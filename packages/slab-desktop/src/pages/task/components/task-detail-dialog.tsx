@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
 import { Button } from '@slab/components/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@slab/components/dialog';
@@ -6,7 +7,7 @@ import { SoftPanel } from '@slab/components/workspace';
 import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 import type { Task, TaskResult } from '../const';
-import { formatDateTime, getTaskTypeMeta } from '../utils';
+import { formatDateTime, getTaskDeepLink, getTaskTypeMeta, isMediaTaskType } from '../utils';
 import { renderStatusPill } from './task-status-pill';
 
 type TaskDetailDialogProps = {
@@ -34,6 +35,8 @@ export function TaskDetailDialog({
   const locale = i18n.resolvedLanguage ?? i18n.language;
   const taskDetail = selectedTask ?? task;
   const taskMeta = getTaskTypeMeta(taskDetail.task_type, t);
+  const mediaTask = isMediaTaskType(taskDetail.task_type);
+  const deepLink = getTaskDeepLink(taskDetail.task_type, taskDetail.id);
 
   return (
     <Dialog>
@@ -101,7 +104,23 @@ export function TaskDetailDialog({
                 </Alert>
               ) : null}
 
-              {selectedTask.status === 'succeeded' && taskResult ? (
+              {mediaTask && deepLink ? (
+                <SoftPanel className="space-y-3 rounded-[20px]">
+                  <h4 className="text-sm font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                    {t('pages.task.dialog.domainDetail')}
+                  </h4>
+                  <p className="text-sm leading-6 text-muted-foreground">
+                    {t('pages.task.dialog.domainDetailDescription')}
+                  </p>
+                  <div>
+                    <Button asChild variant="pill" size="sm">
+                      <Link to={deepLink}>{t('pages.task.dialog.openDomainDetail')}</Link>
+                    </Button>
+                  </div>
+                </SoftPanel>
+              ) : null}
+
+              {!mediaTask && selectedTask.status === 'succeeded' && taskResult ? (
                 <SoftPanel className="space-y-3 rounded-[20px]">
                   <h4 className="text-sm font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                     {t('pages.task.dialog.taskResult')}
@@ -141,9 +160,10 @@ export function TaskDetailDialog({
                       : t('pages.task.dialog.cancelTask')}
                   </Button>
                 ) : null}
-                {selectedTask.status === 'failed' ||
+                {!mediaTask &&
+                (selectedTask.status === 'failed' ||
                 selectedTask.status === 'cancelled' ||
-                selectedTask.status === 'succeeded' ? (
+                selectedTask.status === 'succeeded') ? (
                   <Button
                     variant="pill"
                     size="sm"

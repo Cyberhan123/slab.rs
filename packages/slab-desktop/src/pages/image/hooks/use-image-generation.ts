@@ -8,6 +8,12 @@ import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import api from '@/lib/api';
 import type { components } from '@/lib/api/v1.d.ts';
 import {
+  getImageGeneration,
+  listImageGenerations,
+  resolveMediaUrl,
+  type ImageGenerationTask,
+} from '@/lib/media-task-api';
+import {
   MAX_POLL_ATTEMPTS,
   POLL_INTERVAL_MS,
   type GeneratedImage,
@@ -18,7 +24,6 @@ import { useImageModelPreparation } from './use-image-model-preparation';
 
 type GenerationPhase = 'idle' | 'polling' | 'fetchingResult';
 type TaskResponse = components['schemas']['TaskResponse'];
-type TaskResultPayload = components['schemas']['TaskResultPayload'];
 
 async function fileToDataUri(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -40,6 +45,11 @@ export function useImageGeneration() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
+  const [history, setHistory] = useState<ImageGenerationTask[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [selectedHistoryTask, setSelectedHistoryTask] = useState<ImageGenerationTask | null>(null);
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
 
   const initImageInputRef = useRef<HTMLInputElement>(null);
   const pollAttempts = useRef(0);
@@ -130,30 +140,6 @@ export function useImageGeneration() {
     dataUpdatedAt: number;
   };
 
-  const {
-    data: taskResult,
-    error: taskResultError,
-    dataUpdatedAt: taskResultUpdatedAt,
-  } = api.useQuery(
-    'get',
-    '/v1/tasks/{id}/result',
-    {
-      params: {
-        path: {
-          id: taskId ?? '',
-        },
-      },
-    },
-    {
-      enabled: isFetchingResult && Boolean(taskId),
-      retry: false,
-    },
-  ) as {
-    data: TaskResultPayload | undefined;
-    error: unknown;
-    dataUpdatedAt: number;
-  };
-
   const getPrefilledPrompt = useCallback(() => {
     const statePrompt =
       typeof (location.state as ImageRouteState | null)?.prompt === 'string'
@@ -210,6 +196,59 @@ export function useImageGeneration() {
     setTaskId(null);
   }, []);
 
+  const toGeneratedImages = useCallback((task: ImageGenerationTask): GeneratedImage[] => {
+    const width = task.width || 512;
+    const height = task.height || 512;
+    const generationMode = task.mode === 'img2img' ? 'img2img' : 'txt2img';
+
+    return task.image_urls
+      .map((url) => resolveMediaUrl(url))
+      .filter((url): url is string => typeof url === 'string' && url.length > 0)
+      .map((src) => ({
+        src,
+        prompt: task.prompt,
+        width,
+        height,
+        mode: generationMode,
+      }));
+  }, []);
+
+  const mergeHistoryTask = useCallback((task: ImageGenerationTask) => {
+    setHistory((previous) => {
+      const next = [task, ...previous.filter((entry) => entry.task_id !== task.task_id)];
+      return next.toSorted((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
+    });
+  }, []);
+
+  const refreshHistory = useCallback(async () => {
+    try {
+      setHistoryLoading(true);
+      setHistoryError(null);
+      const items = await listImageGenerations();
+      setHistory(items);
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  const openHistoryDetail = useCallback(async (taskIdToOpen: string) => {
+    try {
+      const detail = await getImageGeneration(taskIdToOpen);
+      setSelectedHistoryTask(detail);
+      setHistoryDialogOpen(true);
+      mergeHistoryTask(detail);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error(t('pages.image.toast.historyDetailFailed', { message }));
+    }
+  }, [mergeHistoryTask, t]);
+
+  useEffect(() => {
+    void refreshHistory();
+  }, [refreshHistory]);
+
   const handleInitImageChange = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
@@ -252,6 +291,7 @@ export function useImageGeneration() {
 
       const { operation_id } = await generateImagesMutation.mutateAsync({
         body: {
+          model_id: selectedModelId || undefined,
           model: modelPath,
           prompt,
           negative_prompt: negativePrompt || undefined,
@@ -269,7 +309,7 @@ export function useImageGeneration() {
           strength: mode === 'img2img' ? strength : undefined,
           init_image: mode === 'img2img' ? initImageDataUri : undefined,
           mode,
-        },
+        } as never,
       });
 
       setTaskId(operation_id);
@@ -299,6 +339,7 @@ export function useImageGeneration() {
     sampleMethod,
     scheduler,
     seed,
+    selectedModelId,
     steps,
     strength,
     t,
@@ -347,49 +388,46 @@ export function useImageGeneration() {
   }, [clearGenerationTask, isPolling, taskId, taskStatusError, t]);
 
   useEffect(() => {
-    if (!isFetchingResult || !taskId || taskResultUpdatedAt === 0 || !taskResult) {
+    if (!isFetchingResult || !taskId) {
       return;
     }
 
-    const srcs = taskResult.images ?? (taskResult.image ? [taskResult.image] : []);
-    const width = Number.parseInt(widthStr, 10) || 512;
-    const height = Number.parseInt(heightStr, 10) || 512;
+    let cancelled = false;
 
-    const generated: GeneratedImage[] = srcs
-      .filter((src): src is string => typeof src === 'string' && src.length > 0)
-      .map((src) => ({
-        src,
-        prompt,
-        width,
-        height,
-        mode,
-      }));
+    const loadResult = async () => {
+      try {
+        const detail = await getImageGeneration(taskId);
+        if (cancelled) {
+          return;
+        }
 
-    setImages((previous) => [...generated, ...previous]);
-    toast.success(t('pages.image.toast.generated', { count: generated.length }));
-    clearGenerationTask();
-  }, [
-    clearGenerationTask,
-    heightStr,
-    isFetchingResult,
-    mode,
-    prompt,
-    taskId,
-    taskResult,
-    taskResultUpdatedAt,
-    t,
-    widthStr,
-  ]);
+        const generated = toGeneratedImages(detail);
+        mergeHistoryTask(detail);
+        setSelectedHistoryTask(detail);
+        setImages((previous) => [...generated, ...previous]);
+        setHistoryDialogOpen(true);
+        toast.success(t('pages.image.toast.generated', { count: generated.length }));
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
 
-  useEffect(() => {
-    if (!isFetchingResult || !taskId || !taskResultError) {
-      return;
-    }
+        const message = error instanceof Error ? error.message : String(error);
+        toast.error(t('pages.image.toast.resultFetchFailed', { message }));
+      } finally {
+        if (!cancelled) {
+          clearGenerationTask();
+          void refreshHistory();
+        }
+      }
+    };
 
-    const message = taskResultError instanceof Error ? taskResultError.message : String(taskResultError);
-    toast.error(t('pages.image.toast.resultFetchFailed', { message }));
-    clearGenerationTask();
-  }, [clearGenerationTask, isFetchingResult, taskId, taskResultError, t]);
+    void loadResult();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clearGenerationTask, isFetchingResult, mergeHistoryTask, refreshHistory, t, taskId, toGeneratedImages]);
 
   const handleCancel = useCallback(async () => {
     if (taskId) {
@@ -409,7 +447,7 @@ export function useImageGeneration() {
 
   const handleDownload = useCallback((src: string, index: number) => {
     const anchor = document.createElement('a');
-    anchor.href = src;
+    anchor.href = resolveMediaUrl(src) ?? src;
     anchor.download = `generated-${index + 1}.png`;
     anchor.click();
   }, []);
@@ -428,6 +466,10 @@ export function useImageGeneration() {
     handleSubmit,
     heightStr,
     images,
+    history,
+    historyDialogOpen,
+    historyError,
+    historyLoading,
     initImageDataUri,
     initImageInputRef,
     isBusy,
@@ -443,7 +485,9 @@ export function useImageGeneration() {
     sampleMethod,
     scheduler,
     seed,
+    selectedHistoryTask,
     selectedModelId,
+    setHistoryDialogOpen,
     setAdvancedOpen,
     setCfgScale,
     setClipSkip,
@@ -461,10 +505,12 @@ export function useImageGeneration() {
     setSteps,
     setStrength,
     setWidthStr,
+    setSelectedHistoryTask,
     setZoomedImage,
     steps,
     strength,
     widthStr,
     zoomedImage,
+    openHistoryDetail,
   };
 }

@@ -16,6 +16,7 @@ pub struct DecodedImageInput {
 
 #[derive(Debug, Clone)]
 pub struct ImageGenerationCommand {
+    pub model_id: Option<String>,
     pub model: String,
     pub prompt: String,
     pub negative_prompt: Option<String>,

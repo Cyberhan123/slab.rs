@@ -3,6 +3,7 @@ mod backend;
 mod chat;
 mod ffmpeg;
 mod image;
+mod media_task;
 mod model;
 mod pmid;
 mod session;
@@ -29,6 +30,10 @@ pub use chat::{
 };
 pub use ffmpeg::FfmpegConvertCommand;
 pub use image::{DecodedImageInput, ImageGenerationCommand, ImageGenerationMode};
+pub use media_task::{
+    AUDIO_TRANSCRIPTION_TASK_TYPE, AudioTranscriptionTaskView, IMAGE_GENERATION_TASK_TYPE,
+    ImageGenerationTaskView, VIDEO_GENERATION_TASK_TYPE, VideoGenerationTaskView,
+};
 pub use model::{
     AvailableModelsQuery, AvailableModelsView, CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
     CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION, CreateModelCommand, DeletedModelView,

@@ -3,11 +3,20 @@ use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
 use crate::domain::models::{
-    AudioTranscriptionCommand, TranscribeDecodeOptions, TranscribeVadOptions,
+    AudioTranscriptionCommand, AudioTranscriptionTaskView, TranscribeDecodeOptions,
+    TranscribeVadOptions,
 };
+use crate::schemas::tasks::{TaskProgressResponse, TaskStatus};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
 pub struct AudioTranscriptionRequest {
+    /// Optional catalog model identifier used for history attribution.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[validate(custom(
+        function = "crate::schemas::validation::validate_non_blank",
+        message = "model_id must not be empty"
+    ))]
+    pub model_id: Option<String>,
     /// The audio file path to transcribe.
     #[validate(custom(
         function = "crate::schemas::validation::validate_absolute_path",
@@ -189,6 +198,7 @@ impl From<TranscribeDecodeRequest> for TranscribeDecodeOptions {
 impl From<AudioTranscriptionRequest> for AudioTranscriptionCommand {
     fn from(request: AudioTranscriptionRequest) -> Self {
         Self {
+            model_id: normalize_optional_text(request.model_id),
             path: request.path,
             language: normalize_optional_text(request.language),
             prompt: normalize_optional_text(request.prompt),
@@ -204,4 +214,61 @@ fn normalize_optional_text(value: Option<String>) -> Option<String> {
         let trimmed = value.trim();
         (!trimmed.is_empty()).then(|| trimmed.to_owned())
     })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct AudioTranscriptionTaskResponse {
+    pub task_id: String,
+    pub task_type: String,
+    pub status: TaskStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<TaskProgressResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_msg: Option<String>,
+    pub backend_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    pub source_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detect_language: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vad_json: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decode_json: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcript_text: Option<String>,
+    pub request_data: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_data: Option<serde_json::Value>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<AudioTranscriptionTaskView> for AudioTranscriptionTaskResponse {
+    fn from(value: AudioTranscriptionTaskView) -> Self {
+        Self {
+            task_id: value.task_id,
+            task_type: value.task_type,
+            status: value.status.into(),
+            progress: value.progress.map(Into::into),
+            error_msg: value.error_msg,
+            backend_id: value.backend_id,
+            model_id: value.model_id,
+            source_path: value.source_path,
+            language: value.language,
+            prompt: value.prompt,
+            detect_language: value.detect_language,
+            vad_json: value.vad_json,
+            decode_json: value.decode_json,
+            transcript_text: value.transcript_text,
+            request_data: value.request_data,
+            result_data: value.result_data,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
 }

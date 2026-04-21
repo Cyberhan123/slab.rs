@@ -40,6 +40,7 @@ export const audio = {
       title: '转录任务已创建',
       description: '任务 ID：{{id}}。你可以继续在这里工作，或直接前往任务页查看进度。',
       openTasks: '打开任务',
+      viewTranscript: '打开转录详情',
     },
     ready: {
       title: '源文件已就绪',
@@ -135,9 +136,25 @@ export const audio = {
     downloadedVadModel: '已下载 VAD 模型 {{model}}',
     taskCreated: '转录任务已创建。',
     taskCreatedDescription: '任务 ID：{{id}} | 模型：{{model}} | {{vad}} | {{decode}}',
+    historyDetailFailed: '打开转录详情失败：{{message}}',
+    transcriptionReady: '转录结果已就绪。',
     viewTasks: '查看任务',
     failedToCreateTask: '创建转录任务失败。',
     unknownError: '未知错误',
+  },
+  history: {
+    title: '最近转录',
+    loading: '正在加载转录历史...',
+    error: '加载历史失败：{{message}}',
+    description: '在这里查看转录结果，并重新打开最近的转录详情。',
+    empty: '暂无转录历史。已完成的转录结果会显示在这里。',
+    detailTitle: '转录详情',
+    pendingTranscript: '转录内容暂时还不可用。',
+    fields: {
+      source: '来源',
+      model: '模型',
+      language: '语言',
+    },
   },
   error: {
     webUploadNotImplemented: '网页端暂未实现音频上传转录，请使用桌面应用。',

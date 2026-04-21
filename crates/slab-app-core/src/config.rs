@@ -185,6 +185,14 @@ pub fn default_model_config_dir_for_settings_path(settings_path: &Path) -> PathB
         .join("models")
 }
 
+pub fn default_output_dir_for_settings_path(settings_path: &Path) -> PathBuf {
+    settings_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("outputs")
+}
+
 pub fn sqlite_url_for_path(path: &Path) -> String {
     let normalized = path.to_string_lossy().replace('\\', "/");
     let prefix = if normalized.starts_with('/') { "sqlite://" } else { "sqlite:///" };

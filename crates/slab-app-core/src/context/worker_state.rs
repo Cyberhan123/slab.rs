@@ -144,6 +144,7 @@ impl OperationContext {
 
 #[derive(Clone, Debug)]
 pub struct WorkerState {
+    config: Arc<crate::context::AppConfig>,
     store: Arc<crate::infra::db::AnyStore>,
     grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
     runtime_status: Arc<crate::runtime_supervisor::RuntimeSupervisorStatus>,
@@ -153,13 +154,18 @@ pub struct WorkerState {
 
 impl WorkerState {
     pub fn new(
+        config: Arc<crate::context::AppConfig>,
         store: Arc<crate::infra::db::AnyStore>,
         grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
         runtime_status: Arc<crate::runtime_supervisor::RuntimeSupervisorStatus>,
         model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
         operations: Arc<OperationManager>,
     ) -> Self {
-        Self { store, grpc, runtime_status, model_auto_unload, operations }
+        Self { config, store, grpc, runtime_status, model_auto_unload, operations }
+    }
+
+    pub fn config(&self) -> &Arc<crate::context::AppConfig> {
+        &self.config
     }
 
     pub fn store(&self) -> &Arc<crate::infra::db::AnyStore> {

@@ -1,5 +1,8 @@
-#[derive(Debug, Clone)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioTranscriptionCommand {
+    pub model_id: Option<String>,
     pub path: String,
     pub language: Option<String>,
     pub prompt: Option<String>,
@@ -8,7 +11,7 @@ pub struct AudioTranscriptionCommand {
     pub decode: Option<TranscribeDecodeOptions>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscribeVadOptions {
     pub enabled: bool,
     pub model_path: Option<String>,
@@ -20,7 +23,7 @@ pub struct TranscribeVadOptions {
     pub samples_overlap: Option<f32>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscribeDecodeOptions {
     pub offset_ms: Option<i32>,
     pub duration_ms: Option<i32>,

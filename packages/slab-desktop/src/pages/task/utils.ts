@@ -1,4 +1,4 @@
-import { Download, Image, ListChecks, Mic } from 'lucide-react';
+import { Download, Film, Image, ListChecks, Mic } from 'lucide-react';
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -127,7 +127,7 @@ export function getStatusTone(status: string, t: Translate) {
 export function getTaskTypeMeta(taskType: string, t: Translate) {
   const normalized = taskType.toLowerCase();
 
-  if (normalized.includes('whisper') || normalized.includes('transcription')) {
+  if (normalized === 'audio_transcription' || normalized.includes('whisper') || normalized.includes('transcription')) {
     return {
       label: t('pages.task.taskType.transcription'),
       icon: Mic,
@@ -136,12 +136,21 @@ export function getTaskTypeMeta(taskType: string, t: Translate) {
     };
   }
 
-  if (normalized.includes('diffusion') || normalized.includes('image')) {
+  if (normalized === 'image_generation' || normalized.includes('diffusion') || normalized.includes('image')) {
     return {
       label: t('pages.task.taskType.imageGeneration'),
       icon: Image,
       iconBg: 'bg-[var(--surface-soft)]',
       iconColor: 'text-[var(--accent-foreground)]',
+    };
+  }
+
+  if (normalized === 'video_generation') {
+    return {
+      label: t('pages.task.taskType.videoGeneration'),
+      icon: Film,
+      iconBg: 'bg-[var(--surface-soft)]',
+      iconColor: 'text-[var(--brand-teal)]',
     };
   }
 
@@ -163,4 +172,21 @@ export function getTaskTypeMeta(taskType: string, t: Translate) {
     iconBg: 'bg-[var(--surface-soft)]',
     iconColor: 'text-muted-foreground',
   };
+}
+
+export function isMediaTaskType(taskType: string) {
+  return ['image_generation', 'video_generation', 'audio_transcription'].includes(taskType);
+}
+
+export function getTaskDeepLink(taskType: string, taskId: string) {
+  switch (taskType) {
+    case 'image_generation':
+      return `/image?task=${taskId}`;
+    case 'video_generation':
+      return `/video?task=${taskId}`;
+    case 'audio_transcription':
+      return `/audio?task=${taskId}`;
+    default:
+      return null;
+  }
 }

@@ -4,7 +4,7 @@ import { useTranslation } from '@slab/i18n';
 
 import api from '@/lib/api';
 import { PAGE_SIZE, type Task, type TaskResult } from '../const';
-import { getSparklineWeight, getTaskDurationMs, isSettledStatus } from '../utils';
+import { getSparklineWeight, getTaskDurationMs, isMediaTaskType, isSettledStatus } from '../utils';
 
 export function useTaskList() {
   const { t } = useTranslation();
@@ -144,7 +144,7 @@ export function useTaskList() {
 
       setSelectedTask(data);
 
-      if (data.status === 'succeeded') {
+      if (data.status === 'succeeded' && !isMediaTaskType(data.task_type)) {
         await fetchTaskResult(id);
       }
     } catch {

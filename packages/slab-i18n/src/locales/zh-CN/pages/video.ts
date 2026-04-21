@@ -71,6 +71,21 @@ export const video = {
       clipSpecValue: '{{frames}} 帧 - {{fps}} fps',
     },
   },
+  history: {
+    title: '最近历史',
+    loading: '正在加载最近的视频生成记录...',
+    error: '加载历史失败：{{message}}',
+    description: '重新查看最近视频任务的生成片段、提示词和渲染参数。',
+    empty: '暂无视频历史。已完成的渲染结果会显示在这里。',
+    detailTitle: '视频任务详情',
+    noArtifact: '这个任务暂时还没有可持久化查看的视频产物。',
+    fields: {
+      size: '尺寸',
+      clip: '片段',
+      backend: '后端',
+      model: '模型',
+    },
+  },
   stage: {
     title: {
       ready: '渲染已完成',
@@ -98,6 +113,7 @@ export const video = {
   toast: {
     started: '视频生成已开始（{{frames}} 帧，{{fps}} fps）...',
     generated: '视频已生成！',
+    historyDetailFailed: '打开视频历史详情失败：{{message}}',
     timedOut: '视频生成超时',
     pollingError: '轮询出错：{{message}}',
     completedWithoutPath: '视频生成完成，但没有返回视频路径',

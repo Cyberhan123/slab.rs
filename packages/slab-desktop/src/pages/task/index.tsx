@@ -16,15 +16,24 @@ import {
   TableHeader,
   TableRow,
 } from '@slab/components/table';
+import { Button } from '@slab/components/button';
 import {
   StageEmptyState,
 } from '@slab/components/workspace';
 import { useTranslation } from '@slab/i18n';
+import { Link } from 'react-router-dom';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 
 import { useTaskList } from './hooks/use-task-list';
-import { formatCompactDuration, formatDateTime, formatPercent, formatTaskId, getTaskTypeMeta } from './utils';
+import {
+  formatCompactDuration,
+  formatDateTime,
+  formatPercent,
+  formatTaskId,
+  getTaskDeepLink,
+  getTaskTypeMeta,
+} from './utils';
 import { TaskMetricCard } from './components/task-metric-card';
 import { PaginationButton } from './components/pagination-button';
 import { TaskDetailDialog } from './components/task-detail-dialog';
@@ -195,6 +204,7 @@ export default function Task() {
               <TableBody>
                 {paginatedTasks.map((task) => {
                   const taskMeta = getTaskTypeMeta(task.task_type, t);
+                  const deepLink = getTaskDeepLink(task.task_type, task.id);
 
                   return (
                     <TableRow
@@ -224,19 +234,26 @@ export default function Task() {
                         {formatDateTime(task.created_at, locale)}
                       </TableCell>
                       <TableCell className="px-6 py-5 text-right">
-                        <TaskDetailDialog
-                          task={task}
-                          selectedTask={selectedTask}
-                          taskResult={taskResult}
-                          cancelTaskMutation={cancelTaskMutation}
-                          restartTaskMutation={restartTaskMutation}
-                          onOpen={(id) => {
-                            setSelectedTask(null);
-                            void fetchTaskDetail(id);
-                          }}
-                          onCancel={cancelTask}
-                          onRestart={restartTask}
-                        />
+                        <div className="flex justify-end gap-2">
+                          {deepLink ? (
+                            <Button asChild variant="quiet" size="sm">
+                              <Link to={deepLink}>{t('pages.task.table.openDomain')}</Link>
+                            </Button>
+                          ) : null}
+                          <TaskDetailDialog
+                            task={task}
+                            selectedTask={selectedTask}
+                            taskResult={taskResult}
+                            cancelTaskMutation={cancelTaskMutation}
+                            restartTaskMutation={restartTaskMutation}
+                            onOpen={(id) => {
+                              setSelectedTask(null);
+                              void fetchTaskDetail(id);
+                            }}
+                            onCancel={cancelTask}
+                            onRestart={restartTask}
+                          />
+                        </div>
                       </TableCell>
                     </TableRow>
                   );

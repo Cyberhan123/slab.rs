@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
@@ -10,6 +9,11 @@ import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
 import useIsTauri from '@/hooks/use-tauri';
 import api from '@/lib/api';
 import { modelSupportsCapability, toCatalogModelList, type CatalogModel } from '@/lib/api/models';
+import {
+  getAudioTranscription,
+  listAudioTranscriptions,
+  type AudioTranscriptionTask,
+} from '@/lib/media-task-api';
 import {
   useModelConfigDocumentQuery,
   type ModelConfigDocumentResponse,
@@ -81,7 +85,6 @@ function findBundledVadArtifact(
 
 export function useAudio() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const isTauri = useIsTauri();
   usePageHeader({
     icon: PAGE_HEADER_META.audio.icon,
@@ -92,6 +95,11 @@ export function useAudio() {
   const [file, setFile] = useState<SelectedFile | null>(null);
   const [preparingStage, setPreparingStage] = useState<PreparingStage>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [history, setHistory] = useState<AudioTranscriptionTask[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [selectedHistoryTask, setSelectedHistoryTask] = useState<AudioTranscriptionTask | null>(null);
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
 
   const { handleFile } = useFile();
   const transcribe = useTranscribe();
@@ -159,6 +167,43 @@ export function useAudio() {
     () => whisperTranscribeModels.find((model) => model.id === selectedModelId),
     [whisperTranscribeModels, selectedModelId],
   );
+
+  const mergeHistoryTask = useCallback((task: AudioTranscriptionTask) => {
+    setHistory((previous) => {
+      const next = [task, ...previous.filter((entry) => entry.task_id !== task.task_id)];
+      return next.toSorted((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
+    });
+  }, []);
+
+  const refreshHistory = useCallback(async () => {
+    try {
+      setHistoryLoading(true);
+      setHistoryError(null);
+      const items = await listAudioTranscriptions();
+      setHistory(items);
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  const openHistoryDetail = useCallback(async (taskIdToOpen: string) => {
+    try {
+      const detail = await getAudioTranscription(taskIdToOpen);
+      setSelectedHistoryTask(detail);
+      setHistoryDialogOpen(true);
+      mergeHistoryTask(detail);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error(t('pages.audio.toast.historyDetailFailed', { message }));
+    }
+  }, [mergeHistoryTask, t]);
+
+  useEffect(() => {
+    void refreshHistory();
+  }, [refreshHistory]);
+
   const {
     data: selectedModelConfigDocument,
     error: selectedModelConfigError,
@@ -735,6 +780,8 @@ export function useAudio() {
         decodeDescription = t('pages.audio.summary.decodeCustom');
       }
 
+      transcribeOptions = { ...transcribeOptions, model_id: selectedModelId };
+
       setPreparingStage('transcribe');
       const result = await transcribe.handleTranscribe(file.file, transcribeOptions);
       setTaskId(result.operation_id);
@@ -746,11 +793,14 @@ export function useAudio() {
           vad: vadDescription,
           decode: decodeDescription,
         }),
-        action: {
-          label: t('pages.audio.toast.viewTasks'),
-          onClick: () => navigate('/task'),
-        },
       });
+
+      await waitForTaskToFinish(result.operation_id);
+      const detail = await getAudioTranscription(result.operation_id);
+      mergeHistoryTask(detail);
+      setSelectedHistoryTask(detail);
+      setHistoryDialogOpen(true);
+      toast.success(t('pages.audio.toast.transcriptionReady'));
     } catch (err: unknown) {
       const anyErr = err as { message?: string; error?: string } | null;
       toast.error(t('pages.audio.toast.failedToCreateTask'), {
@@ -832,12 +882,17 @@ export function useAudio() {
     handleTauriFileSelect,
     handleTranscribe,
     hasBundledVad,
+    history,
+    historyDialogOpen,
+    historyError,
+    historyLoading,
     isBusy,
     isTauri,
     isUsingBundledVad,
-    navigate,
+    openHistoryDetail,
     preparingStage,
     previewRows,
+    selectedHistoryTask,
     selectedVadModel,
     selectedVadModelId,
     setDecodeEntropyThold: (value: string) => updateControl('decodeEntropyThold', value),
@@ -857,7 +912,9 @@ export function useAudio() {
     setDecodeTokenTimestamps: (value: boolean) => updateControl('decodeTokenTimestamps', value),
     setDecodeWordThold: (value: string) => updateControl('decodeWordThold', value),
     setEnableVad: (value: boolean) => updateControl('enableVad', value),
+    setHistoryDialogOpen,
     setSelectedVadModelId: (value: string) => updateControl('selectedVadModelId', value),
+    setSelectedHistoryTask,
     setShowDecodeOptions: (value: boolean) => updateControl('showDecodeOptions', value),
     setVadMaxSpeechDurationS: (value: string) => updateControl('vadMaxSpeechDurationS', value),
     setVadMinSilenceDurationMs: (value: string) =>

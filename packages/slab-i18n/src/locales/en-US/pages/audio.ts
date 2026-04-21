@@ -45,6 +45,7 @@ export const audio = {
       description:
         'Task ID: {{id}}. You can keep working here or jump straight to the Tasks page to monitor progress.',
       openTasks: 'Open Tasks',
+      viewTranscript: 'Open Transcript',
     },
     ready: {
       title: 'Source file ready',
@@ -145,9 +146,25 @@ export const audio = {
     taskCreated: 'Transcription task created.',
     taskCreatedDescription:
       'Task ID: {{id}} | Model: {{model}} | {{vad}} | {{decode}}',
+    historyDetailFailed: 'Failed to open transcription detail: {{message}}',
+    transcriptionReady: 'Transcription is ready.',
     viewTasks: 'View tasks',
     failedToCreateTask: 'Failed to create transcription task.',
     unknownError: 'Unknown error',
+  },
+  history: {
+    title: 'Recent Transcriptions',
+    loading: 'Loading transcription history...',
+    error: 'Failed to load history: {{message}}',
+    description: 'Review transcript output and reopen recent transcription details here.',
+    empty: 'No transcription history yet. Finished transcripts will appear here.',
+    detailTitle: 'Transcription Detail',
+    pendingTranscript: 'Transcript is not available yet.',
+    fields: {
+      source: 'Source',
+      model: 'Model',
+      language: 'Language',
+    },
   },
   error: {
     webUploadNotImplemented: 'Web transcription upload is not implemented yet. Please use the desktop app.',

@@ -36,6 +36,7 @@ export const task = {
       createdAt: 'Created At',
       actions: 'Actions',
     },
+    openDomain: 'Open Detail',
     pagination: {
       summary: 'Showing {{start}} to {{end}} of {{total}} entries',
       empty: 'Showing 0 to 0 of 0 entries',
@@ -53,6 +54,9 @@ export const task = {
       created: 'Created',
       updated: 'Updated',
     },
+    domainDetail: 'Media Detail',
+    domainDetailDescription: 'This media task now keeps its result and history in the domain page instead of the generic task result view.',
+    openDomainDetail: 'Open domain detail',
     failureReason: 'Failure reason',
     taskResult: 'Task Result',
     copyResult: 'Copy result',
@@ -80,6 +84,7 @@ export const task = {
   taskType: {
     transcription: 'Transcription',
     imageGeneration: 'Image Generation',
+    videoGeneration: 'Video Generation',
     modelDownload: 'Model Download',
   },
 } as const;

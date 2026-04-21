@@ -36,6 +36,7 @@ export const task = {
       createdAt: '创建时间',
       actions: '操作',
     },
+    openDomain: '打开详情',
     pagination: {
       summary: '显示第 {{start}} 到 {{end}} 条，共 {{total}} 条',
       empty: '显示第 0 到 0 条，共 0 条',
@@ -53,6 +54,9 @@ export const task = {
       created: '创建时间',
       updated: '更新时间',
     },
+    domainDetail: '媒体详情',
+    domainDetailDescription: '这个媒体任务的结果和历史现在保存在对应业务页面里，不再继续使用通用任务结果视图。',
+    openDomainDetail: '打开业务详情',
     failureReason: '失败原因',
     taskResult: '任务结果',
     copyResult: '复制结果',
@@ -80,6 +84,7 @@ export const task = {
   taskType: {
     transcription: '转录',
     imageGeneration: '图像生成',
+    videoGeneration: '视频生成',
     modelDownload: '模型下载',
   },
 } as const;

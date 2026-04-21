@@ -35,6 +35,7 @@ impl AppContext {
             Arc::clone(&model_auto_unload),
         ));
         let worker_state = Arc::new(WorkerState::new(
+            Arc::clone(&config),
             Arc::clone(&store),
             Arc::clone(&grpc),
             Arc::clone(&runtime_status),

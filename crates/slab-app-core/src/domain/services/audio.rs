@@ -2,13 +2,21 @@ use std::sync::Arc;
 
 use slab_types::RuntimeBackendId;
 use tracing::{debug, warn};
+use uuid::Uuid;
 
-use crate::context::{SubmitOperation, WorkerState};
+use crate::context::WorkerState;
 use crate::domain::models::{
-    AcceptedOperation, AudioTranscriptionCommand, TranscribeDecodeOptions, TranscribeVadOptions,
+    AUDIO_TRANSCRIPTION_TASK_TYPE, AcceptedOperation, AudioTranscriptionCommand,
+    AudioTranscriptionTaskView, TaskResult, TaskStatus, TranscribeDecodeOptions,
+    TranscribeVadOptions,
 };
 use crate::error::AppCoreError;
+use crate::infra::db::{
+    AudioTranscriptionTaskViewRecord, MediaTaskStore, NewAudioTranscriptionTaskRecord, TaskRecord,
+};
 use crate::infra::rpc::{self, codec, pb};
+
+const AUDIO_BACKEND_ID: &str = "ggml.whisper";
 
 #[derive(Clone)]
 pub struct AudioService {
@@ -48,56 +56,136 @@ impl AudioService {
             decode,
         };
 
-        let model_auto_unload = Arc::clone(self.state.auto_unload());
-        let transcribe_channel_for_spawn = transcribe_channel;
-        let input_data = req.path.clone();
-        let operation_id = self
-            .state
-            .submit_operation(
-                SubmitOperation::running("ggml.whisper", None, Some(input_data)),
-                move |operation| async move {
-                    let operation_id = operation.id().to_owned();
-                    let _usage_guard =
-                        match model_auto_unload
-                            .acquire_for_inference(RuntimeBackendId::GgmlWhisper)
-                            .await
-                        {
-                            Ok(guard) => guard,
-                            Err(error) => {
-                                let msg = format!("whisper backend not ready: {error}");
-                                if let Err(db_e) = operation.mark_failed(&msg).await {
-                                    warn!(task_id = %operation_id, error = %db_e, "failed to update auto-reload failure");
-                                }
-                                return;
-                            }
-                        };
+        let request_data = serde_json::json!({
+            "model_id": req.model_id,
+            "source_path": req.path,
+            "language": req.language,
+            "prompt": req.prompt,
+            "detect_language": req.detect_language,
+            "vad": req.vad,
+            "decode": req.decode,
+        })
+        .to_string();
 
-                    let rpc_result =
-                        rpc::client::transcribe(transcribe_channel_for_spawn, grpc_req).await;
-                    if operation.is_cancelled().await {
-                        return;
-                    }
-
-                    match rpc_result {
-                        Ok(response) => {
-                            let text = codec::decode_whisper_transcription_text(&response);
-                            let payload = serde_json::json!({ "text": text }).to_string();
-                            if let Err(error) = operation.mark_succeeded(&payload).await {
-                                warn!(task_id = %operation_id, error = %error, "failed to update remote transcription result");
-                            }
-                        }
-                        Err(error) => {
-                            let message = error.to_string();
-                            if let Err(db_e) = operation.mark_failed(&message).await {
-                                warn!(task_id = %operation_id, error = %db_e, "failed to update remote transcription failure");
-                            }
-                        }
-                    }
+        let operation_id = Uuid::new_v4().to_string();
+        let now = chrono::Utc::now();
+        self.state
+            .store()
+            .insert_audio_transcription_operation(
+                TaskRecord {
+                    id: operation_id.clone(),
+                    task_type: AUDIO_TRANSCRIPTION_TASK_TYPE.to_owned(),
+                    status: TaskStatus::Running,
+                    model_id: req.model_id.clone(),
+                    input_data: Some(request_data.clone()),
+                    result_data: None,
+                    error_msg: None,
+                    core_task_id: None,
+                    created_at: now,
+                    updated_at: now,
+                },
+                NewAudioTranscriptionTaskRecord {
+                    task_id: operation_id.clone(),
+                    backend_id: AUDIO_BACKEND_ID.to_owned(),
+                    model_id: req.model_id.clone(),
+                    source_path: req.path.clone(),
+                    language: req.language.clone(),
+                    prompt: req.prompt.clone(),
+                    detect_language: req.detect_language,
+                    vad_json: req.vad.as_ref().map(to_json_string),
+                    decode_json: req.decode.as_ref().map(to_json_string),
+                    request_data,
+                    created_at: now,
+                    updated_at: now,
                 },
             )
             .await?;
 
+        let model_auto_unload = Arc::clone(self.state.auto_unload());
+        let transcribe_channel_for_spawn = transcribe_channel;
+        let store = Arc::clone(self.state.store());
+        self.state
+            .clone()
+            .spawn_existing_operation(operation_id.clone(), move |operation| async move {
+                let operation_id = operation.id().to_owned();
+                let _usage_guard = match model_auto_unload
+                    .acquire_for_inference(RuntimeBackendId::GgmlWhisper)
+                    .await
+                {
+                    Ok(guard) => guard,
+                    Err(error) => {
+                        let msg = format!("whisper backend not ready: {error}");
+                        if let Err(db_e) = operation.mark_failed(&msg).await {
+                            warn!(task_id = %operation_id, error = %db_e, "failed to update auto-reload failure");
+                        }
+                        return;
+                    }
+                };
+
+                let rpc_result =
+                    rpc::client::transcribe(transcribe_channel_for_spawn, grpc_req).await;
+                if operation.is_cancelled().await {
+                    return;
+                }
+
+                match rpc_result {
+                    Ok(response) => {
+                        let text = codec::decode_whisper_transcription_text(&response);
+                        let persisted_result = serde_json::json!({ "text": text }).to_string();
+                        let task_payload = serde_json::to_string(&TaskResult {
+                            image: None,
+                            images: None,
+                            video_path: None,
+                            text: Some(text.clone()),
+                        })
+                        .unwrap_or_default();
+                        if let Err(error) = store
+                            .update_audio_transcription_result(
+                                &operation_id,
+                                Some(&text),
+                                Some(&persisted_result),
+                            )
+                            .await
+                        {
+                            let message =
+                                format!("failed to persist audio transcription metadata: {error}");
+                            if let Err(db_e) = operation.mark_failed(&message).await {
+                                warn!(task_id = %operation_id, error = %db_e, "failed to update audio transcription metadata failure");
+                            }
+                            return;
+                        }
+                        if let Err(error) = operation.mark_succeeded(&task_payload).await {
+                            warn!(task_id = %operation_id, error = %error, "failed to update remote transcription result");
+                        }
+                    }
+                    Err(error) => {
+                        let message = error.to_string();
+                        if let Err(db_e) = operation.mark_failed(&message).await {
+                            warn!(task_id = %operation_id, error = %db_e, "failed to update remote transcription failure");
+                        }
+                    }
+                }
+            });
+
         Ok(AcceptedOperation { operation_id })
+    }
+
+    pub async fn list_transcription_tasks(
+        &self,
+    ) -> Result<Vec<AudioTranscriptionTaskView>, AppCoreError> {
+        let rows = self.state.store().list_audio_transcription_tasks().await?;
+        Ok(rows.into_iter().map(map_audio_view).collect())
+    }
+
+    pub async fn get_transcription_task(
+        &self,
+        task_id: &str,
+    ) -> Result<AudioTranscriptionTaskView, AppCoreError> {
+        let row =
+            self.state.store().get_audio_transcription_task(task_id).await?.ok_or_else(|| {
+                AppCoreError::NotFound(format!("audio transcription task {task_id} not found"))
+            })?;
+        Ok(map_audio_view(row))
     }
 }
 
@@ -189,5 +277,33 @@ fn build_decode_request(
     }))
 }
 
-#[cfg(test)]
-mod test {}
+fn map_audio_view(row: AudioTranscriptionTaskViewRecord) -> AudioTranscriptionTaskView {
+    AudioTranscriptionTaskView {
+        task_id: row.task.task_id,
+        task_type: AUDIO_TRANSCRIPTION_TASK_TYPE.to_owned(),
+        status: row.state.status,
+        progress: row.state.progress,
+        error_msg: row.state.error_msg,
+        backend_id: row.task.backend_id,
+        model_id: row.task.model_id,
+        source_path: row.task.source_path,
+        language: row.task.language,
+        prompt: row.task.prompt,
+        detect_language: row.task.detect_language,
+        vad_json: row.task.vad_json.as_deref().map(parse_json_value),
+        decode_json: row.task.decode_json.as_deref().map(parse_json_value),
+        transcript_text: row.task.transcript_text,
+        request_data: parse_json_value(&row.task.request_data),
+        result_data: row.task.result_data.as_deref().map(parse_json_value),
+        created_at: row.state.task_created_at.to_rfc3339(),
+        updated_at: row.state.task_updated_at.to_rfc3339(),
+    }
+}
+
+fn parse_json_value(raw: &str) -> serde_json::Value {
+    serde_json::from_str(raw).unwrap_or_else(|_| serde_json::Value::String(raw.to_owned()))
+}
+
+fn to_json_string<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "null".to_owned())
+}
