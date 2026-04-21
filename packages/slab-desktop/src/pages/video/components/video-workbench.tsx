@@ -3,6 +3,7 @@ import {
   ChevronUp,
   Download,
   Film,
+  History,
   ImagePlus,
   Loader2,
   Maximize2,
@@ -16,6 +17,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@slab/components/collapsible';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@slab/components/dialog';
 import { Input } from '@slab/components/input';
 import {
   Select,
@@ -26,6 +28,10 @@ import {
 } from '@slab/components/select';
 import { Slider } from '@slab/components/slider';
 import { Textarea } from '@slab/components/textarea';
+import {
+  resolveMediaUrl,
+  type VideoGenerationTask,
+} from '@/lib/media-task-api';
 import { cn } from '@/lib/utils';
 import { FRAME_OPTIONS, FPS_OPTIONS, SAMPLE_METHODS, SCHEDULERS } from '../const';
 import { FieldLabel } from './field-label';
@@ -49,6 +55,10 @@ export type VideoWorkbenchProps = {
   heightStr: string;
   heightValue: number;
   hasSelectedModel: boolean;
+  history: VideoGenerationTask[];
+  historyDialogOpen: boolean;
+  historyError: string | null;
+  historyLoading: boolean;
   immersivePreview: boolean;
   initImageDataUri: string | null;
   initImageInputRef: React.RefObject<HTMLInputElement | null>;
@@ -58,18 +68,21 @@ export type VideoWorkbenchProps = {
   sampleMethod: string;
   scheduler: string;
   seed: number;
+  selectedHistoryTask: VideoGenerationTask | null;
   setAdvancedOpen: (open: boolean) => void;
   setCfgScale: (value: number) => void;
   setFps: (value: number) => void;
   setFrames: (value: number) => void;
   setGuidance: (value: number) => void;
   setHeightStr: (value: string) => void;
+  setHistoryDialogOpen: (open: boolean) => void;
   setImmersivePreview: React.Dispatch<React.SetStateAction<boolean>>;
   setInitImageDataUri: (value: string | null) => void;
   setNegativePrompt: (value: string) => void;
   setPrompt: (value: string) => void;
   setSampleMethod: (value: string) => void;
   setScheduler: (value: string) => void;
+  setSelectedHistoryTask: (task: VideoGenerationTask | null) => void;
   setSeed: (value: number) => void;
   setSteps: (value: number) => void;
   setStrength: (value: number) => void;
@@ -82,7 +95,17 @@ export type VideoWorkbenchProps = {
   videoPath: string | null;
   widthStr: string;
   widthValue: number;
+  openHistoryDetail: (taskId: string) => void | Promise<void>;
 };
+
+function formatHistoryTime(value: string) {
+  return new Date(value).toLocaleString(undefined, {
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 export function VideoWorkbench({
   advancedOpen,
@@ -99,6 +122,10 @@ export function VideoWorkbench({
   heightStr,
   heightValue,
   hasSelectedModel,
+  history,
+  historyDialogOpen,
+  historyError,
+  historyLoading,
   immersivePreview,
   initImageDataUri,
   initImageInputRef,
@@ -108,18 +135,21 @@ export function VideoWorkbench({
   sampleMethod,
   scheduler,
   seed,
+  selectedHistoryTask,
   setAdvancedOpen,
   setCfgScale,
   setFps,
   setFrames,
   setGuidance,
   setHeightStr,
+  setHistoryDialogOpen,
   setImmersivePreview,
   setInitImageDataUri,
   setNegativePrompt,
   setPrompt,
   setSampleMethod,
   setScheduler,
+  setSelectedHistoryTask,
   setSeed,
   setSteps,
   setStrength,
@@ -132,6 +162,7 @@ export function VideoWorkbench({
   videoPath,
   widthStr,
   widthValue,
+  openHistoryDetail,
 }: VideoWorkbenchProps) {
   const { t } = useTranslation();
   const sampleMethodOptions = SAMPLE_METHODS.map((method) =>
@@ -482,7 +513,7 @@ export function VideoWorkbench({
                   <div className="overflow-hidden rounded-[28px] border border-[var(--shell-card)]/50 bg-[var(--media-canvas)]/88 shadow-[0_32px_80px_-42px_color-mix(in_oklab,var(--foreground)_60%,transparent)]">
                     {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
                     <video
-                      src={`file://${videoPath}`}
+                      src={videoPath}
                       controls
                       autoPlay
                       loop
@@ -548,9 +579,125 @@ export function VideoWorkbench({
                 <p className="text-xs font-medium text-muted-foreground xl:text-right">{footerHint}</p>
               </div>
             </div>
+
+            <div className="rounded-[22px] border border-border/50 bg-[var(--surface-soft)] px-5 py-4 shadow-[0_18px_42px_-34px_color-mix(in_oklab,var(--foreground)_28%,transparent)]">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                    {t('pages.video.history.title')}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {historyLoading
+                      ? t('pages.video.history.loading')
+                      : historyError
+                        ? t('pages.video.history.error', { message: historyError })
+                        : t('pages.video.history.description')}
+                  </p>
+                </div>
+                <History className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                {history.slice(0, 4).map((task) => (
+                  <button
+                    key={task.task_id}
+                    type="button"
+                    className="rounded-[18px] border border-border/50 bg-[var(--shell-card)] px-4 py-3 text-left transition hover:border-[var(--brand-teal)]/50 hover:shadow-[0_18px_36px_-30px_color-mix(in_oklab,var(--foreground)_38%,transparent)]"
+                    onClick={() => void openHistoryDetail(task.task_id)}
+                  >
+                    <p className="line-clamp-2 text-sm font-semibold leading-5 text-foreground">
+                      {task.prompt}
+                    </p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                      <span className="rounded-full bg-[var(--surface-soft)] px-2 py-0.5">
+                        {task.status}
+                      </span>
+                      <span>{task.frames}f / {task.fps}fps</span>
+                      <span>{formatHistoryTime(task.created_at)}</span>
+                    </div>
+                  </button>
+                ))}
+                {!historyLoading && history.length === 0 ? (
+                  <div className="rounded-[18px] border border-dashed border-border/60 bg-[var(--shell-card)] px-4 py-5 text-sm text-muted-foreground lg:col-span-2">
+                    {t('pages.video.history.empty')}
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </section>
         </div>
       </div>
+
+      <Dialog
+        open={historyDialogOpen}
+        onOpenChange={(open) => {
+          setHistoryDialogOpen(open);
+          if (!open) {
+            setSelectedHistoryTask(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-4xl">
+          {selectedHistoryTask ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>{t('pages.video.history.detailTitle')}</DialogTitle>
+                <DialogDescription>
+                  {selectedHistoryTask.status} | {selectedHistoryTask.frames} frames at {selectedHistoryTask.fps} fps
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
+                <div className="overflow-hidden rounded-[24px] border border-border/60 bg-[var(--media-canvas)]">
+                  {resolveMediaUrl(selectedHistoryTask.video_url) ? (
+                    // eslint-disable-next-line jsx-a11y/media-has-caption
+                    <video
+                      src={resolveMediaUrl(selectedHistoryTask.video_url) ?? undefined}
+                      controls
+                      className="max-h-[62vh] w-full bg-[var(--media-canvas)] object-contain"
+                    />
+                  ) : (
+                    <div className="flex min-h-[260px] items-center justify-center text-sm text-muted-foreground">
+                      {t('pages.video.history.noArtifact')}
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-4 rounded-[22px] bg-[var(--surface-soft)] p-4">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                      {t('pages.video.workbench.prompt.label')}
+                    </p>
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground">
+                      {selectedHistoryTask.prompt}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground">{t('pages.video.history.fields.size')}</p>
+                      <p className="font-semibold">{selectedHistoryTask.width} x {selectedHistoryTask.height}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">{t('pages.video.history.fields.clip')}</p>
+                      <p className="font-semibold">{selectedHistoryTask.frames} / {selectedHistoryTask.fps}fps</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">{t('pages.video.history.fields.backend')}</p>
+                      <p className="truncate font-semibold">{selectedHistoryTask.backend_id}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">{t('pages.video.history.fields.model')}</p>
+                      <p className="truncate font-semibold">{selectedHistoryTask.model_id ?? selectedHistoryTask.model_path}</p>
+                    </div>
+                  </div>
+                  {selectedHistoryTask.error_msg ? (
+                    <p className="rounded-xl bg-destructive/10 p-3 text-xs leading-5 text-destructive">
+                      {selectedHistoryTask.error_msg}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

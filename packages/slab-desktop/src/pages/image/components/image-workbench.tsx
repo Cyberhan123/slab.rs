@@ -15,7 +15,7 @@ import { useTranslation } from '@slab/i18n';
 
 import { Badge } from '@slab/components/badge';
 import { Button } from '@slab/components/button';
-import { Dialog, DialogContent } from '@slab/components/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@slab/components/dialog';
 import { Input } from '@slab/components/input';
 import { Label } from '@slab/components/label';
 import { Slider } from '@slab/components/slider';
@@ -34,6 +34,10 @@ import {
   CollapsibleTrigger,
 } from '@slab/components/collapsible';
 import { SplitWorkbench } from '@slab/components/workspace';
+import {
+  resolveMediaUrl,
+  type ImageGenerationTask,
+} from '@/lib/media-task-api';
 import { cn } from '@/lib/utils';
 import {
   DIMENSION_PRESETS,
@@ -59,6 +63,10 @@ type ImageWorkbenchProps = {
   handleInitImageChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   handleSubmit: () => void;
   heightStr: string;
+  history: ImageGenerationTask[];
+  historyDialogOpen: boolean;
+  historyError: string | null;
+  historyLoading: boolean;
   images: GeneratedImage[];
   initImageDataUri: string | null;
   initImageInputRef: RefObject<HTMLInputElement | null>;
@@ -75,7 +83,10 @@ type ImageWorkbenchProps = {
   sampleMethod: string;
   scheduler: string;
   seed: number;
+  selectedHistoryTask: ImageGenerationTask | null;
   selectedModelId: string;
+  setHistoryDialogOpen: (open: boolean) => void;
+  setSelectedHistoryTask: (task: ImageGenerationTask | null) => void;
   setAdvancedOpen: (open: boolean) => void;
   setCfgScale: (value: number) => void;
   setClipSkip: (value: number) => void;
@@ -98,7 +109,17 @@ type ImageWorkbenchProps = {
   strength: number;
   widthStr: string;
   zoomedImage: string | null;
+  openHistoryDetail: (taskId: string) => void | Promise<void>;
 };
+
+function formatHistoryTime(value: string) {
+  return new Date(value).toLocaleString(undefined, {
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 export function ImageWorkbench({
   activeDimensionPreset,
@@ -113,6 +134,10 @@ export function ImageWorkbench({
   handleInitImageChange,
   handleSubmit,
   heightStr,
+  history,
+  historyDialogOpen,
+  historyError,
+  historyLoading,
   images,
   initImageDataUri,
   initImageInputRef,
@@ -129,7 +154,10 @@ export function ImageWorkbench({
   sampleMethod,
   scheduler,
   seed,
+  selectedHistoryTask,
   selectedModelId,
+  setHistoryDialogOpen,
+  setSelectedHistoryTask,
   setAdvancedOpen,
   setCfgScale,
   setClipSkip,
@@ -152,6 +180,7 @@ export function ImageWorkbench({
   strength,
   widthStr,
   zoomedImage,
+  openHistoryDetail,
 }: ImageWorkbenchProps) {
   const { t } = useTranslation();
   const sampleMethodOptions = SAMPLE_METHODS.map((method) =>
@@ -160,6 +189,9 @@ export function ImageWorkbench({
   const schedulerOptions = SCHEDULERS.map((schedulerItem) =>
     Object.assign({}, schedulerItem, { label: t(`pages.image.options.schedulers.${schedulerItem.value}`) }),
   );
+  const selectedHistoryImages = selectedHistoryTask?.image_urls
+    .map((url) => resolveMediaUrl(url))
+    .filter((url): url is string => typeof url === 'string' && url.length > 0) ?? [];
 
   return (
     <div className="h-full w-full overflow-y-auto bg-[var(--shell-card)] lg:overflow-hidden">
@@ -571,9 +603,10 @@ export function ImageWorkbench({
             </aside>
           }
           main={
-            <section className="h-full min-h-[520px] rounded-[28px] border border-border/60 bg-[var(--shell-card)] lg:min-h-0 lg:overflow-hidden lg:rounded-none lg:border-0">
-              {images.length === 0 ? (
-                <div className="flex h-full min-h-[520px] items-center justify-center px-6 py-12 xl:min-h-[780px]">
+            <section className="flex h-full min-h-[520px] flex-col rounded-[28px] border border-border/60 bg-[var(--shell-card)] lg:min-h-0 lg:overflow-hidden lg:rounded-none lg:border-0">
+              <div className="min-h-0 flex-1">
+                {images.length === 0 ? (
+                <div className="flex h-full min-h-[360px] items-center justify-center px-6 py-12 xl:min-h-[560px]">
                   <div className="flex max-w-[448px] flex-col items-center gap-6 text-center">
                     <div className="relative flex items-center justify-center">
                       <div className="flex size-32 items-center justify-center rounded-full bg-[var(--surface-soft)] text-muted-foreground/60">
@@ -608,6 +641,12 @@ export function ImageWorkbench({
                         <button
                           type="button"
                           className="inline-flex items-center gap-1.5 transition hover:text-foreground"
+                          onClick={() => {
+                            const firstHistoryTask = history[0];
+                            if (firstHistoryTask) {
+                              void openHistoryDetail(firstHistoryTask.task_id);
+                            }
+                          }}
                         >
                           <History className="size-3.5" />
                           {t('pages.image.workbench.emptyState.viewHistory')}
@@ -624,8 +663,8 @@ export function ImageWorkbench({
                     )}
                   </div>
                 </div>
-              ) : (
-                <div className="flex h-full min-h-[520px] flex-col">
+                ) : (
+                <div className="flex h-full min-h-[360px] flex-col">
                   <div className="border-b border-border/60 px-6 py-6 xl:px-10">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
@@ -645,7 +684,7 @@ export function ImageWorkbench({
                     <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
                       {images.map((image, index) => (
                         <figure
-                          key={`${image.src}-${index}`}
+                          key={image.src}
                           className="group overflow-hidden rounded-[24px] border border-border/60 bg-[var(--surface-soft)] shadow-[0_18px_32px_-28px_color-mix(in_oklab,var(--foreground)_28%,transparent)]"
                         >
                           <div className="relative overflow-hidden bg-[var(--shell-card)]">
@@ -695,7 +734,63 @@ export function ImageWorkbench({
                     </div>
                   </div>
                 </div>
-              )}
+                )}
+              </div>
+              <div className="border-t border-border/60 bg-[var(--surface-soft)] px-5 py-4 xl:px-8">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                      {t('pages.image.history.title')}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {historyLoading
+                        ? t('pages.image.history.loading')
+                        : historyError
+                          ? t('pages.image.history.error', { message: historyError })
+                          : t('pages.image.history.description')}
+                    </p>
+                  </div>
+                  <Badge variant="chip">{history.length}</Badge>
+                </div>
+
+                <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {history.slice(0, 3).map((task) => {
+                    const previewUrl = resolveMediaUrl(task.primary_image_url ?? task.image_urls[0]);
+                    return (
+                      <button
+                        key={task.task_id}
+                        type="button"
+                        className="group flex gap-3 rounded-[18px] border border-border/50 bg-[var(--shell-card)] p-3 text-left transition hover:border-[var(--brand-teal)]/50 hover:shadow-[0_18px_36px_-28px_color-mix(in_oklab,var(--foreground)_35%,transparent)]"
+                        onClick={() => void openHistoryDetail(task.task_id)}
+                      >
+                        <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-[14px] bg-[var(--surface-soft)] text-muted-foreground">
+                          {previewUrl ? (
+                            <img src={previewUrl} alt={task.prompt} className="h-full w-full object-cover" />
+                          ) : (
+                            <ImageIcon className="size-5" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="line-clamp-2 text-sm font-semibold leading-5 text-foreground">
+                            {task.prompt}
+                          </p>
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                            <span className="rounded-full bg-[var(--surface-soft)] px-2 py-0.5">
+                              {task.status}
+                            </span>
+                            <span>{formatHistoryTime(task.created_at)}</span>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {!historyLoading && history.length === 0 ? (
+                    <div className="rounded-[18px] border border-dashed border-border/60 bg-[var(--shell-card)] px-4 py-5 text-sm text-muted-foreground md:col-span-2 xl:col-span-3">
+                      {t('pages.image.history.empty')}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
             </section>
           }
         />
@@ -716,6 +811,81 @@ export function ImageWorkbench({
               alt={t('pages.image.workbench.gallery.previewAlt')}
               className="w-full rounded-xl"
             />
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={historyDialogOpen}
+        onOpenChange={(open) => {
+          setHistoryDialogOpen(open);
+          if (!open) {
+            setSelectedHistoryTask(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-5xl">
+          {selectedHistoryTask ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>{t('pages.image.history.detailTitle')}</DialogTitle>
+                <DialogDescription>
+                  {selectedHistoryTask.status} | {formatHistoryTime(selectedHistoryTask.created_at)}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
+                <div className="grid max-h-[70vh] gap-3 overflow-y-auto sm:grid-cols-2">
+                  {selectedHistoryImages.map((src, index) => (
+                    <figure key={src} className="overflow-hidden rounded-[22px] border border-border/60 bg-[var(--surface-soft)]">
+                      <img src={src} alt={selectedHistoryTask.prompt} className="w-full object-cover" />
+                      <figcaption className="flex justify-end border-t border-border/50 bg-[var(--shell-card)] px-3 py-2">
+                        <Button
+                          variant="pill"
+                          size="sm"
+                          onClick={() => handleDownload(src, index)}
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          {t('pages.image.workbench.gallery.downloadAria')}
+                        </Button>
+                      </figcaption>
+                    </figure>
+                  ))}
+                </div>
+                <div className="space-y-4 rounded-[22px] bg-[var(--surface-soft)] p-4">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                      {t('pages.image.workbench.prompt.label')}
+                    </p>
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground">
+                      {selectedHistoryTask.prompt}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground">{t('pages.image.history.fields.mode')}</p>
+                      <p className="font-semibold">{selectedHistoryTask.mode}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">{t('pages.image.history.fields.size')}</p>
+                      <p className="font-semibold">{selectedHistoryTask.width} x {selectedHistoryTask.height}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">{t('pages.image.history.fields.backend')}</p>
+                      <p className="truncate font-semibold">{selectedHistoryTask.backend_id}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">{t('pages.image.history.fields.model')}</p>
+                      <p className="truncate font-semibold">{selectedHistoryTask.model_id ?? selectedHistoryTask.model_path}</p>
+                    </div>
+                  </div>
+                  {selectedHistoryTask.error_msg ? (
+                    <p className="rounded-xl bg-destructive/10 p-3 text-xs leading-5 text-destructive">
+                      {selectedHistoryTask.error_msg}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </>
           ) : null}
         </DialogContent>
       </Dialog>

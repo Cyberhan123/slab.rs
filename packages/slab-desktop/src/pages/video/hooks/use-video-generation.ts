@@ -5,6 +5,12 @@ import { useTranslation } from '@slab/i18n';
 import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
 import api from '@/lib/api';
 import type { components } from '@/lib/api/v1.d.ts';
+import {
+  getVideoGeneration,
+  listVideoGenerations,
+  resolveMediaUrl,
+  type VideoGenerationTask,
+} from '@/lib/media-task-api';
 import { toCatalogModelList } from '@/lib/api/models';
 import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
 import { HEADER_SELECT_KEYS } from '@/layouts/header-controls';
@@ -17,7 +23,6 @@ import {
 
 type GenerationPhase = 'idle' | 'polling' | 'fetchingResult';
 type TaskResponse = components['schemas']['TaskResponse'];
-type TaskResultPayload = components['schemas']['TaskResultPayload'];
 
 async function fileToDataUri(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -51,6 +56,11 @@ export function useVideoGeneration() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [videoPath, setVideoPath] = useState<string | null>(null);
   const [immersivePreview, setImmersivePreview] = useState(false);
+  const [history, setHistory] = useState<VideoGenerationTask[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [selectedHistoryTask, setSelectedHistoryTask] = useState<VideoGenerationTask | null>(null);
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
 
   const initImageInputRef = useRef<HTMLInputElement>(null);
   const pollAttempts = useRef(0);
@@ -127,29 +137,6 @@ export function useVideoGeneration() {
     error: unknown;
     dataUpdatedAt: number;
   };
-  const {
-    data: taskResult,
-    error: taskResultError,
-    dataUpdatedAt: taskResultUpdatedAt,
-  } = api.useQuery(
-    'get',
-    '/v1/tasks/{id}/result',
-    {
-      params: {
-        path: {
-          id: taskId ?? '',
-        },
-      },
-    },
-    {
-      enabled: isFetchingResult && Boolean(taskId),
-      retry: false,
-    },
-  ) as {
-    data: TaskResultPayload | undefined;
-    error: unknown;
-    dataUpdatedAt: number;
-  };
   const isGenerating = isSubmitting || generationPhase !== 'idle';
   const headerModelPicker = useMemo(
     () => ({
@@ -179,6 +166,43 @@ export function useVideoGeneration() {
     setGenerationPhase('idle');
     setTaskId(null);
   }, []);
+
+  const mergeHistoryTask = useCallback((task: VideoGenerationTask) => {
+    setHistory((previous) => {
+      const next = [task, ...previous.filter((entry) => entry.task_id !== task.task_id)];
+      return next.toSorted((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
+    });
+  }, []);
+
+  const refreshHistory = useCallback(async () => {
+    try {
+      setHistoryLoading(true);
+      setHistoryError(null);
+      const items = await listVideoGenerations();
+      setHistory(items);
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  const openHistoryDetail = useCallback(async (taskIdToOpen: string) => {
+    try {
+      const detail = await getVideoGeneration(taskIdToOpen);
+      setSelectedHistoryTask(detail);
+      setHistoryDialogOpen(true);
+      mergeHistoryTask(detail);
+      setVideoPath(resolveMediaUrl(detail.video_url));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error(t('pages.video.toast.historyDetailFailed', { message }));
+    }
+  }, [mergeHistoryTask, t]);
+
+  useEffect(() => {
+    void refreshHistory();
+  }, [refreshHistory]);
 
   const loadInitImageFile = useCallback(async (file: File) => {
     if (!file.type.startsWith('image/')) {
@@ -235,6 +259,7 @@ export function useVideoGeneration() {
       const height = Number.parseInt(heightStr, 10) || 512;
       const { operation_id } = await generateVideoMutation.mutateAsync({
         body: {
+          model_id: selectedModelId || undefined,
           model: selectedModel.local_path,
           prompt,
           negative_prompt: negativePrompt || undefined,
@@ -250,7 +275,7 @@ export function useVideoGeneration() {
           scheduler: scheduler === 'auto' ? undefined : scheduler,
           strength: initImageDataUri ? strength : undefined,
           init_image: initImageDataUri ?? undefined,
-        },
+        } as never,
       });
       setTaskId(operation_id);
       setGenerationPhase('polling');
@@ -274,6 +299,7 @@ export function useVideoGeneration() {
     sampleMethod,
     scheduler,
     seed,
+    selectedModelId,
     selectedModel,
     steps,
     strength,
@@ -324,29 +350,51 @@ export function useVideoGeneration() {
   }, [clearGenerationTask, isPolling, taskId, taskStatusError, t]);
 
   useEffect(() => {
-    if (!isFetchingResult || !taskId || taskResultUpdatedAt === 0 || !taskResult) {
+    if (!isFetchingResult || !taskId) {
       return;
     }
 
-    if (taskResult.video_path) {
-      setVideoPath(taskResult.video_path);
-      toast.success(t('pages.video.toast.generated'));
-    } else {
-      toast.error(t('pages.video.toast.completedWithoutPath'));
-    }
+    let cancelled = false;
 
-    clearGenerationTask();
-  }, [clearGenerationTask, isFetchingResult, taskId, taskResult, taskResultUpdatedAt, t]);
+    const loadResult = async () => {
+      try {
+        const detail = await getVideoGeneration(taskId);
+        if (cancelled) {
+          return;
+        }
 
-  useEffect(() => {
-    if (!isFetchingResult || !taskId || !taskResultError) {
-      return;
-    }
+        const videoUrl = resolveMediaUrl(detail.video_url);
+        mergeHistoryTask(detail);
+        setSelectedHistoryTask(detail);
+        setHistoryDialogOpen(true);
 
-    const message = taskResultError instanceof Error ? taskResultError.message : String(taskResultError);
-    toast.error(t('pages.video.toast.resultFetchFailed', { message }));
-    clearGenerationTask();
-  }, [clearGenerationTask, isFetchingResult, taskId, taskResultError, t]);
+        if (videoUrl) {
+          setVideoPath(videoUrl);
+          toast.success(t('pages.video.toast.generated'));
+        } else {
+          toast.error(t('pages.video.toast.completedWithoutPath'));
+        }
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        const message = error instanceof Error ? error.message : String(error);
+        toast.error(t('pages.video.toast.resultFetchFailed', { message }));
+      } finally {
+        if (!cancelled) {
+          clearGenerationTask();
+          void refreshHistory();
+        }
+      }
+    };
+
+    void loadResult();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clearGenerationTask, isFetchingResult, mergeHistoryTask, refreshHistory, t, taskId]);
 
   const handleCancel = useCallback(async () => {
     if (taskId) {
@@ -369,7 +417,7 @@ export function useVideoGeneration() {
       return;
     }
     const anchor = document.createElement('a');
-    anchor.href = `file://${videoPath}`;
+    anchor.href = videoPath;
     anchor.download = 'generated-video.mp4';
     anchor.click();
   }, [videoPath]);
@@ -423,6 +471,10 @@ export function useVideoGeneration() {
     heightStr,
     heightValue,
     hasSelectedModel: Boolean(selectedModel?.local_path),
+    history,
+    historyDialogOpen,
+    historyError,
+    historyLoading,
     immersivePreview,
     initImageDataUri,
     initImageInputRef,
@@ -432,18 +484,21 @@ export function useVideoGeneration() {
     sampleMethod,
     scheduler,
     seed,
+    selectedHistoryTask,
     setAdvancedOpen,
     setCfgScale,
     setFps,
     setFrames,
     setGuidance,
     setHeightStr,
+    setHistoryDialogOpen,
     setImmersivePreview,
     setInitImageDataUri,
     setNegativePrompt,
     setPrompt,
     setSampleMethod,
     setScheduler,
+    setSelectedHistoryTask,
     setSeed,
     setSteps,
     setStrength,
@@ -456,5 +511,6 @@ export function useVideoGeneration() {
     videoPath,
     widthStr,
     widthValue,
+    openHistoryDetail,
   };
 }

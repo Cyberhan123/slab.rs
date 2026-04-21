@@ -1,13 +1,14 @@
 import type { ChangeEvent, RefObject } from 'react';
-import type { NavigateFunction } from 'react-router-dom';
 import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
 import { Button } from '@slab/components/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@slab/components/dialog';
 import { Input } from '@slab/components/input';
 import { SoftPanel } from '@slab/components/workspace';
 import { useTranslation } from '@slab/i18n';
-import { FileAudio2, Loader2 } from 'lucide-react';
+import { FileAudio2, History, Loader2 } from 'lucide-react';
 import type { SelectedFile } from '@/hooks/use-file';
 import type { CatalogModel } from '@/lib/api/models';
+import type { AudioTranscriptionTask } from '@/lib/media-task-api';
 import type { PreparingStage } from '../const';
 import { VadSettings } from './vad-settings';
 import { DecodeOptions } from './decode-options';
@@ -39,12 +40,17 @@ export type AudioWorkbenchProps = {
   handleTauriFileSelect: () => void | Promise<void>;
   handleTranscribe: () => void | Promise<void>;
   hasBundledVad: boolean;
+  history: AudioTranscriptionTask[];
+  historyDialogOpen: boolean;
+  historyError: string | null;
+  historyLoading: boolean;
   isBusy: boolean;
   isTauri: boolean;
   isUsingBundledVad: boolean;
-  navigate: NavigateFunction;
+  openHistoryDetail: (taskId: string) => void | Promise<void>;
   preparingStage: PreparingStage;
   previewRows: Array<{ label: string; value: string; accent: boolean; chip: boolean }>;
+  selectedHistoryTask: AudioTranscriptionTask | null;
   selectedVadModel: CatalogModel | undefined;
   selectedVadModelId: string;
   setDecodeEntropyThold: (value: string) => void;
@@ -64,7 +70,9 @@ export type AudioWorkbenchProps = {
   setDecodeTokenTimestamps: (value: boolean) => void;
   setDecodeWordThold: (value: string) => void;
   setEnableVad: (value: boolean) => void;
+  setHistoryDialogOpen: (open: boolean) => void;
   setSelectedVadModelId: (value: string) => void;
+  setSelectedHistoryTask: (task: AudioTranscriptionTask | null) => void;
   setShowDecodeOptions: (value: boolean) => void;
   setVadMaxSpeechDurationS: (value: string) => void;
   setVadMinSilenceDurationMs: (value: string) => void;
@@ -84,6 +92,15 @@ export type AudioWorkbenchProps = {
   webFileInputRef: RefObject<HTMLInputElement | null>;
   whisperVadModels: CatalogModel[];
 };
+
+function formatHistoryTime(value: string) {
+  return new Date(value).toLocaleString(undefined, {
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 export function AudioWorkbench({
   bundledVadLabel,
@@ -112,12 +129,17 @@ export function AudioWorkbench({
   handleTauriFileSelect,
   handleTranscribe,
   hasBundledVad,
+  history,
+  historyDialogOpen,
+  historyError,
+  historyLoading,
   isBusy,
   isTauri,
   isUsingBundledVad,
-  navigate,
+  openHistoryDetail,
   preparingStage,
   previewRows,
+  selectedHistoryTask,
   selectedVadModel,
   selectedVadModelId,
   setDecodeEntropyThold,
@@ -137,7 +159,9 @@ export function AudioWorkbench({
   setDecodeTokenTimestamps,
   setDecodeWordThold,
   setEnableVad,
+  setHistoryDialogOpen,
   setSelectedVadModelId,
+  setSelectedHistoryTask,
   setShowDecodeOptions,
   setVadMaxSpeechDurationS,
   setVadMinSilenceDurationMs,
@@ -410,8 +434,19 @@ export function AudioWorkbench({
                       {t('pages.audio.workbench.taskCreated.description', { id: taskId })}
                     </p>
                   </div>
-                  <Button variant="pill" size="pill" onClick={() => navigate('/task')}>
-                    {t('pages.audio.workbench.taskCreated.openTasks')}
+                  <Button
+                    variant="pill"
+                    size="pill"
+                    onClick={() => {
+                      if (selectedHistoryTask) {
+                        setHistoryDialogOpen(true);
+                        return;
+                      }
+
+                      void openHistoryDetail(taskId);
+                    }}
+                  >
+                    {t('pages.audio.workbench.taskCreated.viewTranscript')}
                   </Button>
                 </div>
               ) : (
@@ -429,8 +464,108 @@ export function AudioWorkbench({
               )}
             </div>
           ) : null}
+
+          <div className="mt-6 rounded-[22px] bg-[var(--surface-soft)] p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                  {t('pages.audio.history.title')}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {historyLoading
+                    ? t('pages.audio.history.loading')
+                    : historyError
+                      ? t('pages.audio.history.error', { message: historyError })
+                      : t('pages.audio.history.description')}
+                </p>
+              </div>
+              <History className="size-4 text-muted-foreground" />
+            </div>
+            <div className="mt-3 space-y-3">
+              {history.slice(0, 4).map((task) => (
+                <button
+                  key={task.task_id}
+                  type="button"
+                  className="w-full rounded-[18px] border border-border/50 bg-[var(--shell-card)] px-4 py-3 text-left transition hover:border-[var(--brand-teal)]/50"
+                  onClick={() => void openHistoryDetail(task.task_id)}
+                >
+                  <p className="line-clamp-2 text-sm font-semibold text-foreground">
+                    {task.transcript_text?.slice(0, 96) ||
+                      task.prompt ||
+                      task.source_path}
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                    <span className="rounded-full bg-[var(--surface-soft)] px-2 py-0.5">
+                      {task.status}
+                    </span>
+                    <span>{formatHistoryTime(task.created_at)}</span>
+                  </div>
+                </button>
+              ))}
+              {!historyLoading && history.length === 0 ? (
+                <p className="rounded-[18px] border border-dashed border-border/60 bg-[var(--shell-card)] px-4 py-5 text-sm text-muted-foreground">
+                  {t('pages.audio.history.empty')}
+                </p>
+              ) : null}
+            </div>
+          </div>
         </div>
       </div>
+
+      <Dialog
+        open={historyDialogOpen}
+        onOpenChange={(open) => {
+          setHistoryDialogOpen(open);
+          if (!open) {
+            setSelectedHistoryTask(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-4xl">
+          {selectedHistoryTask ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>{t('pages.audio.history.detailTitle')}</DialogTitle>
+                <DialogDescription>
+                  {selectedHistoryTask.status} | {formatHistoryTime(selectedHistoryTask.created_at)}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
+                <div className="max-h-[68vh] overflow-y-auto rounded-[22px] bg-[var(--surface-soft)] p-4">
+                  <pre className="whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
+                    {selectedHistoryTask.transcript_text ?? t('pages.audio.history.pendingTranscript')}
+                  </pre>
+                </div>
+                <div className="space-y-4 rounded-[22px] bg-[var(--surface-soft)] p-4">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                      {t('pages.audio.history.fields.source')}
+                    </p>
+                    <p className="mt-2 break-all text-sm text-foreground">
+                      {selectedHistoryTask.source_path}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground">{t('pages.audio.history.fields.model')}</p>
+                      <p className="font-semibold">{selectedHistoryTask.model_id ?? selectedHistoryTask.backend_id}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">{t('pages.audio.history.fields.language')}</p>
+                      <p className="font-semibold">{selectedHistoryTask.language ?? '-'}</p>
+                    </div>
+                  </div>
+                  {selectedHistoryTask.error_msg ? (
+                    <p className="rounded-xl bg-destructive/10 p-3 text-xs leading-5 text-destructive">
+                      {selectedHistoryTask.error_msg}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

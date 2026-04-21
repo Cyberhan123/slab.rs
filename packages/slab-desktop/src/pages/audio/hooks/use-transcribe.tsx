@@ -17,6 +17,7 @@ export type TranscribeVadSettings = {
 };
 
 export type TranscribeOptions = {
+    model_id?: string;
     language?: string;
     prompt?: string;
     detect_language?: boolean;
@@ -59,6 +60,9 @@ const useTranscribe = () => {
 
         const body: AudioTranscriptionRequest = { path: value };
 
+        if (typeof options?.model_id === 'string' && options.model_id.trim()) {
+            (body as AudioTranscriptionRequest & { model_id?: string }).model_id = options.model_id.trim();
+        }
         if (typeof options?.language === 'string' && options.language.trim()) {
             body.language = options.language.trim();
         }

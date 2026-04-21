@@ -71,6 +71,21 @@ export const video = {
       clipSpecValue: '{{frames}} frames - {{fps}} fps',
     },
   },
+  history: {
+    title: 'Recent History',
+    loading: 'Loading recent video generations...',
+    error: 'Failed to load history: {{message}}',
+    description: 'Reopen generated clips, prompts, and render settings from recent video tasks.',
+    empty: 'No video history yet. Completed renders will show up here.',
+    detailTitle: 'Video Task Detail',
+    noArtifact: 'This task has not produced a persisted video artifact yet.',
+    fields: {
+      size: 'Size',
+      clip: 'Clip',
+      backend: 'Backend',
+      model: 'Model',
+    },
+  },
   stage: {
     title: {
       ready: 'Render Ready',
@@ -98,6 +113,7 @@ export const video = {
   toast: {
     started: 'Video generation started ({{frames}} frames at {{fps}} fps)...',
     generated: 'Video generated!',
+    historyDetailFailed: 'Failed to open video history detail: {{message}}',
     timedOut: 'Video generation timed out',
     pollingError: 'Polling error: {{message}}',
     completedWithoutPath: 'Video generation completed without a video path',

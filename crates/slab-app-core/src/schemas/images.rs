@@ -2,8 +2,11 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
-use crate::domain::models::{DecodedImageInput, ImageGenerationCommand, ImageGenerationMode};
+use crate::domain::models::{
+    DecodedImageInput, ImageGenerationCommand, ImageGenerationMode, ImageGenerationTaskView,
+};
 use crate::error::AppCoreError;
+use crate::schemas::tasks::{TaskProgressResponse, TaskStatus};
 
 const MAX_PROMPT_BYTES: usize = 128 * 1024;
 const MAX_IMAGES_PER_REQUEST: u32 = 10;
@@ -25,6 +28,14 @@ pub enum ImageMode {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
 #[validate(schema(function = "validate_image_generation_request"))]
 pub struct ImageGenerationRequest {
+    /// Optional catalog model identifier used for history attribution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[validate(custom(
+        function = "crate::schemas::validation::validate_non_blank",
+        message = "model_id must not be empty"
+    ))]
+    pub model_id: Option<String>,
+
     /// The model identifier to use.
     #[validate(custom(
         function = "crate::schemas::validation::validate_non_blank",
@@ -203,6 +214,7 @@ impl TryFrom<ImageGenerationRequest> for ImageGenerationCommand {
         };
 
         Ok(Self {
+            model_id: request.model_id,
             model: request.model,
             prompt: request.prompt,
             negative_prompt: request.negative_prompt,
@@ -227,4 +239,64 @@ impl TryFrom<ImageGenerationRequest> for ImageGenerationCommand {
 fn decode_init_image(data_uri: &str) -> Result<DecodedImageInput, AppCoreError> {
     let (data, width, height) = crate::schemas::decode_base64_init_image(data_uri)?;
     Ok(DecodedImageInput { data, width, height, channels: 3 })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ImageGenerationTaskResponse {
+    pub task_id: String,
+    pub task_type: String,
+    pub status: TaskStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<TaskProgressResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_msg: Option<String>,
+    pub backend_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    pub model_path: String,
+    pub prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub negative_prompt: Option<String>,
+    pub mode: String,
+    pub width: u32,
+    pub height: u32,
+    pub requested_count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference_image_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary_image_url: Option<String>,
+    pub image_urls: Vec<String>,
+    pub request_data: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_data: Option<serde_json::Value>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<ImageGenerationTaskView> for ImageGenerationTaskResponse {
+    fn from(value: ImageGenerationTaskView) -> Self {
+        Self {
+            task_id: value.task_id,
+            task_type: value.task_type,
+            status: value.status.into(),
+            progress: value.progress.map(Into::into),
+            error_msg: value.error_msg,
+            backend_id: value.backend_id,
+            model_id: value.model_id,
+            model_path: value.model_path,
+            prompt: value.prompt,
+            negative_prompt: value.negative_prompt,
+            mode: value.mode,
+            width: value.width,
+            height: value.height,
+            requested_count: value.requested_count,
+            reference_image_url: value.reference_image_url,
+            primary_image_url: value.primary_image_url,
+            image_urls: value.image_urls,
+            request_data: value.request_data,
+            result_data: value.result_data,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
 }
