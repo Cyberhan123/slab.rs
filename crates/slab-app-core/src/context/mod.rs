@@ -103,9 +103,8 @@ fn build_agent_control(
     let store_adapter: Arc<dyn slab_agent::port::AgentStorePort> = store;
     let notify = Arc::new(NoopNotifyAdapter);
 
-    // Register built-in tools.
     let mut tool_router = ToolRouter::new();
-    tool_router.register(Box::new(slab_agent::tools::EchoTool));
+    slab_agent_tools::register_builtin_tools(&mut tool_router);
 
     AgentControl::new(llm, store_adapter, notify, Arc::new(tool_router), 32, 4)
 }

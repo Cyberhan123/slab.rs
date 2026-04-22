@@ -70,7 +70,7 @@ pub fn mount_plugin_view(
         });
     }
 
-    let navigation_allow_hosts = collect_navigation_allow_hosts(&plugin.manifest.network);
+    let navigation_allow_hosts = collect_navigation_allow_hosts(&plugin.manifest.permissions.network);
     let plugin_id = request.plugin_id.clone();
     let webview_builder = WebviewBuilder::new(
         webview_label.clone(),

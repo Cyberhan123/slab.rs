@@ -8,10 +8,88 @@ export type PluginInfo = {
   version: string;
   valid: boolean;
   error?: string | null;
+  manifestVersion: number;
+  compatibility: PluginCompatibility;
   uiEntry?: string | null;
   hasWasm?: boolean;
   networkMode: "blocked" | "allowlist" | string;
   allowHosts: string[];
+  contributions: PluginContributions;
+  permissions: PluginPermissions;
+};
+
+export type PluginCompatibility = {
+  slab?: string | null;
+  pluginApi?: string | null;
+};
+
+export type PluginContributions = {
+  routes: PluginRouteContribution[];
+  sidebar: PluginSidebarContribution[];
+  commands: PluginCommandContribution[];
+  settings: PluginSettingsContribution[];
+  agentCapabilities: PluginAgentCapabilityContribution[];
+};
+
+export type PluginRouteContribution = {
+  id: string;
+  path: string;
+  title?: string | null;
+  titleKey?: string | null;
+  entry?: string | null;
+};
+
+export type PluginSidebarContribution = {
+  id: string;
+  label?: string | null;
+  labelKey?: string | null;
+  route?: string | null;
+  command?: string | null;
+  icon?: string | null;
+};
+
+export type PluginCommandContribution = {
+  id: string;
+  label?: string | null;
+  labelKey?: string | null;
+  action?: string | null;
+  route?: string | null;
+};
+
+export type PluginSettingsContribution = {
+  id: string;
+  title?: string | null;
+  titleKey?: string | null;
+  schema: string;
+};
+
+export type PluginAgentCapabilityContribution = {
+  id: string;
+  kind: "tool" | "workflow" | string;
+  description?: string | null;
+  descriptionKey?: string | null;
+  inputSchema?: string | null;
+  outputSchema?: string | null;
+  effects: string[];
+  transport: {
+    type: "pluginCall" | string;
+    function: string;
+  };
+  exposeAsMcpTool: boolean;
+};
+
+export type PluginPermissions = {
+  network: {
+    mode: "blocked" | "allowlist" | string;
+    allowHosts: string[];
+  };
+  ui: string[];
+  agent: string[];
+  slabApi: string[];
+  files: {
+    read: string[];
+    write: string[];
+  };
 };
 
 export type PluginViewBounds = {

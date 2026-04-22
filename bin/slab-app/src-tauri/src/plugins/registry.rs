@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
@@ -9,7 +9,11 @@ use sha2::{Digest, Sha256};
 use tauri::Manager;
 use tauri::path::BaseDirectory;
 
-use super::types::{PluginInfo, PluginManifest, PluginNetworkMode};
+use super::types::{
+    PluginCapabilityTransportType, PluginCommandContribution, PluginContributesManifest,
+    PluginInfo, PluginManifest, PluginNetworkMode, PluginPermissionsManifest,
+    PluginSettingsContribution, PluginSidebarContribution,
+};
 
 pub const DEFAULT_PLUGINS_DIR: &str = "plugins";
 
@@ -20,6 +24,32 @@ pub struct LoadedPlugin {
     pub ui_entry: String,
     pub wasm_entry_path: Option<PathBuf>,
     pub files_sha256: HashMap<String, String>,
+    #[allow(dead_code)]
+    pub extension_registry: ExtensionPointRegistry,
+    pub capability_registry: CapabilityRegistry,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ExtensionPointRegistry {
+    contribution_ids: HashSet<String>,
+    route_ids: HashSet<String>,
+    route_paths: HashSet<String>,
+    command_ids: HashSet<String>,
+}
+
+impl ExtensionPointRegistry {
+    fn contains_route_reference(&self, target: &str) -> bool {
+        self.route_ids.contains(target) || self.route_paths.contains(target)
+    }
+
+    fn contains_command(&self, target: &str) -> bool {
+        self.command_ids.contains(target)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct CapabilityRegistry {
+    capability_ids: HashSet<String>,
 }
 
 #[derive(Default)]
@@ -83,10 +113,15 @@ impl PluginRegistryState {
                 version: plugin.manifest.version.clone(),
                 valid: true,
                 error: None,
+                manifest_version: plugin.manifest.manifest_version,
+                compatibility: plugin.manifest.compatibility.clone(),
                 ui_entry: Some(plugin.ui_entry.clone()),
                 has_wasm: plugin.wasm_entry_path.is_some(),
-                network_mode: network_mode_label(&plugin.manifest.network.mode).to_string(),
-                allow_hosts: plugin.manifest.network.allow_hosts.clone(),
+                network_mode: network_mode_label(&plugin.manifest.permissions.network.mode)
+                    .to_string(),
+                allow_hosts: plugin.manifest.permissions.network.allow_hosts.clone(),
+                contributions: plugin.manifest.contributes.clone(),
+                permissions: plugin.manifest.permissions.clone(),
             });
         }
 
@@ -97,10 +132,14 @@ impl PluginRegistryState {
                 version: "invalid".to_string(),
                 valid: false,
                 error: Some(error.clone()),
+                manifest_version: 0,
+                compatibility: Default::default(),
                 ui_entry: None,
                 has_wasm: false,
                 network_mode: "blocked".to_string(),
                 allow_hosts: Vec::new(),
+                contributions: PluginContributesManifest::default(),
+                permissions: PluginPermissionsManifest::default(),
             });
         }
 
@@ -195,6 +234,7 @@ pub fn is_path_within_root(root: &Path, path: &Path) -> bool {
 fn scan_plugins(root_dir: &Path) -> Result<PluginRegistrySnapshot, String> {
     let mut loaded = HashMap::new();
     let mut invalid = HashMap::new();
+    let mut seen_capability_ids = HashMap::<String, String>::new();
 
     let entries = fs::read_dir(root_dir)
         .map_err(|e| format!("failed to scan plugins directory {}: {e}", root_dir.display()))?;
@@ -263,6 +303,25 @@ fn scan_plugins(root_dir: &Path) -> Result<PluginRegistrySnapshot, String> {
                     invalid.insert(plugin_id, "duplicated plugin id".to_string());
                     continue;
                 }
+
+                for capability_id in &plugin.capability_registry.capability_ids {
+                    if let Some(existing_plugin) = seen_capability_ids.get(capability_id) {
+                        invalid.insert(
+                            plugin_id.clone(),
+                            format!(
+                                "duplicated capability id `{capability_id}` already provided by plugin `{existing_plugin}`"
+                            ),
+                        );
+                    }
+                }
+
+                if invalid.contains_key(&plugin_id) {
+                    continue;
+                }
+
+                for capability_id in &plugin.capability_registry.capability_ids {
+                    seen_capability_ids.insert(capability_id.clone(), plugin_id.clone());
+                }
                 loaded.insert(plugin_id, plugin);
             }
             Err(error) => {
@@ -300,27 +359,6 @@ fn validate_and_load_plugin(
         return Err("integrity.filesSha256 must not be empty".to_string());
     }
 
-    let ui_entry = normalize_relative_path(&manifest.ui.entry)?;
-    let ui_entry_path = plugin_dir.join(&ui_entry);
-
-    if !ui_entry_path.is_file() {
-        return Err(format!("missing UI entry file at {}", ui_entry_path.display()));
-    }
-
-    let wasm_entry = match manifest.wasm.as_ref() {
-        Some(wasm) => Some(normalize_relative_path(&wasm.entry)?),
-        None => None,
-    };
-    let wasm_entry_path = if let Some(wasm_entry) = wasm_entry.as_ref() {
-        let path = plugin_dir.join(wasm_entry);
-        if !path.is_file() {
-            return Err(format!("missing wasm entry file at {}", path.display()));
-        }
-        Some(path)
-    } else {
-        None
-    };
-
     let mut files_sha256 = HashMap::new();
     for (raw_path, expected_hash) in &manifest.integrity.files_sha256 {
         let normalized_path = normalize_relative_path(raw_path)?;
@@ -341,20 +379,35 @@ fn validate_and_load_plugin(
         files_sha256.insert(normalized_path, expected_hash.to_ascii_lowercase());
     }
 
-    if !files_sha256.contains_key(&ui_entry) {
-        return Err("integrity.filesSha256 must contain ui.entry".to_string());
-    }
-    if let Some(wasm_entry) = wasm_entry.as_ref()
-        && !files_sha256.contains_key(wasm_entry)
+    let ui_entry = validate_declared_file(
+        plugin_dir,
+        &files_sha256,
+        &manifest.runtime.ui.entry,
+        "runtime.ui.entry",
+    )?
+    .0;
+
+    let wasm_entry_path = match manifest.runtime.wasm.as_ref() {
+        Some(wasm) => Some(
+            validate_declared_file(
+                plugin_dir,
+                &files_sha256,
+                &wasm.entry,
+                "runtime.wasm.entry",
+            )?
+            .1,
+        ),
+        None => None,
+    };
+
+    if manifest.permissions.network.mode == PluginNetworkMode::Blocked
+        && !manifest.permissions.network.allow_hosts.is_empty()
     {
-        return Err("integrity.filesSha256 must contain wasm.entry".to_string());
+        return Err("permissions.network.allowHosts must be empty when mode is `blocked`".to_string());
     }
 
-    if manifest.network.mode == PluginNetworkMode::Blocked
-        && !manifest.network.allow_hosts.is_empty()
-    {
-        return Err("network.allowHosts must be empty when mode is `blocked`".to_string());
-    }
+    let extension_registry = build_extension_registry(plugin_dir, &manifest, &files_sha256)?;
+    let capability_registry = build_capability_registry(plugin_dir, &manifest, &files_sha256)?;
 
     Ok(LoadedPlugin {
         manifest,
@@ -362,7 +415,263 @@ fn validate_and_load_plugin(
         ui_entry,
         wasm_entry_path,
         files_sha256,
+        extension_registry,
+        capability_registry,
     })
+}
+
+fn build_extension_registry(
+    plugin_dir: &Path,
+    manifest: &PluginManifest,
+    files_sha256: &HashMap<String, String>,
+) -> Result<ExtensionPointRegistry, String> {
+    let mut registry = ExtensionPointRegistry::default();
+    let path_prefix = format!("/plugins/{}", manifest.id);
+
+    ensure_ui_permission(
+        manifest,
+        !manifest.contributes.routes.is_empty(),
+        "route:create",
+        "contributes.routes",
+    )?;
+    ensure_ui_permission(
+        manifest,
+        !manifest.contributes.sidebar.is_empty(),
+        "sidebar:item:create",
+        "contributes.sidebar",
+    )?;
+    ensure_ui_permission(
+        manifest,
+        !manifest.contributes.commands.is_empty(),
+        "command:create",
+        "contributes.commands",
+    )?;
+    ensure_ui_permission(
+        manifest,
+        !manifest.contributes.settings.is_empty(),
+        "settings:section:create",
+        "contributes.settings",
+    )?;
+
+    for route in &manifest.contributes.routes {
+        validate_contribution_id(&route.id, "route id")?;
+        insert_contribution_id(&mut registry.contribution_ids, &route.id)?;
+        if !(route.path == path_prefix || route.path.starts_with(&(path_prefix.clone() + "/"))) {
+            return Err(format!(
+                "route `{}` must use a path inside `{}`",
+                route.id, path_prefix
+            ));
+        }
+        if !registry.route_ids.insert(route.id.clone()) {
+            return Err(format!("duplicated route id `{}`", route.id));
+        }
+        registry.route_paths.insert(route.path.clone());
+        if let Some(entry) = route.entry.as_deref() {
+            validate_declared_file(plugin_dir, files_sha256, entry, "contributes.routes[].entry")?;
+        }
+    }
+
+    for command in &manifest.contributes.commands {
+        validate_command_contribution(&mut registry, command)?;
+    }
+
+    for sidebar in &manifest.contributes.sidebar {
+        validate_sidebar_contribution(&mut registry, sidebar)?;
+    }
+
+    for setting in &manifest.contributes.settings {
+        validate_settings_contribution(plugin_dir, files_sha256, &mut registry, setting)?;
+    }
+
+    Ok(registry)
+}
+
+fn build_capability_registry(
+    plugin_dir: &Path,
+    manifest: &PluginManifest,
+    files_sha256: &HashMap<String, String>,
+) -> Result<CapabilityRegistry, String> {
+    let mut registry = CapabilityRegistry::default();
+    ensure_agent_permission(
+        manifest,
+        !manifest.contributes.agent_capabilities.is_empty(),
+        "capability:declare",
+        "contributes.agentCapabilities",
+    )?;
+
+    for capability in &manifest.contributes.agent_capabilities {
+        validate_capability_id(&capability.id)?;
+        if !registry.capability_ids.insert(capability.id.clone()) {
+            return Err(format!("duplicated capability id `{}`", capability.id));
+        }
+        if capability.transport.transport_type != PluginCapabilityTransportType::PluginCall {
+            return Err(format!(
+                "capability `{}` uses an unsupported transport type",
+                capability.id
+            ));
+        }
+        if capability.transport.function.trim().is_empty() {
+            return Err(format!("capability `{}` must declare a transport.function", capability.id));
+        }
+        if let Some(path) = capability.input_schema.as_deref() {
+            validate_declared_file(
+                plugin_dir,
+                files_sha256,
+                path,
+                "contributes.agentCapabilities[].inputSchema",
+            )?;
+        }
+        if let Some(path) = capability.output_schema.as_deref() {
+            validate_declared_file(
+                plugin_dir,
+                files_sha256,
+                path,
+                "contributes.agentCapabilities[].outputSchema",
+            )?;
+        }
+        if capability.expose_as_mcp_tool {
+            ensure_agent_permission(
+                manifest,
+                true,
+                "mcpTool:expose",
+                "contributes.agentCapabilities[].exposeAsMcpTool",
+            )?;
+        }
+    }
+
+    Ok(registry)
+}
+
+fn validate_command_contribution(
+    registry: &mut ExtensionPointRegistry,
+    command: &PluginCommandContribution,
+) -> Result<(), String> {
+    validate_contribution_id(&command.id, "command id")?;
+    insert_contribution_id(&mut registry.contribution_ids, &command.id)?;
+    registry.command_ids.insert(command.id.clone());
+
+    if command.action.as_deref() == Some("openRoute") {
+        let Some(route_target) = command.route.as_deref() else {
+            return Err(format!("command `{}` with action `openRoute` must declare route", command.id));
+        };
+        if !registry.contains_route_reference(route_target) {
+            return Err(format!(
+                "command `{}` references unknown route `{}`",
+                command.id, route_target
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_sidebar_contribution(
+    registry: &mut ExtensionPointRegistry,
+    sidebar: &PluginSidebarContribution,
+) -> Result<(), String> {
+    validate_contribution_id(&sidebar.id, "sidebar id")?;
+    insert_contribution_id(&mut registry.contribution_ids, &sidebar.id)?;
+
+    match (sidebar.route.as_deref(), sidebar.command.as_deref()) {
+        (Some(route), None) => {
+            if !registry.contains_route_reference(route) {
+                return Err(format!("sidebar `{}` references unknown route `{}`", sidebar.id, route));
+            }
+        }
+        (None, Some(command)) => {
+            if !registry.contains_command(command) {
+                return Err(format!(
+                    "sidebar `{}` references unknown command `{}`",
+                    sidebar.id, command
+                ));
+            }
+        }
+        _ => {
+            return Err(format!(
+                "sidebar `{}` must reference exactly one of `route` or `command`",
+                sidebar.id
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_settings_contribution(
+    plugin_dir: &Path,
+    files_sha256: &HashMap<String, String>,
+    registry: &mut ExtensionPointRegistry,
+    setting: &PluginSettingsContribution,
+) -> Result<(), String> {
+    validate_contribution_id(&setting.id, "settings id")?;
+    insert_contribution_id(&mut registry.contribution_ids, &setting.id)?;
+    validate_declared_file(plugin_dir, files_sha256, &setting.schema, "contributes.settings[].schema")?;
+    Ok(())
+}
+
+fn validate_declared_file(
+    plugin_dir: &Path,
+    files_sha256: &HashMap<String, String>,
+    raw_path: &str,
+    label: &str,
+) -> Result<(String, PathBuf), String> {
+    let normalized_path = normalize_relative_path(raw_path)?;
+    if !files_sha256.contains_key(&normalized_path) {
+        return Err(format!("integrity.filesSha256 must contain {label}"));
+    }
+    let file_path = plugin_dir.join(&normalized_path);
+    if !file_path.is_file() {
+        return Err(format!("{label} file does not exist at {}", file_path.display()));
+    }
+    Ok((normalized_path, file_path))
+}
+
+fn validate_contribution_id(id: &str, label: &str) -> Result<(), String> {
+    if !is_valid_extension_id(id) {
+        return Err(format!(
+            "invalid {label} `{id}`: use lowercase letters, numbers, '.', '-' or '_' and length 2..128"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_capability_id(id: &str) -> Result<(), String> {
+    validate_contribution_id(id, "capability id")
+}
+
+fn insert_contribution_id(ids: &mut HashSet<String>, id: &str) -> Result<(), String> {
+    if !ids.insert(id.to_string()) {
+        return Err(format!("duplicated contribution id `{id}`"));
+    }
+    Ok(())
+}
+
+fn ensure_ui_permission(
+    manifest: &PluginManifest,
+    needed: bool,
+    permission: &str,
+    contribution_name: &str,
+) -> Result<(), String> {
+    if needed && !manifest.permissions.ui.iter().any(|entry| entry == permission) {
+        return Err(format!(
+            "permissions.ui must include `{permission}` when `{contribution_name}` is declared"
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_agent_permission(
+    manifest: &PluginManifest,
+    needed: bool,
+    permission: &str,
+    contribution_name: &str,
+) -> Result<(), String> {
+    if needed && !manifest.permissions.agent.iter().any(|entry| entry == permission) {
+        return Err(format!(
+            "permissions.agent must include `{permission}` when `{contribution_name}` is declared"
+        ));
+    }
+    Ok(())
 }
 
 fn is_valid_plugin_id(id: &str) -> bool {
@@ -380,6 +689,24 @@ fn is_valid_plugin_id(id: &str) -> bool {
     }
 
     chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' || ch == '_')
+}
+
+fn is_valid_extension_id(id: &str) -> bool {
+    if id.len() < 2 || id.len() > 128 {
+        return false;
+    }
+
+    let mut chars = id.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
+        return false;
+    }
+
+    chars.all(|ch| {
+        ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' || ch == '_' || ch == '.'
+    })
 }
 
 fn validate_sha256_hash(hash: &str) -> Result<(), String> {
@@ -418,12 +745,29 @@ fn network_mode_label(mode: &PluginNetworkMode) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use crate::plugins::types::{
-        PluginIntegrityManifest, PluginManifest, PluginNetworkManifest, PluginUiManifest,
-    };
+    fn temp_root(name: &str) -> PathBuf {
+        let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        std::env::temp_dir().join(format!("slab-plugin-{name}-{suffix}"))
+    }
+
+    fn write_plugin_file(root: &Path, plugin_id: &str, relative_path: &str, content: &str) -> String {
+        let path = root.join(plugin_id).join(relative_path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, content).unwrap();
+        compute_file_sha256(&path).unwrap()
+    }
+
+    fn write_manifest(root: &Path, plugin_id: &str, manifest: serde_json::Value) {
+        let plugin_dir = root.join(plugin_id);
+        fs::create_dir_all(&plugin_dir).unwrap();
+        fs::write(
+            plugin_dir.join("plugin.json"),
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+    }
 
     #[test]
     fn plugin_id_validation_works() {
@@ -444,8 +788,7 @@ mod tests {
 
     #[test]
     fn plugins_root_prefers_existing_dev_directory() {
-        let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("slab-plugin-root-{suffix}"));
+        let root = temp_root("root-prefers-dev");
         let cwd = root.join("repo");
         let app_data_dir = root.join("app-data");
         let dev_plugins_dir = cwd.join(DEFAULT_PLUGINS_DIR);
@@ -461,8 +804,7 @@ mod tests {
 
     #[test]
     fn plugins_root_falls_back_to_app_data_when_cwd_has_no_plugins() {
-        let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("slab-plugin-root-{suffix}"));
+        let root = temp_root("root-fallback");
         let cwd = root.join("launchd-cwd");
         let app_data_dir = root.join("app-data");
         fs::create_dir_all(&cwd).unwrap();
@@ -475,42 +817,340 @@ mod tests {
     }
 
     #[test]
-    fn registry_lists_ui_only_plugin_without_wasm() {
-        let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("slab-plugin-ui-only-{suffix}"));
-        let plugin_dir = root.join("ui-only-plugin");
-        let ui_dir = plugin_dir.join("ui");
-        fs::create_dir_all(&ui_dir).unwrap();
+    fn registry_lists_legacy_ui_only_plugin_without_wasm() {
+        let root = temp_root("legacy-ui-only");
+        let html_hash =
+            write_plugin_file(&root, "ui-only-plugin", "ui/index.html", "<!doctype html><title>ui only</title>");
 
-        let html_path = ui_dir.join("index.html");
-        fs::write(&html_path, "<!doctype html><title>ui only</title>").unwrap();
-        let html_hash = compute_file_sha256(&html_path).unwrap();
-
-        let manifest = PluginManifest {
-            id: "ui-only-plugin".to_owned(),
-            name: "UI Only Plugin".to_owned(),
-            version: "0.1.0".to_owned(),
-            ui: PluginUiManifest { entry: "ui/index.html".to_owned() },
-            wasm: None,
-            integrity: PluginIntegrityManifest {
-                files_sha256: HashMap::from([(String::from("ui/index.html"), html_hash)]),
-            },
-            network: PluginNetworkManifest {
-                mode: PluginNetworkMode::Blocked,
-                allow_hosts: vec![],
-            },
-        };
-
-        fs::write(plugin_dir.join("plugin.json"), serde_json::to_string_pretty(&manifest).unwrap())
-            .unwrap();
+        write_manifest(
+            &root,
+            "ui-only-plugin",
+            serde_json::json!({
+                "id": "ui-only-plugin",
+                "name": "UI Only Plugin",
+                "version": "0.1.0",
+                "ui": { "entry": "ui/index.html" },
+                "integrity": { "filesSha256": { "ui/index.html": html_hash } },
+                "network": { "mode": "blocked", "allowHosts": [] }
+            }),
+        );
 
         let registry = PluginRegistryState::new(root.clone()).unwrap();
         let plugins = registry.list().unwrap();
         let plugin = plugins.iter().find(|plugin| plugin.id == "ui-only-plugin").unwrap();
 
         assert!(plugin.valid);
+        assert_eq!(plugin.manifest_version, 0);
         assert!(!plugin.has_wasm);
         assert_eq!(plugin.ui_entry.as_deref(), Some("ui/index.html"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn registry_accepts_v1_manifest_with_contributions_and_capabilities() {
+        let root = temp_root("v1-manifest");
+        let html_hash = write_plugin_file(&root, "video-subtitle-translator", "ui/index.html", "<!doctype html><title>v1</title>");
+        let settings_hash = write_plugin_file(&root, "video-subtitle-translator", "schemas/settings.schema.json", "{\"type\":\"object\"}");
+        let input_hash = write_plugin_file(&root, "video-subtitle-translator", "schemas/translate-input.schema.json", "{\"type\":\"object\"}");
+        let output_hash = write_plugin_file(&root, "video-subtitle-translator", "schemas/translate-output.schema.json", "{\"type\":\"object\"}");
+
+        write_manifest(
+            &root,
+            "video-subtitle-translator",
+            serde_json::json!({
+                "manifestVersion": 1,
+                "id": "video-subtitle-translator",
+                "name": "Video Subtitle Translator",
+                "version": "0.1.0",
+                "runtime": { "ui": { "entry": "ui/index.html" } },
+                "integrity": {
+                    "filesSha256": {
+                        "ui/index.html": html_hash,
+                        "schemas/settings.schema.json": settings_hash,
+                        "schemas/translate-input.schema.json": input_hash,
+                        "schemas/translate-output.schema.json": output_hash
+                    }
+                },
+                "permissions": {
+                    "network": { "mode": "blocked", "allowHosts": [] },
+                    "ui": ["route:create", "sidebar:item:create", "command:create", "settings:section:create"],
+                    "agent": ["capability:declare", "mcpTool:expose"]
+                },
+                "contributes": {
+                    "routes": [{ "id": "subtitle.translate.page", "path": "/plugins/video-subtitle-translator" }],
+                    "commands": [{ "id": "subtitle.translate.open", "action": "openRoute", "route": "subtitle.translate.page" }],
+                    "sidebar": [{ "id": "subtitle.translate.nav", "route": "subtitle.translate.page" }],
+                    "settings": [{ "id": "subtitle.translate.settings", "schema": "schemas/settings.schema.json" }],
+                    "agentCapabilities": [{
+                        "id": "subtitle.translate_video",
+                        "kind": "workflow",
+                        "inputSchema": "schemas/translate-input.schema.json",
+                        "outputSchema": "schemas/translate-output.schema.json",
+                        "transport": { "type": "pluginCall", "function": "translateVideo" },
+                        "exposeAsMcpTool": true
+                    }]
+                }
+            }),
+        );
+
+        let registry = PluginRegistryState::new(root.clone()).unwrap();
+        let plugins = registry.list().unwrap();
+        let plugin = plugins.iter().find(|plugin| plugin.id == "video-subtitle-translator").unwrap();
+
+        assert!(plugin.valid);
+        assert_eq!(plugin.manifest_version, 1);
+        assert_eq!(plugin.contributions.routes.len(), 1);
+        assert_eq!(plugin.contributions.agent_capabilities.len(), 1);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn registry_rejects_missing_integrity_entries_for_settings_schema() {
+        let root = temp_root("missing-integrity");
+        let html_hash =
+            write_plugin_file(&root, "settings-plugin", "ui/index.html", "<!doctype html><title>ui only</title>");
+        write_plugin_file(&root, "settings-plugin", "schemas/settings.schema.json", "{\"type\":\"object\"}");
+
+        write_manifest(
+            &root,
+            "settings-plugin",
+            serde_json::json!({
+                "manifestVersion": 1,
+                "id": "settings-plugin",
+                "name": "Settings Plugin",
+                "version": "0.1.0",
+                "runtime": { "ui": { "entry": "ui/index.html" } },
+                "integrity": { "filesSha256": { "ui/index.html": html_hash } },
+                "permissions": {
+                    "network": { "mode": "blocked", "allowHosts": [] },
+                    "ui": ["settings:section:create"]
+                },
+                "contributes": {
+                    "settings": [{ "id": "settings.page", "schema": "schemas/settings.schema.json" }]
+                }
+            }),
+        );
+
+        let registry = PluginRegistryState::new(root.clone()).unwrap();
+        let plugins = registry.list().unwrap();
+        let plugin = plugins.iter().find(|plugin| plugin.id == "settings-plugin").unwrap();
+        assert!(!plugin.valid);
+        assert!(plugin.error.as_deref().unwrap().contains("integrity.filesSha256"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn registry_rejects_duplicate_contribution_ids() {
+        let root = temp_root("duplicate-contribution");
+        let html_hash = write_plugin_file(&root, "duplicate-plugin", "ui/index.html", "<!doctype html><title>dup</title>");
+
+        write_manifest(
+            &root,
+            "duplicate-plugin",
+            serde_json::json!({
+                "manifestVersion": 1,
+                "id": "duplicate-plugin",
+                "name": "Duplicate Plugin",
+                "version": "0.1.0",
+                "runtime": { "ui": { "entry": "ui/index.html" } },
+                "integrity": { "filesSha256": { "ui/index.html": html_hash } },
+                "permissions": {
+                    "network": { "mode": "blocked", "allowHosts": [] },
+                    "ui": ["route:create", "command:create"]
+                },
+                "contributes": {
+                    "routes": [{ "id": "duplicate.id", "path": "/plugins/duplicate-plugin" }],
+                    "commands": [{ "id": "duplicate.id" }]
+                }
+            }),
+        );
+
+        let registry = PluginRegistryState::new(root.clone()).unwrap();
+        let plugins = registry.list().unwrap();
+        let plugin = plugins.iter().find(|plugin| plugin.id == "duplicate-plugin").unwrap();
+        assert!(!plugin.valid);
+        assert!(plugin.error.as_deref().unwrap().contains("duplicated contribution id"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn registry_rejects_route_outside_plugin_namespace() {
+        let root = temp_root("bad-route");
+        let html_hash = write_plugin_file(&root, "bad-route-plugin", "ui/index.html", "<!doctype html><title>bad route</title>");
+
+        write_manifest(
+            &root,
+            "bad-route-plugin",
+            serde_json::json!({
+                "manifestVersion": 1,
+                "id": "bad-route-plugin",
+                "name": "Bad Route Plugin",
+                "version": "0.1.0",
+                "runtime": { "ui": { "entry": "ui/index.html" } },
+                "integrity": { "filesSha256": { "ui/index.html": html_hash } },
+                "permissions": {
+                    "network": { "mode": "blocked", "allowHosts": [] },
+                    "ui": ["route:create"]
+                },
+                "contributes": {
+                    "routes": [{ "id": "bad.route", "path": "/settings" }]
+                }
+            }),
+        );
+
+        let registry = PluginRegistryState::new(root.clone()).unwrap();
+        let plugins = registry.list().unwrap();
+        let plugin = plugins.iter().find(|plugin| plugin.id == "bad-route-plugin").unwrap();
+        assert!(!plugin.valid);
+        assert!(plugin.error.as_deref().unwrap().contains("must use a path inside"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn registry_requires_ui_permission_for_route_contributions() {
+        let root = temp_root("missing-permission");
+        let html_hash = write_plugin_file(&root, "permission-plugin", "ui/index.html", "<!doctype html><title>perm</title>");
+
+        write_manifest(
+            &root,
+            "permission-plugin",
+            serde_json::json!({
+                "manifestVersion": 1,
+                "id": "permission-plugin",
+                "name": "Permission Plugin",
+                "version": "0.1.0",
+                "runtime": { "ui": { "entry": "ui/index.html" } },
+                "integrity": { "filesSha256": { "ui/index.html": html_hash } },
+                "permissions": {
+                    "network": { "mode": "blocked", "allowHosts": [] },
+                    "ui": []
+                },
+                "contributes": {
+                    "routes": [{ "id": "permission.route", "path": "/plugins/permission-plugin" }]
+                }
+            }),
+        );
+
+        let registry = PluginRegistryState::new(root.clone()).unwrap();
+        let plugins = registry.list().unwrap();
+        let plugin = plugins.iter().find(|plugin| plugin.id == "permission-plugin").unwrap();
+        assert!(!plugin.valid);
+        assert!(plugin.error.as_deref().unwrap().contains("permissions.ui"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn registry_rejects_missing_capability_schema_file() {
+        let root = temp_root("missing-capability-schema");
+        let html_hash = write_plugin_file(&root, "capability-plugin", "ui/index.html", "<!doctype html><title>cap</title>");
+
+        write_manifest(
+            &root,
+            "capability-plugin",
+            serde_json::json!({
+                "manifestVersion": 1,
+                "id": "capability-plugin",
+                "name": "Capability Plugin",
+                "version": "0.1.0",
+                "runtime": { "ui": { "entry": "ui/index.html" } },
+                "integrity": { "filesSha256": { "ui/index.html": html_hash } },
+                "permissions": {
+                    "network": { "mode": "blocked", "allowHosts": [] },
+                    "agent": ["capability:declare"]
+                },
+                "contributes": {
+                    "agentCapabilities": [{
+                        "id": "subtitle.translate_video",
+                        "kind": "workflow",
+                        "inputSchema": "schemas/missing.schema.json",
+                        "transport": { "type": "pluginCall", "function": "translateVideo" }
+                    }]
+                }
+            }),
+        );
+
+        let registry = PluginRegistryState::new(root.clone()).unwrap();
+        let plugins = registry.list().unwrap();
+        let plugin = plugins.iter().find(|plugin| plugin.id == "capability-plugin").unwrap();
+        assert!(!plugin.valid);
+        assert!(plugin.error.as_deref().unwrap().contains("integrity.filesSha256"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn registry_rejects_duplicate_capability_ids_across_plugins() {
+        let root = temp_root("duplicate-capability");
+        let first_html = write_plugin_file(&root, "first-plugin", "ui/index.html", "<!doctype html><title>first</title>");
+        let second_html = write_plugin_file(&root, "second-plugin", "ui/index.html", "<!doctype html><title>second</title>");
+
+        write_manifest(
+            &root,
+            "first-plugin",
+            serde_json::json!({
+                "manifestVersion": 1,
+                "id": "first-plugin",
+                "name": "First Plugin",
+                "version": "0.1.0",
+                "runtime": { "ui": { "entry": "ui/index.html" } },
+                "integrity": { "filesSha256": { "ui/index.html": first_html } },
+                "permissions": {
+                    "network": { "mode": "blocked", "allowHosts": [] },
+                    "agent": ["capability:declare"]
+                },
+                "contributes": {
+                    "agentCapabilities": [{
+                        "id": "shared.capability",
+                        "kind": "tool",
+                        "transport": { "type": "pluginCall", "function": "run" }
+                    }]
+                }
+            }),
+        );
+
+        write_manifest(
+            &root,
+            "second-plugin",
+            serde_json::json!({
+                "manifestVersion": 1,
+                "id": "second-plugin",
+                "name": "Second Plugin",
+                "version": "0.1.0",
+                "runtime": { "ui": { "entry": "ui/index.html" } },
+                "integrity": { "filesSha256": { "ui/index.html": second_html } },
+                "permissions": {
+                    "network": { "mode": "blocked", "allowHosts": [] },
+                    "agent": ["capability:declare"]
+                },
+                "contributes": {
+                    "agentCapabilities": [{
+                        "id": "shared.capability",
+                        "kind": "tool",
+                        "transport": { "type": "pluginCall", "function": "run" }
+                    }]
+                }
+            }),
+        );
+
+        let registry = PluginRegistryState::new(root.clone()).unwrap();
+        let plugins = registry.list().unwrap();
+        let invalid_duplicate = plugins
+            .iter()
+            .find(|plugin| {
+                !plugin.valid
+                    && plugin
+                        .error
+                        .as_deref()
+                        .is_some_and(|error| error.contains("duplicated capability id"))
+            })
+            .expect("one plugin should be rejected for duplicate capability id");
+        assert!(matches!(invalid_duplicate.id.as_str(), "first-plugin" | "second-plugin"));
 
         fs::remove_dir_all(root).unwrap();
     }

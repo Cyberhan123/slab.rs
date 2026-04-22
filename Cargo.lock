@@ -8634,6 +8634,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "slab-agent-tools"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "slab-agent",
+ "tokio",
+]
+
+[[package]]
 name = "slab-app"
 version = "0.1.0"
 dependencies = [
@@ -8689,6 +8699,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "slab-agent",
+ "slab-agent-tools",
  "slab-hub",
  "slab-libfetch",
  "slab-model-pack",

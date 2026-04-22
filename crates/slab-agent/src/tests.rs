@@ -8,9 +8,8 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::tools::EchoTool;
 use crate::{
-    AgentControl, AgentError, ToolRouter,
+    AgentControl, AgentError, ToolContext, ToolHandler, ToolOutput, ToolRouter,
     config::AgentConfig,
     port::{
         AgentNotifyPort, AgentStorePort, LlmPort, LlmResponse, ParsedToolCall, ThreadSnapshot,
@@ -19,6 +18,41 @@ use crate::{
 };
 use async_trait::async_trait;
 use slab_types::ConversationMessage;
+
+struct TestEchoTool;
+
+#[async_trait]
+impl ToolHandler for TestEchoTool {
+    fn name(&self) -> &str {
+        "echo"
+    }
+
+    fn description(&self) -> &str {
+        "Echo the provided message back verbatim."
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "The text to echo back."
+                }
+            },
+            "required": ["message"]
+        })
+    }
+
+    async fn execute(
+        &self,
+        _ctx: &ToolContext,
+        arguments: &serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        let message = arguments.get("message").and_then(serde_json::Value::as_str).unwrap_or("");
+        Ok(ToolOutput { content: message.to_owned(), metadata: None })
+    }
+}
 
 // ── Mock LLM ─────────────────────────────────────────────────────────────────
 
@@ -123,7 +157,7 @@ async fn smoke_echo_tool_agent_completes() {
     let notify = Arc::new(NoopNotify);
 
     let mut router = ToolRouter::new();
-    router.register(Box::new(EchoTool));
+    router.register(Box::new(TestEchoTool));
 
     let control = Arc::new(AgentControl::new(llm, store, notify, Arc::new(router), 8, 4));
 
@@ -179,7 +213,7 @@ async fn echo_tool_returns_input() {
     let ctx = ToolContext { thread_id: "t1".into(), turn_index: 0, depth: 0 };
     let args = serde_json::json!({"message": "test message"});
 
-    let output = EchoTool.execute(&ctx, &args).await.expect("echo should succeed");
+    let output = TestEchoTool.execute(&ctx, &args).await.expect("echo should succeed");
     assert_eq!(output.content, "test message");
 }
 
@@ -190,7 +224,7 @@ async fn echo_tool_missing_message_returns_empty() {
     let ctx = ToolContext { thread_id: "t1".into(), turn_index: 0, depth: 0 };
     let args = serde_json::json!({});
 
-    let output = EchoTool.execute(&ctx, &args).await.expect("echo should succeed");
+    let output = TestEchoTool.execute(&ctx, &args).await.expect("echo should succeed");
     assert_eq!(output.content, "");
 }
 
@@ -199,10 +233,9 @@ async fn echo_tool_missing_message_returns_empty() {
 #[tokio::test]
 async fn tool_router_registers_and_retrieves_tools() {
     use crate::tool::ToolRouter;
-    use crate::tools::EchoTool;
 
     let mut router = ToolRouter::new();
-    router.register(Box::new(EchoTool));
+    router.register(Box::new(TestEchoTool));
 
     let tool = router.get("echo");
     assert!(tool.is_some(), "echo tool should be registered");
@@ -268,10 +301,9 @@ async fn tool_router_overwrites_existing_tool() {
 #[tokio::test]
 async fn tool_router_generates_tool_specs() {
     use crate::tool::ToolRouter;
-    use crate::tools::EchoTool;
 
     let mut router = ToolRouter::new();
-    router.register(Box::new(EchoTool));
+    router.register(Box::new(TestEchoTool));
 
     let specs = router.tool_specs();
     assert_eq!(specs.len(), 1, "should have one tool spec");

@@ -319,10 +319,21 @@ export default function Plugins() {
                       </Badge>
                     </div>
                     {plugin.valid ? (
-                      <div className="mt-2 flex items-center gap-2">
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <Badge variant="outline">Manifest v{plugin.manifestVersion}</Badge>
                         <Badge variant="outline">
                           {plugin.hasWasm ? "WASM runtime" : "WebView only"}
                         </Badge>
+                        {plugin.contributions.routes.length > 0 ? (
+                          <Badge variant="outline">
+                            {plugin.contributions.routes.length} route
+                          </Badge>
+                        ) : null}
+                        {plugin.contributions.agentCapabilities.length > 0 ? (
+                          <Badge variant="outline">
+                            {plugin.contributions.agentCapabilities.length} agent tool
+                          </Badge>
+                        ) : null}
                       </div>
                     ) : null}
                     {!plugin.valid && plugin.error ? (
