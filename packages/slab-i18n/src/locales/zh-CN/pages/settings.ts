@@ -13,7 +13,6 @@ export const settings = {
     noSettingsDescription: '当前设置文档为空。',
     settingsCount_one: '{{count}} 项设置',
     settingsCount_other: '{{count}} 项设置',
-    schemaVersion: 'schema 版本 {{version}}',
     issues_one: '{{count}} 个问题',
     issues_other: '{{count}} 个问题',
     saving_one: '{{count}} 项保存中',

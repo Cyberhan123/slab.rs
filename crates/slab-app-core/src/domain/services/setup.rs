@@ -24,8 +24,8 @@ use crate::infra::db::repository::config::ConfigStore;
 use crate::infra::runtime::ManagedRuntimeHost;
 use crate::runtime_supervisor::RuntimeBackendRuntimeStatus;
 
-const SETUP_INITIALIZED_CONFIG_KEY: &str = "setup_initialized";
-const SETUP_INITIALIZED_CONFIG_NAME: &str = "Setup Initialized";
+pub(crate) const SETUP_INITIALIZED_CONFIG_KEY: &str = "setup_initialized";
+pub(crate) const SETUP_INITIALIZED_CONFIG_NAME: &str = "Setup Initialized";
 const SETUP_PROVISION_TASK_TYPE: &str = "setup_provision";
 const GITHUB_RELEASE_OWNER: &str = "Cyberhan123";
 const GITHUB_RELEASE_REPO: &str = "slab.rs";

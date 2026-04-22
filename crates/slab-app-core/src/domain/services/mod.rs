@@ -8,7 +8,7 @@ mod model;
 mod pmid;
 mod session;
 mod settings;
-mod setup;
+pub(crate) mod setup;
 mod system;
 mod task;
 mod ui_state;

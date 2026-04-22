@@ -1,4 +1,3 @@
-// Re-export the shared structured PMID constant from the slab-types crate.
 pub use slab_types::settings::PMID;
 
 #[cfg(test)]
@@ -7,34 +6,23 @@ mod tests {
 
     use slab_types::settings::{PMID, SettingPmid};
 
-    use crate::domain::models::embedded_settings_schema;
-
     #[test]
-    fn nested_builder_generates_expected_pmid() {
-        assert_eq!(PMID.setup.backends.dir().as_str(), "setup.backends.dir");
+    fn current_pmids_include_expected_paths() {
+        assert_eq!(PMID.general.language().as_str(), "general.language");
+        assert_eq!(PMID.runtime.mode().as_str(), "runtime.mode");
         assert_eq!(
-            PMID.runtime.model_auto_unload.idle_minutes().as_str(),
-            "runtime.model_auto_unload.idle_minutes"
-        );
-        assert_eq!(
-            PMID.runtime.model_auto_unload.max_pressure_evictions_per_load().as_str(),
-            "runtime.model_auto_unload.max_pressure_evictions_per_load"
+            PMID.runtime.ggml.backends.llama.context_length().as_str(),
+            "runtime.ggml.backends.llama.context_length"
         );
     }
 
     #[test]
-    fn structured_pmids_cover_embedded_schema() {
-        let schema = embedded_settings_schema().expect("schema");
-        let expected: BTreeSet<String> = schema
-            .sections()
-            .iter()
-            .flat_map(|section| section.subsections.iter())
-            .flat_map(|subsection| subsection.properties.iter())
-            .map(|property| property.pmid.clone())
-            .collect();
+    fn current_pmids_are_unique() {
         let actual: BTreeSet<String> =
             PMID.all().into_iter().map(SettingPmid::into_string).collect();
 
-        assert_eq!(actual, expected);
+        assert_eq!(actual.len(), PMID.all().len());
+        assert!(actual.contains("providers.registry"));
+        assert!(actual.contains("server.swagger.enabled"));
     }
 }

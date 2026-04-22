@@ -4,22 +4,20 @@ use std::sync::{Arc, RwLock};
 use serde_json::Value;
 use slab_types::settings::{
     ChatConfig, CloudProviderConfig, DesktopLaunchProfileConfig, DiffusionConfig,
-    DiffusionPathsConfig, DiffusionPerformanceConfig, LaunchBackendConfig, LaunchBackendsConfig,
-    LaunchConfig, LaunchProfilesConfig, ModelDownloadSourcePreference, PmidConfig,
+    DiffusionPerformanceConfig, LaunchBackendConfig, LaunchBackendsConfig, LaunchConfig,
+    LaunchProfilesConfig, ModelDownloadSourcePreference, PMID, PmidConfig,
     ProviderRegistryEntry, RuntimeConfig, RuntimeLlamaConfig, RuntimeModelAutoUnloadConfig,
-    RuntimeTransportMode, RuntimeWhisperConfig, RuntimeWorkerConfig, ServerLaunchProfileConfig,
-    SettingsDocumentV2, SetupBackendsConfig, SetupConfig, SetupFfmpegConfig, V2_PMID,
-    provider_registry_json_schema, string_list_json_schema,
+    RuntimeWorkerConfig, RuntimeWhisperConfig, ServerLaunchProfileConfig, SettingsDocument,
+    SetupBackendsConfig, SetupConfig, SetupFfmpegConfig, provider_registry_json_schema,
+    string_list_json_schema,
 };
 
 use crate::domain::models::{
-    PMID, SettingPropertySchema, SettingPropertyView, SettingValueType, SettingsDocumentView,
-    SettingsSectionView, SettingsSubsectionView, UpdateSettingCommand, UpdateSettingOperation,
+    SettingPropertySchema, SettingPropertyView, SettingValueType, SettingsDocumentView,
+    SettingsSectionView, SettingsSubsectionView, UpdateSettingCommand,
 };
 use crate::error::AppCoreError;
-use crate::infra::settings::{
-    SettingsDocumentProviderV2, SettingsProvider, settings_document_v2_to_json_value,
-};
+use crate::infra::settings::{SettingsDocumentProvider, settings_document_to_json_value};
 use crate::launch::{self, LaunchHostPaths, LaunchProfile, ResolvedLaunchSpec};
 
 const DEFAULT_SERVER_RUNTIME_BIND_HOST: &str = "127.0.0.1";
@@ -28,42 +26,16 @@ const DEFAULT_DESKTOP_RUNTIME_BIND_HOST: &str = "127.0.0.1";
 const DEFAULT_DESKTOP_RUNTIME_BASE_PORT: u32 = 50051;
 
 #[derive(Debug, Clone)]
-enum SettingsBackend {
-    Legacy(Arc<SettingsProvider>),
-    V2(Arc<SettingsDocumentProviderV2>),
-}
-
-#[derive(Debug, Clone)]
 pub struct PmidService {
-    backend: SettingsBackend,
+    settings: Arc<SettingsDocumentProvider>,
     config: Arc<RwLock<PmidConfig>>,
 }
 
 impl PmidService {
-    pub async fn load(settings: Arc<SettingsProvider>) -> Result<Self, AppCoreError> {
-        let config = load_legacy_config(&settings).await?;
-        Ok(Self {
-            backend: SettingsBackend::Legacy(settings),
-            config: Arc::new(RwLock::new(config)),
-        })
-    }
-
     pub async fn load_from_path(path: PathBuf) -> Result<Self, AppCoreError> {
-        match SettingsDocumentProviderV2::load(path.clone()).await {
-            Ok(settings) => {
-                let settings = Arc::new(settings);
-                let config = load_v2_config(&settings.document().await);
-                Ok(Self {
-                    backend: SettingsBackend::V2(settings),
-                    config: Arc::new(RwLock::new(config)),
-                })
-            }
-            Err(AppCoreError::NotImplemented(_)) => match SettingsProvider::load(path).await {
-                Ok(settings) => Self::load(Arc::new(settings)).await,
-                Err(error) => Err(error),
-            },
-            Err(error) => Err(error),
-        }
+        let settings = Arc::new(SettingsDocumentProvider::load(path).await?);
+        let config = load_config(&settings.document().await);
+        Ok(Self { settings, config: Arc::new(RwLock::new(config)) })
     }
 
     pub fn config(&self) -> PmidConfig {
@@ -75,45 +47,24 @@ impl PmidService {
         profile: LaunchProfile,
         host_paths: &LaunchHostPaths,
     ) -> Result<ResolvedLaunchSpec, AppCoreError> {
-        match &self.backend {
-            SettingsBackend::Legacy(_) => {
-                launch::resolve_launch_spec(&self.config(), profile, host_paths)
-            }
-            SettingsBackend::V2(settings) => {
-                launch::resolve_launch_spec_v2(&settings.document().await, profile, host_paths)
-            }
-        }
+        launch::resolve_launch_spec(&self.settings.document().await, profile, host_paths)
     }
 
     pub async fn document(&self) -> SettingsDocumentView {
-        match &self.backend {
-            SettingsBackend::Legacy(settings) => settings.document().await,
-            SettingsBackend::V2(settings) => {
-                build_v2_document_view(settings).await.unwrap_or_else(|error| {
-                    SettingsDocumentView {
-                        schema_version: 2,
-                        settings_path: settings.path().display().to_string(),
-                        warnings: vec![format!("Failed to build V2 settings view: {error}")],
-                        sections: Vec::new(),
-                    }
-                })
-            }
-        }
+        build_document_view(&self.settings).await.unwrap_or_else(|error| SettingsDocumentView {
+            schema_version: SettingsDocument::default().schema_version,
+            settings_path: self.settings.path().display().to_string(),
+            warnings: vec![format!("Failed to build settings view: {error}")],
+            sections: Vec::new(),
+        })
     }
 
     pub async fn property(&self, pmid: &str) -> Result<SettingPropertyView, AppCoreError> {
-        match &self.backend {
-            SettingsBackend::Legacy(settings) => settings.property(pmid).await,
-            SettingsBackend::V2(settings) => build_v2_property_view(settings, pmid).await,
-        }
+        build_property_view(&self.settings, pmid).await
     }
 
     pub async fn refresh(&self) -> Result<PmidConfig, AppCoreError> {
-        let next = match &self.backend {
-            SettingsBackend::Legacy(settings) => load_legacy_config(settings).await?,
-            SettingsBackend::V2(settings) => load_v2_config(&settings.document().await),
-        };
-
+        let next = load_config(&self.settings.document().await);
         *self.config.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = next.clone();
         Ok(next)
     }
@@ -124,188 +75,24 @@ impl PmidService {
         command: UpdateSettingCommand,
     ) -> Result<SettingPropertyView, AppCoreError> {
         let pmid = pmid.as_ref();
-        match &self.backend {
-            SettingsBackend::Legacy(settings) => {
-                let property = settings.update(pmid, command).await?;
-                self.refresh().await?;
-                Ok(property)
-            }
-            SettingsBackend::V2(settings) => {
-                settings.update(pmid, command).await?;
-                self.refresh().await?;
-                self.property(pmid).await
-            }
-        }
-    }
-
-    pub async fn set_setup_initialized(
-        &self,
-        initialized: bool,
-    ) -> Result<SettingPropertyView, AppCoreError> {
-        match &self.backend {
-            SettingsBackend::Legacy(_) => {
-                self.update_setting(
-                    PMID.setup.initialized(),
-                    UpdateSettingCommand {
-                        op: UpdateSettingOperation::Set,
-                        value: Some(serde_json::Value::Bool(initialized)),
-                    },
-                )
-                .await
-            }
-            SettingsBackend::V2(_) => Err(AppCoreError::NotImplemented(
-                "setup.initialized is stored in config_store for V2 settings".to_owned(),
-            )),
-        }
+        self.settings.update(pmid, command).await?;
+        self.refresh().await?;
+        self.property(pmid).await
     }
 
     pub async fn model_download_source_preference(
         &self,
     ) -> Result<ModelDownloadSourcePreference, AppCoreError> {
-        match &self.backend {
-            SettingsBackend::Legacy(_) => Ok(ModelDownloadSourcePreference::Auto),
-            SettingsBackend::V2(settings) => {
-                let value = settings.value(V2_PMID.models.download_source().as_str()).await?;
-                serde_json::from_value(value).map_err(|error| {
-                    AppCoreError::Internal(format!(
-                        "invalid models.download_source setting value: {error}"
-                    ))
-                })
-            }
-        }
+        let value = self.settings.value(PMID.models.download_source().as_str()).await?;
+        serde_json::from_value(value).map_err(|error| {
+            AppCoreError::Internal(format!(
+                "invalid models.download_source setting value: {error}"
+            ))
+        })
     }
 }
 
-async fn load_legacy_config(settings: &SettingsProvider) -> Result<PmidConfig, AppCoreError> {
-    Ok(PmidConfig {
-        setup: SetupConfig {
-            initialized: settings.get_bool(PMID.setup.initialized()).await?,
-            ffmpeg: SetupFfmpegConfig {
-                auto_download: settings.get_bool(PMID.setup.ffmpeg.auto_download()).await?,
-                dir: settings.get_optional_string(PMID.setup.ffmpeg.dir()).await?,
-            },
-            backends: SetupBackendsConfig {
-                dir: settings.get_optional_string(PMID.setup.backends.dir()).await?,
-            },
-        },
-        runtime: RuntimeConfig {
-            model_cache_dir: settings.get_optional_string(PMID.runtime.model_cache_dir()).await?,
-            llama: RuntimeLlamaConfig {
-                num_workers: required_u32(settings, PMID.runtime.llama.num_workers()).await?,
-                context_length: settings
-                    .get_optional_u32(PMID.runtime.llama.context_length())
-                    .await?,
-                flash_attn: settings.get_bool(PMID.runtime.llama.flash_attn()).await?,
-            },
-            whisper: RuntimeWhisperConfig {
-                num_workers: required_u32(settings, PMID.runtime.whisper.num_workers()).await?,
-                flash_attn: settings.get_bool(PMID.runtime.whisper.flash_attn()).await?,
-            },
-            diffusion: RuntimeWorkerConfig {
-                num_workers: required_u32(settings, PMID.runtime.diffusion.num_workers()).await?,
-            },
-            model_auto_unload: RuntimeModelAutoUnloadConfig {
-                enabled: settings.get_bool(PMID.runtime.model_auto_unload.enabled()).await?,
-                idle_minutes: required_u32(settings, PMID.runtime.model_auto_unload.idle_minutes())
-                    .await?,
-                min_free_system_memory_bytes: required_u64(
-                    settings,
-                    PMID.runtime.model_auto_unload.min_free_system_memory_bytes(),
-                )
-                .await?,
-                min_free_gpu_memory_bytes: required_u64(
-                    settings,
-                    PMID.runtime.model_auto_unload.min_free_gpu_memory_bytes(),
-                )
-                .await?,
-                max_pressure_evictions_per_load: required_u32(
-                    settings,
-                    PMID.runtime.model_auto_unload.max_pressure_evictions_per_load(),
-                )
-                .await?,
-            },
-        },
-        launch: LaunchConfig {
-            transport: required_runtime_transport(settings, PMID.launch.transport()).await?,
-            queue_capacity: required_u32(settings, PMID.launch.queue_capacity()).await?,
-            backend_capacity: required_u32(settings, PMID.launch.backend_capacity()).await?,
-            runtime_ipc_dir: settings.get_optional_string(PMID.launch.runtime_ipc_dir()).await?,
-            runtime_log_dir: settings.get_optional_string(PMID.launch.runtime_log_dir()).await?,
-            backends: LaunchBackendsConfig {
-                llama: LaunchBackendConfig {
-                    enabled: settings.get_bool(PMID.launch.backends.llama.enabled()).await?,
-                },
-                whisper: LaunchBackendConfig {
-                    enabled: settings.get_bool(PMID.launch.backends.whisper.enabled()).await?,
-                },
-                diffusion: LaunchBackendConfig {
-                    enabled: settings.get_bool(PMID.launch.backends.diffusion.enabled()).await?,
-                },
-            },
-            profiles: LaunchProfilesConfig {
-                server: ServerLaunchProfileConfig {
-                    gateway_bind: required_string(
-                        settings,
-                        PMID.launch.profiles.server.gateway_bind(),
-                    )
-                    .await?,
-                    runtime_bind_host: required_string(
-                        settings,
-                        PMID.launch.profiles.server.runtime_bind_host(),
-                    )
-                    .await?,
-                    runtime_bind_base_port: required_u32(
-                        settings,
-                        PMID.launch.profiles.server.runtime_bind_base_port(),
-                    )
-                    .await?,
-                },
-                desktop: DesktopLaunchProfileConfig {
-                    runtime_bind_host: required_string(
-                        settings,
-                        PMID.launch.profiles.desktop.runtime_bind_host(),
-                    )
-                    .await?,
-                    runtime_bind_base_port: required_u32(
-                        settings,
-                        PMID.launch.profiles.desktop.runtime_bind_base_port(),
-                    )
-                    .await?,
-                },
-            },
-        },
-        chat: ChatConfig { providers: settings.get_chat_providers(PMID.chat.providers()).await? },
-        diffusion: DiffusionConfig {
-            paths: DiffusionPathsConfig {
-                model: settings.get_optional_string(PMID.diffusion.paths.model()).await?,
-                vae: settings.get_optional_string(PMID.diffusion.paths.vae()).await?,
-                taesd: settings.get_optional_string(PMID.diffusion.paths.taesd()).await?,
-                lora_model_dir: settings
-                    .get_optional_string(PMID.diffusion.paths.lora_model_dir())
-                    .await?,
-                clip_l: settings.get_optional_string(PMID.diffusion.paths.clip_l()).await?,
-                clip_g: settings.get_optional_string(PMID.diffusion.paths.clip_g()).await?,
-                t5xxl: settings.get_optional_string(PMID.diffusion.paths.t5xxl()).await?,
-            },
-            performance: DiffusionPerformanceConfig {
-                flash_attn: settings.get_bool(PMID.diffusion.performance.flash_attn()).await?,
-                vae_device: settings
-                    .get_optional_string(PMID.diffusion.performance.vae_device())
-                    .await?
-                    .unwrap_or_default(),
-                clip_device: settings
-                    .get_optional_string(PMID.diffusion.performance.clip_device())
-                    .await?
-                    .unwrap_or_default(),
-                offload_params_to_cpu: settings
-                    .get_bool(PMID.diffusion.performance.offload_params_to_cpu())
-                    .await?,
-            },
-        },
-    })
-}
-
-fn load_v2_config(settings: &SettingsDocumentV2) -> PmidConfig {
+fn load_config(settings: &SettingsDocument) -> PmidConfig {
     PmidConfig {
         setup: SetupConfig {
             initialized: false,
@@ -320,16 +107,16 @@ fn load_v2_config(settings: &SettingsDocumentV2) -> PmidConfig {
         runtime: RuntimeConfig {
             model_cache_dir: normalize_string(settings.models.cache_dir.clone()),
             llama: RuntimeLlamaConfig {
-                num_workers: resolve_v2_backend_concurrency(settings, V2Backend::Llama),
+                num_workers: resolve_backend_concurrency(settings, RuntimeBackend::Llama),
                 context_length: settings.runtime.ggml.backends.llama.context_length,
                 flash_attn: settings.runtime.ggml.backends.llama.flash_attn,
             },
             whisper: RuntimeWhisperConfig {
-                num_workers: resolve_v2_backend_concurrency(settings, V2Backend::Whisper),
+                num_workers: resolve_backend_concurrency(settings, RuntimeBackend::Whisper),
                 flash_attn: settings.runtime.ggml.backends.whisper.flash_attn,
             },
             diffusion: RuntimeWorkerConfig {
-                num_workers: resolve_v2_backend_concurrency(settings, V2Backend::Diffusion),
+                num_workers: resolve_backend_concurrency(settings, RuntimeBackend::Diffusion),
             },
             model_auto_unload: RuntimeModelAutoUnloadConfig {
                 enabled: settings.models.auto_unload.enabled,
@@ -394,18 +181,17 @@ fn load_v2_config(settings: &SettingsDocumentV2) -> PmidConfig {
     }
 }
 
-async fn build_v2_document_view(
-    settings: &SettingsDocumentProviderV2,
+async fn build_document_view(
+    settings: &SettingsDocumentProvider,
 ) -> Result<SettingsDocumentView, AppCoreError> {
     let current = settings.document().await;
-    let current_json = settings_document_v2_to_json_value(&current);
-    let default_json = settings_document_v2_to_json_value(&SettingsDocumentV2::default());
-    let mut sections = empty_v2_sections();
+    let current_json = settings_document_to_json_value(&current);
+    let default_json = settings_document_to_json_value(&SettingsDocument::default());
+    let mut sections = empty_sections();
 
-    for pmid in V2_PMID.all() {
-        let property =
-            build_v2_property_view_from_values(pmid.as_str(), &current_json, &default_json)?;
-        push_v2_property(&mut sections, property)?;
+    for pmid in PMID.all() {
+        let property = build_property_view_from_values(pmid.as_str(), &current_json, &default_json)?;
+        push_property(&mut sections, property)?;
     }
 
     Ok(SettingsDocumentView {
@@ -416,17 +202,17 @@ async fn build_v2_document_view(
     })
 }
 
-async fn build_v2_property_view(
-    settings: &SettingsDocumentProviderV2,
+async fn build_property_view(
+    settings: &SettingsDocumentProvider,
     pmid: &str,
 ) -> Result<SettingPropertyView, AppCoreError> {
     let current = settings.document().await;
-    let current_json = settings_document_v2_to_json_value(&current);
-    let default_json = settings_document_v2_to_json_value(&SettingsDocumentV2::default());
-    build_v2_property_view_from_values(pmid, &current_json, &default_json)
+    let current_json = settings_document_to_json_value(&current);
+    let default_json = settings_document_to_json_value(&SettingsDocument::default());
+    build_property_view_from_values(pmid, &current_json, &default_json)
 }
 
-fn build_v2_property_view_from_values(
+fn build_property_view_from_values(
     pmid: &str,
     current_json: &Value,
     default_json: &Value,
@@ -441,29 +227,29 @@ fn build_v2_property_view_from_values(
 
     Ok(SettingPropertyView {
         pmid: pmid.to_owned(),
-        label: v2_property_label(pmid),
-        description_md: v2_property_description(pmid),
+        label: property_label(pmid),
+        description_md: property_description(pmid),
         editable: true,
         schema: SettingPropertySchema {
-            value_type: v2_value_type(pmid, &effective_value, &default_value),
-            enum_values: v2_enum_values(pmid),
-            minimum: v2_minimum_value(pmid),
+            value_type: value_type(pmid, &effective_value, &default_value),
+            enum_values: enum_values(pmid),
+            minimum: minimum_value(pmid),
             maximum: None,
             pattern: None,
-            json_schema: v2_json_schema(pmid),
+            json_schema: json_schema(pmid),
             default_value: default_value.clone(),
-            secret: v2_secret(pmid),
-            multiline: v2_multiline(pmid),
+            secret: secret(pmid),
+            multiline: multiline(pmid),
             order: 0,
         },
         effective_value: effective_value.clone(),
         override_value: is_overridden.then_some(effective_value),
         is_overridden,
-        search_terms: v2_search_terms(pmid),
+        search_terms: search_terms(pmid),
     })
 }
 
-fn empty_v2_sections() -> Vec<SettingsSectionView> {
+fn empty_sections() -> Vec<SettingsSectionView> {
     vec![
         SettingsSectionView {
             id: "general".to_owned(),
@@ -646,22 +432,21 @@ fn empty_v2_sections() -> Vec<SettingsSectionView> {
     ]
 }
 
-fn push_v2_property(
+fn push_property(
     sections: &mut [SettingsSectionView],
     property: SettingPropertyView,
 ) -> Result<(), AppCoreError> {
-    let (section_id, subsection_id) = v2_section_location(&property.pmid);
-    let section =
-        sections.iter_mut().find(|section| section.id == section_id).ok_or_else(|| {
-            AppCoreError::Internal(format!("unknown V2 settings section '{}'", section_id))
-        })?;
+    let (section_id, subsection_id) = section_location(&property.pmid);
+    let section = sections.iter_mut().find(|section| section.id == section_id).ok_or_else(|| {
+        AppCoreError::Internal(format!("unknown settings section '{}'", section_id))
+    })?;
     let subsection = section
         .subsections
         .iter_mut()
         .find(|subsection| subsection.id == subsection_id)
         .ok_or_else(|| {
             AppCoreError::Internal(format!(
-                "unknown V2 settings subsection '{}.{}'",
+                "unknown settings subsection '{}.{}'",
                 section_id, subsection_id
             ))
         })?;
@@ -669,7 +454,7 @@ fn push_v2_property(
     Ok(())
 }
 
-fn v2_section_location(path: &str) -> (&'static str, &'static str) {
+fn section_location(path: &str) -> (&'static str, &'static str) {
     match path {
         _ if path.starts_with("general.") => ("general", "general"),
         _ if path.starts_with("database.") => ("database", "general"),
@@ -693,7 +478,7 @@ fn v2_section_location(path: &str) -> (&'static str, &'static str) {
     }
 }
 
-fn v2_value_type(path: &str, effective: &Value, default: &Value) -> SettingValueType {
+fn value_type(path: &str, effective: &Value, default: &Value) -> SettingValueType {
     if path == "providers.registry" || path == "server.cors.allowed_origins" {
         return SettingValueType::Array;
     }
@@ -729,7 +514,7 @@ fn v2_value_type(path: &str, effective: &Value, default: &Value) -> SettingValue
     }
 }
 
-fn v2_enum_values(path: &str) -> Option<Vec<String>> {
+fn enum_values(path: &str) -> Option<Vec<String>> {
     match path {
         "general.language" => Some(vec!["auto".to_owned(), "en-US".to_owned(), "zh-CN".to_owned()]),
         "runtime.mode" => {
@@ -743,7 +528,7 @@ fn v2_enum_values(path: &str) -> Option<Vec<String>> {
     }
 }
 
-fn v2_minimum_value(path: &str) -> Option<i64> {
+fn minimum_value(path: &str) -> Option<i64> {
     if path.ends_with(".queue")
         || path.ends_with(".concurrent_requests")
         || path.ends_with(".idle_minutes")
@@ -755,7 +540,7 @@ fn v2_minimum_value(path: &str) -> Option<i64> {
     }
 }
 
-fn v2_json_schema(path: &str) -> Option<Value> {
+fn json_schema(path: &str) -> Option<Value> {
     match path {
         "providers.registry" => Some(provider_registry_json_schema()),
         "server.cors.allowed_origins" => Some(string_list_json_schema("Allowed Origins")),
@@ -763,15 +548,15 @@ fn v2_json_schema(path: &str) -> Option<Value> {
     }
 }
 
-fn v2_secret(path: &str) -> bool {
+fn secret(path: &str) -> bool {
     path == "server.admin.token"
 }
 
-fn v2_multiline(path: &str) -> bool {
+fn multiline(path: &str) -> bool {
     path == "providers.registry"
 }
 
-fn v2_property_label(path: &str) -> String {
+fn property_label(path: &str) -> String {
     match path {
         "general.language" => "Interface Language".to_owned(),
         "database.url" => "Database URL".to_owned(),
@@ -794,7 +579,7 @@ fn v2_property_label(path: &str) -> String {
     }
 }
 
-fn v2_property_description(path: &str) -> String {
+fn property_description(path: &str) -> String {
     match path {
         "general.language" => {
             "Choose how the desktop frontend selects translation resources.".to_owned()
@@ -851,10 +636,9 @@ fn v2_property_description(path: &str) -> String {
     }
 }
 
-fn v2_search_terms(path: &str) -> Vec<String> {
+fn search_terms(path: &str) -> Vec<String> {
     let mut search_terms: Vec<String> = path.split('.').map(|segment| segment.to_owned()).collect();
-    search_terms
-        .extend(v2_property_label(path).split_whitespace().map(|segment| segment.to_lowercase()));
+    search_terms.extend(property_label(path).split_whitespace().map(|segment| segment.to_lowercase()));
     search_terms.sort();
     search_terms.dedup();
     search_terms
@@ -909,18 +693,20 @@ fn provider_registry_entry_to_cloud_provider(entry: &ProviderRegistryEntry) -> C
 }
 
 #[derive(Debug, Clone, Copy)]
-enum V2Backend {
+enum RuntimeBackend {
     Llama,
     Whisper,
     Diffusion,
 }
 
-fn resolve_v2_backend_concurrency(settings: &SettingsDocumentV2, backend: V2Backend) -> u32 {
+fn resolve_backend_concurrency(settings: &SettingsDocument, backend: RuntimeBackend) -> u32 {
     let family = &settings.runtime.ggml.capacity;
     let leaf = match backend {
-        V2Backend::Llama => settings.runtime.ggml.backends.llama.capacity.concurrent_requests,
-        V2Backend::Whisper => settings.runtime.ggml.backends.whisper.capacity.concurrent_requests,
-        V2Backend::Diffusion => {
+        RuntimeBackend::Llama => settings.runtime.ggml.backends.llama.capacity.concurrent_requests,
+        RuntimeBackend::Whisper => {
+            settings.runtime.ggml.backends.whisper.capacity.concurrent_requests
+        }
+        RuntimeBackend::Diffusion => {
             settings.runtime.ggml.backends.diffusion.capacity.concurrent_requests
         }
     };
@@ -928,195 +714,27 @@ fn resolve_v2_backend_concurrency(settings: &SettingsDocumentV2, backend: V2Back
     leaf.or(family.concurrent_requests).unwrap_or(settings.runtime.capacity.concurrent_requests)
 }
 
-async fn required_u32(
-    settings: &SettingsProvider,
-    pmid: impl AsRef<str>,
-) -> Result<u32, AppCoreError> {
-    let pmid = pmid.as_ref();
-    settings
-        .get_optional_u32(pmid)
-        .await?
-        .ok_or_else(|| AppCoreError::Internal(format!("setting '{}' resolved to null", pmid)))
-}
-
-async fn required_u64(
-    settings: &SettingsProvider,
-    pmid: impl AsRef<str>,
-) -> Result<u64, AppCoreError> {
-    let pmid = pmid.as_ref();
-    settings
-        .get_optional_u64(pmid)
-        .await?
-        .ok_or_else(|| AppCoreError::Internal(format!("setting '{}' resolved to null", pmid)))
-}
-
-async fn required_string(
-    settings: &SettingsProvider,
-    pmid: impl AsRef<str>,
-) -> Result<String, AppCoreError> {
-    let pmid = pmid.as_ref();
-    settings
-        .get_optional_string(pmid)
-        .await?
-        .ok_or_else(|| AppCoreError::Internal(format!("setting '{}' resolved to null", pmid)))
-}
-
-async fn required_runtime_transport(
-    settings: &SettingsProvider,
-    pmid: impl AsRef<str>,
-) -> Result<RuntimeTransportMode, AppCoreError> {
-    let pmid = pmid.as_ref();
-    let raw = required_string(settings, pmid).await?;
-    raw.parse().map_err(|error| {
-        AppCoreError::Internal(format!(
-            "setting '{}' contains invalid runtime transport: {error}",
-            pmid
-        ))
-    })
-}
-
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
     use std::fs;
-    use std::path::PathBuf;
 
     use serde_json::json;
-    use uuid::Uuid;
 
     use super::*;
-    use crate::domain::models::{PMID, SettingsValuesFile};
     use slab_types::settings::{
         InterfaceLanguagePreference, ProviderAuthConfig, ProviderDefaultsConfig, ProviderFamily,
-        ProviderRegistryEntry, SettingsDocumentV2,
     };
 
     fn temp_settings_path() -> PathBuf {
-        let base = std::env::temp_dir().join(format!("slab-pmid-test-{}", Uuid::new_v4()));
+        let base = std::env::temp_dir().join(format!("slab-pmid-test-{}", uuid::Uuid::new_v4()));
         base.join("settings.json")
     }
 
     #[tokio::test]
-    async fn loads_typed_snapshot_from_settings_provider() {
-        let path = temp_settings_path();
-        let settings = Arc::new(SettingsProvider::load(path.clone()).await.expect("provider"));
-
-        settings
-            .update(
-                PMID.setup.ffmpeg.dir(),
-                UpdateSettingCommand {
-                    op: UpdateSettingOperation::Set,
-                    value: Some(json!("C:/ffmpeg")),
-                },
-            )
-            .await
-            .expect("set ffmpeg dir");
-
-        let service = PmidService::load(Arc::clone(&settings)).await.expect("pmid service");
-        let config = service.config();
-
-        assert_eq!(config.setup.ffmpeg.dir.as_deref(), Some("C:/ffmpeg"));
-
-        let _ = fs::remove_dir_all(path.parent().expect("parent"));
-    }
-
-    #[tokio::test]
-    async fn update_setting_refreshes_cached_snapshot() {
-        let path = temp_settings_path();
-        let settings = Arc::new(SettingsProvider::load(path.clone()).await.expect("provider"));
-        let service = PmidService::load(Arc::clone(&settings)).await.expect("pmid service");
-
-        service
-            .update_setting(
-                PMID.setup.initialized(),
-                UpdateSettingCommand { op: UpdateSettingOperation::Set, value: Some(json!(true)) },
-            )
-            .await
-            .expect("update");
-
-        assert!(service.config().setup.initialized);
-
-        let file: SettingsValuesFile =
-            serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
-        assert_eq!(file.values.get(PMID.setup.initialized().as_str()), Some(&json!(true)));
-
-        let _ = fs::remove_dir_all(path.parent().expect("parent"));
-    }
-
-    #[tokio::test]
-    async fn refresh_picks_up_external_settings_changes() {
-        let path = temp_settings_path();
-        let settings = Arc::new(SettingsProvider::load(path.clone()).await.expect("provider"));
-        let _service = PmidService::load(Arc::clone(&settings)).await.expect("pmid service");
-
-        fs::write(
-            &path,
-            serde_json::to_string_pretty(&SettingsValuesFile {
-                version: 1,
-                values: BTreeMap::from([(
-                    PMID.runtime.model_cache_dir().into_string(),
-                    json!("C:/models"),
-                )]),
-            })
-            .expect("serialize"),
-        )
-        .expect("write");
-
-        let reloaded_settings =
-            Arc::new(SettingsProvider::load(path.clone()).await.expect("reload"));
-        let refreshed_service =
-            PmidService::load(reloaded_settings).await.expect("reloaded pmid service");
-
-        assert_eq!(
-            refreshed_service.config().runtime.model_cache_dir.as_deref(),
-            Some("C:/models")
-        );
-
-        let _ = fs::remove_dir_all(path.parent().expect("parent"));
-    }
-
-    #[tokio::test]
-    async fn set_setup_initialized_refreshes_cached_snapshot() {
-        let path = temp_settings_path();
-        let settings = Arc::new(SettingsProvider::load(path.clone()).await.expect("provider"));
-        let service = PmidService::load(Arc::clone(&settings)).await.expect("pmid service");
-
-        service.set_setup_initialized(true).await.expect("set setup initialized");
-
-        assert!(service.config().setup.initialized);
-
-        let file: SettingsValuesFile =
-            serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
-        assert_eq!(file.values.get(PMID.setup.initialized().as_str()), Some(&json!(true)));
-
-        let _ = fs::remove_dir_all(path.parent().expect("parent"));
-    }
-
-    #[tokio::test]
-    async fn update_setting_uses_provider_not_found_for_unknown_pmid() {
-        let path = temp_settings_path();
-        let settings = Arc::new(SettingsProvider::load(path.clone()).await.expect("provider"));
-        let service = PmidService::load(Arc::clone(&settings)).await.expect("pmid service");
-
-        let error = service
-            .update_setting(
-                "missing.setting",
-                UpdateSettingCommand { op: UpdateSettingOperation::Set, value: Some(json!(true)) },
-            )
-            .await
-            .expect_err("missing pmid should fail");
-
-        assert!(matches!(error, AppCoreError::NotFound(_)));
-        assert!(error.to_string().contains("missing.setting"));
-
-        let _ = fs::remove_dir_all(path.parent().expect("parent"));
-    }
-
-    #[tokio::test]
-    async fn load_from_path_supports_v2_settings_document() {
+    async fn load_from_path_supports_current_settings_document() {
         let path = temp_settings_path();
         fs::create_dir_all(path.parent().expect("parent")).expect("dir");
-        let mut document = SettingsDocumentV2::default();
+        let mut document = SettingsDocument::default();
         document.models.cache_dir = Some("C:/models".to_owned());
         document.tools.ffmpeg.install_dir = Some("C:/ffmpeg".to_owned());
         document.providers.registry.push(ProviderRegistryEntry {
@@ -1143,12 +761,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn v2_update_setting_refreshes_cached_snapshot() {
+    async fn update_setting_refreshes_cached_snapshot() {
         let path = temp_settings_path();
         fs::create_dir_all(path.parent().expect("parent")).expect("dir");
         fs::write(
             &path,
-            serde_json::to_string_pretty(&SettingsDocumentV2::default()).expect("serialize"),
+            serde_json::to_string_pretty(&SettingsDocument::default()).expect("serialize"),
         )
         .expect("write");
 
@@ -1158,14 +776,14 @@ mod tests {
             .update_setting(
                 "models.cache_dir",
                 UpdateSettingCommand {
-                    op: UpdateSettingOperation::Set,
+                    op: crate::domain::models::UpdateSettingOperation::Set,
                     value: Some(json!("D:/models")),
                 },
             )
             .await
             .expect("update");
 
-        let persisted: SettingsDocumentV2 =
+        let persisted: SettingsDocument =
             serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
 
         assert_eq!(service.config().runtime.model_cache_dir.as_deref(), Some("D:/models"));
@@ -1175,12 +793,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn v2_general_language_setting_is_grouped_and_persisted() {
+    async fn general_language_setting_is_grouped_and_persisted() {
         let path = temp_settings_path();
         fs::create_dir_all(path.parent().expect("parent")).expect("dir");
         fs::write(
             &path,
-            serde_json::to_string_pretty(&SettingsDocumentV2::default()).expect("serialize"),
+            serde_json::to_string_pretty(&SettingsDocument::default()).expect("serialize"),
         )
         .expect("write");
 
@@ -1208,17 +826,43 @@ mod tests {
             .update_setting(
                 "general.language",
                 UpdateSettingCommand {
-                    op: UpdateSettingOperation::Set,
+                    op: crate::domain::models::UpdateSettingOperation::Set,
                     value: Some(json!("zh-CN")),
                 },
             )
             .await
             .expect("update");
 
-        let persisted: SettingsDocumentV2 =
+        let persisted: SettingsDocument =
             serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
 
         assert_eq!(persisted.general.language, InterfaceLanguagePreference::ZhCn);
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn update_setting_uses_not_found_for_unknown_pmid() {
+        let path = temp_settings_path();
+        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&SettingsDocument::default()).expect("serialize"),
+        )
+        .expect("write");
+
+        let service = PmidService::load_from_path(path.clone()).await.expect("pmid service");
+
+        let error = service
+            .update_setting(
+                "missing.setting",
+                UpdateSettingCommand { op: crate::domain::models::UpdateSettingOperation::Set, value: Some(json!(true)) },
+            )
+            .await
+            .expect_err("missing pmid should fail");
+
+        assert!(matches!(error, AppCoreError::NotFound(_)));
+        assert!(error.to_string().contains("missing.setting"));
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }
