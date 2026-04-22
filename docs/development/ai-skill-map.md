@@ -20,11 +20,12 @@ slab.rs no longer uses a separate project-skill wrapper layer. Most tasks should
 ## No Local Skill Needed
 
 - Agent control-plane work
-  Start in `crates/slab-agent/**`, `slab-server/src/api/v1/agent/**`, and `slab-server/src/infra/agent_adapter.rs`.
+  Start in `crates/slab-agent/**`, `crates/slab-agent-tools/**`, `slab-server/src/api/v1/agent/**`, and `slab-server/src/infra/agent_adapter.rs`.
 - Runtime and engine work
   Start in `bin/slab-runtime/**`, especially `bin/slab-runtime/src/{config,context,domain,infra}/**` and `bin/slab-runtime/src/infra/backends/**`, plus `crates/slab-runtime-core/**`, `crates/slab-llama/**`, `crates/slab-whisper/**`, `crates/slab-diffusion/**`, and `crates/slab-ggml/**`.
 - Plugin package and bridge work
   Start in `plugins/**`, `packages/slab-desktop/src/pages/plugins/**`, `packages/slab-desktop/src/lib/plugin-sdk.ts`, and `bin/slab-app/src-tauri/src/plugins/**`.
+  Manifest v1 work should preserve the separation between runtime assets, `contributes.*`, `permissions.*`, and agent capabilities.
 - Windows full-installer packaging work
   Start in `bin/slab-windows-full-installer/**`, `bin/slab-app/src-tauri/build.rs`, `bin/slab-app/src-tauri/installer-hooks/**`, and `Makefile.toml`. Add `tauri-v2` only when the change crosses into Tauri config or NSIS hook behavior.
 - Shared contracts, settings, and manifests
@@ -49,4 +50,4 @@ slab.rs no longer uses a separate project-skill wrapper layer. Most tasks should
 - Chat rendering changes sometimes pair `use-x-chat` with `x-markdown`.
 - A custom provider change should usually start with `use-x-chat` and `x-request`, then add `x-chat-provider` only if needed.
 - Plugin UI work often starts in `packages/slab-desktop/src/pages/plugins/**` and adds `tauri-v2` only when the change crosses into `src-tauri`, capabilities, permissions, or plugin-view lifecycle code.
-- Agent changes usually touch both `slab-server/src/api/v1/agent/**` and `crates/slab-agent/**` without any repo-local skill.
+- Agent changes usually touch both `slab-server/src/api/v1/agent/**` and `crates/slab-agent/**` without any repo-local skill. Built-in deterministic tools belong in `crates/slab-agent-tools/**`, not in the control-plane crate.

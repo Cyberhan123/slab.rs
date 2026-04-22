@@ -28,7 +28,9 @@ Key repo facts:
 - `bin/slab-windows-full-installer` is the Windows-only full-installer bootstrap. It packs the resource-less Tauri NSIS installer with CAB payloads, expands runtime files into `%TEMP%`, and uses NSIS hooks plus its `apply` helper mode to hydrate `$INSTDIR/resources/libs`.
 - `crates/slab-runtime-core` (package: `slab-runtime-core`) holds the scheduler, backend protocol, worker runner, task state, and generic payload/error types. Keep HTTP, SQL, typed runtime codecs, and backend composition concerns out.
 - `crates/slab-types` and `crates/slab-proto` are the shared Rust contract crates for semantic types, settings/runtime models, and server/runtime IPC.
-- All Rust library crates live in `crates/` (e.g., `crates/slab-runtime-core`, `crates/slab-types`, `crates/slab-agent`, `crates/slab-app-core`).
+- All Rust library crates live in `crates/` (e.g., `crates/slab-runtime-core`, `crates/slab-types`, `crates/slab-agent`, `crates/slab-agent-tools`, `crates/slab-app-core`).
 - Binary executables live in `bin/` (e.g., `bin/slab-server`, `bin/slab-runtime`, `bin/slab-app`).
+- `crates/slab-agent` is the pure agent control-plane crate. Concrete host tools belong in `crates/slab-agent-tools`; plugin/API capability adapters are registered by host/app-core layers.
+- Plugin manifests support `manifestVersion: 1` with runtime assets, host-controlled `contributes.*`, `permissions.*`, and agent capabilities. MCP is a capability export target, not the plugin runtime itself.
 - Tauri security settings are explicit in `bin/slab-app/src-tauri/tauri.conf.json`; preserve CSP, permissions, capabilities, and plugin boundaries unless the task requires a deliberate change.
 - If documentation and code disagree, trust the code and update the documentation.

@@ -1,0 +1,17 @@
+[package]
+name = "slab-agent-tools"
+version.workspace = true
+edition.workspace = true
+description = "Built-in tool adapters for slab-agent"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[dependencies]
+slab-agent = { workspace = true }
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

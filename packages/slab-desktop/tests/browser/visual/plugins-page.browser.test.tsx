@@ -35,8 +35,30 @@ function createMockPlugin(overrides: Partial<PluginInfo> = {}): PluginInfo {
     version: '1.0.0',
     valid: true,
     error: null,
+    manifestVersion: 1,
+    compatibility: {},
     networkMode: 'blocked',
     allowHosts: [],
+    contributions: {
+      routes: [],
+      sidebar: [],
+      commands: [],
+      settings: [],
+      agentCapabilities: [],
+    },
+    permissions: {
+      network: {
+        mode: 'blocked',
+        allowHosts: [],
+      },
+      ui: [],
+      agent: [],
+      slabApi: [],
+      files: {
+        read: [],
+        write: [],
+      },
+    },
     ...overrides,
   };
 }

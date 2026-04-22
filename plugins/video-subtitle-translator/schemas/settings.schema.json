@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "defaultTargetLanguage": {
+      "type": "string",
+      "default": "Chinese"
+    },
+    "defaultSubtitleFormat": {
+      "type": "string",
+      "enum": ["srt", "vtt", "ass"],
+      "default": "srt"
+    }
+  },
+  "additionalProperties": false
+}

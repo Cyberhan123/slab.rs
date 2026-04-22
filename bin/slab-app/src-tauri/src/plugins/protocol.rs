@@ -110,7 +110,7 @@ pub fn handle_protocol_request<R: Runtime>(
     let content_type = mime_guess::from_path(&asset_path).first_or_octet_stream().to_string();
     let csp = if content_type.starts_with("text/html") {
         let api_endpoint = app_handle.state::<ApiEndpointConfig>().inner().clone();
-        Some(build_plugin_csp(&plugin.manifest.network, &api_endpoint))
+        Some(build_plugin_csp(&plugin.manifest.permissions.network, &api_endpoint))
     } else {
         None
     };

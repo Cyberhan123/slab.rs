@@ -154,11 +154,13 @@ fn build_extism_plugin(
     manifest = manifest
         .with_allowed_path(plugin.root_dir.to_string_lossy().to_string(), plugin.root_dir.clone());
 
-    if plugin.manifest.network.mode == PluginNetworkMode::Allowlist
-        && !plugin.manifest.network.allow_hosts.is_empty()
+    if plugin.manifest.permissions.network.mode == PluginNetworkMode::Allowlist
+        && !plugin.manifest.permissions.network.allow_hosts.is_empty()
     {
         manifest =
-            manifest.with_allowed_hosts(plugin.manifest.network.allow_hosts.clone().into_iter());
+            manifest.with_allowed_hosts(
+                plugin.manifest.permissions.network.allow_hosts.clone().into_iter(),
+            );
     }
 
     let context = HostFunctionContext {

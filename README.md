@@ -70,7 +70,8 @@ The tree below is a high-level view distilled from the current repository. It is
 |   `-- slab-windows-full-installer/   Windows full installer bootstrap
 |-- crates/
 |   |-- slab-app-core/                 Shared application logic
-|   |-- slab-agent/                    Agent and orchestration logic
+|   |-- slab-agent/                    Agent control-plane and orchestration kernel
+|   |-- slab-agent-tools/              Built-in deterministic agent tools
 |   |-- slab-hub/                      Model hub abstraction
 |   |-- slab-proto/                    Shared protocol definitions
 |   |-- slab-runtime-core/             Backend worker substrate and admission core
@@ -90,7 +91,7 @@ The tree below is a high-level view distilled from the current repository. It is
 - `packages/slab-desktop` is the desktop interface users interact with every day.
 - `bin/slab-app`, `bin/slab-server`, and `bin/slab-runtime` together support the local app shell, task execution, and service entry points.
 - `crates/` contains the main shared capability layer for models, tasks, contracts, and reusable logic.
-- `plugins/` is where the upcoming plugin and extensibility work is being prepared.
+- `plugins/` contains runtime plugin packages. Manifest v1 declares runtime assets, extension contributions, permissions, and agent capabilities.
 - `docs/`, `models/`, `testdata/`, and `vendor/` support documentation, model packaging assets, sample data, and bundled runtime resources.
 
 ## Development Guide

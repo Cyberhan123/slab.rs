@@ -20,6 +20,7 @@ slab-utils = { workspace = true }
 # Internal workspace deps
 slab-runtime-core = { workspace = true }
 slab-agent        = { workspace = true }
+slab-agent-tools  = { workspace = true }
 slab-proto        = { workspace = true }
 slab-model-pack   = { workspace = true }
 slab-types        = { workspace = true }

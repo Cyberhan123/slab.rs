@@ -1,19 +1,109 @@
 {
+  "manifestVersion": 1,
   "id": "video-subtitle-translator",
   "name": "Video Subtitle Translator",
   "version": "0.1.0",
-  "ui": {
-    "entry": "ui/index.html"
+  "compatibility": {
+    "slab": ">=0.1.0",
+    "pluginApi": "^1.0.0"
+  },
+  "runtime": {
+    "ui": {
+      "entry": "ui/index.html"
+    }
   },
   "integrity": {
     "filesSha256": {
       "ui/index.html": "367b064f49486f16abc8c6bf8c062f2a154dc81a34339d8a07bcebb970dbb8e4",
       "ui/styles.css": "bf93700fd7f66099bf3d1c3bbf347a7427d2024a50baea15d41e99d66c73f66c",
-      "ui/app.js": "e72870569a0b996c9ad9957d19fda3228d9edc14c58b0aa504941b92b3434515"
+      "ui/app.js": "e72870569a0b996c9ad9957d19fda3228d9edc14c58b0aa504941b92b3434515",
+      "schemas/settings.schema.json": "3f3bcdf747ec558b8254d5cc25129b0e07fe6850ad674ede66ab4fd6a475bdcd",
+      "schemas/translate-video-input.schema.json": "357b67fabe4f1fc6c5e2807fbd9bef4a649fbf3eb9ab2107c98fe6c3930abbcb",
+      "schemas/translate-video-output.schema.json": "6697352c730fb2bac9fe73d04db2d5425765e926e2e76d23a5e77075144389cd"
     }
   },
-  "network": {
-    "mode": "blocked",
-    "allowHosts": []
+  "permissions": {
+    "network": {
+      "mode": "blocked",
+      "allowHosts": []
+    },
+    "ui": [
+      "route:create",
+      "sidebar:item:create",
+      "command:create",
+      "settings:section:create"
+    ],
+    "agent": [
+      "capability:declare",
+      "mcpTool:expose"
+    ],
+    "slabApi": [
+      "video:read",
+      "audio:transcribe",
+      "subtitle:render",
+      "tasks:create",
+      "tasks:read"
+    ],
+    "files": {
+      "read": [
+        "video",
+        "audio",
+        "subtitle"
+      ],
+      "write": [
+        "subtitle"
+      ]
+    }
+  },
+  "contributes": {
+    "routes": [
+      {
+        "id": "subtitle.translate.page",
+        "path": "/plugins/video-subtitle-translator",
+        "title": "Video Subtitle Translator"
+      }
+    ],
+    "sidebar": [
+      {
+        "id": "subtitle.translate.nav",
+        "label": "Video Subtitle Translator",
+        "route": "subtitle.translate.page",
+        "icon": "subtitles"
+      }
+    ],
+    "commands": [
+      {
+        "id": "subtitle.translate.open",
+        "label": "Open subtitle translator",
+        "action": "openRoute",
+        "route": "subtitle.translate.page"
+      }
+    ],
+    "settings": [
+      {
+        "id": "subtitle.translate.settings",
+        "title": "Subtitle translator settings",
+        "schema": "schemas/settings.schema.json"
+      }
+    ],
+    "agentCapabilities": [
+      {
+        "id": "subtitle.translate_video",
+        "kind": "workflow",
+        "description": "Translate subtitles for a local video and export subtitle files.",
+        "inputSchema": "schemas/translate-video-input.schema.json",
+        "outputSchema": "schemas/translate-video-output.schema.json",
+        "effects": [
+          "readFile",
+          "writeFile",
+          "longRunningTask"
+        ],
+        "transport": {
+          "type": "pluginCall",
+          "function": "translateVideo"
+        },
+        "exposeAsMcpTool": true
+      }
+    ]
   }
 }

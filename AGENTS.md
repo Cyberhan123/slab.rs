@@ -61,6 +61,7 @@ crates/slab-runtime-core (scheduler, backend protocol, worker runner)
 - `bin/slab-windows-full-installer` is the Windows-only outer bootstrap packer/runtime. It builds the self-extracting full installer EXE, embeds the resource-less Tauri NSIS `setup.exe` plus CAB payloads, expands runtime payloads into `%TEMP%`, and lets NSIS complete the actual app install/uninstall work.
 - `crates/slab-runtime-core` (package name: `slab-runtime-core`) now holds only the scheduler, backend protocol, worker runner, task state, common error surface, and generic payload types. Keep HTTP, SQL, typed inference codecs, and backend composition concerns out of this crate.
 - `crates/slab-agent` is a pure control-plane library for agent threads, tool routing, and port-based orchestration.
+- `crates/slab-agent-tools` contains host-provided deterministic tool handlers and tool registration helpers for `slab-agent`; keep business/tool implementations out of `crates/slab-agent`.
 - `crates/slab-proto` owns the protobuf contract between `bin/slab-server` and `bin/slab-runtime`.
 - `crates/slab-types` is the shared semantic types, settings, runtime, and JSON-schema-friendly contract crate used across the workspace.
 - `crates/slab-llama`, `crates/slab-whisper`, `crates/slab-diffusion`, `crates/slab-ggml`, `crates/slab-libfetch`, `crates/slab-subtitle`, `crates/slab-build-utils`, `crates/slab-runtime-macros`, and the `*-sys` crates provide engine bindings, low-level runtime utilities, artifact fetching, and supporting infrastructure.
@@ -74,7 +75,8 @@ crates/slab-runtime-core (scheduler, backend protocol, worker runner)
 - `crates/slab-hub`: unified model hub abstraction used by `slab-app-core` for feature-gated Hugging Face / ModelScope-style listing, download, and provider fallback.
 - `crates/slab-runtime-core`: pure scheduler/backend-protocol library only (package: `slab-runtime-core`); keep HTTP, SQL, driver resolution, typed codecs, and backend composition concerns out.
 - `bin/slab-runtime/src/infra/backends`: in-package GGML, Candle, and ONNX backend registrations, engines, adapters, and worker implementations.
-- `crates/slab-agent`: agent orchestration library and tool router abstractions.
+- `crates/slab-agent`: pure agent orchestration library and tool router abstractions.
+- `crates/slab-agent-tools`: built-in deterministic agent tools and registration helpers used by app-core.
 - `crates/slab-types`: shared semantic types, settings models, load specs, and other reusable Rust contracts.
 - `crates/slab-proto`: protobuf definitions and generated conversion helpers for server/runtime IPC.
 - `packages/slab-desktop/src`: React frontend pages for chat, image, audio, video, hub, plugins, task, setup, settings, and about.
@@ -88,7 +90,7 @@ crates/slab-runtime-core (scheduler, backend protocol, worker runner)
 - `docs`: public VitePress site source.
 - `docs/development`: internal planning, audits, engineering notes, AI maintenance docs, and contributor-only references.
 - `docs/public/manifests/v1`: published schemars-generated JSON Schemas served at `https://slab.reorgix.com/manifests/v1/*`.
-- `plugins`: local runtime plugin packages loaded by the Tauri host from `plugins/<plugin-id>/`.
+- `plugins`: local runtime plugin packages loaded by the Tauri host from `plugins/<plugin-id>/`; plugin manifests can declare runtime assets, extension contributions, permissions, and agent capabilities.
 - `manifests`: JSON schemas and manifest assets used by settings/model tooling.
 - `vendor`: vendored runtime artifacts and external resources kept in-repo.
 - `testdata`: sample media, fixture models, and integration assets.
@@ -99,8 +101,9 @@ crates/slab-runtime-core (scheduler, backend protocol, worker runner)
 - Extend the existing `/v1/*` API modules instead of adding a parallel API tree. The current surface includes `agent`, `audio`, `backend`, `chat`, `ffmpeg`, `images`, `models`, `session`, `settings`, `setup`, `system`, `tasks`, and `video`.
 - Keep long-running AI work in task-oriented flows when the feature already follows that model.
 - Prefer `crates/slab-types` and `crates/slab-proto` for contracts that need to cross crate boundaries instead of duplicating shapes.
-- Keep `crates/slab-agent` pure: storage, HTTP, SSE/WebSocket, and model adapters belong in `crates/slab-app-core` or `bin/slab-server`, behind the port traits.
+- Keep `crates/slab-agent` pure: storage, HTTP, SSE/WebSocket, model adapters, and concrete tool implementations belong outside it. Put built-in deterministic tools in `crates/slab-agent-tools`; plugin and API tool adapters are registered by host/app-core layers.
 - Preserve Tauri CSP, capabilities, permissions, sidecar boundaries, and the `plugins/<plugin-id>/plugin.json` contract unless the task explicitly requires a change.
+- Treat plugin `manifestVersion: 1` as a declaration of runtime assets, `contributes.*`, `permissions.*`, and agent capabilities. MCP is an export target for capabilities, not the plugin runtime itself.
 - `plugins/` is runtime plugin content, not AI skill content; `.agents/skills` is only for agent guidance.
 - SQLx migrations in `crates/slab-app-core/migrations/` are append-only.
 - Cargo excludes `packages/slab-desktop/src`, so Rust tooling does not validate the TypeScript frontend.
@@ -116,6 +119,7 @@ cargo test --workspace
 cargo check --workspace
 cargo check -p slab-server
 cargo check -p slab-runtime
+cargo check -p slab-agent-tools
 cargo check -p slab-windows-full-installer
 cargo make check
 cargo make test
