@@ -1,36 +1,18 @@
 use std::fmt;
 
 /// A dot-separated Property-Management ID that uniquely identifies a setting.
-///
-/// PMIDs are composed of dot-separated segments (variable depth), such as
-/// `"section.subsection.key"`, and serve as stable, machine-readable keys for
-/// the settings system.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SettingPmid(String);
 
 impl SettingPmid {
-    /// Build a [`SettingPmid`] by joining N static segments with `.`.
-    ///
-    /// # Note
-    /// TODO: This performs a heap allocation on every call because `segments.join(".")` is not
-    /// a `const` operation. Since all PMIDs are compile-time known values, a future optimization
-    /// could store `&'static str` directly (e.g., via a `const fn from_static(s: &'static str)`
-    /// constructor or a proc-macro) to eliminate the per-call allocation.
-    pub fn from_segments<const N: usize>(segments: [&'static str; N]) -> Self {
-        Self(segments.join("."))
-    }
-
-    /// Build a [`SettingPmid`] from an already-joined dot path.
     pub fn from_path(path: impl Into<String>) -> Self {
         Self(path.into())
     }
 
-    /// Return the PMID as a string slice.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
-    /// Consume self and return the owned string.
     pub fn into_string(self) -> String {
         self.0
     }
@@ -48,162 +30,324 @@ impl fmt::Display for SettingPmid {
     }
 }
 
-// ── Top-level catalog ────────────────────────────────────────────────────────
-
-/// The complete catalog of all known setting PMIDs.
+/// The complete settings PMID catalog.
 #[derive(Debug, Clone, Copy)]
-pub struct PmidCatalog {
-    pub setup: SetupPmids,
+pub struct SettingsPmidCatalog {
+    pub general: GeneralPmids,
+    pub database: DatabasePmids,
+    pub logging: LoggingPmids,
+    pub tools: ToolsPmids,
     pub runtime: RuntimePmids,
-    pub launch: LaunchPmids,
-    pub chat: ChatPmids,
-    pub diffusion: DiffusionPmids,
+    pub providers: ProvidersPmids,
+    pub models: ModelsPmids,
+    pub server: ServerPmids,
 }
 
-impl PmidCatalog {
+impl SettingsPmidCatalog {
     pub const fn new() -> Self {
         Self {
-            setup: SetupPmids::new(),
+            general: GeneralPmids,
+            database: DatabasePmids,
+            logging: LoggingPmids::new("logging"),
+            tools: ToolsPmids::new(),
             runtime: RuntimePmids::new(),
-            launch: LaunchPmids::new(),
-            chat: ChatPmids::new(),
-            diffusion: DiffusionPmids::new(),
+            providers: ProvidersPmids,
+            models: ModelsPmids::new(),
+            server: ServerPmids::new(),
         }
     }
 
-    /// Return every known [`SettingPmid`] in declaration order.
     pub fn all(self) -> Vec<SettingPmid> {
         vec![
-            self.setup.initialized(),
-            self.setup.ffmpeg.auto_download(),
-            self.setup.ffmpeg.dir(),
-            self.setup.backends.dir(),
-            self.runtime.model_cache_dir(),
-            self.runtime.llama.num_workers(),
-            self.runtime.llama.context_length(),
-            self.runtime.llama.flash_attn(),
-            self.runtime.whisper.num_workers(),
-            self.runtime.whisper.flash_attn(),
-            self.runtime.diffusion.num_workers(),
-            self.runtime.model_auto_unload.enabled(),
-            self.runtime.model_auto_unload.idle_minutes(),
-            self.runtime.model_auto_unload.min_free_system_memory_bytes(),
-            self.runtime.model_auto_unload.min_free_gpu_memory_bytes(),
-            self.runtime.model_auto_unload.max_pressure_evictions_per_load(),
-            self.launch.transport(),
-            self.launch.queue_capacity(),
-            self.launch.backend_capacity(),
-            self.launch.runtime_ipc_dir(),
-            self.launch.runtime_log_dir(),
-            self.launch.backends.llama.enabled(),
-            self.launch.backends.whisper.enabled(),
-            self.launch.backends.diffusion.enabled(),
-            self.launch.profiles.server.gateway_bind(),
-            self.launch.profiles.server.runtime_bind_host(),
-            self.launch.profiles.server.runtime_bind_base_port(),
-            self.launch.profiles.desktop.runtime_bind_host(),
-            self.launch.profiles.desktop.runtime_bind_base_port(),
-            self.chat.providers(),
-            self.diffusion.paths.model(),
-            self.diffusion.paths.vae(),
-            self.diffusion.paths.taesd(),
-            self.diffusion.paths.lora_model_dir(),
-            self.diffusion.paths.clip_l(),
-            self.diffusion.paths.clip_g(),
-            self.diffusion.paths.t5xxl(),
-            self.diffusion.performance.flash_attn(),
-            self.diffusion.performance.vae_device(),
-            self.diffusion.performance.clip_device(),
-            self.diffusion.performance.offload_params_to_cpu(),
+            self.general.language(),
+            self.database.url(),
+            self.logging.level(),
+            self.logging.json(),
+            self.logging.path(),
+            self.tools.ffmpeg.enabled(),
+            self.tools.ffmpeg.auto_download(),
+            self.tools.ffmpeg.install_dir(),
+            self.tools.ffmpeg.source.version(),
+            self.tools.ffmpeg.source.artifact(),
+            self.runtime.mode(),
+            self.runtime.transport(),
+            self.runtime.sessions.state_dir(),
+            self.runtime.logging.level(),
+            self.runtime.logging.json(),
+            self.runtime.logging.path(),
+            self.runtime.capacity.queue(),
+            self.runtime.capacity.concurrent_requests(),
+            self.runtime.endpoint.http_address(),
+            self.runtime.endpoint.ipc_path(),
+            self.runtime.ggml.install_dir(),
+            self.runtime.ggml.source.version(),
+            self.runtime.ggml.source.artifact(),
+            self.runtime.ggml.logging.level(),
+            self.runtime.ggml.logging.json(),
+            self.runtime.ggml.logging.path(),
+            self.runtime.ggml.capacity.queue(),
+            self.runtime.ggml.capacity.concurrent_requests(),
+            self.runtime.ggml.endpoint.http_address(),
+            self.runtime.ggml.endpoint.ipc_path(),
+            self.runtime.ggml.backends.llama.enabled(),
+            self.runtime.ggml.backends.llama.context_length(),
+            self.runtime.ggml.backends.llama.flash_attn(),
+            self.runtime.ggml.backends.llama.source.version(),
+            self.runtime.ggml.backends.llama.source.artifact(),
+            self.runtime.ggml.backends.llama.logging.level(),
+            self.runtime.ggml.backends.llama.logging.json(),
+            self.runtime.ggml.backends.llama.logging.path(),
+            self.runtime.ggml.backends.llama.capacity.queue(),
+            self.runtime.ggml.backends.llama.capacity.concurrent_requests(),
+            self.runtime.ggml.backends.llama.endpoint.http_address(),
+            self.runtime.ggml.backends.llama.endpoint.ipc_path(),
+            self.runtime.ggml.backends.whisper.enabled(),
+            self.runtime.ggml.backends.whisper.flash_attn(),
+            self.runtime.ggml.backends.whisper.source.version(),
+            self.runtime.ggml.backends.whisper.source.artifact(),
+            self.runtime.ggml.backends.whisper.logging.level(),
+            self.runtime.ggml.backends.whisper.logging.json(),
+            self.runtime.ggml.backends.whisper.logging.path(),
+            self.runtime.ggml.backends.whisper.capacity.queue(),
+            self.runtime.ggml.backends.whisper.capacity.concurrent_requests(),
+            self.runtime.ggml.backends.whisper.endpoint.http_address(),
+            self.runtime.ggml.backends.whisper.endpoint.ipc_path(),
+            self.runtime.ggml.backends.diffusion.enabled(),
+            self.runtime.ggml.backends.diffusion.flash_attn(),
+            self.runtime.ggml.backends.diffusion.source.version(),
+            self.runtime.ggml.backends.diffusion.source.artifact(),
+            self.runtime.ggml.backends.diffusion.logging.level(),
+            self.runtime.ggml.backends.diffusion.logging.json(),
+            self.runtime.ggml.backends.diffusion.logging.path(),
+            self.runtime.ggml.backends.diffusion.capacity.queue(),
+            self.runtime.ggml.backends.diffusion.capacity.concurrent_requests(),
+            self.runtime.ggml.backends.diffusion.endpoint.http_address(),
+            self.runtime.ggml.backends.diffusion.endpoint.ipc_path(),
+            self.runtime.candle.enabled(),
+            self.runtime.candle.install_dir(),
+            self.runtime.candle.source.version(),
+            self.runtime.candle.source.artifact(),
+            self.runtime.candle.logging.level(),
+            self.runtime.candle.logging.json(),
+            self.runtime.candle.logging.path(),
+            self.runtime.candle.capacity.queue(),
+            self.runtime.candle.capacity.concurrent_requests(),
+            self.runtime.candle.endpoint.http_address(),
+            self.runtime.candle.endpoint.ipc_path(),
+            self.runtime.onnx.enabled(),
+            self.runtime.onnx.install_dir(),
+            self.runtime.onnx.source.version(),
+            self.runtime.onnx.source.artifact(),
+            self.runtime.onnx.logging.level(),
+            self.runtime.onnx.logging.json(),
+            self.runtime.onnx.logging.path(),
+            self.runtime.onnx.capacity.queue(),
+            self.runtime.onnx.capacity.concurrent_requests(),
+            self.runtime.onnx.endpoint.http_address(),
+            self.runtime.onnx.endpoint.ipc_path(),
+            self.providers.registry(),
+            self.models.cache_dir(),
+            self.models.config_dir(),
+            self.models.download_source(),
+            self.models.auto_unload.enabled(),
+            self.models.auto_unload.idle_minutes(),
+            self.models.auto_unload.min_free_system_memory_bytes(),
+            self.models.auto_unload.min_free_gpu_memory_bytes(),
+            self.models.auto_unload.max_pressure_evictions_per_load(),
+            self.server.address(),
+            self.server.logging.level(),
+            self.server.logging.json(),
+            self.server.logging.path(),
+            self.server.cors.allowed_origins(),
+            self.server.admin.token(),
+            self.server.swagger.enabled(),
+            self.server.cloud_http_trace(),
         ]
     }
 }
 
-impl Default for PmidCatalog {
+impl Default for SettingsPmidCatalog {
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// The global PMID catalog singleton.
-pub const PMID: PmidCatalog = PmidCatalog::new();
+pub const PMID: SettingsPmidCatalog = SettingsPmidCatalog::new();
 
-// ── Setup PMIDs ──────────────────────────────────────────────────────────────
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GeneralPmids;
 
-#[derive(Debug, Clone, Copy)]
-pub struct SetupPmids {
-    pub ffmpeg: SetupFfmpegPmids,
-    pub backends: SetupBackendPmids,
-}
-
-impl SetupPmids {
-    pub const fn new() -> Self {
-        Self { ffmpeg: SetupFfmpegPmids::new(), backends: SetupBackendPmids::new() }
-    }
-
-    pub fn initialized(self) -> SettingPmid {
-        SettingPmid::from_segments(["setup", "initialized"])
-    }
-}
-
-impl Default for SetupPmids {
-    fn default() -> Self {
-        Self::new()
+impl GeneralPmids {
+    pub fn language(self) -> SettingPmid {
+        SettingPmid::from_path("general.language")
     }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct SetupFfmpegPmids;
+pub struct DatabasePmids;
 
-impl SetupFfmpegPmids {
+impl DatabasePmids {
+    pub fn url(self) -> SettingPmid {
+        SettingPmid::from_path("database.url")
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LoggingPmids {
+    prefix: &'static str,
+}
+
+impl LoggingPmids {
+    pub const fn new(prefix: &'static str) -> Self {
+        Self { prefix }
+    }
+
+    pub fn level(self) -> SettingPmid {
+        SettingPmid::from_path(format!("{}.level", self.prefix))
+    }
+
+    pub fn json(self) -> SettingPmid {
+        SettingPmid::from_path(format!("{}.json", self.prefix))
+    }
+
+    pub fn path(self) -> SettingPmid {
+        SettingPmid::from_path(format!("{}.path", self.prefix))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CapacityPmids {
+    prefix: &'static str,
+}
+
+impl CapacityPmids {
+    pub const fn new(prefix: &'static str) -> Self {
+        Self { prefix }
+    }
+
+    pub fn queue(self) -> SettingPmid {
+        SettingPmid::from_path(format!("{}.queue", self.prefix))
+    }
+
+    pub fn concurrent_requests(self) -> SettingPmid {
+        SettingPmid::from_path(format!("{}.concurrent_requests", self.prefix))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct EndpointPmids {
+    prefix: &'static str,
+}
+
+impl EndpointPmids {
+    pub const fn new(prefix: &'static str) -> Self {
+        Self { prefix }
+    }
+
+    pub fn http_address(self) -> SettingPmid {
+        SettingPmid::from_path(format!("{}.http.address", self.prefix))
+    }
+
+    pub fn ipc_path(self) -> SettingPmid {
+        SettingPmid::from_path(format!("{}.ipc.path", self.prefix))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SourcePmids {
+    prefix: &'static str,
+}
+
+impl SourcePmids {
+    pub const fn new(prefix: &'static str) -> Self {
+        Self { prefix }
+    }
+
+    pub fn version(self) -> SettingPmid {
+        SettingPmid::from_path(format!("{}.version", self.prefix))
+    }
+
+    pub fn artifact(self) -> SettingPmid {
+        SettingPmid::from_path(format!("{}.artifact", self.prefix))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ToolsPmids {
+    pub ffmpeg: FfmpegToolPmids,
+}
+
+impl ToolsPmids {
     pub const fn new() -> Self {
-        Self
+        Self { ffmpeg: FfmpegToolPmids::new() }
+    }
+}
+
+impl Default for ToolsPmids {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct FfmpegToolPmids {
+    pub source: SourcePmids,
+}
+
+impl FfmpegToolPmids {
+    pub const fn new() -> Self {
+        Self { source: SourcePmids::new("tools.ffmpeg.source") }
+    }
+
+    pub fn enabled(self) -> SettingPmid {
+        SettingPmid::from_path("tools.ffmpeg.enabled")
     }
 
     pub fn auto_download(self) -> SettingPmid {
-        SettingPmid::from_segments(["setup", "ffmpeg", "auto_download"])
+        SettingPmid::from_path("tools.ffmpeg.auto_download")
     }
 
-    pub fn dir(self) -> SettingPmid {
-        SettingPmid::from_segments(["setup", "ffmpeg", "dir"])
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct SetupBackendPmids;
-
-impl SetupBackendPmids {
-    pub const fn new() -> Self {
-        Self
-    }
-
-    pub fn dir(self) -> SettingPmid {
-        SettingPmid::from_segments(["setup", "backends", "dir"])
+    pub fn install_dir(self) -> SettingPmid {
+        SettingPmid::from_path("tools.ffmpeg.install_dir")
     }
 }
 
-// ── Runtime PMIDs ────────────────────────────────────────────────────────────
+impl Default for FfmpegToolPmids {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct RuntimePmids {
-    pub llama: RuntimeLlamaPmids,
-    pub whisper: RuntimeWorkerPmids,
-    pub diffusion: RuntimeWorkerPmids,
-    pub model_auto_unload: RuntimeModelAutoUnloadPmids,
+    pub sessions: RuntimeSessionsPmids,
+    pub logging: LoggingPmids,
+    pub capacity: CapacityPmids,
+    pub endpoint: EndpointPmids,
+    pub ggml: GgmlRuntimePmids,
+    pub candle: SingleRuntimeFamilyPmids,
+    pub onnx: SingleRuntimeFamilyPmids,
 }
 
 impl RuntimePmids {
     pub const fn new() -> Self {
         Self {
-            llama: RuntimeLlamaPmids::new(),
-            whisper: RuntimeWorkerPmids::new("whisper"),
-            diffusion: RuntimeWorkerPmids::new("diffusion"),
-            model_auto_unload: RuntimeModelAutoUnloadPmids::new(),
+            sessions: RuntimeSessionsPmids,
+            logging: LoggingPmids::new("runtime.logging"),
+            capacity: CapacityPmids::new("runtime.capacity"),
+            endpoint: EndpointPmids::new("runtime.endpoint"),
+            ggml: GgmlRuntimePmids::new(),
+            candle: SingleRuntimeFamilyPmids::candle(),
+            onnx: SingleRuntimeFamilyPmids::onnx(),
         }
     }
 
-    pub fn model_cache_dir(self) -> SettingPmid {
-        SettingPmid::from_segments(["runtime", "model_cache_dir"])
+    pub fn mode(self) -> SettingPmid {
+        SettingPmid::from_path("runtime.mode")
+    }
+
+    pub fn transport(self) -> SettingPmid {
+        SettingPmid::from_path("runtime.transport")
     }
 }
 
@@ -214,334 +358,358 @@ impl Default for RuntimePmids {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct RuntimeLlamaPmids;
+pub struct RuntimeSessionsPmids;
 
-impl RuntimeLlamaPmids {
-    pub const fn new() -> Self {
-        Self
-    }
-
-    pub fn num_workers(self) -> SettingPmid {
-        SettingPmid::from_segments(["runtime", "llama", "num_workers"])
-    }
-
-    pub fn context_length(self) -> SettingPmid {
-        SettingPmid::from_segments(["runtime", "llama", "context_length"])
-    }
-
-    pub fn flash_attn(self) -> SettingPmid {
-        SettingPmid::from_segments(["runtime", "llama", "flash_attn"])
+impl RuntimeSessionsPmids {
+    pub fn state_dir(self) -> SettingPmid {
+        SettingPmid::from_path("runtime.sessions.state_dir")
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct RuntimeWorkerPmids {
-    backend: &'static str,
+pub struct GgmlRuntimePmids {
+    pub source: SourcePmids,
+    pub logging: LoggingPmids,
+    pub capacity: CapacityPmids,
+    pub endpoint: EndpointPmids,
+    pub backends: GgmlBackendPmids,
 }
 
-impl RuntimeWorkerPmids {
-    pub const fn new(backend: &'static str) -> Self {
-        Self { backend }
-    }
-
-    pub fn num_workers(self) -> SettingPmid {
-        SettingPmid::from_segments(["runtime", self.backend, "num_workers"])
-    }
-
-    pub fn flash_attn(self) -> SettingPmid {
-        SettingPmid::from_segments(["runtime", self.backend, "flash_attn"])
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct RuntimeModelAutoUnloadPmids;
-
-impl RuntimeModelAutoUnloadPmids {
+impl GgmlRuntimePmids {
     pub const fn new() -> Self {
-        Self
+        Self {
+            source: SourcePmids::new("runtime.ggml.source"),
+            logging: LoggingPmids::new("runtime.ggml.logging"),
+            capacity: CapacityPmids::new("runtime.ggml.capacity"),
+            endpoint: EndpointPmids::new("runtime.ggml.endpoint"),
+            backends: GgmlBackendPmids::new(),
+        }
     }
 
-    pub fn enabled(self) -> SettingPmid {
-        SettingPmid::from_segments(["runtime", "model_auto_unload", "enabled"])
-    }
-
-    pub fn idle_minutes(self) -> SettingPmid {
-        SettingPmid::from_segments(["runtime", "model_auto_unload", "idle_minutes"])
-    }
-
-    pub fn min_free_system_memory_bytes(self) -> SettingPmid {
-        SettingPmid::from_segments(["runtime", "model_auto_unload", "min_free_system_memory_bytes"])
-    }
-
-    pub fn min_free_gpu_memory_bytes(self) -> SettingPmid {
-        SettingPmid::from_segments(["runtime", "model_auto_unload", "min_free_gpu_memory_bytes"])
-    }
-
-    pub fn max_pressure_evictions_per_load(self) -> SettingPmid {
-        SettingPmid::from_segments([
-            "runtime",
-            "model_auto_unload",
-            "max_pressure_evictions_per_load",
-        ])
+    pub fn install_dir(self) -> SettingPmid {
+        SettingPmid::from_path("runtime.ggml.install_dir")
     }
 }
 
-// ── Chat PMIDs ───────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Copy)]
-pub struct LaunchPmids {
-    pub backends: LaunchBackendPmids,
-    pub profiles: LaunchProfilePmids,
-}
-
-impl LaunchPmids {
-    pub const fn new() -> Self {
-        Self { backends: LaunchBackendPmids::new(), profiles: LaunchProfilePmids::new() }
-    }
-
-    pub fn transport(self) -> SettingPmid {
-        SettingPmid::from_segments(["launch", "transport"])
-    }
-
-    pub fn queue_capacity(self) -> SettingPmid {
-        SettingPmid::from_segments(["launch", "queue_capacity"])
-    }
-
-    pub fn backend_capacity(self) -> SettingPmid {
-        SettingPmid::from_segments(["launch", "backend_capacity"])
-    }
-
-    pub fn runtime_ipc_dir(self) -> SettingPmid {
-        SettingPmid::from_segments(["launch", "runtime_ipc_dir"])
-    }
-
-    pub fn runtime_log_dir(self) -> SettingPmid {
-        SettingPmid::from_segments(["launch", "runtime_log_dir"])
-    }
-}
-
-impl Default for LaunchPmids {
+impl Default for GgmlRuntimePmids {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct LaunchBackendPmids {
-    pub llama: LaunchBackendTogglePmids,
-    pub whisper: LaunchBackendTogglePmids,
-    pub diffusion: LaunchBackendTogglePmids,
+pub struct GgmlBackendPmids {
+    pub llama: LlamaRuntimePmids,
+    pub whisper: RuntimeBackendLeafPmids,
+    pub diffusion: RuntimeBackendLeafPmids,
 }
 
-impl LaunchBackendPmids {
+impl GgmlBackendPmids {
     pub const fn new() -> Self {
         Self {
-            llama: LaunchBackendTogglePmids::new("llama"),
-            whisper: LaunchBackendTogglePmids::new("whisper"),
-            diffusion: LaunchBackendTogglePmids::new("diffusion"),
+            llama: LlamaRuntimePmids::new(),
+            whisper: RuntimeBackendLeafPmids::whisper(),
+            diffusion: RuntimeBackendLeafPmids::diffusion(),
         }
     }
 }
 
-impl Default for LaunchBackendPmids {
+impl Default for GgmlBackendPmids {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct LaunchBackendTogglePmids {
-    backend: &'static str,
+pub struct RuntimeBackendLeafPmids {
+    prefix: &'static str,
+    pub source: SourcePmids,
+    pub logging: LoggingPmids,
+    pub capacity: CapacityPmids,
+    pub endpoint: EndpointPmids,
 }
 
-impl LaunchBackendTogglePmids {
-    pub const fn new(backend: &'static str) -> Self {
-        Self { backend }
+impl RuntimeBackendLeafPmids {
+    const fn new(
+        prefix: &'static str,
+        source_prefix: &'static str,
+        logging_prefix: &'static str,
+        capacity_prefix: &'static str,
+        endpoint_prefix: &'static str,
+    ) -> Self {
+        Self {
+            prefix,
+            source: SourcePmids::new(source_prefix),
+            logging: LoggingPmids::new(logging_prefix),
+            capacity: CapacityPmids::new(capacity_prefix),
+            endpoint: EndpointPmids::new(endpoint_prefix),
+        }
+    }
+
+    pub const fn whisper() -> Self {
+        Self::new(
+            "runtime.ggml.backends.whisper",
+            "runtime.ggml.backends.whisper.source",
+            "runtime.ggml.backends.whisper.logging",
+            "runtime.ggml.backends.whisper.capacity",
+            "runtime.ggml.backends.whisper.endpoint",
+        )
+    }
+
+    pub const fn diffusion() -> Self {
+        Self::new(
+            "runtime.ggml.backends.diffusion",
+            "runtime.ggml.backends.diffusion.source",
+            "runtime.ggml.backends.diffusion.logging",
+            "runtime.ggml.backends.diffusion.capacity",
+            "runtime.ggml.backends.diffusion.endpoint",
+        )
     }
 
     pub fn enabled(self) -> SettingPmid {
-        SettingPmid::from_segments(["launch", "backends", self.backend, "enabled"])
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct LaunchProfilePmids {
-    pub server: ServerLaunchProfilePmids,
-    pub desktop: DesktopLaunchProfilePmids,
-}
-
-impl LaunchProfilePmids {
-    pub const fn new() -> Self {
-        Self { server: ServerLaunchProfilePmids::new(), desktop: DesktopLaunchProfilePmids::new() }
-    }
-}
-
-impl Default for LaunchProfilePmids {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ServerLaunchProfilePmids;
-
-impl ServerLaunchProfilePmids {
-    pub const fn new() -> Self {
-        Self
-    }
-
-    pub fn gateway_bind(self) -> SettingPmid {
-        SettingPmid::from_segments(["launch", "profiles", "server", "gateway_bind"])
-    }
-
-    pub fn runtime_bind_host(self) -> SettingPmid {
-        SettingPmid::from_segments(["launch", "profiles", "server", "runtime_bind_host"])
-    }
-
-    pub fn runtime_bind_base_port(self) -> SettingPmid {
-        SettingPmid::from_segments(["launch", "profiles", "server", "runtime_bind_base_port"])
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct DesktopLaunchProfilePmids;
-
-impl DesktopLaunchProfilePmids {
-    pub const fn new() -> Self {
-        Self
-    }
-
-    pub fn runtime_bind_host(self) -> SettingPmid {
-        SettingPmid::from_segments(["launch", "profiles", "desktop", "runtime_bind_host"])
-    }
-
-    pub fn runtime_bind_base_port(self) -> SettingPmid {
-        SettingPmid::from_segments(["launch", "profiles", "desktop", "runtime_bind_base_port"])
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ChatPmids;
-
-impl ChatPmids {
-    pub const fn new() -> Self {
-        Self
-    }
-
-    pub fn providers(self) -> SettingPmid {
-        SettingPmid::from_segments(["chat", "providers"])
-    }
-}
-
-// ── Diffusion PMIDs ──────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Copy)]
-pub struct DiffusionPmids {
-    pub paths: DiffusionPathPmids,
-    pub performance: DiffusionPerformancePmids,
-}
-
-impl DiffusionPmids {
-    pub const fn new() -> Self {
-        Self { paths: DiffusionPathPmids::new(), performance: DiffusionPerformancePmids::new() }
-    }
-}
-
-impl Default for DiffusionPmids {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct DiffusionPathPmids;
-
-impl DiffusionPathPmids {
-    pub const fn new() -> Self {
-        Self
-    }
-
-    pub fn model(self) -> SettingPmid {
-        SettingPmid::from_segments(["diffusion", "paths", "model"])
-    }
-
-    pub fn vae(self) -> SettingPmid {
-        SettingPmid::from_segments(["diffusion", "paths", "vae"])
-    }
-
-    pub fn taesd(self) -> SettingPmid {
-        SettingPmid::from_segments(["diffusion", "paths", "taesd"])
-    }
-
-    pub fn lora_model_dir(self) -> SettingPmid {
-        SettingPmid::from_segments(["diffusion", "paths", "lora_model_dir"])
-    }
-
-    pub fn clip_l(self) -> SettingPmid {
-        SettingPmid::from_segments(["diffusion", "paths", "clip_l"])
-    }
-
-    pub fn clip_g(self) -> SettingPmid {
-        SettingPmid::from_segments(["diffusion", "paths", "clip_g"])
-    }
-
-    pub fn t5xxl(self) -> SettingPmid {
-        SettingPmid::from_segments(["diffusion", "paths", "t5xxl"])
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct DiffusionPerformancePmids;
-
-impl DiffusionPerformancePmids {
-    pub const fn new() -> Self {
-        Self
+        SettingPmid::from_path(format!("{}.enabled", self.prefix))
     }
 
     pub fn flash_attn(self) -> SettingPmid {
-        SettingPmid::from_segments(["diffusion", "performance", "flash_attn"])
+        SettingPmid::from_path(format!("{}.flash_attn", self.prefix))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LlamaRuntimePmids {
+    prefix: &'static str,
+    pub source: SourcePmids,
+    pub logging: LoggingPmids,
+    pub capacity: CapacityPmids,
+    pub endpoint: EndpointPmids,
+}
+
+impl LlamaRuntimePmids {
+    pub const fn new() -> Self {
+        Self {
+            prefix: "runtime.ggml.backends.llama",
+            source: SourcePmids::new("runtime.ggml.backends.llama.source"),
+            logging: LoggingPmids::new("runtime.ggml.backends.llama.logging"),
+            capacity: CapacityPmids::new("runtime.ggml.backends.llama.capacity"),
+            endpoint: EndpointPmids::new("runtime.ggml.backends.llama.endpoint"),
+        }
     }
 
-    pub fn vae_device(self) -> SettingPmid {
-        SettingPmid::from_segments(["diffusion", "performance", "vae_device"])
+    pub fn enabled(self) -> SettingPmid {
+        SettingPmid::from_path(format!("{}.enabled", self.prefix))
     }
 
-    pub fn clip_device(self) -> SettingPmid {
-        SettingPmid::from_segments(["diffusion", "performance", "clip_device"])
+    pub fn context_length(self) -> SettingPmid {
+        SettingPmid::from_path(format!("{}.context_length", self.prefix))
     }
 
-    pub fn offload_params_to_cpu(self) -> SettingPmid {
-        SettingPmid::from_segments(["diffusion", "performance", "offload_params_to_cpu"])
+    pub fn flash_attn(self) -> SettingPmid {
+        SettingPmid::from_path(format!("{}.flash_attn", self.prefix))
+    }
+}
+
+impl Default for LlamaRuntimePmids {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SingleRuntimeFamilyPmids {
+    prefix: &'static str,
+    pub source: SourcePmids,
+    pub logging: LoggingPmids,
+    pub capacity: CapacityPmids,
+    pub endpoint: EndpointPmids,
+}
+
+impl SingleRuntimeFamilyPmids {
+    const fn new(
+        prefix: &'static str,
+        source_prefix: &'static str,
+        logging_prefix: &'static str,
+        capacity_prefix: &'static str,
+        endpoint_prefix: &'static str,
+    ) -> Self {
+        Self {
+            prefix,
+            source: SourcePmids::new(source_prefix),
+            logging: LoggingPmids::new(logging_prefix),
+            capacity: CapacityPmids::new(capacity_prefix),
+            endpoint: EndpointPmids::new(endpoint_prefix),
+        }
+    }
+
+    pub const fn candle() -> Self {
+        Self::new(
+            "runtime.candle",
+            "runtime.candle.source",
+            "runtime.candle.logging",
+            "runtime.candle.capacity",
+            "runtime.candle.endpoint",
+        )
+    }
+
+    pub const fn onnx() -> Self {
+        Self::new(
+            "runtime.onnx",
+            "runtime.onnx.source",
+            "runtime.onnx.logging",
+            "runtime.onnx.capacity",
+            "runtime.onnx.endpoint",
+        )
+    }
+
+    pub fn enabled(self) -> SettingPmid {
+        SettingPmid::from_path(format!("{}.enabled", self.prefix))
+    }
+
+    pub fn install_dir(self) -> SettingPmid {
+        SettingPmid::from_path(format!("{}.install_dir", self.prefix))
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProvidersPmids;
+
+impl ProvidersPmids {
+    pub fn registry(self) -> SettingPmid {
+        SettingPmid::from_path("providers.registry")
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ModelsPmids {
+    pub auto_unload: AutoUnloadPmids,
+}
+
+impl ModelsPmids {
+    pub const fn new() -> Self {
+        Self { auto_unload: AutoUnloadPmids }
+    }
+
+    pub fn cache_dir(self) -> SettingPmid {
+        SettingPmid::from_path("models.cache_dir")
+    }
+
+    pub fn config_dir(self) -> SettingPmid {
+        SettingPmid::from_path("models.config_dir")
+    }
+
+    pub fn download_source(self) -> SettingPmid {
+        SettingPmid::from_path("models.download_source")
+    }
+}
+
+impl Default for ModelsPmids {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AutoUnloadPmids;
+
+impl AutoUnloadPmids {
+    pub fn enabled(self) -> SettingPmid {
+        SettingPmid::from_path("models.auto_unload.enabled")
+    }
+
+    pub fn idle_minutes(self) -> SettingPmid {
+        SettingPmid::from_path("models.auto_unload.idle_minutes")
+    }
+
+    pub fn min_free_system_memory_bytes(self) -> SettingPmid {
+        SettingPmid::from_path("models.auto_unload.min_free_system_memory_bytes")
+    }
+
+    pub fn min_free_gpu_memory_bytes(self) -> SettingPmid {
+        SettingPmid::from_path("models.auto_unload.min_free_gpu_memory_bytes")
+    }
+
+    pub fn max_pressure_evictions_per_load(self) -> SettingPmid {
+        SettingPmid::from_path("models.auto_unload.max_pressure_evictions_per_load")
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ServerPmids {
+    pub logging: LoggingPmids,
+    pub cors: CorsPmids,
+    pub admin: AdminPmids,
+    pub swagger: SwaggerPmids,
+}
+
+impl ServerPmids {
+    pub const fn new() -> Self {
+        Self {
+            logging: LoggingPmids::new("server.logging"),
+            cors: CorsPmids,
+            admin: AdminPmids,
+            swagger: SwaggerPmids,
+        }
+    }
+
+    pub fn address(self) -> SettingPmid {
+        SettingPmid::from_path("server.address")
+    }
+
+    pub fn cloud_http_trace(self) -> SettingPmid {
+        SettingPmid::from_path("server.cloud_http_trace")
+    }
+}
+
+impl Default for ServerPmids {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CorsPmids;
+
+impl CorsPmids {
+    pub fn allowed_origins(self) -> SettingPmid {
+        SettingPmid::from_path("server.cors.allowed_origins")
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AdminPmids;
+
+impl AdminPmids {
+    pub fn token(self) -> SettingPmid {
+        SettingPmid::from_path("server.admin.token")
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SwaggerPmids;
+
+impl SwaggerPmids {
+    pub fn enabled(self) -> SettingPmid {
+        SettingPmid::from_path("server.swagger.enabled")
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::collections::BTreeSet;
+
+    use super::PMID;
 
     #[test]
-    fn nested_builder_generates_expected_pmid() {
-        assert_eq!(PMID.setup.backends.dir().as_str(), "setup.backends.dir");
-        assert_eq!(
-            PMID.runtime.model_auto_unload.idle_minutes().as_str(),
-            "runtime.model_auto_unload.idle_minutes"
-        );
-        assert_eq!(
-            PMID.runtime.model_auto_unload.min_free_system_memory_bytes().as_str(),
-            "runtime.model_auto_unload.min_free_system_memory_bytes"
-        );
-        assert_eq!(
-            PMID.launch.profiles.desktop.runtime_bind_base_port().as_str(),
-            "launch.profiles.desktop.runtime_bind_base_port"
-        );
-    }
-
-    #[test]
-    fn all_pmids_are_unique() {
-        use std::collections::HashSet;
+    fn settings_pmids_are_unique() {
         let all = PMID.all();
-        let count = all.len();
-        let unique: HashSet<_> = all.iter().map(|p| p.as_str()).collect();
-        assert_eq!(unique.len(), count, "duplicate PMIDs detected");
+        let unique: BTreeSet<String> = all.iter().map(|pmid| pmid.as_str().to_owned()).collect();
+
+        assert_eq!(all.len(), unique.len());
+        assert!(unique.contains("general.language"));
+        assert!(unique.contains("runtime.ggml.backends.llama.context_length"));
+        assert!(unique.contains("runtime.ggml.backends.llama.flash_attn"));
+        assert!(unique.contains("runtime.ggml.backends.whisper.flash_attn"));
+        assert!(unique.contains("runtime.ggml.backends.diffusion.flash_attn"));
+        assert!(unique.contains("providers.registry"));
+        assert!(unique.contains("server.cloud_http_trace"));
     }
 }

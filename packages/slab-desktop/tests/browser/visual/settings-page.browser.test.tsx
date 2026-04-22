@@ -49,45 +49,32 @@ vi.mock('@slab/i18n', () => ({
 
 function createMockSettingsData(overrides: Partial<SettingsDocumentResponse> = {}): SettingsDocumentResponse {
   return {
-    schema_version: 1,
-    settings_path: '/etc/slab/settings.toml',
+    schema_version: 2,
+    settings_path: '/etc/slab/settings.json',
     warnings: [],
     sections: [
       {
         id: 'general',
-        title: 'General Settings',
-        description_md: 'Basic application configuration',
+        title: 'General',
+        description_md: 'Desktop application preferences shared across the frontend shell.',
         subsections: [
           {
-            id: 'appearance',
-            title: 'Appearance',
-            description_md: 'Customize the look and feel',
+            id: 'general',
+            title: 'General',
+            description_md: 'Choose how the desktop app should present shared interface preferences.',
             properties: [
               {
-                pmid: 'general.appearance.theme',
-                label: 'Theme',
-                description_md: 'Application color theme',
+                pmid: 'general.language',
+                label: 'Interface Language',
+                description_md: 'Choose how the desktop frontend selects translation resources.',
                 editable: true,
-                effective_value: 'dark',
+                effective_value: 'auto',
                 is_overridden: false,
                 search_terms: [],
                 schema: {
                   type: 'string',
-                  enum: ['light', 'dark', 'auto'],
-                  default_value: 'dark',
-                },
-              },
-              {
-                pmid: 'general.appearance.language',
-                label: 'Language',
-                description_md: 'Interface language',
-                editable: true,
-                effective_value: 'en',
-                is_overridden: false,
-                search_terms: [],
-                schema: {
-                  type: 'string',
-                  default_value: 'en',
+                  enum: ['auto', 'en-US', 'zh-CN'],
+                  default_value: 'auto',
                 },
               },
             ],
@@ -96,28 +83,27 @@ function createMockSettingsData(overrides: Partial<SettingsDocumentResponse> = {
       },
       {
         id: 'runtime',
-        title: 'Runtime Configuration',
-        description_md: 'Model runtime settings',
+        title: 'Runtime',
+        description_md: 'Shared inference runtime topology, transport, and backend-specific overrides.',
         subsections: [
           {
-            id: 'memory',
-            title: 'Memory Management',
-            description_md: 'Configure memory allocation',
+            id: 'llama',
+            title: 'Llama',
+            description_md: 'Overrides specific to the GGML llama worker.',
             properties: [
               {
-                pmid: 'runtime.memory.max_gb',
-                label: 'Max Memory (GB)',
-                description_md: 'Maximum memory allocation',
+                pmid: 'runtime.ggml.backends.llama.context_length',
+                label: 'Context Length',
+                description_md: 'Override the llama context window length in tokens.',
                 editable: true,
-                effective_value: 16,
+                effective_value: 4096,
                 is_overridden: true,
-                override_value: 16,
+                override_value: 4096,
                 search_terms: [],
                 schema: {
                   type: 'integer',
-                  default_value: 8,
-                  minimum: 2,
-                  maximum: 64,
+                  default_value: null,
+                  minimum: 0,
                 },
               },
             ],
@@ -181,7 +167,7 @@ describe('SettingsPage browser visual regression', () => {
 
     await renderDesktopScene(<SettingsPage />, { route: '/settings' });
 
-    await expect.element(page.getByRole('heading', { name: 'General Settings' })).toBeVisible();
+    await expect.element(page.getByRole('heading', { name: 'General' })).toBeVisible();
     await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot('settings-page-with-data.png');
   });
 
@@ -197,7 +183,7 @@ describe('SettingsPage browser visual regression', () => {
     mockUseSettingsAutosave.mockReturnValue(
       createSettingsAutosaveViewModel({
         drafts: {
-          'general.appearance.theme': 'light',
+          'general.language': 'zh-CN',
         },
         statusSummary: {
           error: 0,

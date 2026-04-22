@@ -5,7 +5,7 @@ outline: deep
 
 # Settings Document Schema
 
-The canonical JSON Schema for `SettingsDocumentV2` is published at:
+The canonical JSON Schema for `SettingsDocument` is published at:
 
 `https://slab.reorgix.com/manifests/v1/settings-document.schema.json`
 

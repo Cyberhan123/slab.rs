@@ -65,9 +65,9 @@ pub enum InterfaceLanguagePreference {
     ZhCn,
 }
 
-/// V2 user-facing settings document persisted as nested JSON.
+/// User-facing settings document persisted as nested JSON.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct SettingsDocumentV2 {
+pub struct SettingsDocument {
     /// Relative schema reference for editor tooling.
     #[serde(
         rename = "$schema",
@@ -79,7 +79,7 @@ pub struct SettingsDocumentV2 {
     #[serde(default = "default_schema_version")]
     pub schema_version: u32,
     #[serde(default)]
-    pub general: GeneralConfigV2,
+    pub general: GeneralSettingsConfig,
     #[serde(default)]
     pub database: DatabaseConfig,
     #[serde(default)]
@@ -87,41 +87,41 @@ pub struct SettingsDocumentV2 {
     #[serde(default)]
     pub tools: ToolsConfig,
     #[serde(default)]
-    pub runtime: RuntimeConfigV2,
+    pub runtime: RuntimeSettingsConfig,
     #[serde(default)]
     pub providers: ProvidersConfig,
     #[serde(default)]
-    pub models: ModelsConfigV2,
+    pub models: ModelSettingsConfig,
     #[serde(default)]
-    pub server: ServerConfigV2,
+    pub server: ServerSettingsConfig,
 }
 
-impl Default for SettingsDocumentV2 {
+impl Default for SettingsDocument {
     fn default() -> Self {
         Self {
             schema: default_schema_ref(),
             schema_version: default_schema_version(),
-            general: GeneralConfigV2::default(),
+            general: GeneralSettingsConfig::default(),
             database: DatabaseConfig::default(),
             logging: LoggingConfig::default(),
             tools: ToolsConfig::default(),
-            runtime: RuntimeConfigV2::default(),
+            runtime: RuntimeSettingsConfig::default(),
             providers: ProvidersConfig::default(),
-            models: ModelsConfigV2::default(),
-            server: ServerConfigV2::default(),
+            models: ModelSettingsConfig::default(),
+            server: ServerSettingsConfig::default(),
         }
     }
 }
 
 /// General desktop-app settings.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct GeneralConfigV2 {
+pub struct GeneralSettingsConfig {
     /// Preferred desktop interface language.
     #[serde(default)]
     pub language: InterfaceLanguagePreference,
 }
 
-impl Default for GeneralConfigV2 {
+impl Default for GeneralSettingsConfig {
     fn default() -> Self {
         Self { language: InterfaceLanguagePreference::Auto }
     }
@@ -283,7 +283,7 @@ pub enum RuntimeMode {
 
 /// Shared runtime configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct RuntimeConfigV2 {
+pub struct RuntimeSettingsConfig {
     #[serde(default)]
     pub mode: RuntimeMode,
     #[serde(default = "default_runtime_transport")]
@@ -304,7 +304,7 @@ pub struct RuntimeConfigV2 {
     pub onnx: SingleRuntimeFamilyConfig,
 }
 
-impl Default for RuntimeConfigV2 {
+impl Default for RuntimeSettingsConfig {
     fn default() -> Self {
         Self {
             mode: RuntimeMode::ManagedChildren,
@@ -503,7 +503,7 @@ pub struct ProviderDefaultsConfig {
 
 /// Model storage settings.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct ModelsConfigV2 {
+pub struct ModelSettingsConfig {
     /// Directory used for cached model artifacts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_dir: Option<String>,
@@ -517,7 +517,7 @@ pub struct ModelsConfigV2 {
     pub auto_unload: AutoUnloadConfig,
 }
 
-impl Default for ModelsConfigV2 {
+impl Default for ModelSettingsConfig {
     fn default() -> Self {
         Self {
             cache_dir: None,
@@ -588,7 +588,7 @@ const fn default_max_pressure_evictions_per_load() -> u32 {
 
 /// Server-only settings.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct ServerConfigV2 {
+pub struct ServerSettingsConfig {
     /// HTTP bind address for slab-server.
     pub address: String,
     #[serde(default)]
@@ -604,7 +604,7 @@ pub struct ServerConfigV2 {
     pub cloud_http_trace: bool,
 }
 
-impl Default for ServerConfigV2 {
+impl Default for ServerSettingsConfig {
     fn default() -> Self {
         Self {
             address: DESKTOP_API_BIND.to_owned(),
@@ -647,10 +647,10 @@ impl Default for SwaggerConfig {
     }
 }
 
-pub fn settings_document_v2_json_schema() -> Value {
-    let mut schema = serde_json::to_value(schema_for!(SettingsDocumentV2))
-        .expect("SettingsDocumentV2 schema should serialize");
-    let root = schema.as_object_mut().expect("SettingsDocumentV2 schema root should be an object");
+pub fn settings_document_json_schema() -> Value {
+    let mut schema = serde_json::to_value(schema_for!(SettingsDocument))
+        .expect("SettingsDocument schema should serialize");
+    let root = schema.as_object_mut().expect("SettingsDocument schema root should be an object");
 
     root.insert(
         "$schema".into(),
@@ -661,16 +661,16 @@ pub fn settings_document_v2_json_schema() -> Value {
     root.insert(
         "description".into(),
         Value::String(
-            "Schema for the persisted SettingsDocumentV2 configuration used by Slab hosts.".into(),
+            "Schema for the persisted settings document used by Slab hosts.".into(),
         ),
     );
 
     schema
 }
 
-pub fn render_settings_document_v2_json_schema() -> String {
-    let mut rendered = serde_json::to_string_pretty(&settings_document_v2_json_schema())
-        .expect("SettingsDocumentV2 schema should render");
+pub fn render_settings_document_json_schema() -> String {
+    let mut rendered = serde_json::to_string_pretty(&settings_document_json_schema())
+        .expect("SettingsDocument schema should render");
     rendered.push('\n');
     rendered
 }
@@ -775,8 +775,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn document_defaults_to_v2_schema() {
-        let settings = SettingsDocumentV2::default();
+    fn document_defaults_to_current_schema() {
+        let settings = SettingsDocument::default();
 
         assert_eq!(settings.schema.as_deref(), Some(PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL));
         assert_eq!(settings.schema_version, 2);
@@ -788,7 +788,7 @@ mod tests {
 
     #[test]
     fn runtime_leaf_defaults_match_intended_shape() {
-        let settings = SettingsDocumentV2::default();
+        let settings = SettingsDocument::default();
 
         assert!(settings.runtime.ggml.backends.llama.enabled);
         assert!(settings.runtime.ggml.backends.whisper.enabled);
@@ -802,7 +802,7 @@ mod tests {
 
     #[test]
     fn generated_document_schema_is_root_object() {
-        let schema = settings_document_v2_json_schema();
+        let schema = settings_document_json_schema();
 
         assert_eq!(schema.get("type"), Some(&Value::String("object".to_owned())));
         assert_eq!(
@@ -818,7 +818,7 @@ mod tests {
             .join("../../docs/public/manifests/v1/settings-document.schema.json");
         let expected = fs::read_to_string(&schema_path).expect("read checked-in schema");
 
-        assert_eq!(render_settings_document_v2_json_schema(), expected);
+        assert_eq!(render_settings_document_json_schema(), expected);
     }
 
     #[test]

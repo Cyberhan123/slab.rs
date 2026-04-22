@@ -25,6 +25,7 @@ use slab_app_core::domain::services::PmidService;
 use slab_app_core::infra::db::{AnyStore, TaskStore};
 use slab_app_core::infra::rpc::gateway::GrpcGateway;
 use slab_app_core::infra::runtime::{ManagedRuntimeHost, ManagedRuntimeHostStartOptions};
+use slab_app_core::infra::settings::migrate_legacy_settings_if_needed;
 use slab_app_core::runtime_supervisor::RuntimeSupervisorStatus;
 
 #[derive(Parser, Debug, Clone, Default)]
@@ -157,7 +158,7 @@ impl SupervisorArgs {
         }
 
         anyhow::bail!(
-            "legacy startup override(s) {} are no longer supported. Update settings.json launch.* instead.",
+            "legacy startup override(s) {} are no longer supported. Update settings.json runtime.* or server.address instead.",
             rejected.join(", ")
         );
     }
@@ -255,6 +256,7 @@ async fn run_gateway<F>(
     cfg: Config,
     runtime_status: Arc<RuntimeSupervisorStatus>,
     runtime_host: Option<Arc<ManagedRuntimeHost>>,
+    store: Arc<AnyStore>,
     shutdown: F,
 ) -> anyhow::Result<()>
 where
@@ -270,7 +272,6 @@ where
         );
     }
 
-    let store = AnyStore::connect(&cfg.database_url).await?;
     info!(database_url = %cfg.database_url, "database ready");
     let pmid = Arc::new(PmidService::load_from_path(cfg.settings_path.clone()).await?);
     info!(settings_path = %cfg.settings_path.display(), "settings service ready");
@@ -283,7 +284,6 @@ where
     info!(?grpc, "shared gRPC gateway services initialized");
 
     let grpc = Arc::new(grpc);
-    let store = Arc::new(store.clone());
     let model_auto_unload =
         Arc::new(slab_app_core::model_auto_unload::ModelAutoUnloadManager::new(
             Arc::clone(&pmid),
@@ -320,6 +320,15 @@ where
 
 async fn run_supervisor(args: SupervisorArgs, mut gateway_cfg: Config) -> anyhow::Result<()> {
     info!("slab-server supervisor starting");
+    let store = Arc::new(AnyStore::connect(&gateway_cfg.database_url).await?);
+    info!(database_url = %gateway_cfg.database_url, "database ready");
+    let migration = migrate_legacy_settings_if_needed(&gateway_cfg.settings_path, store.as_ref()).await?;
+    if migration.migrated {
+        info!(
+            settings_path = %gateway_cfg.settings_path.display(),
+            "settings migration completed before runtime startup"
+        );
+    }
     let runtime_host = Arc::new(
         ManagedRuntimeHost::start_server(
             &gateway_cfg,
@@ -355,10 +364,17 @@ async fn run_supervisor(args: SupervisorArgs, mut gateway_cfg: Config) -> anyhow
     let mut gateway_shutdown_tx = Some(gateway_shutdown_tx);
     let runtime_status = runtime_host.status_registry();
     let runtime_host_for_gateway = Arc::clone(&runtime_host);
+    let store_for_gateway = Arc::clone(&store);
     let mut gateway_join = tokio::spawn(async move {
-        run_gateway(gateway_cfg, runtime_status, Some(runtime_host_for_gateway), async move {
+        run_gateway(
+            gateway_cfg,
+            runtime_status,
+            Some(runtime_host_for_gateway),
+            store_for_gateway,
+            async move {
             let _ = gateway_shutdown_rx.await;
-        })
+        },
+        )
         .await
     });
     let mut gateway_result_observed = false;

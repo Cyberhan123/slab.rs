@@ -8,6 +8,6 @@ fn main() {
         fs::create_dir_all(parent)
             .unwrap_or_else(|error| panic!("failed to create {}: {error}", parent.display()));
     }
-    fs::write(&output_path, slab_types::settings::render_settings_document_v2_json_schema())
+    fs::write(&output_path, slab_types::settings::render_settings_document_json_schema())
         .unwrap_or_else(|error| panic!("failed to write {}: {error}", output_path.display()));
 }

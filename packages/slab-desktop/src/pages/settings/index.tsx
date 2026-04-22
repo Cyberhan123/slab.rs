@@ -170,14 +170,6 @@ export default function SettingsPage() {
                           count: countSectionProperties(activeSection),
                         })}
                       </Badge>
-                      <Badge
-                        variant="chip"
-                        className="rounded-full border-border/60 bg-border/20 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-muted-foreground"
-                      >
-                        {t('pages.settings.page.schemaVersion', {
-                          version: data.schema_version,
-                        })}
-                      </Badge>
                     </div>
                     {activeSection.description_md ? (
                       <p className="max-w-3xl text-base leading-8 text-muted-foreground">

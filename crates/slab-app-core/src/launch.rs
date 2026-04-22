@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use slab_types::RuntimeBackendId;
 use slab_types::settings::{
-    LoggingOverrideConfig, PmidConfig, RuntimeMode, RuntimeTransportMode, SettingsDocumentV2,
+    LoggingOverrideConfig, RuntimeMode, RuntimeTransportMode, SettingsDocument,
 };
 
 use crate::config::Config;
@@ -170,148 +170,18 @@ impl ResolvedLaunchSpec {
 }
 
 pub fn resolve_launch_spec(
-    settings: &PmidConfig,
-    profile: LaunchProfile,
-    host_paths: &LaunchHostPaths,
-) -> Result<ResolvedLaunchSpec, AppCoreError> {
-    let launch = &settings.launch;
-    let transport = launch.transport;
-    let runtime_log_dir = launch
-        .runtime_log_dir
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| host_paths.runtime_log_dir_fallback.clone());
-    let runtime_ipc_dir = if transport == RuntimeTransportMode::Ipc {
-        Some(
-            launch
-                .runtime_ipc_dir
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(PathBuf::from)
-                .unwrap_or_else(|| host_paths.runtime_ipc_dir_fallback.clone()),
-        )
-    } else {
-        None
-    };
-    let lib_dir = resolve_legacy_runtime_lib_dir(settings, profile, host_paths);
-
-    let queue_capacity = usize::try_from(launch.queue_capacity).map_err(|_| {
-        AppCoreError::Internal("launch.queue_capacity does not fit into usize".to_owned())
-    })?;
-    let backend_capacity = usize::try_from(launch.backend_capacity).map_err(|_| {
-        AppCoreError::Internal("launch.backend_capacity does not fit into usize".to_owned())
-    })?;
-
-    let mut children = Vec::new();
-    let mut endpoints = ResolvedRuntimeEndpoints::default();
-    let pid = std::process::id();
-
-    for (backend, alias, slot) in RUNTIME_BACKEND_SLOTS {
-        if !backend_enabled(settings, backend) {
-            continue;
-        }
-
-        let endpoint = resolve_backend_endpoint(
-            settings,
-            profile,
-            transport,
-            runtime_ipc_dir.as_deref(),
-            alias,
-            slot,
-            pid,
-        )?;
-
-        match backend {
-            RuntimeBackendId::GgmlWhisper => endpoints.whisper = Some(endpoint.clone()),
-            RuntimeBackendId::GgmlLlama => endpoints.llama = Some(endpoint.clone()),
-            RuntimeBackendId::GgmlDiffusion => endpoints.diffusion = Some(endpoint.clone()),
-            _ => {}
-        }
-
-        children.push(ResolvedRuntimeChildSpec {
-            backend,
-            grpc_bind_address: endpoint,
-            transport,
-            queue_capacity,
-            backend_capacity,
-            lib_dir: lib_dir.clone(),
-            log_level: None,
-            log_json: None,
-            log_file: runtime_log_dir.join(format!(
-                "slab-runtime-{}-{}-{}.log",
-                pid,
-                profile.as_str(),
-                alias
-            )),
-            shutdown_on_stdin_close: host_paths.shutdown_on_stdin_close,
-        });
-    }
-
-    if children.is_empty() {
-        return Err(AppCoreError::Internal(
-            "launch settings disable every runtime backend; enable at least one launch.backends.*.enabled setting"
-                .to_owned(),
-        ));
-    }
-
-    let gateway = match profile {
-        LaunchProfile::Server => Some(ResolvedGatewaySpec {
-            bind_address: settings.launch.profiles.server.gateway_bind.trim().to_owned(),
-        }),
-        LaunchProfile::Desktop => None,
-    };
-
-    Ok(ResolvedLaunchSpec {
-        profile,
-        transport,
-        runtime_log_dir,
-        runtime_ipc_dir,
-        extra_dirs: Vec::new(),
-        children,
-        endpoints,
-        gateway,
-    })
-}
-
-pub fn resolve_launch_spec_v2(
-    settings: &SettingsDocumentV2,
+    settings: &SettingsDocument,
     profile: LaunchProfile,
     host_paths: &LaunchHostPaths,
 ) -> Result<ResolvedLaunchSpec, AppCoreError> {
     match settings.runtime.mode {
-        RuntimeMode::ManagedChildren => {
-            resolve_managed_launch_spec_v2(settings, profile, host_paths)
-        }
-        RuntimeMode::ExternalEndpoints => {
-            resolve_external_launch_spec_v2(settings, profile, host_paths)
-        }
+        RuntimeMode::ManagedChildren => resolve_managed_launch_spec(settings, profile, host_paths),
+        RuntimeMode::ExternalEndpoints => resolve_external_launch_spec(settings, profile, host_paths),
     }
 }
 
-fn resolve_legacy_runtime_lib_dir(
-    settings: &PmidConfig,
-    profile: LaunchProfile,
-    host_paths: &LaunchHostPaths,
-) -> Option<PathBuf> {
-    match profile {
-        LaunchProfile::Desktop => host_paths.runtime_lib_dir_fallback.clone(),
-        LaunchProfile::Server => settings
-            .setup
-            .backends
-            .dir
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-            .or_else(|| host_paths.runtime_lib_dir_fallback.clone()),
-    }
-}
-
-fn resolve_v2_runtime_lib_dir(
-    settings: &SettingsDocumentV2,
+fn resolve_runtime_lib_dir(
+    settings: &SettingsDocument,
     profile: LaunchProfile,
     host_paths: &LaunchHostPaths,
 ) -> Option<PathBuf> {
@@ -325,17 +195,17 @@ fn resolve_v2_runtime_lib_dir(
     }
 }
 
-fn resolve_managed_launch_spec_v2(
-    settings: &SettingsDocumentV2,
+fn resolve_managed_launch_spec(
+    settings: &SettingsDocument,
     profile: LaunchProfile,
     host_paths: &LaunchHostPaths,
 ) -> Result<ResolvedLaunchSpec, AppCoreError> {
     let transport = settings.runtime.transport;
-    let runtime_log_dir = resolve_primary_runtime_log_dir_v2(settings, host_paths);
+    let runtime_log_dir = resolve_primary_runtime_log_dir(settings, host_paths);
     let runtime_ipc_dir = (transport == RuntimeTransportMode::Ipc)
         .then(|| host_paths.runtime_ipc_dir_fallback.clone());
-    let lib_dir = resolve_v2_runtime_lib_dir(settings, profile, host_paths);
-    let enabled_backends = enabled_ggml_backends_v2(settings);
+    let lib_dir = resolve_runtime_lib_dir(settings, profile, host_paths);
+    let enabled_backends = enabled_ggml_backends(settings);
 
     let mut children = Vec::new();
     let mut endpoints = ResolvedRuntimeEndpoints::default();
@@ -344,11 +214,11 @@ fn resolve_managed_launch_spec_v2(
     let single_backend = enabled_backends.len() == 1;
 
     for (backend, alias, slot) in RUNTIME_BACKEND_SLOTS {
-        if !v2_backend_enabled(settings, backend) {
+        if !backend_enabled(settings, backend) {
             continue;
         }
 
-        let endpoint = resolve_managed_backend_endpoint_v2(
+        let endpoint = resolve_managed_backend_endpoint(
             settings,
             profile,
             transport,
@@ -359,9 +229,9 @@ fn resolve_managed_launch_spec_v2(
             pid,
             single_backend,
         )?;
-        let (queue_capacity, backend_capacity) = resolve_backend_capacity_v2(settings, backend)?;
+        let (queue_capacity, backend_capacity) = resolve_backend_capacity(settings, backend)?;
         let (log_level, log_json, log_dir) =
-            resolve_backend_logging_v2(settings, backend, &runtime_log_dir);
+            resolve_backend_logging(settings, backend, &runtime_log_dir);
 
         if log_dir != runtime_log_dir {
             extra_dirs.insert(log_dir.clone());
@@ -418,23 +288,23 @@ fn resolve_managed_launch_spec_v2(
     })
 }
 
-fn resolve_external_launch_spec_v2(
-    settings: &SettingsDocumentV2,
+fn resolve_external_launch_spec(
+    settings: &SettingsDocument,
     profile: LaunchProfile,
     host_paths: &LaunchHostPaths,
 ) -> Result<ResolvedLaunchSpec, AppCoreError> {
     let transport = settings.runtime.transport;
-    let enabled_backends = enabled_ggml_backends_v2(settings);
+    let enabled_backends = enabled_ggml_backends(settings);
 
     let mut endpoints = ResolvedRuntimeEndpoints::default();
     let single_backend = enabled_backends.len() == 1;
 
     for (backend, alias, _) in RUNTIME_BACKEND_SLOTS {
-        if !v2_backend_enabled(settings, backend) {
+        if !backend_enabled(settings, backend) {
             continue;
         }
 
-        let endpoint = resolve_external_backend_endpoint_v2(
+        let endpoint = resolve_external_backend_endpoint(
             settings,
             transport,
             backend,
@@ -460,7 +330,7 @@ fn resolve_external_launch_spec_v2(
     Ok(ResolvedLaunchSpec {
         profile,
         transport,
-        runtime_log_dir: resolve_primary_runtime_log_dir_v2(settings, host_paths),
+        runtime_log_dir: resolve_primary_runtime_log_dir(settings, host_paths),
         runtime_ipc_dir: None,
         extra_dirs: Vec::new(),
         children: Vec::new(),
@@ -469,16 +339,7 @@ fn resolve_external_launch_spec_v2(
     })
 }
 
-fn backend_enabled(settings: &PmidConfig, backend: RuntimeBackendId) -> bool {
-    match backend {
-        RuntimeBackendId::GgmlLlama => settings.launch.backends.llama.enabled,
-        RuntimeBackendId::GgmlWhisper => settings.launch.backends.whisper.enabled,
-        RuntimeBackendId::GgmlDiffusion => settings.launch.backends.diffusion.enabled,
-        _ => false,
-    }
-}
-
-fn v2_backend_enabled(settings: &SettingsDocumentV2, backend: RuntimeBackendId) -> bool {
+fn backend_enabled(settings: &SettingsDocument, backend: RuntimeBackendId) -> bool {
     match backend {
         RuntimeBackendId::GgmlLlama => settings.runtime.ggml.backends.llama.enabled,
         RuntimeBackendId::GgmlWhisper => settings.runtime.ggml.backends.whisper.enabled,
@@ -487,91 +348,17 @@ fn v2_backend_enabled(settings: &SettingsDocumentV2, backend: RuntimeBackendId) 
     }
 }
 
-fn enabled_ggml_backends_v2(settings: &SettingsDocumentV2) -> Vec<RuntimeBackendId> {
+fn enabled_ggml_backends(settings: &SettingsDocument) -> Vec<RuntimeBackendId> {
     RUNTIME_BACKEND_SLOTS
         .into_iter()
         .map(|(backend, _, _)| backend)
-        .filter(|backend| v2_backend_enabled(settings, *backend))
+        .filter(|backend| backend_enabled(settings, *backend))
         .collect()
 }
 
-fn resolve_backend_endpoint(
-    settings: &PmidConfig,
-    profile: LaunchProfile,
-    transport: RuntimeTransportMode,
-    runtime_ipc_dir: Option<&std::path::Path>,
-    backend_alias: &str,
-    slot: u32,
-    pid: u32,
-) -> Result<String, AppCoreError> {
-    match transport {
-        RuntimeTransportMode::Http => {
-            let (host, base_port) = match profile {
-                LaunchProfile::Server => (
-                    settings.launch.profiles.server.runtime_bind_host.trim(),
-                    settings.launch.profiles.server.runtime_bind_base_port,
-                ),
-                LaunchProfile::Desktop => (
-                    settings.launch.profiles.desktop.runtime_bind_host.trim(),
-                    settings.launch.profiles.desktop.runtime_bind_base_port,
-                ),
-            };
-
-            if host.is_empty() {
-                return Err(AppCoreError::Internal(format!(
-                    "launch profile '{}' runtime bind host must not be empty",
-                    profile.as_str()
-                )));
-            }
-
-            let port = base_port.checked_add(slot).ok_or_else(|| {
-                AppCoreError::Internal(format!(
-                    "launch profile '{}' runtime port allocation overflowed",
-                    profile.as_str()
-                ))
-            })?;
-            if port == 0 || port > u32::from(u16::MAX) {
-                return Err(AppCoreError::Internal(format!(
-                    "launch profile '{}' resolved invalid runtime port '{}'",
-                    profile.as_str(),
-                    port
-                )));
-            }
-
-            Ok(format!("{host}:{port}"))
-        }
-        RuntimeTransportMode::Ipc => {
-            #[cfg(windows)]
-            {
-                let _ = runtime_ipc_dir;
-                Ok(format!(
-                    r"ipc://\\.\pipe\slab-runtime-{}-{}-{}",
-                    pid,
-                    profile.as_str(),
-                    backend_alias
-                ))
-            }
-
-            #[cfg(not(windows))]
-            {
-                let runtime_ipc_dir = runtime_ipc_dir.ok_or_else(|| {
-                    AppCoreError::Internal("runtime IPC directory was not resolved".to_owned())
-                })?;
-                let path = runtime_ipc_dir.join(format!(
-                    "slab-runtime-{}-{}-{}.sock",
-                    pid,
-                    profile.as_str(),
-                    backend_alias
-                ));
-                Ok(format!("ipc://{}", path.to_string_lossy()))
-            }
-        }
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
-fn resolve_managed_backend_endpoint_v2(
-    settings: &SettingsDocumentV2,
+fn resolve_managed_backend_endpoint(
+    settings: &SettingsDocument,
     profile: LaunchProfile,
     transport: RuntimeTransportMode,
     host_paths: &LaunchHostPaths,
@@ -581,15 +368,15 @@ fn resolve_managed_backend_endpoint_v2(
     pid: u32,
     single_backend: bool,
 ) -> Result<String, AppCoreError> {
-    if let Some(explicit) = explicit_leaf_endpoint_v2(settings, backend, transport) {
+    if let Some(explicit) = explicit_leaf_endpoint(settings, backend, transport) {
         return normalize_runtime_endpoint(explicit, transport);
     }
 
     if single_backend {
-        if let Some(explicit) = shared_ggml_endpoint_v2(settings, transport) {
+        if let Some(explicit) = shared_ggml_endpoint(settings, transport) {
             return normalize_runtime_endpoint(explicit, transport);
         }
-        if let Some(explicit) = shared_runtime_endpoint_v2(settings, transport) {
+        if let Some(explicit) = shared_runtime_endpoint(settings, transport) {
             return normalize_runtime_endpoint(explicit, transport);
         }
     }
@@ -597,17 +384,17 @@ fn resolve_managed_backend_endpoint_v2(
     default_generated_backend_endpoint(profile, transport, host_paths, backend_alias, slot, pid)
 }
 
-fn resolve_external_backend_endpoint_v2(
-    settings: &SettingsDocumentV2,
+fn resolve_external_backend_endpoint(
+    settings: &SettingsDocument,
     transport: RuntimeTransportMode,
     backend: RuntimeBackendId,
     backend_alias: &str,
     single_backend: bool,
 ) -> Result<String, AppCoreError> {
-    let explicit = explicit_leaf_endpoint_v2(settings, backend, transport)
-        .or_else(|| single_backend.then(|| shared_ggml_endpoint_v2(settings, transport)).flatten())
+    let explicit = explicit_leaf_endpoint(settings, backend, transport)
+        .or_else(|| single_backend.then(|| shared_ggml_endpoint(settings, transport)).flatten())
         .or_else(|| {
-            single_backend.then(|| shared_runtime_endpoint_v2(settings, transport)).flatten()
+            single_backend.then(|| shared_runtime_endpoint(settings, transport)).flatten()
         })
         .ok_or_else(|| {
             AppCoreError::BadRequest(format!(
@@ -619,8 +406,8 @@ fn resolve_external_backend_endpoint_v2(
     normalize_runtime_endpoint(explicit, transport)
 }
 
-fn resolve_backend_capacity_v2(
-    settings: &SettingsDocumentV2,
+fn resolve_backend_capacity(
+    settings: &SettingsDocument,
     backend: RuntimeBackendId,
 ) -> Result<(usize, usize), AppCoreError> {
     let root = &settings.runtime.capacity;
@@ -631,7 +418,7 @@ fn resolve_backend_capacity_v2(
         RuntimeBackendId::GgmlDiffusion => &settings.runtime.ggml.backends.diffusion.capacity,
         _ => {
             return Err(AppCoreError::Internal(format!(
-                "backend '{}' is not supported by resolve_backend_capacity_v2",
+                "backend '{}' is not supported by resolve_backend_capacity",
                 backend.canonical_id()
             )));
         }
@@ -657,8 +444,8 @@ fn resolve_backend_capacity_v2(
     Ok((queue_capacity, backend_capacity))
 }
 
-fn resolve_backend_logging_v2(
-    settings: &SettingsDocumentV2,
+fn resolve_backend_logging(
+    settings: &SettingsDocument,
     backend: RuntimeBackendId,
     fallback_dir: &std::path::Path,
 ) -> (Option<String>, bool, PathBuf) {
@@ -693,8 +480,8 @@ fn resolve_backend_logging_v2(
     (level, json, dir)
 }
 
-fn resolve_primary_runtime_log_dir_v2(
-    settings: &SettingsDocumentV2,
+fn resolve_primary_runtime_log_dir(
+    settings: &SettingsDocument,
     host_paths: &LaunchHostPaths,
 ) -> PathBuf {
     settings
@@ -708,8 +495,8 @@ fn resolve_primary_runtime_log_dir_v2(
         .unwrap_or_else(|| host_paths.runtime_log_dir_fallback.clone())
 }
 
-fn explicit_leaf_endpoint_v2(
-    settings: &SettingsDocumentV2,
+fn explicit_leaf_endpoint(
+    settings: &SettingsDocument,
     backend: RuntimeBackendId,
     transport: RuntimeTransportMode,
 ) -> Option<&str> {
@@ -736,8 +523,8 @@ fn explicit_leaf_endpoint_v2(
     }
 }
 
-fn shared_ggml_endpoint_v2(
-    settings: &SettingsDocumentV2,
+fn shared_ggml_endpoint(
+    settings: &SettingsDocument,
     transport: RuntimeTransportMode,
 ) -> Option<&str> {
     match transport {
@@ -746,8 +533,8 @@ fn shared_ggml_endpoint_v2(
     }
 }
 
-fn shared_runtime_endpoint_v2(
-    settings: &SettingsDocumentV2,
+fn shared_runtime_endpoint(
+    settings: &SettingsDocument,
     transport: RuntimeTransportMode,
 ) -> Option<&str> {
     match transport {
@@ -853,7 +640,7 @@ fn normalize_text(raw: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use slab_types::settings::{RuntimeMode, RuntimeTransportMode, SettingsDocumentV2};
+    use slab_types::settings::{RuntimeMode, RuntimeTransportMode, SettingsDocument};
 
     fn host_paths() -> LaunchHostPaths {
         LaunchHostPaths {
@@ -862,90 +649,6 @@ mod tests {
             runtime_ipc_dir_fallback: PathBuf::from("C:/runtime/ipc"),
             shutdown_on_stdin_close: true,
         }
-    }
-
-    #[test]
-    fn planner_keeps_server_and_desktop_backend_shape_in_sync() {
-        let settings = PmidConfig::default();
-
-        let server = resolve_launch_spec(&settings, LaunchProfile::Server, &host_paths()).unwrap();
-        let desktop =
-            resolve_launch_spec(&settings, LaunchProfile::Desktop, &host_paths()).unwrap();
-
-        assert_eq!(server.children.len(), desktop.children.len());
-        assert_eq!(
-            server.children.iter().map(|child| child.backend).collect::<Vec<_>>(),
-            desktop.children.iter().map(|child| child.backend).collect::<Vec<_>>()
-        );
-        assert!(server.gateway.is_some());
-        assert!(desktop.gateway.is_none());
-
-        for (server_child, desktop_child) in server.children.iter().zip(desktop.children.iter()) {
-            assert_eq!(server_child.backend, desktop_child.backend);
-            assert_eq!(server_child.queue_capacity, desktop_child.queue_capacity);
-            assert_eq!(server_child.backend_capacity, desktop_child.backend_capacity);
-            assert_eq!(server_child.lib_dir, desktop_child.lib_dir);
-            assert_ne!(server_child.grpc_bind_address, desktop_child.grpc_bind_address);
-        }
-    }
-
-    #[test]
-    fn planner_drops_disabled_backends() {
-        let mut settings = PmidConfig::default();
-        settings.launch.backends.diffusion.enabled = false;
-
-        let spec = resolve_launch_spec(&settings, LaunchProfile::Server, &host_paths()).unwrap();
-
-        assert_eq!(spec.children.len(), 2);
-        assert!(spec.endpoints.diffusion.is_none());
-        assert!(
-            !spec.children.iter().any(|child| child.backend == RuntimeBackendId::GgmlDiffusion)
-        );
-    }
-
-    #[test]
-    fn planner_rejects_invalid_port_allocations() {
-        let mut settings = PmidConfig::default();
-        settings.launch.profiles.server.runtime_bind_base_port = u32::from(u16::MAX);
-
-        let error =
-            resolve_launch_spec(&settings, LaunchProfile::Server, &host_paths()).unwrap_err();
-        assert!(error.to_string().contains("invalid runtime port"));
-    }
-
-    #[test]
-    fn desktop_planner_uses_host_resolved_backend_dir() {
-        let mut settings = PmidConfig::default();
-        settings.setup.backends.dir = Some("D:/settings/backend-libs".to_owned());
-
-        let spec = resolve_launch_spec(&settings, LaunchProfile::Desktop, &host_paths()).unwrap();
-
-        assert!(
-            spec.children
-                .iter()
-                .all(|child| child.lib_dir == host_paths().runtime_lib_dir_fallback)
-        );
-    }
-
-    #[test]
-    fn launch_spec_applies_runtime_endpoints_and_gateway_bind_to_config() {
-        let settings = PmidConfig::default();
-        let spec = resolve_launch_spec(&settings, LaunchProfile::Server, &host_paths()).unwrap();
-        let mut config = Config::from_env();
-
-        config.bind_address = "127.0.0.1:1".to_owned();
-        config.transport_mode = "unknown".to_owned();
-        config.llama_grpc_endpoint = None;
-        config.whisper_grpc_endpoint = None;
-        config.diffusion_grpc_endpoint = None;
-
-        spec.apply_to_config(&mut config);
-
-        assert_eq!(config.bind_address, settings.launch.profiles.server.gateway_bind);
-        assert_eq!(config.transport_mode, settings.launch.transport.as_str());
-        assert_eq!(config.llama_grpc_endpoint, spec.endpoints.llama);
-        assert_eq!(config.whisper_grpc_endpoint, spec.endpoints.whisper);
-        assert_eq!(config.diffusion_grpc_endpoint, spec.endpoints.diffusion);
     }
 
     #[test]
@@ -972,8 +675,8 @@ mod tests {
     }
 
     #[test]
-    fn v2_managed_planner_uses_leaf_overrides() {
-        let mut settings = SettingsDocumentV2::default();
+    fn managed_planner_uses_leaf_overrides() {
+        let mut settings = SettingsDocument::default();
         settings.logging.level = "warn".to_owned();
         settings.runtime.logging.level = Some("debug".to_owned());
         settings.runtime.ggml.logging.level = Some("trace".to_owned());
@@ -986,7 +689,7 @@ mod tests {
         settings.runtime.ggml.backends.llama.endpoint.http.address =
             Some("127.0.0.1:4100".to_owned());
 
-        let spec = resolve_launch_spec_v2(&settings, LaunchProfile::Server, &host_paths()).unwrap();
+        let spec = resolve_launch_spec(&settings, LaunchProfile::Server, &host_paths()).unwrap();
 
         assert_eq!(spec.children.len(), 1);
         assert_eq!(spec.children[0].backend, RuntimeBackendId::GgmlLlama);
@@ -1001,12 +704,11 @@ mod tests {
     }
 
     #[test]
-    fn v2_desktop_planner_uses_host_resolved_backend_dir() {
-        let mut settings = SettingsDocumentV2::default();
+    fn desktop_planner_uses_host_resolved_backend_dir() {
+        let mut settings = SettingsDocument::default();
         settings.runtime.ggml.install_dir = Some("D:/settings/backend-libs".to_owned());
 
-        let spec =
-            resolve_launch_spec_v2(&settings, LaunchProfile::Desktop, &host_paths()).unwrap();
+        let spec = resolve_launch_spec(&settings, LaunchProfile::Desktop, &host_paths()).unwrap();
 
         assert!(
             spec.children
@@ -1016,13 +718,13 @@ mod tests {
     }
 
     #[test]
-    fn v2_managed_planner_allows_gateway_only_startup() {
-        let mut settings = SettingsDocumentV2::default();
+    fn managed_planner_allows_gateway_only_startup() {
+        let mut settings = SettingsDocument::default();
         settings.runtime.ggml.backends.llama.enabled = false;
         settings.runtime.ggml.backends.whisper.enabled = false;
         settings.runtime.ggml.backends.diffusion.enabled = false;
 
-        let spec = resolve_launch_spec_v2(&settings, LaunchProfile::Server, &host_paths()).unwrap();
+        let spec = resolve_launch_spec(&settings, LaunchProfile::Server, &host_paths()).unwrap();
 
         assert!(spec.children.is_empty());
         assert!(spec.endpoints.llama.is_none());
@@ -1035,19 +737,18 @@ mod tests {
     }
 
     #[test]
-    fn v2_external_planner_requires_explicit_endpoints() {
-        let mut settings = SettingsDocumentV2::default();
+    fn external_planner_requires_explicit_endpoints() {
+        let mut settings = SettingsDocument::default();
         settings.runtime.mode = RuntimeMode::ExternalEndpoints;
         settings.runtime.transport = RuntimeTransportMode::Http;
 
-        let error =
-            resolve_launch_spec_v2(&settings, LaunchProfile::Server, &host_paths()).unwrap_err();
+        let error = resolve_launch_spec(&settings, LaunchProfile::Server, &host_paths()).unwrap_err();
         assert!(error.to_string().contains("requires an explicit endpoint"));
     }
 
     #[test]
-    fn v2_external_planner_uses_explicit_endpoints_without_children() {
-        let mut settings = SettingsDocumentV2::default();
+    fn external_planner_uses_explicit_endpoints_without_children() {
+        let mut settings = SettingsDocument::default();
         settings.runtime.mode = RuntimeMode::ExternalEndpoints;
         settings.runtime.transport = RuntimeTransportMode::Http;
         settings.runtime.ggml.backends.llama.endpoint.http.address =
@@ -1057,7 +758,7 @@ mod tests {
         settings.runtime.ggml.backends.diffusion.endpoint.http.address =
             Some("127.0.0.1:9103".to_owned());
 
-        let spec = resolve_launch_spec_v2(&settings, LaunchProfile::Server, &host_paths()).unwrap();
+        let spec = resolve_launch_spec(&settings, LaunchProfile::Server, &host_paths()).unwrap();
 
         assert!(spec.children.is_empty());
         assert_eq!(spec.endpoints.llama.as_deref(), Some("127.0.0.1:9101"));
@@ -1066,14 +767,14 @@ mod tests {
     }
 
     #[test]
-    fn v2_external_planner_allows_zero_enabled_backends() {
-        let mut settings = SettingsDocumentV2::default();
+    fn external_planner_allows_zero_enabled_backends() {
+        let mut settings = SettingsDocument::default();
         settings.runtime.mode = RuntimeMode::ExternalEndpoints;
         settings.runtime.ggml.backends.llama.enabled = false;
         settings.runtime.ggml.backends.whisper.enabled = false;
         settings.runtime.ggml.backends.diffusion.enabled = false;
 
-        let spec = resolve_launch_spec_v2(&settings, LaunchProfile::Server, &host_paths()).unwrap();
+        let spec = resolve_launch_spec(&settings, LaunchProfile::Server, &host_paths()).unwrap();
 
         assert!(spec.children.is_empty());
         assert!(spec.endpoints.llama.is_none());

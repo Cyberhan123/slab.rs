@@ -13,7 +13,6 @@ export const settings = {
     noSettingsDescription: 'The settings document is empty.',
     settingsCount_one: '{{count}} setting',
     settingsCount_other: '{{count}} settings',
-    schemaVersion: 'schema v{{version}}',
     issues_one: '{{count}} issue',
     issues_other: '{{count}} issues',
     saving_one: '{{count}} saving',

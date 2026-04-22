@@ -163,7 +163,7 @@
       },
       "type": "object"
     },
-    "GeneralConfigV2": {
+    "GeneralSettingsConfig": {
       "description": "General desktop-app settings.",
       "properties": {
         "language": {
@@ -432,7 +432,7 @@
       ],
       "type": "string"
     },
-    "ModelsConfigV2": {
+    "ModelSettingsConfig": {
       "description": "Model storage settings.",
       "properties": {
         "auto_unload": {
@@ -561,7 +561,63 @@
       },
       "type": "object"
     },
-    "RuntimeConfigV2": {
+    "RuntimeLeafConfig": {
+      "description": "Shared runtime leaf configuration.",
+      "properties": {
+        "capacity": {
+          "$ref": "#/$defs/CapacityOverrideConfig",
+          "default": {}
+        },
+        "enabled": {
+          "default": true,
+          "description": "Whether the leaf backend is enabled.",
+          "type": "boolean"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/EndpointConfig",
+          "default": {
+            "http": {},
+            "ipc": {}
+          }
+        },
+        "flash_attn": {
+          "default": true,
+          "description": "Whether Flash Attention is enabled for this backend when supported.",
+          "type": "boolean"
+        },
+        "logging": {
+          "$ref": "#/$defs/LoggingOverrideConfig",
+          "default": {}
+        },
+        "source": {
+          "$ref": "#/$defs/SourceConfig",
+          "default": {}
+        }
+      },
+      "type": "object"
+    },
+    "RuntimeMode": {
+      "description": "Runtime topology mode.",
+      "enum": [
+        "managed_children",
+        "external_endpoints"
+      ],
+      "type": "string"
+    },
+    "RuntimeSessionsConfig": {
+      "description": "Shared session-state location for runtime-backed features.",
+      "properties": {
+        "state_dir": {
+          "description": "Directory where session state files are stored.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RuntimeSettingsConfig": {
       "description": "Shared runtime configuration.",
       "properties": {
         "candle": {
@@ -671,62 +727,6 @@
       },
       "type": "object"
     },
-    "RuntimeLeafConfig": {
-      "description": "Shared runtime leaf configuration.",
-      "properties": {
-        "capacity": {
-          "$ref": "#/$defs/CapacityOverrideConfig",
-          "default": {}
-        },
-        "enabled": {
-          "default": true,
-          "description": "Whether the leaf backend is enabled.",
-          "type": "boolean"
-        },
-        "endpoint": {
-          "$ref": "#/$defs/EndpointConfig",
-          "default": {
-            "http": {},
-            "ipc": {}
-          }
-        },
-        "flash_attn": {
-          "default": true,
-          "description": "Whether Flash Attention is enabled for this backend when supported.",
-          "type": "boolean"
-        },
-        "logging": {
-          "$ref": "#/$defs/LoggingOverrideConfig",
-          "default": {}
-        },
-        "source": {
-          "$ref": "#/$defs/SourceConfig",
-          "default": {}
-        }
-      },
-      "type": "object"
-    },
-    "RuntimeMode": {
-      "description": "Runtime topology mode.",
-      "enum": [
-        "managed_children",
-        "external_endpoints"
-      ],
-      "type": "string"
-    },
-    "RuntimeSessionsConfig": {
-      "description": "Shared session-state location for runtime-backed features.",
-      "properties": {
-        "state_dir": {
-          "description": "Directory where session state files are stored.",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "type": "object"
-    },
     "RuntimeTransportMode": {
       "description": "Shared runtime transport modes supported by the supervisor and gateway.",
       "enum": [
@@ -735,7 +735,7 @@
       ],
       "type": "string"
     },
-    "ServerConfigV2": {
+    "ServerSettingsConfig": {
       "description": "Server-only settings.",
       "properties": {
         "address": {
@@ -856,7 +856,7 @@
   },
   "$id": "https://slab.reorgix.com/manifests/v1/settings-document.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "Schema for the persisted SettingsDocumentV2 configuration used by Slab hosts.",
+  "description": "Schema for the persisted settings document used by Slab hosts.",
   "properties": {
     "$schema": {
       "default": "https://slab.reorgix.com/manifests/v1/settings-document.schema.json",
@@ -873,7 +873,7 @@
       }
     },
     "general": {
-      "$ref": "#/$defs/GeneralConfigV2",
+      "$ref": "#/$defs/GeneralSettingsConfig",
       "default": {
         "language": "auto"
       }
@@ -886,7 +886,7 @@
       }
     },
     "models": {
-      "$ref": "#/$defs/ModelsConfigV2",
+      "$ref": "#/$defs/ModelSettingsConfig",
       "default": {
         "auto_unload": {
           "enabled": false,
@@ -905,7 +905,7 @@
       }
     },
     "runtime": {
-      "$ref": "#/$defs/RuntimeConfigV2",
+      "$ref": "#/$defs/RuntimeSettingsConfig",
       "default": {
         "candle": {
           "capacity": {},
@@ -994,7 +994,7 @@
       "type": "integer"
     },
     "server": {
-      "$ref": "#/$defs/ServerConfigV2",
+      "$ref": "#/$defs/ServerSettingsConfig",
       "default": {
         "address": "127.0.0.1:3000",
         "admin": {},

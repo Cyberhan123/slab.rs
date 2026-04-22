@@ -8,7 +8,6 @@ mod model;
 mod pmid;
 mod session;
 mod settings;
-mod settings_jsonschema;
 mod setup;
 mod system;
 mod task;
@@ -51,10 +50,9 @@ pub use model::{
 pub use pmid::PMID;
 pub use session::{CreateSessionCommand, SessionMessageView, SessionView};
 pub use settings::{
-    SettingDefinition, SettingPropertySchema, SettingPropertyView, SettingValidationErrorData,
-    SettingValueType, SettingsDocumentView, SettingsSchema, SettingsSectionView,
-    SettingsSubsectionView, SettingsValuesFile, UpdateSettingCommand, UpdateSettingOperation,
-    embedded_settings_schema,
+    SettingPropertySchema, SettingPropertyView, SettingValidationErrorData, SettingValueType,
+    SettingsDocumentView, SettingsSectionView, SettingsSubsectionView, UpdateSettingCommand,
+    UpdateSettingOperation,
 };
 pub use setup::{CompleteSetupCommand, ComponentStatus, EnvironmentStatus};
 pub use system::{GpuDeviceSnapshot, GpuStatusSnapshot};
