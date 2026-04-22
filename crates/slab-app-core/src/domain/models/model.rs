@@ -261,19 +261,9 @@ pub struct CreateModelCommand {
 pub const CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION: u32 = 2;
 pub const CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION: u32 = 3;
 
-const fn current_stored_model_config_schema_version() -> u32 {
-    CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION
-}
-
-const fn current_stored_model_config_policy_version() -> u32 {
-    CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredModelConfig {
-    #[serde(default = "current_stored_model_config_schema_version")]
     pub schema_version: u32,
-    #[serde(default = "current_stored_model_config_policy_version")]
     pub policy_version: u32,
     pub id: String,
     pub display_name: String,
@@ -296,68 +286,36 @@ pub struct StoredModelConfig {
     pub pack_selection: Option<ModelPackSelection>,
 }
 
-pub fn upgrade_stored_model_config(config: StoredModelConfig) -> Result<StoredModelConfig, String> {
-    let config = upgrade_stored_model_config_schema(config)?;
-    let config = upgrade_stored_model_config_policy(config)?;
+pub fn validate_stored_model_config(
+    config: StoredModelConfig,
+) -> Result<StoredModelConfig, String> {
+    ensure_current_stored_model_config_schema_version(config.schema_version)?;
+    ensure_current_stored_model_config_policy_version(config.policy_version)?;
     Ok(normalize_stored_model_capabilities(config))
 }
 
-fn upgrade_stored_model_config_schema(
-    config: StoredModelConfig,
-) -> Result<StoredModelConfig, String> {
-    if config.schema_version == 0 {
+fn ensure_current_stored_model_config_schema_version(schema_version: u32) -> Result<(), String> {
+    if schema_version == 0 {
         return Err("stored model config schema_version must be at least 1".to_owned());
     }
 
-    if config.schema_version > CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION {
-        return Err(format!(
-            "unsupported stored model config schema_version: {}",
-            config.schema_version
-        ));
+    if schema_version != CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION {
+        return Err(format!("unsupported stored model config schema_version: {}", schema_version));
     }
 
-    let mut upgraded = config;
-    while upgraded.schema_version < CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION {
-        upgraded = match upgraded.schema_version {
-            1 => upgrade_stored_model_config_schema_v1_to_v2(upgraded),
-            version => {
-                return Err(format!(
-                    "missing stored model config schema upgrader for version {}",
-                    version
-                ));
-            }
-        };
-    }
-
-    Ok(upgraded)
+    Ok(())
 }
 
-fn upgrade_stored_model_config_schema_v1_to_v2(mut config: StoredModelConfig) -> StoredModelConfig {
-    config.schema_version = 2;
-    config
-}
-
-fn upgrade_stored_model_config_policy(
-    config: StoredModelConfig,
-) -> Result<StoredModelConfig, String> {
-    if config.policy_version == 0 {
+fn ensure_current_stored_model_config_policy_version(policy_version: u32) -> Result<(), String> {
+    if policy_version == 0 {
         return Err("stored model config policy_version must be at least 1".to_owned());
     }
 
-    if config.policy_version > CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION {
-        return Err(format!(
-            "unsupported stored model config policy_version: {}",
-            config.policy_version
-        ));
+    if policy_version != CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION {
+        return Err(format!("unsupported stored model config policy_version: {}", policy_version));
     }
 
-    if config.policy_version < CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION {
-        let mut upgraded = config;
-        upgraded.policy_version = CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION;
-        return Ok(upgraded);
-    }
-
-    Ok(config)
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -702,7 +660,7 @@ mod tests {
         CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
         ManagedModelBackendId, ModelSpec, RuntimePresets, StoredModelConfig, UnifiedModel,
         UnifiedModelKind, UnifiedModelStatus, default_model_capabilities,
-        upgrade_stored_model_config,
+        validate_stored_model_config,
     };
     use chrono::Utc;
     use serde_json::json;
@@ -710,8 +668,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     #[test]
-    fn legacy_stored_model_config_defaults_versions_during_deserialization() {
-        let config: StoredModelConfig = serde_json::from_value(json!({
+    fn stored_model_config_deserialization_requires_explicit_versions() {
+        let error = serde_json::from_value::<StoredModelConfig>(json!({
             "id": "cloud-model",
             "display_name": "Cloud Model",
             "kind": "cloud",
@@ -721,43 +679,16 @@ mod tests {
                 "remote_model_id": "gpt-4.1-mini"
             }
         }))
-        .expect("deserialize legacy config");
+        .expect_err("stored model config should require explicit versions");
 
-        assert_eq!(config.schema_version, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION);
-        assert_eq!(config.policy_version, CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION);
-        assert!(config.capabilities.is_empty());
+        assert!(error.to_string().contains("schema_version"));
     }
 
     #[test]
-    fn upgrading_legacy_stored_model_config_restores_default_capabilities() {
-        let config = upgrade_stored_model_config(
-            serde_json::from_value(json!({
-                "id": "cloud-model",
-                "display_name": "Cloud Model",
-                "kind": "cloud",
-                "status": "ready",
-                "spec": {
-                    "provider_id": "openai-main",
-                    "remote_model_id": "gpt-4.1-mini"
-                }
-            }))
-            .expect("deserialize legacy config"),
-        )
-        .expect("upgrade legacy config");
-
-        assert_eq!(config.schema_version, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION);
-        assert_eq!(config.policy_version, CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION);
-        assert_eq!(
-            config.capabilities,
-            vec![Capability::TextGeneration, Capability::ChatGeneration]
-        );
-    }
-
-    #[test]
-    fn schema_version_one_configs_upgrade_to_current_schema_version() {
-        let config = upgrade_stored_model_config(StoredModelConfig {
-            schema_version: 1,
-            policy_version: 1,
+    fn current_stored_model_config_restores_default_capabilities_when_missing() {
+        let config = validate_stored_model_config(StoredModelConfig {
+            schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
+            policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
             id: "cloud-model".to_owned(),
             display_name: "Cloud Model".to_owned(),
             kind: UnifiedModelKind::Cloud,
@@ -774,7 +705,7 @@ mod tests {
             selected_download_source: None,
             pack_selection: None,
         })
-        .expect("schema version one should upgrade");
+        .expect("validate current config");
 
         assert_eq!(config.schema_version, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION);
         assert_eq!(config.policy_version, CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION);
@@ -782,6 +713,32 @@ mod tests {
             config.capabilities,
             vec![Capability::TextGeneration, Capability::ChatGeneration]
         );
+    }
+
+    #[test]
+    fn schema_version_one_configs_are_rejected() {
+        let error = validate_stored_model_config(StoredModelConfig {
+            schema_version: 1,
+            policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
+            id: "cloud-model".to_owned(),
+            display_name: "Cloud Model".to_owned(),
+            kind: UnifiedModelKind::Cloud,
+            backend_id: None,
+            capabilities: Vec::new(),
+            status: Some(UnifiedModelStatus::Ready),
+            spec: ModelSpec {
+                provider_id: Some("openai-main".to_owned()),
+                remote_model_id: Some("gpt-4.1-mini".to_owned()),
+                ..ModelSpec::default()
+            },
+            runtime_presets: None,
+            materialized_artifacts: BTreeMap::new(),
+            selected_download_source: None,
+            pack_selection: None,
+        })
+        .expect_err("schema version one should be rejected");
+
+        assert!(error.contains("unsupported stored model config schema_version"));
     }
 
     #[test]
@@ -815,7 +772,7 @@ mod tests {
 
     #[test]
     fn future_schema_versions_are_rejected() {
-        let error = upgrade_stored_model_config(StoredModelConfig {
+        let error = validate_stored_model_config(StoredModelConfig {
             schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION + 1,
             policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
             id: "cloud-model".to_owned(),
@@ -840,8 +797,34 @@ mod tests {
     }
 
     #[test]
+    fn older_policy_versions_are_rejected() {
+        let error = validate_stored_model_config(StoredModelConfig {
+            schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
+            policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION - 1,
+            id: "cloud-model".to_owned(),
+            display_name: "Cloud Model".to_owned(),
+            kind: UnifiedModelKind::Cloud,
+            backend_id: None,
+            capabilities: vec![Capability::TextGeneration, Capability::ChatGeneration],
+            status: Some(UnifiedModelStatus::Ready),
+            spec: ModelSpec {
+                provider_id: Some("openai-main".to_owned()),
+                remote_model_id: Some("gpt-4.1-mini".to_owned()),
+                ..ModelSpec::default()
+            },
+            runtime_presets: None,
+            materialized_artifacts: BTreeMap::new(),
+            pack_selection: None,
+            selected_download_source: None,
+        })
+        .expect_err("older policy version should fail");
+
+        assert!(error.contains("unsupported stored model config policy_version"));
+    }
+
+    #[test]
     fn future_policy_versions_are_rejected() {
-        let error = upgrade_stored_model_config(StoredModelConfig {
+        let error = validate_stored_model_config(StoredModelConfig {
             schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
             policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION + 1,
             id: "cloud-model".to_owned(),
