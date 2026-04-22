@@ -6,6 +6,7 @@ use crate::domain::models::{
     AudioTranscriptionCommand, AudioTranscriptionTaskView, TranscribeDecodeOptions,
     TranscribeVadOptions,
 };
+use crate::schemas::tasks::TimedTextSegmentResponse;
 use crate::schemas::tasks::{TaskProgressResponse, TaskStatus};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
@@ -241,6 +242,8 @@ pub struct AudioTranscriptionTaskResponse {
     pub decode_json: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transcript_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub segments: Option<Vec<TimedTextSegmentResponse>>,
     pub request_data: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result_data: Option<serde_json::Value>,
@@ -265,6 +268,7 @@ impl From<AudioTranscriptionTaskView> for AudioTranscriptionTaskResponse {
             vad_json: value.vad_json,
             decode_json: value.decode_json,
             transcript_text: value.transcript_text,
+            segments: value.segments.map(|segments| segments.into_iter().map(Into::into).collect()),
             request_data: value.request_data,
             result_data: value.result_data,
             created_at: value.created_at,

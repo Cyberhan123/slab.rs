@@ -18,7 +18,7 @@ pub struct LoadedPlugin {
     pub manifest: PluginManifest,
     pub root_dir: PathBuf,
     pub ui_entry: String,
-    pub wasm_entry_path: PathBuf,
+    pub wasm_entry_path: Option<PathBuf>,
     pub files_sha256: HashMap<String, String>,
 }
 
@@ -84,6 +84,7 @@ impl PluginRegistryState {
                 valid: true,
                 error: None,
                 ui_entry: Some(plugin.ui_entry.clone()),
+                has_wasm: plugin.wasm_entry_path.is_some(),
                 network_mode: network_mode_label(&plugin.manifest.network.mode).to_string(),
                 allow_hosts: plugin.manifest.network.allow_hosts.clone(),
             });
@@ -97,6 +98,7 @@ impl PluginRegistryState {
                 valid: false,
                 error: Some(error.clone()),
                 ui_entry: None,
+                has_wasm: false,
                 network_mode: "blocked".to_string(),
                 allow_hosts: Vec::new(),
             });
@@ -299,16 +301,25 @@ fn validate_and_load_plugin(
     }
 
     let ui_entry = normalize_relative_path(&manifest.ui.entry)?;
-    let wasm_entry = normalize_relative_path(&manifest.wasm.entry)?;
     let ui_entry_path = plugin_dir.join(&ui_entry);
-    let wasm_entry_path = plugin_dir.join(&wasm_entry);
 
     if !ui_entry_path.is_file() {
         return Err(format!("missing UI entry file at {}", ui_entry_path.display()));
     }
-    if !wasm_entry_path.is_file() {
-        return Err(format!("missing wasm entry file at {}", wasm_entry_path.display()));
-    }
+
+    let wasm_entry = match manifest.wasm.as_ref() {
+        Some(wasm) => Some(normalize_relative_path(&wasm.entry)?),
+        None => None,
+    };
+    let wasm_entry_path = if let Some(wasm_entry) = wasm_entry.as_ref() {
+        let path = plugin_dir.join(wasm_entry);
+        if !path.is_file() {
+            return Err(format!("missing wasm entry file at {}", path.display()));
+        }
+        Some(path)
+    } else {
+        None
+    };
 
     let mut files_sha256 = HashMap::new();
     for (raw_path, expected_hash) in &manifest.integrity.files_sha256 {
@@ -333,7 +344,9 @@ fn validate_and_load_plugin(
     if !files_sha256.contains_key(&ui_entry) {
         return Err("integrity.filesSha256 must contain ui.entry".to_string());
     }
-    if !files_sha256.contains_key(&wasm_entry) {
+    if let Some(wasm_entry) = wasm_entry.as_ref()
+        && !files_sha256.contains_key(wasm_entry)
+    {
         return Err("integrity.filesSha256 must contain wasm.entry".to_string());
     }
 
@@ -405,7 +418,12 @@ fn network_mode_label(mode: &PluginNetworkMode) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    use crate::plugins::types::{
+        PluginIntegrityManifest, PluginManifest, PluginNetworkManifest, PluginUiManifest,
+    };
 
     #[test]
     fn plugin_id_validation_works() {
@@ -452,6 +470,47 @@ mod tests {
         let resolved = resolve_plugins_root_with(None, None, Some(cwd), app_data_dir.clone());
 
         assert_eq!(resolved, app_data_dir.join(DEFAULT_PLUGINS_DIR));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn registry_lists_ui_only_plugin_without_wasm() {
+        let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("slab-plugin-ui-only-{suffix}"));
+        let plugin_dir = root.join("ui-only-plugin");
+        let ui_dir = plugin_dir.join("ui");
+        fs::create_dir_all(&ui_dir).unwrap();
+
+        let html_path = ui_dir.join("index.html");
+        fs::write(&html_path, "<!doctype html><title>ui only</title>").unwrap();
+        let html_hash = compute_file_sha256(&html_path).unwrap();
+
+        let manifest = PluginManifest {
+            id: "ui-only-plugin".to_owned(),
+            name: "UI Only Plugin".to_owned(),
+            version: "0.1.0".to_owned(),
+            ui: PluginUiManifest { entry: "ui/index.html".to_owned() },
+            wasm: None,
+            integrity: PluginIntegrityManifest {
+                files_sha256: HashMap::from([(String::from("ui/index.html"), html_hash)]),
+            },
+            network: PluginNetworkManifest {
+                mode: PluginNetworkMode::Blocked,
+                allow_hosts: vec![],
+            },
+        };
+
+        fs::write(plugin_dir.join("plugin.json"), serde_json::to_string_pretty(&manifest).unwrap())
+            .unwrap();
+
+        let registry = PluginRegistryState::new(root.clone()).unwrap();
+        let plugins = registry.list().unwrap();
+        let plugin = plugins.iter().find(|plugin| plugin.id == "ui-only-plugin").unwrap();
+
+        assert!(plugin.valid);
+        assert!(!plugin.has_wasm);
+        assert_eq!(plugin.ui_entry.as_deref(), Some("ui/index.html"));
 
         fs::remove_dir_all(root).unwrap();
     }

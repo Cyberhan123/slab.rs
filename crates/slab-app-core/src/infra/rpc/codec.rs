@@ -14,6 +14,8 @@ use slab_types::media::{GeneratedFrame, GeneratedImage, RawImageInput};
 use slab_types::{RuntimeBackendId, RuntimeBackendLoadSpec, RuntimeModelStatus};
 use thiserror::Error;
 
+use crate::domain::models::TimedTextSegment;
+
 use super::pb;
 
 const REASONING_CONTENT_METADATA_KEY: &str = "reasoning_content";
@@ -295,6 +297,26 @@ pub fn decode_whisper_transcription_text(response: &pb::GgmlWhisperTranscribeRes
         .transcription
         .as_ref()
         .and_then(|transcription| transcription.raw_text.clone())
+        .unwrap_or_default()
+}
+
+pub fn decode_whisper_transcription_segments(
+    response: &pb::GgmlWhisperTranscribeResponse,
+) -> Vec<TimedTextSegment> {
+    response
+        .transcription
+        .as_ref()
+        .map(|transcription| {
+            transcription
+                .segments
+                .iter()
+                .map(|segment| TimedTextSegment {
+                    start_ms: segment.start_ms,
+                    end_ms: segment.end_ms,
+                    text: segment.text.clone(),
+                })
+                .collect()
+        })
         .unwrap_or_default()
 }
 

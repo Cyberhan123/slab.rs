@@ -96,9 +96,25 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["list_audio_transcriptions"];
         put?: never;
         post: operations["transcribe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/audio/transcriptions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_audio_transcription"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -528,6 +544,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/subtitles/render": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["render_subtitle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/tasks": {
         parameters: {
             query?: never;
@@ -688,11 +720,34 @@ export interface components {
             detect_language?: boolean | null;
             /** @description Optional language override passed to whisper inference. */
             language?: string | null;
+            /** @description Optional catalog model identifier used for history attribution. */
+            model_id?: string | null;
             /** @description The audio file path to transcribe. */
             path: string;
             /** @description Optional initial prompt passed to whisper inference. */
             prompt?: string | null;
             vad?: null | components["schemas"]["TranscribeVadRequest"];
+        };
+        AudioTranscriptionTaskResponse: {
+            backend_id: string;
+            created_at: string;
+            decode_json?: unknown;
+            detect_language?: boolean | null;
+            error_msg?: string | null;
+            language?: string | null;
+            model_id?: string | null;
+            progress?: null | components["schemas"]["TaskProgressResponse"];
+            prompt?: string | null;
+            request_data: unknown;
+            result_data?: unknown;
+            segments?: components["schemas"]["TimedTextSegmentResponse"][] | null;
+            source_path: string;
+            status: components["schemas"]["TaskStatus"];
+            task_id: string;
+            task_type: string;
+            transcript_text?: string | null;
+            updated_at: string;
+            vad_json?: unknown;
         };
         /** @description Response body for list backends endpoint. */
         BackendListResponse: {
@@ -1543,6 +1598,31 @@ export interface components {
             thread_id: string;
         };
         StopSequences: string | string[];
+        RenderSubtitleRequest: {
+            entries: components["schemas"]["SubtitleEntryRequest"][];
+            format: components["schemas"]["SubtitleFormatRequest"];
+            /** @description Optional absolute output path. Defaults to `<source_stem>.<variant>.srt`. */
+            output_path?: string | null;
+            /** @description Whether an existing output file should be overwritten. Defaults to true. */
+            overwrite?: boolean;
+            /** @description Absolute path to the source video/audio file used for default output naming. */
+            source_path: string;
+            variant: components["schemas"]["SubtitleVariantRequest"];
+        };
+        RenderSubtitleResponse: {
+            entry_count: number;
+            format: string;
+            output_path: string;
+        };
+        SubtitleEntryRequest: {
+            end_ms: number;
+            start_ms: number;
+            text: string;
+        };
+        /** @enum {string} */
+        SubtitleFormatRequest: "srt";
+        /** @enum {string} */
+        SubtitleVariantRequest: "source" | "translated";
         /** @description Request body for `POST /v1/models/switch`. */
         SwitchModelRequest: {
             /** @description Legacy backend identifier, e.g. `"ggml.llama"`. */
@@ -1593,6 +1673,10 @@ export interface components {
             image?: string | null;
             /** @description Array of base64-encoded PNG data URIs for multi-image task results. */
             images?: string[] | null;
+            /** @description Absolute output path for file-producing utility tasks such as FFmpeg conversion. */
+            output_path?: string | null;
+            /** @description Timed text segments, present for Whisper transcriptions with timestamps. */
+            segments?: components["schemas"]["TimedTextSegmentResponse"][] | null;
             /** @description Text content, present for `whisper` and other text-producing task results. */
             text?: string | null;
             /** @description Absolute path to the assembled MP4 video file for video task results. */
@@ -1602,6 +1686,11 @@ export interface components {
         TaskStatus: "pending" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
         TaskTypeQuery: {
             type?: string | null;
+        };
+        TimedTextSegmentResponse: {
+            end_ms?: number | null;
+            start_ms?: number | null;
+            text?: string | null;
         };
         TranscribeDecodeRequest: {
             /**
@@ -2022,6 +2111,70 @@ export interface operations {
             };
             /** @description Bad request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_audio_transcriptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audio transcription tasks listed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AudioTranscriptionTaskResponse"][];
+                };
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_audio_transcription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Audio transcription task ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audio transcription task detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AudioTranscriptionTaskResponse"];
+                };
+            };
+            /** @description Task not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3165,6 +3318,44 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["GpuStatusResponse"];
                 };
+            };
+        };
+    };
+    render_subtitle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenderSubtitleRequest"];
+            };
+        };
+        responses: {
+            /** @description Subtitle file rendered */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RenderSubtitleResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -9,6 +9,7 @@ export type PluginInfo = {
   valid: boolean;
   error?: string | null;
   uiEntry?: string | null;
+  hasWasm?: boolean;
   networkMode: "blocked" | "allowlist" | string;
   allowHosts: string[];
 };
@@ -56,6 +57,10 @@ export type PluginApiResponse = {
   body: string;
 };
 
+export type PluginPickFileResponse = {
+  path: string | null;
+};
+
 export type PluginEventPayload = {
   pluginId: string;
   topic: string;
@@ -97,6 +102,13 @@ export async function pluginCall(request: PluginCallRequest): Promise<PluginCall
     throw new Error("plugin call is only available in Tauri mode");
   }
   return invoke<PluginCallResponse>("plugin_call", { request });
+}
+
+export async function pluginPickFile(): Promise<PluginPickFileResponse> {
+  if (!isTauri()) {
+    throw new Error("plugin file picker is only available in Tauri mode");
+  }
+  return invoke<PluginPickFileResponse>("plugin_pick_file");
 }
 
 export async function pluginApiRequest(

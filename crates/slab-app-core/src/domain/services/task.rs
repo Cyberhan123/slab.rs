@@ -1,7 +1,7 @@
 use tracing::info;
 
 use crate::context::WorkerState;
-use crate::domain::models::{TaskResult, TaskStatus, TaskView};
+use crate::domain::models::{TaskResult, TaskStatus, TaskView, TimedTextSegment};
 use crate::error::AppCoreError;
 use crate::infra::db::TaskStore;
 
@@ -47,10 +47,19 @@ impl TaskApplicationService {
                         image: None,
                         images: None,
                         video_path: None,
+                        output_path: None,
                         text: Some(data),
+                        segments: None,
                     })
                 })
-                .unwrap_or(TaskResult { image: None, images: None, video_path: None, text: None })),
+                .unwrap_or(TaskResult {
+                    image: None,
+                    images: None,
+                    video_path: None,
+                    output_path: None,
+                    text: None,
+                    segments: None,
+                })),
             status => {
                 Err(AppCoreError::BadRequest(format!("task is not succeeded (status: {status})")))
             }
@@ -111,6 +120,11 @@ fn deserialize_task_result(raw: &str) -> Result<TaskResult, serde_json::Error> {
             .and_then(|v| v.as_array())
             .map(|arr| arr.iter().filter_map(|item| item.as_str().map(str::to_owned)).collect()),
         video_path: value.get("video_path").and_then(|v| v.as_str()).map(str::to_owned),
+        output_path: value.get("output_path").and_then(|v| v.as_str()).map(str::to_owned),
         text: value.get("text").and_then(|v| v.as_str()).map(str::to_owned),
+        segments: value
+            .get("segments")
+            .cloned()
+            .and_then(|value| serde_json::from_value::<Vec<TimedTextSegment>>(value).ok()),
     })
 }

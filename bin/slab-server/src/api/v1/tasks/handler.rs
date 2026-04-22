@@ -9,6 +9,7 @@ use validator::Validate;
 
 use crate::api::v1::tasks::schema::{
     TaskProgressResponse, TaskResponse, TaskResultPayload, TaskStatus, TaskTypeQuery,
+    TimedTextSegmentResponse,
 };
 use crate::api::validation::{ValidatedQuery, validate};
 use crate::error::ServerError;
@@ -22,6 +23,7 @@ use slab_app_core::domain::services::TaskApplicationService;
         TaskProgressResponse,
         TaskResponse,
         TaskResultPayload,
+        TimedTextSegmentResponse,
         TaskStatus,
         TaskTypeQuery
     ))

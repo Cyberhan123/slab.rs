@@ -11,6 +11,7 @@ use crate::api::v1::audio::schema::{
     TranscribeVadRequest,
 };
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
+use crate::api::v1::tasks::schema::TimedTextSegmentResponse;
 use crate::api::validation::ValidatedJson;
 use crate::error::ServerError;
 use slab_app_core::context::AppState;
@@ -24,6 +25,7 @@ use slab_app_core::domain::services::AudioService;
         AudioTranscriptionTaskResponse,
         TranscribeVadRequest,
         TranscribeDecodeRequest,
+        TimedTextSegmentResponse,
         OperationAcceptedResponse
     ))
 )]

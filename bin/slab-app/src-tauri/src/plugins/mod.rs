@@ -4,14 +4,17 @@ mod runtime;
 mod types;
 mod view;
 
+use std::path::Path;
+
 use tauri::{AppHandle, Manager, Runtime, State, Window};
+use tauri_plugin_dialog::{DialogExt, PickerMode};
 
 use crate::setup::ApiEndpointConfig;
 
 pub use types::{
     PluginApiRequest, PluginApiResponse, PluginCallRequest, PluginCallResponse, PluginInfo,
-    PluginMountViewRequest, PluginMountViewResponse, PluginUnmountViewRequest,
-    PluginUpdateViewBoundsRequest,
+    PluginMountViewRequest, PluginMountViewResponse, PluginPickFileResponse,
+    PluginUnmountViewRequest, PluginUpdateViewBoundsRequest,
 };
 pub use view::PluginViewManager;
 
@@ -88,4 +91,51 @@ pub async fn plugin_api_request(
     request: PluginApiRequest,
 ) -> Result<PluginApiResponse, String> {
     execute_plugin_api_request_async(api_endpoint.inner(), &request).await
+}
+
+#[tauri::command]
+pub async fn plugin_pick_file(app_handle: AppHandle) -> Result<PluginPickFileResponse, String> {
+    let selected = app_handle
+        .dialog()
+        .file()
+        .set_title("Select a video file")
+        .set_picker_mode(PickerMode::Video)
+        .add_filter("Video", VIDEO_FILE_EXTENSIONS)
+        .blocking_pick_file();
+
+    let Some(selected) = selected else {
+        return Ok(PluginPickFileResponse { path: None });
+    };
+
+    let path = selected
+        .simplified()
+        .into_path()
+        .map_err(|e| format!("failed to resolve selected file path: {e}"))?;
+    if !is_allowed_video_path(&path) {
+        return Err(format!("unsupported video file extension: {}", path.display()));
+    }
+
+    Ok(PluginPickFileResponse { path: Some(path.to_string_lossy().into_owned()) })
+}
+
+const VIDEO_FILE_EXTENSIONS: &[&str] =
+    &["mp4", "m4v", "mov", "mkv", "webm", "avi", "wmv", "flv", "mpeg", "mpg", "3gp"];
+
+fn is_allowed_video_path(path: &Path) -> bool {
+    path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| {
+        VIDEO_FILE_EXTENSIONS.iter().any(|allowed| allowed.eq_ignore_ascii_case(extension))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_allowed_video_path;
+    use std::path::Path;
+
+    #[test]
+    fn video_file_filter_accepts_known_video_extensions() {
+        assert!(is_allowed_video_path(Path::new("C:/media/movie.mp4")));
+        assert!(is_allowed_video_path(Path::new("C:/media/MOVIE.MKV")));
+        assert!(!is_allowed_video_path(Path::new("C:/media/audio.wav")));
+    }
 }

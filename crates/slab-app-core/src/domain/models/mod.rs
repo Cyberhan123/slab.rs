@@ -9,6 +9,7 @@ mod pmid;
 mod session;
 mod settings;
 mod setup;
+mod subtitle;
 mod system;
 mod task;
 mod ui_state;
@@ -55,9 +56,13 @@ pub use settings::{
     UpdateSettingOperation,
 };
 pub use setup::{CompleteSetupCommand, ComponentStatus, EnvironmentStatus};
+pub use subtitle::{
+    RenderSubtitleCommand, RenderSubtitleEntry, RenderSubtitleResult, SubtitleVariant,
+};
 pub use system::{GpuDeviceSnapshot, GpuStatusSnapshot};
 pub use task::{
     AcceptedOperation, TaskPayloadEnvelope, TaskProgress, TaskResult, TaskStatus, TaskView,
+    TimedTextSegment,
 };
 pub use ui_state::{DeleteUiStateView, UiStateValueView, UpdateUiStateCommand};
 pub use video::{DecodedVideoInitImage, VideoGenerationCommand};

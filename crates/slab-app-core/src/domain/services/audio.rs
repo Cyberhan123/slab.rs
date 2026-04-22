@@ -131,12 +131,16 @@ impl AudioService {
                 match rpc_result {
                     Ok(response) => {
                         let text = codec::decode_whisper_transcription_text(&response);
-                        let persisted_result = serde_json::json!({ "text": text }).to_string();
+                        let segments = codec::decode_whisper_transcription_segments(&response);
+                        let persisted_result =
+                            serde_json::json!({ "text": text, "segments": segments }).to_string();
                         let task_payload = serde_json::to_string(&TaskResult {
                             image: None,
                             images: None,
                             video_path: None,
+                            output_path: None,
                             text: Some(text.clone()),
+                            segments: Some(segments.clone()),
                         })
                         .unwrap_or_default();
                         if let Err(error) = store
@@ -293,6 +297,7 @@ fn map_audio_view(row: AudioTranscriptionTaskViewRecord) -> AudioTranscriptionTa
         vad_json: row.task.vad_json.as_deref().map(parse_json_value),
         decode_json: row.task.decode_json.as_deref().map(parse_json_value),
         transcript_text: row.task.transcript_text,
+        segments: row.task.result_data.as_deref().and_then(parse_result_segments),
         request_data: parse_json_value(&row.task.request_data),
         result_data: row.task.result_data.as_deref().map(parse_json_value),
         created_at: row.state.task_created_at.to_rfc3339(),
@@ -302,6 +307,14 @@ fn map_audio_view(row: AudioTranscriptionTaskViewRecord) -> AudioTranscriptionTa
 
 fn parse_json_value(raw: &str) -> serde_json::Value {
     serde_json::from_str(raw).unwrap_or_else(|_| serde_json::Value::String(raw.to_owned()))
+}
+
+fn parse_result_segments(raw: &str) -> Option<Vec<crate::domain::models::TimedTextSegment>> {
+    serde_json::from_str::<serde_json::Value>(raw)
+        .ok()?
+        .get("segments")
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok())
 }
 
 fn to_json_string<T: serde::Serialize>(value: &T) -> String {

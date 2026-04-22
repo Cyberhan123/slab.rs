@@ -4,6 +4,7 @@ use validator::Validate;
 
 use crate::domain::models::{
     AcceptedOperation, TaskProgress, TaskResult, TaskStatus as DomainTaskStatus, TaskView,
+    TimedTextSegment,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -31,7 +32,23 @@ pub struct TaskResultPayload {
     /// Absolute path to the assembled MP4 video file for video task results.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub video_path: Option<String>,
+    /// Absolute output path for file-producing utility tasks such as FFmpeg conversion.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_path: Option<String>,
     /// Text content, present for `whisper` and other text-producing task results.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// Timed text segments, present for Whisper transcriptions with timestamps.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub segments: Option<Vec<TimedTextSegmentResponse>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TimedTextSegmentResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
 }
@@ -96,8 +113,18 @@ impl From<TaskResult> for TaskResultPayload {
             image: result.image,
             images: result.images,
             video_path: result.video_path,
+            output_path: result.output_path,
             text: result.text,
+            segments: result
+                .segments
+                .map(|segments| segments.into_iter().map(Into::into).collect()),
         }
+    }
+}
+
+impl From<TimedTextSegment> for TimedTextSegmentResponse {
+    fn from(segment: TimedTextSegment) -> Self {
+        Self { start_ms: segment.start_ms, end_ms: segment.end_ms, text: segment.text }
     }
 }
 

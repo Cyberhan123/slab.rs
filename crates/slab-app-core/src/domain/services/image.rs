@@ -250,7 +250,9 @@ impl ImageService {
                                 .collect(),
                         ),
                         video_path: None,
+                        output_path: None,
                         text: None,
+                        segments: None,
                     };
                     let task_payload = serde_json::to_string(&task_result).unwrap_or_default();
 

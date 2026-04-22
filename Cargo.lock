@@ -8694,6 +8694,7 @@ dependencies = [
  "slab-model-pack",
  "slab-proto",
  "slab-runtime-core",
+ "slab-subtitle",
  "slab-types",
  "slab-utils",
  "sqlx",

@@ -27,6 +27,7 @@
     "allow-plugin-unmount-view",
     "allow-plugin-call",
     "allow-plugin-api-request",
+    "allow-plugin-pick-file",
     "window-state:default",
     "decorum:allow-show-snap-overlay",
     {

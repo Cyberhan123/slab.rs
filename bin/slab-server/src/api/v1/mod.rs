@@ -8,6 +8,7 @@ pub mod models;
 pub mod session;
 pub mod settings;
 pub mod setup;
+pub mod subtitles;
 pub mod system;
 pub mod tasks;
 pub mod ui_state;
@@ -38,6 +39,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .merge(system::router())
         .merge(tasks::router())
         .merge(settings::router(state.clone()))
+        .merge(subtitles::router())
         .merge(ui_state::router())
         .merge(setup::router())
         .merge(backend::router(state))
@@ -56,6 +58,7 @@ pub fn api_docs() -> utoipa::openapi::OpenApi {
     spec.merge(system::SystemApi::openapi());
     spec.merge(tasks::TasksApi::openapi());
     spec.merge(settings::SettingsApi::openapi());
+    spec.merge(subtitles::SubtitleApi::openapi());
     spec.merge(ui_state::UiStateApi::openapi());
     spec.merge(setup::SetupApi::openapi());
     spec.merge(backend::BackendApi::openapi());
