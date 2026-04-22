@@ -41,6 +41,7 @@ pub fn run() {
             plugins::plugin_unmount_view,
             plugins::plugin_call,
             plugins::plugin_api_request,
+            plugins::plugin_pick_file,
         ])
         .setup(move |app| {
             setup::setup_windows(app)?;

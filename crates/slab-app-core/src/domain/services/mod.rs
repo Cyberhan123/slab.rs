@@ -9,6 +9,7 @@ mod pmid;
 mod session;
 mod settings;
 pub(crate) mod setup;
+mod subtitle;
 mod system;
 mod task;
 mod ui_state;
@@ -25,6 +26,7 @@ pub use pmid::PmidService;
 pub use session::SessionService;
 pub use settings::SettingsService;
 pub use setup::SetupService;
+pub use subtitle::SubtitleService;
 pub use system::SystemService;
 pub use task::TaskApplicationService;
 pub use ui_state::UiStateService;
@@ -46,6 +48,7 @@ pub struct AppServices {
     pub settings: SettingsService,
     pub session: SessionService,
     pub setup: SetupService,
+    pub subtitle: SubtitleService,
     pub system: SystemService,
     pub task_application: TaskApplicationService,
     pub ui_state: UiStateService,
@@ -70,6 +73,7 @@ impl AppServices {
             settings: SettingsService::new(model_state.clone()),
             session: SessionService::new(model_state.clone()),
             setup: SetupService::new(model_state.clone(), worker_state.clone(), runtime_host),
+            subtitle: SubtitleService::new(),
             system: SystemService::new(),
             task_application: TaskApplicationService::new(worker_state.clone()),
             ui_state: UiStateService::new(model_state.clone()),

@@ -1,0 +1,19 @@
+{
+  "id": "video-subtitle-translator",
+  "name": "Video Subtitle Translator",
+  "version": "0.1.0",
+  "ui": {
+    "entry": "ui/index.html"
+  },
+  "integrity": {
+    "filesSha256": {
+      "ui/index.html": "367b064f49486f16abc8c6bf8c062f2a154dc81a34339d8a07bcebb970dbb8e4",
+      "ui/styles.css": "bf93700fd7f66099bf3d1c3bbf347a7427d2024a50baea15d41e99d66c73f66c",
+      "ui/app.js": "e72870569a0b996c9ad9957d19fda3228d9edc14c58b0aa504941b92b3434515"
+    }
+  },
+  "network": {
+    "mode": "blocked",
+    "allowHosts": []
+  }
+}

@@ -13,6 +13,7 @@ pub mod images;
 pub mod models;
 pub mod session;
 pub mod setup;
+pub mod subtitles;
 pub mod system;
 pub mod tasks;
 pub mod ui_state;

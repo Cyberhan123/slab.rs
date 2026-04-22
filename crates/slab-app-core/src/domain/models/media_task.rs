@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{TaskProgress, TaskStatus};
+use super::{TaskProgress, TaskStatus, TimedTextSegment};
 
 pub const IMAGE_GENERATION_TASK_TYPE: &str = "image_generation";
 pub const VIDEO_GENERATION_TASK_TYPE: &str = "video_generation";
@@ -71,6 +71,7 @@ pub struct AudioTranscriptionTaskView {
     pub vad_json: Option<serde_json::Value>,
     pub decode_json: Option<serde_json::Value>,
     pub transcript_text: Option<String>,
+    pub segments: Option<Vec<TimedTextSegment>>,
     pub request_data: serde_json::Value,
     pub result_data: Option<serde_json::Value>,
     pub created_at: String,

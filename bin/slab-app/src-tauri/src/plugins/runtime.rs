@@ -146,7 +146,11 @@ fn build_extism_plugin(
     blocking_http_client: BlockingHttpClient,
     api_endpoint: ApiEndpointConfig,
 ) -> Result<Plugin, String> {
-    let mut manifest = ExtismManifest::new([Wasm::file(plugin.wasm_entry_path.clone())]);
+    let wasm_entry_path = plugin
+        .wasm_entry_path
+        .as_ref()
+        .ok_or_else(|| format!("plugin `{}` has no wasm runtime", plugin.manifest.id))?;
+    let mut manifest = ExtismManifest::new([Wasm::file(wasm_entry_path.clone())]);
     manifest = manifest
         .with_allowed_path(plugin.root_dir.to_string_lossy().to_string(), plugin.root_dir.clone());
 

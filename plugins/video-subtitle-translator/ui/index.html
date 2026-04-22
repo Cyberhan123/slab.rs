@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Video Subtitle Translator</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Slab WebView Plugin</p>
+          <h1>Video Subtitle Translator</h1>
+          <p class="subtitle">
+            Extract audio with FFmpeg, transcribe timed segments with Whisper + VAD, then render SRT files.
+          </p>
+        </div>
+        <div class="status-pill" id="runStatus">Idle</div>
+      </section>
+
+      <section class="panel video-panel">
+        <div>
+          <label>Video file</label>
+          <p id="videoPath" class="path-text">No video selected yet.</p>
+        </div>
+        <button id="pickVideo" type="button" class="primary">Choose Video</button>
+      </section>
+
+      <section class="grid">
+        <form class="panel form-card" id="settingsForm">
+          <div class="section-title">
+            <span>Transcription</span>
+            <button id="refreshModels" type="button" class="ghost">Refresh models</button>
+          </div>
+
+          <label for="whisperModel">Whisper model</label>
+          <select id="whisperModel">
+            <option value="">Use active/default Whisper model</option>
+          </select>
+
+          <div class="inline-fields">
+            <div>
+              <label for="sourceLanguage">Source language</label>
+              <input id="sourceLanguage" type="text" placeholder="auto, en, zh, ja..." />
+            </div>
+            <label class="check-row">
+              <input id="detectLanguage" type="checkbox" checked />
+              Auto detect
+            </label>
+          </div>
+
+          <div class="section-title compact">
+            <span>VAD</span>
+            <label class="check-row">
+              <input id="vadEnabled" type="checkbox" checked />
+              Enabled
+            </label>
+          </div>
+
+          <label for="vadModel">VAD model</label>
+          <select id="vadModel">
+            <option value="">Select or enter VAD model path below</option>
+          </select>
+          <input id="vadModelPath" type="text" placeholder="Absolute VAD model path" />
+
+          <div class="inline-fields three">
+            <div>
+              <label for="vadThreshold">Threshold</label>
+              <input id="vadThreshold" type="number" min="0" max="1" step="0.01" value="0.5" />
+            </div>
+            <div>
+              <label for="minSilence">Min silence ms</label>
+              <input id="minSilence" type="number" min="0" step="50" value="500" />
+            </div>
+            <div>
+              <label for="speechPad">Speech pad ms</label>
+              <input id="speechPad" type="number" min="0" step="50" value="200" />
+            </div>
+          </div>
+        </form>
+
+        <form class="panel form-card">
+          <div class="section-title">
+            <span>Translation</span>
+            <label class="check-row">
+              <input id="translateEnabled" type="checkbox" />
+              Enable
+            </label>
+          </div>
+
+          <label for="targetLanguage">Target language</label>
+          <input id="targetLanguage" type="text" value="Chinese" />
+
+          <label for="llamaModel">Llama model</label>
+          <select id="llamaModel">
+            <option value="">Use active/default chat model</option>
+          </select>
+
+          <div class="inline-fields">
+            <div>
+              <label for="batchSize">Batch size</label>
+              <input id="batchSize" type="number" min="1" max="50" step="1" value="20" />
+            </div>
+            <div>
+              <label for="maxTokens">Max tokens</label>
+              <input id="maxTokens" type="number" min="128" step="128" value="2048" />
+            </div>
+          </div>
+
+          <div class="actions">
+            <button id="runPipeline" type="button" class="primary wide">Run Pipeline</button>
+            <button id="cancelPipeline" type="button" class="danger" disabled>Cancel</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="grid results">
+        <div class="panel">
+          <div class="section-title">
+            <span>Outputs</span>
+          </div>
+          <dl class="outputs">
+            <dt>Audio</dt>
+            <dd id="audioOutput">Not generated</dd>
+            <dt>Source SRT</dt>
+            <dd id="sourceOutput">Not generated</dd>
+            <dt>Translated SRT</dt>
+            <dd id="translatedOutput">Not generated</dd>
+          </dl>
+        </div>
+        <div class="panel">
+          <div class="section-title">
+            <span>Step Log</span>
+            <button id="clearLog" type="button" class="ghost">Clear</button>
+          </div>
+          <ol id="logList" class="log-list"></ol>
+        </div>
+      </section>
+
+      <section class="grid previews">
+        <div class="panel preview-card">
+          <div class="section-title">
+            <span>Source Preview</span>
+            <span id="sourceCount" class="muted">0 segments</span>
+          </div>
+          <pre id="sourcePreview">No transcript yet.</pre>
+        </div>
+        <div class="panel preview-card">
+          <div class="section-title">
+            <span>Translation Preview</span>
+            <span id="translatedCount" class="muted">0 segments</span>
+          </div>
+          <pre id="translatedPreview">Translation is optional.</pre>
+        </div>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

@@ -8,7 +8,7 @@ Required files:
 
 - `plugin.json`
 - `ui/index.html` (or your configured `ui.entry`)
-- `wasm/plugin.wasm` (or your configured `wasm.entry`)
+- `wasm/plugin.wasm` (or your configured `wasm.entry`, optional for WebView-only plugins)
 
 `plugin.json` shape:
 
@@ -31,3 +31,6 @@ Required files:
   }
 }
 ```
+
+For lightweight WebView-only plugins, omit the `wasm` field and only include
+the UI assets in `integrity.filesSha256`.

@@ -293,7 +293,9 @@ impl VideoService {
                             image: None,
                             images: None,
                             video_path: Some(format!("/v1/video/generations/{operation_id}/artifact")),
+                            output_path: None,
                             text: None,
+                            segments: None,
                         };
                         let task_payload = serde_json::to_string(&task_result).unwrap_or_default();
                         if let Err(db_error) = store

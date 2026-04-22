@@ -96,12 +96,21 @@ pub struct TaskView {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimedTextSegment {
+    pub start_ms: Option<u64>,
+    pub end_ms: Option<u64>,
+    pub text: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TaskResult {
     pub image: Option<String>,
     pub images: Option<Vec<String>>,
     pub video_path: Option<String>,
+    pub output_path: Option<String>,
     pub text: Option<String>,
+    pub segments: Option<Vec<TimedTextSegment>>,
 }
 
 impl From<&TaskRecord> for TaskView {

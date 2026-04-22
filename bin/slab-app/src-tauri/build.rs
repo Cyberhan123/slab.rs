@@ -33,6 +33,7 @@ fn main() {
             "plugin_unmount_view",
             "plugin_call",
             "plugin_api_request",
+            "plugin_pick_file",
         ]));
 
     tauri_build::try_build(attributes).expect("failed to run tauri build script");

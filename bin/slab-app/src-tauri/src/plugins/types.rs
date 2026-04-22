@@ -9,7 +9,8 @@ pub struct PluginManifest {
     pub name: String,
     pub version: String,
     pub ui: PluginUiManifest,
-    pub wasm: PluginWasmManifest,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub wasm: Option<PluginWasmManifest>,
     pub integrity: PluginIntegrityManifest,
     pub network: PluginNetworkManifest,
 }
@@ -54,6 +55,7 @@ pub struct PluginInfo {
     pub valid: bool,
     pub error: Option<String>,
     pub ui_entry: Option<String>,
+    pub has_wasm: bool,
     pub network_mode: String,
     pub allow_hosts: Vec<String>,
 }
@@ -109,6 +111,12 @@ pub struct PluginCallRequest {
 pub struct PluginCallResponse {
     pub output_text: String,
     pub output_base64: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginPickFileResponse {
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -38,6 +38,15 @@ pub fn validate_absolute_path(value: &str) -> Result<(), ValidationError> {
     Ok(())
 }
 
+pub fn validate_optional_absolute_path(value: &str) -> Result<(), ValidationError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+
+    validate_absolute_path(trimmed)
+}
+
 pub fn validate_positive_u32(value: u32) -> Result<(), ValidationError> {
     if value == 0 {
         return Err(ValidationError::new("positive_u32"));

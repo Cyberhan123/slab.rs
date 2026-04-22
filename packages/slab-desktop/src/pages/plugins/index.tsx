@@ -50,6 +50,7 @@ export default function Plugins() {
     () => plugins.find((plugin) => plugin.id === mountedPluginId),
     [plugins, mountedPluginId],
   );
+  const mountedPluginHasWasm = mountedPlugin?.hasWasm === true;
 
   const readBounds = useCallback((): PluginViewBounds | null => {
     const element = viewportRef.current;
@@ -159,6 +160,10 @@ export default function Plugins() {
       toast.error("Mount a plugin first");
       return;
     }
+    if (!mountedPluginHasWasm) {
+      toast.error("Mounted plugin does not provide a WASM runtime");
+      return;
+    }
     try {
       const result = await pluginCall({
         pluginId: mountedPluginId,
@@ -171,7 +176,7 @@ export default function Plugins() {
         description: error instanceof Error ? error.message : String(error),
       });
     }
-  }, [callFunction, callInput, mountedPluginId]);
+  }, [callFunction, callInput, mountedPluginHasWasm, mountedPluginId]);
 
   const handleApiProbe = useCallback(async () => {
     try {
@@ -313,6 +318,13 @@ export default function Plugins() {
                         {plugin.valid ? "Ready" : "Invalid"}
                       </Badge>
                     </div>
+                    {plugin.valid ? (
+                      <div className="mt-2 flex items-center gap-2">
+                        <Badge variant="outline">
+                          {plugin.hasWasm ? "WASM runtime" : "WebView only"}
+                        </Badge>
+                      </div>
+                    ) : null}
                     {!plugin.valid && plugin.error ? (
                       <p className="mt-2 text-xs text-destructive">{plugin.error}</p>
                     ) : null}
@@ -359,9 +371,13 @@ export default function Plugins() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Wasm & API Bridge</CardTitle>
+              <CardTitle>Wasm Function Bridge</CardTitle>
               <CardDescription>
-                Call plugin wasm functions and probe host API proxy.
+                {mountedPluginId
+                  ? mountedPluginHasWasm
+                    ? "Call Extism functions exposed by the mounted plugin."
+                    : "This mounted plugin is WebView-only, so WASM calls are disabled."
+                  : "Mount a plugin to call WASM functions."}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -370,8 +386,12 @@ export default function Plugins() {
                   value={callFunction}
                   onChange={(event) => setCallFunction(event.target.value)}
                   placeholder="Function name"
+                  disabled={!mountedPluginHasWasm}
                 />
-                <Button onClick={() => void handleCallPlugin()} disabled={!mountedPluginId}>
+                <Button
+                  onClick={() => void handleCallPlugin()}
+                  disabled={!mountedPluginId || !mountedPluginHasWasm}
+                >
                   Call Plugin Function
                 </Button>
               </div>
@@ -380,6 +400,7 @@ export default function Plugins() {
                 onChange={(event) => setCallInput(event.target.value)}
                 className="min-h-[100px] font-mono text-xs"
                 placeholder="Input payload passed to Extism function"
+                disabled={!mountedPluginHasWasm}
               />
               <Textarea
                 value={callOutput}
@@ -387,6 +408,17 @@ export default function Plugins() {
                 className="min-h-[100px] font-mono text-xs"
                 placeholder="Function output"
               />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Host API Bridge</CardTitle>
+              <CardDescription>
+                Probe the local host API proxy available to plugin webviews.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
               <div className="flex items-center gap-2">
                 <Button variant="outline" onClick={() => void handleApiProbe()}>
                   Probe /health
