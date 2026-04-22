@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use slab_model_pack::{
     BackendConfigDocument, BackendConfigScope, ConfigEntryRef, ConfigRef, MANIFEST_FILE_NAME,
@@ -22,9 +22,10 @@ use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
 use crate::domain::models::{
+    CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
     CreateModelCommand, ManagedModelBackendId, ModelSpec, Pricing, RuntimePresets,
     StoredModelConfig, UnifiedModel, UnifiedModelKind, UnifiedModelStatus,
-    upgrade_stored_model_config,
+    validate_stored_model_config,
 };
 use crate::error::AppCoreError;
 
@@ -114,6 +115,7 @@ pub fn read_model_pack_runtime_bridge_from_bytes(
 }
 
 pub fn build_model_command_from_pack(path: &Path) -> Result<CreateModelCommand, AppCoreError> {
+    migrate_legacy_persisted_model_pack(path)?;
     let bytes = read_pack_bytes(path)?;
     build_model_command_from_pack_bytes(path, &bytes)
 }
@@ -163,7 +165,43 @@ pub fn write_imported_model_pack(
 pub fn read_persisted_model_config_from_pack(
     path: &Path,
 ) -> Result<Option<StoredModelConfig>, AppCoreError> {
+    migrate_legacy_persisted_model_pack(path)?;
     read_persisted_model_config_from_pack_bytes(&read_pack_bytes(path)?)
+}
+
+fn migrate_legacy_persisted_model_pack(path: &Path) -> Result<(), AppCoreError> {
+    let bytes = read_pack_bytes(path)?;
+    let Some(migrated_bytes) = migrate_legacy_persisted_model_pack_bytes(&bytes)? else {
+        return Ok(());
+    };
+    write_bytes_file(path, &migrated_bytes)
+}
+
+fn migrate_legacy_persisted_model_pack_bytes(
+    bytes: &[u8],
+) -> Result<Option<Vec<u8>>, AppCoreError> {
+    let Some(state_bytes) = read_pack_entry_bytes(bytes, INTERNAL_MODEL_STATE_ENTRY)? else {
+        return Ok(None);
+    };
+    let Some(migrated_state_bytes) = migrate_legacy_persisted_model_pack_state(&state_bytes)?
+    else {
+        return Ok(None);
+    };
+
+    let mut entries = collect_pack_entries(bytes)?;
+    let mut replaced = false;
+    for (path, payload) in &mut entries {
+        if path == INTERNAL_MODEL_STATE_ENTRY {
+            *payload = migrated_state_bytes.clone();
+            replaced = true;
+        }
+    }
+
+    if !replaced {
+        return Ok(None);
+    }
+
+    Ok(Some(build_pack_bytes(entries)?))
 }
 
 pub fn write_persisted_model_pack(
@@ -399,20 +437,117 @@ fn read_persisted_model_config_from_pack_bytes(
         return Ok(None);
     };
 
-    let Ok(state) = serde_json::from_slice::<PersistedModelPackState>(&state_bytes) else {
+    let Ok(state_json) = serde_json::from_slice::<Value>(&state_bytes) else {
+        return Ok(None);
+    };
+    let Some(state) = state_json.as_object() else {
+        return Ok(None);
+    };
+    let Some(manifest_sha256) = state.get("manifest_sha256").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    let Some(config_json) = state.get("config") else {
         return Ok(None);
     };
 
-    let manifest_sha256 = manifest_sha256_from_pack_bytes(bytes)?;
-    if state.manifest_sha256 != manifest_sha256 {
+    if manifest_sha256 != manifest_sha256_from_pack_bytes(bytes)? {
         return Ok(None);
     }
 
-    let config = upgrade_stored_model_config(state.config).map_err(|error| {
+    let config =
+        serde_json::from_value::<StoredModelConfig>(config_json.clone()).map_err(|error| {
+            AppCoreError::BadRequest(format!("invalid persisted model config: {error}"))
+        })?;
+    let config = validate_stored_model_config(config).map_err(|error| {
         AppCoreError::BadRequest(format!("invalid persisted model config: {error}"))
     })?;
 
     Ok(Some(config))
+}
+
+fn migrate_legacy_persisted_model_pack_state(
+    state_bytes: &[u8],
+) -> Result<Option<Vec<u8>>, AppCoreError> {
+    let Ok(mut state_json) = serde_json::from_slice::<Value>(state_bytes) else {
+        return Ok(None);
+    };
+    let Some(state) = state_json.as_object_mut() else {
+        return Ok(None);
+    };
+    let Some(config) = state.get_mut("config").and_then(Value::as_object_mut) else {
+        return Ok(None);
+    };
+
+    let schema_version =
+        read_persisted_model_config_version(config, "schema_version")?.unwrap_or(1);
+    let policy_version =
+        read_persisted_model_config_version(config, "policy_version")?.unwrap_or(1);
+    let mut changed = false;
+
+    if schema_version != CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION {
+        if schema_version == 0 {
+            return Err(AppCoreError::BadRequest(
+                "invalid persisted model config: stored model config schema_version must be at least 1"
+                    .to_owned(),
+            ));
+        }
+        if schema_version != 1 {
+            return Err(AppCoreError::BadRequest(format!(
+                "invalid persisted model config: unsupported stored model config schema_version: {}",
+                schema_version
+            )));
+        }
+        config
+            .insert("schema_version".to_owned(), json!(CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION));
+        changed = true;
+    }
+
+    if policy_version != CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION {
+        if policy_version == 0 {
+            return Err(AppCoreError::BadRequest(
+                "invalid persisted model config: stored model config policy_version must be at least 1"
+                    .to_owned(),
+            ));
+        }
+        if policy_version > CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION {
+            return Err(AppCoreError::BadRequest(format!(
+                "invalid persisted model config: unsupported stored model config policy_version: {}",
+                policy_version
+            )));
+        }
+        config
+            .insert("policy_version".to_owned(), json!(CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION));
+        changed = true;
+    }
+
+    if !changed {
+        return Ok(None);
+    }
+
+    serde_json::to_vec_pretty(&state_json).map(Some).map_err(|error| {
+        AppCoreError::Internal(format!(
+            "failed to serialize migrated persisted model config state: {error}"
+        ))
+    })
+}
+
+fn read_persisted_model_config_version(
+    config: &Map<String, Value>,
+    field: &str,
+) -> Result<Option<u32>, AppCoreError> {
+    let Some(value) = config.get(field) else {
+        return Ok(None);
+    };
+    let Some(raw) = value.as_u64() else {
+        return Err(AppCoreError::BadRequest(format!(
+            "invalid persisted model config: '{field}' must be an unsigned integer"
+        )));
+    };
+    u32::try_from(raw).map(Some).map_err(|_| {
+        AppCoreError::BadRequest(format!(
+            "invalid persisted model config: '{field}' is out of range"
+        ))
+    })
 }
 
 fn attach_persisted_state_to_pack_bytes(
@@ -921,7 +1056,8 @@ mod tests {
     use super::{
         attach_persisted_state_to_pack_bytes, build_generated_model_pack_bytes,
         build_model_command_from_pack_bytes, build_pack_bytes, collect_pack_entries,
-        manifest_sha256_from_pack_bytes, read_persisted_model_config_from_pack_bytes,
+        manifest_sha256_from_pack_bytes, migrate_legacy_persisted_model_pack_bytes,
+        read_persisted_model_config_from_pack_bytes,
     };
     use crate::domain::models::{
         CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
@@ -1474,7 +1610,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_persisted_state_without_versions_still_loads() {
+    fn persisted_state_with_schema_version_one_is_rejected_until_migrated() {
         let base_bytes = build_pack(vec![(
             "manifest.json",
             json!({
@@ -1498,6 +1634,8 @@ mod tests {
             serde_json::to_vec_pretty(&json!({
                 "manifest_sha256": manifest_sha256,
                 "config": {
+                    "schema_version": 1,
+                    "policy_version": 1,
                     "id": "gpt_4_1_mini",
                     "display_name": "Persisted GPT-4.1 mini",
                     "kind": "cloud",
@@ -1516,7 +1654,62 @@ mod tests {
         ));
         let bytes = build_pack_bytes(entries).expect("build pack");
 
-        let restored = read_persisted_model_config_from_pack_bytes(&bytes)
+        let error = read_persisted_model_config_from_pack_bytes(&bytes)
+            .expect_err("legacy persisted state should require migration");
+
+        assert!(
+            matches!(error, AppCoreError::BadRequest(message) if message.contains("unsupported stored model config schema_version"))
+        );
+    }
+
+    #[test]
+    fn migrating_schema_version_one_persisted_state_restores_current_versions() {
+        let base_bytes = build_pack(vec![(
+            "manifest.json",
+            json!({
+                "version": 2,
+                "id": "gpt_4_1_mini",
+                "label": "GPT-4.1 mini",
+                "status": "ready",
+                "family": "llama",
+                "source": {
+                    "kind": "cloud",
+                    "provider_id": "openai-main",
+                    "remote_model_id": "gpt-4.1-mini"
+                }
+            })
+            .to_string(),
+        )]);
+        let manifest_sha256 = manifest_sha256_from_pack_bytes(&base_bytes).expect("manifest hash");
+        let mut entries = collect_pack_entries(&base_bytes).expect("collect entries");
+        entries.push((
+            "internal/stored-model-config".to_owned(),
+            serde_json::to_vec_pretty(&json!({
+                "manifest_sha256": manifest_sha256,
+                "config": {
+                    "schema_version": 1,
+                    "policy_version": 1,
+                    "id": "gpt_4_1_mini",
+                    "display_name": "Persisted GPT-4.1 mini",
+                    "kind": "cloud",
+                    "status": "ready",
+                    "spec": {
+                        "provider_id": "openai-main",
+                        "remote_model_id": "gpt-4.1-mini",
+                        "context_window": 128000
+                    },
+                    "runtime_presets": {
+                        "temperature": 0.6
+                    }
+                }
+            }))
+            .expect("serialize state"),
+        ));
+        let bytes = build_pack_bytes(entries).expect("build pack");
+        let migrated = migrate_legacy_persisted_model_pack_bytes(&bytes)
+            .expect("migrate state")
+            .expect("legacy state should be rewritten");
+        let restored = read_persisted_model_config_from_pack_bytes(&migrated)
             .expect("read state")
             .expect("state exists");
 

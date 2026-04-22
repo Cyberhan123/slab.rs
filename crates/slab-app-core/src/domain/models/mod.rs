@@ -45,7 +45,7 @@ pub use model::{
     SelectedModelDownloadSource, StoredModelConfig, UnifiedModel, UnifiedModelKind,
     UnifiedModelStatus, UpdateModelCommand, UpdateModelConfigSelectionCommand,
     UpdateModelEnhancementCommand, default_model_capabilities, normalize_model_capabilities,
-    upgrade_stored_model_config,
+    validate_stored_model_config,
 };
 pub use pmid::PMID;
 pub use session::{CreateSessionCommand, SessionMessageView, SessionView};

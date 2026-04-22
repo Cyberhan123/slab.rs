@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use crate::domain::models::{
     ManagedModelBackendId, ModelSpec, RuntimePresets, StoredModelConfig, UnifiedModel,
-    UnifiedModelKind, UnifiedModelStatus, upgrade_stored_model_config,
+    UnifiedModelKind, UnifiedModelStatus, validate_stored_model_config,
 };
 use slab_types::Capability;
 
@@ -144,7 +144,7 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
             None
         };
         let default_status = status.clone();
-        let config = upgrade_stored_model_config(StoredModelConfig {
+        let config = validate_stored_model_config(StoredModelConfig {
             schema_version: parse_config_version(config_schema_version, "config_schema_version")?,
             policy_version: parse_config_version(config_policy_version, "config_policy_version")?,
             id,
@@ -222,9 +222,9 @@ mod tests {
     }
 
     #[test]
-    fn converts_records_with_schema_version_one() {
+    fn rejects_records_with_schema_version_one() {
         let now = Utc::now();
-        let model = UnifiedModel::try_from(UnifiedModelRecord {
+        let error = UnifiedModel::try_from(UnifiedModelRecord {
             id: "cloud-model".to_owned(),
             display_name: "Cloud Model".to_owned(),
             provider: "cloud.openai-main".to_owned(),
@@ -239,17 +239,13 @@ mod tests {
             .to_string(),
             runtime_presets: None,
             config_schema_version: 1,
-            config_policy_version: 1,
+            config_policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION as i64,
             created_at: now,
             updated_at: now,
         })
-        .expect("schema version one record should deserialize");
+        .expect_err("schema version one record should fail");
 
-        assert_eq!(model.kind, UnifiedModelKind::Cloud);
-        assert_eq!(
-            model.capabilities,
-            vec![Capability::TextGeneration, Capability::ChatGeneration]
-        );
+        assert!(error.contains("unsupported stored model config schema_version"));
     }
 
     #[test]
