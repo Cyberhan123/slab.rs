@@ -141,7 +141,7 @@ describe("PluginsPage browser visual regression", () => {
     await renderDesktopScene(<PluginsPage />, { route: "/plugins" });
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    await expect.element(page.getByText("Image Enhancer")).toBeVisible();
+    await expect.element(page.getByRole("heading", { name: "Image Enhancer" })).toBeVisible();
     await expect(page.getByTestId("desktop-browser-scene")).toMatchScreenshot(
       "plugins-page-with-plugins.png",
     );
