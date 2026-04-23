@@ -11,6 +11,7 @@ pub mod chat;
 pub mod ffmpeg;
 pub mod images;
 pub mod models;
+pub mod plugin;
 pub mod session;
 pub mod setup;
 pub mod subtitles;

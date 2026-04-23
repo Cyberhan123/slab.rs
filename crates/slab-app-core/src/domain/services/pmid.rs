@@ -5,11 +5,10 @@ use serde_json::Value;
 use slab_types::settings::{
     ChatConfig, CloudProviderConfig, DesktopLaunchProfileConfig, DiffusionConfig,
     DiffusionPerformanceConfig, LaunchBackendConfig, LaunchBackendsConfig, LaunchConfig,
-    LaunchProfilesConfig, ModelDownloadSourcePreference, PMID, PmidConfig,
-    ProviderRegistryEntry, RuntimeConfig, RuntimeLlamaConfig, RuntimeModelAutoUnloadConfig,
-    RuntimeWorkerConfig, RuntimeWhisperConfig, ServerLaunchProfileConfig, SettingsDocument,
-    SetupBackendsConfig, SetupConfig, SetupFfmpegConfig, provider_registry_json_schema,
-    string_list_json_schema,
+    LaunchProfilesConfig, ModelDownloadSourcePreference, PMID, PmidConfig, ProviderRegistryEntry,
+    RuntimeConfig, RuntimeLlamaConfig, RuntimeModelAutoUnloadConfig, RuntimeWhisperConfig,
+    RuntimeWorkerConfig, ServerLaunchProfileConfig, SettingsDocument, SetupBackendsConfig,
+    SetupConfig, SetupFfmpegConfig, provider_registry_json_schema, string_list_json_schema,
 };
 
 use crate::domain::models::{
@@ -85,9 +84,7 @@ impl PmidService {
     ) -> Result<ModelDownloadSourcePreference, AppCoreError> {
         let value = self.settings.value(PMID.models.download_source().as_str()).await?;
         serde_json::from_value(value).map_err(|error| {
-            AppCoreError::Internal(format!(
-                "invalid models.download_source setting value: {error}"
-            ))
+            AppCoreError::Internal(format!("invalid models.download_source setting value: {error}"))
         })
     }
 }
@@ -190,7 +187,8 @@ async fn build_document_view(
     let mut sections = empty_sections();
 
     for pmid in PMID.all() {
-        let property = build_property_view_from_values(pmid.as_str(), &current_json, &default_json)?;
+        let property =
+            build_property_view_from_values(pmid.as_str(), &current_json, &default_json)?;
         push_property(&mut sections, property)?;
     }
 
@@ -437,9 +435,10 @@ fn push_property(
     property: SettingPropertyView,
 ) -> Result<(), AppCoreError> {
     let (section_id, subsection_id) = section_location(&property.pmid);
-    let section = sections.iter_mut().find(|section| section.id == section_id).ok_or_else(|| {
-        AppCoreError::Internal(format!("unknown settings section '{}'", section_id))
-    })?;
+    let section =
+        sections.iter_mut().find(|section| section.id == section_id).ok_or_else(|| {
+            AppCoreError::Internal(format!("unknown settings section '{}'", section_id))
+        })?;
     let subsection = section
         .subsections
         .iter_mut()
@@ -638,7 +637,8 @@ fn property_description(path: &str) -> String {
 
 fn search_terms(path: &str) -> Vec<String> {
     let mut search_terms: Vec<String> = path.split('.').map(|segment| segment.to_owned()).collect();
-    search_terms.extend(property_label(path).split_whitespace().map(|segment| segment.to_lowercase()));
+    search_terms
+        .extend(property_label(path).split_whitespace().map(|segment| segment.to_lowercase()));
     search_terms.sort();
     search_terms.dedup();
     search_terms
@@ -856,7 +856,10 @@ mod tests {
         let error = service
             .update_setting(
                 "missing.setting",
-                UpdateSettingCommand { op: crate::domain::models::UpdateSettingOperation::Set, value: Some(json!(true)) },
+                UpdateSettingCommand {
+                    op: crate::domain::models::UpdateSettingOperation::Set,
+                    value: Some(json!(true)),
+                },
             )
             .await
             .expect_err("missing pmid should fail");

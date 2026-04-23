@@ -389,13 +389,7 @@ fn validate_and_load_plugin(
 
     let wasm_entry_path = match manifest.runtime.wasm.as_ref() {
         Some(wasm) => Some(
-            validate_declared_file(
-                plugin_dir,
-                &files_sha256,
-                &wasm.entry,
-                "runtime.wasm.entry",
-            )?
-            .1,
+            validate_declared_file(plugin_dir, &files_sha256, &wasm.entry, "runtime.wasm.entry")?.1,
         ),
         None => None,
     };
@@ -403,7 +397,9 @@ fn validate_and_load_plugin(
     if manifest.permissions.network.mode == PluginNetworkMode::Blocked
         && !manifest.permissions.network.allow_hosts.is_empty()
     {
-        return Err("permissions.network.allowHosts must be empty when mode is `blocked`".to_string());
+        return Err(
+            "permissions.network.allowHosts must be empty when mode is `blocked`".to_string()
+        );
     }
 
     let extension_registry = build_extension_registry(plugin_dir, &manifest, &files_sha256)?;
@@ -457,10 +453,7 @@ fn build_extension_registry(
         validate_contribution_id(&route.id, "route id")?;
         insert_contribution_id(&mut registry.contribution_ids, &route.id)?;
         if !(route.path == path_prefix || route.path.starts_with(&(path_prefix.clone() + "/"))) {
-            return Err(format!(
-                "route `{}` must use a path inside `{}`",
-                route.id, path_prefix
-            ));
+            return Err(format!("route `{}` must use a path inside `{}`", route.id, path_prefix));
         }
         if !registry.route_ids.insert(route.id.clone()) {
             return Err(format!("duplicated route id `{}`", route.id));
@@ -511,7 +504,10 @@ fn build_capability_registry(
             ));
         }
         if capability.transport.function.trim().is_empty() {
-            return Err(format!("capability `{}` must declare a transport.function", capability.id));
+            return Err(format!(
+                "capability `{}` must declare a transport.function",
+                capability.id
+            ));
         }
         if let Some(path) = capability.input_schema.as_deref() {
             validate_declared_file(
@@ -552,7 +548,10 @@ fn validate_command_contribution(
 
     if command.action.as_deref() == Some("openRoute") {
         let Some(route_target) = command.route.as_deref() else {
-            return Err(format!("command `{}` with action `openRoute` must declare route", command.id));
+            return Err(format!(
+                "command `{}` with action `openRoute` must declare route",
+                command.id
+            ));
         };
         if !registry.contains_route_reference(route_target) {
             return Err(format!(
@@ -575,7 +574,10 @@ fn validate_sidebar_contribution(
     match (sidebar.route.as_deref(), sidebar.command.as_deref()) {
         (Some(route), None) => {
             if !registry.contains_route_reference(route) {
-                return Err(format!("sidebar `{}` references unknown route `{}`", sidebar.id, route));
+                return Err(format!(
+                    "sidebar `{}` references unknown route `{}`",
+                    sidebar.id, route
+                ));
             }
         }
         (None, Some(command)) => {
@@ -605,7 +607,12 @@ fn validate_settings_contribution(
 ) -> Result<(), String> {
     validate_contribution_id(&setting.id, "settings id")?;
     insert_contribution_id(&mut registry.contribution_ids, &setting.id)?;
-    validate_declared_file(plugin_dir, files_sha256, &setting.schema, "contributes.settings[].schema")?;
+    validate_declared_file(
+        plugin_dir,
+        files_sha256,
+        &setting.schema,
+        "contributes.settings[].schema",
+    )?;
     Ok(())
 }
 
@@ -752,7 +759,12 @@ mod tests {
         std::env::temp_dir().join(format!("slab-plugin-{name}-{suffix}"))
     }
 
-    fn write_plugin_file(root: &Path, plugin_id: &str, relative_path: &str, content: &str) -> String {
+    fn write_plugin_file(
+        root: &Path,
+        plugin_id: &str,
+        relative_path: &str,
+        content: &str,
+    ) -> String {
         let path = root.join(plugin_id).join(relative_path);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, content).unwrap();
@@ -762,11 +774,8 @@ mod tests {
     fn write_manifest(root: &Path, plugin_id: &str, manifest: serde_json::Value) {
         let plugin_dir = root.join(plugin_id);
         fs::create_dir_all(&plugin_dir).unwrap();
-        fs::write(
-            plugin_dir.join("plugin.json"),
-            serde_json::to_string_pretty(&manifest).unwrap(),
-        )
-        .unwrap();
+        fs::write(plugin_dir.join("plugin.json"), serde_json::to_string_pretty(&manifest).unwrap())
+            .unwrap();
     }
 
     #[test]
@@ -819,8 +828,12 @@ mod tests {
     #[test]
     fn registry_lists_legacy_ui_only_plugin_without_wasm() {
         let root = temp_root("legacy-ui-only");
-        let html_hash =
-            write_plugin_file(&root, "ui-only-plugin", "ui/index.html", "<!doctype html><title>ui only</title>");
+        let html_hash = write_plugin_file(
+            &root,
+            "ui-only-plugin",
+            "ui/index.html",
+            "<!doctype html><title>ui only</title>",
+        );
 
         write_manifest(
             &root,
@@ -850,10 +863,30 @@ mod tests {
     #[test]
     fn registry_accepts_v1_manifest_with_contributions_and_capabilities() {
         let root = temp_root("v1-manifest");
-        let html_hash = write_plugin_file(&root, "video-subtitle-translator", "ui/index.html", "<!doctype html><title>v1</title>");
-        let settings_hash = write_plugin_file(&root, "video-subtitle-translator", "schemas/settings.schema.json", "{\"type\":\"object\"}");
-        let input_hash = write_plugin_file(&root, "video-subtitle-translator", "schemas/translate-input.schema.json", "{\"type\":\"object\"}");
-        let output_hash = write_plugin_file(&root, "video-subtitle-translator", "schemas/translate-output.schema.json", "{\"type\":\"object\"}");
+        let html_hash = write_plugin_file(
+            &root,
+            "video-subtitle-translator",
+            "ui/index.html",
+            "<!doctype html><title>v1</title>",
+        );
+        let settings_hash = write_plugin_file(
+            &root,
+            "video-subtitle-translator",
+            "schemas/settings.schema.json",
+            "{\"type\":\"object\"}",
+        );
+        let input_hash = write_plugin_file(
+            &root,
+            "video-subtitle-translator",
+            "schemas/translate-input.schema.json",
+            "{\"type\":\"object\"}",
+        );
+        let output_hash = write_plugin_file(
+            &root,
+            "video-subtitle-translator",
+            "schemas/translate-output.schema.json",
+            "{\"type\":\"object\"}",
+        );
 
         write_manifest(
             &root,
@@ -896,7 +929,8 @@ mod tests {
 
         let registry = PluginRegistryState::new(root.clone()).unwrap();
         let plugins = registry.list().unwrap();
-        let plugin = plugins.iter().find(|plugin| plugin.id == "video-subtitle-translator").unwrap();
+        let plugin =
+            plugins.iter().find(|plugin| plugin.id == "video-subtitle-translator").unwrap();
 
         assert!(plugin.valid);
         assert_eq!(plugin.manifest_version, 1);
@@ -909,9 +943,18 @@ mod tests {
     #[test]
     fn registry_rejects_missing_integrity_entries_for_settings_schema() {
         let root = temp_root("missing-integrity");
-        let html_hash =
-            write_plugin_file(&root, "settings-plugin", "ui/index.html", "<!doctype html><title>ui only</title>");
-        write_plugin_file(&root, "settings-plugin", "schemas/settings.schema.json", "{\"type\":\"object\"}");
+        let html_hash = write_plugin_file(
+            &root,
+            "settings-plugin",
+            "ui/index.html",
+            "<!doctype html><title>ui only</title>",
+        );
+        write_plugin_file(
+            &root,
+            "settings-plugin",
+            "schemas/settings.schema.json",
+            "{\"type\":\"object\"}",
+        );
 
         write_manifest(
             &root,
@@ -945,7 +988,12 @@ mod tests {
     #[test]
     fn registry_rejects_duplicate_contribution_ids() {
         let root = temp_root("duplicate-contribution");
-        let html_hash = write_plugin_file(&root, "duplicate-plugin", "ui/index.html", "<!doctype html><title>dup</title>");
+        let html_hash = write_plugin_file(
+            &root,
+            "duplicate-plugin",
+            "ui/index.html",
+            "<!doctype html><title>dup</title>",
+        );
 
         write_manifest(
             &root,
@@ -980,7 +1028,12 @@ mod tests {
     #[test]
     fn registry_rejects_route_outside_plugin_namespace() {
         let root = temp_root("bad-route");
-        let html_hash = write_plugin_file(&root, "bad-route-plugin", "ui/index.html", "<!doctype html><title>bad route</title>");
+        let html_hash = write_plugin_file(
+            &root,
+            "bad-route-plugin",
+            "ui/index.html",
+            "<!doctype html><title>bad route</title>",
+        );
 
         write_manifest(
             &root,
@@ -1014,7 +1067,12 @@ mod tests {
     #[test]
     fn registry_requires_ui_permission_for_route_contributions() {
         let root = temp_root("missing-permission");
-        let html_hash = write_plugin_file(&root, "permission-plugin", "ui/index.html", "<!doctype html><title>perm</title>");
+        let html_hash = write_plugin_file(
+            &root,
+            "permission-plugin",
+            "ui/index.html",
+            "<!doctype html><title>perm</title>",
+        );
 
         write_manifest(
             &root,
@@ -1048,7 +1106,12 @@ mod tests {
     #[test]
     fn registry_rejects_missing_capability_schema_file() {
         let root = temp_root("missing-capability-schema");
-        let html_hash = write_plugin_file(&root, "capability-plugin", "ui/index.html", "<!doctype html><title>cap</title>");
+        let html_hash = write_plugin_file(
+            &root,
+            "capability-plugin",
+            "ui/index.html",
+            "<!doctype html><title>cap</title>",
+        );
 
         write_manifest(
             &root,
@@ -1087,8 +1150,18 @@ mod tests {
     #[test]
     fn registry_rejects_duplicate_capability_ids_across_plugins() {
         let root = temp_root("duplicate-capability");
-        let first_html = write_plugin_file(&root, "first-plugin", "ui/index.html", "<!doctype html><title>first</title>");
-        let second_html = write_plugin_file(&root, "second-plugin", "ui/index.html", "<!doctype html><title>second</title>");
+        let first_html = write_plugin_file(
+            &root,
+            "first-plugin",
+            "ui/index.html",
+            "<!doctype html><title>first</title>",
+        );
+        let second_html = write_plugin_file(
+            &root,
+            "second-plugin",
+            "ui/index.html",
+            "<!doctype html><title>second</title>",
+        );
 
         write_manifest(
             &root,

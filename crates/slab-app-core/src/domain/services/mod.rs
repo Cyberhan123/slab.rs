@@ -5,6 +5,7 @@ mod chat;
 mod ffmpeg;
 mod image;
 mod model;
+mod plugin;
 mod pmid;
 mod session;
 mod settings;
@@ -22,6 +23,7 @@ pub use chat::ChatService;
 pub use ffmpeg::FfmpegService;
 pub use image::ImageService;
 pub use model::ModelService;
+pub use plugin::PluginService;
 pub use pmid::PmidService;
 pub use session::SessionService;
 pub use settings::SettingsService;
@@ -46,6 +48,7 @@ pub struct AppServices {
     pub image: ImageService,
     pub model: ModelService,
     pub settings: SettingsService,
+    pub plugin: PluginService,
     pub session: SessionService,
     pub setup: SetupService,
     pub subtitle: SubtitleService,
@@ -70,6 +73,7 @@ impl AppServices {
             ffmpeg: FfmpegService::new(worker_state.clone()),
             image: ImageService::new(worker_state.clone()),
             model: ModelService::new(model_state.clone(), worker_state.clone()),
+            plugin: PluginService::new(model_state.clone()),
             settings: SettingsService::new(model_state.clone()),
             session: SessionService::new(model_state.clone()),
             setup: SetupService::new(model_state.clone(), worker_state.clone(), runtime_host),

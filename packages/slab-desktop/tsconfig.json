@@ -5,8 +5,10 @@
       "@/*": ["./src/*"],
       "@slab/components": ["../slab-components/src/index.ts"],
       "@slab/components/*": ["../slab-components/src/*"],
-      "@slab/i18n": ["../slab-i18n/src/index.ts"]
+      "@slab/i18n": ["../slab-i18n/src/index.ts"],
+      "@slab/plugin-sdk": ["../slab-plugin-sdk/src/index.ts"]
     },
+    "types": ["node"],
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true

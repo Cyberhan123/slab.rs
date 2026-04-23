@@ -42,10 +42,16 @@ pub fn run() {
             plugins::plugin_call,
             plugins::plugin_api_request,
             plugins::plugin_pick_file,
+            plugins::plugin_set_theme_snapshot,
+            plugins::plugin_theme_snapshot,
         ])
         .setup(move |app| {
             setup::setup_windows(app)?;
-            setup::run_server_sidecar(app)?;
+            let plugins_root = plugins::resolve_plugins_root_for_app(app).map_err(|error| {
+                log::error!("failed to resolve plugins root before starting sidecar: {error}");
+                std::io::Error::other(error)
+            })?;
+            setup::run_server_sidecar(app, &plugins_root)?;
             plugins::init(app, api_endpoint.clone()).map_err(|error| {
                 log::error!("failed to initialize plugins: {error}");
                 std::io::Error::other(error)

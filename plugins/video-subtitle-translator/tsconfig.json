@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@slab/plugin-sdk": ["../../packages/slab-plugin-sdk/src/index.ts"],
+      "@slab/plugin-ui": ["../../packages/slab-plugin-ui/src/index.ts"],
+      "@slab/plugin-ui/*": ["../../packages/slab-plugin-ui/src/*"],
+      "@slab/components": ["../../packages/slab-components/src/index.ts"],
+      "@slab/components/*": ["../../packages/slab-components/src/*"]
+    },
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src", "vite.config.ts"]
+}

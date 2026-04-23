@@ -114,8 +114,8 @@ mod axum_extractors {
     use crate::context::{AppConfig, AppState, ModelState, WorkerState};
     use crate::domain::services::{
         AgentService, AudioService, BackendService, ChatService, FfmpegService, ImageService,
-        ModelService, PmidService, SessionService, SettingsService, SetupService, SubtitleService,
-        SystemService, TaskApplicationService, UiStateService, VideoService,
+        ModelService, PluginService, PmidService, SessionService, SettingsService, SetupService,
+        SubtitleService, SystemService, TaskApplicationService, UiStateService, VideoService,
     };
     use axum::extract::FromRef;
     use std::sync::Arc;
@@ -183,6 +183,12 @@ mod axum_extractors {
     impl FromRef<Arc<AppState>> for SettingsService {
         fn from_ref(input: &Arc<AppState>) -> Self {
             input.services.settings.clone()
+        }
+    }
+
+    impl FromRef<Arc<AppState>> for PluginService {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            input.services.plugin.clone()
         }
     }
 

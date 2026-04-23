@@ -28,7 +28,7 @@ Slab is built for developers, researchers, creators, and teams who want to run A
 
 - One app covers multiple AI workflows, so you do not need to jump between separate tools for chat, transcription, image generation, and model management.
 - It fits privacy-first, offline-friendly, and local-control workflows, with many tasks handled directly on your device.
-- It is built for daily use, with a task queue for long jobs, centralized model management, and room to grow with upcoming extensibility features.
+- It is built for daily use, with a task queue for long jobs, centralized model management, and plugin-driven extensibility for add-on workflows.
 - It works both as a desktop application and as a unified interface that can connect with your broader tooling and workflows.
 
 ## Key Features
@@ -52,10 +52,10 @@ Slab is built for developers, researchers, creators, and teams who want to run A
 - **Unified Settings**  
   Manage runtime preferences, model choices, and app settings in one place to reduce day-to-day setup friction.
 
-### Coming Soon
+### Plugin Extensibility
 
-- **Upcoming Plugin Support**  
-  Plugin extensibility is part of the product direction, but it is not a shipped user-facing capability yet. The current repository already includes the foundations for this area, and broader plugin support is planned for a future release.
+- **Plugin Market and Lifecycle Management**  
+  Desktop builds now expose a plugin market and installed-plugin management flow, while keeping `plugin.json` as the static source of truth for runtime assets, permissions, and contribution points.
 
 ## Project Structure
 
@@ -80,10 +80,11 @@ The tree below is a high-level view distilled from the current repository. It is
 |-- packages/
 |   |-- slab-desktop/                  Desktop frontend application
 |   |-- slab-components/               Shared UI component library
+|   |-- slab-plugin-sdk/              Plugin author SDK package
 |   `-- slab-i18n/                     Shared internationalization package
 |-- docs/                              Documentation site and guides
 |-- models/                            Model packaging scripts and assets
-|-- plugins/                           Runtime plugin package workspace for upcoming extensibility
+|-- plugins/                           Runtime plugin package workspace
 |-- testdata/                          Sample media and test fixtures
 `-- vendor/                            Vendored third-party runtime artifacts
 ```
@@ -91,7 +92,7 @@ The tree below is a high-level view distilled from the current repository. It is
 - `packages/slab-desktop` is the desktop interface users interact with every day.
 - `bin/slab-app`, `bin/slab-server`, and `bin/slab-runtime` together support the local app shell, task execution, and service entry points.
 - `crates/` contains the main shared capability layer for models, tasks, contracts, and reusable logic.
-- `plugins/` contains runtime plugin packages. Manifest v1 declares runtime assets, extension contributions, permissions, and agent capabilities.
+- `plugins/` contains runtime plugin packages. Manifest v1 declares runtime assets, extension contributions, permissions, and agent capabilities, while the host tracks install/runtime state separately.
 - `docs/`, `models/`, `testdata/`, and `vendor/` support documentation, model packaging assets, sample data, and bundled runtime resources.
 
 ## Development Guide

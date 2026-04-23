@@ -5,6 +5,7 @@ pub mod chat;
 pub mod ffmpeg;
 pub mod images;
 pub mod models;
+pub mod plugins;
 pub mod session;
 pub mod settings;
 pub mod setup;
@@ -31,6 +32,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .merge(agent::router())
         .merge(chat::router())
         .merge(models::router())
+        .merge(plugins::router())
         .merge(session::router())
         .merge(audio::router())
         .merge(images::router())
@@ -50,6 +52,7 @@ pub fn api_docs() -> utoipa::openapi::OpenApi {
     spec.merge(agent::AgentApi::openapi());
     spec.merge(chat::ChatApi::openapi());
     spec.merge(models::ModelsApi::openapi());
+    spec.merge(plugins::PluginApi::openapi());
     spec.merge(session::SessionApi::openapi());
     spec.merge(audio::AudioApi::openapi());
     spec.merge(images::ImagesApi::openapi());

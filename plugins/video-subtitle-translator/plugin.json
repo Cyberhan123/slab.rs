@@ -14,12 +14,12 @@
   },
   "integrity": {
     "filesSha256": {
-      "ui/index.html": "367b064f49486f16abc8c6bf8c062f2a154dc81a34339d8a07bcebb970dbb8e4",
-      "ui/styles.css": "bf93700fd7f66099bf3d1c3bbf347a7427d2024a50baea15d41e99d66c73f66c",
-      "ui/app.js": "e72870569a0b996c9ad9957d19fda3228d9edc14c58b0aa504941b92b3434515",
       "schemas/settings.schema.json": "3f3bcdf747ec558b8254d5cc25129b0e07fe6850ad674ede66ab4fd6a475bdcd",
       "schemas/translate-video-input.schema.json": "357b67fabe4f1fc6c5e2807fbd9bef4a649fbf3eb9ab2107c98fe6c3930abbcb",
-      "schemas/translate-video-output.schema.json": "6697352c730fb2bac9fe73d04db2d5425765e926e2e76d23a5e77075144389cd"
+      "schemas/translate-video-output.schema.json": "6697352c730fb2bac9fe73d04db2d5425765e926e2e76d23a5e77075144389cd",
+      "ui/assets/index-HgJ_yYMB.css": "7a6ed03c6a64878298410f78658d0b909556028f9d245d0d4226a1f9de716bf0",
+      "ui/assets/index-hujvD5yO.js": "d61fd28cfc09256087fe15eb80d591f5502916120ec18f746f71b0c514b2a7d9",
+      "ui/index.html": "6e2d6c674d08ebe46ec5ed48c8d0b34983e23f0c183a68f137180eae7ebacd83"
     }
   },
   "permissions": {
@@ -38,17 +38,17 @@
       "mcpTool:expose"
     ],
     "slabApi": [
-      "video:read",
+      "models:read",
+      "ffmpeg:convert",
       "audio:transcribe",
       "subtitle:render",
-      "tasks:create",
-      "tasks:read"
+      "chat:complete",
+      "tasks:read",
+      "tasks:cancel"
     ],
     "files": {
       "read": [
-        "video",
-        "audio",
-        "subtitle"
+        "video"
       ],
       "write": [
         "subtitle"

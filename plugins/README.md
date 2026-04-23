@@ -11,6 +11,23 @@ Required files:
 - any schema/assets referenced by `integrity.filesSha256`
 - `wasm/plugin.wasm` or the configured `runtime.wasm.entry` when the plugin exposes WASM functions
 
+## Frontend build model
+
+The default plugin UI runtime is a sandboxed Tauri child WebView. Do not use
+Module Federation as the default third-party plugin model; reserve that for a
+future trusted first-party path if the host can own the dependency graph.
+
+Repository plugins can be built with Vite, React, and TypeScript. Use
+`@slab/plugin-sdk` for host bridge calls and theme snapshots, and use
+`@slab/plugin-ui` plus `@slab/plugin-ui/globals.css` for the stable plugin UI
+ABI. `@slab/plugin-ui` intentionally exposes only a safe component subset
+instead of the full `@slab/components` surface.
+
+Run `bun run build:plugins` from the repo root to build local plugin frontends.
+The build writes static assets to each plugin's `ui/` directory, then rewrites
+`plugin.json` with `integrity.filesSha256` entries for `ui/**/*`,
+`schemas/**/*`, and optional `wasm/plugin.wasm`.
+
 ## Manifest v1
 
 `plugin.json` v1 is the canonical declaration format. It separates runtime
@@ -41,7 +58,7 @@ assets from host-controlled extension points and agent-facing capabilities:
     "network": { "mode": "blocked", "allowHosts": [] },
     "ui": ["route:create", "sidebar:item:create", "command:create", "settings:section:create"],
     "agent": ["capability:declare", "mcpTool:expose"],
-    "slabApi": ["tasks:create", "tasks:read"],
+    "slabApi": ["models:read", "tasks:read"],
     "files": {
       "read": ["video"],
       "write": ["subtitle"]

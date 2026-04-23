@@ -660,9 +660,7 @@ pub fn settings_document_json_schema() -> Value {
     root.insert("title".into(), Value::String("Slab Settings Document".into()));
     root.insert(
         "description".into(),
-        Value::String(
-            "Schema for the persisted settings document used by Slab hosts.".into(),
-        ),
+        Value::String("Schema for the persisted settings document used by Slab hosts.".into()),
     );
 
     schema

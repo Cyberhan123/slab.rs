@@ -13,7 +13,10 @@ vi.mock('@/pages/video/hooks/use-video-generation', () => ({
 }));
 
 vi.mock('@/hooks/use-persisted-header-select', () => ({
-  usePersistedHeaderSelect: vi.fn(() => ({ value: 'model-1', setValue: vi.fn() })),
+  usePersistedHeaderSelect: vi.fn<() => unknown>(() => ({
+    value: 'model-1',
+    setValue: vi.fn<() => void>(),
+  })),
 }));
 
 vi.mock('@/hooks/use-global-header-meta', () => ({
@@ -22,6 +25,10 @@ vi.mock('@/hooks/use-global-header-meta', () => ({
 }));
 
 function createVideoViewModel(overrides = {}) {
+  const createVoidMock = () => vi.fn<(...args: unknown[]) => void>();
+  const createAsyncVoidMock = () =>
+    vi.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined);
+
   return {
     advancedOpen: false,
     cfgScale: 7,
@@ -29,11 +36,11 @@ function createVideoViewModel(overrides = {}) {
     fps: 8,
     frames: 16,
     guidance: 3.5,
-    handleCancel: vi.fn().mockResolvedValue(undefined),
-    handleDownload: vi.fn(),
-    handleInitImageChange: vi.fn(),
-    handleInitImageDrop: vi.fn(),
-    handleSubmit: vi.fn().mockResolvedValue(undefined),
+    handleCancel: createAsyncVoidMock(),
+    handleDownload: createVoidMock(),
+    handleInitImageChange: createVoidMock(),
+    handleInitImageDrop: createVoidMock(),
+    handleSubmit: createAsyncVoidMock(),
     heightStr: '512',
     heightValue: 512,
     hasSelectedModel: true,
@@ -46,22 +53,22 @@ function createVideoViewModel(overrides = {}) {
     sampleMethod: 'euler_a',
     scheduler: 'normal',
     seed: -1,
-    setAdvancedOpen: vi.fn(),
-    setCfgScale: vi.fn(),
-    setFps: vi.fn(),
-    setFrames: vi.fn(),
-    setGuidance: vi.fn(),
-    setHeightStr: vi.fn(),
-    setImmersivePreview: vi.fn(),
-    setInitImageDataUri: vi.fn(),
-    setNegativePrompt: vi.fn(),
-    setPrompt: vi.fn(),
-    setSampleMethod: vi.fn(),
-    setScheduler: vi.fn(),
-    setSeed: vi.fn(),
-    setSteps: vi.fn(),
-    setStrength: vi.fn(),
-    setWidthStr: vi.fn(),
+    setAdvancedOpen: createVoidMock(),
+    setCfgScale: createVoidMock(),
+    setFps: createVoidMock(),
+    setFrames: createVoidMock(),
+    setGuidance: createVoidMock(),
+    setHeightStr: createVoidMock(),
+    setImmersivePreview: createVoidMock(),
+    setInitImageDataUri: createVoidMock(),
+    setNegativePrompt: createVoidMock(),
+    setPrompt: createVoidMock(),
+    setSampleMethod: createVoidMock(),
+    setScheduler: createVoidMock(),
+    setSeed: createVoidMock(),
+    setSteps: createVoidMock(),
+    setStrength: createVoidMock(),
+    setWidthStr: createVoidMock(),
     stageDescription: 'Enter a prompt to generate video',
     stageStatus: 'Awaiting prompt',
     stageTitle: 'Ready',

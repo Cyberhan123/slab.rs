@@ -44,20 +44,23 @@ vi.mock('@/hooks/use-global-header-meta', () => ({
 }));
 
 vi.mock('@/hooks/use-persisted-header-select', () => ({
-  usePersistedHeaderSelect: vi.fn(() => ({ value: 'model-1', setValue: vi.fn() })),
+  usePersistedHeaderSelect: vi.fn<() => unknown>(() => ({
+    value: 'model-1',
+    setValue: vi.fn<() => void>(),
+  })),
 }));
 
 vi.mock('@/store/useChatUiStore', () => ({
-  useChatUiStore: vi.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+  useChatUiStore: vi.fn<(selector?: (state: Record<string, unknown>) => unknown) => unknown>((selector) => {
     const state = {
       deepThink: false,
-      setDeepThink: vi.fn(),
+      setDeepThink: vi.fn<() => void>(),
       hasHydrated: true,
       currentSessionId: 'session-1',
-      setCurrentSessionId: vi.fn(),
+      setCurrentSessionId: vi.fn<() => void>(),
       sessionLabels: {},
-      setSessionLabel: vi.fn(),
-      removeSessionLabel: vi.fn(),
+      setSessionLabel: vi.fn<() => void>(),
+      removeSessionLabel: vi.fn<() => void>(),
     };
     return selector ? selector(state) : state;
   }),
@@ -65,36 +68,40 @@ vi.mock('@/store/useChatUiStore', () => ({
 
 vi.mock('@/lib/api', () => ({
   apiClient: {
-    GET: vi.fn(),
-    POST: vi.fn(),
-    PUT: vi.fn(),
-    DELETE: vi.fn(),
+    GET: vi.fn<(...args: unknown[]) => unknown>(),
+    POST: vi.fn<(...args: unknown[]) => unknown>(),
+    PUT: vi.fn<(...args: unknown[]) => unknown>(),
+    DELETE: vi.fn<(...args: unknown[]) => unknown>(),
   },
   default: {
-    useQuery: vi.fn(() => ({
+    useQuery: vi.fn<() => unknown>(() => ({
       data: null,
       isLoading: false,
-      refetch: vi.fn().mockResolvedValue(undefined),
+      refetch: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     })),
-    useMutation: vi.fn(() => ({
+    useMutation: vi.fn<() => unknown>(() => ({
       isPending: false,
-      mutateAsync: vi.fn().mockResolvedValue(undefined),
+      mutateAsync: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     })),
   },
-  getErrorMessage: vi.fn((err: Error) => err.message),
-  isApiError: vi.fn(() => false),
+  getErrorMessage: vi.fn<(err: Error) => string>((err) => err.message),
+  isApiError: vi.fn<() => boolean>(() => false),
   queryClient: {},
 }));
 
 vi.mock('@slab/i18n', () => ({
-  useTranslation: vi.fn(() => ({
-    t: vi.fn((key: string) => key),
+  useTranslation: vi.fn<() => unknown>(() => ({
+    t: vi.fn<(key: string) => string>((key) => key),
   })),
-  getResolvedAppLanguage: vi.fn(() => 'en'),
+  getResolvedAppLanguage: vi.fn<() => string>(() => 'en'),
   DEFAULT_CHAT_LABELS: ['New Chat'],
   LEGACY_DEFAULT_CHAT_LABELS: ['New Conversation'],
   Trans: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
+
+const createVoidMock = () => vi.fn<(...args: unknown[]) => void>();
+const createAsyncVoidMock = () =>
+  vi.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined);
 
 function createMockMessage(overrides: Partial<ChatMessageRecord> = {}): ChatMessageRecord {
   return {
@@ -113,12 +120,12 @@ function createChatViewModel(overrides = {}) {
     messages: [] as ChatMessageRecord[],
     isRequesting: false,
     isHistoryLoading: false,
-    abort: vi.fn(),
-    onReload: vi.fn(),
-    onContinue: vi.fn(),
+    abort: createVoidMock(),
+    onReload: createVoidMock(),
+    onContinue: createVoidMock(),
     activeConversation: 'session-1',
-    setActiveConversation: vi.fn(),
-    handleSubmit: vi.fn().mockResolvedValue(undefined),
+    setActiveConversation: createVoidMock(),
+    handleSubmit: createAsyncVoidMock(),
     ...overrides,
   };
 }
@@ -126,15 +133,15 @@ function createChatViewModel(overrides = {}) {
 function createChatSessionsViewModel(overrides = {}) {
   return {
     conversationList: [] as ChatConversationItem[],
-    createSession: vi.fn().mockResolvedValue({ id: 'session-new' }),
+    createSession: vi.fn<() => Promise<{ id: string }>>().mockResolvedValue({ id: 'session-new' }),
     currentSessionId: 'session-1',
     isCreatingSession: false,
     isDeletingSession: false,
     isSessionMutating: false,
     isSessionsLoading: false,
-    setCurrentSessionId: vi.fn(),
-    setSessionLabel: vi.fn(),
-    deleteSession: vi.fn().mockResolvedValue(true),
+    setCurrentSessionId: createVoidMock(),
+    setSessionLabel: createVoidMock(),
+    deleteSession: vi.fn<() => Promise<boolean>>().mockResolvedValue(true),
     ...overrides,
   };
 }

@@ -1,0 +1,26 @@
+{
+  "name": "@slab/plugin-video-subtitle-translator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && vite build && bun run sync:integrity",
+    "dev": "vite --host 127.0.0.1",
+    "sync:integrity": "bun ../../packages/slab-plugin-sdk/scripts/generate-plugin-integrity.ts ."
+  },
+  "dependencies": {
+    "@slab/plugin-sdk": "workspace:*",
+    "@slab/plugin-ui": "workspace:*",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.8"
+  },
+  "license": "AGPL-3.0-only"
+}
