@@ -11,7 +11,7 @@ import {
   type HeaderMeta,
   type HeaderMetaOverride,
 } from "@/layouts/header-meta";
-import type { HeaderControl } from "@/layouts/header-controls";
+import type { HeaderControl, HeaderSearchControl } from "@/layouts/header-controls";
 
 type HeaderMetaEntry = {
   id: string;
@@ -23,13 +23,21 @@ type HeaderControlEntry = {
   control: HeaderControl;
 };
 
+type HeaderSearchEntry = {
+  id: string;
+  search: HeaderSearchControl;
+};
+
 export type GlobalHeaderContextValue = {
   meta: HeaderMeta;
   control: HeaderControl | null;
+  search: HeaderSearchControl | null;
   setMeta: (id: string, meta: HeaderMetaOverride) => void;
   clearMeta: (id: string) => void;
   setControl: (id: string, control: HeaderControl) => void;
   clearControl: (id: string) => void;
+  setSearch: (id: string, search: HeaderSearchControl) => void;
+  clearSearch: (id: string) => void;
 };
 
 export const GlobalHeaderContext = createContext<GlobalHeaderContextValue | null>(null);
@@ -52,6 +60,7 @@ export function GlobalHeaderProvider({
 }: GlobalHeaderProviderProps) {
   const [entries, setEntries] = useState<HeaderMetaEntry[]>([]);
   const [controlEntries, setControlEntries] = useState<HeaderControlEntry[]>([]);
+  const [searchEntries, setSearchEntries] = useState<HeaderSearchEntry[]>([]);
 
   const setMeta = useCallback((id: string, meta: HeaderMetaOverride) => {
     setEntries((current) => {
@@ -89,6 +98,24 @@ export function GlobalHeaderProvider({
     setControlEntries((current) => current.filter((entry) => entry.id !== id));
   }, []);
 
+  const setSearch = useCallback((id: string, search: HeaderSearchControl) => {
+    setSearchEntries((current) => {
+      const index = current.findIndex((entry) => entry.id === id);
+
+      if (index === -1) {
+        return [...current, { id, search }];
+      }
+
+      return current.map((entry, entryIndex) =>
+        entryIndex === index ? { ...entry, search } : entry,
+      );
+    });
+  }, []);
+
+  const clearSearch = useCallback((id: string) => {
+    setSearchEntries((current) => current.filter((entry) => entry.id !== id));
+  }, []);
+
   const meta = useMemo(
     () => entries.reduce((current, entry) => mergeHeaderMeta(current, entry.meta), defaultMeta),
     [defaultMeta, entries],
@@ -100,6 +127,13 @@ export function GlobalHeaderProvider({
 
     return controlEntries[controlEntries.length - 1]?.control ?? null;
   }, [controlEntries]);
+  const search = useMemo(() => {
+    if (searchEntries.length === 0) {
+      return null;
+    }
+
+    return searchEntries[searchEntries.length - 1]?.search ?? null;
+  }, [searchEntries]);
 
   useEffect(() => {
     document.title = `${meta.title} | Slab`;
@@ -109,12 +143,15 @@ export function GlobalHeaderProvider({
     () => ({
       meta,
       control,
+      search,
       setMeta,
       clearMeta,
       setControl,
       clearControl,
+      setSearch,
+      clearSearch,
     }),
-    [clearControl, clearMeta, control, meta, setControl, setMeta],
+    [clearControl, clearMeta, clearSearch, control, meta, search, setControl, setMeta, setSearch],
   );
 
   return <GlobalHeaderContext.Provider value={value}>{children}</GlobalHeaderContext.Provider>;

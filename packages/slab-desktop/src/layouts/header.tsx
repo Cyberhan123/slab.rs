@@ -1,5 +1,6 @@
 import { History, Search } from "lucide-react"
 import { useTranslation } from "@slab/i18n"
+import { Input } from "@slab/components/input"
 import { useGlobalHeaderState } from "@/hooks/use-global-header-meta"
 import type { HeaderSelectControl } from "@/layouts/header-controls"
 import { WindowControls } from "@/layouts/window-controls"
@@ -63,12 +64,15 @@ export default function Header({ variant = "default" }: HeaderProps) {
   const {
     meta: { title, subtitle },
     control,
+    search,
   } = useGlobalHeaderState()
   const isChatVariant = variant === "chat"
   const isMinimalVariant = variant === "minimal"
-  const searchPlaceholder = isChatVariant
+  const defaultSearchPlaceholder = isChatVariant
     ? t("layouts.header.search.chat")
     : t("layouts.header.search.default")
+  const searchPlaceholder = search?.placeholder ?? defaultSearchPlaceholder
+  const searchAriaLabel = search?.ariaLabel ?? searchPlaceholder
   const subtitleParts = isChatVariant ? subtitle.split(" - ") : [subtitle]
   const displaySubtitle = subtitleParts[0] ?? subtitle
   const shellContextLabel = isChatVariant
@@ -107,7 +111,19 @@ export default function Header({ variant = "default" }: HeaderProps) {
           <>
             <div className="shell-search hidden h-8 min-w-[12rem] flex-1 items-center gap-2.5 rounded-full px-3.5 text-[12px] text-[var(--shell-search-foreground)] md:flex lg:w-64">
               <Search className="size-3.5 shrink-0" />
-              <span className="truncate">{searchPlaceholder}</span>
+              {search ? (
+                <Input
+                  type="search"
+                  value={search.value}
+                  onChange={(event) => search.onValueChange(event.target.value)}
+                  placeholder={searchPlaceholder}
+                  aria-label={searchAriaLabel}
+                  disabled={search.disabled}
+                  className="h-full border-0 bg-transparent p-0 text-[12px] text-[var(--shell-search-foreground)] shadow-none outline-none placeholder:text-[var(--shell-search-foreground)]/70 focus-visible:border-transparent focus-visible:ring-0"
+                />
+              ) : (
+                <span className="truncate">{searchPlaceholder}</span>
+              )}
             </div>
             <span className="hidden h-4 w-px shrink-0 bg-[var(--shell-divider)] md:block" />
             <div
