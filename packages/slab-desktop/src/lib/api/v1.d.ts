@@ -228,9 +228,57 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["list_image_generations"];
         put?: never;
         post: operations["generate_images"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/images/generations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_image_generation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/images/generations/{id}/artifacts/{index}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_image_generation_artifact"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/images/generations/{id}/reference": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_image_generation_reference"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -397,6 +445,134 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_plugins"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["install_plugin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/market": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_market_plugins"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_plugin"];
+        put?: never;
+        post?: never;
+        delete: operations["delete_plugin"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/{id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["disable_plugin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/{id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["enable_plugin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/{id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["start_plugin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/{id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["stop_plugin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sessions": {
         parameters: {
             query?: never;
@@ -528,22 +704,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/system/gpu": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["gpu_status"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/subtitles/render": {
         parameters: {
             query?: never;
@@ -554,6 +714,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["render_subtitle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/system/gpu": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["gpu_status"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -663,9 +839,57 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["list_video_generations"];
         put?: never;
         post: operations["generate_video"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/video/generations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_video_generation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/video/generations/{id}/artifact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_video_generation_artifact"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/video/generations/{id}/reference": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_video_generation_reference"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1129,6 +1353,10 @@ export interface components {
         CreateSessionRequest: {
             name?: string | null;
         };
+        DeletePluginResponse: {
+            deleted: boolean;
+            id: string;
+        };
         /** @description Request body for `POST /v1/models/download`. */
         DownloadModelRequest: {
             /** @description Model ID from `/v1/models`. */
@@ -1225,6 +1453,8 @@ export interface components {
             mode?: components["schemas"]["ImageMode"];
             /** @description The model identifier to use. */
             model: string;
+            /** @description Optional catalog model identifier used for history attribution. */
+            model_id?: string | null;
             /**
              * Format: int32
              * @description Number of images to generate (default `1`).
@@ -1259,6 +1489,32 @@ export interface components {
              */
             width?: number;
         };
+        ImageGenerationTaskResponse: {
+            backend_id: string;
+            created_at: string;
+            error_msg?: string | null;
+            /** Format: int32 */
+            height: number;
+            image_urls: string[];
+            mode: string;
+            model_id?: string | null;
+            model_path: string;
+            negative_prompt?: string | null;
+            primary_image_url?: string | null;
+            progress?: null | components["schemas"]["TaskProgressResponse"];
+            prompt: string;
+            reference_image_url?: string | null;
+            request_data: unknown;
+            /** Format: int32 */
+            requested_count: number;
+            result_data?: unknown;
+            status: components["schemas"]["TaskStatus"];
+            task_id: string;
+            task_type: string;
+            updated_at: string;
+            /** Format: int32 */
+            width: number;
+        };
         /**
          * @description Generation mode.
          * @enum {string}
@@ -1267,6 +1523,13 @@ export interface components {
         ImportModelPackMultipartRequest: {
             /** Format: binary */
             file: string;
+        };
+        InstallPluginRequest: {
+            packageSha256?: string | null;
+            packageUrl?: string | null;
+            pluginId: string;
+            sourceId?: string | null;
+            version?: string | null;
         };
         /** @description Query parameters for listing files in a HuggingFace repo. */
         ListAvailableQuery: {
@@ -1433,6 +1696,55 @@ export interface components {
         OperationAcceptedResponse: {
             operation_id: string;
         };
+        PluginMarketResponse: {
+            description?: string | null;
+            enabled: boolean;
+            homepage?: string | null;
+            id: string;
+            installedVersion?: string | null;
+            name: string;
+            packageSha256?: string | null;
+            packageUrl: string;
+            sourceId: string;
+            tags: string[];
+            updateAvailable: boolean;
+            version: string;
+        };
+        PluginPath: {
+            id: string;
+        };
+        PluginResponse: {
+            allowHosts: string[];
+            availableVersion?: string | null;
+            compatibility: Record<string, never>;
+            contributions: Record<string, never>;
+            enabled: boolean;
+            error?: string | null;
+            hasWasm: boolean;
+            id: string;
+            installRoot?: string | null;
+            installedAt?: string | null;
+            installedVersion?: string | null;
+            lastError?: string | null;
+            lastSeenAt?: string | null;
+            lastStartedAt?: string | null;
+            lastStoppedAt?: string | null;
+            manifestHash?: string | null;
+            /** Format: int32 */
+            manifestVersion: number;
+            name: string;
+            networkMode: string;
+            permissions: Record<string, never>;
+            removable: boolean;
+            runtimeStatus: string;
+            sourceKind: string;
+            sourceRef?: string | null;
+            uiEntry?: string | null;
+            updateAvailable: boolean;
+            updatedAt?: string | null;
+            valid: boolean;
+            version: string;
+        };
         /** @description Pricing info for cost tracking. */
         PricingRequest: {
             /**
@@ -1452,6 +1764,22 @@ export interface components {
             input: number;
             /** Format: double */
             output: number;
+        };
+        RenderSubtitleRequest: {
+            entries: components["schemas"]["SubtitleEntryRequest"][];
+            format: components["schemas"]["SubtitleFormatRequest"];
+            /** @description Optional absolute output path. Defaults to `<source_stem>.<variant>.srt`. */
+            output_path?: string | null;
+            /** @description Whether an existing output file should be overwritten. Defaults to true. */
+            overwrite?: boolean;
+            /** @description Absolute path to the source video/audio file used for default output naming. */
+            source_path: string;
+            variant: components["schemas"]["SubtitleVariantRequest"];
+        };
+        RenderSubtitleResponse: {
+            entry_count: number;
+            format: string;
+            output_path: string;
         };
         /** @description Default runtime parameters (request). */
         RuntimePresetsRequest: {
@@ -1597,25 +1925,14 @@ export interface components {
             /** @description Unique ID of the newly created agent thread. */
             thread_id: string;
         };
+        StopPluginRequest: {
+            lastError?: string | null;
+        };
         StopSequences: string | string[];
-        RenderSubtitleRequest: {
-            entries: components["schemas"]["SubtitleEntryRequest"][];
-            format: components["schemas"]["SubtitleFormatRequest"];
-            /** @description Optional absolute output path. Defaults to `<source_stem>.<variant>.srt`. */
-            output_path?: string | null;
-            /** @description Whether an existing output file should be overwritten. Defaults to true. */
-            overwrite?: boolean;
-            /** @description Absolute path to the source video/audio file used for default output naming. */
-            source_path: string;
-            variant: components["schemas"]["SubtitleVariantRequest"];
-        };
-        RenderSubtitleResponse: {
-            entry_count: number;
-            format: string;
-            output_path: string;
-        };
         SubtitleEntryRequest: {
+            /** Format: int64 */
             end_ms: number;
+            /** Format: int64 */
             start_ms: number;
             text: string;
         };
@@ -1688,7 +2005,9 @@ export interface components {
             type?: string | null;
         };
         TimedTextSegmentResponse: {
+            /** Format: int64 */
             end_ms?: number | null;
+            /** Format: int64 */
             start_ms?: number | null;
             text?: string | null;
         };
@@ -1879,6 +2198,8 @@ export interface components {
             init_image?: string | null;
             /** @description The model identifier to use. */
             model: string;
+            /** @description Optional catalog model identifier used for history attribution. */
+            model_id?: string | null;
             /** @description Negative text prompt. */
             negative_prompt?: string | null;
             /** @description Text description of the desired video content. */
@@ -1912,6 +2233,32 @@ export interface components {
              * @description Frame width in pixels (default `512`).
              */
             width?: number;
+        };
+        VideoGenerationTaskResponse: {
+            backend_id: string;
+            created_at: string;
+            error_msg?: string | null;
+            /** Format: float */
+            fps: number;
+            /** Format: int32 */
+            frames: number;
+            /** Format: int32 */
+            height: number;
+            model_id?: string | null;
+            model_path: string;
+            negative_prompt?: string | null;
+            progress?: null | components["schemas"]["TaskProgressResponse"];
+            prompt: string;
+            reference_image_url?: string | null;
+            request_data: unknown;
+            result_data?: unknown;
+            status: components["schemas"]["TaskStatus"];
+            task_id: string;
+            task_type: string;
+            updated_at: string;
+            video_url?: string | null;
+            /** Format: int32 */
+            width: number;
         };
     };
     responses: never;
@@ -2086,6 +2433,33 @@ export interface operations {
             };
         };
     };
+    list_audio_transcriptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audio transcription tasks listed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AudioTranscriptionTaskResponse"][];
+                };
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     transcribe: {
         parameters: {
             query?: never;
@@ -2115,33 +2489,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Backend error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    list_audio_transcriptions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Audio transcription tasks listed */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AudioTranscriptionTaskResponse"][];
-                };
             };
             /** @description Backend error */
             500: {
@@ -2402,6 +2749,33 @@ export interface operations {
             };
         };
     };
+    list_image_generations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Image generation tasks listed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImageGenerationTaskResponse"][];
+                };
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     generate_images: {
         parameters: {
             query?: never;
@@ -2426,6 +2800,115 @@ export interface operations {
             };
             /** @description Bad request (invalid parameters) */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_image_generation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Image generation task ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Image generation task detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImageGenerationTaskResponse"];
+                };
+            };
+            /** @description Task not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_image_generation_artifact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Image generation task ID */
+                id: string;
+                /** @description Artifact index */
+                index: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Image artifact bytes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Artifact not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_image_generation_reference: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Image generation task ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reference image bytes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Reference image not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2955,6 +3438,206 @@ export interface operations {
             };
         };
     };
+    list_plugins: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List discovered plugins */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginResponse"][];
+                };
+            };
+        };
+    };
+    install_plugin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstallPluginRequest"];
+            };
+        };
+        responses: {
+            /** @description Installed plugin */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginResponse"];
+                };
+            };
+        };
+    };
+    list_market_plugins: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Remote market catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginMarketResponse"][];
+                };
+            };
+        };
+    };
+    get_plugin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Plugin detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginResponse"];
+                };
+            };
+        };
+    };
+    delete_plugin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted plugin */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletePluginResponse"];
+                };
+            };
+        };
+    };
+    disable_plugin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Disabled plugin */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginResponse"];
+                };
+            };
+        };
+    };
+    enable_plugin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Enabled plugin */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginResponse"];
+                };
+            };
+        };
+    };
+    start_plugin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Marked plugin as running */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginResponse"];
+                };
+            };
+        };
+    };
+    stop_plugin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StopPluginRequest"];
+            };
+        };
+        responses: {
+            /** @description Marked plugin as stopped */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginResponse"];
+                };
+            };
+        };
+    };
     list_sessions: {
         parameters: {
             query?: never;
@@ -3301,26 +3984,6 @@ export interface operations {
             };
         };
     };
-    gpu_status: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Current GPU telemetry snapshot */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GpuStatusResponse"];
-                };
-            };
-        };
-    };
     render_subtitle: {
         parameters: {
             query?: never;
@@ -3356,6 +4019,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    gpu_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current GPU telemetry snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GpuStatusResponse"];
+                };
             };
         };
     };
@@ -3660,6 +4343,33 @@ export interface operations {
             };
         };
     };
+    list_video_generations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Video generation tasks listed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoGenerationTaskResponse"][];
+                };
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     generate_video: {
         parameters: {
             query?: never;
@@ -3684,6 +4394,113 @@ export interface operations {
             };
             /** @description Bad request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_video_generation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Video generation task ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Video generation task detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoGenerationTaskResponse"];
+                };
+            };
+            /** @description Task not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_video_generation_artifact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Video generation task ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Generated MP4 bytes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Artifact not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_video_generation_reference: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Video generation task ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reference image bytes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Reference image not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

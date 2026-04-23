@@ -16,6 +16,15 @@ export type HeaderSelectControl = {
   emptyLabel?: string;
 };
 
+export type HeaderSearchControl = {
+  type: 'search';
+  value: string;
+  onValueChange: (value: string) => void;
+  placeholder?: string;
+  ariaLabel?: string;
+  disabled?: boolean;
+};
+
 export type HeaderControl = HeaderSelectControl;
 
 export const HEADER_SELECT_KEYS = {

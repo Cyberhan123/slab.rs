@@ -2,11 +2,28 @@ import { page } from "vitest/browser";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import PluginsPage from "@/pages/plugins";
-import type { PluginRecord } from "@/lib/plugin-market-api";
+import type { components } from "@/lib/api/v1.d.ts";
 import { renderDesktopScene } from "../test-utils";
 
-const { mockIsTauri } = vi.hoisted(() => ({
+type PluginRecord = components["schemas"]["PluginResponse"];
+
+const {
+  mockApiState,
+  mockIsTauri,
+  mockUseMutation,
+  mockUseQuery,
+} = vi.hoisted(() => ({
+  mockApiState: {
+    plugins: [] as unknown[],
+    marketPlugins: [] as unknown[],
+    pluginsLoading: false,
+    marketPluginsLoading: false,
+    pluginsError: null as unknown,
+    marketPluginsError: null as unknown,
+  },
   mockIsTauri: vi.fn<() => boolean>(),
+  mockUseMutation: vi.fn<(...args: unknown[]) => unknown>(),
+  mockUseQuery: vi.fn<(...args: unknown[]) => unknown>(),
 }));
 
 vi.mock("@/hooks/use-tauri", () => ({
@@ -16,17 +33,15 @@ vi.mock("@/hooks/use-tauri", () => ({
 vi.mock("@/hooks/use-global-header-meta", () => ({
   usePageHeader: vi.fn<() => void>(),
   usePageHeaderControl: vi.fn<() => void>(),
+  usePageHeaderSearch: vi.fn<() => void>(),
 }));
 
-vi.mock("@/lib/plugin-market-api", () => ({
-  listPlugins: vi.fn<() => Promise<PluginRecord[]>>().mockResolvedValue([]),
-  listMarketPlugins: vi.fn<() => Promise<unknown[]>>().mockResolvedValue([]),
-  installPlugin: vi.fn<(...args: unknown[]) => unknown>(),
-  enablePlugin: vi.fn<(...args: unknown[]) => unknown>(),
-  disablePlugin: vi.fn<(...args: unknown[]) => unknown>(),
-  removePlugin: vi.fn<(...args: unknown[]) => unknown>(),
-  startPlugin: vi.fn<(...args: unknown[]) => unknown>(),
-  stopPlugin: vi.fn<(...args: unknown[]) => unknown>(),
+vi.mock("@/lib/api", () => ({
+  default: {
+    useMutation: mockUseMutation,
+    useQuery: mockUseQuery,
+  },
+  getErrorMessage: (error: unknown) => (error instanceof Error ? error.message : String(error)),
 }));
 
 vi.mock("@/lib/plugin-host-bridge", () => ({
@@ -78,9 +93,37 @@ function createMockPlugin(overrides: Partial<PluginRecord> = {}): PluginRecord {
   };
 }
 
+function configurePluginQueries() {
+  mockUseQuery.mockImplementation((_method: unknown, path: unknown) => {
+    const isMarketQuery = path === "/v1/plugins/market";
+    const data = isMarketQuery ? mockApiState.marketPlugins : mockApiState.plugins;
+    const error = isMarketQuery ? mockApiState.marketPluginsError : mockApiState.pluginsError;
+    const isLoading = isMarketQuery ? mockApiState.marketPluginsLoading : mockApiState.pluginsLoading;
+
+    return {
+      data,
+      error,
+      isLoading,
+      isFetching: isLoading,
+      refetch: vi.fn<() => Promise<{ data: unknown[]; error: unknown }>>().mockResolvedValue({ data, error }),
+    };
+  });
+
+  mockUseMutation.mockReturnValue({
+    mutateAsync: vi.fn<() => Promise<Record<string, never>>>().mockResolvedValue({}),
+  });
+}
+
 describe("PluginsPage browser visual regression", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockApiState.plugins = [];
+    mockApiState.marketPlugins = [];
+    mockApiState.pluginsLoading = false;
+    mockApiState.marketPluginsLoading = false;
+    mockApiState.pluginsError = null;
+    mockApiState.marketPluginsError = null;
+    configurePluginQueries();
   });
 
   it("captures the plugins page non-Tauri fallback state", async () => {
@@ -99,10 +142,6 @@ describe("PluginsPage browser visual regression", () => {
   it("captures the plugins page empty state in Tauri", async () => {
     mockIsTauri.mockReturnValue(true);
 
-    const pluginApi = await import("@/lib/plugin-market-api");
-    vi.mocked(pluginApi.listPlugins).mockResolvedValue([]);
-    vi.mocked(pluginApi.listMarketPlugins).mockResolvedValue([]);
-
     await renderDesktopScene(<PluginsPage />, { route: "/plugins" });
     await new Promise((resolve) => setTimeout(resolve, 100));
 
@@ -114,9 +153,7 @@ describe("PluginsPage browser visual regression", () => {
 
   it("captures the plugins page with plugins loaded in Tauri", async () => {
     mockIsTauri.mockReturnValue(true);
-
-    const pluginApi = await import("@/lib/plugin-market-api");
-    vi.mocked(pluginApi.listPlugins).mockResolvedValue([
+    mockApiState.plugins = [
       createMockPlugin({
         id: "plugin-1",
         name: "Image Enhancer",
@@ -135,8 +172,7 @@ describe("PluginsPage browser visual regression", () => {
         valid: false,
         lastError: "Missing manifest.json",
       }),
-    ]);
-    vi.mocked(pluginApi.listMarketPlugins).mockResolvedValue([]);
+    ];
 
     await renderDesktopScene(<PluginsPage />, { route: "/plugins" });
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -149,10 +185,8 @@ describe("PluginsPage browser visual regression", () => {
 
   it("captures the plugins page loading state in Tauri", async () => {
     mockIsTauri.mockReturnValue(true);
-
-    const pluginApi = await import("@/lib/plugin-market-api");
-    const pendingPromise = new Promise<PluginRecord[]>(() => {});
-    vi.mocked(pluginApi.listPlugins).mockReturnValue(pendingPromise as never);
+    mockApiState.pluginsLoading = true;
+    mockApiState.marketPluginsLoading = true;
 
     await renderDesktopScene(<PluginsPage />, { route: "/plugins" });
 
@@ -162,4 +196,3 @@ describe("PluginsPage browser visual regression", () => {
     );
   });
 });
-

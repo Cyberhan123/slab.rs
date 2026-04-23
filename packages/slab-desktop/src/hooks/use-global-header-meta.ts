@@ -2,7 +2,7 @@ import { useContext, useId, useLayoutEffect } from "react";
 import { GlobalHeaderContext } from "@/layouts/global-header-provider";
 import type { HeaderMeta, HeaderMetaOverride } from "@/layouts/header-meta";
 import type { GlobalHeaderContextValue } from "@/layouts/global-header-provider";
-import type { HeaderControl } from "@/layouts/header-controls";
+import type { HeaderControl, HeaderSearchControl } from "@/layouts/header-controls";
 
 export function useGlobalHeaderMeta(): HeaderMeta {
   const context = useContext(GlobalHeaderContext);
@@ -14,7 +14,7 @@ export function useGlobalHeaderMeta(): HeaderMeta {
   return context.meta;
 }
 
-export function useGlobalHeaderState(): Pick<GlobalHeaderContextValue, "meta" | "control"> {
+export function useGlobalHeaderState(): Pick<GlobalHeaderContextValue, "meta" | "control" | "search"> {
   const context = useContext(GlobalHeaderContext);
 
   if (!context) {
@@ -24,6 +24,7 @@ export function useGlobalHeaderState(): Pick<GlobalHeaderContextValue, "meta" | 
   return {
     meta: context.meta,
     control: context.control,
+    search: context.search,
   };
 }
 
@@ -100,6 +101,54 @@ export function usePageHeaderControl(
     placeholder,
     setControl,
     type,
+    value,
+  ]);
+}
+
+export function usePageHeaderSearch(
+  search: HeaderSearchControl | null | undefined,
+): void {
+  const context = useContext(GlobalHeaderContext);
+  const id = useId();
+
+  if (!context) {
+    throw new Error("usePageHeaderSearch must be used within GlobalHeaderProvider");
+  }
+
+  const { setSearch, clearSearch } = context;
+  const isActive = search != null;
+  const value = search?.type === "search" ? search.value : "";
+  const onValueChange = search?.type === "search" ? search.onValueChange : undefined;
+  const placeholder = search?.type === "search" ? search.placeholder : undefined;
+  const ariaLabel = search?.type === "search" ? search.ariaLabel : undefined;
+  const disabled = search?.type === "search" ? search.disabled : undefined;
+
+  useLayoutEffect(() => {
+    if (!isActive || !onValueChange) {
+      return undefined;
+    }
+
+    setSearch(id, {
+      type: "search",
+      value,
+      onValueChange,
+      placeholder,
+      ariaLabel,
+      disabled,
+    });
+
+    return () => {
+      clearSearch(id);
+    };
+  }, [
+    ariaLabel,
+    clearSearch,
+    disabled,
+    id,
+    isActive,
+    onValueChange,
+    placeholder,
+    setSearch,
     value,
   ]);
 }
