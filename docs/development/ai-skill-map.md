@@ -24,8 +24,8 @@ slab.rs no longer uses a separate project-skill wrapper layer. Most tasks should
 - Runtime and engine work
   Start in `bin/slab-runtime/**`, especially `bin/slab-runtime/src/{config,context,domain,infra}/**` and `bin/slab-runtime/src/infra/backends/**`, plus `crates/slab-runtime-core/**`, `crates/slab-llama/**`, `crates/slab-whisper/**`, `crates/slab-diffusion/**`, and `crates/slab-ggml/**`.
 - Plugin package and bridge work
-  Start in `plugins/**`, `packages/slab-desktop/src/pages/plugins/**`, `packages/slab-desktop/src/lib/plugin-sdk.ts`, and `bin/slab-app/src-tauri/src/plugins/**`.
-  Manifest v1 work should preserve the separation between runtime assets, `contributes.*`, `permissions.*`, and agent capabilities.
+  Start in `plugins/**`, `packages/slab-desktop/src/pages/plugins/**`, `packages/slab-desktop/src/lib/plugin-host-bridge.ts`, `packages/slab-desktop/src/lib/plugin-market-api.ts`, `packages/slab-plugin-sdk/**`, `packages/slab-plugin-ui/**`, and `bin/slab-app/src-tauri/src/plugins/**`.
+  Manifest v1 work should preserve the separation between runtime assets, `contributes.*`, `permissions.*`, and agent capabilities. The default third-party UI runtime is a sandboxed Tauri child WebView with token mirroring, not Module Federation.
 - Windows full-installer packaging work
   Start in `bin/slab-windows-full-installer/**`, `bin/slab-app/src-tauri/build.rs`, `bin/slab-app/src-tauri/installer-hooks/**`, and `Makefile.toml`. Add `tauri-v2` only when the change crosses into Tauri config or NSIS hook behavior.
 - Shared contracts, settings, and manifests
@@ -49,5 +49,5 @@ slab.rs no longer uses a separate project-skill wrapper layer. Most tasks should
 - Chat flow changes often need both `use-x-chat` and `x-request`.
 - Chat rendering changes sometimes pair `use-x-chat` with `x-markdown`.
 - A custom provider change should usually start with `use-x-chat` and `x-request`, then add `x-chat-provider` only if needed.
-- Plugin UI work often starts in `packages/slab-desktop/src/pages/plugins/**` and adds `tauri-v2` only when the change crosses into `src-tauri`, capabilities, permissions, or plugin-view lifecycle code.
+- Plugin UI work often starts in `packages/slab-desktop/src/pages/plugins/**`, `packages/slab-plugin-ui/**`, or `plugins/<plugin-id>/src/**` and adds `tauri-v2` only when the change crosses into `src-tauri`, capabilities, permissions, or plugin-view lifecycle code.
 - Agent changes usually touch both `slab-server/src/api/v1/agent/**` and `crates/slab-agent/**` without any repo-local skill. Built-in deterministic tools belong in `crates/slab-agent-tools/**`, not in the control-plane crate.

@@ -9,6 +9,7 @@
 //! - [`error`] crate-level error type.
 //! - [`inference`] shared inference request and response types.
 //! - [`media`] reusable image and frame payload types.
+//! - [`plugin`] shared plugin manifest and contribution contracts.
 //! - [`runtime`] shared runtime model and load specifications.
 //! - [`settings`] PMID catalog and typed configuration snapshots for the settings system.
 //! - [`whisper`] shared whisper VAD and decode option types.
@@ -24,6 +25,7 @@ pub mod error;
 pub mod inference;
 pub mod load_config;
 pub mod media;
+pub mod plugin;
 pub mod runtime;
 pub mod settings;
 pub mod whisper;
@@ -60,6 +62,14 @@ pub use load_config::{
     GgmlWhisperLoadConfig, OnnxLoadConfig, RuntimeBackendLoadSpec,
 };
 pub use media::{GeneratedFrame, GeneratedImage, RawImageInput};
+pub use plugin::{
+    PluginAgentCapabilityContribution, PluginCapabilityKind, PluginCapabilityTransport,
+    PluginCapabilityTransportType, PluginCommandContribution, PluginCompatibilityManifest,
+    PluginContributesManifest, PluginFilePermissions, PluginInfo, PluginIntegrityManifest,
+    PluginManifest, PluginNetworkManifest, PluginNetworkMode, PluginPermissionsManifest,
+    PluginRouteContribution, PluginRuntimeManifest, PluginSettingsContribution,
+    PluginSidebarContribution, PluginUiManifest, PluginWasmManifest,
+};
 pub use runtime::{
     Capability, DiffusionLoadOptions, DriverDescriptor, DriverHints, DriverLoadStyle, ModelFamily,
     ModelSource, ModelSourceKind, ModelSpec, RuntimeModelLoadCommand, RuntimeModelLoadSpec,

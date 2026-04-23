@@ -10,6 +10,7 @@ use reqwest::blocking::Client as BlockingHttpClient;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use tauri::{AppHandle, Emitter};
 
+use super::authorize_slab_api_request;
 use super::registry::LoadedPlugin;
 use super::types::{
     PluginApiRequest, PluginApiResponse, PluginCallRequest, PluginCallResponse, PluginEmitRequest,
@@ -91,25 +92,25 @@ struct HostFunctionContext {
     app_handle: AppHandle,
     blocking_http_client: BlockingHttpClient,
     api_endpoint: ApiEndpointConfig,
+    slab_api_permissions: Vec<String>,
 }
 
 extism::host_fn!(slab_api_request(context: HostFunctionContext; payload: String) -> String {
     let context = context.get()?;
-    let blocking_http_client = {
+    let (blocking_http_client, api_endpoint, slab_api_permissions) = {
         let guard = context
             .lock()
             .map_err(|_| extism::Error::msg("failed to lock extism host context"))?;
-        guard.blocking_http_client.clone()
+        (
+            guard.blocking_http_client.clone(),
+            guard.api_endpoint.clone(),
+            guard.slab_api_permissions.clone(),
+        )
     };
 
     let api_request: PluginApiRequest =
         serde_json::from_str(&payload).map_err(|e| extism::Error::msg(format!("invalid API payload: {e}")))?;
-    let api_endpoint = {
-        let guard = context
-            .lock()
-            .map_err(|_| extism::Error::msg("failed to lock extism host context"))?;
-        guard.api_endpoint.clone()
-    };
+    authorize_slab_api_request(&slab_api_permissions, &api_request).map_err(extism::Error::msg)?;
     let response = execute_plugin_api_request_blocking(&blocking_http_client, &api_endpoint, &api_request)
         .map_err(extism::Error::msg)?;
     serde_json::to_string(&response).map_err(extism::Error::from)
@@ -157,10 +158,9 @@ fn build_extism_plugin(
     if plugin.manifest.permissions.network.mode == PluginNetworkMode::Allowlist
         && !plugin.manifest.permissions.network.allow_hosts.is_empty()
     {
-        manifest =
-            manifest.with_allowed_hosts(
-                plugin.manifest.permissions.network.allow_hosts.clone().into_iter(),
-            );
+        manifest = manifest.with_allowed_hosts(
+            plugin.manifest.permissions.network.allow_hosts.clone().into_iter(),
+        );
     }
 
     let context = HostFunctionContext {
@@ -168,6 +168,7 @@ fn build_extism_plugin(
         app_handle: app_handle.clone(),
         blocking_http_client,
         api_endpoint,
+        slab_api_permissions: plugin.manifest.permissions.slab_api.clone(),
     };
     let user_data = UserData::new(context);
 

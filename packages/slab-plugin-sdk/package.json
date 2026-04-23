@@ -1,0 +1,26 @@
+{
+  "name": "@slab/plugin-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit && bun run build:browser",
+    "build:browser": "bun build ./src/index.ts --outdir ./browser --entry-naming slab-plugin-sdk.js --format iife --target browser --global-name=SlabPluginSdk",
+    "test": "vitest --config vitest.config.ts",
+    "test:run": "vitest run --config vitest.config.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./browser": "./browser/slab-plugin-sdk.js",
+    "./integrity": "./src/integrity.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.12",
+    "@types/node": "^25.6.0",
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.4"
+  },
+  "license": "AGPL-3.0-only"
+}
+

@@ -19,14 +19,18 @@ vi.mock('@/hooks/use-global-header-meta', () => ({
 }));
 
 vi.mock('@slab/i18n', () => ({
-  useTranslation: vi.fn(() => ({
-    t: vi.fn((key: string) => key),
+  useTranslation: vi.fn<() => unknown>(() => ({
+    t: vi.fn<(key: string) => string>((key) => key),
     i18n: {
       resolvedLanguage: 'en',
       language: 'en',
     },
   })),
 }));
+
+const createVoidMock = () => vi.fn<(...args: unknown[]) => void>();
+const createAsyncVoidMock = () =>
+  vi.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined);
 
 function createMockTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -61,22 +65,22 @@ function createTaskViewModel(overrides = {}) {
     paginatedTasks: [] as Task[],
     paginationLabel: 'pages.task.table.pagination.empty',
     selectedTask: null,
-    setSelectedTask: vi.fn(),
+    setSelectedTask: createVoidMock(),
     taskResult: null,
     tasksError: null,
     tasksLoading: false,
     cancelTaskMutation: {
       isPending: false,
-      mutateAsync: vi.fn().mockResolvedValue(undefined),
+      mutateAsync: createAsyncVoidMock(),
     },
     restartTaskMutation: {
       isPending: false,
-      mutateAsync: vi.fn().mockResolvedValue(undefined),
+      mutateAsync: createAsyncVoidMock(),
     },
-    fetchTaskDetail: vi.fn().mockResolvedValue(undefined),
-    cancelTask: vi.fn().mockResolvedValue(undefined),
-    restartTask: vi.fn().mockResolvedValue(undefined),
-    setPage: vi.fn(),
+    fetchTaskDetail: createAsyncVoidMock(),
+    cancelTask: createAsyncVoidMock(),
+    restartTask: createAsyncVoidMock(),
+    setPage: createVoidMock(),
     ...overrides,
   };
 }

@@ -12,6 +12,8 @@ use super::types::{
     PluginUpdateViewBoundsRequest, PluginViewBounds,
 };
 
+const PLUGIN_WEBVIEW_PREFIX: &str = "plugin-";
+
 #[derive(Default)]
 pub struct PluginViewManager {
     plugin_to_webview: Mutex<HashMap<String, String>>,
@@ -54,7 +56,7 @@ pub fn mount_plugin_view(
     validate_bounds(&request.bounds)?;
 
     let plugin = registry.get_plugin(&request.plugin_id)?;
-    let webview_label = format!("plugin-{}", request.plugin_id);
+    let webview_label = plugin_webview_label(&request.plugin_id);
     let plugin_url = plugin_ui_url(&plugin);
 
     if let Some(existing_webview) = app_handle.get_webview(&webview_label) {
@@ -70,7 +72,8 @@ pub fn mount_plugin_view(
         });
     }
 
-    let navigation_allow_hosts = collect_navigation_allow_hosts(&plugin.manifest.permissions.network);
+    let navigation_allow_hosts =
+        collect_navigation_allow_hosts(&plugin.manifest.permissions.network);
     let plugin_id = request.plugin_id.clone();
     let webview_builder = WebviewBuilder::new(
         webview_label.clone(),
@@ -132,6 +135,16 @@ pub fn unmount_plugin_view(
     Ok(())
 }
 
+pub fn plugin_webview_label(plugin_id: &str) -> String {
+    format!("{PLUGIN_WEBVIEW_PREFIX}{plugin_id}")
+}
+
+pub fn plugin_id_from_webview_label(label: &str) -> Option<String> {
+    label
+        .strip_prefix(PLUGIN_WEBVIEW_PREFIX)
+        .and_then(|plugin_id| if plugin_id.is_empty() { None } else { Some(plugin_id.to_string()) })
+}
+
 fn validate_bounds(bounds: &PluginViewBounds) -> Result<(), String> {
     if !bounds.x.is_finite()
         || !bounds.y.is_finite()
@@ -159,4 +172,20 @@ fn apply_bounds_to_webview<R: Runtime>(
         .set_size(LogicalSize::new(bounds.width, bounds.height))
         .map_err(|e| format!("failed to set webview size: {e}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{plugin_id_from_webview_label, plugin_webview_label};
+
+    #[test]
+    fn plugin_webview_label_roundtrips_plugin_id() {
+        let label = plugin_webview_label("video-subtitle-translator");
+        assert_eq!(label, "plugin-video-subtitle-translator");
+        assert_eq!(
+            plugin_id_from_webview_label(&label).as_deref(),
+            Some("video-subtitle-translator")
+        );
+        assert_eq!(plugin_id_from_webview_label("main"), None);
+    }
 }

@@ -1,0 +1,62 @@
+.plugin-shell {
+  width: min(1180px, calc(100vw - 28px));
+  margin: 0 auto;
+  padding: 24px 0 32px;
+}
+
+.hero-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.25rem;
+  margin-bottom: 1rem;
+  border: 1px solid color-mix(in oklab, var(--border) 86%, var(--background) 14%);
+  border-radius: 2rem;
+  padding: 1.5rem;
+  background:
+    linear-gradient(135deg, color-mix(in oklab, var(--brand-teal) 12%, var(--surface-1)), var(--surface-1) 48%, color-mix(in oklab, var(--brand-gold) 11%, var(--surface-1))),
+    repeating-linear-gradient(45deg, color-mix(in oklab, var(--foreground) 5%, transparent) 0 1px, transparent 1px 11px);
+  box-shadow: 0 24px 70px -48px color-mix(in oklab, var(--foreground) 38%, transparent);
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 4.25rem);
+  line-height: 0.92;
+  letter-spacing: -0.06em;
+}
+
+.plugin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.output-list {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 0.75rem 1rem;
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.output-list dt {
+  color: var(--muted-foreground);
+  font-weight: 700;
+}
+
+.output-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 860px) {
+  .hero-card {
+    flex-direction: column;
+  }
+
+  .plugin-grid {
+    grid-template-columns: 1fr;
+  }
+}

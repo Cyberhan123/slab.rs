@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -38,7 +39,10 @@ pub fn shutdown_server_sidecar<R: tauri::Runtime>(app_handle: &tauri::AppHandle<
     }
 }
 
-pub fn run_server_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_server_sidecar(
+    app: &mut tauri::App,
+    plugins_dir: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     let bundled_lib_dir = app.path().resolve("resources/libs", BaseDirectory::Resource)?;
     let log_dir = app.path().app_log_dir()?;
     std::fs::create_dir_all(&log_dir)?;
@@ -58,6 +62,7 @@ pub fn run_server_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error
             std::io::Error::other(format!("failed to resolve slab-server sidecar: {error}"))
         })?
         .args(args.clone())
+        .env("SLAB_PLUGINS_DIR", plugins_dir.to_string_lossy().into_owned())
         .spawn()
         .map_err(|error| {
             std::io::Error::other(format!("failed to spawn slab-server sidecar: {error}"))

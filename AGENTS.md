@@ -53,7 +53,9 @@ crates/slab-runtime-core (scheduler, backend protocol, worker runner)
 - `bin/slab-app` is the Tauri 2 desktop host. It mounts plugin child webviews, exposes the desktop-only plugin bridge UI, starts `bin/slab-server` as a local sidecar, and keeps the main frontend data path on HTTP instead of native business-API IPC.
 - `packages/slab-desktop` is the React 19 + Vite + React Router 7 frontend application for the Tauri desktop host. It imports UI components from `packages/slab-components` and i18n from `packages/slab-i18n`.
 - `packages/slab-components` is the shared shadcn/ui-based React component library (Radix UI + Tailwind CSS). It can be consumed by both `slab-desktop` and future mobile packages.
+- `packages/slab-plugin-ui` is the stable plugin UI ABI package (`@slab/plugin-ui`). It reuses the shared component implementation but only exports the safe plugin subset plus plugin-scoped `globals.css`.
 - `packages/slab-i18n` is the shared internationalization package (i18next + react-i18next) with locale definitions.
+- `packages/slab-plugin-sdk` is the plugin-author TypeScript SDK package (`@slab/plugin-sdk`) that wraps the host bridge for plugin webviews, theme snapshots, JSON API helpers, and plugin integrity generation.
 - `packages/vitest-rust-reporter` is a workspace helper package that adapts `cargo test` and optional `cargo llvm-cov` output into a Vitest project so Rust results appear in `vitest --ui`.
 - `bin/slab-server` is the thin HTTP gateway and headless host (axum). It depends on `crates/slab-app-core` for all domain/infra logic, adds axum `FromRef` extractors (`state_extractors.rs`) and `ServerError` → HTTP response conversion, and launches `bin/slab-runtime` through the same shared supervisor using a `tokio::process` adapter. Runtime crashes restart per backend; the HTTP host stays up unless the gateway itself fails. It exposes `/v1` plus `/api-docs/openapi.json`.
 - `crates/slab-app-core` is the HTTP-free business logic library: `context/`, `domain/`, `infra/`, `config`, `model_auto_unload`, and `runtime_supervisor`. It is the shared domain/runtime layer behind `bin/slab-server`. SQLx migrations live in `crates/slab-app-core/migrations/`.
@@ -82,9 +84,12 @@ crates/slab-runtime-core (scheduler, backend protocol, worker runner)
 - `packages/slab-desktop/src`: React frontend pages for chat, image, audio, video, hub, plugins, task, setup, settings, and about.
 - `packages/slab-desktop/src/pages/chat`: Ant Design X chat UI and page-local wrappers.
 - `packages/slab-desktop/src/pages/plugins`: desktop-only plugin center, wasm function bridge, and plugin event viewport UI.
-- `packages/slab-desktop/src/lib/plugin-sdk.ts`: frontend bridge to Tauri plugin commands and events.
+- `packages/slab-desktop/src/lib/plugin-host-bridge.ts`: frontend bridge to Tauri plugin commands and events.
+- `packages/slab-desktop/src/lib/plugin-market-api.ts`: frontend HTTP client for `/v1/plugins/*`.
 - `packages/slab-components/src`: shared UI component library (shadcn/ui, Radix UI, Tailwind CSS).
+- `packages/slab-plugin-ui/src`: stable plugin UI ABI re-exports and plugin-scoped global styles.
 - `packages/slab-i18n/src`: shared i18n setup and locale files.
+- `packages/slab-plugin-sdk/src`: plugin-author TypeScript SDK sources.
 - `packages/vitest-rust-reporter/src`: Vitest-side Rust test and coverage projection helpers for the workspace test UI.
 - `bin/slab-app/src-tauri`: Tauri host, sidecar startup, plugin runtime, capabilities, permissions, and security boundaries.
 - `docs`: public VitePress site source.
@@ -98,12 +103,16 @@ crates/slab-runtime-core (scheduler, backend protocol, worker runner)
 ## Working Rules
 
 - Keep inference behind `host -> bin/slab-server -> crates/slab-app-core runtime supervisor -> GrpcGateway -> bin/slab-runtime local composition layer -> crates/slab-runtime-core scheduler/backend protocol`; the desktop host should launch `slab-server` and keep product API traffic on HTTP.
-- Extend the existing `/v1/*` API modules instead of adding a parallel API tree. The current surface includes `agent`, `audio`, `backend`, `chat`, `ffmpeg`, `images`, `models`, `session`, `settings`, `setup`, `system`, `tasks`, and `video`.
+- Extend the existing `/v1/*` API modules instead of adding a parallel API tree. The current surface includes `agent`, `audio`, `backend`, `chat`, `ffmpeg`, `images`, `models`, `plugins`, `session`, `settings`, `setup`, `system`, `tasks`, and `video`.
 - Keep long-running AI work in task-oriented flows when the feature already follows that model.
 - Prefer `crates/slab-types` and `crates/slab-proto` for contracts that need to cross crate boundaries instead of duplicating shapes.
 - Keep `crates/slab-agent` pure: storage, HTTP, SSE/WebSocket, model adapters, and concrete tool implementations belong outside it. Put built-in deterministic tools in `crates/slab-agent-tools`; plugin and API tool adapters are registered by host/app-core layers.
 - Preserve Tauri CSP, capabilities, permissions, sidecar boundaries, and the `plugins/<plugin-id>/plugin.json` contract unless the task explicitly requires a change.
+- Keep Tauri child WebView sandboxing as the default third-party plugin UI model. Do not switch third-party plugins to Module Federation by default; treat MF only as a possible future trusted first-party option.
+- Plugin frontends should use `@slab/plugin-ui` as the public component ABI and `@slab/plugin-sdk` for theme token mirroring. Do not expose the full `@slab/components` ABI to arbitrary plugin authors.
 - Treat plugin `manifestVersion: 1` as a declaration of runtime assets, `contributes.*`, `permissions.*`, and agent capabilities. MCP is an export target for capabilities, not the plugin runtime itself.
+- Keep `plugin.json` as the static source of truth for plugin identity, version, permissions, runtime assets, and contributions; database tables only persist dynamic host state such as install source, enablement, runtime status, and timestamps.
+- Plugin WebView commands must derive the caller plugin id from the WebView label, not from plugin-supplied payload fields. Main-window plugin management may list, mount, unmount, and call any plugin; plugin WebViews may only call their own plugin and declared `permissions.slabApi` surface.
 - `plugins/` is runtime plugin content, not AI skill content; `.agents/skills` is only for agent guidance.
 - SQLx migrations in `crates/slab-app-core/migrations/` are append-only.
 - Cargo excludes `packages/slab-desktop/src`, so Rust tooling does not validate the TypeScript frontend.
@@ -152,6 +161,10 @@ bun run test:server
 # Type-check the desktop frontend
 cd packages/slab-desktop
 bun run build
+
+# Build local plugin frontends and refresh manifest integrity
+cd ../..
+bun run build:plugins
 
 # Run Tauri development mode
 cd bin/slab-app

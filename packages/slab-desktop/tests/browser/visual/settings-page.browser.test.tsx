@@ -24,28 +24,32 @@ const { mockApiUseQuery } = vi.hoisted(() => ({
 
 vi.mock('@/lib/api', () => ({
   apiClient: {
-    GET: vi.fn(),
-    POST: vi.fn(),
-    PUT: vi.fn(),
-    DELETE: vi.fn(),
+    GET: vi.fn<(...args: unknown[]) => unknown>(),
+    POST: vi.fn<(...args: unknown[]) => unknown>(),
+    PUT: vi.fn<(...args: unknown[]) => unknown>(),
+    DELETE: vi.fn<(...args: unknown[]) => unknown>(),
   },
   default: {
     useQuery: mockApiUseQuery,
-    useMutation: vi.fn(() => ({
+    useMutation: vi.fn<() => unknown>(() => ({
       isPending: false,
-      mutateAsync: vi.fn().mockResolvedValue(undefined),
+      mutateAsync: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     })),
   },
-  getErrorMessage: vi.fn((err: Error) => err.message),
-  isApiError: vi.fn(() => false),
+  getErrorMessage: vi.fn<(err: Error) => string>((err) => err.message),
+  isApiError: vi.fn<() => boolean>(() => false),
   queryClient: {},
 }));
 
 vi.mock('@slab/i18n', () => ({
-  useTranslation: vi.fn(() => ({
-    t: vi.fn((key: string) => key),
+  useTranslation: vi.fn<() => unknown>(() => ({
+    t: vi.fn<(key: string) => string>((key) => key),
   })),
 }));
+
+const createVoidMock = () => vi.fn<(...args: unknown[]) => void>();
+const createAsyncVoidMock = () =>
+  vi.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined);
 
 function createMockSettingsData(overrides: Partial<SettingsDocumentResponse> = {}): SettingsDocumentResponse {
   return {
@@ -127,8 +131,8 @@ function createSettingsAutosaveViewModel(overrides = {}) {
       dirty: 0,
       saved: 0,
     },
-    setDraftValue: vi.fn(),
-    resetSetting: vi.fn(),
+    setDraftValue: createVoidMock(),
+    resetSetting: createVoidMock(),
     ...overrides,
   };
 }
@@ -143,7 +147,7 @@ describe('SettingsPage browser visual regression', () => {
       data: null,
       error: null,
       isLoading: true,
-      refetch: vi.fn().mockResolvedValue(undefined),
+      refetch: createAsyncVoidMock(),
     });
 
     mockUseSettingsAutosave.mockReturnValue(createSettingsAutosaveViewModel());
@@ -160,7 +164,7 @@ describe('SettingsPage browser visual regression', () => {
       data: mockData,
       error: null,
       isLoading: false,
-      refetch: vi.fn().mockResolvedValue(undefined),
+      refetch: createAsyncVoidMock(),
     });
 
     mockUseSettingsAutosave.mockReturnValue(createSettingsAutosaveViewModel());
@@ -177,7 +181,7 @@ describe('SettingsPage browser visual regression', () => {
       data: mockData,
       error: null,
       isLoading: false,
-      refetch: vi.fn().mockResolvedValue(undefined),
+      refetch: createAsyncVoidMock(),
     });
 
     mockUseSettingsAutosave.mockReturnValue(
@@ -207,7 +211,7 @@ describe('SettingsPage browser visual regression', () => {
       data: null,
       error: new Error('Failed to load settings'),
       isLoading: false,
-      refetch: vi.fn().mockResolvedValue(undefined),
+      refetch: createAsyncVoidMock(),
     });
 
     mockUseSettingsAutosave.mockReturnValue(createSettingsAutosaveViewModel());

@@ -13,7 +13,7 @@ vi.mock('@/pages/hub/hooks/use-hub-model-catalog', () => ({
   useHubModelCatalog: mockUseHubModelCatalog,
   CATEGORY_OPTIONS: ['all', 'language', 'vision', 'audio', 'coding', 'embedding'] as const,
   STATUS_OPTIONS: ['all', 'ready', 'downloading', 'not_downloaded', 'error'] as const,
-  canDownloadModel: vi.fn(() => true),
+  canDownloadModel: vi.fn<() => boolean>(() => true),
 }));
 
 vi.mock('@/hooks/use-global-header-meta', () => ({
@@ -22,10 +22,14 @@ vi.mock('@/hooks/use-global-header-meta', () => ({
 }));
 
 vi.mock('@slab/i18n', () => ({
-  useTranslation: vi.fn(() => ({
-    t: vi.fn((key: string) => key),
+  useTranslation: vi.fn<() => unknown>(() => ({
+    t: vi.fn<(key: string) => string>((key) => key),
   })),
 }));
+
+const createVoidMock = () => vi.fn<(...args: unknown[]) => void>();
+const createAsyncVoidMock = () =>
+  vi.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined);
 
 function createMockModel(overrides: Partial<ModelItem> = {}): ModelItem {
   return {
@@ -50,32 +54,32 @@ function createMockModel(overrides: Partial<ModelItem> = {}): ModelItem {
 function createHubViewModel(overrides = {}) {
   return {
     category: 'all' as const,
-    setCategory: vi.fn(),
+    setCategory: createVoidMock(),
     status: 'all' as const,
-    setStatus: vi.fn(),
+    setStatus: createVoidMock(),
     isCreateOpen: false,
-    setCreateOpen: vi.fn(),
+    setCreateOpen: createVoidMock(),
     createFileName: null,
-    setCreateFile: vi.fn(),
+    setCreateFile: createVoidMock(),
     modelToDelete: null,
-    setModelToDelete: vi.fn(),
+    setModelToDelete: createVoidMock(),
     modelToEnhance: null,
-    setModelToEnhance: vi.fn(),
+    setModelToEnhance: createVoidMock(),
     models: [] as ModelItem[],
     filteredModels: [] as ModelItem[],
     visibleModels: [] as ModelItem[],
     hasMore: false,
-    loadMore: vi.fn(),
+    loadMore: createVoidMock(),
     downloadedCount: 0,
     pendingCount: 0,
     isLoading: false,
     isRefetching: false,
     error: null,
-    refetch: vi.fn().mockResolvedValue(undefined),
+    refetch: createAsyncVoidMock(),
     canCreate: false,
-    createModel: vi.fn().mockResolvedValue(undefined),
-    downloadModel: vi.fn().mockResolvedValue(undefined),
-    deleteModel: vi.fn().mockResolvedValue(undefined),
+    createModel: createAsyncVoidMock(),
+    downloadModel: createAsyncVoidMock(),
+    deleteModel: createAsyncVoidMock(),
     createModelPending: false,
     deleteModelPending: false,
     ...overrides,

@@ -28,6 +28,8 @@
     "allow-plugin-call",
     "allow-plugin-api-request",
     "allow-plugin-pick-file",
+    "allow-plugin-set-theme-snapshot",
+    "allow-plugin-theme-snapshot",
     "window-state:default",
     "decorum:allow-show-snap-overlay",
     {

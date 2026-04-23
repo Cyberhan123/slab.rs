@@ -322,7 +322,8 @@ async fn run_supervisor(args: SupervisorArgs, mut gateway_cfg: Config) -> anyhow
     info!("slab-server supervisor starting");
     let store = Arc::new(AnyStore::connect(&gateway_cfg.database_url).await?);
     info!(database_url = %gateway_cfg.database_url, "database ready");
-    let migration = migrate_legacy_settings_if_needed(&gateway_cfg.settings_path, store.as_ref()).await?;
+    let migration =
+        migrate_legacy_settings_if_needed(&gateway_cfg.settings_path, store.as_ref()).await?;
     if migration.migrated {
         info!(
             settings_path = %gateway_cfg.settings_path.display(),
@@ -372,8 +373,8 @@ async fn run_supervisor(args: SupervisorArgs, mut gateway_cfg: Config) -> anyhow
             Some(runtime_host_for_gateway),
             store_for_gateway,
             async move {
-            let _ = gateway_shutdown_rx.await;
-        },
+                let _ = gateway_shutdown_rx.await;
+            },
         )
         .await
     });

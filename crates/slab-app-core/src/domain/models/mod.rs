@@ -5,6 +5,7 @@ mod ffmpeg;
 mod image;
 mod media_task;
 mod model;
+mod plugin;
 mod pmid;
 mod session;
 mod settings;
@@ -48,6 +49,7 @@ pub use model::{
     UpdateModelEnhancementCommand, default_model_capabilities, normalize_model_capabilities,
     validate_stored_model_config,
 };
+pub use plugin::{InstallPluginCommand, PluginMarketView, PluginView};
 pub use pmid::PMID;
 pub use session::{CreateSessionCommand, SessionMessageView, SessionView};
 pub use settings::{

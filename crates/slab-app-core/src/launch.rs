@@ -176,7 +176,9 @@ pub fn resolve_launch_spec(
 ) -> Result<ResolvedLaunchSpec, AppCoreError> {
     match settings.runtime.mode {
         RuntimeMode::ManagedChildren => resolve_managed_launch_spec(settings, profile, host_paths),
-        RuntimeMode::ExternalEndpoints => resolve_external_launch_spec(settings, profile, host_paths),
+        RuntimeMode::ExternalEndpoints => {
+            resolve_external_launch_spec(settings, profile, host_paths)
+        }
     }
 }
 
@@ -304,13 +306,8 @@ fn resolve_external_launch_spec(
             continue;
         }
 
-        let endpoint = resolve_external_backend_endpoint(
-            settings,
-            transport,
-            backend,
-            alias,
-            single_backend,
-        )?;
+        let endpoint =
+            resolve_external_backend_endpoint(settings, transport, backend, alias, single_backend)?;
 
         match backend {
             RuntimeBackendId::GgmlWhisper => endpoints.whisper = Some(endpoint),
@@ -393,9 +390,7 @@ fn resolve_external_backend_endpoint(
 ) -> Result<String, AppCoreError> {
     let explicit = explicit_leaf_endpoint(settings, backend, transport)
         .or_else(|| single_backend.then(|| shared_ggml_endpoint(settings, transport)).flatten())
-        .or_else(|| {
-            single_backend.then(|| shared_runtime_endpoint(settings, transport)).flatten()
-        })
+        .or_else(|| single_backend.then(|| shared_runtime_endpoint(settings, transport)).flatten())
         .ok_or_else(|| {
             AppCoreError::BadRequest(format!(
                 "runtime.mode=external_endpoints requires an explicit endpoint for backend '{}'",
@@ -742,7 +737,8 @@ mod tests {
         settings.runtime.mode = RuntimeMode::ExternalEndpoints;
         settings.runtime.transport = RuntimeTransportMode::Http;
 
-        let error = resolve_launch_spec(&settings, LaunchProfile::Server, &host_paths()).unwrap_err();
+        let error =
+            resolve_launch_spec(&settings, LaunchProfile::Server, &host_paths()).unwrap_err();
         assert!(error.to_string().contains("requires an explicit endpoint"));
     }
 

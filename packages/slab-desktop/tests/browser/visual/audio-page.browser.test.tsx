@@ -1,6 +1,5 @@
 import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChangeEvent } from 'react';
 
 import AudioPage from '@/pages/audio';
 import type { SelectedFile } from '@/hooks/use-file';
@@ -20,8 +19,15 @@ vi.mock('@/hooks/use-global-header-meta', () => ({
 }));
 
 vi.mock('@/hooks/use-persisted-header-select', () => ({
-  usePersistedHeaderSelect: vi.fn(() => ({ value: 'model-1', setValue: vi.fn() })),
+  usePersistedHeaderSelect: vi.fn<() => unknown>(() => ({
+    value: 'model-1',
+    setValue: vi.fn<() => void>(),
+  })),
 }));
+
+const createVoidMock = () => vi.fn<(...args: unknown[]) => void>();
+const createAsyncVoidMock = () =>
+  vi.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined);
 
 function createAudioViewModel(overrides = {}) {
   return {
@@ -47,14 +53,14 @@ function createAudioViewModel(overrides = {}) {
     decodeWordThold: '',
     enableVad: false,
     file: null as SelectedFile | null,
-    handleFileChange: vi.fn(async (_e: ChangeEvent<HTMLInputElement>) => undefined),
-    handleTauriFileSelect: vi.fn(async () => undefined),
-    handleTranscribe: vi.fn(async () => undefined),
+    handleFileChange: createAsyncVoidMock(),
+    handleTauriFileSelect: createAsyncVoidMock(),
+    handleTranscribe: createAsyncVoidMock(),
     hasBundledVad: true,
     isBusy: false,
     isTauri: true,
     isUsingBundledVad: false,
-    navigate: vi.fn(),
+    navigate: createVoidMock(),
     preparingStage: null as string | null,
     previewRows: [
       {
@@ -84,36 +90,36 @@ function createAudioViewModel(overrides = {}) {
     ],
     selectedVadModel: undefined,
     selectedVadModelId: '',
-    setDecodeEntropyThold: vi.fn(),
-    setDecodeDurationMs: vi.fn(),
-    setDecodeLogprobThold: vi.fn(),
-    setDecodeMaxLen: vi.fn(),
-    setDecodeMaxTokens: vi.fn(),
-    setDecodeNoContext: vi.fn(),
-    setDecodeNoSpeechThold: vi.fn(),
-    setDecodeNoTimestamps: vi.fn(),
-    setDecodeOffsetMs: vi.fn(),
-    setDecodeSplitOnWord: vi.fn(),
-    setDecodeSuppressNst: vi.fn(),
-    setDecodeTdrzEnable: vi.fn(),
-    setDecodeTemperature: vi.fn(),
-    setDecodeTemperatureInc: vi.fn(),
-    setDecodeTokenTimestamps: vi.fn(),
-    setDecodeWordThold: vi.fn(),
-    setEnableVad: vi.fn(),
-    setSelectedVadModelId: vi.fn(),
-    setShowDecodeOptions: vi.fn(),
-    setVadMaxSpeechDurationS: vi.fn(),
-    setVadMinSilenceDurationMs: vi.fn(),
-    setVadMinSpeechDurationMs: vi.fn(),
-    setVadSamplesOverlap: vi.fn(),
-    setVadSpeechPadMs: vi.fn(),
-    setVadThreshold: vi.fn(),
+    setDecodeEntropyThold: createVoidMock(),
+    setDecodeDurationMs: createVoidMock(),
+    setDecodeLogprobThold: createVoidMock(),
+    setDecodeMaxLen: createVoidMock(),
+    setDecodeMaxTokens: createVoidMock(),
+    setDecodeNoContext: createVoidMock(),
+    setDecodeNoSpeechThold: createVoidMock(),
+    setDecodeNoTimestamps: createVoidMock(),
+    setDecodeOffsetMs: createVoidMock(),
+    setDecodeSplitOnWord: createVoidMock(),
+    setDecodeSuppressNst: createVoidMock(),
+    setDecodeTdrzEnable: createVoidMock(),
+    setDecodeTemperature: createVoidMock(),
+    setDecodeTemperatureInc: createVoidMock(),
+    setDecodeTokenTimestamps: createVoidMock(),
+    setDecodeWordThold: createVoidMock(),
+    setEnableVad: createVoidMock(),
+    setSelectedVadModelId: createVoidMock(),
+    setShowDecodeOptions: createVoidMock(),
+    setVadMaxSpeechDurationS: createVoidMock(),
+    setVadMinSilenceDurationMs: createVoidMock(),
+    setVadMinSpeechDurationMs: createVoidMock(),
+    setVadSamplesOverlap: createVoidMock(),
+    setVadSpeechPadMs: createVoidMock(),
+    setVadThreshold: createVoidMock(),
     showDecodeOptions: false,
     taskId: null,
     transcribe: {
       isPending: false,
-      handleTranscribe: vi.fn(),
+      handleTranscribe: createVoidMock(),
     },
     vadMaxSpeechDurationS: '',
     vadMinSilenceDurationMs: '',

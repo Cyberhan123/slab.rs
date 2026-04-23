@@ -89,6 +89,12 @@ pub struct Config {
     /// unified `models` table so the catalog can be initialized from bundled or
     /// user-managed config files.
     pub model_config_dir: PathBuf,
+
+    /// Root directory containing installed runtime plugins.
+    pub plugins_dir: PathBuf,
+
+    /// Optional remote market catalog URL used by `/v1/plugins/market`.
+    pub plugin_market_url: Option<String>,
 }
 
 impl Config {
@@ -131,6 +137,11 @@ impl Config {
                 .unwrap_or_else(|_| default_session_state_dir().to_string_lossy().into_owned()),
             settings_path,
             model_config_dir,
+            plugins_dir: std::env::var("SLAB_PLUGINS_DIR")
+                .ok()
+                .map(PathBuf::from)
+                .unwrap_or_else(default_plugins_dir),
+            plugin_market_url: std::env::var("SLAB_PLUGIN_MARKET_URL").ok(),
         }
     }
 }
@@ -167,6 +178,10 @@ pub fn default_database_url() -> String {
 
 pub fn default_session_state_dir() -> PathBuf {
     default_app_dir().join("sessions")
+}
+
+pub fn default_plugins_dir() -> PathBuf {
+    default_app_dir().join("plugins")
 }
 
 pub fn default_runtime_log_dir() -> PathBuf {

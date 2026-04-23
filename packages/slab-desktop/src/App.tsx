@@ -10,6 +10,10 @@ import {
 import { Toaster } from "@slab/components/sonner";
 import { TooltipProvider } from "@slab/components/tooltip";
 import api, { queryClient } from "@/lib/api";
+import {
+  pluginSetThemeSnapshot,
+  readPluginThemeSnapshot,
+} from "@/lib/plugin-host-bridge";
 import AppRoutes from "@/routes";
 
 /**
@@ -98,6 +102,36 @@ function AppLanguageSync() {
   return null;
 }
 
+function PluginThemeSync() {
+  useEffect(() => {
+    let animationFrame = 0;
+
+    const publishTheme = () => {
+      window.cancelAnimationFrame(animationFrame);
+      animationFrame = window.requestAnimationFrame(() => {
+        void pluginSetThemeSnapshot(readPluginThemeSnapshot()).catch((error) => {
+          console.warn("failed to publish plugin theme snapshot", error);
+        });
+      });
+    };
+
+    publishTheme();
+
+    const observer = new MutationObserver(publishTheme);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "style"],
+    });
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      observer.disconnect();
+    };
+  }, []);
+
+  return null;
+}
+
 function App() {
   return (
     <ErrorBoundary>
@@ -105,6 +139,7 @@ function App() {
         <QueryClientProvider client={queryClient}>
           <SetupGuard />
           <AppLanguageSync />
+          <PluginThemeSync />
           <AppRoutes />
           <Toaster />
         </QueryClientProvider>

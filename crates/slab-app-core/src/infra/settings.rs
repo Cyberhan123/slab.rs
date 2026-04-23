@@ -17,9 +17,7 @@ use slab_types::settings::{
 };
 
 use crate::domain::models::{UpdateSettingCommand, UpdateSettingOperation};
-use crate::domain::services::setup::{
-    SETUP_INITIALIZED_CONFIG_KEY, SETUP_INITIALIZED_CONFIG_NAME,
-};
+use crate::domain::services::setup::{SETUP_INITIALIZED_CONFIG_KEY, SETUP_INITIALIZED_CONFIG_NAME};
 use crate::error::AppCoreError;
 use crate::infra::db::repository::config::ConfigStore;
 
@@ -98,7 +96,11 @@ impl SettingsDocumentProvider {
             .ok_or_else(|| AppCoreError::NotFound(format!("setting pmid '{}' not found", path)))
     }
 
-    pub async fn update(&self, path: &str, command: UpdateSettingCommand) -> Result<Value, AppCoreError> {
+    pub async fn update(
+        &self,
+        path: &str,
+        command: UpdateSettingCommand,
+    ) -> Result<Value, AppCoreError> {
         let mut state = self.state.write().await;
         let mut next_document = settings_document_to_json_value(&state.document);
         let default_document = settings_document_to_json_value(&SettingsDocument::default());
@@ -119,12 +121,13 @@ impl SettingsDocumentProvider {
 
         set_value_at_path(&mut next_document, path, next_value.clone())?;
 
-        let next_settings: SettingsDocument = serde_json::from_value(next_document).map_err(|error| {
-            AppCoreError::BadRequest(format!(
-                "setting '{}' update produced an invalid settings document: {error}",
-                path
-            ))
-        })?;
+        let next_settings: SettingsDocument =
+            serde_json::from_value(next_document).map_err(|error| {
+                AppCoreError::BadRequest(format!(
+                    "setting '{}' update produced an invalid settings document: {error}",
+                    path
+                ))
+            })?;
 
         write_settings_document_file(&self.path, &next_settings)?;
         state.document = next_settings;
@@ -205,11 +208,7 @@ where
         warn!(settings_path = %path.display(), "{warning_message}");
     }
 
-    Ok(SettingsMigrationResult {
-        migrated: true,
-        backup_path: Some(backup_path),
-        warnings,
-    })
+    Ok(SettingsMigrationResult { migrated: true, backup_path: Some(backup_path), warnings })
 }
 
 fn load_runtime_state(path: &Path) -> Result<SettingsRuntimeState, AppCoreError> {
@@ -339,11 +338,12 @@ fn migrate_legacy_settings_document(
         ));
     }
 
-    let document: SettingsDocument = serde_json::from_value(state.document_json).map_err(|error| {
-        AppCoreError::BadRequest(format!(
-            "failed to convert legacy settings into the current document format: {error}"
-        ))
-    })?;
+    let document: SettingsDocument =
+        serde_json::from_value(state.document_json).map_err(|error| {
+            AppCoreError::BadRequest(format!(
+                "failed to convert legacy settings into the current document format: {error}"
+            ))
+        })?;
 
     Ok((document, state.setup_initialized, state.warnings))
 }
@@ -354,14 +354,8 @@ fn direct_legacy_mappings() -> &'static [(&'static str, &'static str)] {
         ("setup.ffmpeg.dir", "tools.ffmpeg.install_dir"),
         ("setup.backends.dir", "runtime.ggml.install_dir"),
         ("runtime.model_cache_dir", "models.cache_dir"),
-        (
-            "runtime.llama.num_workers",
-            "runtime.ggml.backends.llama.capacity.concurrent_requests",
-        ),
-        (
-            "runtime.llama.context_length",
-            "runtime.ggml.backends.llama.context_length",
-        ),
+        ("runtime.llama.num_workers", "runtime.ggml.backends.llama.capacity.concurrent_requests"),
+        ("runtime.llama.context_length", "runtime.ggml.backends.llama.context_length"),
         ("runtime.llama.flash_attn", "runtime.ggml.backends.llama.flash_attn"),
         (
             "runtime.whisper.num_workers",
@@ -372,14 +366,8 @@ fn direct_legacy_mappings() -> &'static [(&'static str, &'static str)] {
             "runtime.diffusion.num_workers",
             "runtime.ggml.backends.diffusion.capacity.concurrent_requests",
         ),
-        (
-            "runtime.model_auto_unload.enabled",
-            "models.auto_unload.enabled",
-        ),
-        (
-            "runtime.model_auto_unload.idle_minutes",
-            "models.auto_unload.idle_minutes",
-        ),
+        ("runtime.model_auto_unload.enabled", "models.auto_unload.enabled"),
+        ("runtime.model_auto_unload.idle_minutes", "models.auto_unload.idle_minutes"),
         (
             "runtime.model_auto_unload.min_free_system_memory_bytes",
             "models.auto_unload.min_free_system_memory_bytes",
@@ -394,28 +382,13 @@ fn direct_legacy_mappings() -> &'static [(&'static str, &'static str)] {
         ),
         ("launch.transport", "runtime.transport"),
         ("launch.queue_capacity", "runtime.capacity.queue"),
-        (
-            "launch.backend_capacity",
-            "runtime.capacity.concurrent_requests",
-        ),
+        ("launch.backend_capacity", "runtime.capacity.concurrent_requests"),
         ("launch.runtime_log_dir", "runtime.logging.path"),
         ("launch.backends.llama.enabled", "runtime.ggml.backends.llama.enabled"),
-        (
-            "launch.backends.whisper.enabled",
-            "runtime.ggml.backends.whisper.enabled",
-        ),
-        (
-            "launch.backends.diffusion.enabled",
-            "runtime.ggml.backends.diffusion.enabled",
-        ),
-        (
-            "launch.profiles.server.gateway_bind",
-            "server.address",
-        ),
-        (
-            "diffusion.performance.flash_attn",
-            "runtime.ggml.backends.diffusion.flash_attn",
-        ),
+        ("launch.backends.whisper.enabled", "runtime.ggml.backends.whisper.enabled"),
+        ("launch.backends.diffusion.enabled", "runtime.ggml.backends.diffusion.enabled"),
+        ("launch.profiles.server.gateway_bind", "server.address"),
+        ("diffusion.performance.flash_attn", "runtime.ggml.backends.diffusion.flash_attn"),
     ]
 }
 
@@ -482,7 +455,10 @@ fn ensure_settings_parent_dir(path: &Path) -> Result<(), AppCoreError> {
     Ok(())
 }
 
-fn write_settings_document_file(path: &Path, document: &SettingsDocument) -> Result<(), AppCoreError> {
+fn write_settings_document_file(
+    path: &Path,
+    document: &SettingsDocument,
+) -> Result<(), AppCoreError> {
     ensure_settings_parent_dir(path)?;
 
     let parent = path.parent().ok_or_else(|| {
@@ -927,7 +903,8 @@ mod tests {
         fn get_config_entry(
             &self,
             key: &str,
-        ) -> impl std::future::Future<Output = Result<Option<(String, String)>, sqlx::Error>> + Send {
+        ) -> impl std::future::Future<Output = Result<Option<(String, String)>, sqlx::Error>> + Send
+        {
             let values = Arc::clone(&self.values);
             let key = key.to_owned();
             async move {
@@ -962,7 +939,8 @@ mod tests {
 
         fn list_config_values(
             &self,
-        ) -> impl std::future::Future<Output = Result<Vec<(String, String, String)>, sqlx::Error>> + Send {
+        ) -> impl std::future::Future<Output = Result<Vec<(String, String, String)>, sqlx::Error>> + Send
+        {
             let values = Arc::clone(&self.values);
             async move {
                 Ok(values
@@ -1020,9 +998,7 @@ mod tests {
         );
         let store = TestConfigStore::default();
 
-        let migration = migrate_legacy_settings_if_needed(&path, &store)
-            .await
-            .expect("migration");
+        let migration = migrate_legacy_settings_if_needed(&path, &store).await.expect("migration");
         let persisted: SettingsDocument =
             serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
 
@@ -1031,10 +1007,7 @@ mod tests {
         assert_eq!(persisted.tools.ffmpeg.install_dir.as_deref(), Some("C:/ffmpeg"));
         assert_eq!(persisted.models.cache_dir.as_deref(), Some("D:/models"));
         assert_eq!(persisted.server.address, "127.0.0.1:4000");
-        assert_eq!(
-            store.value(SETUP_INITIALIZED_CONFIG_KEY).as_deref(),
-            Some("true")
-        );
+        assert_eq!(store.value(SETUP_INITIALIZED_CONFIG_KEY).as_deref(), Some("true"));
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }
@@ -1056,9 +1029,7 @@ mod tests {
         );
         let store = TestConfigStore::default();
 
-        migrate_legacy_settings_if_needed(&path, &store)
-            .await
-            .expect("migration");
+        migrate_legacy_settings_if_needed(&path, &store).await.expect("migration");
 
         let persisted: SettingsDocument =
             serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
@@ -1108,10 +1079,7 @@ mod tests {
         provider
             .update(
                 "logging.level",
-                UpdateSettingCommand {
-                    op: UpdateSettingOperation::Unset,
-                    value: None,
-                },
+                UpdateSettingCommand { op: UpdateSettingOperation::Unset, value: None },
             )
             .await
             .expect("unset");

@@ -1,0 +1,180 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@source "..";
+@source "../../../slab-components/src";
+
+@custom-variant dark (&:is(.dark *));
+
+@layer base {
+  :root {
+    color-scheme: light;
+    --background: oklch(98.12% 0.0034 247.86);
+    --foreground: oklch(22.41% 0.006 236.83);
+    --card: oklch(100% 0 0);
+    --card-foreground: var(--foreground);
+    --popover: oklch(100% 0 0);
+    --popover-foreground: var(--foreground);
+    --primary: oklch(60.02% 0.1038 184.7);
+    --primary-foreground: oklch(99.42% 0.0078 177.33);
+    --secondary: oklch(96.62% 0.0034 247.86);
+    --secondary-foreground: oklch(39.41% 0.0158 184.37);
+    --muted: oklch(96.62% 0.0034 247.86);
+    --muted-foreground: oklch(56.78% 0.0161 180.31);
+    --accent: oklch(95.87% 0.0051 228.82);
+    --accent-foreground: var(--foreground);
+    --destructive: oklch(63.68% 0.2078 25.33);
+    --destructive-foreground: oklch(100% 0 0);
+    --border: oklch(92.82% 0.0104 247.94);
+    --input: oklch(91.41% 0.0042 236.5);
+    --ring: var(--primary);
+    --radius: 0.95rem;
+    --app-canvas: var(--background);
+    --surface-1: oklch(100% 0 0);
+    --surface-2: oklch(99.06% 0.0017 247.84);
+    --surface-soft: oklch(96.62% 0.0034 247.86);
+    --surface-selected: oklch(93.74% 0.0076 241.67);
+    --surface-input: var(--input);
+    --brand-teal: var(--primary);
+    --brand-teal-foreground: var(--primary-foreground);
+    --brand-gold: oklch(48.72% 0.1056 69.9);
+    --success: oklch(59.6% 0.1274 163.23);
+    --success-foreground: oklch(98.19% 0.0181 155.83);
+    --status-success-bg: color-mix(in oklab, var(--success) 40%, var(--background));
+    --status-info-bg: color-mix(in oklab, var(--brand-teal) 16%, var(--background));
+    --status-danger-bg: color-mix(in oklab, var(--destructive) 15%, var(--background));
+    --status-neutral-bg: color-mix(in oklab, var(--foreground) 6%, var(--background));
+  }
+
+  .dark {
+    color-scheme: dark;
+    --background: oklch(19.09% 0.011 229.67);
+    --foreground: oklch(97.31% 0.0043 197.09);
+    --card: oklch(22.46% 0.0141 229.77);
+    --card-foreground: var(--foreground);
+    --popover: oklch(24.5% 0.015 226.78);
+    --popover-foreground: var(--foreground);
+    --primary: oklch(75.79% 0.11 185.41);
+    --primary-foreground: oklch(23.39% 0.0345 188.68);
+    --secondary: oklch(27.65% 0.0199 229.98);
+    --secondary-foreground: var(--foreground);
+    --muted: oklch(24.13% 0.0161 232.61);
+    --muted-foreground: oklch(70.83% 0.0233 230.7);
+    --accent: oklch(30.05% 0.0249 236.88);
+    --accent-foreground: var(--foreground);
+    --destructive: oklch(71.06% 0.1661 22.22);
+    --destructive-foreground: oklch(18.62% 0.0381 10.04);
+    --border: oklch(33.2% 0.0244 236.68);
+    --input: oklch(26.92% 0.0189 232.21);
+    --ring: var(--primary);
+    --app-canvas: var(--background);
+    --surface-1: var(--card);
+    --surface-2: oklch(24.5% 0.015 226.78);
+    --surface-soft: var(--secondary);
+    --surface-selected: oklch(31.59% 0.0235 233.53);
+    --surface-input: var(--input);
+    --brand-teal: var(--primary);
+    --brand-teal-foreground: var(--primary-foreground);
+    --brand-gold: oklch(84.08% 0.102 76.23);
+    --success: oklch(77.29% 0.1535 163.22);
+    --success-foreground: oklch(22.27% 0.0394 169.04);
+    --status-success-bg: color-mix(in oklab, var(--success) 24%, var(--surface-2));
+    --status-info-bg: color-mix(in oklab, var(--brand-teal) 18%, var(--surface-2));
+    --status-danger-bg: color-mix(in oklab, var(--destructive) 20%, var(--surface-2));
+    --status-neutral-bg: color-mix(in oklab, var(--foreground) 10%, var(--surface-2));
+  }
+}
+
+@theme inline {
+  --font-sans: "Outfit", "Geist", system-ui, sans-serif;
+  --font-mono: "Fira Code", "Geist Mono", monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-app-canvas: var(--app-canvas);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-soft: var(--surface-soft);
+  --color-surface-selected: var(--surface-selected);
+  --color-surface-input: var(--surface-input);
+  --color-brand-teal: var(--brand-teal);
+  --color-brand-teal-foreground: var(--brand-teal-foreground);
+  --color-brand-gold: var(--brand-gold);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-status-success-bg: var(--status-success-bg);
+  --color-status-info-bg: var(--status-info-bg);
+  --color-status-danger-bg: var(--status-danger-bg);
+  --color-status-neutral-bg: var(--status-neutral-bg);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    margin: 0;
+    background:
+      radial-gradient(circle at top left, color-mix(in oklab, var(--brand-teal) 10%, transparent), transparent 30%),
+      radial-gradient(circle at bottom right, color-mix(in oklab, var(--brand-gold) 14%, transparent), transparent 32%),
+      var(--app-canvas);
+  }
+}
+
+@layer components {
+  .workspace-surface {
+    background: var(--surface-1);
+    border: 1px solid color-mix(in oklab, var(--border) 90%, var(--background) 10%);
+    box-shadow: 0 20px 56px -42px color-mix(in oklab, var(--foreground) 32%, transparent);
+  }
+
+  .workspace-soft-panel {
+    background: var(--surface-soft);
+    border: 1px solid color-mix(in oklab, var(--border) 86%, var(--background) 14%);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--foreground) 4%, transparent);
+  }
+
+  .workspace-halo {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+  }
+
+  .workspace-halo::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background:
+      radial-gradient(circle at top right, color-mix(in oklab, var(--brand-teal) 16%, transparent), transparent 38%),
+      radial-gradient(circle at bottom left, color-mix(in oklab, var(--brand-gold) 18%, transparent), transparent 34%);
+    opacity: 0.85;
+  }
+}

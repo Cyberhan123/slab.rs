@@ -34,6 +34,8 @@ fn main() {
             "plugin_call",
             "plugin_api_request",
             "plugin_pick_file",
+            "plugin_set_theme_snapshot",
+            "plugin_theme_snapshot",
         ]));
 
     tauri_build::try_build(attributes).expect("failed to run tauri build script");
