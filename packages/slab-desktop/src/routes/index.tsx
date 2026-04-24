@@ -11,6 +11,8 @@ import Audio from "@/pages/audio";
 import Video from "@/pages/video";
 import Image from "@/pages/image";
 import Plugins from "@/pages/plugins";
+import { PluginWebviewPage } from "@/pages/plugins/components/plugin-webview-page";
+import { useRuntimePlugins } from "@/pages/plugins/hooks/use-runtime-plugins";
 import { Spinner } from "@slab/components/spinner";
 import { GlobalHeaderProvider } from "@/layouts/global-header-provider";
 
@@ -18,6 +20,16 @@ import { GlobalHeaderProvider } from "@/layouts/global-header-provider";
 const SetupPage = lazy(() => import("@/pages/setup"));
 
 function AppRoutes() {
+  const { data: runtimePlugins = [] } = useRuntimePlugins();
+  const pluginRoutes = runtimePlugins
+    .filter((plugin) => plugin.valid && plugin.uiEntry)
+    .flatMap((plugin) =>
+      plugin.contributions.routes.map((route) => ({
+        path: route.path.replace(/^\//, ''),
+        element: <PluginWebviewPage plugin={plugin} />,
+      })),
+    );
+
   const routes = useRoutes([
     {
       // The setup wizard lives outside the main Layout so it gets a clean,
@@ -47,6 +59,7 @@ function AppRoutes() {
         { path: 'video', element: <Video /> },
         { path: 'hub', element: <Hub /> },
         { path: 'plugins', element: <Plugins /> },
+        ...pluginRoutes,
         { path: 'task', element: <Task /> },
         { path: 'settings', element: <Settings /> },
         { path: 'about', element: <About /> },

@@ -162,11 +162,11 @@ bun run test:server
 cd packages/slab-desktop
 bun run build
 
-# Build local plugin frontends, refresh manifest integrity, and emit `.plugin.slab` packs
+# Scan `plugins/*/plugin.json`, refresh manifest integrity, and emit `.plugin.slab` packs
 cd ../..
 bun run build:plugins
 
-# Repackage local plugins into `.plugin.slab` archives without rebuilding their UIs
+# Same pack-generation command under an explicit name
 bun run build:plugin-packs
 
 # Run Tauri development mode

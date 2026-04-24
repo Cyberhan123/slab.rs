@@ -40,6 +40,7 @@ pub struct SettingsPmidCatalog {
     pub runtime: RuntimePmids,
     pub providers: ProvidersPmids,
     pub models: ModelsPmids,
+    pub plugin: PluginPmids,
     pub server: ServerPmids,
 }
 
@@ -53,6 +54,7 @@ impl SettingsPmidCatalog {
             runtime: RuntimePmids::new(),
             providers: ProvidersPmids,
             models: ModelsPmids::new(),
+            plugin: PluginPmids,
             server: ServerPmids::new(),
         }
     }
@@ -154,6 +156,7 @@ impl SettingsPmidCatalog {
             self.models.auto_unload.min_free_system_memory_bytes(),
             self.models.auto_unload.min_free_gpu_memory_bytes(),
             self.models.auto_unload.max_pressure_evictions_per_load(),
+            self.plugin.install_dir(),
             self.server.address(),
             self.server.logging.level(),
             self.server.logging.json(),
@@ -629,6 +632,15 @@ impl AutoUnloadPmids {
 
     pub fn max_pressure_evictions_per_load(self) -> SettingPmid {
         SettingPmid::from_path("models.auto_unload.max_pressure_evictions_per_load")
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PluginPmids;
+
+impl PluginPmids {
+    pub fn install_dir(self) -> SettingPmid {
+        SettingPmid::from_path("plugin.install_dir")
     }
 }
 

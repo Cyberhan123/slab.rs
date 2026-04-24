@@ -7,6 +7,7 @@ import {
   Package,
   Puzzle,
   Settings,
+  Subtitles,
   type LucideIcon,
 } from "lucide-react"
 import { useTranslation } from "@slab/i18n"
@@ -14,10 +15,12 @@ import { Link, useLocation } from "react-router-dom"
 
 import { cn } from "@/lib/utils"
 import { WindowControls } from "@/layouts/window-controls"
+import { useRuntimePlugins } from "@/pages/plugins/hooks/use-runtime-plugins"
 
 type SidebarItem = {
   to: string
-  labelKey: string
+  labelKey?: string
+  label?: string
   icon: LucideIcon
   end?: boolean
 }
@@ -51,7 +54,27 @@ type AppSidebarProps = {
 export function AppSidebar({ variant = "default" }: AppSidebarProps) {
   const { t } = useTranslation()
   const { pathname } = useLocation()
+  const { data: runtimePlugins = [] } = useRuntimePlugins()
   const isChatVariant = variant === "chat"
+  const pluginItems = runtimePlugins
+    .filter((plugin) => plugin.valid && plugin.uiEntry)
+    .flatMap((plugin) =>
+      plugin.contributions.sidebar
+        .map((item) => {
+          const targetRoute = plugin.contributions.routes.find(
+            (contributedRoute) =>
+              contributedRoute.id === item.route || contributedRoute.path === item.route
+          )
+          if (!targetRoute) return null
+          return {
+            to: targetRoute.path,
+            label: item.label,
+            icon: item.icon === "subtitles" ? Subtitles : Puzzle,
+          } satisfies SidebarItem
+        })
+        .filter((item): item is SidebarItem => item !== null)
+    )
+  const visiblePrimaryItems = [...primaryItems, ...pluginItems]
 
   const renderItem = (item: SidebarItem) => {
     const Icon = item.icon
@@ -77,7 +100,7 @@ export function AppSidebar({ variant = "default" }: AppSidebarProps) {
             active && "text-[var(--shell-rail-active)]"
           )}
         >
-          {t(item.labelKey)}
+          {item.labelKey ? t(item.labelKey) : item.label}
         </span>
       </Link>
     )
@@ -100,7 +123,7 @@ export function AppSidebar({ variant = "default" }: AppSidebarProps) {
           </div>
 
           <nav className="flex flex-col items-center gap-4">
-            {primaryItems.map(renderItem)}
+            {visiblePrimaryItems.map(renderItem)}
           </nav>
         </div>
 

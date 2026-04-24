@@ -10,7 +10,7 @@
   "type": "module",
   "scripts": {
     "build:desktop": "bun run --filter @slab/desktop build",
-    "build:plugins": "bun run --cwd plugins/video-subtitle-translator build && bun run build:plugin-packs",
+    "build:plugins": "bun run build:plugin-packs",
     "build:plugin-packs": "node plugins/scripts/generate-plugin-packs.ts",
     "dev:desktop": "bun run --filter @slab/desktop dev",
     "api:desktop": "bun run --filter @slab/desktop api",

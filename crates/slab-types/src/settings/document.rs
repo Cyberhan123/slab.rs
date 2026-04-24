@@ -93,6 +93,8 @@ pub struct SettingsDocument {
     #[serde(default)]
     pub models: ModelSettingsConfig,
     #[serde(default)]
+    pub plugin: PluginSettingsConfig,
+    #[serde(default)]
     pub server: ServerSettingsConfig,
 }
 
@@ -108,6 +110,7 @@ impl Default for SettingsDocument {
             runtime: RuntimeSettingsConfig::default(),
             providers: ProvidersConfig::default(),
             models: ModelSettingsConfig::default(),
+            plugin: PluginSettingsConfig::default(),
             server: ServerSettingsConfig::default(),
         }
     }
@@ -584,6 +587,14 @@ const fn default_min_free_gpu_memory_bytes() -> u64 {
 
 const fn default_max_pressure_evictions_per_load() -> u32 {
     3
+}
+
+/// Runtime plugin installation settings.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct PluginSettingsConfig {
+    /// Directory containing installed runtime plugin packages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install_dir: Option<String>,
 }
 
 /// Server-only settings.

@@ -801,7 +801,7 @@ pub(crate) fn settings_document_to_json_value(document: &SettingsDocument) -> Va
         },
         "models": {
             "cache_dir": document.models.cache_dir,
-            "config_dir": document.models.config_dir,
+                "config_dir": document.models.config_dir,
             "download_source": document.models.download_source,
             "auto_unload": {
                 "enabled": document.models.auto_unload.enabled,
@@ -810,8 +810,11 @@ pub(crate) fn settings_document_to_json_value(document: &SettingsDocument) -> Va
                 "min_free_gpu_memory_bytes": document.models.auto_unload.min_free_gpu_memory_bytes,
                 "max_pressure_evictions_per_load": document.models.auto_unload.max_pressure_evictions_per_load,
             }
-        },
-        "server": {
+            },
+            "plugin": {
+                "install_dir": document.plugin.install_dir,
+            },
+            "server": {
             "address": document.server.address,
             "logging": {
                 "level": document.server.logging.level,
