@@ -7,7 +7,6 @@ use std::sync::RwLock;
 use percent_encoding::percent_decode_str;
 use sha2::{Digest, Sha256};
 use tauri::Manager;
-use tauri::path::BaseDirectory;
 
 use super::types::{
     PluginCapabilityTransportType, PluginCommandContribution, PluginContributesManifest,
@@ -16,6 +15,7 @@ use super::types::{
 };
 
 pub const DEFAULT_PLUGINS_DIR: &str = "plugins";
+const IGNORED_PLUGIN_ROOT_NAMES: &[&str] = &["dist", ".git", "node_modules"];
 
 #[derive(Clone)]
 pub struct LoadedPlugin {
@@ -149,42 +149,38 @@ impl PluginRegistryState {
 }
 
 pub fn resolve_plugins_root<R: tauri::Runtime>(app: &tauri::App<R>) -> Result<PathBuf, String> {
-    let app_data_dir = app
+    let app_data_plugins_dir = app
         .path()
         .app_data_dir()
-        .map_err(|e| format!("failed to resolve app data directory for plugins: {e}"))?;
-    let bundled_plugins_dir = app.path().resolve(DEFAULT_PLUGINS_DIR, BaseDirectory::Resource).ok();
+        .map_err(|e| format!("failed to resolve app data directory for plugins: {e}"))?
+        .join(DEFAULT_PLUGINS_DIR);
     let current_dir = std::env::current_dir().ok();
 
     Ok(resolve_plugins_root_with(
         std::env::var("SLAB_PLUGINS_DIR").ok().map(PathBuf::from),
-        bundled_plugins_dir,
         current_dir,
-        app_data_dir,
+        app_data_plugins_dir,
     ))
 }
 
 fn resolve_plugins_root_with(
     explicit_root: Option<PathBuf>,
-    bundled_root: Option<PathBuf>,
     current_dir: Option<PathBuf>,
-    app_data_dir: PathBuf,
+    app_data_plugins_dir: PathBuf,
 ) -> PathBuf {
     if let Some(path) = explicit_root {
         return path;
     }
 
-    if let Some(path) = bundled_root.filter(|path| path.exists()) {
+    if let Some(path) = current_dir.as_deref().and_then(find_dev_plugins_dir) {
         return path;
     }
 
-    if let Some(path) =
-        current_dir.map(|dir| dir.join(DEFAULT_PLUGINS_DIR)).filter(|path| path.exists())
-    {
-        return path;
-    }
+    app_data_plugins_dir
+}
 
-    app_data_dir.join(DEFAULT_PLUGINS_DIR)
+fn find_dev_plugins_dir(current_dir: &Path) -> Option<PathBuf> {
+    current_dir.ancestors().map(|dir| dir.join(DEFAULT_PLUGINS_DIR)).find(|path| path.exists())
 }
 
 pub fn normalize_relative_path(raw: &str) -> Result<String, String> {
@@ -267,6 +263,9 @@ fn scan_plugins(root_dir: &Path) -> Result<PluginRegistrySnapshot, String> {
         }
 
         let folder_name = entry.file_name().to_string_lossy().to_string();
+        if IGNORED_PLUGIN_ROOT_NAMES.iter().any(|ignored| ignored == &folder_name.as_str()) {
+            continue;
+        }
         let plugin_dir = entry.path();
         let manifest_path = plugin_dir.join("plugin.json");
         if !manifest_path.exists() {
@@ -799,12 +798,11 @@ mod tests {
     fn plugins_root_prefers_existing_dev_directory() {
         let root = temp_root("root-prefers-dev");
         let cwd = root.join("repo");
-        let app_data_dir = root.join("app-data");
+        let app_data_plugins_dir = root.join("app-data").join(DEFAULT_PLUGINS_DIR);
         let dev_plugins_dir = cwd.join(DEFAULT_PLUGINS_DIR);
         fs::create_dir_all(&dev_plugins_dir).unwrap();
 
-        let resolved =
-            resolve_plugins_root_with(None, None, Some(cwd.clone()), app_data_dir.clone());
+        let resolved = resolve_plugins_root_with(None, Some(cwd.clone()), app_data_plugins_dir);
 
         assert_eq!(resolved, dev_plugins_dir);
 
@@ -815,12 +813,43 @@ mod tests {
     fn plugins_root_falls_back_to_app_data_when_cwd_has_no_plugins() {
         let root = temp_root("root-fallback");
         let cwd = root.join("launchd-cwd");
-        let app_data_dir = root.join("app-data");
+        let app_data_plugins_dir = root.join("app-data").join(DEFAULT_PLUGINS_DIR);
         fs::create_dir_all(&cwd).unwrap();
 
-        let resolved = resolve_plugins_root_with(None, None, Some(cwd), app_data_dir.clone());
+        let resolved = resolve_plugins_root_with(None, Some(cwd), app_data_plugins_dir.clone());
 
-        assert_eq!(resolved, app_data_dir.join(DEFAULT_PLUGINS_DIR));
+        assert_eq!(resolved, app_data_plugins_dir);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn plugins_root_finds_workspace_plugins_in_parent_directory() {
+        let root = temp_root("root-prefers-parent-dev");
+        let repo_root = root.join("repo");
+        let cwd = repo_root.join("bin").join("slab-app");
+        let app_data_plugins_dir = root.join("app-data").join(DEFAULT_PLUGINS_DIR);
+        let dev_plugins_dir = repo_root.join(DEFAULT_PLUGINS_DIR);
+        fs::create_dir_all(&cwd).unwrap();
+        fs::create_dir_all(&dev_plugins_dir).unwrap();
+
+        let resolved = resolve_plugins_root_with(None, Some(cwd), app_data_plugins_dir);
+
+        assert_eq!(resolved, dev_plugins_dir);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn registry_ignores_dist_directory() {
+        let root = temp_root("registry-ignores-dist");
+        fs::create_dir_all(root.join("dist")).unwrap();
+        fs::write(root.join("dist").join("example.plugin.slab"), b"pack").unwrap();
+
+        let snapshot = scan_plugins(&root).expect("scan plugins");
+
+        assert!(snapshot.loaded.is_empty());
+        assert!(snapshot.invalid.is_empty());
 
         fs::remove_dir_all(root).unwrap();
     }

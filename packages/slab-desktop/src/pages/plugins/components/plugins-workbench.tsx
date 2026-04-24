@@ -1,5 +1,6 @@
 import {
   Loader2,
+  PackagePlus,
   PackageOpen,
   PlugZap,
   RefreshCw,
@@ -14,6 +15,7 @@ import { StageEmptyState } from '@slab/components/workspace';
 import type { PluginsPageState } from '../hooks/use-plugins-page';
 import { MARKET_ICONS, PLUGIN_ICONS, PLUGIN_TONES } from '../utils';
 import { EmptyPanel } from './empty-panel';
+import { ImportPluginPackDialog } from './import-plugin-pack-dialog';
 import { InstalledPluginCard } from './installed-plugin-card';
 import { MarketPluginRow } from './market-plugin-row';
 import { InstalledSkeletonGrid, MarketSkeletonRow } from './plugin-skeletons';
@@ -21,13 +23,20 @@ import { SectionHeading } from './section-heading';
 
 export function PluginsWorkbench({
   busyPluginId,
+  canImport,
   dataErrorMessage,
   filteredMarketPlugins,
   filteredPlugins,
+  handleImportFileChange,
+  handleImportOpenChange,
+  handleImportPlugin,
   handleInstall,
   handlePrimaryAction,
   handleToggleEnabled,
   hasSearchQuery,
+  importFileName,
+  importPluginPending,
+  isImportOpen,
   isDesktopTauri,
   loading,
   marketPlugins,
@@ -66,16 +75,36 @@ export function PluginsWorkbench({
             icon={PlugZap}
             title={t('pages.plugins.sections.installed')}
             action={
-              <Button
-                variant="pill"
-                size="sm"
-                onClick={() => void refreshData()}
-                disabled={refreshing}
-                className="rounded-[12px] bg-[var(--shell-card)]/80"
-              >
-                {refreshing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-                {t('pages.plugins.actions.refresh')}
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => handleImportOpenChange(true)}
+                  disabled={importPluginPending}
+                  className="rounded-[12px] bg-[var(--shell-card)]/80"
+                >
+                  {importPluginPending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <PackagePlus className="size-4" />
+                  )}
+                  {t('pages.plugins.actions.import')}
+                </Button>
+                <Button
+                  variant="pill"
+                  size="sm"
+                  onClick={() => void refreshData()}
+                  disabled={refreshing}
+                  className="rounded-[12px] bg-[var(--shell-card)]/80"
+                >
+                  {refreshing ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="size-4" />
+                  )}
+                  {t('pages.plugins.actions.refresh')}
+                </Button>
+              </div>
             }
           />
 
@@ -148,6 +177,16 @@ export function PluginsWorkbench({
           </div>
         </section>
       </div>
+
+      <ImportPluginPackDialog
+        open={isImportOpen}
+        onOpenChange={handleImportOpenChange}
+        selectedFileName={importFileName}
+        setImportFile={handleImportFileChange}
+        canImport={canImport}
+        importPending={importPluginPending}
+        onImport={() => void handleImportPlugin()}
+      />
     </div>
   );
 }

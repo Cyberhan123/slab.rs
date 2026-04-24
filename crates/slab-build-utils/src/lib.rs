@@ -132,6 +132,34 @@ pub fn sync_tauri_vendor_runtime_artifacts(target: &str, tauri_manifest_dir: &Pa
     Ok(())
 }
 
+pub fn sync_tauri_bundled_plugins(tauri_manifest_dir: &Path) -> Result<()> {
+    let source_root = workspace_root()?.join("plugins").join("dist");
+    let resources_root = tauri_manifest_dir.join("resources").join("plugins");
+    let resources_dir = resources_root.join("dist");
+
+    println!("cargo:rerun-if-changed={}", source_root.display());
+
+    fs::create_dir_all(&resources_root).with_context(|| {
+        format!("failed to create tauri bundled plugins root {}", resources_root.display())
+    })?;
+
+    let mut expected_files = HashSet::new();
+    ensure_plugin_resource_placeholder(&resources_root, &mut expected_files)?;
+
+    if !source_root.exists() {
+        prune_stale_plugin_files(&resources_root, &expected_files)?;
+        return Ok(());
+    }
+
+    fs::create_dir_all(&resources_dir).with_context(|| {
+        format!("failed to create tauri bundled plugin packs directory {}", resources_dir.display())
+    })?;
+
+    sync_plugin_tree(&source_root, &resources_dir, &mut expected_files)?;
+    prune_stale_plugin_files(&resources_root, &expected_files)?;
+    Ok(())
+}
+
 fn emit_rerun_directives(manifest_path: &Path) {
     println!("cargo:rerun-if-changed={}", manifest_path.display());
     for var in ["HTTP_PROXY", "HTTPS_PROXY", "CUDA_PATH", "VULKAN_SDK"] {
@@ -173,6 +201,124 @@ fn should_copy_file(src_path: &Path, dst_path: &Path) -> bool {
 
 fn runtime_source_subdir(target: &str) -> &'static str {
     if target.contains("windows") { "bin" } else { "lib" }
+}
+
+fn sync_plugin_runtime_file(
+    src_path: &Path,
+    dst_path: &Path,
+    expected: &mut HashSet<PathBuf>,
+) -> Result<()> {
+    if let Some(parent) = dst_path.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!("failed to create bundled plugin parent directory {}", parent.display())
+        })?;
+    }
+
+    if should_copy_file(src_path, dst_path) {
+        fs::copy(src_path, dst_path).with_context(|| {
+            format!(
+                "failed to copy bundled plugin runtime file {} -> {}",
+                src_path.display(),
+                dst_path.display()
+            )
+        })?;
+    }
+    expected.insert(dst_path.to_path_buf());
+    Ok(())
+}
+
+fn ensure_plugin_resource_placeholder(
+    resources_root: &Path,
+    expected: &mut HashSet<PathBuf>,
+) -> Result<()> {
+    let placeholder_path = resources_root.join("placeholder.txt");
+    let placeholder_contents = "Generated plugin resource root for Tauri bundles.\n";
+
+    let should_write = match fs::read_to_string(&placeholder_path) {
+        Ok(existing) => existing != placeholder_contents,
+        Err(_) => true,
+    };
+    if should_write {
+        fs::write(&placeholder_path, placeholder_contents).with_context(|| {
+            format!(
+                "failed to write bundled plugin placeholder file {}",
+                placeholder_path.display()
+            )
+        })?;
+    }
+
+    expected.insert(placeholder_path);
+    Ok(())
+}
+
+fn sync_plugin_tree(src_dir: &Path, dst_dir: &Path, expected: &mut HashSet<PathBuf>) -> Result<()> {
+    fs::create_dir_all(dst_dir).with_context(|| {
+        format!("failed to create bundled plugin directory {}", dst_dir.display())
+    })?;
+
+    let entries = fs::read_dir(src_dir).with_context(|| {
+        format!("failed to read bundled plugin directory {}", src_dir.display())
+    })?;
+
+    for entry in entries {
+        let entry = entry.with_context(|| {
+            format!("failed to read entry under bundled plugin directory {}", src_dir.display())
+        })?;
+        let src_path = entry.path();
+        let dst_path = dst_dir.join(entry.file_name());
+        if src_path.is_dir() {
+            sync_plugin_tree(&src_path, &dst_path, expected)?;
+        } else {
+            sync_plugin_runtime_file(&src_path, &dst_path, expected)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn prune_stale_plugin_files(root: &Path, expected: &HashSet<PathBuf>) -> Result<()> {
+    if !root.exists() {
+        return Ok(());
+    }
+
+    prune_stale_plugin_files_inner(root, expected)?;
+    Ok(())
+}
+
+fn prune_stale_plugin_files_inner(current_dir: &Path, expected: &HashSet<PathBuf>) -> Result<bool> {
+    let mut has_entries = false;
+    let entries = fs::read_dir(current_dir).with_context(|| {
+        format!("failed to read bundled plugin directory {}", current_dir.display())
+    })?;
+
+    for entry in entries {
+        let entry = entry.with_context(|| {
+            format!("failed to read entry under bundled plugin directory {}", current_dir.display())
+        })?;
+        let path = entry.path();
+        if path.is_dir() {
+            let child_has_entries = prune_stale_plugin_files_inner(&path, expected)?;
+            if !child_has_entries {
+                fs::remove_dir(&path).with_context(|| {
+                    format!("failed to remove stale bundled plugin directory {}", path.display())
+                })?;
+            } else {
+                has_entries = true;
+            }
+            continue;
+        }
+
+        if expected.contains(&path) {
+            has_entries = true;
+            continue;
+        }
+
+        fs::remove_file(&path).with_context(|| {
+            format!("failed to remove stale bundled plugin file {}", path.display())
+        })?;
+    }
+
+    Ok(has_entries)
 }
 
 fn sync_runtime_tree(

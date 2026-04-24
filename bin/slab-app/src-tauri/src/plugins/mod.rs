@@ -4,7 +4,7 @@ mod runtime;
 mod types;
 mod view;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use tauri::{AppHandle, Emitter, Manager, Runtime, State, Webview, Window};
@@ -57,8 +57,8 @@ pub fn register_protocol<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Build
 pub fn init<R: Runtime>(
     app: &mut tauri::App<R>,
     api_endpoint: ApiEndpointConfig,
+    plugins_root: PathBuf,
 ) -> Result<(), String> {
-    let plugins_root = resolve_plugins_root(app)?;
     log::info!("resolved plugins root to {}", plugins_root.display());
     let registry = PluginRegistryState::new(plugins_root)?;
     let runtime = PluginRuntimeManager::new(api_endpoint)?;
