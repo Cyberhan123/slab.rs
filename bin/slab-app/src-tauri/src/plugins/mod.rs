@@ -76,7 +76,7 @@ pub fn plugin_list(registry: State<'_, PluginRegistryState>) -> Result<Vec<Plugi
 }
 
 #[tauri::command]
-pub fn plugin_mount_view(
+pub async fn plugin_mount_view(
     app_handle: AppHandle,
     window: Window,
     registry: State<'_, PluginRegistryState>,
