@@ -44,11 +44,6 @@ pub fn run_server_sidecar(
     plugins_dir: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let bundled_lib_dir = app.path().resolve("resources/libs", BaseDirectory::Resource)?;
-    let bundled_plugin_market_path = app
-        .path()
-        .resolve("resources/plugins/dist/plugin-market.json", BaseDirectory::Resource)
-        .ok()
-        .filter(|path| path.is_file());
     let log_dir = app.path().app_log_dir()?;
     std::fs::create_dir_all(&log_dir)?;
     let log_file = log_dir.join("slab-server.log");
@@ -68,12 +63,6 @@ pub fn run_server_sidecar(
         })?
         .args(args.clone())
         .env("SLAB_PLUGINS_DIR", plugins_dir.to_string_lossy().into_owned());
-
-    if std::env::var_os("SLAB_PLUGIN_MARKET_URL").is_none()
-        && let Some(path) = bundled_plugin_market_path
-    {
-        command = command.env("SLAB_PLUGIN_MARKET_URL", path.to_string_lossy().into_owned());
-    }
 
     let (rx, child) = command
         .spawn()

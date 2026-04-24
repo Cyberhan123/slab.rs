@@ -85,7 +85,7 @@ crates/slab-runtime-core (scheduler, backend protocol, worker runner)
 - `packages/slab-desktop/src/pages/chat`: Ant Design X chat UI and page-local wrappers.
 - `packages/slab-desktop/src/pages/plugins`: desktop-only plugin center, wasm function bridge, and plugin event viewport UI.
 - `packages/slab-desktop/src/lib/plugin-host-bridge.ts`: frontend bridge to Tauri plugin commands and events.
-- `packages/slab-desktop/src/lib/plugin-market-api.ts`: frontend HTTP client for `/v1/plugins/*`.
+- `packages/slab-desktop/src/lib/api`: frontend HTTP client and OpenAPI hooks for `/v1/*`.
 - `packages/slab-components/src`: shared UI component library (shadcn/ui, Radix UI, Tailwind CSS).
 - `packages/slab-plugin-ui/src`: stable plugin UI ABI re-exports and plugin-scoped global styles.
 - `packages/slab-i18n/src`: shared i18n setup and locale files.
@@ -162,9 +162,12 @@ bun run test:server
 cd packages/slab-desktop
 bun run build
 
-# Build local plugin frontends and refresh manifest integrity
+# Build local plugin frontends, refresh manifest integrity, and emit `.plugin.slab` packs
 cd ../..
 bun run build:plugins
+
+# Repackage local plugins into `.plugin.slab` archives without rebuilding their UIs
+bun run build:plugin-packs
 
 # Run Tauri development mode
 cd bin/slab-app

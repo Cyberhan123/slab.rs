@@ -5,14 +5,13 @@ use std::path::{Component, Path, PathBuf};
 
 use chrono::Utc;
 use reqwest::Url;
-use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use zip::ZipArchive;
 
 use crate::context::ModelState;
-use crate::domain::models::{InstallPluginCommand, PluginMarketView, PluginView};
+use crate::domain::models::{InstallPluginCommand, PluginView};
 use crate::error::AppCoreError;
 use crate::infra::db::{PluginStateRecord, PluginStateStore};
 use slab_types::plugin::{
@@ -23,11 +22,12 @@ use slab_types::plugin::{
 
 const SOURCE_KIND_DEV: &str = "dev";
 const SOURCE_KIND_IMPORT_PACK: &str = "import_pack";
-const SOURCE_KIND_MARKET_PACK: &str = "market_pack";
+const SOURCE_KIND_PACKAGE_URL: &str = "package_url";
+const LEGACY_SOURCE_KIND_MARKET_PACK: &str = "market_pack";
 const RUNTIME_STATUS_RUNNING: &str = "running";
 const RUNTIME_STATUS_STOPPED: &str = "stopped";
 const RUNTIME_STATUS_ERROR: &str = "error";
-const DEFAULT_MARKET_SOURCE_ID: &str = "default";
+const DEFAULT_PACKAGE_SOURCE_ID: &str = "direct";
 const IGNORED_PLUGIN_ROOT_NAMES: &[&str] = &["dist", ".git", "node_modules"];
 
 #[derive(Clone)]
@@ -41,10 +41,6 @@ impl PluginService {
     }
 
     pub async fn list_plugins(&self) -> Result<Vec<PluginView>, AppCoreError> {
-        let market = self.fetch_market_plugins().await?;
-        let market_map =
-            market.iter().map(|item| (item.id.clone(), item.clone())).collect::<HashMap<_, _>>();
-
         let scans = self.scan_and_sync().await?;
         let states = self
             .state
@@ -57,14 +53,14 @@ impl PluginService {
 
         let mut rows = scans
             .iter()
-            .map(|scan| build_plugin_view(scan, states.get(&scan.id), market_map.get(&scan.id)))
+            .map(|scan| build_plugin_view(scan, states.get(&scan.id)))
             .collect::<Vec<_>>();
 
         for (plugin_id, state) in &states {
             if scans.iter().any(|scan| scan.id == *plugin_id) {
                 continue;
             }
-            rows.push(build_missing_plugin_view(state, market_map.get(plugin_id)));
+            rows.push(build_missing_plugin_view(state));
         }
 
         rows.sort_by(|left, right| left.id.cmp(&right.id));
@@ -77,57 +73,6 @@ impl PluginService {
             .into_iter()
             .find(|plugin| plugin.id == plugin_id)
             .ok_or_else(|| AppCoreError::NotFound(format!("plugin '{plugin_id}' not found")))
-    }
-
-    pub async fn list_market(&self) -> Result<Vec<PluginMarketView>, AppCoreError> {
-        let market = self.fetch_market_plugins().await?;
-        let scans = self.scan_and_sync().await?;
-        let states = self
-            .state
-            .store()
-            .list_plugin_states()
-            .await?
-            .into_iter()
-            .map(|record| (record.plugin_id.clone(), record))
-            .collect::<HashMap<_, _>>();
-        let scan_map =
-            scans.into_iter().map(|plugin| (plugin.id.clone(), plugin)).collect::<HashMap<_, _>>();
-
-        let mut rows = market
-            .into_iter()
-            .map(|item| {
-                let installed_version = scan_map
-                    .get(&item.id)
-                    .and_then(|scan| {
-                        scan.manifest.as_ref().map(|manifest| manifest.version.clone())
-                    })
-                    .or_else(|| {
-                        states.get(&item.id).and_then(|state| state.installed_version.clone())
-                    });
-                let enabled = states.get(&item.id).map(|state| state.enabled).unwrap_or(true);
-                let update_available = installed_version
-                    .as_deref()
-                    .map(|version| version != item.version)
-                    .unwrap_or(false);
-
-                PluginMarketView {
-                    source_id: item.source_id,
-                    id: item.id,
-                    name: item.name,
-                    version: item.version,
-                    description: item.description,
-                    package_url: item.package_url,
-                    package_sha256: item.package_sha256,
-                    homepage: item.homepage,
-                    tags: item.tags,
-                    installed_version,
-                    enabled,
-                    update_available,
-                }
-            })
-            .collect::<Vec<_>>();
-        rows.sort_by(|left, right| left.id.cmp(&right.id));
-        Ok(rows)
     }
 
     pub async fn install_plugin(
@@ -156,7 +101,7 @@ impl PluginService {
         self.install_plugin_pack_bytes(
             &package_bytes,
             Some(command.plugin_id.as_str()),
-            SOURCE_KIND_MARKET_PACK,
+            SOURCE_KIND_PACKAGE_URL,
             Some(source.source_id.as_str()),
         )
         .await
@@ -413,65 +358,16 @@ impl PluginService {
                 source_id: command
                     .source_id
                     .clone()
-                    .unwrap_or_else(|| DEFAULT_MARKET_SOURCE_ID.to_owned()),
+                    .unwrap_or_else(|| DEFAULT_PACKAGE_SOURCE_ID.to_owned()),
                 package_url,
                 package_sha256: command.package_sha256.clone(),
             });
         }
 
-        let market = self.fetch_market_plugins().await?;
-        let item = market
-            .into_iter()
-            .find(|item| {
-                item.id == command.plugin_id
-                    && command
-                        .source_id
-                        .as_ref()
-                        .map(|source_id| source_id == &item.source_id)
-                        .unwrap_or(true)
-                    && command
-                        .version
-                        .as_ref()
-                        .map(|version| version == &item.version)
-                        .unwrap_or(true)
-            })
-            .ok_or_else(|| {
-                AppCoreError::NotFound(format!(
-                    "market plugin '{}' was not found in the configured catalog",
-                    command.plugin_id
-                ))
-            })?;
-
-        Ok(ResolvedInstallSource {
-            source_id: item.source_id,
-            package_url: item.package_url,
-            package_sha256: item.package_sha256,
-        })
-    }
-
-    async fn fetch_market_plugins(&self) -> Result<Vec<RemoteMarketPluginItem>, AppCoreError> {
-        let Some(source_url) = self.state.config().plugin_market_url.as_deref() else {
-            return Ok(Vec::new());
-        };
-
-        let raw = load_market_bytes(source_url).await?;
-        let document: RemoteMarketDocument = serde_json::from_slice(&raw).map_err(|error| {
-            AppCoreError::BadRequest(format!("failed to parse plugin market catalog: {error}"))
-        })?;
-
-        match document {
-            RemoteMarketDocument::Catalog(catalog) => catalog
-                .plugins
-                .into_iter()
-                .map(|plugin| plugin.into_market_plugin(catalog.source_id.clone(), source_url))
-                .collect(),
-            RemoteMarketDocument::Items(items) => items
-                .into_iter()
-                .map(|plugin| {
-                    plugin.into_market_plugin(DEFAULT_MARKET_SOURCE_ID.to_owned(), source_url)
-                })
-                .collect(),
-        }
+        Err(AppCoreError::BadRequest(format!(
+            "plugin '{}' install requires an explicit packageUrl",
+            command.plugin_id
+        )))
     }
 
     fn resolve_plugin_dir(
@@ -505,113 +401,9 @@ struct ResolvedInstallSource {
     package_sha256: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RemoteMarketCatalog {
-    #[serde(default = "default_market_source_id")]
-    source_id: String,
-    #[serde(default)]
-    plugins: Vec<RemoteMarketItem>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RemoteMarketItem {
-    id: String,
-    name: String,
-    version: String,
-    #[serde(default)]
-    description: Option<String>,
-    package_url: String,
-    #[serde(default)]
-    package_sha256: Option<String>,
-    #[serde(default)]
-    homepage: Option<String>,
-    #[serde(default)]
-    tags: Vec<String>,
-}
-
-impl RemoteMarketItem {
-    fn into_market_plugin(
-        self,
-        source_id: String,
-        catalog_source: &str,
-    ) -> Result<RemoteMarketPluginItem, AppCoreError> {
-        Ok(RemoteMarketPluginItem {
-            source_id,
-            id: self.id,
-            name: self.name,
-            version: self.version,
-            description: self.description,
-            package_url: resolve_market_package_url(catalog_source, &self.package_url)?,
-            package_sha256: self.package_sha256,
-            homepage: self.homepage,
-            tags: self.tags,
-        })
-    }
-}
-
-#[derive(Debug, Clone)]
-struct RemoteMarketPluginItem {
-    source_id: String,
-    id: String,
-    name: String,
-    version: String,
-    description: Option<String>,
-    package_url: String,
-    package_sha256: Option<String>,
-    homepage: Option<String>,
-    tags: Vec<String>,
-}
-
-fn resolve_market_package_url(
-    catalog_source: &str,
-    package_url: &str,
-) -> Result<String, AppCoreError> {
-    let package_url = package_url.trim();
-    if package_url.is_empty() {
-        return Err(AppCoreError::BadRequest(
-            "plugin market item is missing a packageUrl".to_owned(),
-        ));
-    }
-
-    let package_path = Path::new(package_url);
-    if package_path.is_absolute() {
-        return Ok(package_url.to_owned());
-    }
-
-    if let Ok(url) = Url::parse(package_url) {
-        return Ok(url.to_string());
-    }
-
-    if let Ok(base_url) = Url::parse(catalog_source) {
-        return base_url.join(package_url).map(|url| url.to_string()).map_err(|error| {
-            AppCoreError::BadRequest(format!(
-                "failed to resolve plugin package URL '{package_url}' against '{catalog_source}': {error}"
-            ))
-        });
-    }
-
-    let catalog_path = Path::new(catalog_source);
-    let base_dir = catalog_path.parent().unwrap_or_else(|| Path::new("."));
-    Ok(base_dir.join(package_url).to_string_lossy().into_owned())
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum RemoteMarketDocument {
-    Catalog(RemoteMarketCatalog),
-    Items(Vec<RemoteMarketItem>),
-}
-
-fn default_market_source_id() -> String {
-    DEFAULT_MARKET_SOURCE_ID.to_owned()
-}
-
 fn build_plugin_view(
     scan: &ScannedPlugin,
     state: Option<&PluginStateRecord>,
-    market: Option<&RemoteMarketPluginItem>,
 ) -> PluginView {
     let manifest = scan.manifest.as_ref();
     let manifest_compatibility =
@@ -623,11 +415,6 @@ fn build_plugin_view(
     let installed_version = manifest
         .map(|value| value.version.clone())
         .or_else(|| state.and_then(|record| record.installed_version.clone()));
-    let available_version = market.map(|item| item.version.clone());
-    let update_available = matches!(
-        (installed_version.as_deref(), available_version.as_deref()),
-        (Some(installed), Some(available)) if installed != available
-    );
 
     PluginView {
         id: scan.id.clone(),
@@ -677,18 +464,14 @@ fn build_plugin_view(
             .and_then(|record| record.last_started_at.map(|value| value.to_rfc3339())),
         last_stopped_at: state
             .and_then(|record| record.last_stopped_at.map(|value| value.to_rfc3339())),
-        available_version,
-        update_available,
+        available_version: None,
+        update_available: false,
         removable: state
             .is_some_and(|record| is_pack_managed_source_kind(record.source_kind.as_str())),
     }
 }
 
-fn build_missing_plugin_view(
-    state: &PluginStateRecord,
-    market: Option<&RemoteMarketPluginItem>,
-) -> PluginView {
-    let available_version = market.map(|item| item.version.clone());
+fn build_missing_plugin_view(state: &PluginStateRecord) -> PluginView {
     PluginView {
         id: state.plugin_id.clone(),
         name: state.plugin_id.clone(),
@@ -716,11 +499,8 @@ fn build_missing_plugin_view(
         last_seen_at: state.last_seen_at.map(|value| value.to_rfc3339()),
         last_started_at: state.last_started_at.map(|value| value.to_rfc3339()),
         last_stopped_at: state.last_stopped_at.map(|value| value.to_rfc3339()),
-        available_version: available_version.clone(),
-        update_available: matches!(
-            (state.installed_version.as_deref(), available_version.as_deref()),
-            (Some(installed), Some(available)) if installed != available
-        ),
+        available_version: None,
+        update_available: false,
         removable: is_pack_managed_source_kind(&state.source_kind),
     }
 }
@@ -1145,7 +925,10 @@ fn is_valid_plugin_id(id: &str) -> bool {
 }
 
 fn is_pack_managed_source_kind(source_kind: &str) -> bool {
-    matches!(source_kind, SOURCE_KIND_IMPORT_PACK | SOURCE_KIND_MARKET_PACK)
+    matches!(
+        source_kind,
+        SOURCE_KIND_IMPORT_PACK | SOURCE_KIND_PACKAGE_URL | LEGACY_SOURCE_KIND_MARKET_PACK
+    )
 }
 
 fn network_mode_label(mode: &PluginNetworkMode) -> &'static str {
@@ -1207,10 +990,6 @@ async fn load_package_bytes(source: &str) -> Result<Vec<u8>, AppCoreError> {
     fs::read(source).map_err(|error| {
         AppCoreError::Internal(format!("failed to read plugin package `{source}`: {error}"))
     })
-}
-
-async fn load_market_bytes(source: &str) -> Result<Vec<u8>, AppCoreError> {
-    load_package_bytes(source).await
 }
 
 fn create_staging_dir(plugins_dir: &Path) -> Result<PathBuf, AppCoreError> {
@@ -1368,10 +1147,7 @@ fn ensure_path_within(path: &Path, root: &Path) -> Result<(), AppCoreError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        hash_bytes_hex, locate_plugin_root, normalize_relative_path, resolve_market_package_url,
-        scan_plugin_dir, scan_plugins,
-    };
+    use super::{hash_bytes_hex, locate_plugin_root, normalize_relative_path, scan_plugin_dir, scan_plugins};
     use serde_json::json;
     use std::fs;
 
@@ -1435,20 +1211,5 @@ mod tests {
         let rows = scan_plugins(&root).expect("scan plugins");
 
         assert!(rows.is_empty());
-    }
-
-    #[test]
-    fn resolve_market_package_url_supports_relative_file_paths() {
-        let resolved = resolve_market_package_url(
-            "C:/repo/plugins/dist/plugin-market.json",
-            "video-subtitle-translator-0.1.0.plugin.slab",
-        )
-        .expect("resolve package url");
-
-        assert!(
-            resolved
-                .replace('\\', "/")
-                .ends_with("plugins/dist/video-subtitle-translator-0.1.0.plugin.slab")
-        );
     }
 }

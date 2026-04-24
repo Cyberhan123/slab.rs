@@ -10,8 +10,8 @@
   "type": "module",
   "scripts": {
     "build:desktop": "bun run --filter @slab/desktop build",
-    "build:plugins": "bun run --cwd plugins/video-subtitle-translator build && bun run build:plugin-market",
-    "build:plugin-market": "node scripts/generate-plugin-market.ts",
+    "build:plugins": "bun run --cwd plugins/video-subtitle-translator build && bun run build:plugin-packs",
+    "build:plugin-packs": "node plugins/scripts/generate-plugin-packs.ts",
     "dev:desktop": "bun run --filter @slab/desktop dev",
     "api:desktop": "bun run --filter @slab/desktop api",
     "lint": "oxlint packages/slab-desktop packages/slab-components packages/slab-i18n packages/slab-plugin-sdk packages/slab-plugin-ui packages/vitest-rust-reporter plugins/video-subtitle-translator/src models/scripts",

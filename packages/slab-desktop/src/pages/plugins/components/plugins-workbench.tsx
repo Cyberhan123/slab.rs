@@ -13,24 +13,21 @@ import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
 import { Button } from '@slab/components/button';
 import { StageEmptyState } from '@slab/components/workspace';
 import type { PluginsPageState } from '../hooks/use-plugins-page';
-import { MARKET_ICONS, PLUGIN_ICONS, PLUGIN_TONES } from '../utils';
+import { PLUGIN_ICONS, PLUGIN_TONES } from '../utils';
 import { EmptyPanel } from './empty-panel';
 import { ImportPluginPackDialog } from './import-plugin-pack-dialog';
 import { InstalledPluginCard } from './installed-plugin-card';
-import { MarketPluginRow } from './market-plugin-row';
-import { InstalledSkeletonGrid, MarketSkeletonRow } from './plugin-skeletons';
+import { InstalledSkeletonGrid } from './plugin-skeletons';
 import { SectionHeading } from './section-heading';
 
 export function PluginsWorkbench({
   busyPluginId,
   canImport,
   dataErrorMessage,
-  filteredMarketPlugins,
   filteredPlugins,
   handleImportFileChange,
   handleImportOpenChange,
   handleImportPlugin,
-  handleInstall,
   handlePrimaryAction,
   handleToggleEnabled,
   hasSearchQuery,
@@ -39,7 +36,6 @@ export function PluginsWorkbench({
   isImportOpen,
   isDesktopTauri,
   loading,
-  marketPlugins,
   plugins,
   refreshData,
   refreshing,
@@ -137,44 +133,6 @@ export function PluginsWorkbench({
               ))}
             </div>
           )}
-        </section>
-
-        <section className="space-y-4">
-          <SectionHeading
-            icon={PackageOpen}
-            title={t('pages.plugins.sections.market')}
-          />
-
-          <div className="space-y-3">
-            {loading && marketPlugins.length === 0 ? (
-              <>
-                <MarketSkeletonRow />
-                <MarketSkeletonRow />
-              </>
-            ) : marketPlugins.length === 0 ? (
-              <EmptyPanel
-                icon={PackageOpen}
-                title={t('pages.plugins.empty.noMarket.title')}
-                description={t('pages.plugins.empty.noMarket.description')}
-              />
-            ) : filteredMarketPlugins.length === 0 ? (
-              <EmptyPanel
-                icon={Search}
-                title={t('pages.plugins.empty.noMarketMatches.title')}
-                description={t('pages.plugins.empty.noMarketMatches.description')}
-              />
-            ) : (
-              filteredMarketPlugins.map((plugin, index) => (
-                <MarketPluginRow
-                  key={`${plugin.sourceId}:${plugin.id}`}
-                  plugin={plugin}
-                  icon={MARKET_ICONS[index % MARKET_ICONS.length]}
-                  busy={busyPluginId === plugin.id}
-                  onInstall={() => void handleInstall(plugin)}
-                />
-              ))
-            )}
-          </div>
         </section>
       </div>
 
