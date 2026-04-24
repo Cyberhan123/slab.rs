@@ -22,11 +22,13 @@ use slab_types::plugin::{
 };
 
 const SOURCE_KIND_DEV: &str = "dev";
-const SOURCE_KIND_MARKET_ZIP: &str = "market_zip";
+const SOURCE_KIND_IMPORT_PACK: &str = "import_pack";
+const SOURCE_KIND_MARKET_PACK: &str = "market_pack";
 const RUNTIME_STATUS_RUNNING: &str = "running";
 const RUNTIME_STATUS_STOPPED: &str = "stopped";
 const RUNTIME_STATUS_ERROR: &str = "error";
 const DEFAULT_MARKET_SOURCE_ID: &str = "default";
+const IGNORED_PLUGIN_ROOT_NAMES: &[&str] = &["dist", ".git", "node_modules"];
 
 #[derive(Clone)]
 pub struct PluginService {
@@ -151,35 +153,75 @@ impl PluginService {
             }
         }
 
+        self.install_plugin_pack_bytes(
+            &package_bytes,
+            Some(command.plugin_id.as_str()),
+            SOURCE_KIND_MARKET_PACK,
+            Some(source.source_id.as_str()),
+        )
+        .await
+    }
+
+    pub async fn import_plugin_pack_bytes(
+        &self,
+        bytes: &[u8],
+        source_ref: Option<&str>,
+    ) -> Result<PluginView, AppCoreError> {
+        self.install_plugin_pack_bytes(bytes, None, SOURCE_KIND_IMPORT_PACK, source_ref).await
+    }
+
+    async fn install_plugin_pack_bytes(
+        &self,
+        package_bytes: &[u8],
+        expected_plugin_id: Option<&str>,
+        source_kind: &str,
+        source_ref: Option<&str>,
+    ) -> Result<PluginView, AppCoreError> {
+        fs::create_dir_all(&self.state.config().plugins_dir).map_err(|error| {
+            AppCoreError::Internal(format!(
+                "failed to create plugins directory {}: {error}",
+                self.state.config().plugins_dir.display()
+            ))
+        })?;
+
         let staging_root = create_staging_dir(&self.state.config().plugins_dir)?;
-        extract_zip_archive(&package_bytes, &staging_root)?;
+        extract_plugin_pack_archive(package_bytes, &staging_root)?;
         let extracted_root = locate_plugin_root(&staging_root)?;
-        let scanned = scan_plugin_dir(&extracted_root, SOURCE_KIND_MARKET_ZIP)?;
+        let scanned = scan_plugin_dir(&extracted_root, source_kind)?;
         if !scanned.valid {
             return Err(AppCoreError::BadRequest(scanned.error.unwrap_or_else(|| {
-                format!("plugin '{}' failed validation after extraction", command.plugin_id)
+                expected_plugin_id.map_or_else(
+                    || "plugin pack failed validation after extraction".to_owned(),
+                    |plugin_id| {
+                        format!("plugin '{plugin_id}' failed validation after extraction")
+                    },
+                )
             })));
         }
 
         let manifest = scanned.manifest.as_ref().ok_or_else(|| {
-            AppCoreError::BadRequest("plugin archive is missing plugin.json".into())
+            AppCoreError::BadRequest("plugin pack is missing plugin.json".into())
         })?;
-        if manifest.id != command.plugin_id {
+        if let Some(expected_plugin_id) = expected_plugin_id
+            && manifest.id != expected_plugin_id
+        {
             return Err(AppCoreError::BadRequest(format!(
                 "installed plugin id '{}' does not match request '{}'",
-                manifest.id, command.plugin_id
+                manifest.id, expected_plugin_id
             )));
         }
 
         let final_dir = self.state.config().plugins_dir.join(&manifest.id);
         if final_dir.exists() {
-            if let Some(state) = self.state.store().get_plugin_state(&manifest.id).await? {
-                if state.source_kind != SOURCE_KIND_MARKET_ZIP {
-                    return Err(AppCoreError::BadRequest(format!(
-                        "plugin '{}' is not a market-managed install and cannot be replaced",
-                        manifest.id
-                    )));
-                }
+            let state = self.state.store().get_plugin_state(&manifest.id).await?;
+            if !state
+                .as_ref()
+                .is_some_and(|record| is_pack_managed_source_kind(record.source_kind.as_str()))
+            {
+                return Err(AppCoreError::BadRequest(format!(
+                    "plugin '{}' already exists on disk and is not a managed pack install",
+                    manifest.id
+                )));
             }
             safe_remove_dir(&final_dir)?;
         }
@@ -196,8 +238,8 @@ impl PluginService {
             .store()
             .upsert_plugin_state(PluginStateRecord {
                 plugin_id: manifest.id.clone(),
-                source_kind: SOURCE_KIND_MARKET_ZIP.to_owned(),
-                source_ref: Some(source.source_id),
+                source_kind: source_kind.to_owned(),
+                source_ref: source_ref.map(str::to_owned),
                 install_root: Some(final_dir.to_string_lossy().into_owned()),
                 installed_version: Some(manifest.version.clone()),
                 manifest_hash: scanned.manifest_hash.clone(),
@@ -280,9 +322,9 @@ impl PluginService {
             .get_plugin_state(plugin_id)
             .await?
             .ok_or_else(|| AppCoreError::NotFound(format!("plugin '{plugin_id}' not found")))?;
-        if state.source_kind != SOURCE_KIND_MARKET_ZIP {
+        if !is_pack_managed_source_kind(&state.source_kind) {
             return Err(AppCoreError::BadRequest(format!(
-                "plugin '{plugin_id}' is not removable because it is not a market ZIP install"
+                "plugin '{plugin_id}' is not removable because it is not a managed pack install"
             )));
         }
 
@@ -417,17 +459,19 @@ impl PluginService {
             AppCoreError::BadRequest(format!("failed to parse plugin market catalog: {error}"))
         })?;
 
-        Ok(match document {
+        match document {
             RemoteMarketDocument::Catalog(catalog) => catalog
                 .plugins
                 .into_iter()
-                .map(|plugin| plugin.into_market_plugin(catalog.source_id.clone()))
+                .map(|plugin| plugin.into_market_plugin(catalog.source_id.clone(), source_url))
                 .collect(),
             RemoteMarketDocument::Items(items) => items
                 .into_iter()
-                .map(|plugin| plugin.into_market_plugin(DEFAULT_MARKET_SOURCE_ID.to_owned()))
+                .map(|plugin| {
+                    plugin.into_market_plugin(DEFAULT_MARKET_SOURCE_ID.to_owned(), source_url)
+                })
                 .collect(),
-        })
+        }
     }
 
     fn resolve_plugin_dir(
@@ -488,18 +532,22 @@ struct RemoteMarketItem {
 }
 
 impl RemoteMarketItem {
-    fn into_market_plugin(self, source_id: String) -> RemoteMarketPluginItem {
-        RemoteMarketPluginItem {
+    fn into_market_plugin(
+        self,
+        source_id: String,
+        catalog_source: &str,
+    ) -> Result<RemoteMarketPluginItem, AppCoreError> {
+        Ok(RemoteMarketPluginItem {
             source_id,
             id: self.id,
             name: self.name,
             version: self.version,
             description: self.description,
-            package_url: self.package_url,
+            package_url: resolve_market_package_url(catalog_source, &self.package_url)?,
             package_sha256: self.package_sha256,
             homepage: self.homepage,
             tags: self.tags,
-        }
+        })
     }
 }
 
@@ -514,6 +562,39 @@ struct RemoteMarketPluginItem {
     package_sha256: Option<String>,
     homepage: Option<String>,
     tags: Vec<String>,
+}
+
+fn resolve_market_package_url(
+    catalog_source: &str,
+    package_url: &str,
+) -> Result<String, AppCoreError> {
+    let package_url = package_url.trim();
+    if package_url.is_empty() {
+        return Err(AppCoreError::BadRequest(
+            "plugin market item is missing a packageUrl".to_owned(),
+        ));
+    }
+
+    let package_path = Path::new(package_url);
+    if package_path.is_absolute() {
+        return Ok(package_url.to_owned());
+    }
+
+    if let Ok(url) = Url::parse(package_url) {
+        return Ok(url.to_string());
+    }
+
+    if let Ok(base_url) = Url::parse(catalog_source) {
+        return base_url.join(package_url).map(|url| url.to_string()).map_err(|error| {
+            AppCoreError::BadRequest(format!(
+                "failed to resolve plugin package URL '{package_url}' against '{catalog_source}': {error}"
+            ))
+        });
+    }
+
+    let catalog_path = Path::new(catalog_source);
+    let base_dir = catalog_path.parent().unwrap_or_else(|| Path::new("."));
+    Ok(base_dir.join(package_url).to_string_lossy().into_owned())
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -598,7 +679,8 @@ fn build_plugin_view(
             .and_then(|record| record.last_stopped_at.map(|value| value.to_rfc3339())),
         available_version,
         update_available,
-        removable: state.is_some_and(|record| record.source_kind == SOURCE_KIND_MARKET_ZIP),
+        removable: state
+            .is_some_and(|record| is_pack_managed_source_kind(record.source_kind.as_str())),
     }
 }
 
@@ -639,7 +721,7 @@ fn build_missing_plugin_view(
             (state.installed_version.as_deref(), available_version.as_deref()),
             (Some(installed), Some(available)) if installed != available
         ),
-        removable: state.source_kind == SOURCE_KIND_MARKET_ZIP,
+        removable: is_pack_managed_source_kind(&state.source_kind),
     }
 }
 
@@ -664,6 +746,9 @@ fn scan_plugins(root_dir: &Path) -> Result<Vec<ScannedPlugin>, AppCoreError> {
         })?;
         let path = entry.path();
         if !path.is_dir() {
+            continue;
+        }
+        if IGNORED_PLUGIN_ROOT_NAMES.iter().any(|ignored| entry.file_name() == *ignored) {
             continue;
         }
         rows.push(scan_plugin_dir(&path, SOURCE_KIND_DEV)?);
@@ -1059,6 +1144,10 @@ fn is_valid_plugin_id(id: &str) -> bool {
     })
 }
 
+fn is_pack_managed_source_kind(source_kind: &str) -> bool {
+    matches!(source_kind, SOURCE_KIND_IMPORT_PACK | SOURCE_KIND_MARKET_PACK)
+}
+
 fn network_mode_label(mode: &PluginNetworkMode) -> &'static str {
     match mode {
         PluginNetworkMode::Blocked => "blocked",
@@ -1135,14 +1224,16 @@ fn create_staging_dir(plugins_dir: &Path) -> Result<PathBuf, AppCoreError> {
     Ok(path)
 }
 
-fn extract_zip_archive(bytes: &[u8], dest: &Path) -> Result<(), AppCoreError> {
+fn extract_plugin_pack_archive(bytes: &[u8], dest: &Path) -> Result<(), AppCoreError> {
     let mut archive = ZipArchive::new(Cursor::new(bytes)).map_err(|error| {
-        AppCoreError::BadRequest(format!("failed to open plugin ZIP archive: {error}"))
+        AppCoreError::BadRequest(format!("failed to open .plugin.slab archive: {error}"))
     })?;
 
     for index in 0..archive.len() {
         let mut file = archive.by_index(index).map_err(|error| {
-            AppCoreError::BadRequest(format!("failed to access plugin ZIP entry #{index}: {error}"))
+            AppCoreError::BadRequest(format!(
+                "failed to access .plugin.slab entry #{index}: {error}"
+            ))
         })?;
         let Some(path) = file.enclosed_name().map(|value| value.to_path_buf()) else {
             continue;
@@ -1195,10 +1286,12 @@ fn locate_plugin_root(staging_root: &Path) -> Result<PathBuf, AppCoreError> {
     match manifests.as_slice() {
         [only] => Ok(only.clone()),
         [] => {
-            Err(AppCoreError::BadRequest("plugin archive does not contain plugin.json".to_owned()))
+            Err(AppCoreError::BadRequest(
+                "plugin pack does not contain plugin.json".to_owned(),
+            ))
         }
         _ => Err(AppCoreError::BadRequest(
-            "plugin archive contains multiple plugin.json files".to_owned(),
+            "plugin pack contains multiple plugin.json files".to_owned(),
         )),
     }
 }
@@ -1275,7 +1368,10 @@ fn ensure_path_within(path: &Path, root: &Path) -> Result<(), AppCoreError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{hash_bytes_hex, locate_plugin_root, normalize_relative_path, scan_plugin_dir};
+    use super::{
+        hash_bytes_hex, locate_plugin_root, normalize_relative_path, resolve_market_package_url,
+        scan_plugin_dir, scan_plugins,
+    };
     use serde_json::json;
     use std::fs;
 
@@ -1328,5 +1424,31 @@ mod tests {
         write(&nested.join("plugin.json"), "{}");
         let located = locate_plugin_root(&root).expect("locate plugin root");
         assert_eq!(located, nested);
+    }
+
+    #[test]
+    fn scan_plugins_ignores_dist_directory() {
+        let root = temp_dir("scan-plugins");
+        fs::create_dir_all(root.join("dist")).expect("create dist dir");
+        fs::write(root.join("dist").join("example.plugin.slab"), b"pack").expect("write pack");
+
+        let rows = scan_plugins(&root).expect("scan plugins");
+
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn resolve_market_package_url_supports_relative_file_paths() {
+        let resolved = resolve_market_package_url(
+            "C:/repo/plugins/dist/plugin-market.json",
+            "video-subtitle-translator-0.1.0.plugin.slab",
+        )
+        .expect("resolve package url");
+
+        assert!(
+            resolved
+                .replace('\\', "/")
+                .ends_with("plugins/dist/video-subtitle-translator-0.1.0.plugin.slab")
+        );
     }
 }

@@ -2,7 +2,8 @@ use std::env;
 use std::path::PathBuf;
 
 use slab_build_utils::{
-    sync_tauri_sidecar, sync_tauri_vendor_runtime_artifacts, workspace_target_dir,
+    sync_tauri_bundled_plugins, sync_tauri_sidecar, sync_tauri_vendor_runtime_artifacts,
+    workspace_target_dir,
 };
 
 fn main() {
@@ -20,6 +21,7 @@ fn main() {
         .expect("failed to sync slab-server sidecar");
     sync_tauri_sidecar("slab-runtime", &target, &workspace_target_dir, &manifest_dir)
         .expect("failed to sync slab-runtime sidecar");
+    sync_tauri_bundled_plugins(&manifest_dir).expect("failed to sync bundled plugins");
     if !skip_vendor_runtime_sync {
         sync_tauri_vendor_runtime_artifacts(&target, &manifest_dir)
             .expect("failed to sync vendored runtime artifacts");

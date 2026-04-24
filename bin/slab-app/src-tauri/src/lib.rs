@@ -52,7 +52,7 @@ pub fn run() {
                 std::io::Error::other(error)
             })?;
             setup::run_server_sidecar(app, &plugins_root)?;
-            plugins::init(app, api_endpoint.clone()).map_err(|error| {
+            plugins::init(app, api_endpoint.clone(), plugins_root).map_err(|error| {
                 log::error!("failed to initialize plugins: {error}");
                 std::io::Error::other(error)
             })?;

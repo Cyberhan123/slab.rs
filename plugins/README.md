@@ -28,6 +28,27 @@ The build writes static assets to each plugin's `ui/` directory, then rewrites
 `plugin.json` with `integrity.filesSha256` entries for `ui/**/*`,
 `schemas/**/*`, and optional `wasm/plugin.wasm`.
 
+## Local Market Catalog
+
+Run `bun run build:plugin-market` from the repo root to package every
+`plugins/<plugin-id>/` directory that contains a `plugin.json`.
+
+The generator:
+
+- refreshes each plugin's `integrity.filesSha256`
+- writes `.plugin.slab` plugin packs to `plugins/dist/<plugin-id>-<version>.plugin.slab`
+- writes a market catalog to `plugins/dist/plugin-market.json`
+
+By default the catalog uses relative package URLs so the local desktop app can
+resolve packs next to the catalog without hard-coded absolute file paths. The
+generator also accepts `--package-url-base <absolute-url>` when you want to
+publish the packs behind an HTTP endpoint instead.
+
+`cargo make dev` now runs this generator automatically and exports
+`SLAB_PLUGIN_MARKET_URL=<repo>/plugins/dist/plugin-market.json` for the Tauri dev
+process, so the Plugin Market page can list the local catalog during desktop
+development.
+
 ## Manifest v1
 
 `plugin.json` v1 is the canonical declaration format. It separates runtime

@@ -1,6 +1,6 @@
 [tasks.dev]
 workspace = false
-dependencies = ["build-runtime-dev","build-server-dev", "run-tauri"]
+dependencies = ["build-runtime-dev","build-server-dev", "build-plugin-market", "run-tauri"]
 
 [tasks.release]
 workspace = false
@@ -31,7 +31,7 @@ dependencies = [
 
 [tasks.debug]
 workspace = false
-dependencies = ["build-runtime-dev","build-server-dev", "build-tauri-debug"]
+dependencies = ["build-runtime-dev","build-server-dev", "build-plugin-market", "build-tauri-debug"]
 
 [tasks.check]
 workspace = false
@@ -81,6 +81,7 @@ workspace = false
 command = "bun"
 args = ["run", "dev"]
 cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
+env = { SLAB_PLUGIN_MARKET_URL = "${CARGO_MAKE_WORKING_DIRECTORY}/plugins/dist/plugin-market.json" }
 
 [tasks.run-tauri-windows]
 workspace = false
@@ -93,6 +94,13 @@ args = [
     "src-tauri/tauri.windows.dev.conf.json",
 ]
 cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
+env = { SLAB_PLUGIN_MARKET_URL = "${CARGO_MAKE_WORKING_DIRECTORY}/plugins/dist/plugin-market.json" }
+
+[tasks.build-plugin-market]
+workspace = false
+command = "bun"
+args = ["run", "build:plugin-market"]
+cwd = "${CARGO_MAKE_WORKING_DIRECTORY}"
 
 [tasks.build-tauri-release]
 workspace = false

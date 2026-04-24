@@ -16,6 +16,7 @@ export const plugins = {
   },
   actions: {
     refresh: "Refresh",
+    import: "Import Pack",
     stop: "Stop",
     enable: "Enable",
     launch: "Launch",
@@ -40,13 +41,25 @@ export const plugins = {
     webviewRuntime: "WebView and runtime entry configured",
     runtimeHooks: "Runtime hooks available",
     uiEntry: "Plugin UI entry configured",
-    sourceVersion: "{{sourceKind}} source · v{{version}}",
+    sourceVersion: "{{sourceKind}} source - v{{version}}",
   },
   card: {
     runtimeIssue: "Runtime issue",
   },
   market: {
-    fallbackDescription: "{{id}} · v{{version}}",
+    fallbackDescription: "{{id}} - v{{version}}",
+  },
+  dialogs: {
+    import: {
+      title: "Import Plugin Pack",
+      description: "Install a .plugin.slab package into the local plugins directory.",
+      packLabel: "Plugin Pack",
+      selectedDescription:
+        "This .plugin.slab pack will be extracted into the managed plugins directory.",
+      emptyDescription:
+        "Choose a .plugin.slab file to install and activate the plugin in this workspace.",
+      submit: "Import Plugin",
+    },
   },
   desktopOnly: {
     title: "Plugins require Tauri desktop runtime",
@@ -56,7 +69,8 @@ export const plugins = {
   empty: {
     noInstalled: {
       title: "No installed plugins found.",
-      description: "Install a plugin from the market below to populate this workspace.",
+      description:
+        "Import a .plugin.slab pack or install one from the market below to populate this workspace.",
     },
     noInstalledMatches: {
       title: "No installed plugins match",
@@ -71,8 +85,12 @@ export const plugins = {
       description: "Try a different plugin name, tag, source, or version.",
     },
   },
+  error: {
+    onlyPluginPacks: "Only .plugin.slab plugin packs are supported.",
+  },
   toast: {
     loadFailed: "Failed to load plugin data",
+    importFailed: "Failed to import plugin pack",
     invalidPlugin: "Selected plugin is invalid",
     unknownValidationError: "Unknown plugin validation error",
     actionFailed: "Could not update {{name}}",
@@ -80,6 +98,7 @@ export const plugins = {
     enabled: "Enabled {{name}}",
     launched: "Launched {{name}}",
     disabled: "Disabled {{name}}",
+    imported: "Imported {{name}}",
     installed: "Installed {{name}}",
     updated: "Updated {{name}}",
   },

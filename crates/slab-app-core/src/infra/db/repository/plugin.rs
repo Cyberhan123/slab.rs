@@ -237,7 +237,7 @@ mod tests {
         store
             .upsert_plugin_state(PluginStateRecord {
                 plugin_id: "example-plugin".to_owned(),
-                source_kind: "market_zip".to_owned(),
+                source_kind: "market_pack".to_owned(),
                 source_ref: Some("default".to_owned()),
                 install_root: Some("C:/Slab/plugins/example-plugin".to_owned()),
                 installed_version: Some("0.1.0".to_owned()),
@@ -266,7 +266,7 @@ mod tests {
             .expect("plugin state exists");
 
         assert_eq!(record.plugin_id, "example-plugin");
-        assert_eq!(record.source_kind, "market_zip");
+        assert_eq!(record.source_kind, "market_pack");
         assert!(record.enabled);
         assert_eq!(record.runtime_status, "running");
         assert!(record.last_started_at.is_some());

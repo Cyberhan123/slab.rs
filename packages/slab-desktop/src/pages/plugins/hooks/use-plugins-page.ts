@@ -6,6 +6,7 @@ import { usePageHeader, usePageHeaderSearch } from '@/hooks/use-global-header-me
 import { isTauri } from '@/hooks/use-tauri';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import api, { getErrorMessage } from '@/lib/api';
+import { SERVER_BASE_URL } from '@/lib/config';
 import {
   isPluginRunning,
   marketPluginSearchText,
@@ -13,6 +14,55 @@ import {
   type PluginMarketRecord,
   type PluginRecord,
 } from '../utils';
+
+type ImportedPluginResponse = PluginRecord;
+
+async function parseErrorPayload(response: Response): Promise<unknown> {
+  try {
+    return await response.clone().json();
+  } catch {
+    try {
+      return await response.clone().text();
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+async function importPluginPack(body: FormData): Promise<ImportedPluginResponse> {
+  const response = await fetch(`${SERVER_BASE_URL}/v1/plugins/import-pack`, {
+    body,
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    throw createImportError(response, await parseErrorPayload(response));
+  }
+
+  return (await response.json()) as ImportedPluginResponse;
+}
+
+function createImportError(response: Response, payload: unknown) {
+  if (payload instanceof Error) {
+    return payload;
+  }
+
+  if (typeof payload === 'string' && payload.trim().length > 0) {
+    return new Error(payload);
+  }
+
+  if (payload && typeof payload === 'object') {
+    const candidate = payload as { error?: unknown; message?: unknown };
+    if (typeof candidate.error === 'string' && candidate.error.trim().length > 0) {
+      return new Error(candidate.error);
+    }
+    if (typeof candidate.message === 'string' && candidate.message.trim().length > 0) {
+      return new Error(candidate.message);
+    }
+  }
+
+  return new Error(`Request failed with ${response.status}`);
+}
 
 export function usePluginsPage() {
   const { t } = useTranslation();
@@ -26,6 +76,9 @@ export function usePluginsPage() {
 
   const [busyPluginId, setBusyPluginId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPluginPending, setImportPluginPending] = useState(false);
 
   const headerSearch = useMemo(
     () =>
@@ -75,6 +128,7 @@ export function usePluginsPage() {
   const loading = pluginsLoading || marketPluginsLoading;
   const refreshing = pluginsFetching || marketPluginsFetching;
   const dataError = pluginsError ?? marketPluginsError;
+  const canImport = Boolean(importFile && !importPluginPending);
 
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const normalizedSearchQuery = deferredSearchQuery.trim().toLowerCase();
@@ -220,15 +274,66 @@ export function usePluginsPage() {
     [installPluginMutation, refreshData, runAction, t],
   );
 
+  const resetImportState = useCallback(() => {
+    setImportFile(null);
+  }, []);
+
+  const handleImportOpenChange = useCallback(
+    (open: boolean) => {
+      setIsImportOpen(open);
+      if (!open && !importPluginPending) {
+        resetImportState();
+      }
+    },
+    [importPluginPending, resetImportState],
+  );
+
+  const handleImportFileChange = useCallback((file: File | null) => {
+    setImportFile(file);
+  }, []);
+
+  const handleImportPlugin = useCallback(async () => {
+    if (!importFile || importPluginPending) {
+      return;
+    }
+
+    setImportPluginPending(true);
+    try {
+      const imported = await importPluginPack(
+        buildImportPluginPackBody(importFile, t('pages.plugins.error.onlyPluginPacks')),
+      );
+
+      toast.success(t('pages.plugins.toast.imported', { name: imported.name }), {
+        description: imported.name,
+      });
+
+      handleImportOpenChange(false);
+      await refreshData();
+    } catch (error) {
+      toast.error(t('pages.plugins.toast.importFailed'), {
+        description: getErrorMessage(error),
+      });
+    } finally {
+      setImportPluginPending(false);
+    }
+  }, [handleImportOpenChange, importFile, importPluginPending, refreshData, t]);
+
   return {
     busyPluginId,
+    canImport,
     dataErrorMessage: dataError ? getErrorMessage(dataError) : null,
     filteredMarketPlugins,
     filteredPlugins,
+    handleImportFileChange,
+    handleImportOpenChange,
+    handleImportPlugin,
     handleInstall,
     handlePrimaryAction,
     handleToggleEnabled,
     hasSearchQuery,
+    importFileName: importFile?.name ?? null,
+    importPluginPending,
+    isImportOpen,
     isDesktopTauri,
     loading,
     marketPlugins,
@@ -239,3 +344,17 @@ export function usePluginsPage() {
 }
 
 export type PluginsPageState = ReturnType<typeof usePluginsPage>;
+
+function isPluginPackFile(file: File) {
+  return file.name.trim().toLowerCase().endsWith('.plugin.slab');
+}
+
+function buildImportPluginPackBody(file: File, invalidFileMessage: string) {
+  if (!isPluginPackFile(file)) {
+    throw new Error(invalidFileMessage);
+  }
+
+  const body = new FormData();
+  body.set('file', file, file.name);
+  return body;
+}

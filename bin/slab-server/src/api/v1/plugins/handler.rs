@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::{Multipart, Path, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use utoipa::OpenApi;
+use utoipa::{OpenApi, ToSchema};
+
+const MAX_PLUGIN_PACK_SIZE: usize = 1024 * 1024 * 1024; // 1GB
 
 use crate::api::validation::{ValidatedJson, validate};
 use crate::error::ServerError;
@@ -14,6 +16,13 @@ use slab_app_core::schemas::plugin::{
     StopPluginRequest,
 };
 
+#[allow(dead_code)]
+#[derive(ToSchema)]
+struct ImportPluginPackMultipartRequest {
+    #[schema(value_type = String, format = Binary)]
+    file: Vec<u8>,
+}
+
 #[derive(OpenApi)]
 #[openapi(
     paths(
@@ -21,6 +30,7 @@ use slab_app_core::schemas::plugin::{
         get_plugin,
         list_market_plugins,
         install_plugin,
+        import_plugin_pack,
         enable_plugin,
         disable_plugin,
         start_plugin,
@@ -29,6 +39,7 @@ use slab_app_core::schemas::plugin::{
     ),
     components(schemas(
         DeletePluginResponse,
+        ImportPluginPackMultipartRequest,
         InstallPluginRequest,
         PluginMarketResponse,
         PluginPath,
@@ -42,6 +53,7 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/plugins", get(list_plugins))
         .route("/plugins/install", post(install_plugin))
+        .route("/plugins/import-pack", post(import_plugin_pack))
         .route("/plugins/market", get(list_market_plugins))
         .route("/plugins/{id}", get(get_plugin).delete(delete_plugin))
         .route("/plugins/{id}/enable", post(enable_plugin))
@@ -101,6 +113,62 @@ async fn install_plugin(
     ValidatedJson(body): ValidatedJson<InstallPluginRequest>,
 ) -> Result<Json<PluginResponse>, ServerError> {
     Ok(Json(service.install_plugin(body.into()).await?.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/plugins/import-pack",
+    tag = "plugins",
+    request_body(
+        content = ImportPluginPackMultipartRequest,
+        content_type = "multipart/form-data",
+        description = "Upload a .plugin.slab plugin pack as a multipart file field named `file`."
+    ),
+    responses((status = 200, description = "Imported plugin", body = PluginResponse))
+)]
+async fn import_plugin_pack(
+    State(service): State<PluginService>,
+    mut multipart: Multipart,
+) -> Result<Json<PluginResponse>, ServerError> {
+    while let Some(field) = multipart.next_field().await.map_err(|error| {
+        ServerError::BadRequest(format!("failed to read multipart field: {error}"))
+    })? {
+        let file_name = field.file_name().map(str::to_owned);
+        if file_name.is_none() {
+            continue;
+        }
+        if let Some(file_name) = file_name.as_deref()
+            && !file_name.trim().to_ascii_lowercase().ends_with(".plugin.slab")
+        {
+            return Err(ServerError::BadRequest(format!(
+                "uploaded plugin pack must use the .plugin.slab extension: {file_name}"
+            )));
+        }
+
+        let bytes = field.bytes().await.map_err(|error| {
+            ServerError::BadRequest(format!("failed to read plugin pack bytes: {error}"))
+        })?;
+
+        if bytes.is_empty() {
+            return Err(ServerError::BadRequest("uploaded plugin pack is empty".into()));
+        }
+
+        if bytes.len() > MAX_PLUGIN_PACK_SIZE {
+            return Err(ServerError::BadRequest(format!(
+                "uploaded plugin pack is too large ({} bytes); maximum size is {} bytes (1GB)",
+                bytes.len(),
+                MAX_PLUGIN_PACK_SIZE
+            )));
+        }
+
+        return Ok(Json(
+            service.import_plugin_pack_bytes(bytes.as_ref(), file_name.as_deref()).await?.into(),
+        ));
+    }
+
+    Err(ServerError::BadRequest(
+        "multipart body must contain a .plugin.slab file field".into(),
+    ))
 }
 
 #[utoipa::path(
@@ -190,6 +258,7 @@ mod tests {
     fn plugin_routes_publish_install_and_market_paths_in_openapi() {
         let openapi = serde_json::to_value(PluginApi::openapi()).expect("serialize plugin openapi");
         assert!(openapi["paths"]["/v1/plugins/install"]["post"].is_object());
+        assert!(openapi["paths"]["/v1/plugins/import-pack"]["post"].is_object());
         assert!(openapi["paths"]["/v1/plugins/market"]["get"].is_object());
         assert!(openapi["paths"]["/v1/plugins/{id}/start"]["post"].is_object());
     }
