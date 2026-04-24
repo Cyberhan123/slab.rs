@@ -392,6 +392,18 @@ fn empty_sections() -> Vec<SettingsSectionView> {
             ],
         },
         SettingsSectionView {
+            id: "plugin".to_owned(),
+            title: "Plugins".to_owned(),
+            description_md: "Runtime plugin installation and registration settings.".to_owned(),
+            subsections: vec![SettingsSubsectionView {
+                id: "general".to_owned(),
+                title: "General".to_owned(),
+                description_md: "Choose where installed plugin packages are loaded from."
+                    .to_owned(),
+                properties: Vec::new(),
+            }],
+        },
+        SettingsSectionView {
             id: "server".to_owned(),
             title: "Server".to_owned(),
             description_md: "HTTP gateway configuration, access control, and API tooling."
@@ -469,6 +481,7 @@ fn section_location(path: &str) -> (&'static str, &'static str) {
         _ if path.starts_with("providers.") => ("providers", "registry"),
         _ if path.starts_with("models.auto_unload.") => ("models", "auto_unload"),
         _ if path.starts_with("models.") => ("models", "general"),
+        _ if path.starts_with("plugin.") => ("plugin", "general"),
         _ if path.starts_with("server.cors.") => ("server", "cors"),
         _ if path.starts_with("server.admin.") => ("server", "admin"),
         _ if path.starts_with("server.swagger.") => ("server", "swagger"),
@@ -570,6 +583,7 @@ fn property_label(path: &str) -> String {
         "models.cache_dir" => "Model Cache Directory".to_owned(),
         "models.config_dir" => "Model Config Directory".to_owned(),
         "models.download_source" => "Model Source".to_owned(),
+        "plugin.install_dir" => "Plugin Install Directory".to_owned(),
         "server.address" => "Bind Address".to_owned(),
         "server.admin.token" => "Admin Token".to_owned(),
         "server.cors.allowed_origins" => "Allowed Origins".to_owned(),
@@ -597,6 +611,7 @@ fn property_description(path: &str) -> String {
         "models.cache_dir" => "Directory used for cached model artifacts.".to_owned(),
         "models.config_dir" => "Directory scanned for persisted model configuration documents.".to_owned(),
         "models.download_source" => "Preferred remote source used when downloading model artifacts. Auto follows the pack candidate order.".to_owned(),
+        "plugin.install_dir" => "Directory used as the plugin installation source for runtime registration.".to_owned(),
         "models.auto_unload.enabled" => "Unload idle models automatically to reclaim memory.".to_owned(),
         "models.auto_unload.idle_minutes" => "Idle timeout in minutes before auto-unload triggers.".to_owned(),
         "models.auto_unload.min_free_system_memory_bytes" => {

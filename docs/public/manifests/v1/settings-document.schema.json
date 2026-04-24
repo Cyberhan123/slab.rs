@@ -467,6 +467,19 @@
       },
       "type": "object"
     },
+    "PluginSettingsConfig": {
+      "description": "Runtime plugin installation settings.",
+      "properties": {
+        "install_dir": {
+          "description": "Directory containing installed runtime plugin packages.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "ProviderAuthConfig": {
       "description": "Provider authentication settings.",
       "properties": {
@@ -897,6 +910,10 @@
         },
         "download_source": "auto"
       }
+    },
+    "plugin": {
+      "$ref": "#/$defs/PluginSettingsConfig",
+      "default": {}
     },
     "providers": {
       "$ref": "#/$defs/ProvidersConfig",

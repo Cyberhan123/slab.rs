@@ -132,11 +132,12 @@ impl Config {
             lib_dir: std::env::var("SLAB_LIB_DIR").ok().map(PathBuf::from),
             session_state_dir: std::env::var("SLAB_SESSION_STATE_DIR")
                 .unwrap_or_else(|_| default_session_state_dir().to_string_lossy().into_owned()),
-            settings_path,
+            settings_path: settings_path.clone(),
             model_config_dir,
             plugins_dir: std::env::var("SLAB_PLUGINS_DIR")
                 .ok()
                 .map(PathBuf::from)
+                .or_else(|| plugin_install_dir_from_settings(&settings_path))
                 .unwrap_or_else(default_plugins_dir),
         }
     }
@@ -178,6 +179,17 @@ pub fn default_session_state_dir() -> PathBuf {
 
 pub fn default_plugins_dir() -> PathBuf {
     default_app_dir().join("plugins")
+}
+
+fn plugin_install_dir_from_settings(settings_path: &Path) -> Option<PathBuf> {
+    let raw = std::fs::read_to_string(settings_path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    value
+        .pointer("/plugin/install_dir")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 pub fn default_runtime_log_dir() -> PathBuf {

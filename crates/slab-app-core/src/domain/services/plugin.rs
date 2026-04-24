@@ -531,6 +531,9 @@ fn scan_plugins(root_dir: &Path) -> Result<Vec<ScannedPlugin>, AppCoreError> {
         if IGNORED_PLUGIN_ROOT_NAMES.iter().any(|ignored| entry.file_name() == *ignored) {
             continue;
         }
+        if !path.join("plugin.json").is_file() {
+            continue;
+        }
         rows.push(scan_plugin_dir(&path, SOURCE_KIND_DEV)?);
     }
     rows.sort_by(|left, right| left.id.cmp(&right.id));
@@ -1207,6 +1210,18 @@ mod tests {
         let root = temp_dir("scan-plugins");
         fs::create_dir_all(root.join("dist")).expect("create dist dir");
         fs::write(root.join("dist").join("example.plugin.slab"), b"pack").expect("write pack");
+
+        let rows = scan_plugins(&root).expect("scan plugins");
+
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn scan_plugins_ignores_non_plugin_directories() {
+        let root = temp_dir("scan-non-plugin-directories");
+        fs::create_dir_all(root.join("scripts")).expect("create scripts dir");
+        fs::write(root.join("scripts").join("generate-plugin-packs.ts"), b"export {};")
+            .expect("write helper");
 
         let rows = scan_plugins(&root).expect("scan plugins");
 

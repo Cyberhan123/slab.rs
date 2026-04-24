@@ -55,7 +55,7 @@ pub fn run_server_sidecar(
         bundled_lib_dir.display().to_string(),
     ];
 
-    let mut command = app
+    let command = app
         .shell()
         .sidecar("slab-server")
         .map_err(|error| {
