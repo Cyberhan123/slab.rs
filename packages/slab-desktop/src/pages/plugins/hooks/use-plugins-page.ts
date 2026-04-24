@@ -9,9 +9,7 @@ import api, { getErrorMessage } from '@/lib/api';
 import { SERVER_BASE_URL } from '@/lib/config';
 import {
   isPluginRunning,
-  marketPluginSearchText,
   pluginSearchText,
-  type PluginMarketRecord,
   type PluginRecord,
 } from '../utils';
 
@@ -106,28 +104,15 @@ export function usePluginsPage() {
     enabled: isDesktopTauri,
     retry: false,
   });
-  const {
-    data: marketRows,
-    error: marketPluginsError,
-    isLoading: marketPluginsLoading,
-    isFetching: marketPluginsFetching,
-    refetch: refetchMarketPlugins,
-  } = api.useQuery('get', '/v1/plugins/market', undefined, {
-    enabled: isDesktopTauri,
-    retry: false,
-  });
-
-  const installPluginMutation = api.useMutation('post', '/v1/plugins/install');
   const enablePluginMutation = api.useMutation('post', '/v1/plugins/{id}/enable');
   const disablePluginMutation = api.useMutation('post', '/v1/plugins/{id}/disable');
   const startPluginMutation = api.useMutation('post', '/v1/plugins/{id}/start');
   const stopPluginMutation = api.useMutation('post', '/v1/plugins/{id}/stop');
 
   const plugins = useMemo(() => pluginRows ?? [], [pluginRows]);
-  const marketPlugins = useMemo(() => marketRows ?? [], [marketRows]);
-  const loading = pluginsLoading || marketPluginsLoading;
-  const refreshing = pluginsFetching || marketPluginsFetching;
-  const dataError = pluginsError ?? marketPluginsError;
+  const loading = pluginsLoading;
+  const refreshing = pluginsFetching;
+  const dataError = pluginsError;
   const canImport = Boolean(importFile && !importPluginPending);
 
   const deferredSearchQuery = useDeferredValue(searchQuery);
@@ -139,23 +124,17 @@ export function usePluginsPage() {
     return plugins.filter((plugin) => pluginSearchText(plugin).includes(normalizedSearchQuery));
   }, [normalizedSearchQuery, plugins]);
 
-  const filteredMarketPlugins = useMemo(() => {
-    if (!normalizedSearchQuery) return marketPlugins;
-    return marketPlugins.filter((plugin) => marketPluginSearchText(plugin).includes(normalizedSearchQuery));
-  }, [marketPlugins, normalizedSearchQuery]);
-
   const refreshData = useCallback(async () => {
     if (!isDesktopTauri) return;
 
-    const [pluginResult, marketResult] = await Promise.all([refetchPlugins(), refetchMarketPlugins()]);
-    const error = pluginResult.error ?? marketResult.error;
-
-    if (error) {
+    try {
+      await refetchPlugins();
+    } catch (error) {
       toast.error(t('pages.plugins.toast.loadFailed'), {
         description: getErrorMessage(error),
       });
     }
-  }, [isDesktopTauri, refetchMarketPlugins, refetchPlugins, t]);
+  }, [isDesktopTauri, refetchPlugins, t]);
 
   const runAction = useCallback(
     async (pluginId: string, errorTitle: string, action: () => Promise<void>) => {
@@ -247,33 +226,6 @@ export function usePluginsPage() {
     [disablePluginMutation, enablePluginMutation, refreshData, runAction, stopPluginMutation, t],
   );
 
-  const handleInstall = useCallback(
-    async (marketPlugin: PluginMarketRecord) => {
-      await runAction(
-        marketPlugin.id,
-        t('pages.plugins.toast.actionFailed', { name: marketPlugin.name }),
-        async () => {
-          await installPluginMutation.mutateAsync({
-            body: {
-              pluginId: marketPlugin.id,
-              sourceId: marketPlugin.sourceId,
-              version: marketPlugin.version,
-            },
-          });
-
-          toast.success(
-            marketPlugin.installedVersion && marketPlugin.updateAvailable
-              ? t('pages.plugins.toast.updated', { name: marketPlugin.name })
-              : t('pages.plugins.toast.installed', { name: marketPlugin.name }),
-          );
-
-          await refreshData();
-        },
-      );
-    },
-    [installPluginMutation, refreshData, runAction, t],
-  );
-
   const resetImportState = useCallback(() => {
     setImportFile(null);
   }, []);
@@ -322,12 +274,10 @@ export function usePluginsPage() {
     busyPluginId,
     canImport,
     dataErrorMessage: dataError ? getErrorMessage(dataError) : null,
-    filteredMarketPlugins,
     filteredPlugins,
     handleImportFileChange,
     handleImportOpenChange,
     handleImportPlugin,
-    handleInstall,
     handlePrimaryAction,
     handleToggleEnabled,
     hasSearchQuery,
@@ -336,7 +286,6 @@ export function usePluginsPage() {
     isImportOpen,
     isDesktopTauri,
     loading,
-    marketPlugins,
     plugins,
     refreshData,
     refreshing,

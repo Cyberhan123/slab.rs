@@ -4,15 +4,14 @@ export const plugins = {
     subtitle: "\u5728\u5de5\u4f5c\u533a\u4e2d\u8fd0\u884c Extism \u63d2\u4ef6",
   },
   search: {
-    placeholder: "\u641c\u7d22\u5df2\u5b89\u88c5\u63d2\u4ef6\u548c\u63d2\u4ef6\u5e02\u573a...",
-    ariaLabel: "\u641c\u7d22\u5df2\u5b89\u88c5\u63d2\u4ef6\u548c\u63d2\u4ef6\u5e02\u573a",
+    placeholder: "\u641c\u7d22\u5df2\u5b89\u88c5\u63d2\u4ef6...",
+    ariaLabel: "\u641c\u7d22\u5df2\u5b89\u88c5\u63d2\u4ef6",
   },
   alerts: {
     loadFailedTitle: "\u63d2\u4ef6\u6570\u636e\u52a0\u8f7d\u5931\u8d25",
   },
   sections: {
     installed: "\u5df2\u5b89\u88c5\u63d2\u4ef6",
-    market: "\u63d2\u4ef6\u5e02\u573a",
   },
   actions: {
     refresh: "\u5237\u65b0",
@@ -20,9 +19,6 @@ export const plugins = {
     stop: "\u505c\u6b62",
     enable: "\u542f\u7528",
     launch: "\u542f\u52a8",
-    update: "\u66f4\u65b0",
-    install: "\u5b89\u88c5",
-    installed: "\u5df2\u5b89\u88c5",
     disableAria: "\u7981\u7528 {{name}}",
     enableAria: "\u542f\u7528 {{name}}",
   },
@@ -46,9 +42,6 @@ export const plugins = {
   card: {
     runtimeIssue: "\u8fd0\u884c\u65f6\u95ee\u9898",
   },
-  market: {
-    fallbackDescription: "{{id}} - v{{version}}",
-  },
   dialogs: {
     import: {
       title: "\u5bfc\u5165\u63d2\u4ef6\u5305",
@@ -68,22 +61,12 @@ export const plugins = {
     noInstalled: {
       title: "\u5f53\u524d\u6ca1\u6709\u5df2\u5b89\u88c5\u63d2\u4ef6\u3002",
       description:
-        "\u53ef\u4ee5\u5148\u5bfc\u5165 .plugin.slab \u63d2\u4ef6\u5305\uff0c\u6216\u4ece\u4e0b\u65b9\u63d2\u4ef6\u5e02\u573a\u5b89\u88c5\u63d2\u4ef6\uff0c\u968f\u540e\u8fd9\u91cc\u4f1a\u663e\u793a\u5de5\u4f5c\u533a\u91cc\u7684\u63d2\u4ef6\u3002",
+        "\u53ef\u4ee5\u5148\u5bfc\u5165 .plugin.slab \u63d2\u4ef6\u5305\uff0c\u968f\u540e\u8fd9\u91cc\u4f1a\u663e\u793a\u5de5\u4f5c\u533a\u91cc\u7684\u63d2\u4ef6\u3002",
     },
     noInstalledMatches: {
       title: "\u6ca1\u6709\u5339\u914d\u7684\u5df2\u5b89\u88c5\u63d2\u4ef6",
       description:
         "\u8bd5\u8bd5\u6362\u4e00\u4e2a\u63d2\u4ef6\u540d\u3001\u72b6\u6001\u3001\u6765\u6e90\u6216\u7248\u672c\u5173\u952e\u8bcd\u3002",
-    },
-    noMarket: {
-      title: "\u5f53\u524d\u6ca1\u6709\u914d\u7f6e\u63d2\u4ef6\u5e02\u573a\u76ee\u5f55\u3002",
-      description:
-        "\u914d\u7f6e\u597d\u8fdc\u7a0b\u76ee\u5f55\u540e\uff0c\u8fd9\u91cc\u4f1a\u663e\u793a\u53ef\u5b89\u88c5\u6216\u66f4\u65b0\u7684\u63d2\u4ef6\u6761\u76ee\u3002",
-    },
-    noMarketMatches: {
-      title: "\u63d2\u4ef6\u5e02\u573a\u6ca1\u6709\u5339\u914d\u7ed3\u679c",
-      description:
-        "\u8bd5\u8bd5\u6362\u4e00\u4e2a\u63d2\u4ef6\u540d\u3001\u6807\u7b7e\u3001\u6765\u6e90\u6216\u7248\u672c\u5173\u952e\u8bcd\u3002",
     },
   },
   error: {
@@ -100,7 +83,5 @@ export const plugins = {
     launched: "\u5df2\u542f\u52a8 {{name}}",
     disabled: "\u5df2\u7981\u7528 {{name}}",
     imported: "\u5df2\u5bfc\u5165 {{name}}",
-    installed: "\u5df2\u5b89\u88c5 {{name}}",
-    updated: "\u5df2\u66f4\u65b0 {{name}}",
   },
 } as const;

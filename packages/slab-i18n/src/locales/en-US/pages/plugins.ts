@@ -4,15 +4,14 @@ export const plugins = {
     subtitle: "Run workspace plugins with Extism runtime",
   },
   search: {
-    placeholder: "Search installed plugins and market...",
-    ariaLabel: "Search installed plugins and plugin market",
+    placeholder: "Search installed plugins...",
+    ariaLabel: "Search installed plugins",
   },
   alerts: {
     loadFailedTitle: "Plugin data failed to load",
   },
   sections: {
     installed: "Installed Plugins",
-    market: "Plugin Market",
   },
   actions: {
     refresh: "Refresh",
@@ -20,9 +19,6 @@ export const plugins = {
     stop: "Stop",
     enable: "Enable",
     launch: "Launch",
-    update: "Update",
-    install: "Install",
-    installed: "Installed",
     disableAria: "Disable {{name}}",
     enableAria: "Enable {{name}}",
   },
@@ -46,9 +42,6 @@ export const plugins = {
   card: {
     runtimeIssue: "Runtime issue",
   },
-  market: {
-    fallbackDescription: "{{id}} - v{{version}}",
-  },
   dialogs: {
     import: {
       title: "Import Plugin Pack",
@@ -69,20 +62,11 @@ export const plugins = {
   empty: {
     noInstalled: {
       title: "No installed plugins found.",
-      description:
-        "Import a .plugin.slab pack or install one from the market below to populate this workspace.",
+      description: "Import a .plugin.slab pack to populate this workspace.",
     },
     noInstalledMatches: {
       title: "No installed plugins match",
       description: "Try a different plugin name, status, source, or version.",
-    },
-    noMarket: {
-      title: "No market catalog configured.",
-      description: "Remote catalog entries will appear here with install and update controls.",
-    },
-    noMarketMatches: {
-      title: "No catalog matches",
-      description: "Try a different plugin name, tag, source, or version.",
     },
   },
   error: {
@@ -99,7 +83,5 @@ export const plugins = {
     launched: "Launched {{name}}",
     disabled: "Disabled {{name}}",
     imported: "Imported {{name}}",
-    installed: "Installed {{name}}",
-    updated: "Updated {{name}}",
   },
 } as const;

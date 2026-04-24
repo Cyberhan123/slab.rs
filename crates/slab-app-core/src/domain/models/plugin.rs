@@ -37,23 +37,6 @@ pub struct PluginView {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PluginMarketView {
-    pub source_id: String,
-    pub id: String,
-    pub name: String,
-    pub version: String,
-    pub description: Option<String>,
-    pub package_url: String,
-    pub package_sha256: Option<String>,
-    pub homepage: Option<String>,
-    pub tags: Vec<String>,
-    pub installed_version: Option<String>,
-    pub enabled: bool,
-    pub update_available: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct InstallPluginCommand {
     pub plugin_id: String,
     pub source_id: Option<String>,

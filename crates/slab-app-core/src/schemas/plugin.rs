@@ -3,7 +3,7 @@ use serde_json::Value;
 use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
-use crate::domain::models::{InstallPluginCommand, PluginMarketView, PluginView};
+use crate::domain::models::{InstallPluginCommand, PluginView};
 
 #[derive(Debug, Clone, Deserialize, IntoParams, Validate, ToSchema)]
 pub struct PluginPath {
@@ -73,23 +73,6 @@ pub struct PluginResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct PluginMarketResponse {
-    pub source_id: String,
-    pub id: String,
-    pub name: String,
-    pub version: String,
-    pub description: Option<String>,
-    pub package_url: String,
-    pub package_sha256: Option<String>,
-    pub homepage: Option<String>,
-    pub tags: Vec<String>,
-    pub installed_version: Option<String>,
-    pub enabled: bool,
-    pub update_available: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct DeletePluginResponse {
     pub id: String,
     pub deleted: bool,
@@ -143,21 +126,3 @@ impl From<PluginView> for PluginResponse {
     }
 }
 
-impl From<PluginMarketView> for PluginMarketResponse {
-    fn from(value: PluginMarketView) -> Self {
-        Self {
-            source_id: value.source_id,
-            id: value.id,
-            name: value.name,
-            version: value.version,
-            description: value.description,
-            package_url: value.package_url,
-            package_sha256: value.package_sha256,
-            homepage: value.homepage,
-            tags: value.tags,
-            installed_version: value.installed_version,
-            enabled: value.enabled,
-            update_available: value.update_available,
-        }
-    }
-}

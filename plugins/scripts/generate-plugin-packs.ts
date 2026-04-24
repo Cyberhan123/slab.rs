@@ -11,19 +11,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync } from "node:zlib";
 
+import { updatePluginManifestIntegrity } from "../../packages/slab-plugin-sdk/src/integrity.ts";
+
 type CliOptions = {
   outDir: string;
-  packageUrlBase?: string;
   pluginIds: Set<string>;
   pluginsDir: string;
-  sourceId: string;
 };
 
-type PluginIntegrityMap = Record<string, string>;
-
-type MarketManifest = {
-  description?: unknown;
-  homepage?: unknown;
+type PluginManifest = {
   id: string;
   integrity?: {
     filesSha256?: Record<string, string>;
@@ -37,18 +33,6 @@ type MarketManifest = {
       entry?: unknown;
     };
   };
-  tags?: unknown;
-  version: string;
-};
-
-type MarketCatalogItem = {
-  description?: string;
-  homepage?: string;
-  id: string;
-  name: string;
-  packageSha256: string;
-  packageUrl: string;
-  tags?: string[];
   version: string;
 };
 
@@ -57,10 +41,7 @@ type ZipEntry = {
   path: string;
 };
 
-const ALWAYS_INCLUDED_DIRS = ["ui", "schemas"] as const;
-const OPTIONAL_INCLUDED_FILES = ["wasm/plugin.wasm"] as const;
 const DEFAULT_OUT_DIR = "plugins/dist";
-const DEFAULT_SOURCE_ID = "local-dev";
 const PACKAGE_EXTENSION = ".plugin.slab";
 const CRC32_TABLE = (() => {
   const table = new Uint32Array(256);
@@ -75,7 +56,7 @@ const CRC32_TABLE = (() => {
 })();
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(scriptDir, "..");
+const repoRoot = path.resolve(scriptDir, "../..");
 
 const options = parseArgs(process.argv.slice(2));
 const pluginDirs = await discoverPluginDirs(options.pluginsDir, options.pluginIds);
@@ -87,31 +68,20 @@ if (pluginDirs.length === 0) {
 await rm(options.outDir, { force: true, recursive: true });
 await mkdir(options.outDir, { recursive: true });
 
-const plugins: MarketCatalogItem[] = [];
+const archivePaths: string[] = [];
 for (const pluginDir of pluginDirs) {
-  plugins.push(await packagePlugin(pluginDir, options.outDir, options.packageUrlBase));
+  archivePaths.push(await packagePlugin(pluginDir, options.outDir));
 }
 
-plugins.sort((left, right) => left.id.localeCompare(right.id));
-
-const catalogPath = path.join(options.outDir, "plugin-market.json");
-await mkdir(options.outDir, { recursive: true });
-await writeFile(
-  catalogPath,
-  `${JSON.stringify({ sourceId: options.sourceId, plugins }, null, 2)}\n`,
-  "utf8",
-);
-
-console.log(`Generated ${plugins.length} market package(s).`);
-console.log(`Catalog: ${catalogPath}`);
-console.log(`Archives: ${options.outDir}`);
+console.log(`Generated ${archivePaths.length} plugin pack(s).`);
+for (const archivePath of archivePaths) {
+  console.log(`- ${path.relative(repoRoot, archivePath)}`);
+}
 
 function parseArgs(argv: string[]): CliOptions {
   const pluginIds = new Set<string>();
   let outDir = path.join(repoRoot, DEFAULT_OUT_DIR);
-  let packageUrlBase: string | undefined;
   let pluginsDir = path.join(repoRoot, "plugins");
-  let sourceId = DEFAULT_SOURCE_ID;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -123,13 +93,6 @@ function parseArgs(argv: string[]): CliOptions {
           throw new Error("--out-dir requires a value.");
         }
         outDir = path.resolve(repoRoot, value);
-        index += 1;
-        break;
-      case "--package-url-base":
-        if (!value) {
-          throw new Error("--package-url-base requires a value.");
-        }
-        packageUrlBase = value;
         index += 1;
         break;
       case "--plugin":
@@ -146,13 +109,6 @@ function parseArgs(argv: string[]): CliOptions {
         pluginsDir = path.resolve(repoRoot, value);
         index += 1;
         break;
-      case "--source-id":
-        if (!value) {
-          throw new Error("--source-id requires a value.");
-        }
-        sourceId = value;
-        index += 1;
-        break;
       default:
         throw new Error(`Unknown argument: ${argument}`);
     }
@@ -160,10 +116,8 @@ function parseArgs(argv: string[]): CliOptions {
 
   return {
     outDir,
-    packageUrlBase,
     pluginIds,
     pluginsDir,
-    sourceId,
   };
 }
 
@@ -202,15 +156,11 @@ async function discoverPluginDirs(
   return matches.sort((left, right) => left.localeCompare(right));
 }
 
-async function packagePlugin(
-  pluginDir: string,
-  outDir: string,
-  packageUrlBase?: string,
-): Promise<MarketCatalogItem> {
+async function packagePlugin(pluginDir: string, outDir: string): Promise<string> {
   await updatePluginManifestIntegrity(pluginDir);
 
   const manifestPath = path.join(pluginDir, "plugin.json");
-  const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as MarketManifest;
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as PluginManifest;
 
   validateManifest(manifest, pluginDir);
 
@@ -225,7 +175,7 @@ async function packagePlugin(
     left.localeCompare(right),
   );
 
-  const archiveEntries: Record<string, Uint8Array> = {};
+  const archiveEntries: ZipEntry[] = [];
   for (const relativePath of packageFiles) {
     const absolutePath = path.join(pluginDir, fromPosix(relativePath));
     if (!(await isFile(absolutePath))) {
@@ -233,111 +183,17 @@ async function packagePlugin(
         `Plugin '${manifest.id}' references a missing packaged file: ${relativePath}`,
       );
     }
-    archiveEntries[toPosix(path.join(manifest.id, relativePath))] = new Uint8Array(
-      await readFile(absolutePath),
-    );
+
+    archiveEntries.push({
+      bytes: new Uint8Array(await readFile(absolutePath)),
+      path: toPosix(path.join(manifest.id, relativePath)),
+    });
   }
 
   const archiveName = `${manifest.id}-${manifest.version}${PACKAGE_EXTENSION}`;
   const archivePath = path.join(outDir, archiveName);
-  const archiveBytes = createZipArchive(
-    Object.entries(archiveEntries).map(([entryPath, bytes]) => ({
-      bytes,
-      path: entryPath,
-    })),
-  );
-  await writeFile(archivePath, archiveBytes);
-
-  const item: MarketCatalogItem = {
-    id: manifest.id,
-    name: manifest.name,
-    packageSha256: sha256Hex(archiveBytes),
-    packageUrl: resolvePackageUrl(archiveName, archivePath, packageUrlBase),
-    version: manifest.version,
-  };
-
-  if (typeof manifest.description === "string" && manifest.description.length > 0) {
-    item.description = manifest.description;
-  }
-  if (typeof manifest.homepage === "string" && manifest.homepage.length > 0) {
-    item.homepage = manifest.homepage;
-  }
-  if (Array.isArray(manifest.tags)) {
-    const tags = manifest.tags.filter((tag): tag is string => typeof tag === "string");
-    if (tags.length > 0) {
-      item.tags = tags;
-    }
-  }
-
-  return item;
-}
-
-async function updatePluginManifestIntegrity(
-  pluginDir: string,
-): Promise<PluginIntegrityMap> {
-  const root = path.resolve(pluginDir);
-  const manifestPath = path.join(root, "plugin.json");
-  const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<
-    string,
-    unknown
-  >;
-  const filesSha256 = await computePluginIntegrity(root);
-
-  manifest.integrity = {
-    ...(typeof manifest.integrity === "object" && manifest.integrity
-      ? (manifest.integrity as Record<string, unknown>)
-      : {}),
-    filesSha256,
-  };
-
-  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-  return filesSha256;
-}
-
-async function computePluginIntegrity(pluginDir: string): Promise<PluginIntegrityMap> {
-  const root = path.resolve(pluginDir);
-  const directoryEntries = await Promise.all(
-    ALWAYS_INCLUDED_DIRS.map(async (relativeDir) => {
-      const absoluteDir = path.join(root, relativeDir);
-      return (await isDirectory(absoluteDir)) ? collectFiles(root, absoluteDir) : [];
-    }),
-  );
-  const optionalEntries = await Promise.all(
-    OPTIONAL_INCLUDED_FILES.map(async (relativeFile) => {
-      const absoluteFile = path.join(root, relativeFile);
-      return (await isFile(absoluteFile)) ? toPosix(path.relative(root, absoluteFile)) : null;
-    }),
-  );
-
-  const entries = [
-    ...directoryEntries.flat(),
-    ...optionalEntries.filter((entry): entry is string => entry !== null),
-  ];
-  const uniqueEntries = [...new Set(entries)].sort((left, right) => left.localeCompare(right));
-  const hashes = await Promise.all(
-    uniqueEntries.map(async (relativePath) => [
-      relativePath,
-      await sha256File(path.join(root, fromPosix(relativePath))),
-    ] as const),
-  );
-  return Object.fromEntries(hashes);
-}
-
-async function collectFiles(root: string, currentDir: string): Promise<string[]> {
-  const rows = await readdir(currentDir, { withFileTypes: true });
-  const files = await Promise.all(
-    rows.map(async (row) => {
-      const absolutePath = path.join(currentDir, row.name);
-      if (row.isDirectory()) {
-        return collectFiles(root, absolutePath);
-      }
-      if (row.isFile()) {
-        return [toPosix(path.relative(root, absolutePath))];
-      }
-      return [];
-    }),
-  );
-  return files.flat();
+  await writeFile(archivePath, createZipArchive(archiveEntries));
+  return archivePath;
 }
 
 async function ensureRuntimeEntriesExist(
@@ -354,22 +210,7 @@ async function ensureRuntimeEntriesExist(
   }
 }
 
-function resolvePackageUrl(
-  archiveName: string,
-  archivePath: string,
-  packageUrlBase?: string,
-): string {
-  if (!packageUrlBase) {
-    return archiveName;
-  }
-
-  const normalizedBase = packageUrlBase.endsWith("/")
-    ? packageUrlBase
-    : `${packageUrlBase}/`;
-  return new URL(archiveName, normalizedBase).href;
-}
-
-function validateManifest(manifest: MarketManifest, pluginDir: string): void {
+function validateManifest(manifest: PluginManifest, pluginDir: string): void {
   if (typeof manifest.id !== "string" || manifest.id.trim().length === 0) {
     throw new Error(`Plugin manifest in ${pluginDir} is missing 'id'.`);
   }
@@ -381,28 +222,12 @@ function validateManifest(manifest: MarketManifest, pluginDir: string): void {
   }
 }
 
-async function sha256File(filePath: string): Promise<string> {
-  return createHash("sha256").update(await readFile(filePath)).digest("hex");
-}
-
-function sha256Hex(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
 function fromPosix(relativePath: string): string {
   return relativePath.split("/").join(path.sep);
 }
 
 function toPosix(relativePath: string): string {
   return relativePath.split(path.sep).join("/");
-}
-
-async function isDirectory(filePath: string): Promise<boolean> {
-  try {
-    return (await stat(filePath)).isDirectory();
-  } catch {
-    return false;
-  }
 }
 
 async function isFile(filePath: string): Promise<boolean> {

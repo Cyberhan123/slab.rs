@@ -24,7 +24,7 @@ slab.rs no longer uses a separate project-skill wrapper layer. Most tasks should
 - Runtime and engine work
   Start in `bin/slab-runtime/**`, especially `bin/slab-runtime/src/{config,context,domain,infra}/**` and `bin/slab-runtime/src/infra/backends/**`, plus `crates/slab-runtime-core/**`, `crates/slab-llama/**`, `crates/slab-whisper/**`, `crates/slab-diffusion/**`, and `crates/slab-ggml/**`.
 - Plugin package and bridge work
-  Start in `plugins/**`, `packages/slab-desktop/src/pages/plugins/**`, `packages/slab-desktop/src/lib/plugin-host-bridge.ts`, `packages/slab-desktop/src/lib/plugin-market-api.ts`, `packages/slab-plugin-sdk/**`, `packages/slab-plugin-ui/**`, and `bin/slab-app/src-tauri/src/plugins/**`.
+  Start in `plugins/**`, `packages/slab-desktop/src/pages/plugins/**`, `packages/slab-desktop/src/lib/plugin-host-bridge.ts`, `packages/slab-desktop/src/lib/api/**`, `packages/slab-plugin-sdk/**`, `packages/slab-plugin-ui/**`, and `bin/slab-app/src-tauri/src/plugins/**`.
   Manifest v1 work should preserve the separation between runtime assets, `contributes.*`, `permissions.*`, and agent capabilities. The default third-party UI runtime is a sandboxed Tauri child WebView with token mirroring, not Module Federation.
 - Windows full-installer packaging work
   Start in `bin/slab-windows-full-installer/**`, `bin/slab-app/src-tauri/build.rs`, `bin/slab-app/src-tauri/installer-hooks/**`, and `Makefile.toml`. Add `tauri-v2` only when the change crosses into Tauri config or NSIS hook behavior.

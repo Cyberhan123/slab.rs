@@ -92,9 +92,6 @@ pub struct Config {
 
     /// Root directory containing installed runtime plugins.
     pub plugins_dir: PathBuf,
-
-    /// Optional remote market catalog URL used by `/v1/plugins/market`.
-    pub plugin_market_url: Option<String>,
 }
 
 impl Config {
@@ -141,7 +138,6 @@ impl Config {
                 .ok()
                 .map(PathBuf::from)
                 .unwrap_or_else(default_plugins_dir),
-            plugin_market_url: std::env::var("SLAB_PLUGIN_MARKET_URL").ok(),
         }
     }
 }

@@ -493,22 +493,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/plugins/market": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_market_plugins"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/plugins/{id}": {
         parameters: {
             query?: never;
@@ -1715,20 +1699,6 @@ export interface components {
         };
         OperationAcceptedResponse: {
             operation_id: string;
-        };
-        PluginMarketResponse: {
-            description?: string | null;
-            enabled: boolean;
-            homepage?: string | null;
-            id: string;
-            installedVersion?: string | null;
-            name: string;
-            packageSha256?: string | null;
-            packageUrl: string;
-            sourceId: string;
-            tags: string[];
-            updateAvailable: boolean;
-            version: string;
         };
         PluginPath: {
             id: string;
@@ -3523,26 +3493,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PluginResponse"];
-                };
-            };
-        };
-    };
-    list_market_plugins: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Remote market catalog */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PluginMarketResponse"][];
                 };
             };
         };

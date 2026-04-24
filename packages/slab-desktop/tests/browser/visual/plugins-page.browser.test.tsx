@@ -15,11 +15,8 @@ const {
 } = vi.hoisted(() => ({
   mockApiState: {
     plugins: [] as unknown[],
-    marketPlugins: [] as unknown[],
     pluginsLoading: false,
-    marketPluginsLoading: false,
     pluginsError: null as unknown,
-    marketPluginsError: null as unknown,
   },
   mockIsTauri: vi.fn<() => boolean>(),
   mockUseMutation: vi.fn<(...args: unknown[]) => unknown>(),
@@ -94,18 +91,16 @@ function createMockPlugin(overrides: Partial<PluginRecord> = {}): PluginRecord {
 }
 
 function configurePluginQueries() {
-  mockUseQuery.mockImplementation((_method: unknown, path: unknown) => {
-    const isMarketQuery = path === "/v1/plugins/market";
-    const data = isMarketQuery ? mockApiState.marketPlugins : mockApiState.plugins;
-    const error = isMarketQuery ? mockApiState.marketPluginsError : mockApiState.pluginsError;
-    const isLoading = isMarketQuery ? mockApiState.marketPluginsLoading : mockApiState.pluginsLoading;
-
+  mockUseQuery.mockImplementation(() => {
     return {
-      data,
-      error,
-      isLoading,
-      isFetching: isLoading,
-      refetch: vi.fn<() => Promise<{ data: unknown[]; error: unknown }>>().mockResolvedValue({ data, error }),
+      data: mockApiState.plugins,
+      error: mockApiState.pluginsError,
+      isLoading: mockApiState.pluginsLoading,
+      isFetching: mockApiState.pluginsLoading,
+      refetch: vi.fn<() => Promise<{ data: unknown[]; error: unknown }>>().mockResolvedValue({
+        data: mockApiState.plugins,
+        error: mockApiState.pluginsError,
+      }),
     };
   });
 
@@ -118,11 +113,8 @@ describe("PluginsPage browser visual regression", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockApiState.plugins = [];
-    mockApiState.marketPlugins = [];
     mockApiState.pluginsLoading = false;
-    mockApiState.marketPluginsLoading = false;
     mockApiState.pluginsError = null;
-    mockApiState.marketPluginsError = null;
     configurePluginQueries();
   });
 
@@ -186,7 +178,6 @@ describe("PluginsPage browser visual regression", () => {
   it("captures the plugins page loading state in Tauri", async () => {
     mockIsTauri.mockReturnValue(true);
     mockApiState.pluginsLoading = true;
-    mockApiState.marketPluginsLoading = true;
 
     await renderDesktopScene(<PluginsPage />, { route: "/plugins" });
 

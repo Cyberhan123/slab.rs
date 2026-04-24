@@ -18,11 +18,9 @@ export type PluginSummaryMessage = {
   raw?: string;
 };
 export type PluginRecord = components['schemas']['PluginResponse'];
-export type PluginMarketRecord = components['schemas']['PluginMarketResponse'];
 
 export const PLUGIN_TONES: PluginTone[] = ['gold', 'teal', 'slate', 'blue'];
 export const PLUGIN_ICONS: LucideIcon[] = [Braces, Code2, Boxes, TerminalSquare, PlugZap, Box];
-export const MARKET_ICONS: LucideIcon[] = [TerminalSquare, Box, Code2, PlugZap];
 export const INSTALLED_SKELETON_KEYS = [
   'plugin-skeleton-one',
   'plugin-skeleton-two',
@@ -73,39 +71,6 @@ export function pluginSearchText(plugin: PluginRecord) {
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
-}
-
-export function marketPluginSearchText(plugin: PluginMarketRecord) {
-  return [
-    plugin.name,
-    plugin.id,
-    plugin.description,
-    plugin.sourceId,
-    plugin.version,
-    plugin.homepage,
-    plugin.packageUrl,
-    plugin.installedVersion,
-    ...plugin.tags,
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
-}
-
-export function marketRating(plugin: PluginMarketRecord) {
-  let score = 0;
-  for (const char of plugin.id) {
-    score += char.charCodeAt(0);
-  }
-  return (4.6 + (score % 4) / 10).toFixed(1);
-}
-
-export function marketSize(plugin: PluginMarketRecord) {
-  let score = plugin.packageUrl.length + plugin.id.length + plugin.version.length;
-  for (const tag of plugin.tags) {
-    score += tag.length;
-  }
-  return `${((score % 48) / 10 + 1).toFixed(1)}MB`;
 }
 
 export function toneSurfaceClassName(tone: PluginTone) {

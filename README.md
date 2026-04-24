@@ -54,8 +54,8 @@ Slab is built for developers, researchers, creators, and teams who want to run A
 
 ### Plugin Extensibility
 
-- **Plugin Market and Lifecycle Management**  
-  Desktop builds now expose a plugin market and installed-plugin management flow, while keeping `plugin.json` as the static source of truth for runtime assets, permissions, and contribution points.
+- **Plugin Lifecycle Management**  
+  Desktop builds manage installed plugins while keeping `plugin.json` as the static source of truth for runtime assets, permissions, and contribution points.
 
 ## Project Structure
 

@@ -12,8 +12,7 @@ use crate::error::ServerError;
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::PluginService;
 use slab_app_core::schemas::plugin::{
-    DeletePluginResponse, InstallPluginRequest, PluginMarketResponse, PluginPath, PluginResponse,
-    StopPluginRequest,
+    DeletePluginResponse, InstallPluginRequest, PluginPath, PluginResponse, StopPluginRequest,
 };
 
 #[allow(dead_code)]
@@ -28,7 +27,6 @@ struct ImportPluginPackMultipartRequest {
     paths(
         list_plugins,
         get_plugin,
-        list_market_plugins,
         install_plugin,
         import_plugin_pack,
         enable_plugin,
@@ -41,7 +39,6 @@ struct ImportPluginPackMultipartRequest {
         DeletePluginResponse,
         ImportPluginPackMultipartRequest,
         InstallPluginRequest,
-        PluginMarketResponse,
         PluginPath,
         PluginResponse,
         StopPluginRequest
@@ -54,7 +51,6 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/plugins", get(list_plugins))
         .route("/plugins/install", post(install_plugin))
         .route("/plugins/import-pack", post(import_plugin_pack))
-        .route("/plugins/market", get(list_market_plugins))
         .route("/plugins/{id}", get(get_plugin).delete(delete_plugin))
         .route("/plugins/{id}/enable", post(enable_plugin))
         .route("/plugins/{id}/disable", post(disable_plugin))
@@ -87,18 +83,6 @@ async fn get_plugin(
 ) -> Result<Json<PluginResponse>, ServerError> {
     let params = validate(params)?;
     Ok(Json(service.get_plugin(&params.id).await?.into()))
-}
-
-#[utoipa::path(
-    get,
-    path = "/v1/plugins/market",
-    tag = "plugins",
-    responses((status = 200, description = "Remote market catalog", body = [PluginMarketResponse]))
-)]
-async fn list_market_plugins(
-    State(service): State<PluginService>,
-) -> Result<Json<Vec<PluginMarketResponse>>, ServerError> {
-    Ok(Json(service.list_market().await?.into_iter().map(PluginMarketResponse::from).collect()))
 }
 
 #[utoipa::path(
@@ -255,11 +239,10 @@ mod tests {
     use utoipa::OpenApi;
 
     #[test]
-    fn plugin_routes_publish_install_and_market_paths_in_openapi() {
+    fn plugin_routes_publish_install_paths_in_openapi() {
         let openapi = serde_json::to_value(PluginApi::openapi()).expect("serialize plugin openapi");
         assert!(openapi["paths"]["/v1/plugins/install"]["post"].is_object());
         assert!(openapi["paths"]["/v1/plugins/import-pack"]["post"].is_object());
-        assert!(openapi["paths"]["/v1/plugins/market"]["get"].is_object());
         assert!(openapi["paths"]["/v1/plugins/{id}/start"]["post"].is_object());
     }
 }
