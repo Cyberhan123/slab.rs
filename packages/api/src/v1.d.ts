@@ -1945,6 +1945,8 @@ export interface components {
             /** Format: int64 */
             current: number;
             label?: string | null;
+            logs?: string[] | null;
+            message?: string | null;
             /** Format: int32 */
             step?: number | null;
             /** Format: int32 */

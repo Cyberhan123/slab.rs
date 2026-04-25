@@ -51,6 +51,43 @@ h1 {
   overflow-wrap: anywhere;
 }
 
+.pipeline-progress {
+  display: grid;
+  gap: 0.75rem;
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+
+.pipeline-step-list {
+  display: grid;
+  gap: 0.625rem;
+}
+
+.pipeline-step {
+  display: grid;
+  gap: 0.5rem;
+  border: 1px solid color-mix(in oklab, var(--border) 84%, transparent);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  background: color-mix(in oklab, var(--surface-soft) 70%, transparent);
+}
+
+.pipeline-step-header,
+.pipeline-meter {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.pipeline-meter span {
+  min-width: 3rem;
+  text-align: right;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted-foreground);
+}
+
 @media (max-width: 860px) {
   .hero-card {
     flex-direction: column;

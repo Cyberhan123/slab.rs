@@ -12,7 +12,7 @@
     "api": "bunx openapi-typescript http://127.0.0.1:3000/api-docs/openapi.json -o packages/api/src/v1.d.ts",
     "build:desktop": "bun run --filter @slab/desktop build",
     "build:plugins": "bun run build:plugin-packs",
-    "build:plugin-packs": "node plugins/scripts/generate-plugin-packs.ts",
+    "build:plugin-packs": "bun run plugins/scripts/generate-plugin-packs.ts",
     "dev:desktop": "bun run --filter @slab/desktop dev",
     "api:desktop": "bun run api",
     "lint": "oxlint packages/api packages/slab-desktop packages/slab-components packages/slab-i18n packages/slab-plugin-sdk packages/slab-plugin-ui packages/vitest-rust-reporter plugins/video-subtitle-translator/src models/scripts",
