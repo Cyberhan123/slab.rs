@@ -2,7 +2,8 @@
  * Shared Slab HTTP API entry point.
  *
  * The generated OpenAPI contract lives in `v1.d.ts`; regenerate it with
- * `bun run api` from the repo root while slab-server is running.
+ * `bun run gen:api` from the repo root. The generator will start `slab-server`
+ * automatically when `/api-docs/openapi.json` is not already available.
  */
 
 import createFetchClient from "openapi-fetch";

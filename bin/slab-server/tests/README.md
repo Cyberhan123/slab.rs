@@ -20,6 +20,12 @@ Vitest-based migration tests.
 - Integration tests target `http://127.0.0.1:3000` by default
 - Override integration target base URL with `SLAB_SERVER_BASE_URL`
 
+Run the full migrated Vitest suite from the repo root:
+
+```sh
+bun run test:server
+```
+
 Run unit tests:
 
 ```sh

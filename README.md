@@ -117,11 +117,10 @@ Use these commands from the repository root for the most common day-to-day workf
 
 ```sh
 # Start the main development stack
-cargo make dev
+bun run dev:app
 
-# Type-check the desktop frontend
-cd packages/slab-desktop
-bun run build
+# Start the desktop frontend only
+bun run dev:desktop
 ```
 
 ### Build
@@ -129,23 +128,26 @@ bun run build
 These commands cover the usual build, check, and test workflows.
 
 ```sh
-# Rust workspace
-cargo build --workspace
-cargo test --workspace
-cargo check --workspace
+# Run the standard workspace checks
+bun run check
 
-# Focused checks
-cargo check -p slab-server
-cargo check -p slab-runtime
-cargo check -p slab-windows-full-installer
+# Run the full automated test suite
+bun run test
 
-# Desktop frontend
-cd packages/slab-desktop
-bun run build
+# Build the desktop frontend only
+bun run build:desktop
 
-# Windows full installer
-cd ../..
-cargo make build-windows-full-installer
+# Build the desktop app bundle
+bun run build:app
+
+# Build the Windows full installer
+bun run build:windows-installer
+
+# Regenerate generated assets
+bun run gen:api
+bun run gen:schemas
+bun run gen:plugin-packs
+bun run gen:model-packs
 
 # Server compatibility tests
 python -m pip install -r bin/slab-server/tests/requirements.txt

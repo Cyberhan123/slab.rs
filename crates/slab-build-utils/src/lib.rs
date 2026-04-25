@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, anyhow};
+use bindgen::Builder as BindgenBuilder;
 use cargo_metadata::MetadataCommand;
 use slab_libfetch::{Api, Manifest};
 use std::collections::HashSet;
@@ -52,6 +53,53 @@ pub fn ensure_vendor_layout(primary: &str, include_deps: &[&str]) -> Result<Vend
 
 pub fn workspace_target_dir(profile: &str) -> Result<PathBuf> {
     Ok(workspace_root()?.join("target").join(profile))
+}
+
+pub fn configure_bindgen_builder<I, P>(
+    header: &str,
+    include_dirs: I,
+    dynamic_library_name: &str,
+) -> BindgenBuilder
+where
+    I: IntoIterator<Item = P>,
+    P: AsRef<Path>,
+{
+    let mut builder = BindgenBuilder::default()
+        .header(header)
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .dynamic_library_name(dynamic_library_name);
+
+    for include_dir in include_dirs {
+        builder = builder.clang_arg(clang_include_arg(include_dir.as_ref()));
+    }
+
+    builder
+}
+
+pub fn generate_or_copy_bindings(
+    builder: BindgenBuilder,
+    out_dir: &Path,
+    fallback_source: &Path,
+) -> Result<()> {
+    let output_path = out_dir.join("bindings.rs");
+
+    match builder.generate() {
+        Ok(bindings) => {
+            bindings.write_to_file(&output_path).with_context(|| {
+                format!("failed to write generated bindings to {}", output_path.display())
+            })?;
+        }
+        Err(error) => {
+            println!("cargo:warning=Unable to generate bindings: {error}");
+            println!(
+                "cargo:warning=Using bundled bindings.rs fallback at {}",
+                fallback_source.display()
+            );
+            copy_fallback_bindings(fallback_source, &output_path)?;
+        }
+    }
+
+    Ok(())
 }
 
 pub fn sync_tauri_sidecar(
@@ -486,4 +534,83 @@ fn install_artifact(
     }
 
     Ok(ArtifactLayout { name: artifact_name.to_string(), root_dir, include_dir })
+}
+
+fn clang_include_arg(include_dir: &Path) -> String {
+    format!("-I{}", include_dir.display())
+}
+
+fn copy_fallback_bindings(fallback_source: &Path, output_path: &Path) -> Result<()> {
+    if !fallback_source.is_file() {
+        return Err(anyhow!(
+            "Unable to generate bindings and bundled fallback is missing at {}",
+            fallback_source.display()
+        ));
+    }
+
+    fs::copy(fallback_source, output_path).with_context(|| {
+        format!(
+            "failed to copy fallback bindings {} -> {}",
+            fallback_source.display(),
+            output_path.display()
+        )
+    })?;
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{clang_include_arg, copy_fallback_bindings};
+    use std::env;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn clang_include_arg_prefixes_include_flag() {
+        let include_dir = PathBuf::from("vendor").join("ggml").join("include");
+
+        assert_eq!(clang_include_arg(&include_dir), format!("-I{}", include_dir.display()));
+    }
+
+    #[test]
+    fn copy_fallback_bindings_copies_existing_file() {
+        let root = temp_dir("copy-fallback");
+        let fallback_source = root.join("src").join("bindings.rs");
+        let output_path = root.join("out").join("bindings.rs");
+        let contents = "// fallback bindings\n";
+
+        fs::create_dir_all(fallback_source.parent().expect("fallback parent")).unwrap();
+        fs::create_dir_all(output_path.parent().expect("out parent")).unwrap();
+        fs::write(&fallback_source, contents).unwrap();
+
+        copy_fallback_bindings(&fallback_source, &output_path).unwrap();
+
+        assert_eq!(fs::read_to_string(&output_path).unwrap(), contents);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn copy_fallback_bindings_errors_when_missing() {
+        let root = temp_dir("missing-fallback");
+        let fallback_source = root.join("src").join("bindings.rs");
+        let output_path = root.join("out").join("bindings.rs");
+
+        let error = copy_fallback_bindings(&fallback_source, &output_path).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("Unable to generate bindings and bundled fallback is missing")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let suffix = SystemTime::now().duration_since(UNIX_EPOCH).expect("system time").as_nanos();
+        let root = env::temp_dir().join(format!("slab-build-utils-{label}-{suffix}"));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
 }

@@ -1,12 +1,4 @@
-import { createHash } from "node:crypto";
-import {
-  mkdir,
-  readFile,
-  readdir,
-  rm,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync } from "node:zlib";
@@ -68,10 +60,9 @@ if (pluginDirs.length === 0) {
 await rm(options.outDir, { force: true, recursive: true });
 await mkdir(options.outDir, { recursive: true });
 
-const archivePaths: string[] = [];
-for (const pluginDir of pluginDirs) {
-  archivePaths.push(await packagePlugin(pluginDir, options.outDir));
-}
+const archivePaths = await Promise.all(
+  pluginDirs.map(async (pluginDir) => packagePlugin(pluginDir, options.outDir)),
+);
 
 console.log(`Generated ${archivePaths.length} plugin pack(s).`);
 for (const archivePath of archivePaths) {
@@ -129,22 +120,21 @@ async function discoverPluginDirs(
   const directories = rows
     .filter((row) => row.isDirectory())
     .map((row) => path.join(pluginsDir, row.name));
+  const candidates = await Promise.all(
+    directories.map(async (pluginDir) => {
+      const pluginId = path.basename(pluginDir);
+      if (pluginIds.size > 0 && !pluginIds.has(pluginId)) {
+        return null;
+      }
 
-  const matches: string[] = [];
-  for (const pluginDir of directories) {
-    const pluginId = path.basename(pluginDir);
-    if (pluginIds.size > 0 && !pluginIds.has(pluginId)) {
-      continue;
-    }
-
-    const manifestPath = path.join(pluginDir, "plugin.json");
-    if (await isFile(manifestPath)) {
-      matches.push(pluginDir);
-    }
-  }
+      const manifestPath = path.join(pluginDir, "plugin.json");
+      return (await isFile(manifestPath)) ? pluginDir : null;
+    }),
+  );
+  const matches = candidates.filter((pluginDir): pluginDir is string => pluginDir !== null);
 
   if (pluginIds.size === 0) {
-    return matches.sort((left, right) => left.localeCompare(right));
+    return matches.toSorted((left, right) => left.localeCompare(right));
   }
 
   const discoveredIds = new Set(matches.map((pluginDir) => path.basename(pluginDir)));
@@ -153,7 +143,7 @@ async function discoverPluginDirs(
     throw new Error(`Plugin(s) not found: ${missingIds.join(", ")}`);
   }
 
-  return matches.sort((left, right) => left.localeCompare(right));
+  return matches.toSorted((left, right) => left.localeCompare(right));
 }
 
 async function packagePlugin(pluginDir: string, outDir: string): Promise<string> {
@@ -164,31 +154,31 @@ async function packagePlugin(pluginDir: string, outDir: string): Promise<string>
 
   validateManifest(manifest, pluginDir);
 
-  const runtimeEntries = [
-    manifest.runtime?.ui?.entry,
-    manifest.runtime?.wasm?.entry,
-  ].filter((entry): entry is string => typeof entry === "string");
+  const runtimeEntries = [manifest.runtime?.ui?.entry, manifest.runtime?.wasm?.entry].filter(
+    (entry): entry is string => typeof entry === "string",
+  );
   await ensureRuntimeEntriesExist(pluginDir, runtimeEntries);
 
   const fileMap = manifest.integrity?.filesSha256 ?? {};
-  const packageFiles = ["plugin.json", ...Object.keys(fileMap)].sort((left, right) =>
+  const packageFiles = ["plugin.json", ...Object.keys(fileMap)].toSorted((left, right) =>
     left.localeCompare(right),
   );
 
-  const archiveEntries: ZipEntry[] = [];
-  for (const relativePath of packageFiles) {
-    const absolutePath = path.join(pluginDir, fromPosix(relativePath));
-    if (!(await isFile(absolutePath))) {
-      throw new Error(
-        `Plugin '${manifest.id}' references a missing packaged file: ${relativePath}`,
-      );
-    }
+  const archiveEntries = await Promise.all(
+    packageFiles.map(async (relativePath) => {
+      const absolutePath = path.join(pluginDir, fromPosix(relativePath));
+      if (!(await isFile(absolutePath))) {
+        throw new Error(
+          `Plugin '${manifest.id}' references a missing packaged file: ${relativePath}`,
+        );
+      }
 
-    archiveEntries.push({
-      bytes: new Uint8Array(await readFile(absolutePath)),
-      path: toPosix(path.join(manifest.id, relativePath)),
-    });
-  }
+      return {
+        bytes: new Uint8Array(await readFile(absolutePath)),
+        path: toPosix(path.join(manifest.id, relativePath)),
+      };
+    }),
+  );
 
   const archiveName = `${manifest.id}-${manifest.version}${PACKAGE_EXTENSION}`;
   const archivePath = path.join(outDir, archiveName);
@@ -196,18 +186,17 @@ async function packagePlugin(pluginDir: string, outDir: string): Promise<string>
   return archivePath;
 }
 
-async function ensureRuntimeEntriesExist(
-  pluginDir: string,
-  runtimeEntries: string[],
-): Promise<void> {
-  for (const relativePath of runtimeEntries) {
-    const absolutePath = path.join(pluginDir, fromPosix(relativePath));
-    if (!(await isFile(absolutePath))) {
-      throw new Error(
-        `Plugin '${path.basename(pluginDir)}' is missing runtime asset '${relativePath}'.`,
-      );
-    }
-  }
+async function ensureRuntimeEntriesExist(pluginDir: string, runtimeEntries: string[]) {
+  await Promise.all(
+    runtimeEntries.map(async (relativePath) => {
+      const absolutePath = path.join(pluginDir, fromPosix(relativePath));
+      if (!(await isFile(absolutePath))) {
+        throw new Error(
+          `Plugin '${path.basename(pluginDir)}' is missing runtime asset '${relativePath}'.`,
+        );
+      }
+    }),
+  );
 }
 
 function validateManifest(manifest: PluginManifest, pluginDir: string): void {

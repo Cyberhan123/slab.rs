@@ -34,8 +34,7 @@ const DEFAULT_REASON =
   "Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.";
 
 const toOklch = converter("oklch");
-const colorRegex =
-  /#(?:[A-Fa-f0-9]{3,4}|[A-Fa-f0-9]{6}|[A-Fa-f0-9]{8})\b|rgba?\(\s*[^)]+\)/g;
+const colorRegex = /#(?:[A-Fa-f0-9]{3,4}|[A-Fa-f0-9]{6}|[A-Fa-f0-9]{8})\b|rgba?\(\s*[^)]+\)/g;
 
 function printHelp() {
   console.log(`figma-color-to-oklch
@@ -44,8 +43,8 @@ Usage:
   bun run color:oklch -- background=#f7f9fb primary=#0d9488
   bun run color:oklch -- "--background: #f7f9fb;" "--primary: rgb(13, 148, 136);"
   bun run color:oklch -- --stdin < colors.txt
-  bun run color:oklch -- --file ../slab-components/src/styles/globals.css --out ../slab-components/src/styles/globals.oklch.css
-  bun run color:oklch -- --file ../slab-components/src/styles/globals.css --write --annotate
+  bun run color:oklch -- --file packages/slab-components/src/styles/globals.css --out packages/slab-components/src/styles/globals.oklch.css
+  bun run color:oklch -- --file packages/slab-components/src/styles/globals.css --write --annotate
 
 Options:
   --file PATH      Convert a CSS file with PostCSS.
@@ -355,7 +354,7 @@ async function handleFileMode(options: CliOptions) {
   if (options.write || options.outPath) {
     await fs.writeFile(outputPath, convertedCss, "utf8");
     console.log(
-      `Converted ${records.length} declaration${records.length === 1 ? "" : "s"} to OKLCH in ${outputPath}.`
+      `Converted ${records.length} declaration${records.length === 1 ? "" : "s"} to OKLCH in ${outputPath}.`,
     );
     return;
   }

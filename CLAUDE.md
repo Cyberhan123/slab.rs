@@ -22,7 +22,7 @@ Read [AGENTS.md](AGENTS.md) before making changes. This file only keeps the repo
 - `packages/slab-desktop` is the main React frontend app (workspace package `@slab/desktop`).
 - `packages/vitest-rust-reporter` is the workspace helper that maps Rust `cargo test` and optional `cargo llvm-cov` results into a Vitest project for `vitest --ui`.
 - Frontend/workspace lint now runs from the repo root with `bun run lint`, and auto-fixes use `bun run lint:fix`.
-- Public VitePress pages live in `docs/`, internal contributor docs live in `docs/development/`, and published JSON Schemas are generated into `docs/public/manifests/v1/` with `bun run docs:schemas`.
+- Public VitePress pages live in `docs/`, internal contributor docs live in `docs/development/`, and published JSON Schemas are generated into `docs/public/manifests/v1/` with `bun run gen:schemas`.
 - All Rust library crates live in `crates/` (e.g., `crates/slab-runtime-core`, `crates/slab-types`, `crates/slab-agent`, `crates/slab-agent-tools`, `crates/slab-app-core`).
 - Binary executables live in `bin/` (e.g., `bin/slab-server`, `bin/slab-runtime`, `bin/slab-app`).
 - `crates/slab-app-core` (package: `slab-app-core`) is the HTTP-free business logic library behind `bin/slab-server`. Contains `context/`, `domain/`, `infra/`, `config`, `model_auto_unload`, and the shared `runtime_supervisor`. Migrations are in `crates/slab-app-core/migrations/`.
@@ -33,6 +33,6 @@ Read [AGENTS.md](AGENTS.md) before making changes. This file only keeps the repo
 - `crates/slab-runtime-core` (package: `slab-runtime-core`) is the pure scheduler/backend-protocol crate; backend composition and typed runtime codecs belong in `bin/slab-runtime`, and shared contracts belong in `crates/slab-types` and `crates/slab-proto`.
 - `crates/slab-agent` is the pure agent control-plane crate. Concrete host tools belong in `crates/slab-agent-tools`; plugin/API capability adapters are registered by host/app-core layers.
 - Plugin manifests now support `manifestVersion: 1` with runtime assets, host-controlled `contributes.*`, `permissions.*`, and agent capabilities. `plugin.json` remains the static source of truth, while `/v1/plugins/*` plus the plugin state table track dynamic install/runtime state. MCP is a future export target for capabilities, not the plugin runtime itself.
-- The default third-party plugin UI model is a sandboxed Tauri child WebView with token mirroring through `@slab/plugin-sdk`; do not make Module Federation the default plugin runtime. Use `bun run build:plugins` from the repo root to scan `plugins/*` for directories that contain `plugin.json`, refresh manifest integrity from the current plugin files, and emit `.plugin.slab` packs to `plugins/dist/`.
+- The default third-party plugin UI model is a sandboxed Tauri child WebView with token mirroring through `@slab/plugin-sdk`; do not make Module Federation the default plugin runtime. Use `bun run gen:plugin-packs` from the repo root to scan `plugins/*` for directories that contain `plugin.json`, refresh manifest integrity from the current plugin files, and emit `.plugin.slab` packs to `plugins/dist/`.
 - Preserve the current Tauri CSP, permissions, capabilities, and plugin host boundaries unless the task explicitly requires a change.
 - If repo docs and code disagree, follow the code and update the docs.

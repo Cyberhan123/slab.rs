@@ -19,7 +19,7 @@ Key repo facts:
 - `packages/slab-plugin-sdk` is the plugin-author SDK package (`@slab/plugin-sdk`) for stable plugin webview host calls, theme snapshots, plugin-safe `@slab/api` calls, and manifest integrity generation.
 - `packages/vitest-rust-reporter` is the workspace helper package that projects Rust `cargo test` and optional `cargo llvm-cov` results into the Vitest UI.
 - Frontend/workspace lint runs from the repo root with `bun run lint`, and auto-fixes use `bun run lint:fix`.
-- Public VitePress pages live in `docs/`, internal contributor docs live in `docs/development/`, and published JSON Schemas are generated into `docs/public/manifests/v1/` with `bun run docs:schemas`.
+- Public VitePress pages live in `docs/`, internal contributor docs live in `docs/development/`, and published JSON Schemas are generated into `docs/public/manifests/v1/` with `bun run gen:schemas`.
 - Frontend server state uses TanStack Query with `openapi-fetch` and `openapi-react-query`.
 - Frontend client state uses Zustand.
 - AI-focused frontend components use Ant Design X, with shared Tailwind 4 primitives from `packages/slab-components/src`.
@@ -35,6 +35,6 @@ Key repo facts:
 - Binary executables live in `bin/` (e.g., `bin/slab-server`, `bin/slab-runtime`, `bin/slab-app`).
 - `crates/slab-agent` is the pure agent control-plane crate. Concrete host tools belong in `crates/slab-agent-tools`; plugin/API capability adapters are registered by host/app-core layers.
 - Plugin manifests support `manifestVersion: 1` with runtime assets, host-controlled `contributes.*`, `permissions.*`, and agent capabilities. `plugin.json` stays the static source of truth; `/v1/plugins/*` and the plugin state table track dynamic install/runtime state. MCP is a capability export target, not the plugin runtime itself.
-- The default third-party plugin UI model is a sandboxed Tauri child WebView, not Module Federation. Use `@slab/plugin-ui` and `@slab/plugin-sdk` for plugin UIs, and run `bun run build:plugins` from the repo root to scan `plugins/*` for directories that contain `plugin.json`, refresh integrity hashes from the current plugin files, and emit `.plugin.slab` packs to `plugins/dist/`.
+- The default third-party plugin UI model is a sandboxed Tauri child WebView, not Module Federation. Use `@slab/plugin-ui` and `@slab/plugin-sdk` for plugin UIs, and run `bun run gen:plugin-packs` from the repo root to scan `plugins/*` for directories that contain `plugin.json`, refresh integrity hashes from the current plugin files, and emit `.plugin.slab` packs to `plugins/dist/`.
 - Tauri security settings are explicit in `bin/slab-app/src-tauri/tauri.conf.json`; preserve CSP, permissions, capabilities, and plugin boundaries unless the task requires a deliberate change.
 - If documentation and code disagree, trust the code and update the documentation.

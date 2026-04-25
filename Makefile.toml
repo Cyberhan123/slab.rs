@@ -97,7 +97,7 @@ cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
 [tasks.build-plugin-packs]
 workspace = false
 command = "bun"
-args = ["run", "build:plugin-packs"]
+args = ["run", "gen:plugin-packs"]
 cwd = "${CARGO_MAKE_WORKING_DIRECTORY}"
 
 [tasks.build-tauri-release]
@@ -179,96 +179,9 @@ args = ["run", "--bin", "slab-server", "--", "--settings-path", "./testdata/api-
 
 [tasks.api]
 workspace = false
-script_runner = "@duckscript"
-script = '''
-docs_url = set http://127.0.0.1:3000/api-docs/openapi.json
-server_started = set false
-server_pid = set ""
-
-fn probe_docs
-	probe_exit = exec --get-exit-code bun -e "fetch(process.argv[1]).then((response)=>process.exit(response.ok ? 0 : 1)).catch(()=>process.exit(1))" ${docs_url}
-	probe_ready = not ${probe_exit}
-	return ${probe_ready}
-end
-
-fn cleanup_server
-	if not ${server_started}
-		return
-	end
-
-	windows = is_windows
-	if ${windows}
-		exec taskkill /PID ${server_pid} /T /F
-	else
-		exec kill ${server_pid}
-	end
-end
-
-probe_ready = probe_docs
-need_server = not ${probe_ready}
-
-if ${need_server}
-	cm_run_task build-server-dev
-
-	windows = is_windows
-	if ${windows}
-		server_bin = set "${CARGO_MAKE_CRATE_TARGET_DIRECTORY}/debug/slab-server.exe"
-	else
-		server_bin = set "${CARGO_MAKE_CRATE_TARGET_DIRECTORY}/debug/slab-server"
-	end
-
-	if not is_file ${server_bin}
-		echo slab-server binary not found after build.
-		exit 1
-	end
-
-	server_pid = spawn --silent ${server_bin} --settings-path ./testdata/api-settings.json
-	server_started = set true
-
-	attempts_remaining = set 50
-	ready = set false
-	timed_out = set false
-	while not ${ready}
-		probe_ready = probe_docs
-		if ${probe_ready}
-			ready = set true
-		else
-			attempts_remaining = calc ${attempts_remaining} - 1
-			if not ${attempts_remaining}
-				timed_out = set true
-				ready = set true
-			else
-				sleep 200
-			end
-		end
-	end
-
-	if ${timed_out}
-		echo slab-server did not expose /api-docs/openapi.json in time.
-		cleanup_server
-		exit 1
-	end
-end
-
-cd ${CARGO_MAKE_WORKING_DIRECTORY}/packages/slab-desktop
-api_result = exec bun run api
-api_succeeded = not ${api_result.code}
-api_failed = not ${api_succeeded}
-
-if ${server_started}
-	cleanup_server
-end
-
-if ${api_failed}
-	if not is_empty ${api_result.stdout}
-		echo ${api_result.stdout}
-	end
-	if not is_empty ${api_result.stderr}
-		echo ${api_result.stderr}
-	end
-	exit ${api_result.code}
-end
-'''
+command = "bun"
+args = ["run", "gen:api"]
+cwd = "${CARGO_MAKE_WORKING_DIRECTORY}"
 
 [tasks.build-tauri-release-windows-full-installer]
 workspace = false

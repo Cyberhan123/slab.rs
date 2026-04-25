@@ -99,17 +99,18 @@ describe("slab-server unit migration tests", () => {
   });
 
   it("returns CORS headers for preflight requests", async () => {
+    const origin = "http://localhost:1420";
     const response = await server!.request("/v1/setup/status", {
       method: "OPTIONS",
       headers: {
-        Origin: "https://example.com",
+        Origin: origin,
         "Access-Control-Request-Method": "GET",
         "Access-Control-Request-Headers": "Authorization"
       }
     });
 
     expect(response.status).toBeLessThan(300);
-    expect(response.headers.get("access-control-allow-origin")).toBeTruthy();
+    expect(response.headers.get("access-control-allow-origin")).toBe(origin);
     expect(response.headers.get("access-control-allow-methods")).toBeTruthy();
     expect(response.headers.get("access-control-allow-headers")).toBeTruthy();
   });

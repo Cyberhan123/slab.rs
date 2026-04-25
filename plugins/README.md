@@ -23,16 +23,13 @@ Repository plugins can be built with Vite, React, and TypeScript. Use
 ABI. `@slab/plugin-ui` intentionally exposes only a safe component subset
 instead of the full `@slab/components` surface.
 
-Run `bun run build:plugins` from the repo root to scan `plugins/*` for
+Run `bun run gen:plugin-packs` from the repo root to scan `plugins/*` for
 directories that contain `plugin.json`, refresh `plugin.json`
 `integrity.filesSha256` entries from the current plugin files, and emit
 `.plugin.slab` archives to `plugins/dist/`.
 
-`plugins/scripts/` and any other helper directories without `plugin.json` are
-not treated as plugins.
-
-`bun run build:plugin-packs` is the same pack-generation command exposed under a
-more explicit name.
+Helper scripts now live under the repo-root `scripts/plugins/` directory.
+Directories under `plugins/` without `plugin.json` are not treated as plugins.
 
 ## Manifest v1
 

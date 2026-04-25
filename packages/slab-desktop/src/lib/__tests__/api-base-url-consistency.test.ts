@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
@@ -13,11 +14,19 @@ describe('desktop API base URL consistency', () => {
   });
 
   it('keeps static mirrors aligned across package and Tauri config', () => {
-    const packageJsonPath = resolve(process.cwd(), 'package.json');
-    const apiPackageJsonPath = resolve(process.cwd(), '../api/package.json');
-    const tauriConfigPath = resolve(process.cwd(), '../../bin/slab-app/src-tauri/tauri.conf.json');
+    const testDir = dirname(fileURLToPath(import.meta.url));
+    const workspacePackageJsonPath = resolve(testDir, '../../../../../package.json');
+    const desktopPackageJsonPath = resolve(testDir, '../../../package.json');
+    const apiPackageJsonPath = resolve(testDir, '../../../../../packages/api/package.json');
+    const tauriConfigPath = resolve(
+      testDir,
+      '../../../../../bin/slab-app/src-tauri/tauri.conf.json'
+    );
 
-    const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as {
+    const workspacePackageJson = JSON.parse(readFileSync(workspacePackageJsonPath, 'utf8')) as {
+      scripts?: Record<string, string>;
+    };
+    const desktopPackageJson = JSON.parse(readFileSync(desktopPackageJsonPath, 'utf8')) as {
       scripts?: Record<string, string>;
     };
     const apiPackageJson = JSON.parse(readFileSync(apiPackageJsonPath, 'utf8')) as {
@@ -34,8 +43,9 @@ describe('desktop API base URL consistency', () => {
       };
     };
 
-    expect(packageJson.scripts?.api).toContain('../api/src/v1.d.ts');
-    expect(apiPackageJson.scripts?.api).toContain('http://127.0.0.1:3000/api-docs/openapi.json');
+    expect(workspacePackageJson.scripts?.['gen:api']).toBe('bun ./scripts/gen/generate-openapi.ts');
+    expect(desktopPackageJson.scripts?.api).toBeUndefined();
+    expect(apiPackageJson.scripts?.api).toBeUndefined();
     expect(tauriConfig.app?.security?.csp?.['connect-src']).toContain(DEFAULT_API_BASE_URL);
     expect(tauriConfig.app?.security?.csp?.['script-src']).toContain(DEFAULT_API_BASE_URL);
   });

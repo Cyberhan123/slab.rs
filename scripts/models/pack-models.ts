@@ -16,13 +16,15 @@ type ZipEntry = {
 };
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const modelsRoot = path.resolve(scriptDir, "..");
+const repoRoot = path.resolve(scriptDir, "../..");
+const modelsRoot = path.join(repoRoot, "models");
 const outputDir = path.join(modelsRoot, "dist");
 const skippedRoots = new Set(["dist", "node_modules", ".git"]);
 
 async function main() {
   const targets = process.argv.slice(2);
-  const packDirs = targets.length > 0 ? await resolveTargetDirs(targets) : await findPackDirs(modelsRoot);
+  const packDirs =
+    targets.length > 0 ? await resolveTargetDirs(targets) : await findPackDirs(modelsRoot);
 
   if (packDirs.length === 0) {
     console.error("No model pack directories with manifest.json were found.");
