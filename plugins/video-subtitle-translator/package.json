@@ -4,9 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit && vite build && bun run sync:integrity",
-    "dev": "vite --host 127.0.0.1",
-    "sync:integrity": "bun ../../packages/slab-plugin-sdk/scripts/generate-plugin-integrity.ts ."
+    "dev": "vite --host 127.0.0.1"
   },
   "dependencies": {
     "@slab/plugin-sdk": "workspace:*",

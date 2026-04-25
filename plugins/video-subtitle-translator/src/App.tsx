@@ -51,6 +51,17 @@ type LogEntry = {
   kind?: "ok" | "error";
 };
 
+type PipelineStepId = "ffmpeg" | "whisper" | "source-srt" | "translate" | "translated-srt";
+type PipelineStepStatus = "pending" | "running" | "done" | "failed" | "skipped";
+
+type PipelineStep = {
+  id: PipelineStepId;
+  label: string;
+  status: PipelineStepStatus;
+  detail?: string;
+  progress?: TaskProgress | null;
+};
+
 type TaskAccepted = {
   operation_id?: string;
   task_id?: string;
@@ -59,11 +70,13 @@ type TaskAccepted = {
 
 type TaskProgress = {
   label?: string;
+  message?: string;
   current?: number;
   total?: number;
   unit?: string;
   step?: number;
   step_count?: number;
+  logs?: string[];
 };
 
 type TaskState = {
@@ -134,8 +147,12 @@ export function App() {
   const [translatedOutput, setTranslatedOutput] = useState("Not generated");
   const [sourceSegments, setSourceSegments] = useState<Segment[]>([]);
   const [translatedSegments, setTranslatedSegments] = useState<Segment[]>([]);
+  const [pipelineSteps, setPipelineSteps] = useState<PipelineStep[]>(() =>
+    createPipelineSteps(false),
+  );
   const cancelRequestedRef = useRef(false);
   const activeTaskIdRef = useRef("");
+  const taskLogOffsetsRef = useRef(new Map<string, number>());
 
   const modelMetaById = useMemo(() => {
     const rows = new Map<string, ModelInfo>();
@@ -147,6 +164,26 @@ export function App() {
 
   const addLog = (message: string, kind?: LogEntry["kind"]) => {
     setLogs((current) => [...current, { id: Date.now() + current.length, message, kind }]);
+  };
+
+  const addLogs = (messages: string[], kind?: LogEntry["kind"]) => {
+    if (messages.length === 0) {
+      return;
+    }
+    setLogs((current) => [
+      ...current,
+      ...messages.map((message, index) => ({
+        id: Date.now() + current.length + index,
+        message,
+        kind,
+      })),
+    ]);
+  };
+
+  const updatePipelineStep = (id: PipelineStepId, patch: Partial<PipelineStep>) => {
+    setPipelineSteps((current) =>
+      current.map((step) => (step.id === id ? { ...step, ...patch } : step)),
+    );
   };
 
   const resetOutputs = () => {
@@ -201,34 +238,79 @@ export function App() {
     addLog(`Selected video: ${response.path}`, "ok");
   };
 
-  const submitTask = async <T,>(label: string, method: string, path: string, body: unknown) => {
+  const appendTaskLogs = (label: string, taskId: string, progress?: TaskProgress) => {
+    const progressLogs = Array.isArray(progress?.logs) ? progress.logs : [];
+    if (progressLogs.length === 0) {
+      return;
+    }
+
+    const previousOffset = taskLogOffsetsRef.current.get(taskId) ?? 0;
+    const nextOffset = previousOffset > progressLogs.length ? 0 : previousOffset;
+    const nextLogs = progressLogs.slice(nextOffset).map((line) => `${label}: ${line}`);
+    taskLogOffsetsRef.current.set(taskId, progressLogs.length);
+    addLogs(nextLogs);
+  };
+
+  const submitTask = async <T,>(
+    stepId: PipelineStepId,
+    label: string,
+    method: string,
+    path: string,
+    body: unknown,
+  ) => {
     assertNotCancelled(cancelRequestedRef.current);
     addLog(`${label}: submitting task...`);
+    updatePipelineStep(stepId, {
+      status: "running",
+      detail: "Submitting task",
+      progress: null,
+    });
     const accepted = await apiRequest<TaskAccepted>(method, path, body);
     const taskId = accepted.operation_id ?? accepted.task_id ?? accepted.id;
     if (!taskId) {
       throw new Error(`${label}: response did not include operation_id.`);
     }
-    const result = await waitForTask<T>(label, taskId);
+    updatePipelineStep(stepId, {
+      status: "running",
+      detail: `Task ${taskId}`,
+      progress: null,
+    });
+    const result = await waitForTask<T>(stepId, label, taskId);
     activeTaskIdRef.current = "";
     setActiveTaskId("");
     return result;
   };
 
-  const waitForTask = async <T,>(label: string, taskId: string) => {
+  const waitForTask = async <T,>(stepId: PipelineStepId, label: string, taskId: string) => {
     activeTaskIdRef.current = taskId;
     setActiveTaskId(taskId);
     const pollTask = async (delayMs: number): Promise<T> => {
       assertNotCancelled(cancelRequestedRef.current);
       const task = await apiRequest<TaskState>("GET", `/v1/tasks/${encodeURIComponent(taskId)}`);
       const taskStatus = String(task.status ?? "").toLowerCase();
+      appendTaskLogs(label, taskId, task.progress);
+      updatePipelineStep(stepId, {
+        status: TASK_FAILED.has(taskStatus) ? "failed" : "running",
+        detail: formatTaskDetail(taskStatus, task.progress),
+        progress: task.progress ?? null,
+      });
       addLog(`${label}: ${taskStatus || "unknown"}${formatProgress(task.progress)}`);
 
       if (TASK_DONE.has(taskStatus)) {
+        updatePipelineStep(stepId, {
+          status: "done",
+          detail: "Completed",
+          progress: completeTaskProgress(task.progress),
+        });
         return apiRequest<T>("GET", `/v1/tasks/${encodeURIComponent(taskId)}/result`);
       }
 
       if (TASK_FAILED.has(taskStatus)) {
+        updatePipelineStep(stepId, {
+          status: "failed",
+          detail: task.error_msg || taskStatus,
+          progress: task.progress ?? null,
+        });
         throw new Error(`${label} failed: ${task.error_msg || taskStatus}`);
       }
 
@@ -294,6 +376,17 @@ export function App() {
     }
 
     const size = Math.max(1, Math.min(50, Math.round(numberValue(batchSize, 20))));
+    const batchCount = Math.max(1, Math.ceil(segments.length / size));
+    updatePipelineStep("translate", {
+      status: "running",
+      detail: `Batch 0/${batchCount}`,
+      progress: {
+        label: "Llama translation",
+        current: 0,
+        total: batchCount,
+        unit: "batch",
+      },
+    });
     const translateRemaining = async (offset: number, translated: Segment[]): Promise<Segment[]> => {
       if (offset >= segments.length) {
         return translated;
@@ -303,9 +396,29 @@ export function App() {
       const batchNumber = Math.floor(offset / size) + 1;
       addLog(`Llama: translating batch ${batchNumber} (${batch.length} segments)...`);
       const nextBatch = await translateBatchWithRetry(batch, language, model);
+      updatePipelineStep("translate", {
+        status: "running",
+        detail: `Batch ${Math.min(batchNumber, batchCount)}/${batchCount}`,
+        progress: {
+          label: "Llama translation",
+          current: Math.min(batchNumber, batchCount),
+          total: batchCount,
+          unit: "batch",
+        },
+      });
       return translateRemaining(offset + size, [...translated, ...nextBatch]);
     };
     const translated = await translateRemaining(0, []);
+    updatePipelineStep("translate", {
+      status: "done",
+      detail: `${translated.length} segments translated`,
+      progress: {
+        label: "Llama translation",
+        current: batchCount,
+        total: batchCount,
+        unit: "batch",
+      },
+    });
     addLog(`Llama translated ${translated.length} segments.`, "ok");
     return translated;
   };
@@ -382,6 +495,11 @@ export function App() {
   const cancelPipeline = async () => {
     cancelRequestedRef.current = true;
     setStatus("cancelling");
+    setPipelineSteps((current) =>
+      current.map((step) =>
+        step.status === "running" ? { ...step, detail: "Cancelling..." } : step,
+      ),
+    );
     const taskId = activeTaskIdRef.current || activeTaskId;
     if (!taskId) {
       return;
@@ -405,13 +523,21 @@ export function App() {
     resetOutputs();
     setRunning(true);
     cancelRequestedRef.current = false;
+    taskLogOffsetsRef.current.clear();
     setStatus("running");
+    setPipelineSteps(createPipelineSteps(translateEnabled));
 
     try {
-      const audioResult = await submitTask<FfmpegResponse>("FFmpeg", "POST", "/v1/ffmpeg/convert", {
-        source_path: videoPath,
-        output_format: "wav",
-      });
+      const audioResult = await submitTask<FfmpegResponse>(
+        "ffmpeg",
+        "FFmpeg",
+        "POST",
+        "/v1/ffmpeg/convert",
+        {
+          source_path: videoPath,
+          output_format: "wav",
+        },
+      );
       const audioPath = requireString(
         audioResult.output_path,
         "FFmpeg result did not include output_path.",
@@ -420,6 +546,7 @@ export function App() {
       addLog(`FFmpeg output: ${audioPath}`, "ok");
 
       const whisperResult = await submitTask<WhisperResponse>(
+        "whisper",
         "Whisper",
         "POST",
         "/v1/audio/transcriptions",
@@ -434,20 +561,50 @@ export function App() {
       setSourceSegments(nextSourceSegments);
       addLog(`Whisper produced ${nextSourceSegments.length} timed segments.`, "ok");
 
+      updatePipelineStep("source-srt", {
+        status: "running",
+        detail: "Rendering source SRT",
+        progress: { label: "Source SRT", current: 0, total: 1, unit: "file" },
+      });
       const sourceSrt = await renderSubtitle("source", nextSourceSegments);
       setSourceOutput(requireString(sourceSrt.output_path, "Source subtitle path is missing."));
+      updatePipelineStep("source-srt", {
+        status: "done",
+        detail: "Source SRT written",
+        progress: { label: "Source SRT", current: 1, total: 1, unit: "file" },
+      });
       addLog(`Source SRT written: ${sourceSrt.output_path}`, "ok");
 
       if (translateEnabled) {
         const translated = await translateSegments(nextSourceSegments);
         setTranslatedSegments(translated);
+        updatePipelineStep("translated-srt", {
+          status: "running",
+          detail: "Rendering translated SRT",
+          progress: { label: "Translated SRT", current: 0, total: 1, unit: "file" },
+        });
         const translatedSrt = await renderSubtitle("translated", translated);
         setTranslatedOutput(
           requireString(translatedSrt.output_path, "Translated subtitle path is missing."),
         );
+        updatePipelineStep("translated-srt", {
+          status: "done",
+          detail: "Translated SRT written",
+          progress: { label: "Translated SRT", current: 1, total: 1, unit: "file" },
+        });
         addLog(`Translated SRT written: ${translatedSrt.output_path}`, "ok");
       } else {
         setTranslatedOutput("Skipped");
+        updatePipelineStep("translate", {
+          status: "skipped",
+          detail: "Translation disabled",
+          progress: null,
+        });
+        updatePipelineStep("translated-srt", {
+          status: "skipped",
+          detail: "Translation disabled",
+          progress: null,
+        });
         addLog("Translation skipped.");
       }
 
@@ -689,7 +846,7 @@ export function App() {
                 Cancel
               </Button>
             </div>
-            <Progress value={status === "done" ? 100 : running ? 45 : 0} />
+            <PipelineProgress steps={pipelineSteps} />
           </CardContent>
         </Card>
       </section>
@@ -866,6 +1023,59 @@ function StatusBadge({ status }: { status: "idle" | "running" | "failed" | "done
   );
 }
 
+function PipelineProgress({ steps }: { steps: PipelineStep[] }) {
+  const completedSteps = steps.filter((step) =>
+    step.status === "done" || step.status === "skipped",
+  ).length;
+
+  return (
+    <div className="pipeline-progress">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-semibold">Pipeline progress</p>
+        <span className="text-xs font-medium text-muted-foreground">
+          {completedSteps}/{steps.length}
+        </span>
+      </div>
+      <div className="pipeline-step-list">
+        {steps.map((step) => {
+          const percent = pipelineStepPercent(step);
+          return (
+            <div key={step.id} className="pipeline-step">
+              <div className="pipeline-step-header">
+                <span className="text-sm font-medium">{step.label}</span>
+                <Badge
+                  variant="status"
+                  data-status={
+                    step.status === "done"
+                      ? "success"
+                      : step.status === "failed"
+                        ? "danger"
+                        : "info"
+                  }
+                  className="px-2 py-1 text-[0.65rem] uppercase tracking-[0.12em]"
+                >
+                  {pipelineStatusLabel(step.status)}
+                </Badge>
+              </div>
+              {step.detail ? (
+                <p className="line-clamp-2 text-xs text-muted-foreground">{step.detail}</p>
+              ) : null}
+              {percent === null ? (
+                <p className="text-xs text-muted-foreground">Waiting for progress data</p>
+              ) : (
+                <div className="pipeline-meter">
+                  <Progress value={percent} />
+                  <span>{Math.round(percent)}%</span>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function formatProgress(progress: TaskProgress | undefined): string {
   if (!progress) {
     return "";
@@ -874,6 +1084,9 @@ function formatProgress(progress: TaskProgress | undefined): string {
   const parts = [];
   if (progress.label) {
     parts.push(progress.label);
+  }
+  if (progress.message && parts.length === 0) {
+    parts.push(progress.message);
   }
   if (
     typeof progress.current === "number" &&
@@ -887,6 +1100,108 @@ function formatProgress(progress: TaskProgress | undefined): string {
   }
 
   return parts.length > 0 ? ` (${parts.join(", ")})` : "";
+}
+
+function formatTaskDetail(status: string, progress?: TaskProgress): string {
+  const percent = taskProgressPercent(progress);
+  if (percent !== null) {
+    return `${status || "running"} - ${Math.round(percent)}%`;
+  }
+  return progress?.message || status || "running";
+}
+
+function completeTaskProgress(progress: TaskProgress | undefined): TaskProgress {
+  if (progress?.total && progress.total > 0) {
+    return { ...progress, current: progress.total };
+  }
+
+  if (typeof progress?.current === "number" && progress.current > 0) {
+    return { ...progress, total: progress.current };
+  }
+
+  const fallback = progress ?? {};
+  return {
+    ...fallback,
+    current: 1,
+    total: 1,
+    unit: progress?.unit ?? "task",
+  };
+}
+
+function taskProgressPercent(progress: TaskProgress | null | undefined): number | null {
+  if (
+    typeof progress?.current !== "number" ||
+    typeof progress?.total !== "number" ||
+    progress.total <= 0
+  ) {
+    return null;
+  }
+
+  return clamp((progress.current / progress.total) * 100, 0, 100);
+}
+
+function pipelineStepPercent(step: PipelineStep): number | null {
+  if (step.status === "done") {
+    return 100;
+  }
+  if (step.status === "pending") {
+    return 0;
+  }
+  if (step.status === "skipped") {
+    return null;
+  }
+  return taskProgressPercent(step.progress);
+}
+
+function pipelineStatusLabel(status: PipelineStepStatus): string {
+  const labels = {
+    pending: "Pending",
+    running: "Running",
+    done: "Done",
+    failed: "Failed",
+    skipped: "Skipped",
+  } as const;
+  return labels[status];
+}
+
+function createPipelineSteps(includeTranslation: boolean): PipelineStep[] {
+  return [
+    {
+      id: "ffmpeg",
+      label: "FFmpeg audio extraction",
+      status: "pending",
+      detail: "Waiting",
+      progress: null,
+    },
+    {
+      id: "whisper",
+      label: "Whisper transcription",
+      status: "pending",
+      detail: "Waiting",
+      progress: null,
+    },
+    {
+      id: "source-srt",
+      label: "Source SRT render",
+      status: "pending",
+      detail: "Waiting",
+      progress: null,
+    },
+    {
+      id: "translate",
+      label: "Translation batches",
+      status: includeTranslation ? "pending" : "skipped",
+      detail: includeTranslation ? "Waiting" : "Translation disabled",
+      progress: null,
+    },
+    {
+      id: "translated-srt",
+      label: "Translated SRT render",
+      status: includeTranslation ? "pending" : "skipped",
+      detail: includeTranslation ? "Waiting" : "Translation disabled",
+      progress: null,
+    },
+  ];
 }
 
 function normalizeSegments(rawSegments: unknown[] | undefined): Segment[] {
@@ -1002,6 +1317,10 @@ function selectedValue(value: string): string | null {
 function numberValue(value: string, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
 function requireString(value: unknown, message: string): string {
