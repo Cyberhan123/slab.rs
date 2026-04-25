@@ -16,6 +16,7 @@ use slab_types::settings::{
     ProviderRegistryEntry, SettingsDocument,
 };
 
+use crate::config::default_plugin_install_dir_for_settings_path;
 use crate::domain::models::{UpdateSettingCommand, UpdateSettingOperation};
 use crate::domain::services::setup::{SETUP_INITIALIZED_CONFIG_KEY, SETUP_INITIALIZED_CONFIG_NAME};
 use crate::error::AppCoreError;
@@ -87,6 +88,10 @@ impl SettingsDocumentProvider {
         self.state.read().await.warnings.clone()
     }
 
+    pub fn default_document(&self) -> SettingsDocument {
+        default_settings_document_for_path(&self.path)
+    }
+
     pub async fn value(&self, path: &str) -> Result<Value, AppCoreError> {
         let state = self.state.read().await;
         let document = settings_document_to_json_value(&state.document);
@@ -103,9 +108,9 @@ impl SettingsDocumentProvider {
     ) -> Result<Value, AppCoreError> {
         let mut state = self.state.write().await;
         let mut next_document = settings_document_to_json_value(&state.document);
-        let default_document = settings_document_to_json_value(&SettingsDocument::default());
+        let default_document = settings_document_to_json_value(&self.default_document());
 
-        let next_value = match command.op {
+        let requested_value = match command.op {
             UpdateSettingOperation::Set => command.value.ok_or_else(|| {
                 AppCoreError::BadRequest(format!(
                     "setting '{}' update requires a value when op=set",
@@ -119,15 +124,21 @@ impl SettingsDocumentProvider {
             }
         };
 
-        set_value_at_path(&mut next_document, path, next_value.clone())?;
+        set_value_at_path(&mut next_document, path, requested_value)?;
 
-        let next_settings: SettingsDocument =
+        let mut next_settings: SettingsDocument =
             serde_json::from_value(next_document).map_err(|error| {
                 AppCoreError::BadRequest(format!(
                     "setting '{}' update produced an invalid settings document: {error}",
                     path
                 ))
             })?;
+
+        apply_dynamic_defaults(&self.path, &mut next_settings);
+        let persisted_document = settings_document_to_json_value(&next_settings);
+        let next_value = value_at_path(&persisted_document, path)
+            .cloned()
+            .ok_or_else(|| AppCoreError::NotFound(format!("setting pmid '{}' not found", path)))?;
 
         write_settings_document_file(&self.path, &next_settings)?;
         state.document = next_settings;
@@ -179,7 +190,9 @@ where
         )));
     }
 
-    let (document, setup_initialized, warnings) = migrate_legacy_settings_document(parsed.values)?;
+    let (mut document, setup_initialized, warnings) =
+        migrate_legacy_settings_document(parsed.values)?;
+    apply_dynamic_defaults(path, &mut document);
     let backup_path = create_settings_backup(path, MIGRATION_BACKUP_SUFFIX)?;
     write_settings_document_file(path, &document)?;
 
@@ -215,7 +228,7 @@ fn load_runtime_state(path: &Path) -> Result<SettingsRuntimeState, AppCoreError>
     ensure_settings_parent_dir(path)?;
 
     if !path.exists() {
-        let document = SettingsDocument::default();
+        let document = default_settings_document_for_path(path);
         write_settings_document_file(path, &document)?;
         return Ok(SettingsRuntimeState { document, warnings: Vec::new() });
     }
@@ -232,7 +245,7 @@ fn load_runtime_state(path: &Path) -> Result<SettingsRuntimeState, AppCoreError>
         Err(error) => {
             let warning = recover_corrupt_settings_file(path, &error.to_string())?;
             return Ok(SettingsRuntimeState {
-                document: SettingsDocument::default(),
+                document: default_settings_document_for_path(path),
                 warnings: vec![warning],
             });
         }
@@ -245,8 +258,11 @@ fn load_runtime_state(path: &Path) -> Result<SettingsRuntimeState, AppCoreError>
         ));
     }
 
-    if let Ok(document) = serde_json::from_value::<SettingsDocument>(raw_json) {
+    if let Ok(mut document) = serde_json::from_value::<SettingsDocument>(raw_json) {
         ensure_current_schema_version(document.schema_version)?;
+        if apply_dynamic_defaults(path, &mut document) {
+            write_settings_document_file(path, &document)?;
+        }
         return Ok(SettingsRuntimeState { document, warnings: Vec::new() });
     }
 
@@ -423,12 +439,28 @@ fn create_settings_backup(path: &Path, reason: &str) -> Result<PathBuf, AppCoreE
 
 fn recover_corrupt_settings_file(path: &Path, reason: &str) -> Result<String, AppCoreError> {
     let backup_path = create_settings_backup(path, "corrupt")?;
-    write_settings_document_file(path, &SettingsDocument::default())?;
+    write_settings_document_file(path, &default_settings_document_for_path(path))?;
 
     Ok(format!(
         "Recovered from corrupt settings file. Original file was backed up to '{}' ({reason}).",
         backup_path.display()
     ))
+}
+
+fn default_settings_document_for_path(path: &Path) -> SettingsDocument {
+    let mut document = SettingsDocument::default();
+    apply_dynamic_defaults(path, &mut document);
+    document
+}
+
+fn apply_dynamic_defaults(path: &Path, document: &mut SettingsDocument) -> bool {
+    if document.plugin.install_dir.as_deref().is_some_and(|value| !value.trim().is_empty()) {
+        return false;
+    }
+
+    document.plugin.install_dir =
+        Some(default_plugin_install_dir_for_settings_path(path).to_string_lossy().into_owned());
+    true
 }
 
 fn ensure_settings_parent_dir(path: &Path) -> Result<(), AppCoreError> {
@@ -980,9 +1012,11 @@ mod tests {
         let provider = SettingsDocumentProvider::load(path.clone()).await.expect("provider");
         let file: SettingsDocument =
             serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
+        let expected = default_settings_document_for_path(&path);
 
-        assert_eq!(provider.document().await, SettingsDocument::default());
+        assert_eq!(provider.document().await, expected);
         assert_eq!(file.schema_version, SettingsDocument::default().schema_version);
+        assert_eq!(file.plugin.install_dir, expected.plugin.install_dir);
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }
@@ -1010,6 +1044,10 @@ mod tests {
         assert_eq!(persisted.tools.ffmpeg.install_dir.as_deref(), Some("C:/ffmpeg"));
         assert_eq!(persisted.models.cache_dir.as_deref(), Some("D:/models"));
         assert_eq!(persisted.server.address, "127.0.0.1:4000");
+        assert_eq!(
+            persisted.plugin.install_dir.as_deref(),
+            default_settings_document_for_path(&path).plugin.install_dir.as_deref()
+        );
         assert_eq!(store.value(SETUP_INITIALIZED_CONFIG_KEY).as_deref(), Some("true"));
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
@@ -1063,6 +1101,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn provider_fills_missing_plugin_install_dir() {
+        let path = temp_settings_path();
+        ensure_settings_parent_dir(&path).expect("dir");
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&SettingsDocument::default()).expect("serialize"),
+        )
+        .expect("write");
+
+        let provider = SettingsDocumentProvider::load(path.clone()).await.expect("provider");
+        let persisted: SettingsDocument =
+            serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
+        let expected = default_settings_document_for_path(&path);
+
+        assert_eq!(provider.document().await.plugin.install_dir, expected.plugin.install_dir);
+        assert_eq!(persisted.plugin.install_dir, expected.plugin.install_dir);
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
     async fn provider_set_and_unset_restore_defaults() {
         let path = temp_settings_path();
         let provider = SettingsDocumentProvider::load(path.clone()).await.expect("provider");
@@ -1096,6 +1155,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn provider_unset_plugin_install_dir_restores_dynamic_default() {
+        let path = temp_settings_path();
+        let provider = SettingsDocumentProvider::load(path.clone()).await.expect("provider");
+        let configured_dir = path.parent().expect("parent").join("custom-plugins");
+
+        provider
+            .update(
+                "plugin.install_dir",
+                UpdateSettingCommand {
+                    op: UpdateSettingOperation::Set,
+                    value: Some(json!(configured_dir.to_string_lossy())),
+                },
+            )
+            .await
+            .expect("set");
+        provider
+            .update(
+                "plugin.install_dir",
+                UpdateSettingCommand { op: UpdateSettingOperation::Unset, value: None },
+            )
+            .await
+            .expect("unset");
+
+        let persisted: SettingsDocument =
+            serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
+        let expected = default_settings_document_for_path(&path);
+
+        assert_eq!(persisted.plugin.install_dir, expected.plugin.install_dir);
+        assert_eq!(
+            provider.value("plugin.install_dir").await.expect("value"),
+            json!(expected.plugin.install_dir.expect("plugin dir"))
+        );
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
     async fn corrupt_file_is_backed_up_and_rebuilt() {
         let path = temp_settings_path();
         ensure_settings_parent_dir(&path).expect("dir");
@@ -1109,7 +1205,7 @@ mod tests {
             .flatten()
             .any(|entry| entry.file_name().to_string_lossy().contains(".corrupt-"));
 
-        assert_eq!(file, SettingsDocument::default());
+        assert_eq!(file, default_settings_document_for_path(&path));
         assert!(!provider.warnings().await.is_empty());
         assert!(backup_exists);
 

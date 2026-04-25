@@ -183,7 +183,7 @@ async fn build_document_view(
 ) -> Result<SettingsDocumentView, AppCoreError> {
     let current = settings.document().await;
     let current_json = settings_document_to_json_value(&current);
-    let default_json = settings_document_to_json_value(&SettingsDocument::default());
+    let default_json = settings_document_to_json_value(&settings.default_document());
     let mut sections = empty_sections();
 
     for pmid in PMID.all() {
@@ -206,7 +206,7 @@ async fn build_property_view(
 ) -> Result<SettingPropertyView, AppCoreError> {
     let current = settings.document().await;
     let current_json = settings_document_to_json_value(&current);
-    let default_json = settings_document_to_json_value(&SettingsDocument::default());
+    let default_json = settings_document_to_json_value(&settings.default_document());
     build_property_view_from_values(pmid, &current_json, &default_json)
 }
 
@@ -611,7 +611,9 @@ fn property_description(path: &str) -> String {
         "models.cache_dir" => "Directory used for cached model artifacts.".to_owned(),
         "models.config_dir" => "Directory scanned for persisted model configuration documents.".to_owned(),
         "models.download_source" => "Preferred remote source used when downloading model artifacts. Auto follows the pack candidate order.".to_owned(),
-        "plugin.install_dir" => "Directory used as the plugin installation source for runtime registration.".to_owned(),
+        "plugin.install_dir" => {
+            "Directory used as the plugin installation source for runtime registration. Defaults to the plugins directory next to settings.json.".to_owned()
+        },
         "models.auto_unload.enabled" => "Unload idle models automatically to reclaim memory.".to_owned(),
         "models.auto_unload.idle_minutes" => "Idle timeout in minutes before auto-unload triggers.".to_owned(),
         "models.auto_unload.min_free_system_memory_bytes" => {
@@ -766,11 +768,17 @@ mod tests {
         let service = PmidService::load_from_path(path.clone()).await.expect("pmid service");
         let config = service.config();
         let property = service.property("models.cache_dir").await.expect("property");
+        let plugin_install_dir = service.property("plugin.install_dir").await.expect("plugin dir");
+        let expected_plugin_dir =
+            path.parent().expect("parent").join("plugins").to_string_lossy().into_owned();
 
         assert_eq!(config.runtime.model_cache_dir.as_deref(), Some("C:/models"));
         assert_eq!(config.setup.ffmpeg.dir.as_deref(), Some("C:/ffmpeg"));
         assert_eq!(config.chat.providers.len(), 1);
         assert_eq!(property.effective_value, json!("C:/models"));
+        assert_eq!(plugin_install_dir.effective_value, json!(expected_plugin_dir));
+        assert_eq!(plugin_install_dir.schema.default_value, plugin_install_dir.effective_value);
+        assert!(!plugin_install_dir.is_overridden);
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }
