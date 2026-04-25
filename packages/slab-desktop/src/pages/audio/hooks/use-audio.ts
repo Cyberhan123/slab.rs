@@ -639,7 +639,7 @@ export function useAudio() {
       next.prompt = trimmedPrompt;
     }
     if (!trimmedLanguage && detectLanguage) {
-      next.detect_language = true;
+      next.language = 'auto';
     }
 
     return Object.keys(next).length > 0 ? next : undefined;

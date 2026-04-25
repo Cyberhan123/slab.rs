@@ -24,13 +24,15 @@ pub struct AudioTranscriptionRequest {
         message = "path must be an absolute path without '..'"
     ))]
     pub path: String,
-    /// Optional language override passed to whisper inference.
+    /// Optional language override passed to whisper inference. Use `"auto"` to
+    /// let whisper detect the language and continue transcription.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub language: Option<String>,
     /// Optional initial prompt passed to whisper inference.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub prompt: Option<String>,
-    /// Enable whisper language auto-detection when no explicit language is set.
+    /// Native whisper detection-only flag. When `true`, ggml whisper detects the
+    /// language and may return without transcript segments.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub detect_language: Option<bool>,
     /// Optional VAD (Voice Activity Detection) settings.

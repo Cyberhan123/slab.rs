@@ -150,9 +150,7 @@ async fn import_plugin_pack(
         ));
     }
 
-    Err(ServerError::BadRequest(
-        "multipart body must contain a .plugin.slab file field".into(),
-    ))
+    Err(ServerError::BadRequest("multipart body must contain a .plugin.slab file field".into()))
 }
 
 #[utoipa::path(

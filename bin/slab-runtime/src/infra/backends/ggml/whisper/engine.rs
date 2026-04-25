@@ -244,3 +244,41 @@ fn full_params_from_options(options: &AudioTranscriptionOptions) -> FullParams {
 
     params
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detect_language_is_forwarded_verbatim() {
+        let params = full_params_from_options(&AudioTranscriptionOptions {
+            detect_language: Some(true),
+            ..Default::default()
+        });
+
+        assert_eq!(params.language, None);
+        assert_eq!(params.detect_language, Some(true));
+    }
+
+    #[test]
+    fn language_is_forwarded_verbatim() {
+        let params = full_params_from_options(&AudioTranscriptionOptions {
+            language: Some("auto".to_owned()),
+            ..Default::default()
+        });
+
+        assert_eq!(params.language.as_deref(), Some("auto"));
+        assert_eq!(params.detect_language, None);
+    }
+
+    #[test]
+    fn detect_language_false_is_forwarded_verbatim() {
+        let params = full_params_from_options(&AudioTranscriptionOptions {
+            detect_language: Some(false),
+            ..Default::default()
+        });
+
+        assert_eq!(params.language, None);
+        assert_eq!(params.detect_language, Some(false));
+    }
+}

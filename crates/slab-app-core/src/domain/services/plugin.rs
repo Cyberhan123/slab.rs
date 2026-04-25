@@ -137,16 +137,15 @@ impl PluginService {
             return Err(AppCoreError::BadRequest(scanned.error.unwrap_or_else(|| {
                 expected_plugin_id.map_or_else(
                     || "plugin pack failed validation after extraction".to_owned(),
-                    |plugin_id| {
-                        format!("plugin '{plugin_id}' failed validation after extraction")
-                    },
+                    |plugin_id| format!("plugin '{plugin_id}' failed validation after extraction"),
                 )
             })));
         }
 
-        let manifest = scanned.manifest.as_ref().ok_or_else(|| {
-            AppCoreError::BadRequest("plugin pack is missing plugin.json".into())
-        })?;
+        let manifest = scanned
+            .manifest
+            .as_ref()
+            .ok_or_else(|| AppCoreError::BadRequest("plugin pack is missing plugin.json".into()))?;
         if let Some(expected_plugin_id) = expected_plugin_id
             && manifest.id != expected_plugin_id
         {
@@ -401,10 +400,7 @@ struct ResolvedInstallSource {
     package_sha256: Option<String>,
 }
 
-fn build_plugin_view(
-    scan: &ScannedPlugin,
-    state: Option<&PluginStateRecord>,
-) -> PluginView {
+fn build_plugin_view(scan: &ScannedPlugin, state: Option<&PluginStateRecord>) -> PluginView {
     let manifest = scan.manifest.as_ref();
     let manifest_compatibility =
         manifest.map(|value| serde_json::to_value(&value.compatibility).unwrap_or(Value::Null));
@@ -1067,11 +1063,7 @@ fn locate_plugin_root(staging_root: &Path) -> Result<PathBuf, AppCoreError> {
 
     match manifests.as_slice() {
         [only] => Ok(only.clone()),
-        [] => {
-            Err(AppCoreError::BadRequest(
-                "plugin pack does not contain plugin.json".to_owned(),
-            ))
-        }
+        [] => Err(AppCoreError::BadRequest("plugin pack does not contain plugin.json".to_owned())),
         _ => Err(AppCoreError::BadRequest(
             "plugin pack contains multiple plugin.json files".to_owned(),
         )),
@@ -1150,7 +1142,9 @@ fn ensure_path_within(path: &Path, root: &Path) -> Result<(), AppCoreError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{hash_bytes_hex, locate_plugin_root, normalize_relative_path, scan_plugin_dir, scan_plugins};
+    use super::{
+        hash_bytes_hex, locate_plugin_root, normalize_relative_path, scan_plugin_dir, scan_plugins,
+    };
     use serde_json::json;
     use std::fs;
 
