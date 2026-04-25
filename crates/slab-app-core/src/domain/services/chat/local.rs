@@ -41,6 +41,12 @@ struct StopEmission {
     matched: bool,
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct StreamDeltaRouting {
+    content: String,
+    reasoning: Option<String>,
+}
+
 fn trailing_partial_marker_len(raw: &str, marker: &str) -> usize {
     let max = raw.len().min(marker.len().saturating_sub(1));
     (1..=max).rev().find(|len| raw.ends_with(&marker[..*len])).unwrap_or(0)
@@ -189,6 +195,47 @@ impl ContentStopState {
 
         StopEmission { text, matched }
     }
+}
+
+fn reasoning_is_disabled(reasoning_effort: Option<ChatReasoningEffort>) -> bool {
+    matches!(reasoning_effort, Some(ChatReasoningEffort::None))
+}
+
+fn remove_reasoning_content_metadata(
+    metadata: &mut slab_types::inference::JsonOptions,
+) -> Option<String> {
+    match metadata.remove(REASONING_CONTENT_METADATA_KEY) {
+        Some(Value::String(reasoning)) if !reasoning.trim().is_empty() => Some(reasoning),
+        _ => None,
+    }
+}
+
+fn suppress_reasoning_output(response: &mut TextGenerationResponse) {
+    let reasoning = remove_reasoning_content_metadata(&mut response.metadata);
+    if response.text.trim().is_empty()
+        && let Some(reasoning) = reasoning.map(|value| value.trim().to_owned())
+    {
+        response.text = reasoning;
+    }
+}
+
+fn route_stream_delta(
+    content_delta: &str,
+    reasoning_delta: Option<&str>,
+    reasoning_disabled: bool,
+) -> StreamDeltaRouting {
+    if !reasoning_disabled {
+        return StreamDeltaRouting {
+            content: content_delta.to_owned(),
+            reasoning: reasoning_delta.filter(|value| !value.is_empty()).map(str::to_owned),
+        };
+    }
+
+    if !content_delta.is_empty() {
+        return StreamDeltaRouting { content: content_delta.to_owned(), reasoning: None };
+    }
+
+    StreamDeltaRouting { content: reasoning_delta.unwrap_or_default().to_owned(), reasoning: None }
 }
 
 fn attach_reasoning_metadata(response: &mut TextGenerationResponse) {
@@ -437,6 +484,7 @@ pub(super) async fn create_chat_completion(
         let error_flag = Arc::new(AtomicBool::new(false));
         let completion_tokens = Arc::new(AtomicU32::new(0));
         let terminal_metadata = Arc::new(Mutex::new(LocalStreamTerminalMetadata::default()));
+        let reasoning_disabled = reasoning_is_disabled(config.reasoning_effort);
 
         let role_chunk = stream::once(async move {
             ChatStreamChunk::Data(super::build_role_chunk(
@@ -501,10 +549,18 @@ pub(super) async fn create_chat_completion(
                             {
                                 // The runtime layer has already separated
                                 // reasoning from content via its own
-                                // ThinkingStreamState. Pass reasoning through
-                                // directly and apply stop detection to content.
+                                // ThinkingStreamState. When reasoning is
+                                // disabled for this request, suppress the
+                                // reasoning side channel and fall back to the
+                                // content delta, or the reasoning delta itself
+                                // if the model never produced a visible answer.
                                 let mut chunks = Vec::new();
-                                if !reasoning.is_empty() {
+                                let routed = route_stream_delta(
+                                    &decoded.delta,
+                                    Some(reasoning),
+                                    reasoning_disabled,
+                                );
+                                if let Some(reasoning) = routed.reasoning.as_deref() {
                                     chunks.push(ChatStreamChunk::Data(
                                         super::build_reasoning_chunk(
                                             &completion_id,
@@ -514,12 +570,12 @@ pub(super) async fn create_chat_completion(
                                         ),
                                     ));
                                 }
-                                if !decoded.delta.is_empty() {
+                                if !routed.content.is_empty() {
                                     let emission = content_stop_state
                                         .lock()
                                         .expect("local content stop state lock poisoned")
                                         .ingest(
-                                            &decoded.delta,
+                                            &routed.content,
                                             &effective_stop,
                                             &trailing_stop_markers,
                                         );
@@ -672,6 +728,9 @@ pub(super) async fn create_chat_completion(
         super::finish_reason_from_token_budget(usage.completion_tokens, config.max_tokens)
     });
     attach_reasoning_metadata(&mut response);
+    if reasoning_is_disabled(config.reasoning_effort) {
+        suppress_reasoning_output(&mut response);
+    }
     let (trimmed_text, stop_matched) = super::apply_stop_sequences(&response.text, &effective_stop);
     if stop_matched {
         response.text = trimmed_text;
@@ -761,7 +820,7 @@ mod tests {
         ParsedThinkingOutput, apply_local_reasoning_controls,
         apply_local_reasoning_controls_to_prompt, attach_reasoning_metadata,
         local_reasoning_guidance, parse_thinking_output, reasoning_content_from_metadata,
-        trim_trailing_stop_markers,
+        route_stream_delta, suppress_reasoning_output, trim_trailing_stop_markers,
     };
     use crate::domain::models::{
         ChatReasoningEffort, ChatVerbosity, ConversationMessage as DomainConversationMessage,
@@ -837,11 +896,59 @@ mod tests {
     }
 
     #[test]
+    fn suppress_reasoning_output_drops_reasoning_metadata_when_answer_exists() {
+        let mut response = TextGenerationResponse {
+            text: "answer".to_owned(),
+            metadata: [("reasoning_content".to_owned(), json!("hidden chain"))]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+
+        suppress_reasoning_output(&mut response);
+
+        assert_eq!(response.text, "answer");
+        assert!(reasoning_content_from_metadata(&response.metadata).is_none());
+    }
+
+    #[test]
+    fn suppress_reasoning_output_falls_back_to_reasoning_when_answer_is_empty() {
+        let mut response = TextGenerationResponse {
+            text: String::new(),
+            metadata: [("reasoning_content".to_owned(), json!("answer hidden in reasoning"))]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+
+        suppress_reasoning_output(&mut response);
+
+        assert_eq!(response.text, "answer hidden in reasoning");
+        assert!(reasoning_content_from_metadata(&response.metadata).is_none());
+    }
+
+    #[test]
     fn local_reasoning_guidance_disables_think_blocks() {
         let guidance = local_reasoning_guidance(Some(ChatReasoningEffort::None), None)
             .expect("guidance should be produced");
 
         assert!(guidance.contains("do not emit <think>...</think>"));
+    }
+
+    #[test]
+    fn route_stream_delta_suppresses_reasoning_when_disabled() {
+        let routed = route_stream_delta("", Some("hidden answer"), true);
+
+        assert_eq!(routed.content, "hidden answer");
+        assert_eq!(routed.reasoning, None);
+    }
+
+    #[test]
+    fn route_stream_delta_prefers_visible_content_when_disabled() {
+        let routed = route_stream_delta("final answer", Some("hidden chain"), true);
+
+        assert_eq!(routed.content, "final answer");
+        assert_eq!(routed.reasoning, None);
     }
 
     #[test]

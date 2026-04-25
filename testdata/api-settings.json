@@ -1,12 +1,23 @@
 {
   "$schema": "https://slab.reorgix.com/manifests/v1/settings-document.schema.json",
   "schema_version": 2,
- 
+  "general": {
+    "language": "auto"
+  },
+  "database": {
+    "url": "sqlite://slab.db?mode=rwc"
+  },
   "logging": {
     "level": "info",
     "json": false
   },
-
+  "tools": {
+    "ffmpeg": {
+      "enabled": true,
+      "auto_download": true,
+      "source": {}
+    }
+  },
   "runtime": {
     "mode": "managed_children",
     "transport": "ipc",
@@ -31,6 +42,7 @@
       "backends": {
         "llama": {
           "enabled": false,
+          "flash_attn": true,
           "source": {},
           "logging": {},
           "capacity": {},
@@ -41,6 +53,7 @@
         },
         "whisper": {
           "enabled": false,
+          "flash_attn": true,
           "source": {},
           "logging": {},
           "capacity": {},
@@ -51,6 +64,7 @@
         },
         "diffusion": {
           "enabled": false,
+          "flash_attn": true,
           "source": {},
           "logging": {},
           "capacity": {
@@ -88,10 +102,17 @@
     "registry": []
   },
   "models": {
+    "download_source": "auto",
     "auto_unload": {
       "enabled": false,
-      "idle_minutes": 10
+      "idle_minutes": 10,
+      "min_free_system_memory_bytes": 1073741824,
+      "min_free_gpu_memory_bytes": 536870912,
+      "max_pressure_evictions_per_load": 3
     }
+  },
+  "plugin": {
+    "install_dir": "./testdata\\plugins"
   },
   "server": {
     "address": "127.0.0.1:3000",
