@@ -1,10 +1,28 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createSlabPluginSdk, SlabPluginApiError } from "../src/index";
+import {
+  createSlabPluginApiFetch,
+  createSlabPluginSdk,
+  SlabPluginApiError,
+} from "../src/index";
 
 type InvokeMock = (command: string, args?: unknown) => Promise<unknown>;
 
 describe("plugin API bridge", () => {
+  it("exposes low-level API fetch helpers from the SDK package", async () => {
+    const pluginFetch = createSlabPluginApiFetch(async (request) => ({
+      status: 200,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: request.path }),
+    }));
+
+    const response = await pluginFetch("/v1/models?capability=chat_generation");
+
+    await expect(response.json()).resolves.toEqual({
+      path: "/v1/models?capability=chat_generation",
+    });
+  });
+
   it("exposes an OpenAPI client that routes through plugin_api_request", async () => {
     const invoke = vi.fn<InvokeMock>(async () => ({
       status: 200,

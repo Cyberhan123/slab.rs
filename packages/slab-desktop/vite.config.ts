@@ -40,6 +40,7 @@ export default defineConfig(async () => ({
   },
   // Path alias configuration
   resolve: {
+    dedupe: ["@tanstack/react-query"],
     alias: {
       "@": path.resolve(__dirname, "./src"),
       "@slab/api/config": path.resolve(__dirname, "../api/src/config.ts"),
