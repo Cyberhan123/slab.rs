@@ -618,11 +618,13 @@ async fn publish_progress(
     let payload = serde_json::json!({
         "progress": TaskProgress {
             label: Some(label.into()),
+            message: None,
             current,
             total,
             unit: None,
             step: Some(step),
             step_count: Some(step_count),
+            logs: None,
         }
     })
     .to_string();

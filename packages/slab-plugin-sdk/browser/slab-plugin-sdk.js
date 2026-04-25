@@ -42,6 +42,8 @@
   __export(exports_src, {
     getSlabPluginSdk: () => getSlabPluginSdk,
     createSlabPluginSdk: () => createSlabPluginSdk,
+    createSlabPluginApiFetch: () => createSlabPluginApiFetch,
+    createSlabPluginApiClient: () => createSlabPluginApiClient,
     applySlabThemeToDocument: () => applySlabThemeToDocument,
     SlabPluginApiError: () => SlabPluginApiError,
     SLAB_THEME_TOKENS: () => SLAB_THEME_TOKENS

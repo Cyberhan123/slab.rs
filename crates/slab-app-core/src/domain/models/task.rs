@@ -74,6 +74,8 @@ pub struct TaskPayloadEnvelope {
 pub struct TaskProgress {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
     pub current: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total: Option<u64>,
@@ -83,6 +85,8 @@ pub struct TaskProgress {
     pub step: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub step_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logs: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -164,11 +168,13 @@ mod tests {
             view.progress,
             Some(TaskProgress {
                 label: Some("model.gguf".to_owned()),
+                message: None,
                 current: 512,
                 total: Some(1024),
                 unit: Some("bytes".to_owned()),
                 step: Some(1),
                 step_count: Some(2),
+                logs: None,
             })
         );
     }

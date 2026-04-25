@@ -79,6 +79,8 @@ pub struct TaskResponse {
 pub struct TaskProgressResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
     pub current: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total: Option<u64>,
@@ -88,6 +90,8 @@ pub struct TaskProgressResponse {
     pub step: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub step_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logs: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
@@ -146,11 +150,13 @@ impl From<TaskProgress> for TaskProgressResponse {
     fn from(progress: TaskProgress) -> Self {
         Self {
             label: progress.label,
+            message: progress.message,
             current: progress.current,
             total: progress.total,
             unit: progress.unit,
             step: progress.step,
             step_count: progress.step_count,
+            logs: progress.logs,
         }
     }
 }

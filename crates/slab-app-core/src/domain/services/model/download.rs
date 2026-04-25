@@ -110,11 +110,13 @@ impl ModelDownloadProgressReporter {
 
         TaskProgress {
             label: Some(update.filename.clone()),
+            message: None,
             current: update.downloaded_bytes,
             total: update.total_bytes,
             unit: Some("bytes".to_owned()),
             step,
             step_count: (self.artifact_count > 1).then_some(self.artifact_count),
+            logs: None,
         }
     }
 

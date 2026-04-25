@@ -4,6 +4,8 @@ import {
   createSlabPluginApiFetch,
   type SlabApiBridgeRequest,
   type SlabApiBridgeResponse,
+  type SlabApiBridgeTransport,
+  type SlabApiFetch,
   type SlabPluginApiClient,
 } from "@slab/api/plugin";
 
@@ -16,7 +18,11 @@ export type { SlabApiPermission } from "@slab/api/permissions";
 
 export type SlabPluginApiRequest = SlabApiBridgeRequest;
 export type SlabPluginApiResponse = SlabApiBridgeResponse;
+export type SlabPluginApiTransport = SlabApiBridgeTransport;
+export type SlabPluginApiFetch = SlabApiFetch;
 export type SlabPluginOpenApiClient = SlabPluginApiClient;
+
+export { createSlabPluginApiClient, createSlabPluginApiFetch };
 
 export type SlabPluginJsonRequest = Omit<SlabPluginApiRequest, "body" | "headers"> & {
   headers?: Record<string, string>;
