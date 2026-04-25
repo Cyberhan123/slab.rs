@@ -254,6 +254,7 @@ fn required_slab_api_permission(method: &str, path: &str) -> Option<&'static str
 
     match method.as_str() {
         "GET" if path_matches(path, "/v1/models") => Some("models:read"),
+        "POST" if path == "/v1/models/load" => Some("models:load"),
         "POST" if path == "/v1/ffmpeg/convert" => Some("ffmpeg:convert"),
         "POST" if path == "/v1/audio/transcriptions" => Some("audio:transcribe"),
         "POST" if path == "/v1/subtitles/render" => Some("subtitle:render"),
@@ -289,6 +290,7 @@ mod tests {
     fn slab_api_permissions_allow_declared_plugin_surface() {
         let permissions = vec![
             "models:read".to_string(),
+            "models:load".to_string(),
             "ffmpeg:convert".to_string(),
             "audio:transcribe".to_string(),
             "subtitle:render".to_string(),
@@ -299,6 +301,7 @@ mod tests {
 
         for (method, path) in [
             ("GET", "/v1/models?capability=audio_transcription"),
+            ("POST", "/v1/models/load"),
             ("POST", "/v1/ffmpeg/convert"),
             ("POST", "/v1/audio/transcriptions"),
             ("POST", "/v1/subtitles/render"),

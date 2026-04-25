@@ -1,4 +1,5 @@
 import { useCallback, useDeferredValue, useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
@@ -12,6 +13,7 @@ import {
   pluginSearchText,
   type PluginRecord,
 } from '../utils';
+import { RUNTIME_PLUGINS_QUERY_KEY } from './use-runtime-plugins';
 
 type ImportedPluginResponse = PluginRecord;
 
@@ -64,6 +66,7 @@ function createImportError(response: Response, payload: unknown) {
 
 export function usePluginsPage() {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const isDesktopTauri = isTauri();
 
   usePageHeader({
@@ -128,13 +131,16 @@ export function usePluginsPage() {
     if (!isDesktopTauri) return;
 
     try {
-      await refetchPlugins();
+      await Promise.all([
+        refetchPlugins(),
+        queryClient.invalidateQueries({ queryKey: RUNTIME_PLUGINS_QUERY_KEY }),
+      ]);
     } catch (error) {
       toast.error(t('pages.plugins.toast.loadFailed'), {
         description: getErrorMessage(error),
       });
     }
-  }, [isDesktopTauri, refetchPlugins, t]);
+  }, [isDesktopTauri, queryClient, refetchPlugins, t]);
 
   const runAction = useCallback(
     async (pluginId: string, errorTitle: string, action: () => Promise<void>) => {
