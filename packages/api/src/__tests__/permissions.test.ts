@@ -7,6 +7,7 @@ describe("requiredSlabApiPermission", () => {
     expect(requiredSlabApiPermission("GET", "/v1/models?capability=chat_generation")).toBe(
       "models:read",
     );
+    expect(requiredSlabApiPermission("POST", "/v1/models/load")).toBe("models:load");
     expect(requiredSlabApiPermission("POST", "/v1/ffmpeg/convert")).toBe("ffmpeg:convert");
     expect(requiredSlabApiPermission("POST", "/v1/audio/transcriptions")).toBe(
       "audio:transcribe",

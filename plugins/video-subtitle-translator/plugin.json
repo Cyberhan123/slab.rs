@@ -17,9 +17,9 @@
       "schemas/settings.schema.json": "3f3bcdf747ec558b8254d5cc25129b0e07fe6850ad674ede66ab4fd6a475bdcd",
       "schemas/translate-video-input.schema.json": "357b67fabe4f1fc6c5e2807fbd9bef4a649fbf3eb9ab2107c98fe6c3930abbcb",
       "schemas/translate-video-output.schema.json": "6697352c730fb2bac9fe73d04db2d5425765e926e2e76d23a5e77075144389cd",
-      "ui/assets/index-CEtAnqKw.css": "d9cd59d365fe81c6e747dda4fc93b057c60967b5a56aed6ee3f3647016e7942b",
-      "ui/assets/index-DmH15Sm-.js": "e5dacd6e9efa2cc1a5caab72de653c546fc4ecfa0740b01fdb31e4b3fefdb66a",
-      "ui/index.html": "e32e8041b8d6efa8bb6cc3ef6938e948fb7211e6c1ba0feef1eef8047b801c5d"
+      "ui/assets/index-BXp6kx12.css": "66965f7ca96d7f68445fbdc71c5460173a8cd1bb5ddbfadbcc2485773bfd47fb",
+      "ui/assets/index-UeYIgZut.js": "f802efcfb6863cffad0d24d59f4e5307bacbbb9ffad17ff4a28ac833c9a0fdd6",
+      "ui/index.html": "be2845736ab8745147369310b3841649ab6a75a8060bc6258584bdc047733407"
     }
   },
   "permissions": {
@@ -39,7 +39,7 @@
     ],
     "slabApi": [
       "models:read",
-      "ffmpeg:convert",
+      "models:load",
       "audio:transcribe",
       "subtitle:render",
       "chat:complete",

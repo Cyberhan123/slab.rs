@@ -1,5 +1,6 @@
 export const SLAB_API_PERMISSIONS = {
   modelsRead: "models:read",
+  modelsLoad: "models:load",
   ffmpegConvert: "ffmpeg:convert",
   audioTranscribe: "audio:transcribe",
   subtitleRender: "subtitle:render",
@@ -28,6 +29,9 @@ export function requiredSlabApiPermission(
       }
       return null;
     case "POST":
+      if (normalizedPath === "/v1/models/load") {
+        return SLAB_API_PERMISSIONS.modelsLoad;
+      }
       if (normalizedPath === "/v1/ffmpeg/convert") {
         return SLAB_API_PERMISSIONS.ffmpegConvert;
       }

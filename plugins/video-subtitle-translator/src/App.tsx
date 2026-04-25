@@ -33,8 +33,11 @@ const EMPTY_SELECT_VALUE = "__slab_default__";
 type ModelInfo = {
   id: string;
   display_name?: string;
+  kind?: string;
+  status?: string;
+  backend_id?: string | null;
   spec?: {
-    local_path?: string;
+    local_path?: string | null;
   };
 };
 
@@ -51,7 +54,7 @@ type LogEntry = {
   kind?: "ok" | "error";
 };
 
-type PipelineStepId = "ffmpeg" | "whisper" | "source-srt" | "translate" | "translated-srt";
+type PipelineStepId = "whisper" | "source-srt" | "translate" | "translated-srt";
 type PipelineStepStatus = "pending" | "running" | "done" | "failed" | "skipped";
 
 type PipelineStep = {
@@ -89,8 +92,9 @@ type RenderSubtitleResponse = {
   output_path?: string;
 };
 
-type FfmpegResponse = {
-  output_path?: string;
+type ModelStatusResponse = {
+  backend?: string;
+  status?: string;
 };
 
 type WhisperResponse = {
@@ -142,7 +146,6 @@ export function App() {
   const [targetLanguage, setTargetLanguage] = useState("Chinese");
   const [batchSize, setBatchSize] = useState("20");
   const [maxTokens, setMaxTokens] = useState("2048");
-  const [audioOutput, setAudioOutput] = useState("Not generated");
   const [sourceOutput, setSourceOutput] = useState("Not generated");
   const [translatedOutput, setTranslatedOutput] = useState("Not generated");
   const [sourceSegments, setSourceSegments] = useState<Segment[]>([]);
@@ -189,7 +192,6 @@ export function App() {
   const resetOutputs = () => {
     setSourceSegments([]);
     setTranslatedSegments([]);
-    setAudioOutput("Not generated");
     setSourceOutput("Not generated");
     setTranslatedOutput("Not generated");
   };
@@ -221,9 +223,15 @@ export function App() {
       apiRequest<ModelInfo[]>("GET", "/v1/models?capability=chat_generation"),
     ]);
 
-    setWhisperModels(Array.isArray(nextWhisperModels) ? nextWhisperModels : []);
-    setVadModels(Array.isArray(nextVadModels) ? nextVadModels : []);
-    setChatModels(Array.isArray(nextChatModels) ? nextChatModels : []);
+    const normalizedWhisperModels = Array.isArray(nextWhisperModels) ? nextWhisperModels : [];
+    const normalizedVadModels = Array.isArray(nextVadModels) ? nextVadModels : [];
+    const normalizedChatModels = Array.isArray(nextChatModels) ? nextChatModels : [];
+
+    setWhisperModels(normalizedWhisperModels);
+    setVadModels(normalizedVadModels);
+    setChatModels(normalizedChatModels);
+    setWhisperModel((current) => selectedOrFirstModelId(current, normalizedWhisperModels));
+    setVadModel((current) => selectedOrFirstModelId(current, normalizedVadModels));
     addLog("Model lists refreshed.", "ok");
   };
 
@@ -321,11 +329,74 @@ export function App() {
     return pollTask(800);
   };
 
-  const buildWhisperRequest = (audioPath: string) => {
+  const loadSelectedModel = async (
+    stepId: PipelineStepId,
+    label: string,
+    modelId: string | null,
+  ) => {
+    if (!modelId) {
+      throw new Error(`${label} model is required. Select a model before running.`);
+    }
+
+    const model = modelMetaById.get(modelId);
+    if (model?.kind === "cloud") {
+      throw new Error(`${label} model "${modelLabel(model, modelId)}" is a cloud model.`);
+    }
+    if (model?.status && model.status !== "ready") {
+      throw new Error(
+        `${label} model "${modelLabel(model, modelId)}" is ${model.status}; download it before running.`,
+      );
+    }
+
+    addLog(`${label}: loading model ${modelLabel(model, modelId)}...`);
+    updatePipelineStep(stepId, {
+      status: "running",
+      detail: `Loading ${label} model`,
+      progress: null,
+    });
+
+    try {
+      const response = await apiRequest<ModelStatusResponse>(
+        "POST",
+        "/v1/models/load",
+        { model_id: modelId },
+        300_000,
+      );
+      addLog(
+        `${label}: model ${response.status ?? "loaded"} on ${response.backend ?? "runtime"}.`,
+        "ok",
+      );
+    } catch (error) {
+      updatePipelineStep(stepId, {
+        status: "failed",
+        detail: getErrorMessage(error),
+        progress: null,
+      });
+      throw error;
+    }
+
+    return modelId;
+  };
+
+  const prepareTranslationModel = async () => {
+    const modelId = selectedValue(llamaModel);
+    if (!modelId) {
+      throw new Error("Llama model is required when translation is enabled.");
+    }
+
+    const model = modelMetaById.get(modelId);
+    if (model?.kind === "cloud") {
+      return modelId;
+    }
+
+    return loadSelectedModel("translate", "Llama", modelId);
+  };
+
+  const buildWhisperRequest = (mediaPath: string, modelId: string) => {
     const language = detectLanguage ? null : sourceLanguage.trim();
     const request: Record<string, unknown> = {
-      model_id: selectedValue(whisperModel),
-      path: audioPath,
+      model_id: modelId,
+      path: mediaPath,
       language: language || null,
       detect_language: detectLanguage,
       decode: {
@@ -368,8 +439,7 @@ export function App() {
     });
   };
 
-  const translateSegments = async (segments: Segment[]) => {
-    const model = selectedValue(llamaModel) ?? "";
+  const translateSegments = async (segments: Segment[], model: string) => {
     const language = targetLanguage.trim();
     if (!language) {
       throw new Error("Target language is required when translation is enabled.");
@@ -528,29 +598,17 @@ export function App() {
     setPipelineSteps(createPipelineSteps(translateEnabled));
 
     try {
-      const audioResult = await submitTask<FfmpegResponse>(
-        "ffmpeg",
-        "FFmpeg",
-        "POST",
-        "/v1/ffmpeg/convert",
-        {
-          source_path: videoPath,
-          output_format: "wav",
-        },
+      const selectedWhisperModel = await loadSelectedModel(
+        "whisper",
+        "Whisper",
+        selectedValue(whisperModel),
       );
-      const audioPath = requireString(
-        audioResult.output_path,
-        "FFmpeg result did not include output_path.",
-      );
-      setAudioOutput(audioPath);
-      addLog(`FFmpeg output: ${audioPath}`, "ok");
-
       const whisperResult = await submitTask<WhisperResponse>(
         "whisper",
         "Whisper",
         "POST",
         "/v1/audio/transcriptions",
-        buildWhisperRequest(audioPath),
+        buildWhisperRequest(videoPath, selectedWhisperModel),
       );
       const nextSourceSegments = normalizeSegments(whisperResult.segments);
       if (nextSourceSegments.length === 0) {
@@ -576,7 +634,8 @@ export function App() {
       addLog(`Source SRT written: ${sourceSrt.output_path}`, "ok");
 
       if (translateEnabled) {
-        const translated = await translateSegments(nextSourceSegments);
+        const translationModel = await prepareTranslationModel();
+        const translated = await translateSegments(nextSourceSegments, translationModel);
         setTranslatedSegments(translated);
         updatePipelineStep("translated-srt", {
           status: "running",
@@ -674,8 +733,8 @@ export function App() {
           <div className="space-y-2">
             <h1>Video Subtitle Translator</h1>
             <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-              Extract audio with FFmpeg, transcribe timed segments with Whisper + VAD,
-              then optionally translate and render SRT files.
+              Transcribe timed segments with Whisper + VAD, then optionally translate and render
+              SRT files.
             </p>
           </div>
         </div>
@@ -837,7 +896,7 @@ export function App() {
               <Button
                 variant="cta"
                 onClick={() => runPipeline().catch(() => undefined)}
-                disabled={running || !videoPath}
+                disabled={running || !videoPath || !whisperModel}
               >
                 {running ? <Spinner /> : null}
                 Run Pipeline
@@ -858,8 +917,6 @@ export function App() {
           </CardHeader>
           <CardContent>
             <dl className="output-list">
-              <dt>Audio</dt>
-              <dd>{audioOutput}</dd>
               <dt>Source SRT</dt>
               <dd>{sourceOutput}</dd>
               <dt>Translated SRT</dt>
@@ -1167,13 +1224,6 @@ function pipelineStatusLabel(status: PipelineStepStatus): string {
 function createPipelineSteps(includeTranslation: boolean): PipelineStep[] {
   return [
     {
-      id: "ffmpeg",
-      label: "FFmpeg audio extraction",
-      status: "pending",
-      detail: "Waiting",
-      progress: null,
-    },
-    {
       id: "whisper",
       label: "Whisper transcription",
       status: "pending",
@@ -1314,6 +1364,27 @@ function selectedValue(value: string): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function selectedOrFirstModelId(current: string, models: ModelInfo[]): string {
+  const selected = selectedValue(current);
+  if (selected && models.some((model) => model.id === selected)) {
+    return selected;
+  }
+
+  return (
+    models.find((model) => model.status === "ready" && model.spec?.local_path)?.id ??
+    models[0]?.id ??
+    ""
+  );
+}
+
+function modelLabel(model: ModelInfo | undefined, fallback: string): string {
+  return model?.display_name ? `${model.display_name} (${model.id})` : fallback;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function numberValue(value: string, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -1352,7 +1423,7 @@ function assertNotCancelled(cancelRequested: boolean): void {
 
 function reportError(addLog: (message: string, kind?: LogEntry["kind"]) => void) {
   return (error: unknown) => {
-    addLog(error instanceof Error ? error.message : String(error), "error");
+    addLog(getErrorMessage(error), "error");
   };
 }
 
