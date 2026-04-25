@@ -471,7 +471,7 @@
       "description": "Runtime plugin installation settings.",
       "properties": {
         "install_dir": {
-          "description": "Directory containing installed runtime plugin packages.",
+          "description": "Directory containing installed runtime plugin packages. Defaults to the `plugins` directory next to `settings.json`.",
           "type": [
             "string",
             "null"

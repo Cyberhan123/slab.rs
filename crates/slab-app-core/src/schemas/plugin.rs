@@ -125,4 +125,3 @@ impl From<PluginView> for PluginResponse {
         }
     }
 }
-

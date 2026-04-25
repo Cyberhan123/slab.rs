@@ -4,9 +4,9 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::RwLock;
 
+use dirs_next::config_dir;
 use percent_encoding::percent_decode_str;
 use sha2::{Digest, Sha256};
-use tauri::Manager;
 
 use super::types::{
     PluginCapabilityTransportType, PluginCommandContribution, PluginContributesManifest,
@@ -148,39 +148,40 @@ impl PluginRegistryState {
     }
 }
 
-pub fn resolve_plugins_root<R: tauri::Runtime>(app: &tauri::App<R>) -> Result<PathBuf, String> {
-    let app_data_plugins_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("failed to resolve app data directory for plugins: {e}"))?
-        .join(DEFAULT_PLUGINS_DIR);
-    let settings_path = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| format!("failed to resolve app config directory for plugins: {e}"))?
-        .join("settings.json");
+pub fn resolve_plugins_root<R: tauri::Runtime>(_app: &tauri::App<R>) -> Result<PathBuf, String> {
+    let settings_path = settings_path_for_plugins();
 
-    Ok(resolve_plugins_root_with(
-        std::env::var("SLAB_PLUGINS_DIR").ok().map(PathBuf::from),
-        plugin_install_dir_from_settings(&settings_path),
-        app_data_plugins_dir,
-    ))
+    Ok(resolve_plugins_root_with(&settings_path, plugin_install_dir_from_settings(&settings_path)))
 }
 
 fn resolve_plugins_root_with(
-    explicit_root: Option<PathBuf>,
+    settings_path: &Path,
     settings_install_dir: Option<PathBuf>,
-    app_data_plugins_dir: PathBuf,
 ) -> PathBuf {
-    if let Some(path) = explicit_root {
-        return path;
-    }
-
     if let Some(path) = settings_install_dir {
         return path;
     }
 
-    app_data_plugins_dir
+    default_plugins_dir_for_settings_path(settings_path)
+}
+
+fn settings_path_for_plugins() -> PathBuf {
+    std::env::var("SLAB_SETTINGS_PATH")
+        .ok()
+        .map(PathBuf::from)
+        .unwrap_or_else(default_settings_path)
+}
+
+fn default_settings_path() -> PathBuf {
+    config_dir().unwrap_or_else(|| PathBuf::from(".")).join("Slab").join("settings.json")
+}
+
+fn default_plugins_dir_for_settings_path(settings_path: &Path) -> PathBuf {
+    settings_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(DEFAULT_PLUGINS_DIR)
 }
 
 fn plugin_install_dir_from_settings(settings_path: &Path) -> Option<PathBuf> {
@@ -809,11 +810,10 @@ mod tests {
     #[test]
     fn plugins_root_prefers_settings_install_dir() {
         let root = temp_root("root-prefers-settings");
+        let settings_path = root.join("settings.json");
         let install_dir = root.join("configured-plugins");
-        let app_data_plugins_dir = root.join("app-data").join(DEFAULT_PLUGINS_DIR);
 
-        let resolved =
-            resolve_plugins_root_with(None, Some(install_dir.clone()), app_data_plugins_dir);
+        let resolved = resolve_plugins_root_with(&settings_path, Some(install_dir.clone()));
 
         assert_eq!(resolved, install_dir);
 
@@ -821,33 +821,24 @@ mod tests {
     }
 
     #[test]
-    fn plugins_root_falls_back_to_app_data_without_settings_install_dir() {
+    fn plugins_root_falls_back_to_settings_sibling_plugins_without_settings_install_dir() {
         let root = temp_root("root-fallback");
-        let app_data_plugins_dir = root.join("app-data").join(DEFAULT_PLUGINS_DIR);
+        let settings_path = root.join("settings.json");
 
-        let resolved = resolve_plugins_root_with(None, None, app_data_plugins_dir.clone());
+        let resolved = resolve_plugins_root_with(&settings_path, None);
 
-        assert_eq!(resolved, app_data_plugins_dir);
+        assert_eq!(resolved, root.join(DEFAULT_PLUGINS_DIR));
 
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn plugins_root_prefers_explicit_env_over_settings_install_dir() {
-        let root = temp_root("root-prefers-env");
-        let explicit_dir = root.join("env-plugins");
-        let install_dir = root.join("configured-plugins");
-        let app_data_plugins_dir = root.join("app-data").join(DEFAULT_PLUGINS_DIR);
+    fn plugins_root_falls_back_to_current_dir_plugins_without_settings_parent() {
+        let settings_path = PathBuf::from("settings.json");
 
-        let resolved = resolve_plugins_root_with(
-            Some(explicit_dir.clone()),
-            Some(install_dir),
-            app_data_plugins_dir,
-        );
+        let resolved = resolve_plugins_root_with(&settings_path, None);
 
-        assert_eq!(resolved, explicit_dir);
-
-        fs::remove_dir_all(root).unwrap();
+        assert_eq!(resolved, PathBuf::from(DEFAULT_PLUGINS_DIR));
     }
 
     #[test]

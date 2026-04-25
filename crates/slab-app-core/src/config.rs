@@ -134,11 +134,8 @@ impl Config {
                 .unwrap_or_else(|_| default_session_state_dir().to_string_lossy().into_owned()),
             settings_path: settings_path.clone(),
             model_config_dir,
-            plugins_dir: std::env::var("SLAB_PLUGINS_DIR")
-                .ok()
-                .map(PathBuf::from)
-                .or_else(|| plugin_install_dir_from_settings(&settings_path))
-                .unwrap_or_else(default_plugins_dir),
+            plugins_dir: plugin_install_dir_from_settings(&settings_path)
+                .unwrap_or_else(|| default_plugin_install_dir_for_settings_path(&settings_path)),
         }
     }
 }
@@ -178,7 +175,7 @@ pub fn default_session_state_dir() -> PathBuf {
 }
 
 pub fn default_plugins_dir() -> PathBuf {
-    default_app_dir().join("plugins")
+    default_plugin_install_dir_for_settings_path(&default_settings_path())
 }
 
 fn plugin_install_dir_from_settings(settings_path: &Path) -> Option<PathBuf> {
@@ -190,6 +187,14 @@ fn plugin_install_dir_from_settings(settings_path: &Path) -> Option<PathBuf> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
+}
+
+pub fn default_plugin_install_dir_for_settings_path(settings_path: &Path) -> PathBuf {
+    settings_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("plugins")
 }
 
 pub fn default_runtime_log_dir() -> PathBuf {
@@ -224,8 +229,10 @@ pub fn sqlite_url_for_path(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use super::{Config, default_plugin_install_dir_for_settings_path};
     use slab_types::DESKTOP_API_BIND;
+    use std::fs;
+    use std::path::{Path, PathBuf};
     use std::sync::{Mutex, OnceLock};
 
     fn env_lock() -> &'static Mutex<()> {
@@ -253,20 +260,104 @@ mod tests {
         }
     }
 
+    fn temp_settings_path() -> PathBuf {
+        std::env::temp_dir()
+            .join(format!("slab-config-test-{}", uuid::Uuid::new_v4()))
+            .join("settings.json")
+    }
+
+    fn write_json(path: &Path, value: serde_json::Value) {
+        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        fs::write(path, serde_json::to_string_pretty(&value).expect("serialize")).expect("write");
+    }
+
     #[test]
     fn from_env_uses_desktop_api_bind_by_default() {
         let _lock = env_lock().lock().unwrap();
         let _bind = EnvGuard::capture("SLAB_BIND");
         let _settings = EnvGuard::capture("SLAB_SETTINGS_PATH");
         let _model_config = EnvGuard::capture("SLAB_MODEL_CONFIG_DIR");
+        let _plugins = EnvGuard::capture("SLAB_PLUGINS_DIR");
 
         unsafe {
             std::env::remove_var("SLAB_BIND");
             std::env::remove_var("SLAB_SETTINGS_PATH");
             std::env::remove_var("SLAB_MODEL_CONFIG_DIR");
+            std::env::remove_var("SLAB_PLUGINS_DIR");
         }
 
         let config = Config::from_env();
         assert_eq!(config.bind_address, DESKTOP_API_BIND);
+    }
+
+    #[test]
+    fn from_env_defaults_plugins_dir_next_to_settings_path() {
+        let _lock = env_lock().lock().unwrap();
+        let _settings = EnvGuard::capture("SLAB_SETTINGS_PATH");
+        let _model_config = EnvGuard::capture("SLAB_MODEL_CONFIG_DIR");
+        let _plugins = EnvGuard::capture("SLAB_PLUGINS_DIR");
+        let settings_path = temp_settings_path();
+
+        unsafe {
+            std::env::set_var("SLAB_SETTINGS_PATH", &settings_path);
+            std::env::remove_var("SLAB_MODEL_CONFIG_DIR");
+            std::env::remove_var("SLAB_PLUGINS_DIR");
+        }
+
+        let config = Config::from_env();
+
+        assert_eq!(
+            config.plugins_dir,
+            default_plugin_install_dir_for_settings_path(&settings_path)
+        );
+    }
+
+    #[test]
+    fn from_env_ignores_slab_plugins_dir_override() {
+        let _lock = env_lock().lock().unwrap();
+        let _settings = EnvGuard::capture("SLAB_SETTINGS_PATH");
+        let _plugins = EnvGuard::capture("SLAB_PLUGINS_DIR");
+        let settings_path = temp_settings_path();
+        let ignored_plugins_dir = settings_path.parent().expect("parent").join("ignored-plugins");
+
+        unsafe {
+            std::env::set_var("SLAB_SETTINGS_PATH", &settings_path);
+            std::env::set_var("SLAB_PLUGINS_DIR", &ignored_plugins_dir);
+        }
+
+        let config = Config::from_env();
+
+        assert_eq!(
+            config.plugins_dir,
+            default_plugin_install_dir_for_settings_path(&settings_path)
+        );
+    }
+
+    #[test]
+    fn from_env_uses_settings_plugin_install_dir_when_present() {
+        let _lock = env_lock().lock().unwrap();
+        let _settings = EnvGuard::capture("SLAB_SETTINGS_PATH");
+        let _plugins = EnvGuard::capture("SLAB_PLUGINS_DIR");
+        let settings_path = temp_settings_path();
+        let configured_plugins_dir =
+            settings_path.parent().expect("parent").join("configured-plugins");
+        write_json(
+            &settings_path,
+            serde_json::json!({
+                "plugin": {
+                    "install_dir": configured_plugins_dir.to_string_lossy()
+                }
+            }),
+        );
+
+        unsafe {
+            std::env::set_var("SLAB_SETTINGS_PATH", &settings_path);
+            std::env::remove_var("SLAB_PLUGINS_DIR");
+        }
+
+        let config = Config::from_env();
+
+        assert_eq!(config.plugins_dir, configured_plugins_dir);
+        let _ = fs::remove_dir_all(settings_path.parent().expect("parent"));
     }
 }

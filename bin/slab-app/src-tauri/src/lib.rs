@@ -51,7 +51,7 @@ pub fn run() {
                 log::error!("failed to resolve plugins root before starting sidecar: {error}");
                 std::io::Error::other(error)
             })?;
-            setup::run_server_sidecar(app, &plugins_root)?;
+            setup::run_server_sidecar(app)?;
             plugins::init(app, api_endpoint.clone(), plugins_root).map_err(|error| {
                 log::error!("failed to initialize plugins: {error}");
                 std::io::Error::other(error)

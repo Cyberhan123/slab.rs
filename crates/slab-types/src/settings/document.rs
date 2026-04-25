@@ -592,7 +592,8 @@ const fn default_max_pressure_evictions_per_load() -> u32 {
 /// Runtime plugin installation settings.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct PluginSettingsConfig {
-    /// Directory containing installed runtime plugin packages.
+    /// Directory containing installed runtime plugin packages. Defaults to the `plugins`
+    /// directory next to `settings.json`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub install_dir: Option<String>,
 }
