@@ -1,6 +1,6 @@
 import useIsTauri from "@/hooks/use-tauri";
-import api from "@/lib/api";
-import type { components } from "@/lib/api/v1.d.ts";
+import api from "@slab/api";
+import type { components } from "@slab/api/v1";
 import { useTranslation } from "@slab/i18n";
 
 type AudioTranscriptionRequest = components["schemas"]["AudioTranscriptionRequest"];

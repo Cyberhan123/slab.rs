@@ -31,8 +31,8 @@ import {
   ChatSessionSummaryCard,
   type ChatSessionSummaryItem,
 } from "@/pages/chat/components/chat-session-summary-card"
-import api from "@/lib/api"
-import { toCatalogModelList, type CatalogModel } from "@/lib/api/models"
+import api from "@slab/api"
+import { toCatalogModelList, type CatalogModel } from "@slab/api/models"
 import { PAGE_HEADER_META } from "@/layouts/header-meta"
 import { usePageHeader, usePageHeaderControl } from "@/hooks/use-global-header-meta"
 import { usePersistedHeaderSelect } from "@/hooks/use-persisted-header-select"

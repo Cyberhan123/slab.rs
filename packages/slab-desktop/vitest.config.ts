@@ -4,6 +4,8 @@ import { defineProject } from "vitest/config";
 
 const componentSourcePath = path.resolve(__dirname, "../slab-components/src");
 const componentSourceUrl = componentSourcePath.replace(/\\/g, "/");
+const apiSourcePath = path.resolve(__dirname, "../api/src");
+const apiSourceUrl = apiSourcePath.replace(/\\/g, "/");
 
 export default defineProject({
   plugins: [react()],
@@ -34,6 +36,14 @@ export default defineProject({
       {
         find: "@slab/components",
         replacement: path.resolve(componentSourcePath, "index.ts"),
+      },
+      {
+        find: /^@slab\/api\/(.+)$/,
+        replacement: `${apiSourceUrl}/$1`,
+      },
+      {
+        find: "@slab/api",
+        replacement: path.resolve(apiSourcePath, "index.ts"),
       },
       {
         find: "@slab/i18n",

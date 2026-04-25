@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::fs;
+use std::net::IpAddr;
 
 use tauri::http::{self, Method, StatusCode, header};
 use tauri::{AppHandle, Manager, Runtime};
@@ -210,7 +211,7 @@ fn build_text_response(
 }
 
 fn build_plugin_csp(network: &PluginNetworkManifest, api_endpoint: &ApiEndpointConfig) -> String {
-    let mut connect_src = api_endpoint.connect_src.clone();
+    let mut connect_src = vec!["'self'".to_string()];
 
     if network.mode == PluginNetworkMode::Allowlist {
         for host in &network.allow_hosts {
@@ -220,10 +221,18 @@ fn build_plugin_csp(network: &PluginNetworkManifest, api_endpoint: &ApiEndpointC
             }
 
             if trimmed.contains("://") {
-                connect_src.push(trimmed.to_string());
+                push_plugin_connect_src(&mut connect_src, trimmed.to_string(), api_endpoint);
             } else {
-                connect_src.push(format!("https://{trimmed}"));
-                connect_src.push(format!("http://{trimmed}"));
+                push_plugin_connect_src(
+                    &mut connect_src,
+                    format!("https://{trimmed}"),
+                    api_endpoint,
+                );
+                push_plugin_connect_src(
+                    &mut connect_src,
+                    format!("http://{trimmed}"),
+                    api_endpoint,
+                );
             }
         }
     }
@@ -235,6 +244,45 @@ fn build_plugin_csp(network: &PluginNetworkManifest, api_endpoint: &ApiEndpointC
         "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src {}; base-uri 'none'; frame-ancestors 'none';",
         connect_src.join(" ")
     )
+}
+
+fn push_plugin_connect_src(
+    connect_src: &mut Vec<String>,
+    candidate: String,
+    api_endpoint: &ApiEndpointConfig,
+) {
+    if !is_api_endpoint_origin(&candidate, api_endpoint) {
+        connect_src.push(candidate);
+    }
+}
+
+fn is_api_endpoint_origin(candidate: &str, api_endpoint: &ApiEndpointConfig) -> bool {
+    let Ok(candidate_url) = tauri::Url::parse(candidate) else {
+        return false;
+    };
+    let Ok(api_url) = tauri::Url::parse(&api_endpoint.api_origin) else {
+        return false;
+    };
+
+    let Some(candidate_host) = candidate_url.host_str() else {
+        return false;
+    };
+    let Some(api_host) = api_url.host_str() else {
+        return false;
+    };
+
+    hosts_match_local_api(candidate_host, api_host)
+        && candidate_url.port_or_known_default() == api_url.port_or_known_default()
+}
+
+fn hosts_match_local_api(candidate_host: &str, api_host: &str) -> bool {
+    candidate_host.eq_ignore_ascii_case(api_host)
+        || (is_loopback_host(candidate_host) && is_loopback_host(api_host))
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host.parse::<IpAddr>().is_ok_and(|ip_address| ip_address.is_loopback())
 }
 
 #[cfg(test)]
@@ -249,6 +297,29 @@ mod tests {
         );
         assert!(csp.contains("default-src 'none'"));
         assert!(!csp.contains("https://example.com"));
-        assert!(csp.contains("http://127.0.0.1:3000"));
+        assert!(!csp.contains("http://127.0.0.1:3000"));
+    }
+
+    #[test]
+    fn csp_filters_direct_local_api_access_from_plugin_allowlist() {
+        let csp = build_plugin_csp(
+            &PluginNetworkManifest {
+                mode: PluginNetworkMode::Allowlist,
+                allow_hosts: vec![
+                    "example.com".to_string(),
+                    "127.0.0.1:3000".to_string(),
+                    "localhost:3000".to_string(),
+                    ApiEndpointConfig::desktop().api_origin,
+                ],
+            },
+            &ApiEndpointConfig::desktop(),
+        );
+
+        assert!(csp.contains("https://example.com"));
+        assert!(csp.contains("http://example.com"));
+        assert!(!csp.contains("http://127.0.0.1:3000"));
+        assert!(!csp.contains("https://127.0.0.1:3000"));
+        assert!(!csp.contains("http://localhost:3000"));
+        assert!(!csp.contains("https://localhost:3000"));
     }
 }

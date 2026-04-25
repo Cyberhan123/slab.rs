@@ -5,8 +5,8 @@ import { useTranslation } from '@slab/i18n';
 import { usePageHeader, usePageHeaderSearch } from '@/hooks/use-global-header-meta';
 import { isTauri } from '@/hooks/use-tauri';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
-import api, { getErrorMessage } from '@/lib/api';
-import { SERVER_BASE_URL } from '@/lib/config';
+import api, { getErrorMessage } from '@slab/api';
+import { SERVER_BASE_URL } from '@slab/api/config';
 import {
   isPluginRunning,
   pluginSearchText,

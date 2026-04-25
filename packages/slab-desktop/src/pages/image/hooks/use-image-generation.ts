@@ -5,8 +5,8 @@ import { useTranslation } from '@slab/i18n';
 
 import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
-import api from '@/lib/api';
-import type { components } from '@/lib/api/v1.d.ts';
+import api from '@slab/api';
+import type { components } from '@slab/api/v1';
 import {
   getImageGeneration,
   listImageGenerations,

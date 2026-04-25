@@ -8,7 +8,7 @@ import { StageEmptyState, StatusPill } from '@slab/components/workspace';
 import { useTranslation } from '@slab/i18n';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
-import api, { getErrorMessage } from '@/lib/api';
+import api, { getErrorMessage } from '@slab/api';
 
 import { SettingFieldCard } from './components/setting-field-card';
 import { SettingsNavigation } from './components/settings-navigation';

@@ -2,6 +2,8 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "paths": {
+      "@slab/api": ["../../packages/api/src/index.ts"],
+      "@slab/api/*": ["../../packages/api/src/*"],
       "@slab/plugin-sdk": ["../../packages/slab-plugin-sdk/src/index.ts"],
       "@slab/plugin-ui": ["../../packages/slab-plugin-ui/src/index.ts"],
       "@slab/plugin-ui/*": ["../../packages/slab-plugin-ui/src/*"],

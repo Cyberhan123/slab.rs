@@ -1,6 +1,6 @@
 import type { StateStorage } from 'zustand/middleware';
 
-import { apiClient } from '@/lib/api';
+import { apiClient } from '@slab/api';
 
 function toUiStateKey(name: string, namespace: string) {
   return `${namespace}:${name}`;

@@ -25,7 +25,8 @@ export default defineConfig({
     "**/dist/**",
     "**/coverage/**",
     "**/.vitepress/**",
-    "packages/slab-desktop/src/lib/api/v1.d.ts",
+    "packages/api/src/v1.d.ts",
+    "packages/slab-plugin-sdk/browser/**",
   ],
   settings: {
     react: {

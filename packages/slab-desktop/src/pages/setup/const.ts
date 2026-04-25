@@ -1,4 +1,4 @@
-import type { components } from '@/lib/api/v1.d.ts';
+import type { components } from '@slab/api/v1';
 
 export const TASK_POLL_INTERVAL_MS = 1_000;
 export const MIN_ACTIVE_PROGRESS = 6;

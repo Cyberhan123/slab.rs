@@ -7,7 +7,7 @@ import { SoftPanel } from '@slab/components/workspace';
 import { useTranslation } from '@slab/i18n';
 import { FileAudio2, History, Loader2 } from 'lucide-react';
 import type { SelectedFile } from '@/hooks/use-file';
-import type { CatalogModel } from '@/lib/api/models';
+import type { CatalogModel } from '@slab/api/models';
 import type { AudioTranscriptionTask } from '@/lib/media-task-api';
 import type { PreparingStage } from '../const';
 import { VadSettings } from './vad-settings';

@@ -1,6 +1,6 @@
 import type { DefaultMessageInfo } from '@ant-design/x-sdk'
 
-import { apiClient } from '@/lib/api'
+import { apiClient } from '@slab/api'
 
 import {
   isEphemeralConversationKey,

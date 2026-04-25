@@ -66,7 +66,7 @@ vi.mock('@/store/useChatUiStore', () => ({
   }),
 }));
 
-vi.mock('@/lib/api', () => ({
+vi.mock('@slab/api', () => ({
   apiClient: {
     GET: vi.fn<(...args: unknown[]) => unknown>(),
     POST: vi.fn<(...args: unknown[]) => unknown>(),

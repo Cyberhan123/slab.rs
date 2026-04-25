@@ -51,11 +51,12 @@ crates/slab-runtime-core (scheduler, backend protocol, worker runner)
 ```
 
 - `bin/slab-app` is the Tauri 2 desktop host. It mounts plugin child webviews, exposes the desktop-only plugin bridge UI, starts `bin/slab-server` as a local sidecar, and keeps the main frontend data path on HTTP instead of native business-API IPC.
-- `packages/slab-desktop` is the React 19 + Vite + React Router 7 frontend application for the Tauri desktop host. It imports UI components from `packages/slab-components` and i18n from `packages/slab-i18n`.
+- `packages/slab-desktop` is the React 19 + Vite + React Router 7 frontend application for the Tauri desktop host. It imports UI components from `packages/slab-components`, i18n from `packages/slab-i18n`, and generated HTTP clients/types from `packages/api`.
+- `packages/api` is the shared TypeScript API package (`@slab/api`) with generated OpenAPI v1 types, `openapi-fetch` / `openapi-react-query` clients, API error helpers, model normalization helpers, and plugin-safe bridge transport utilities.
 - `packages/slab-components` is the shared shadcn/ui-based React component library (Radix UI + Tailwind CSS). It can be consumed by both `slab-desktop` and future mobile packages.
 - `packages/slab-plugin-ui` is the stable plugin UI ABI package (`@slab/plugin-ui`). It reuses the shared component implementation but only exports the safe plugin subset plus plugin-scoped `globals.css`.
 - `packages/slab-i18n` is the shared internationalization package (i18next + react-i18next) with locale definitions.
-- `packages/slab-plugin-sdk` is the plugin-author TypeScript SDK package (`@slab/plugin-sdk`) that wraps the host bridge for plugin webviews, theme snapshots, JSON API helpers, and plugin integrity generation.
+- `packages/slab-plugin-sdk` is the plugin-author TypeScript SDK package (`@slab/plugin-sdk`) that wraps the host bridge for plugin webviews, theme snapshots, plugin-safe `@slab/api` calls, and plugin integrity generation.
 - `packages/vitest-rust-reporter` is a workspace helper package that adapts `cargo test` and optional `cargo llvm-cov` output into a Vitest project so Rust results appear in `vitest --ui`.
 - `bin/slab-server` is the thin HTTP gateway and headless host (axum). It depends on `crates/slab-app-core` for all domain/infra logic, adds axum `FromRef` extractors (`state_extractors.rs`) and `ServerError` → HTTP response conversion, and launches `bin/slab-runtime` through the same shared supervisor using a `tokio::process` adapter. Runtime crashes restart per backend; the HTTP host stays up unless the gateway itself fails. It exposes `/v1` plus `/api-docs/openapi.json`.
 - `crates/slab-app-core` is the HTTP-free business logic library: `context/`, `domain/`, `infra/`, `config`, `model_auto_unload`, and `runtime_supervisor`. It is the shared domain/runtime layer behind `bin/slab-server`. SQLx migrations live in `crates/slab-app-core/migrations/`.
@@ -85,7 +86,7 @@ crates/slab-runtime-core (scheduler, backend protocol, worker runner)
 - `packages/slab-desktop/src/pages/chat`: Ant Design X chat UI and page-local wrappers.
 - `packages/slab-desktop/src/pages/plugins`: desktop-only plugin center, wasm function bridge, and plugin event viewport UI.
 - `packages/slab-desktop/src/lib/plugin-host-bridge.ts`: frontend bridge to Tauri plugin commands and events.
-- `packages/slab-desktop/src/lib/api`: frontend HTTP client and OpenAPI hooks for `/v1/*`.
+- `packages/api/src`: shared frontend HTTP client, generated OpenAPI v1 types, plugin-safe API bridge transport, and OpenAPI hooks for `/v1/*`.
 - `packages/slab-components/src`: shared UI component library (shadcn/ui, Radix UI, Tailwind CSS).
 - `packages/slab-plugin-ui/src`: stable plugin UI ABI re-exports and plugin-scoped global styles.
 - `packages/slab-i18n/src`: shared i18n setup and locale files.
@@ -116,7 +117,7 @@ crates/slab-runtime-core (scheduler, backend protocol, worker runner)
 - `plugins/` is runtime plugin content, not AI skill content; `.agents/skills` is only for agent guidance.
 - SQLx migrations in `crates/slab-app-core/migrations/` are append-only.
 - Cargo excludes `packages/slab-desktop/src`, so Rust tooling does not validate the TypeScript frontend.
-- When backend API shapes change, regenerate `packages/slab-desktop/src/lib/api/v1.d.ts` from `http://localhost:3000/api-docs/openapi.json`.
+- When backend API shapes change, regenerate `packages/api/src/v1.d.ts` from `http://localhost:3000/api-docs/openapi.json`.
 
 ## Build and Test
 
@@ -178,7 +179,6 @@ cd ../..
 cargo make build-windows-full-installer
 
 # Regenerate OpenAPI types
-cd packages/slab-desktop
 bun run api
 
 # Refresh published docs schema assets

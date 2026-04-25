@@ -1,5 +1,5 @@
-import { ApiError, apiClient } from '@/lib/api';
-import type { components } from '@/lib/api/v1.d.ts';
+import { ApiError, apiClient } from '@slab/api';
+import type { components } from '@slab/api/v1';
 
 export const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000;
 export const MODEL_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1_000;

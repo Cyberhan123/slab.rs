@@ -1,4 +1,4 @@
-import { SERVER_BASE_URL } from './config';
+import { SERVER_BASE_URL } from '@slab/api/config';
 
 export type MediaTaskStatus =
   | 'pending'
