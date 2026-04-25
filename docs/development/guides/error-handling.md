@@ -70,7 +70,7 @@ impl IntoResponse for ServerError {
 
 ### Error Middleware
 
-**File**: `slab-app/src/lib/api/errors.ts`
+**File**: `packages/api/src/errors.ts`
 
 #### ApiError Class
 
@@ -132,7 +132,7 @@ export const errorMiddleware: Middleware = {
 
 ### API Client Setup
 
-**File**: `slab-app/src/lib/api/index.ts`
+**File**: `packages/api/src/index.ts`
 
 ```typescript
 import createFetchClient from "openapi-fetch";
@@ -190,7 +190,7 @@ pub async fn transcribe(
 #### Handling Errors in Components
 
 ```typescript
-import api, { ApiError, getErrorMessage } from "@/lib/api";
+import api, { ApiError, getErrorMessage } from "@slab/api";
 import { toast } from "sonner";
 
 const handleSubmit = async (data: MyData) => {
@@ -207,7 +207,7 @@ const handleSubmit = async (data: MyData) => {
 #### Advanced Error Handling
 
 ```typescript
-import { ApiError, isApiError, ErrorCodes } from "@/lib/api";
+import { ApiError, isApiError, ErrorCodes } from "@slab/api";
 
 const handleApiCall = async () => {
   try {

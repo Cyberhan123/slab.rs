@@ -1,5 +1,5 @@
 import { Badge } from '@slab/components/badge';
-import api from '@/lib/api';
+import api from '@slab/api';
 
 const statusBadge = (
   label: string,

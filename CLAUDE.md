@@ -13,11 +13,12 @@ Read [AGENTS.md](AGENTS.md) before making changes. This file only keeps the repo
   - `shadcn-ui`
   - `tauri-v2`
 - Current frontend stack: React 19, Vite, React Router 7, Tauri 2, TanStack Query, `openapi-fetch`, `openapi-react-query`, Zustand, Ant Design X, `i18next`, and Tailwind 4.
-- `bin/slab-app` is the Tauri desktop host. Its frontend is `packages/slab-desktop`, which uses `packages/slab-components` for UI and `packages/slab-i18n` for i18n. The desktop host starts `bin/slab-server` as a local sidecar, keeps product API traffic on HTTP, and reserves Tauri commands for host-only features such as plugin runtime integration.
+- `bin/slab-app` is the Tauri desktop host. Its frontend is `packages/slab-desktop`, which uses `packages/slab-components` for UI, `packages/slab-i18n` for i18n, and `packages/api` for generated API clients/types. The desktop host starts `bin/slab-server` as a local sidecar, keeps product API traffic on HTTP, and reserves Tauri commands for host-only features such as plugin runtime integration.
+- `packages/api` is the shared TypeScript API package (`@slab/api`) with generated OpenAPI v1 types, API clients, error helpers, model helpers, and plugin-safe bridge transport utilities.
 - `packages/slab-components` is the shadcn/ui-based shared component library (workspace package `@slab/components`).
 - `packages/slab-i18n` is the shared i18n package (workspace package `@slab/i18n`) with i18next and react-i18next.
 - `packages/slab-plugin-ui` is the stable plugin UI ABI package (`@slab/plugin-ui`) and exports only the safe plugin component subset plus plugin-scoped global styles.
-- `packages/slab-plugin-sdk` is the plugin-author SDK package (workspace package `@slab/plugin-sdk`) that wraps the webview host bridge, theme snapshots, JSON API helpers, and plugin integrity generation for plugin pages.
+- `packages/slab-plugin-sdk` is the plugin-author SDK package (workspace package `@slab/plugin-sdk`) that wraps the webview host bridge, theme snapshots, plugin-safe `@slab/api` calls, and plugin integrity generation for plugin pages.
 - `packages/slab-desktop` is the main React frontend app (workspace package `@slab/desktop`).
 - `packages/vitest-rust-reporter` is the workspace helper that maps Rust `cargo test` and optional `cargo llvm-cov` results into a Vitest project for `vitest --ui`.
 - Frontend/workspace lint now runs from the repo root with `bun run lint`, and auto-fixes use `bun run lint:fix`.

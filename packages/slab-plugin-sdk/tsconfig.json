@@ -1,6 +1,10 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
+    "paths": {
+      "@slab/api": ["../api/src/index.ts"],
+      "@slab/api/*": ["../api/src/*"]
+    },
     "types": ["bun", "node"]
   },
   "include": ["src", "scripts", "tests", "vitest.config.ts"]

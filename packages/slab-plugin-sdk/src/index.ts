@@ -1,16 +1,22 @@
-export type SlabPluginApiRequest = {
-  method: string;
-  path: string;
-  headers?: Record<string, string>;
-  body?: string | null;
-  timeoutMs?: number | null;
-};
+import { assertSlabPluginApiSurface } from "@slab/api/permissions";
+import {
+  createSlabPluginApiClient,
+  createSlabPluginApiFetch,
+  type SlabApiBridgeRequest,
+  type SlabApiBridgeResponse,
+  type SlabPluginApiClient,
+} from "@slab/api/plugin";
 
-export type SlabPluginApiResponse = {
-  status: number;
-  headers: Record<string, string>;
-  body: string;
-};
+export type {
+  components as SlabApiComponents,
+  operations as SlabApiOperations,
+  paths as SlabApiPaths,
+} from "@slab/api/v1";
+export type { SlabApiPermission } from "@slab/api/permissions";
+
+export type SlabPluginApiRequest = SlabApiBridgeRequest;
+export type SlabPluginApiResponse = SlabApiBridgeResponse;
+export type SlabPluginOpenApiClient = SlabPluginApiClient;
 
 export type SlabPluginJsonRequest = Omit<SlabPluginApiRequest, "body" | "headers"> & {
   headers?: Record<string, string>;
@@ -199,6 +205,13 @@ export function applySlabThemeToDocument(
 export type SlabPluginSdk = ReturnType<typeof createSlabPluginSdk>;
 
 export function createSlabPluginSdk(target?: Window) {
+  const invokeApiRequest = (request: SlabPluginApiRequest) => {
+    assertSlabPluginApiSurface(request.method, request.path);
+    return requireCore(target).invoke<SlabPluginApiResponse>("plugin_api_request", { request });
+  };
+  const apiFetch = createSlabPluginApiFetch(invokeApiRequest);
+  const apiClient = createSlabPluginApiClient(invokeApiRequest);
+
   return {
     host: {
       isAvailable: () => {
@@ -212,13 +225,11 @@ export function createSlabPluginSdk(target?: Window) {
       invoke: <T>(command: string, args?: unknown) => requireCore(target).invoke<T>(command, args),
     },
     api: {
-      request: (request: SlabPluginApiRequest) =>
-        requireCore(target).invoke<SlabPluginApiResponse>("plugin_api_request", { request }),
+      client: apiClient,
+      fetch: apiFetch,
+      request: invokeApiRequest,
       requestJson: async <T>(request: SlabPluginJsonRequest): Promise<T> => {
-        const response = await requireCore(target).invoke<SlabPluginApiResponse>(
-          "plugin_api_request",
-          { request: serializeJsonRequest(request) },
-        );
+        const response = await invokeApiRequest(serializeJsonRequest(request));
         const data = parseResponseBody(response);
         if (response.status < 200 || response.status >= 300) {
           throw new SlabPluginApiError(

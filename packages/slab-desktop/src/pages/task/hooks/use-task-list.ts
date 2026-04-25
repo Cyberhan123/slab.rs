@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
-import api from '@/lib/api';
+import api from '@slab/api';
 import { PAGE_SIZE, type Task, type TaskResult } from '../const';
 import { getSparklineWeight, getTaskDurationMs, isMediaTaskType, isSettledStatus } from '../utils';
 

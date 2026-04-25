@@ -6,7 +6,7 @@ import {
   isAppLanguagePreference,
   useTranslation,
 } from '@slab/i18n';
-import api, { getErrorMessage } from '@/lib/api';
+import api, { getErrorMessage } from '@slab/api';
 
 import type {
   DraftValue,

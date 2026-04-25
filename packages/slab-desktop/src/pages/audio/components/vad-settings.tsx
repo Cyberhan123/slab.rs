@@ -3,7 +3,7 @@ import { Label } from '@slab/components/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slab/components/select';
 import { Switch } from '@slab/components/switch';
 import { useTranslation } from '@slab/i18n';
-import type { CatalogModel } from '@/lib/api/models';
+import type { CatalogModel } from '@slab/api/models';
 
 const BUNDLED_VAD_MODEL_ID = '__bundled_vad__';
 

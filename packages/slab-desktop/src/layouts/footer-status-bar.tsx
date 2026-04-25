@@ -2,9 +2,9 @@ import { useEffect, useMemo } from "react"
 import { Bell } from "lucide-react"
 import { useTranslation } from "@slab/i18n"
 
-import { getErrorMessage } from "@/lib/api"
-import type { components } from "@/lib/api/v1.d.ts"
-import api from "@/lib/api"
+import { getErrorMessage } from "@slab/api"
+import type { components } from "@slab/api/v1"
+import api from "@slab/api"
 import { cn } from "@/lib/utils"
 
 type GpuStatusResponse = components["schemas"]["GpuStatusResponse"]

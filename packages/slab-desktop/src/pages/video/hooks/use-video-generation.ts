@@ -3,15 +3,15 @@ import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
 import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
-import api from '@/lib/api';
-import type { components } from '@/lib/api/v1.d.ts';
+import api from '@slab/api';
+import type { components } from '@slab/api/v1';
 import {
   getVideoGeneration,
   listVideoGenerations,
   resolveMediaUrl,
   type VideoGenerationTask,
 } from '@/lib/media-task-api';
-import { toCatalogModelList } from '@/lib/api/models';
+import { toCatalogModelList } from '@slab/api/models';
 import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
 import { HEADER_SELECT_KEYS } from '@/layouts/header-controls';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';

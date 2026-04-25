@@ -1,5 +1,5 @@
-import api from '@/lib/api';
-import type { components } from '@/lib/api/v1.d.ts';
+import api from '@slab/api';
+import type { components } from '@slab/api/v1';
 
 export type ModelConfigFieldScope = components['schemas']['ModelConfigFieldScopeResponse'];
 export type ModelConfigValueType = components['schemas']['ModelConfigValueTypeResponse'];

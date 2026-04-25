@@ -9,7 +9,8 @@ import {
 } from "@slab/i18n";
 import { Toaster } from "@slab/components/sonner";
 import { TooltipProvider } from "@slab/components/tooltip";
-import api, { queryClient } from "@/lib/api";
+import api from "@slab/api";
+import { queryClient } from "@/lib/query-client";
 import {
   pluginSetThemeSnapshot,
   readPluginThemeSnapshot,

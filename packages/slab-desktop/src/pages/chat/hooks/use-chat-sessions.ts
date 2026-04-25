@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef } from "react"
 import { toast } from "sonner"
 
-import type { components } from "@/lib/api/v1.d.ts"
+import type { components } from "@slab/api/v1"
 import { useTranslation } from "@slab/i18n"
-import api from "@/lib/api"
+import api from "@slab/api"
 import { useChatUiStore } from "@/store/useChatUiStore"
 
 import { clearConversationCache } from "../chat-context"

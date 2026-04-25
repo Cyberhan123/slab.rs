@@ -8,7 +8,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-import type { components } from '@/lib/api/v1.d.ts';
+import type { components } from '@slab/api/v1';
 
 export type PluginTone = 'teal' | 'gold' | 'slate' | 'blue';
 export type PluginStatusKey = 'working' | 'invalid' | 'running' | 'idle' | 'disabled';

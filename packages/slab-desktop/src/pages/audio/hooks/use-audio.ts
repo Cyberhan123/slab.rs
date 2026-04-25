@@ -7,8 +7,8 @@ import useFile, { type SelectedFile } from '@/hooks/use-file';
 import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
 import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
 import useIsTauri from '@/hooks/use-tauri';
-import api from '@/lib/api';
-import { modelSupportsCapability, toCatalogModelList, type CatalogModel } from '@/lib/api/models';
+import api from '@slab/api';
+import { modelSupportsCapability, toCatalogModelList, type CatalogModel } from '@slab/api/models';
 import {
   getAudioTranscription,
   listAudioTranscriptions,

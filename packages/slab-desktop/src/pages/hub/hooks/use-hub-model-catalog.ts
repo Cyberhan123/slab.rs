@@ -2,15 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
-import api, { ApiError, getErrorMessage } from '@/lib/api';
-import type { components } from '@/lib/api/v1.d.ts';
-import { SERVER_BASE_URL } from '@/lib/config';
+import api, { ApiError, getErrorMessage } from '@slab/api';
+import type { components } from '@slab/api/v1';
+import { SERVER_BASE_URL } from '@slab/api/config';
 import {
   modelSupportsCapability,
   toCatalogModelList,
   type CatalogModelStatus,
   type ModelCapability,
-} from '@/lib/api/models';
+} from '@slab/api/models';
 import {
   extractTaskId,
   getModelDownloadTask,

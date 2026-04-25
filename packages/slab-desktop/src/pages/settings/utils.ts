@@ -1,4 +1,4 @@
-import { getErrorMessage, isApiError } from '@/lib/api';
+import { getErrorMessage, isApiError } from '@slab/api';
 
 import { isJsonObject } from './schema';
 import type {

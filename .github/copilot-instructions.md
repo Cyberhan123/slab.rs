@@ -12,10 +12,11 @@ Key repo facts:
   - `tauri-v2`
 - `bin/slab-app` is the Tauri 2 desktop host that mounts local plugin webviews, starts `bin/slab-server` as a local sidecar, and keeps product API traffic on HTTP. Tauri commands are reserved for host-only features such as plugin runtime integration.
 - `packages/slab-desktop` is the React 19 + Vite + React Router 7 frontend app, managed as a bun workspace package (`@slab/desktop`).
+- `packages/api` is the shared TypeScript API package (`@slab/api`) with generated OpenAPI v1 types, API clients, error helpers, model helpers, and plugin-safe bridge transport utilities.
 - `packages/slab-components` is the shared shadcn/ui-based React component library (`@slab/components`), with Radix UI + Tailwind 4 primitives.
 - `packages/slab-i18n` is the shared i18n package (`@slab/i18n`) using i18next and react-i18next.
 - `packages/slab-plugin-ui` is the stable plugin UI ABI package (`@slab/plugin-ui`) for the safe plugin component subset and plugin-scoped global styles.
-- `packages/slab-plugin-sdk` is the plugin-author SDK package (`@slab/plugin-sdk`) for stable plugin webview host calls, theme snapshots, JSON API helpers, and manifest integrity generation.
+- `packages/slab-plugin-sdk` is the plugin-author SDK package (`@slab/plugin-sdk`) for stable plugin webview host calls, theme snapshots, plugin-safe `@slab/api` calls, and manifest integrity generation.
 - `packages/vitest-rust-reporter` is the workspace helper package that projects Rust `cargo test` and optional `cargo llvm-cov` results into the Vitest UI.
 - Frontend/workspace lint runs from the repo root with `bun run lint`, and auto-fixes use `bun run lint:fix`.
 - Public VitePress pages live in `docs/`, internal contributor docs live in `docs/development/`, and published JSON Schemas are generated into `docs/public/manifests/v1/` with `bun run docs:schemas`.

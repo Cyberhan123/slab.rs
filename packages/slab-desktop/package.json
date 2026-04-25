@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "api": "bunx openapi-typescript http://127.0.0.1:3000/api-docs/openapi.json -o src/lib/api/v1.d.ts",
+    "api": "bunx openapi-typescript http://127.0.0.1:3000/api-docs/openapi.json -o ../api/src/v1.d.ts",
     "color:oklch": "bun ./scripts/figma-color-to-oklch.ts",
     "lint": "oxlint .",
     "lint:fix": "oxlint --fix .",
@@ -23,6 +23,7 @@
     "*.rs": "cargo fmt -- --check"
   },
   "dependencies": {
+    "@slab/api": "workspace:*",
     "@slab/components": "workspace:*",
     "@slab/i18n": "workspace:*",
     "@slab/plugin-sdk": "workspace:*",
@@ -40,8 +41,6 @@
     "antd-style": "^4.1.0",
     "clsx": "^2.1.1",
     "lucide-react": "^1.8.0",
-    "openapi-fetch": "^0.17.0",
-    "openapi-react-query": "^0.5.4",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-router-dom": "^7.14.1",
@@ -63,7 +62,6 @@
     "cross-spawn": "^7.0.6",
     "culori": "^4.0.2",
     "jsdom": "^29.0.2",
-    "openapi-typescript": "^7.13.0",
     "postcss": "^8.5.10",
     "vite": "^8.0.8",
     "vitest": "^4.1.4"

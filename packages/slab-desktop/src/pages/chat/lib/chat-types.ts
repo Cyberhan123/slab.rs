@@ -1,6 +1,6 @@
 import type { MessageInfo, XModelMessage, XModelParams } from '@ant-design/x-sdk'
 
-import type { components } from '@/lib/api/v1.d.ts'
+import type { components } from '@slab/api/v1'
 
 export type ChatApiError = components['schemas']['OpenAiError']
 export type ChatApiErrorResponse = components['schemas']['OpenAiErrorResponse']

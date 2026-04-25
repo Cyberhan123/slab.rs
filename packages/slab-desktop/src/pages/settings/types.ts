@@ -1,4 +1,4 @@
-import type { paths } from '@/lib/api';
+import type { paths } from '@slab/api';
 
 export type SettingsDocumentResponse =
   paths['/v1/settings']['get']['responses'][200]['content']['application/json'];

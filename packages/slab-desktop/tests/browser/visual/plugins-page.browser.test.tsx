@@ -2,7 +2,7 @@ import { page } from "vitest/browser";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import PluginsPage from "@/pages/plugins";
-import type { components } from "@/lib/api/v1.d.ts";
+import type { components } from "@slab/api/v1";
 import { renderDesktopScene } from "../test-utils";
 
 type PluginRecord = components["schemas"]["PluginResponse"];
@@ -33,7 +33,7 @@ vi.mock("@/hooks/use-global-header-meta", () => ({
   usePageHeaderSearch: vi.fn<() => void>(),
 }));
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@slab/api", () => ({
   default: {
     useMutation: mockUseMutation,
     useQuery: mockUseQuery,

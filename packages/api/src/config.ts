@@ -11,5 +11,15 @@ export function normalizeApiBaseUrl(value?: string | null): string {
   return candidate.replace(/\/+$/, '');
 }
 
+type ImportMetaWithEnv = ImportMeta & {
+  env?: {
+    VITE_API_BASE_URL?: string;
+  };
+};
+
+function resolveViteApiBaseUrl(): string | undefined {
+  return (import.meta as ImportMetaWithEnv).env?.VITE_API_BASE_URL;
+}
+
 /** Base URL of the slab-server HTTP API. */
-export const SERVER_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
+export const SERVER_BASE_URL = normalizeApiBaseUrl(resolveViteApiBaseUrl());

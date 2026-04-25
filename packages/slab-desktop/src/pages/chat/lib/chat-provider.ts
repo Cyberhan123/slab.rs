@@ -6,7 +6,7 @@ import {
 } from '@ant-design/x-sdk'
 import { chatMessagesStoreHelper } from '@ant-design/x-sdk/es/x-chat/store'
 
-import { SERVER_BASE_URL } from '@/lib/config'
+import { SERVER_BASE_URL } from '@slab/api/config'
 
 import {
   extractSseDeltaTextField,

@@ -60,7 +60,7 @@ export function AppSidebar({ variant = "default" }: AppSidebarProps) {
     .filter((plugin) => plugin.valid && plugin.uiEntry)
     .flatMap((plugin) =>
       plugin.contributions.sidebar
-        .map((item) => {
+        .map((item): SidebarItem | null => {
           const targetRoute = plugin.contributions.routes.find(
             (contributedRoute) =>
               contributedRoute.id === item.route || contributedRoute.path === item.route
@@ -68,9 +68,10 @@ export function AppSidebar({ variant = "default" }: AppSidebarProps) {
           if (!targetRoute) return null
           return {
             to: targetRoute.path,
-            label: item.label,
+            labelKey: item.labelKey ?? targetRoute.titleKey ?? undefined,
+            label: item.label ?? targetRoute.title ?? item.id,
             icon: item.icon === "subtitles" ? Subtitles : Puzzle,
-          } satisfies SidebarItem
+          }
         })
         .filter((item): item is SidebarItem => item !== null)
     )

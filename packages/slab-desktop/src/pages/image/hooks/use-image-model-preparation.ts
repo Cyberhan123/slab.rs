@@ -3,8 +3,8 @@ import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
 import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
-import api from '@/lib/api';
-import { toCatalogModelList } from '@/lib/api/models';
+import api from '@slab/api';
+import { toCatalogModelList } from '@slab/api/models';
 import { HEADER_SELECT_KEYS } from '@/layouts/header-controls';
 
 const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000;
