@@ -117,7 +117,7 @@ crates/slab-runtime-core (scheduler, backend protocol, worker runner)
 - `plugins/` is runtime plugin content, not AI skill content; `.agents/skills` is only for agent guidance.
 - SQLx migrations in `crates/slab-app-core/migrations/` are append-only.
 - Cargo excludes `packages/slab-desktop/src`, so Rust tooling does not validate the TypeScript frontend.
-- When backend API shapes change, regenerate `packages/api/src/v1.d.ts` from `http://localhost:3000/api-docs/openapi.json`.
+- When backend API shapes change, regenerate `packages/api/src/v1.d.ts` with `bun run gen:api`.
 
 ## Build and Test
 
@@ -128,13 +128,14 @@ cargo build --workspace
 cargo test --workspace
 cargo check --workspace
 cargo check -p slab-server
+bun run check
+bun run check:rust
 cargo check -p slab-runtime
 cargo check -p slab-agent-tools
 cargo check -p slab-windows-full-installer
-cargo make check
-cargo make test
-cargo make dev
-cargo make build-windows-full-installer
+bun run test
+bun run dev:app
+bun run build:windows-installer
 ```
 
 Frontend and Tauri:
@@ -149,41 +150,35 @@ bun run lint
 # Apply Oxlint autofixes where available
 bun run lint:fix
 
-# Run all Vitest projects from the repo root
-bun run test:run
+# Run the frontend-focused Vitest suite from the repo root
+bun run test:frontend
 
 # Run Vitest coverage across all configured projects
 bun run test:coverage
 
-# Run a single Vitest project from the repo root
-bun run test:desktop
+# Run the server migration Vitest suite from the repo root
 bun run test:server
 
-# Type-check the desktop frontend
-cd packages/slab-desktop
-bun run build
+# Type-check and build the desktop frontend
+bun run build:desktop
 
 # Scan `plugins/*/plugin.json`, refresh manifest integrity, and emit `.plugin.slab` packs
-cd ../..
-bun run build:plugins
+bun run gen:plugin-packs
 
-# Same pack-generation command under an explicit name
-bun run build:plugin-packs
+# Pack model manifests into `.slab` archives
+bun run gen:model-packs
 
 # Run Tauri development mode
-cd bin/slab-app
-bun run tauri dev
+bun run dev:app
 
 # Build the Windows full installer bootstrap + NSIS bundle
-cd ../..
-cargo make build-windows-full-installer
+bun run build:windows-installer
 
 # Regenerate OpenAPI types
-bun run api
+bun run gen:api
 
 # Refresh published docs schema assets
-cd ../..
-bun run docs:schemas
+bun run gen:schemas
 
 # Generate OKLCH color tokens
 bun run color:oklch -- background=#f7f9fb primary=#0d9488

@@ -1,8 +1,8 @@
 #![allow(clippy::uninlined_format_args)]
 
-extern crate bindgen;
-
-use slab_build_utils::ensure_vendor_layout;
+use slab_build_utils::{
+    configure_bindgen_builder, ensure_vendor_layout, generate_or_copy_bindings,
+};
 use std::env;
 use std::path::PathBuf;
 
@@ -16,27 +16,15 @@ fn main() {
         .artifact("ggml")
         .expect("ggml dependency should be present in vendor layout")
         .include_dir;
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let fallback_source = PathBuf::from("src").join("bindings.rs");
 
-    let bindings = bindgen::Builder::default()
-        .header("wrapper.h")
-        .clang_arg(format!("-I{}", layout.primary.include_dir.display()))
-        .clang_arg(format!("-I{}", ggml_include_path.display()))
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .dynamic_library_name("LlamaLib")
-        .generate();
+    let builder = configure_bindgen_builder(
+        "wrapper.h",
+        [&layout.primary.include_dir, ggml_include_path],
+        "LlamaLib",
+    );
 
-    let out = PathBuf::from(env::var("OUT_DIR").unwrap());
-
-    match bindings {
-        Ok(b) => {
-            let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-            b.write_to_file(out_path.join("bindings.rs")).expect("Couldn't write bindings!");
-        }
-        Err(e) => {
-            println!("cargo:warning=Unable to generate bindings: {}", e);
-            println!("cargo:warning=Using bundled bindings.rs, which may be out of date");
-            std::fs::copy("src/bindings.rs", out.join("bindings.rs"))
-                .expect("Unable to copy bindings.rs");
-        }
-    }
+    generate_or_copy_bindings(builder, &out_dir, &fallback_source)
+        .expect("failed to prepare llama bindings");
 }

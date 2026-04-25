@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "pack": "bun ./scripts/pack-models.ts",
-    "lint": "oxlint scripts",
-    "lint:fix": "oxlint --fix scripts"
+    "pack": "bun ../scripts/models/pack-models.ts",
+    "lint": "oxlint ../scripts/models",
+    "lint:fix": "oxlint --fix ../scripts/models"
   },
   "engines": {
     "node": ">=24",

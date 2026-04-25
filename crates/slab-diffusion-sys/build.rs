@@ -1,8 +1,8 @@
 #![allow(clippy::uninlined_format_args)]
 
-extern crate bindgen;
-
-use slab_build_utils::ensure_vendor_layout;
+use slab_build_utils::{
+    configure_bindgen_builder, ensure_vendor_layout, generate_or_copy_bindings,
+};
 use std::env;
 use std::path::PathBuf;
 
@@ -12,23 +12,12 @@ fn main() {
 
     let layout =
         ensure_vendor_layout("diffusion", &[]).expect("Failed to prepare diffusion vendor layout");
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let fallback_source = PathBuf::from("src").join("bindings.rs");
 
-    let bindings = bindgen::Builder::default()
-        .header("wrapper.h")
-        .clang_arg(format!("-I{}", layout.primary.include_dir.display()))
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .dynamic_library_name("DiffusionLib")
-        .generate();
+    let builder =
+        configure_bindgen_builder("wrapper.h", [&layout.primary.include_dir], "DiffusionLib");
 
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-
-    match bindings {
-        Ok(b) => {
-            b.write_to_file(out_path.join("bindings.rs")).expect("Couldn't write bindings!");
-        }
-        Err(e) => {
-            println!("cargo:warning=Unable to generate bindings: {}", e);
-            println!("cargo:warning=Using bundled bindings.rs, which may be out of date");
-        }
-    }
+    generate_or_copy_bindings(builder, &out_dir, &fallback_source)
+        .expect("failed to prepare diffusion bindings");
 }

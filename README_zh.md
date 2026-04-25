@@ -117,11 +117,10 @@ bun install
 
 ```sh
 # 启动主开发流程
-cargo make dev
+bun run dev:app
 
-# 检查桌面前端构建
-cd packages/slab-desktop
-bun run build
+# 只启动桌面前端
+bun run dev:desktop
 ```
 
 ### 构建
@@ -129,23 +128,26 @@ bun run build
 下面这些命令适合做常规构建、检查和测试。
 
 ```sh
-# Rust 工作区
-cargo build --workspace
-cargo test --workspace
-cargo check --workspace
+# 运行标准工作区检查
+bun run check
 
-# 重点模块检查
-cargo check -p slab-server
-cargo check -p slab-runtime
-cargo check -p slab-windows-full-installer
+# 运行完整自动化测试
+bun run test
 
-# 桌面前端
-cd packages/slab-desktop
-bun run build
+# 只构建桌面前端
+bun run build:desktop
 
-# Windows 全量安装器
-cd ../..
-cargo make build-windows-full-installer
+# 构建桌面应用包
+bun run build:app
+
+# 构建 Windows 全量安装器
+bun run build:windows-installer
+
+# 重新生成衍生产物
+bun run gen:api
+bun run gen:schemas
+bun run gen:plugin-packs
+bun run gen:model-packs
 
 # 服务兼容性测试
 python -m pip install -r bin/slab-server/tests/requirements.txt
