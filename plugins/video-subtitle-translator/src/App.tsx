@@ -98,6 +98,7 @@ type ModelStatusResponse = {
 };
 
 type WhisperResponse = {
+  text?: unknown;
   segments?: unknown[];
 };
 
@@ -392,20 +393,24 @@ export function App() {
     return loadSelectedModel("translate", "Llama", modelId);
   };
 
-  const buildWhisperRequest = (mediaPath: string, modelId: string) => {
-    const language = detectLanguage ? null : sourceLanguage.trim();
+  const buildWhisperRequest = (
+    mediaPath: string,
+    modelId: string,
+    options: { vad?: boolean } = {},
+  ) => {
+    const language = detectLanguage ? "auto" : sourceLanguage.trim();
+    const useVad = options.vad ?? vadEnabled;
     const request: Record<string, unknown> = {
       model_id: modelId,
       path: mediaPath,
       language: language || null,
-      detect_language: detectLanguage,
       decode: {
         no_timestamps: false,
         token_timestamps: false,
       },
     };
 
-    if (vadEnabled) {
+    if (useVad) {
       const selectedVadPath = localModelPath(selectedValue(vadModel) ?? "");
       const modelPath = vadModelPath.trim() || selectedVadPath;
       if (!modelPath) {
@@ -421,6 +426,24 @@ export function App() {
     }
 
     return pruneNulls(request);
+  };
+
+  const submitWhisperTranscription = async (
+    modelId: string,
+    options: { vad?: boolean; label?: string } = {},
+  ) => {
+    const result = await submitTask<WhisperResponse>(
+      "whisper",
+      options.label ?? "Whisper",
+      "POST",
+      "/v1/audio/transcriptions",
+      buildWhisperRequest(videoPath, modelId, { vad: options.vad }),
+    );
+    return {
+      result,
+      segments: normalizeSegments(result.segments),
+      text: whisperText(result),
+    };
   };
 
   const renderSubtitle = async (variant: string, segments: Segment[]) => {
@@ -603,18 +626,20 @@ export function App() {
         "Whisper",
         selectedValue(whisperModel),
       );
-      const whisperResult = await submitTask<WhisperResponse>(
-        "whisper",
-        "Whisper",
-        "POST",
-        "/v1/audio/transcriptions",
-        buildWhisperRequest(videoPath, selectedWhisperModel),
-      );
-      const nextSourceSegments = normalizeSegments(whisperResult.segments);
+      let whisperAttempt = await submitWhisperTranscription(selectedWhisperModel, {
+        vad: vadEnabled,
+      });
+      if (vadEnabled && whisperAttempt.segments.length === 0 && !whisperAttempt.text) {
+        addLog("Whisper returned no speech with VAD enabled; retrying once without VAD.");
+        whisperAttempt = await submitWhisperTranscription(selectedWhisperModel, {
+          vad: false,
+          label: "Whisper fallback",
+        });
+      }
+
+      const nextSourceSegments = whisperAttempt.segments;
       if (nextSourceSegments.length === 0) {
-        throw new Error(
-          "Whisper completed but returned no timed segments. Enable timestamps/VAD and try again.",
-        );
+        throw new Error(noTimedSegmentsMessage(whisperAttempt));
       }
       setSourceSegments(nextSourceSegments);
       addLog(`Whisper produced ${nextSourceSegments.length} timed segments.`, "ok");
@@ -1276,6 +1301,18 @@ function normalizeSegments(rawSegments: unknown[] | undefined): Segment[] {
       };
     })
     .filter((segment): segment is Segment => segment !== null);
+}
+
+function whisperText(response: WhisperResponse): string {
+  return typeof response.text === "string" ? response.text.trim() : "";
+}
+
+function noTimedSegmentsMessage(attempt: { text: string }): string {
+  if (attempt.text) {
+    return "Whisper returned transcript text but no timed segments. Disable no-timestamps decode options and try again.";
+  }
+
+  return "Whisper returned no transcript text or timed segments. If VAD is enabled, lower the threshold or disable VAD; otherwise check the selected audio track.";
 }
 
 function extractAssistantText(response: ChatResponse): string {

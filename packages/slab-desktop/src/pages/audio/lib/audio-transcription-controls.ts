@@ -205,6 +205,11 @@ export function buildAudioTranscriptionControlsFromModelConfig(
   const inferenceSpec = extractResolvedInferenceSpec(document);
   const vad = isRecord(inferenceSpec.vad) ? inferenceSpec.vad : {};
   const decode = isRecord(inferenceSpec.decode) ? inferenceSpec.decode : {};
+  const configuredLanguage = normalizeString(toStringValue(inferenceSpec.language), '');
+  const detectLanguage =
+    configuredLanguage.trim().toLowerCase() === 'auto'
+      ? true
+      : toBoolean(inferenceSpec.detect_language);
 
   return normalizeAudioTranscriptionControls({
     enableVad: toBoolean(vad.enabled),
@@ -231,9 +236,9 @@ export function buildAudioTranscriptionControlsFromModelConfig(
     decodeSplitOnWord: toBoolean(decode.split_on_word),
     decodeSuppressNst: toBoolean(decode.suppress_nst),
     decodeTdrzEnable: toBoolean(decode.tdrz_enable),
-    language: toStringValue(inferenceSpec.language),
+    language: detectLanguage ? '' : configuredLanguage,
     prompt: toStringValue(inferenceSpec.prompt),
-    detectLanguage: toBoolean(inferenceSpec.detect_language),
+    detectLanguage,
   });
 }
 

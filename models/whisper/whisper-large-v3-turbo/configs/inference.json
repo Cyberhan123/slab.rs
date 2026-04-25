@@ -4,6 +4,6 @@
     "label": "Default inference",
     "scope": "inference",
     "payload": {
-        "detect_language": true
+        "language": "auto"
     }
 }
