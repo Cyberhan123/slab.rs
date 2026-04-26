@@ -1,198 +1,109 @@
 # Project Guidelines
 
-## Agent Workflow
+Keep repo guidance high signal and task-focused. Prefer concrete local context over broad exploration.
 
-- Read this file before making changes.
-- Trust the current code when docs and implementation disagree, then update the docs.
+If a task is blocked by missing product intent, missing access, or conflicting user changes, ask the user. Otherwise continue autonomously.
+
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+## Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No speculative error handling for scenarios that have no evidence in the current code path.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+## Bug fix 
+
+When fixing bugs, it's essential to start with first principles to find the root cause. You can't compromise the fundamental problem by making minimal fixes.
+
+## Workflow
+- When docs and implementation disagree, verify the current behavior in code before changing docs or behavior.
 - Keep repo guidance deterministic: commands should work from the repo root, and local references should come before remote-only advice.
 - `.agents/skills` contains optional task guidance. `plugins/` contains runtime plugin packages, `manifests/` contains JSON schemas and model metadata, and `vendor/` contains vendored runtime artifacts.
-- The project is stable now, so do not force a skill-selection step for every task. Read the code first and only open a skill when the task directly matches it.
+- Do not add repo-specific workflow that forces a skill-selection step for every task. Use skills when the active environment requires them or when the task directly matches them.
 - When updating repo guidance, confirm the current workspace members and scripts instead of copying older architecture notes forward.
 
-## Local Skills
+## Hard Constraints
 
-Only the skills that actually exist in `.agents/skills` should be treated as repo-local defaults:
-
-- `use-x-chat`: chat state and `useXChat` / `useXConversations` work in `packages/slab-desktop/src/pages/chat/**`
-- `x-request`: frontend chat transport changes in `packages/slab-desktop/src/pages/chat/chat-context.ts`
-- `x-markdown`: assistant Markdown rendering in `packages/slab-desktop/src/pages/chat/components/chat-message-list.tsx`
-- `x-chat-provider`: custom Ant Design X provider work, only when the built-in `DeepSeekChatProvider` no longer fits the backend contract
-- `shadcn-ui`: shared React UI primitives, forms, and Tailwind-based component patterns (in `packages/slab-components/`)
-- `tauri-v2`: `bin/slab-app/src-tauri`, sidecar startup, capabilities, commands, plugin webview runtime, and desktop host integration details
-
-If a task does not clearly match one of the skills above, work directly from the codebase without adding an extra routing layer.
-
-See [docs/development/ai-skill-map.md](docs/development/ai-skill-map.md) for the short routing map.
-
-## Architecture Snapshot
-
-This workspace now has desktop and headless hosts that share a core runtime supervisor, plus separate runtime worker and plugin/agent layers:
-
-```text
-bin/slab-app (Tauri desktop host + plugin shell)
-    | local HTTP + Tauri sidecar adapter
-    v
-bin/slab-server (axum HTTP gateway, desktop/headless host)
-    |
-    | app-core domain/services + shared runtime supervisor
-    v
-crates/slab-app-core (business logic + shared runtime supervisor -- no HTTP/axum/Tauri)
-    |
-    | gRPC / IPC
-    v
-GrpcGateway / runtime endpoints
-    |
-    | gRPC / IPC
-    v
-bin/slab-runtime (worker process: backend composition root)
-    |
-    v
-crates/slab-runtime-core (scheduler, backend protocol, worker runner)
-```
-
-- `bin/slab-app` is the Tauri 2 desktop host. It mounts plugin child webviews, exposes the desktop-only plugin bridge UI, starts `bin/slab-server` as a local sidecar, and keeps the main frontend data path on HTTP instead of native business-API IPC.
-- `packages/slab-desktop` is the React 19 + Vite + React Router 7 frontend application for the Tauri desktop host. It imports UI components from `packages/slab-components`, i18n from `packages/slab-i18n`, and generated HTTP clients/types from `packages/api`.
-- `packages/api` is the shared TypeScript API package (`@slab/api`) with generated OpenAPI v1 types, `openapi-fetch` / `openapi-react-query` clients, API error helpers, model normalization helpers, and plugin-safe bridge transport utilities.
-- `packages/slab-components` is the shared shadcn/ui-based React component library (Radix UI + Tailwind CSS). It can be consumed by both `slab-desktop` and future mobile packages.
-- `packages/slab-plugin-ui` is the stable plugin UI ABI package (`@slab/plugin-ui`). It reuses the shared component implementation but only exports the safe plugin subset plus plugin-scoped `globals.css`.
-- `packages/slab-i18n` is the shared internationalization package (i18next + react-i18next) with locale definitions.
-- `packages/slab-plugin-sdk` is the plugin-author TypeScript SDK package (`@slab/plugin-sdk`) that wraps the host bridge for plugin webviews, theme snapshots, plugin-safe `@slab/api` calls, and plugin integrity generation.
-- `packages/vitest-rust-reporter` is a workspace helper package that adapts `cargo test` and optional `cargo llvm-cov` output into a Vitest project so Rust results appear in `vitest --ui`.
-- `bin/slab-server` is the thin HTTP gateway and headless host (axum). It depends on `crates/slab-app-core` for all domain/infra logic, adds axum `FromRef` extractors (`state_extractors.rs`) and `ServerError` → HTTP response conversion, and launches `bin/slab-runtime` through the same shared supervisor using a `tokio::process` adapter. Runtime crashes restart per backend; the HTTP host stays up unless the gateway itself fails. It exposes `/v1` plus `/api-docs/openapi.json`.
-- `crates/slab-app-core` is the HTTP-free business logic library: `context/`, `domain/`, `infra/`, `config`, `model_auto_unload`, and `runtime_supervisor`. It is the shared domain/runtime layer behind `bin/slab-server`. SQLx migrations live in `crates/slab-app-core/migrations/`.
-- `bin/slab-runtime` is the standalone gRPC worker that can serve TCP or IPC transports. It is the only backend composition root: it owns driver resolution, load/inference codecs, task submission, and now keeps its DDD-style `api/`, `application/`, `domain/`, `infra/`, and `bootstrap/` layers in-package, with system startup in `src/bootstrap/`, gRPC handlers in `src/api/handlers/`, application orchestration in `src/application/services/`, and flattened GGML, Candle, and ONNX backend implementations under `src/infra/backends/`.
-- `bin/slab-windows-full-installer` is the Windows-only outer bootstrap packer/runtime. It builds the self-extracting full installer EXE, embeds the resource-less Tauri NSIS `setup.exe` plus CAB payloads, expands runtime payloads into `%TEMP%`, and lets NSIS complete the actual app install/uninstall work.
-- `crates/slab-runtime-core` (package name: `slab-runtime-core`) now holds only the scheduler, backend protocol, worker runner, task state, common error surface, and generic payload types. Keep HTTP, SQL, typed inference codecs, and backend composition concerns out of this crate.
-- `crates/slab-agent` is a pure control-plane library for agent threads, tool routing, and port-based orchestration.
-- `crates/slab-agent-tools` contains host-provided deterministic tool handlers and tool registration helpers for `slab-agent`; keep business/tool implementations out of `crates/slab-agent`.
-- `crates/slab-proto` owns the protobuf contract between `bin/slab-server` and `bin/slab-runtime`.
-- `crates/slab-types` is the shared semantic types, settings, runtime, and JSON-schema-friendly contract crate used across the workspace.
-- `crates/slab-llama`, `crates/slab-whisper`, `crates/slab-diffusion`, `crates/slab-ggml`, `crates/slab-libfetch`, `crates/slab-subtitle`, `crates/slab-build-utils`, `crates/slab-runtime-macros`, and the `*-sys` crates provide engine bindings, low-level runtime utilities, artifact fetching, and supporting infrastructure.
-
-## Repo Layout
-
-- `bin/slab-server`: thin HTTP gateway; exposes `/v1` routes via axum. Business logic lives in `crates/slab-app-core`.
-- `bin/slab-runtime`: gRPC server and runtime worker package. `src/main.rs` is the thin binary entrypoint; `src/api`, `src/application`, `src/domain`, and `src/infra` hold the worker logic and backend composition.
-- `bin/slab-windows-full-installer`: Windows full-installer bootstrap binary. `pack` builds the outer self-extracting installer, `run` expands CAB payloads and launches the embedded Tauri NSIS installer, and `apply` is the helper entrypoint used by NSIS hooks to copy `resources/libs`.
-- `crates/slab-app-core`: HTTP-free business logic (domain, infra, context, config) plus the shared runtime supervisor used by `slab-server`. Migrations are in `crates/slab-app-core/migrations/`.
-- `crates/slab-hub`: unified model hub abstraction used by `slab-app-core` for feature-gated Hugging Face / ModelScope-style listing, download, and provider fallback.
-- `crates/slab-runtime-core`: pure scheduler/backend-protocol library only (package: `slab-runtime-core`); keep HTTP, SQL, driver resolution, typed codecs, and backend composition concerns out.
-- `bin/slab-runtime/src/infra/backends`: in-package GGML, Candle, and ONNX backend registrations, engines, adapters, and worker implementations.
-- `crates/slab-agent`: pure agent orchestration library and tool router abstractions.
-- `crates/slab-agent-tools`: built-in deterministic agent tools and registration helpers used by app-core.
-- `crates/slab-types`: shared semantic types, settings models, load specs, and other reusable Rust contracts.
-- `crates/slab-proto`: protobuf definitions and generated conversion helpers for server/runtime IPC.
-- `packages/slab-desktop/src`: React frontend pages for chat, image, audio, video, hub, plugins, task, setup, settings, and about.
-- `packages/slab-desktop/src/pages/chat`: Ant Design X chat UI and page-local wrappers.
-- `packages/slab-desktop/src/pages/plugins`: desktop-only plugin center, wasm function bridge, and plugin event viewport UI.
-- `packages/slab-desktop/src/lib/plugin-host-bridge.ts`: frontend bridge to Tauri plugin commands and events.
-- `packages/api/src`: shared frontend HTTP client, generated OpenAPI v1 types, plugin-safe API bridge transport, and OpenAPI hooks for `/v1/*`.
-- `packages/slab-components/src`: shared UI component library (shadcn/ui, Radix UI, Tailwind CSS).
-- `packages/slab-plugin-ui/src`: stable plugin UI ABI re-exports and plugin-scoped global styles.
-- `packages/slab-i18n/src`: shared i18n setup and locale files.
-- `packages/slab-plugin-sdk/src`: plugin-author TypeScript SDK sources.
-- `packages/vitest-rust-reporter/src`: Vitest-side Rust test and coverage projection helpers for the workspace test UI.
-- `bin/slab-app/src-tauri`: Tauri host, sidecar startup, plugin runtime, capabilities, permissions, and security boundaries.
-- `docs`: public VitePress site source.
-- `docs/development`: internal planning, audits, engineering notes, AI maintenance docs, and contributor-only references.
-- `docs/public/manifests/v1`: published schemars-generated JSON Schemas served at `https://slab.reorgix.com/manifests/v1/*`.
-- `plugins`: local runtime plugin packages loaded by the Tauri host from `plugins/<plugin-id>/`; plugin manifests can declare runtime assets, extension contributions, permissions, and agent capabilities.
-- `manifests`: JSON schemas and manifest assets used by settings/model tooling.
-- `vendor`: vendored runtime artifacts and external resources kept in-repo.
-- `testdata`: sample media, fixture models, and integration assets.
-
-## Working Rules
-
-- Keep inference behind `host -> bin/slab-server -> crates/slab-app-core runtime supervisor -> GrpcGateway -> bin/slab-runtime local composition layer -> crates/slab-runtime-core scheduler/backend protocol`; the desktop host should launch `slab-server` and keep product API traffic on HTTP.
-- Extend the existing `/v1/*` API modules instead of adding a parallel API tree. The current surface includes `agent`, `audio`, `backend`, `chat`, `ffmpeg`, `images`, `models`, `plugins`, `session`, `settings`, `setup`, `system`, `tasks`, and `video`.
+- Keep inference behind `bin/slab-app -> bin/slab-server -> crates/slab-app-core runtime supervisor -> GrpcGateway -> bin/slab-runtime -> crates/slab-runtime-core`; the desktop host starts `slab-server`, product API traffic stays on HTTP, and Tauri commands stay host-only.
+- Extend the existing `/v1/*` API surface instead of adding a parallel API tree.
 - Keep long-running AI work in task-oriented flows when the feature already follows that model.
-- Prefer `crates/slab-types` and `crates/slab-proto` for contracts that need to cross crate boundaries instead of duplicating shapes.
-- Keep `crates/slab-agent` pure: storage, HTTP, SSE/WebSocket, model adapters, and concrete tool implementations belong outside it. Put built-in deterministic tools in `crates/slab-agent-tools`; plugin and API tool adapters are registered by host/app-core layers.
-- Preserve Tauri CSP, capabilities, permissions, sidecar boundaries, and the `plugins/<plugin-id>/plugin.json` contract unless the task explicitly requires a change.
-- Keep Tauri child WebView sandboxing as the default third-party plugin UI model. Do not switch third-party plugins to Module Federation by default; treat MF only as a possible future trusted first-party option.
-- Plugin frontends should use `@slab/plugin-ui` as the public component ABI and `@slab/plugin-sdk` for theme token mirroring. Do not expose the full `@slab/components` ABI to arbitrary plugin authors.
-- Treat plugin `manifestVersion: 1` as a declaration of runtime assets, `contributes.*`, `permissions.*`, and agent capabilities. MCP is an export target for capabilities, not the plugin runtime itself.
-- Keep `plugin.json` as the static source of truth for plugin identity, version, permissions, runtime assets, and contributions; database tables only persist dynamic host state such as install source, enablement, runtime status, and timestamps.
-- Plugin WebView commands must derive the caller plugin id from the WebView label, not from plugin-supplied payload fields. Main-window plugin management may list, mount, unmount, and call any plugin; plugin WebViews may only call their own plugin and declared `permissions.slabApi` surface.
+- Prefer `crates/slab-types` and `crates/slab-proto` for contracts that cross crate boundaries.
+- Keep `crates/slab-app-core` HTTP-free, keep `bin/slab-runtime` as the only runtime composition root, and keep `crates/slab-runtime-core` limited to scheduler/backend protocol concerns.
+- Keep `crates/slab-agent` pure; built-in deterministic tools belong in `crates/slab-agent-tools`, and plugin/API capability adapters are registered by host/app-core layers.
+- Preserve Tauri CSP, capabilities, permissions, sidecar boundaries, and plugin sandboxing unless the task explicitly changes them.
+- Keep Tauri child WebViews as the default third-party plugin UI runtime; do not make Module Federation the default plugin model.
+- Keep `plugin.json` as the static source of truth. `manifestVersion: 1` separates runtime assets, `contributes.*`, `permissions.*`, and agent capabilities.
+- Plugin WebView commands must derive the caller plugin id from the WebView label, not from plugin-supplied payload fields.
 - `plugins/` is runtime plugin content, not AI skill content; `.agents/skills` is only for agent guidance.
 - SQLx migrations in `crates/slab-app-core/migrations/` are append-only.
 - Cargo excludes `packages/slab-desktop/src`, so Rust tooling does not validate the TypeScript frontend.
 - When backend API shapes change, regenerate `packages/api/src/v1.d.ts` with `bun run gen:api`.
 
-## Build and Test
+## Reference Pointers
 
-From the repo root:
+Keep this file focused on always-on constraints. For module-specific role, stack, testing, and layout details, prefer the nearest subproject `README.md` before restating that information here.
+
+- Desktop host and Tauri backend: `bin/slab-app/src-tauri/README.md`
+- HTTP gateway: `bin/slab-server/README.md`
+- Runtime worker: `bin/slab-runtime/README.md`
+- Windows full installer: `bin/slab-windows-full-installer/README.md`
+- Shared business logic: `crates/slab-app-core/README.md`
+- Agent control plane: `crates/slab-agent/README.md`
+- Built-in agent tools: `crates/slab-agent-tools/README.md`
+- Model hub abstraction: `crates/slab-hub/README.md`
+- Runtime protocol substrate: `crates/slab-runtime-core/README.md`
+- Shared frontend API package: `packages/api/README.md`
+- Desktop frontend: `packages/slab-desktop/README.md`
+- Shared UI primitives: `packages/slab-components/README.md`
+- Plugin author SDK: `packages/slab-plugin-sdk/README.md`
+- Plugin workspace and manifest model: `plugins/README.md`
+- When a crate or package already has its own `README.md` under `crates/*`, `packages/*`, or `bin/*`, prefer that local README over expanding `AGENTS.md`.
+
+## Common Root Commands
+
+Run these from the repo root unless a local README says otherwise. Pick the narrowest command that validates your change before reaching for broader workspace-wide checks:
 
 ```sh
-cargo build --workspace
-cargo test --workspace
-cargo check --workspace
-cargo check -p slab-server
-bun run check
-bun run check:rust
-cargo check -p slab-runtime
-cargo check -p slab-agent-tools
-cargo check -p slab-windows-full-installer
-bun run test
-bun run dev:app
-bun run build:windows-installer
-```
-
-Frontend and Tauri:
-
-```sh
-# From repo root (bun workspace)
 bun install
-
-# Run frontend/workspace lint from the repo root
 bun run lint
-
-# Apply Oxlint autofixes where available
 bun run lint:fix
-
-# Run the frontend-focused Vitest suite from the repo root
-bun run test:frontend
-
-# Run Vitest coverage across all configured projects
-bun run test:coverage
-
-# Run the server migration Vitest suite from the repo root
-bun run test:server
-
-# Type-check and build the desktop frontend
+bun run test
 bun run build:desktop
-
-# Scan `plugins/*/plugin.json`, refresh manifest integrity, and emit `.plugin.slab` packs
-bun run gen:plugin-packs
-
-# Pack model manifests into `.slab` archives
-bun run gen:model-packs
-
-# Run Tauri development mode
 bun run dev:app
-
-# Build the Windows full installer bootstrap + NSIS bundle
-bun run build:windows-installer
-
-# Regenerate OpenAPI types
 bun run gen:api
-
-# Refresh published docs schema assets
+bun run gen:plugin-packs
 bun run gen:schemas
-
-# Generate OKLCH color tokens
-bun run color:oklch -- background=#f7f9fb primary=#0d9488
+cargo check --workspace
+cargo test --workspace
 ```
 
-Server compatibility tests:
-
-```sh
-python -m pip install -r bin/slab-server/tests/requirements.txt
-pytest bin/slab-server/tests
-```
+For package-specific or crate-specific workflows, prefer the nearest subproject `README.md` and the local `package.json` / `Cargo.toml` scripts over copying those details into this file.
 
 ## AI Docs Maintenance
 
-- Keep `AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, and `docs/development/ai-skill-map.md` aligned when the skill list, workflow, architecture snapshot, plugin/runtime boundaries, or build commands change.
-- Do not document repo-local skills that do not exist on disk.
-- When adding or removing workspace members, plugin surfaces, or desktop sidecar behavior, update this doc set in the same change.
+- `AGENTS.md` is the canonical repo-wide AI reference for architecture, boundaries, and build/test commands.
+- Keep `AGENTS.md` focused on hard constraints and a short set of repo-root commands; move module-specific reference material into subproject `README.md` files when possible.
+- `CLAUDE.md` and `.github/copilot-instructions.md` should stay thin and point to `AGENTS.md` for repo-wide guidance.
+- Keep `AGENTS.md` aligned when workflow, architecture snapshot, plugin/runtime boundaries, or build commands change.
+- When adding or removing workspace members, plugin surfaces, or desktop sidecar behavior, update this doc and the relevant `README.md` files in the same change.
