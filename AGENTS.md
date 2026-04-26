@@ -39,7 +39,7 @@ When fixing bugs, it's essential to start with first principles to find the root
 ## Workflow
 - When docs and implementation disagree, verify the current behavior in code before changing docs or behavior.
 - Keep repo guidance deterministic: commands should work from the repo root, and local references should come before remote-only advice.
-- `.agents/skills` contains optional task guidance. `plugins/` contains runtime plugin packages, `manifests/` contains JSON schemas and model metadata, and `vendor/` contains vendored runtime artifacts.
+- `.agents/skills` contains optional task guidance. `plugins/` contains runtime plugin packages, `docs/public/manifests/` contains JSON schemas and model metadata, and `vendor/` contains vendored runtime artifacts.
 - Do not add repo-specific workflow that forces a skill-selection step for every task. Use skills when the active environment requires them or when the task directly matches them.
 - When updating repo guidance, confirm the current workspace members and scripts instead of copying older architecture notes forward.
 
