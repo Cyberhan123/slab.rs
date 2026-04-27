@@ -67,7 +67,7 @@
     "openapi-typescript": "^7.13.0",
     "oxlint": "^1.60.0",
     "playwright": "^1.59.1",
-    "postcss": "^8.5.10",
+    "postcss": "^8.5.12",
     "tailwindcss": "^4.2.2",
     "typescript": "~6.0.3",
     "vitepress": "^2.0.0-alpha.17",
