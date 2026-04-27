@@ -6903,7 +6903,7 @@ version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "itertools 0.14.0",
  "log",
  "multimap",
@@ -6923,7 +6923,7 @@ version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "343d3bd7056eda839b03204e68deff7d1b13aba7af2b2fd16890697274262ee7"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "itertools 0.14.0",
  "log",
  "multimap",
@@ -8721,7 +8721,7 @@ dependencies = [
  "validator",
  "winapi",
  "windows-sys 0.61.2",
- "zip 8.5.1",
+ "zip 8.6.0",
 ]
 
 [[package]]
@@ -8811,7 +8811,7 @@ dependencies = [
  "tokio",
  "toml 1.1.2+spec-1.1.0",
  "tracing",
- "zip 8.5.1",
+ "zip 8.6.0",
 ]
 
 [[package]]
@@ -8846,7 +8846,7 @@ dependencies = [
  "serde_json",
  "slab-types",
  "thiserror 2.0.18",
- "zip 8.5.1",
+ "zip 8.6.0",
 ]
 
 [[package]]
@@ -13414,9 +13414,9 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "8.5.1"
+version = "8.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcab981e19633ebcf0b001ddd37dd802996098bc1864f90b7c5d970ce76c1d59"
+checksum = "2d04a6b5381502aa6087c94c669499eb1602eb9c5e8198e534de571f7154809b"
 dependencies = [
  "crc32fast",
  "flate2",
