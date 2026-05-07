@@ -20,7 +20,7 @@
     "@slab/api": "workspace:*"
   },
   "devDependencies": {
-    "@types/bun": "1.3.12",
+    "@types/bun": "1.3.13",
     "@types/node": "^25.6.0",
     "typescript": "~6.0.3",
     "vitest": "^4.1.4"
