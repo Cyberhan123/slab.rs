@@ -4,7 +4,6 @@ import { open } from "@tauri-apps/plugin-dialog"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "@slab/i18n"
 import { Button } from "@slab/components/button"
-import { Switch } from "@slab/components/switch"
 import { SoftPanel, StageEmptyState, StatusPill } from "@slab/components/workspace"
 import { Tree, type NodeRendererProps } from "react-arborist"
 import {
@@ -15,8 +14,6 @@ import {
   FolderKanban,
   FolderOpen,
   Loader2,
-  Plug,
-  Power,
   X,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -30,19 +27,16 @@ import {
   workspaceReadDirectory,
   workspaceReadFile,
   workspaceState,
-  workspaceUpdatePluginPreference,
   WORKSPACE_STATE_QUERY_KEY,
   type WorkspaceFileContent,
   type WorkspaceFileEntry,
 } from "@/lib/workspace-bridge"
-import { RUNTIME_PLUGINS_QUERY_KEY } from "@/pages/plugins/hooks/use-runtime-plugins"
-import { isPluginRunning, type PluginRecord } from "@/pages/plugins/utils"
 import {
   emptyWorkspaceUiSnapshot,
   useWorkspaceUiStore,
   type WorkspaceFileTab,
 } from "@/store/useWorkspaceUiStore"
-import api, { getErrorMessage } from "@slab/api"
+import { getErrorMessage } from "@slab/api"
 
 type WorkspaceTreeNode = WorkspaceFileEntry & {
   children?: WorkspaceTreeNode[]
@@ -57,7 +51,6 @@ export default function WorkspacePage() {
   const [selectedFile, setSelectedFile] = useState<WorkspaceFileContent | null>(null)
   const [fileError, setFileError] = useState<string | null>(null)
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set())
-  const [busyPluginId, setBusyPluginId] = useState<string | null>(null)
   const treeHostRef = useRef<HTMLDivElement | null>(null)
   const restoredWorkspaceRootRef = useRef<string | null>(null)
   const [treeHeight, setTreeHeight] = useState(320)
@@ -75,7 +68,6 @@ export default function WorkspacePage() {
     retry: false,
   })
   const workspace = workspaceQuery.data?.current ?? null
-  const workspaceConfig = workspaceQuery.data?.config ?? null
   const recentWorkspaces = workspaceQuery.data?.recent ?? []
   const workspaceUiHasHydrated = useWorkspaceUiStore((state) => state.hasHydrated)
   const workspaceUiByRoot = useWorkspaceUiStore((state) => state.workspaces)
@@ -91,18 +83,6 @@ export default function WorkspacePage() {
       Object.fromEntries(openDirectoryPaths.map((relativePath) => [relativePath, true])),
     [openDirectoryPaths],
   )
-
-  const {
-    data: pluginRows,
-    refetch: refetchPlugins,
-    isFetching: pluginsFetching,
-  } = api.useQuery("get", "/v1/plugins", undefined, {
-    enabled: isDesktopTauri && Boolean(workspace),
-    retry: 1,
-  })
-  const stopPluginMutation = api.useMutation("post", "/v1/plugins/{id}/stop")
-
-  const plugins = useMemo(() => pluginRows ?? [], [pluginRows])
 
   useEffect(() => {
     const element = treeHostRef.current
@@ -144,10 +124,6 @@ export default function WorkspacePage() {
       })
     }
   }, [])
-
-  const refreshWorkspaceState = useCallback(async () => {
-    await workspaceQuery.refetch()
-  }, [workspaceQuery])
 
   const openWorkspacePath = useCallback(
     async (rootPath: string) => {
@@ -279,43 +255,6 @@ export default function WorkspacePage() {
     workspace,
     workspaceUiHasHydrated,
   ])
-
-  const handlePluginEnabledChange = useCallback(
-    async (plugin: PluginRecord, enabled: boolean) => {
-      setBusyPluginId(plugin.id)
-      try {
-        if (!enabled && plugin.enabled && isPluginRunning(plugin)) {
-          await stopPluginMutation.mutateAsync({
-            params: { path: { id: plugin.id } },
-            body: { lastError: null },
-          })
-        }
-
-        await workspaceUpdatePluginPreference({
-          pluginId: plugin.id,
-          enabled,
-        })
-        await Promise.all([
-          refreshWorkspaceState(),
-          refetchPlugins(),
-          queryClient.invalidateQueries({ queryKey: RUNTIME_PLUGINS_QUERY_KEY }),
-        ])
-      } catch (error) {
-        toast.error(t("pages.workspace.toast.pluginFailed"), {
-          description: getErrorMessage(error),
-        })
-      } finally {
-        setBusyPluginId(null)
-      }
-    },
-    [
-      queryClient,
-      refetchPlugins,
-      refreshWorkspaceState,
-      stopPluginMutation,
-      t,
-    ],
-  )
 
   const handleTreeToggle = useCallback(
     (relativePath: string) => {
@@ -455,8 +394,8 @@ export default function WorkspacePage() {
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[320px_minmax(0,1fr)_320px]">
-        <SoftPanel className="flex min-h-0 flex-col gap-3 overflow-hidden rounded-[18px] px-3 py-3">
+      <div className="grid h-full min-h-0 flex-1 items-stretch gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
+        <SoftPanel className="flex h-full min-h-0 flex-col gap-3 overflow-hidden rounded-[18px] px-3 py-3">
           <div className="flex items-center justify-between gap-3 px-1">
             <div className="flex items-center gap-2 text-sm font-semibold">
               <Folder className="size-4 text-[var(--brand-teal)]" />
@@ -464,7 +403,7 @@ export default function WorkspacePage() {
             </div>
             {loadingPaths.has("") ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
           </div>
-          <div ref={treeHostRef} className="min-h-0 flex-1 overflow-hidden rounded-[12px] bg-[var(--surface-1)]">
+          <div ref={treeHostRef} className="h-full min-h-0 flex-1 overflow-hidden rounded-[12px] bg-[var(--surface-1)]">
             {workspaceUiHasHydrated ? (
               <Tree
                 key={workspace.rootPath}
@@ -501,7 +440,7 @@ export default function WorkspacePage() {
           </div>
         </SoftPanel>
 
-        <SoftPanel className="flex min-h-0 flex-col overflow-hidden rounded-[18px] p-0">
+        <SoftPanel className="flex h-full min-h-0 flex-col overflow-hidden rounded-[18px] p-0">
           {openFileTabs.length > 0 ? (
             <div className="flex h-10 shrink-0 items-end overflow-x-auto border-b border-border/60 bg-[var(--surface-1)] px-2 pt-2">
               {openFileTabs.map((tab) => {
@@ -567,61 +506,6 @@ export default function WorkspacePage() {
               className="h-full min-h-[420px] flex-1 rounded-[18px] bg-transparent"
             />
           )}
-        </SoftPanel>
-
-        <SoftPanel className="flex min-h-0 flex-col gap-3 overflow-hidden rounded-[18px] px-4 py-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <Plug className="size-4 text-[var(--brand-teal)]" />
-              {t("pages.workspace.plugins.title")}
-            </div>
-            {pluginsFetching ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
-          </div>
-
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-            {plugins.length === 0 ? (
-              <p className="rounded-[12px] bg-[var(--surface-1)] px-3 py-3 text-sm text-muted-foreground">
-                {t("pages.workspace.plugins.empty")}
-              </p>
-            ) : (
-              plugins.map((plugin) => {
-                const preference = workspaceConfig?.plugins[plugin.id]
-                const workspaceDisabled = preference?.enabled === false
-                const enabled = plugin.enabled && !workspaceDisabled
-                const busy = busyPluginId === plugin.id
-
-                return (
-                  <div
-                    key={plugin.id}
-                    className="rounded-[12px] border border-border/60 bg-[var(--surface-1)] px-3 py-3"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">{plugin.name}</p>
-                        <p className="mt-0.5 truncate text-xs text-muted-foreground">{plugin.id}</p>
-                      </div>
-                      {busy ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : <Power className="size-4 text-muted-foreground" />}
-                    </div>
-
-                    <div className="mt-3 grid gap-2">
-                      <label className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                        <span>{t("pages.workspace.plugins.enable")}</span>
-                        <Switch
-                          size="sm"
-                          variant="workspace"
-                          checked={enabled}
-                          disabled={busy || !plugin.valid || (!plugin.enabled && !workspaceDisabled)}
-                          onCheckedChange={(checked) => {
-                            void handlePluginEnabledChange(plugin, checked)
-                          }}
-                        />
-                      </label>
-                    </div>
-                  </div>
-                )
-              })
-            )}
-          </div>
         </SoftPanel>
       </div>
     </div>
