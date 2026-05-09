@@ -105,7 +105,7 @@ export default function WorkspacePage() {
     return () => {
       observer.disconnect()
     }
-  }, [])
+  }, [workspace?.rootPath])
 
   const loadDirectory = useCallback(async (relativePath = "") => {
     setLoadingPaths((current) => new Set(current).add(relativePath))
