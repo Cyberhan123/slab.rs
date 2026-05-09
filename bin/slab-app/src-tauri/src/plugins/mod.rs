@@ -19,8 +19,10 @@ pub use types::{
 };
 pub use view::PluginViewManager;
 
-use registry::{PluginRegistryState, resolve_plugins_root};
-use runtime::{PluginRuntimeManager, execute_plugin_api_request_async};
+pub use registry::PluginRegistryState;
+use registry::resolve_plugins_root;
+pub use runtime::PluginRuntimeManager;
+use runtime::execute_plugin_api_request_async;
 
 const HOST_THEME_EVENT_NAME: &str = "plugin://host/theme";
 
@@ -48,6 +50,10 @@ pub fn resolve_plugins_root_for_app<R: Runtime>(
     app: &tauri::App<R>,
 ) -> Result<std::path::PathBuf, String> {
     resolve_plugins_root(app)
+}
+
+pub fn resolve_plugins_root_for_settings_path(settings_path: &Path) -> PathBuf {
+    registry::resolve_plugins_root_for_settings_path(settings_path)
 }
 
 pub fn register_protocol<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {

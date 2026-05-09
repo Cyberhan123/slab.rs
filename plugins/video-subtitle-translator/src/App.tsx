@@ -731,13 +731,13 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    window.__SLAB_VIDEO_SUBTITLE_TRANSLATOR__ = {
+    window["__SLAB_VIDEO_SUBTITLE_TRANSLATOR__"] = {
       pluginId: PLUGIN_ID,
       runPipeline,
       loadModels,
     };
     return () => {
-      delete window.__SLAB_VIDEO_SUBTITLE_TRANSLATOR__;
+      delete window["__SLAB_VIDEO_SUBTITLE_TRANSLATOR__"];
     };
   });
 

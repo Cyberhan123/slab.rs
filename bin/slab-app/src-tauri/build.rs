@@ -38,6 +38,12 @@ fn main() {
             "plugin_pick_file",
             "plugin_set_theme_snapshot",
             "plugin_theme_snapshot",
+            "workspace_state",
+            "workspace_open",
+            "workspace_close",
+            "workspace_read_directory",
+            "workspace_read_file",
+            "workspace_update_plugin_preference",
         ]));
 
     tauri_build::try_build(attributes).expect("failed to run tauri build script");

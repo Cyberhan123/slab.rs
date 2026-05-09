@@ -5,7 +5,7 @@ type TauriWindow = Window & {
 };
 
 export function isTauri(): boolean {
-  return typeof window !== "undefined" && Boolean((window as TauriWindow).__TAURI_INTERNALS__);
+  return typeof window !== "undefined" && Boolean((window as TauriWindow)["__TAURI_INTERNALS__"]);
 }
 
 export default function useIsTauri() {

@@ -1,6 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod plugins;
 mod setup;
+mod workspace;
 
 use setup::ApiEndpointConfig;
 
@@ -44,14 +45,24 @@ pub fn run() {
             plugins::plugin_pick_file,
             plugins::plugin_set_theme_snapshot,
             plugins::plugin_theme_snapshot,
+            workspace::workspace_state,
+            workspace::workspace_open,
+            workspace::workspace_close,
+            workspace::workspace_read_directory,
+            workspace::workspace_read_file,
+            workspace::workspace_update_plugin_preference,
         ])
         .setup(move |app| {
             setup::setup_windows(app)?;
+            let workspace_bootstrap = workspace::init(app).map_err(|error| {
+                log::error!("failed to initialize workspace state: {error}");
+                std::io::Error::other(error)
+            })?;
             let plugins_root = plugins::resolve_plugins_root_for_app(app).map_err(|error| {
                 log::error!("failed to resolve plugins root before starting sidecar: {error}");
                 std::io::Error::other(error)
             })?;
-            setup::run_server_sidecar(app)?;
+            setup::run_server_sidecar(app, workspace_bootstrap.sidecar_config)?;
             plugins::init(app, api_endpoint.clone(), plugins_root).map_err(|error| {
                 log::error!("failed to initialize plugins: {error}");
                 std::io::Error::other(error)

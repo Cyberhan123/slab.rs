@@ -125,7 +125,7 @@ function resolveWindow(target?: Window): TauriPluginWindow {
 }
 
 function requireCore(target?: Window): TauriCoreApi {
-  const core = resolveWindow(target).__TAURI__?.core;
+  const core = resolveWindow(target)["__TAURI__"]?.core;
   if (!core || typeof core.invoke !== "function") {
     throw new Error("Slab plugin host bridge is not available in this webview.");
   }
@@ -133,7 +133,7 @@ function requireCore(target?: Window): TauriCoreApi {
 }
 
 function resolveEventApi(target?: Window): TauriEventApi | null {
-  const eventApi = resolveWindow(target).__TAURI__?.event;
+  const eventApi = resolveWindow(target)["__TAURI__"]?.event;
   return eventApi && typeof eventApi.listen === "function" ? eventApi : null;
 }
 

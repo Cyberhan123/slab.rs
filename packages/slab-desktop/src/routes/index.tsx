@@ -18,6 +18,7 @@ import { GlobalHeaderProvider } from "@/layouts/global-header-provider";
 
 // Lazy-load the setup page so it doesn't bloat the main bundle.
 const SetupPage = lazy(() => import("@/pages/setup"));
+const WorkspacePage = lazy(() => import("@/pages/workspace"));
 
 function AppRoutes() {
   const { data: runtimePlugins = [] } = useRuntimePlugins();
@@ -58,6 +59,20 @@ function AppRoutes() {
         { path: 'audio', element: <Audio /> },
         { path: 'video', element: <Video /> },
         { path: 'hub', element: <Hub /> },
+        {
+          path: 'workspace',
+          element: (
+            <Suspense
+              fallback={
+                <div className="flex h-full w-full items-center justify-center">
+                  <Spinner className="h-8 w-8" />
+                </div>
+              }
+            >
+              <WorkspacePage />
+            </Suspense>
+          ),
+        },
         { path: 'plugins', element: <Plugins /> },
         ...pluginRoutes,
         { path: 'task', element: <Task /> },
