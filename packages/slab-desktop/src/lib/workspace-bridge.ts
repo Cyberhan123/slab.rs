@@ -1,0 +1,115 @@
+import { invoke } from "@tauri-apps/api/core"
+
+import { isTauri } from "@/hooks/use-tauri"
+
+export const WORKSPACE_STATE_QUERY_KEY = ["workspace-state"] as const
+
+export type WorkspaceInfo = {
+  rootPath: string
+  name: string
+  slabDir: string
+  settingsPath: string
+  workspaceConfigPath: string
+  databasePath: string
+  modelConfigDir: string
+  sessionStateDir: string
+}
+
+export type RecentWorkspace = {
+  rootPath: string
+  name: string
+  lastOpenedAt: number
+}
+
+export type WorkspacePluginConfig = {
+  enabled?: boolean | null
+}
+
+export type WorkspaceConfig = {
+  schemaVersion: number
+  plugins: Record<string, WorkspacePluginConfig>
+}
+
+export type WorkspaceStateResponse = {
+  current: WorkspaceInfo | null
+  recent: RecentWorkspace[]
+  config: WorkspaceConfig | null
+}
+
+export type WorkspaceFileEntry = {
+  id: string
+  name: string
+  relativePath: string
+  kind: "directory" | "file"
+  hasChildren: boolean
+}
+
+export type WorkspaceDirectoryResponse = {
+  relativePath: string
+  entries: WorkspaceFileEntry[]
+  truncated: boolean
+}
+
+export type WorkspaceFileContent = {
+  relativePath: string
+  name: string
+  content: string
+  sizeBytes: number
+}
+
+export type WorkspacePluginPreferenceUpdate = {
+  pluginId: string
+  enabled?: boolean | null
+}
+
+export async function workspaceState(): Promise<WorkspaceStateResponse> {
+  if (!isTauri()) {
+    return { current: null, recent: [], config: null }
+  }
+
+  return invoke<WorkspaceStateResponse>("workspace_state")
+}
+
+export async function workspaceOpen(rootPath: string): Promise<WorkspaceStateResponse> {
+  if (!isTauri()) {
+    throw new Error("workspaces are only available in the desktop app")
+  }
+
+  return invoke<WorkspaceStateResponse>("workspace_open", { rootPath })
+}
+
+export async function workspaceClose(): Promise<WorkspaceStateResponse> {
+  if (!isTauri()) {
+    return { current: null, recent: [], config: null }
+  }
+
+  return invoke<WorkspaceStateResponse>("workspace_close")
+}
+
+export async function workspaceReadDirectory(
+  relativePath?: string,
+): Promise<WorkspaceDirectoryResponse> {
+  if (!isTauri()) {
+    return { relativePath: relativePath ?? "", entries: [], truncated: false }
+  }
+
+  return invoke<WorkspaceDirectoryResponse>("workspace_read_directory", { relativePath })
+}
+
+export async function workspaceReadFile(relativePath: string): Promise<WorkspaceFileContent> {
+  if (!isTauri()) {
+    throw new Error("workspace files are only available in the desktop app")
+  }
+
+  return invoke<WorkspaceFileContent>("workspace_read_file", { relativePath })
+}
+
+export async function workspaceUpdatePluginPreference(
+  update: WorkspacePluginPreferenceUpdate,
+): Promise<WorkspaceStateResponse> {
+  if (!isTauri()) {
+    throw new Error("workspace plugin preferences are only available in the desktop app")
+  }
+
+  return invoke<WorkspaceStateResponse>("workspace_update_plugin_preference", { update })
+}

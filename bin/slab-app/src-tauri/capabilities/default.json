@@ -30,6 +30,12 @@
     "allow-plugin-pick-file",
     "allow-plugin-set-theme-snapshot",
     "allow-plugin-theme-snapshot",
+    "allow-workspace-state",
+    "allow-workspace-open",
+    "allow-workspace-close",
+    "allow-workspace-read-directory",
+    "allow-workspace-read-file",
+    "allow-workspace-update-plugin-preference",
     "window-state:default",
     "decorum:allow-show-snap-overlay",
     {

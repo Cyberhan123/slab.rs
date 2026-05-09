@@ -1,5 +1,6 @@
 export const sidebar = {
   items: {
+    workspace: '\u5de5\u4f5c\u533a',
     assistant: '助手',
     image: '图像',
     video: '视频',

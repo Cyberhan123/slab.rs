@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-workspace-state"
+description = "Enables the workspace_state command without any pre-configured scope."
+commands.allow = ["workspace_state"]
+
+[[permission]]
+identifier = "deny-workspace-state"
+description = "Denies the workspace_state command without any pre-configured scope."
+commands.deny = ["workspace_state"]

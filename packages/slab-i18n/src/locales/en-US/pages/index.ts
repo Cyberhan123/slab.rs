@@ -6,6 +6,7 @@ import { plugins } from './plugins';
 import { settings } from './settings';
 import { task } from './task';
 import { video } from './video';
+import { workspace } from './workspace';
 
 export const pages = {
   audio,
@@ -16,4 +17,5 @@ export const pages = {
   settings,
   task,
   video,
+  workspace,
 } as const;

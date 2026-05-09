@@ -65,7 +65,9 @@ export default defineConfig({
       rules: {
         "jest/no-disabled-tests": "off",
         "jest/valid-title": "off",
+        "vitest/no-disabled-tests": "off",
         "vitest/no-conditional-tests": "off",
+        "vitest/valid-title": "off",
       },
     },
   ],

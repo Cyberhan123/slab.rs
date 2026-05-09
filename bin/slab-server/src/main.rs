@@ -37,6 +37,10 @@ struct SupervisorArgs {
     settings_path: Option<PathBuf>,
     #[arg(long = "model-config-dir")]
     model_config_dir: Option<PathBuf>,
+    #[arg(long = "session-state-dir")]
+    session_state_dir: Option<PathBuf>,
+    #[arg(long = "plugins-dir")]
+    plugins_dir: Option<PathBuf>,
     #[arg(long = "log")]
     log_level: Option<String>,
     #[arg(long = "log-json", action = clap::ArgAction::SetTrue)]
@@ -88,6 +92,12 @@ impl SupervisorArgs {
         if let Some(model_config_dir) = &self.model_config_dir {
             cfg.model_config_dir = model_config_dir.clone();
         }
+        if let Some(session_state_dir) = &self.session_state_dir {
+            cfg.session_state_dir = session_state_dir.to_string_lossy().into_owned();
+        }
+        if let Some(plugins_dir) = &self.plugins_dir {
+            cfg.plugins_dir = plugins_dir.clone();
+        }
         if let Some(log_level) = &self.log_level {
             cfg.log_level = log_level.clone();
         }
@@ -117,6 +127,12 @@ impl SupervisorArgs {
         }
         if self.model_config_dir.is_none() {
             self.model_config_dir = Some(cfg.model_config_dir.clone());
+        }
+        if self.session_state_dir.is_none() {
+            self.session_state_dir = Some(PathBuf::from(&cfg.session_state_dir));
+        }
+        if self.plugins_dir.is_none() {
+            self.plugins_dir = Some(cfg.plugins_dir.clone());
         }
         if self.lib_dir.is_none() {
             self.lib_dir = cfg.lib_dir.clone();
@@ -530,6 +546,7 @@ mod tests {
         let args = SupervisorArgs {
             database_url: Some("sqlite:///tmp/slab.db?mode=rwc".to_owned()),
             settings_path: Some(PathBuf::from("C:/Slab/settings.json")),
+            plugins_dir: Some(PathBuf::from("C:/Slab/plugins")),
             lib_dir: Some(PathBuf::from("C:/Slab/resources/libs")),
             ..SupervisorArgs::default()
         };
@@ -549,13 +566,34 @@ mod tests {
         cfg.database_url = "sqlite:///tmp/default.db?mode=rwc".to_owned();
         cfg.settings_path = PathBuf::from("C:/Slab/settings.json");
         cfg.model_config_dir = default_model_config_dir_for_settings_path(&cfg.settings_path);
+        cfg.plugins_dir = PathBuf::from("C:/Slab/plugins");
 
         args.apply_bootstrap_config(&mut cfg);
 
         assert_eq!(cfg.database_url, "sqlite:///tmp/api.db?mode=rwc");
         assert_eq!(cfg.settings_path, PathBuf::from("D:/Slab/api-settings.json"));
         assert_eq!(cfg.model_config_dir, PathBuf::from("D:/Slab/models"));
+        assert_eq!(cfg.plugins_dir, PathBuf::from("C:/Slab/plugins"));
         assert_eq!(args.model_config_dir, Some(PathBuf::from("D:/Slab/models")));
+    }
+
+    #[test]
+    fn bootstrap_args_apply_cli_plugins_dir_override_to_runtime_config() {
+        let mut args = SupervisorArgs {
+            settings_path: Some(PathBuf::from("D:/Workspace/.slab/settings.json")),
+            plugins_dir: Some(PathBuf::from("C:/Slab/global-plugins")),
+            ..SupervisorArgs::default()
+        };
+        let mut cfg = Config::from_env();
+
+        cfg.settings_path = PathBuf::from("C:/Slab/settings.json");
+        cfg.plugins_dir = PathBuf::from("D:/Workspace/.slab/plugins");
+
+        args.apply_bootstrap_config(&mut cfg);
+
+        assert_eq!(cfg.settings_path, PathBuf::from("D:/Workspace/.slab/settings.json"));
+        assert_eq!(cfg.plugins_dir, PathBuf::from("C:/Slab/global-plugins"));
+        assert_eq!(args.plugins_dir, Some(PathBuf::from("C:/Slab/global-plugins")));
     }
 
     #[test]

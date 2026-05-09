@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { ErrorBoundary } from "@/components/error-boundary";
 import {
@@ -11,10 +11,17 @@ import { Toaster } from "@slab/components/sonner";
 import { TooltipProvider } from "@slab/components/tooltip";
 import api from "@slab/api";
 import { queryClient } from "@/lib/query-client";
+import { isTauri } from "@/hooks/use-tauri";
 import {
   pluginSetThemeSnapshot,
   readPluginThemeSnapshot,
 } from "@/lib/plugin-host-bridge";
+import {
+  WORKSPACE_STATE_QUERY_KEY,
+  workspaceState,
+} from "@/lib/workspace-bridge";
+import { RUNTIME_PLUGINS_QUERY_KEY } from "@/pages/plugins/hooks/use-runtime-plugins";
+import { isPluginRunning } from "@/pages/plugins/utils";
 import AppRoutes from "@/routes";
 
 /**
@@ -133,12 +140,129 @@ function PluginThemeSync() {
   return null;
 }
 
+function WorkspaceModeSync() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const workspaceQueryClient = useQueryClient();
+  const initialPathRef = useRef(location.pathname);
+  const redirectedWorkspaceRootRef = useRef<string | null>(null);
+  const appliedPluginConfigSignatureRef = useRef<string | null>(null);
+  const isDesktopTauri = isTauri();
+
+  const workspaceQuery = useQuery({
+    queryKey: WORKSPACE_STATE_QUERY_KEY,
+    queryFn: workspaceState,
+    enabled: isDesktopTauri,
+    retry: false,
+  });
+  const workspace = workspaceQuery.data?.current ?? null;
+  const workspaceConfig = workspaceQuery.data?.config ?? null;
+
+  const {
+    data: pluginRows,
+    refetch: refetchPlugins,
+    isFetching: pluginsFetching,
+  } = api.useQuery("get", "/v1/plugins", undefined, {
+    enabled: isDesktopTauri && Boolean(workspace),
+    retry: 1,
+  });
+  const stopPluginMutation = api.useMutation("post", "/v1/plugins/{id}/stop");
+
+  useEffect(() => {
+    if (
+      initialPathRef.current === "/" &&
+      workspace &&
+      redirectedWorkspaceRootRef.current !== workspace.rootPath
+    ) {
+      redirectedWorkspaceRootRef.current = workspace.rootPath;
+      navigate("/workspace", { replace: true });
+    }
+  }, [navigate, workspace]);
+
+  useEffect(() => {
+    if (!workspace) {
+      appliedPluginConfigSignatureRef.current = null;
+    }
+  }, [workspace]);
+
+  useEffect(() => {
+    const disabledPluginIds = Object.entries(workspaceConfig?.plugins ?? {})
+      .filter(([, preference]) => preference.enabled === false)
+      .map(([pluginId]) => pluginId)
+      .toSorted();
+    const disabledPluginIdSet = new Set(disabledPluginIds);
+    const disabledRunningPluginIds = (pluginRows ?? [])
+      .filter((plugin) => disabledPluginIdSet.has(plugin.id) && isPluginRunning(plugin))
+      .map((plugin) => plugin.id)
+      .toSorted();
+    const configSignature = workspace
+      ? `${workspace.rootPath}:${disabledPluginIds.join(",")}:${disabledRunningPluginIds.join(",")}`
+      : null;
+
+    if (
+      !workspace ||
+      !workspaceConfig ||
+      !pluginRows ||
+      pluginsFetching ||
+      appliedPluginConfigSignatureRef.current === configSignature
+    ) {
+      return;
+    }
+
+    const activeConfigSignature = configSignature;
+    const activePlugins = pluginRows;
+    let cancelled = false;
+
+    async function applyWorkspacePluginConfig() {
+      try {
+        await Promise.all(activePlugins.map(async (plugin) => {
+          if (disabledPluginIdSet.has(plugin.id) && isPluginRunning(plugin)) {
+            await stopPluginMutation.mutateAsync({
+              params: { path: { id: plugin.id } },
+              body: { lastError: null },
+            });
+          }
+        }));
+
+        if (!cancelled) {
+          appliedPluginConfigSignatureRef.current = activeConfigSignature;
+          await Promise.all([
+            refetchPlugins(),
+            workspaceQueryClient.invalidateQueries({ queryKey: RUNTIME_PLUGINS_QUERY_KEY }),
+          ]);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn("failed to apply workspace plugin preferences", error);
+        }
+      }
+    }
+
+    void applyWorkspacePluginConfig();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    pluginRows,
+    pluginsFetching,
+    refetchPlugins,
+    stopPluginMutation,
+    workspace,
+    workspaceConfig,
+    workspaceQueryClient,
+  ]);
+
+  return null;
+}
+
 function App() {
   return (
     <ErrorBoundary>
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
           <SetupGuard />
+          <WorkspaceModeSync />
           <AppLanguageSync />
           <PluginThemeSync />
           <AppRoutes />

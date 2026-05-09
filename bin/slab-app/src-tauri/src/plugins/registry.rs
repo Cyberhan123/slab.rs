@@ -59,7 +59,7 @@ struct PluginRegistrySnapshot {
 }
 
 pub struct PluginRegistryState {
-    root_dir: PathBuf,
+    root_dir: RwLock<PathBuf>,
     snapshot: RwLock<PluginRegistrySnapshot>,
 }
 
@@ -71,13 +71,21 @@ impl PluginRegistryState {
             })?;
         }
 
-        let registry = Self { root_dir, snapshot: RwLock::new(PluginRegistrySnapshot::default()) };
+        let registry = Self {
+            root_dir: RwLock::new(root_dir),
+            snapshot: RwLock::new(PluginRegistrySnapshot::default()),
+        };
         registry.refresh()?;
         Ok(registry)
     }
 
     pub fn refresh(&self) -> Result<(), String> {
-        let fresh = scan_plugins(&self.root_dir)?;
+        let root_dir = self
+            .root_dir
+            .read()
+            .map_err(|_| "failed to lock plugin registry root for read".to_string())?
+            .clone();
+        let fresh = scan_plugins(&root_dir)?;
         let mut guard = self
             .snapshot
             .write()
@@ -152,6 +160,10 @@ pub fn resolve_plugins_root<R: tauri::Runtime>(_app: &tauri::App<R>) -> Result<P
     let settings_path = settings_path_for_plugins();
 
     Ok(resolve_plugins_root_with(&settings_path, plugin_install_dir_from_settings(&settings_path)))
+}
+
+pub fn resolve_plugins_root_for_settings_path(settings_path: &Path) -> PathBuf {
+    resolve_plugins_root_with(settings_path, plugin_install_dir_from_settings(settings_path))
 }
 
 fn resolve_plugins_root_with(
