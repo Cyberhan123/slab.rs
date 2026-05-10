@@ -9,16 +9,21 @@ import { usePageHeader } from "@/hooks/use-global-header-meta"
 import { isTauri } from "@/hooks/use-tauri"
 import {
   workspaceClose,
+  workspaceConsoleRun,
+  workspaceGitStatus,
   workspaceOpen,
   workspaceReadDirectory,
   workspaceReadFile,
   workspaceState,
   WORKSPACE_STATE_QUERY_KEY,
+  type WorkspaceConsoleOutput,
   type WorkspaceFileContent,
 } from "@/lib/workspace-bridge"
 import {
   emptyWorkspaceUiSnapshot,
   useWorkspaceUiStore,
+  type WorkspaceExplorerPanel,
+  type WorkspaceMarkdownMode,
 } from "@/store/useWorkspaceUiStore"
 import { getErrorMessage } from "@slab/api"
 import {
@@ -29,6 +34,11 @@ import {
   type WorkspaceTreeNode,
 } from "../lib/workspace-page-utils"
 
+export type WorkspaceConsoleEntry = WorkspaceConsoleOutput & {
+  id: string
+  startedAt: number
+}
+
 export function useWorkspacePage() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -37,6 +47,14 @@ export function useWorkspacePage() {
   const [selectedFile, setSelectedFile] = useState<WorkspaceFileContent | null>(null)
   const [fileError, setFileError] = useState<string | null>(null)
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set())
+  const [consoleCommand, setConsoleCommand] = useState("")
+  const [consoleEntries, setConsoleEntries] = useState<WorkspaceConsoleEntry[]>([])
+  const [isConsoleRunning, setIsConsoleRunning] = useState(false)
+  const [editorTheme, setEditorTheme] = useState(() =>
+    typeof document !== "undefined" && document.documentElement.classList.contains("dark")
+      ? "vs-dark"
+      : "light",
+  )
   const treeHostRef = useRef<HTMLDivElement | null>(null)
   const restoredWorkspaceRootRef = useRef<string | null>(null)
   const [treeHeight, setTreeHeight] = useState(320)
@@ -64,11 +82,45 @@ export function useWorkspacePage() {
   const openDirectoryPaths = workspaceUi.openDirectoryPaths
   const openFileTabs = workspaceUi.openFiles
   const activeFilePath = workspaceUi.activeFilePath
+  const explorerPanel = workspaceUi.explorerPanel
+  const markdownMode = workspaceUi.markdownMode
+  const consoleOpen = workspaceUi.consoleOpen
   const initialOpenState = useMemo(
     () =>
       Object.fromEntries(openDirectoryPaths.map((relativePath) => [relativePath, true])),
     [openDirectoryPaths],
   )
+  const {
+    data: gitStatus,
+    isFetching: gitStatusFetching,
+    refetch: refetchGitStatus,
+  } = useQuery({
+    queryKey: ["workspace-git-status", workspace?.rootPath],
+    queryFn: workspaceGitStatus,
+    enabled: isDesktopTauri && Boolean(workspace),
+    retry: false,
+  })
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return
+    }
+
+    const updateEditorTheme = () => {
+      setEditorTheme(document.documentElement.classList.contains("dark") ? "vs-dark" : "light")
+    }
+
+    updateEditorTheme()
+    const observer = new MutationObserver(updateEditorTheme)
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    })
+
+    return () => {
+      observer.disconnect()
+    }
+  }, [])
 
   useEffect(() => {
     const element = treeHostRef.current
@@ -190,6 +242,8 @@ export function useWorkspacePage() {
       setTreeData([])
       setSelectedFile(null)
       setFileError(null)
+      setConsoleEntries([])
+      setConsoleCommand("")
       restoredWorkspaceRootRef.current = null
       return
     }
@@ -258,6 +312,81 @@ export function useWorkspacePage() {
     [openDirectoryPaths, patchWorkspaceState, workspace],
   )
 
+  const handleSelectExplorerPanel = useCallback(
+    (panel: WorkspaceExplorerPanel) => {
+      if (!workspace || explorerPanel === panel) {
+        return
+      }
+
+      patchWorkspaceState(workspace.rootPath, {
+        explorerPanel: panel,
+      })
+    },
+    [explorerPanel, patchWorkspaceState, workspace],
+  )
+
+  const handleSetMarkdownMode = useCallback(
+    (mode: WorkspaceMarkdownMode) => {
+      if (!workspace || markdownMode === mode) {
+        return
+      }
+
+      patchWorkspaceState(workspace.rootPath, {
+        markdownMode: mode,
+      })
+    },
+    [markdownMode, patchWorkspaceState, workspace],
+  )
+
+  const handleToggleConsole = useCallback(() => {
+    if (!workspace) {
+      return
+    }
+
+    patchWorkspaceState(workspace.rootPath, {
+      consoleOpen: !consoleOpen,
+    })
+  }, [consoleOpen, patchWorkspaceState, workspace])
+
+  const handleRefreshGitStatus = useCallback(async () => {
+    await refetchGitStatus()
+  }, [refetchGitStatus])
+
+  const handleRunConsoleCommand = useCallback(async () => {
+    const command = consoleCommand.trim()
+    if (!command || isConsoleRunning) {
+      return
+    }
+
+    setConsoleCommand("")
+    setIsConsoleRunning(true)
+    const startedAt = Date.now()
+    try {
+      const output = await workspaceConsoleRun(command)
+      setConsoleEntries((current) =>
+        [
+          ...current,
+          {
+            ...output,
+            id: `${startedAt}-${current.length}`,
+            startedAt,
+          },
+        ].slice(-50),
+      )
+      await refetchGitStatus()
+    } catch (error) {
+      toast.error(t("pages.workspace.toast.consoleFailed"), {
+        description: getErrorMessage(error),
+      })
+    } finally {
+      setIsConsoleRunning(false)
+    }
+  }, [consoleCommand, isConsoleRunning, refetchGitStatus, t])
+
+  const handleClearConsole = useCallback(() => {
+    setConsoleEntries([])
+  }, [])
+
   const handleCloseFileTab = useCallback(
     async (relativePath: string) => {
       if (!workspace) {
@@ -319,21 +448,37 @@ export function useWorkspacePage() {
 
   return {
     activeFilePath,
+    consoleCommand,
+    consoleEntries,
+    consoleOpen,
+    editorTheme,
+    explorerPanel,
     fileError,
+    gitStatus,
+    gitStatusFetching,
+    handleClearConsole,
     handleCloseFileTab,
     handleCloseWorkspace,
     handleOpenFile,
     handleOpenFolder,
+    handleRefreshGitStatus,
+    handleRunConsoleCommand,
+    handleSelectExplorerPanel,
     handleSelectFileTab,
+    handleSetMarkdownMode,
     handleTreeToggle,
+    handleToggleConsole,
     initialOpenState,
+    isConsoleRunning,
     isDesktopTauri,
     loadDirectory,
     loadingPaths,
+    markdownMode,
     openFileTabs,
     openWorkspacePath,
     recentWorkspaces,
     selectedFile,
+    setConsoleCommand,
     treeData,
     treeHeight,
     treeHostRef,

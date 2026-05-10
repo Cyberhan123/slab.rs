@@ -15,6 +15,7 @@ mod system;
 mod task;
 mod ui_state;
 mod video;
+mod workspace;
 
 pub use audio::{AudioTranscriptionCommand, TranscribeDecodeOptions, TranscribeVadOptions};
 pub use backend::{BackendStatusQuery, BackendStatusView};
@@ -68,3 +69,7 @@ pub use task::{
 };
 pub use ui_state::{DeleteUiStateView, UiStateValueView, UpdateUiStateCommand};
 pub use video::{DecodedVideoInitImage, VideoGenerationCommand};
+pub use workspace::{
+    WorkspaceConsoleOutput, WorkspaceGitFileStatus, WorkspaceGitStatusEntry,
+    WorkspaceGitStatusSummary, WorkspaceGitStatusView,
+};

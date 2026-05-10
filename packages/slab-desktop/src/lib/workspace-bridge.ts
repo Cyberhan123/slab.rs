@@ -57,6 +57,49 @@ export type WorkspaceFileContent = {
   sizeBytes: number
 }
 
+export type WorkspaceGitFileStatus =
+  | "added"
+  | "modified"
+  | "deleted"
+  | "renamed"
+  | "copied"
+  | "untracked"
+  | "conflicted"
+
+export type WorkspaceGitStatusEntry = {
+  path: string
+  originalPath: string | null
+  status: WorkspaceGitFileStatus
+}
+
+export type WorkspaceGitStatusSummary = {
+  added: number
+  modified: number
+  deleted: number
+  renamed: number
+  copied: number
+  untracked: number
+  conflicted: number
+}
+
+export type WorkspaceGitStatus = {
+  available: boolean
+  isRepository: boolean
+  branch: string | null
+  repositoryRoot: string | null
+  message: string | null
+  summary: WorkspaceGitStatusSummary
+  entries: WorkspaceGitStatusEntry[]
+}
+
+export type WorkspaceConsoleOutput = {
+  command: string
+  exitCode: number | null
+  stdout: string
+  stderr: string
+  timedOut: boolean
+}
+
 export type WorkspacePluginPreferenceUpdate = {
   pluginId: string
   enabled?: boolean | null
@@ -102,6 +145,38 @@ export async function workspaceReadFile(relativePath: string): Promise<Workspace
   }
 
   return invoke<WorkspaceFileContent>("workspace_read_file", { relativePath })
+}
+
+export async function workspaceGitStatus(): Promise<WorkspaceGitStatus> {
+  if (!isTauri()) {
+    return {
+      available: false,
+      isRepository: false,
+      branch: null,
+      repositoryRoot: null,
+      message: "Git is only available in the desktop app.",
+      summary: {
+        added: 0,
+        modified: 0,
+        deleted: 0,
+        renamed: 0,
+        copied: 0,
+        untracked: 0,
+        conflicted: 0,
+      },
+      entries: [],
+    }
+  }
+
+  return invoke<WorkspaceGitStatus>("workspace_git_status")
+}
+
+export async function workspaceConsoleRun(command: string): Promise<WorkspaceConsoleOutput> {
+  if (!isTauri()) {
+    throw new Error("workspace console is only available in the desktop app")
+  }
+
+  return invoke<WorkspaceConsoleOutput>("workspace_console_run", { command })
 }
 
 export async function workspaceUpdatePluginPreference(

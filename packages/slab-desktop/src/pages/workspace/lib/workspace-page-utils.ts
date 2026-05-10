@@ -38,19 +38,51 @@ export function languageForFile(fileName: string) {
       return "typescript"
     case "js":
     case "jsx":
+    case "mjs":
+    case "cjs":
       return "javascript"
     case "rs":
       return "rust"
+    case "py":
+      return "python"
+    case "go":
+      return "go"
+    case "java":
+      return "java"
+    case "c":
+    case "h":
+      return "c"
+    case "cc":
+    case "cpp":
+    case "cxx":
+    case "hpp":
+      return "cpp"
     case "json":
       return "json"
     case "md":
+    case "mdx":
       return "markdown"
     case "css":
       return "css"
+    case "scss":
+      return "scss"
+    case "less":
+      return "less"
     case "html":
       return "html"
     case "toml":
       return "toml"
+    case "sh":
+    case "bash":
+    case "zsh":
+      return "shell"
+    case "ps1":
+      return "powershell"
+    case "sql":
+      return "sql"
+    case "xml":
+    case "svg":
+      return "xml"
     case "yaml":
     case "yml":
       return "yaml"

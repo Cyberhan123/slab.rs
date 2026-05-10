@@ -8,6 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use dirs_next::config_dir;
 use serde::{Deserialize, Serialize};
+use slab_app_core::domain::models::{WorkspaceConsoleOutput, WorkspaceGitStatusView};
+use slab_app_core::domain::services::WorkspaceService;
 use slab_types::settings::SettingsDocument;
 use tauri::{AppHandle, Manager, Runtime, State};
 
@@ -318,6 +320,26 @@ pub fn workspace_read_file(
         .to_owned();
 
     Ok(WorkspaceFileContent { relative_path, name, size_bytes: metadata.len(), content })
+}
+
+#[tauri::command]
+pub fn workspace_git_status(
+    state: State<'_, WorkspaceState>,
+) -> Result<WorkspaceGitStatusView, String> {
+    let workspace = active_workspace(&state)?;
+    WorkspaceService::git_status(PathBuf::from(workspace.root_path))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn workspace_console_run(
+    state: State<'_, WorkspaceState>,
+    command: String,
+) -> Result<WorkspaceConsoleOutput, String> {
+    let workspace = active_workspace(&state)?;
+    WorkspaceService::run_console_command(PathBuf::from(workspace.root_path), &command)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

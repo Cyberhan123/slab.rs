@@ -35,6 +35,8 @@
     "allow-workspace-close",
     "allow-workspace-read-directory",
     "allow-workspace-read-file",
+    "allow-workspace-git-status",
+    "allow-workspace-console-run",
     "allow-workspace-update-plugin-preference",
     "window-state:default",
     "decorum:allow-show-snap-overlay",

@@ -8,8 +8,14 @@ export type WorkspaceFileTab = {
   name: string;
 };
 
+export type WorkspaceExplorerPanel = 'files' | 'git';
+export type WorkspaceMarkdownMode = 'preview' | 'source';
+
 type WorkspaceUiSnapshot = {
   activeFilePath: string | null;
+  explorerPanel: WorkspaceExplorerPanel;
+  markdownMode: WorkspaceMarkdownMode;
+  consoleOpen: boolean;
   openDirectoryPaths: string[];
   openFiles: WorkspaceFileTab[];
 };
@@ -26,6 +32,9 @@ type WorkspaceUiState = PersistedWorkspaceUiState & {
 
 export const emptyWorkspaceUiSnapshot: WorkspaceUiSnapshot = {
   activeFilePath: null,
+  explorerPanel: 'files',
+  markdownMode: 'preview',
+  consoleOpen: false,
   openDirectoryPaths: [],
   openFiles: [],
 };
