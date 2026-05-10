@@ -1,8 +1,9 @@
-import { GitBranch, GitCommitHorizontal, Loader2, RefreshCcw } from "lucide-react"
+import { GitBranch, GitCommitHorizontal, Loader2, Minus, Plus, RefreshCcw, RotateCcw } from "lucide-react"
+import { useMemo, useState } from "react"
 
 import { Button } from "@slab/components/button"
 import { useTranslation } from "@slab/i18n"
-import type { WorkspaceGitFileStatus, WorkspaceGitStatus } from "@/lib/workspace-bridge"
+import type { WorkspaceGitFileStatus, WorkspaceGitStatus, WorkspaceGitStatusEntry } from "@/lib/workspace-bridge"
 import { cn } from "@/lib/utils"
 
 const statusClassName: Record<WorkspaceGitFileStatus, string> = {
@@ -18,17 +19,30 @@ const statusClassName: Record<WorkspaceGitFileStatus, string> = {
 type WorkspaceGitPanelProps = {
   gitStatus: WorkspaceGitStatus | undefined
   gitStatusFetching: boolean
+  operationPending: boolean
+  onCommit: (message: string) => Promise<void>
+  onDiscard: (path: string) => Promise<void>
   onOpenFile: (relativePath: string) => Promise<void>
   onRefresh: () => Promise<void>
+  onStage: (path: string) => Promise<void>
+  onUnstage: (path: string) => Promise<void>
 }
 
 export function WorkspaceGitPanel({
   gitStatus,
   gitStatusFetching,
+  operationPending,
+  onCommit,
+  onDiscard,
   onOpenFile,
   onRefresh,
+  onStage,
+  onUnstage,
 }: WorkspaceGitPanelProps) {
   const { t } = useTranslation()
+  const [commitMessage, setCommitMessage] = useState("")
+  const stagedEntries = useMemo(() => gitStatus?.entries.filter((entry) => entry.staged) ?? [], [gitStatus])
+  const unstagedEntries = useMemo(() => gitStatus?.entries.filter((entry) => !entry.staged) ?? [], [gitStatus])
 
   if (!gitStatus) {
     return (
@@ -108,42 +122,155 @@ export function WorkspaceGitPanel({
 
       <div className="min-h-0 flex-1 overflow-y-auto rounded-[12px] bg-[var(--surface-1)] py-1">
         {gitStatus.entries.length > 0 ? (
-          gitStatus.entries.map((entry) => {
-            const canOpen = entry.status !== "deleted"
-
-            return (
-              <button
-                key={`${entry.status}:${entry.path}`}
-                type="button"
-                disabled={!canOpen}
-                className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-sm transition enabled:hover:bg-[var(--surface-selected)] disabled:cursor-default disabled:opacity-70"
-                onClick={() => {
-                  if (canOpen) {
-                    void onOpenFile(entry.path)
-                  }
-                }}
-              >
-                <GitCommitHorizontal className="size-4 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate">
-                  {entry.originalPath ? `${entry.originalPath} -> ${entry.path}` : entry.path}
-                </span>
-                <span
-                  className={cn(
-                    "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase",
-                    statusClassName[entry.status],
-                  )}
-                >
-                  {t(`pages.workspace.git.statusShort.${entry.status}`)}
-                </span>
-              </button>
-            )
-          })
+          <div className="space-y-3 px-1">
+            <GitEntryGroup
+              title={t("pages.workspace.git.staged")}
+              entries={stagedEntries}
+              operationPending={operationPending}
+              onDiscard={onDiscard}
+              onOpenFile={onOpenFile}
+              onStage={onStage}
+              onUnstage={onUnstage}
+            />
+            <GitEntryGroup
+              title={t("pages.workspace.git.changes")}
+              entries={unstagedEntries}
+              operationPending={operationPending}
+              onDiscard={onDiscard}
+              onOpenFile={onOpenFile}
+              onStage={onStage}
+              onUnstage={onUnstage}
+            />
+          </div>
         ) : (
           <div className="flex min-h-[180px] items-center justify-center px-4 text-center text-sm text-muted-foreground">
             {t("pages.workspace.git.cleanDescription")}
           </div>
         )}
       </div>
+
+      <form
+        className="rounded-[12px] border border-border/50 bg-[var(--surface-1)] p-2"
+        onSubmit={(event) => {
+          event.preventDefault()
+          const message = commitMessage.trim()
+          if (!message) {
+            return
+          }
+          void onCommit(message).then(() => setCommitMessage(""))
+        }}
+      >
+        <input
+          value={commitMessage}
+          onChange={(event) => setCommitMessage(event.target.value)}
+          className="h-8 w-full rounded-[8px] border border-border/60 bg-background px-2 text-xs outline-none transition focus:border-[var(--brand-teal)]"
+          placeholder={t("pages.workspace.git.commitPlaceholder")}
+          disabled={operationPending || stagedEntries.length === 0}
+        />
+        <Button
+          type="submit"
+          variant="cta"
+          size="sm"
+          className="mt-2 w-full"
+          disabled={operationPending || stagedEntries.length === 0 || !commitMessage.trim()}
+        >
+          {operationPending ? <Loader2 className="size-3.5 animate-spin" /> : <GitCommitHorizontal className="size-3.5" />}
+          {t("pages.workspace.git.commit")}
+        </Button>
+      </form>
     </div>
+  )
+}
+
+function GitEntryGroup({
+  title,
+  entries,
+  operationPending,
+  onDiscard,
+  onOpenFile,
+  onStage,
+  onUnstage,
+}: {
+  title: string
+  entries: WorkspaceGitStatusEntry[]
+  operationPending: boolean
+  onDiscard: (path: string) => Promise<void>
+  onOpenFile: (relativePath: string) => Promise<void>
+  onStage: (path: string) => Promise<void>
+  onUnstage: (path: string) => Promise<void>
+}) {
+  const { t } = useTranslation()
+
+  if (entries.length === 0) {
+    return null
+  }
+
+  return (
+    <section className="space-y-1">
+      <div className="px-2 pt-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+        {title}
+      </div>
+      {entries.map((entry) => {
+        const canOpen = entry.status !== "deleted"
+        const canDiscard = entry.status !== "conflicted"
+
+        return (
+          <div
+            key={`${entry.status}:${entry.staged}:${entry.path}`}
+            className="group flex min-w-0 items-center gap-1 rounded-[8px] px-2 py-1.5 text-sm transition hover:bg-[var(--surface-selected)]"
+          >
+            <button
+              type="button"
+              disabled={!canOpen}
+              className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default disabled:opacity-70"
+              onClick={() => {
+                if (canOpen) {
+                  void onOpenFile(entry.path)
+                }
+              }}
+            >
+              <GitCommitHorizontal className="size-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate">
+                {entry.originalPath ? `${entry.originalPath} -> ${entry.path}` : entry.path}
+              </span>
+              <span
+                className={cn(
+                  "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase",
+                  statusClassName[entry.status],
+                )}
+              >
+                {t(`pages.workspace.git.statusShort.${entry.status}`)}
+              </span>
+            </button>
+            <Button
+              type="button"
+              variant="quiet"
+              size="icon-xs"
+              disabled={operationPending}
+              title={entry.staged ? t("pages.workspace.git.unstage") : t("pages.workspace.git.stage")}
+              onClick={() => {
+                void (entry.staged ? onUnstage(entry.path) : onStage(entry.path))
+              }}
+            >
+              {entry.staged ? <Minus className="size-3.5" /> : <Plus className="size-3.5" />}
+            </Button>
+            <Button
+              type="button"
+              variant="quiet"
+              size="icon-xs"
+              disabled={operationPending || !canDiscard}
+              title={t("pages.workspace.git.discard")}
+              onClick={() => {
+                if (window.confirm(t("pages.workspace.confirm.discardGitChange", { path: entry.path }))) {
+                  void onDiscard(entry.path)
+                }
+              }}
+            >
+              <RotateCcw className="size-3.5" />
+            </Button>
+          </div>
+        )
+      })}
+    </section>
   )
 }

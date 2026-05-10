@@ -1,7 +1,4 @@
 import Editor from "@monaco-editor/react"
-import XMarkdown from "@ant-design/x-markdown"
-import "@ant-design/x-markdown/themes/dark.css"
-import "@ant-design/x-markdown/themes/light.css"
 import { useTranslation } from "@slab/i18n"
 import { Button } from "@slab/components/button"
 import { SoftPanel, StageEmptyState, StatusPill } from "@slab/components/workspace"
@@ -15,6 +12,7 @@ import {
   FolderOpen,
   GitBranch,
   Loader2,
+  Save,
   Terminal,
   X,
 } from "lucide-react"
@@ -25,25 +23,35 @@ import { languageForFile, SLAB_DIR_NAME } from "../lib/workspace-page-utils"
 import { RecentWorkspaceList } from "./recent-workspace-list"
 import { WorkspaceConsolePanel } from "./workspace-console-panel"
 import { WorkspaceGitPanel } from "./workspace-git-panel"
+import { WorkspaceMarkdownPreview } from "./workspace-markdown-preview"
 import { WorkspaceTreeRow } from "./workspace-tree-row"
+import { setupShikiMonaco } from "../lib/monaco-shiki"
 
 export function WorkspaceWorkbench({
   activeFilePath,
   consoleCommand,
   consoleEntries,
   consoleOpen,
+  editorContent,
   editorTheme,
   explorerPanel,
   fileError,
   gitStatus,
   gitStatusFetching,
+  gitOperationPending,
   handleClearConsole,
   handleCloseFileTab,
   handleCloseWorkspace,
+  handleConsoleHistory,
+  handleGitCommit,
+  handleGitDiscard,
+  handleGitStage,
+  handleGitUnstage,
   handleOpenFile,
   handleOpenFolder,
   handleRefreshGitStatus,
   handleRunConsoleCommand,
+  handleSaveFile,
   handleSelectExplorerPanel,
   handleSelectFileTab,
   handleSetMarkdownMode,
@@ -59,7 +67,10 @@ export function WorkspaceWorkbench({
   openWorkspacePath,
   recentWorkspaces,
   selectedFile,
+  selectedFileDirty,
   setConsoleCommand,
+  setEditorContent,
+  savingFile,
   treeData,
   treeHeight,
   treeHostRef,
@@ -69,7 +80,7 @@ export function WorkspaceWorkbench({
   const { t } = useTranslation()
   const selectedFileLanguage = selectedFile ? languageForFile(selectedFile.name) : "plaintext"
   const isMarkdownFile = selectedFileLanguage === "markdown"
-  const markdownThemeClassName = editorTheme === "vs-dark" ? "x-markdown-dark" : "x-markdown-light"
+  const terminalThemeMode = editorTheme === "github-dark" ? "dark" : "light"
 
   if (!isDesktopTauri) {
     return (
@@ -217,8 +228,13 @@ export function WorkspaceWorkbench({
               <WorkspaceGitPanel
                 gitStatus={gitStatus}
                 gitStatusFetching={gitStatusFetching}
+                operationPending={gitOperationPending}
+                onCommit={handleGitCommit}
+                onDiscard={handleGitDiscard}
                 onOpenFile={handleOpenFile}
                 onRefresh={handleRefreshGitStatus}
+                onStage={handleGitStage}
+                onUnstage={handleGitUnstage}
               />
             </div>
           )}
@@ -271,45 +287,55 @@ export function WorkspaceWorkbench({
               <div className="flex h-9 shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-background/80 px-3">
                 <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
                   {selectedFile.relativePath}
+                  {selectedFileDirty ? " *" : ""}
                 </span>
-                {isMarkdownFile ? (
-                  <div className="flex shrink-0 items-center gap-1 rounded-full bg-[var(--surface-1)] p-0.5">
-                    <button
-                      type="button"
-                      className={cn(
-                        "flex h-7 items-center gap-1 rounded-full px-2 text-[11px] text-muted-foreground transition hover:text-foreground",
-                        markdownMode === "preview" && "bg-background text-foreground shadow-sm",
-                      )}
-                      onClick={() => handleSetMarkdownMode("preview")}
-                    >
-                      <Eye className="size-3.5" />
-                      {t("pages.workspace.editor.preview")}
-                    </button>
-                    <button
-                      type="button"
-                      className={cn(
-                        "flex h-7 items-center gap-1 rounded-full px-2 text-[11px] text-muted-foreground transition hover:text-foreground",
-                        markdownMode === "source" && "bg-background text-foreground shadow-sm",
-                      )}
-                      onClick={() => handleSetMarkdownMode("source")}
-                    >
-                      <Code2 className="size-3.5" />
-                      {t("pages.workspace.editor.source")}
-                    </button>
-                  </div>
-                ) : null}
+                <div className="flex shrink-0 items-center gap-2">
+                  {isMarkdownFile ? (
+                    <div className="flex items-center gap-1 rounded-full bg-[var(--surface-1)] p-0.5">
+                      <button
+                        type="button"
+                        className={cn(
+                          "flex h-7 items-center gap-1 rounded-full px-2 text-[11px] text-muted-foreground transition hover:text-foreground",
+                          markdownMode === "preview" && "bg-background text-foreground shadow-sm",
+                        )}
+                        onClick={() => handleSetMarkdownMode("preview")}
+                      >
+                        <Eye className="size-3.5" />
+                        {t("pages.workspace.editor.preview")}
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(
+                          "flex h-7 items-center gap-1 rounded-full px-2 text-[11px] text-muted-foreground transition hover:text-foreground",
+                          markdownMode === "source" && "bg-background text-foreground shadow-sm",
+                        )}
+                        onClick={() => handleSetMarkdownMode("source")}
+                      >
+                        <Code2 className="size-3.5" />
+                        {t("pages.workspace.editor.source")}
+                      </button>
+                    </div>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant={selectedFileDirty ? "cta" : "quiet"}
+                    size="sm"
+                    disabled={!selectedFileDirty || savingFile}
+                    onClick={() => {
+                      void handleSaveFile()
+                    }}
+                  >
+                    {savingFile ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+                    {t("pages.workspace.editor.save")}
+                  </Button>
+                </div>
               </div>
             ) : null}
 
             {selectedFile ? (
               isMarkdownFile && markdownMode === "preview" ? (
                 <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-                  <XMarkdown
-                    paragraphTag="div"
-                    className={cn("workspace-markdown", markdownThemeClassName)}
-                  >
-                    {selectedFile.content}
-                  </XMarkdown>
+                  <WorkspaceMarkdownPreview content={editorContent} />
                 </div>
               ) : (
                 <div className="min-h-0 flex-1">
@@ -318,13 +344,18 @@ export function WorkspaceWorkbench({
                     language={selectedFileLanguage}
                     path={selectedFile.relativePath}
                     theme={editorTheme}
-                    value={selectedFile.content}
+                    value={editorContent}
+                    beforeMount={(monaco) => {
+                      void setupShikiMonaco(monaco)
+                    }}
+                    onChange={(value) => setEditorContent(value ?? "")}
                     options={{
-                      readOnly: true,
+                      readOnly: savingFile,
                       minimap: { enabled: false },
                       scrollBeyondLastLine: false,
                       wordWrap: "on",
                       fontSize: 13,
+                      tabSize: 2,
                     }}
                   />
                 </div>
@@ -346,7 +377,9 @@ export function WorkspaceWorkbench({
               isRunning={isConsoleRunning}
               onChangeCommand={setConsoleCommand}
               onClear={handleClearConsole}
+              onHistory={handleConsoleHistory}
               onRun={handleRunConsoleCommand}
+              themeMode={terminalThemeMode}
             />
           ) : null}
         </div>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { open } from "@tauri-apps/plugin-dialog"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "@slab/i18n"
 import { FolderKanban } from "lucide-react"
 import { toast } from "sonner"
@@ -10,14 +10,20 @@ import { isTauri } from "@/hooks/use-tauri"
 import {
   workspaceClose,
   workspaceConsoleRun,
+  workspaceGitCommit,
+  workspaceGitDiscard,
+  workspaceGitStage,
   workspaceGitStatus,
+  workspaceGitUnstage,
   workspaceOpen,
   workspaceReadDirectory,
   workspaceReadFile,
   workspaceState,
+  workspaceWriteFile,
   WORKSPACE_STATE_QUERY_KEY,
   type WorkspaceConsoleOutput,
   type WorkspaceFileContent,
+  type WorkspaceGitStatus,
 } from "@/lib/workspace-bridge"
 import {
   emptyWorkspaceUiSnapshot,
@@ -45,15 +51,18 @@ export function useWorkspacePage() {
   const isDesktopTauri = isTauri()
   const [treeData, setTreeData] = useState<WorkspaceTreeNode[]>([])
   const [selectedFile, setSelectedFile] = useState<WorkspaceFileContent | null>(null)
+  const [editorContent, setEditorContent] = useState("")
   const [fileError, setFileError] = useState<string | null>(null)
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set())
   const [consoleCommand, setConsoleCommand] = useState("")
   const [consoleEntries, setConsoleEntries] = useState<WorkspaceConsoleEntry[]>([])
+  const [consoleHistory, setConsoleHistory] = useState<string[]>([])
+  const [consoleHistoryIndex, setConsoleHistoryIndex] = useState<number | null>(null)
   const [isConsoleRunning, setIsConsoleRunning] = useState(false)
   const [editorTheme, setEditorTheme] = useState(() =>
     typeof document !== "undefined" && document.documentElement.classList.contains("dark")
-      ? "vs-dark"
-      : "light",
+      ? "github-dark"
+      : "github-light",
   )
   const treeHostRef = useRef<HTMLDivElement | null>(null)
   const restoredWorkspaceRootRef = useRef<string | null>(null)
@@ -100,6 +109,28 @@ export function useWorkspacePage() {
     enabled: isDesktopTauri && Boolean(workspace),
     retry: false,
   })
+  const saveFileMutation = useMutation({
+    mutationFn: workspaceWriteFile,
+  })
+  const gitStageMutation = useMutation({
+    mutationFn: workspaceGitStage,
+  })
+  const gitUnstageMutation = useMutation({
+    mutationFn: workspaceGitUnstage,
+  })
+  const gitDiscardMutation = useMutation({
+    mutationFn: workspaceGitDiscard,
+  })
+  const gitCommitMutation = useMutation({
+    mutationFn: workspaceGitCommit,
+  })
+  const savingFile = saveFileMutation.isPending
+  const gitOperationPending =
+    gitStageMutation.isPending ||
+    gitUnstageMutation.isPending ||
+    gitDiscardMutation.isPending ||
+    gitCommitMutation.isPending
+  const selectedFileDirty = Boolean(selectedFile && editorContent !== selectedFile.content)
 
   useEffect(() => {
     if (typeof document === "undefined") {
@@ -107,7 +138,7 @@ export function useWorkspacePage() {
     }
 
     const updateEditorTheme = () => {
-      setEditorTheme(document.documentElement.classList.contains("dark") ? "vs-dark" : "light")
+      setEditorTheme(document.documentElement.classList.contains("dark") ? "github-dark" : "github-light")
     }
 
     updateEditorTheme()
@@ -190,6 +221,7 @@ export function useWorkspacePage() {
       const nextState = await workspaceClose()
       setTreeData([])
       setSelectedFile(null)
+      setEditorContent("")
       setFileError(null)
       queryClient.setQueryData(WORKSPACE_STATE_QUERY_KEY, nextState)
       await queryClient.invalidateQueries()
@@ -206,9 +238,11 @@ export function useWorkspacePage() {
       try {
         const file = await workspaceReadFile(relativePath)
         setSelectedFile(file)
+        setEditorContent(file.content)
         return file
       } catch (error) {
         setSelectedFile(null)
+        setEditorContent("")
         setFileError(getErrorMessage(error))
         toast.error(t("pages.workspace.toast.fileFailed"), {
           description: getErrorMessage(error),
@@ -221,6 +255,10 @@ export function useWorkspacePage() {
 
   const handleOpenFile = useCallback(
     async (relativePath: string) => {
+      if (selectedFileDirty && !window.confirm(t("pages.workspace.confirm.discardUnsaved"))) {
+        return
+      }
+
       const file = await openFileContent(relativePath)
       if (!file || !workspace) {
         return
@@ -234,16 +272,19 @@ export function useWorkspacePage() {
         }),
       })
     },
-    [openFileContent, openFileTabs, patchWorkspaceState, workspace],
+    [openFileContent, openFileTabs, patchWorkspaceState, selectedFileDirty, t, workspace],
   )
 
   useEffect(() => {
     if (!workspace) {
       setTreeData([])
       setSelectedFile(null)
+      setEditorContent("")
       setFileError(null)
       setConsoleEntries([])
       setConsoleCommand("")
+      setConsoleHistory([])
+      setConsoleHistoryIndex(null)
       restoredWorkspaceRootRef.current = null
       return
     }
@@ -255,6 +296,7 @@ export function useWorkspacePage() {
     restoredWorkspaceRootRef.current = workspace.rootPath
     setTreeData([])
     setSelectedFile(null)
+    setEditorContent("")
     setFileError(null)
 
     const savedOpenDirectoryPaths = sortDirectoryPaths(openDirectoryPaths)
@@ -352,6 +394,114 @@ export function useWorkspacePage() {
     await refetchGitStatus()
   }, [refetchGitStatus])
 
+  const handleSaveFile = useCallback(async () => {
+    if (!selectedFile) {
+      return
+    }
+
+    try {
+      const result = await saveFileMutation.mutateAsync({
+        relativePath: selectedFile.relativePath,
+        content: editorContent,
+        expectedHash: selectedFile.contentHash,
+      })
+      setSelectedFile({
+        ...selectedFile,
+        content: editorContent,
+        contentHash: result.contentHash,
+        sizeBytes: result.sizeBytes,
+      })
+      toast.success(t("pages.workspace.toast.fileSaved"))
+      await Promise.all([loadDirectory(""), refetchGitStatus()])
+    } catch (error) {
+      toast.error(t("pages.workspace.toast.saveFailed"), {
+        description: getErrorMessage(error),
+      })
+    }
+  }, [editorContent, loadDirectory, refetchGitStatus, saveFileMutation, selectedFile, t])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault()
+        void handleSaveFile()
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [handleSaveFile])
+
+  const applyGitStatus = useCallback(
+    (status: WorkspaceGitStatus) => {
+      queryClient.setQueryData(["workspace-git-status", workspace?.rootPath], status)
+    },
+    [queryClient, workspace?.rootPath],
+  )
+
+  const handleGitStage = useCallback(
+    async (path: string) => {
+      try {
+        const result = await gitStageMutation.mutateAsync(path)
+        applyGitStatus(result.status)
+      } catch (error) {
+        toast.error(t("pages.workspace.toast.gitFailed"), {
+          description: getErrorMessage(error),
+        })
+      }
+    },
+    [applyGitStatus, gitStageMutation, t],
+  )
+
+  const handleGitUnstage = useCallback(
+    async (path: string) => {
+      try {
+        const result = await gitUnstageMutation.mutateAsync(path)
+        applyGitStatus(result.status)
+      } catch (error) {
+        toast.error(t("pages.workspace.toast.gitFailed"), {
+          description: getErrorMessage(error),
+        })
+      }
+    },
+    [applyGitStatus, gitUnstageMutation, t],
+  )
+
+  const handleGitDiscard = useCallback(
+    async (path: string) => {
+      try {
+        const result = await gitDiscardMutation.mutateAsync(path)
+        applyGitStatus(result.status)
+        if (selectedFile?.relativePath === path) {
+          await openFileContent(path)
+        }
+        await loadDirectory("")
+      } catch (error) {
+        toast.error(t("pages.workspace.toast.gitFailed"), {
+          description: getErrorMessage(error),
+        })
+      }
+    },
+    [applyGitStatus, gitDiscardMutation, loadDirectory, openFileContent, selectedFile?.relativePath, t],
+  )
+
+  const handleGitCommit = useCallback(
+    async (message: string) => {
+      try {
+        const result = await gitCommitMutation.mutateAsync(message)
+        applyGitStatus(result.status)
+        toast.success(t("pages.workspace.toast.gitCommitted"))
+      } catch (error) {
+        toast.error(t("pages.workspace.toast.gitFailed"), {
+          description: getErrorMessage(error),
+        })
+      }
+    },
+    [applyGitStatus, gitCommitMutation, t],
+  )
+
   const handleRunConsoleCommand = useCallback(async () => {
     const command = consoleCommand.trim()
     if (!command || isConsoleRunning) {
@@ -359,6 +509,8 @@ export function useWorkspacePage() {
     }
 
     setConsoleCommand("")
+    setConsoleHistory((current) => [command, ...current.filter((item) => item !== command)].slice(0, 20))
+    setConsoleHistoryIndex(null)
     setIsConsoleRunning(true)
     const startedAt = Date.now()
     try {
@@ -387,6 +539,37 @@ export function useWorkspacePage() {
     setConsoleEntries([])
   }, [])
 
+  const handleConsoleHistory = useCallback(
+    (direction: "previous" | "next") => {
+      if (consoleHistory.length === 0) {
+        return
+      }
+
+      if (direction === "previous") {
+        const nextIndex =
+          consoleHistoryIndex === null ? 0 : Math.min(consoleHistoryIndex + 1, consoleHistory.length - 1)
+        setConsoleHistoryIndex(nextIndex)
+        setConsoleCommand(consoleHistory[nextIndex] ?? "")
+        return
+      }
+
+      if (consoleHistoryIndex === null) {
+        return
+      }
+
+      const nextIndex = consoleHistoryIndex - 1
+      if (nextIndex < 0) {
+        setConsoleHistoryIndex(null)
+        setConsoleCommand("")
+        return
+      }
+
+      setConsoleHistoryIndex(nextIndex)
+      setConsoleCommand(consoleHistory[nextIndex] ?? "")
+    },
+    [consoleHistory, consoleHistoryIndex],
+  )
+
   const handleCloseFileTab = useCallback(
     async (relativePath: string) => {
       if (!workspace) {
@@ -395,6 +578,14 @@ export function useWorkspacePage() {
 
       const tabIndex = openFileTabs.findIndex((tab) => tab.relativePath === relativePath)
       if (tabIndex < 0) {
+        return
+      }
+
+      if (
+        activeFilePath === relativePath &&
+        selectedFileDirty &&
+        !window.confirm(t("pages.workspace.confirm.closeUnsaved"))
+      ) {
         return
       }
 
@@ -419,14 +610,19 @@ export function useWorkspacePage() {
       }
 
       setSelectedFile(null)
+      setEditorContent("")
       setFileError(null)
     },
-    [activeFilePath, openFileContent, openFileTabs, patchWorkspaceState, workspace],
+    [activeFilePath, openFileContent, openFileTabs, patchWorkspaceState, selectedFileDirty, t, workspace],
   )
 
   const handleSelectFileTab = useCallback(
     async (relativePath: string) => {
       if (!workspace || activeFilePath === relativePath) {
+        return
+      }
+
+      if (selectedFileDirty && !window.confirm(t("pages.workspace.confirm.discardUnsaved"))) {
         return
       }
 
@@ -443,7 +639,7 @@ export function useWorkspacePage() {
         }),
       })
     },
-    [activeFilePath, openFileContent, openFileTabs, patchWorkspaceState, workspace],
+    [activeFilePath, openFileContent, openFileTabs, patchWorkspaceState, selectedFileDirty, t, workspace],
   )
 
   return {
@@ -451,18 +647,26 @@ export function useWorkspacePage() {
     consoleCommand,
     consoleEntries,
     consoleOpen,
+    editorContent,
     editorTheme,
     explorerPanel,
     fileError,
     gitStatus,
     gitStatusFetching,
+    gitOperationPending,
     handleClearConsole,
     handleCloseFileTab,
     handleCloseWorkspace,
+    handleConsoleHistory,
+    handleGitCommit,
+    handleGitDiscard,
+    handleGitStage,
+    handleGitUnstage,
     handleOpenFile,
     handleOpenFolder,
     handleRefreshGitStatus,
     handleRunConsoleCommand,
+    handleSaveFile,
     handleSelectExplorerPanel,
     handleSelectFileTab,
     handleSetMarkdownMode,
@@ -478,7 +682,10 @@ export function useWorkspacePage() {
     openWorkspacePath,
     recentWorkspaces,
     selectedFile,
+    selectedFileDirty,
     setConsoleCommand,
+    setEditorContent,
+    savingFile,
     treeData,
     treeHeight,
     treeHostRef,

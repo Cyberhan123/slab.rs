@@ -55,6 +55,7 @@ export type WorkspaceFileContent = {
   name: string
   content: string
   sizeBytes: number
+  contentHash: string
 }
 
 export type WorkspaceGitFileStatus =
@@ -70,6 +71,7 @@ export type WorkspaceGitStatusEntry = {
   path: string
   originalPath: string | null
   status: WorkspaceGitFileStatus
+  staged: boolean
 }
 
 export type WorkspaceGitStatusSummary = {
@@ -98,6 +100,22 @@ export type WorkspaceConsoleOutput = {
   stdout: string
   stderr: string
   timedOut: boolean
+}
+
+export type WorkspaceWriteFileCommand = {
+  relativePath: string
+  content: string
+  expectedHash?: string | null
+}
+
+export type WorkspaceWriteFileResult = {
+  relativePath: string
+  sizeBytes: number
+  contentHash: string
+}
+
+export type WorkspaceGitOperationResult = {
+  status: WorkspaceGitStatus
 }
 
 export type WorkspacePluginPreferenceUpdate = {
@@ -147,6 +165,14 @@ export async function workspaceReadFile(relativePath: string): Promise<Workspace
   return invoke<WorkspaceFileContent>("workspace_read_file", { relativePath })
 }
 
+export async function workspaceWriteFile(command: WorkspaceWriteFileCommand): Promise<WorkspaceWriteFileResult> {
+  if (!isTauri()) {
+    throw new Error("workspace files are only available in the desktop app")
+  }
+
+  return invoke<WorkspaceWriteFileResult>("workspace_write_file", { command })
+}
+
 export async function workspaceGitStatus(): Promise<WorkspaceGitStatus> {
   if (!isTauri()) {
     return {
@@ -169,6 +195,38 @@ export async function workspaceGitStatus(): Promise<WorkspaceGitStatus> {
   }
 
   return invoke<WorkspaceGitStatus>("workspace_git_status")
+}
+
+export async function workspaceGitStage(path: string): Promise<WorkspaceGitOperationResult> {
+  if (!isTauri()) {
+    throw new Error("workspace Git operations are only available in the desktop app")
+  }
+
+  return invoke<WorkspaceGitOperationResult>("workspace_git_stage", { command: { path } })
+}
+
+export async function workspaceGitUnstage(path: string): Promise<WorkspaceGitOperationResult> {
+  if (!isTauri()) {
+    throw new Error("workspace Git operations are only available in the desktop app")
+  }
+
+  return invoke<WorkspaceGitOperationResult>("workspace_git_unstage", { command: { path } })
+}
+
+export async function workspaceGitDiscard(path: string): Promise<WorkspaceGitOperationResult> {
+  if (!isTauri()) {
+    throw new Error("workspace Git operations are only available in the desktop app")
+  }
+
+  return invoke<WorkspaceGitOperationResult>("workspace_git_discard", { command: { path } })
+}
+
+export async function workspaceGitCommit(message: string): Promise<WorkspaceGitOperationResult> {
+  if (!isTauri()) {
+    throw new Error("workspace Git operations are only available in the desktop app")
+  }
+
+  return invoke<WorkspaceGitOperationResult>("workspace_git_commit", { command: { message } })
 }
 
 export async function workspaceConsoleRun(command: string): Promise<WorkspaceConsoleOutput> {
