@@ -43,6 +43,8 @@ fn main() {
             "workspace_close",
             "workspace_read_directory",
             "workspace_read_file",
+            "workspace_git_status",
+            "workspace_console_run",
             "workspace_update_plugin_preference",
         ]));
 

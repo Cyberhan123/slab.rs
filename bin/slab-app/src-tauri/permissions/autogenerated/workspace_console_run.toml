@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-workspace-console-run"
+description = "Enables the workspace_console_run command without any pre-configured scope."
+commands.allow = ["workspace_console_run"]
+
+[[permission]]
+identifier = "deny-workspace-console-run"
+description = "Denies the workspace_console_run command without any pre-configured scope."
+commands.deny = ["workspace_console_run"]

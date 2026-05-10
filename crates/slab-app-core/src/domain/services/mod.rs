@@ -15,6 +15,7 @@ mod system;
 mod task;
 mod ui_state;
 mod video;
+mod workspace;
 
 pub use agent::AgentService;
 pub use audio::AudioService;
@@ -33,6 +34,7 @@ pub use system::SystemService;
 pub use task::TaskApplicationService;
 pub use ui_state::UiStateService;
 pub use video::VideoService;
+pub use workspace::WorkspaceService;
 
 use std::sync::Arc;
 

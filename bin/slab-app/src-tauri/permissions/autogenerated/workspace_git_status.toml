@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-workspace-git-status"
+description = "Enables the workspace_git_status command without any pre-configured scope."
+commands.allow = ["workspace_git_status"]
+
+[[permission]]
+identifier = "deny-workspace-git-status"
+description = "Denies the workspace_git_status command without any pre-configured scope."
+commands.deny = ["workspace_git_status"]
