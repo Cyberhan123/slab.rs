@@ -47,7 +47,6 @@ export const workspace = {
     discard: '放弃',
     commit: '提交',
     commitPlaceholder: '提交信息',
-    push: 'Push',
     status: {
       added: '新增',
       modified: '已修改',
@@ -68,6 +67,8 @@ export const workspace = {
     },
   },
   console: {
+    terminal: 'Terminal',
+    newTerminal: 'New terminal',
     title: '控制台',
     show: '控制台',
     hide: '隐藏控制台',
@@ -101,6 +102,5 @@ export const workspace = {
     gitFailed: 'Git 操作失败',
     pluginFailed: '更新插件偏好失败',
     consoleFailed: '运行命令失败',
-    gitPushed: 'Pushed changes',
   },
 } as const;

@@ -233,14 +233,6 @@ export async function workspaceGitCommit(message: string): Promise<WorkspaceGitO
   return invoke<WorkspaceGitOperationResult>("workspace_git_commit", { command: { message } })
 }
 
-export async function workspaceGitPush(): Promise<WorkspaceGitOperationResult> {
-  if (!isTauri()) {
-    throw new Error("workspace Git operations are only available in the desktop app")
-  }
-
-  return invoke<WorkspaceGitOperationResult>("workspace_git_push")
-}
-
 export async function workspaceConsoleRun(command: string): Promise<WorkspaceConsoleOutput> {
   if (!isTauri()) {
     throw new Error("workspace console is only available in the desktop app")

@@ -5,18 +5,24 @@ import { FitAddon } from "@xterm/addon-fit"
 import { Unicode11Addon } from "@xterm/addon-unicode11"
 import { WebLinksAddon } from "@xterm/addon-web-links"
 import { Terminal as XtermTerminal, type IDisposable, type ITerminalAddon, type ITheme } from "@xterm/xterm"
-import { Terminal, Trash2 } from "lucide-react"
-import { useEffect, useMemo, useRef } from "react"
+import { Plus, Terminal, Trash2, X } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { Button } from "@slab/components/button"
 import { useTranslation } from "@slab/i18n"
 import { getErrorMessage } from "@slab/api"
 import { workspaceTerminalSession } from "@/lib/workspace-bridge"
+import { cn } from "@/lib/utils"
 
 type WorkspaceConsolePanelProps = {
   themeMode: "light" | "dark"
   workspaceRoot: string
+}
+
+type TerminalSession = {
+  id: string
+  index: number
 }
 
 type TerminalControlMessage =
@@ -90,13 +96,186 @@ const darkTheme: ITheme = {
   brightWhite: "#ffffff",
 }
 
+function createTerminalSession(index: number): TerminalSession {
+  return {
+    id: `terminal-${Date.now()}-${index}`,
+    index,
+  }
+}
+
 export function WorkspaceConsolePanel({ themeMode, workspaceRoot }: WorkspaceConsolePanelProps) {
+  const { t } = useTranslation()
+  const terminalRefs = useRef(new Map<string, XtermTerminal>())
+  const nextSessionIndexRef = useRef(1)
+  const workspaceRootRef = useRef(workspaceRoot)
+  const [sessions, setSessions] = useState<TerminalSession[]>(() => [createTerminalSession(1)])
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(() => sessions[0].id)
+  const theme = useMemo(() => (themeMode === "dark" ? darkTheme : lightTheme), [themeMode])
+
+  useEffect(() => {
+    if (workspaceRootRef.current === workspaceRoot) {
+      return
+    }
+    workspaceRootRef.current = workspaceRoot
+    nextSessionIndexRef.current = 1
+    const session = createTerminalSession(1)
+    terminalRefs.current.clear()
+    setSessions([session])
+    setActiveSessionId(session.id)
+  }, [workspaceRoot])
+
+  const handleTerminalReady = useCallback((sessionId: string, terminal: XtermTerminal | null) => {
+    if (terminal) {
+      terminalRefs.current.set(sessionId, terminal)
+      return
+    }
+    terminalRefs.current.delete(sessionId)
+  }, [])
+
+  const handleNewTerminal = useCallback(() => {
+    nextSessionIndexRef.current += 1
+    const session = createTerminalSession(nextSessionIndexRef.current)
+    setSessions((current) => [...current, session])
+    setActiveSessionId(session.id)
+  }, [])
+
+  const handleCloseTerminal = useCallback(
+    (sessionId: string) => {
+      const closingIndex = sessions.findIndex((session) => session.id === sessionId)
+      if (closingIndex < 0) {
+        return
+      }
+
+      const nextSessions = sessions.filter((session) => session.id !== sessionId)
+      setSessions(nextSessions)
+      setActiveSessionId((currentActiveId) => {
+        if (currentActiveId !== sessionId) {
+          return currentActiveId
+        }
+        return nextSessions[Math.min(closingIndex, nextSessions.length - 1)]?.id ?? null
+      })
+    },
+    [sessions],
+  )
+
+  return (
+    <section className="workspace-soft-panel flex h-[260px] shrink-0 flex-col overflow-hidden rounded-[18px]">
+      <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-b border-border/60 px-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2 text-sm font-semibold">
+            <Terminal className="size-4 text-[var(--brand-teal)]" />
+            {t("pages.workspace.console.title")}
+          </div>
+          <div className="flex min-w-0 items-center gap-1 overflow-x-auto" role="tablist">
+            {sessions.map((session) => {
+              const active = session.id === activeSessionId
+              const name = `${t("pages.workspace.console.terminal")} ${session.index}`
+
+              return (
+                <div
+                  key={session.id}
+                  className={cn(
+                    "flex h-6 shrink-0 items-center gap-1 rounded-full pl-2 pr-1 text-[11px] font-medium text-muted-foreground transition hover:bg-[var(--surface-selected)] hover:text-foreground",
+                    active && "bg-[var(--surface-selected)] text-foreground",
+                  )}
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    className="h-full min-w-0 outline-none"
+                    onClick={() => setActiveSessionId(session.id)}
+                  >
+                    {name}
+                  </button>
+                  <button
+                    type="button"
+                    className="flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                    aria-label={t("pages.workspace.tabs.close", { name })}
+                    title={t("pages.workspace.tabs.close", { name })}
+                    onClick={() => handleCloseTerminal(session.id)}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            type="button"
+            variant="quiet"
+            size="icon-xs"
+            onClick={handleNewTerminal}
+            aria-label={t("pages.workspace.console.newTerminal")}
+          >
+            <Plus className="size-3.5" />
+          </Button>
+          <Button
+            type="button"
+            variant="quiet"
+            size="icon-xs"
+            disabled={!activeSessionId}
+            onClick={() => {
+              if (activeSessionId) {
+                terminalRefs.current.get(activeSessionId)?.clear()
+              }
+            }}
+            aria-label={t("pages.workspace.console.clear")}
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
+        </div>
+      </div>
+
+      <div className="relative min-h-0 flex-1 bg-[var(--surface-1)]">
+        {sessions.length > 0 ? (
+          sessions.map((session) => (
+            <TerminalSessionPane
+              key={session.id}
+              active={session.id === activeSessionId}
+              sessionId={session.id}
+              theme={theme}
+              themeMode={themeMode}
+              workspaceRoot={workspaceRoot}
+              onTerminalReady={handleTerminalReady}
+            />
+          ))
+        ) : (
+          <div className="flex h-full items-center justify-center">
+            <Button type="button" variant="quiet" size="sm" onClick={handleNewTerminal}>
+              <Plus className="size-3.5" />
+              {t("pages.workspace.console.newTerminal")}
+            </Button>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function TerminalSessionPane({
+  active,
+  onTerminalReady,
+  sessionId,
+  theme,
+  themeMode,
+  workspaceRoot,
+}: {
+  active: boolean
+  onTerminalReady: (sessionId: string, terminal: XtermTerminal | null) => void
+  sessionId: string
+  theme: ITheme
+  themeMode: "light" | "dark"
+  workspaceRoot: string
+}) {
   const { t } = useTranslation()
   const hostRef = useRef<HTMLDivElement | null>(null)
   const terminalRef = useRef<XtermTerminal | null>(null)
   const socketRef = useRef<WebSocket | null>(null)
+  const fitAddonRef = useRef<FitAddon | null>(null)
   const initialThemeModeRef = useRef(themeMode)
-  const theme = useMemo(() => (themeMode === "dark" ? darkTheme : lightTheme), [themeMode])
 
   useEffect(() => {
     const host = hostRef.current
@@ -132,8 +311,9 @@ export function WorkspaceConsolePanel({ themeMode, workspaceRoot }: WorkspaceCon
     terminal.unicode.activeVersion = "11"
     terminal.open(host)
     fitAddon.fit()
-    terminal.focus()
     terminalRef.current = terminal
+    fitAddonRef.current = fitAddon
+    onTerminalReady(sessionId, terminal)
 
     const sendControl = (message: TerminalControlMessage) => {
       const socket = socketRef.current
@@ -169,7 +349,6 @@ export function WorkspaceConsolePanel({ themeMode, workspaceRoot }: WorkspaceCon
         socketRef.current = socket
         socket.addEventListener("open", () => {
           sendResize()
-          terminal.focus()
         })
         socket.addEventListener("message", (event) => {
           if (event.data instanceof ArrayBuffer) {
@@ -205,8 +384,10 @@ export function WorkspaceConsolePanel({ themeMode, workspaceRoot }: WorkspaceCon
       socketRef.current = null
       terminal.dispose()
       terminalRef.current = null
+      fitAddonRef.current = null
+      onTerminalReady(sessionId, null)
     }
-  }, [t, workspaceRoot])
+  }, [onTerminalReady, sessionId, t, workspaceRoot])
 
   useEffect(() => {
     if (terminalRef.current) {
@@ -214,25 +395,20 @@ export function WorkspaceConsolePanel({ themeMode, workspaceRoot }: WorkspaceCon
     }
   }, [theme])
 
-  return (
-    <section className="workspace-soft-panel flex h-[260px] shrink-0 flex-col overflow-hidden rounded-[18px]">
-      <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-b border-border/60 px-3">
-        <div className="flex items-center gap-2 text-sm font-semibold">
-          <Terminal className="size-4 text-[var(--brand-teal)]" />
-          {t("pages.workspace.console.title")}
-        </div>
-        <Button
-          type="button"
-          variant="quiet"
-          size="icon-xs"
-          onClick={() => terminalRef.current?.clear()}
-          aria-label={t("pages.workspace.console.clear")}
-        >
-          <Trash2 className="size-3.5" />
-        </Button>
-      </div>
+  useEffect(() => {
+    if (!active) {
+      return
+    }
+    fitAddonRef.current?.fit()
+    terminalRef.current?.focus()
+  }, [active])
 
-      <div ref={hostRef} className="min-h-0 flex-1 bg-[var(--surface-1)] px-2 py-2" />
-    </section>
+  return (
+    <div
+      role="tabpanel"
+      ref={hostRef}
+      className={cn("absolute inset-0 min-h-0 px-2 py-2", !active && "pointer-events-none opacity-0")}
+      aria-hidden={!active}
+    />
   )
 }

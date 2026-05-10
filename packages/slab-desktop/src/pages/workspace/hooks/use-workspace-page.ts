@@ -11,7 +11,6 @@ import {
   workspaceClose,
   workspaceGitCommit,
   workspaceGitDiscard,
-  workspaceGitPush,
   workspaceGitStage,
   workspaceGitStatus,
   workspaceGitUnstage,
@@ -96,6 +95,7 @@ export function useWorkspacePage() {
     queryKey: ["workspace-git-status", workspace?.rootPath],
     queryFn: workspaceGitStatus,
     enabled: isDesktopTauri && Boolean(workspace),
+    refetchInterval: 30_000,
     retry: false,
   })
   const saveFileMutation = useMutation({
@@ -113,16 +113,12 @@ export function useWorkspacePage() {
   const gitCommitMutation = useMutation({
     mutationFn: workspaceGitCommit,
   })
-  const gitPushMutation = useMutation({
-    mutationFn: workspaceGitPush,
-  })
   const savingFile = saveFileMutation.isPending
   const gitOperationPending =
     gitStageMutation.isPending ||
     gitUnstageMutation.isPending ||
     gitDiscardMutation.isPending ||
-    gitCommitMutation.isPending ||
-    gitPushMutation.isPending
+    gitCommitMutation.isPending
   const selectedFileDirty = Boolean(selectedFile && editorContent !== selectedFile.content)
 
   useEffect(() => {
@@ -491,18 +487,6 @@ export function useWorkspacePage() {
     [applyGitStatus, gitCommitMutation, t],
   )
 
-  const handleGitPush = useCallback(async () => {
-    try {
-      const result = await gitPushMutation.mutateAsync()
-      applyGitStatus(result.status)
-      toast.success(t("pages.workspace.toast.gitPushed"))
-    } catch (error) {
-      toast.error(t("pages.workspace.toast.gitFailed"), {
-        description: getErrorMessage(error),
-      })
-    }
-  }, [applyGitStatus, gitPushMutation, t])
-
   const handleCloseFileTab = useCallback(
     async (relativePath: string) => {
       if (!workspace) {
@@ -589,7 +573,6 @@ export function useWorkspacePage() {
     handleCloseWorkspace,
     handleGitCommit,
     handleGitDiscard,
-    handleGitPush,
     handleGitStage,
     handleGitUnstage,
     handleOpenFile,
