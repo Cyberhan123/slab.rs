@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, State};
+use axum::extract::{Path as AxumPath, State};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use futures::{SinkExt, StreamExt};
@@ -119,7 +119,7 @@ pub fn init<R: tauri::Runtime>(app: &mut tauri::App<R>) -> Result<(), String> {
 
 async fn upgrade_terminal(
     State(state): State<TerminalServerInner>,
-    Path(session_id): Path<String>,
+    AxumPath(session_id): AxumPath<String>,
     upgrade: WebSocketUpgrade,
 ) -> impl IntoResponse {
     upgrade.on_upgrade(move |socket| handle_terminal_socket(state, session_id, socket))
@@ -147,7 +147,7 @@ async fn run_terminal_session(root_path: PathBuf, socket: WebSocket) -> Result<(
         })
         .map_err(|error| format!("failed to open workspace terminal pty: {error}"))?;
     let mut command = shell_command();
-    command.cwd(root_path);
+    command.cwd(terminal_cwd(&root_path));
     configure_prompt(&mut command);
     let mut child = pair
         .slave
@@ -264,9 +264,8 @@ fn spawn_pty_reader(mut reader: Box<dyn Read + Send>, output_tx: mpsc::Unbounded
 
 #[cfg(windows)]
 fn shell_command() -> CommandBuilder {
-    let shell = std::env::var("ComSpec").unwrap_or_else(|_| "cmd.exe".to_string());
-    let mut command = CommandBuilder::new(shell);
-    command.env("PROMPT", "slab $P$G ");
+    let mut command = CommandBuilder::new("powershell.exe");
+    command.arg("-NoLogo");
     command
 }
 
@@ -282,4 +281,39 @@ fn configure_prompt(_command: &mut CommandBuilder) {}
 #[cfg(not(windows))]
 fn configure_prompt(command: &mut CommandBuilder) {
     command.env("PS1", "\\[\\e[36m\\]\\w\\[\\e[0m\\] \\[\\e[32m\\]>\\[\\e[0m\\] ");
+}
+
+#[cfg(windows)]
+fn terminal_cwd(path: &Path) -> PathBuf {
+    let raw = path.to_string_lossy();
+    if let Some(path) = raw.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{path}"));
+    }
+    if let Some(path) = raw.strip_prefix(r"\\?\") {
+        return PathBuf::from(path);
+    }
+    path.to_path_buf()
+}
+
+#[cfg(not(windows))]
+fn terminal_cwd(path: &Path) -> PathBuf {
+    path.to_path_buf()
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::terminal_cwd;
+    use std::path::Path;
+
+    #[test]
+    fn terminal_cwd_strips_windows_extended_path_prefix() {
+        assert_eq!(
+            terminal_cwd(Path::new(r"\\?\C:\Users\example\repo")),
+            Path::new(r"C:\Users\example\repo")
+        );
+        assert_eq!(
+            terminal_cwd(Path::new(r"\\?\UNC\server\share\repo")),
+            Path::new(r"\\server\share\repo")
+        );
+    }
 }

@@ -178,13 +178,12 @@ impl WorkspaceService {
             run_git_operation(root, &["add", "--all"])?;
         }
         run_git_operation(root, &["commit", "-m", message])?;
-        Ok(WorkspaceGitOperationView { status: Self::git_status(root)? })
-    }
-
-    pub fn git_push(root: impl AsRef<Path>) -> Result<WorkspaceGitOperationView, AppCoreError> {
-        let root = root.as_ref();
-        run_git_operation(root, &["push"])?;
-        Ok(WorkspaceGitOperationView { status: Self::git_status(root)? })
+        let status = Self::git_status(root)?;
+        if should_push_after_commit(&status) {
+            run_git_operation(root, &["push"])?;
+            return Ok(WorkspaceGitOperationView { status: Self::git_status(root)? });
+        }
+        Ok(WorkspaceGitOperationView { status })
     }
 
     pub async fn run_console_command(
@@ -258,8 +257,8 @@ fn run_git_operation(root: &Path, args: &[&str]) -> Result<(), AppCoreError> {
 
 #[cfg(windows)]
 fn shell_command(command: &str) -> TokioCommand {
-    let mut process = TokioCommand::new("cmd");
-    process.args(["/C", command]);
+    let mut process = TokioCommand::new("powershell.exe");
+    process.args(["-NoLogo", "-NoProfile", "-Command", command]);
     process
 }
 
@@ -385,6 +384,10 @@ fn should_stage_all_before_commit(status: &WorkspaceGitStatusView) -> bool {
     !status.entries.is_empty() && status.entries.iter().all(|entry| !entry.staged)
 }
 
+fn should_push_after_commit(status: &WorkspaceGitStatusView) -> bool {
+    status.available && status.is_repository && status.entries.is_empty()
+}
+
 fn decode_limited_output(bytes: &[u8]) -> String {
     if bytes.len() <= MAX_CONSOLE_OUTPUT_BYTES {
         return String::from_utf8_lossy(bytes).into_owned();
@@ -483,7 +486,7 @@ fn content_hash(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_relative_path, parse_branch_line, parse_git_status,
+        normalize_relative_path, parse_branch_line, parse_git_status, should_push_after_commit,
         should_stage_all_before_commit,
     };
     use crate::domain::models::{
@@ -555,5 +558,35 @@ mod tests {
         assert!(should_stage_all_before_commit(&unstaged_status));
         assert!(!should_stage_all_before_commit(&mixed_status));
         assert!(!should_stage_all_before_commit(&WorkspaceGitStatusView::default()));
+    }
+
+    #[test]
+    fn commit_pushes_only_after_clean_commit_status() {
+        let clean_repository = WorkspaceGitStatusView {
+            available: true,
+            is_repository: true,
+            ..WorkspaceGitStatusView::default()
+        };
+        let dirty_repository = WorkspaceGitStatusView {
+            available: true,
+            is_repository: true,
+            entries: vec![WorkspaceGitStatusEntry {
+                path: "src/main.rs".to_string(),
+                original_path: None,
+                status: WorkspaceGitFileStatus::Modified,
+                staged: false,
+            }],
+            ..WorkspaceGitStatusView::default()
+        };
+        let unavailable_git = WorkspaceGitStatusView {
+            available: false,
+            is_repository: true,
+            ..WorkspaceGitStatusView::default()
+        };
+
+        assert!(should_push_after_commit(&clean_repository));
+        assert!(!should_push_after_commit(&dirty_repository));
+        assert!(!should_push_after_commit(&unavailable_git));
+        assert!(!should_push_after_commit(&WorkspaceGitStatusView::default()));
     }
 }

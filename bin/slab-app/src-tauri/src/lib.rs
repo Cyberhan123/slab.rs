@@ -57,7 +57,6 @@ pub fn run() {
             workspace::workspace_git_unstage,
             workspace::workspace_git_discard,
             workspace::workspace_git_commit,
-            workspace::workspace_git_push,
             workspace::workspace_console_run,
             workspace::workspace_update_plugin_preference,
             terminal::workspace_terminal_session,

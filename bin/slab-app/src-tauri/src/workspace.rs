@@ -396,15 +396,6 @@ pub fn workspace_git_commit(
 }
 
 #[tauri::command]
-pub fn workspace_git_push(
-    state: State<'_, WorkspaceState>,
-) -> Result<WorkspaceGitOperationView, String> {
-    let workspace = active_workspace(&state)?;
-    WorkspaceService::git_push(PathBuf::from(workspace.root_path))
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
 pub async fn workspace_console_run(
     state: State<'_, WorkspaceState>,
     command: String,
@@ -496,14 +487,14 @@ fn prepare_workspace(root_path: PathBuf) -> Result<WorkspaceInfo, String> {
     let name = root.file_name().and_then(|name| name.to_str()).unwrap_or("Workspace").to_owned();
 
     Ok(WorkspaceInfo {
-        root_path: root.to_string_lossy().into_owned(),
+        root_path: workspace_path_string(&root),
         name,
-        slab_dir: slab_dir.to_string_lossy().into_owned(),
-        settings_path: settings_path.to_string_lossy().into_owned(),
-        workspace_config_path: workspace_config_path.to_string_lossy().into_owned(),
-        database_path: slab_dir.join(DATABASE_FILE).to_string_lossy().into_owned(),
-        model_config_dir: model_config_dir.to_string_lossy().into_owned(),
-        session_state_dir: session_state_dir.to_string_lossy().into_owned(),
+        slab_dir: workspace_path_string(&slab_dir),
+        settings_path: workspace_path_string(&settings_path),
+        workspace_config_path: workspace_path_string(&workspace_config_path),
+        database_path: workspace_path_string(&slab_dir.join(DATABASE_FILE)),
+        model_config_dir: workspace_path_string(&model_config_dir),
+        session_state_dir: workspace_path_string(&session_state_dir),
     })
 }
 
@@ -647,6 +638,23 @@ fn sqlite_url_for_path(path: &Path) -> String {
     format!("{prefix}{normalized}?mode=rwc")
 }
 
+#[cfg(windows)]
+fn workspace_path_string(path: &Path) -> String {
+    let raw = path.to_string_lossy();
+    if let Some(path) = raw.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{path}");
+    }
+    if let Some(path) = raw.strip_prefix(r"\\?\") {
+        return path.to_string();
+    }
+    raw.into_owned()
+}
+
+#[cfg(not(windows))]
+fn workspace_path_string(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
 fn validate_plugin_id(plugin_id: &str) -> Result<(), String> {
     let valid = (2..=64).contains(&plugin_id.len())
         && plugin_id.bytes().all(|byte| {
@@ -693,6 +701,19 @@ mod tests {
     fn sqlite_url_for_path_uses_file_url_shape() {
         assert!(
             sqlite_url_for_path(Path::new("C:/Project/.slab/slab.db")).starts_with("sqlite:///")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workspace_path_string_strips_windows_extended_path_prefix() {
+        assert_eq!(
+            super::workspace_path_string(Path::new(r"\\?\C:\Users\example\repo")),
+            r"C:\Users\example\repo"
+        );
+        assert_eq!(
+            super::workspace_path_string(Path::new(r"\\?\UNC\server\share\repo")),
+            r"\\server\share\repo"
         );
     }
 }

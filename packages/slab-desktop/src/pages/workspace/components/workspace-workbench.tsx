@@ -41,7 +41,6 @@ export function WorkspaceWorkbench({
   handleCloseWorkspace,
   handleGitCommit,
   handleGitDiscard,
-  handleGitPush,
   handleGitStage,
   handleGitUnstage,
   handleOpenFile,
@@ -226,7 +225,6 @@ export function WorkspaceWorkbench({
                 onCommit={handleGitCommit}
                 onDiscard={handleGitDiscard}
                 onOpenFile={handleOpenFile}
-                onPush={handleGitPush}
                 onRefresh={handleRefreshGitStatus}
                 onStage={handleGitStage}
                 onUnstage={handleGitUnstage}
