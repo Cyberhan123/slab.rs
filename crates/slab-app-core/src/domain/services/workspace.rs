@@ -173,7 +173,17 @@ impl WorkspaceService {
         if message.is_empty() {
             return Err(AppCoreError::BadRequest("commit message cannot be empty".to_string()));
         }
+        let status = Self::git_status(root)?;
+        if should_stage_all_before_commit(&status) {
+            run_git_operation(root, &["add", "--all"])?;
+        }
         run_git_operation(root, &["commit", "-m", message])?;
+        Ok(WorkspaceGitOperationView { status: Self::git_status(root)? })
+    }
+
+    pub fn git_push(root: impl AsRef<Path>) -> Result<WorkspaceGitOperationView, AppCoreError> {
+        let root = root.as_ref();
+        run_git_operation(root, &["push"])?;
         Ok(WorkspaceGitOperationView { status: Self::git_status(root)? })
     }
 
@@ -371,6 +381,10 @@ fn increment_summary(summary: &mut WorkspaceGitStatusSummary, status: WorkspaceG
     }
 }
 
+fn should_stage_all_before_commit(status: &WorkspaceGitStatusView) -> bool {
+    !status.entries.is_empty() && status.entries.iter().all(|entry| !entry.staged)
+}
+
 fn decode_limited_output(bytes: &[u8]) -> String {
     if bytes.len() <= MAX_CONSOLE_OUTPUT_BYTES {
         return String::from_utf8_lossy(bytes).into_owned();
@@ -468,8 +482,13 @@ fn content_hash(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_relative_path, parse_branch_line, parse_git_status};
-    use crate::domain::models::WorkspaceGitFileStatus;
+    use super::{
+        normalize_relative_path, parse_branch_line, parse_git_status,
+        should_stage_all_before_commit,
+    };
+    use crate::domain::models::{
+        WorkspaceGitFileStatus, WorkspaceGitStatusEntry, WorkspaceGitStatusView,
+    };
 
     #[test]
     fn parses_branch_with_tracking_status() {
@@ -502,5 +521,39 @@ mod tests {
     #[test]
     fn normalize_relative_path_rejects_parent_segments() {
         assert!(normalize_relative_path("../outside.txt").is_err());
+    }
+
+    #[test]
+    fn commit_auto_stages_only_when_index_is_empty() {
+        let unstaged_status = WorkspaceGitStatusView {
+            entries: vec![WorkspaceGitStatusEntry {
+                path: "src/main.rs".to_string(),
+                original_path: None,
+                status: WorkspaceGitFileStatus::Modified,
+                staged: false,
+            }],
+            ..WorkspaceGitStatusView::default()
+        };
+        let mixed_status = WorkspaceGitStatusView {
+            entries: vec![
+                WorkspaceGitStatusEntry {
+                    path: "src/main.rs".to_string(),
+                    original_path: None,
+                    status: WorkspaceGitFileStatus::Modified,
+                    staged: false,
+                },
+                WorkspaceGitStatusEntry {
+                    path: "README.md".to_string(),
+                    original_path: None,
+                    status: WorkspaceGitFileStatus::Modified,
+                    staged: true,
+                },
+            ],
+            ..WorkspaceGitStatusView::default()
+        };
+
+        assert!(should_stage_all_before_commit(&unstaged_status));
+        assert!(!should_stage_all_before_commit(&mixed_status));
+        assert!(!should_stage_all_before_commit(&WorkspaceGitStatusView::default()));
     }
 }

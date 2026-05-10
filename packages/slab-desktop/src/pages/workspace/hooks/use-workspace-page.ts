@@ -9,9 +9,9 @@ import { usePageHeader } from "@/hooks/use-global-header-meta"
 import { isTauri } from "@/hooks/use-tauri"
 import {
   workspaceClose,
-  workspaceConsoleRun,
   workspaceGitCommit,
   workspaceGitDiscard,
+  workspaceGitPush,
   workspaceGitStage,
   workspaceGitStatus,
   workspaceGitUnstage,
@@ -21,7 +21,6 @@ import {
   workspaceState,
   workspaceWriteFile,
   WORKSPACE_STATE_QUERY_KEY,
-  type WorkspaceConsoleOutput,
   type WorkspaceFileContent,
   type WorkspaceGitStatus,
 } from "@/lib/workspace-bridge"
@@ -40,11 +39,6 @@ import {
   type WorkspaceTreeNode,
 } from "../lib/workspace-page-utils"
 
-export type WorkspaceConsoleEntry = WorkspaceConsoleOutput & {
-  id: string
-  startedAt: number
-}
-
 export function useWorkspacePage() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -54,11 +48,6 @@ export function useWorkspacePage() {
   const [editorContent, setEditorContent] = useState("")
   const [fileError, setFileError] = useState<string | null>(null)
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set())
-  const [consoleCommand, setConsoleCommand] = useState("")
-  const [consoleEntries, setConsoleEntries] = useState<WorkspaceConsoleEntry[]>([])
-  const [consoleHistory, setConsoleHistory] = useState<string[]>([])
-  const [consoleHistoryIndex, setConsoleHistoryIndex] = useState<number | null>(null)
-  const [isConsoleRunning, setIsConsoleRunning] = useState(false)
   const [editorTheme, setEditorTheme] = useState(() =>
     typeof document !== "undefined" && document.documentElement.classList.contains("dark")
       ? "github-dark"
@@ -124,12 +113,16 @@ export function useWorkspacePage() {
   const gitCommitMutation = useMutation({
     mutationFn: workspaceGitCommit,
   })
+  const gitPushMutation = useMutation({
+    mutationFn: workspaceGitPush,
+  })
   const savingFile = saveFileMutation.isPending
   const gitOperationPending =
     gitStageMutation.isPending ||
     gitUnstageMutation.isPending ||
     gitDiscardMutation.isPending ||
-    gitCommitMutation.isPending
+    gitCommitMutation.isPending ||
+    gitPushMutation.isPending
   const selectedFileDirty = Boolean(selectedFile && editorContent !== selectedFile.content)
 
   useEffect(() => {
@@ -281,10 +274,6 @@ export function useWorkspacePage() {
       setSelectedFile(null)
       setEditorContent("")
       setFileError(null)
-      setConsoleEntries([])
-      setConsoleCommand("")
-      setConsoleHistory([])
-      setConsoleHistoryIndex(null)
       restoredWorkspaceRootRef.current = null
       return
     }
@@ -502,73 +491,17 @@ export function useWorkspacePage() {
     [applyGitStatus, gitCommitMutation, t],
   )
 
-  const handleRunConsoleCommand = useCallback(async () => {
-    const command = consoleCommand.trim()
-    if (!command || isConsoleRunning) {
-      return
-    }
-
-    setConsoleCommand("")
-    setConsoleHistory((current) => [command, ...current.filter((item) => item !== command)].slice(0, 20))
-    setConsoleHistoryIndex(null)
-    setIsConsoleRunning(true)
-    const startedAt = Date.now()
+  const handleGitPush = useCallback(async () => {
     try {
-      const output = await workspaceConsoleRun(command)
-      setConsoleEntries((current) =>
-        [
-          ...current,
-          {
-            ...output,
-            id: `${startedAt}-${current.length}`,
-            startedAt,
-          },
-        ].slice(-50),
-      )
-      await refetchGitStatus()
+      const result = await gitPushMutation.mutateAsync()
+      applyGitStatus(result.status)
+      toast.success(t("pages.workspace.toast.gitPushed"))
     } catch (error) {
-      toast.error(t("pages.workspace.toast.consoleFailed"), {
+      toast.error(t("pages.workspace.toast.gitFailed"), {
         description: getErrorMessage(error),
       })
-    } finally {
-      setIsConsoleRunning(false)
     }
-  }, [consoleCommand, isConsoleRunning, refetchGitStatus, t])
-
-  const handleClearConsole = useCallback(() => {
-    setConsoleEntries([])
-  }, [])
-
-  const handleConsoleHistory = useCallback(
-    (direction: "previous" | "next") => {
-      if (consoleHistory.length === 0) {
-        return
-      }
-
-      if (direction === "previous") {
-        const nextIndex =
-          consoleHistoryIndex === null ? 0 : Math.min(consoleHistoryIndex + 1, consoleHistory.length - 1)
-        setConsoleHistoryIndex(nextIndex)
-        setConsoleCommand(consoleHistory[nextIndex] ?? "")
-        return
-      }
-
-      if (consoleHistoryIndex === null) {
-        return
-      }
-
-      const nextIndex = consoleHistoryIndex - 1
-      if (nextIndex < 0) {
-        setConsoleHistoryIndex(null)
-        setConsoleCommand("")
-        return
-      }
-
-      setConsoleHistoryIndex(nextIndex)
-      setConsoleCommand(consoleHistory[nextIndex] ?? "")
-    },
-    [consoleHistory, consoleHistoryIndex],
-  )
+  }, [applyGitStatus, gitPushMutation, t])
 
   const handleCloseFileTab = useCallback(
     async (relativePath: string) => {
@@ -644,8 +577,6 @@ export function useWorkspacePage() {
 
   return {
     activeFilePath,
-    consoleCommand,
-    consoleEntries,
     consoleOpen,
     editorContent,
     editorTheme,
@@ -654,18 +585,16 @@ export function useWorkspacePage() {
     gitStatus,
     gitStatusFetching,
     gitOperationPending,
-    handleClearConsole,
     handleCloseFileTab,
     handleCloseWorkspace,
-    handleConsoleHistory,
     handleGitCommit,
     handleGitDiscard,
+    handleGitPush,
     handleGitStage,
     handleGitUnstage,
     handleOpenFile,
     handleOpenFolder,
     handleRefreshGitStatus,
-    handleRunConsoleCommand,
     handleSaveFile,
     handleSelectExplorerPanel,
     handleSelectFileTab,
@@ -673,7 +602,6 @@ export function useWorkspacePage() {
     handleTreeToggle,
     handleToggleConsole,
     initialOpenState,
-    isConsoleRunning,
     isDesktopTauri,
     loadDirectory,
     loadingPaths,
@@ -683,7 +611,6 @@ export function useWorkspacePage() {
     recentWorkspaces,
     selectedFile,
     selectedFileDirty,
-    setConsoleCommand,
     setEditorContent,
     savingFile,
     treeData,

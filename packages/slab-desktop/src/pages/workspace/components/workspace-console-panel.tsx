@@ -1,26 +1,48 @@
 import "@xterm/xterm/css/xterm.css"
 
+import { LocalEchoAddon } from "@gytx/xterm-local-echo"
 import { FitAddon } from "@xterm/addon-fit"
 import { Unicode11Addon } from "@xterm/addon-unicode11"
 import { WebLinksAddon } from "@xterm/addon-web-links"
-import { Terminal as XtermTerminal, type ITheme } from "@xterm/xterm"
-import { Loader2, Play, Terminal, Trash2 } from "lucide-react"
+import { Terminal as XtermTerminal, type IDisposable, type ITerminalAddon, type ITheme } from "@xterm/xterm"
+import { Terminal, Trash2 } from "lucide-react"
 import { useEffect, useMemo, useRef } from "react"
+import { toast } from "sonner"
 
 import { Button } from "@slab/components/button"
 import { useTranslation } from "@slab/i18n"
-import type { WorkspaceConsoleEntry } from "../hooks/use-workspace-page"
+import { getErrorMessage } from "@slab/api"
+import { workspaceTerminalSession } from "@/lib/workspace-bridge"
 
 type WorkspaceConsolePanelProps = {
-  command: string
-  entries: WorkspaceConsoleEntry[]
-  isRunning: boolean
-  onChangeCommand: (command: string) => void
-  onClear: () => void
-  onHistory: (direction: "previous" | "next") => void
-  onRun: () => Promise<void>
   themeMode: "light" | "dark"
+  workspaceRoot: string
 }
+
+type TerminalControlMessage =
+  | {
+      type: "input"
+      data: string
+    }
+  | {
+      type: "resize"
+      cols: number
+      rows: number
+    }
+
+const localAutocompleteCommands = [
+  "bun",
+  "cargo",
+  "cd",
+  "clear",
+  "dir",
+  "git",
+  "ls",
+  "npm",
+  "pnpm",
+  "pwd",
+  "yarn",
+]
 
 const lightTheme: ITheme = {
   background: "#f8fafc",
@@ -68,21 +90,11 @@ const darkTheme: ITheme = {
   brightWhite: "#ffffff",
 }
 
-export function WorkspaceConsolePanel({
-  command,
-  entries,
-  isRunning,
-  onChangeCommand,
-  onClear,
-  onHistory,
-  onRun,
-  themeMode,
-}: WorkspaceConsolePanelProps) {
+export function WorkspaceConsolePanel({ themeMode, workspaceRoot }: WorkspaceConsolePanelProps) {
   const { t } = useTranslation()
   const hostRef = useRef<HTMLDivElement | null>(null)
   const terminalRef = useRef<XtermTerminal | null>(null)
-  const fitAddonRef = useRef<FitAddon | null>(null)
-  const renderedEntryCountRef = useRef(0)
+  const socketRef = useRef<WebSocket | null>(null)
   const initialThemeModeRef = useRef(themeMode)
   const theme = useMemo(() => (themeMode === "dark" ? darkTheme : lightTheme), [themeMode])
 
@@ -92,84 +104,115 @@ export function WorkspaceConsolePanel({
       return
     }
 
+    let disposed = false
+    const disposables: IDisposable[] = []
     const terminal = new XtermTerminal({
       allowProposedApi: true,
       convertEol: true,
-      cursorBlink: false,
-      disableStdin: true,
+      cursorBlink: true,
+      disableStdin: false,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
       fontSize: 12,
-      scrollback: 1_000,
+      scrollback: 2_000,
       theme: initialThemeModeRef.current === "dark" ? darkTheme : lightTheme,
     })
     const fitAddon = new FitAddon()
+    const localEcho = new LocalEchoAddon({
+      enableAutocomplete: true,
+      enableIncompleteInput: true,
+      historySize: 50,
+      maxAutocompleteEntries: 80,
+    })
+
     terminal.loadAddon(fitAddon)
     terminal.loadAddon(new WebLinksAddon())
     terminal.loadAddon(new Unicode11Addon())
+    terminal.loadAddon(localEcho as unknown as ITerminalAddon)
+    localEcho.addAutocompleteHandler((index: number) => (index === 0 ? localAutocompleteCommands : []))
     terminal.unicode.activeVersion = "11"
     terminal.open(host)
     fitAddon.fit()
+    terminal.focus()
     terminalRef.current = terminal
-    fitAddonRef.current = fitAddon
 
-    const observer = new ResizeObserver(() => fitAddon.fit())
+    const sendControl = (message: TerminalControlMessage) => {
+      const socket = socketRef.current
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(message))
+      }
+    }
+
+    const sendResize = () => {
+      sendControl({ type: "resize", cols: terminal.cols, rows: terminal.rows })
+    }
+
+    disposables.push(
+      terminal.onData((data) => {
+        sendControl({ type: "input", data })
+      }),
+    )
+    disposables.push(terminal.onResize(({ cols, rows }) => sendControl({ type: "resize", cols, rows })))
+
+    const observer = new ResizeObserver(() => {
+      fitAddon.fit()
+      sendResize()
+    })
     observer.observe(host)
 
+    void workspaceTerminalSession()
+      .then(({ url }) => {
+        if (disposed) {
+          return
+        }
+        const socket = new WebSocket(url)
+        socket.binaryType = "arraybuffer"
+        socketRef.current = socket
+        socket.addEventListener("open", () => {
+          sendResize()
+          terminal.focus()
+        })
+        socket.addEventListener("message", (event) => {
+          if (event.data instanceof ArrayBuffer) {
+            terminal.write(new Uint8Array(event.data))
+            return
+          }
+          if (event.data instanceof Blob) {
+            void event.data.arrayBuffer().then((buffer) => terminal.write(new Uint8Array(buffer)))
+            return
+          }
+          terminal.write(String(event.data))
+        })
+        socket.addEventListener("error", () => {
+          toast.error(t("pages.workspace.toast.consoleFailed"))
+        })
+        socket.addEventListener("close", () => {
+          if (!disposed) {
+            terminal.write("\r\n\x1b[90m[terminal disconnected]\x1b[0m\r\n")
+          }
+        })
+      })
+      .catch((error) => {
+        toast.error(t("pages.workspace.toast.consoleFailed"), {
+          description: getErrorMessage(error),
+        })
+      })
+
     return () => {
+      disposed = true
       observer.disconnect()
+      disposables.forEach((disposable) => disposable.dispose())
+      socketRef.current?.close()
+      socketRef.current = null
       terminal.dispose()
       terminalRef.current = null
-      fitAddonRef.current = null
-      renderedEntryCountRef.current = 0
     }
-  }, [])
+  }, [t, workspaceRoot])
 
   useEffect(() => {
     if (terminalRef.current) {
       terminalRef.current.options.theme = theme
     }
   }, [theme])
-
-  useEffect(() => {
-    const terminal = terminalRef.current
-    if (!terminal) {
-      return
-    }
-
-    if (entries.length === 0) {
-      terminal.clear()
-      renderedEntryCountRef.current = 0
-      terminal.writeln(t("pages.workspace.console.empty"))
-      return
-    }
-
-    if (renderedEntryCountRef.current > entries.length) {
-      terminal.clear()
-      renderedEntryCountRef.current = 0
-    }
-
-    entries.slice(renderedEntryCountRef.current).forEach((entry) => {
-      terminal.writeln(`\x1b[36m$\x1b[0m ${entry.command}`)
-      if (entry.stdout) {
-        terminal.write(entry.stdout.replaceAll("\n", "\r\n"))
-        if (!entry.stdout.endsWith("\n")) {
-          terminal.writeln("")
-        }
-      }
-      if (entry.stderr) {
-        terminal.write(`\x1b[31m${entry.stderr.replaceAll("\n", "\r\n")}\x1b[0m`)
-        if (!entry.stderr.endsWith("\n")) {
-          terminal.writeln("")
-        }
-      }
-      const status = entry.timedOut
-        ? t("pages.workspace.console.timedOut")
-        : t("pages.workspace.console.exitCode", { code: entry.exitCode ?? "-" })
-      terminal.writeln(`\x1b[90m${status}\x1b[0m`)
-      terminal.writeln("")
-    })
-    renderedEntryCountRef.current = entries.length
-  }, [entries, t])
 
   return (
     <section className="workspace-soft-panel flex h-[260px] shrink-0 flex-col overflow-hidden rounded-[18px]">
@@ -182,46 +225,14 @@ export function WorkspaceConsolePanel({
           type="button"
           variant="quiet"
           size="icon-xs"
-          onClick={onClear}
+          onClick={() => terminalRef.current?.clear()}
           aria-label={t("pages.workspace.console.clear")}
-          disabled={entries.length === 0}
         >
           <Trash2 className="size-3.5" />
         </Button>
       </div>
 
       <div ref={hostRef} className="min-h-0 flex-1 bg-[var(--surface-1)] px-2 py-2" />
-
-      <form
-        className="flex h-12 shrink-0 items-center gap-2 border-t border-border/60 bg-[var(--surface-soft)] px-3"
-        onSubmit={(event) => {
-          event.preventDefault()
-          void onRun()
-        }}
-      >
-        <span className="font-mono text-sm text-[var(--brand-teal)]">$</span>
-        <input
-          value={command}
-          onChange={(event) => onChangeCommand(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "ArrowUp") {
-              event.preventDefault()
-              onHistory("previous")
-            }
-            if (event.key === "ArrowDown") {
-              event.preventDefault()
-              onHistory("next")
-            }
-          }}
-          className="h-8 min-w-0 flex-1 rounded-[8px] border border-border/60 bg-[var(--surface-1)] px-3 font-mono text-xs outline-none transition focus:border-[var(--brand-teal)]"
-          placeholder={t("pages.workspace.console.placeholder")}
-          disabled={isRunning}
-        />
-        <Button type="submit" variant="cta" size="sm" disabled={!command.trim() || isRunning}>
-          {isRunning ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
-          {t("pages.workspace.console.run")}
-        </Button>
-      </form>
     </section>
   )
 }

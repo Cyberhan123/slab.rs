@@ -104,6 +104,7 @@
         "@ant-design/x": "^2.5.0",
         "@ant-design/x-markdown": "^2.5.0",
         "@ant-design/x-sdk": "^2.5.0",
+        "@gytx/xterm-local-echo": "^0.1.8",
         "@monaco-editor/react": "^4.7.0",
         "@shikijs/monaco": "^4.0.2",
         "@slab/api": "workspace:*",
@@ -405,6 +406,8 @@
     "@floating-ui/react-dom": ["@floating-ui/react-dom@2.1.8", "", { "dependencies": { "@floating-ui/dom": "^1.7.6" }, "peerDependencies": { "react": ">=16.8.0", "react-dom": ">=16.8.0" } }, "sha512-cC52bHwM/n/CxS87FH0yWdngEZrjdtLW/qVruo68qg+prK7ZQ4YGdut2GyDVpoGeAYe/h899rVeOVm6Oi40k2A=="],
 
     "@floating-ui/utils": ["@floating-ui/utils@0.2.11", "", {}, "sha512-RiB/yIh78pcIxl6lLMG0CgBXAZ2Y0eVHqMPYugu+9U0AeT6YBeiJpf7lbdJNIugFP5SIjwNRgo4DhR1Qxi26Gg=="],
+
+    "@gytx/xterm-local-echo": ["@gytx/xterm-local-echo@0.1.8", "", {}, "sha512-JKq/J9fLfcP4af+FNv5zW2hzokio/0KO+iOVtuKpCXBCWsShV74n5bZhU8/KiuHquAq7emVHxFCapSZftqrZVg=="],
 
     "@hookform/resolvers": ["@hookform/resolvers@5.2.2", "", { "dependencies": { "@standard-schema/utils": "^0.3.0" }, "peerDependencies": { "react-hook-form": "^7.55.0" } }, "sha512-A/IxlMLShx3KjV/HeTcTfaMxdwy690+L/ZADoeaTltLx+CVuzkeVIPuybK3jrRfw7YZnmdKsVVHAlEPIAEUNlA=="],
 

@@ -30,6 +30,8 @@ tauri-plugin-log = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tauri-plugin-dialog = "2"
+axum = { workspace = true, features = ["ws"] }
+futures = { workspace = true }
 reqwest = { workspace = true, features = ["blocking"] }
 tokio = { workspace = true }
 tauri-plugin-shell = "2"
@@ -44,6 +46,8 @@ percent-encoding = "2.3"
 base64 = { workspace = true }
 dirs-next = "2.0.0"
 validator = "0.20"
+portable-pty = "0.9.0"
+uuid = { workspace = true }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-window-state = "2"
