@@ -396,6 +396,15 @@ pub fn workspace_git_commit(
 }
 
 #[tauri::command]
+pub fn workspace_git_push(
+    state: State<'_, WorkspaceState>,
+) -> Result<WorkspaceGitOperationView, String> {
+    let workspace = active_workspace(&state)?;
+    WorkspaceService::git_push(PathBuf::from(workspace.root_path))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn workspace_console_run(
     state: State<'_, WorkspaceState>,
     command: String,
@@ -434,7 +443,7 @@ fn state_response(state: &WorkspaceState) -> Result<WorkspaceStateResponse, Stri
     Ok(WorkspaceStateResponse { current: snapshot.current, recent: snapshot.recent, config })
 }
 
-fn active_workspace(state: &WorkspaceState) -> Result<WorkspaceInfo, String> {
+pub(crate) fn active_workspace(state: &WorkspaceState) -> Result<WorkspaceInfo, String> {
     state.snapshot()?.current.ok_or_else(|| "no workspace is currently open".to_string())
 }
 

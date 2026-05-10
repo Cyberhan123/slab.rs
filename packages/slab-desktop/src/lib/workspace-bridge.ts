@@ -102,6 +102,10 @@ export type WorkspaceConsoleOutput = {
   timedOut: boolean
 }
 
+export type WorkspaceTerminalSession = {
+  url: string
+}
+
 export type WorkspaceWriteFileCommand = {
   relativePath: string
   content: string
@@ -229,12 +233,28 @@ export async function workspaceGitCommit(message: string): Promise<WorkspaceGitO
   return invoke<WorkspaceGitOperationResult>("workspace_git_commit", { command: { message } })
 }
 
+export async function workspaceGitPush(): Promise<WorkspaceGitOperationResult> {
+  if (!isTauri()) {
+    throw new Error("workspace Git operations are only available in the desktop app")
+  }
+
+  return invoke<WorkspaceGitOperationResult>("workspace_git_push")
+}
+
 export async function workspaceConsoleRun(command: string): Promise<WorkspaceConsoleOutput> {
   if (!isTauri()) {
     throw new Error("workspace console is only available in the desktop app")
   }
 
   return invoke<WorkspaceConsoleOutput>("workspace_console_run", { command })
+}
+
+export async function workspaceTerminalSession(): Promise<WorkspaceTerminalSession> {
+  if (!isTauri()) {
+    throw new Error("workspace terminal is only available in the desktop app")
+  }
+
+  return invoke<WorkspaceTerminalSession>("workspace_terminal_session")
 }
 
 export async function workspaceUpdatePluginPreference(

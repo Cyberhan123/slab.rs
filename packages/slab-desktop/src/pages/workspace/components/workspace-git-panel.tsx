@@ -1,4 +1,4 @@
-import { GitBranch, GitCommitHorizontal, Loader2, Minus, Plus, RefreshCcw, RotateCcw } from "lucide-react"
+import { GitBranch, GitCommitHorizontal, Loader2, Minus, Plus, RefreshCcw, RotateCcw, Upload } from "lucide-react"
 import { useMemo, useState } from "react"
 
 import { Button } from "@slab/components/button"
@@ -23,6 +23,7 @@ type WorkspaceGitPanelProps = {
   onCommit: (message: string) => Promise<void>
   onDiscard: (path: string) => Promise<void>
   onOpenFile: (relativePath: string) => Promise<void>
+  onPush: () => Promise<void>
   onRefresh: () => Promise<void>
   onStage: (path: string) => Promise<void>
   onUnstage: (path: string) => Promise<void>
@@ -35,6 +36,7 @@ export function WorkspaceGitPanel({
   onCommit,
   onDiscard,
   onOpenFile,
+  onPush,
   onRefresh,
   onStage,
   onUnstage,
@@ -43,6 +45,7 @@ export function WorkspaceGitPanel({
   const [commitMessage, setCommitMessage] = useState("")
   const stagedEntries = useMemo(() => gitStatus?.entries.filter((entry) => entry.staged) ?? [], [gitStatus])
   const unstagedEntries = useMemo(() => gitStatus?.entries.filter((entry) => !entry.staged) ?? [], [gitStatus])
+  const hasChanges = (gitStatus?.entries.length ?? 0) > 0
 
   if (!gitStatus) {
     return (
@@ -120,6 +123,50 @@ export function WorkspaceGitPanel({
         </div>
       </div>
 
+      <form
+        className="rounded-[12px] border border-border/50 bg-[var(--surface-1)] p-2"
+        onSubmit={(event) => {
+          event.preventDefault()
+          const message = commitMessage.trim()
+          if (!message) {
+            return
+          }
+          void onCommit(message).then(() => setCommitMessage(""))
+        }}
+      >
+        <input
+          value={commitMessage}
+          onChange={(event) => setCommitMessage(event.target.value)}
+          className="h-8 w-full rounded-[8px] border border-border/60 bg-background px-2 text-xs outline-none transition focus:border-[var(--brand-teal)]"
+          placeholder={t("pages.workspace.git.commitPlaceholder")}
+          disabled={operationPending || !hasChanges}
+        />
+        <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+          <Button
+            type="submit"
+            variant="cta"
+            size="sm"
+            className="min-w-0"
+            disabled={operationPending || !hasChanges || !commitMessage.trim()}
+          >
+            {operationPending ? <Loader2 className="size-3.5 animate-spin" /> : <GitCommitHorizontal className="size-3.5" />}
+            {t("pages.workspace.git.commit")}
+          </Button>
+          <Button
+            type="button"
+            variant="quiet"
+            size="sm"
+            disabled={operationPending}
+            onClick={() => {
+              void onPush()
+            }}
+          >
+            <Upload className="size-3.5" />
+            {t("pages.workspace.git.push")}
+          </Button>
+        </div>
+      </form>
+
       <div className="min-h-0 flex-1 overflow-y-auto rounded-[12px] bg-[var(--surface-1)] py-1">
         {gitStatus.entries.length > 0 ? (
           <div className="space-y-3 px-1">
@@ -148,36 +195,6 @@ export function WorkspaceGitPanel({
           </div>
         )}
       </div>
-
-      <form
-        className="rounded-[12px] border border-border/50 bg-[var(--surface-1)] p-2"
-        onSubmit={(event) => {
-          event.preventDefault()
-          const message = commitMessage.trim()
-          if (!message) {
-            return
-          }
-          void onCommit(message).then(() => setCommitMessage(""))
-        }}
-      >
-        <input
-          value={commitMessage}
-          onChange={(event) => setCommitMessage(event.target.value)}
-          className="h-8 w-full rounded-[8px] border border-border/60 bg-background px-2 text-xs outline-none transition focus:border-[var(--brand-teal)]"
-          placeholder={t("pages.workspace.git.commitPlaceholder")}
-          disabled={operationPending || stagedEntries.length === 0}
-        />
-        <Button
-          type="submit"
-          variant="cta"
-          size="sm"
-          className="mt-2 w-full"
-          disabled={operationPending || stagedEntries.length === 0 || !commitMessage.trim()}
-        >
-          {operationPending ? <Loader2 className="size-3.5 animate-spin" /> : <GitCommitHorizontal className="size-3.5" />}
-          {t("pages.workspace.git.commit")}
-        </Button>
-      </form>
     </div>
   )
 }

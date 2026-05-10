@@ -29,8 +29,6 @@ import { setupShikiMonaco } from "../lib/monaco-shiki"
 
 export function WorkspaceWorkbench({
   activeFilePath,
-  consoleCommand,
-  consoleEntries,
   consoleOpen,
   editorContent,
   editorTheme,
@@ -39,18 +37,16 @@ export function WorkspaceWorkbench({
   gitStatus,
   gitStatusFetching,
   gitOperationPending,
-  handleClearConsole,
   handleCloseFileTab,
   handleCloseWorkspace,
-  handleConsoleHistory,
   handleGitCommit,
   handleGitDiscard,
+  handleGitPush,
   handleGitStage,
   handleGitUnstage,
   handleOpenFile,
   handleOpenFolder,
   handleRefreshGitStatus,
-  handleRunConsoleCommand,
   handleSaveFile,
   handleSelectExplorerPanel,
   handleSelectFileTab,
@@ -58,7 +54,6 @@ export function WorkspaceWorkbench({
   handleTreeToggle,
   handleToggleConsole,
   initialOpenState,
-  isConsoleRunning,
   isDesktopTauri,
   loadDirectory,
   loadingPaths,
@@ -68,7 +63,6 @@ export function WorkspaceWorkbench({
   recentWorkspaces,
   selectedFile,
   selectedFileDirty,
-  setConsoleCommand,
   setEditorContent,
   savingFile,
   treeData,
@@ -232,6 +226,7 @@ export function WorkspaceWorkbench({
                 onCommit={handleGitCommit}
                 onDiscard={handleGitDiscard}
                 onOpenFile={handleOpenFile}
+                onPush={handleGitPush}
                 onRefresh={handleRefreshGitStatus}
                 onStage={handleGitStage}
                 onUnstage={handleGitUnstage}
@@ -372,14 +367,8 @@ export function WorkspaceWorkbench({
 
           {consoleOpen ? (
             <WorkspaceConsolePanel
-              command={consoleCommand}
-              entries={consoleEntries}
-              isRunning={isConsoleRunning}
-              onChangeCommand={setConsoleCommand}
-              onClear={handleClearConsole}
-              onHistory={handleConsoleHistory}
-              onRun={handleRunConsoleCommand}
               themeMode={terminalThemeMode}
+              workspaceRoot={workspace.rootPath}
             />
           ) : null}
         </div>

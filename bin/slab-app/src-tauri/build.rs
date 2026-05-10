@@ -49,8 +49,10 @@ fn main() {
             "workspace_git_unstage",
             "workspace_git_discard",
             "workspace_git_commit",
+            "workspace_git_push",
             "workspace_console_run",
             "workspace_update_plugin_preference",
+            "workspace_terminal_session",
         ]));
 
     tauri_build::try_build(attributes).expect("failed to run tauri build script");

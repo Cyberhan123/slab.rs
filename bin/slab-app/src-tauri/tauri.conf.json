@@ -17,7 +17,8 @@
         "script-src": "'self' asset: http://127.0.0.1:3000 blob:",
         "connect-src": [
           "'self'",
-          "http://127.0.0.1:3000"
+          "http://127.0.0.1:3000",
+          "ws://127.0.0.1:*"
         ],
         "font-src": "'self' asset:",
         "img-src": "'self' asset: http://asset.localhost blob: data:",

@@ -25,6 +25,7 @@
     "@ant-design/x": "^2.5.0",
     "@ant-design/x-markdown": "^2.5.0",
     "@ant-design/x-sdk": "^2.5.0",
+    "@gytx/xterm-local-echo": "^0.1.8",
     "@monaco-editor/react": "^4.7.0",
     "@shikijs/monaco": "^4.0.2",
     "@slab/api": "workspace:*",

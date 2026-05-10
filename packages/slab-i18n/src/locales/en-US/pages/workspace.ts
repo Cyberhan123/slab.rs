@@ -47,6 +47,7 @@ export const workspace = {
     discard: 'Discard',
     commit: 'Commit',
     commitPlaceholder: 'Commit message',
+    push: 'Push',
     status: {
       added: 'Added',
       modified: 'Modified',
@@ -97,6 +98,7 @@ export const workspace = {
     fileSaved: 'File saved',
     saveFailed: 'Failed to save file',
     gitCommitted: 'Commit created',
+    gitPushed: 'Pushed changes',
     gitFailed: 'Git operation failed',
     pluginFailed: 'Failed to update plugin preference',
     consoleFailed: 'Failed to run command',
