@@ -70,6 +70,8 @@ pub use task::{
 pub use ui_state::{DeleteUiStateView, UiStateValueView, UpdateUiStateCommand};
 pub use video::{DecodedVideoInitImage, VideoGenerationCommand};
 pub use workspace::{
-    WorkspaceConsoleOutput, WorkspaceGitFileStatus, WorkspaceGitStatusEntry,
-    WorkspaceGitStatusSummary, WorkspaceGitStatusView,
+    WorkspaceConsoleOutput, WorkspaceGitCommitCommand, WorkspaceGitFileStatus,
+    WorkspaceGitOperationView, WorkspaceGitPathCommand, WorkspaceGitStatusEntry,
+    WorkspaceGitStatusSummary, WorkspaceGitStatusView, WorkspaceWriteFileCommand,
+    WorkspaceWriteFileView,
 };

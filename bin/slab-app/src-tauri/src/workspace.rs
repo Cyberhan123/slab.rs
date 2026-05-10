@@ -8,7 +8,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use dirs_next::config_dir;
 use serde::{Deserialize, Serialize};
-use slab_app_core::domain::models::{WorkspaceConsoleOutput, WorkspaceGitStatusView};
+use sha2::{Digest, Sha256};
+use slab_app_core::domain::models::{
+    WorkspaceConsoleOutput, WorkspaceGitCommitCommand, WorkspaceGitOperationView,
+    WorkspaceGitPathCommand, WorkspaceGitStatusView, WorkspaceWriteFileCommand,
+    WorkspaceWriteFileView,
+};
 use slab_app_core::domain::services::WorkspaceService;
 use slab_types::settings::SettingsDocument;
 use tauri::{AppHandle, Manager, Runtime, State};
@@ -117,6 +122,7 @@ pub struct WorkspaceFileContent {
     pub name: String,
     pub content: String,
     pub size_bytes: u64,
+    pub content_hash: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -319,7 +325,25 @@ pub fn workspace_read_file(
         .unwrap_or(relative_path.as_str())
         .to_owned();
 
-    Ok(WorkspaceFileContent { relative_path, name, size_bytes: metadata.len(), content })
+    let content_hash = content_hash(content.as_bytes());
+
+    Ok(WorkspaceFileContent {
+        relative_path,
+        name,
+        size_bytes: metadata.len(),
+        content,
+        content_hash,
+    })
+}
+
+#[tauri::command]
+pub fn workspace_write_file(
+    state: State<'_, WorkspaceState>,
+    command: WorkspaceWriteFileCommand,
+) -> Result<WorkspaceWriteFileView, String> {
+    let workspace = active_workspace(&state)?;
+    WorkspaceService::write_file(PathBuf::from(workspace.root_path), command)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -328,6 +352,46 @@ pub fn workspace_git_status(
 ) -> Result<WorkspaceGitStatusView, String> {
     let workspace = active_workspace(&state)?;
     WorkspaceService::git_status(PathBuf::from(workspace.root_path))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_git_stage(
+    state: State<'_, WorkspaceState>,
+    command: WorkspaceGitPathCommand,
+) -> Result<WorkspaceGitOperationView, String> {
+    let workspace = active_workspace(&state)?;
+    WorkspaceService::git_stage(PathBuf::from(workspace.root_path), &command.path)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_git_unstage(
+    state: State<'_, WorkspaceState>,
+    command: WorkspaceGitPathCommand,
+) -> Result<WorkspaceGitOperationView, String> {
+    let workspace = active_workspace(&state)?;
+    WorkspaceService::git_unstage(PathBuf::from(workspace.root_path), &command.path)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_git_discard(
+    state: State<'_, WorkspaceState>,
+    command: WorkspaceGitPathCommand,
+) -> Result<WorkspaceGitOperationView, String> {
+    let workspace = active_workspace(&state)?;
+    WorkspaceService::git_discard(PathBuf::from(workspace.root_path), &command.path)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_git_commit(
+    state: State<'_, WorkspaceState>,
+    command: WorkspaceGitCommitCommand,
+) -> Result<WorkspaceGitOperationView, String> {
+    let workspace = active_workspace(&state)?;
+    WorkspaceService::git_commit(PathBuf::from(workspace.root_path), &command.message)
         .map_err(|error| error.to_string())
 }
 
@@ -587,6 +651,12 @@ fn now_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
+}
+
+fn content_hash(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 #[cfg(test)]

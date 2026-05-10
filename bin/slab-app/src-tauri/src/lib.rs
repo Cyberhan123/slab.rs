@@ -50,7 +50,12 @@ pub fn run() {
             workspace::workspace_close,
             workspace::workspace_read_directory,
             workspace::workspace_read_file,
+            workspace::workspace_write_file,
             workspace::workspace_git_status,
+            workspace::workspace_git_stage,
+            workspace::workspace_git_unstage,
+            workspace::workspace_git_discard,
+            workspace::workspace_git_commit,
             workspace::workspace_console_run,
             workspace::workspace_update_plugin_preference,
         ])

@@ -43,7 +43,12 @@ fn main() {
             "workspace_close",
             "workspace_read_directory",
             "workspace_read_file",
+            "workspace_write_file",
             "workspace_git_status",
+            "workspace_git_stage",
+            "workspace_git_unstage",
+            "workspace_git_discard",
+            "workspace_git_commit",
             "workspace_console_run",
             "workspace_update_plugin_preference",
         ]));

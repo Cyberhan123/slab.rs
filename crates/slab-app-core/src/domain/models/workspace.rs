@@ -30,6 +30,7 @@ pub struct WorkspaceGitStatusEntry {
     pub path: String,
     pub original_path: Option<String>,
     pub status: WorkspaceGitFileStatus,
+    pub staged: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -52,4 +53,38 @@ pub struct WorkspaceConsoleOutput {
     pub stdout: String,
     pub stderr: String,
     pub timed_out: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceWriteFileCommand {
+    pub relative_path: String,
+    pub content: String,
+    pub expected_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceWriteFileView {
+    pub relative_path: String,
+    pub size_bytes: u64,
+    pub content_hash: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitPathCommand {
+    pub path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitCommitCommand {
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitOperationView {
+    pub status: WorkspaceGitStatusView,
 }
