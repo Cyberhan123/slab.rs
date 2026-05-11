@@ -852,6 +852,14 @@ fn validate_language_server(provider: &PluginLanguageServerContribution) -> Resu
                 ));
             }
         }
+        PluginLanguageServerTransport::NodePackage { package, .. } => {
+            if package.trim().is_empty() {
+                return Err(format!(
+                    "language server `{}` must declare transport.package",
+                    provider.id
+                ));
+            }
+        }
         PluginLanguageServerTransport::WebSocket { url } => {
             if !(url.starts_with("ws://") || url.starts_with("wss://")) {
                 return Err(format!(

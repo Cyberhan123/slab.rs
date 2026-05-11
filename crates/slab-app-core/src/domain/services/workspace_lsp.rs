@@ -95,13 +95,20 @@ impl WorkspaceLspService {
         provider: &WorkspaceLspProvider,
         workspace_root: &Path,
     ) -> Result<WorkspaceLspProcess, AppCoreError> {
-        let PluginLanguageServerTransport::Stdio { command, args, env } =
-            &provider.contribution.transport
-        else {
-            return Err(AppCoreError::BadRequest(format!(
-                "language server '{}' does not use stdio transport",
-                provider.contribution.id
-            )));
+        let (command, args, env) = match &provider.contribution.transport {
+            PluginLanguageServerTransport::Stdio { command, args, env } => {
+                (command.as_str(), args.as_slice(), env)
+            }
+            PluginLanguageServerTransport::NodePackage { package, command, args, env } => {
+                let cmd = command.as_deref().unwrap_or(package.as_str());
+                (cmd, args.as_slice(), env)
+            }
+            _ => {
+                return Err(AppCoreError::BadRequest(format!(
+                    "language server '{}' does not use stdio transport",
+                    provider.contribution.id
+                )));
+            }
         };
 
         if command.trim().is_empty() {

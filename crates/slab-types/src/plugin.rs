@@ -275,6 +275,27 @@ pub enum PluginLanguageServerTransport {
     WebSocket {
         url: String,
     },
+    /// Node.js package-based language server bundled inside the plugin directory.
+    /// The runtime looks for the command binary in the plugin's `node_modules/.bin/`
+    /// directory before falling back to the system PATH, so the language server
+    /// can be shipped as a plain npm dependency of the plugin without requiring
+    /// any system-wide installation.  This is the recommended transport for
+    /// wrapping VS Code extension language servers (e.g. `typescript-language-server`,
+    /// `pyright-langserver`) as slab plugins.
+    NodePackage {
+        /// npm package name used to identify this language server (e.g.
+        /// `"typescript-language-server"`).  The package must be present in the
+        /// plugin's install directory under `node_modules/`.
+        package: String,
+        /// Executable name to invoke.  Defaults to the value of `package` when
+        /// omitted.  Resolved against the plugin's `node_modules/.bin/` first.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command: Option<String>,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default)]
+        env: HashMap<String, String>,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

@@ -62,7 +62,8 @@ async fn run_workspace_lsp_socket(
     );
 
     match &provider.contribution.transport {
-        PluginLanguageServerTransport::Stdio { .. } => {
+        PluginLanguageServerTransport::Stdio { .. }
+        | PluginLanguageServerTransport::NodePackage { .. } => {
             let mut process = service
                 .spawn_stdio_process(&provider, &workspace_root)
                 .await
