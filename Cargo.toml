@@ -120,6 +120,7 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 parity-tokio-ipc = "0.9"
 winapi = { version = "0.3.9", features = ["winerror"] }
 tokio-stream = "0.1"
+tokio-tungstenite = "0.29.0"
 # Utilities
 async-trait = "0.1"
 bytemuck = "1"

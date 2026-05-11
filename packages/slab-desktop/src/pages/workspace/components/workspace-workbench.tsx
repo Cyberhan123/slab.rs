@@ -19,6 +19,8 @@ import {
 
 import { cn } from "@/lib/utils"
 import type { WorkspacePageState } from "../hooks/use-workspace-page"
+import { useWorkspaceLsp } from "../hooks/use-workspace-lsp"
+import { workspaceLspModelPath } from "../lib/workspace-lsp"
 import { languageForFile, SLAB_DIR_NAME } from "../lib/workspace-page-utils"
 import { RecentWorkspaceList } from "./recent-workspace-list"
 import { WorkspaceConsolePanel } from "./workspace-console-panel"
@@ -74,6 +76,11 @@ export function WorkspaceWorkbench({
   const selectedFileLanguage = selectedFile ? languageForFile(selectedFile.name) : "plaintext"
   const isMarkdownFile = selectedFileLanguage === "markdown"
   const terminalThemeMode = editorTheme === "github-dark" ? "dark" : "light"
+  const { handleEditorMount } = useWorkspaceLsp({
+    language: selectedFileLanguage,
+    relativePath: selectedFile?.relativePath ?? null,
+    workspaceRoot: workspace?.rootPath ?? null,
+  })
 
   if (!isDesktopTauri) {
     return (
@@ -335,12 +342,13 @@ export function WorkspaceWorkbench({
                   <Editor
                     height="100%"
                     language={selectedFileLanguage}
-                    path={selectedFile.relativePath}
+                    path={workspaceLspModelPath(workspace.rootPath, selectedFile.relativePath)}
                     theme={editorTheme}
                     value={editorContent}
                     beforeMount={(monaco) => {
                       void setupShikiMonaco(monaco)
                     }}
+                    onMount={handleEditorMount}
                     onChange={(value) => setEditorContent(value ?? "")}
                     options={{
                       readOnly: savingFile,

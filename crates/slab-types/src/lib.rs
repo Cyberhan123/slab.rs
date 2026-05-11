@@ -66,9 +66,10 @@ pub use plugin::{
     PluginAgentCapabilityContribution, PluginCapabilityKind, PluginCapabilityTransport,
     PluginCapabilityTransportType, PluginCommandContribution, PluginCompatibilityManifest,
     PluginContributesManifest, PluginFilePermissions, PluginInfo, PluginIntegrityManifest,
-    PluginManifest, PluginNetworkManifest, PluginNetworkMode, PluginPermissionsManifest,
-    PluginRouteContribution, PluginRuntimeManifest, PluginSettingsContribution,
-    PluginSidebarContribution, PluginUiManifest, PluginWasmManifest,
+    PluginLanguageServerContribution, PluginLanguageServerTransport, PluginManifest,
+    PluginNetworkManifest, PluginNetworkMode, PluginPermissionsManifest, PluginRouteContribution,
+    PluginRuntimeManifest, PluginSettingsContribution, PluginSidebarContribution, PluginUiManifest,
+    PluginWasmManifest,
 };
 pub use runtime::{
     Capability, DiffusionLoadOptions, DriverDescriptor, DriverHints, DriverLoadStyle, ModelFamily,

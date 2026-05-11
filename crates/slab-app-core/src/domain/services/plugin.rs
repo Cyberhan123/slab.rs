@@ -15,9 +15,9 @@ use crate::domain::models::{InstallPluginCommand, PluginView};
 use crate::error::AppCoreError;
 use crate::infra::db::{PluginStateRecord, PluginStateStore};
 use slab_types::plugin::{
-    PluginAgentCapabilityContribution, PluginCommandContribution, PluginManifest,
-    PluginNetworkMode, PluginPermissionsManifest, PluginRouteContribution,
-    PluginSettingsContribution, PluginSidebarContribution,
+    PluginAgentCapabilityContribution, PluginCommandContribution, PluginLanguageServerContribution,
+    PluginLanguageServerTransport, PluginManifest, PluginNetworkMode, PluginPermissionsManifest,
+    PluginRouteContribution, PluginSettingsContribution, PluginSidebarContribution,
 };
 
 const SOURCE_KIND_DEV: &str = "dev";
@@ -661,6 +661,10 @@ fn validate_contributions(root_dir: &Path, manifest: &PluginManifest) -> Result<
         "contributes.agentCapabilities",
         manifest.contributes.agent_capabilities.iter().map(|item| &item.id),
     )?;
+    validate_duplicate_ids(
+        "contributes.languageServers",
+        manifest.contributes.language_servers.iter().map(|item| &item.id),
+    )?;
 
     if !manifest.contributes.routes.is_empty() {
         ensure_permission(
@@ -697,6 +701,13 @@ fn validate_contributions(root_dir: &Path, manifest: &PluginManifest) -> Result<
             "contributes.agentCapabilities requires permissions.agent to include capability:declare",
         )?;
     }
+    if !manifest.contributes.language_servers.is_empty() {
+        ensure_lsp_permission(
+            &manifest.permissions,
+            "languageServer:declare",
+            "contributes.languageServers requires permissions.lsp to include languageServer:declare",
+        )?;
+    }
 
     let route_ids =
         manifest.contributes.routes.iter().map(|route| route.id.clone()).collect::<HashSet<_>>();
@@ -713,6 +724,9 @@ fn validate_contributions(root_dir: &Path, manifest: &PluginManifest) -> Result<
     }
     for capability in &manifest.contributes.agent_capabilities {
         validate_agent_capability(root_dir, capability, manifest)?;
+    }
+    for provider in &manifest.contributes.language_servers {
+        validate_language_server(provider)?;
     }
     for sidebar in &manifest.contributes.sidebar {
         validate_sidebar(sidebar, &route_ids)?;
@@ -816,6 +830,40 @@ fn validate_agent_capability(
     Ok(())
 }
 
+fn validate_language_server(provider: &PluginLanguageServerContribution) -> Result<(), String> {
+    if provider.languages.is_empty() {
+        return Err(format!("language server `{}` must declare languages", provider.id));
+    }
+    for language in &provider.languages {
+        if !is_valid_language_id(language) {
+            return Err(format!(
+                "language server `{}` has invalid language `{language}`",
+                provider.id
+            ));
+        }
+    }
+
+    match &provider.transport {
+        PluginLanguageServerTransport::Stdio { command, .. } => {
+            if command.trim().is_empty() {
+                return Err(format!(
+                    "language server `{}` must declare transport.command",
+                    provider.id
+                ));
+            }
+        }
+        PluginLanguageServerTransport::WebSocket { url } => {
+            if !(url.starts_with("ws://") || url.starts_with("wss://")) {
+                return Err(format!(
+                    "language server `{}` websocket url must start with ws:// or wss://",
+                    provider.id
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_duplicate_ids<'a>(
     context: &str,
     ids: impl Iterator<Item = &'a String>,
@@ -827,6 +875,18 @@ fn validate_duplicate_ids<'a>(
         }
     }
     Ok(())
+}
+
+fn ensure_lsp_permission(
+    permissions: &PluginPermissionsManifest,
+    expected: &str,
+    error: &str,
+) -> Result<(), String> {
+    if permissions.lsp.iter().any(|value| value == expected) {
+        Ok(())
+    } else {
+        Err(error.to_owned())
+    }
 }
 
 fn ensure_permission(
@@ -916,6 +976,18 @@ fn is_valid_plugin_id(id: &str) -> bool {
         return false;
     }
     chars.all(|character| {
+        character.is_ascii_lowercase()
+            || character.is_ascii_digit()
+            || character == '-'
+            || character == '_'
+    })
+}
+
+fn is_valid_language_id(id: &str) -> bool {
+    if !(1..=64).contains(&id.len()) {
+        return false;
+    }
+    id.chars().all(|character| {
         character.is_ascii_lowercase()
             || character.is_ascii_digit()
             || character == '-'
@@ -1188,6 +1260,76 @@ mod tests {
         let scanned = scan_plugin_dir(&plugin_root, "dev").expect("scan plugin");
         assert!(scanned.valid);
         assert_eq!(scanned.id, "example-plugin");
+    }
+
+    #[test]
+    fn scan_plugin_dir_accepts_language_server_contribution() {
+        let root = temp_dir("scan-language-server");
+        let plugin_root = root.join("lsp-plugin");
+        write(&plugin_root.join("ui/index.html"), "<html></html>");
+        let html_hash = hash_bytes_hex(b"<html></html>");
+        write(
+            &plugin_root.join("plugin.json"),
+            &serde_json::to_string_pretty(&json!({
+                "manifestVersion": 1,
+                "id": "lsp-plugin",
+                "name": "LSP Plugin",
+                "version": "0.1.0",
+                "runtime": { "ui": { "entry": "ui/index.html" } },
+                "integrity": { "filesSha256": { "ui/index.html": html_hash } },
+                "permissions": {
+                    "network": { "mode": "blocked", "allowHosts": [] },
+                    "lsp": ["languageServer:declare"]
+                },
+                "contributes": {
+                    "languageServers": [{
+                        "id": "lsp-plugin.pyright",
+                        "languages": ["python"],
+                        "transport": { "type": "stdio", "command": "pyright-langserver", "args": ["--stdio"] }
+                    }]
+                }
+            }))
+            .expect("manifest json"),
+        );
+
+        let scanned = scan_plugin_dir(&plugin_root, "dev").expect("scan plugin");
+
+        assert!(scanned.valid);
+        let manifest = scanned.manifest.expect("manifest");
+        assert_eq!(manifest.contributes.language_servers[0].id, "lsp-plugin.pyright");
+    }
+
+    #[test]
+    fn scan_plugin_dir_rejects_language_server_without_lsp_permission() {
+        let root = temp_dir("scan-language-server-permission");
+        let plugin_root = root.join("lsp-plugin");
+        write(&plugin_root.join("ui/index.html"), "<html></html>");
+        let html_hash = hash_bytes_hex(b"<html></html>");
+        write(
+            &plugin_root.join("plugin.json"),
+            &serde_json::to_string_pretty(&json!({
+                "manifestVersion": 1,
+                "id": "lsp-plugin",
+                "name": "LSP Plugin",
+                "version": "0.1.0",
+                "runtime": { "ui": { "entry": "ui/index.html" } },
+                "integrity": { "filesSha256": { "ui/index.html": html_hash } },
+                "permissions": { "network": { "mode": "blocked", "allowHosts": [] } },
+                "contributes": {
+                    "languageServers": [{
+                        "id": "lsp-plugin.pyright",
+                        "languages": ["python"],
+                        "transport": { "type": "stdio", "command": "pyright-langserver", "args": ["--stdio"] }
+                    }]
+                }
+            }))
+            .expect("manifest json"),
+        );
+
+        let scanned = scan_plugin_dir(&plugin_root, "dev").expect("scan plugin");
+
+        assert!(!scanned.valid);
+        assert!(scanned.error.as_deref().unwrap().contains("permissions.lsp"));
     }
 
     #[test]

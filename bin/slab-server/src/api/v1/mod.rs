@@ -14,6 +14,7 @@ pub mod system;
 pub mod tasks;
 pub mod ui_state;
 pub mod video;
+pub mod workspace_lsp;
 
 use std::sync::Arc;
 
@@ -44,6 +45,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .merge(subtitles::router())
         .merge(ui_state::router())
         .merge(setup::router())
+        .merge(workspace_lsp::router())
         .merge(backend::router(state))
 }
 

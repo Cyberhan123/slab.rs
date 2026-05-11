@@ -53,6 +53,7 @@
     "markdown-it-emoji": "^3.0.0",
     "markdown-it-katex": "^2.0.3",
     "monaco-editor": "^0.55.1",
+    "monaco-languageclient": "^10.7.0",
     "react": "^19.2.5",
     "react-arborist": "^3.5.0",
     "react-dom": "^19.2.5",
@@ -60,6 +61,10 @@
     "shiki": "^4.0.2",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0",
+    "vscode": "npm:@codingame/monaco-vscode-extension-api@25.1.2",
+    "vscode-jsonrpc": "^8.2.1",
+    "vscode-languageclient": "^9.0.1",
+    "vscode-ws-jsonrpc": "^3.5.0",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
