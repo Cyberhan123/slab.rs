@@ -15,6 +15,22 @@ export default defineConfig(async () => ({
     // feature set instead of following Vite's moving default baseline.
     target: "safari16",
     cssTarget: "safari16",
+    rolldownOptions: {
+      output: {
+        manualChunks(id) {
+          if (
+            id.includes("monaco-languageclient") ||
+            id.includes("vscode-languageclient") ||
+            id.includes("vscode-ws-jsonrpc") ||
+            id.includes("@codingame/monaco-vscode") ||
+            id.includes("/node_modules/vscode/")
+          ) {
+            return "workspace-lsp-client";
+          }
+          return undefined;
+        },
+      },
+    },
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
@@ -50,6 +66,7 @@ export default defineConfig(async () => ({
       "@slab/api/plugin": path.resolve(__dirname, "../api/src/plugin.ts"),
       "@slab/api/v1": path.resolve(__dirname, "../api/src/v1.d.ts"),
       "@slab/api": path.resolve(__dirname, "../api/src/index.ts"),
+      vscode: path.resolve(__dirname, "./node_modules/vscode"),
     },
   },
   test: {

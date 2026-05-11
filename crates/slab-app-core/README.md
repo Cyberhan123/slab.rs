@@ -13,6 +13,8 @@ HTTP-free business logic library for Slab.
 - `model_auto_unload` - automatic model eviction to manage memory.
 - `schemas/` - shared request/response DTO types used by HTTP consumers.
 
+Workspace LSP provider resolution, workspace-root validation, and language-server process spawning live here so `bin/slab-server` can stay limited to HTTP/WebSocket routing.
+
 SQLx migrations live in `migrations/`.
 
 ## Type

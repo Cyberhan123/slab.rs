@@ -116,6 +116,7 @@ mod axum_extractors {
         AgentService, AudioService, BackendService, ChatService, FfmpegService, ImageService,
         ModelService, PluginService, PmidService, SessionService, SettingsService, SetupService,
         SubtitleService, SystemService, TaskApplicationService, UiStateService, VideoService,
+        WorkspaceLspService,
     };
     use axum::extract::FromRef;
     use std::sync::Arc;
@@ -237,6 +238,12 @@ mod axum_extractors {
     impl FromRef<Arc<AppState>> for AgentService {
         fn from_ref(input: &Arc<AppState>) -> Self {
             input.services.agent.clone()
+        }
+    }
+
+    impl FromRef<Arc<AppState>> for WorkspaceLspService {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            input.services.workspace_lsp.clone()
         }
     }
 }

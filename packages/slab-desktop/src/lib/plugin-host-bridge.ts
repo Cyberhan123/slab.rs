@@ -34,6 +34,7 @@ export type PluginContributions = {
   commands: PluginCommandContribution[];
   settings: PluginSettingsContribution[];
   agentCapabilities: PluginAgentCapabilityContribution[];
+  languageServers: PluginLanguageServerContribution[];
 };
 
 export type PluginRouteContribution = {
@@ -83,6 +84,22 @@ export type PluginAgentCapabilityContribution = {
   exposeAsMcpTool: boolean;
 };
 
+export type PluginLanguageServerContribution = {
+  id: string;
+  languages: string[];
+  transport:
+    | {
+        type: "stdio";
+        command: string;
+        args?: string[];
+        env?: Record<string, string>;
+      }
+    | {
+        type: "webSocket";
+        url: string;
+      };
+};
+
 export type PluginPermissions = {
   network: {
     mode: "blocked" | "allowlist" | string;
@@ -90,6 +107,7 @@ export type PluginPermissions = {
   };
   ui: string[];
   agent: string[];
+  lsp: string[];
   slabApi: string[];
   files: {
     read: string[];

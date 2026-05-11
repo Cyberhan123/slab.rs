@@ -10,6 +10,7 @@ React frontend application for the Slab desktop shell.
 - Image generation, audio transcription, and video processing pages.
 - Model hub, plugin center, task queue, and settings views.
 - Integration with `bin/slab-server` via `openapi-fetch` and TanStack Query.
+- Workspace Monaco language features via `monaco-languageclient` over `bin/slab-server` WebSocket LSP sessions.
 - Integration with host-only Tauri commands via `@tauri-apps/api` for plugin/runtime shell features.
 - Theme and layout using `@slab/components` (shared shadcn/ui + Tailwind 4 primitives).
 - Internationalization via `@slab/i18n`.

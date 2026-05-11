@@ -147,6 +147,8 @@ pub struct PluginPermissionsManifest {
     #[serde(default)]
     pub agent: Vec<String>,
     #[serde(default)]
+    pub lsp: Vec<String>,
+    #[serde(default)]
     pub slab_api: Vec<String>,
     #[serde(default)]
     pub files: PluginFilePermissions,
@@ -174,6 +176,8 @@ pub struct PluginContributesManifest {
     pub settings: Vec<PluginSettingsContribution>,
     #[serde(default)]
     pub agent_capabilities: Vec<PluginAgentCapabilityContribution>,
+    #[serde(default)]
+    pub language_servers: Vec<PluginLanguageServerContribution>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -248,6 +252,29 @@ pub struct PluginAgentCapabilityContribution {
     pub transport: PluginCapabilityTransport,
     #[serde(default)]
     pub expose_as_mcp_tool: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginLanguageServerContribution {
+    pub id: String,
+    pub languages: Vec<String>,
+    pub transport: PluginLanguageServerTransport,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum PluginLanguageServerTransport {
+    Stdio {
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default)]
+        env: HashMap<String, String>,
+    },
+    WebSocket {
+        url: String,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
