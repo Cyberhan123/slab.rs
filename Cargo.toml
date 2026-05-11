@@ -109,7 +109,7 @@ axum = { version = "0.8", features = ["macros"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "set-header", "util"] }
 tonic = { version = "0.14.5", features = ["transport"] }
-tonic-build = "0.14.5"
+tonic-build = "0.14.6"
 tonic-prost = "0.14.5"
 tonic-prost-build = "0.14.5"
 prost = "0.14.3"
