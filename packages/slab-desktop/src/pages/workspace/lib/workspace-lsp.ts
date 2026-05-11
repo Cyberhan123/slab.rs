@@ -1,4 +1,10 @@
 import type * as Monaco from "monaco-editor"
+import {
+  initialize as initializeMonacoWrapper,
+  isInitialized as workspaceMonacoIsInitialized,
+  registerEditorOpenHandler,
+} from "@codingame/monaco-editor-wrapper"
+import "@codingame/monaco-editor-wrapper/features/extensionHostWorker"
 import type { MonacoLanguageClient } from "monaco-languageclient"
 import { SERVER_BASE_URL } from "@slab/api/config"
 import {
@@ -45,9 +51,10 @@ type WorkspaceFileService = {
 }
 
 let monacoVscodeApiReady: Promise<void> | null = null
-let monacoVscodeApiStarted = false
 let currentOpenFile: WorkspaceLspOpenFile | null = null
 let currentWorkspaceFileService: WorkspaceFileService = { root: null }
+let workspaceFileSystemOverlayRegistered = false
+let workspaceEditorOpenHandlerRegistered = false
 
 export function supportsWorkspaceLsp(language: string) {
   return SUPPORTED_WORKSPACE_LSP_LANGUAGES.has(language)
@@ -109,109 +116,46 @@ export function setWorkspaceLspFileServiceRoot(workspaceRoot: string | null) {
 }
 
 export function workspaceLspServicesReady() {
-  return monacoVscodeApiStarted
+  return workspaceMonacoIsInitialized()
 }
 
 export function ensureWorkspaceLspServices() {
   monacoVscodeApiReady ??= (async () => {
-    const [
-      { MonacoVscodeApiWrapper },
-      { useWorkerFactory, Worker: VscodeWorker },
-    ] = await Promise.all([
-      import("monaco-languageclient/vscodeApiWrapper"),
-      import("monaco-languageclient/workerFactory"),
-    ])
-    const apiWrapper = new MonacoVscodeApiWrapper({
-      $type: "extended",
-      viewsConfig: {
-        $type: "EditorService",
-        openEditorFunc: async (modelRef, options) => {
-          const workspaceRoot = currentWorkspaceFileService.root
-          const selection = editorSelection(options)
-          const relativePath = workspaceRoot
-            ? workspaceLspRelativePathFromUri(workspaceRoot, modelRef.object.textEditorModel.uri.toString())
-            : null
-          if (relativePath === null || !currentOpenFile) {
-            return undefined
-          }
+    if (!workspaceFileSystemOverlayRegistered) {
+      await registerWorkspaceFileSystemOverlay()
+      workspaceFileSystemOverlayRegistered = true
+    }
 
-          return currentOpenFile(relativePath, {
+    if (!workspaceEditorOpenHandlerRegistered) {
+      registerEditorOpenHandler(async (modelRef, options) => {
+        const workspaceRoot = currentWorkspaceFileService.root
+        const selection = editorSelection(options)
+        const relativePath = workspaceRoot
+          ? workspaceLspRelativePathFromUri(workspaceRoot, modelRef.object.textEditorModel.uri.toString())
+          : null
+        if (relativePath === null || !currentOpenFile) {
+          return null
+        }
+
+        return (
+          (await currentOpenFile(relativePath, {
             endColumn: selection?.endColumn,
             endLineNumber: selection?.endLineNumber,
             startColumn: selection?.startColumn,
             startLineNumber: selection?.startLineNumber,
-          })
-        },
-      },
-      // Replace defineDefaultWorkerLoaders() with explicit loaders so that
-      // Vite can resolve the bare package specifiers in source (not in
-      // node_modules where the browser would evaluate them at runtime and
-      // produce wrong @fs URLs in dev mode).
-      monacoWorkerFactory: () => {
-        useWorkerFactory({
-          workerLoaders: {
-            editorWorkerService: () =>
-              new VscodeWorker(
-                new URL(
-                  "@codingame/monaco-vscode-editor-api/esm/vs/editor/editor.worker.js",
-                  import.meta.url,
-                ),
-                { type: "module" },
-              ),
-            extensionHostWorkerMain: () =>
-              new VscodeWorker(
-                new URL(
-                  "@codingame/monaco-vscode-api/workers/extensionHost.worker.js",
-                  import.meta.url,
-                ),
-                { type: "module" },
-              ),
-            typescript: () =>
-              new VscodeWorker(
-                new URL("monaco-editor/esm/vs/language/typescript/ts.worker.js", import.meta.url),
-                { type: "module" },
-              ),
-            javascript: () =>
-              new VscodeWorker(
-                new URL("monaco-editor/esm/vs/language/typescript/ts.worker.js", import.meta.url),
-                { type: "module" },
-              ),
-            json: () =>
-              new VscodeWorker(
-                new URL("monaco-editor/esm/vs/language/json/json.worker.js", import.meta.url),
-                { type: "module" },
-              ),
-            css: () =>
-              new VscodeWorker(
-                new URL("monaco-editor/esm/vs/language/css/css.worker.js", import.meta.url),
-                { type: "module" },
-              ),
-            less: () =>
-              new VscodeWorker(
-                new URL("monaco-editor/esm/vs/language/css/css.worker.js", import.meta.url),
-                { type: "module" },
-              ),
-            scss: () =>
-              new VscodeWorker(
-                new URL("monaco-editor/esm/vs/language/css/css.worker.js", import.meta.url),
-                { type: "module" },
-              ),
-            html: () =>
-              new VscodeWorker(
-                new URL("monaco-editor/esm/vs/language/html/html.worker.js", import.meta.url),
-                { type: "module" },
-              ),
-          },
-        })
-      },
-    })
+          })) ?? null
+        )
+      })
+      workspaceEditorOpenHandlerRegistered = true
+    }
 
-    await registerWorkspaceFileSystemOverlay()
-    await apiWrapper.start({ caller: "slab-workspace-lsp" })
-    monacoVscodeApiStarted = true
+    if (!workspaceMonacoIsInitialized()) {
+      await initializeMonacoWrapper(undefined, {
+        registerAdditionalExtensions: false,
+      })
+    }
   })().catch((error) => {
     monacoVscodeApiReady = null
-    monacoVscodeApiStarted = false
     throw error
   })
 
@@ -238,6 +182,15 @@ export async function startWorkspaceLspSession({
 
   try {
     await ensureWorkspaceLspServices()
+
+    // Register the model as a VSCode text document before starting the language client.
+    // The Monaco model is created when the editor mounts, which happens before the
+    // @codingame/monaco-vscode-api bridge finishes initializing. Because of this timing,
+    // the bridge never intercepts the model-creation event and the model is absent from
+    // vscode.workspace.textDocuments. Without this registration, MonacoLanguageClient
+    // never sends textDocument/didOpen and the server returns nothing for hover/definition.
+    const { workspace: vscodeWorkspace, Uri: VscodeUri } = await import("vscode")
+    await vscodeWorkspace.openTextDocument(VscodeUri.parse(model.uri.toString()))
 
     socket = new WebSocket(workspaceLspUrl(language))
     const [languageClientModule, { CloseAction, ErrorAction }, jsonrpc] = await Promise.all([

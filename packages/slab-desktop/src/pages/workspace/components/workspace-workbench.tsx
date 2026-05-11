@@ -1,4 +1,4 @@
-import Editor from "@monaco-editor/react"
+import { useCallback } from "react"
 import { useTranslation } from "@slab/i18n"
 import { Button } from "@slab/components/button"
 import { SoftPanel, StageEmptyState, StatusPill } from "@slab/components/workspace"
@@ -22,17 +22,15 @@ import {
 import { cn } from "@/lib/utils"
 import type { WorkspacePageState } from "../hooks/use-workspace-page"
 import { useWorkspaceLsp } from "../hooks/use-workspace-lsp"
-import { supportsWorkspaceLsp, workspaceLspModelPath } from "../lib/workspace-lsp"
+import { workspaceLspModelPath } from "../lib/workspace-lsp"
 import { languageForFile, lspLanguageForFile, SLAB_DIR_NAME } from "../lib/workspace-page-utils"
 import { RecentWorkspaceList } from "./recent-workspace-list"
 import { WorkspaceConsolePanel } from "./workspace-console-panel"
+import { WorkspaceCodeEditor } from "./workspace-code-editor"
 import { WorkspaceGitPanel } from "./workspace-git-panel"
 import { WorkspaceMarkdownPreview } from "./workspace-markdown-preview"
 import { WorkspaceTreeRow } from "./workspace-tree-row"
-import { configureWorkspaceMonacoLoader } from "../lib/monaco-editor-loader"
 import { setupShikiMonaco } from "../lib/monaco-shiki"
-
-configureWorkspaceMonacoLoader()
 
 export function WorkspaceWorkbench({
   activeFilePath,
@@ -96,9 +94,32 @@ export function WorkspaceWorkbench({
     relativePath: selectedFile?.relativePath ?? null,
     workspaceRoot: workspace?.rootPath ?? null,
   })
-  const waitForLspServices = selectedFile
-    ? supportsWorkspaceLsp(selectedFileLspLanguage) && servicesPending && !servicesReady
-    : false
+  const waitForEditorServices = Boolean(selectedFile && servicesPending && !servicesReady)
+  const handleBeforeEditorMount = useCallback((monaco: typeof import("monaco-editor")) => {
+    void setupShikiMonaco(monaco)
+  }, [])
+  const handleWorkspaceEditorMount = useCallback(
+    (editor: import("monaco-editor").editor.IStandaloneCodeEditor, monaco: typeof import("monaco-editor")) => {
+      handleEditorMount(editor, monaco)
+      editor.onKeyDown((event) => {
+        if (event.keyCode !== monaco.KeyCode.Escape) {
+          return
+        }
+        const findController = editor.getContribution("editor.contrib.findController") as {
+          closeFindWidget?: () => void
+          getState?: () => { isRevealed?: boolean }
+        } | null
+        if (!findController?.getState?.().isRevealed) {
+          return
+        }
+        findController.closeFindWidget?.()
+        void editor.getAction("closeFindWidget")?.run()
+        event.preventDefault()
+        event.stopPropagation()
+      })
+    },
+    [handleEditorMount],
+  )
 
   if (!isDesktopTauri) {
     return (
@@ -439,7 +460,7 @@ export function WorkspaceWorkbench({
             ) : null}
 
             {selectedFile ? (
-              waitForLspServices ? (
+              waitForEditorServices ? (
                 <div className="flex h-full min-h-[420px] flex-1 items-center justify-center">
                   <Loader2 className="size-4 animate-spin text-muted-foreground" />
                 </div>
@@ -449,35 +470,12 @@ export function WorkspaceWorkbench({
                 </div>
               ) : (
                 <div className="min-h-0 flex-1">
-                  <Editor
-                    height="100%"
+                  <WorkspaceCodeEditor
+                    filePath={workspaceLspModelPath(workspace.rootPath, selectedFile.relativePath)}
                     language={selectedFileLanguage}
-                    path={workspaceLspModelPath(workspace.rootPath, selectedFile.relativePath)}
-                    theme={editorTheme}
-                    value={editorContent}
-                    beforeMount={(monaco) => {
-                      void setupShikiMonaco(monaco)
-                    }}
-                    onMount={(editor, monaco) => {
-                      handleEditorMount(editor, monaco)
-                      editor.onKeyDown((event) => {
-                        if (event.keyCode !== monaco.KeyCode.Escape) {
-                          return
-                        }
-                        const findController = editor.getContribution("editor.contrib.findController") as {
-                          closeFindWidget?: () => void
-                          getState?: () => { isRevealed?: boolean }
-                        } | null
-                        if (!findController?.getState?.().isRevealed) {
-                          return
-                        }
-                        findController.closeFindWidget?.()
-                        void editor.getAction("closeFindWidget")?.run()
-                        event.preventDefault()
-                        event.stopPropagation()
-                      })
-                    }}
+                    onBeforeMount={handleBeforeEditorMount}
                     onChange={(value) => setEditorContent(value ?? "")}
+                    onMount={handleWorkspaceEditorMount}
                     options={{
                       readOnly: savingFile,
                       minimap: { enabled: false },
@@ -492,6 +490,8 @@ export function WorkspaceWorkbench({
                       renameOnType: true,
                       suggestOnTriggerCharacters: true,
                     }}
+                    theme={editorTheme}
+                    value={editorContent}
                   />
                 </div>
               )

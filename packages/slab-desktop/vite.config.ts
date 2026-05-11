@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import importMetaUrlPlugin from "@codingame/esbuild-import-meta-url-plugin";
 import path from "path";
 
 const host = process.env.TAURI_DEV_HOST;
@@ -8,6 +9,12 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
+
+  optimizeDeps: {
+    esbuildOptions: {
+      plugins: [importMetaUrlPlugin],
+    },
+  },
 
   build: {
     // Tauri on macOS uses the system WebKit. Our minimum supported macOS
@@ -22,6 +29,7 @@ export default defineConfig(async () => ({
             id.includes("monaco-languageclient") ||
             id.includes("vscode-languageclient") ||
             id.includes("vscode-ws-jsonrpc") ||
+            id.includes("@codingame/monaco-editor") ||
             id.includes("@codingame/monaco-vscode") ||
             id.includes("/node_modules/vscode/")
           ) {
@@ -56,7 +64,7 @@ export default defineConfig(async () => ({
   },
   // Path alias configuration
   resolve: {
-    dedupe: ["@tanstack/react-query"],
+    dedupe: ["@tanstack/react-query", "monaco-editor", "vscode"],
     alias: {
       "@": path.resolve(__dirname, "./src"),
       "@slab/api/config": path.resolve(__dirname, "../api/src/config.ts"),
