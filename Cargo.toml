@@ -129,7 +129,7 @@ protoc-bin-vendored = "3"
 cargo_metadata = "0.23.1"
 sysinfo = "0.38.4"
 # GUI
-egui = "0.34.1"
+egui = "0.34.2"
 eframe = { version = "0.34.1", default-features = false, features = ["default_fonts", "glow"] }
 
 # Platform-specific dependencies
