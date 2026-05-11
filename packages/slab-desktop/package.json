@@ -25,6 +25,7 @@
     "@ant-design/x": "^2.5.0",
     "@ant-design/x-markdown": "^2.5.0",
     "@ant-design/x-sdk": "^2.5.0",
+    "@codingame/monaco-vscode-api": "25.1.2",
     "@codingame/monaco-vscode-editor-api": "25.1.2",
     "@codingame/monaco-vscode-files-service-override": "25.1.2",
     "@gytx/xterm-local-echo": "^0.1.8",

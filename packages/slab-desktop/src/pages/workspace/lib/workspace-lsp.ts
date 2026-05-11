@@ -116,7 +116,7 @@ export function ensureWorkspaceLspServices() {
   monacoVscodeApiReady ??= (async () => {
     const [
       { MonacoVscodeApiWrapper },
-      { defineDefaultWorkerLoaders, useWorkerFactory, Worker: VscodeWorker },
+      { useWorkerFactory, Worker: VscodeWorker },
     ] = await Promise.all([
       import("monaco-languageclient/vscodeApiWrapper"),
       import("monaco-languageclient/workerFactory"),
@@ -143,16 +143,29 @@ export function ensureWorkspaceLspServices() {
           })
         },
       },
-      // Extend the default VS Code API worker loaders to also include the
-      // standard Monaco language workers (TypeScript, JSON, CSS, HTML).
-      // Without this, the call to useWorkerFactory inside the wrapper would
-      // overwrite the MonacoEnvironment.getWorkerUrl set in monaco-editor-loader
-      // with a version that only knows about editorWorkerService and extensionHost,
-      // causing Monaco's language modes to lose their worker bindings.
+      // Replace defineDefaultWorkerLoaders() with explicit loaders so that
+      // Vite can resolve the bare package specifiers in source (not in
+      // node_modules where the browser would evaluate them at runtime and
+      // produce wrong @fs URLs in dev mode).
       monacoWorkerFactory: () => {
         useWorkerFactory({
           workerLoaders: {
-            ...defineDefaultWorkerLoaders(),
+            editorWorkerService: () =>
+              new VscodeWorker(
+                new URL(
+                  "@codingame/monaco-vscode-editor-api/esm/vs/editor/editor.worker.js",
+                  import.meta.url,
+                ),
+                { type: "module" },
+              ),
+            extensionHostWorkerMain: () =>
+              new VscodeWorker(
+                new URL(
+                  "@codingame/monaco-vscode-api/workers/extensionHost.worker.js",
+                  import.meta.url,
+                ),
+                { type: "module" },
+              ),
             typescript: () =>
               new VscodeWorker(
                 new URL("monaco-editor/esm/vs/language/typescript/ts.worker.js", import.meta.url),

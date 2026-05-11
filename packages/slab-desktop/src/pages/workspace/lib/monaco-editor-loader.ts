@@ -53,5 +53,25 @@ export function configureWorkspaceMonacoLoader() {
   }
 
   loader.config({ monaco: monaco as unknown as typeof Monaco })
+
+  // The workspace uses a real TypeScript language server via LSP (WebSocket to the backend).
+  // Disable semantic validation in the built-in Monaco TypeScript service to prevent false
+  // errors such as "Cannot use JSX" and "Cannot find module '@slab/...'" that arise because
+  // the built-in service does not read the workspace tsconfig.json. The LSP handles type
+  // checking, module resolution, and JSX correctly via the workspace tsconfig.
+  //
+  // @codingame/monaco-vscode-api marks monaco.languages.typescript as deprecated at the type
+  // level, but the underlying runtime object is still present (the TypeScript language
+  // contribution is explicitly loaded via the ts.worker.js mapping above).
+  type MonacoTsDefaults = {
+    setDiagnosticsOptions(opts: { noSemanticValidation?: boolean }): void
+  }
+  type MonacoTsLanguage = {
+    typescript: { typescriptDefaults: MonacoTsDefaults; javascriptDefaults: MonacoTsDefaults }
+  }
+  const tsLang = (monaco.languages as unknown as MonacoTsLanguage).typescript
+  tsLang.typescriptDefaults.setDiagnosticsOptions({ noSemanticValidation: true })
+  tsLang.javascriptDefaults.setDiagnosticsOptions({ noSemanticValidation: true })
+
   configured = true
 }

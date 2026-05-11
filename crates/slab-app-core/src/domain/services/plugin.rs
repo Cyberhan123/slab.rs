@@ -177,6 +177,10 @@ impl PluginService {
             safe_remove_dir(&staging_root)?;
         }
 
+        if final_dir.join("package.json").exists() {
+            run_bun_install(&final_dir).await;
+        }
+
         let now = Utc::now();
         self.state
             .store()
@@ -1069,6 +1073,27 @@ async fn load_package_bytes(source: &str) -> Result<Vec<u8>, AppCoreError> {
     fs::read(source).map_err(|error| {
         AppCoreError::Internal(format!("failed to read plugin package `{source}`: {error}"))
     })
+}
+
+async fn run_bun_install(dir: &Path) {
+    let result = tokio::process::Command::new("bun")
+        .arg("install")
+        .arg("--production")
+        .current_dir(dir)
+        .output()
+        .await;
+    match result {
+        Ok(output) if output.status.success() => {
+            tracing::info!("bun install succeeded in {}", dir.display());
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            tracing::warn!("bun install failed in {}: {stderr}", dir.display());
+        }
+        Err(error) => {
+            tracing::warn!("bun install could not be launched in {}: {error}", dir.display());
+        }
+    }
 }
 
 fn create_staging_dir(plugins_dir: &Path) -> Result<PathBuf, AppCoreError> {
