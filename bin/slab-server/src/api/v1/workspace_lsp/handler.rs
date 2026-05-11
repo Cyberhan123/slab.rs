@@ -55,13 +55,13 @@ async fn run_workspace_lsp_socket(
         return Err(format!("no language server provider for language `{language}`"));
     };
     debug!(
-        provider = %provider.id,
+        provider = %provider.contribution.id,
         workspace_root = %workspace_root.display(),
         language = %language,
         "starting workspace LSP session"
     );
 
-    match &provider.transport {
+    match &provider.contribution.transport {
         PluginLanguageServerTransport::Stdio { .. } => {
             let mut process = service
                 .spawn_stdio_process(&provider, &workspace_root)
