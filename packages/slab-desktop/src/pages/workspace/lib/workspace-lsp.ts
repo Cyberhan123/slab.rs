@@ -114,7 +114,10 @@ export function workspaceLspServicesReady() {
 
 export function ensureWorkspaceLspServices() {
   monacoVscodeApiReady ??= (async () => {
-    const [{ MonacoVscodeApiWrapper }, { configureDefaultWorkerFactory }] = await Promise.all([
+    const [
+      { MonacoVscodeApiWrapper },
+      { defineDefaultWorkerLoaders, useWorkerFactory, Worker: VscodeWorker },
+    ] = await Promise.all([
       import("monaco-languageclient/vscodeApiWrapper"),
       import("monaco-languageclient/workerFactory"),
     ])
@@ -140,7 +143,54 @@ export function ensureWorkspaceLspServices() {
           })
         },
       },
-      monacoWorkerFactory: configureDefaultWorkerFactory,
+      // Extend the default VS Code API worker loaders to also include the
+      // standard Monaco language workers (TypeScript, JSON, CSS, HTML).
+      // Without this, the call to useWorkerFactory inside the wrapper would
+      // overwrite the MonacoEnvironment.getWorkerUrl set in monaco-editor-loader
+      // with a version that only knows about editorWorkerService and extensionHost,
+      // causing Monaco's language modes to lose their worker bindings.
+      monacoWorkerFactory: () => {
+        useWorkerFactory({
+          workerLoaders: {
+            ...defineDefaultWorkerLoaders(),
+            typescript: () =>
+              new VscodeWorker(
+                new URL("monaco-editor/esm/vs/language/typescript/ts.worker.js", import.meta.url),
+                { type: "module" },
+              ),
+            javascript: () =>
+              new VscodeWorker(
+                new URL("monaco-editor/esm/vs/language/typescript/ts.worker.js", import.meta.url),
+                { type: "module" },
+              ),
+            json: () =>
+              new VscodeWorker(
+                new URL("monaco-editor/esm/vs/language/json/json.worker.js", import.meta.url),
+                { type: "module" },
+              ),
+            css: () =>
+              new VscodeWorker(
+                new URL("monaco-editor/esm/vs/language/css/css.worker.js", import.meta.url),
+                { type: "module" },
+              ),
+            less: () =>
+              new VscodeWorker(
+                new URL("monaco-editor/esm/vs/language/css/css.worker.js", import.meta.url),
+                { type: "module" },
+              ),
+            scss: () =>
+              new VscodeWorker(
+                new URL("monaco-editor/esm/vs/language/css/css.worker.js", import.meta.url),
+                { type: "module" },
+              ),
+            html: () =>
+              new VscodeWorker(
+                new URL("monaco-editor/esm/vs/language/html/html.worker.js", import.meta.url),
+                { type: "module" },
+              ),
+          },
+        })
+      },
     })
 
     await registerWorkspaceFileSystemOverlay()

@@ -97,6 +97,16 @@ export type PluginLanguageServerContribution = {
     | {
         type: "webSocket";
         url: string;
+      }
+    | {
+        /** npm package bundled inside the plugin directory. The runtime resolves
+         *  the command from the plugin's node_modules/.bin/ before falling back
+         *  to the system PATH, so no global installation is required. */
+        type: "nodePackage";
+        package: string;
+        command?: string;
+        args?: string[];
+        env?: Record<string, string>;
       };
 };
 
