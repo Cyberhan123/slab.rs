@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-workspace-git-diff"
+description = "Enables the workspace_git_diff command without any pre-configured scope."
+commands.allow = ["workspace_git_diff"]
+
+[[permission]]
+identifier = "deny-workspace-git-diff"
+description = "Denies the workspace_git_diff command without any pre-configured scope."
+commands.deny = ["workspace_git_diff"]

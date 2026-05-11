@@ -10,6 +10,8 @@ import {
 const SUPPORTED_WORKSPACE_LSP_LANGUAGES = new Set([
   "typescript",
   "javascript",
+  "typescriptreact",
+  "javascriptreact",
   "json",
   "css",
   "less",
@@ -267,7 +269,7 @@ async function registerWorkspaceFileSystemOverlay() {
     },
     async readdir(resource) {
       const relativePath = relativePathForResource(resource.toString())
-      const directory = await workspaceReadDirectory(relativePath)
+      const directory = await workspaceReadDirectory(relativePath, { includeIgnored: true })
 
       return directory.entries.map((entry) => [
         entry.name,
@@ -302,7 +304,7 @@ async function registerWorkspaceFileSystemOverlay() {
         }
       } catch {
         try {
-          await workspaceReadDirectory(relativePath)
+          await workspaceReadDirectory(relativePath, { includeIgnored: true })
           return {
             ctime: Date.now(),
             mtime: Date.now(),

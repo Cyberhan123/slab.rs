@@ -33,6 +33,13 @@ export const workspace = {
     preview: 'Preview',
     source: 'Source',
     save: 'Save',
+    breadcrumbs: 'File breadcrumbs',
+  },
+  search: {
+    placeholder: 'Search files',
+    clear: 'Clear search',
+    empty: 'No matching files',
+    truncated: 'Showing first results',
   },
   git: {
     detached: 'Detached HEAD',
@@ -47,6 +54,8 @@ export const workspace = {
     discard: 'Discard',
     commit: 'Commit',
     commitPlaceholder: 'Commit message',
+    diff: 'Diff',
+    noDiff: 'No diff to show',
     status: {
       added: 'Added',
       modified: 'Modified',

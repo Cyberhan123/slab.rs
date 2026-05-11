@@ -5,6 +5,7 @@ import { SoftPanel, StageEmptyState, StatusPill } from "@slab/components/workspa
 import { Tree } from "react-arborist"
 import {
   Code2,
+  ChevronRight,
   Eye,
   FileCode2,
   Files,
@@ -13,6 +14,7 @@ import {
   GitBranch,
   Loader2,
   Save,
+  Search,
   Terminal,
   X,
 } from "lucide-react"
@@ -21,7 +23,7 @@ import { cn } from "@/lib/utils"
 import type { WorkspacePageState } from "../hooks/use-workspace-page"
 import { useWorkspaceLsp } from "../hooks/use-workspace-lsp"
 import { supportsWorkspaceLsp, workspaceLspModelPath } from "../lib/workspace-lsp"
-import { languageForFile, SLAB_DIR_NAME } from "../lib/workspace-page-utils"
+import { languageForFile, lspLanguageForFile, SLAB_DIR_NAME } from "../lib/workspace-page-utils"
 import { RecentWorkspaceList } from "./recent-workspace-list"
 import { WorkspaceConsolePanel } from "./workspace-console-panel"
 import { WorkspaceGitPanel } from "./workspace-git-panel"
@@ -39,6 +41,10 @@ export function WorkspaceWorkbench({
   editorTheme,
   explorerPanel,
   fileError,
+  fileSearchFetching,
+  fileSearchQuery,
+  fileSearchResults,
+  fileSearchTruncated,
   gitStatus,
   gitStatusFetching,
   gitOperationPending,
@@ -51,6 +57,7 @@ export function WorkspaceWorkbench({
   handleOpenFile,
   handleOpenFolder,
   handleRefreshGitStatus,
+  handleRevealDirectoryInTree,
   handleSaveFile,
   handleSelectExplorerPanel,
   handleSelectFileTab,
@@ -74,19 +81,23 @@ export function WorkspaceWorkbench({
   treeHostRef,
   workspace,
   workspaceUiHasHydrated,
+  setFileSearchQuery,
 }: WorkspacePageState) {
   const { t } = useTranslation()
   const selectedFileLanguage = selectedFile ? languageForFile(selectedFile.name) : "plaintext"
+  const selectedFileLspLanguage = selectedFile ? lspLanguageForFile(selectedFile.name) : "plaintext"
   const isMarkdownFile = selectedFileLanguage === "markdown"
-  const terminalThemeMode = editorTheme === "github-dark" ? "dark" : "light"
+  const terminalThemeMode = editorTheme === "dark-plus" ? "dark" : "light"
+  const hasFileSearch = fileSearchQuery.trim().length > 0
+  const selectedFileBreadcrumbs = selectedFile?.relativePath.split("/").filter(Boolean) ?? []
   const { handleEditorMount, servicesPending, servicesReady } = useWorkspaceLsp({
-    language: selectedFileLanguage,
+    language: selectedFileLspLanguage,
     onOpenFile: handleOpenFile,
     relativePath: selectedFile?.relativePath ?? null,
     workspaceRoot: workspace?.rootPath ?? null,
   })
   const waitForLspServices = selectedFile
-    ? supportsWorkspaceLsp(selectedFileLanguage) && servicesPending && !servicesReady
+    ? supportsWorkspaceLsp(selectedFileLspLanguage) && servicesPending && !servicesReady
     : false
 
   if (!isDesktopTauri) {
@@ -195,40 +206,100 @@ export function WorkspaceWorkbench({
           </div>
 
           {explorerPanel === "files" ? (
-            <div ref={treeHostRef} className="h-full min-h-0 flex-1 overflow-hidden rounded-[12px] bg-[var(--surface-1)]">
-              {workspaceUiHasHydrated ? (
-                <Tree
-                  key={workspace.rootPath}
-                  data={treeData}
-                  idAccessor="id"
-                  childrenAccessor="children"
-                  rowHeight={32}
-                  indent={18}
-                  height={treeHeight}
-                  width="100%"
-                  disableDrag
-                  disableDrop
-                  disableEdit
-                  openByDefault={false}
-                  initialOpenState={initialOpenState}
-                  selection={activeFilePath ?? undefined}
-                  onToggle={handleTreeToggle}
-                >
-                  {(props) => (
-                    <WorkspaceTreeRow
-                      {...props}
-                      selectedPath={activeFilePath}
-                      loadingPaths={loadingPaths}
-                      onOpenDirectory={loadDirectory}
-                      onOpenFile={handleOpenFile}
-                    />
-                  )}
-                </Tree>
-              ) : (
-                <div className="flex h-full min-h-[240px] items-center justify-center">
-                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                </div>
-              )}
+            <div className="flex min-h-0 flex-1 flex-col gap-2">
+              <div className="relative px-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  value={fileSearchQuery}
+                  onChange={(event) => setFileSearchQuery(event.target.value)}
+                  className="h-8 w-full rounded-[8px] border border-border/50 bg-[var(--surface-1)] pl-8 pr-8 text-xs outline-none transition focus:border-[var(--brand-teal)]"
+                  placeholder={t("pages.workspace.search.placeholder")}
+                  aria-label={t("pages.workspace.search.placeholder")}
+                />
+                {fileSearchFetching ? (
+                  <Loader2 className="absolute right-3 top-1/2 size-3.5 -translate-y-1/2 animate-spin text-muted-foreground" />
+                ) : hasFileSearch ? (
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-[4px] text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                    aria-label={t("pages.workspace.search.clear")}
+                    onClick={() => setFileSearchQuery("")}
+                  >
+                    <X className="size-3" />
+                  </button>
+                ) : null}
+              </div>
+              <div ref={treeHostRef} className="h-full min-h-0 flex-1 overflow-hidden rounded-[12px] bg-[var(--surface-1)]">
+                {hasFileSearch ? (
+                  <div className="h-full overflow-y-auto py-1">
+                    {fileSearchResults.length > 0 ? (
+                      <>
+                        {fileSearchResults.map((entry) => (
+                          <button
+                            key={entry.relativePath}
+                            type="button"
+                            className={cn(
+                              "flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left text-sm transition hover:bg-[var(--surface-selected)]",
+                              activeFilePath === entry.relativePath && "bg-[var(--surface-selected)] text-[var(--brand-teal)]",
+                            )}
+                            title={entry.relativePath}
+                            onClick={() => {
+                              void handleOpenFile(entry.relativePath)
+                            }}
+                          >
+                            <FileCode2 className="size-4 shrink-0 text-muted-foreground" />
+                            <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                            <span className="min-w-0 max-w-[54%] truncate font-mono text-[11px] text-muted-foreground">
+                              {entry.relativePath}
+                            </span>
+                          </button>
+                        ))}
+                        {fileSearchTruncated ? (
+                          <div className="px-3 py-2 text-xs text-muted-foreground">
+                            {t("pages.workspace.search.truncated")}
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <div className="flex h-full min-h-[180px] items-center justify-center px-4 text-center text-sm text-muted-foreground">
+                        {fileSearchFetching ? t("pages.workspace.tree.loading") : t("pages.workspace.search.empty")}
+                      </div>
+                    )}
+                  </div>
+                ) : workspaceUiHasHydrated ? (
+                  <Tree
+                    key={workspace.rootPath}
+                    data={treeData}
+                    idAccessor="id"
+                    childrenAccessor="children"
+                    rowHeight={32}
+                    indent={18}
+                    height={treeHeight}
+                    width="100%"
+                    disableDrag
+                    disableDrop
+                    disableEdit
+                    openByDefault={false}
+                    initialOpenState={initialOpenState}
+                    selection={activeFilePath ?? undefined}
+                    onToggle={handleTreeToggle}
+                  >
+                    {(props) => (
+                      <WorkspaceTreeRow
+                        {...props}
+                        selectedPath={activeFilePath}
+                        loadingPaths={loadingPaths}
+                        onOpenDirectory={loadDirectory}
+                        onOpenFile={handleOpenFile}
+                      />
+                    )}
+                  </Tree>
+                ) : (
+                  <div className="flex h-full min-h-[240px] items-center justify-center">
+                    <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             <div className="h-full min-h-0 flex-1 overflow-hidden">
@@ -292,10 +363,38 @@ export function WorkspaceWorkbench({
 
             {selectedFile ? (
               <div className="flex h-9 shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-background/80 px-3">
-                <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
-                  {selectedFile.relativePath}
-                  {selectedFileDirty ? " *" : ""}
-                </span>
+                <nav
+                  className="flex min-w-0 items-center gap-1 overflow-hidden font-mono text-xs text-muted-foreground"
+                  aria-label={t("pages.workspace.editor.breadcrumbs")}
+                  title={selectedFile.relativePath}
+                >
+                  {selectedFileBreadcrumbs.map((segment, index) => {
+                    const path = selectedFileBreadcrumbs.slice(0, index + 1).join("/")
+                    const isLast = index === selectedFileBreadcrumbs.length - 1
+
+                    return (
+                      <span key={path} className="flex min-w-0 items-center gap-1">
+                        {index > 0 ? <ChevronRight className="size-3 shrink-0" /> : null}
+                        {isLast ? (
+                          <span className="min-w-0 truncate text-foreground">
+                            {segment}
+                            {selectedFileDirty ? " *" : ""}
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="min-w-0 truncate transition hover:text-foreground"
+                            onClick={() => {
+                              void handleRevealDirectoryInTree(path)
+                            }}
+                          >
+                            {segment}
+                          </button>
+                        )}
+                      </span>
+                    )
+                  })}
+                </nav>
                 <div className="flex shrink-0 items-center gap-2">
                   {isMarkdownFile ? (
                     <div className="flex items-center gap-1 rounded-full bg-[var(--surface-1)] p-0.5">
@@ -359,7 +458,25 @@ export function WorkspaceWorkbench({
                     beforeMount={(monaco) => {
                       void setupShikiMonaco(monaco)
                     }}
-                    onMount={handleEditorMount}
+                    onMount={(editor, monaco) => {
+                      handleEditorMount(editor, monaco)
+                      editor.onKeyDown((event) => {
+                        if (event.keyCode !== monaco.KeyCode.Escape) {
+                          return
+                        }
+                        const findController = editor.getContribution("editor.contrib.findController") as {
+                          closeFindWidget?: () => void
+                          getState?: () => { isRevealed?: boolean }
+                        } | null
+                        if (!findController?.getState?.().isRevealed) {
+                          return
+                        }
+                        findController.closeFindWidget?.()
+                        void editor.getAction("closeFindWidget")?.run()
+                        event.preventDefault()
+                        event.stopPropagation()
+                      })
+                    }}
                     onChange={(value) => setEditorContent(value ?? "")}
                     options={{
                       readOnly: savingFile,

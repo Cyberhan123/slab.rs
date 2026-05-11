@@ -1,5 +1,5 @@
-import loader from "@monaco-editor/loader"
-import * as monaco from "@codingame/monaco-vscode-editor-api"
+import { loader } from "@monaco-editor/react"
+import * as monaco from "monaco-editor"
 import type * as Monaco from "monaco-editor"
 
 let configured = false

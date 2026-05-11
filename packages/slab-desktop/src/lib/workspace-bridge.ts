@@ -50,6 +50,12 @@ export type WorkspaceDirectoryResponse = {
   truncated: boolean
 }
 
+export type WorkspaceFileSearchResponse = {
+  query: string
+  entries: WorkspaceFileEntry[]
+  truncated: boolean
+}
+
 export type WorkspaceFileContent = {
   relativePath: string
   name: string
@@ -122,6 +128,17 @@ export type WorkspaceGitOperationResult = {
   status: WorkspaceGitStatus
 }
 
+export type WorkspaceGitDiffCommand = {
+  path: string
+  staged: boolean
+}
+
+export type WorkspaceGitDiff = {
+  path: string
+  staged: boolean
+  diff: string
+}
+
 export type WorkspacePluginPreferenceUpdate = {
   pluginId: string
   enabled?: boolean | null
@@ -153,12 +170,16 @@ export async function workspaceClose(): Promise<WorkspaceStateResponse> {
 
 export async function workspaceReadDirectory(
   relativePath?: string,
+  options?: { includeIgnored?: boolean },
 ): Promise<WorkspaceDirectoryResponse> {
   if (!isTauri()) {
     return { relativePath: relativePath ?? "", entries: [], truncated: false }
   }
 
-  return invoke<WorkspaceDirectoryResponse>("workspace_read_directory", { relativePath })
+  return invoke<WorkspaceDirectoryResponse>("workspace_read_directory", {
+    includeIgnored: options?.includeIgnored,
+    relativePath,
+  })
 }
 
 export async function workspaceReadFile(relativePath: string): Promise<WorkspaceFileContent> {
@@ -167,6 +188,14 @@ export async function workspaceReadFile(relativePath: string): Promise<Workspace
   }
 
   return invoke<WorkspaceFileContent>("workspace_read_file", { relativePath })
+}
+
+export async function workspaceSearchFiles(query: string): Promise<WorkspaceFileSearchResponse> {
+  if (!isTauri()) {
+    return { query, entries: [], truncated: false }
+  }
+
+  return invoke<WorkspaceFileSearchResponse>("workspace_search_files", { query })
 }
 
 export async function workspaceWriteFile(command: WorkspaceWriteFileCommand): Promise<WorkspaceWriteFileResult> {
@@ -231,6 +260,14 @@ export async function workspaceGitCommit(message: string): Promise<WorkspaceGitO
   }
 
   return invoke<WorkspaceGitOperationResult>("workspace_git_commit", { command: { message } })
+}
+
+export async function workspaceGitDiff(command: WorkspaceGitDiffCommand): Promise<WorkspaceGitDiff> {
+  if (!isTauri()) {
+    return { path: command.path, staged: command.staged, diff: "" }
+  }
+
+  return invoke<WorkspaceGitDiff>("workspace_git_diff", { command })
 }
 
 export async function workspaceConsoleRun(command: string): Promise<WorkspaceConsoleOutput> {
