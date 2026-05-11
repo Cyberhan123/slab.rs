@@ -20,14 +20,17 @@ import {
 import { cn } from "@/lib/utils"
 import type { WorkspacePageState } from "../hooks/use-workspace-page"
 import { useWorkspaceLsp } from "../hooks/use-workspace-lsp"
-import { workspaceLspModelPath } from "../lib/workspace-lsp"
+import { supportsWorkspaceLsp, workspaceLspModelPath } from "../lib/workspace-lsp"
 import { languageForFile, SLAB_DIR_NAME } from "../lib/workspace-page-utils"
 import { RecentWorkspaceList } from "./recent-workspace-list"
 import { WorkspaceConsolePanel } from "./workspace-console-panel"
 import { WorkspaceGitPanel } from "./workspace-git-panel"
 import { WorkspaceMarkdownPreview } from "./workspace-markdown-preview"
 import { WorkspaceTreeRow } from "./workspace-tree-row"
+import { configureWorkspaceMonacoLoader } from "../lib/monaco-editor-loader"
 import { setupShikiMonaco } from "../lib/monaco-shiki"
+
+configureWorkspaceMonacoLoader()
 
 export function WorkspaceWorkbench({
   activeFilePath,
@@ -76,11 +79,15 @@ export function WorkspaceWorkbench({
   const selectedFileLanguage = selectedFile ? languageForFile(selectedFile.name) : "plaintext"
   const isMarkdownFile = selectedFileLanguage === "markdown"
   const terminalThemeMode = editorTheme === "github-dark" ? "dark" : "light"
-  const { handleEditorMount } = useWorkspaceLsp({
+  const { handleEditorMount, servicesPending, servicesReady } = useWorkspaceLsp({
     language: selectedFileLanguage,
+    onOpenFile: handleOpenFile,
     relativePath: selectedFile?.relativePath ?? null,
     workspaceRoot: workspace?.rootPath ?? null,
   })
+  const waitForLspServices = selectedFile
+    ? supportsWorkspaceLsp(selectedFileLanguage) && servicesPending && !servicesReady
+    : false
 
   if (!isDesktopTauri) {
     return (
@@ -333,7 +340,11 @@ export function WorkspaceWorkbench({
             ) : null}
 
             {selectedFile ? (
-              isMarkdownFile && markdownMode === "preview" ? (
+              waitForLspServices ? (
+                <div className="flex h-full min-h-[420px] flex-1 items-center justify-center">
+                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                </div>
+              ) : isMarkdownFile && markdownMode === "preview" ? (
                 <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
                   <WorkspaceMarkdownPreview content={editorContent} />
                 </div>
@@ -357,6 +368,12 @@ export function WorkspaceWorkbench({
                       wordWrap: "on",
                       fontSize: 13,
                       tabSize: 2,
+                      codeLens: true,
+                      inlayHints: { enabled: "on" },
+                      parameterHints: { enabled: true },
+                      quickSuggestions: true,
+                      renameOnType: true,
+                      suggestOnTriggerCharacters: true,
                     }}
                   />
                 </div>
