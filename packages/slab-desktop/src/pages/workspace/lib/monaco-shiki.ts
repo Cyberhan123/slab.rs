@@ -7,8 +7,8 @@ export function setupShikiMonaco(monaco: typeof Monaco) {
     import("@shikijs/monaco"),
     import("shiki/core"),
     import("@shikijs/engine-javascript"),
-    import("@shikijs/themes/github-light"),
-    import("@shikijs/themes/github-dark"),
+    import("@shikijs/themes/light-plus"),
+    import("@shikijs/themes/dark-plus"),
     import("@shikijs/langs/bash"),
     import("@shikijs/langs/c"),
     import("@shikijs/langs/cpp"),
@@ -35,18 +35,18 @@ export function setupShikiMonaco(monaco: typeof Monaco) {
     { shikiToMonaco },
     { createHighlighterCore },
     { createJavaScriptRegexEngine },
-    githubLight,
-    githubDark,
+    lightPlus,
+    darkPlus,
     ...langs
   ]) => {
     const highlighter = await createHighlighterCore({
       engine: createJavaScriptRegexEngine(),
-      themes: [githubLight.default, githubDark.default],
+      themes: [lightPlus.default, darkPlus.default],
       langs: langs.flatMap((lang) => lang.default),
     })
 
     shikiToMonaco(highlighter, monaco)
-    monaco.editor.setTheme("github-light")
+    monaco.editor.setTheme("light-plus")
   })
 
   return setupPromise

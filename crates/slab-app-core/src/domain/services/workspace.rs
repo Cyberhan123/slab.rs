@@ -9,15 +9,16 @@ use tokio::process::Command as TokioCommand;
 use tokio::time::timeout;
 
 use crate::domain::models::{
-    WorkspaceConsoleOutput, WorkspaceGitFileStatus, WorkspaceGitOperationView,
-    WorkspaceGitStatusEntry, WorkspaceGitStatusSummary, WorkspaceGitStatusView,
-    WorkspaceWriteFileCommand, WorkspaceWriteFileView,
+    WorkspaceConsoleOutput, WorkspaceGitDiffView, WorkspaceGitFileStatus,
+    WorkspaceGitOperationView, WorkspaceGitStatusEntry, WorkspaceGitStatusSummary,
+    WorkspaceGitStatusView, WorkspaceWriteFileCommand, WorkspaceWriteFileView,
 };
 use crate::error::AppCoreError;
 
 const CONSOLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_CONSOLE_COMMAND_BYTES: usize = 2_000;
 const MAX_CONSOLE_OUTPUT_BYTES: usize = 64 * 1024;
+const MAX_GIT_DIFF_BYTES: usize = 256 * 1024;
 const MAX_WRITE_FILE_BYTES: usize = 2 * 1024 * 1024;
 
 pub struct WorkspaceService;
@@ -186,6 +187,32 @@ impl WorkspaceService {
         Ok(WorkspaceGitOperationView { status })
     }
 
+    pub fn git_diff(
+        root: impl AsRef<Path>,
+        path: &str,
+        staged: bool,
+    ) -> Result<WorkspaceGitDiffView, AppCoreError> {
+        let root = root.as_ref();
+        let relative_path = normalize_relative_path(path)?;
+        let args = if staged {
+            vec!["diff", "--cached", "--", relative_path.as_str()]
+        } else {
+            vec!["diff", "--", relative_path.as_str()]
+        };
+        let output = git_output(root, &args)
+            .map_err(|error| AppCoreError::Internal(format!("failed to run git diff: {error}")))?;
+        if !output.status.success() {
+            return Err(git_command_error("git diff failed", &output));
+        }
+
+        let mut diff = decode_limited_output_with_limit(&output.stdout, MAX_GIT_DIFF_BYTES);
+        if diff.trim().is_empty() && !staged && is_untracked_git_path(root, &relative_path)? {
+            diff = git_untracked_file_diff(root, &relative_path)?;
+        }
+
+        Ok(WorkspaceGitDiffView { path: relative_path, staged, diff })
+    }
+
     pub async fn run_console_command(
         root: impl AsRef<Path>,
         command: &str,
@@ -245,14 +272,37 @@ fn run_git_operation(root: &Path, args: &[&str]) -> Result<(), AppCoreError> {
         return Ok(());
     }
 
+    Err(git_command_error("git operation failed", &output))
+}
+
+fn git_command_error(default_message: &str, output: &std::process::Output) -> AppCoreError {
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let message = if !stderr.is_empty() { stderr } else { stdout };
-    Err(AppCoreError::BadRequest(if message.is_empty() {
-        "git operation failed".to_string()
-    } else {
-        message
-    }))
+    AppCoreError::BadRequest(if message.is_empty() { default_message.to_string() } else { message })
+}
+
+fn is_untracked_git_path(root: &Path, relative_path: &str) -> Result<bool, AppCoreError> {
+    let output =
+        git_output(root, &["ls-files", "--others", "--exclude-standard", "--", relative_path])
+            .map_err(|error| {
+                AppCoreError::Internal(format!("failed to inspect git path: {error}"))
+            })?;
+    if !output.status.success() {
+        return Err(git_command_error("git ls-files failed", &output));
+    }
+
+    Ok(!String::from_utf8_lossy(&output.stdout).trim().is_empty())
+}
+
+fn git_untracked_file_diff(root: &Path, relative_path: &str) -> Result<String, AppCoreError> {
+    let output = git_output(root, &["diff", "--no-index", "--", "/dev/null", relative_path])
+        .map_err(|error| AppCoreError::Internal(format!("failed to run git diff: {error}")))?;
+    if !output.status.success() && output.status.code() != Some(1) {
+        return Err(git_command_error("git diff failed", &output));
+    }
+
+    Ok(decode_limited_output_with_limit(&output.stdout, MAX_GIT_DIFF_BYTES))
 }
 
 #[cfg(windows)]
@@ -389,11 +439,15 @@ fn should_push_after_commit(status: &WorkspaceGitStatusView) -> bool {
 }
 
 fn decode_limited_output(bytes: &[u8]) -> String {
-    if bytes.len() <= MAX_CONSOLE_OUTPUT_BYTES {
+    decode_limited_output_with_limit(bytes, MAX_CONSOLE_OUTPUT_BYTES)
+}
+
+fn decode_limited_output_with_limit(bytes: &[u8], limit: usize) -> String {
+    if bytes.len() <= limit {
         return String::from_utf8_lossy(bytes).into_owned();
     }
 
-    let mut output = String::from_utf8_lossy(&bytes[..MAX_CONSOLE_OUTPUT_BYTES]).into_owned();
+    let mut output = String::from_utf8_lossy(&bytes[..limit]).into_owned();
     output.push_str("\n[output truncated]\n");
     output
 }

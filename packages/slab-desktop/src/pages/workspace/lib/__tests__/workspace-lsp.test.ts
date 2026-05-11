@@ -5,13 +5,23 @@ import {
   workspaceLspModelPath,
   workspaceLspRelativePathFromUri,
 } from "../workspace-lsp"
+import { languageForFile, lspLanguageForFile } from "../workspace-page-utils"
 
 describe("workspace LSP helpers", () => {
   it("matches supported language providers", () => {
     expect(supportsWorkspaceLsp("typescript")).toBe(true)
+    expect(supportsWorkspaceLsp("typescriptreact")).toBe(true)
+    expect(supportsWorkspaceLsp("javascriptreact")).toBe(true)
     expect(supportsWorkspaceLsp("python")).toBe(true)
     expect(supportsWorkspaceLsp("markdown")).toBe(false)
     expect(supportsWorkspaceLsp("plaintext")).toBe(false)
+  })
+
+  it("keeps editor language compatible while using React LSP ids", () => {
+    expect(languageForFile("component.tsx")).toBe("typescript")
+    expect(languageForFile("component.jsx")).toBe("javascript")
+    expect(lspLanguageForFile("component.tsx")).toBe("typescriptreact")
+    expect(lspLanguageForFile("component.jsx")).toBe("javascriptreact")
   })
 
   it("builds file uri model paths for Monaco", () => {

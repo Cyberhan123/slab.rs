@@ -22,7 +22,6 @@ type WorkspaceConsolePanelProps = {
 
 type TerminalSession = {
   id: string
-  index: number
 }
 
 type TerminalControlMessage =
@@ -96,19 +95,17 @@ const darkTheme: ITheme = {
   brightWhite: "#ffffff",
 }
 
-function createTerminalSession(index: number): TerminalSession {
+function createTerminalSession(): TerminalSession {
   return {
-    id: `terminal-${Date.now()}-${index}`,
-    index,
+    id: `terminal-${Date.now()}-${crypto.randomUUID()}`,
   }
 }
 
 export function WorkspaceConsolePanel({ themeMode, workspaceRoot }: WorkspaceConsolePanelProps) {
   const { t } = useTranslation()
   const terminalRefs = useRef(new Map<string, XtermTerminal>())
-  const nextSessionIndexRef = useRef(1)
   const workspaceRootRef = useRef(workspaceRoot)
-  const [sessions, setSessions] = useState<TerminalSession[]>(() => [createTerminalSession(1)])
+  const [sessions, setSessions] = useState<TerminalSession[]>(() => [createTerminalSession()])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(() => sessions[0].id)
   const theme = useMemo(() => (themeMode === "dark" ? darkTheme : lightTheme), [themeMode])
 
@@ -117,8 +114,7 @@ export function WorkspaceConsolePanel({ themeMode, workspaceRoot }: WorkspaceCon
       return
     }
     workspaceRootRef.current = workspaceRoot
-    nextSessionIndexRef.current = 1
-    const session = createTerminalSession(1)
+    const session = createTerminalSession()
     terminalRefs.current.clear()
     setSessions([session])
     setActiveSessionId(session.id)
@@ -133,8 +129,7 @@ export function WorkspaceConsolePanel({ themeMode, workspaceRoot }: WorkspaceCon
   }, [])
 
   const handleNewTerminal = useCallback(() => {
-    nextSessionIndexRef.current += 1
-    const session = createTerminalSession(nextSessionIndexRef.current)
+    const session = createTerminalSession()
     setSessions((current) => [...current, session])
     setActiveSessionId(session.id)
   }, [])
@@ -167,9 +162,9 @@ export function WorkspaceConsolePanel({ themeMode, workspaceRoot }: WorkspaceCon
             {t("pages.workspace.console.title")}
           </div>
           <div className="flex min-w-0 items-center gap-1 overflow-x-auto" role="tablist">
-            {sessions.map((session) => {
+            {sessions.map((session, index) => {
               const active = session.id === activeSessionId
-              const name = `${t("pages.workspace.console.terminal")} ${session.index}`
+              const name = `${t("pages.workspace.console.terminal")} ${index + 1}`
 
               return (
                 <div

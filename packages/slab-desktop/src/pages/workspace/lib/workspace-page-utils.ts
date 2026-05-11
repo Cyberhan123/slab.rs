@@ -91,6 +91,18 @@ export function languageForFile(fileName: string) {
   }
 }
 
+export function lspLanguageForFile(fileName: string) {
+  const extension = fileName.split(".").pop()?.toLowerCase()
+  switch (extension) {
+    case "tsx":
+      return "typescriptreact"
+    case "jsx":
+      return "javascriptreact"
+    default:
+      return languageForFile(fileName)
+  }
+}
+
 export function upsertFileTab(tabs: WorkspaceFileTab[], tab: WorkspaceFileTab) {
   if (tabs.some((item) => item.relativePath === tab.relativePath)) {
     return tabs.map((item) => (item.relativePath === tab.relativePath ? tab : item))
@@ -112,6 +124,12 @@ export function sortDirectoryPaths(paths: string[]) {
 
       return left.localeCompare(right)
     })
+}
+
+export function directoryAncestors(relativePath: string, includeSelf = false) {
+  const segments = relativePath.split("/").filter(Boolean)
+  const count = includeSelf ? segments.length : Math.max(0, segments.length - 1)
+  return segments.slice(0, count).map((_, index) => segments.slice(0, index + 1).join("/"))
 }
 
 export const SLAB_DIR_NAME = ".slab"

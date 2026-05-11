@@ -17,6 +17,7 @@ import {
   workspaceOpen,
   workspaceReadDirectory,
   workspaceReadFile,
+  workspaceSearchFiles,
   workspaceState,
   workspaceWriteFile,
   WORKSPACE_STATE_QUERY_KEY,
@@ -31,6 +32,7 @@ import {
 } from "@/store/useWorkspaceUiStore"
 import { getErrorMessage } from "@slab/api"
 import {
+  directoryAncestors,
   entryToTreeNode,
   insertChildren,
   sortDirectoryPaths,
@@ -46,11 +48,12 @@ export function useWorkspacePage() {
   const [selectedFile, setSelectedFile] = useState<WorkspaceFileContent | null>(null)
   const [editorContent, setEditorContent] = useState("")
   const [fileError, setFileError] = useState<string | null>(null)
+  const [fileSearchQuery, setFileSearchQuery] = useState("")
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set())
   const [editorTheme, setEditorTheme] = useState(() =>
     typeof document !== "undefined" && document.documentElement.classList.contains("dark")
-      ? "github-dark"
-      : "github-light",
+      ? "dark-plus"
+      : "light-plus",
   )
   const treeHostRef = useRef<HTMLDivElement | null>(null)
   const restoredWorkspaceRootRef = useRef<string | null>(null)
@@ -82,6 +85,7 @@ export function useWorkspacePage() {
   const explorerPanel = workspaceUi.explorerPanel
   const markdownMode = workspaceUi.markdownMode
   const consoleOpen = workspaceUi.consoleOpen
+  const trimmedFileSearchQuery = fileSearchQuery.trim()
   const initialOpenState = useMemo(
     () =>
       Object.fromEntries(openDirectoryPaths.map((relativePath) => [relativePath, true])),
@@ -96,6 +100,15 @@ export function useWorkspacePage() {
     queryFn: workspaceGitStatus,
     enabled: isDesktopTauri && Boolean(workspace),
     refetchInterval: 30_000,
+    retry: false,
+  })
+  const {
+    data: fileSearchResult,
+    isFetching: fileSearchFetching,
+  } = useQuery({
+    queryKey: ["workspace-file-search", workspace?.rootPath, trimmedFileSearchQuery],
+    queryFn: () => workspaceSearchFiles(trimmedFileSearchQuery),
+    enabled: isDesktopTauri && Boolean(workspace && trimmedFileSearchQuery),
     retry: false,
   })
   const saveFileMutation = useMutation({
@@ -127,7 +140,7 @@ export function useWorkspacePage() {
     }
 
     const updateEditorTheme = () => {
-      setEditorTheme(document.documentElement.classList.contains("dark") ? "github-dark" : "github-light")
+      setEditorTheme(document.documentElement.classList.contains("dark") ? "dark-plus" : "light-plus")
     }
 
     updateEditorTheme()
@@ -182,6 +195,46 @@ export function useWorkspacePage() {
       })
     }
   }, [])
+
+  const revealFileInTree = useCallback(
+    async (relativePath: string) => {
+      if (!workspace) {
+        return
+      }
+
+      const paths = directoryAncestors(relativePath)
+      await paths.reduce<Promise<void>>(async (chain, path) => {
+        await chain
+        await loadDirectory(path)
+      }, Promise.resolve())
+      if (paths.length > 0) {
+        patchWorkspaceState(workspace.rootPath, {
+          openDirectoryPaths: sortDirectoryPaths([...openDirectoryPaths, ...paths]),
+        })
+      }
+    },
+    [loadDirectory, openDirectoryPaths, patchWorkspaceState, workspace],
+  )
+
+  const revealDirectoryInTree = useCallback(
+    async (relativePath: string) => {
+      if (!workspace) {
+        return
+      }
+
+      const paths = directoryAncestors(relativePath, true)
+      await paths.reduce<Promise<void>>(async (chain, path) => {
+        await chain
+        await loadDirectory(path)
+      }, Promise.resolve())
+      if (paths.length > 0) {
+        patchWorkspaceState(workspace.rootPath, {
+          openDirectoryPaths: sortDirectoryPaths([...openDirectoryPaths, ...paths]),
+        })
+      }
+    },
+    [loadDirectory, openDirectoryPaths, patchWorkspaceState, workspace],
+  )
 
   const openWorkspacePath = useCallback(
     async (rootPath: string) => {
@@ -260,8 +313,17 @@ export function useWorkspacePage() {
           name: file.name,
         }),
       })
+      await revealFileInTree(file.relativePath)
     },
-    [openFileContent, openFileTabs, patchWorkspaceState, selectedFileDirty, t, workspace],
+    [
+      openFileContent,
+      openFileTabs,
+      patchWorkspaceState,
+      revealFileInTree,
+      selectedFileDirty,
+      t,
+      workspace,
+    ],
   )
 
   useEffect(() => {
@@ -270,6 +332,7 @@ export function useWorkspacePage() {
       setSelectedFile(null)
       setEditorContent("")
       setFileError(null)
+      setFileSearchQuery("")
       restoredWorkspaceRootRef.current = null
       return
     }
@@ -283,6 +346,7 @@ export function useWorkspacePage() {
     setSelectedFile(null)
     setEditorContent("")
     setFileError(null)
+    setFileSearchQuery("")
 
     const savedOpenDirectoryPaths = sortDirectoryPaths(openDirectoryPaths)
     const savedActiveFilePath = activeFilePath
@@ -566,6 +630,10 @@ export function useWorkspacePage() {
     editorTheme,
     explorerPanel,
     fileError,
+    fileSearchFetching,
+    fileSearchQuery,
+    fileSearchResults: fileSearchResult?.entries ?? [],
+    fileSearchTruncated: fileSearchResult?.truncated ?? false,
     gitStatus,
     gitStatusFetching,
     gitOperationPending,
@@ -578,6 +646,7 @@ export function useWorkspacePage() {
     handleOpenFile,
     handleOpenFolder,
     handleRefreshGitStatus,
+    handleRevealDirectoryInTree: revealDirectoryInTree,
     handleSaveFile,
     handleSelectExplorerPanel,
     handleSelectFileTab,
@@ -596,6 +665,7 @@ export function useWorkspacePage() {
     selectedFileDirty,
     setEditorContent,
     savingFile,
+    setFileSearchQuery,
     treeData,
     treeHeight,
     treeHostRef,

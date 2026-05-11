@@ -10,9 +10,9 @@ use dirs_next::config_dir;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use slab_app_core::domain::models::{
-    WorkspaceConsoleOutput, WorkspaceGitCommitCommand, WorkspaceGitOperationView,
-    WorkspaceGitPathCommand, WorkspaceGitStatusView, WorkspaceWriteFileCommand,
-    WorkspaceWriteFileView,
+    WorkspaceConsoleOutput, WorkspaceGitCommitCommand, WorkspaceGitDiffCommand,
+    WorkspaceGitDiffView, WorkspaceGitOperationView, WorkspaceGitPathCommand,
+    WorkspaceGitStatusView, WorkspaceWriteFileCommand, WorkspaceWriteFileView,
 };
 use slab_app_core::domain::services::WorkspaceService;
 use slab_types::settings::SettingsDocument;
@@ -28,6 +28,7 @@ const DATABASE_FILE: &str = "slab.db";
 const MAX_RECENT_WORKSPACES: usize = 10;
 const MAX_DIRECTORY_ENTRIES: usize = 500;
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
+const MAX_SEARCH_RESULTS: usize = 100;
 const IGNORED_DIR_NAMES: &[&str] = &[
     SLAB_DIR_NAME,
     ".git",
@@ -94,6 +95,14 @@ pub struct WorkspaceStateResponse {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceDirectoryResponse {
     pub relative_path: String,
+    pub entries: Vec<WorkspaceFileEntry>,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFileSearchResponse {
+    pub query: String,
     pub entries: Vec<WorkspaceFileEntry>,
     pub truncated: bool,
 }
@@ -232,6 +241,7 @@ pub fn workspace_close<R: Runtime>(
 pub fn workspace_read_directory(
     state: State<'_, WorkspaceState>,
     relative_path: Option<String>,
+    include_ignored: Option<bool>,
 ) -> Result<WorkspaceDirectoryResponse, String> {
     let workspace = active_workspace(&state)?;
     let relative_path = normalize_relative_path(relative_path.as_deref().unwrap_or(""))?;
@@ -243,10 +253,12 @@ pub fn workspace_read_directory(
 
     let mut entries = Vec::new();
     let mut truncated = false;
+    let include_ignored = include_ignored.unwrap_or(false);
+    let max_entries = if include_ignored { usize::MAX } else { MAX_DIRECTORY_ENTRIES };
     for entry in fs::read_dir(&directory)
         .map_err(|error| format!("failed to read directory {}: {error}", directory.display()))?
     {
-        if entries.len() >= MAX_DIRECTORY_ENTRIES {
+        if entries.len() >= max_entries {
             truncated = true;
             break;
         }
@@ -255,7 +267,7 @@ pub fn workspace_read_directory(
         let file_type =
             entry.file_type().map_err(|error| format!("failed to read file type: {error}"))?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        if should_hide_entry(&name, file_type.is_dir()) {
+        if should_hide_entry(&name, file_type.is_dir(), include_ignored) {
             continue;
         }
 
@@ -337,6 +349,25 @@ pub fn workspace_read_file(
 }
 
 #[tauri::command]
+pub fn workspace_search_files(
+    state: State<'_, WorkspaceState>,
+    query: String,
+) -> Result<WorkspaceFileSearchResponse, String> {
+    let workspace = active_workspace(&state)?;
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return Ok(WorkspaceFileSearchResponse { query, entries: Vec::new(), truncated: false });
+    }
+
+    let root = PathBuf::from(&workspace.root_path);
+    let mut entries = Vec::new();
+    let mut truncated = false;
+    search_workspace_files(&root, "", &query, &mut entries, &mut truncated)?;
+
+    Ok(WorkspaceFileSearchResponse { query, entries, truncated })
+}
+
+#[tauri::command]
 pub fn workspace_write_file(
     state: State<'_, WorkspaceState>,
     command: WorkspaceWriteFileCommand,
@@ -392,6 +423,16 @@ pub fn workspace_git_commit(
 ) -> Result<WorkspaceGitOperationView, String> {
     let workspace = active_workspace(&state)?;
     WorkspaceService::git_commit(PathBuf::from(workspace.root_path), &command.message)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_git_diff(
+    state: State<'_, WorkspaceState>,
+    command: WorkspaceGitDiffCommand,
+) -> Result<WorkspaceGitDiffView, String> {
+    let workspace = active_workspace(&state)?;
+    WorkspaceService::git_diff(PathBuf::from(workspace.root_path), &command.path, command.staged)
         .map_err(|error| error.to_string())
 }
 
@@ -628,8 +669,60 @@ fn join_relative_path(parent: &str, name: &str) -> String {
     if parent.is_empty() { name.to_owned() } else { format!("{parent}/{name}") }
 }
 
-fn should_hide_entry(name: &str, is_directory: bool) -> bool {
-    is_directory && IGNORED_DIR_NAMES.iter().any(|ignored| ignored.eq_ignore_ascii_case(name))
+fn should_hide_entry(name: &str, is_directory: bool, include_ignored: bool) -> bool {
+    !include_ignored
+        && is_directory
+        && IGNORED_DIR_NAMES.iter().any(|ignored| ignored.eq_ignore_ascii_case(name))
+}
+
+fn search_workspace_files(
+    directory: &Path,
+    relative_path: &str,
+    query: &str,
+    entries: &mut Vec<WorkspaceFileEntry>,
+    truncated: &mut bool,
+) -> Result<(), String> {
+    if entries.len() >= MAX_SEARCH_RESULTS {
+        *truncated = true;
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(directory)
+        .map_err(|error| format!("failed to read directory {}: {error}", directory.display()))?
+    {
+        if entries.len() >= MAX_SEARCH_RESULTS {
+            *truncated = true;
+            break;
+        }
+
+        let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
+        let file_type =
+            entry.file_type().map_err(|error| format!("failed to read file type: {error}"))?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if should_hide_entry(&name, file_type.is_dir(), false) {
+            continue;
+        }
+
+        let entry_relative_path = join_relative_path(relative_path, &name);
+        if file_type.is_dir() {
+            search_workspace_files(&entry.path(), &entry_relative_path, query, entries, truncated)?;
+            continue;
+        }
+
+        if !entry_relative_path.to_lowercase().contains(query) {
+            continue;
+        }
+
+        entries.push(WorkspaceFileEntry {
+            id: entry_relative_path.clone(),
+            name,
+            relative_path: entry_relative_path,
+            kind: WorkspaceFileKind::File,
+            has_children: false,
+        });
+    }
+
+    Ok(())
 }
 
 fn sqlite_url_for_path(path: &Path) -> String {
