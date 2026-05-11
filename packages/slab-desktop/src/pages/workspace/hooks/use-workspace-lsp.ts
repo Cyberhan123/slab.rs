@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import type { OnMount } from "@monaco-editor/react"
+import type * as Monaco from "monaco-editor"
 
 import {
   ensureWorkspaceLspServices,
@@ -28,14 +28,15 @@ export function useWorkspaceLsp({
   relativePath,
   workspaceRoot,
 }: WorkspaceLspOptions) {
+  const shouldInitializeServices = Boolean(workspaceRoot)
   const shouldUseLsp = Boolean(workspaceRoot && supportsWorkspaceLsp(language))
-  const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
-  const monacoRef = useRef<Parameters<OnMount>[1] | null>(null)
+  const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
+  const monacoRef = useRef<typeof Monaco | null>(null)
   const sessionRef = useRef<WorkspaceLspSession | null>(null)
   const startGenerationRef = useRef(0)
   const [editorMountVersion, setEditorMountVersion] = useState(0)
   const [servicesState, setServicesState] = useState<WorkspaceLspServicesState>(() =>
-    initialServicesState(shouldUseLsp),
+    initialServicesState(shouldInitializeServices),
   )
 
   useEffect(() => {
@@ -48,7 +49,7 @@ export function useWorkspaceLsp({
   useEffect(() => {
     let cancelled = false
 
-    if (!shouldUseLsp) {
+    if (!shouldInitializeServices) {
       setServicesState("idle")
       return
     }
@@ -75,7 +76,7 @@ export function useWorkspaceLsp({
     return () => {
       cancelled = true
     }
-  }, [language, shouldUseLsp, workspaceRoot])
+  }, [language, shouldInitializeServices, workspaceRoot])
 
   useEffect(() => {
     setWorkspaceLspOpenFile(async (nextRelativePath, options) => {
@@ -113,7 +114,7 @@ export function useWorkspaceLsp({
 
     void previousSession?.dispose()
 
-    if (servicesState !== "ready" || !relativePath || !workspaceRoot || !supportsWorkspaceLsp(language)) {
+    if (servicesState !== "ready" || !relativePath || !workspaceRoot || !shouldUseLsp) {
       return
     }
 
@@ -163,9 +164,9 @@ export function useWorkspaceLsp({
         void currentSession?.dispose()
       }
     }
-  }, [editorMountVersion, language, relativePath, servicesState, workspaceRoot])
+  }, [editorMountVersion, language, relativePath, servicesState, shouldUseLsp, workspaceRoot])
 
-  const handleEditorMount = useCallback<OnMount>((editor, monaco) => {
+  const handleEditorMount = useCallback((editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco) => {
     editorRef.current = editor
     monacoRef.current = monaco
     setEditorMountVersion((version) => version + 1)
@@ -173,13 +174,13 @@ export function useWorkspaceLsp({
 
   return {
     handleEditorMount,
-    servicesPending: shouldUseLsp && servicesState !== "ready" && servicesState !== "failed",
+    servicesPending: shouldInitializeServices && servicesState !== "ready" && servicesState !== "failed",
     servicesReady: servicesState === "ready",
   }
 }
 
-function initialServicesState(shouldUseLsp: boolean): WorkspaceLspServicesState {
-  if (!shouldUseLsp) {
+function initialServicesState(shouldInitializeServices: boolean): WorkspaceLspServicesState {
+  if (!shouldInitializeServices) {
     return "idle"
   }
 
@@ -187,7 +188,7 @@ function initialServicesState(shouldUseLsp: boolean): WorkspaceLspServicesState 
 }
 
 function waitForEditorModel(
-  editor: Parameters<OnMount>[0],
+  editor: Monaco.editor.IStandaloneCodeEditor,
   expectedUri: string,
 ) {
   if (editor.getModel()?.uri.toString() === expectedUri) {
@@ -209,7 +210,7 @@ function waitForEditorModel(
 }
 
 function applySelection(
-  editor: Parameters<OnMount>[0],
+  editor: Monaco.editor.IStandaloneCodeEditor,
   options: WorkspaceLspOpenFileOptions | undefined,
 ) {
   if (!options?.startLineNumber || !options.startColumn) {
