@@ -1,11 +1,13 @@
-import { useCallback, useRef } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslation } from "@slab/i18n"
 import { Button } from "@slab/components/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@slab/components/tooltip"
 import { SoftPanel, StageEmptyState, StatusPill } from "@slab/components/workspace"
 import { Tree } from "react-arborist"
 import {
   Code2,
   ChevronRight,
+  Command as CommandPaletteIcon,
   Eye,
   FileCode2,
   Files,
@@ -27,14 +29,17 @@ import { languageForFile, lspLanguageForFile, SLAB_DIR_NAME } from "../lib/works
 import { RecentWorkspaceList } from "./recent-workspace-list"
 import { WorkspaceConsolePanel } from "./workspace-console-panel"
 import { WorkspaceCodeEditor } from "./workspace-code-editor"
+import { WorkspaceCommandPalette } from "./workspace-command-palette"
 import { WorkspaceGitPanel } from "./workspace-git-panel"
 import { WorkspaceMarkdownPreview } from "./workspace-markdown-preview"
+import { WorkspaceSearchPanel } from "./workspace-search-panel"
 import { WorkspaceTreeRow } from "./workspace-tree-row"
 
 export function WorkspaceWorkbench({
   activeFilePath,
   consoleOpen,
   editorContent,
+  editorRevealTarget,
   editorTheme,
   explorerPanel,
   fileError,
@@ -53,6 +58,7 @@ export function WorkspaceWorkbench({
   handleGitUnstage,
   handleOpenFile,
   handleOpenFolder,
+  handleOpenTextSearchMatch,
   handleRefreshGitStatus,
   handleRevealDirectoryInTree,
   handleSaveFile,
@@ -79,8 +85,14 @@ export function WorkspaceWorkbench({
   workspace,
   workspaceUiHasHydrated,
   setFileSearchQuery,
+  setTextSearchQuery,
+  textSearchFetching,
+  textSearchQuery,
+  textSearchResults,
+  textSearchTruncated,
 }: WorkspacePageState) {
   const { t } = useTranslation()
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const selectedFileLanguage = selectedFile ? languageForFile(selectedFile.name) : "plaintext"
   const selectedFileLspLanguage = selectedFile ? lspLanguageForFile(selectedFile.name) : "plaintext"
   const isMarkdownFile = selectedFileLanguage === "markdown"
@@ -95,6 +107,43 @@ export function WorkspaceWorkbench({
     workspaceRoot: workspace?.rootPath ?? null,
   })
   const waitForEditorServices = Boolean(selectedFile && servicesPending && !servicesReady)
+
+  useEffect(() => {
+    if (!isDesktopTauri) {
+      return
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat || (!event.ctrlKey && !event.metaKey)) {
+        return
+      }
+
+      if (event.key.toLowerCase() !== "p") {
+        return
+      }
+
+      const target = event.target as HTMLElement | null
+      const isTextInput = target?.matches("input, textarea, select") || target?.isContentEditable
+      if (isTextInput && !target?.closest(".monaco-editor")) {
+        return
+      }
+
+      event.preventDefault()
+      setCommandPaletteOpen(true)
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [isDesktopTauri])
+
+  useEffect(() => {
+    if (!workspace) {
+      setCommandPaletteOpen(false)
+    }
+  }, [workspace])
+
   const handleWorkspaceEditorMount = useCallback(
     (editor: import("monaco-editor").editor.IStandaloneCodeEditor, monaco: typeof import("monaco-editor")) => {
       handleEditorMount(editor, monaco)
@@ -121,6 +170,49 @@ export function WorkspaceWorkbench({
     },
     [handleEditorMount],
   )
+  const commandPaletteButton = (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="quiet"
+          size="icon-sm"
+          aria-label={t("pages.workspace.commandPalette.trigger")}
+          onClick={() => setCommandPaletteOpen(true)}
+        >
+          <CommandPaletteIcon className="size-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{t("pages.workspace.commandPalette.trigger")}</TooltipContent>
+    </Tooltip>
+  )
+  const commandPalette = (
+    <WorkspaceCommandPalette
+      open={commandPaletteOpen}
+      onOpenChange={setCommandPaletteOpen}
+      workspaceRoot={workspace?.rootPath ?? null}
+      recentWorkspaces={recentWorkspaces}
+      openFileTabs={openFileTabs}
+      explorerPanel={explorerPanel}
+      consoleOpen={consoleOpen}
+      markdownMode={markdownMode}
+      selectedFile={selectedFile}
+      selectedFileDirty={selectedFileDirty}
+      gitStatusFetching={gitStatusFetching}
+      gitOperationPending={gitOperationPending}
+      onOpenFolder={handleOpenFolder}
+      onCloseWorkspace={handleCloseWorkspace}
+      onToggleConsole={handleToggleConsole}
+      onSelectExplorerPanel={handleSelectExplorerPanel}
+      onRefreshGitStatus={handleRefreshGitStatus}
+      onOpenFile={handleOpenFile}
+      onSelectFileTab={handleSelectFileTab}
+      onRevealDirectoryInTree={handleRevealDirectoryInTree}
+      onSaveFile={handleSaveFile}
+      onSetMarkdownMode={handleSetMarkdownMode}
+      onOpenWorkspacePath={openWorkspacePath}
+    />
+  )
 
   if (!isDesktopTauri) {
     return (
@@ -144,10 +236,13 @@ export function WorkspaceWorkbench({
             title={t("pages.workspace.empty.title")}
             description={t("pages.workspace.empty.description")}
             action={
-              <Button variant="cta" size="pill" onClick={handleOpenFolder}>
-                <FolderOpen className="size-4" />
-                {t("pages.workspace.actions.openFolder")}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button variant="cta" size="pill" onClick={handleOpenFolder}>
+                  <FolderOpen className="size-4" />
+                  {t("pages.workspace.actions.openFolder")}
+                </Button>
+                {commandPaletteButton}
+              </div>
             }
             className="min-h-[360px]"
           />
@@ -159,6 +254,7 @@ export function WorkspaceWorkbench({
             openLabel={t("pages.workspace.actions.reopen")}
           />
         </div>
+        {commandPalette}
       </div>
     )
   }
@@ -182,6 +278,7 @@ export function WorkspaceWorkbench({
             <X className="size-4" />
             {t("pages.workspace.actions.closeWorkspace")}
           </Button>
+          {commandPaletteButton}
           <Button variant={consoleOpen ? "pill" : "quiet"} size="sm" onClick={handleToggleConsole}>
             <Terminal className="size-4" />
             {consoleOpen ? t("pages.workspace.console.hide") : t("pages.workspace.console.show")}
@@ -197,12 +294,13 @@ export function WorkspaceWorkbench({
               {t("pages.workspace.explorer.title")}
             </div>
             {(explorerPanel === "files" && loadingPaths.has("")) ||
+            (explorerPanel === "search" && textSearchFetching) ||
             (explorerPanel === "git" && gitStatusFetching) ? (
               <Loader2 className="size-4 animate-spin text-muted-foreground" />
             ) : null}
           </div>
 
-          <div className="grid grid-cols-2 gap-1 rounded-full bg-[var(--surface-1)] p-1">
+          <div className="grid grid-cols-3 gap-1 rounded-full bg-[var(--surface-1)] p-1">
             <button
               type="button"
               className={cn(
@@ -213,6 +311,17 @@ export function WorkspaceWorkbench({
             >
               <Files className="size-3.5" />
               {t("pages.workspace.explorer.files")}
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "flex h-8 items-center justify-center gap-1.5 rounded-full text-xs font-medium text-muted-foreground transition hover:text-foreground",
+                explorerPanel === "search" && "bg-background text-foreground shadow-sm",
+              )}
+              onClick={() => handleSelectExplorerPanel("search")}
+            >
+              <Search className="size-3.5" />
+              {t("pages.workspace.explorer.search")}
             </button>
             <button
               type="button"
@@ -322,6 +431,18 @@ export function WorkspaceWorkbench({
                   </div>
                 )}
               </div>
+            </div>
+          ) : explorerPanel === "search" ? (
+            <div className="h-full min-h-0 flex-1 overflow-hidden">
+              <WorkspaceSearchPanel
+                activeFilePath={activeFilePath}
+                fetching={textSearchFetching}
+                query={textSearchQuery}
+                results={textSearchResults}
+                truncated={textSearchTruncated}
+                onOpenMatch={handleOpenTextSearchMatch}
+                onQueryChange={setTextSearchQuery}
+              />
             </div>
           ) : (
             <div className="h-full min-h-0 flex-1 overflow-hidden">
@@ -490,6 +611,7 @@ export function WorkspaceWorkbench({
                       renameOnType: true,
                       suggestOnTriggerCharacters: true,
                     }}
+                    revealTarget={editorRevealTarget}
                     theme={editorTheme}
                     value={editorContent}
                   />
@@ -513,6 +635,7 @@ export function WorkspaceWorkbench({
           ) : null}
         </div>
       </div>
+      {commandPalette}
     </div>
   )
 }

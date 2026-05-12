@@ -15,7 +15,7 @@ import {
 
 type WorkspaceLspOptions = {
   language: string
-  onOpenFile: (relativePath: string) => Promise<void>
+  onOpenFile: (relativePath: string) => Promise<unknown>
   relativePath: string | null
   workspaceRoot: string | null
 }

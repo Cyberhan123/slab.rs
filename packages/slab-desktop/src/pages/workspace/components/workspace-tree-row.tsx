@@ -15,7 +15,7 @@ export function WorkspaceTreeRow({
   selectedPath: string | null
   loadingPaths: Set<string>
   onOpenDirectory: (relativePath: string) => Promise<unknown>
-  onOpenFile: (relativePath: string) => Promise<void>
+  onOpenFile: (relativePath: string) => Promise<unknown>
 }) {
   const isDirectory = node.data.kind === "directory"
   const selected = selectedPath === node.data.relativePath

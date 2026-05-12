@@ -13,8 +13,35 @@ type WorkspaceCodeEditorProps = {
     monaco: typeof Monaco,
   ) => void
   options: Monaco.editor.IStandaloneEditorConstructionOptions
+  revealTarget?: WorkspaceEditorRevealTarget | null
   theme: string
   value: string
+}
+
+export type WorkspaceEditorRevealTarget = {
+  lineNumber: number
+  matchStart: number
+  matchEnd: number
+}
+
+function revealEditorTarget(
+  editor: Monaco.editor.IStandaloneCodeEditor,
+  model: Monaco.editor.ITextModel,
+  target: WorkspaceEditorRevealTarget,
+) {
+  const maxLineNumber = model.getLineCount()
+  const lineNumber = Math.min(Math.max(target.lineNumber, 1), maxLineNumber)
+  const lineLength = model.getLineMaxColumn(lineNumber)
+  const startColumn = Math.min(Math.max(target.matchStart + 1, 1), lineLength)
+  const endColumn = Math.min(Math.max(target.matchEnd + 1, startColumn), lineLength)
+  editor.setSelection({
+    startLineNumber: lineNumber,
+    startColumn,
+    endLineNumber: lineNumber,
+    endColumn,
+  })
+  editor.revealLineInCenter(lineNumber)
+  editor.focus()
 }
 
 export function WorkspaceCodeEditor({
@@ -23,6 +50,7 @@ export function WorkspaceCodeEditor({
   onChange,
   onMount,
   options,
+  revealTarget,
   theme,
   value,
 }: WorkspaceCodeEditorProps) {
@@ -34,6 +62,7 @@ export function WorkspaceCodeEditor({
   const onChangeRef = useRef(onChange)
   const onMountRef = useRef(onMount)
   const optionsRef = useRef(options)
+  const revealTargetRef = useRef(revealTarget)
   const valueRef = useRef(value)
   const [servicesReady, setServicesReady] = useState(false)
 
@@ -49,6 +78,10 @@ export function WorkspaceCodeEditor({
     optionsRef.current = options
     editorRef.current?.updateOptions(options)
   }, [options])
+
+  useEffect(() => {
+    revealTargetRef.current = revealTarget
+  }, [revealTarget])
 
   useEffect(() => {
     valueRef.current = value
@@ -160,6 +193,9 @@ export function WorkspaceCodeEditor({
       modelRef.current = model
       modelReferenceRef.current = nextModelReference
       onMountRef.current?.(editor, Monaco)
+      if (revealTargetRef.current) {
+        revealEditorTarget(editor, model, revealTargetRef.current)
+      }
     })().catch((error) => {
       console.error("failed to open workspace editor model", { filePath: uriString, error })
       modelReference?.dispose()
@@ -188,6 +224,16 @@ export function WorkspaceCodeEditor({
     model.setValue(value)
     applyingExternalValueRef.current = false
   }, [filePath, value])
+
+  useEffect(() => {
+    const editor = editorRef.current
+    const model = modelRef.current
+    if (!editor || !model || !revealTarget) {
+      return
+    }
+
+    revealEditorTarget(editor, model, revealTarget)
+  }, [revealTarget])
 
   if (!servicesReady) {
     return <div className="h-full w-full" />

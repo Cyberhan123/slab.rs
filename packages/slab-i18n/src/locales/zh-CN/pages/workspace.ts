@@ -24,6 +24,7 @@ export const workspace = {
   explorer: {
     title: '资源管理器',
     files: '文件',
+    search: '搜索',
     git: 'Git',
   },
   editor: {
@@ -40,6 +41,24 @@ export const workspace = {
     clear: '清除搜索',
     empty: '没有匹配的文件',
     truncated: '仅显示前若干条结果',
+  },
+  textSearch: {
+    placeholder: '搜索文本',
+    clear: '清除搜索',
+    empty: '没有文本匹配',
+    truncated: '仅显示前几个匹配',
+  },
+  commandPalette: {
+    title: '工作区命令面板',
+    description: '搜索工作区操作和文件。',
+    trigger: '打开工作区命令面板',
+    placeholder: '搜索操作或文件',
+    empty: '没有匹配的操作或文件',
+    actions: '操作',
+    files: '文件',
+    tabs: '已打开的标签',
+    recent: '最近工作区',
+    revealCurrentFile: '在文件树中定位当前文件',
   },
   git: {
     detached: '游离 HEAD',

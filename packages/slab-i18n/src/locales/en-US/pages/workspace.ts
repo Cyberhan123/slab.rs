@@ -24,6 +24,7 @@ export const workspace = {
   explorer: {
     title: 'Explorer',
     files: 'Files',
+    search: 'Search',
     git: 'Git',
   },
   editor: {
@@ -40,6 +41,24 @@ export const workspace = {
     clear: 'Clear search',
     empty: 'No matching files',
     truncated: 'Showing first results',
+  },
+  textSearch: {
+    placeholder: 'Search text',
+    clear: 'Clear search',
+    empty: 'No text matches',
+    truncated: 'Showing first matches',
+  },
+  commandPalette: {
+    title: 'Workspace palette',
+    description: 'Search workspace actions and files.',
+    trigger: 'Open workspace palette',
+    placeholder: 'Search actions or files',
+    empty: 'No matching actions or files',
+    actions: 'Actions',
+    files: 'Files',
+    tabs: 'Open tabs',
+    recent: 'Recent workspaces',
+    revealCurrentFile: 'Reveal current file',
   },
   git: {
     detached: 'Detached HEAD',
