@@ -78,8 +78,8 @@ export function useWorkspaceLsp({
     }
   }, [language, shouldInitializeServices, workspaceRoot])
 
-  useLayoutEffect(() => {
-    setWorkspaceLspOpenFile(async (nextRelativePath, options) => {
+  const openFileInEditor = useCallback(
+    async (nextRelativePath: string, options?: WorkspaceLspOpenFileOptions) => {
       if (nextRelativePath !== relativePath) {
         await onOpenFile(nextRelativePath)
       }
@@ -99,12 +99,61 @@ export function useWorkspaceLsp({
       applySelection(editor, options)
       editor.focus()
       return editor
-    })
+    },
+    [onOpenFile, relativePath, workspaceRoot],
+  )
+
+  useLayoutEffect(() => {
+    setWorkspaceLspOpenFile(openFileInEditor)
 
     return () => {
       setWorkspaceLspOpenFile(null)
     }
-  }, [onOpenFile, relativePath, workspaceRoot])
+  }, [openFileInEditor])
+
+  useEffect(() => {
+    if (servicesState !== "ready" || !workspaceRoot || !shouldUseLsp) {
+      return
+    }
+
+    const editor = editorRef.current
+    if (!editor) {
+      return
+    }
+
+    const mouseDownDisposable = editor.onMouseDown((event) => {
+      const session = sessionRef.current
+      const model = editor.getModel()
+      const position = event.target.position
+      if (!session || !model || !position || !event.event.leftButton || (!event.event.ctrlKey && !event.event.metaKey)) {
+        return
+      }
+
+      event.event.preventDefault()
+      event.event.stopPropagation()
+      void (async () => {
+        const target = await session.definitionTarget(
+          model,
+          position,
+        )
+        if (!target) {
+          return
+        }
+
+        await openFileInEditor(target.relativePath, target)
+      })().catch((error) => {
+        console.debug("workspace LSP definition click failed", {
+          position,
+          uri: model.uri.toString(),
+          error,
+        })
+      })
+    })
+
+    return () => {
+      mouseDownDisposable.dispose()
+    }
+  }, [editorMountVersion, openFileInEditor, servicesState, shouldUseLsp, workspaceRoot])
 
   useEffect(() => {
     const generation = startGenerationRef.current + 1

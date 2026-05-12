@@ -15,6 +15,22 @@ const SUPPORTED_WORKSPACE_LSP_LANGUAGES = new Set([
   "rust",
 ])
 
+export type WorkspaceLspOpenFileOptions = {
+  endColumn?: number
+  endLineNumber?: number
+  startColumn?: number
+  startLineNumber?: number
+}
+
+export type WorkspaceLspDefinitionTarget = WorkspaceLspOpenFileOptions & {
+  relativePath: string
+}
+
+export type WorkspaceLspPosition = {
+  column: number
+  lineNumber: number
+}
+
 export function supportsWorkspaceLsp(language: string) {
   return SUPPORTED_WORKSPACE_LSP_LANGUAGES.has(language)
 }
@@ -56,6 +72,119 @@ export function workspaceLspRelativePathFromUri(
   }
 
   return absolutePath.slice(normalizedRoot.length)
+}
+
+export function workspaceLspDefinitionTargetFromResult(
+  workspaceRoot: string,
+  definitions: unknown,
+): WorkspaceLspDefinitionTarget | null {
+  if (!definitions) {
+    return null
+  }
+
+  const definitionEntries = Array.isArray(definitions) ? definitions : [definitions]
+  for (const definition of definitionEntries) {
+    const target = workspaceLspDefinitionTargetFromEntry(workspaceRoot, definition)
+    if (target) {
+      return target
+    }
+  }
+
+  return null
+}
+
+export function workspaceLspImportSpecifierPositionForTarget(
+  lineText: string,
+  target: WorkspaceLspDefinitionTarget,
+): WorkspaceLspPosition | null {
+  if (!target.startLineNumber || !target.startColumn) {
+    return null
+  }
+
+  const searchStart = Math.max(0, (target.endColumn ?? target.startColumn) - 1)
+  const fromMatch = /\bfrom\s*(['"])/.exec(lineText.slice(searchStart))
+  if (!fromMatch || fromMatch.index === undefined) {
+    return null
+  }
+
+  const quoteIndex = searchStart + fromMatch.index + fromMatch[0].length - 1
+  return {
+    column: quoteIndex + 2,
+    lineNumber: target.startLineNumber,
+  }
+}
+
+function workspaceLspDefinitionTargetFromEntry(
+  workspaceRoot: string,
+  definition: unknown,
+): WorkspaceLspDefinitionTarget | null {
+  if (!definition || typeof definition !== "object") {
+    return null
+  }
+
+  const record = definition as Record<string, unknown>
+  const uriString = uriStringFromValue(record.targetUri ?? record.uri)
+  if (!uriString) {
+    return null
+  }
+
+  const relativePath = workspaceLspRelativePathFromUri(workspaceRoot, uriString)
+  if (relativePath === null) {
+    return null
+  }
+
+  return {
+    relativePath,
+    ...selectionFromRange(record.targetSelectionRange ?? record.range ?? record.targetRange),
+  }
+}
+
+function selectionFromRange(range: unknown): WorkspaceLspOpenFileOptions {
+  if (!range || typeof range !== "object") {
+    return {}
+  }
+
+  const record = range as Record<string, unknown>
+  const start = lineCharacterPosition(record.start)
+  if (!start) {
+    return {}
+  }
+
+  const end = lineCharacterPosition(record.end)
+  return {
+    endColumn: end?.column ?? start.column,
+    endLineNumber: end?.lineNumber ?? start.lineNumber,
+    startColumn: start.column,
+    startLineNumber: start.lineNumber,
+  }
+}
+
+function lineCharacterPosition(position: unknown) {
+  if (!position || typeof position !== "object") {
+    return null
+  }
+
+  const record = position as Record<string, unknown>
+  if (typeof record.line !== "number" || typeof record.character !== "number") {
+    return null
+  }
+
+  return {
+    column: record.character + 1,
+    lineNumber: record.line + 1,
+  }
+}
+
+function uriStringFromValue(value: unknown) {
+  if (typeof value === "string") {
+    return value
+  }
+
+  if (!value) {
+    return null
+  }
+
+  return String(value)
 }
 
 function normalizeWorkspacePath(path: string) {

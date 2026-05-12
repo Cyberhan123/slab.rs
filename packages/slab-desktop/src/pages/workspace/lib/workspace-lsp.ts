@@ -13,26 +13,33 @@ import {
   workspaceWriteFile,
 } from "@/lib/workspace-bridge"
 import {
+  workspaceLspDefinitionTargetFromResult,
+  workspaceLspImportSpecifierPositionForTarget,
   supportsWorkspaceLsp,
   workspaceLspModelPath,
   workspaceLspRelativePathFromUri,
+  type WorkspaceLspDefinitionTarget,
+  type WorkspaceLspOpenFileOptions,
 } from "./workspace-lsp-utils"
 
 export {
   supportsWorkspaceLsp,
+  workspaceLspDefinitionTargetFromResult,
+  workspaceLspImportSpecifierPositionForTarget,
   workspaceLspModelPath,
   workspaceLspRelativePathFromUri,
 } from "./workspace-lsp-utils"
+export type {
+  WorkspaceLspDefinitionTarget,
+  WorkspaceLspOpenFileOptions,
+} from "./workspace-lsp-utils"
 
 export type WorkspaceLspSession = {
+  definitionTarget: (
+    model: Monaco.editor.ITextModel,
+    position: Monaco.IPosition,
+  ) => Promise<WorkspaceLspDefinitionTarget | null>
   dispose: () => Promise<void>
-}
-
-export type WorkspaceLspOpenFileOptions = {
-  endColumn?: number
-  endLineNumber?: number
-  startColumn?: number
-  startLineNumber?: number
 }
 
 export type WorkspaceLspOpenFile = (
@@ -178,6 +185,31 @@ export async function startWorkspaceLspSession({
     await waitForSocketOpen(socket)
     await languageClient.start()
     return {
+      definitionTarget: async (definitionModel, position) => {
+        const currentRelativePath = workspaceLspRelativePathFromUri(workspaceRoot, definitionModel.uri.toString())
+        const definitions = await languageClient?.sendRequest<unknown>(
+          "textDocument/definition",
+          textDocumentPositionParams(definitionModel, position),
+        )
+        const target = workspaceLspDefinitionTargetFromResult(workspaceRoot, definitions)
+        if (!target || target.relativePath !== currentRelativePath || !target.startLineNumber) {
+          return target
+        }
+
+        const importSpecifierPosition = workspaceLspImportSpecifierPositionForTarget(
+          definitionModel.getLineContent(target.startLineNumber),
+          target,
+        )
+        if (!importSpecifierPosition) {
+          return target
+        }
+
+        const moduleDefinitions = await languageClient?.sendRequest<unknown>(
+          "textDocument/definition",
+          textDocumentPositionParams(definitionModel, importSpecifierPosition),
+        )
+        return workspaceLspDefinitionTargetFromResult(workspaceRoot, moduleDefinitions) ?? target
+      },
       dispose: async () => {
         await languageClient?.stop()
         socket?.close()
@@ -188,6 +220,21 @@ export async function startWorkspaceLspSession({
     socket?.close()
     await languageClient?.stop().catch(() => {})
     return null
+  }
+}
+
+function textDocumentPositionParams(
+  model: Monaco.editor.ITextModel,
+  position: Monaco.IPosition,
+) {
+  return {
+    position: {
+      character: position.column - 1,
+      line: position.lineNumber - 1,
+    },
+    textDocument: {
+      uri: model.uri.toString(),
+    },
   }
 }
 
