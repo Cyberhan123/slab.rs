@@ -12,23 +12,17 @@ import {
   workspaceReadFile,
   workspaceWriteFile,
 } from "@/lib/workspace-bridge"
+import {
+  supportsWorkspaceLsp,
+  workspaceLspModelPath,
+  workspaceLspRelativePathFromUri,
+} from "./workspace-lsp-utils"
 
-const SUPPORTED_WORKSPACE_LSP_LANGUAGES = new Set([
-  "typescript",
-  "javascript",
-  "typescriptreact",
-  "javascriptreact",
-  "json",
-  "css",
-  "less",
-  "scss",
-  "html",
-  "python",
-  "c",
-  "cpp",
-  "go",
-  "rust",
-])
+export {
+  supportsWorkspaceLsp,
+  workspaceLspModelPath,
+  workspaceLspRelativePathFromUri,
+} from "./workspace-lsp-utils"
 
 export type WorkspaceLspSession = {
   dispose: () => Promise<void>
@@ -56,55 +50,12 @@ let currentWorkspaceFileService: WorkspaceFileService = { root: null }
 let workspaceFileSystemOverlayRegistered = false
 let workspaceEditorOpenHandlerRegistered = false
 
-export function supportsWorkspaceLsp(language: string) {
-  return SUPPORTED_WORKSPACE_LSP_LANGUAGES.has(language)
-}
-
 export function workspaceLspModelUri(
   monaco: typeof Monaco,
   workspaceRoot: string,
   relativePath: string,
 ) {
   return monaco.Uri.parse(workspaceLspModelPath(workspaceRoot, relativePath))
-}
-
-export function workspaceLspModelPath(workspaceRoot: string, relativePath: string) {
-  const path = relativePath.replace(/\\/g, "/").replace(/^\/+/, "")
-  const root = workspaceRoot.replace(/\\/g, "/").replace(/\/+$/, "")
-  const absolutePath = `${root}/${path}`
-  const prefixedPath = absolutePath.startsWith("/") ? absolutePath : `/${absolutePath}`
-
-  return `file://${encodeURI(prefixedPath)}`
-}
-
-export function workspaceLspRelativePathFromUri(
-  workspaceRoot: string,
-  uriString: string,
-) {
-  let pathname = uriString
-  try {
-    const url = new URL(uriString)
-    if (url.protocol !== "file:") {
-      return null
-    }
-    pathname = url.hostname ? `/${url.hostname}${url.pathname}` : url.pathname
-  } catch {
-    // Monaco can also hand back path-like strings in tests and internal flows.
-  }
-
-  const rootPath = normalizeWorkspacePath(workspaceRoot)
-  const absolutePath = normalizeWorkspacePath(decodeURI(pathname))
-  const normalizedRoot = rootPath.endsWith("/") ? rootPath : `${rootPath}/`
-
-  if (absolutePath === rootPath) {
-    return ""
-  }
-
-  if (!absolutePath.startsWith(normalizedRoot)) {
-    return null
-  }
-
-  return absolutePath.slice(normalizedRoot.length)
 }
 
 export function setWorkspaceLspOpenFile(openFile: WorkspaceLspOpenFile | null) {
@@ -121,6 +72,13 @@ export function workspaceLspServicesReady() {
 
 export function ensureWorkspaceLspServices() {
   monacoVscodeApiReady ??= (async () => {
+    if (!workspaceMonacoIsInitialized()) {
+      await initializeMonacoWrapper(undefined, {
+        registerAdditionalExtensions: false,
+        waitForDefaultExtensions: false,
+      })
+    }
+
     if (!workspaceFileSystemOverlayRegistered) {
       await registerWorkspaceFileSystemOverlay()
       workspaceFileSystemOverlayRegistered = true
@@ -147,12 +105,6 @@ export function ensureWorkspaceLspServices() {
         )
       })
       workspaceEditorOpenHandlerRegistered = true
-    }
-
-    if (!workspaceMonacoIsInitialized()) {
-      await initializeMonacoWrapper(undefined, {
-        registerAdditionalExtensions: false,
-      })
     }
   })().catch((error) => {
     monacoVscodeApiReady = null
@@ -368,12 +320,4 @@ function waitForSocketOpen(socket: WebSocket) {
       once: true,
     })
   })
-}
-
-function normalizeWorkspacePath(path: string) {
-  let normalized = path.replace(/\\/g, "/")
-  if (/^\/[A-Za-z]:/.test(normalized)) {
-    normalized = normalized.slice(1)
-  }
-  return normalized.replace(/\/+$/, "")
 }

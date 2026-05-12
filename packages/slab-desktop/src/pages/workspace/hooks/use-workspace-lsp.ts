@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import type * as Monaco from "monaco-editor"
 
 import {
@@ -39,7 +39,7 @@ export function useWorkspaceLsp({
     initialServicesState(shouldInitializeServices),
   )
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setWorkspaceLspFileServiceRoot(workspaceRoot)
     return () => {
       setWorkspaceLspFileServiceRoot(null)
@@ -78,7 +78,7 @@ export function useWorkspaceLsp({
     }
   }, [language, shouldInitializeServices, workspaceRoot])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setWorkspaceLspOpenFile(async (nextRelativePath, options) => {
       if (nextRelativePath !== relativePath) {
         await onOpenFile(nextRelativePath)

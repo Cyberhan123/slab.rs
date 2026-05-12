@@ -4,7 +4,7 @@ import {
   supportsWorkspaceLsp,
   workspaceLspModelPath,
   workspaceLspRelativePathFromUri,
-} from "../workspace-lsp"
+} from "../workspace-lsp-utils"
 import { languageForFile, lspLanguageForFile } from "../workspace-page-utils"
 
 describe("workspace LSP helpers", () => {
@@ -26,7 +26,7 @@ describe("workspace LSP helpers", () => {
 
   it("builds file uri model paths for Monaco", () => {
     expect(workspaceLspModelPath("C:\\Users\\demo\\repo", "src/index.ts")).toBe(
-      "file:///C:/Users/demo/repo/src/index.ts",
+      "file:///c:/Users/demo/repo/src/index.ts",
     )
   })
 
@@ -35,6 +35,24 @@ describe("workspace LSP helpers", () => {
       workspaceLspRelativePathFromUri(
         "C:\\Users\\demo\\repo",
         "file:///C:/Users/demo/repo/src/index.ts",
+      ),
+    ).toBe("src/index.ts")
+  })
+
+  it("handles lowercase drive letters emitted by Monaco URIs", () => {
+    expect(
+      workspaceLspRelativePathFromUri(
+        "C:\\Users\\demo\\repo",
+        "file:///c:/Users/demo/repo/src/index.ts",
+      ),
+    ).toBe("src/index.ts")
+  })
+
+  it("handles encoded drive letters emitted by Monaco URIs", () => {
+    expect(
+      workspaceLspRelativePathFromUri(
+        "C:\\Users\\demo\\repo",
+        "file:///c%3A/Users/demo/repo/src/index.ts",
       ),
     ).toBe("src/index.ts")
   })
