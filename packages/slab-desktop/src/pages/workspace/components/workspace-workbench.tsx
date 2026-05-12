@@ -1,4 +1,4 @@
-import { useCallback } from "react"
+import { useCallback, useRef } from "react"
 import { useTranslation } from "@slab/i18n"
 import { Button } from "@slab/components/button"
 import { SoftPanel, StageEmptyState, StatusPill } from "@slab/components/workspace"
@@ -30,7 +30,6 @@ import { WorkspaceCodeEditor } from "./workspace-code-editor"
 import { WorkspaceGitPanel } from "./workspace-git-panel"
 import { WorkspaceMarkdownPreview } from "./workspace-markdown-preview"
 import { WorkspaceTreeRow } from "./workspace-tree-row"
-import { setupShikiMonaco } from "../lib/monaco-shiki"
 
 export function WorkspaceWorkbench({
   activeFilePath,
@@ -85,9 +84,10 @@ export function WorkspaceWorkbench({
   const selectedFileLanguage = selectedFile ? languageForFile(selectedFile.name) : "plaintext"
   const selectedFileLspLanguage = selectedFile ? lspLanguageForFile(selectedFile.name) : "plaintext"
   const isMarkdownFile = selectedFileLanguage === "markdown"
-  const terminalThemeMode = editorTheme === "dark-plus" ? "dark" : "light"
+  const terminalThemeMode = editorTheme === "vs-dark" ? "dark" : "light"
   const hasFileSearch = fileSearchQuery.trim().length > 0
   const selectedFileBreadcrumbs = selectedFile?.relativePath.split("/").filter(Boolean) ?? []
+  const editorsWithEscapeHandlerRef = useRef(new WeakSet<import("monaco-editor").editor.IStandaloneCodeEditor>())
   const { handleEditorMount, servicesPending, servicesReady } = useWorkspaceLsp({
     language: selectedFileLspLanguage,
     onOpenFile: handleOpenFile,
@@ -95,12 +95,13 @@ export function WorkspaceWorkbench({
     workspaceRoot: workspace?.rootPath ?? null,
   })
   const waitForEditorServices = Boolean(selectedFile && servicesPending && !servicesReady)
-  const handleBeforeEditorMount = useCallback((monaco: typeof import("monaco-editor")) => {
-    void setupShikiMonaco(monaco)
-  }, [])
   const handleWorkspaceEditorMount = useCallback(
     (editor: import("monaco-editor").editor.IStandaloneCodeEditor, monaco: typeof import("monaco-editor")) => {
       handleEditorMount(editor, monaco)
+      if (editorsWithEscapeHandlerRef.current.has(editor)) {
+        return
+      }
+      editorsWithEscapeHandlerRef.current.add(editor)
       editor.onKeyDown((event) => {
         if (event.keyCode !== monaco.KeyCode.Escape) {
           return
@@ -473,7 +474,6 @@ export function WorkspaceWorkbench({
                   <WorkspaceCodeEditor
                     filePath={workspaceLspModelPath(workspace.rootPath, selectedFile.relativePath)}
                     language={selectedFileLanguage}
-                    onBeforeMount={handleBeforeEditorMount}
                     onChange={(value) => setEditorContent(value ?? "")}
                     onMount={handleWorkspaceEditorMount}
                     options={{

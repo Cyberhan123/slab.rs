@@ -52,8 +52,8 @@ export function useWorkspacePage() {
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set())
   const [editorTheme, setEditorTheme] = useState(() =>
     typeof document !== "undefined" && document.documentElement.classList.contains("dark")
-      ? "dark-plus"
-      : "light-plus",
+      ? "vs-dark"
+      : "vs",
   )
   const treeHostRef = useRef<HTMLDivElement | null>(null)
   const restoredWorkspaceRootRef = useRef<string | null>(null)
@@ -140,7 +140,7 @@ export function useWorkspacePage() {
     }
 
     const updateEditorTheme = () => {
-      setEditorTheme(document.documentElement.classList.contains("dark") ? "dark-plus" : "light-plus")
+      setEditorTheme(document.documentElement.classList.contains("dark") ? "vs-dark" : "vs")
     }
 
     updateEditorTheme()

@@ -17,6 +17,8 @@
         "script-src": "'self' asset: http://127.0.0.1:3000 blob:",
         "connect-src": [
           "'self'",
+          "ipc:",
+          "http://ipc.localhost",
           "http://127.0.0.1:3000",
           "ws://127.0.0.1:*"
         ],
