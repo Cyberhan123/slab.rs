@@ -18,11 +18,13 @@ import {
   workspaceReadDirectory,
   workspaceReadFile,
   workspaceSearchFiles,
+  workspaceSearchText,
   workspaceState,
   workspaceWriteFile,
   WORKSPACE_STATE_QUERY_KEY,
   type WorkspaceFileContent,
   type WorkspaceGitStatus,
+  type WorkspaceTextSearchLineMatch,
 } from "@/lib/workspace-bridge"
 import {
   emptyWorkspaceUiSnapshot,
@@ -49,6 +51,13 @@ export function useWorkspacePage() {
   const [editorContent, setEditorContent] = useState("")
   const [fileError, setFileError] = useState<string | null>(null)
   const [fileSearchQuery, setFileSearchQuery] = useState("")
+  const [textSearchQuery, setTextSearchQuery] = useState("")
+  const [editorRevealTarget, setEditorRevealTarget] = useState<{
+    relativePath: string
+    lineNumber: number
+    matchStart: number
+    matchEnd: number
+  } | null>(null)
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set())
   const [editorTheme, setEditorTheme] = useState(() =>
     typeof document !== "undefined" && document.documentElement.classList.contains("dark")
@@ -86,6 +95,7 @@ export function useWorkspacePage() {
   const markdownMode = workspaceUi.markdownMode
   const consoleOpen = workspaceUi.consoleOpen
   const trimmedFileSearchQuery = fileSearchQuery.trim()
+  const trimmedTextSearchQuery = textSearchQuery.trim()
   const initialOpenState = useMemo(
     () =>
       Object.fromEntries(openDirectoryPaths.map((relativePath) => [relativePath, true])),
@@ -109,6 +119,15 @@ export function useWorkspacePage() {
     queryKey: ["workspace-file-search", workspace?.rootPath, trimmedFileSearchQuery],
     queryFn: () => workspaceSearchFiles(trimmedFileSearchQuery),
     enabled: isDesktopTauri && Boolean(workspace && trimmedFileSearchQuery),
+    retry: false,
+  })
+  const {
+    data: textSearchResult,
+    isFetching: textSearchFetching,
+  } = useQuery({
+    queryKey: ["workspace-text-search", workspace?.rootPath, trimmedTextSearchQuery],
+    queryFn: () => workspaceSearchText(trimmedTextSearchQuery),
+    enabled: isDesktopTauri && Boolean(workspace && trimmedTextSearchQuery),
     retry: false,
   })
   const saveFileMutation = useMutation({
@@ -297,13 +316,14 @@ export function useWorkspacePage() {
 
   const handleOpenFile = useCallback(
     async (relativePath: string) => {
+      setEditorRevealTarget(null)
       if (selectedFileDirty && !window.confirm(t("pages.workspace.confirm.discardUnsaved"))) {
-        return
+        return null
       }
 
       const file = await openFileContent(relativePath)
       if (!file || !workspace) {
-        return
+        return file
       }
 
       patchWorkspaceState(workspace.rootPath, {
@@ -314,6 +334,7 @@ export function useWorkspacePage() {
         }),
       })
       await revealFileInTree(file.relativePath)
+      return file
     },
     [
       openFileContent,
@@ -326,6 +347,23 @@ export function useWorkspacePage() {
     ],
   )
 
+  const handleOpenTextSearchMatch = useCallback(
+    async (relativePath: string, match: WorkspaceTextSearchLineMatch) => {
+      const file = await handleOpenFile(relativePath)
+      if (!file) {
+        return
+      }
+
+      setEditorRevealTarget({
+        relativePath,
+        lineNumber: match.lineNumber,
+        matchStart: match.matchStart,
+        matchEnd: match.matchEnd,
+      })
+    },
+    [handleOpenFile],
+  )
+
   useEffect(() => {
     if (!workspace) {
       setTreeData([])
@@ -333,6 +371,8 @@ export function useWorkspacePage() {
       setEditorContent("")
       setFileError(null)
       setFileSearchQuery("")
+      setTextSearchQuery("")
+      setEditorRevealTarget(null)
       restoredWorkspaceRootRef.current = null
       return
     }
@@ -347,6 +387,8 @@ export function useWorkspacePage() {
     setEditorContent("")
     setFileError(null)
     setFileSearchQuery("")
+    setTextSearchQuery("")
+    setEditorRevealTarget(null)
 
     const savedOpenDirectoryPaths = sortDirectoryPaths(openDirectoryPaths)
     const savedActiveFilePath = activeFilePath
@@ -627,6 +669,8 @@ export function useWorkspacePage() {
     activeFilePath,
     consoleOpen,
     editorContent,
+    editorRevealTarget:
+      selectedFile?.relativePath === editorRevealTarget?.relativePath ? editorRevealTarget : null,
     editorTheme,
     explorerPanel,
     fileError,
@@ -645,6 +689,7 @@ export function useWorkspacePage() {
     handleGitUnstage,
     handleOpenFile,
     handleOpenFolder,
+    handleOpenTextSearchMatch,
     handleRefreshGitStatus,
     handleRevealDirectoryInTree: revealDirectoryInTree,
     handleSaveFile,
@@ -666,6 +711,11 @@ export function useWorkspacePage() {
     setEditorContent,
     savingFile,
     setFileSearchQuery,
+    setTextSearchQuery,
+    textSearchFetching,
+    textSearchQuery,
+    textSearchResults: textSearchResult?.matches ?? [],
+    textSearchTruncated: textSearchResult?.truncated ?? false,
     treeData,
     treeHeight,
     treeHostRef,

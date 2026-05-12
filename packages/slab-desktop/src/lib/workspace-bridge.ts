@@ -56,6 +56,25 @@ export type WorkspaceFileSearchResponse = {
   truncated: boolean
 }
 
+export type WorkspaceTextSearchLineMatch = {
+  lineNumber: number
+  lineText: string
+  matchStart: number
+  matchEnd: number
+}
+
+export type WorkspaceTextSearchFileMatch = {
+  relativePath: string
+  name: string
+  lineMatches: WorkspaceTextSearchLineMatch[]
+}
+
+export type WorkspaceTextSearchResponse = {
+  query: string
+  matches: WorkspaceTextSearchFileMatch[]
+  truncated: boolean
+}
+
 export type WorkspaceFileContent = {
   relativePath: string
   name: string
@@ -196,6 +215,14 @@ export async function workspaceSearchFiles(query: string): Promise<WorkspaceFile
   }
 
   return invoke<WorkspaceFileSearchResponse>("workspace_search_files", { query })
+}
+
+export async function workspaceSearchText(query: string): Promise<WorkspaceTextSearchResponse> {
+  if (!isTauri()) {
+    return { query, matches: [], truncated: false }
+  }
+
+  return invoke<WorkspaceTextSearchResponse>("workspace_search_text", { query })
 }
 
 export async function workspaceWriteFile(command: WorkspaceWriteFileCommand): Promise<WorkspaceWriteFileResult> {

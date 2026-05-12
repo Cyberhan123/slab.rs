@@ -27,8 +27,8 @@ const SETTINGS_FILE: &str = "settings.json";
 const DATABASE_FILE: &str = "slab.db";
 const MAX_RECENT_WORKSPACES: usize = 10;
 const MAX_DIRECTORY_ENTRIES: usize = 500;
-const MAX_FILE_BYTES: u64 = 1024 * 1024;
-const MAX_SEARCH_RESULTS: usize = 100;
+pub(crate) const MAX_FILE_BYTES: u64 = 1024 * 1024;
+pub(crate) const MAX_SEARCH_RESULTS: usize = 100;
 const IGNORED_DIR_NAMES: &[&str] = &[
     SLAB_DIR_NAME,
     ".git",
@@ -665,11 +665,11 @@ fn resolve_workspace_path(root: &Path, relative_path: &str) -> Result<PathBuf, S
     Ok(canonical_candidate)
 }
 
-fn join_relative_path(parent: &str, name: &str) -> String {
+pub(crate) fn join_relative_path(parent: &str, name: &str) -> String {
     if parent.is_empty() { name.to_owned() } else { format!("{parent}/{name}") }
 }
 
-fn should_hide_entry(name: &str, is_directory: bool, include_ignored: bool) -> bool {
+pub(crate) fn should_hide_entry(name: &str, is_directory: bool, include_ignored: bool) -> bool {
     !include_ignored
         && is_directory
         && IGNORED_DIR_NAMES.iter().any(|ignored| ignored.eq_ignore_ascii_case(name))

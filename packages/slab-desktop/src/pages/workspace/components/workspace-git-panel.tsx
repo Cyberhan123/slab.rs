@@ -28,7 +28,7 @@ type WorkspaceGitPanelProps = {
   operationPending: boolean
   onCommit: (message: string) => Promise<void>
   onDiscard: (path: string) => Promise<void>
-  onOpenFile: (relativePath: string) => Promise<void>
+  onOpenFile: (relativePath: string) => Promise<unknown>
   onRefresh: () => Promise<void>
   onStage: (path: string) => Promise<void>
   onUnstage: (path: string) => Promise<void>
@@ -245,7 +245,7 @@ function GitEntryGroup({
   operationPending: boolean
   selectedEntry: WorkspaceGitStatusEntry | null
   onDiscard: (path: string) => Promise<void>
-  onOpenFile: (relativePath: string) => Promise<void>
+  onOpenFile: (relativePath: string) => Promise<unknown>
   onSelectDiff: (entry: WorkspaceGitStatusEntry) => void
   onStage: (path: string) => Promise<void>
   onUnstage: (path: string) => Promise<void>

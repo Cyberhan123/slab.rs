@@ -44,6 +44,7 @@ fn main() {
             "workspace_read_directory",
             "workspace_read_file",
             "workspace_search_files",
+            "workspace_search_text",
             "workspace_write_file",
             "workspace_git_status",
             "workspace_git_stage",
