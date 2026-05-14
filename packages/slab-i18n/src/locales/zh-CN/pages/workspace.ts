@@ -37,12 +37,13 @@ export const workspace = {
     breadcrumbs: '文件面包屑导航',
   },
   search: {
-    placeholder: '搜索文件',
+    placeholder: '搜索文件或文本',
     clear: '清除搜索',
-    empty: '没有匹配的文件',
+    empty: '没有匹配的文件或文本',
     truncated: '仅显示前若干条结果',
   },
   textSearch: {
+    results: '文本匹配',
     placeholder: '搜索文本',
     clear: '清除搜索',
     empty: '没有文本匹配',

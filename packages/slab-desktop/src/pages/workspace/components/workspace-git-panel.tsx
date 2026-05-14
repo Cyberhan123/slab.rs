@@ -1,11 +1,9 @@
 import { GitBranch, GitCommitHorizontal, Loader2, Minus, Plus, RefreshCcw, RotateCcw } from "lucide-react"
 import { useMemo, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
 
 import { Button } from "@slab/components/button"
 import { useTranslation } from "@slab/i18n"
 import {
-  workspaceGitDiff,
   type WorkspaceGitFileStatus,
   type WorkspaceGitStatus,
   type WorkspaceGitStatusEntry,
@@ -28,9 +26,10 @@ type WorkspaceGitPanelProps = {
   operationPending: boolean
   onCommit: (message: string) => Promise<void>
   onDiscard: (path: string) => Promise<void>
-  onOpenFile: (relativePath: string) => Promise<unknown>
   onRefresh: () => Promise<void>
+  onSelectDiff: (entry: WorkspaceGitStatusEntry) => void
   onStage: (path: string) => Promise<void>
+  selectedEntry: WorkspaceGitStatusEntry | null
   onUnstage: (path: string) => Promise<void>
 }
 
@@ -40,39 +39,17 @@ export function WorkspaceGitPanel({
   operationPending,
   onCommit,
   onDiscard,
-  onOpenFile,
   onRefresh,
+  onSelectDiff,
   onStage,
+  selectedEntry,
   onUnstage,
 }: WorkspaceGitPanelProps) {
   const { t } = useTranslation()
   const [commitMessage, setCommitMessage] = useState("")
-  const [selectedDiffEntry, setSelectedDiffEntry] = useState<WorkspaceGitStatusEntry | null>(null)
   const stagedEntries = useMemo(() => gitStatus?.entries.filter((entry) => entry.staged) ?? [], [gitStatus])
   const unstagedEntries = useMemo(() => gitStatus?.entries.filter((entry) => !entry.staged) ?? [], [gitStatus])
   const hasChanges = (gitStatus?.entries.length ?? 0) > 0
-  const visibleSelectedDiffEntry = useMemo(
-    () =>
-      gitStatus?.entries.find(
-        (entry) =>
-          entry.path === selectedDiffEntry?.path &&
-          entry.staged === selectedDiffEntry.staged,
-      ) ?? gitStatus?.entries[0] ?? null,
-    [gitStatus, selectedDiffEntry],
-  )
-  const {
-    data: selectedDiff,
-    isFetching: diffFetching,
-  } = useQuery({
-    queryKey: ["workspace-git-diff", visibleSelectedDiffEntry?.path, visibleSelectedDiffEntry?.staged],
-    queryFn: () =>
-      workspaceGitDiff({
-        path: visibleSelectedDiffEntry?.path ?? "",
-        staged: visibleSelectedDiffEntry?.staged ?? false,
-      }),
-    enabled: Boolean(gitStatus?.available && gitStatus.isRepository && visibleSelectedDiffEntry),
-    retry: false,
-  })
 
   if (!gitStatus) {
     return (
@@ -182,42 +159,27 @@ export function WorkspaceGitPanel({
 
       <div className="min-h-0 flex-1 overflow-y-auto rounded-[12px] bg-[var(--surface-1)] py-1">
         {gitStatus.entries.length > 0 ? (
-          <div className="grid min-h-full gap-2 px-1 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-            <div className="space-y-3">
-              <GitEntryGroup
-                title={t("pages.workspace.git.staged")}
-                entries={stagedEntries}
-                operationPending={operationPending}
-                selectedEntry={visibleSelectedDiffEntry}
-                onDiscard={onDiscard}
-                onOpenFile={onOpenFile}
-                onSelectDiff={setSelectedDiffEntry}
-                onStage={onStage}
-                onUnstage={onUnstage}
-              />
-              <GitEntryGroup
-                title={t("pages.workspace.git.changes")}
-                entries={unstagedEntries}
-                operationPending={operationPending}
-                selectedEntry={visibleSelectedDiffEntry}
-                onDiscard={onDiscard}
-                onOpenFile={onOpenFile}
-                onSelectDiff={setSelectedDiffEntry}
-                onStage={onStage}
-                onUnstage={onUnstage}
-              />
-            </div>
-            <div className="min-h-[180px] overflow-hidden rounded-[10px] border border-border/50 bg-background">
-              <div className="flex h-8 items-center justify-between gap-2 border-b border-border/50 px-2">
-                <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
-                  {visibleSelectedDiffEntry?.path ?? t("pages.workspace.git.diff")}
-                </span>
-                {diffFetching ? <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" /> : null}
-              </div>
-              <pre className="h-[260px] overflow-auto p-3 text-xs leading-relaxed">
-                <code>{selectedDiff?.diff.trim() || t("pages.workspace.git.noDiff")}</code>
-              </pre>
-            </div>
+          <div className="space-y-3 px-1">
+            <GitEntryGroup
+              title={t("pages.workspace.git.staged")}
+              entries={stagedEntries}
+              operationPending={operationPending}
+              selectedEntry={selectedEntry}
+              onDiscard={onDiscard}
+              onSelectDiff={onSelectDiff}
+              onStage={onStage}
+              onUnstage={onUnstage}
+            />
+            <GitEntryGroup
+              title={t("pages.workspace.git.changes")}
+              entries={unstagedEntries}
+              operationPending={operationPending}
+              selectedEntry={selectedEntry}
+              onDiscard={onDiscard}
+              onSelectDiff={onSelectDiff}
+              onStage={onStage}
+              onUnstage={onUnstage}
+            />
           </div>
         ) : (
           <div className="flex min-h-[180px] items-center justify-center px-4 text-center text-sm text-muted-foreground">
@@ -235,7 +197,6 @@ function GitEntryGroup({
   operationPending,
   selectedEntry,
   onDiscard,
-  onOpenFile,
   onSelectDiff,
   onStage,
   onUnstage,
@@ -245,7 +206,6 @@ function GitEntryGroup({
   operationPending: boolean
   selectedEntry: WorkspaceGitStatusEntry | null
   onDiscard: (path: string) => Promise<void>
-  onOpenFile: (relativePath: string) => Promise<unknown>
   onSelectDiff: (entry: WorkspaceGitStatusEntry) => void
   onStage: (path: string) => Promise<void>
   onUnstage: (path: string) => Promise<void>
@@ -262,7 +222,6 @@ function GitEntryGroup({
         {title}
       </div>
       {entries.map((entry) => {
-        const canOpen = entry.status !== "deleted"
         const canDiscard = entry.status !== "conflicted"
         const selected = selectedEntry?.path === entry.path && selectedEntry.staged === entry.staged
 
@@ -276,13 +235,9 @@ function GitEntryGroup({
           >
             <button
               type="button"
-              disabled={!canOpen}
-              className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default disabled:opacity-70"
+              className="flex min-w-0 flex-1 items-center gap-2 text-left"
               onClick={() => {
                 onSelectDiff(entry)
-                if (canOpen) {
-                  void onOpenFile(entry.path)
-                }
               }}
             >
               <GitCommitHorizontal className="size-4 shrink-0 text-muted-foreground" />

@@ -44,9 +44,9 @@ export function WorkspaceWorkbench({
   explorerPanel,
   fileError,
   fileSearchFetching,
-  fileSearchQuery,
   fileSearchResults,
   fileSearchTruncated,
+  gitDiffFetching,
   gitStatus,
   gitStatusFetching,
   gitOperationPending,
@@ -64,6 +64,7 @@ export function WorkspaceWorkbench({
   handleSaveFile,
   handleSelectExplorerPanel,
   handleSelectFileTab,
+  handleSelectGitDiff,
   handleSetMarkdownMode,
   handleTreeToggle,
   handleToggleConsole,
@@ -76,15 +77,17 @@ export function WorkspaceWorkbench({
   openWorkspacePath,
   recentWorkspaces,
   selectedFile,
+  selectedGitDiff,
+  selectedGitDiffEntry,
   selectedFileDirty,
   setEditorContent,
   savingFile,
   treeData,
   treeHeight,
   treeHostRef,
+  treeMeasureKey,
   workspace,
   workspaceUiHasHydrated,
-  setFileSearchQuery,
   setTextSearchQuery,
   textSearchFetching,
   textSearchQuery,
@@ -96,8 +99,10 @@ export function WorkspaceWorkbench({
   const selectedFileLanguage = selectedFile ? languageForFile(selectedFile.name) : "plaintext"
   const selectedFileLspLanguage = selectedFile ? lspLanguageForFile(selectedFile.name) : "plaintext"
   const isMarkdownFile = selectedFileLanguage === "markdown"
+  const selectedGitDiffEditorPath = selectedGitDiff
+    ? `.slab-git-diff/${selectedGitDiff.staged ? "staged" : "changes"}/${selectedGitDiff.path}.diff`
+    : ""
   const terminalThemeMode = editorTheme === "vs-dark" ? "dark" : "light"
-  const hasFileSearch = fileSearchQuery.trim().length > 0
   const selectedFileBreadcrumbs = selectedFile?.relativePath.split("/").filter(Boolean) ?? []
   const editorsWithEscapeHandlerRef = useRef(new WeakSet<import("monaco-editor").editor.IStandaloneCodeEditor>())
   const { handleEditorMount, servicesPending, servicesReady } = useWorkspaceLsp({
@@ -337,69 +342,10 @@ export function WorkspaceWorkbench({
           </div>
 
           {explorerPanel === "files" ? (
-            <div className="flex min-h-0 flex-1 flex-col gap-2">
-              <div className="relative px-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  value={fileSearchQuery}
-                  onChange={(event) => setFileSearchQuery(event.target.value)}
-                  className="h-8 w-full rounded-[8px] border border-border/50 bg-[var(--surface-1)] pl-8 pr-8 text-xs outline-none transition focus:border-[var(--brand-teal)]"
-                  placeholder={t("pages.workspace.search.placeholder")}
-                  aria-label={t("pages.workspace.search.placeholder")}
-                />
-                {fileSearchFetching ? (
-                  <Loader2 className="absolute right-3 top-1/2 size-3.5 -translate-y-1/2 animate-spin text-muted-foreground" />
-                ) : hasFileSearch ? (
-                  <button
-                    type="button"
-                    className="absolute right-2 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-[4px] text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                    aria-label={t("pages.workspace.search.clear")}
-                    onClick={() => setFileSearchQuery("")}
-                  >
-                    <X className="size-3" />
-                  </button>
-                ) : null}
-              </div>
-              <div ref={treeHostRef} className="h-full min-h-0 flex-1 overflow-hidden rounded-[12px] bg-[var(--surface-1)]">
-                {hasFileSearch ? (
-                  <div className="h-full overflow-y-auto py-1">
-                    {fileSearchResults.length > 0 ? (
-                      <>
-                        {fileSearchResults.map((entry) => (
-                          <button
-                            key={entry.relativePath}
-                            type="button"
-                            className={cn(
-                              "flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left text-sm transition hover:bg-[var(--surface-selected)]",
-                              activeFilePath === entry.relativePath && "bg-[var(--surface-selected)] text-[var(--brand-teal)]",
-                            )}
-                            title={entry.relativePath}
-                            onClick={() => {
-                              void handleOpenFile(entry.relativePath)
-                            }}
-                          >
-                            <FileCode2 className="size-4 shrink-0 text-muted-foreground" />
-                            <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-                            <span className="min-w-0 max-w-[54%] truncate font-mono text-[11px] text-muted-foreground">
-                              {entry.relativePath}
-                            </span>
-                          </button>
-                        ))}
-                        {fileSearchTruncated ? (
-                          <div className="px-3 py-2 text-xs text-muted-foreground">
-                            {t("pages.workspace.search.truncated")}
-                          </div>
-                        ) : null}
-                      </>
-                    ) : (
-                      <div className="flex h-full min-h-[180px] items-center justify-center px-4 text-center text-sm text-muted-foreground">
-                        {fileSearchFetching ? t("pages.workspace.tree.loading") : t("pages.workspace.search.empty")}
-                      </div>
-                    )}
-                  </div>
-                ) : workspaceUiHasHydrated ? (
+            <div ref={treeHostRef} className="h-full min-h-0 flex-1 overflow-hidden rounded-[12px] bg-[var(--surface-1)]">
+              {workspaceUiHasHydrated ? (
                   <Tree
-                    key={workspace.rootPath}
+                    key={`${workspace.rootPath}:${treeMeasureKey}`}
                     data={treeData}
                     idAccessor="id"
                     childrenAccessor="children"
@@ -430,16 +376,19 @@ export function WorkspaceWorkbench({
                     <Loader2 className="size-4 animate-spin text-muted-foreground" />
                   </div>
                 )}
-              </div>
             </div>
           ) : explorerPanel === "search" ? (
             <div className="h-full min-h-0 flex-1 overflow-hidden">
               <WorkspaceSearchPanel
                 activeFilePath={activeFilePath}
-                fetching={textSearchFetching}
+                fileFetching={fileSearchFetching}
+                fileResults={fileSearchResults}
+                fileTruncated={fileSearchTruncated}
                 query={textSearchQuery}
-                results={textSearchResults}
-                truncated={textSearchTruncated}
+                textFetching={textSearchFetching}
+                textResults={textSearchResults}
+                textTruncated={textSearchTruncated}
+                onOpenFile={handleOpenFile}
                 onOpenMatch={handleOpenTextSearchMatch}
                 onQueryChange={setTextSearchQuery}
               />
@@ -452,9 +401,10 @@ export function WorkspaceWorkbench({
                 operationPending={gitOperationPending}
                 onCommit={handleGitCommit}
                 onDiscard={handleGitDiscard}
-                onOpenFile={handleOpenFile}
                 onRefresh={handleRefreshGitStatus}
+                onSelectDiff={handleSelectGitDiff}
                 onStage={handleGitStage}
+                selectedEntry={selectedGitDiffEntry}
                 onUnstage={handleGitUnstage}
               />
             </div>
@@ -579,6 +529,16 @@ export function WorkspaceWorkbench({
                   </Button>
                 </div>
               </div>
+            ) : selectedGitDiffEntry ? (
+              <div className="flex h-9 shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-background/80 px-3">
+                <div
+                  className="min-w-0 truncate font-mono text-xs text-muted-foreground"
+                  title={selectedGitDiffEntry.path}
+                >
+                  {selectedGitDiffEntry.path}
+                </div>
+                {gitDiffFetching ? <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" /> : null}
+              </div>
             ) : null}
 
             {selectedFile ? (
@@ -617,6 +577,26 @@ export function WorkspaceWorkbench({
                   />
                 </div>
               )
+            ) : selectedGitDiffEntry ? (
+              <div className="min-h-0 flex-1">
+                <WorkspaceCodeEditor
+                  filePath={workspaceLspModelPath(workspace.rootPath, selectedGitDiffEditorPath)}
+                  language="diff"
+                  memoryModel
+                  onChange={() => {}}
+                  options={{
+                    readOnly: true,
+                    minimap: { enabled: false },
+                    scrollBeyondLastLine: false,
+                    wordWrap: "off",
+                    fontSize: 13,
+                    tabSize: 2,
+                    lineNumbersMinChars: 3,
+                  }}
+                  theme={editorTheme}
+                  value={selectedGitDiff?.diff.trim() || t("pages.workspace.git.noDiff")}
+                />
+              </div>
             ) : (
               <StageEmptyState
                 icon={FileCode2}

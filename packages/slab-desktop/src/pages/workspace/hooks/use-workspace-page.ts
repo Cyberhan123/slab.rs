@@ -11,6 +11,7 @@ import {
   workspaceClose,
   workspaceGitCommit,
   workspaceGitDiscard,
+  workspaceGitDiff,
   workspaceGitStage,
   workspaceGitStatus,
   workspaceGitUnstage,
@@ -23,7 +24,9 @@ import {
   workspaceWriteFile,
   WORKSPACE_STATE_QUERY_KEY,
   type WorkspaceFileContent,
+  type WorkspaceGitDiff,
   type WorkspaceGitStatus,
+  type WorkspaceGitStatusEntry,
   type WorkspaceTextSearchLineMatch,
 } from "@/lib/workspace-bridge"
 import {
@@ -50,8 +53,8 @@ export function useWorkspacePage() {
   const [selectedFile, setSelectedFile] = useState<WorkspaceFileContent | null>(null)
   const [editorContent, setEditorContent] = useState("")
   const [fileError, setFileError] = useState<string | null>(null)
-  const [fileSearchQuery, setFileSearchQuery] = useState("")
   const [textSearchQuery, setTextSearchQuery] = useState("")
+  const [selectedGitDiffEntry, setSelectedGitDiffEntry] = useState<WorkspaceGitStatusEntry | null>(null)
   const [editorRevealTarget, setEditorRevealTarget] = useState<{
     relativePath: string
     lineNumber: number
@@ -67,6 +70,7 @@ export function useWorkspacePage() {
   const treeHostRef = useRef<HTMLDivElement | null>(null)
   const restoredWorkspaceRootRef = useRef<string | null>(null)
   const [treeHeight, setTreeHeight] = useState(320)
+  const [treeMeasureKey, setTreeMeasureKey] = useState(0)
 
   usePageHeader({
     icon: FolderKanban,
@@ -94,7 +98,6 @@ export function useWorkspacePage() {
   const explorerPanel = workspaceUi.explorerPanel
   const markdownMode = workspaceUi.markdownMode
   const consoleOpen = workspaceUi.consoleOpen
-  const trimmedFileSearchQuery = fileSearchQuery.trim()
   const trimmedTextSearchQuery = textSearchQuery.trim()
   const initialOpenState = useMemo(
     () =>
@@ -116,9 +119,9 @@ export function useWorkspacePage() {
     data: fileSearchResult,
     isFetching: fileSearchFetching,
   } = useQuery({
-    queryKey: ["workspace-file-search", workspace?.rootPath, trimmedFileSearchQuery],
-    queryFn: () => workspaceSearchFiles(trimmedFileSearchQuery),
-    enabled: isDesktopTauri && Boolean(workspace && trimmedFileSearchQuery),
+    queryKey: ["workspace-file-search", workspace?.rootPath, trimmedTextSearchQuery],
+    queryFn: () => workspaceSearchFiles(trimmedTextSearchQuery),
+    enabled: isDesktopTauri && Boolean(workspace && trimmedTextSearchQuery),
     retry: false,
   })
   const {
@@ -128,6 +131,28 @@ export function useWorkspacePage() {
     queryKey: ["workspace-text-search", workspace?.rootPath, trimmedTextSearchQuery],
     queryFn: () => workspaceSearchText(trimmedTextSearchQuery),
     enabled: isDesktopTauri && Boolean(workspace && trimmedTextSearchQuery),
+    retry: false,
+  })
+  const visibleGitDiffEntry = useMemo(
+    () =>
+      gitStatus?.entries.find(
+        (entry) =>
+          entry.path === selectedGitDiffEntry?.path &&
+          entry.staged === selectedGitDiffEntry.staged,
+      ) ?? null,
+    [gitStatus, selectedGitDiffEntry],
+  )
+  const {
+    data: selectedGitDiff,
+    isFetching: gitDiffFetching,
+  } = useQuery({
+    queryKey: ["workspace-git-diff", workspace?.rootPath, visibleGitDiffEntry?.path, visibleGitDiffEntry?.staged],
+    queryFn: () =>
+      workspaceGitDiff({
+        path: visibleGitDiffEntry?.path ?? "",
+        staged: visibleGitDiffEntry?.staged ?? false,
+      }),
+    enabled: Boolean(gitStatus?.available && gitStatus.isRepository && visibleGitDiffEntry),
     retry: false,
   })
   const saveFileMutation = useMutation({
@@ -181,7 +206,7 @@ export function useWorkspacePage() {
     }
 
     const updateHeight = () => {
-      setTreeHeight(Math.max(240, Math.floor(element.getBoundingClientRect().height)))
+      setTreeHeight(Math.max(320, Math.floor(element.getBoundingClientRect().height)))
     }
 
     updateHeight()
@@ -195,7 +220,27 @@ export function useWorkspacePage() {
     return () => {
       observer.disconnect()
     }
-  }, [workspace?.rootPath])
+  }, [explorerPanel, workspace?.rootPath])
+
+  useEffect(() => {
+    if (explorerPanel !== "files") {
+      return
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const element = treeHostRef.current
+      if (!element) {
+        return
+      }
+
+      setTreeHeight(Math.max(320, Math.floor(element.getBoundingClientRect().height)))
+      setTreeMeasureKey((current) => current + 1)
+    })
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+    }
+  }, [explorerPanel, workspace?.rootPath])
 
   const loadDirectory = useCallback(async (relativePath = "") => {
     setLoadingPaths((current) => new Set(current).add(relativePath))
@@ -298,6 +343,7 @@ export function useWorkspacePage() {
       setFileError(null)
       try {
         const file = await workspaceReadFile(relativePath)
+        setSelectedGitDiffEntry(null)
         setSelectedFile(file)
         setEditorContent(file.content)
         return file
@@ -370,8 +416,8 @@ export function useWorkspacePage() {
       setSelectedFile(null)
       setEditorContent("")
       setFileError(null)
-      setFileSearchQuery("")
       setTextSearchQuery("")
+      setSelectedGitDiffEntry(null)
       setEditorRevealTarget(null)
       restoredWorkspaceRootRef.current = null
       return
@@ -386,8 +432,8 @@ export function useWorkspacePage() {
     setSelectedFile(null)
     setEditorContent("")
     setFileError(null)
-    setFileSearchQuery("")
     setTextSearchQuery("")
+    setSelectedGitDiffEntry(null)
     setEditorRevealTarget(null)
 
     const savedOpenDirectoryPaths = sortDirectoryPaths(openDirectoryPaths)
@@ -485,6 +531,21 @@ export function useWorkspacePage() {
     await refetchGitStatus()
   }, [refetchGitStatus])
 
+  const handleSelectGitDiff = useCallback(
+    (entry: WorkspaceGitStatusEntry) => {
+      if (selectedFileDirty && !window.confirm(t("pages.workspace.confirm.discardUnsaved"))) {
+        return
+      }
+
+      setSelectedFile(null)
+      setEditorContent("")
+      setFileError(null)
+      setEditorRevealTarget(null)
+      setSelectedGitDiffEntry(entry)
+    },
+    [selectedFileDirty, t],
+  )
+
   const handleSaveFile = useCallback(async () => {
     if (!selectedFile) {
       return
@@ -565,6 +626,9 @@ export function useWorkspacePage() {
       try {
         const result = await gitDiscardMutation.mutateAsync(path)
         applyGitStatus(result.status)
+        if (selectedGitDiffEntry?.path === path) {
+          setSelectedGitDiffEntry(null)
+        }
         if (selectedFile?.relativePath === path) {
           await openFileContent(path)
         }
@@ -575,7 +639,15 @@ export function useWorkspacePage() {
         })
       }
     },
-    [applyGitStatus, gitDiscardMutation, loadDirectory, openFileContent, selectedFile?.relativePath, t],
+    [
+      applyGitStatus,
+      gitDiscardMutation,
+      loadDirectory,
+      openFileContent,
+      selectedFile?.relativePath,
+      selectedGitDiffEntry?.path,
+      t,
+    ],
   )
 
   const handleGitCommit = useCallback(
@@ -675,12 +747,12 @@ export function useWorkspacePage() {
     explorerPanel,
     fileError,
     fileSearchFetching,
-    fileSearchQuery,
     fileSearchResults: fileSearchResult?.entries ?? [],
     fileSearchTruncated: fileSearchResult?.truncated ?? false,
     gitStatus,
     gitStatusFetching,
     gitOperationPending,
+    gitDiffFetching,
     handleCloseFileTab,
     handleCloseWorkspace,
     handleGitCommit,
@@ -695,6 +767,7 @@ export function useWorkspacePage() {
     handleSaveFile,
     handleSelectExplorerPanel,
     handleSelectFileTab,
+    handleSelectGitDiff,
     handleSetMarkdownMode,
     handleTreeToggle,
     handleToggleConsole,
@@ -706,11 +779,18 @@ export function useWorkspacePage() {
     openFileTabs,
     openWorkspacePath,
     recentWorkspaces,
+    selectedGitDiff: visibleGitDiffEntry
+      ? selectedGitDiff ?? ({
+          path: visibleGitDiffEntry.path,
+          staged: visibleGitDiffEntry.staged,
+          diff: "",
+        } satisfies WorkspaceGitDiff)
+      : null,
+    selectedGitDiffEntry: visibleGitDiffEntry,
     selectedFile,
     selectedFileDirty,
     setEditorContent,
     savingFile,
-    setFileSearchQuery,
     setTextSearchQuery,
     textSearchFetching,
     textSearchQuery,
@@ -719,6 +799,7 @@ export function useWorkspacePage() {
     treeData,
     treeHeight,
     treeHostRef,
+    treeMeasureKey,
     workspace,
     workspaceUiHasHydrated,
   }
