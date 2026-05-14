@@ -7,6 +7,7 @@ import { ensureWorkspaceLspServices } from "../lib/workspace-lsp"
 type WorkspaceCodeEditorProps = {
   filePath: string
   language: string
+  memoryModel?: boolean
   onChange: (value: string) => void
   onMount?: (
     editor: Monaco.editor.IStandaloneCodeEditor,
@@ -47,6 +48,7 @@ function revealEditorTarget(
 export function WorkspaceCodeEditor({
   filePath,
   language,
+  memoryModel = false,
   onChange,
   onMount,
   options,
@@ -169,6 +171,26 @@ export function WorkspaceCodeEditor({
         return
       }
 
+      if (memoryModel) {
+        const existingModel = Monaco.editor.getModel(uri)
+        const model = existingModel ?? Monaco.editor.createModel(valueRef.current, language, uri)
+        if (model.getLanguageId() !== language) {
+          Monaco.editor.setModelLanguage(model, language)
+        }
+        if (model.getValue() !== valueRef.current) {
+          applyingExternalValueRef.current = true
+          model.setValue(valueRef.current)
+          applyingExternalValueRef.current = false
+        }
+        editor.setModel(model)
+        modelRef.current = model
+        onMountRef.current?.(editor, Monaco)
+        if (revealTargetRef.current) {
+          revealEditorTarget(editor, model, revealTargetRef.current)
+        }
+        return
+      }
+
       const nextModelReference = await createModelReference(uri)
       modelReference = nextModelReference
       if (cancelled) {
@@ -211,8 +233,11 @@ export function WorkspaceCodeEditor({
         modelReferenceRef.current = null
       }
       modelReference?.dispose()
+      if (memoryModel) {
+        Monaco.editor.getModel(uri)?.dispose()
+      }
     }
-  }, [filePath, language, servicesReady])
+  }, [filePath, language, memoryModel, servicesReady])
 
   useEffect(() => {
     const model = modelRef.current

@@ -37,15 +37,16 @@ export const workspace = {
     breadcrumbs: 'File breadcrumbs',
   },
   search: {
-    placeholder: 'Search files',
+    placeholder: 'Search files or text',
     clear: 'Clear search',
-    empty: 'No matching files',
+    empty: 'No matching files or text',
     truncated: 'Showing first results',
   },
   textSearch: {
     placeholder: 'Search text',
     clear: 'Clear search',
     empty: 'No text matches',
+    results: 'Text matches',
     truncated: 'Showing first matches',
   },
   commandPalette: {
