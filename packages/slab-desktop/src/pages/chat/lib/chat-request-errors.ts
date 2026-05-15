@@ -1,5 +1,7 @@
 import type { SSEFields, XModelResponse } from '@ant-design/x-sdk'
 
+import { getErrorDescription } from '@/lib/error-description'
+
 import { extractChunkPayload } from './chat-message-utils'
 import {
   isRecord,
@@ -76,6 +78,15 @@ export const getChatRequestErrorMessage = (value: unknown): string | undefined =
   }
 
   return isChatRequestErrorInfo(value) ? value.error.message : undefined
+}
+
+export const getChatErrorDescription = (value: unknown, fallback: string): string => {
+  const requestErrorMessage = getChatRequestErrorMessage(value)
+  if (requestErrorMessage?.trim()) {
+    return requestErrorMessage
+  }
+
+  return getErrorDescription(value, fallback)
 }
 
 export const getChatRequestErrorMeta = (

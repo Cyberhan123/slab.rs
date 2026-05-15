@@ -4,6 +4,7 @@ mod backend;
 mod chat;
 mod ffmpeg;
 mod image;
+mod media_task;
 mod model;
 mod plugin;
 mod pmid;

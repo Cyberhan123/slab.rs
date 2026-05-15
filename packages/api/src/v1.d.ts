@@ -1523,11 +1523,11 @@ export interface components {
         ImageMode: "txt2img" | "img2img";
         ImportModelPackMultipartRequest: {
             /** Format: binary */
-            file: string;
+            file: Blob;
         };
         ImportPluginPackMultipartRequest: {
             /** Format: binary */
-            file: string;
+            file: Blob;
         };
         InstallPluginRequest: {
             packageSha256?: string | null;
@@ -1701,14 +1701,106 @@ export interface components {
         OperationAcceptedResponse: {
             operation_id: string;
         };
+        PluginAgentCapabilityContribution: {
+            description?: string | null;
+            descriptionKey?: string | null;
+            effects?: string[];
+            exposeAsMcpTool?: boolean;
+            id: string;
+            inputSchema?: string | null;
+            kind: components["schemas"]["PluginCapabilityKind"];
+            outputSchema?: string | null;
+            transport: components["schemas"]["PluginCapabilityTransport"];
+        };
+        /** @enum {string} */
+        PluginCapabilityKind: "tool" | "workflow";
+        PluginCapabilityTransport: {
+            function: string;
+            type: components["schemas"]["PluginCapabilityTransportType"];
+        };
+        /** @enum {string} */
+        PluginCapabilityTransportType: "pluginCall";
+        PluginCommandContribution: {
+            action?: string | null;
+            id: string;
+            label?: string | null;
+            labelKey?: string | null;
+            route?: string | null;
+        };
+        PluginCompatibilityManifest: {
+            pluginApi?: string | null;
+            slab?: string | null;
+        };
+        PluginContributesManifest: {
+            agentCapabilities?: components["schemas"]["PluginAgentCapabilityContribution"][];
+            commands?: components["schemas"]["PluginCommandContribution"][];
+            languageServers?: components["schemas"]["PluginLanguageServerContribution"][];
+            routes?: components["schemas"]["PluginRouteContribution"][];
+            settings?: components["schemas"]["PluginSettingsContribution"][];
+            sidebar?: components["schemas"]["PluginSidebarContribution"][];
+        };
+        PluginFilePermissions: {
+            read?: string[];
+            write?: string[];
+        };
+        PluginLanguageServerContribution: {
+            id: string;
+            languages: string[];
+            transport: components["schemas"]["PluginLanguageServerTransport"];
+        };
+        PluginLanguageServerTransport: {
+            args?: string[];
+            command: string;
+            env?: {
+                [key: string]: string;
+            };
+            /** @enum {string} */
+            type: "stdio";
+        } | {
+            /** @enum {string} */
+            type: "webSocket";
+            url: string;
+        } | {
+            args?: string[];
+            /**
+             * @description Executable name to invoke.  Defaults to the value of `package` when
+             *     omitted.  Resolved against the plugin's `node_modules/.bin/` first.
+             */
+            command?: string | null;
+            env?: {
+                [key: string]: string;
+            };
+            /**
+             * @description npm package name used to identify this language server (e.g.
+             *     `"typescript-language-server"`).  The package must be present in the
+             *     plugin's install directory under `node_modules/`.
+             */
+            package: string;
+            /** @enum {string} */
+            type: "nodePackage";
+        };
+        PluginNetworkManifest: {
+            allowHosts?: string[];
+            mode: components["schemas"]["PluginNetworkMode"];
+        };
+        /** @enum {string} */
+        PluginNetworkMode: "blocked" | "allowlist";
         PluginPath: {
             id: string;
+        };
+        PluginPermissionsManifest: {
+            agent?: string[];
+            files?: components["schemas"]["PluginFilePermissions"];
+            lsp?: string[];
+            network?: components["schemas"]["PluginNetworkManifest"];
+            slabApi?: string[];
+            ui?: string[];
         };
         PluginResponse: {
             allowHosts: string[];
             availableVersion?: string | null;
-            compatibility: Record<string, never>;
-            contributions: Record<string, never>;
+            compatibility?: null | components["schemas"]["PluginCompatibilityManifest"];
+            contributions?: null | components["schemas"]["PluginContributesManifest"];
             enabled: boolean;
             error?: string | null;
             hasWasm: boolean;
@@ -1725,7 +1817,7 @@ export interface components {
             manifestVersion: number;
             name: string;
             networkMode: string;
-            permissions: Record<string, never>;
+            permissions?: null | components["schemas"]["PluginPermissionsManifest"];
             removable: boolean;
             runtimeStatus: string;
             sourceKind: string;
@@ -1735,6 +1827,27 @@ export interface components {
             updatedAt?: string | null;
             valid: boolean;
             version: string;
+        };
+        PluginRouteContribution: {
+            entry?: string | null;
+            id: string;
+            path: string;
+            title?: string | null;
+            titleKey?: string | null;
+        };
+        PluginSettingsContribution: {
+            id: string;
+            schema: string;
+            title?: string | null;
+            titleKey?: string | null;
+        };
+        PluginSidebarContribution: {
+            command?: string | null;
+            icon?: string | null;
+            id: string;
+            label?: string | null;
+            labelKey?: string | null;
+            route?: string | null;
         };
         /** @description Pricing info for cost tracking. */
         PricingRequest: {

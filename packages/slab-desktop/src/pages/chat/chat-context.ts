@@ -20,6 +20,7 @@ export {
 
 export {
   ChatTransportError,
+  getChatErrorDescription,
   getChatRequestErrorMessage,
   getChatRequestErrorMeta,
   isChatRequestErrorInfo,

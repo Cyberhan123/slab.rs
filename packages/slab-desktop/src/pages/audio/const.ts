@@ -1,5 +1,4 @@
 export const WHISPER_BACKEND_ID = 'ggml.whisper';
-export const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000;
-export const MODEL_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1_000;
+export const BUNDLED_VAD_MODEL_ID = '__bundled_vad__';
 
 export type PreparingStage = 'prepare' | 'transcribe' | null;

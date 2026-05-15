@@ -79,6 +79,8 @@ export const useChat = (
     },
   })
 
+  type ReloadOptions = Parameters<typeof rawOnReload>[2]
+
   const buildThinkingParams = (): Partial<Pick<ChatRequestParams, 'thinking'>> =>
     supportsReasoningControls
       ? {
@@ -154,7 +156,7 @@ export const useChat = (
     }
   }
 
-  const onReload = (id: string | number, requestParams?: Partial<ChatRequestParams>, opts?: any) => {
+  const onReload = (id: string | number, requestParams?: Partial<ChatRequestParams>, opts?: ReloadOptions) => {
     runWithPreparedModel(() => {
       rawOnReload(id, withRequestDefaults(requestParams), opts)
     })
@@ -163,7 +165,7 @@ export const useChat = (
   const onContinue = (
     id: string | number,
     requestParams?: Partial<ChatRequestParams>,
-    opts?: any
+    opts?: ReloadOptions
   ) => {
     const targetIndex = messages.findIndex((item) => item.id === id)
     if (targetIndex < 0) {

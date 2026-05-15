@@ -5,7 +5,6 @@ use std::path::{Component, Path, PathBuf};
 
 use chrono::Utc;
 use reqwest::Url;
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use zip::ZipArchive;
@@ -406,12 +405,6 @@ struct ResolvedInstallSource {
 
 fn build_plugin_view(scan: &ScannedPlugin, state: Option<&PluginStateRecord>) -> PluginView {
     let manifest = scan.manifest.as_ref();
-    let manifest_compatibility =
-        manifest.map(|value| serde_json::to_value(&value.compatibility).unwrap_or(Value::Null));
-    let manifest_contributions =
-        manifest.map(|value| serde_json::to_value(&value.contributes).unwrap_or(Value::Null));
-    let manifest_permissions =
-        manifest.map(|value| serde_json::to_value(&value.permissions).unwrap_or(Value::Null));
     let installed_version = manifest
         .map(|value| value.version.clone())
         .or_else(|| state.and_then(|record| record.installed_version.clone()));
@@ -427,7 +420,7 @@ fn build_plugin_view(scan: &ScannedPlugin, state: Option<&PluginStateRecord>) ->
         valid: scan.valid,
         error: scan.error.clone(),
         manifest_version: manifest.map(|value| value.manifest_version).unwrap_or(0),
-        compatibility: manifest_compatibility.unwrap_or(Value::Null),
+        compatibility: manifest.map(|value| value.compatibility.clone()),
         ui_entry: manifest.map(|value| value.runtime.ui.entry.clone()),
         has_wasm: manifest.and_then(|value| value.runtime.wasm.as_ref()).is_some(),
         network_mode: manifest
@@ -436,8 +429,8 @@ fn build_plugin_view(scan: &ScannedPlugin, state: Option<&PluginStateRecord>) ->
         allow_hosts: manifest
             .map(|value| value.permissions.network.allow_hosts.clone())
             .unwrap_or_default(),
-        contributions: manifest_contributions.unwrap_or(Value::Null),
-        permissions: manifest_permissions.unwrap_or(Value::Null),
+        contributions: manifest.map(|value| value.contributes.clone()),
+        permissions: manifest.map(|value| value.permissions.clone()),
         source_kind: state
             .map(|record| record.source_kind.clone())
             .unwrap_or_else(|| scan.source_kind.clone()),
@@ -479,13 +472,13 @@ fn build_missing_plugin_view(state: &PluginStateRecord) -> PluginView {
         valid: false,
         error: Some("plugin is recorded in the database but missing on disk".to_owned()),
         manifest_version: 0,
-        compatibility: Value::Null,
+        compatibility: None,
         ui_entry: None,
         has_wasm: false,
         network_mode: "blocked".to_owned(),
         allow_hosts: Vec::new(),
-        contributions: Value::Null,
-        permissions: Value::Null,
+        contributions: None,
+        permissions: None,
         source_kind: state.source_kind.clone(),
         source_ref: state.source_ref.clone(),
         install_root: state.install_root.clone(),

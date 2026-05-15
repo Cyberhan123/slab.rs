@@ -1,3 +1,8 @@
+import {
+  DEFAULT_GENERATION_SIZE,
+  MAX_RANDOM_SEED,
+} from '@/lib/media-generation-constants';
+
 export const SAMPLE_METHODS = [
   { value: 'auto', label: 'Auto' },
   { value: 'euler', label: 'Euler' },
@@ -23,9 +28,13 @@ export const SCHEDULERS = [
 
 export const POLL_INTERVAL_MS = 2_000;
 export const MAX_POLL_ATTEMPTS = 150;
+export {
+  DEFAULT_GENERATION_SIZE,
+  MAX_RANDOM_SEED,
+};
 
 export const DIMENSION_PRESETS = [
-  { label: '1:1', width: 512, height: 512 },
+  { label: '1:1', width: DEFAULT_GENERATION_SIZE, height: DEFAULT_GENERATION_SIZE },
   { label: '4:3', width: 768, height: 576 },
   { label: '16:9', width: 1024, height: 576 },
 ] as const;

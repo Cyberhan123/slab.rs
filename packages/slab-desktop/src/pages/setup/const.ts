@@ -1,4 +1,8 @@
 import type { components } from '@slab/api/v1';
+import {
+  normalizeTaskProgress,
+  type NormalizedTaskProgress,
+} from '@/pages/task/utils';
 
 export const TASK_POLL_INTERVAL_MS = 1_000;
 export const MIN_ACTIVE_PROGRESS = 6;
@@ -10,6 +14,7 @@ export type SetupStatus = components['schemas']['SetupStatusResponse'];
 export type OperationAccepted = components['schemas']['OperationAcceptedResponse'];
 export type TaskRecord = components['schemas']['TaskResponse'];
 export type TaskProgress = components['schemas']['TaskProgressResponse'];
+export { normalizeTaskProgress, type NormalizedTaskProgress };
 
 export type ProvisionState =
   | 'idle'
@@ -17,36 +22,6 @@ export type ProvisionState =
   | 'running'
   | 'succeeded'
   | 'failed';
-
-export interface NormalizedTaskProgress {
-  label: string | null;
-  current: number;
-  total: number | null;
-  step: number | null;
-  stepCount: number | null;
-  unit: string | null;
-}
-
-export function normalizeTaskProgress(
-  progress: TaskProgress | null | undefined,
-): NormalizedTaskProgress | null {
-  if (!progress || typeof progress.current !== 'number' || !Number.isFinite(progress.current)) {
-    return null;
-  }
-
-  return {
-    label: typeof progress.label === 'string' ? progress.label : null,
-    current: progress.current,
-    total:
-      typeof progress.total === 'number' && Number.isFinite(progress.total) ? progress.total : null,
-    step: typeof progress.step === 'number' && Number.isFinite(progress.step) ? progress.step : null,
-    stepCount:
-      typeof progress.step_count === 'number' && Number.isFinite(progress.step_count)
-        ? progress.step_count
-        : null,
-    unit: typeof progress.unit === 'string' ? progress.unit : null,
-  };
-}
 
 export function getProvisionStageLabel(
   state: ProvisionState,

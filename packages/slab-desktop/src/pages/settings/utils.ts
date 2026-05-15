@@ -11,6 +11,11 @@ import type {
   UpdateSettingRequest,
 } from './types';
 
+type SettingNumberType = 'integer' | 'number';
+
+const INTEGER_VALUE_PATTERN = /^-?\d+$/;
+const NUMBER_VALUE_PATTERN = /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+
 export function countProperties(sections: SettingsSectionResponse[]): number {
   return sections.reduce(
     (sectionTotal, section) =>
@@ -143,12 +148,13 @@ export function buildRequestBody(
     if (!trimmed) {
       return { op: 'unset' };
     }
-    if (!/^-?\d+$/.test(trimmed)) {
+    const value = parseSettingNumberValue(trimmed, 'integer');
+    if (value === null) {
       throw new Error('Value must be an integer.');
     }
     return {
       op: 'set',
-      value: Number.parseInt(trimmed, 10),
+      value,
     };
   }
 
@@ -228,6 +234,27 @@ export function subsectionAnchorId(sectionId: string, subsectionId: string): str
 
 export function fallbackErrorMessage(error: unknown): string {
   return getErrorMessage(error);
+}
+
+export function parseSettingNumberValue(
+  rawValue: string,
+  numberType: SettingNumberType,
+): number | null {
+  const trimmed = rawValue.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (numberType === 'integer') {
+    return INTEGER_VALUE_PATTERN.test(trimmed) ? Number.parseInt(trimmed, 10) : null;
+  }
+
+  if (!NUMBER_VALUE_PATTERN.test(trimmed)) {
+    return null;
+  }
+
+  const value = Number(trimmed);
+  return Number.isFinite(value) ? value : null;
 }
 
 function normalizeSettingsHeading(value: string): string {

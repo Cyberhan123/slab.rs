@@ -1,7 +1,7 @@
 //! Server configuration, loaded from environment variables at startup.
 
 use dirs_next::config_dir;
-use slab_types::DESKTOP_API_BIND;
+use slab_types::{DESKTOP_API_BIND, sqlite_url_for_path};
 use std::path::{Path, PathBuf};
 
 /// Runtime configuration for slab-server.
@@ -219,12 +219,6 @@ pub fn default_output_dir_for_settings_path(settings_path: &Path) -> PathBuf {
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."))
         .join("outputs")
-}
-
-pub fn sqlite_url_for_path(path: &Path) -> String {
-    let normalized = path.to_string_lossy().replace('\\', "/");
-    let prefix = if normalized.starts_with('/') { "sqlite://" } else { "sqlite:///" };
-    format!("{prefix}{normalized}?mode=rwc")
 }
 
 #[cfg(test)]

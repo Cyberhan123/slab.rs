@@ -2,8 +2,9 @@ use std::collections::HashMap;
 
 use serde::de::Error as DeError;
 use serde::{Deserialize, Deserializer, Serialize};
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginManifest {
     pub manifest_version: u32,
@@ -83,7 +84,7 @@ struct RawPluginManifest {
     network: Option<PluginNetworkManifest>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginCompatibilityManifest {
     #[serde(default)]
@@ -92,7 +93,7 @@ pub struct PluginCompatibilityManifest {
     pub plugin_api: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginRuntimeManifest {
     pub ui: PluginUiManifest,
@@ -100,30 +101,30 @@ pub struct PluginRuntimeManifest {
     pub wasm: Option<PluginWasmManifest>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 pub struct PluginUiManifest {
     pub entry: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 pub struct PluginWasmManifest {
     pub entry: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 pub struct PluginIntegrityManifest {
     #[serde(rename = "filesSha256")]
     pub files_sha256: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum PluginNetworkMode {
     Blocked,
     Allowlist,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginNetworkManifest {
     pub mode: PluginNetworkMode,
@@ -137,7 +138,7 @@ impl Default for PluginNetworkManifest {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginPermissionsManifest {
     #[serde(default)]
@@ -154,7 +155,7 @@ pub struct PluginPermissionsManifest {
     pub files: PluginFilePermissions,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginFilePermissions {
     #[serde(default)]
@@ -163,7 +164,7 @@ pub struct PluginFilePermissions {
     pub write: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginContributesManifest {
     #[serde(default)]
@@ -180,7 +181,7 @@ pub struct PluginContributesManifest {
     pub language_servers: Vec<PluginLanguageServerContribution>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginRouteContribution {
     pub id: String,
@@ -193,7 +194,7 @@ pub struct PluginRouteContribution {
     pub entry: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginSidebarContribution {
     pub id: String,
@@ -209,7 +210,7 @@ pub struct PluginSidebarContribution {
     pub icon: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginCommandContribution {
     pub id: String,
@@ -223,7 +224,7 @@ pub struct PluginCommandContribution {
     pub route: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginSettingsContribution {
     pub id: String,
@@ -234,7 +235,7 @@ pub struct PluginSettingsContribution {
     pub schema: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginAgentCapabilityContribution {
     pub id: String,
@@ -254,7 +255,7 @@ pub struct PluginAgentCapabilityContribution {
     pub expose_as_mcp_tool: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginLanguageServerContribution {
     pub id: String,
@@ -262,7 +263,7 @@ pub struct PluginLanguageServerContribution {
     pub transport: PluginLanguageServerTransport,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum PluginLanguageServerTransport {
     Stdio {
@@ -298,14 +299,14 @@ pub enum PluginLanguageServerTransport {
     },
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum PluginCapabilityKind {
     Tool,
     Workflow,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginCapabilityTransport {
     #[serde(rename = "type")]
@@ -313,13 +314,13 @@ pub struct PluginCapabilityTransport {
     pub function: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum PluginCapabilityTransportType {
     PluginCall,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginInfo {
     pub id: String,
