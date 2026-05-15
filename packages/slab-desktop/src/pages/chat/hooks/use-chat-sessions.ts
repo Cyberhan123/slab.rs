@@ -6,7 +6,7 @@ import { useTranslation } from "@slab/i18n"
 import api from "@slab/api"
 import { useChatUiStore } from "@/store/useChatUiStore"
 
-import { clearConversationCache } from "../chat-context"
+import { clearConversationCache, getChatErrorDescription } from "../chat-context"
 
 type SessionRecord = components["schemas"]["SessionResponse"]
 
@@ -19,26 +19,6 @@ export type ChatConversationItem = {
 type CreateSessionOptions = {
   quiet?: boolean
   select?: boolean
-}
-
-function getErrorDescription(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message
-  }
-
-  if (typeof error === "object" && error !== null) {
-    const message = (error as { error?: unknown; message?: unknown }).message
-    if (typeof message === "string" && message.trim()) {
-      return message
-    }
-
-    const rawError = (error as { error?: unknown }).error
-    if (typeof rawError === "string" && rawError.trim()) {
-      return rawError
-    }
-  }
-
-  return fallback
 }
 
 function toConversationItem(
@@ -110,7 +90,7 @@ export function useChatSessions() {
       } catch (error) {
         if (!options?.quiet) {
           toast.error(t("pages.chat.toast.failedToCreateSession"), {
-            description: getErrorDescription(error, t("pages.chat.toast.unknownError")),
+            description: getChatErrorDescription(error, t("pages.chat.toast.unknownError")),
           })
         }
 
@@ -130,7 +110,7 @@ export function useChatSessions() {
         })
       } catch (error) {
         toast.error(t("pages.chat.toast.failedToDeleteSession"), {
-          description: getErrorDescription(error, t("pages.chat.toast.unknownError")),
+          description: getChatErrorDescription(error, t("pages.chat.toast.unknownError")),
         })
         return false
       }

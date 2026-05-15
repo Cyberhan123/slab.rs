@@ -131,7 +131,7 @@ impl From<&TaskRecord> for TaskView {
     }
 }
 
-fn task_progress_from_payload(raw: Option<&str>) -> Option<TaskProgress> {
+pub(crate) fn task_progress_from_payload(raw: Option<&str>) -> Option<TaskProgress> {
     let raw = raw?;
     let payload: Value = serde_json::from_str(raw).ok()?;
     let progress = payload.get("progress")?;

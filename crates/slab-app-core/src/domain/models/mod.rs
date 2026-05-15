@@ -63,6 +63,7 @@ pub use subtitle::{
     RenderSubtitleCommand, RenderSubtitleEntry, RenderSubtitleResult, SubtitleVariant,
 };
 pub use system::{GpuDeviceSnapshot, GpuStatusSnapshot};
+pub(crate) use task::task_progress_from_payload;
 pub use task::{
     AcceptedOperation, TaskPayloadEnvelope, TaskProgress, TaskResult, TaskStatus, TaskView,
     TimedTextSegment,

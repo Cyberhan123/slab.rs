@@ -1,89 +1,12 @@
+import { ApiError, apiClient } from '@slab/api';
 import { SERVER_BASE_URL } from '@slab/api/config';
+import type { components } from '@slab/api/v1';
 
-export type MediaTaskStatus =
-  | 'pending'
-  | 'running'
-  | 'succeeded'
-  | 'failed'
-  | 'cancelled'
-  | 'interrupted'
-  | string;
-
-export type MediaTaskProgress = {
-  current?: number;
-  total?: number;
-  percent?: number;
-  message?: string;
-  stage?: string;
-} | null;
-
-export type ImageGenerationTask = {
-  task_id: string;
-  task_type: string;
-  status: MediaTaskStatus;
-  progress?: MediaTaskProgress;
-  error_msg?: string | null;
-  backend_id: string;
-  model_id?: string | null;
-  model_path: string;
-  prompt: string;
-  negative_prompt?: string | null;
-  mode: string;
-  width: number;
-  height: number;
-  requested_count: number;
-  reference_image_url?: string | null;
-  primary_image_url?: string | null;
-  image_urls: string[];
-  request_data: unknown;
-  result_data?: unknown | null;
-  created_at: string;
-  updated_at: string;
-};
-
-export type VideoGenerationTask = {
-  task_id: string;
-  task_type: string;
-  status: MediaTaskStatus;
-  progress?: MediaTaskProgress;
-  error_msg?: string | null;
-  backend_id: string;
-  model_id?: string | null;
-  model_path: string;
-  prompt: string;
-  negative_prompt?: string | null;
-  width: number;
-  height: number;
-  frames: number;
-  fps: number;
-  reference_image_url?: string | null;
-  video_url?: string | null;
-  request_data: unknown;
-  result_data?: unknown | null;
-  created_at: string;
-  updated_at: string;
-};
-
-export type AudioTranscriptionTask = {
-  task_id: string;
-  task_type: string;
-  status: MediaTaskStatus;
-  progress?: MediaTaskProgress;
-  error_msg?: string | null;
-  backend_id: string;
-  model_id?: string | null;
-  source_path: string;
-  language?: string | null;
-  prompt?: string | null;
-  detect_language?: boolean | null;
-  vad_json?: unknown | null;
-  decode_json?: unknown | null;
-  transcript_text?: string | null;
-  request_data: unknown;
-  result_data?: unknown | null;
-  created_at: string;
-  updated_at: string;
-};
+export type MediaTaskStatus = components['schemas']['TaskStatus'];
+export type MediaTaskProgress = components['schemas']['TaskProgressResponse'] | null;
+export type ImageGenerationTask = components['schemas']['ImageGenerationTaskResponse'];
+export type VideoGenerationTask = components['schemas']['VideoGenerationTaskResponse'];
+export type AudioTranscriptionTask = components['schemas']['AudioTranscriptionTaskResponse'];
 
 function buildApiUrl(path: string): string {
   return new URL(path.replace(/^\//, ''), `${SERVER_BASE_URL}/`).toString();
@@ -101,57 +24,65 @@ export function resolveMediaUrl(path?: string | null): string | null {
   return buildApiUrl(path);
 }
 
-async function readJson<T>(path: string): Promise<T> {
-  const response = await fetch(buildApiUrl(path), {
-    headers: {
-      Accept: 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    let message = `${response.status} ${response.statusText}`;
-
-    try {
-      const errorBody = (await response.json()) as { message?: unknown; error?: unknown };
-      const detail =
-        typeof errorBody.message === 'string'
-          ? errorBody.message
-          : typeof errorBody.error === 'string'
-            ? errorBody.error
-            : null;
-      if (detail) {
-        message = detail;
-      }
-    } catch {
-      // Ignore invalid JSON error bodies and keep the HTTP status text.
-    }
-
-    throw new Error(message);
+function requireApiData<T>(
+  result: { data?: T; error?: unknown; response: Response },
+  emptyMessage: string,
+): T {
+  if (!result.response.ok || result.error) {
+    throw ApiError.fromResponse(result.response, result.error);
   }
 
-  return (await response.json()) as T;
+  if (result.data === undefined) {
+    throw new Error(emptyMessage);
+  }
+
+  return result.data;
 }
 
-export function listImageGenerations(): Promise<ImageGenerationTask[]> {
-  return readJson<ImageGenerationTask[]>('/v1/images/generations');
+export async function listImageGenerations(): Promise<ImageGenerationTask[]> {
+  return requireApiData(
+    await apiClient.GET('/v1/images/generations'),
+    'Image generation history returned an empty response.',
+  );
 }
 
-export function getImageGeneration(taskId: string): Promise<ImageGenerationTask> {
-  return readJson<ImageGenerationTask>(`/v1/images/generations/${taskId}`);
+export async function getImageGeneration(taskId: string): Promise<ImageGenerationTask> {
+  return requireApiData(
+    await apiClient.GET('/v1/images/generations/{id}', {
+      params: { path: { id: taskId } },
+    }),
+    `Image generation '${taskId}' returned an empty response.`,
+  );
 }
 
-export function listVideoGenerations(): Promise<VideoGenerationTask[]> {
-  return readJson<VideoGenerationTask[]>('/v1/video/generations');
+export async function listVideoGenerations(): Promise<VideoGenerationTask[]> {
+  return requireApiData(
+    await apiClient.GET('/v1/video/generations'),
+    'Video generation history returned an empty response.',
+  );
 }
 
-export function getVideoGeneration(taskId: string): Promise<VideoGenerationTask> {
-  return readJson<VideoGenerationTask>(`/v1/video/generations/${taskId}`);
+export async function getVideoGeneration(taskId: string): Promise<VideoGenerationTask> {
+  return requireApiData(
+    await apiClient.GET('/v1/video/generations/{id}', {
+      params: { path: { id: taskId } },
+    }),
+    `Video generation '${taskId}' returned an empty response.`,
+  );
 }
 
-export function listAudioTranscriptions(): Promise<AudioTranscriptionTask[]> {
-  return readJson<AudioTranscriptionTask[]>('/v1/audio/transcriptions');
+export async function listAudioTranscriptions(): Promise<AudioTranscriptionTask[]> {
+  return requireApiData(
+    await apiClient.GET('/v1/audio/transcriptions'),
+    'Audio transcription history returned an empty response.',
+  );
 }
 
-export function getAudioTranscription(taskId: string): Promise<AudioTranscriptionTask> {
-  return readJson<AudioTranscriptionTask>(`/v1/audio/transcriptions/${taskId}`);
+export async function getAudioTranscription(taskId: string): Promise<AudioTranscriptionTask> {
+  return requireApiData(
+    await apiClient.GET('/v1/audio/transcriptions/{id}', {
+      params: { path: { id: taskId } },
+    }),
+    `Audio transcription '${taskId}' returned an empty response.`,
+  );
 }

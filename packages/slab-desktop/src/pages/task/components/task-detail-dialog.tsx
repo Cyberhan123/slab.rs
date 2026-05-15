@@ -37,6 +37,7 @@ export function TaskDetailDialog({
   const taskMeta = getTaskTypeMeta(taskDetail.task_type, t);
   const mediaTask = isMediaTaskType(taskDetail.task_type);
   const deepLink = getTaskDeepLink(taskDetail.task_type, taskDetail.id);
+  const resultText = taskResult?.text;
 
   return (
     <Dialog>
@@ -125,14 +126,14 @@ export function TaskDetailDialog({
                   <h4 className="text-sm font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                     {t('pages.task.dialog.taskResult')}
                   </h4>
-                  {taskResult.text ? (
+                  {resultText ? (
                     <div className="space-y-3">
-                      <p className="whitespace-pre-wrap text-sm leading-6">{taskResult.text}</p>
+                      <p className="whitespace-pre-wrap text-sm leading-6">{resultText}</p>
                       <Button
                         variant="pill"
                         size="sm"
                         onClick={() => {
-                          navigator.clipboard.writeText(taskResult.text);
+                          navigator.clipboard.writeText(resultText);
                           toast.success(t('pages.task.dialog.copied'));
                         }}
                       >

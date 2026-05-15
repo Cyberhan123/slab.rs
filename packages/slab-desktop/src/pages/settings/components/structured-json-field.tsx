@@ -26,6 +26,7 @@ import {
   type JsonSchemaNode,
 } from '../schema';
 import type { FieldErrorState, JsonValue } from '../types';
+import { parseSettingNumberValue } from '../utils';
 
 type StructuredJsonFieldProps = {
   schema: JsonSchemaNode;
@@ -344,7 +345,7 @@ function NumberEditor({
   value,
   onChange,
 }: Pick<SchemaEditorProps, 'schema' | 'value' | 'onChange'>) {
-  const numberType = schemaPrimaryType(schema);
+  const numberType = schemaPrimaryType(schema) === 'integer' ? 'integer' : 'number';
   const currentValue = typeof value === 'number' ? String(value) : '';
 
   return (
@@ -358,12 +359,9 @@ function NumberEditor({
           return;
         }
 
-        const nextValue =
-          numberType === 'integer'
-            ? Number.parseInt(trimmed, 10)
-            : Number.parseFloat(trimmed);
+        const nextValue = parseSettingNumberValue(trimmed, numberType);
 
-        if (!Number.isNaN(nextValue)) {
+        if (nextValue !== null) {
           onChange(nextValue);
         }
       }}

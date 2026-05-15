@@ -9,9 +9,7 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use crate::context::AppConfig;
 use crate::domain::services::PluginService;
 use crate::error::AppCoreError;
-use slab_types::plugin::{
-    PluginContributesManifest, PluginLanguageServerContribution, PluginLanguageServerTransport,
-};
+use slab_types::plugin::{PluginLanguageServerContribution, PluginLanguageServerTransport};
 
 const BUILTIN_LANGUAGE_SERVER_PROVIDERS: &[(&str, &[&str], &str, &[&str])] = &[
     (
@@ -65,9 +63,7 @@ impl WorkspaceLspService {
 
         let plugins = self.plugin.list_plugins().await?;
         for plugin in plugins.into_iter().filter(|plugin| plugin.valid && plugin.enabled) {
-            let Ok(contributes) =
-                serde_json::from_value::<PluginContributesManifest>(plugin.contributions.clone())
-            else {
+            let Some(contributes) = plugin.contributions else {
                 continue;
             };
 

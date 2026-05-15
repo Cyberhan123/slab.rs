@@ -18,6 +18,10 @@ export const FPS_OPTIONS = [6, 8, 12, 16, 24, 30, 48, 60] as const;
 export const POLL_INTERVAL_MS = 2_000;
 export const MAX_POLL_ATTEMPTS = 300;
 export const DIFFUSION_BACKEND_ID = 'ggml.diffusion';
+export {
+  DEFAULT_GENERATION_SIZE,
+  MAX_RANDOM_SEED,
+} from '@/lib/media-generation-constants';
 
 export type ModelOption = {
   id: string;

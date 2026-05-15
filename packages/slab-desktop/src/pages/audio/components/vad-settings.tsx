@@ -5,7 +5,7 @@ import { Switch } from '@slab/components/switch';
 import { useTranslation } from '@slab/i18n';
 import type { CatalogModel } from '@slab/api/models';
 
-const BUNDLED_VAD_MODEL_ID = '__bundled_vad__';
+import { BUNDLED_VAD_MODEL_ID } from '../const';
 
 export type VadSettingsProps = {
   bundledVadLabel: string;

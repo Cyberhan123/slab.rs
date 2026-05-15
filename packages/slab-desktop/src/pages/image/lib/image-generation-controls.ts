@@ -2,7 +2,7 @@ import {
   getModelConfigFieldValue,
   type ModelConfigDocumentResponse,
 } from '@/lib/model-config';
-import { SAMPLE_METHODS, SCHEDULERS } from '../const';
+import { DEFAULT_GENERATION_SIZE, SAMPLE_METHODS, SCHEDULERS } from '../const';
 
 export type ImageGenerationMode = 'txt2img' | 'img2img';
 
@@ -27,8 +27,8 @@ type UnknownRecord = Record<string, unknown>;
 
 const DEFAULT_IMAGE_GENERATION_CONTROLS: ImageGenerationControls = {
   mode: 'txt2img',
-  widthStr: '512',
-  heightStr: '512',
+  widthStr: String(DEFAULT_GENERATION_SIZE),
+  heightStr: String(DEFAULT_GENERATION_SIZE),
   numImages: 1,
   advancedOpen: false,
   cfgScale: 7,

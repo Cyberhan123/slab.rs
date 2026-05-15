@@ -1,0 +1,2 @@
+export const DEFAULT_GENERATION_SIZE = 512;
+export const MAX_RANDOM_SEED = 2_147_483_647;

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use slab_types::{
+    PluginCompatibilityManifest, PluginContributesManifest, PluginPermissionsManifest,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -10,13 +12,13 @@ pub struct PluginView {
     pub valid: bool,
     pub error: Option<String>,
     pub manifest_version: u32,
-    pub compatibility: Value,
+    pub compatibility: Option<PluginCompatibilityManifest>,
     pub ui_entry: Option<String>,
     pub has_wasm: bool,
     pub network_mode: String,
     pub allow_hosts: Vec<String>,
-    pub contributions: Value,
-    pub permissions: Value,
+    pub contributions: Option<PluginContributesManifest>,
+    pub permissions: Option<PluginPermissionsManifest>,
     pub source_kind: String,
     pub source_ref: Option<String>,
     pub install_root: Option<String>,

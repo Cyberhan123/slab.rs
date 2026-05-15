@@ -1,5 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use minijinja::value::{Value as MiniJinjaValue, ValueKind, from_args};
 use minijinja::{Environment, Error, ErrorKind, UndefinedBehavior, context};
 use serde_json::{Map, Value};
 
@@ -76,6 +77,21 @@ fn render_minijinja_template(
 ) -> Result<String, AppCoreError> {
     let mut env = Environment::new();
     env.set_undefined_behavior(UndefinedBehavior::Strict);
+    env.set_unknown_method_callback(|_, value, method, args| {
+        if value.kind() != ValueKind::String {
+            return Err(Error::from(ErrorKind::UnknownMethod));
+        }
+
+        let Some(text) = value.as_str() else {
+            return Err(Error::from(ErrorKind::UnknownMethod));
+        };
+        let (needle,): (&str,) = from_args(args)?;
+        match method {
+            "startswith" => Ok(MiniJinjaValue::from(text.starts_with(needle))),
+            "endswith" => Ok(MiniJinjaValue::from(text.ends_with(needle))),
+            _ => Err(Error::from(ErrorKind::UnknownMethod)),
+        }
+    });
     env.add_function("raise_exception", |message: String| -> Result<String, Error> {
         Err(Error::new(ErrorKind::InvalidOperation, message))
     });
@@ -366,12 +382,11 @@ mod tests {
         let rendered = build_prompt(&[message("user", "hello")], Some(QWEN35_TEMPLATE), None)
             .expect("qwen3.5 prompt");
 
-        assert!(rendered.ends_with("<|im_start|>assistant\n"));
-        assert!(!rendered.ends_with("<think>\n"));
+        assert!(rendered.ends_with("<|im_start|>assistant\n<think>\n"));
     }
 
     #[test]
-    fn qwen35_template_does_not_prefill_open_think_when_reasoning_is_enabled() {
+    fn qwen35_template_prefills_open_think_when_reasoning_is_enabled() {
         let rendered = build_prompt(
             &[message("user", "hello")],
             Some(QWEN35_TEMPLATE),
@@ -379,8 +394,7 @@ mod tests {
         )
         .expect("qwen3.5 prompt");
 
-        assert!(rendered.ends_with("<|im_start|>assistant\n"));
-        assert!(!rendered.ends_with("<think>\n"));
+        assert!(rendered.ends_with("<|im_start|>assistant\n<think>\n"));
     }
 
     #[test]

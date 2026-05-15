@@ -6,9 +6,13 @@ import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
 import api from '@slab/api';
 import { toCatalogModelList } from '@slab/api/models';
 import { HEADER_SELECT_KEYS } from '@/layouts/header-controls';
-
-const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000;
-const MODEL_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1_000;
+import {
+  extractTaskId,
+  isFailedTaskStatus,
+  MODEL_DOWNLOAD_POLL_INTERVAL_MS,
+  MODEL_DOWNLOAD_TIMEOUT_MS,
+  sleep,
+} from '@/pages/task/utils';
 
 export type ImageModelOption = {
   id: string;
@@ -16,18 +20,6 @@ export type ImageModelOption = {
   downloaded: boolean;
   pending: boolean;
   local_path: string | null;
-};
-
-const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
-
-const extractTaskId = (payload: unknown): string | null => {
-  if (typeof payload !== 'object' || payload === null) return null;
-  const taskId =
-    (payload as { operation_id?: unknown }).operation_id ??
-    (payload as { task_id?: unknown }).task_id;
-  if (typeof taskId !== 'string') return null;
-  const trimmed = taskId.trim();
-  return trimmed.length > 0 ? trimmed : null;
 };
 
 export function useImageModelPreparation() {
@@ -91,7 +83,7 @@ export function useImageModelPreparation() {
         return;
       }
 
-      if (task.status === 'failed' || task.status === 'cancelled' || task.status === 'interrupted') {
+      if (isFailedTaskStatus(task.status)) {
         throw new Error(
           task.error_msg ??
             t('pages.hub.error.taskEndedWithStatus', {

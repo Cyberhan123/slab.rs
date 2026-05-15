@@ -15,7 +15,7 @@ use slab_app_core::domain::models::{
     WorkspaceGitStatusView, WorkspaceWriteFileCommand, WorkspaceWriteFileView,
 };
 use slab_app_core::domain::services::WorkspaceService;
-use slab_types::settings::SettingsDocument;
+use slab_types::{settings::SettingsDocument, sqlite_url_for_path};
 use tauri::{AppHandle, Manager, Runtime, State};
 
 use crate::plugins;
@@ -725,12 +725,6 @@ fn search_workspace_files(
     Ok(())
 }
 
-fn sqlite_url_for_path(path: &Path) -> String {
-    let normalized = path.to_string_lossy().replace('\\', "/");
-    let prefix = if normalized.starts_with('/') { "sqlite://" } else { "sqlite:///" };
-    format!("{prefix}{normalized}?mode=rwc")
-}
-
 #[cfg(windows)]
 fn workspace_path_string(path: &Path) -> String {
     let raw = path.to_string_lossy();
@@ -771,7 +765,8 @@ fn content_hash(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_relative_path, sqlite_url_for_path, validate_plugin_id};
+    use super::{normalize_relative_path, validate_plugin_id};
+    use slab_types::sqlite_url_for_path;
     use std::path::Path;
 
     #[test]

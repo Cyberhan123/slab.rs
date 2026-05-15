@@ -1,5 +1,5 @@
 use super::AnyStore;
-use crate::domain::models::{TaskProgress, TaskStatus};
+use crate::domain::models::{TaskStatus, task_progress_from_payload};
 use crate::infra::db::entities::{
     AudioTranscriptionTaskRecord, AudioTranscriptionTaskViewRecord, ImageGenerationTaskRecord,
     ImageGenerationTaskViewRecord, MediaTaskState, NewAudioTranscriptionTaskRecord,
@@ -7,7 +7,6 @@ use crate::infra::db::entities::{
     VideoGenerationTaskRecord, VideoGenerationTaskViewRecord,
 };
 use chrono::Utc;
-use serde_json::Value;
 use std::future::Future;
 use std::str::FromStr;
 
@@ -523,12 +522,6 @@ fn decode_task_status(raw: &str) -> TaskStatus {
         tracing::warn!(status = %raw, "unknown media task status stored in repository; defaulting to failed");
         TaskStatus::Failed
     })
-}
-
-fn task_progress_from_payload(raw: Option<&str>) -> Option<TaskProgress> {
-    let raw = raw?;
-    let payload: Value = serde_json::from_str(raw).ok()?;
-    serde_json::from_value(payload.get("progress")?.clone()).ok()
 }
 
 fn decode_string_array(raw: Option<&str>) -> Vec<String> {

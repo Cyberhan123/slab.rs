@@ -202,6 +202,7 @@ pub fn plugin_theme_snapshot(
 
 const VIDEO_FILE_EXTENSIONS: &[&str] =
     &["mp4", "m4v", "mov", "mkv", "webm", "avi", "wmv", "flv", "mpeg", "mpg", "3gp"];
+const VIDEO_FILE_READ_PERMISSION: &str = "video";
 
 fn is_allowed_video_path(path: &Path) -> bool {
     path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| {
@@ -225,11 +226,13 @@ fn ensure_same_plugin_call(
 }
 
 fn ensure_video_file_read_permission(read_permissions: &[String]) -> Result<(), String> {
-    if read_permissions.iter().any(|permission| permission == "video") {
+    if read_permissions.iter().any(|permission| permission == VIDEO_FILE_READ_PERMISSION) {
         return Ok(());
     }
 
-    Err("plugin file picker requires permissions.files.read to include `video`".to_string())
+    Err(format!(
+        "plugin file picker requires permissions.files.read to include `{VIDEO_FILE_READ_PERMISSION}`"
+    ))
 }
 
 pub(super) fn authorize_slab_api_request(
@@ -349,7 +352,10 @@ mod tests {
 
     #[test]
     fn file_picker_requires_video_read_permission() {
-        assert!(ensure_video_file_read_permission(&["video".to_string()]).is_ok());
+        assert!(
+            ensure_video_file_read_permission(&[super::VIDEO_FILE_READ_PERMISSION.to_string()])
+                .is_ok()
+        );
         assert!(ensure_video_file_read_permission(&["audio".to_string()]).is_err());
     }
 

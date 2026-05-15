@@ -5,6 +5,7 @@ import api from '@slab/api';
 import { queryClient } from '@/lib/query-client';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
+import { isSettledStatus } from '@/pages/task/utils';
 
 import {
   TASK_POLL_INTERVAL_MS,
@@ -19,13 +20,6 @@ import {
 
 function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
-}
-
-function isTerminalTaskStatus(status: TaskRecord['status']) {
-  return status === 'succeeded'
-    || status === 'failed'
-    || status === 'cancelled'
-    || status === 'interrupted';
 }
 
 export interface SetupViewModel {
@@ -192,7 +186,7 @@ export function useSetup(): SetupViewModel {
           return;
         }
 
-        if (isTerminalTaskStatus(task.status) && pollIntervalRef.current) {
+        if (isSettledStatus(task.status) && pollIntervalRef.current) {
           clearInterval(pollIntervalRef.current);
           pollIntervalRef.current = null;
         }

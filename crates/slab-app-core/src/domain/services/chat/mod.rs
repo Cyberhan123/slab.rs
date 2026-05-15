@@ -28,6 +28,7 @@ use crate::infra::db::{ChatMessage, ChatStore};
 
 const LLAMA_BACKEND_ID: RuntimeBackendId = RuntimeBackendId::GgmlLlama;
 const CLOUD_MODEL_ID_PREFIX: &str = "cloud";
+const DEFAULT_COMPLETION_MAX_TOKENS: u32 = 512;
 const REASONING_CONTENT_METADATA_KEY: &str = "reasoning_content";
 const SYSTEM_FINGERPRINT: &str = "b-slab";
 
@@ -610,7 +611,7 @@ async fn create_chat_completion_with_state(
         .map(DomainConversationMessage::rendered_text)
         .unwrap_or_default();
 
-    let max_tokens = command.common.max_tokens.unwrap_or(512);
+    let max_tokens = command.common.max_tokens.unwrap_or(DEFAULT_COMPLETION_MAX_TOKENS);
     let temperature = command.common.temperature.unwrap_or(0.7);
     let route_to_cloud = cloud::should_route_to_cloud(&state, &resolved_model).await?;
     if command.common.stream && route_to_cloud && !command.common.stop.is_empty() {
@@ -849,7 +850,7 @@ async fn create_text_completion_with_state(
     }
 
     let resolved_model = resolve_requested_model(&state, &command.model).await?;
-    let max_tokens = command.common.max_tokens.unwrap_or(512);
+    let max_tokens = command.common.max_tokens.unwrap_or(DEFAULT_COMPLETION_MAX_TOKENS);
     let temperature = command.common.temperature.unwrap_or(0.7);
     let route_to_cloud = cloud::should_route_to_cloud(&state, &resolved_model).await?;
     validate_text_route_params(route_to_cloud, &command)?;
@@ -1070,7 +1071,7 @@ mod test {
         let mut req = make_command("user", "hello");
         req.common.max_tokens = Some(0);
         assert_eq!(req.common.max_tokens, Some(0));
-        let max_tokens = req.common.max_tokens.unwrap_or(512);
+        let max_tokens = req.common.max_tokens.unwrap_or(DEFAULT_COMPLETION_MAX_TOKENS);
         assert_eq!(max_tokens, 0, "zero should stay invalid");
     }
 
@@ -1078,7 +1079,7 @@ mod test {
     fn validate_large_max_tokens_is_preserved() {
         let mut req = make_command("user", "hello");
         req.common.max_tokens = Some(81_920);
-        let max_tokens = req.common.max_tokens.unwrap_or(512);
+        let max_tokens = req.common.max_tokens.unwrap_or(DEFAULT_COMPLETION_MAX_TOKENS);
         assert_eq!(max_tokens, 81_920);
     }
 
