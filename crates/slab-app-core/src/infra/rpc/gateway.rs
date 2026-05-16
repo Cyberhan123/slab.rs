@@ -10,6 +10,7 @@ use tower::service_fn;
 use tracing::warn;
 
 use crate::config::Config;
+use crate::infra::endpoint::{TransportEndpoint, parse_transport_endpoint};
 
 const STRICT_CONNECT_ATTEMPTS: usize = 30;
 const BEST_EFFORT_CONNECT_ATTEMPTS: usize = 3;
@@ -28,12 +29,6 @@ impl GrpcGatewayConnectPolicy {
             Self::BestEffort => BEST_EFFORT_CONNECT_ATTEMPTS,
         }
     }
-}
-
-#[derive(Debug, Clone)]
-enum GrpcEndpoint {
-    Http(String),
-    Ipc(String),
 }
 
 #[derive(Clone, Default)]
@@ -151,14 +146,14 @@ async fn connect_optional(
 }
 
 async fn connect_channel(endpoint: &str, attempts: usize) -> anyhow::Result<Channel> {
-    let endpoint = parse_grpc_endpoint(endpoint)?;
+    let endpoint = parse_transport_endpoint(endpoint)?;
     let attempts = attempts.max(1);
 
     let mut last_error = None;
     for _ in 0..attempts {
         let connect_result = match &endpoint {
-            GrpcEndpoint::Http(url) => connect_http_channel(url).await,
-            GrpcEndpoint::Ipc(path) => connect_ipc_channel(path).await,
+            TransportEndpoint::Http(url) => connect_http_channel(url).await,
+            TransportEndpoint::Ipc(path) => connect_ipc_channel(path).await,
         };
 
         match connect_result {
@@ -173,38 +168,6 @@ async fn connect_channel(endpoint: &str, attempts: usize) -> anyhow::Result<Chan
     let err =
         last_error.map(|e| e.to_string()).unwrap_or_else(|| "unknown connection error".to_string());
     anyhow::bail!("failed to connect to gRPC endpoint {}: {err}", endpoint.as_display());
-}
-
-impl GrpcEndpoint {
-    fn as_display(&self) -> &str {
-        match self {
-            Self::Http(url) => url.as_str(),
-            Self::Ipc(path) => path.as_str(),
-        }
-    }
-}
-
-fn parse_grpc_endpoint(raw: &str) -> anyhow::Result<GrpcEndpoint> {
-    let raw = raw.trim();
-    if raw.is_empty() {
-        anyhow::bail!("gRPC endpoint is empty");
-    }
-
-    if let Some(path) = raw.strip_prefix("ipc://") {
-        let path = path.trim();
-        if path.is_empty() {
-            anyhow::bail!("invalid IPC endpoint '{}': missing socket/pipe path", raw);
-        }
-        return Ok(GrpcEndpoint::Ipc(path.to_owned()));
-    }
-
-    let url = if raw.starts_with("http://") || raw.starts_with("https://") {
-        raw.to_owned()
-    } else {
-        format!("http://{raw}")
-    };
-
-    Ok(GrpcEndpoint::Http(url))
 }
 
 async fn connect_http_channel(url: &str) -> anyhow::Result<Channel> {

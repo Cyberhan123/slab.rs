@@ -1,22 +1,78 @@
-use std::fmt;
 use std::str::FromStr;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString};
 
 use crate::error::SlabTypeError;
 
 /// Canonical backend identifiers exposed on the runtime boundary today.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    Display,
+    EnumString,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(
+    parse_err_ty = SlabTypeError,
+    parse_err_fn = parse_runtime_backend_id_error
+)]
 pub enum RuntimeBackendId {
+    #[strum(
+        to_string = "ggml.llama",
+        serialize = "ggml.llama",
+        serialize = "ggml-llama",
+        serialize = "llama",
+        ascii_case_insensitive
+    )]
     GgmlLlama,
+    #[strum(
+        to_string = "ggml.whisper",
+        serialize = "ggml.whisper",
+        serialize = "ggml-whisper",
+        serialize = "whisper",
+        ascii_case_insensitive
+    )]
     GgmlWhisper,
+    #[strum(
+        to_string = "ggml.diffusion",
+        serialize = "ggml.diffusion",
+        serialize = "ggml-diffusion",
+        serialize = "diffusion",
+        ascii_case_insensitive
+    )]
     GgmlDiffusion,
+    #[strum(
+        to_string = "candle.llama",
+        serialize = "candle.llama",
+        serialize = "candle-llama",
+        ascii_case_insensitive
+    )]
     CandleLlama,
+    #[strum(
+        to_string = "candle.whisper",
+        serialize = "candle.whisper",
+        serialize = "candle-whisper",
+        ascii_case_insensitive
+    )]
     CandleWhisper,
+    #[strum(
+        to_string = "candle.diffusion",
+        serialize = "candle.diffusion",
+        serialize = "candle-diffusion",
+        ascii_case_insensitive
+    )]
     CandleDiffusion,
+    #[strum(to_string = "onnx", serialize = "onnx", ascii_case_insensitive)]
     Onnx,
 }
 
@@ -58,27 +114,9 @@ impl RuntimeBackendId {
     }
 }
 
-impl fmt::Display for RuntimeBackendId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.canonical_id())
-    }
-}
-
-impl FromStr for RuntimeBackendId {
-    type Err = SlabTypeError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "ggml.llama" | "ggml-llama" | "llama" => Ok(Self::GgmlLlama),
-            "ggml.whisper" | "ggml-whisper" | "whisper" => Ok(Self::GgmlWhisper),
-            "ggml.diffusion" | "ggml-diffusion" | "diffusion" => Ok(Self::GgmlDiffusion),
-            "candle.llama" | "candle-llama" => Ok(Self::CandleLlama),
-            "candle.whisper" | "candle-whisper" => Ok(Self::CandleWhisper),
-            "candle.diffusion" | "candle-diffusion" => Ok(Self::CandleDiffusion),
-            "onnx" => Ok(Self::Onnx),
-            other => Err(SlabTypeError::Parse(format!("unknown runtime backend id: {other}"))),
-        }
-    }
+fn parse_runtime_backend_id_error(value: &str) -> SlabTypeError {
+    let normalized = value.trim().to_ascii_lowercase();
+    SlabTypeError::Parse(format!("unknown runtime backend id: {normalized}"))
 }
 
 #[cfg(test)]

@@ -54,36 +54,6 @@ impl std::fmt::Display for EnabledBackends {
     }
 }
 
-pub fn parse_enabled_backends(raw: Option<&str>) -> anyhow::Result<EnabledBackends> {
-    let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
-        return Ok(EnabledBackends::all());
-    };
-
-    let mut enabled = EnabledBackends { llama: false, whisper: false, diffusion: false };
-    let mut unknown = Vec::new();
-
-    for token in raw.split(',').map(str::trim).filter(|value| !value.is_empty()) {
-        match token.to_ascii_lowercase().as_str() {
-            "llama" | "ggml.llama" => enabled.llama = true,
-            "whisper" | "ggml.whisper" => enabled.whisper = true,
-            "diffusion" | "ggml.diffusion" => enabled.diffusion = true,
-            other => unknown.push(other.to_string()),
-        }
-    }
-
-    if !unknown.is_empty() {
-        anyhow::bail!(
-            "invalid enabled backends: {}. Supported: llama, whisper, diffusion",
-            unknown.join(", ")
-        );
-    }
-    if !enabled.llama && !enabled.whisper && !enabled.diffusion {
-        anyhow::bail!("at least one backend must be enabled");
-    }
-
-    Ok(enabled)
-}
-
 pub(crate) fn resolve_base_lib_path(path: PathBuf, current_dir: &Path) -> PathBuf {
     let absolute = if path.is_absolute() { path } else { current_dir.join(path) };
     absolute.canonicalize().unwrap_or(absolute)

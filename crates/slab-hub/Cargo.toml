@@ -18,6 +18,7 @@ provider-huggingface-hub-rust = ["dep:huggingface-hub"]
 reqwest = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
+strum = { workspace = true }
 
 hf-hub = { version = "0.5.0", default-features = false, features = ["tokio", "native-tls"], optional = true }
 models-cat = { version = "0.1.0", default-features = false, features = ["tokio"], optional = true }

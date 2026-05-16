@@ -25,6 +25,7 @@ use crate::domain::models::{
 };
 use crate::error::AppCoreError;
 use crate::infra::db::ModelStore;
+use crate::infra::endpoint::{ensure_http_base_url, join_http_url_path};
 
 use super::GeneratedChatOutput;
 
@@ -435,8 +436,8 @@ fn map_genai_error(action: &str, err: genai::Error) -> AppCoreError {
     AppCoreError::BackendNotReady(format!("cloud {action} failed: {detail}"))
 }
 
-fn build_genai_client_for_target(target: &ResolvedCloudModel) -> GenaiClient {
-    let endpoint = ensure_genai_endpoint_base(&target.api_base);
+fn build_genai_client_for_target(target: &ResolvedCloudModel) -> Result<GenaiClient, AppCoreError> {
+    let endpoint = ensure_genai_endpoint_base(&target.api_base)?;
     let api_key = target.api_key.clone();
     let remote_model = target.remote_model.clone();
 
@@ -450,7 +451,7 @@ fn build_genai_client_for_target(target: &ResolvedCloudModel) -> GenaiClient {
         },
     );
 
-    GenaiClient::builder().with_service_target_resolver(resolver).build()
+    Ok(GenaiClient::builder().with_service_target_resolver(resolver).build())
 }
 
 fn build_genai_chat_request(messages: &[DomainConversationMessage]) -> GenaiChatRequest {
@@ -536,12 +537,16 @@ async fn cloud_chat_completion(
         "sending cloud chat completion request via genai"
     );
 
-    let trace = trace_http.then(|| build_cloud_http_trace_context(target, messages, &config));
+    let trace = if trace_http {
+        Some(build_cloud_http_trace_context(target, messages, &config)?)
+    } else {
+        None
+    };
     if let Some(trace) = trace.as_ref() {
         log_cloud_http_request(target, trace, false);
     }
 
-    let client = build_genai_client_for_target(target);
+    let client = build_genai_client_for_target(target)?;
     let request = build_genai_chat_request(messages);
     let options = build_genai_chat_options(&config, trace_http);
 
@@ -593,12 +598,16 @@ async fn cloud_chat_stream(
         "opening cloud chat stream via genai"
     );
 
-    let trace = trace_http.then(|| build_cloud_http_trace_context(target, messages, &config));
+    let trace = if trace_http {
+        Some(build_cloud_http_trace_context(target, messages, &config)?)
+    } else {
+        None
+    };
     if let Some(trace) = trace.as_ref() {
         log_cloud_http_request(target, trace, true);
     }
 
-    let client = build_genai_client_for_target(target);
+    let client = build_genai_client_for_target(target)?;
     let request = build_genai_chat_request(messages);
     let options = build_genai_chat_options(&config, false);
     let response = client
@@ -639,18 +648,20 @@ async fn cloud_chat_stream(
     Ok(Box::pin(stream))
 }
 
-fn ensure_genai_endpoint_base(api_base: &str) -> String {
-    match api_base.trim().split_once('?') {
-        Some((base, query)) => format!("{}/?{query}", base.trim_end_matches('/')),
-        None => format!("{}/", api_base.trim().trim_end_matches('/')),
-    }
+fn ensure_genai_endpoint_base(api_base: &str) -> Result<String, AppCoreError> {
+    ensure_http_base_url(api_base).map_err(|error| invalid_cloud_api_base(api_base, error))
 }
 
-fn build_openai_chat_completions_url(api_base: &str) -> String {
-    match api_base.trim().split_once('?') {
-        Some((base, query)) => format!("{}/chat/completions?{query}", base.trim_end_matches('/')),
-        None => format!("{}/chat/completions", api_base.trim().trim_end_matches('/')),
-    }
+fn build_openai_chat_completions_url(api_base: &str) -> Result<String, AppCoreError> {
+    join_http_url_path(api_base, "chat/completions")
+        .map_err(|error| invalid_cloud_api_base(api_base, error))
+}
+
+fn invalid_cloud_api_base(api_base: &str, error: anyhow::Error) -> AppCoreError {
+    AppCoreError::BadRequest(format!(
+        "cloud provider api_base '{}' is invalid: {error}",
+        api_base.trim()
+    ))
 }
 
 fn extract_reasoning_content_from_raw_body(raw_body: Option<&Value>) -> Option<String> {
@@ -671,19 +682,19 @@ fn build_cloud_http_trace_context(
     target: &ResolvedCloudModel,
     messages: &[DomainConversationMessage],
     config: &CloudChatRequestConfig,
-) -> CloudHttpTraceContext {
+) -> Result<CloudHttpTraceContext, AppCoreError> {
     let request_headers = redact_headers(build_cloud_http_request_headers(target));
     let request_body =
         serde_json::to_string_pretty(&build_cloud_http_request_body(target, messages, config))
             .unwrap_or_else(|_| "<failed to serialize request body>".to_owned());
 
-    CloudHttpTraceContext {
+    Ok(CloudHttpTraceContext {
         request_id: Uuid::new_v4().to_string(),
-        request_url: build_openai_chat_completions_url(&target.api_base),
+        request_url: build_openai_chat_completions_url(&target.api_base)?,
         request_headers: serde_json::to_string_pretty(&request_headers)
             .unwrap_or_else(|_| "<failed to serialize request headers>".to_owned()),
         request_body,
-    }
+    })
 }
 
 fn build_cloud_http_request_headers(target: &ResolvedCloudModel) -> BTreeMap<String, String> {
@@ -1050,7 +1061,7 @@ mod test {
     #[test]
     fn ensure_genai_endpoint_base_keeps_v1_path() {
         assert_eq!(
-            ensure_genai_endpoint_base("https://api.openai.com/v1"),
+            ensure_genai_endpoint_base("https://api.openai.com/v1").unwrap(),
             "https://api.openai.com/v1/"
         );
     }
@@ -1058,7 +1069,7 @@ mod test {
     #[test]
     fn build_openai_chat_completions_url_keeps_v1_path() {
         assert_eq!(
-            build_openai_chat_completions_url("https://api.openai.com/v1"),
+            build_openai_chat_completions_url("https://api.openai.com/v1").unwrap(),
             "https://api.openai.com/v1/chat/completions"
         );
     }

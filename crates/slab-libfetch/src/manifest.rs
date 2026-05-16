@@ -1,6 +1,7 @@
 use crate::error::FetchError;
 use crate::platform::Platform;
 use crate::variant::Variant;
+use minijinja::{Environment, UndefinedBehavior, context};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
@@ -144,7 +145,7 @@ impl ArtifactSpec {
             &resolved_target.arch,
             resolved_target.variant.as_deref(),
             resolved_target.extension,
-        );
+        )?;
         let checksum = resolved_target.checksum.map(str::to_string).or_else(|| {
             self.lookup_checksum(
                 &os_str,
@@ -316,13 +317,37 @@ fn render_asset_name(
     arch_str: &str,
     variant: Option<&str>,
     extension: Option<&str>,
-) -> String {
-    asset_pattern
-        .replace("{version}", version)
-        .replace("{os}", os_str)
-        .replace("{arch}", arch_str)
-        .replace("{variant}", variant.unwrap_or(""))
-        .replace("{extension}", extension.unwrap_or(""))
+) -> Result<String, FetchError> {
+    let template = asset_pattern
+        .replace("{version}", "{{ version }}")
+        .replace("{os}", "{{ os }}")
+        .replace("{arch}", "{{ arch }}")
+        .replace("{variant}", "{{ variant }}")
+        .replace("{extension}", "{{ extension }}");
+
+    let mut env = Environment::new();
+    env.set_undefined_behavior(UndefinedBehavior::Strict);
+    env.add_template("asset_name", &template).map_err(|error| {
+        FetchError::ManifestError(format!(
+            "invalid asset_pattern template '{asset_pattern}': {error}"
+        ))
+    })?;
+
+    env.get_template("asset_name")
+        .and_then(|template| {
+            template.render(context! {
+                version => version,
+                os => os_str,
+                arch => arch_str,
+                variant => variant.unwrap_or(""),
+                extension => extension.unwrap_or(""),
+            })
+        })
+        .map_err(|error| {
+            FetchError::ManifestError(format!(
+                "failed to render asset_pattern '{asset_pattern}': {error}"
+            ))
+        })
 }
 
 /// Convenience: resolve using automatically detected platform and variant.
