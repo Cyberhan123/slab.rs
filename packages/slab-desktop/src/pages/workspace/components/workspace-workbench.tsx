@@ -1,10 +1,13 @@
-import Editor from "@monaco-editor/react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslation } from "@slab/i18n"
 import { Button } from "@slab/components/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@slab/components/tooltip"
 import { SoftPanel, StageEmptyState, StatusPill } from "@slab/components/workspace"
 import { Tree } from "react-arborist"
 import {
   Code2,
+  ChevronRight,
+  Command as CommandPaletteIcon,
   Eye,
   FileCode2,
   Files,
@@ -13,52 +16,59 @@ import {
   GitBranch,
   Loader2,
   Save,
+  Search,
   Terminal,
   X,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import type { WorkspacePageState } from "../hooks/use-workspace-page"
-import { languageForFile, SLAB_DIR_NAME } from "../lib/workspace-page-utils"
+import { useWorkspaceLsp } from "../hooks/use-workspace-lsp"
+import { workspaceLspModelPath } from "../lib/workspace-lsp"
+import { languageForFile, lspLanguageForFile, SLAB_DIR_NAME } from "../lib/workspace-page-utils"
 import { RecentWorkspaceList } from "./recent-workspace-list"
 import { WorkspaceConsolePanel } from "./workspace-console-panel"
+import { WorkspaceCodeEditor } from "./workspace-code-editor"
+import { WorkspaceCommandPalette } from "./workspace-command-palette"
 import { WorkspaceGitPanel } from "./workspace-git-panel"
 import { WorkspaceMarkdownPreview } from "./workspace-markdown-preview"
+import { WorkspaceSearchPanel } from "./workspace-search-panel"
 import { WorkspaceTreeRow } from "./workspace-tree-row"
-import { setupShikiMonaco } from "../lib/monaco-shiki"
 
 export function WorkspaceWorkbench({
   activeFilePath,
-  consoleCommand,
-  consoleEntries,
   consoleOpen,
   editorContent,
+  editorRevealTarget,
   editorTheme,
   explorerPanel,
   fileError,
+  fileSearchFetching,
+  fileSearchResults,
+  fileSearchTruncated,
+  gitDiffFetching,
   gitStatus,
   gitStatusFetching,
   gitOperationPending,
-  handleClearConsole,
   handleCloseFileTab,
   handleCloseWorkspace,
-  handleConsoleHistory,
   handleGitCommit,
   handleGitDiscard,
   handleGitStage,
   handleGitUnstage,
   handleOpenFile,
   handleOpenFolder,
+  handleOpenTextSearchMatch,
   handleRefreshGitStatus,
-  handleRunConsoleCommand,
+  handleRevealDirectoryInTree,
   handleSaveFile,
   handleSelectExplorerPanel,
   handleSelectFileTab,
+  handleSelectGitDiff,
   handleSetMarkdownMode,
   handleTreeToggle,
   handleToggleConsole,
   initialOpenState,
-  isConsoleRunning,
   isDesktopTauri,
   loadDirectory,
   loadingPaths,
@@ -67,20 +77,147 @@ export function WorkspaceWorkbench({
   openWorkspacePath,
   recentWorkspaces,
   selectedFile,
+  selectedGitDiff,
+  selectedGitDiffEntry,
   selectedFileDirty,
-  setConsoleCommand,
   setEditorContent,
   savingFile,
   treeData,
   treeHeight,
   treeHostRef,
+  treeMeasureKey,
   workspace,
   workspaceUiHasHydrated,
+  setTextSearchQuery,
+  textSearchFetching,
+  textSearchQuery,
+  textSearchResults,
+  textSearchTruncated,
 }: WorkspacePageState) {
   const { t } = useTranslation()
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const selectedFileLanguage = selectedFile ? languageForFile(selectedFile.name) : "plaintext"
+  const selectedFileLspLanguage = selectedFile ? lspLanguageForFile(selectedFile.name) : "plaintext"
   const isMarkdownFile = selectedFileLanguage === "markdown"
-  const terminalThemeMode = editorTheme === "github-dark" ? "dark" : "light"
+  const selectedGitDiffEditorPath = selectedGitDiff
+    ? `.slab-git-diff/${selectedGitDiff.staged ? "staged" : "changes"}/${selectedGitDiff.path}.diff`
+    : ""
+  const terminalThemeMode = editorTheme === "vs-dark" ? "dark" : "light"
+  const selectedFileBreadcrumbs = selectedFile?.relativePath.split("/").filter(Boolean) ?? []
+  const editorsWithEscapeHandlerRef = useRef(new WeakSet<import("monaco-editor").editor.IStandaloneCodeEditor>())
+  const { handleEditorMount, servicesPending, servicesReady } = useWorkspaceLsp({
+    language: selectedFileLspLanguage,
+    onOpenFile: handleOpenFile,
+    relativePath: selectedFile?.relativePath ?? null,
+    workspaceRoot: workspace?.rootPath ?? null,
+  })
+  const waitForEditorServices = Boolean(selectedFile && servicesPending && !servicesReady)
+
+  useEffect(() => {
+    if (!isDesktopTauri) {
+      return
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat || (!event.ctrlKey && !event.metaKey)) {
+        return
+      }
+
+      if (event.key.toLowerCase() !== "p") {
+        return
+      }
+
+      const target = event.target as HTMLElement | null
+      const isTextInput = target?.matches("input, textarea, select") || target?.isContentEditable
+      if (isTextInput && !target?.closest(".monaco-editor")) {
+        return
+      }
+
+      event.preventDefault()
+      setCommandPaletteOpen(true)
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [isDesktopTauri])
+
+  useEffect(() => {
+    if (!workspace) {
+      setCommandPaletteOpen(false)
+    }
+  }, [workspace])
+
+  const handleWorkspaceEditorMount = useCallback(
+    (editor: import("monaco-editor").editor.IStandaloneCodeEditor, monaco: typeof import("monaco-editor")) => {
+      handleEditorMount(editor, monaco)
+      if (editorsWithEscapeHandlerRef.current.has(editor)) {
+        return
+      }
+      editorsWithEscapeHandlerRef.current.add(editor)
+      editor.onKeyDown((event) => {
+        if (event.keyCode !== monaco.KeyCode.Escape) {
+          return
+        }
+        const findController = editor.getContribution("editor.contrib.findController") as {
+          closeFindWidget?: () => void
+          getState?: () => { isRevealed?: boolean }
+        } | null
+        if (!findController?.getState?.().isRevealed) {
+          return
+        }
+        findController.closeFindWidget?.()
+        void editor.getAction("closeFindWidget")?.run()
+        event.preventDefault()
+        event.stopPropagation()
+      })
+    },
+    [handleEditorMount],
+  )
+  const commandPaletteButton = (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="quiet"
+          size="icon-sm"
+          aria-label={t("pages.workspace.commandPalette.trigger")}
+          onClick={() => setCommandPaletteOpen(true)}
+        >
+          <CommandPaletteIcon className="size-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{t("pages.workspace.commandPalette.trigger")}</TooltipContent>
+    </Tooltip>
+  )
+  const commandPalette = (
+    <WorkspaceCommandPalette
+      open={commandPaletteOpen}
+      onOpenChange={setCommandPaletteOpen}
+      workspaceRoot={workspace?.rootPath ?? null}
+      recentWorkspaces={recentWorkspaces}
+      openFileTabs={openFileTabs}
+      explorerPanel={explorerPanel}
+      consoleOpen={consoleOpen}
+      markdownMode={markdownMode}
+      selectedFile={selectedFile}
+      selectedFileDirty={selectedFileDirty}
+      gitStatusFetching={gitStatusFetching}
+      gitOperationPending={gitOperationPending}
+      onOpenFolder={handleOpenFolder}
+      onCloseWorkspace={handleCloseWorkspace}
+      onToggleConsole={handleToggleConsole}
+      onSelectExplorerPanel={handleSelectExplorerPanel}
+      onRefreshGitStatus={handleRefreshGitStatus}
+      onOpenFile={handleOpenFile}
+      onSelectFileTab={handleSelectFileTab}
+      onRevealDirectoryInTree={handleRevealDirectoryInTree}
+      onSaveFile={handleSaveFile}
+      onSetMarkdownMode={handleSetMarkdownMode}
+      onOpenWorkspacePath={openWorkspacePath}
+    />
+  )
 
   if (!isDesktopTauri) {
     return (
@@ -104,10 +241,13 @@ export function WorkspaceWorkbench({
             title={t("pages.workspace.empty.title")}
             description={t("pages.workspace.empty.description")}
             action={
-              <Button variant="cta" size="pill" onClick={handleOpenFolder}>
-                <FolderOpen className="size-4" />
-                {t("pages.workspace.actions.openFolder")}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button variant="cta" size="pill" onClick={handleOpenFolder}>
+                  <FolderOpen className="size-4" />
+                  {t("pages.workspace.actions.openFolder")}
+                </Button>
+                {commandPaletteButton}
+              </div>
             }
             className="min-h-[360px]"
           />
@@ -119,6 +259,7 @@ export function WorkspaceWorkbench({
             openLabel={t("pages.workspace.actions.reopen")}
           />
         </div>
+        {commandPalette}
       </div>
     )
   }
@@ -142,6 +283,7 @@ export function WorkspaceWorkbench({
             <X className="size-4" />
             {t("pages.workspace.actions.closeWorkspace")}
           </Button>
+          {commandPaletteButton}
           <Button variant={consoleOpen ? "pill" : "quiet"} size="sm" onClick={handleToggleConsole}>
             <Terminal className="size-4" />
             {consoleOpen ? t("pages.workspace.console.hide") : t("pages.workspace.console.show")}
@@ -157,12 +299,13 @@ export function WorkspaceWorkbench({
               {t("pages.workspace.explorer.title")}
             </div>
             {(explorerPanel === "files" && loadingPaths.has("")) ||
+            (explorerPanel === "search" && textSearchFetching) ||
             (explorerPanel === "git" && gitStatusFetching) ? (
               <Loader2 className="size-4 animate-spin text-muted-foreground" />
             ) : null}
           </div>
 
-          <div className="grid grid-cols-2 gap-1 rounded-full bg-[var(--surface-1)] p-1">
+          <div className="grid grid-cols-3 gap-1 rounded-full bg-[var(--surface-1)] p-1">
             <button
               type="button"
               className={cn(
@@ -173,6 +316,17 @@ export function WorkspaceWorkbench({
             >
               <Files className="size-3.5" />
               {t("pages.workspace.explorer.files")}
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "flex h-8 items-center justify-center gap-1.5 rounded-full text-xs font-medium text-muted-foreground transition hover:text-foreground",
+                explorerPanel === "search" && "bg-background text-foreground shadow-sm",
+              )}
+              onClick={() => handleSelectExplorerPanel("search")}
+            >
+              <Search className="size-3.5" />
+              {t("pages.workspace.explorer.search")}
             </button>
             <button
               type="button"
@@ -190,38 +344,54 @@ export function WorkspaceWorkbench({
           {explorerPanel === "files" ? (
             <div ref={treeHostRef} className="h-full min-h-0 flex-1 overflow-hidden rounded-[12px] bg-[var(--surface-1)]">
               {workspaceUiHasHydrated ? (
-                <Tree
-                  key={workspace.rootPath}
-                  data={treeData}
-                  idAccessor="id"
-                  childrenAccessor="children"
-                  rowHeight={32}
-                  indent={18}
-                  height={treeHeight}
-                  width="100%"
-                  disableDrag
-                  disableDrop
-                  disableEdit
-                  openByDefault={false}
-                  initialOpenState={initialOpenState}
-                  selection={activeFilePath ?? undefined}
-                  onToggle={handleTreeToggle}
-                >
-                  {(props) => (
-                    <WorkspaceTreeRow
-                      {...props}
-                      selectedPath={activeFilePath}
-                      loadingPaths={loadingPaths}
-                      onOpenDirectory={loadDirectory}
-                      onOpenFile={handleOpenFile}
-                    />
-                  )}
-                </Tree>
-              ) : (
-                <div className="flex h-full min-h-[240px] items-center justify-center">
-                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                </div>
-              )}
+                  <Tree
+                    key={`${workspace.rootPath}:${treeMeasureKey}`}
+                    data={treeData}
+                    idAccessor="id"
+                    childrenAccessor="children"
+                    rowHeight={32}
+                    indent={18}
+                    height={treeHeight}
+                    width="100%"
+                    disableDrag
+                    disableDrop
+                    disableEdit
+                    openByDefault={false}
+                    initialOpenState={initialOpenState}
+                    selection={activeFilePath ?? undefined}
+                    onToggle={handleTreeToggle}
+                  >
+                    {(props) => (
+                      <WorkspaceTreeRow
+                        {...props}
+                        selectedPath={activeFilePath}
+                        loadingPaths={loadingPaths}
+                        onOpenDirectory={loadDirectory}
+                        onOpenFile={handleOpenFile}
+                      />
+                    )}
+                  </Tree>
+                ) : (
+                  <div className="flex h-full min-h-[240px] items-center justify-center">
+                    <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+            </div>
+          ) : explorerPanel === "search" ? (
+            <div className="h-full min-h-0 flex-1 overflow-hidden">
+              <WorkspaceSearchPanel
+                activeFilePath={activeFilePath}
+                fileFetching={fileSearchFetching}
+                fileResults={fileSearchResults}
+                fileTruncated={fileSearchTruncated}
+                query={textSearchQuery}
+                textFetching={textSearchFetching}
+                textResults={textSearchResults}
+                textTruncated={textSearchTruncated}
+                onOpenFile={handleOpenFile}
+                onOpenMatch={handleOpenTextSearchMatch}
+                onQueryChange={setTextSearchQuery}
+              />
             </div>
           ) : (
             <div className="h-full min-h-0 flex-1 overflow-hidden">
@@ -231,9 +401,10 @@ export function WorkspaceWorkbench({
                 operationPending={gitOperationPending}
                 onCommit={handleGitCommit}
                 onDiscard={handleGitDiscard}
-                onOpenFile={handleOpenFile}
                 onRefresh={handleRefreshGitStatus}
+                onSelectDiff={handleSelectGitDiff}
                 onStage={handleGitStage}
+                selectedEntry={selectedGitDiffEntry}
                 onUnstage={handleGitUnstage}
               />
             </div>
@@ -285,10 +456,38 @@ export function WorkspaceWorkbench({
 
             {selectedFile ? (
               <div className="flex h-9 shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-background/80 px-3">
-                <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
-                  {selectedFile.relativePath}
-                  {selectedFileDirty ? " *" : ""}
-                </span>
+                <nav
+                  className="flex min-w-0 items-center gap-1 overflow-hidden font-mono text-xs text-muted-foreground"
+                  aria-label={t("pages.workspace.editor.breadcrumbs")}
+                  title={selectedFile.relativePath}
+                >
+                  {selectedFileBreadcrumbs.map((segment, index) => {
+                    const path = selectedFileBreadcrumbs.slice(0, index + 1).join("/")
+                    const isLast = index === selectedFileBreadcrumbs.length - 1
+
+                    return (
+                      <span key={path} className="flex min-w-0 items-center gap-1">
+                        {index > 0 ? <ChevronRight className="size-3 shrink-0" /> : null}
+                        {isLast ? (
+                          <span className="min-w-0 truncate text-foreground">
+                            {segment}
+                            {selectedFileDirty ? " *" : ""}
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="min-w-0 truncate transition hover:text-foreground"
+                            onClick={() => {
+                              void handleRevealDirectoryInTree(path)
+                            }}
+                          >
+                            {segment}
+                          </button>
+                        )}
+                      </span>
+                    )
+                  })}
+                </nav>
                 <div className="flex shrink-0 items-center gap-2">
                   {isMarkdownFile ? (
                     <div className="flex items-center gap-1 rounded-full bg-[var(--surface-1)] p-0.5">
@@ -330,25 +529,34 @@ export function WorkspaceWorkbench({
                   </Button>
                 </div>
               </div>
+            ) : selectedGitDiffEntry ? (
+              <div className="flex h-9 shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-background/80 px-3">
+                <div
+                  className="min-w-0 truncate font-mono text-xs text-muted-foreground"
+                  title={selectedGitDiffEntry.path}
+                >
+                  {selectedGitDiffEntry.path}
+                </div>
+                {gitDiffFetching ? <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" /> : null}
+              </div>
             ) : null}
 
             {selectedFile ? (
-              isMarkdownFile && markdownMode === "preview" ? (
+              waitForEditorServices ? (
+                <div className="flex h-full min-h-[420px] flex-1 items-center justify-center">
+                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                </div>
+              ) : isMarkdownFile && markdownMode === "preview" ? (
                 <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
                   <WorkspaceMarkdownPreview content={editorContent} />
                 </div>
               ) : (
                 <div className="min-h-0 flex-1">
-                  <Editor
-                    height="100%"
+                  <WorkspaceCodeEditor
+                    filePath={workspaceLspModelPath(workspace.rootPath, selectedFile.relativePath)}
                     language={selectedFileLanguage}
-                    path={selectedFile.relativePath}
-                    theme={editorTheme}
-                    value={editorContent}
-                    beforeMount={(monaco) => {
-                      void setupShikiMonaco(monaco)
-                    }}
                     onChange={(value) => setEditorContent(value ?? "")}
+                    onMount={handleWorkspaceEditorMount}
                     options={{
                       readOnly: savingFile,
                       minimap: { enabled: false },
@@ -356,10 +564,39 @@ export function WorkspaceWorkbench({
                       wordWrap: "on",
                       fontSize: 13,
                       tabSize: 2,
+                      codeLens: true,
+                      inlayHints: { enabled: "on" },
+                      parameterHints: { enabled: true },
+                      quickSuggestions: true,
+                      renameOnType: true,
+                      suggestOnTriggerCharacters: true,
                     }}
+                    revealTarget={editorRevealTarget}
+                    theme={editorTheme}
+                    value={editorContent}
                   />
                 </div>
               )
+            ) : selectedGitDiffEntry ? (
+              <div className="min-h-0 flex-1">
+                <WorkspaceCodeEditor
+                  filePath={workspaceLspModelPath(workspace.rootPath, selectedGitDiffEditorPath)}
+                  language="diff"
+                  memoryModel
+                  onChange={() => {}}
+                  options={{
+                    readOnly: true,
+                    minimap: { enabled: false },
+                    scrollBeyondLastLine: false,
+                    wordWrap: "off",
+                    fontSize: 13,
+                    tabSize: 2,
+                    lineNumbersMinChars: 3,
+                  }}
+                  theme={editorTheme}
+                  value={selectedGitDiff?.diff.trim() || t("pages.workspace.git.noDiff")}
+                />
+              </div>
             ) : (
               <StageEmptyState
                 icon={FileCode2}
@@ -372,18 +609,13 @@ export function WorkspaceWorkbench({
 
           {consoleOpen ? (
             <WorkspaceConsolePanel
-              command={consoleCommand}
-              entries={consoleEntries}
-              isRunning={isConsoleRunning}
-              onChangeCommand={setConsoleCommand}
-              onClear={handleClearConsole}
-              onHistory={handleConsoleHistory}
-              onRun={handleRunConsoleCommand}
               themeMode={terminalThemeMode}
+              workspaceRoot={workspace.rootPath}
             />
           ) : null}
         </div>
       </div>
+      {commandPalette}
     </div>
   )
 }

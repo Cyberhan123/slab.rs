@@ -43,14 +43,18 @@ fn main() {
             "workspace_close",
             "workspace_read_directory",
             "workspace_read_file",
+            "workspace_search_files",
+            "workspace_search_text",
             "workspace_write_file",
             "workspace_git_status",
             "workspace_git_stage",
             "workspace_git_unstage",
             "workspace_git_discard",
             "workspace_git_commit",
+            "workspace_git_diff",
             "workspace_console_run",
             "workspace_update_plugin_preference",
+            "workspace_terminal_session",
         ]));
 
     tauri_build::try_build(attributes).expect("failed to run tauri build script");

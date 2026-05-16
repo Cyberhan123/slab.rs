@@ -14,6 +14,7 @@ import {
   listAudioTranscriptions,
   type AudioTranscriptionTask,
 } from '@/lib/media-task-api';
+import { getErrorDescription } from '@/lib/error-description';
 import {
   useModelConfigDocumentQuery,
   type ModelConfigDocumentResponse,
@@ -22,8 +23,14 @@ import { HEADER_SELECT_KEYS } from '@/layouts/header-controls';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import { useAudioUiStore } from '@/store/useAudioUiStore';
 import {
+  extractTaskId,
+  isFailedTaskStatus,
   MODEL_DOWNLOAD_POLL_INTERVAL_MS,
   MODEL_DOWNLOAD_TIMEOUT_MS,
+  sleep,
+} from '@/pages/task/utils';
+import {
+  BUNDLED_VAD_MODEL_ID,
   type PreparingStage,
 } from '../const';
 import {
@@ -34,20 +41,6 @@ import {
   type AudioTranscriptionControls,
 } from '../lib/audio-transcription-controls';
 import useTranscribe, { type TranscribeOptions, type TranscribeVadSettings } from './use-transcribe';
-
-const BUNDLED_VAD_MODEL_ID = '__bundled_vad__';
-
-const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
-
-const extractTaskId = (payload: unknown): string | null => {
-  if (typeof payload !== 'object' || payload === null) return null;
-  const tid =
-    (payload as { operation_id?: unknown }).operation_id ??
-    (payload as { task_id?: unknown }).task_id;
-  if (typeof tid !== 'string') return null;
-  const trimmed = tid.trim();
-  return trimmed.length > 0 ? trimmed : null;
-};
 
 type BundledVadArtifact = {
   id: string;
@@ -395,7 +388,7 @@ export function useAudio() {
         return;
       }
 
-      if (task.status === 'failed' || task.status === 'cancelled' || task.status === 'interrupted') {
+      if (isFailedTaskStatus(task.status)) {
         throw new Error(
           task.error_msg ??
             t('pages.hub.error.taskEndedWithStatus', {
@@ -802,9 +795,8 @@ export function useAudio() {
       setHistoryDialogOpen(true);
       toast.success(t('pages.audio.toast.transcriptionReady'));
     } catch (err: unknown) {
-      const anyErr = err as { message?: string; error?: string } | null;
       toast.error(t('pages.audio.toast.failedToCreateTask'), {
-        description: anyErr?.message || anyErr?.error || t('pages.audio.toast.unknownError'),
+        description: getErrorDescription(err, t('pages.audio.toast.unknownError')),
       });
     } finally {
       setPreparingStage(null);

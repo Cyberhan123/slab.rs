@@ -1,0 +1,10 @@
+{
+  "name": "web-language-servers",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "typescript": "^5.8.3",
+    "typescript-language-server": "^4.3.3",
+    "vscode-langservers-extracted": "^4.10.0"
+  }
+}

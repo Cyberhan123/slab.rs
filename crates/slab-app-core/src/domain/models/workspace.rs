@@ -85,6 +85,21 @@ pub struct WorkspaceGitCommitCommand {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitDiffCommand {
+    pub path: String,
+    pub staged: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitDiffView {
+    pub path: String,
+    pub staged: bool,
+    pub diff: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceGitOperationView {
     pub status: WorkspaceGitStatusView,
 }

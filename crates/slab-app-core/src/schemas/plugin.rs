@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use slab_types::{
+    PluginCompatibilityManifest, PluginContributesManifest, PluginPermissionsManifest,
+};
 use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
@@ -43,16 +45,13 @@ pub struct PluginResponse {
     pub valid: bool,
     pub error: Option<String>,
     pub manifest_version: u32,
-    #[schema(value_type = Object)]
-    pub compatibility: Value,
+    pub compatibility: Option<PluginCompatibilityManifest>,
     pub ui_entry: Option<String>,
     pub has_wasm: bool,
     pub network_mode: String,
     pub allow_hosts: Vec<String>,
-    #[schema(value_type = Object)]
-    pub contributions: Value,
-    #[schema(value_type = Object)]
-    pub permissions: Value,
+    pub contributions: Option<PluginContributesManifest>,
+    pub permissions: Option<PluginPermissionsManifest>,
     pub source_kind: String,
     pub source_ref: Option<String>,
     pub install_root: Option<String>,

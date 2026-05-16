@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import importMetaUrlPlugin from "@codingame/esbuild-import-meta-url-plugin";
 import path from "path";
 
 const host = process.env.TAURI_DEV_HOST;
@@ -9,12 +10,35 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
 
+  optimizeDeps: {
+    esbuildOptions: {
+      plugins: [importMetaUrlPlugin],
+    },
+  },
+
   build: {
     // Tauri on macOS uses the system WebKit. Our minimum supported macOS
     // version is 13.0, so keep the frontend output within the Safari 16
     // feature set instead of following Vite's moving default baseline.
     target: "safari16",
     cssTarget: "safari16",
+    rolldownOptions: {
+      output: {
+        manualChunks(id) {
+          if (
+            id.includes("monaco-languageclient") ||
+            id.includes("vscode-languageclient") ||
+            id.includes("vscode-ws-jsonrpc") ||
+            id.includes("@codingame/monaco-editor") ||
+            id.includes("@codingame/monaco-vscode") ||
+            id.includes("/node_modules/vscode/")
+          ) {
+            return "workspace-lsp-client";
+          }
+          return undefined;
+        },
+      },
+    },
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
@@ -40,7 +64,7 @@ export default defineConfig(async () => ({
   },
   // Path alias configuration
   resolve: {
-    dedupe: ["@tanstack/react-query"],
+    dedupe: ["@tanstack/react-query", "monaco-editor", "vscode"],
     alias: {
       "@": path.resolve(__dirname, "./src"),
       "@slab/api/config": path.resolve(__dirname, "../api/src/config.ts"),
@@ -50,6 +74,7 @@ export default defineConfig(async () => ({
       "@slab/api/plugin": path.resolve(__dirname, "../api/src/plugin.ts"),
       "@slab/api/v1": path.resolve(__dirname, "../api/src/v1.d.ts"),
       "@slab/api": path.resolve(__dirname, "../api/src/index.ts"),
+      vscode: path.resolve(__dirname, "./node_modules/vscode"),
     },
   },
   test: {

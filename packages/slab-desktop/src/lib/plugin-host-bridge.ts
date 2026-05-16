@@ -34,6 +34,7 @@ export type PluginContributions = {
   commands: PluginCommandContribution[];
   settings: PluginSettingsContribution[];
   agentCapabilities: PluginAgentCapabilityContribution[];
+  languageServers: PluginLanguageServerContribution[];
 };
 
 export type PluginRouteContribution = {
@@ -83,6 +84,32 @@ export type PluginAgentCapabilityContribution = {
   exposeAsMcpTool: boolean;
 };
 
+export type PluginLanguageServerContribution = {
+  id: string;
+  languages: string[];
+  transport:
+    | {
+        type: "stdio";
+        command: string;
+        args?: string[];
+        env?: Record<string, string>;
+      }
+    | {
+        type: "webSocket";
+        url: string;
+      }
+    | {
+        /** npm package bundled inside the plugin directory. The runtime resolves
+         *  the command from the plugin's node_modules/.bin/ before falling back
+         *  to the system PATH, so no global installation is required. */
+        type: "nodePackage";
+        package: string;
+        command?: string;
+        args?: string[];
+        env?: Record<string, string>;
+      };
+};
+
 export type PluginPermissions = {
   network: {
     mode: "blocked" | "allowlist" | string;
@@ -90,6 +117,7 @@ export type PluginPermissions = {
   };
   ui: string[];
   agent: string[];
+  lsp: string[];
   slabApi: string[];
   files: {
     read: string[];

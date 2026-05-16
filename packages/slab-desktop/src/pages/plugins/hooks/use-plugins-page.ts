@@ -6,8 +6,7 @@ import { useTranslation } from '@slab/i18n';
 import { usePageHeader, usePageHeaderSearch } from '@/hooks/use-global-header-meta';
 import { isTauri } from '@/hooks/use-tauri';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
-import api, { getErrorMessage } from '@slab/api';
-import { SERVER_BASE_URL } from '@slab/api/config';
+import api, { getErrorMessage, postFormData } from '@slab/api';
 import {
   isPluginRunning,
   pluginSearchText,
@@ -17,51 +16,12 @@ import { RUNTIME_PLUGINS_QUERY_KEY } from './use-runtime-plugins';
 
 type ImportedPluginResponse = PluginRecord;
 
-async function parseErrorPayload(response: Response): Promise<unknown> {
-  try {
-    return await response.clone().json();
-  } catch {
-    try {
-      return await response.clone().text();
-    } catch {
-      return undefined;
-    }
-  }
-}
-
-async function importPluginPack(body: FormData): Promise<ImportedPluginResponse> {
-  const response = await fetch(`${SERVER_BASE_URL}/v1/plugins/import-pack`, {
-    body,
-    method: 'POST',
-  });
-
-  if (!response.ok) {
-    throw createImportError(response, await parseErrorPayload(response));
+async function importPluginPack(file: File, invalidFileMessage: string): Promise<ImportedPluginResponse> {
+  if (!isPluginPackFile(file)) {
+    throw new Error(invalidFileMessage);
   }
 
-  return (await response.json()) as ImportedPluginResponse;
-}
-
-function createImportError(response: Response, payload: unknown) {
-  if (payload instanceof Error) {
-    return payload;
-  }
-
-  if (typeof payload === 'string' && payload.trim().length > 0) {
-    return new Error(payload);
-  }
-
-  if (payload && typeof payload === 'object') {
-    const candidate = payload as { error?: unknown; message?: unknown };
-    if (typeof candidate.error === 'string' && candidate.error.trim().length > 0) {
-      return new Error(candidate.error);
-    }
-    if (typeof candidate.message === 'string' && candidate.message.trim().length > 0) {
-      return new Error(candidate.message);
-    }
-  }
-
-  return new Error(`Request failed with ${response.status}`);
+  return postFormData('/v1/plugins/import-pack', file);
 }
 
 export function usePluginsPage() {
@@ -257,9 +217,7 @@ export function usePluginsPage() {
 
     setImportPluginPending(true);
     try {
-      const imported = await importPluginPack(
-        buildImportPluginPackBody(importFile, t('pages.plugins.error.onlyPluginPacks')),
-      );
+      const imported = await importPluginPack(importFile, t('pages.plugins.error.onlyPluginPacks'));
 
       toast.success(t('pages.plugins.toast.imported', { name: imported.name }), {
         description: imported.name,
@@ -302,14 +260,4 @@ export type PluginsPageState = ReturnType<typeof usePluginsPage>;
 
 function isPluginPackFile(file: File) {
   return file.name.trim().toLowerCase().endsWith('.plugin.slab');
-}
-
-function buildImportPluginPackBody(file: File, invalidFileMessage: string) {
-  if (!isPluginPackFile(file)) {
-    throw new Error(invalidFileMessage);
-  }
-
-  const body = new FormData();
-  body.set('file', file, file.name);
-  return body;
 }

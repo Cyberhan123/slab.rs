@@ -9,21 +9,25 @@ import { usePageHeader } from "@/hooks/use-global-header-meta"
 import { isTauri } from "@/hooks/use-tauri"
 import {
   workspaceClose,
-  workspaceConsoleRun,
   workspaceGitCommit,
   workspaceGitDiscard,
+  workspaceGitDiff,
   workspaceGitStage,
   workspaceGitStatus,
   workspaceGitUnstage,
   workspaceOpen,
   workspaceReadDirectory,
   workspaceReadFile,
+  workspaceSearchFiles,
+  workspaceSearchText,
   workspaceState,
   workspaceWriteFile,
   WORKSPACE_STATE_QUERY_KEY,
-  type WorkspaceConsoleOutput,
   type WorkspaceFileContent,
+  type WorkspaceGitDiff,
   type WorkspaceGitStatus,
+  type WorkspaceGitStatusEntry,
+  type WorkspaceTextSearchLineMatch,
 } from "@/lib/workspace-bridge"
 import {
   emptyWorkspaceUiSnapshot,
@@ -33,17 +37,13 @@ import {
 } from "@/store/useWorkspaceUiStore"
 import { getErrorMessage } from "@slab/api"
 import {
+  directoryAncestors,
   entryToTreeNode,
   insertChildren,
   sortDirectoryPaths,
   upsertFileTab,
   type WorkspaceTreeNode,
 } from "../lib/workspace-page-utils"
-
-export type WorkspaceConsoleEntry = WorkspaceConsoleOutput & {
-  id: string
-  startedAt: number
-}
 
 export function useWorkspacePage() {
   const { t } = useTranslation()
@@ -53,20 +53,24 @@ export function useWorkspacePage() {
   const [selectedFile, setSelectedFile] = useState<WorkspaceFileContent | null>(null)
   const [editorContent, setEditorContent] = useState("")
   const [fileError, setFileError] = useState<string | null>(null)
+  const [textSearchQuery, setTextSearchQuery] = useState("")
+  const [selectedGitDiffEntry, setSelectedGitDiffEntry] = useState<WorkspaceGitStatusEntry | null>(null)
+  const [editorRevealTarget, setEditorRevealTarget] = useState<{
+    relativePath: string
+    lineNumber: number
+    matchStart: number
+    matchEnd: number
+  } | null>(null)
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set())
-  const [consoleCommand, setConsoleCommand] = useState("")
-  const [consoleEntries, setConsoleEntries] = useState<WorkspaceConsoleEntry[]>([])
-  const [consoleHistory, setConsoleHistory] = useState<string[]>([])
-  const [consoleHistoryIndex, setConsoleHistoryIndex] = useState<number | null>(null)
-  const [isConsoleRunning, setIsConsoleRunning] = useState(false)
   const [editorTheme, setEditorTheme] = useState(() =>
     typeof document !== "undefined" && document.documentElement.classList.contains("dark")
-      ? "github-dark"
-      : "github-light",
+      ? "vs-dark"
+      : "vs",
   )
   const treeHostRef = useRef<HTMLDivElement | null>(null)
   const restoredWorkspaceRootRef = useRef<string | null>(null)
   const [treeHeight, setTreeHeight] = useState(320)
+  const [treeMeasureKey, setTreeMeasureKey] = useState(0)
 
   usePageHeader({
     icon: FolderKanban,
@@ -94,6 +98,7 @@ export function useWorkspacePage() {
   const explorerPanel = workspaceUi.explorerPanel
   const markdownMode = workspaceUi.markdownMode
   const consoleOpen = workspaceUi.consoleOpen
+  const trimmedTextSearchQuery = textSearchQuery.trim()
   const initialOpenState = useMemo(
     () =>
       Object.fromEntries(openDirectoryPaths.map((relativePath) => [relativePath, true])),
@@ -107,6 +112,47 @@ export function useWorkspacePage() {
     queryKey: ["workspace-git-status", workspace?.rootPath],
     queryFn: workspaceGitStatus,
     enabled: isDesktopTauri && Boolean(workspace),
+    refetchInterval: 30_000,
+    retry: false,
+  })
+  const {
+    data: fileSearchResult,
+    isFetching: fileSearchFetching,
+  } = useQuery({
+    queryKey: ["workspace-file-search", workspace?.rootPath, trimmedTextSearchQuery],
+    queryFn: () => workspaceSearchFiles(trimmedTextSearchQuery),
+    enabled: isDesktopTauri && Boolean(workspace && trimmedTextSearchQuery),
+    retry: false,
+  })
+  const {
+    data: textSearchResult,
+    isFetching: textSearchFetching,
+  } = useQuery({
+    queryKey: ["workspace-text-search", workspace?.rootPath, trimmedTextSearchQuery],
+    queryFn: () => workspaceSearchText(trimmedTextSearchQuery),
+    enabled: isDesktopTauri && Boolean(workspace && trimmedTextSearchQuery),
+    retry: false,
+  })
+  const visibleGitDiffEntry = useMemo(
+    () =>
+      gitStatus?.entries.find(
+        (entry) =>
+          entry.path === selectedGitDiffEntry?.path &&
+          entry.staged === selectedGitDiffEntry.staged,
+      ) ?? null,
+    [gitStatus, selectedGitDiffEntry],
+  )
+  const {
+    data: selectedGitDiff,
+    isFetching: gitDiffFetching,
+  } = useQuery({
+    queryKey: ["workspace-git-diff", workspace?.rootPath, visibleGitDiffEntry?.path, visibleGitDiffEntry?.staged],
+    queryFn: () =>
+      workspaceGitDiff({
+        path: visibleGitDiffEntry?.path ?? "",
+        staged: visibleGitDiffEntry?.staged ?? false,
+      }),
+    enabled: Boolean(gitStatus?.available && gitStatus.isRepository && visibleGitDiffEntry),
     retry: false,
   })
   const saveFileMutation = useMutation({
@@ -138,7 +184,7 @@ export function useWorkspacePage() {
     }
 
     const updateEditorTheme = () => {
-      setEditorTheme(document.documentElement.classList.contains("dark") ? "github-dark" : "github-light")
+      setEditorTheme(document.documentElement.classList.contains("dark") ? "vs-dark" : "vs")
     }
 
     updateEditorTheme()
@@ -160,7 +206,7 @@ export function useWorkspacePage() {
     }
 
     const updateHeight = () => {
-      setTreeHeight(Math.max(240, Math.floor(element.getBoundingClientRect().height)))
+      setTreeHeight(Math.max(320, Math.floor(element.getBoundingClientRect().height)))
     }
 
     updateHeight()
@@ -174,7 +220,27 @@ export function useWorkspacePage() {
     return () => {
       observer.disconnect()
     }
-  }, [workspace?.rootPath])
+  }, [explorerPanel, workspace?.rootPath])
+
+  useEffect(() => {
+    if (explorerPanel !== "files") {
+      return
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const element = treeHostRef.current
+      if (!element) {
+        return
+      }
+
+      setTreeHeight(Math.max(320, Math.floor(element.getBoundingClientRect().height)))
+      setTreeMeasureKey((current) => current + 1)
+    })
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+    }
+  }, [explorerPanel, workspace?.rootPath])
 
   const loadDirectory = useCallback(async (relativePath = "") => {
     setLoadingPaths((current) => new Set(current).add(relativePath))
@@ -193,6 +259,46 @@ export function useWorkspacePage() {
       })
     }
   }, [])
+
+  const revealFileInTree = useCallback(
+    async (relativePath: string) => {
+      if (!workspace) {
+        return
+      }
+
+      const paths = directoryAncestors(relativePath)
+      await paths.reduce<Promise<void>>(async (chain, path) => {
+        await chain
+        await loadDirectory(path)
+      }, Promise.resolve())
+      if (paths.length > 0) {
+        patchWorkspaceState(workspace.rootPath, {
+          openDirectoryPaths: sortDirectoryPaths([...openDirectoryPaths, ...paths]),
+        })
+      }
+    },
+    [loadDirectory, openDirectoryPaths, patchWorkspaceState, workspace],
+  )
+
+  const revealDirectoryInTree = useCallback(
+    async (relativePath: string) => {
+      if (!workspace) {
+        return
+      }
+
+      const paths = directoryAncestors(relativePath, true)
+      await paths.reduce<Promise<void>>(async (chain, path) => {
+        await chain
+        await loadDirectory(path)
+      }, Promise.resolve())
+      if (paths.length > 0) {
+        patchWorkspaceState(workspace.rootPath, {
+          openDirectoryPaths: sortDirectoryPaths([...openDirectoryPaths, ...paths]),
+        })
+      }
+    },
+    [loadDirectory, openDirectoryPaths, patchWorkspaceState, workspace],
+  )
 
   const openWorkspacePath = useCallback(
     async (rootPath: string) => {
@@ -237,6 +343,7 @@ export function useWorkspacePage() {
       setFileError(null)
       try {
         const file = await workspaceReadFile(relativePath)
+        setSelectedGitDiffEntry(null)
         setSelectedFile(file)
         setEditorContent(file.content)
         return file
@@ -255,13 +362,14 @@ export function useWorkspacePage() {
 
   const handleOpenFile = useCallback(
     async (relativePath: string) => {
+      setEditorRevealTarget(null)
       if (selectedFileDirty && !window.confirm(t("pages.workspace.confirm.discardUnsaved"))) {
-        return
+        return null
       }
 
       const file = await openFileContent(relativePath)
       if (!file || !workspace) {
-        return
+        return file
       }
 
       patchWorkspaceState(workspace.rootPath, {
@@ -271,8 +379,35 @@ export function useWorkspacePage() {
           name: file.name,
         }),
       })
+      await revealFileInTree(file.relativePath)
+      return file
     },
-    [openFileContent, openFileTabs, patchWorkspaceState, selectedFileDirty, t, workspace],
+    [
+      openFileContent,
+      openFileTabs,
+      patchWorkspaceState,
+      revealFileInTree,
+      selectedFileDirty,
+      t,
+      workspace,
+    ],
+  )
+
+  const handleOpenTextSearchMatch = useCallback(
+    async (relativePath: string, match: WorkspaceTextSearchLineMatch) => {
+      const file = await handleOpenFile(relativePath)
+      if (!file) {
+        return
+      }
+
+      setEditorRevealTarget({
+        relativePath,
+        lineNumber: match.lineNumber,
+        matchStart: match.matchStart,
+        matchEnd: match.matchEnd,
+      })
+    },
+    [handleOpenFile],
   )
 
   useEffect(() => {
@@ -281,10 +416,9 @@ export function useWorkspacePage() {
       setSelectedFile(null)
       setEditorContent("")
       setFileError(null)
-      setConsoleEntries([])
-      setConsoleCommand("")
-      setConsoleHistory([])
-      setConsoleHistoryIndex(null)
+      setTextSearchQuery("")
+      setSelectedGitDiffEntry(null)
+      setEditorRevealTarget(null)
       restoredWorkspaceRootRef.current = null
       return
     }
@@ -298,6 +432,9 @@ export function useWorkspacePage() {
     setSelectedFile(null)
     setEditorContent("")
     setFileError(null)
+    setTextSearchQuery("")
+    setSelectedGitDiffEntry(null)
+    setEditorRevealTarget(null)
 
     const savedOpenDirectoryPaths = sortDirectoryPaths(openDirectoryPaths)
     const savedActiveFilePath = activeFilePath
@@ -394,6 +531,21 @@ export function useWorkspacePage() {
     await refetchGitStatus()
   }, [refetchGitStatus])
 
+  const handleSelectGitDiff = useCallback(
+    (entry: WorkspaceGitStatusEntry) => {
+      if (selectedFileDirty && !window.confirm(t("pages.workspace.confirm.discardUnsaved"))) {
+        return
+      }
+
+      setSelectedFile(null)
+      setEditorContent("")
+      setFileError(null)
+      setEditorRevealTarget(null)
+      setSelectedGitDiffEntry(entry)
+    },
+    [selectedFileDirty, t],
+  )
+
   const handleSaveFile = useCallback(async () => {
     if (!selectedFile) {
       return
@@ -474,6 +626,9 @@ export function useWorkspacePage() {
       try {
         const result = await gitDiscardMutation.mutateAsync(path)
         applyGitStatus(result.status)
+        if (selectedGitDiffEntry?.path === path) {
+          setSelectedGitDiffEntry(null)
+        }
         if (selectedFile?.relativePath === path) {
           await openFileContent(path)
         }
@@ -484,7 +639,15 @@ export function useWorkspacePage() {
         })
       }
     },
-    [applyGitStatus, gitDiscardMutation, loadDirectory, openFileContent, selectedFile?.relativePath, t],
+    [
+      applyGitStatus,
+      gitDiscardMutation,
+      loadDirectory,
+      openFileContent,
+      selectedFile?.relativePath,
+      selectedGitDiffEntry?.path,
+      t,
+    ],
   )
 
   const handleGitCommit = useCallback(
@@ -500,74 +663,6 @@ export function useWorkspacePage() {
       }
     },
     [applyGitStatus, gitCommitMutation, t],
-  )
-
-  const handleRunConsoleCommand = useCallback(async () => {
-    const command = consoleCommand.trim()
-    if (!command || isConsoleRunning) {
-      return
-    }
-
-    setConsoleCommand("")
-    setConsoleHistory((current) => [command, ...current.filter((item) => item !== command)].slice(0, 20))
-    setConsoleHistoryIndex(null)
-    setIsConsoleRunning(true)
-    const startedAt = Date.now()
-    try {
-      const output = await workspaceConsoleRun(command)
-      setConsoleEntries((current) =>
-        [
-          ...current,
-          {
-            ...output,
-            id: `${startedAt}-${current.length}`,
-            startedAt,
-          },
-        ].slice(-50),
-      )
-      await refetchGitStatus()
-    } catch (error) {
-      toast.error(t("pages.workspace.toast.consoleFailed"), {
-        description: getErrorMessage(error),
-      })
-    } finally {
-      setIsConsoleRunning(false)
-    }
-  }, [consoleCommand, isConsoleRunning, refetchGitStatus, t])
-
-  const handleClearConsole = useCallback(() => {
-    setConsoleEntries([])
-  }, [])
-
-  const handleConsoleHistory = useCallback(
-    (direction: "previous" | "next") => {
-      if (consoleHistory.length === 0) {
-        return
-      }
-
-      if (direction === "previous") {
-        const nextIndex =
-          consoleHistoryIndex === null ? 0 : Math.min(consoleHistoryIndex + 1, consoleHistory.length - 1)
-        setConsoleHistoryIndex(nextIndex)
-        setConsoleCommand(consoleHistory[nextIndex] ?? "")
-        return
-      }
-
-      if (consoleHistoryIndex === null) {
-        return
-      }
-
-      const nextIndex = consoleHistoryIndex - 1
-      if (nextIndex < 0) {
-        setConsoleHistoryIndex(null)
-        setConsoleCommand("")
-        return
-      }
-
-      setConsoleHistoryIndex(nextIndex)
-      setConsoleCommand(consoleHistory[nextIndex] ?? "")
-    },
-    [consoleHistory, consoleHistoryIndex],
   )
 
   const handleCloseFileTab = useCallback(
@@ -644,36 +739,39 @@ export function useWorkspacePage() {
 
   return {
     activeFilePath,
-    consoleCommand,
-    consoleEntries,
     consoleOpen,
     editorContent,
+    editorRevealTarget:
+      selectedFile?.relativePath === editorRevealTarget?.relativePath ? editorRevealTarget : null,
     editorTheme,
     explorerPanel,
     fileError,
+    fileSearchFetching,
+    fileSearchResults: fileSearchResult?.entries ?? [],
+    fileSearchTruncated: fileSearchResult?.truncated ?? false,
     gitStatus,
     gitStatusFetching,
     gitOperationPending,
-    handleClearConsole,
+    gitDiffFetching,
     handleCloseFileTab,
     handleCloseWorkspace,
-    handleConsoleHistory,
     handleGitCommit,
     handleGitDiscard,
     handleGitStage,
     handleGitUnstage,
     handleOpenFile,
     handleOpenFolder,
+    handleOpenTextSearchMatch,
     handleRefreshGitStatus,
-    handleRunConsoleCommand,
+    handleRevealDirectoryInTree: revealDirectoryInTree,
     handleSaveFile,
     handleSelectExplorerPanel,
     handleSelectFileTab,
+    handleSelectGitDiff,
     handleSetMarkdownMode,
     handleTreeToggle,
     handleToggleConsole,
     initialOpenState,
-    isConsoleRunning,
     isDesktopTauri,
     loadDirectory,
     loadingPaths,
@@ -681,14 +779,27 @@ export function useWorkspacePage() {
     openFileTabs,
     openWorkspacePath,
     recentWorkspaces,
+    selectedGitDiff: visibleGitDiffEntry
+      ? selectedGitDiff ?? ({
+          path: visibleGitDiffEntry.path,
+          staged: visibleGitDiffEntry.staged,
+          diff: "",
+        } satisfies WorkspaceGitDiff)
+      : null,
+    selectedGitDiffEntry: visibleGitDiffEntry,
     selectedFile,
     selectedFileDirty,
-    setConsoleCommand,
     setEditorContent,
     savingFile,
+    setTextSearchQuery,
+    textSearchFetching,
+    textSearchQuery,
+    textSearchResults: textSearchResult?.matches ?? [],
+    textSearchTruncated: textSearchResult?.truncated ?? false,
     treeData,
     treeHeight,
     treeHostRef,
+    treeMeasureKey,
     workspace,
     workspaceUiHasHydrated,
   }

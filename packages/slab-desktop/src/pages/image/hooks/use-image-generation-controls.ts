@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useModelConfigDocumentQuery } from '@/lib/model-config';
 import { useImageUiStore } from '@/store/useImageUiStore';
-import { DIMENSION_PRESETS } from '../const';
+import { DEFAULT_GENERATION_SIZE, DIMENSION_PRESETS } from '../const';
 import {
   areImageGenerationControlsEqual,
   buildImageGenerationControlsFromModelConfig,
@@ -101,8 +101,8 @@ export function useImageGenerationControls(selectedModelId: string) {
     setControls((current) => ({ ...current, ...patch }));
   }, []);
 
-  const parsedWidth = Number.parseInt(controls.widthStr, 10) || 512;
-  const parsedHeight = Number.parseInt(controls.heightStr, 10) || 512;
+  const parsedWidth = Number.parseInt(controls.widthStr, 10) || DEFAULT_GENERATION_SIZE;
+  const parsedHeight = Number.parseInt(controls.heightStr, 10) || DEFAULT_GENERATION_SIZE;
 
   const activeDimensionPreset = useMemo(
     () =>

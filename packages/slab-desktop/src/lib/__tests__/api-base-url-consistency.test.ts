@@ -47,6 +47,7 @@ describe('desktop API base URL consistency', () => {
     expect(desktopPackageJson.scripts?.api).toBeUndefined();
     expect(apiPackageJson.scripts?.api).toBeUndefined();
     expect(tauriConfig.app?.security?.csp?.['connect-src']).toContain(DEFAULT_API_BASE_URL);
+    expect(tauriConfig.app?.security?.csp?.['connect-src']).toContain('http://ipc.localhost');
     expect(tauriConfig.app?.security?.csp?.['script-src']).toContain(DEFAULT_API_BASE_URL);
   });
 });

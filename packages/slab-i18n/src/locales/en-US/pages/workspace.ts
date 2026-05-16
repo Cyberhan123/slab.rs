@@ -24,6 +24,7 @@ export const workspace = {
   explorer: {
     title: 'Explorer',
     files: 'Files',
+    search: 'Search',
     git: 'Git',
   },
   editor: {
@@ -33,6 +34,32 @@ export const workspace = {
     preview: 'Preview',
     source: 'Source',
     save: 'Save',
+    breadcrumbs: 'File breadcrumbs',
+  },
+  search: {
+    placeholder: 'Search files or text',
+    clear: 'Clear search',
+    empty: 'No matching files or text',
+    truncated: 'Showing first results',
+  },
+  textSearch: {
+    placeholder: 'Search text',
+    clear: 'Clear search',
+    empty: 'No text matches',
+    results: 'Text matches',
+    truncated: 'Showing first matches',
+  },
+  commandPalette: {
+    title: 'Workspace palette',
+    description: 'Search workspace actions and files.',
+    trigger: 'Open workspace palette',
+    placeholder: 'Search actions or files',
+    empty: 'No matching actions or files',
+    actions: 'Actions',
+    files: 'Files',
+    tabs: 'Open tabs',
+    recent: 'Recent workspaces',
+    revealCurrentFile: 'Reveal current file',
   },
   git: {
     detached: 'Detached HEAD',
@@ -47,6 +74,8 @@ export const workspace = {
     discard: 'Discard',
     commit: 'Commit',
     commitPlaceholder: 'Commit message',
+    diff: 'Diff',
+    noDiff: 'No diff to show',
     status: {
       added: 'Added',
       modified: 'Modified',
@@ -68,8 +97,10 @@ export const workspace = {
   },
   console: {
     title: 'Console',
+    terminal: 'Terminal',
     show: 'Console',
     hide: 'Hide console',
+    newTerminal: 'New terminal',
     clear: 'Clear console',
     empty: 'Run a workspace command to see output here.',
     placeholder: 'Enter a command',

@@ -2,15 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
-import api, { ApiError, getErrorMessage } from '@slab/api';
+import api, { getErrorMessage, postFormData } from '@slab/api';
 import type { components } from '@slab/api/v1';
-import { SERVER_BASE_URL } from '@slab/api/config';
 import {
   modelSupportsCapability,
   toCatalogModelList,
   type CatalogModelStatus,
   type ModelCapability,
 } from '@slab/api/models';
+import { isFailedTaskStatus } from '@/pages/task/utils';
 import {
   extractTaskId,
   getModelDownloadTask,
@@ -57,29 +57,12 @@ export type ModelItem = {
 
 type ImportedModelResponse = components['schemas']['UnifiedModelResponse'];
 
-async function parseErrorPayload(response: Response): Promise<unknown> {
-  try {
-    return await response.clone().json();
-  } catch {
-    try {
-      return await response.clone().text();
-    } catch {
-      return undefined;
-    }
-  }
-}
-
-async function importModelPack(body: FormData): Promise<ImportedModelResponse> {
-  const response = await fetch(`${SERVER_BASE_URL}/v1/models/import-pack`, {
-    body,
-    method: 'POST',
-  });
-
-  if (!response.ok) {
-    throw ApiError.fromResponse(response, await parseErrorPayload(response));
+async function importModelPack(file: File, invalidFileMessage: string): Promise<ImportedModelResponse> {
+  if (!isModelPackFile(file)) {
+    throw new Error(invalidFileMessage);
   }
 
-  return (await response.json()) as ImportedModelResponse;
+  return postFormData('/v1/models/import-pack', file);
 }
 
 export function useHubModelCatalog() {
@@ -184,9 +167,7 @@ export function useHubModelCatalog() {
 
     setCreateModelPending(true);
     try {
-      const created = await importModelPack(
-        buildImportModelPackBody(createFile, t('pages.hub.error.onlySlabPacks')),
-      );
+      const created = await importModelPack(createFile, t('pages.hub.error.onlySlabPacks'));
 
       toast.success(t('pages.hub.toast.imported'), {
         description:
@@ -223,7 +204,7 @@ export function useHubModelCatalog() {
         return;
       }
 
-      if (task.status === 'failed' || task.status === 'cancelled' || task.status === 'interrupted') {
+      if (isFailedTaskStatus(task.status)) {
         throw new Error(
           task.error_msg ??
             t('pages.hub.error.taskEndedWithStatus', {
@@ -415,16 +396,6 @@ function inferModelCategory(model: ModelItem): ModelCategory {
 
 function isModelPackFile(file: File): boolean {
   return file.name.trim().toLowerCase().endsWith('.slab');
-}
-
-function buildImportModelPackBody(file: File, invalidFileMessage: string) {
-  if (!isModelPackFile(file)) {
-    throw new Error(invalidFileMessage);
-  }
-
-  const body = new FormData();
-  body.set('file', file, file.name);
-  return body;
 }
 
 function toModelItem(
