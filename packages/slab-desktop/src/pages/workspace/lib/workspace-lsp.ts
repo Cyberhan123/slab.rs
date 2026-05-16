@@ -3,8 +3,14 @@ import {
   initialize as initializeMonacoWrapper,
   isInitialized as workspaceMonacoIsInitialized,
   registerEditorOpenHandler,
+  registerServices,
 } from "@codingame/monaco-editor-wrapper"
 import "@codingame/monaco-editor-wrapper/features/extensionHostWorker"
+import "@codingame/monaco-editor-wrapper/features/search"
+import getLifecycleServiceOverride from "@codingame/monaco-vscode-lifecycle-service-override"
+import getNotificationsServiceOverride from "@codingame/monaco-vscode-notifications-service-override"
+import getOutputServiceOverride from "@codingame/monaco-vscode-output-service-override"
+import getSearchServiceOverride from "@codingame/monaco-vscode-search-service-override"
 import { whenReady as emmetExtensionReady } from "@codingame/monaco-vscode-emmet-default-extension"
 import { whenReady as dockerExtensionReady } from "@codingame/monaco-vscode-docker-default-extension"
 import { whenReady as dotenvExtensionReady } from "@codingame/monaco-vscode-dotenv-default-extension"
@@ -90,6 +96,7 @@ let currentOpenFile: WorkspaceLspOpenFile | null = null
 let currentWorkspaceFileService: WorkspaceFileService = { root: null }
 let workspaceFileSystemOverlayRegistered = false
 let workspaceEditorOpenHandlerRegistered = false
+let workspaceVscodeServiceOverridesRegistered = false
 
 export function workspaceLspModelUri(
   monaco: typeof Monaco,
@@ -114,9 +121,10 @@ export function workspaceLspServicesReady() {
 export function ensureWorkspaceLspServices() {
   monacoVscodeApiReady ??= (async () => {
     if (!workspaceMonacoIsInitialized()) {
+      registerWorkspaceVscodeServiceOverrides()
       await initializeMonacoWrapper(undefined, {
         registerAdditionalExtensions: true,
-        waitForDefaultExtensions: false,
+        waitForDefaultExtensions: true,
       })
       // Load additional extensions not included in the default set
       await Promise.allSettled([
@@ -159,6 +167,20 @@ export function ensureWorkspaceLspServices() {
   })
 
   return monacoVscodeApiReady
+}
+
+function registerWorkspaceVscodeServiceOverrides() {
+  if (workspaceVscodeServiceOverridesRegistered) {
+    return
+  }
+
+  registerServices({
+    ...getLifecycleServiceOverride(),
+    ...getNotificationsServiceOverride(),
+    ...getOutputServiceOverride(),
+    ...getSearchServiceOverride(),
+  })
+  workspaceVscodeServiceOverridesRegistered = true
 }
 
 export async function startWorkspaceLspSession({
