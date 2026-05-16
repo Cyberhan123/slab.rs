@@ -9,15 +9,24 @@ type WorkspaceCodeEditorProps = {
   language: string
   memoryModel?: boolean
   onChange: (value: string) => void
+  onCursorChange?: (cursor: WorkspaceEditorCursor | null) => void
   onMount?: (
     editor: Monaco.editor.IStandaloneCodeEditor,
     monaco: typeof Monaco,
   ) => void
+  onProblemsChange?: (problems: WorkspaceEditorProblem[]) => void
   options: Monaco.editor.IStandaloneEditorConstructionOptions
   revealTarget?: WorkspaceEditorRevealTarget | null
   theme: string
   value: string
 }
+
+export type WorkspaceEditorCursor = {
+  column: number
+  lineNumber: number
+}
+
+export type WorkspaceEditorProblem = Monaco.editor.IMarker
 
 export type WorkspaceEditorRevealTarget = {
   lineNumber: number
@@ -50,7 +59,9 @@ export function WorkspaceCodeEditor({
   language,
   memoryModel = false,
   onChange,
+  onCursorChange,
   onMount,
+  onProblemsChange,
   options,
   revealTarget,
   theme,
@@ -62,7 +73,9 @@ export function WorkspaceCodeEditor({
   const modelRef = useRef<Monaco.editor.ITextModel | null>(null)
   const modelReferenceRef = useRef<{ dispose(): void } | null>(null)
   const onChangeRef = useRef(onChange)
+  const onCursorChangeRef = useRef(onCursorChange)
   const onMountRef = useRef(onMount)
+  const onProblemsChangeRef = useRef(onProblemsChange)
   const optionsRef = useRef(options)
   const revealTargetRef = useRef(revealTarget)
   const valueRef = useRef(value)
@@ -73,8 +86,16 @@ export function WorkspaceCodeEditor({
   }, [onChange])
 
   useEffect(() => {
+    onCursorChangeRef.current = onCursorChange
+  }, [onCursorChange])
+
+  useEffect(() => {
     onMountRef.current = onMount
   }, [onMount])
+
+  useEffect(() => {
+    onProblemsChangeRef.current = onProblemsChange
+  }, [onProblemsChange])
 
   useEffect(() => {
     optionsRef.current = options
@@ -145,13 +166,38 @@ export function WorkspaceCodeEditor({
 
       onChangeRef.current(editor.getValue())
     })
+    const cursorDisposable = editor.onDidChangeCursorPosition(({ position }) => {
+      onCursorChangeRef.current?.(position)
+    })
 
     editorRef.current = editor
 
     return () => {
       contentDisposable.dispose()
+      cursorDisposable.dispose()
       editor.dispose()
       editorRef.current = null
+      onCursorChangeRef.current?.(null)
+      onProblemsChangeRef.current?.([])
+    }
+  }, [servicesReady])
+
+  useEffect(() => {
+    if (!servicesReady) {
+      return
+    }
+
+    const disposable = Monaco.editor.onDidChangeMarkers((resources) => {
+      const model = modelRef.current
+      if (!model || !resources.some((resource) => resource.toString() === model.uri.toString())) {
+        return
+      }
+
+      onProblemsChangeRef.current?.(Monaco.editor.getModelMarkers({ resource: model.uri }))
+    })
+
+    return () => {
+      disposable.dispose()
     }
   }, [servicesReady])
 
@@ -185,6 +231,8 @@ export function WorkspaceCodeEditor({
         editor.setModel(model)
         modelRef.current = model
         onMountRef.current?.(editor, Monaco)
+        onCursorChangeRef.current?.(editor.getPosition())
+        onProblemsChangeRef.current?.(Monaco.editor.getModelMarkers({ resource: model.uri }))
         if (revealTargetRef.current) {
           revealEditorTarget(editor, model, revealTargetRef.current)
         }
@@ -215,6 +263,8 @@ export function WorkspaceCodeEditor({
       modelRef.current = model
       modelReferenceRef.current = nextModelReference
       onMountRef.current?.(editor, Monaco)
+      onCursorChangeRef.current?.(editor.getPosition())
+      onProblemsChangeRef.current?.(Monaco.editor.getModelMarkers({ resource: model.uri }))
       if (revealTargetRef.current) {
         revealEditorTarget(editor, model, revealTargetRef.current)
       }

@@ -15,11 +15,15 @@ import {
   FolderKanban,
   FolderOpen,
   GitBranch,
+  Lightbulb,
+  ListTree,
   Loader2,
   Save,
   Search,
+  SearchCode,
   Settings2,
   Terminal,
+  WandSparkles,
   X,
 } from "lucide-react"
 
@@ -30,9 +34,10 @@ import { workspaceLspModelPath } from "../lib/workspace-lsp"
 import { languageForFile, lspLanguageForFile, SLAB_DIR_NAME } from "../lib/workspace-page-utils"
 import { RecentWorkspaceList } from "./recent-workspace-list"
 import { WorkspaceConsolePanel } from "./workspace-console-panel"
-import { WorkspaceCodeEditor } from "./workspace-code-editor"
+import { WorkspaceCodeEditor, type WorkspaceEditorCursor, type WorkspaceEditorProblem } from "./workspace-code-editor"
 import { WorkspaceCommandPalette } from "./workspace-command-palette"
 import { WorkspaceDiffEditor } from "./workspace-diff-editor"
+import { WorkspaceEditorStatusBar } from "./workspace-editor-status-bar"
 import { WorkspaceGitPanel } from "./workspace-git-panel"
 import { WorkspaceMarkdownPreview } from "./workspace-markdown-preview"
 import { WorkspaceSearchPanel } from "./workspace-search-panel"
@@ -106,6 +111,9 @@ export function WorkspaceWorkbench({
   const isMarkdownFile = selectedFileLanguage === "markdown"
   const terminalThemeMode = editorTheme === "vs-dark" ? "dark" : "light"
   const selectedFileBreadcrumbs = selectedFile?.relativePath.split("/").filter(Boolean) ?? []
+  const activeEditorRef = useRef<import("monaco-editor").editor.IStandaloneCodeEditor | null>(null)
+  const [editorCursor, setEditorCursor] = useState<WorkspaceEditorCursor | null>(null)
+  const [editorProblems, setEditorProblems] = useState<WorkspaceEditorProblem[]>([])
   const editorsWithEscapeHandlerRef = useRef(new WeakSet<import("monaco-editor").editor.IStandaloneCodeEditor>())
   const { handleEditorMount, servicesPending, servicesReady } = useWorkspaceLsp({
     language: selectedFileLspLanguage,
@@ -151,13 +159,50 @@ export function WorkspaceWorkbench({
     }
   }, [workspace])
 
+  useEffect(() => {
+    setEditorCursor(null)
+    setEditorProblems([])
+  }, [selectedFile?.relativePath])
+
+  const runEditorAction = useCallback(async (actionId: string) => {
+    const editor = activeEditorRef.current
+    if (!editor) {
+      return
+    }
+
+    await editor.getAction(actionId)?.run()
+    editor.focus()
+  }, [])
+
+  const revealEditorProblem = useCallback((problem: WorkspaceEditorProblem) => {
+    const editor = activeEditorRef.current
+    if (!editor) {
+      return
+    }
+
+    editor.setSelection({
+      endColumn: problem.endColumn,
+      endLineNumber: problem.endLineNumber,
+      startColumn: problem.startColumn,
+      startLineNumber: problem.startLineNumber,
+    })
+    editor.revealLineInCenter(problem.startLineNumber)
+    editor.focus()
+  }, [])
+
   const handleWorkspaceEditorMount = useCallback(
     (editor: import("monaco-editor").editor.IStandaloneCodeEditor, monaco: typeof import("monaco-editor")) => {
       handleEditorMount(editor, monaco)
+      activeEditorRef.current = editor
       if (editorsWithEscapeHandlerRef.current.has(editor)) {
         return
       }
       editorsWithEscapeHandlerRef.current.add(editor)
+      editor.onDidDispose(() => {
+        if (activeEditorRef.current === editor) {
+          activeEditorRef.current = null
+        }
+      })
       editor.onKeyDown((event) => {
         if (event.keyCode !== monaco.KeyCode.Escape) {
           return
@@ -218,6 +263,7 @@ export function WorkspaceWorkbench({
       onSaveFile={handleSaveFile}
       onSetMarkdownMode={handleSetMarkdownMode}
       onOpenWorkspacePath={openWorkspacePath}
+      onEditorAction={runEditorAction}
     />
   )
 
@@ -517,6 +563,75 @@ export function WorkspaceWorkbench({
                       </button>
                     </div>
                   ) : null}
+                  {!isMarkdownFile || markdownMode === "source" ? (
+                    <div className="hidden items-center gap-1 sm:flex">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="quiet"
+                            size="icon-sm"
+                            aria-label={t("pages.workspace.editor.find")}
+                            onClick={() => {
+                              void runEditorAction("actions.find")
+                            }}
+                          >
+                            <SearchCode className="size-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("pages.workspace.editor.find")}</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="quiet"
+                            size="icon-sm"
+                            aria-label={t("pages.workspace.editor.goToSymbol")}
+                            onClick={() => {
+                              void runEditorAction("editor.action.quickOutline")
+                            }}
+                          >
+                            <ListTree className="size-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("pages.workspace.editor.goToSymbol")}</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="quiet"
+                            size="icon-sm"
+                            aria-label={t("pages.workspace.editor.quickFix")}
+                            onClick={() => {
+                              void runEditorAction("editor.action.quickFix")
+                            }}
+                          >
+                            <Lightbulb className="size-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("pages.workspace.editor.quickFix")}</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="quiet"
+                            size="icon-sm"
+                            aria-label={t("pages.workspace.editor.formatDocument")}
+                            disabled={savingFile}
+                            onClick={() => {
+                              void runEditorAction("editor.action.formatDocument")
+                            }}
+                          >
+                            <WandSparkles className="size-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("pages.workspace.editor.formatDocument")}</TooltipContent>
+                      </Tooltip>
+                    </div>
+                  ) : null}
                   <Popover>
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -638,34 +753,45 @@ export function WorkspaceWorkbench({
                   <WorkspaceMarkdownPreview content={editorContent} />
                 </div>
               ) : (
-                <div className="min-h-0 flex-1">
-                  <WorkspaceCodeEditor
-                    filePath={workspaceLspModelPath(workspace.rootPath, selectedFile.relativePath)}
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <div className="min-h-0 flex-1">
+                    <WorkspaceCodeEditor
+                      filePath={workspaceLspModelPath(workspace.rootPath, selectedFile.relativePath)}
+                      language={selectedFileLanguage}
+                      onChange={(value) => setEditorContent(value ?? "")}
+                      onCursorChange={setEditorCursor}
+                      onMount={handleWorkspaceEditorMount}
+                      onProblemsChange={setEditorProblems}
+                      options={{
+                        readOnly: savingFile,
+                        minimap: { enabled: editorSettings.minimapEnabled },
+                        scrollBeyondLastLine: false,
+                        wordWrap: editorSettings.wordWrap,
+                        fontSize: editorSettings.fontSize,
+                        tabSize: editorSettings.tabSize,
+                        codeLens: true,
+                        inlayHints: { enabled: "on" },
+                        parameterHints: { enabled: true },
+                        quickSuggestions: true,
+                        renameOnType: true,
+                        suggestOnTriggerCharacters: true,
+                        bracketPairColorization: { enabled: true },
+                        stickyScroll: { enabled: true },
+                        guides: { bracketPairs: true, indentation: true },
+                        foldingHighlight: true,
+                        cursorSmoothCaretAnimation: "on",
+                      }}
+                      revealTarget={editorRevealTarget}
+                      theme={editorTheme}
+                      value={editorContent}
+                    />
+                  </div>
+                  <WorkspaceEditorStatusBar
+                    cursor={editorCursor}
                     language={selectedFileLanguage}
-                    onChange={(value) => setEditorContent(value ?? "")}
-                    onMount={handleWorkspaceEditorMount}
-                    options={{
-                      readOnly: savingFile,
-                      minimap: { enabled: editorSettings.minimapEnabled },
-                      scrollBeyondLastLine: false,
-                      wordWrap: editorSettings.wordWrap,
-                      fontSize: editorSettings.fontSize,
-                      tabSize: editorSettings.tabSize,
-                      codeLens: true,
-                      inlayHints: { enabled: "on" },
-                      parameterHints: { enabled: true },
-                      quickSuggestions: true,
-                      renameOnType: true,
-                      suggestOnTriggerCharacters: true,
-                      bracketPairColorization: { enabled: true },
-                      stickyScroll: { enabled: true },
-                      guides: { bracketPairs: true, indentation: true },
-                      foldingHighlight: true,
-                      cursorSmoothCaretAnimation: "on",
-                    }}
-                    revealTarget={editorRevealTarget}
-                    theme={editorTheme}
-                    value={editorContent}
+                    problems={editorProblems}
+                    tabSize={editorSettings.tabSize}
+                    onRevealProblem={revealEditorProblem}
                   />
                 </div>
               )
