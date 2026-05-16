@@ -35,6 +35,13 @@ export const workspace = {
     source: 'Source',
     save: 'Save',
     breadcrumbs: 'File breadcrumbs',
+    settings: 'Editor settings',
+    settingsFontSize: 'Font size',
+    settingsTabSize: 'Tab size',
+    settingsWordWrap: 'Word wrap',
+    settingsWordWrapOn: 'On',
+    settingsWordWrapOff: 'Off',
+    settingsMinimap: 'Minimap',
   },
   search: {
     placeholder: 'Search files or text',
