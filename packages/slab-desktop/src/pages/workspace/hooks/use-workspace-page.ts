@@ -32,6 +32,7 @@ import {
 import {
   emptyWorkspaceUiSnapshot,
   useWorkspaceUiStore,
+  type WorkspaceEditorSettings,
   type WorkspaceExplorerPanel,
   type WorkspaceMarkdownMode,
 } from "@/store/useWorkspaceUiStore"
@@ -98,6 +99,7 @@ export function useWorkspacePage() {
   const explorerPanel = workspaceUi.explorerPanel
   const markdownMode = workspaceUi.markdownMode
   const consoleOpen = workspaceUi.consoleOpen
+  const editorSettings = workspaceUi.editorSettings
   const trimmedTextSearchQuery = textSearchQuery.trim()
   const initialOpenState = useMemo(
     () =>
@@ -527,6 +529,18 @@ export function useWorkspacePage() {
     })
   }, [consoleOpen, patchWorkspaceState, workspace])
 
+  const handleUpdateEditorSettings = useCallback(
+    (patch: Partial<WorkspaceEditorSettings>) => {
+      if (!workspace) {
+        return
+      }
+      patchWorkspaceState(workspace.rootPath, {
+        editorSettings: { ...editorSettings, ...patch },
+      })
+    },
+    [editorSettings, patchWorkspaceState, workspace],
+  )
+
   const handleRefreshGitStatus = useCallback(async () => {
     await refetchGitStatus()
   }, [refetchGitStatus])
@@ -743,6 +757,7 @@ export function useWorkspacePage() {
     editorContent,
     editorRevealTarget:
       selectedFile?.relativePath === editorRevealTarget?.relativePath ? editorRevealTarget : null,
+    editorSettings,
     editorTheme,
     explorerPanel,
     fileError,
@@ -771,6 +786,7 @@ export function useWorkspacePage() {
     handleSetMarkdownMode,
     handleTreeToggle,
     handleToggleConsole,
+    handleUpdateEditorSettings,
     initialOpenState,
     isDesktopTauri,
     loadDirectory,

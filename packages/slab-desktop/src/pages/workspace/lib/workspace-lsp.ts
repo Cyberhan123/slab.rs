@@ -5,6 +5,9 @@ import {
   registerEditorOpenHandler,
 } from "@codingame/monaco-editor-wrapper"
 import "@codingame/monaco-editor-wrapper/features/extensionHostWorker"
+import { whenReady as emmetExtensionReady } from "@codingame/monaco-vscode-emmet-default-extension"
+import { whenReady as dockerExtensionReady } from "@codingame/monaco-vscode-docker-default-extension"
+import { whenReady as dotenvExtensionReady } from "@codingame/monaco-vscode-dotenv-default-extension"
 import type { MonacoLanguageClient } from "monaco-languageclient"
 import { SERVER_BASE_URL } from "@slab/api/config"
 import {
@@ -81,9 +84,15 @@ export function ensureWorkspaceLspServices() {
   monacoVscodeApiReady ??= (async () => {
     if (!workspaceMonacoIsInitialized()) {
       await initializeMonacoWrapper(undefined, {
-        registerAdditionalExtensions: false,
+        registerAdditionalExtensions: true,
         waitForDefaultExtensions: false,
       })
+      // Load additional extensions not included in the default set
+      await Promise.allSettled([
+        emmetExtensionReady(),
+        dockerExtensionReady(),
+        dotenvExtensionReady(),
+      ])
     }
 
     if (!workspaceFileSystemOverlayRegistered) {

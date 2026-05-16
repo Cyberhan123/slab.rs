@@ -106,6 +106,9 @@
         "@ant-design/x-sdk": "^2.5.0",
         "@codingame/monaco-editor-react": "^27.0.0",
         "@codingame/monaco-editor-wrapper": "^28.0.0",
+        "@codingame/monaco-vscode-docker-default-extension": "^31.0.0",
+        "@codingame/monaco-vscode-dotenv-default-extension": "^31.0.0",
+        "@codingame/monaco-vscode-emmet-default-extension": "^31.0.0",
         "@codingame/monaco-vscode-files-service-override": "^31.0.0",
         "@gytx/xterm-local-echo": "^0.1.8",
         "@shikijs/monaco": "^4.0.2",
@@ -353,9 +356,15 @@
 
     "@codingame/monaco-vscode-diff-default-extension": ["@codingame/monaco-vscode-diff-default-extension@31.0.1", "", { "dependencies": { "@codingame/monaco-vscode-api": "31.0.1" } }, "sha512-cjddwKeUBzWGmy9xW8aqoAJbj8FyIIeCywTclec46CC2i+ZWFC9TilIqCPorwu0FZ2csCG221OkbPhPoNfqOEw=="],
 
+    "@codingame/monaco-vscode-docker-default-extension": ["@codingame/monaco-vscode-docker-default-extension@31.0.1", "", { "dependencies": { "@codingame/monaco-vscode-api": "31.0.1" } }, "sha512-E+gEceWI5rjlCMrzxF/nKJhEcKPVYjtNzA7Z2ooyX64GhPgp14iLMJ0LZsUaVtj325M1GfpQFMgWcCi7VJHncQ=="],
+
+    "@codingame/monaco-vscode-dotenv-default-extension": ["@codingame/monaco-vscode-dotenv-default-extension@31.0.1", "", { "dependencies": { "@codingame/monaco-vscode-api": "31.0.1" } }, "sha512-3ox5zWVU93XiOaJXPg3nANJkFdyaMbkpNqPuqQ3ARVONgmyPAcxX7Z/IlPQBZbAfpZmhbDcPRROtJt4Ly7aoOA=="],
+
     "@codingame/monaco-vscode-editor-api": ["@codingame/monaco-vscode-editor-api@25.1.2", "", { "dependencies": { "@codingame/monaco-vscode-api": "25.1.2" } }, "sha512-dVXoBLRN8vyFHsLY6iYISaNetZ3ispXLut0qL+jvN0e0CEFkUv1F/3EAE7myptrJSS/N1AptrRIxATT3lwFP+Q=="],
 
     "@codingame/monaco-vscode-editor-service-override": ["@codingame/monaco-vscode-editor-service-override@31.0.1", "", { "dependencies": { "@codingame/monaco-vscode-api": "31.0.1" } }, "sha512-XCL2hOJ5QYKq3b1u9J9V/nrELElR+QNt9gnFreqfrgNPEMPWsy3Hw+a+cJ9y3YCwrR3g3MLRAbQf7N3+ICOqlA=="],
+
+    "@codingame/monaco-vscode-emmet-default-extension": ["@codingame/monaco-vscode-emmet-default-extension@31.0.1", "", { "dependencies": { "@codingame/monaco-vscode-api": "31.0.1" } }, "sha512-kGsBtr3EaynZw2l+ct3ZDdGJUVzVVp7Hxmg9/1OOoZ/jeWWjFjZYAL9IbVDVI2dvvgnzMnIyYnWHIwbta7MMqA=="],
 
     "@codingame/monaco-vscode-emmet-service-override": ["@codingame/monaco-vscode-emmet-service-override@31.0.1", "", { "dependencies": { "@codingame/monaco-vscode-api": "31.0.1" } }, "sha512-B620lknwtKOf5NMgzk5DEarxgX4ahRUj3bXBhDIgJ6Asc/f0dXveKWkRwPxF3x+I4yGGRzpWNFh0/ACZXdXzzA=="],
 
