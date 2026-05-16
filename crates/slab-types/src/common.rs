@@ -1,7 +1,11 @@
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+pub type JsonOptions = BTreeMap<String, serde_json::Value>;
 
 /// A strongly-typed, opaque identifier backed by a [`Uuid`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]

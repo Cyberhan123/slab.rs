@@ -10,7 +10,6 @@ use futures::StreamExt;
 use futures::stream::{self, BoxStream};
 use serde_json::{Value, json};
 use slab_types::RuntimeBackendId;
-use slab_types::inference::{TextGenerationResponse, TextGenerationUsage};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -20,8 +19,8 @@ use crate::domain::models::{
     ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatResultChoice,
     ChatStreamChunk, ConversationMessage as DomainConversationMessage, ConversationMessageContent,
     StructuredOutput, TextCompletionCommand, TextCompletionOutput, TextCompletionResult,
-    TextResultChoice, assistant_message_from_parts, assistant_message_from_text_response,
-    serialize_session_message,
+    TextGenerationResponse, TextGenerationUsage, TextResultChoice, assistant_message_from_parts,
+    assistant_message_from_text_response, serialize_session_message,
 };
 use crate::error::AppCoreError;
 use crate::infra::db::{ChatMessage, ChatStore};

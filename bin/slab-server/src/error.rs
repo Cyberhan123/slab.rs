@@ -168,6 +168,9 @@ impl From<slab_app_core::error::AppCoreError> for ServerError {
             slab_app_core::error::AppCoreError::BackendNotReady(m) => {
                 ServerError::BackendNotReady(m)
             }
+            slab_app_core::error::AppCoreError::RuntimeMemoryPressure(m) => {
+                ServerError::BackendNotReady(m)
+            }
             slab_app_core::error::AppCoreError::NotImplemented(m) => ServerError::NotImplemented(m),
             slab_app_core::error::AppCoreError::TooManyRequests(m) => {
                 ServerError::TooManyRequests(m)

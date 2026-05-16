@@ -8,6 +8,7 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::domain::models::TaskStatus;
+use crate::domain::ports::RuntimeInferenceGateway;
 use crate::error::AppCoreError;
 use crate::infra::db::{TaskRecord, TaskStore};
 
@@ -147,6 +148,7 @@ pub struct WorkerState {
     config: Arc<crate::context::AppConfig>,
     store: Arc<crate::infra::db::AnyStore>,
     grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
+    runtime: Arc<dyn RuntimeInferenceGateway>,
     runtime_status: Arc<crate::runtime_supervisor::RuntimeSupervisorStatus>,
     model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
     operations: Arc<OperationManager>,
@@ -157,11 +159,12 @@ impl WorkerState {
         config: Arc<crate::context::AppConfig>,
         store: Arc<crate::infra::db::AnyStore>,
         grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
+        runtime: Arc<dyn RuntimeInferenceGateway>,
         runtime_status: Arc<crate::runtime_supervisor::RuntimeSupervisorStatus>,
         model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
         operations: Arc<OperationManager>,
     ) -> Self {
-        Self { config, store, grpc, runtime_status, model_auto_unload, operations }
+        Self { config, store, grpc, runtime, runtime_status, model_auto_unload, operations }
     }
 
     pub fn config(&self) -> &Arc<crate::context::AppConfig> {
@@ -174,6 +177,10 @@ impl WorkerState {
 
     pub fn grpc(&self) -> &Arc<crate::infra::rpc::gateway::GrpcGateway> {
         &self.grpc
+    }
+
+    pub fn runtime(&self) -> &Arc<dyn RuntimeInferenceGateway> {
+        &self.runtime
     }
 
     pub fn runtime_status(&self) -> &Arc<crate::runtime_supervisor::RuntimeSupervisorStatus> {

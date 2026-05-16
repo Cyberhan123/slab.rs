@@ -33,6 +33,10 @@ pub enum AppCoreError {
     #[error("backend not ready: {0}")]
     BackendNotReady(String),
 
+    /// Runtime reported resource pressure while loading or running a model.
+    #[error("runtime memory pressure: {0}")]
+    RuntimeMemoryPressure(String),
+
     /// The requested operation is not yet implemented.
     #[error("not implemented: {0}")]
     NotImplemented(String),

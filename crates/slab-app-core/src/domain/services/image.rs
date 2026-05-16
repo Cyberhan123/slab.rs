@@ -2,10 +2,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use slab_types::RuntimeBackendId;
-use slab_types::diffusion::{
-    DiffusionImageBackend, DiffusionImageRequest, DiffusionRequestCommon, GgmlDiffusionImageParams,
-};
-use slab_types::media::RawImageInput;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
@@ -15,6 +11,7 @@ use crate::domain::models::{
     AcceptedOperation, IMAGE_GENERATION_TASK_TYPE, ImageGenerationCommand, ImageGenerationMode,
     ImageGenerationTaskView, TaskResult, TaskStatus,
 };
+use crate::domain::ports::{RuntimeDiffusionImageRequest, RuntimeRawImageInput};
 use crate::domain::services::media_task::{
     cleanup_dir, parse_json_value, read_managed_file, save_rgb_png,
 };
@@ -22,7 +19,6 @@ use crate::error::AppCoreError;
 use crate::infra::db::{
     ImageGenerationTaskViewRecord, MediaTaskStore, NewImageGenerationTaskRecord, TaskRecord,
 };
-use crate::infra::rpc::{self, codec};
 
 const IMAGE_BACKEND_ID: &str = "ggml.diffusion";
 
@@ -55,10 +51,11 @@ impl ImageService {
             "image generation request"
         );
 
-        let generate_image_channel =
-            self.state.grpc().generate_image_channel().ok_or_else(|| {
-                AppCoreError::BackendNotReady("diffusion gRPC endpoint is not configured".into())
-            })?;
+        if !self.state.runtime().backend_available(RuntimeBackendId::GgmlDiffusion) {
+            return Err(AppCoreError::BackendNotReady(
+                "diffusion gRPC endpoint is not configured".into(),
+            ));
+        }
 
         let operation_id = Uuid::new_v4().to_string();
         let output_dir = image_task_dir(&self.output_root(), &operation_id);
@@ -99,34 +96,29 @@ impl ImageService {
         })
         .to_string();
 
-        let shared_request = DiffusionImageRequest {
-            common: DiffusionRequestCommon {
-                prompt: req.prompt.clone(),
-                negative_prompt: req.negative_prompt.clone(),
-                width: req.width,
-                height: req.height,
-                init_image: effective_init_image.map(|image| RawImageInput {
-                    data: image.data,
-                    width: image.width,
-                    height: image.height,
-                    channels: image.channels.clamp(1, u8::MAX as u32) as u8,
-                }),
-                options: Default::default(),
-            },
-            backend: DiffusionImageBackend::Ggml(GgmlDiffusionImageParams {
-                count: Some(req.n),
-                cfg_scale: req.cfg_scale,
-                guidance: req.guidance,
-                steps: req.steps,
-                seed: req.seed,
-                sample_method: req.sample_method.clone(),
-                scheduler: req.scheduler.clone(),
-                clip_skip: req.clip_skip,
-                strength: effective_strength,
-                eta: req.eta,
+        let runtime_request = RuntimeDiffusionImageRequest {
+            model: req.model.clone(),
+            prompt: req.prompt.clone(),
+            negative_prompt: req.negative_prompt.clone(),
+            width: req.width,
+            height: req.height,
+            init_image: effective_init_image.map(|image| RuntimeRawImageInput {
+                data: image.data,
+                width: image.width,
+                height: image.height,
+                channels: image.channels.clamp(1, u8::MAX as u32) as u8,
             }),
+            count: Some(req.n),
+            cfg_scale: req.cfg_scale,
+            guidance: req.guidance,
+            steps: req.steps,
+            seed: req.seed,
+            sample_method: req.sample_method.clone(),
+            scheduler: req.scheduler.clone(),
+            clip_skip: req.clip_skip,
+            strength: effective_strength,
+            eta: req.eta,
         };
-        let grpc_req = codec::encode_diffusion_image_request(req.model.clone(), &shared_request);
 
         let now = chrono::Utc::now();
         let task_record = TaskRecord {
@@ -174,9 +166,10 @@ impl ImageService {
         let model_auto_unload = Arc::clone(self.state.auto_unload());
         let runtime_status = Arc::clone(self.state.runtime_status());
         let store = Arc::clone(self.state.store());
-        let generate_image_channel_for_spawn = generate_image_channel;
         let output_root = self.output_root();
-        worker_state.spawn_existing_operation(operation_id.clone(), move |operation| async move {
+        self.state
+            .clone()
+            .spawn_existing_operation(operation_id.clone(), move |operation| async move {
             let operation_id = operation.id().to_owned();
             let task_output_dir = image_task_dir(&output_root, &operation_id);
             let _usage_guard = match model_auto_unload
@@ -193,29 +186,14 @@ impl ImageService {
                 }
             };
 
-            let rpc_result =
-                rpc::client::generate_image(generate_image_channel_for_spawn, grpc_req).await;
+            let rpc_result = worker_state.runtime().generate_image(runtime_request).await;
             if operation.is_cancelled().await {
                 cleanup_dir(&task_output_dir).await;
                 return;
             }
 
             match rpc_result {
-                Ok(response) => {
-                    let payload = match codec::decode_diffusion_image_response(&response) {
-                        Ok(value) => value,
-                        Err(error) => {
-                            let message =
-                                format!("invalid diffusion image response payload: {error}");
-                            debug!(task_id = %operation_id, error = %error, "failed to decode image response from backend");
-                            cleanup_dir(&task_output_dir).await;
-                            if let Err(db_error) = operation.mark_failed(&message).await {
-                                warn!(task_id = %operation_id, error = %db_error, "failed to update task status after image decode error");
-                            }
-                            return;
-                        }
-                    };
-
+                Ok(payload) => {
                     if payload.images.is_empty() {
                         let message = "diffusion returned no images".to_owned();
                         cleanup_dir(&task_output_dir).await;
@@ -283,15 +261,12 @@ impl ImageService {
                 Err(error) => {
                     let runtime_snapshot = runtime_status.snapshot(RuntimeBackendId::GgmlDiffusion);
                     let runtime_status = runtime_snapshot.compact_summary();
-                    let transport_disconnect = rpc::client::transient_runtime_detail(&error);
                     let message = format!("{error:#}\nruntime_status: {runtime_status}");
                     cleanup_dir(&task_output_dir).await;
                     warn!(
                         task_id = %operation_id,
                         error = %message,
                         runtime_status = %runtime_status,
-                        transport_disconnect = transport_disconnect.is_some(),
-                        transport_detail = %transport_disconnect.as_deref().unwrap_or(""),
                         "image generation task failed"
                     );
                     if let Err(db_error) = operation.mark_failed(&message).await {

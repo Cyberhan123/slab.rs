@@ -5,15 +5,14 @@ use slab_types::load_config::{
 };
 use slab_types::runtime::DiffusionLoadOptions;
 use slab_types::{RuntimeBackendId, RuntimeBackendLoadSpec};
-use tonic::transport::Channel;
 use tracing::info;
 
 use crate::context::ModelState;
 use crate::domain::models::{ModelLoadCommand, ModelStatus, UnifiedModel, UnifiedModelKind};
+use crate::domain::ports::RuntimeBackendStatus;
 use crate::error::AppCoreError;
 use crate::infra::db::{ModelConfigStateStore, ModelStore};
 use crate::infra::model_packs;
-use crate::infra::rpc::{self, codec, pb};
 use crate::model_auto_unload::ModelReplayPlan;
 
 use super::{ModelService, catalog, pack};
@@ -46,10 +45,7 @@ impl ModelService {
         let backend_id = resolve_unload_backend(&self.model_state, &command).await?;
         info!(backend = %backend_id, model_id = ?command.model_id, "unloading model");
 
-        let (_, channel) = resolve_backend_channel(&self.model_state, backend_id)?;
-        let response = rpc::client::unload_model(channel, backend_id, pb::ModelUnloadRequest {})
-            .await
-            .map_err(|error| map_grpc_model_error("unload_model", error))?;
+        let response = self.model_state.runtime().unload_model(backend_id).await?;
         self.model_state.auto_unload().notify_model_unloaded(backend_id).await;
 
         decode_model_status(response)
@@ -123,17 +119,17 @@ pub(super) fn validate_and_normalize_model_workers(
     Ok((workers, source))
 }
 
-fn resolve_backend_channel(
+fn ensure_runtime_backend_available(
     state: &ModelState,
     backend_id: RuntimeBackendId,
-) -> Result<(RuntimeBackendId, Channel), AppCoreError> {
+) -> Result<(), AppCoreError> {
     let canonical_backend = backend_id.to_string();
-    let channel = state.grpc().backend_channel(backend_id).ok_or_else(|| {
-        AppCoreError::BackendNotReady(format!(
+    if !state.runtime().backend_available(backend_id) {
+        return Err(AppCoreError::BackendNotReady(format!(
             "{canonical_backend} gRPC endpoint is not configured"
-        ))
-    })?;
-    Ok((backend_id, channel))
+        )));
+    }
+    Ok(())
 }
 
 pub(super) async fn resolve_model_workers(
@@ -216,49 +212,15 @@ pub(super) async fn resolve_diffusion_context_params(
     }))
 }
 
-fn grpc_status_message(status: &tonic::Status) -> String {
-    let message = status.message().trim();
-    if !message.is_empty() {
-        return message.to_owned();
-    }
-    status.to_string()
-}
-
 pub(super) fn decode_model_status(
-    response: pb::ModelStatusResponse,
+    response: RuntimeBackendStatus,
 ) -> Result<ModelStatus, AppCoreError> {
-    let status = codec::decode_model_status_response(&response).map_err(|error| {
-        AppCoreError::Internal(format!("invalid model status response from runtime: {error}"))
-    })?;
-
-    Ok(ModelStatus { backend: status.backend.to_string(), status: status.status })
-}
-
-pub(super) fn map_grpc_model_error(action: &str, err: anyhow::Error) -> AppCoreError {
-    if let Some(detail) = rpc::client::transient_runtime_detail(&err) {
-        return AppCoreError::BackendNotReady(detail);
-    }
-
-    let grpc_status = err.chain().find_map(|cause| cause.downcast_ref::<tonic::Status>());
-
-    if let Some(status) = grpc_status {
-        let detail = grpc_status_message(status);
-        return match status.code() {
-            tonic::Code::InvalidArgument
-            | tonic::Code::FailedPrecondition
-            | tonic::Code::ResourceExhausted => AppCoreError::BadRequest(detail),
-            tonic::Code::NotFound => AppCoreError::NotFound(detail),
-            tonic::Code::Unavailable => AppCoreError::BackendNotReady(detail),
-            _ => AppCoreError::Internal(format!("grpc {action} failed: {err:#}")),
-        };
-    }
-
-    AppCoreError::Internal(format!("grpc {action} failed: {err:#}"))
+    Ok(ModelStatus { backend: response.backend.to_string(), status: response.status })
 }
 
 async fn load_model_with_state(
     state: ModelState,
-    action: &'static str,
+    _action: &'static str,
     log_message: &'static str,
     command: ModelLoadCommand,
 ) -> Result<ModelStatus, AppCoreError> {
@@ -267,7 +229,7 @@ async fn load_model_with_state(
     catalog::validate_path("model_path", &resolved_target.model_path)?;
     catalog::validate_existing_model_file(&resolved_target.model_path)?;
 
-    let (_, channel) = resolve_backend_channel(&state, resolved_target.backend_id)?;
+    ensure_runtime_backend_available(&state, resolved_target.backend_id)?;
     let (num_workers, worker_source) = if let Some(workers) = command.num_workers {
         validate_and_normalize_model_workers(resolved_target.backend_id, workers, "request")?
     } else if let Some(workers) =
@@ -317,11 +279,7 @@ async fn load_model_with_state(
         flash_attn,
         diffusion,
     )?;
-    let response = state
-        .auto_unload()
-        .load_model_with_pressure_control(channel, &load_spec)
-        .await
-        .map_err(|error| map_grpc_model_error(action, error))?;
+    let response = state.auto_unload().load_model_with_pressure_control(&load_spec).await?;
     state
         .auto_unload()
         .notify_model_loaded(ModelReplayPlan {
@@ -450,7 +408,7 @@ async fn resolve_model_load_target(
     let backend_id: RuntimeBackendId = backend_id
         .parse()
         .map_err(|_| AppCoreError::BadRequest(format!("unknown backend: {backend_id}")))?;
-    let (backend_id, _) = resolve_backend_channel(state, backend_id)?;
+    ensure_runtime_backend_available(state, backend_id)?;
 
     if model_packs::is_model_pack_path(&model_path) {
         let pack_target =
@@ -555,7 +513,7 @@ async fn resolve_unload_backend(
     {
         let model = resolve_local_catalog_model(state, model_id).await?;
         let backend_id = resolve_local_backend_from_model(&model)?;
-        let (backend_id, _) = resolve_backend_channel(state, backend_id)?;
+        ensure_runtime_backend_available(state, backend_id)?;
         return Ok(backend_id);
     }
 
@@ -570,7 +528,7 @@ async fn resolve_unload_backend(
     let backend_id: RuntimeBackendId = backend_id
         .parse()
         .map_err(|_| AppCoreError::BadRequest(format!("unknown backend: {backend_id}")))?;
-    let (backend_id, _) = resolve_backend_channel(state, backend_id)?;
+    ensure_runtime_backend_available(state, backend_id)?;
     Ok(backend_id)
 }
 

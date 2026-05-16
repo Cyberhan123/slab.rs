@@ -6,10 +6,10 @@ use std::time::Duration;
 
 use slab_types::settings::RuntimeModelAutoUnloadConfig;
 use slab_types::{RuntimeBackendId, RuntimeBackendLoadSpec};
-use tonic::transport::Channel;
 use tracing::{debug, info, warn};
 
-use crate::infra::rpc;
+use crate::domain::ports::{RuntimeBackendStatus, RuntimeInferenceGateway};
+use crate::error::AppCoreError;
 
 #[derive(Debug, Clone)]
 pub struct ModelReplayPlan {
@@ -32,7 +32,7 @@ struct BackendRefState {
 #[derive(Debug)]
 pub struct ModelAutoUnloadManager {
     pmid: Arc<crate::domain::services::PmidService>,
-    grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
+    runtime: Arc<dyn RuntimeInferenceGateway>,
     runtime_status: Arc<crate::runtime_supervisor::RuntimeSupervisorStatus>,
     load_pressure_lock: Arc<tokio::sync::Mutex<()>>,
     access_seq: AtomicU64,
@@ -96,12 +96,12 @@ impl Drop for ModelUsageGuard {
 impl ModelAutoUnloadManager {
     pub fn new(
         pmid: Arc<crate::domain::services::PmidService>,
-        grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
+        runtime: Arc<dyn RuntimeInferenceGateway>,
         runtime_status: Arc<crate::runtime_supervisor::RuntimeSupervisorStatus>,
     ) -> Self {
         Self {
             pmid,
-            grpc,
+            runtime,
             runtime_status,
             load_pressure_lock: Arc::new(tokio::sync::Mutex::new(())),
             access_seq: AtomicU64::new(0),
@@ -287,17 +287,15 @@ impl ModelAutoUnloadManager {
             return;
         }
 
-        let Some(channel) = self.grpc.backend_channel(backend_id) else {
+        if !self.runtime.backend_available(backend_id) {
             warn!(
                 backend = %backend_id,
                 "skipping auto-unload because backend channel is unavailable"
             );
             return;
-        };
+        }
 
-        match rpc::client::unload_model(channel, backend_id, rpc::pb::ModelUnloadRequest::default())
-            .await
-        {
+        match self.runtime.unload_model(backend_id).await {
             Ok(_) => {
                 info!(
                     backend = %backend_id,
@@ -330,11 +328,15 @@ impl ModelAutoUnloadManager {
 
     pub async fn load_model_with_pressure_control(
         &self,
-        channel: Channel,
         load_spec: &RuntimeBackendLoadSpec,
-    ) -> anyhow::Result<rpc::pb::ModelStatusResponse> {
+    ) -> Result<RuntimeBackendStatus, AppCoreError> {
         let _guard = Arc::clone(&self.load_pressure_lock).lock_owned().await;
         let target_backend = load_spec.backend();
+        if !self.runtime.backend_available(target_backend) {
+            return Err(AppCoreError::BackendNotReady(format!(
+                "backend channel unavailable for model load: {target_backend}"
+            )));
+        }
         let config = self.pressure_config().await;
         let mut evictions_remaining = config.max_pressure_evictions_per_load;
 
@@ -349,10 +351,8 @@ impl ModelAutoUnloadManager {
             );
         }
 
-        let request = build_model_load_request(load_spec);
-
         loop {
-            match rpc::client::load_model(channel.clone(), request.clone()).await {
+            match self.runtime.load_model(load_spec).await {
                 Ok(response) => return Ok(response),
                 Err(error)
                     if config.enabled
@@ -451,13 +451,11 @@ impl ModelAutoUnloadManager {
     }
 
     async fn unload_for_pressure(&self, backend_id: RuntimeBackendId) -> Result<(), String> {
-        let Some(channel) = self.grpc.backend_channel(backend_id) else {
+        if !self.runtime.backend_available(backend_id) {
             return Err(format!("backend channel unavailable for pressure eviction: {backend_id}"));
-        };
+        }
 
-        rpc::client::unload_model(channel, backend_id, rpc::pb::ModelUnloadRequest::default())
-            .await
-            .map_err(|error| error.to_string())?;
+        self.runtime.unload_model(backend_id).await.map_err(|error| error.to_string())?;
         self.mark_replayable_unloaded(backend_id, "memory pressure").await;
         info!(backend = %backend_id, "evicted idle model under memory pressure");
         Ok(())
@@ -500,15 +498,15 @@ impl ModelAutoUnloadManager {
             plan
         };
 
-        let Some(channel) = self.grpc.backend_channel(backend) else {
+        if !self.runtime.backend_available(backend) {
             let mut states = self.states.lock().await;
             let state = states.entry(backend).or_default();
             state.auto_unloaded = true;
             state.resident = false;
             return Err(format!("backend channel unavailable for auto-reload: {backend}"));
-        };
+        }
 
-        match self.load_model_with_pressure_control(channel, &plan.load_spec).await {
+        match self.load_model_with_pressure_control(&plan.load_spec).await {
             Ok(_) => {
                 info!(
                     backend = %backend,
@@ -565,29 +563,8 @@ fn is_under_memory_pressure(
     system_pressure || gpu_pressure
 }
 
-fn is_memory_pressure_error(error: &anyhow::Error) -> bool {
-    let Some(status) = error.chain().find_map(|cause| cause.downcast_ref::<tonic::Status>()) else {
-        return false;
-    };
-    let message = status.message().trim().to_ascii_lowercase();
-    let mentions_memory = [
-        "out of memory",
-        "not enough memory",
-        "insufficient memory",
-        "memory allocation",
-        "memory",
-        "oom",
-        "vram",
-        "cudaerrormemoryallocation",
-    ]
-    .iter()
-    .any(|needle| message.contains(needle));
-
-    mentions_memory
-        && matches!(
-            status.code(),
-            tonic::Code::ResourceExhausted | tonic::Code::Internal | tonic::Code::Unknown
-        )
+fn is_memory_pressure_error(error: &AppCoreError) -> bool {
+    matches!(error, AppCoreError::RuntimeMemoryPressure(_))
 }
 
 fn choose_pressure_eviction_candidate(
@@ -609,12 +586,6 @@ fn choose_pressure_eviction_candidate(
                 .then_with(|| left_backend.canonical_id().cmp(right_backend.canonical_id()))
         })
         .map(|(backend_id, _)| *backend_id)
-}
-
-pub(crate) fn build_model_load_request(
-    spec: &RuntimeBackendLoadSpec,
-) -> rpc::codec::ModelLoadRpcRequest {
-    rpc::codec::encode_model_load_request(spec)
 }
 
 fn load_spec_model_path(spec: &RuntimeBackendLoadSpec) -> &Path {
@@ -672,13 +643,14 @@ mod tests {
 
     #[test]
     fn memory_pressure_error_detection_requires_memory_signals() {
-        let memory_error = anyhow::Error::new(tonic::Status::resource_exhausted(
-            "GPU out of memory while allocating tensor",
-        ));
+        let memory_error =
+            AppCoreError::RuntimeMemoryPressure("GPU out of memory while allocating tensor".into());
         assert!(is_memory_pressure_error(&memory_error));
 
-        let queue_error =
-            anyhow::Error::new(tonic::Status::resource_exhausted("queue full: ggml.llama"));
+        let queue_error = AppCoreError::Internal(
+            "load_model RPC failed: status: ResourceExhausted, message: queue full: ggml.llama"
+                .to_owned(),
+        );
         assert!(!is_memory_pressure_error(&queue_error));
     }
 

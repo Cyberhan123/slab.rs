@@ -25,9 +25,9 @@ use crate::domain::models::{
     LocalChatParams as DomainLocalChatParams, StructuredOutput as DomainStructuredOutput,
     StructuredOutputJsonSchema as DomainStructuredOutputJsonSchema,
     TextCompletionCommand as DomainTextCompletionCommand,
-    TextCompletionResult as DomainTextCompletionResult, TextResultChoice as DomainTextResultChoice,
+    TextCompletionResult as DomainTextCompletionResult,
+    TextGenerationUsage as DomainTextGenerationUsage, TextResultChoice as DomainTextResultChoice,
 };
-use slab_types::inference::TextGenerationUsage;
 
 const MAX_PROMPT_BYTES: usize = 128 * 1024;
 const MAX_MESSAGES: usize = 256;
@@ -809,8 +809,8 @@ impl From<DomainTextResultChoice> for CompletionChoice {
     }
 }
 
-impl From<TextGenerationUsage> for ChatCompletionUsage {
-    fn from(value: TextGenerationUsage) -> Self {
+impl From<DomainTextGenerationUsage> for ChatCompletionUsage {
+    fn from(value: DomainTextGenerationUsage) -> Self {
         Self {
             prompt_tokens: value.prompt_tokens,
             completion_tokens: value.completion_tokens,

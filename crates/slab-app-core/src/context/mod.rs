@@ -4,6 +4,8 @@ pub mod config;
 pub mod model_state;
 pub mod worker_state;
 
+use crate::domain::ports::RuntimeInferenceGateway;
+
 pub use config::AppConfig;
 pub use model_state::ModelState;
 pub use worker_state::{OperationManager, SubmitOperation, WorkerState};
@@ -23,14 +25,21 @@ impl AppContext {
         grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
         runtime_status: Arc<crate::runtime_supervisor::RuntimeSupervisorStatus>,
         store: Arc<crate::infra::db::AnyStore>,
-        model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
     ) -> Self {
         let task_manager = Arc::new(OperationManager::new());
+        let runtime_gateway: Arc<dyn RuntimeInferenceGateway> =
+            Arc::new(crate::infra::rpc::GrpcRuntimeInferenceGateway::new(Arc::clone(&grpc)));
+        let model_auto_unload = Arc::new(crate::model_auto_unload::ModelAutoUnloadManager::new(
+            Arc::clone(&pmid),
+            Arc::clone(&runtime_gateway),
+            Arc::clone(&runtime_status),
+        ));
         let model_state = Arc::new(ModelState::new(
             Arc::clone(&config),
             Arc::clone(&pmid),
             Arc::clone(&store),
             Arc::clone(&grpc),
+            Arc::clone(&runtime_gateway),
             Arc::clone(&runtime_status),
             Arc::clone(&model_auto_unload),
         ));
@@ -38,6 +47,7 @@ impl AppContext {
             Arc::clone(&config),
             Arc::clone(&store),
             Arc::clone(&grpc),
+            runtime_gateway,
             Arc::clone(&runtime_status),
             Arc::clone(&model_auto_unload),
             Arc::clone(&task_manager),
@@ -61,7 +71,6 @@ impl AppState {
         runtime_status: Arc<crate::runtime_supervisor::RuntimeSupervisorStatus>,
         runtime_host: Option<Arc<crate::infra::runtime::ManagedRuntimeHost>>,
         store: Arc<crate::infra::db::AnyStore>,
-        model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
     ) -> Self {
         let context = Arc::new(AppContext::new(
             Arc::clone(&config),
@@ -69,7 +78,6 @@ impl AppState {
             Arc::clone(&grpc),
             Arc::clone(&runtime_status),
             Arc::clone(&store),
-            Arc::clone(&model_auto_unload),
         ));
 
         // Build the AgentControl with port adapters and register built-in tools.

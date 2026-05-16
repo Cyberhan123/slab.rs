@@ -1031,7 +1031,7 @@ mod tests {
         canonicalize_runtime_presets, map_hub_client_error, normalize_required_text,
     };
     use super::pack::build_local_model_command_from_pack_preset;
-    use super::runtime::{map_grpc_model_error, validate_and_normalize_model_workers};
+    use super::runtime::validate_and_normalize_model_workers;
 
     #[test]
     fn cloud_models_require_provider_reference() {
@@ -1257,21 +1257,6 @@ mod tests {
         let value = normalize_required_text("  model-id  ".into(), "id").expect("trimmed value");
 
         assert_eq!(value, "model-id");
-    }
-
-    #[test]
-    fn transient_transport_errors_map_to_backend_not_ready() {
-        let error = anyhow::Error::new(tonic::Status::unknown(
-            "transport error: broken pipe while reconnecting runtime",
-        ));
-
-        let mapped = map_grpc_model_error("load_model", error);
-        match mapped {
-            AppCoreError::BackendNotReady(detail) => {
-                assert!(detail.contains("transport error"));
-            }
-            other => panic!("expected BackendNotReady, got {other:?}"),
-        }
     }
 
     #[test]
