@@ -5,7 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::backend::RuntimeBackendId;
-use crate::inference::JsonOptions;
+use crate::common::JsonOptions;
 use crate::load_config::RuntimeBackendLoadSpec;
 
 #[non_exhaustive]

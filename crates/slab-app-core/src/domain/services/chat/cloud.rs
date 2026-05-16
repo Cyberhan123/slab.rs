@@ -11,7 +11,6 @@ use genai::{
     Client as GenaiClient, ModelIden as GenaiModelIden, ServiceTarget as GenaiServiceTarget,
 };
 use serde_json::{Value, json};
-use slab_types::inference::TextGenerationResponse;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -21,8 +20,8 @@ use uuid::Uuid;
 use crate::context::ModelState;
 use crate::domain::models::{
     ChatReasoningEffort, ChatStreamChunk, ChatVerbosity,
-    ConversationMessage as DomainConversationMessage, StructuredOutput, UnifiedModel,
-    UnifiedModelKind,
+    ConversationMessage as DomainConversationMessage, JsonOptions, StructuredOutput,
+    TextGenerationResponse, UnifiedModel, UnifiedModelKind,
 };
 use crate::error::AppCoreError;
 use crate::infra::db::ModelStore;
@@ -564,7 +563,7 @@ async fn cloud_chat_completion(
     let usage = super::build_estimated_usage(&render_messages_for_usage(messages), &text, None);
     let finish_reason =
         super::finish_reason_from_token_budget(usage.completion_tokens, config.max_tokens);
-    let mut metadata = slab_types::inference::JsonOptions::default();
+    let mut metadata = JsonOptions::default();
     if let Some(reasoning) =
         extract_reasoning_content_from_raw_body(response.captured_raw_body.as_ref())
     {

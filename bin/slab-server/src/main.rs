@@ -300,12 +300,6 @@ where
     info!(?grpc, "shared gRPC gateway services initialized");
 
     let grpc = Arc::new(grpc);
-    let model_auto_unload =
-        Arc::new(slab_app_core::model_auto_unload::ModelAutoUnloadManager::new(
-            Arc::clone(&pmid),
-            Arc::clone(&grpc),
-            Arc::clone(&runtime_status),
-        ));
     let state = Arc::new(AppState::new(
         Arc::new(cfg.clone()),
         pmid,
@@ -313,7 +307,6 @@ where
         runtime_status,
         runtime_host,
         Arc::clone(&store),
-        model_auto_unload,
     ));
     state.services.model.sync_model_packs_from_disk().await?;
 

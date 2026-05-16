@@ -10,12 +10,15 @@ use crate::domain::models::{
     AudioTranscriptionTaskView, TaskResult, TaskStatus, TranscribeDecodeOptions,
     TranscribeVadOptions,
 };
+use crate::domain::ports::{
+    RuntimeTranscriptionDecodeOptions, RuntimeTranscriptionRequest, RuntimeTranscriptionVadOptions,
+    RuntimeTranscriptionVadParams,
+};
 use crate::domain::services::media_task::parse_json_value;
 use crate::error::AppCoreError;
 use crate::infra::db::{
     AudioTranscriptionTaskViewRecord, MediaTaskStore, NewAudioTranscriptionTaskRecord, TaskRecord,
 };
-use crate::infra::rpc::{self, codec, pb};
 
 const AUDIO_BACKEND_ID: &str = "ggml.whisper";
 
@@ -44,12 +47,14 @@ impl AudioService {
             "transcription request"
         );
 
-        let transcribe_channel = self.state.grpc().transcribe_channel().ok_or_else(|| {
-            AppCoreError::BackendNotReady("whisper gRPC endpoint is not configured".into())
-        })?;
+        if !self.state.runtime().backend_available(RuntimeBackendId::GgmlWhisper) {
+            return Err(AppCoreError::BackendNotReady(
+                "whisper gRPC endpoint is not configured".into(),
+            ));
+        }
 
-        let grpc_req = pb::GgmlWhisperTranscribeRequest {
-            path: Some(req.path.clone()),
+        let runtime_request = RuntimeTranscriptionRequest {
+            path: req.path.clone(),
             language: req.language.clone(),
             prompt: req.prompt.clone(),
             detect_language: req.detect_language,
@@ -103,8 +108,8 @@ impl AudioService {
             .await?;
 
         let model_auto_unload = Arc::clone(self.state.auto_unload());
-        let transcribe_channel_for_spawn = transcribe_channel;
         let store = Arc::clone(self.state.store());
+        let worker_state = self.state.clone();
         self.state
             .clone()
             .spawn_existing_operation(operation_id.clone(), move |operation| async move {
@@ -123,16 +128,15 @@ impl AudioService {
                     }
                 };
 
-                let rpc_result =
-                    rpc::client::transcribe(transcribe_channel_for_spawn, grpc_req).await;
+                let rpc_result = worker_state.runtime().transcribe(runtime_request).await;
                 if operation.is_cancelled().await {
                     return;
                 }
 
                 match rpc_result {
                     Ok(response) => {
-                        let text = codec::decode_whisper_transcription_text(&response);
-                        let segments = codec::decode_whisper_transcription_segments(&response);
+                        let text = response.text;
+                        let segments = response.segments;
                         let persisted_result =
                             serde_json::json!({ "text": text, "segments": segments }).to_string();
                         let task_payload = serde_json::to_string(&TaskResult {
@@ -196,7 +200,7 @@ impl AudioService {
 
 fn build_vad_request(
     vad: Option<&TranscribeVadOptions>,
-) -> Result<Option<pb::GgmlWhisperVadOptions>, AppCoreError> {
+) -> Result<Option<RuntimeTranscriptionVadOptions>, AppCoreError> {
     let Some(vad) = vad else {
         return Ok(None);
     };
@@ -218,7 +222,7 @@ fn build_vad_request(
         || vad.speech_pad_ms.is_some()
         || vad.samples_overlap.is_some();
 
-    let params = has_custom_params.then_some(pb::GgmlWhisperVadParams {
+    let params = has_custom_params.then_some(RuntimeTranscriptionVadParams {
         threshold: vad.threshold,
         min_speech_duration_ms: vad.min_speech_duration_ms,
         min_silence_duration_ms: vad.min_silence_duration_ms,
@@ -227,8 +231,8 @@ fn build_vad_request(
         samples_overlap: vad.samples_overlap,
     });
 
-    Ok(Some(pb::GgmlWhisperVadOptions {
-        enabled: Some(true),
+    Ok(Some(RuntimeTranscriptionVadOptions {
+        enabled: true,
         model_path: Some(model_path.to_owned()),
         params,
     }))
@@ -236,7 +240,7 @@ fn build_vad_request(
 
 fn build_decode_request(
     decode: Option<&TranscribeDecodeOptions>,
-) -> Result<Option<pb::GgmlWhisperDecodeOptions>, AppCoreError> {
+) -> Result<Option<RuntimeTranscriptionDecodeOptions>, AppCoreError> {
     let Some(decode) = decode else {
         return Ok(None);
     };
@@ -262,7 +266,7 @@ fn build_decode_request(
         return Ok(None);
     }
 
-    Ok(Some(pb::GgmlWhisperDecodeOptions {
+    Ok(Some(RuntimeTranscriptionDecodeOptions {
         offset_ms: decode.offset_ms,
         duration_ms: decode.duration_ms,
         no_context: decode.no_context,

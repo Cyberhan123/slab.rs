@@ -4,17 +4,21 @@ use std::sync::{Arc, Mutex};
 use chrono::Utc;
 use futures::{StreamExt, stream};
 use serde_json::Value;
-use slab_types::inference::{TextGenerationRequest, TextGenerationResponse, TextGenerationUsage};
 use uuid::Uuid;
 
 use crate::context::ModelState;
 use crate::domain::models::{
     ChatReasoningEffort, ChatStreamChunk, ChatVerbosity,
-    ConversationMessage as DomainConversationMessage, ConversationMessageContent, StructuredOutput,
+    ConversationMessage as DomainConversationMessage, ConversationMessageContent, JsonOptions,
+    StructuredOutput, TextGenerationChunk, TextGenerationResponse, TextGenerationUsage,
+    TextPromptTokensDetails,
+};
+use crate::domain::ports::{
+    RuntimeTextGenerationChunk, RuntimeTextGenerationRequest, RuntimeTextGenerationResponse,
+    RuntimeTextGenerationUsage,
 };
 use crate::domain::services::model;
 use crate::error::AppCoreError;
-use crate::infra::rpc::{self, codec};
 
 use super::GeneratedChatOutput;
 
@@ -95,7 +99,7 @@ fn parse_thinking_output(raw: &str, complete: bool) -> ParsedThinkingOutput {
     }
 }
 
-fn reasoning_content_from_metadata(metadata: &slab_types::inference::JsonOptions) -> Option<&str> {
+fn reasoning_content_from_metadata(metadata: &JsonOptions) -> Option<&str> {
     metadata.get(REASONING_CONTENT_METADATA_KEY).and_then(Value::as_str)
 }
 
@@ -201,9 +205,7 @@ fn reasoning_is_disabled(reasoning_effort: Option<ChatReasoningEffort>) -> bool 
     matches!(reasoning_effort, Some(ChatReasoningEffort::None))
 }
 
-fn remove_reasoning_content_metadata(
-    metadata: &mut slab_types::inference::JsonOptions,
-) -> Option<String> {
+fn remove_reasoning_content_metadata(metadata: &mut JsonOptions) -> Option<String> {
     match metadata.remove(REASONING_CONTENT_METADATA_KEY) {
         Some(Value::String(reasoning)) if !reasoning.trim().is_empty() => Some(reasoning),
         _ => None,
@@ -436,7 +438,8 @@ pub(super) async fn create_chat_completion(
         stop_count = effective_stop.len(),
         "local chat prompt rendered"
     );
-    let request = TextGenerationRequest {
+    let request = RuntimeTextGenerationRequest {
+        model: model.to_owned(),
         prompt: prompt.clone(),
         system_prompt: None,
         max_tokens: Some(config.max_tokens),
@@ -450,13 +453,7 @@ pub(super) async fn create_chat_completion(
         stream: config.stream,
         gbnf,
         stop_sequences: effective_stop.clone(),
-        ..Default::default()
     };
-    let grpc_request = codec::encode_chat_request(model.to_owned(), &request);
-
-    let llama_channel = state.grpc().chat_channel().ok_or_else(|| {
-        AppCoreError::BackendNotReady("llama gRPC endpoint is not configured".into())
-    })?;
 
     if config.stream {
         let usage_guard =
@@ -464,9 +461,7 @@ pub(super) async fn create_chat_completion(
                 |error| AppCoreError::BackendNotReady(format!("llama backend not ready: {error}")),
             )?;
 
-        let backend_stream = rpc::client::chat_stream(llama_channel.clone(), grpc_request.clone())
-            .await
-            .map_err(map_runtime_chat_error("chat stream"))?;
+        let backend_stream = state.runtime().chat_stream(request.clone()).await?;
 
         let completion_id = format!("chatcmpl-{}", Uuid::new_v4());
         let created_ts = Utc::now().timestamp();
@@ -514,7 +509,7 @@ pub(super) async fn create_chat_completion(
                 async move {
                     match chunk {
                         Ok(message) => {
-                            let decoded = codec::decode_chat_stream_chunk(&message);
+                            let decoded = text_chunk_from_runtime(message);
                             if decoded.done {
                                 let mut terminal = terminal_metadata
                                     .lock()
@@ -714,10 +709,7 @@ pub(super) async fn create_chat_completion(
             |error| AppCoreError::BackendNotReady(format!("llama backend not ready: {error}")),
         )?;
 
-    let generated = rpc::client::chat(llama_channel, grpc_request)
-        .await
-        .map_err(map_runtime_chat_error("chat"))?;
-    let mut response = codec::decode_chat_response(&generated);
+    let mut response = text_response_from_runtime(state.runtime().chat(request).await?);
 
     let usage = response.usage.clone().unwrap_or_else(|| {
         super::build_estimated_usage(&prompt, &response.text, response.tokens_used)
@@ -751,7 +743,7 @@ pub(super) async fn create_text_completion(
     model: &str,
     prompt: &str,
     config: LocalTextRequestConfig,
-) -> Result<slab_types::inference::TextGenerationResponse, AppCoreError> {
+) -> Result<TextGenerationResponse, AppCoreError> {
     let prompt_profile = model::resolve_local_chat_prompt_profile(state, model).await?;
     let prompt =
         apply_local_reasoning_controls_to_prompt(prompt, config.reasoning_effort, config.verbosity);
@@ -760,7 +752,8 @@ pub(super) async fn create_text_completion(
         config.structured_output.as_ref(),
         prompt_profile.default_gbnf.as_deref(),
     )?;
-    let request = TextGenerationRequest {
+    let request = RuntimeTextGenerationRequest {
+        model: model.to_owned(),
         prompt: prompt.clone(),
         system_prompt: None,
         max_tokens: Some(config.max_tokens),
@@ -770,25 +763,18 @@ pub(super) async fn create_text_completion(
         min_p: config.min_p,
         presence_penalty: config.presence_penalty,
         repetition_penalty: config.repetition_penalty,
+        session_key: None,
         stream: false,
         gbnf,
-        ..Default::default()
+        stop_sequences: Vec::new(),
     };
-    let grpc_request = codec::encode_chat_request(model.to_owned(), &request);
-
-    let llama_channel = state.grpc().chat_channel().ok_or_else(|| {
-        AppCoreError::BackendNotReady("llama gRPC endpoint is not configured".into())
-    })?;
 
     let _usage_guard =
         state.auto_unload().acquire_for_inference(super::LLAMA_BACKEND_ID).await.map_err(
             |error| AppCoreError::BackendNotReady(format!("llama backend not ready: {error}")),
         )?;
 
-    let generated = rpc::client::chat(llama_channel, grpc_request)
-        .await
-        .map_err(map_runtime_chat_error("chat"))?;
-    let mut response = codec::decode_chat_response(&generated);
+    let mut response = text_response_from_runtime(state.runtime().chat(request).await?);
 
     let usage = response.usage.clone().unwrap_or_else(|| {
         super::build_estimated_usage(&prompt, &response.text, response.tokens_used)
@@ -802,15 +788,35 @@ pub(super) async fn create_text_completion(
     Ok(response)
 }
 
-fn map_runtime_chat_error(
-    action: &'static str,
-) -> impl Fn(anyhow::Error) -> AppCoreError + Send + Sync + 'static {
-    move |error| {
-        if let Some(detail) = rpc::client::transient_runtime_detail(&error) {
-            AppCoreError::BackendNotReady(detail)
-        } else {
-            AppCoreError::Internal(format!("grpc {action} failed: {error}"))
-        }
+fn text_usage_from_runtime(usage: RuntimeTextGenerationUsage) -> TextGenerationUsage {
+    TextGenerationUsage {
+        prompt_tokens: usage.prompt_tokens,
+        completion_tokens: usage.completion_tokens,
+        total_tokens: usage.total_tokens,
+        prompt_tokens_details: TextPromptTokensDetails {
+            cached_tokens: usage.prompt_tokens_details.cached_tokens,
+        },
+        estimated: usage.estimated,
+    }
+}
+
+fn text_response_from_runtime(response: RuntimeTextGenerationResponse) -> TextGenerationResponse {
+    TextGenerationResponse {
+        text: response.text,
+        finish_reason: response.finish_reason,
+        tokens_used: response.tokens_used,
+        usage: response.usage.map(text_usage_from_runtime),
+        metadata: response.metadata,
+    }
+}
+
+fn text_chunk_from_runtime(chunk: RuntimeTextGenerationChunk) -> TextGenerationChunk {
+    TextGenerationChunk {
+        delta: chunk.delta,
+        done: chunk.done,
+        finish_reason: chunk.finish_reason,
+        usage: chunk.usage.map(text_usage_from_runtime),
+        metadata: chunk.metadata,
     }
 }
 
@@ -824,11 +830,9 @@ mod tests {
     };
     use crate::domain::models::{
         ChatReasoningEffort, ChatVerbosity, ConversationMessage as DomainConversationMessage,
-        ConversationMessageContent,
+        ConversationMessageContent, TextGenerationResponse,
     };
     use serde_json::json;
-    use slab_types::inference::TextGenerationResponse;
-
     #[test]
     fn parse_thinking_output_extracts_reasoning_block() {
         let parsed = parse_thinking_output("<think>step one</think>\n\nfinal answer", true);

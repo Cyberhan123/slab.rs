@@ -1,9 +1,10 @@
+use std::collections::BTreeMap;
+
 pub use slab_types::chat::{
     ChatModelCapabilities, ChatModelSource, ChatReasoningEffort, ChatVerbosity,
     ConversationContentPart, ConversationMessage, ConversationMessageContent, ConversationToolCall,
     ConversationToolFunction,
 };
-pub use slab_types::inference::{TextGenerationResponse, TextGenerationUsage};
 
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,40 @@ use crate::domain::models::ManagedModelBackendId;
 const SESSION_MESSAGE_STORAGE_VERSION: u8 = 2;
 const SESSION_MESSAGE_STORAGE_KIND: &str = "conversation_message";
 const REASONING_CONTENT_METADATA_KEY: &str = "reasoning_content";
+
+pub type JsonOptions = BTreeMap<String, Value>;
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TextPromptTokensDetails {
+    pub cached_tokens: u32,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TextGenerationUsage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+    pub prompt_tokens_details: TextPromptTokensDetails,
+    pub estimated: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct TextGenerationResponse {
+    pub text: String,
+    pub finish_reason: Option<String>,
+    pub tokens_used: Option<u32>,
+    pub usage: Option<TextGenerationUsage>,
+    pub metadata: JsonOptions,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct TextGenerationChunk {
+    pub delta: String,
+    pub done: bool,
+    pub finish_reason: Option<String>,
+    pub usage: Option<TextGenerationUsage>,
+    pub metadata: JsonOptions,
+}
 
 pub enum ChatStreamChunk {
     Data(String),
@@ -308,11 +343,9 @@ fn sanitize_structured_output_name(value: Option<&str>) -> String {
 mod test {
     use super::{
         ConversationContentPart, ConversationMessage, ConversationMessageContent,
-        ConversationToolCall, ConversationToolFunction,
+        ConversationToolCall, ConversationToolFunction, JsonOptions, TextGenerationResponse,
     };
     use serde_json::json;
-    use slab_types::inference::TextGenerationResponse;
-
     #[test]
     fn structured_session_messages_round_trip_through_json_storage() {
         let message = ConversationMessage {
@@ -384,7 +417,7 @@ mod test {
 
     #[test]
     fn assistant_reasoning_is_embedded_in_session_text_content() {
-        let mut metadata = slab_types::inference::JsonOptions::default();
+        let mut metadata = JsonOptions::default();
         metadata.insert("reasoning_content".into(), json!("step by step"));
         let response = TextGenerationResponse {
             text: "final answer".into(),

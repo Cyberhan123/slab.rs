@@ -2,10 +2,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use slab_types::RuntimeBackendId;
-use slab_types::diffusion::{
-    DiffusionRequestCommon, DiffusionVideoBackend, DiffusionVideoRequest, GgmlDiffusionVideoParams,
-};
-use slab_types::media::RawImageInput;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -15,6 +11,7 @@ use crate::domain::models::{
     AcceptedOperation, TaskResult, TaskStatus, VIDEO_GENERATION_TASK_TYPE, VideoGenerationCommand,
     VideoGenerationTaskView,
 };
+use crate::domain::ports::{RuntimeDiffusionVideoRequest, RuntimeRawImageInput};
 use crate::domain::services::media_task::{
     cleanup_dir, parse_json_value, read_managed_file, save_rgb_png,
 };
@@ -22,7 +19,6 @@ use crate::error::AppCoreError;
 use crate::infra::db::{
     MediaTaskStore, NewVideoGenerationTaskRecord, TaskRecord, VideoGenerationTaskViewRecord,
 };
-use crate::infra::rpc::{self, codec};
 
 const VIDEO_BACKEND_ID: &str = "ggml.diffusion";
 
@@ -47,10 +43,11 @@ impl VideoService {
             "video generation request"
         );
 
-        let generate_image_channel =
-            self.state.grpc().generate_image_channel().ok_or_else(|| {
-                AppCoreError::BackendNotReady("diffusion gRPC endpoint is not configured".into())
-            })?;
+        if !self.state.runtime().backend_available(RuntimeBackendId::GgmlDiffusion) {
+            return Err(AppCoreError::BackendNotReady(
+                "diffusion gRPC endpoint is not configured".into(),
+            ));
+        }
 
         let operation_id = Uuid::new_v4().to_string();
         let output_dir = video_task_dir(&self.output_root(), &operation_id);
@@ -90,33 +87,28 @@ impl VideoService {
         .to_string();
 
         let fps = req.fps;
-        let grpc_request = DiffusionVideoRequest {
-            common: DiffusionRequestCommon {
-                prompt: req.prompt.clone(),
-                negative_prompt: req.negative_prompt.clone(),
-                width: req.width,
-                height: req.height,
-                init_image: req.init_image.map(|image| RawImageInput {
-                    data: image.data,
-                    width: image.width,
-                    height: image.height,
-                    channels: image.channels.clamp(1, u8::MAX as u32) as u8,
-                }),
-                options: Default::default(),
-            },
-            backend: DiffusionVideoBackend::Ggml(GgmlDiffusionVideoParams {
-                video_frames: Some(req.video_frames),
-                fps: Some(req.fps),
-                cfg_scale: req.cfg_scale,
-                guidance: req.guidance,
-                steps: req.steps,
-                seed: req.seed,
-                sample_method: req.sample_method.clone(),
-                scheduler: req.scheduler.clone(),
-                strength: req.strength,
+        let runtime_request = RuntimeDiffusionVideoRequest {
+            model: req.model.clone(),
+            prompt: req.prompt.clone(),
+            negative_prompt: req.negative_prompt.clone(),
+            width: req.width,
+            height: req.height,
+            init_image: req.init_image.map(|image| RuntimeRawImageInput {
+                data: image.data,
+                width: image.width,
+                height: image.height,
+                channels: image.channels.clamp(1, u8::MAX as u32) as u8,
             }),
+            video_frames: Some(req.video_frames),
+            fps: Some(req.fps),
+            cfg_scale: req.cfg_scale,
+            guidance: req.guidance,
+            steps: req.steps,
+            seed: req.seed,
+            sample_method: req.sample_method.clone(),
+            scheduler: req.scheduler.clone(),
+            strength: req.strength,
         };
-        let grpc_req = codec::encode_diffusion_video_request(req.model.clone(), &grpc_request);
 
         let now = chrono::Utc::now();
         let task_record = TaskRecord {
@@ -159,7 +151,7 @@ impl VideoService {
 
         let model_auto_unload = Arc::clone(self.state.auto_unload());
         let store = Arc::clone(self.state.store());
-        let generate_image_channel_for_spawn = generate_image_channel;
+        let worker_state = self.state.clone();
         let output_root = self.output_root();
         self.state
             .clone()
@@ -181,13 +173,13 @@ impl VideoService {
                     }
                 };
 
-                let rpc_result = rpc::client::generate_video(generate_image_channel_for_spawn, grpc_req).await;
+                let rpc_result = worker_state.runtime().generate_video(runtime_request).await;
                 if operation.is_cancelled().await {
                     cleanup_dir(&task_output_dir).await;
                     return;
                 }
 
-                let response = match rpc_result {
+                let frames = match rpc_result {
                     Ok(payload) => payload,
                     Err(error) => {
                         cleanup_dir(&task_output_dir).await;
@@ -196,19 +188,7 @@ impl VideoService {
                         }
                         return;
                     }
-                };
-
-                let frames = match codec::decode_diffusion_video_response(&response) {
-                    Ok(value) => value.frames,
-                    Err(error) => {
-                        let message = format!("failed to decode frames from diffusion backend: {error}");
-                        cleanup_dir(&task_output_dir).await;
-                        if let Err(db_error) = operation.mark_failed(&message).await {
-                            warn!(task_id = %operation_id, error = %db_error, "failed to persist frame decode error");
-                        }
-                        return;
-                    }
-                };
+                }.frames;
 
                 if frames.is_empty() {
                     cleanup_dir(&task_output_dir).await;
