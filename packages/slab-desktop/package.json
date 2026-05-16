@@ -58,7 +58,7 @@
     "monaco-editor": "npm:@codingame/monaco-vscode-editor-api@^31.0.0",
     "monaco-languageclient": "^10.7.0",
     "react": "^19.2.5",
-    "react-arborist": "^3.5.0",
+    "react-arborist": "^3.6.1",
     "react-dom": "^19.2.5",
     "react-router-dom": "^7.14.1",
     "request-light": "~0.8.0",
