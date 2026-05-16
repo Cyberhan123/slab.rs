@@ -35,6 +35,10 @@ export function languageForFile(fileName: string) {
   const baseName = fileName.split("/").pop() ?? fileName
 
   // Detect by exact filename first (for files without extensions like Makefile, Dockerfile)
+  if (baseName.startsWith(".env")) {
+    return "dotenv"
+  }
+
   switch (baseName) {
     case "Dockerfile":
     case "dockerfile":
@@ -43,13 +47,6 @@ export function languageForFile(fileName: string) {
     case "makefile":
     case "GNUmakefile":
       return "makefile"
-    case ".env":
-    case ".env.local":
-    case ".env.development":
-    case ".env.production":
-    case ".env.test":
-    case ".env.example":
-      return "dotenv"
   }
 
   switch (extension) {
