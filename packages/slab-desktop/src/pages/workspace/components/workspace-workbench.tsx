@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslation } from "@slab/i18n"
 import { Button } from "@slab/components/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@slab/components/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@slab/components/tooltip"
 import { SoftPanel, StageEmptyState, StatusPill } from "@slab/components/workspace"
 import { Tree } from "react-arborist"
@@ -17,6 +18,7 @@ import {
   Loader2,
   Save,
   Search,
+  Settings2,
   Terminal,
   X,
 } from "lucide-react"
@@ -30,6 +32,7 @@ import { RecentWorkspaceList } from "./recent-workspace-list"
 import { WorkspaceConsolePanel } from "./workspace-console-panel"
 import { WorkspaceCodeEditor } from "./workspace-code-editor"
 import { WorkspaceCommandPalette } from "./workspace-command-palette"
+import { WorkspaceDiffEditor } from "./workspace-diff-editor"
 import { WorkspaceGitPanel } from "./workspace-git-panel"
 import { WorkspaceMarkdownPreview } from "./workspace-markdown-preview"
 import { WorkspaceSearchPanel } from "./workspace-search-panel"
@@ -40,6 +43,7 @@ export function WorkspaceWorkbench({
   consoleOpen,
   editorContent,
   editorRevealTarget,
+  editorSettings,
   editorTheme,
   explorerPanel,
   fileError,
@@ -68,6 +72,7 @@ export function WorkspaceWorkbench({
   handleSetMarkdownMode,
   handleTreeToggle,
   handleToggleConsole,
+  handleUpdateEditorSettings,
   initialOpenState,
   isDesktopTauri,
   loadDirectory,
@@ -99,9 +104,6 @@ export function WorkspaceWorkbench({
   const selectedFileLanguage = selectedFile ? languageForFile(selectedFile.name) : "plaintext"
   const selectedFileLspLanguage = selectedFile ? lspLanguageForFile(selectedFile.name) : "plaintext"
   const isMarkdownFile = selectedFileLanguage === "markdown"
-  const selectedGitDiffEditorPath = selectedGitDiff
-    ? `.slab-git-diff/${selectedGitDiff.staged ? "staged" : "changes"}/${selectedGitDiff.path}.diff`
-    : ""
   const terminalThemeMode = editorTheme === "vs-dark" ? "dark" : "light"
   const selectedFileBreadcrumbs = selectedFile?.relativePath.split("/").filter(Boolean) ?? []
   const editorsWithEscapeHandlerRef = useRef(new WeakSet<import("monaco-editor").editor.IStandaloneCodeEditor>())
@@ -515,6 +517,91 @@ export function WorkspaceWorkbench({
                       </button>
                     </div>
                   ) : null}
+                  <Popover>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <PopoverTrigger asChild>
+                          <Button type="button" variant="quiet" size="icon-sm" aria-label={t("pages.workspace.editor.settings")}>
+                            <Settings2 className="size-4" />
+                          </Button>
+                        </PopoverTrigger>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("pages.workspace.editor.settings")}</TooltipContent>
+                    </Tooltip>
+                    <PopoverContent className="w-56 p-3" align="end">
+                      <div className="space-y-3 text-sm">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-muted-foreground">{t("pages.workspace.editor.settingsFontSize")}</span>
+                          <select
+                            className="h-7 rounded-[6px] border border-border/60 bg-background px-2 text-xs outline-none focus:border-[var(--brand-teal)]"
+                            value={editorSettings.fontSize}
+                            onChange={(e) => handleUpdateEditorSettings({ fontSize: Number(e.target.value) })}
+                          >
+                            {[12, 13, 14, 15, 16, 18, 20].map((size) => (
+                              <option key={size} value={size}>{size}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-muted-foreground">{t("pages.workspace.editor.settingsTabSize")}</span>
+                          <select
+                            className="h-7 rounded-[6px] border border-border/60 bg-background px-2 text-xs outline-none focus:border-[var(--brand-teal)]"
+                            value={editorSettings.tabSize}
+                            onChange={(e) => handleUpdateEditorSettings({ tabSize: Number(e.target.value) })}
+                          >
+                            <option value={2}>2</option>
+                            <option value={4}>4</option>
+                            <option value={8}>8</option>
+                          </select>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-muted-foreground">{t("pages.workspace.editor.settingsWordWrap")}</span>
+                          <div className="flex items-center gap-1 rounded-full bg-[var(--surface-1)] p-0.5">
+                            <button
+                              type="button"
+                              className={cn(
+                                "flex h-6 items-center rounded-full px-2 text-[11px] text-muted-foreground transition hover:text-foreground",
+                                editorSettings.wordWrap === "on" && "bg-background text-foreground shadow-sm",
+                              )}
+                              onClick={() => handleUpdateEditorSettings({ wordWrap: "on" })}
+                            >
+                              {t("pages.workspace.editor.settingsWordWrapOn")}
+                            </button>
+                            <button
+                              type="button"
+                              className={cn(
+                                "flex h-6 items-center rounded-full px-2 text-[11px] text-muted-foreground transition hover:text-foreground",
+                                editorSettings.wordWrap === "off" && "bg-background text-foreground shadow-sm",
+                              )}
+                              onClick={() => handleUpdateEditorSettings({ wordWrap: "off" })}
+                            >
+                              {t("pages.workspace.editor.settingsWordWrapOff")}
+                            </button>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-muted-foreground">{t("pages.workspace.editor.settingsMinimap")}</span>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={editorSettings.minimapEnabled}
+                            className={cn(
+                              "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors",
+                              editorSettings.minimapEnabled ? "bg-[var(--brand-teal)]" : "bg-muted",
+                            )}
+                            onClick={() => handleUpdateEditorSettings({ minimapEnabled: !editorSettings.minimapEnabled })}
+                          >
+                            <span
+                              className={cn(
+                                "pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm ring-0 transition-transform",
+                                editorSettings.minimapEnabled ? "translate-x-4" : "translate-x-0",
+                              )}
+                            />
+                          </button>
+                        </div>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                   <Button
                     type="button"
                     variant={selectedFileDirty ? "cta" : "quiet"}
@@ -559,17 +646,22 @@ export function WorkspaceWorkbench({
                     onMount={handleWorkspaceEditorMount}
                     options={{
                       readOnly: savingFile,
-                      minimap: { enabled: false },
+                      minimap: { enabled: editorSettings.minimapEnabled },
                       scrollBeyondLastLine: false,
-                      wordWrap: "on",
-                      fontSize: 13,
-                      tabSize: 2,
+                      wordWrap: editorSettings.wordWrap,
+                      fontSize: editorSettings.fontSize,
+                      tabSize: editorSettings.tabSize,
                       codeLens: true,
                       inlayHints: { enabled: "on" },
                       parameterHints: { enabled: true },
                       quickSuggestions: true,
                       renameOnType: true,
                       suggestOnTriggerCharacters: true,
+                      bracketPairColorization: { enabled: true },
+                      stickyScroll: { enabled: true },
+                      guides: { bracketPairs: true, indentation: true },
+                      foldingHighlight: true,
+                      cursorSmoothCaretAnimation: "on",
                     }}
                     revealTarget={editorRevealTarget}
                     theme={editorTheme}
@@ -579,22 +671,10 @@ export function WorkspaceWorkbench({
               )
             ) : selectedGitDiffEntry ? (
               <div className="min-h-0 flex-1">
-                <WorkspaceCodeEditor
-                  filePath={workspaceLspModelPath(workspace.rootPath, selectedGitDiffEditorPath)}
-                  language="diff"
-                  memoryModel
-                  onChange={() => {}}
-                  options={{
-                    readOnly: true,
-                    minimap: { enabled: false },
-                    scrollBeyondLastLine: false,
-                    wordWrap: "off",
-                    fontSize: 13,
-                    tabSize: 2,
-                    lineNumbersMinChars: 3,
-                  }}
+                <WorkspaceDiffEditor
+                  diffText={selectedGitDiff?.diff.trim() ?? ""}
+                  filePath={selectedGitDiffEntry.path}
                   theme={editorTheme}
-                  value={selectedGitDiff?.diff.trim() || t("pages.workspace.git.noDiff")}
                 />
               </div>
             ) : (
