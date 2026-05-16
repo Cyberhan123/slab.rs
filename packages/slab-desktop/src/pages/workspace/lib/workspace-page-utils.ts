@@ -32,6 +32,23 @@ export function insertChildren(
 
 export function languageForFile(fileName: string) {
   const extension = fileName.split(".").pop()?.toLowerCase()
+  const baseName = fileName.split("/").pop() ?? fileName
+
+  // Detect by exact filename first (for files without extensions like Makefile, Dockerfile)
+  if (baseName.startsWith(".env")) {
+    return "dotenv"
+  }
+
+  switch (baseName) {
+    case "Dockerfile":
+    case "dockerfile":
+      return "dockerfile"
+    case "Makefile":
+    case "makefile":
+    case "GNUmakefile":
+      return "makefile"
+  }
+
   switch (extension) {
     case "ts":
     case "tsx":
@@ -58,6 +75,7 @@ export function languageForFile(fileName: string) {
     case "hpp":
       return "cpp"
     case "json":
+    case "jsonc":
       return "json"
     case "md":
     case "mdx":
@@ -86,6 +104,38 @@ export function languageForFile(fileName: string) {
     case "yaml":
     case "yml":
       return "yaml"
+    case "dockerfile":
+      return "dockerfile"
+    case "graphql":
+    case "gql":
+      return "graphql"
+    case "vue":
+      return "vue"
+    case "svelte":
+      return "svelte"
+    case "rb":
+      return "ruby"
+    case "php":
+      return "php"
+    case "lua":
+      return "lua"
+    case "r":
+      return "r"
+    case "swift":
+      return "swift"
+    case "kt":
+    case "kts":
+      return "kotlin"
+    case "cs":
+      return "csharp"
+    case "env":
+      return "dotenv"
+    case "ini":
+    case "cfg":
+    case "conf":
+      return "ini"
+    case "proto":
+      return "proto"
     default:
       return "plaintext"
   }

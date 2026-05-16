@@ -14,7 +14,7 @@
     "security": {
       "csp": {
         "default-src": "'self' asset:",
-        "script-src": "'self' asset: http://127.0.0.1:3000 blob:",
+        "script-src": "'self' asset: http://127.0.0.1:3000 blob: 'wasm-unsafe-eval'",
         "connect-src": [
           "'self'",
           "ipc:",
