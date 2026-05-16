@@ -6,10 +6,12 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString};
 
 /// Lifecycle status of a single agent thread.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Display, EnumString)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum AgentThreadStatus {
     /// Created but not yet executing.
     Pending,
@@ -24,8 +26,9 @@ pub enum AgentThreadStatus {
 }
 
 /// Lifecycle status of a single tool call within an agent thread.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Display, EnumString)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum ToolCallStatus {
     /// Queued but not yet executing.
     Pending,

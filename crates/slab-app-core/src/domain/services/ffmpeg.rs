@@ -1,5 +1,7 @@
 use std::process::Stdio;
+use std::sync::OnceLock;
 
+use regex::Regex;
 use tokio::io::AsyncReadExt;
 use tracing::{info, warn};
 
@@ -314,23 +316,25 @@ async fn publish_ffmpeg_progress(
 }
 
 fn parse_ffmpeg_duration_ms(line: &str) -> Option<u64> {
-    let (_, after) = line.split_once("Duration:")?;
-    let value = after.split(',').next()?.trim();
-    parse_ffmpeg_timestamp_ms(value)
+    let captures = ffmpeg_duration_regex().captures(line)?;
+    parse_ffmpeg_timestamp_captures(&captures)
 }
 
 fn parse_ffmpeg_time_ms(line: &str) -> Option<u64> {
-    let start = line.find("time=")? + "time=".len();
-    let value = line[start..].trim_start().split_whitespace().next()?;
-    parse_ffmpeg_timestamp_ms(value)
+    let captures = ffmpeg_time_regex().captures(line)?;
+    parse_ffmpeg_timestamp_captures(&captures)
 }
 
 fn parse_ffmpeg_timestamp_ms(value: &str) -> Option<u64> {
-    let mut parts = value.split(':');
-    let hours = parts.next()?.parse::<u64>().ok()?;
-    let minutes = parts.next()?.parse::<u64>().ok()?;
-    let seconds = parts.next()?.parse::<f64>().ok()?;
-    if parts.next().is_some() || !seconds.is_finite() || minutes >= 60 {
+    let captures = ffmpeg_timestamp_regex().captures(value.trim())?;
+    parse_ffmpeg_timestamp_captures(&captures)
+}
+
+fn parse_ffmpeg_timestamp_captures(captures: &regex::Captures<'_>) -> Option<u64> {
+    let hours = captures.get(1)?.as_str().parse::<u64>().ok()?;
+    let minutes = captures.get(2)?.as_str().parse::<u64>().ok()?;
+    let seconds = captures.get(3)?.as_str().parse::<f64>().ok()?;
+    if !seconds.is_finite() || seconds.is_sign_negative() {
         return None;
     }
 
@@ -340,6 +344,30 @@ fn parse_ffmpeg_timestamp_ms(value: &str) -> Option<u64> {
             .saturating_add(minutes.saturating_mul(60_000))
             .saturating_add((seconds * 1_000.0).round().max(0.0) as u64),
     )
+}
+
+fn ffmpeg_duration_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)")
+            .expect("ffmpeg duration regex should be valid")
+    })
+}
+
+fn ffmpeg_time_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"(?:^|\s)time=(\d+):(\d{2}):(\d{2}(?:\.\d+)?)")
+            .expect("ffmpeg progress regex should be valid")
+    })
+}
+
+fn ffmpeg_timestamp_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"^(\d+):(\d{2}):(\d{2}(?:\.\d+)?)$")
+            .expect("ffmpeg timestamp regex should be valid")
+    })
 }
 
 #[cfg(test)]

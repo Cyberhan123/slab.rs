@@ -6,13 +6,19 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use slab_types::{Capability, RuntimeBackendId};
+use strum::{Display, EnumString};
 
 // ---------------------------------------------------------------------------
 // Status enum
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Display, EnumString)]
 #[serde(rename_all = "snake_case")]
+#[strum(
+    serialize_all = "snake_case",
+    parse_err_ty = String,
+    parse_err_fn = parse_unified_model_status_error
+)]
 pub enum UnifiedModelStatus {
     Ready,
     NotDownloaded,
@@ -31,21 +37,17 @@ impl UnifiedModelStatus {
     }
 }
 
-impl FromStr for UnifiedModelStatus {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "ready" => Ok(Self::Ready),
-            "not_downloaded" => Ok(Self::NotDownloaded),
-            "downloading" => Ok(Self::Downloading),
-            "error" => Ok(Self::Error),
-            other => Err(format!("unknown model status: {other}")),
-        }
-    }
+fn parse_unified_model_status_error(value: &str) -> String {
+    format!("unknown model status: {value}")
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString)]
 #[serde(rename_all = "snake_case")]
+#[strum(
+    serialize_all = "snake_case",
+    parse_err_ty = String,
+    parse_err_fn = parse_unified_model_kind_error
+)]
 pub enum UnifiedModelKind {
     Local,
     Cloud,
@@ -60,16 +62,8 @@ impl UnifiedModelKind {
     }
 }
 
-impl FromStr for UnifiedModelKind {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "local" => Ok(Self::Local),
-            "cloud" => Ok(Self::Cloud),
-            other => Err(format!("unknown model kind: {other}")),
-        }
-    }
+fn parse_unified_model_kind_error(value: &str) -> String {
+    format!("unknown model kind: {value}")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

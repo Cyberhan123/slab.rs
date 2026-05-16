@@ -8896,6 +8896,7 @@ dependencies = [
  "jsonschema",
  "minijinja",
  "parity-tokio-ipc",
+ "regex",
  "reqwest 0.13.2",
  "serde",
  "serde_json",
@@ -8995,6 +8996,7 @@ dependencies = [
  "huggingface-hub",
  "models-cat",
  "reqwest 0.13.2",
+ "strum",
  "thiserror 2.0.18",
 ]
 
@@ -9005,6 +9007,7 @@ dependencies = [
  "anyhow",
  "flate2",
  "hex",
+ "minijinja",
  "reqwest 0.13.2",
  "serde",
  "serde_json",
@@ -9204,6 +9207,7 @@ dependencies = [
  "schemars 1.2.1",
  "serde",
  "serde_json",
+ "strum",
  "thiserror 2.0.18",
  "utoipa",
  "uuid",

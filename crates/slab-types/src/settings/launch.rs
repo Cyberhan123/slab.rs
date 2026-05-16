@@ -2,16 +2,40 @@ use std::str::FromStr;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString};
 
 use crate::error::SlabTypeError;
 use crate::{DESKTOP_API_BIND, DESKTOP_API_HOST, DESKTOP_API_PORT};
 
 /// Shared runtime transport modes supported by the supervisor and gateway.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Default,
+    Display,
+    EnumString,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(
+    parse_err_ty = SlabTypeError,
+    parse_err_fn = parse_runtime_transport_mode_error
+)]
 pub enum RuntimeTransportMode {
+    #[strum(
+        to_string = "http",
+        serialize = "http",
+        serialize = "both",
+        ascii_case_insensitive
+    )]
     #[default]
     Http,
+    #[strum(to_string = "ipc", serialize = "ipc", ascii_case_insensitive)]
     Ipc,
 }
 
@@ -24,18 +48,11 @@ impl RuntimeTransportMode {
     }
 }
 
-impl FromStr for RuntimeTransportMode {
-    type Err = SlabTypeError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "http" | "both" => Ok(Self::Http),
-            "ipc" => Ok(Self::Ipc),
-            other => Err(SlabTypeError::Parse(format!(
-                "invalid runtime transport '{other}'; expected 'http' or 'ipc'"
-            ))),
-        }
-    }
+fn parse_runtime_transport_mode_error(value: &str) -> SlabTypeError {
+    let normalized = value.trim().to_ascii_lowercase();
+    SlabTypeError::Parse(format!(
+        "invalid runtime transport '{normalized}'; expected 'http' or 'ipc'"
+    ))
 }
 
 /// Shared launch settings used to build host-specific runtime supervisor plans.

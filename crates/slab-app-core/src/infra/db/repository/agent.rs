@@ -7,40 +7,15 @@ use slab_types::agent::ToolCallStatus;
 
 use super::SqlxStore;
 
-fn status_str(s: ThreadStatus) -> &'static str {
-    match s {
-        ThreadStatus::Pending => "pending",
-        ThreadStatus::Running => "running",
-        ThreadStatus::Completed => "completed",
-        ThreadStatus::Errored => "errored",
-        ThreadStatus::Shutdown => "shutdown",
-    }
-}
-
 fn parse_status(s: &str) -> ThreadStatus {
-    match s {
-        "pending" => ThreadStatus::Pending,
-        "running" => ThreadStatus::Running,
-        "completed" => ThreadStatus::Completed,
-        "errored" => ThreadStatus::Errored,
-        "shutdown" => ThreadStatus::Shutdown,
-        other => {
-            tracing::warn!(
-                raw = other,
-                "unknown agent thread status in database; defaulting to Pending"
-            );
-            ThreadStatus::Pending
-        }
-    }
-}
-
-fn tool_call_status_str(s: ToolCallStatus) -> &'static str {
-    match s {
-        ToolCallStatus::Pending => "pending",
-        ToolCallStatus::Running => "running",
-        ToolCallStatus::Completed => "completed",
-        ToolCallStatus::Failed => "failed",
-    }
+    s.parse::<ThreadStatus>().unwrap_or_else(|error| {
+        tracing::warn!(
+            raw = s,
+            error = %error,
+            "unknown agent thread status in database; defaulting to Pending"
+        );
+        ThreadStatus::Pending
+    })
 }
 
 /// sqlx row type for the `agent_threads` table.
@@ -98,7 +73,7 @@ impl AgentStorePort for SqlxStore {
         .bind(&snapshot.session_id)
         .bind(&snapshot.parent_id)
         .bind(snapshot.depth as i64)
-        .bind(status_str(snapshot.status))
+        .bind(snapshot.status.to_string())
         .bind(&snapshot.role_name)
         .bind(&snapshot.config_json)
         .bind(&snapshot.completion_text)
@@ -135,7 +110,7 @@ impl AgentStorePort for SqlxStore {
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
              WHERE id = ?3",
         )
-        .bind(status_str(status))
+        .bind(status.to_string())
         .bind(completion_text)
         .bind(id)
         .execute(&self.pool)
@@ -158,7 +133,7 @@ impl AgentStorePort for SqlxStore {
         .bind(&record.tool_name)
         .bind(&record.arguments)
         .bind(&record.output)
-        .bind(tool_call_status_str(record.status))
+        .bind(record.status.to_string())
         .bind(&record.created_at)
         .bind(&record.completed_at)
         .execute(&self.pool)
@@ -179,7 +154,7 @@ impl AgentStorePort for SqlxStore {
              WHERE id = ?4",
         )
         .bind(output)
-        .bind(tool_call_status_str(status))
+        .bind(status.to_string())
         .bind(completed_at)
         .bind(id)
         .execute(&self.pool)

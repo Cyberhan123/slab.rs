@@ -7,6 +7,7 @@ use tokio::process::{Child, ChildStdin, Command as TokioCommand};
 use tracing::{info, warn};
 
 use crate::error::AppCoreError;
+use crate::infra::endpoint::{http_probe_authority, normalize_ipc_endpoint_path};
 use crate::launch::ResolvedRuntimeChildSpec;
 
 use super::supervisor::{RuntimeChildExit, RuntimeChildHandle, RuntimeChildSpawner};
@@ -109,41 +110,23 @@ async fn runtime_endpoint_ready(
 }
 
 fn normalize_http_probe_target(bind_address: &str) -> Result<String, AppCoreError> {
-    let trimmed = bind_address.trim();
-    if trimmed.is_empty() {
-        return Err(AppCoreError::Internal("runtime child HTTP bind address is empty".to_owned()));
-    }
-
-    let without_scheme = trimmed
-        .strip_prefix("http://")
-        .or_else(|| trimmed.strip_prefix("https://"))
-        .unwrap_or(trimmed);
-    let authority = without_scheme.split('/').next().unwrap_or("").trim();
-    if authority.is_empty() {
-        return Err(AppCoreError::Internal(format!(
-            "runtime child HTTP bind address '{}' is invalid",
-            bind_address
-        )));
-    }
-
-    Ok(authority.to_owned())
+    http_probe_authority(bind_address)
+        .map_err(|error| invalid_runtime_bind_address("HTTP", bind_address, error))
 }
 
 fn normalize_ipc_probe_target(bind_address: &str) -> Result<String, AppCoreError> {
-    let trimmed = bind_address.trim();
-    if trimmed.is_empty() {
-        return Err(AppCoreError::Internal("runtime child IPC bind address is empty".to_owned()));
-    }
+    normalize_ipc_endpoint_path(bind_address)
+        .map_err(|error| invalid_runtime_bind_address("IPC", bind_address, error))
+}
 
-    let path = trimmed.strip_prefix("ipc://").unwrap_or(trimmed).trim();
-    if path.is_empty() {
-        return Err(AppCoreError::Internal(format!(
-            "runtime child IPC bind address '{}' is invalid",
-            bind_address
-        )));
-    }
-
-    Ok(path.to_owned())
+fn invalid_runtime_bind_address(
+    transport: &str,
+    bind_address: &str,
+    error: anyhow::Error,
+) -> AppCoreError {
+    AppCoreError::Internal(format!(
+        "runtime child {transport} bind address '{bind_address}' is invalid: {error}"
+    ))
 }
 
 async fn terminate_failed_start_child(child_spec: &ResolvedRuntimeChildSpec, child: &mut Child) {

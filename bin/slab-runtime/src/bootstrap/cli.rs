@@ -1,9 +1,19 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 
-use crate::infra::config::{RuntimeConfig, parse_enabled_backends, resolve_base_lib_path};
+use crate::infra::config::{EnabledBackends, RuntimeConfig, resolve_base_lib_path};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum EnabledBackendArg {
+    #[value(alias = "ggml.llama")]
+    Llama,
+    #[value(alias = "ggml.whisper")]
+    Whisper,
+    #[value(alias = "ggml.diffusion")]
+    Diffusion,
+}
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "slab-runtime", version, about = "Slab gRPC runtime worker")]
@@ -22,8 +32,8 @@ pub struct Cli {
     pub lib_dir: Option<PathBuf>,
     #[arg(long = "log-file")]
     pub log_file: Option<PathBuf>,
-    #[arg(long = "enabled-backends")]
-    pub enabled_backends: Option<String>,
+    #[arg(long = "enabled-backends", value_enum, value_delimiter = ',', ignore_case = true)]
+    enabled_backends: Vec<EnabledBackendArg>,
     #[arg(long, default_value_t = false)]
     pub shutdown_on_stdin_close: bool,
 }
@@ -34,7 +44,19 @@ impl Cli {
     }
 
     pub fn into_runtime_config(self) -> anyhow::Result<RuntimeConfig> {
-        let enabled_backends = parse_enabled_backends(self.enabled_backends.as_deref())?;
+        let enabled_backends = if self.enabled_backends.is_empty() {
+            EnabledBackends::all()
+        } else {
+            let mut enabled = EnabledBackends { llama: false, whisper: false, diffusion: false };
+            for backend in self.enabled_backends {
+                match backend {
+                    EnabledBackendArg::Llama => enabled.llama = true,
+                    EnabledBackendArg::Whisper => enabled.whisper = true,
+                    EnabledBackendArg::Diffusion => enabled.diffusion = true,
+                }
+            }
+            enabled
+        };
         let current_dir =
             std::env::current_dir().context("failed to resolve slab-runtime current directory")?;
         let base_lib_path = resolve_base_lib_path(
@@ -63,5 +85,36 @@ impl Cli {
             enable_candle_diffusion: false,
             onnx_enabled: false,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Cli;
+    use clap::Parser;
+
+    #[test]
+    fn runtime_config_defaults_to_all_backends() {
+        let cli = <Cli as Parser>::try_parse_from(["slab-runtime"]).expect("parse cli");
+        let config = cli.into_runtime_config().expect("build runtime config");
+
+        assert!(config.enabled_backends.llama);
+        assert!(config.enabled_backends.whisper);
+        assert!(config.enabled_backends.diffusion);
+    }
+
+    #[test]
+    fn runtime_config_accepts_legacy_backend_aliases() {
+        let cli = <Cli as Parser>::try_parse_from([
+            "slab-runtime",
+            "--enabled-backends",
+            "ggml.llama,whisper",
+        ])
+        .expect("parse cli");
+        let config = cli.into_runtime_config().expect("build runtime config");
+
+        assert!(config.enabled_backends.llama);
+        assert!(config.enabled_backends.whisper);
+        assert!(!config.enabled_backends.diffusion);
     }
 }
