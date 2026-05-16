@@ -13,11 +13,11 @@ type PluginStateRow = (
     i64,
     String,
     Option<String>,
-    String,
-    String,
-    Option<String>,
-    Option<String>,
-    Option<String>,
+    DateTime<Utc>,
+    DateTime<Utc>,
+    Option<DateTime<Utc>>,
+    Option<DateTime<Utc>>,
+    Option<DateTime<Utc>>,
 );
 
 pub trait PluginStateStore: Send + Sync + 'static {
@@ -198,19 +198,12 @@ fn row_to_record(row: PluginStateRow) -> PluginStateRecord {
         enabled: row.6 != 0,
         runtime_status: row.7,
         last_error: row.8,
-        installed_at: parse_time("installed_at", &row.9),
-        updated_at: parse_time("updated_at", &row.10),
-        last_seen_at: row.11.as_deref().map(|value| parse_time("last_seen_at", value)),
-        last_started_at: row.12.as_deref().map(|value| parse_time("last_started_at", value)),
-        last_stopped_at: row.13.as_deref().map(|value| parse_time("last_stopped_at", value)),
+        installed_at: row.9,
+        updated_at: row.10,
+        last_seen_at: row.11,
+        last_started_at: row.12,
+        last_stopped_at: row.13,
     }
-}
-
-fn parse_time(field: &str, value: &str) -> DateTime<Utc> {
-    value.parse().unwrap_or_else(|error: chrono::ParseError| {
-        tracing::warn!(field, raw = %value, error = %error, "failed to parse plugin timestamp; using now");
-        Utc::now()
-    })
 }
 
 #[cfg(test)]
@@ -222,10 +215,9 @@ mod tests {
 
     #[tokio::test]
     async fn plugin_state_store_round_trips_lifecycle_fields() {
-        sqlx::any::install_default_drivers();
         let options =
-            sqlx::any::AnyConnectOptions::from_str("sqlite::memory:").expect("sqlite options");
-        let pool = sqlx::any::AnyPoolOptions::new()
+            sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:").expect("sqlite options");
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(1)
             .connect_with(options)
             .await

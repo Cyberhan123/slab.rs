@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Cursor;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use reqwest::Url;
@@ -943,30 +943,7 @@ fn validate_declared_file(
 }
 
 fn normalize_relative_path(raw: &str) -> Result<String, String> {
-    let trimmed = raw.trim().trim_start_matches('/');
-    if trimmed.is_empty() {
-        return Err("empty path is not allowed".to_owned());
-    }
-    let mut components = Vec::new();
-    for component in Path::new(trimmed).components() {
-        match component {
-            Component::Normal(segment) => {
-                let segment = segment.to_string_lossy();
-                if segment.is_empty() {
-                    return Err("empty path segment is not allowed".to_owned());
-                }
-                components.push(segment.to_string());
-            }
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(format!("path `{raw}` is invalid"));
-            }
-        }
-    }
-    if components.is_empty() {
-        return Err("path is invalid".to_owned());
-    }
-    Ok(components.join("/"))
+    slab_utils::path::normalize_relative_path(raw).map_err(|error| error.to_string())
 }
 
 fn is_valid_plugin_id(id: &str) -> bool {
@@ -1015,12 +992,7 @@ fn network_mode_label(mode: &PluginNetworkMode) -> &'static str {
 }
 
 fn hash_bytes_hex(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    let mut hex = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        hex.push_str(&format!("{byte:02x}"));
-    }
-    hex
+    hex::encode(Sha256::digest(bytes))
 }
 
 fn hash_file_hex(path: &Path) -> Result<String, std::io::Error> {

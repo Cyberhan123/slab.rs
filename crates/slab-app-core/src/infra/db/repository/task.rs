@@ -2,7 +2,7 @@ use super::AnyStore;
 use crate::domain::models::{TaskPayloadEnvelope, TaskStatus};
 use crate::infra::db::entities::TaskRecord;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::future::Future;
 use std::str::FromStr;
@@ -16,8 +16,8 @@ type TaskRow = (
     Option<String>,
     Option<String>,
     Option<i64>,
-    String,
-    String,
+    DateTime<Utc>,
+    DateTime<Utc>,
 );
 
 const TASK_PAYLOAD_KIND: &str = "task_result";
@@ -138,14 +138,8 @@ impl TaskStore for AnyStore {
                 result_data: decode_task_payload(result_data),
                 error_msg,
                 core_task_id,
-                created_at: created_at.parse().unwrap_or_else(|e: chrono::ParseError| {
-                    tracing::warn!(raw = %created_at, error = %e, "failed to parse task created_at; using now");
-                    Utc::now()
-                }),
-                updated_at: updated_at.parse().unwrap_or_else(|e: chrono::ParseError| {
-                    tracing::warn!(raw = %updated_at, error = %e, "failed to parse task updated_at; using now");
-                    Utc::now()
-                }),
+                created_at,
+                updated_at,
             }
         }))
     }
@@ -179,14 +173,8 @@ impl TaskStore for AnyStore {
                     result_data: decode_task_payload(result_data),
                     error_msg,
                     core_task_id,
-                    created_at: created_at.parse().unwrap_or_else(|e: chrono::ParseError| {
-                        tracing::warn!(raw = %created_at, error = %e, "failed to parse task created_at; using now");
-                        Utc::now()
-                    }),
-                    updated_at: updated_at.parse().unwrap_or_else(|e: chrono::ParseError| {
-                        tracing::warn!(raw = %updated_at, error = %e, "failed to parse task updated_at; using now");
-                        Utc::now()
-                    }),
+                    created_at,
+                    updated_at,
                 }
             })
             .collect())

@@ -2,7 +2,7 @@ use super::AnyStore;
 use crate::domain::models::TaskStatus;
 use crate::infra::db::TaskStore;
 use crate::infra::db::entities::{ModelDownloadRecord, TaskRecord};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use std::future::Future;
 
 type ModelDownloadRow = (
@@ -14,16 +14,9 @@ type ModelDownloadRow = (
     Option<String>,
     String,
     Option<String>,
-    String,
-    String,
+    DateTime<Utc>,
+    DateTime<Utc>,
 );
-
-fn parse_rfc3339_or_now(raw: String, field: &'static str) -> chrono::DateTime<Utc> {
-    raw.parse().unwrap_or_else(|e: chrono::ParseError| {
-        tracing::warn!(raw = %raw, error = %e, field, "failed to parse model download timestamp; using now");
-        Utc::now()
-    })
-}
 
 fn decode_task_status(raw: &str) -> TaskStatus {
     raw.parse::<TaskStatus>().unwrap_or_else(|_| {
@@ -55,8 +48,8 @@ fn row_to_record(
         hub_provider,
         status: decode_task_status(&status),
         error_msg,
-        created_at: parse_rfc3339_or_now(created_at, "created_at"),
-        updated_at: parse_rfc3339_or_now(updated_at, "updated_at"),
+        created_at,
+        updated_at,
     }
 }
 
@@ -231,10 +224,9 @@ mod tests {
     use std::str::FromStr;
 
     async fn new_store() -> AnyStore {
-        sqlx::any::install_default_drivers();
         let options =
-            sqlx::any::AnyConnectOptions::from_str("sqlite::memory:").expect("sqlite options");
-        let pool = sqlx::any::AnyPoolOptions::new()
+            sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:").expect("sqlite options");
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(1)
             .connect_with(options)
             .await

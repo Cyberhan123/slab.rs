@@ -1,9 +1,9 @@
 use super::AnyStore;
 use crate::infra::db::entities::UiStateRecord;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use std::future::Future;
 
-type UiStateRow = (String, String, String);
+type UiStateRow = (String, String, DateTime<Utc>);
 
 pub trait UiStateStore: Send + Sync + 'static {
     fn upsert_ui_state(
@@ -18,14 +18,7 @@ pub trait UiStateStore: Send + Sync + 'static {
 }
 
 fn row_to_record((key, value, updated_at): UiStateRow) -> UiStateRecord {
-    UiStateRecord {
-        key,
-        value,
-        updated_at: updated_at.parse().unwrap_or_else(|error: chrono::ParseError| {
-            tracing::warn!(raw = %updated_at, error = %error, "failed to parse ui_state updated_at; using now");
-            Utc::now()
-        }),
-    }
+    UiStateRecord { key, value, updated_at }
 }
 
 impl UiStateStore for AnyStore {
@@ -76,10 +69,9 @@ mod tests {
 
     #[tokio::test]
     async fn ui_state_store_round_trips_values() {
-        sqlx::any::install_default_drivers();
         let options =
-            sqlx::any::AnyConnectOptions::from_str("sqlite::memory:").expect("sqlite options");
-        let pool = sqlx::any::AnyPoolOptions::new()
+            sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:").expect("sqlite options");
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(1)
             .connect_with(options)
             .await

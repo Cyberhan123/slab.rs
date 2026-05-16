@@ -311,13 +311,25 @@ fn map_audio_view(row: AudioTranscriptionTaskViewRecord) -> AudioTranscriptionTa
 }
 
 fn parse_result_segments(raw: &str) -> Option<Vec<crate::domain::models::TimedTextSegment>> {
-    serde_json::from_str::<serde_json::Value>(raw)
-        .ok()?
-        .get("segments")
-        .cloned()
-        .and_then(|value| serde_json::from_value(value).ok())
+    serde_json::from_str::<TaskResult>(raw).ok()?.segments
 }
 
 fn to_json_string<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "null".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_result_segments;
+
+    #[test]
+    fn parses_segments_from_task_result_payload() {
+        let segments = parse_result_segments(
+            r#"{"text":"done","segments":[{"start_ms":0,"end_ms":120,"text":"hello"}]}"#,
+        )
+        .expect("segments should deserialize");
+
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].text.as_deref(), Some("hello"));
+    }
 }

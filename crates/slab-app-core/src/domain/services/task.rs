@@ -1,7 +1,7 @@
 use tracing::info;
 
 use crate::context::WorkerState;
-use crate::domain::models::{TaskResult, TaskStatus, TaskView, TimedTextSegment};
+use crate::domain::models::{TaskResult, TaskStatus, TaskView};
 use crate::error::AppCoreError;
 use crate::infra::db::TaskStore;
 
@@ -43,23 +43,10 @@ impl TaskApplicationService {
             TaskStatus::Succeeded => Ok(record
                 .result_data
                 .map(|data| {
-                    deserialize_task_result(&data).unwrap_or(TaskResult {
-                        image: None,
-                        images: None,
-                        video_path: None,
-                        output_path: None,
-                        text: Some(data),
-                        segments: None,
-                    })
+                    deserialize_task_result(&data)
+                        .unwrap_or(TaskResult { text: Some(data), ..TaskResult::default() })
                 })
-                .unwrap_or(TaskResult {
-                    image: None,
-                    images: None,
-                    video_path: None,
-                    output_path: None,
-                    text: None,
-                    segments: None,
-                })),
+                .unwrap_or_default()),
             status => {
                 Err(AppCoreError::BadRequest(format!("task is not succeeded (status: {status})")))
             }
@@ -112,19 +99,29 @@ impl TaskApplicationService {
 }
 
 fn deserialize_task_result(raw: &str) -> Result<TaskResult, serde_json::Error> {
-    let value: serde_json::Value = serde_json::from_str(raw)?;
-    Ok(TaskResult {
-        image: value.get("image").and_then(|v| v.as_str()).map(str::to_owned),
-        images: value
-            .get("images")
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|item| item.as_str().map(str::to_owned)).collect()),
-        video_path: value.get("video_path").and_then(|v| v.as_str()).map(str::to_owned),
-        output_path: value.get("output_path").and_then(|v| v.as_str()).map(str::to_owned),
-        text: value.get("text").and_then(|v| v.as_str()).map(str::to_owned),
-        segments: value
-            .get("segments")
-            .cloned()
-            .and_then(|value| serde_json::from_value::<Vec<TimedTextSegment>>(value).ok()),
-    })
+    serde_json::from_str(raw)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::deserialize_task_result;
+
+    #[test]
+    fn deserializes_structured_task_result() {
+        let result = deserialize_task_result(
+            r#"{"text":"done","images":["a.png","b.png"],"segments":[{"start_ms":0,"end_ms":120,"text":"hello"}]}"#,
+        )
+        .expect("task result should deserialize");
+
+        assert_eq!(result.text.as_deref(), Some("done"));
+        assert_eq!(result.images.as_deref(), Some(&["a.png".to_owned(), "b.png".to_owned()][..]));
+        let segments = result.segments.expect("segments should be present");
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].text.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn rejects_non_object_task_result_json() {
+        assert!(deserialize_task_result(r#""plain text""#).is_err());
+    }
 }

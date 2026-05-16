@@ -964,12 +964,7 @@ fn manifest_sha256_from_pack_bytes(bytes: &[u8]) -> Result<String, AppCoreError>
 }
 
 fn hash_bytes_hex(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    let mut hex = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        hex.push_str(&format!("{byte:02x}"));
-    }
-    hex
+    hex::encode(Sha256::digest(bytes))
 }
 
 fn infer_runtime_backend_from_config(config: &StoredModelConfig) -> Option<RuntimeBackendId> {
