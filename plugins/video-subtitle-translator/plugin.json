@@ -14,7 +14,7 @@
   },
   "integrity": {
     "filesSha256": {
-      "package.json": "9526b15550bcd977ae84ab5ede3c169cd76bc869b4bd0ae8baec348f4da34a53",
+      "package.json": "abce014d98d1f5336875be3a2e2c7eee824e92a70e4b9b8ae4e69cdfd8a9ec82",
       "schemas/settings.schema.json": "3f3bcdf747ec558b8254d5cc25129b0e07fe6850ad674ede66ab4fd6a475bdcd",
       "schemas/translate-video-input.schema.json": "357b67fabe4f1fc6c5e2807fbd9bef4a649fbf3eb9ab2107c98fe6c3930abbcb",
       "schemas/translate-video-output.schema.json": "6697352c730fb2bac9fe73d04db2d5425765e926e2e76d23a5e77075144389cd",
