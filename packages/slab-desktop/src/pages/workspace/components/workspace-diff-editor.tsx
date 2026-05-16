@@ -8,7 +8,6 @@ type WorkspaceDiffEditorProps = {
   diffText: string
   filePath: string
   fontSize?: number
-  theme: string
   wordWrap?: "on" | "off"
 }
 
@@ -37,13 +36,7 @@ function parseUnifiedDiff(diffText: string): ParsedDiff {
       continue
     }
 
-    if (
-      !inHunk ||
-      line.startsWith("---") ||
-      line.startsWith("+++") ||
-      line.startsWith("diff ") ||
-      line.startsWith("index ")
-    ) {
+    if (!inHunk) {
       continue
     }
 
@@ -74,10 +67,16 @@ function parseUnifiedDiff(diffText: string): ParsedDiff {
   return { original, modified }
 }
 
-export function WorkspaceDiffEditor({ diffText, filePath, fontSize = 13, theme, wordWrap = "on" }: WorkspaceDiffEditorProps) {
+export function WorkspaceDiffEditor({ diffText, filePath, fontSize = 13, wordWrap = "on" }: WorkspaceDiffEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<Monaco.editor.IStandaloneDiffEditor | null>(null)
   const [servicesReady, setServicesReady] = useState(false)
+
+  // Keep refs always current so the creation effect reads the latest values
+  const fontSizeRef = useRef(fontSize)
+  const wordWrapRef = useRef(wordWrap)
+  fontSizeRef.current = fontSize
+  wordWrapRef.current = wordWrap
 
   useEffect(() => {
     let cancelled = false
@@ -98,28 +97,8 @@ export function WorkspaceDiffEditor({ diffText, filePath, fontSize = 13, theme, 
   }, [])
 
   useEffect(() => {
-    if (!servicesReady) {
-      return
-    }
-
-    try {
-      Monaco.editor.setTheme(theme)
-    } catch (error) {
-      console.warn("failed to apply workspace diff editor theme", error)
-    }
-  }, [servicesReady, theme])
-
-  useEffect(() => {
     editorRef.current?.updateOptions({ fontSize, wordWrap })
   }, [fontSize, wordWrap])
-
-  const fontSizeRef = useRef(fontSize)
-  const wordWrapRef = useRef(wordWrap)
-
-  useEffect(() => {
-    fontSizeRef.current = fontSize
-    wordWrapRef.current = wordWrap
-  })
 
   useEffect(() => {
     if (!servicesReady || !containerRef.current || editorRef.current) {

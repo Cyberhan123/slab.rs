@@ -675,7 +675,6 @@ export function WorkspaceWorkbench({
                   diffText={selectedGitDiff?.diff.trim() ?? ""}
                   filePath={selectedGitDiffEntry.path}
                   fontSize={editorSettings.fontSize}
-                  theme={editorTheme}
                   wordWrap={editorSettings.wordWrap}
                 />
               </div>
