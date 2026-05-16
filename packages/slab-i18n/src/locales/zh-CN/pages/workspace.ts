@@ -35,6 +35,13 @@ export const workspace = {
     source: '源码',
     save: '保存',
     breadcrumbs: '文件面包屑导航',
+    settings: '编辑器设置',
+    settingsFontSize: '字体大小',
+    settingsTabSize: 'Tab 宽度',
+    settingsWordWrap: '自动换行',
+    settingsWordWrapOn: '开启',
+    settingsWordWrapOff: '关闭',
+    settingsMinimap: '缩略图',
   },
   search: {
     placeholder: '搜索文件或文本',

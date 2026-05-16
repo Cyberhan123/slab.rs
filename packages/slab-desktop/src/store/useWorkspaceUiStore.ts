@@ -11,6 +11,13 @@ export type WorkspaceFileTab = {
 export type WorkspaceExplorerPanel = 'files' | 'search' | 'git';
 export type WorkspaceMarkdownMode = 'preview' | 'source';
 
+export type WorkspaceEditorSettings = {
+  fontSize: number;
+  tabSize: number;
+  wordWrap: 'on' | 'off';
+  minimapEnabled: boolean;
+};
+
 type WorkspaceUiSnapshot = {
   activeFilePath: string | null;
   explorerPanel: WorkspaceExplorerPanel;
@@ -18,6 +25,7 @@ type WorkspaceUiSnapshot = {
   consoleOpen: boolean;
   openDirectoryPaths: string[];
   openFiles: WorkspaceFileTab[];
+  editorSettings: WorkspaceEditorSettings;
 };
 
 type PersistedWorkspaceUiState = {
@@ -30,6 +38,13 @@ type WorkspaceUiState = PersistedWorkspaceUiState & {
   setHasHydrated: (hasHydrated: boolean) => void;
 };
 
+export const defaultEditorSettings: WorkspaceEditorSettings = {
+  fontSize: 13,
+  tabSize: 2,
+  wordWrap: 'on',
+  minimapEnabled: false,
+};
+
 export const emptyWorkspaceUiSnapshot: WorkspaceUiSnapshot = {
   activeFilePath: null,
   explorerPanel: 'files',
@@ -37,6 +52,7 @@ export const emptyWorkspaceUiSnapshot: WorkspaceUiSnapshot = {
   consoleOpen: false,
   openDirectoryPaths: [],
   openFiles: [],
+  editorSettings: defaultEditorSettings,
 };
 
 const initialPersistedState: PersistedWorkspaceUiState = {
