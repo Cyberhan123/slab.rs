@@ -1,17 +1,20 @@
 #!/usr/bin/env bun
 
 import { spawn, spawnSync } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import openapiTS, { astToString } from "openapi-typescript";
+import ts from "typescript";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../..");
-const docsUrl = "http://127.0.0.1:3000/api-docs/openapi.json";
+const docsPath = "/api-docs/openapi.json";
 const outputPath = path.join(repoRoot, "packages", "api", "src", "v1.d.ts");
-const settingsPath = path.join(repoRoot, "testdata", "api-settings.json");
+const settingsTemplatePath = path.join(repoRoot, "testdata", "api-settings.json");
 const serverBinaryPath = path.join(
   repoRoot,
   "target",
@@ -20,35 +23,117 @@ const serverBinaryPath = path.join(
 );
 
 type ServerHandle = {
+  docsUrl: string;
   logs: string[];
   process: ReturnType<typeof spawn>;
 };
 
+type GenerationContext = {
+  bindAddress: string;
+  databaseUrl: string;
+  docsUrl: string;
+  settingsPath: string;
+  tempDir: string;
+};
+
+type ApiSettingsTemplate = {
+  database: {
+    url: string;
+  };
+  server: {
+    address: string;
+  };
+};
+
 async function main() {
+  let generationContext: GenerationContext | undefined;
   let startedServer: ServerHandle | undefined;
 
-  registerCleanup(() => stopServer(startedServer));
+  const cleanup = async () => {
+    await stopServer(startedServer);
+    startedServer = undefined;
+    await removeGenerationContext(generationContext);
+    generationContext = undefined;
+  };
 
-  if (!(await probeDocs())) {
+  registerSignalCleanup(cleanup);
+
+  try {
     await runCommand("cargo", ["build", "-p", "slab-server"]);
-    startedServer = startServer();
+    generationContext = await createGenerationContext();
+    startedServer = startServer(generationContext);
     await waitForDocs(startedServer);
+
+    const ast = await openapiTS(new URL(generationContext.docsUrl), {
+      transform(schemaObject) {
+        if (schemaObject.type === "string" && schemaObject.format === "binary") {
+          return ts.factory.createTypeReferenceNode("Blob");
+        }
+
+        return undefined;
+      },
+    });
+    const rendered = astToString(ast).trimEnd();
+
+    await mkdir(path.dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, `${rendered}\n`, "utf8");
+
+    console.log(
+      `Generated ${path.relative(repoRoot, outputPath).replace(/\\/g, "/")} from ${
+        generationContext.docsUrl
+      }.`,
+    );
+  } finally {
+    await cleanup();
   }
-
-  const ast = await openapiTS(new URL(docsUrl));
-  const rendered = astToString(ast).trimEnd();
-
-  await mkdir(path.dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, `${rendered}\n`, "utf8");
-
-  console.log(
-    `Generated ${path.relative(repoRoot, outputPath).replace(/\\/g, "/")} from ${docsUrl}.`,
-  );
-
-  await stopServer(startedServer);
 }
 
-async function probeDocs() {
+async function createGenerationContext(): Promise<GenerationContext> {
+  const port = await findFreePort();
+  const bindAddress = `127.0.0.1:${port}`;
+  const docsUrl = `http://${bindAddress}${docsPath}`;
+  const tempDir = await mkdtemp(path.join(tmpdir(), "slab-openapi-"));
+  const settingsPath = path.join(tempDir, "api-settings.json");
+  const databasePath = path.join(tempDir, "slab.db").replaceAll("\\", "/");
+  const databaseUrl = databasePath.startsWith("/")
+    ? `sqlite://${databasePath}?mode=rwc`
+    : `sqlite:///${databasePath}?mode=rwc`;
+  const settings = JSON.parse(
+    await readFile(settingsTemplatePath, "utf8"),
+  ) as ApiSettingsTemplate;
+
+  settings.server.address = bindAddress;
+  settings.database.url = databaseUrl;
+  await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+
+  return { bindAddress, databaseUrl, docsUrl, settingsPath, tempDir };
+}
+
+async function findFreePort(): Promise<number> {
+  return await new Promise((resolvePort, reject) => {
+    const probe = createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const address = probe.address();
+      if (!address || typeof address === "string") {
+        probe.close(() => reject(new Error("Failed to allocate a TCP port for slab-server.")));
+        return;
+      }
+
+      probe.close(() => resolvePort(address.port));
+    });
+  });
+}
+
+async function removeGenerationContext(context: GenerationContext | undefined) {
+  if (!context) {
+    return;
+  }
+
+  await rm(context.tempDir, { force: true, recursive: true });
+}
+
+async function probeDocs(docsUrl: string) {
   try {
     const response = await fetch(docsUrl);
     return response.ok;
@@ -79,11 +164,16 @@ async function runCommand(command: string, args: string[]) {
   });
 }
 
-function startServer(): ServerHandle {
+function startServer(context: GenerationContext): ServerHandle {
   const logs: string[] = [];
-  const child = spawn(serverBinaryPath, ["--settings-path", settingsPath], {
+  const child = spawn(serverBinaryPath, ["--settings-path", context.settingsPath], {
     cwd: repoRoot,
-    env: process.env,
+    env: {
+      ...process.env,
+      SLAB_BIND: context.bindAddress,
+      SLAB_DATABASE_URL: context.databaseUrl,
+      SLAB_ENABLE_SWAGGER: "true",
+    },
     shell: false,
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
@@ -92,7 +182,7 @@ function startServer(): ServerHandle {
   child.stdout?.on("data", (chunk) => captureLogs(logs, chunk));
   child.stderr?.on("data", (chunk) => captureLogs(logs, chunk));
 
-  return { process: child, logs };
+  return { docsUrl: context.docsUrl, process: child, logs };
 }
 
 function captureLogs(logs: string[], chunk: string | Buffer) {
@@ -112,7 +202,7 @@ async function waitForDocs(server: ServerHandle, timeoutMs = 10_000) {
 }
 
 async function pollForDocs(server: ServerHandle, startedAt: number, timeoutMs: number): Promise<void> {
-  if (await probeDocs()) {
+  if (await probeDocs(server.docsUrl)) {
     return;
   }
 
@@ -161,7 +251,7 @@ async function waitForExit(processHandle: ServerHandle["process"], timeoutMs: nu
   ]);
 }
 
-function registerCleanup(cleanup: () => Promise<void>) {
+function registerSignalCleanup(cleanup: () => Promise<void>) {
   let cleanedUp = false;
 
   const runCleanup = async () => {
@@ -179,12 +269,6 @@ function registerCleanup(cleanup: () => Promise<void>) {
       });
     });
   }
-
-  process.on("exit", () => {
-    if (!cleanedUp) {
-      void cleanup();
-    }
-  });
 }
 
 function sleep(timeoutMs: number) {

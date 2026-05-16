@@ -12,6 +12,7 @@
 //! - [`plugin`] shared plugin manifest and contribution contracts.
 //! - [`runtime`] shared runtime model and load specifications.
 //! - [`settings`] PMID catalog and typed configuration snapshots for the settings system.
+//! - [`sqlite`] SQLite URL formatting helpers shared by desktop and server crates.
 //! - [`whisper`] shared whisper VAD and decode option types.
 
 pub mod agent;
@@ -28,6 +29,7 @@ pub mod media;
 pub mod plugin;
 pub mod runtime;
 pub mod settings;
+pub mod sqlite;
 pub mod whisper;
 
 pub use agent::{AgentThreadStatus, ToolCallStatus};
@@ -66,13 +68,15 @@ pub use plugin::{
     PluginAgentCapabilityContribution, PluginCapabilityKind, PluginCapabilityTransport,
     PluginCapabilityTransportType, PluginCommandContribution, PluginCompatibilityManifest,
     PluginContributesManifest, PluginFilePermissions, PluginInfo, PluginIntegrityManifest,
-    PluginManifest, PluginNetworkManifest, PluginNetworkMode, PluginPermissionsManifest,
-    PluginRouteContribution, PluginRuntimeManifest, PluginSettingsContribution,
-    PluginSidebarContribution, PluginUiManifest, PluginWasmManifest,
+    PluginLanguageServerContribution, PluginLanguageServerTransport, PluginManifest,
+    PluginNetworkManifest, PluginNetworkMode, PluginPermissionsManifest, PluginRouteContribution,
+    PluginRuntimeManifest, PluginSettingsContribution, PluginSidebarContribution, PluginUiManifest,
+    PluginWasmManifest,
 };
 pub use runtime::{
     Capability, DiffusionLoadOptions, DriverDescriptor, DriverHints, DriverLoadStyle, ModelFamily,
     ModelSource, ModelSourceKind, ModelSpec, RuntimeModelLoadCommand, RuntimeModelLoadSpec,
     RuntimeModelStatus,
 };
+pub use sqlite::sqlite_url_for_path;
 pub use whisper::{WhisperDecodeOptions, WhisperVadOptions, WhisperVadParams};

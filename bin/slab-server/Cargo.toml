@@ -28,7 +28,7 @@ futures = { workspace = true }
 bytes   = { workspace = true }
 
 # Web framework + middleware
-axum       = { workspace = true, features = ["multipart"] }
+axum       = { workspace = true, features = ["multipart", "ws"] }
 tower      = { workspace = true }
 tower-http = { workspace = true }
 http = { workspace = true }
@@ -37,6 +37,7 @@ tonic = { workspace = true }
 parity-tokio-ipc = { workspace = true }
 winapi = { workspace = true }
 hyper-util = { workspace = true }
+tokio-tungstenite = { workspace = true }
 
 # Serialization
 serde      = { workspace = true }

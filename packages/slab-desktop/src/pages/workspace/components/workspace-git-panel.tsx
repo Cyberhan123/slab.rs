@@ -3,7 +3,11 @@ import { useMemo, useState } from "react"
 
 import { Button } from "@slab/components/button"
 import { useTranslation } from "@slab/i18n"
-import type { WorkspaceGitFileStatus, WorkspaceGitStatus, WorkspaceGitStatusEntry } from "@/lib/workspace-bridge"
+import {
+  type WorkspaceGitFileStatus,
+  type WorkspaceGitStatus,
+  type WorkspaceGitStatusEntry,
+} from "@/lib/workspace-bridge"
 import { cn } from "@/lib/utils"
 
 const statusClassName: Record<WorkspaceGitFileStatus, string> = {
@@ -22,9 +26,10 @@ type WorkspaceGitPanelProps = {
   operationPending: boolean
   onCommit: (message: string) => Promise<void>
   onDiscard: (path: string) => Promise<void>
-  onOpenFile: (relativePath: string) => Promise<void>
   onRefresh: () => Promise<void>
+  onSelectDiff: (entry: WorkspaceGitStatusEntry) => void
   onStage: (path: string) => Promise<void>
+  selectedEntry: WorkspaceGitStatusEntry | null
   onUnstage: (path: string) => Promise<void>
 }
 
@@ -34,15 +39,17 @@ export function WorkspaceGitPanel({
   operationPending,
   onCommit,
   onDiscard,
-  onOpenFile,
   onRefresh,
+  onSelectDiff,
   onStage,
+  selectedEntry,
   onUnstage,
 }: WorkspaceGitPanelProps) {
   const { t } = useTranslation()
   const [commitMessage, setCommitMessage] = useState("")
   const stagedEntries = useMemo(() => gitStatus?.entries.filter((entry) => entry.staged) ?? [], [gitStatus])
   const unstagedEntries = useMemo(() => gitStatus?.entries.filter((entry) => !entry.staged) ?? [], [gitStatus])
+  const hasChanges = (gitStatus?.entries.length ?? 0) > 0
 
   if (!gitStatus) {
     return (
@@ -73,7 +80,17 @@ export function WorkspaceGitPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
-      <div className="rounded-[12px] border border-border/50 bg-[var(--surface-1)] px-3 py-3">
+      <form
+        className="rounded-[12px] border border-border/50 bg-[var(--surface-1)] px-3 py-3"
+        onSubmit={(event) => {
+          event.preventDefault()
+          const message = commitMessage.trim()
+          if (!message) {
+            return
+          }
+          void onCommit(message).then(() => setCommitMessage(""))
+        }}
+      >
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
             <GitBranch className="size-4 shrink-0 text-[var(--brand-teal)]" />
@@ -118,7 +135,27 @@ export function WorkspaceGitPanel({
             </span>
           ) : null}
         </div>
-      </div>
+
+        <input
+          value={commitMessage}
+          onChange={(event) => setCommitMessage(event.target.value)}
+          className="mt-3 h-8 w-full rounded-[8px] border border-border/60 bg-background px-2 text-xs outline-none transition focus:border-[var(--brand-teal)]"
+          placeholder={t("pages.workspace.git.commitPlaceholder")}
+          disabled={operationPending || !hasChanges}
+        />
+        <div className="mt-2">
+          <Button
+            type="submit"
+            variant="cta"
+            size="sm"
+            className="w-full min-w-0"
+            disabled={operationPending || !hasChanges || !commitMessage.trim()}
+          >
+            {operationPending ? <Loader2 className="size-3.5 animate-spin" /> : <GitCommitHorizontal className="size-3.5" />}
+            {t("pages.workspace.git.commit")}
+          </Button>
+        </div>
+      </form>
 
       <div className="min-h-0 flex-1 overflow-y-auto rounded-[12px] bg-[var(--surface-1)] py-1">
         {gitStatus.entries.length > 0 ? (
@@ -127,8 +164,9 @@ export function WorkspaceGitPanel({
               title={t("pages.workspace.git.staged")}
               entries={stagedEntries}
               operationPending={operationPending}
+              selectedEntry={selectedEntry}
               onDiscard={onDiscard}
-              onOpenFile={onOpenFile}
+              onSelectDiff={onSelectDiff}
               onStage={onStage}
               onUnstage={onUnstage}
             />
@@ -136,8 +174,9 @@ export function WorkspaceGitPanel({
               title={t("pages.workspace.git.changes")}
               entries={unstagedEntries}
               operationPending={operationPending}
+              selectedEntry={selectedEntry}
               onDiscard={onDiscard}
-              onOpenFile={onOpenFile}
+              onSelectDiff={onSelectDiff}
               onStage={onStage}
               onUnstage={onUnstage}
             />
@@ -148,36 +187,6 @@ export function WorkspaceGitPanel({
           </div>
         )}
       </div>
-
-      <form
-        className="rounded-[12px] border border-border/50 bg-[var(--surface-1)] p-2"
-        onSubmit={(event) => {
-          event.preventDefault()
-          const message = commitMessage.trim()
-          if (!message) {
-            return
-          }
-          void onCommit(message).then(() => setCommitMessage(""))
-        }}
-      >
-        <input
-          value={commitMessage}
-          onChange={(event) => setCommitMessage(event.target.value)}
-          className="h-8 w-full rounded-[8px] border border-border/60 bg-background px-2 text-xs outline-none transition focus:border-[var(--brand-teal)]"
-          placeholder={t("pages.workspace.git.commitPlaceholder")}
-          disabled={operationPending || stagedEntries.length === 0}
-        />
-        <Button
-          type="submit"
-          variant="cta"
-          size="sm"
-          className="mt-2 w-full"
-          disabled={operationPending || stagedEntries.length === 0 || !commitMessage.trim()}
-        >
-          {operationPending ? <Loader2 className="size-3.5 animate-spin" /> : <GitCommitHorizontal className="size-3.5" />}
-          {t("pages.workspace.git.commit")}
-        </Button>
-      </form>
     </div>
   )
 }
@@ -186,16 +195,18 @@ function GitEntryGroup({
   title,
   entries,
   operationPending,
+  selectedEntry,
   onDiscard,
-  onOpenFile,
+  onSelectDiff,
   onStage,
   onUnstage,
 }: {
   title: string
   entries: WorkspaceGitStatusEntry[]
   operationPending: boolean
+  selectedEntry: WorkspaceGitStatusEntry | null
   onDiscard: (path: string) => Promise<void>
-  onOpenFile: (relativePath: string) => Promise<void>
+  onSelectDiff: (entry: WorkspaceGitStatusEntry) => void
   onStage: (path: string) => Promise<void>
   onUnstage: (path: string) => Promise<void>
 }) {
@@ -211,22 +222,22 @@ function GitEntryGroup({
         {title}
       </div>
       {entries.map((entry) => {
-        const canOpen = entry.status !== "deleted"
         const canDiscard = entry.status !== "conflicted"
+        const selected = selectedEntry?.path === entry.path && selectedEntry.staged === entry.staged
 
         return (
           <div
             key={`${entry.status}:${entry.staged}:${entry.path}`}
-            className="group flex min-w-0 items-center gap-1 rounded-[8px] px-2 py-1.5 text-sm transition hover:bg-[var(--surface-selected)]"
+            className={cn(
+              "group flex min-w-0 items-center gap-1 rounded-[8px] px-2 py-1.5 text-sm transition hover:bg-[var(--surface-selected)]",
+              selected && "bg-[var(--surface-selected)]",
+            )}
           >
             <button
               type="button"
-              disabled={!canOpen}
-              className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default disabled:opacity-70"
+              className="flex min-w-0 flex-1 items-center gap-2 text-left"
               onClick={() => {
-                if (canOpen) {
-                  void onOpenFile(entry.path)
-                }
+                onSelectDiff(entry)
               }}
             >
               <GitCommitHorizontal className="size-4 shrink-0 text-muted-foreground" />

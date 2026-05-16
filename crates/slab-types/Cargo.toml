@@ -15,6 +15,7 @@ thiserror   = { workspace = true }
 uuid        = { workspace = true }
 chrono      = { workspace = true }
 schemars    = { workspace = true }
+utoipa      = "5"
 
 [dev-dependencies]
 proptest = "1.5"

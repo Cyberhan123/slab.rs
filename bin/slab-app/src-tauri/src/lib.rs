@@ -1,7 +1,9 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod plugins;
 mod setup;
+mod terminal;
 mod workspace;
+mod workspace_search;
 
 use setup::ApiEndpointConfig;
 
@@ -50,19 +52,27 @@ pub fn run() {
             workspace::workspace_close,
             workspace::workspace_read_directory,
             workspace::workspace_read_file,
+            workspace::workspace_search_files,
+            workspace_search::workspace_search_text,
             workspace::workspace_write_file,
             workspace::workspace_git_status,
             workspace::workspace_git_stage,
             workspace::workspace_git_unstage,
             workspace::workspace_git_discard,
             workspace::workspace_git_commit,
+            workspace::workspace_git_diff,
             workspace::workspace_console_run,
             workspace::workspace_update_plugin_preference,
+            terminal::workspace_terminal_session,
         ])
         .setup(move |app| {
             setup::setup_windows(app)?;
             let workspace_bootstrap = workspace::init(app).map_err(|error| {
                 log::error!("failed to initialize workspace state: {error}");
+                std::io::Error::other(error)
+            })?;
+            terminal::init(app).map_err(|error| {
+                log::error!("failed to initialize workspace terminal server: {error}");
                 std::io::Error::other(error)
             })?;
             let plugins_root = plugins::resolve_plugins_root_for_app(app).map_err(|error| {

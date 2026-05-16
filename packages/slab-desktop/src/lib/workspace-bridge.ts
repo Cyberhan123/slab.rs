@@ -50,6 +50,31 @@ export type WorkspaceDirectoryResponse = {
   truncated: boolean
 }
 
+export type WorkspaceFileSearchResponse = {
+  query: string
+  entries: WorkspaceFileEntry[]
+  truncated: boolean
+}
+
+export type WorkspaceTextSearchLineMatch = {
+  lineNumber: number
+  lineText: string
+  matchStart: number
+  matchEnd: number
+}
+
+export type WorkspaceTextSearchFileMatch = {
+  relativePath: string
+  name: string
+  lineMatches: WorkspaceTextSearchLineMatch[]
+}
+
+export type WorkspaceTextSearchResponse = {
+  query: string
+  matches: WorkspaceTextSearchFileMatch[]
+  truncated: boolean
+}
+
 export type WorkspaceFileContent = {
   relativePath: string
   name: string
@@ -102,6 +127,10 @@ export type WorkspaceConsoleOutput = {
   timedOut: boolean
 }
 
+export type WorkspaceTerminalSession = {
+  url: string
+}
+
 export type WorkspaceWriteFileCommand = {
   relativePath: string
   content: string
@@ -116,6 +145,17 @@ export type WorkspaceWriteFileResult = {
 
 export type WorkspaceGitOperationResult = {
   status: WorkspaceGitStatus
+}
+
+export type WorkspaceGitDiffCommand = {
+  path: string
+  staged: boolean
+}
+
+export type WorkspaceGitDiff = {
+  path: string
+  staged: boolean
+  diff: string
 }
 
 export type WorkspacePluginPreferenceUpdate = {
@@ -149,12 +189,16 @@ export async function workspaceClose(): Promise<WorkspaceStateResponse> {
 
 export async function workspaceReadDirectory(
   relativePath?: string,
+  options?: { includeIgnored?: boolean },
 ): Promise<WorkspaceDirectoryResponse> {
   if (!isTauri()) {
     return { relativePath: relativePath ?? "", entries: [], truncated: false }
   }
 
-  return invoke<WorkspaceDirectoryResponse>("workspace_read_directory", { relativePath })
+  return invoke<WorkspaceDirectoryResponse>("workspace_read_directory", {
+    includeIgnored: options?.includeIgnored,
+    relativePath,
+  })
 }
 
 export async function workspaceReadFile(relativePath: string): Promise<WorkspaceFileContent> {
@@ -163,6 +207,22 @@ export async function workspaceReadFile(relativePath: string): Promise<Workspace
   }
 
   return invoke<WorkspaceFileContent>("workspace_read_file", { relativePath })
+}
+
+export async function workspaceSearchFiles(query: string): Promise<WorkspaceFileSearchResponse> {
+  if (!isTauri()) {
+    return { query, entries: [], truncated: false }
+  }
+
+  return invoke<WorkspaceFileSearchResponse>("workspace_search_files", { query })
+}
+
+export async function workspaceSearchText(query: string): Promise<WorkspaceTextSearchResponse> {
+  if (!isTauri()) {
+    return { query, matches: [], truncated: false }
+  }
+
+  return invoke<WorkspaceTextSearchResponse>("workspace_search_text", { query })
 }
 
 export async function workspaceWriteFile(command: WorkspaceWriteFileCommand): Promise<WorkspaceWriteFileResult> {
@@ -229,12 +289,28 @@ export async function workspaceGitCommit(message: string): Promise<WorkspaceGitO
   return invoke<WorkspaceGitOperationResult>("workspace_git_commit", { command: { message } })
 }
 
+export async function workspaceGitDiff(command: WorkspaceGitDiffCommand): Promise<WorkspaceGitDiff> {
+  if (!isTauri()) {
+    return { path: command.path, staged: command.staged, diff: "" }
+  }
+
+  return invoke<WorkspaceGitDiff>("workspace_git_diff", { command })
+}
+
 export async function workspaceConsoleRun(command: string): Promise<WorkspaceConsoleOutput> {
   if (!isTauri()) {
     throw new Error("workspace console is only available in the desktop app")
   }
 
   return invoke<WorkspaceConsoleOutput>("workspace_console_run", { command })
+}
+
+export async function workspaceTerminalSession(): Promise<WorkspaceTerminalSession> {
+  if (!isTauri()) {
+    throw new Error("workspace terminal is only available in the desktop app")
+  }
+
+  return invoke<WorkspaceTerminalSession>("workspace_terminal_session")
 }
 
 export async function workspaceUpdatePluginPreference(

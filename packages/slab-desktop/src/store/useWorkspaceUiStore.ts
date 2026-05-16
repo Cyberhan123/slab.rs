@@ -8,7 +8,7 @@ export type WorkspaceFileTab = {
   name: string;
 };
 
-export type WorkspaceExplorerPanel = 'files' | 'git';
+export type WorkspaceExplorerPanel = 'files' | 'search' | 'git';
 export type WorkspaceMarkdownMode = 'preview' | 'source';
 
 type WorkspaceUiSnapshot = {

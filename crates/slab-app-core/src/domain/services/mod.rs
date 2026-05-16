@@ -4,6 +4,7 @@ mod backend;
 mod chat;
 mod ffmpeg;
 mod image;
+mod media_task;
 mod model;
 mod plugin;
 mod pmid;
@@ -16,6 +17,7 @@ mod task;
 mod ui_state;
 mod video;
 mod workspace;
+mod workspace_lsp;
 
 pub use agent::AgentService;
 pub use audio::AudioService;
@@ -35,6 +37,7 @@ pub use task::TaskApplicationService;
 pub use ui_state::UiStateService;
 pub use video::VideoService;
 pub use workspace::WorkspaceService;
+pub use workspace_lsp::WorkspaceLspService;
 
 use std::sync::Arc;
 
@@ -59,6 +62,7 @@ pub struct AppServices {
     pub ui_state: UiStateService,
     pub video: VideoService,
     pub agent: AgentService,
+    pub workspace_lsp: WorkspaceLspService,
 }
 
 impl AppServices {
@@ -85,6 +89,10 @@ impl AppServices {
             ui_state: UiStateService::new(model_state.clone()),
             video: VideoService::new(worker_state),
             agent,
+            workspace_lsp: WorkspaceLspService::new(
+                Arc::clone(model_state.config()),
+                PluginService::new(model_state),
+            ),
         }
     }
 }

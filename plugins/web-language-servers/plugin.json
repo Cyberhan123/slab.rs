@@ -1,0 +1,95 @@
+{
+  "manifestVersion": 1,
+  "id": "web-language-servers",
+  "name": "Web Language Servers",
+  "version": "0.1.0",
+  "compatibility": {
+    "slab": ">=0.1.0",
+    "pluginApi": "^1.0.0"
+  },
+  "runtime": {
+    "ui": {
+      "entry": "ui/index.html"
+    }
+  },
+  "integrity": {
+    "filesSha256": {
+      "package.json": "61f7418fb8a8d6ea1829043932430959a10520eeabd71f22076cc25e9e57ce99",
+      "ui/index.html": "a7267a2f04635154f05db2667baa9cc4f74943023f70f5e7e2a62e9a432887fb"
+    }
+  },
+  "permissions": {
+    "network": {
+      "mode": "blocked",
+      "allowHosts": []
+    },
+    "lsp": [
+      "languageServer:declare"
+    ]
+  },
+  "contributes": {
+    "languageServers": [
+      {
+        "id": "web-language-servers.typescript",
+        "languages": [
+          "typescript",
+          "typescriptreact",
+          "javascript",
+          "javascriptreact"
+        ],
+        "transport": {
+          "type": "nodePackage",
+          "package": "typescript-language-server",
+          "args": [
+            "--stdio"
+          ]
+        }
+      },
+      {
+        "id": "web-language-servers.json",
+        "languages": [
+          "json",
+          "jsonc"
+        ],
+        "transport": {
+          "type": "nodePackage",
+          "package": "vscode-langservers-extracted",
+          "command": "vscode-json-language-server",
+          "args": [
+            "--stdio"
+          ]
+        }
+      },
+      {
+        "id": "web-language-servers.css",
+        "languages": [
+          "css",
+          "less",
+          "scss"
+        ],
+        "transport": {
+          "type": "nodePackage",
+          "package": "vscode-langservers-extracted",
+          "command": "vscode-css-language-server",
+          "args": [
+            "--stdio"
+          ]
+        }
+      },
+      {
+        "id": "web-language-servers.html",
+        "languages": [
+          "html"
+        ],
+        "transport": {
+          "type": "nodePackage",
+          "package": "vscode-langservers-extracted",
+          "command": "vscode-html-language-server",
+          "args": [
+            "--stdio"
+          ]
+        }
+      }
+    ]
+  }
+}

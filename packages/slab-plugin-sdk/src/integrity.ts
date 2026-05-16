@@ -5,7 +5,7 @@ import path from "node:path";
 export type PluginIntegrityMap = Record<string, string>;
 
 const ALWAYS_INCLUDED_DIRS = ["ui", "schemas"] as const;
-const OPTIONAL_INCLUDED_FILES = ["wasm/plugin.wasm"] as const;
+const OPTIONAL_INCLUDED_FILES = ["wasm/plugin.wasm", "package.json"] as const;
 
 export async function computePluginIntegrity(pluginDir: string): Promise<PluginIntegrityMap> {
   const root = path.resolve(pluginDir);

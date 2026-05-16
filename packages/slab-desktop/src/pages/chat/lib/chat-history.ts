@@ -43,13 +43,38 @@ const isStoredConversationMessage = (
   tool_calls?: unknown
 } => isRecord(value) && ('content' in value || 'tool_calls' in value || 'tool_call_id' in value)
 
+const stringifyStoredValue = (value: unknown, fallback = ''): string => {
+  try {
+    const rendered = JSON.stringify(value)
+    return typeof rendered === 'string' ? rendered : fallback
+  } catch {
+    return fallback
+  }
+}
+
+const parseStoredSessionPayload = (content: string): unknown | null => {
+  try {
+    return JSON.parse(content) as unknown
+  } catch {
+    return null
+  }
+}
+
+const normalizeStoredMessageRole = (role: unknown, fallbackRole: string): ChatUiMessage['role'] => {
+  if (typeof role === 'string' && role.trim()) {
+    return role.trim()
+  }
+
+  return fallbackRole.trim() || 'assistant'
+}
+
 const renderStoredToolCall = (value: unknown): string => {
   if (!isRecord(value) || !isRecord(value.function) || typeof value.function.name !== 'string') {
     return ''
   }
 
   const rawArguments = value.function.arguments
-  const argumentsText = typeof rawArguments === 'string' ? rawArguments : JSON.stringify(rawArguments ?? '')
+  const argumentsText = typeof rawArguments === 'string' ? rawArguments : stringifyStoredValue(rawArguments ?? '')
   const callId = typeof value.id === 'string' && value.id.trim() ? ` id=${value.id.trim()}` : ''
 
   return `tool_call${callId}: ${value.function.name}(${argumentsText})`
@@ -57,7 +82,7 @@ const renderStoredToolCall = (value: unknown): string => {
 
 const renderStoredContentPart = (value: unknown): string => {
   if (!isRecord(value) || typeof value.type !== 'string') {
-    return typeof value === 'string' ? value : JSON.stringify(value ?? '')
+    return typeof value === 'string' ? value : stringifyStoredValue(value ?? '')
   }
 
   switch (value.type) {
@@ -67,9 +92,9 @@ const renderStoredContentPart = (value: unknown): string => {
     case 'refusal':
       return typeof value.text === 'string' ? value.text : ''
     case 'json':
-      return JSON.stringify(value.value ?? null)
+      return stringifyStoredValue(value.value ?? null, 'null')
     case 'tool_result': {
-      const rendered = JSON.stringify(value.value ?? null)
+      const rendered = stringifyStoredValue(value.value ?? null, 'null')
       const prefix =
         typeof value.tool_call_id === 'string' && value.tool_call_id.trim()
           ? `tool_result[${value.tool_call_id.trim()}]`
@@ -86,7 +111,7 @@ const renderStoredContentPart = (value: unknown): string => {
       return `[image mime=${mime} src=${source}${detail}]`
     }
     default:
-      return JSON.stringify(value)
+      return stringifyStoredValue(value)
   }
 }
 
@@ -110,14 +135,14 @@ const renderStoredMessageContent = (content: unknown): string => {
     return ''
   }
 
-  return JSON.stringify(content)
+  return stringifyStoredValue(content)
 }
 
-const toStoredSessionChatMessage = (
+export const toStoredSessionChatMessage = (
   fallbackRole: string,
   content: string
 ): Pick<ChatUiMessage, 'content' | 'role'> => {
-  const payload = JSON.parse(content) as unknown
+  const payload = parseStoredSessionPayload(content)
   const message = isStoredSessionEnvelope(payload)
     ? payload.message
     : isStoredConversationMessage(payload)
@@ -127,7 +152,7 @@ const toStoredSessionChatMessage = (
   if (!message) {
     return {
       content,
-      role: fallbackRole as ChatUiMessage['role'],
+      role: normalizeStoredMessageRole(null, fallbackRole),
     }
   }
 
@@ -152,8 +177,7 @@ const toStoredSessionChatMessage = (
 
   return {
     content: segments.join('\n'),
-    role:
-      (typeof message.role === 'string' && message.role.trim() ? message.role.trim() : fallbackRole) as ChatUiMessage['role'],
+    role: normalizeStoredMessageRole(message.role, fallbackRole),
   }
 }
 
@@ -192,15 +216,6 @@ export const historyMessageFactory = async (info?: {
 
   return messages.map((message) => ({
     id: message.id,
-    message: (() => {
-      try {
-        return toStoredSessionChatMessage(message.role, message.content)
-      } catch {
-        return {
-          role: message.role as ChatUiMessage['role'],
-          content: message.content,
-        }
-      }
-    })(),
+    message: toStoredSessionChatMessage(message.role, message.content),
   }))
 }

@@ -10,6 +10,7 @@ use crate::domain::models::{
     AudioTranscriptionTaskView, TaskResult, TaskStatus, TranscribeDecodeOptions,
     TranscribeVadOptions,
 };
+use crate::domain::services::media_task::parse_json_value;
 use crate::error::AppCoreError;
 use crate::infra::db::{
     AudioTranscriptionTaskViewRecord, MediaTaskStore, NewAudioTranscriptionTaskRecord, TaskRecord,
@@ -303,10 +304,6 @@ fn map_audio_view(row: AudioTranscriptionTaskViewRecord) -> AudioTranscriptionTa
         created_at: row.state.task_created_at.to_rfc3339(),
         updated_at: row.state.task_updated_at.to_rfc3339(),
     }
-}
-
-fn parse_json_value(raw: &str) -> serde_json::Value {
-    serde_json::from_str(raw).unwrap_or_else(|_| serde_json::Value::String(raw.to_owned()))
 }
 
 fn parse_result_segments(raw: &str) -> Option<Vec<crate::domain::models::TimedTextSegment>> {

@@ -38,8 +38,16 @@ import { usePageHeader, usePageHeaderControl } from "@/hooks/use-global-header-m
 import { usePersistedHeaderSelect } from "@/hooks/use-persisted-header-select"
 import { HEADER_SELECT_KEYS } from "@/layouts/header-controls"
 import { useChatUiStore } from "@/store/useChatUiStore"
+import {
+  extractTaskId,
+  isFailedTaskStatus,
+  MODEL_DOWNLOAD_POLL_INTERVAL_MS,
+  MODEL_DOWNLOAD_TIMEOUT_MS,
+  sleep,
+} from "@/pages/task/utils"
 
 import {
+  getChatErrorDescription,
   getChatMessageTextContent,
   type ChatMessageRecord,
 } from "./chat-context"
@@ -47,9 +55,6 @@ import { useChatLocale } from "./chat-locale"
 import { useChat } from "./hooks/use-chat"
 import { useChatSessions } from "./hooks/use-chat-sessions"
 import { useMarkdownTheme } from "./hooks/use-markdowm-theme"
-
-const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000
-const MODEL_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1_000
 
 type ModelOptionSource = "local" | "cloud"
 
@@ -112,21 +117,6 @@ function getGreeting(date: Date, t: (key: string) => string) {
   }
 
   return t("pages.chat.greeting.evening")
-}
-
-const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
-
-const extractTaskId = (payload: unknown): string | null => {
-  if (typeof payload !== "object" || payload === null) return null
-
-  const taskId =
-    (payload as { operation_id?: unknown }).operation_id ??
-    (payload as { task_id?: unknown }).task_id
-
-  if (typeof taskId !== "string") return null
-
-  const trimmed = taskId.trim()
-  return trimmed.length > 0 ? trimmed : null
 }
 
 function Chat() {
@@ -229,11 +219,7 @@ function Chat() {
         return
       }
 
-      if (
-        task.status === "failed" ||
-        task.status === "cancelled" ||
-        task.status === "interrupted"
-      ) {
+      if (isFailedTaskStatus(task.status)) {
         throw new Error(task.error_msg ?? `Task ${taskId} ended with status: ${task.status}`)
       }
 
@@ -368,11 +354,11 @@ function Chat() {
   const ensureChatModelReady = async () => {
     try {
       await prepareSelectedModel()
-    } catch (err: any) {
+    } catch (error) {
       toast.error(t("pages.chat.toast.failedToPrepareModel"), {
-        description: err?.message || err?.error || t("pages.chat.toast.unknownError"),
+        description: getChatErrorDescription(error, t("pages.chat.toast.unknownError")),
       })
-      throw err
+      throw error
     }
   }
 

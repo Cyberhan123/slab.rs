@@ -15,6 +15,9 @@ use crate::domain::models::{
     AcceptedOperation, IMAGE_GENERATION_TASK_TYPE, ImageGenerationCommand, ImageGenerationMode,
     ImageGenerationTaskView, TaskResult, TaskStatus,
 };
+use crate::domain::services::media_task::{
+    cleanup_dir, parse_json_value, read_managed_file, save_rgb_png,
+};
 use crate::error::AppCoreError;
 use crate::infra::db::{
     ImageGenerationTaskViewRecord, MediaTaskStore, NewImageGenerationTaskRecord, TaskRecord,
@@ -404,56 +407,6 @@ fn map_image_view(row: ImageGenerationTaskViewRecord) -> ImageGenerationTaskView
     }
 }
 
-fn parse_json_value(raw: &str) -> serde_json::Value {
-    serde_json::from_str(raw).unwrap_or_else(|_| serde_json::Value::String(raw.to_owned()))
-}
-
 fn image_task_dir(output_root: &Path, task_id: &str) -> PathBuf {
     output_root.join("images").join(task_id)
-}
-
-async fn save_rgb_png(
-    path: &Path,
-    data: &[u8],
-    width: u32,
-    height: u32,
-) -> Result<(), AppCoreError> {
-    let path = path.to_path_buf();
-    let error_path = path.clone();
-    let bytes = data.to_vec();
-    tokio::task::spawn_blocking(move || {
-        image::save_buffer_with_format(
-            &path,
-            &bytes,
-            width,
-            height,
-            image::ColorType::Rgb8,
-            image::ImageFormat::Png,
-        )
-    })
-    .await
-    .map_err(|error| AppCoreError::Internal(format!("reference image task panicked: {error}")))?
-    .map_err(|error| {
-        AppCoreError::Internal(format!("failed to save PNG '{}': {error}", error_path.display()))
-    })
-}
-
-async fn read_managed_file(path: &str, output_root: &Path) -> Result<Vec<u8>, AppCoreError> {
-    let candidate = PathBuf::from(path);
-    if !candidate.starts_with(output_root) {
-        return Err(AppCoreError::BadRequest("artifact path escapes output root".to_owned()));
-    }
-    tokio::fs::read(&candidate).await.map_err(|error| match error.kind() {
-        std::io::ErrorKind::NotFound => {
-            AppCoreError::NotFound(format!("artifact '{}' not found", candidate.display()))
-        }
-        _ => AppCoreError::Internal(format!(
-            "failed to read artifact '{}': {error}",
-            candidate.display()
-        )),
-    })
-}
-
-async fn cleanup_dir(path: &Path) {
-    tokio::fs::remove_dir_all(path).await.ok();
 }

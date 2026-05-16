@@ -10,8 +10,8 @@ import createFetchClient from "openapi-fetch";
 import createClient from "openapi-react-query";
 
 import { SERVER_BASE_URL, normalizeApiBaseUrl } from "./config";
-import { errorMiddleware } from "./errors";
-import type { paths } from "./v1.d.ts";
+import { ApiError, errorMiddleware } from "./errors";
+import type { components, paths } from "./v1.d.ts";
 
 export type SlabApiClientOptions = {
   baseUrl?: string | null;
@@ -48,6 +48,57 @@ export function createSlabApiQueryHooks(options: SlabApiClientOptions = {}) {
 export const apiClient = createSlabApiFetchClient();
 
 const api = createSlabApiQueryHooks();
+
+type FormDataUploadPath = "/v1/models/import-pack" | "/v1/plugins/import-pack";
+type ImportModelPackResponse = components["schemas"]["UnifiedModelResponse"];
+type ImportPluginPackResponse = components["schemas"]["PluginResponse"];
+type PostFormDataOptions = Pick<SlabApiClientOptions, "baseUrl" | "fetch">;
+
+export function postFormData(
+  path: "/v1/models/import-pack",
+  file: File,
+  options?: PostFormDataOptions,
+): Promise<ImportModelPackResponse>;
+export function postFormData(
+  path: "/v1/plugins/import-pack",
+  file: File,
+  options?: PostFormDataOptions,
+): Promise<ImportPluginPackResponse>;
+export async function postFormData(
+  path: FormDataUploadPath,
+  file: File,
+  options: PostFormDataOptions = {},
+): Promise<ImportModelPackResponse | ImportPluginPackResponse> {
+  const body = new FormData();
+  body.set("file", file);
+
+  const requestFetch = (options.fetch ?? fetch) as typeof fetch;
+  const response = await requestFetch(`${normalizeApiBaseUrl(options.baseUrl ?? SERVER_BASE_URL)}${path}`, {
+    body,
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    let errorData: unknown;
+    try {
+      errorData = await response.clone().json();
+    } catch {
+      try {
+        errorData = await response.clone().text();
+      } catch {
+        errorData = undefined;
+      }
+    }
+    throw ApiError.fromResponse(response, errorData);
+  }
+
+  const data = await response.json();
+  if (!data) {
+    throw new Error(`Request to ${path} returned an empty response.`);
+  }
+
+  return data;
+}
 
 export default api;
 export type { components, operations, paths } from "./v1.d.ts";

@@ -52,6 +52,7 @@ When fixing bugs, it's essential to start with first principles to find the root
 - Keep `crates/slab-app-core` HTTP-free, keep `bin/slab-runtime` as the only runtime composition root, and keep `crates/slab-runtime-core` limited to scheduler/backend protocol concerns.
 - Keep `crates/slab-agent` pure; built-in deterministic tools belong in `crates/slab-agent-tools`, and plugin/API capability adapters are registered by host/app-core layers.
 - Preserve Tauri CSP, capabilities, permissions, sidecar boundaries, and plugin sandboxing unless the task explicitly changes them.
+- Keep workspace LSP traffic behind `packages/slab-desktop -> bin/slab-server /v1/workspace/lsp/* -> crates/slab-app-core`; `slab-app-core` owns provider resolution and LSP process spawning, and the desktop host must not add a second LSP bridge.
 - Keep Tauri child WebViews as the default third-party plugin UI runtime; do not make Module Federation the default plugin model.
 - Keep `plugin.json` as the static source of truth. `manifestVersion: 1` separates runtime assets, `contributes.*`, `permissions.*`, and agent capabilities.
 - Plugin WebView commands must derive the caller plugin id from the WebView label, not from plugin-supplied payload fields.

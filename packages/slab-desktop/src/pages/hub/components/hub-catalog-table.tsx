@@ -336,8 +336,8 @@ function getDownloadProgressLabel(progress: ModelItem['download_progress']) {
   }
 
   const label = progress.label?.trim() || 'download';
-  if (progress.step && progress.step_count) {
-    return `${label} (${progress.step}/${progress.step_count})`;
+  if (progress.step && progress.stepCount) {
+    return `${label} (${progress.step}/${progress.stepCount})`;
   }
 
   return label;

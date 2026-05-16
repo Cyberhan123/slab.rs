@@ -3,7 +3,8 @@ import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
 import api from '@slab/api';
-import { PAGE_SIZE, type Task, type TaskResult } from '../const';
+import { getErrorDescription } from '@/lib/error-description';
+import { PAGE_SIZE, TASK_LIST_POLL_INTERVAL_MS, type Task, type TaskResult } from '../const';
 import { getSparklineWeight, getTaskDurationMs, isMediaTaskType, isSettledStatus } from '../utils';
 
 export function useTaskList() {
@@ -127,7 +128,7 @@ export function useTaskList() {
     } catch (err) {
       toast.error(
         t('pages.task.toast.fetchTaskResultFailed', {
-          message: err instanceof Error ? err.message : t('pages.task.toast.unknownError'),
+          message: getErrorDescription(err, t('pages.task.toast.unknownError')),
         }),
       );
     }
@@ -167,7 +168,7 @@ export function useTaskList() {
     } catch (err) {
       toast.error(
         t('pages.task.toast.cancelTaskFailed', {
-          message: err instanceof Error ? err.message : t('pages.task.toast.unknownError'),
+          message: getErrorDescription(err, t('pages.task.toast.unknownError')),
         }),
       );
     }
@@ -188,7 +189,7 @@ export function useTaskList() {
     } catch (err) {
       toast.error(
         t('pages.task.toast.restartTaskFailed', {
-          message: err instanceof Error ? err.message : t('pages.task.toast.unknownError'),
+          message: getErrorDescription(err, t('pages.task.toast.unknownError')),
         }),
       );
     }
@@ -206,7 +207,7 @@ export function useTaskList() {
 
     const interval = setInterval(() => {
       void refetchTasks();
-    }, 3000);
+    }, TASK_LIST_POLL_INTERVAL_MS);
 
     return () => clearInterval(interval);
   }, [allTasks, refetchTasks]);
@@ -216,7 +217,7 @@ export function useTaskList() {
 
     const interval = setInterval(() => {
       void fetchTaskDetail(selectedTask.id);
-    }, 3000);
+    }, TASK_LIST_POLL_INTERVAL_MS);
 
     return () => clearInterval(interval);
   }, [selectedTask, fetchTaskDetail]);

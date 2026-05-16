@@ -13,7 +13,10 @@ import {
   resolveMediaUrl,
   type ImageGenerationTask,
 } from '@/lib/media-task-api';
+import { isFailedTaskStatus } from '@/pages/task/utils';
 import {
+  DEFAULT_GENERATION_SIZE,
+  MAX_RANDOM_SEED,
   MAX_POLL_ATTEMPTS,
   POLL_INTERVAL_MS,
   type GeneratedImage,
@@ -24,6 +27,7 @@ import { useImageModelPreparation } from './use-image-model-preparation';
 
 type GenerationPhase = 'idle' | 'polling' | 'fetchingResult';
 type TaskResponse = components['schemas']['TaskResponse'];
+type ImageGenerationRequest = components['schemas']['ImageGenerationRequest'];
 
 async function fileToDataUri(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -286,30 +290,31 @@ export function useImageGeneration() {
       clearGenerationTask();
 
       const modelPath = await prepareSelectedModel();
-      const width = Number.parseInt(widthStr, 10) || 512;
-      const height = Number.parseInt(heightStr, 10) || 512;
+      const width = Number.parseInt(widthStr, 10) || DEFAULT_GENERATION_SIZE;
+      const height = Number.parseInt(heightStr, 10) || DEFAULT_GENERATION_SIZE;
+      const body: ImageGenerationRequest = {
+        model_id: selectedModelId || undefined,
+        model: modelPath,
+        prompt,
+        negative_prompt: negativePrompt || undefined,
+        n: numImages,
+        width,
+        height,
+        cfg_scale: cfgScale,
+        guidance,
+        steps,
+        seed: seed < 0 ? Math.floor(Math.random() * MAX_RANDOM_SEED) : seed,
+        sample_method: sampleMethod === 'auto' ? undefined : sampleMethod,
+        scheduler: scheduler === 'auto' ? undefined : scheduler,
+        clip_skip: clipSkip || undefined,
+        eta: eta !== 0 ? eta : undefined,
+        strength: mode === 'img2img' ? strength : undefined,
+        init_image: mode === 'img2img' ? initImageDataUri : undefined,
+        mode,
+      };
 
       const { operation_id } = await generateImagesMutation.mutateAsync({
-        body: {
-          model_id: selectedModelId || undefined,
-          model: modelPath,
-          prompt,
-          negative_prompt: negativePrompt || undefined,
-          n: numImages,
-          width,
-          height,
-          cfg_scale: cfgScale,
-          guidance,
-          steps,
-          seed: seed < 0 ? Math.floor(Math.random() * 2147483647) : seed,
-          sample_method: sampleMethod === 'auto' ? undefined : sampleMethod,
-          scheduler: scheduler === 'auto' ? undefined : scheduler,
-          clip_skip: clipSkip || undefined,
-          eta: eta !== 0 ? eta : undefined,
-          strength: mode === 'img2img' ? strength : undefined,
-          init_image: mode === 'img2img' ? initImageDataUri : undefined,
-          mode,
-        } as never,
+        body,
       });
 
       setTaskId(operation_id);
@@ -362,11 +367,7 @@ export function useImageGeneration() {
       return;
     }
 
-    if (
-      taskStatus.status === 'failed' ||
-      taskStatus.status === 'cancelled' ||
-      taskStatus.status === 'interrupted'
-    ) {
+    if (isFailedTaskStatus(taskStatus.status)) {
       toast.error(taskStatus.error_msg ?? t('pages.image.error.generationFailed'));
       clearGenerationTask();
       return;

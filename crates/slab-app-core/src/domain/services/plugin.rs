@@ -5,7 +5,6 @@ use std::path::{Component, Path, PathBuf};
 
 use chrono::Utc;
 use reqwest::Url;
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use zip::ZipArchive;
@@ -15,9 +14,9 @@ use crate::domain::models::{InstallPluginCommand, PluginView};
 use crate::error::AppCoreError;
 use crate::infra::db::{PluginStateRecord, PluginStateStore};
 use slab_types::plugin::{
-    PluginAgentCapabilityContribution, PluginCommandContribution, PluginManifest,
-    PluginNetworkMode, PluginPermissionsManifest, PluginRouteContribution,
-    PluginSettingsContribution, PluginSidebarContribution,
+    PluginAgentCapabilityContribution, PluginCommandContribution, PluginLanguageServerContribution,
+    PluginLanguageServerTransport, PluginManifest, PluginNetworkMode, PluginPermissionsManifest,
+    PluginRouteContribution, PluginSettingsContribution, PluginSidebarContribution,
 };
 
 const SOURCE_KIND_DEV: &str = "dev";
@@ -175,6 +174,10 @@ impl PluginService {
         } else {
             move_directory(&extracted_root, &final_dir)?;
             safe_remove_dir(&staging_root)?;
+        }
+
+        if final_dir.join("package.json").exists() {
+            run_bun_install(&final_dir).await;
         }
 
         let now = Utc::now();
@@ -402,12 +405,6 @@ struct ResolvedInstallSource {
 
 fn build_plugin_view(scan: &ScannedPlugin, state: Option<&PluginStateRecord>) -> PluginView {
     let manifest = scan.manifest.as_ref();
-    let manifest_compatibility =
-        manifest.map(|value| serde_json::to_value(&value.compatibility).unwrap_or(Value::Null));
-    let manifest_contributions =
-        manifest.map(|value| serde_json::to_value(&value.contributes).unwrap_or(Value::Null));
-    let manifest_permissions =
-        manifest.map(|value| serde_json::to_value(&value.permissions).unwrap_or(Value::Null));
     let installed_version = manifest
         .map(|value| value.version.clone())
         .or_else(|| state.and_then(|record| record.installed_version.clone()));
@@ -423,7 +420,7 @@ fn build_plugin_view(scan: &ScannedPlugin, state: Option<&PluginStateRecord>) ->
         valid: scan.valid,
         error: scan.error.clone(),
         manifest_version: manifest.map(|value| value.manifest_version).unwrap_or(0),
-        compatibility: manifest_compatibility.unwrap_or(Value::Null),
+        compatibility: manifest.map(|value| value.compatibility.clone()),
         ui_entry: manifest.map(|value| value.runtime.ui.entry.clone()),
         has_wasm: manifest.and_then(|value| value.runtime.wasm.as_ref()).is_some(),
         network_mode: manifest
@@ -432,8 +429,8 @@ fn build_plugin_view(scan: &ScannedPlugin, state: Option<&PluginStateRecord>) ->
         allow_hosts: manifest
             .map(|value| value.permissions.network.allow_hosts.clone())
             .unwrap_or_default(),
-        contributions: manifest_contributions.unwrap_or(Value::Null),
-        permissions: manifest_permissions.unwrap_or(Value::Null),
+        contributions: manifest.map(|value| value.contributes.clone()),
+        permissions: manifest.map(|value| value.permissions.clone()),
         source_kind: state
             .map(|record| record.source_kind.clone())
             .unwrap_or_else(|| scan.source_kind.clone()),
@@ -475,13 +472,13 @@ fn build_missing_plugin_view(state: &PluginStateRecord) -> PluginView {
         valid: false,
         error: Some("plugin is recorded in the database but missing on disk".to_owned()),
         manifest_version: 0,
-        compatibility: Value::Null,
+        compatibility: None,
         ui_entry: None,
         has_wasm: false,
         network_mode: "blocked".to_owned(),
         allow_hosts: Vec::new(),
-        contributions: Value::Null,
-        permissions: Value::Null,
+        contributions: None,
+        permissions: None,
         source_kind: state.source_kind.clone(),
         source_ref: state.source_ref.clone(),
         install_root: state.install_root.clone(),
@@ -661,6 +658,10 @@ fn validate_contributions(root_dir: &Path, manifest: &PluginManifest) -> Result<
         "contributes.agentCapabilities",
         manifest.contributes.agent_capabilities.iter().map(|item| &item.id),
     )?;
+    validate_duplicate_ids(
+        "contributes.languageServers",
+        manifest.contributes.language_servers.iter().map(|item| &item.id),
+    )?;
 
     if !manifest.contributes.routes.is_empty() {
         ensure_permission(
@@ -697,6 +698,13 @@ fn validate_contributions(root_dir: &Path, manifest: &PluginManifest) -> Result<
             "contributes.agentCapabilities requires permissions.agent to include capability:declare",
         )?;
     }
+    if !manifest.contributes.language_servers.is_empty() {
+        ensure_lsp_permission(
+            &manifest.permissions,
+            "languageServer:declare",
+            "contributes.languageServers requires permissions.lsp to include languageServer:declare",
+        )?;
+    }
 
     let route_ids =
         manifest.contributes.routes.iter().map(|route| route.id.clone()).collect::<HashSet<_>>();
@@ -713,6 +721,9 @@ fn validate_contributions(root_dir: &Path, manifest: &PluginManifest) -> Result<
     }
     for capability in &manifest.contributes.agent_capabilities {
         validate_agent_capability(root_dir, capability, manifest)?;
+    }
+    for provider in &manifest.contributes.language_servers {
+        validate_language_server(provider)?;
     }
     for sidebar in &manifest.contributes.sidebar {
         validate_sidebar(sidebar, &route_ids)?;
@@ -816,6 +827,48 @@ fn validate_agent_capability(
     Ok(())
 }
 
+fn validate_language_server(provider: &PluginLanguageServerContribution) -> Result<(), String> {
+    if provider.languages.is_empty() {
+        return Err(format!("language server `{}` must declare languages", provider.id));
+    }
+    for language in &provider.languages {
+        if !is_valid_language_id(language) {
+            return Err(format!(
+                "language server `{}` has invalid language `{language}`",
+                provider.id
+            ));
+        }
+    }
+
+    match &provider.transport {
+        PluginLanguageServerTransport::Stdio { command, .. } => {
+            if command.trim().is_empty() {
+                return Err(format!(
+                    "language server `{}` must declare transport.command",
+                    provider.id
+                ));
+            }
+        }
+        PluginLanguageServerTransport::NodePackage { package, .. } => {
+            if package.trim().is_empty() {
+                return Err(format!(
+                    "language server `{}` must declare transport.package",
+                    provider.id
+                ));
+            }
+        }
+        PluginLanguageServerTransport::WebSocket { url } => {
+            if !(url.starts_with("ws://") || url.starts_with("wss://")) {
+                return Err(format!(
+                    "language server `{}` websocket url must start with ws:// or wss://",
+                    provider.id
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_duplicate_ids<'a>(
     context: &str,
     ids: impl Iterator<Item = &'a String>,
@@ -827,6 +880,18 @@ fn validate_duplicate_ids<'a>(
         }
     }
     Ok(())
+}
+
+fn ensure_lsp_permission(
+    permissions: &PluginPermissionsManifest,
+    expected: &str,
+    error: &str,
+) -> Result<(), String> {
+    if permissions.lsp.iter().any(|value| value == expected) {
+        Ok(())
+    } else {
+        Err(error.to_owned())
+    }
 }
 
 fn ensure_permission(
@@ -923,6 +988,18 @@ fn is_valid_plugin_id(id: &str) -> bool {
     })
 }
 
+fn is_valid_language_id(id: &str) -> bool {
+    if !(1..=64).contains(&id.len()) {
+        return false;
+    }
+    id.chars().all(|character| {
+        character.is_ascii_lowercase()
+            || character.is_ascii_digit()
+            || character == '-'
+            || character == '_'
+    })
+}
+
 fn is_pack_managed_source_kind(source_kind: &str) -> bool {
     matches!(
         source_kind,
@@ -989,6 +1066,27 @@ async fn load_package_bytes(source: &str) -> Result<Vec<u8>, AppCoreError> {
     fs::read(source).map_err(|error| {
         AppCoreError::Internal(format!("failed to read plugin package `{source}`: {error}"))
     })
+}
+
+async fn run_bun_install(dir: &Path) {
+    let result = tokio::process::Command::new("bun")
+        .arg("install")
+        .arg("--production")
+        .current_dir(dir)
+        .output()
+        .await;
+    match result {
+        Ok(output) if output.status.success() => {
+            tracing::info!("bun install succeeded in {}", dir.display());
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            tracing::warn!("bun install failed in {}: {stderr}", dir.display());
+        }
+        Err(error) => {
+            tracing::warn!("bun install could not be launched in {}: {error}", dir.display());
+        }
+    }
 }
 
 fn create_staging_dir(plugins_dir: &Path) -> Result<PathBuf, AppCoreError> {
@@ -1188,6 +1286,76 @@ mod tests {
         let scanned = scan_plugin_dir(&plugin_root, "dev").expect("scan plugin");
         assert!(scanned.valid);
         assert_eq!(scanned.id, "example-plugin");
+    }
+
+    #[test]
+    fn scan_plugin_dir_accepts_language_server_contribution() {
+        let root = temp_dir("scan-language-server");
+        let plugin_root = root.join("lsp-plugin");
+        write(&plugin_root.join("ui/index.html"), "<html></html>");
+        let html_hash = hash_bytes_hex(b"<html></html>");
+        write(
+            &plugin_root.join("plugin.json"),
+            &serde_json::to_string_pretty(&json!({
+                "manifestVersion": 1,
+                "id": "lsp-plugin",
+                "name": "LSP Plugin",
+                "version": "0.1.0",
+                "runtime": { "ui": { "entry": "ui/index.html" } },
+                "integrity": { "filesSha256": { "ui/index.html": html_hash } },
+                "permissions": {
+                    "network": { "mode": "blocked", "allowHosts": [] },
+                    "lsp": ["languageServer:declare"]
+                },
+                "contributes": {
+                    "languageServers": [{
+                        "id": "lsp-plugin.pyright",
+                        "languages": ["python"],
+                        "transport": { "type": "stdio", "command": "pyright-langserver", "args": ["--stdio"] }
+                    }]
+                }
+            }))
+            .expect("manifest json"),
+        );
+
+        let scanned = scan_plugin_dir(&plugin_root, "dev").expect("scan plugin");
+
+        assert!(scanned.valid);
+        let manifest = scanned.manifest.expect("manifest");
+        assert_eq!(manifest.contributes.language_servers[0].id, "lsp-plugin.pyright");
+    }
+
+    #[test]
+    fn scan_plugin_dir_rejects_language_server_without_lsp_permission() {
+        let root = temp_dir("scan-language-server-permission");
+        let plugin_root = root.join("lsp-plugin");
+        write(&plugin_root.join("ui/index.html"), "<html></html>");
+        let html_hash = hash_bytes_hex(b"<html></html>");
+        write(
+            &plugin_root.join("plugin.json"),
+            &serde_json::to_string_pretty(&json!({
+                "manifestVersion": 1,
+                "id": "lsp-plugin",
+                "name": "LSP Plugin",
+                "version": "0.1.0",
+                "runtime": { "ui": { "entry": "ui/index.html" } },
+                "integrity": { "filesSha256": { "ui/index.html": html_hash } },
+                "permissions": { "network": { "mode": "blocked", "allowHosts": [] } },
+                "contributes": {
+                    "languageServers": [{
+                        "id": "lsp-plugin.pyright",
+                        "languages": ["python"],
+                        "transport": { "type": "stdio", "command": "pyright-langserver", "args": ["--stdio"] }
+                    }]
+                }
+            }))
+            .expect("manifest json"),
+        );
+
+        let scanned = scan_plugin_dir(&plugin_root, "dev").expect("scan plugin");
+
+        assert!(!scanned.valid);
+        assert!(scanned.error.as_deref().unwrap().contains("permissions.lsp"));
     }
 
     #[test]

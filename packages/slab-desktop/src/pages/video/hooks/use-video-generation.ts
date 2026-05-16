@@ -11,11 +11,14 @@ import {
   resolveMediaUrl,
   type VideoGenerationTask,
 } from '@/lib/media-task-api';
+import { isFailedTaskStatus } from '@/pages/task/utils';
 import { toCatalogModelList } from '@slab/api/models';
 import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
 import { HEADER_SELECT_KEYS } from '@/layouts/header-controls';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import {
+  DEFAULT_GENERATION_SIZE,
+  MAX_RANDOM_SEED,
   MAX_POLL_ATTEMPTS,
   POLL_INTERVAL_MS,
   type ModelOption,
@@ -23,6 +26,7 @@ import {
 
 type GenerationPhase = 'idle' | 'polling' | 'fetchingResult';
 type TaskResponse = components['schemas']['TaskResponse'];
+type VideoGenerationRequest = components['schemas']['VideoGenerationRequest'];
 
 async function fileToDataUri(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -255,27 +259,29 @@ export function useVideoGeneration() {
     setVideoPath(null);
 
     try {
-      const width = Number.parseInt(widthStr, 10) || 512;
-      const height = Number.parseInt(heightStr, 10) || 512;
+      const width = Number.parseInt(widthStr, 10) || DEFAULT_GENERATION_SIZE;
+      const height = Number.parseInt(heightStr, 10) || DEFAULT_GENERATION_SIZE;
+      const body: VideoGenerationRequest = {
+        model_id: selectedModelId || undefined,
+        model: selectedModel.local_path,
+        prompt,
+        negative_prompt: negativePrompt || undefined,
+        width,
+        height,
+        video_frames: frames,
+        fps,
+        cfg_scale: cfgScale,
+        guidance,
+        steps,
+        seed: seed < 0 ? Math.floor(Math.random() * MAX_RANDOM_SEED) : seed,
+        sample_method: sampleMethod === 'auto' ? undefined : sampleMethod,
+        scheduler: scheduler === 'auto' ? undefined : scheduler,
+        strength: initImageDataUri ? strength : undefined,
+        init_image: initImageDataUri ?? undefined,
+      };
+
       const { operation_id } = await generateVideoMutation.mutateAsync({
-        body: {
-          model_id: selectedModelId || undefined,
-          model: selectedModel.local_path,
-          prompt,
-          negative_prompt: negativePrompt || undefined,
-          width,
-          height,
-          video_frames: frames,
-          fps,
-          cfg_scale: cfgScale,
-          guidance,
-          steps,
-          seed: seed < 0 ? Math.floor(Math.random() * 2147483647) : seed,
-          sample_method: sampleMethod === 'auto' ? undefined : sampleMethod,
-          scheduler: scheduler === 'auto' ? undefined : scheduler,
-          strength: initImageDataUri ? strength : undefined,
-          init_image: initImageDataUri ?? undefined,
-        } as never,
+        body,
       });
       setTaskId(operation_id);
       setGenerationPhase('polling');
@@ -324,11 +330,7 @@ export function useVideoGeneration() {
       return;
     }
 
-    if (
-      taskStatus.status === 'failed' ||
-      taskStatus.status === 'cancelled' ||
-      taskStatus.status === 'interrupted'
-    ) {
+    if (isFailedTaskStatus(taskStatus.status)) {
       toast.error(taskStatus.error_msg ?? t('pages.video.error.generationFailed'));
       clearGenerationTask();
       return;
@@ -422,8 +424,8 @@ export function useVideoGeneration() {
     anchor.click();
   }, [videoPath]);
 
-  const widthValue = Number.parseInt(widthStr, 10) || 512;
-  const heightValue = Number.parseInt(heightStr, 10) || 512;
+  const widthValue = Number.parseInt(widthStr, 10) || DEFAULT_GENERATION_SIZE;
+  const heightValue = Number.parseInt(heightStr, 10) || DEFAULT_GENERATION_SIZE;
   const clipDurationSeconds = frames / Math.max(fps, 1);
 
   const stageTitle = videoPath

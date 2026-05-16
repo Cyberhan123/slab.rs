@@ -2,8 +2,9 @@ use std::collections::HashMap;
 
 use serde::de::Error as DeError;
 use serde::{Deserialize, Deserializer, Serialize};
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginManifest {
     pub manifest_version: u32,
@@ -83,7 +84,7 @@ struct RawPluginManifest {
     network: Option<PluginNetworkManifest>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginCompatibilityManifest {
     #[serde(default)]
@@ -92,7 +93,7 @@ pub struct PluginCompatibilityManifest {
     pub plugin_api: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginRuntimeManifest {
     pub ui: PluginUiManifest,
@@ -100,30 +101,30 @@ pub struct PluginRuntimeManifest {
     pub wasm: Option<PluginWasmManifest>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 pub struct PluginUiManifest {
     pub entry: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 pub struct PluginWasmManifest {
     pub entry: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 pub struct PluginIntegrityManifest {
     #[serde(rename = "filesSha256")]
     pub files_sha256: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum PluginNetworkMode {
     Blocked,
     Allowlist,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginNetworkManifest {
     pub mode: PluginNetworkMode,
@@ -137,7 +138,7 @@ impl Default for PluginNetworkManifest {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginPermissionsManifest {
     #[serde(default)]
@@ -147,12 +148,14 @@ pub struct PluginPermissionsManifest {
     #[serde(default)]
     pub agent: Vec<String>,
     #[serde(default)]
+    pub lsp: Vec<String>,
+    #[serde(default)]
     pub slab_api: Vec<String>,
     #[serde(default)]
     pub files: PluginFilePermissions,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginFilePermissions {
     #[serde(default)]
@@ -161,7 +164,7 @@ pub struct PluginFilePermissions {
     pub write: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginContributesManifest {
     #[serde(default)]
@@ -174,9 +177,11 @@ pub struct PluginContributesManifest {
     pub settings: Vec<PluginSettingsContribution>,
     #[serde(default)]
     pub agent_capabilities: Vec<PluginAgentCapabilityContribution>,
+    #[serde(default)]
+    pub language_servers: Vec<PluginLanguageServerContribution>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginRouteContribution {
     pub id: String,
@@ -189,7 +194,7 @@ pub struct PluginRouteContribution {
     pub entry: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginSidebarContribution {
     pub id: String,
@@ -205,7 +210,7 @@ pub struct PluginSidebarContribution {
     pub icon: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginCommandContribution {
     pub id: String,
@@ -219,7 +224,7 @@ pub struct PluginCommandContribution {
     pub route: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginSettingsContribution {
     pub id: String,
@@ -230,7 +235,7 @@ pub struct PluginSettingsContribution {
     pub schema: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginAgentCapabilityContribution {
     pub id: String,
@@ -250,14 +255,58 @@ pub struct PluginAgentCapabilityContribution {
     pub expose_as_mcp_tool: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginLanguageServerContribution {
+    pub id: String,
+    pub languages: Vec<String>,
+    pub transport: PluginLanguageServerTransport,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum PluginLanguageServerTransport {
+    Stdio {
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default)]
+        env: HashMap<String, String>,
+    },
+    WebSocket {
+        url: String,
+    },
+    /// Node.js package-based language server bundled inside the plugin directory.
+    /// The runtime looks for the command binary in the plugin's `node_modules/.bin/`
+    /// directory before falling back to the system PATH, so the language server
+    /// can be shipped as a plain npm dependency of the plugin without requiring
+    /// any system-wide installation.  This is the recommended transport for
+    /// wrapping VS Code extension language servers (e.g. `typescript-language-server`,
+    /// `pyright-langserver`) as slab plugins.
+    NodePackage {
+        /// npm package name used to identify this language server (e.g.
+        /// `"typescript-language-server"`).  The package must be present in the
+        /// plugin's install directory under `node_modules/`.
+        package: String,
+        /// Executable name to invoke.  Defaults to the value of `package` when
+        /// omitted.  Resolved against the plugin's `node_modules/.bin/` first.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command: Option<String>,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default)]
+        env: HashMap<String, String>,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum PluginCapabilityKind {
     Tool,
     Workflow,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginCapabilityTransport {
     #[serde(rename = "type")]
@@ -265,13 +314,13 @@ pub struct PluginCapabilityTransport {
     pub function: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum PluginCapabilityTransportType {
     PluginCall,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginInfo {
     pub id: String,

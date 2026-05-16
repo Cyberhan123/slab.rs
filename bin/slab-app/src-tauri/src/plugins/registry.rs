@@ -10,8 +10,9 @@ use sha2::{Digest, Sha256};
 
 use super::types::{
     PluginCapabilityTransportType, PluginCommandContribution, PluginContributesManifest,
-    PluginInfo, PluginManifest, PluginNetworkMode, PluginPermissionsManifest,
-    PluginSettingsContribution, PluginSidebarContribution,
+    PluginInfo, PluginLanguageServerContribution, PluginLanguageServerTransport, PluginManifest,
+    PluginNetworkMode, PluginPermissionsManifest, PluginSettingsContribution,
+    PluginSidebarContribution,
 };
 
 pub const DEFAULT_PLUGINS_DIR: &str = "plugins";
@@ -470,6 +471,12 @@ fn build_extension_registry(
         "settings:section:create",
         "contributes.settings",
     )?;
+    ensure_lsp_permission(
+        manifest,
+        !manifest.contributes.language_servers.is_empty(),
+        "languageServer:declare",
+        "contributes.languageServers",
+    )?;
 
     for route in &manifest.contributes.routes {
         validate_contribution_id(&route.id, "route id")?;
@@ -496,6 +503,9 @@ fn build_extension_registry(
 
     for setting in &manifest.contributes.settings {
         validate_settings_contribution(plugin_dir, files_sha256, &mut registry, setting)?;
+    }
+    for provider in &manifest.contributes.language_servers {
+        validate_language_server_contribution(&mut registry, provider)?;
     }
 
     Ok(registry)
@@ -638,6 +648,52 @@ fn validate_settings_contribution(
     Ok(())
 }
 
+fn validate_language_server_contribution(
+    registry: &mut ExtensionPointRegistry,
+    provider: &PluginLanguageServerContribution,
+) -> Result<(), String> {
+    validate_contribution_id(&provider.id, "language server id")?;
+    insert_contribution_id(&mut registry.contribution_ids, &provider.id)?;
+    if provider.languages.is_empty() {
+        return Err(format!("language server `{}` must declare languages", provider.id));
+    }
+    for language in &provider.languages {
+        if !is_valid_language_id(language) {
+            return Err(format!(
+                "language server `{}` has invalid language `{language}`",
+                provider.id
+            ));
+        }
+    }
+    match &provider.transport {
+        PluginLanguageServerTransport::Stdio { command, .. } => {
+            if command.trim().is_empty() {
+                return Err(format!(
+                    "language server `{}` must declare transport.command",
+                    provider.id
+                ));
+            }
+        }
+        PluginLanguageServerTransport::NodePackage { package, .. } => {
+            if package.trim().is_empty() {
+                return Err(format!(
+                    "language server `{}` must declare transport.package",
+                    provider.id
+                ));
+            }
+        }
+        PluginLanguageServerTransport::WebSocket { url } => {
+            if !(url.starts_with("ws://") || url.starts_with("wss://")) {
+                return Err(format!(
+                    "language server `{}` websocket url must start with ws:// or wss://",
+                    provider.id
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_declared_file(
     plugin_dir: &Path,
     files_sha256: &HashMap<String, String>,
@@ -703,6 +759,20 @@ fn ensure_agent_permission(
     Ok(())
 }
 
+fn ensure_lsp_permission(
+    manifest: &PluginManifest,
+    needed: bool,
+    permission: &str,
+    contribution_name: &str,
+) -> Result<(), String> {
+    if needed && !manifest.permissions.lsp.iter().any(|entry| entry == permission) {
+        return Err(format!(
+            "permissions.lsp must include `{permission}` when `{contribution_name}` is declared"
+        ));
+    }
+    Ok(())
+}
+
 fn is_valid_plugin_id(id: &str) -> bool {
     if id.len() < 2 || id.len() > 64 {
         return false;
@@ -718,6 +788,14 @@ fn is_valid_plugin_id(id: &str) -> bool {
     }
 
     chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' || ch == '_')
+}
+
+fn is_valid_language_id(id: &str) -> bool {
+    if id.is_empty() || id.len() > 64 {
+        return false;
+    }
+
+    id.chars().all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' || ch == '_')
 }
 
 fn is_valid_extension_id(id: &str) -> bool {

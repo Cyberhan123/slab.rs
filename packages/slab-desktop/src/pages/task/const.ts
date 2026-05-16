@@ -1,14 +1,7 @@
+import type { components } from '@slab/api/v1';
+
 export const PAGE_SIZE = 4;
+export const TASK_LIST_POLL_INTERVAL_MS = 3_000;
 
-export interface Task {
-  id: string;
-  status: string;
-  task_type: string;
-  error_msg?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface TaskResult {
-  [key: string]: any;
-}
+export type Task = components['schemas']['TaskResponse'];
+export type TaskResult = components['schemas']['TaskResultPayload'];

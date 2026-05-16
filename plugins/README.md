@@ -61,6 +61,7 @@ assets from host-controlled extension points and agent-facing capabilities:
     "network": { "mode": "blocked", "allowHosts": [] },
     "ui": ["route:create", "sidebar:item:create", "command:create", "settings:section:create"],
     "agent": ["capability:declare", "mcpTool:expose"],
+    "lsp": ["languageServer:declare"],
     "slabApi": ["models:read", "tasks:read"],
     "files": {
       "read": ["video"],
@@ -89,14 +90,33 @@ assets from host-controlled extension points and agent-facing capabilities:
         "transport": { "type": "pluginCall", "function": "run" },
         "exposeAsMcpTool": true
       }
+    ],
+    "languageServers": [
+      {
+        "id": "example.python",
+        "languages": ["python"],
+        "transport": {
+          "type": "stdio",
+          "command": "pyright-langserver",
+          "args": ["--stdio"]
+        }
+      },
+      {
+        "id": "example.remote",
+        "languages": ["rust"],
+        "transport": {
+          "type": "webSocket",
+          "url": "ws://127.0.0.1:9257/lsp"
+        }
+      }
     ]
   }
 }
 ```
 
 The first supported extension points are routes, sidebar entries, commands,
-settings sections, and agent capabilities. Header, footer, chat toolbar, and
-other shell slots are intentionally not open yet.
+settings sections, agent capabilities, and workspace language servers. Header,
+footer, chat toolbar, and other shell slots are intentionally not open yet.
 
 ## Legacy manifests
 

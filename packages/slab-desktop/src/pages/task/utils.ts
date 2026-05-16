@@ -2,6 +2,15 @@ import { Download, Film, Image, ListChecks, Mic } from 'lucide-react';
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
+export interface NormalizedTaskProgress {
+  label: string | null;
+  current: number;
+  total: number | null;
+  step: number | null;
+  stepCount: number | null;
+  unit: string | null;
+}
+
 export function formatDateTime(value: string, locale: string) {
   return new Date(value).toLocaleString(locale, {
     year: 'numeric',
@@ -55,8 +64,61 @@ export function getTaskDurationMs(task: { created_at: string; updated_at: string
   return Math.max(updatedAt - createdAt, 0);
 }
 
+const SETTLED_TASK_STATUSES = ['succeeded', 'failed', 'cancelled', 'interrupted'] as const;
+const FAILED_TASK_STATUSES = ['failed', 'cancelled', 'interrupted'] as const;
+export const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000;
+export const MODEL_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1_000;
+
 export function isSettledStatus(status: string) {
-  return ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(status);
+  return SETTLED_TASK_STATUSES.includes(status as (typeof SETTLED_TASK_STATUSES)[number]);
+}
+
+export function isFailedTaskStatus(status: string) {
+  return FAILED_TASK_STATUSES.includes(status as (typeof FAILED_TASK_STATUSES)[number]);
+}
+
+export function extractTaskId(payload: unknown): string | null {
+  if (typeof payload !== 'object' || payload === null) {
+    return null;
+  }
+
+  const taskId =
+    (payload as { operation_id?: unknown }).operation_id ??
+    (payload as { task_id?: unknown }).task_id;
+
+  if (typeof taskId !== 'string') {
+    return null;
+  }
+
+  const trimmed = taskId.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+export function normalizeTaskProgress(progress: unknown): NormalizedTaskProgress | null {
+  if (
+    typeof progress !== 'object' ||
+    progress === null ||
+    typeof (progress as { current?: unknown }).current !== 'number' ||
+    !Number.isFinite((progress as { current: number }).current)
+  ) {
+    return null;
+  }
+
+  const value = progress as Record<string, unknown>;
+  return {
+    label: typeof value.label === 'string' ? value.label : null,
+    current: value.current as number,
+    total: finiteNumberOrNull(value.total),
+    step: finiteNumberOrNull(value.step),
+    stepCount: finiteNumberOrNull(value.step_count),
+    unit: typeof value.unit === 'string' ? value.unit : null,
+  };
+}
+
+function finiteNumberOrNull(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 export function getSparklineWeight(status: string) {
