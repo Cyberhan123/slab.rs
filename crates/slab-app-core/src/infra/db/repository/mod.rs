@@ -24,14 +24,13 @@ use std::str::FromStr;
 
 #[derive(Clone, Debug)]
 pub struct SqlxStore {
-    pub(crate) pool: sqlx::Pool<sqlx::Any>,
+    pub(crate) pool: sqlx::Pool<sqlx::Sqlite>,
 }
 
 impl SqlxStore {
     pub async fn connect(url: &str) -> Result<Self, sqlx::Error> {
-        sqlx::any::install_default_drivers();
-        let options = sqlx::any::AnyConnectOptions::from_str(url)?;
-        let pool = sqlx::AnyPool::connect_with(options).await?;
+        let options = sqlx::sqlite::SqliteConnectOptions::from_str(url)?;
+        let pool = sqlx::SqlitePool::connect_with(options).await?;
         sqlx::migrate!("./migrations").run(&pool).await?;
         Ok(Self { pool })
     }

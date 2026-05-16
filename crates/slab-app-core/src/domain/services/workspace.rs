@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::ErrorKind;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -453,31 +453,14 @@ fn decode_limited_output_with_limit(bytes: &[u8], limit: usize) -> String {
 }
 
 fn normalize_relative_path(raw: &str) -> Result<String, AppCoreError> {
-    let trimmed = raw.trim().trim_matches(['/', '\\']);
-    if trimmed.is_empty() {
-        return Ok(String::new());
+    let normalized = slab_utils::path::normalize_relative_path_allow_empty(raw)
+        .map_err(|_| AppCoreError::BadRequest(format!("workspace path `{raw}` is invalid")))?;
+    if normalized.split('/').any(|segment| segment == ".slab") {
+        return Err(AppCoreError::BadRequest(
+            "workspace internals cannot be edited from the file tree".to_string(),
+        ));
     }
-
-    let mut parts = Vec::new();
-    for component in Path::new(trimmed).components() {
-        match component {
-            Component::Normal(segment) => {
-                let segment = segment.to_string_lossy();
-                if segment == ".slab" {
-                    return Err(AppCoreError::BadRequest(
-                        "workspace internals cannot be edited from the file tree".to_string(),
-                    ));
-                }
-                parts.push(segment.to_string());
-            }
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(AppCoreError::BadRequest(format!("workspace path `{raw}` is invalid")));
-            }
-        }
-    }
-
-    Ok(parts.join("/"))
+    Ok(normalized)
 }
 
 fn resolve_workspace_path_for_write(
@@ -534,7 +517,7 @@ fn existing_parent(path: &Path) -> Result<PathBuf, AppCoreError> {
 fn content_hash(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect()
+    hex::encode(hasher.finalize())
 }
 
 #[cfg(test)]
@@ -578,6 +561,11 @@ mod tests {
     #[test]
     fn normalize_relative_path_rejects_parent_segments() {
         assert!(normalize_relative_path("../outside.txt").is_err());
+    }
+
+    #[test]
+    fn normalize_relative_path_rejects_workspace_internals() {
+        assert!(normalize_relative_path(".slab/settings.json").is_err());
     }
 
     #[test]

@@ -6,7 +6,7 @@ use crate::infra::db::entities::{
     NewImageGenerationTaskRecord, NewVideoGenerationTaskRecord, TaskRecord,
     VideoGenerationTaskRecord, VideoGenerationTaskViewRecord,
 };
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use std::future::Future;
 use std::str::FromStr;
 
@@ -27,13 +27,13 @@ struct ImageTaskViewRow {
     artifact_paths: Option<String>,
     request_data: String,
     result_data: Option<String>,
-    created_at: String,
-    updated_at: String,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
     task_status: String,
     task_result_data: Option<String>,
     error_msg: Option<String>,
-    task_created_at: String,
-    task_updated_at: String,
+    task_created_at: DateTime<Utc>,
+    task_updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -52,13 +52,13 @@ struct VideoTaskViewRow {
     video_path: Option<String>,
     request_data: String,
     result_data: Option<String>,
-    created_at: String,
-    updated_at: String,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
     task_status: String,
     task_result_data: Option<String>,
     error_msg: Option<String>,
-    task_created_at: String,
-    task_updated_at: String,
+    task_created_at: DateTime<Utc>,
+    task_updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -75,13 +75,13 @@ struct AudioTaskViewRow {
     transcript_text: Option<String>,
     request_data: String,
     result_data: Option<String>,
-    created_at: String,
-    updated_at: String,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
     task_status: String,
     task_result_data: Option<String>,
     error_msg: Option<String>,
-    task_created_at: String,
-    task_updated_at: String,
+    task_created_at: DateTime<Utc>,
+    task_updated_at: DateTime<Utc>,
 }
 
 pub trait MediaTaskStore: Send + Sync + 'static {
@@ -383,7 +383,7 @@ const AUDIO_TASK_VIEW_QUERY: &str = "SELECT a.task_id, a.backend_id, a.model_id,
 const AUDIO_TASK_VIEW_QUERY_WITH_ID: &str = "SELECT a.task_id, a.backend_id, a.model_id, a.source_path, a.language, a.prompt, a.detect_language, a.vad_json, a.decode_json, a.transcript_text, a.request_data, a.result_data, a.created_at, a.updated_at, t.status AS task_status, t.result_data AS task_result_data, t.error_msg, t.created_at AS task_created_at, t.updated_at AS task_updated_at FROM audio_transcription_tasks a JOIN tasks t ON t.id = a.task_id WHERE a.task_id = ?1";
 
 async fn insert_task_in_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     task: &TaskRecord,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
@@ -423,8 +423,8 @@ fn image_view_from_row(row: ImageTaskViewRow) -> ImageGenerationTaskViewRecord {
             artifact_paths: decode_string_array(row.artifact_paths.as_deref()),
             request_data: row.request_data,
             result_data: row.result_data,
-            created_at: parse_rfc3339_or_now(row.created_at, "image.created_at"),
-            updated_at: parse_rfc3339_or_now(row.updated_at, "image.updated_at"),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
         },
         state: media_state_from_task(
             row.task_status,
@@ -453,8 +453,8 @@ fn video_view_from_row(row: VideoTaskViewRow) -> VideoGenerationTaskViewRecord {
             video_path: row.video_path,
             request_data: row.request_data,
             result_data: row.result_data,
-            created_at: parse_rfc3339_or_now(row.created_at, "video.created_at"),
-            updated_at: parse_rfc3339_or_now(row.updated_at, "video.updated_at"),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
         },
         state: media_state_from_task(
             row.task_status,
@@ -481,8 +481,8 @@ fn audio_view_from_row(row: AudioTaskViewRow) -> AudioTranscriptionTaskViewRecor
             transcript_text: row.transcript_text,
             request_data: row.request_data,
             result_data: row.result_data,
-            created_at: parse_rfc3339_or_now(row.created_at, "audio.created_at"),
-            updated_at: parse_rfc3339_or_now(row.updated_at, "audio.updated_at"),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
         },
         state: media_state_from_task(
             row.task_status,
@@ -498,23 +498,16 @@ fn media_state_from_task(
     status: String,
     result_data: Option<String>,
     error_msg: Option<String>,
-    created_at: String,
-    updated_at: String,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
 ) -> MediaTaskState {
     MediaTaskState {
         status: decode_task_status(&status),
         progress: task_progress_from_payload(result_data.as_deref()),
         error_msg,
-        task_created_at: parse_rfc3339_or_now(created_at, "task.created_at"),
-        task_updated_at: parse_rfc3339_or_now(updated_at, "task.updated_at"),
+        task_created_at: created_at,
+        task_updated_at: updated_at,
     }
-}
-
-fn parse_rfc3339_or_now(raw: String, field: &'static str) -> chrono::DateTime<Utc> {
-    raw.parse().unwrap_or_else(|error: chrono::ParseError| {
-        tracing::warn!(raw = %raw, error = %error, field, "failed to parse media task timestamp; using now");
-        Utc::now()
-    })
 }
 
 fn decode_task_status(raw: &str) -> TaskStatus {

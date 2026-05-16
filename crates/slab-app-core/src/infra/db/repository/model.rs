@@ -1,6 +1,6 @@
 use super::AnyStore;
 use crate::infra::db::entities::UnifiedModelRecord;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use std::future::Future;
 
 pub trait ModelStore: Send + Sync + 'static {
@@ -25,13 +25,6 @@ pub trait ModelStore: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
 }
 
-fn parse_rfc3339_or_now(raw: String, field: &'static str) -> chrono::DateTime<Utc> {
-    raw.parse().unwrap_or_else(|e: chrono::ParseError| {
-        tracing::warn!(raw = %raw, error = %e, field, "failed to parse model timestamp; using now");
-        Utc::now()
-    })
-}
-
 type ModelRow = (
     String,         // id
     String,         // display_name
@@ -44,8 +37,8 @@ type ModelRow = (
     Option<String>, // runtime_presets
     i64,            // config_schema_version
     i64,            // config_policy_version
-    String,         // created_at
-    String,         // updated_at
+    DateTime<Utc>,  // created_at
+    DateTime<Utc>,  // updated_at
 );
 
 fn row_to_record(
@@ -77,8 +70,8 @@ fn row_to_record(
         runtime_presets,
         config_schema_version,
         config_policy_version,
-        created_at: parse_rfc3339_or_now(created_at, "created_at"),
-        updated_at: parse_rfc3339_or_now(updated_at, "updated_at"),
+        created_at,
+        updated_at,
     }
 }
 

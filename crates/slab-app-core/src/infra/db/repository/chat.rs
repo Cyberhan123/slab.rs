@@ -1,6 +1,6 @@
 use super::AnyStore;
 use crate::infra::db::entities::ChatMessage;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use std::future::Future;
 
 pub trait ChatStore: Send + Sync + 'static {
@@ -44,7 +44,7 @@ impl ChatStore for AnyStore {
     }
 
     async fn list_messages(&self, session_id: &str) -> Result<Vec<ChatMessage>, sqlx::Error> {
-        let rows: Vec<(String, String, String, String, String)> = sqlx::query_as(
+        let rows: Vec<(String, String, String, String, DateTime<Utc>)> = sqlx::query_as(
             "SELECT id, session_id, role, content, created_at \
              FROM chat_messages WHERE session_id = ?1 ORDER BY created_at ASC",
         )
@@ -58,10 +58,7 @@ impl ChatStore for AnyStore {
                 session_id,
                 role,
                 content,
-                created_at: created_at.parse().unwrap_or_else(|e: chrono::ParseError| {
-                    tracing::warn!(raw = %created_at, error = %e, "failed to parse message created_at; using now");
-                    Utc::now()
-                }),
+                created_at,
             })
             .collect())
     }

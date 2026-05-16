@@ -1,6 +1,9 @@
 use super::AnyStore;
 use crate::infra::db::entities::ChatSession;
+use chrono::{DateTime, Utc};
 use std::future::Future;
+
+type SessionRow = (String, String, Option<String>, DateTime<Utc>, DateTime<Utc>);
 
 pub trait SessionStore: Send + Sync + 'static {
     fn create_session(
@@ -30,7 +33,7 @@ impl SessionStore for AnyStore {
     }
 
     async fn list_sessions(&self) -> Result<Vec<ChatSession>, sqlx::Error> {
-        let rows: Vec<(String, String, Option<String>, String, String)> = sqlx::query_as(
+        let rows: Vec<SessionRow> = sqlx::query_as(
             "SELECT id, name, state_path, created_at, updated_at \
                  FROM chat_sessions ORDER BY created_at DESC",
         )
@@ -42,8 +45,8 @@ impl SessionStore for AnyStore {
                 id,
                 name,
                 state_path,
-                created_at: created_at.parse().unwrap_or_else(|_| chrono::Utc::now()),
-                updated_at: updated_at.parse().unwrap_or_else(|_| chrono::Utc::now()),
+                created_at,
+                updated_at,
             })
             .collect())
     }

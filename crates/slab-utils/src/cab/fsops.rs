@@ -34,21 +34,7 @@ fn collect_files_recursive_inner(root: &Path, files: &mut Vec<PathBuf>) -> Resul
 }
 
 pub fn normalize_relative_path(path: &Path) -> Result<String> {
-    validate_relative_path(path)?;
-    let value = path
-        .components()
-        .map(|component| match component {
-            Component::Normal(value) => Ok(value.to_string_lossy().replace('\\', "/")),
-            _ => Err(anyhow!("path '{}' is not a normal relative path", path.display())),
-        })
-        .collect::<Result<Vec<_>>>()?
-        .join("/");
-
-    if value.is_empty() {
-        bail!("path '{}' resolved to an empty relative path", path.display());
-    }
-
-    Ok(value)
+    crate::path::normalize_relative_path(&path.to_string_lossy())
 }
 
 pub fn validate_relative_path(path: &Path) -> Result<()> {
@@ -114,20 +100,7 @@ pub fn hash_reader(reader: &mut impl Read) -> Result<String> {
 }
 
 pub fn bytes_to_hex(bytes: &[u8]) -> String {
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        output.push(hex_digit(byte >> 4));
-        output.push(hex_digit(byte & 0x0f));
-    }
-    output
-}
-
-fn hex_digit(value: u8) -> char {
-    match value {
-        0..=9 => (b'0' + value) as char,
-        10..=15 => (b'a' + (value - 10)) as char,
-        _ => unreachable!(),
-    }
+    hex::encode(bytes)
 }
 
 pub fn remove_dir_if_exists(path: &Path) -> Result<()> {

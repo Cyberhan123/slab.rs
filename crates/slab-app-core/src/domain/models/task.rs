@@ -107,7 +107,7 @@ pub struct TimedTextSegment {
     pub text: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TaskResult {
     pub image: Option<String>,
     pub images: Option<Vec<String>>,

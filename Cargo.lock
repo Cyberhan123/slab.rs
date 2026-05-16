@@ -8872,6 +8872,7 @@ dependencies = [
  "ffmpeg-sidecar",
  "futures",
  "genai",
+ "hex",
  "hyper-util",
  "image",
  "jsonschema",
@@ -8985,6 +8986,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "flate2",
+ "hex",
  "reqwest 0.13.2",
  "serde",
  "serde_json",
@@ -9195,6 +9197,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "hex",
  "libloading 0.8.9",
  "serde",
  "serde_json",
