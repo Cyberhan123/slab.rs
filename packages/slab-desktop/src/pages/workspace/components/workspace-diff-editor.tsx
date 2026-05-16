@@ -7,7 +7,9 @@ import { languageForFile } from "../lib/workspace-page-utils"
 type WorkspaceDiffEditorProps = {
   diffText: string
   filePath: string
+  fontSize?: number
   theme: string
+  wordWrap?: "on" | "off"
 }
 
 type ParsedDiff = {
@@ -61,7 +63,7 @@ function parseUnifiedDiff(diffText: string): ParsedDiff {
     modifiedChunks.push(currentModified)
   }
 
-  const separator = ["", "// ...", ""]
+  const separator = ["", "...", ""]
   const original = originalChunks
     .flatMap((chunk, i) => (i > 0 ? separator.concat(chunk) : chunk))
     .join("\n")
@@ -72,7 +74,7 @@ function parseUnifiedDiff(diffText: string): ParsedDiff {
   return { original, modified }
 }
 
-export function WorkspaceDiffEditor({ diffText, filePath, theme }: WorkspaceDiffEditorProps) {
+export function WorkspaceDiffEditor({ diffText, filePath, fontSize = 13, theme, wordWrap = "on" }: WorkspaceDiffEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<Monaco.editor.IStandaloneDiffEditor | null>(null)
   const [servicesReady, setServicesReady] = useState(false)
@@ -108,6 +110,18 @@ export function WorkspaceDiffEditor({ diffText, filePath, theme }: WorkspaceDiff
   }, [servicesReady, theme])
 
   useEffect(() => {
+    editorRef.current?.updateOptions({ fontSize, wordWrap })
+  }, [fontSize, wordWrap])
+
+  const fontSizeRef = useRef(fontSize)
+  const wordWrapRef = useRef(wordWrap)
+
+  useEffect(() => {
+    fontSizeRef.current = fontSize
+    wordWrapRef.current = wordWrap
+  })
+
+  useEffect(() => {
     if (!servicesReady || !containerRef.current || editorRef.current) {
       return
     }
@@ -118,8 +132,8 @@ export function WorkspaceDiffEditor({ diffText, filePath, theme }: WorkspaceDiff
       renderSideBySide: true,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
-      fontSize: 13,
-      wordWrap: "on",
+      fontSize: fontSizeRef.current,
+      wordWrap: wordWrapRef.current,
     })
 
     editorRef.current = editor
