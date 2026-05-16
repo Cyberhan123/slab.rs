@@ -18,10 +18,15 @@ import {
   FolderSearch,
   FolderKanban,
   GitBranch,
+  Lightbulb,
+  ListTree,
   RefreshCcw,
   Save,
   Search,
+  SearchCode,
   Terminal,
+  TextCursorInput,
+  WandSparkles,
   X,
 } from "lucide-react"
 
@@ -58,6 +63,7 @@ type WorkspaceCommandPaletteProps = {
   onSaveFile: () => Promise<void>
   onSetMarkdownMode: (mode: WorkspaceMarkdownMode) => void
   onOpenWorkspacePath: (rootPath: string) => Promise<void>
+  onEditorAction: (actionId: string) => Promise<void>
 }
 
 export function WorkspaceCommandPalette({
@@ -84,6 +90,7 @@ export function WorkspaceCommandPalette({
   onSaveFile,
   onSetMarkdownMode,
   onOpenWorkspacePath,
+  onEditorAction,
 }: WorkspaceCommandPaletteProps) {
   const { t } = useTranslation()
   const [query, setQuery] = useState("")
@@ -217,6 +224,70 @@ export function WorkspaceCommandPalette({
                 <Save className="size-4" />
                 <span>{t("pages.workspace.editor.save")}</span>
               </CommandItem>
+              {selectedFile && (!isMarkdownFile || markdownMode === "source") ? (
+                <>
+                  <CommandItem
+                    value={t("pages.workspace.editor.find")}
+                    onSelect={() => {
+                      onOpenChange(false)
+                      void onEditorAction("actions.find")
+                    }}
+                  >
+                    <SearchCode className="size-4" />
+                    <span>{t("pages.workspace.editor.find")}</span>
+                  </CommandItem>
+                  <CommandItem
+                    value={t("pages.workspace.editor.goToSymbol")}
+                    onSelect={() => {
+                      onOpenChange(false)
+                      void onEditorAction("editor.action.quickOutline")
+                    }}
+                  >
+                    <ListTree className="size-4" />
+                    <span>{t("pages.workspace.editor.goToSymbol")}</span>
+                  </CommandItem>
+                  <CommandItem
+                    value={t("pages.workspace.editor.quickFix")}
+                    onSelect={() => {
+                      onOpenChange(false)
+                      void onEditorAction("editor.action.quickFix")
+                    }}
+                  >
+                    <Lightbulb className="size-4" />
+                    <span>{t("pages.workspace.editor.quickFix")}</span>
+                  </CommandItem>
+                  <CommandItem
+                    value={t("pages.workspace.editor.renameSymbol")}
+                    onSelect={() => {
+                      onOpenChange(false)
+                      void onEditorAction("editor.action.rename")
+                    }}
+                  >
+                    <TextCursorInput className="size-4" />
+                    <span>{t("pages.workspace.editor.renameSymbol")}</span>
+                  </CommandItem>
+                  <CommandItem
+                    value={t("pages.workspace.editor.formatDocument")}
+                    onSelect={() => {
+                      onOpenChange(false)
+                      void onEditorAction("editor.action.formatDocument")
+                    }}
+                  >
+                    <WandSparkles className="size-4" />
+                    <span>{t("pages.workspace.editor.formatDocument")}</span>
+                  </CommandItem>
+                  <CommandItem
+                    value={t("pages.workspace.editor.toggleLineComment")}
+                    onSelect={() => {
+                      onOpenChange(false)
+                      void onEditorAction("editor.action.commentLine")
+                    }}
+                  >
+                    <Code2 className="size-4" />
+                    <span>{t("pages.workspace.editor.toggleLineComment")}</span>
+                  </CommandItem>
+                </>
+              ) : null}
               {selectedFile ? (
                 <CommandItem
                   value={`${t("pages.workspace.commandPalette.revealCurrentFile")} ${selectedFile.name} ${selectedFile.relativePath}`}
