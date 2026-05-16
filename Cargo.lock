@@ -2445,9 +2445,9 @@ checksum = "e1d926b4d407d372f141f93bb444696142c29d32962ccbd3531117cf3aa0bfa9"
 
 [[package]]
 name = "ecolor"
-version = "0.34.1"
+version = "0.34.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "137c0ce4ce4152ff7e223a7ce22ee1057cdff61fce0a45c32459c3ccec64868d"
+checksum = "55f6cc0cb3b84a21232c468db972ebcddd34decbf1ff02cdebffd807c13bbd81"
 dependencies = [
  "bytemuck",
  "emath",
@@ -2489,9 +2489,9 @@ dependencies = [
 
 [[package]]
 name = "egui"
-version = "0.34.1"
+version = "0.34.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f34aaf627da598dfadd64b0fee6101d22e9c451d1e5348157312720b7f459f0f"
+checksum = "3cbe28ac1a9c0761319aafb9ad37737720cc49d99c13a4a6b990768fa01ffe67"
 dependencies = [
  "accesskit",
  "ahash 0.8.12",
@@ -2562,9 +2562,9 @@ dependencies = [
 
 [[package]]
 name = "emath"
-version = "0.34.1"
+version = "0.34.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a05cd8bdf3b598488c627ca97c7fe8909448ffa26278dd3c7e535cdb554d721"
+checksum = "a74fbbf7501c430b89df62d102b6bfa02162faaf3e155512c677c9d20f5708d1"
 dependencies = [
  "bytemuck",
 ]
@@ -2680,9 +2680,9 @@ dependencies = [
 
 [[package]]
 name = "epaint"
-version = "0.34.1"
+version = "0.34.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04f3017dd67f147a697ee0c8484fb568fd9553e2a0c114be5020dbbc11962841"
+checksum = "92b452e348c2758115288802ca25f86ee286ce2cfae6643711ce116662311310"
 dependencies = [
  "ahash 0.8.12",
  "bytemuck",
@@ -2702,9 +2702,9 @@ dependencies = [
 
 [[package]]
 name = "epaint_default_fonts"
-version = "0.34.1"
+version = "0.34.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e3b85a2bb775a3ab02d077a65cc31575c11b2584581913253cc11ce49f48bba"
+checksum = "1644e25dbe3d663fd9c2a4181772c64b23361e377e550c10422ecc3a7de1c3c2"
 
 [[package]]
 name = "equivalent"
@@ -10784,9 +10784,9 @@ dependencies = [
 
 [[package]]
 name = "tonic-build"
-version = "0.14.5"
+version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1882ac3bf5ef12877d7ed57aad87e75154c11931c2ba7e6cde5e22d63522c734"
+checksum = "c68f61875ac5293cf72e6c8cf0158086428c82c37229e98c840878f1706b0322"
 dependencies = [
  "prettyplease",
  "proc-macro2",
@@ -10807,9 +10807,9 @@ dependencies = [
 
 [[package]]
 name = "tonic-prost-build"
-version = "0.14.5"
+version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3144df636917574672e93d0f56d7edec49f90305749c668df5101751bb8f95a"
+checksum = "654e5643eff75d7f8c99197ce1440ed19a3474eada74c12bbac488b2cafdae27"
 dependencies = [
  "prettyplease",
  "proc-macro2",
@@ -11316,9 +11316,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "utoipa"
-version = "5.4.0"
+version = "5.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fcc29c80c21c31608227e0912b2d7fddba57ad76b606890627ba8ee7964e993"
+checksum = "8bde15df68e80b16c7d16b9616e80770ad158988daa56a27dccd1e55558b0160"
 dependencies = [
  "indexmap 2.14.0",
  "serde",
@@ -11341,9 +11341,9 @@ dependencies = [
 
 [[package]]
 name = "utoipa-gen"
-version = "5.4.0"
+version = "5.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d79d08d92ab8af4c5e8a6da20c47ae3f61a0f1dabc1997cdf2d082b757ca08b"
+checksum = "6ba0b99ee52df3028635d93840c797102da61f8a7bb3cf751032455895b52ef8"
 dependencies = [
  "proc-macro2",
  "quote",
