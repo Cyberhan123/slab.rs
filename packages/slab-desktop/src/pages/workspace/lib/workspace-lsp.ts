@@ -8,7 +8,13 @@ import "@codingame/monaco-editor-wrapper/features/extensionHostWorker"
 import { whenReady as emmetExtensionReady } from "@codingame/monaco-vscode-emmet-default-extension"
 import { whenReady as dockerExtensionReady } from "@codingame/monaco-vscode-docker-default-extension"
 import { whenReady as dotenvExtensionReady } from "@codingame/monaco-vscode-dotenv-default-extension"
-import type { MonacoLanguageClient } from "monaco-languageclient"
+import {
+  BaseLanguageClient,
+  CloseAction,
+  ErrorAction,
+  type LanguageClientOptions,
+  type MessageTransports,
+} from "vscode-languageclient/browser.js"
 import { SERVER_BASE_URL } from "@slab/api/config"
 import {
   workspaceReadDirectory,
@@ -52,6 +58,31 @@ export type WorkspaceLspOpenFile = (
 
 type WorkspaceFileService = {
   root: string | null
+}
+
+type WorkspaceLanguageClientOptions = {
+  clientOptions: LanguageClientOptions
+  id: string
+  messageTransports: MessageTransports
+  name: string
+}
+
+class WorkspaceLanguageClient extends BaseLanguageClient {
+  private readonly messageTransports: MessageTransports
+
+  constructor({
+    clientOptions,
+    id,
+    messageTransports,
+    name,
+  }: WorkspaceLanguageClientOptions) {
+    super(id, name, clientOptions)
+    this.messageTransports = messageTransports
+  }
+
+  protected createMessageTransports() {
+    return Promise.resolve(this.messageTransports)
+  }
 }
 
 let monacoVscodeApiReady: Promise<void> | null = null
@@ -146,7 +177,7 @@ export async function startWorkspaceLspSession({
   }
 
   let socket: WebSocket | null = null
-  let languageClient: MonacoLanguageClient | null = null
+  let languageClient: WorkspaceLanguageClient | null = null
 
   try {
     await ensureWorkspaceLspServices()
@@ -161,13 +192,9 @@ export async function startWorkspaceLspSession({
     await vscodeWorkspace.openTextDocument(VscodeUri.parse(model.uri.toString()))
 
     socket = new WebSocket(workspaceLspUrl(language))
-    const [languageClientModule, { CloseAction, ErrorAction }, jsonrpc] = await Promise.all([
-      import("monaco-languageclient"),
-      import("vscode-languageclient/browser.js"),
-      import("vscode-ws-jsonrpc"),
-    ])
+    const jsonrpc = await import("vscode-ws-jsonrpc")
     const rpcSocket = jsonrpc.toSocket(socket)
-    languageClient = new languageClientModule.MonacoLanguageClient({
+    languageClient = new WorkspaceLanguageClient({
       id: `workspace-${language}`,
       name: `Workspace ${language} Language Server`,
       clientOptions: {

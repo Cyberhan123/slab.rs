@@ -26,7 +26,6 @@ export default defineConfig(async () => ({
       output: {
         manualChunks(id) {
           if (
-            id.includes("monaco-languageclient") ||
             id.includes("vscode-languageclient") ||
             id.includes("vscode-ws-jsonrpc") ||
             id.includes("@codingame/monaco-editor") ||
