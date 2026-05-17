@@ -7,10 +7,26 @@ import {
 } from "@codingame/monaco-editor-wrapper"
 import "@codingame/monaco-editor-wrapper/features/extensionHostWorker"
 import "@codingame/monaco-editor-wrapper/features/search"
+import getAccessibilityServiceOverride from "@codingame/monaco-vscode-accessibility-service-override"
+import getConfigurationServiceOverride from "@codingame/monaco-vscode-configuration-service-override"
+import { whenReady as cppExtensionReady } from "@codingame/monaco-vscode-cpp-default-extension"
+import getDialogsServiceOverride from "@codingame/monaco-vscode-dialogs-service-override"
 import getLifecycleServiceOverride from "@codingame/monaco-vscode-lifecycle-service-override"
+import { whenReady as goExtensionReady } from "@codingame/monaco-vscode-go-default-extension"
+import getKeybindingsServiceOverride from "@codingame/monaco-vscode-keybindings-service-override"
+import getLanguageDetectionWorkerServiceOverride from "@codingame/monaco-vscode-language-detection-worker-service-override"
+import getLanguagesServiceOverride from "@codingame/monaco-vscode-languages-service-override"
+import getMarkersServiceOverride from "@codingame/monaco-vscode-markers-service-override"
+import getModelServiceOverride from "@codingame/monaco-vscode-model-service-override"
 import getNotificationsServiceOverride from "@codingame/monaco-vscode-notifications-service-override"
 import getOutputServiceOverride from "@codingame/monaco-vscode-output-service-override"
 import getSearchServiceOverride from "@codingame/monaco-vscode-search-service-override"
+import { whenReady as sqlExtensionReady } from "@codingame/monaco-vscode-sql-default-extension"
+import getStorageServiceOverride from "@codingame/monaco-vscode-storage-service-override"
+import getTerminalServiceOverride from "@codingame/monaco-vscode-terminal-service-override"
+import getTextmateServiceOverride from "@codingame/monaco-vscode-textmate-service-override"
+import getThemeServiceOverride from "@codingame/monaco-vscode-theme-service-override"
+import { whenReady as xmlExtensionReady } from "@codingame/monaco-vscode-xml-default-extension"
 import { whenReady as emmetExtensionReady } from "@codingame/monaco-vscode-emmet-default-extension"
 import { whenReady as dockerExtensionReady } from "@codingame/monaco-vscode-docker-default-extension"
 import { whenReady as dotenvExtensionReady } from "@codingame/monaco-vscode-dotenv-default-extension"
@@ -36,6 +52,7 @@ import {
   type WorkspaceLspDefinitionTarget,
   type WorkspaceLspOpenFileOptions,
 } from "./workspace-lsp-utils"
+import { slabTerminalBackend } from "./workspace-terminal-service"
 
 export {
   supportsWorkspaceLsp,
@@ -131,6 +148,10 @@ export function ensureWorkspaceLspServices() {
         emmetExtensionReady(),
         dockerExtensionReady(),
         dotenvExtensionReady(),
+        cppExtensionReady(),
+        goExtensionReady(),
+        sqlExtensionReady(),
+        xmlExtensionReady(),
       ])
     }
 
@@ -175,10 +196,22 @@ function registerWorkspaceVscodeServiceOverrides() {
   }
 
   registerServices({
+    ...getAccessibilityServiceOverride(),
+    ...getConfigurationServiceOverride(),
+    ...getDialogsServiceOverride(),
+    ...getKeybindingsServiceOverride(),
+    ...getLanguageDetectionWorkerServiceOverride(),
+    ...getLanguagesServiceOverride(),
     ...getLifecycleServiceOverride(),
+    ...getMarkersServiceOverride(),
+    ...getModelServiceOverride(),
     ...getNotificationsServiceOverride(),
     ...getOutputServiceOverride(),
     ...getSearchServiceOverride(),
+    ...getStorageServiceOverride(),
+    ...getTerminalServiceOverride(slabTerminalBackend),
+    ...getTextmateServiceOverride(),
+    ...getThemeServiceOverride(),
   })
   workspaceVscodeServiceOverridesRegistered = true
 }
