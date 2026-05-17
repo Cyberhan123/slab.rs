@@ -15,6 +15,8 @@ describe("workspace LSP helpers", () => {
     expect(supportsWorkspaceLsp("typescriptreact")).toBe(true)
     expect(supportsWorkspaceLsp("javascriptreact")).toBe(true)
     expect(supportsWorkspaceLsp("python")).toBe(true)
+    expect(supportsWorkspaceLsp("go")).toBe(true)
+    expect(supportsWorkspaceLsp("rust")).toBe(true)
     expect(supportsWorkspaceLsp("markdown")).toBe(false)
     expect(supportsWorkspaceLsp("plaintext")).toBe(false)
   })
@@ -24,6 +26,15 @@ describe("workspace LSP helpers", () => {
     expect(languageForFile("component.jsx")).toBe("javascript")
     expect(lspLanguageForFile("component.tsx")).toBe("typescriptreact")
     expect(lspLanguageForFile("component.jsx")).toBe("javascriptreact")
+  })
+
+  it("routes native language files to plugin-capable LSP ids", () => {
+    expect(languageForFile("src/main.rs")).toBe("rust")
+    expect(languageForFile("cmd/server/main.go")).toBe("go")
+    expect(languageForFile("scripts/tool.py")).toBe("python")
+    expect(lspLanguageForFile("src/main.rs")).toBe("rust")
+    expect(lspLanguageForFile("cmd/server/main.go")).toBe("go")
+    expect(lspLanguageForFile("scripts/tool.py")).toBe("python")
   })
 
   it("builds file uri model paths for Monaco", () => {

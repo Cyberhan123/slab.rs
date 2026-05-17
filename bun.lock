@@ -109,6 +109,7 @@
         "@codingame/monaco-vscode-accessibility-service-override": "^32.0.0",
         "@codingame/monaco-vscode-configuration-editing-default-extension": "^32.0.0",
         "@codingame/monaco-vscode-configuration-service-override": "^32.0.0",
+        "@codingame/monaco-vscode-cpp-default-extension": "^32.0.0",
         "@codingame/monaco-vscode-css-default-extension": "^32.0.0",
         "@codingame/monaco-vscode-dialogs-service-override": "^32.0.0",
         "@codingame/monaco-vscode-docker-default-extension": "^32.0.0",
@@ -117,6 +118,7 @@
         "@codingame/monaco-vscode-emmet-default-extension": "^32.0.0",
         "@codingame/monaco-vscode-extensions-service-override": "^32.0.0",
         "@codingame/monaco-vscode-files-service-override": "^32.0.0",
+        "@codingame/monaco-vscode-go-default-extension": "^32.0.0",
         "@codingame/monaco-vscode-html-default-extension": "^32.0.0",
         "@codingame/monaco-vscode-javascript-default-extension": "^32.0.0",
         "@codingame/monaco-vscode-json-default-extension": "^32.0.0",
@@ -142,14 +144,16 @@
         "@codingame/monaco-vscode-search-service-override": "^32.0.0",
         "@codingame/monaco-vscode-shellscript-default-extension": "^32.0.0",
         "@codingame/monaco-vscode-snippets-service-override": "^32.0.0",
+        "@codingame/monaco-vscode-sql-default-extension": "^32.0.0",
         "@codingame/monaco-vscode-storage-service-override": "^32.0.0",
+        "@codingame/monaco-vscode-terminal-service-override": "^32.0.0",
         "@codingame/monaco-vscode-textmate-service-override": "^32.0.0",
         "@codingame/monaco-vscode-theme-defaults-default-extension": "^32.0.0",
         "@codingame/monaco-vscode-theme-service-override": "^32.0.0",
         "@codingame/monaco-vscode-typescript-basics-default-extension": "^32.0.0",
         "@codingame/monaco-vscode-working-copy-service-override": "^32.0.0",
+        "@codingame/monaco-vscode-xml-default-extension": "^32.0.0",
         "@codingame/monaco-vscode-yaml-default-extension": "^32.0.0",
-        "@gytx/xterm-local-echo": "^0.1.8",
         "@shikijs/monaco": "^4.0.2",
         "@slab/api": "workspace:*",
         "@slab/components": "workspace:*",
@@ -663,8 +667,6 @@
     "@floating-ui/react-dom": ["@floating-ui/react-dom@2.1.8", "", { "dependencies": { "@floating-ui/dom": "^1.7.6" }, "peerDependencies": { "react": ">=16.8.0", "react-dom": ">=16.8.0" } }, "sha512-cC52bHwM/n/CxS87FH0yWdngEZrjdtLW/qVruo68qg+prK7ZQ4YGdut2GyDVpoGeAYe/h899rVeOVm6Oi40k2A=="],
 
     "@floating-ui/utils": ["@floating-ui/utils@0.2.11", "", {}, "sha512-RiB/yIh78pcIxl6lLMG0CgBXAZ2Y0eVHqMPYugu+9U0AeT6YBeiJpf7lbdJNIugFP5SIjwNRgo4DhR1Qxi26Gg=="],
-
-    "@gytx/xterm-local-echo": ["@gytx/xterm-local-echo@0.1.8", "", {}, "sha512-JKq/J9fLfcP4af+FNv5zW2hzokio/0KO+iOVtuKpCXBCWsShV74n5bZhU8/KiuHquAq7emVHxFCapSZftqrZVg=="],
 
     "@hookform/resolvers": ["@hookform/resolvers@5.2.2", "", { "dependencies": { "@standard-schema/utils": "^0.3.0" }, "peerDependencies": { "react-hook-form": "^7.55.0" } }, "sha512-A/IxlMLShx3KjV/HeTcTfaMxdwy690+L/ZADoeaTltLx+CVuzkeVIPuybK3jrRfw7YZnmdKsVVHAlEPIAEUNlA=="],
 
