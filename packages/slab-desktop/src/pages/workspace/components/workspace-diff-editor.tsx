@@ -8,6 +8,7 @@ type WorkspaceDiffEditorProps = {
   diffText: string
   filePath: string
   fontSize?: number
+  minimapEnabled?: boolean
   wordWrap?: "on" | "off"
 }
 
@@ -67,15 +68,24 @@ function parseUnifiedDiff(diffText: string): ParsedDiff {
   return { original, modified }
 }
 
-export function WorkspaceDiffEditor({ diffText, filePath, fontSize = 13, wordWrap = "on" }: WorkspaceDiffEditorProps) {
+export function WorkspaceDiffEditor({
+  diffText,
+  filePath,
+  fontSize = 13,
+  minimapEnabled = false,
+  wordWrap = "on",
+}: WorkspaceDiffEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<Monaco.editor.IStandaloneDiffEditor | null>(null)
+  const editorDisposedRef = useRef(false)
   const [servicesReady, setServicesReady] = useState(false)
 
   // Keep refs always current so the creation effect reads the latest values
   const fontSizeRef = useRef(fontSize)
+  const minimapEnabledRef = useRef(minimapEnabled)
   const wordWrapRef = useRef(wordWrap)
   fontSizeRef.current = fontSize
+  minimapEnabledRef.current = minimapEnabled
   wordWrapRef.current = wordWrap
 
   useEffect(() => {
@@ -97,8 +107,8 @@ export function WorkspaceDiffEditor({ diffText, filePath, fontSize = 13, wordWra
   }, [])
 
   useEffect(() => {
-    editorRef.current?.updateOptions({ fontSize, wordWrap })
-  }, [fontSize, wordWrap])
+    editorRef.current?.updateOptions({ fontSize, minimap: { enabled: minimapEnabled }, wordWrap })
+  }, [fontSize, minimapEnabled, wordWrap])
 
   useEffect(() => {
     if (!servicesReady || !containerRef.current || editorRef.current) {
@@ -109,17 +119,21 @@ export function WorkspaceDiffEditor({ diffText, filePath, fontSize = 13, wordWra
       automaticLayout: true,
       readOnly: true,
       renderSideBySide: true,
-      minimap: { enabled: false },
+      minimap: { enabled: minimapEnabledRef.current },
       scrollBeyondLastLine: false,
       fontSize: fontSizeRef.current,
       wordWrap: wordWrapRef.current,
     })
 
+    editorDisposedRef.current = false
     editorRef.current = editor
 
     return () => {
+      if (editorRef.current === editor) {
+        editorRef.current = null
+      }
+      editorDisposedRef.current = true
       editor.dispose()
-      editorRef.current = null
     }
   }, [servicesReady])
 
@@ -138,7 +152,9 @@ export function WorkspaceDiffEditor({ diffText, filePath, fontSize = 13, wordWra
     editor.setModel({ original: originalModel, modified: modifiedModel })
 
     return () => {
-      editor.setModel(null)
+      if (!editorDisposedRef.current && editorRef.current === editor) {
+        editor.setModel(null)
+      }
       originalModel.dispose()
       modifiedModel.dispose()
     }

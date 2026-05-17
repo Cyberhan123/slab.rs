@@ -71,7 +71,6 @@ export function useWorkspacePage() {
   const treeHostRef = useRef<HTMLDivElement | null>(null)
   const restoredWorkspaceRootRef = useRef<string | null>(null)
   const [treeHeight, setTreeHeight] = useState(320)
-  const [treeMeasureKey, setTreeMeasureKey] = useState(0)
 
   usePageHeader({
     icon: FolderKanban,
@@ -236,7 +235,6 @@ export function useWorkspacePage() {
       }
 
       setTreeHeight(Math.max(320, Math.floor(element.getBoundingClientRect().height)))
-      setTreeMeasureKey((current) => current + 1)
     })
 
     return () => {
@@ -363,7 +361,7 @@ export function useWorkspacePage() {
   )
 
   const handleOpenFile = useCallback(
-    async (relativePath: string) => {
+    async (relativePath: string, options: { revealInTree?: boolean } = {}) => {
       setEditorRevealTarget(null)
       if (selectedFileDirty && !window.confirm(t("pages.workspace.confirm.discardUnsaved"))) {
         return null
@@ -381,7 +379,9 @@ export function useWorkspacePage() {
           name: file.name,
         }),
       })
-      await revealFileInTree(file.relativePath)
+      if (options.revealInTree ?? true) {
+        await revealFileInTree(file.relativePath)
+      }
       return file
     },
     [
@@ -815,7 +815,6 @@ export function useWorkspacePage() {
     treeData,
     treeHeight,
     treeHostRef,
-    treeMeasureKey,
     workspace,
     workspaceUiHasHydrated,
   }

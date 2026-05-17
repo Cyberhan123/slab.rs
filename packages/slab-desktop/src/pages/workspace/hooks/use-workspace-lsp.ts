@@ -15,7 +15,7 @@ import {
 
 type WorkspaceLspOptions = {
   language: string
-  onOpenFile: (relativePath: string) => Promise<unknown>
+  onOpenFile: (relativePath: string, options?: { revealInTree?: boolean }) => Promise<unknown>
   relativePath: string | null
   workspaceRoot: string | null
 }
@@ -33,7 +33,9 @@ export function useWorkspaceLsp({
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<typeof Monaco | null>(null)
   const sessionRef = useRef<WorkspaceLspSession | null>(null)
+  const sessionKeyRef = useRef<string | null>(null)
   const startGenerationRef = useRef(0)
+  const [editorModelVersion, setEditorModelVersion] = useState(0)
   const [editorMountVersion, setEditorMountVersion] = useState(0)
   const [servicesState, setServicesState] = useState<WorkspaceLspServicesState>(() =>
     initialServicesState(shouldInitializeServices),
@@ -81,7 +83,7 @@ export function useWorkspaceLsp({
   const openFileInEditor = useCallback(
     async (nextRelativePath: string, options?: WorkspaceLspOpenFileOptions) => {
       if (nextRelativePath !== relativePath) {
-        await onOpenFile(nextRelativePath)
+        await onOpenFile(nextRelativePath, { revealInTree: false })
       }
 
       const editor = editorRef.current
@@ -156,16 +158,20 @@ export function useWorkspaceLsp({
   }, [editorMountVersion, openFileInEditor, servicesState, shouldUseLsp, workspaceRoot])
 
   useEffect(() => {
-    const generation = startGenerationRef.current + 1
-    startGenerationRef.current = generation
-    const previousSession = sessionRef.current
-    sessionRef.current = null
+    const nextSessionKey =
+      servicesState === "ready" && workspaceRoot && shouldUseLsp ? `${workspaceRoot}\0${language}` : null
+    if (sessionRef.current && sessionKeyRef.current !== nextSessionKey) {
+      const previousSession = sessionRef.current
+      sessionRef.current = null
+      sessionKeyRef.current = null
+      startGenerationRef.current += 1
+      void previousSession.dispose()
+    }
 
-    void previousSession?.dispose()
-
-    if (servicesState !== "ready" || !relativePath || !workspaceRoot || !shouldUseLsp) {
+    if (!nextSessionKey || !workspaceRoot || sessionRef.current || !relativePath) {
       return
     }
+    const sessionWorkspaceRoot = workspaceRoot
 
     const editor = editorRef.current
     const monaco = monacoRef.current
@@ -173,6 +179,8 @@ export function useWorkspaceLsp({
       return
     }
 
+    const generation = startGenerationRef.current + 1
+    startGenerationRef.current = generation
     let cancelled = false
     const startTimer = window.setTimeout(() => {
       void (async () => {
@@ -180,7 +188,7 @@ export function useWorkspaceLsp({
           return
         }
 
-        const modelUri = workspaceLspModelUri(monaco, workspaceRoot, relativePath)
+        const modelUri = workspaceLspModelUri(monaco, sessionWorkspaceRoot, relativePath)
         const currentModel = editor.getModel()
         if (!currentModel || currentModel.uri.toString() !== modelUri.toString()) {
           return
@@ -190,35 +198,76 @@ export function useWorkspaceLsp({
           language,
           monaco,
           model: currentModel,
-          workspaceRoot,
+          workspaceRoot: sessionWorkspaceRoot,
         })
         if (!session) {
           return
         }
-        if (cancelled || generation !== startGenerationRef.current) {
+        if (cancelled || generation !== startGenerationRef.current || sessionRef.current) {
           void session.dispose()
           return
         }
 
         sessionRef.current = session
+        sessionKeyRef.current = nextSessionKey
       })()
     }, 0)
 
     return () => {
       cancelled = true
       window.clearTimeout(startTimer)
-      if (generation === startGenerationRef.current) {
-        const currentSession = sessionRef.current
-        sessionRef.current = null
-        void currentSession?.dispose()
-      }
     }
-  }, [editorMountVersion, language, relativePath, servicesState, shouldUseLsp, workspaceRoot])
+  }, [editorModelVersion, editorMountVersion, language, relativePath, servicesState, shouldUseLsp, workspaceRoot])
+
+  useEffect(() => {
+    if (servicesState !== "ready" || !relativePath || !workspaceRoot || !shouldUseLsp) {
+      return
+    }
+
+    const editor = editorRef.current
+    const monaco = monacoRef.current
+    const session = sessionRef.current
+    if (!editor || !monaco || !session) {
+      return
+    }
+
+    let cancelled = false
+    void (async () => {
+      const modelUri = workspaceLspModelUri(monaco, workspaceRoot, relativePath)
+      await waitForEditorModel(editor, modelUri.toString())
+      const currentModel = editor.getModel()
+      if (cancelled || !currentModel || currentModel.uri.toString() !== modelUri.toString()) {
+        return
+      }
+
+      await session.registerModel(currentModel)
+    })().catch((error) => {
+      console.debug("workspace LSP document registration failed", { language, relativePath, workspaceRoot, error })
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [editorModelVersion, language, relativePath, servicesState, shouldUseLsp, workspaceRoot])
 
   const handleEditorMount = useCallback((editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco) => {
+    const mountedEditorChanged = editorRef.current !== editor
     editorRef.current = editor
     monacoRef.current = monaco
-    setEditorMountVersion((version) => version + 1)
+    if (mountedEditorChanged) {
+      setEditorMountVersion((version) => version + 1)
+    }
+    setEditorModelVersion((version) => version + 1)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      const currentSession = sessionRef.current
+      sessionRef.current = null
+      sessionKeyRef.current = null
+      startGenerationRef.current += 1
+      void currentSession?.dispose()
+    }
   }, [])
 
   return {

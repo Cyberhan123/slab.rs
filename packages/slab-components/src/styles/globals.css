@@ -807,6 +807,14 @@
   .workspace-markdown ol {
     padding-left: 1.35rem;
   }
+
+  .workspace-tabs-scrollbar {
+    scrollbar-width: none;
+  }
+
+  .workspace-tabs-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
 }
 /* Hides the Tauri titlebar we don't use tauri config decorations=false may case stuck and stopped */
 div[data-tauri-decorum-tb] {
