@@ -137,10 +137,32 @@ export type WorkspaceWriteFileCommand = {
   expectedHash?: string | null
 }
 
+export type WorkspaceCreateFileCommand = {
+  relativePath: string
+}
+
+export type WorkspaceCreateDirectoryCommand = {
+  relativePath: string
+}
+
+export type WorkspaceRenamePathCommand = {
+  fromRelativePath: string
+  toRelativePath: string
+}
+
+export type WorkspaceDeletePathCommand = {
+  relativePath: string
+  recursive: boolean
+}
+
 export type WorkspaceWriteFileResult = {
   relativePath: string
   sizeBytes: number
   contentHash: string
+}
+
+export type WorkspacePathResult = {
+  relativePath: string
 }
 
 export type WorkspaceGitOperationResult = {
@@ -231,6 +253,38 @@ export async function workspaceWriteFile(command: WorkspaceWriteFileCommand): Pr
   }
 
   return invoke<WorkspaceWriteFileResult>("workspace_write_file", { command })
+}
+
+export async function workspaceCreateFile(command: WorkspaceCreateFileCommand): Promise<WorkspacePathResult> {
+  if (!isTauri()) {
+    throw new Error("workspace files are only available in the desktop app")
+  }
+
+  return invoke<WorkspacePathResult>("workspace_create_file", { command })
+}
+
+export async function workspaceCreateDirectory(command: WorkspaceCreateDirectoryCommand): Promise<WorkspacePathResult> {
+  if (!isTauri()) {
+    throw new Error("workspace files are only available in the desktop app")
+  }
+
+  return invoke<WorkspacePathResult>("workspace_create_directory", { command })
+}
+
+export async function workspaceRenamePath(command: WorkspaceRenamePathCommand): Promise<WorkspacePathResult> {
+  if (!isTauri()) {
+    throw new Error("workspace files are only available in the desktop app")
+  }
+
+  return invoke<WorkspacePathResult>("workspace_rename_path", { command })
+}
+
+export async function workspaceDeletePath(command: WorkspaceDeletePathCommand): Promise<WorkspacePathResult> {
+  if (!isTauri()) {
+    throw new Error("workspace files are only available in the desktop app")
+  }
+
+  return invoke<WorkspacePathResult>("workspace_delete_path", { command })
 }
 
 export async function workspaceGitStatus(): Promise<WorkspaceGitStatus> {

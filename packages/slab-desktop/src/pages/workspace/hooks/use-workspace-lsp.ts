@@ -62,7 +62,7 @@ export function useWorkspaceLsp({
     }
 
     setServicesState("pending")
-    void ensureWorkspaceLspServices()
+    void ensureWorkspaceLspServices(workspaceRoot)
       .then(() => {
         if (!cancelled) {
           setServicesState("ready")

@@ -45,6 +45,15 @@ import {
   upsertFileTab,
   type WorkspaceTreeNode,
 } from "../lib/workspace-page-utils"
+import {
+  openWorkspaceVscodeFile,
+  watchWorkspaceVscodeEditorState,
+  type WorkspaceLspOpenFileOptions,
+} from "../lib/workspace-lsp"
+
+type WorkspaceOpenFileOptions = WorkspaceLspOpenFileOptions & {
+  revealInTree?: boolean
+}
 
 export function useWorkspacePage() {
   const { t } = useTranslation()
@@ -70,6 +79,7 @@ export function useWorkspacePage() {
   )
   const treeHostRef = useRef<HTMLDivElement | null>(null)
   const restoredWorkspaceRootRef = useRef<string | null>(null)
+  const activeVscodeFileGenerationRef = useRef(0)
   const [treeHeight, setTreeHeight] = useState(320)
 
   usePageHeader({
@@ -361,7 +371,8 @@ export function useWorkspacePage() {
   )
 
   const handleOpenFile = useCallback(
-    async (relativePath: string, options: { revealInTree?: boolean } = {}) => {
+    async (relativePath: string, options: WorkspaceOpenFileOptions = {}) => {
+      const { revealInTree = false, ...editorOptions } = options
       setEditorRevealTarget(null)
       if (selectedFileDirty && !window.confirm(t("pages.workspace.confirm.discardUnsaved"))) {
         return null
@@ -379,7 +390,18 @@ export function useWorkspacePage() {
           name: file.name,
         }),
       })
-      if (options.revealInTree ?? true) {
+      try {
+        await openWorkspaceVscodeFile({
+          options: editorOptions,
+          relativePath: file.relativePath,
+          workspaceRoot: workspace.rootPath,
+        })
+      } catch (error) {
+        toast.error(t("pages.workspace.toast.fileFailed"), {
+          description: getErrorMessage(error),
+        })
+      }
+      if (revealInTree) {
         await revealFileInTree(file.relativePath)
       }
       return file
@@ -397,7 +419,12 @@ export function useWorkspacePage() {
 
   const handleOpenTextSearchMatch = useCallback(
     async (relativePath: string, match: WorkspaceTextSearchLineMatch) => {
-      const file = await handleOpenFile(relativePath)
+      const file = await handleOpenFile(relativePath, {
+        endColumn: match.matchEnd + 1,
+        endLineNumber: match.lineNumber,
+        startColumn: match.matchStart + 1,
+        startLineNumber: match.lineNumber,
+      })
       if (!file) {
         return
       }
@@ -441,6 +468,7 @@ export function useWorkspacePage() {
     const savedOpenDirectoryPaths = sortDirectoryPaths(openDirectoryPaths)
     const savedActiveFilePath = activeFilePath
     const savedFileTabs = openFileTabs
+    const workspaceRoot = workspace.rootPath
 
     async function restoreWorkspaceTree() {
       await loadDirectory("")
@@ -457,7 +485,13 @@ export function useWorkspacePage() {
       )
 
       if (savedActiveFilePath && savedFileTabs.some((tab) => tab.relativePath === savedActiveFilePath)) {
-        await openFileContent(savedActiveFilePath)
+        const file = await openFileContent(savedActiveFilePath)
+        if (file) {
+          await openWorkspaceVscodeFile({
+            relativePath: savedActiveFilePath,
+            workspaceRoot,
+          })
+        }
       }
     }
 
@@ -476,6 +510,86 @@ export function useWorkspacePage() {
     workspace,
     workspaceUiHasHydrated,
   ])
+
+  useEffect(() => {
+    if (!workspace) {
+      return
+    }
+
+    let cancelled = false
+    let disposable: { dispose(): void } | null = null
+    const workspaceRoot = workspace.rootPath
+
+    void watchWorkspaceVscodeEditorState(workspaceRoot, ({ activeRelativePath, openFiles }) => {
+      if (cancelled) {
+        return
+      }
+
+      activeVscodeFileGenerationRef.current += 1
+      const generation = activeVscodeFileGenerationRef.current
+
+      const snapshot = useWorkspaceUiStore.getState().workspaces[workspaceRoot] ?? emptyWorkspaceUiSnapshot
+      const openFilesChanged =
+        snapshot.openFiles.length !== openFiles.length ||
+        snapshot.openFiles.some((tab, index) => {
+          const nextTab = openFiles[index]
+          return !nextTab || tab.relativePath !== nextTab.relativePath || tab.name !== nextTab.name
+        })
+
+      if (snapshot.activeFilePath !== activeRelativePath || openFilesChanged) {
+        patchWorkspaceState(workspaceRoot, {
+          activeFilePath: activeRelativePath,
+          openFiles,
+        })
+      }
+
+      if (!activeRelativePath) {
+        setSelectedFile(null)
+        setEditorContent("")
+        return
+      }
+
+      setSelectedGitDiffEntry(null)
+      setEditorRevealTarget(null)
+      setFileError(null)
+
+      void workspaceReadFile(activeRelativePath)
+        .then((file) => {
+          if (cancelled || generation !== activeVscodeFileGenerationRef.current) {
+            return
+          }
+
+          setSelectedFile(file)
+          setEditorContent(file.content)
+        })
+        .catch((error) => {
+          if (cancelled || generation !== activeVscodeFileGenerationRef.current) {
+            return
+          }
+
+          setSelectedFile(null)
+          setEditorContent("")
+          setFileError(getErrorMessage(error))
+        })
+    })
+      .then((nextDisposable) => {
+        if (cancelled) {
+          nextDisposable.dispose()
+          return
+        }
+
+        disposable = nextDisposable
+      })
+      .catch((error) => {
+        console.debug("workspace VS Code active editor watch unavailable", { workspaceRoot, error })
+      })
+
+    return () => {
+      cancelled = true
+      activeVscodeFileGenerationRef.current += 1
+      disposable?.dispose()
+    }
+  }, [patchWorkspaceState, workspace])
 
   const handleTreeToggle = useCallback(
     (relativePath: string) => {
@@ -746,6 +860,10 @@ export function useWorkspacePage() {
           relativePath: file.relativePath,
           name: file.name,
         }),
+      })
+      await openWorkspaceVscodeFile({
+        relativePath: file.relativePath,
+        workspaceRoot: workspace.rootPath,
       })
     },
     [activeFilePath, openFileContent, openFileTabs, patchWorkspaceState, selectedFileDirty, t, workspace],
