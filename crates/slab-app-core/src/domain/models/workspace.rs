@@ -73,6 +73,38 @@ pub struct WorkspaceWriteFileView {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkspaceCreateFileCommand {
+    pub relative_path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceCreateDirectoryCommand {
+    pub relative_path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRenamePathCommand {
+    pub from_relative_path: String,
+    pub to_relative_path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDeletePathCommand {
+    pub relative_path: String,
+    pub recursive: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePathView {
+    pub relative_path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceGitPathCommand {
     pub path: String,
 }
