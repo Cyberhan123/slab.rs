@@ -95,7 +95,6 @@ export function WorkspaceWorkbench({
   treeData,
   treeHeight,
   treeHostRef,
-  treeMeasureKey,
   workspace,
   workspaceUiHasHydrated,
   setTextSearchQuery,
@@ -393,7 +392,6 @@ export function WorkspaceWorkbench({
             <div ref={treeHostRef} className="h-full min-h-0 flex-1 overflow-hidden rounded-[12px] bg-[var(--surface-1)]">
               {workspaceUiHasHydrated ? (
                   <Tree
-                    key={`${workspace.rootPath}:${treeMeasureKey}`}
                     data={treeData}
                     idAccessor="id"
                     childrenAccessor="children"
@@ -415,7 +413,7 @@ export function WorkspaceWorkbench({
                         selectedPath={activeFilePath}
                         loadingPaths={loadingPaths}
                         onOpenDirectory={loadDirectory}
-                        onOpenFile={handleOpenFile}
+                        onOpenFile={(relativePath) => handleOpenFile(relativePath, { revealInTree: false })}
                       />
                     )}
                   </Tree>
@@ -462,7 +460,7 @@ export function WorkspaceWorkbench({
         <div className="flex h-full min-h-0 flex-col gap-4">
           <SoftPanel className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[18px] p-0">
             {openFileTabs.length > 0 ? (
-              <div className="flex h-10 shrink-0 items-end overflow-x-auto border-b border-border/60 bg-[var(--surface-1)] px-2 pt-2">
+              <div className="workspace-tabs-scrollbar flex h-10 shrink-0 items-end overflow-x-auto overflow-y-hidden border-b border-border/60 bg-[var(--surface-1)] px-2 pt-2">
                 {openFileTabs.map((tab) => {
                   const active = activeFilePath === tab.relativePath
 
@@ -801,6 +799,7 @@ export function WorkspaceWorkbench({
                   diffText={selectedGitDiff?.diff.trim() ?? ""}
                   filePath={selectedGitDiffEntry.path}
                   fontSize={editorSettings.fontSize}
+                  minimapEnabled={editorSettings.minimapEnabled}
                   wordWrap={editorSettings.wordWrap}
                 />
               </div>

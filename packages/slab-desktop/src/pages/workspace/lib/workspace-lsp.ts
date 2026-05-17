@@ -71,6 +71,7 @@ export type WorkspaceLspSession = {
     model: Monaco.editor.ITextModel,
     position: Monaco.IPosition,
   ) => Promise<WorkspaceLspDefinitionTarget | null>
+  registerModel: (model: Monaco.editor.ITextModel) => Promise<void>
   dispose: () => Promise<void>
 }
 
@@ -244,7 +245,17 @@ export async function startWorkspaceLspSession({
     // vscode.workspace.textDocuments. Without this registration, MonacoLanguageClient
     // never sends textDocument/didOpen and the server returns nothing for hover/definition.
     const { workspace: vscodeWorkspace, Uri: VscodeUri } = await import("vscode")
-    await vscodeWorkspace.openTextDocument(VscodeUri.parse(model.uri.toString()))
+    const registeredModelUris = new Set<string>()
+    const registerModel = async (modelToRegister: Monaco.editor.ITextModel) => {
+      const uri = modelToRegister.uri.toString()
+      if (registeredModelUris.has(uri)) {
+        return
+      }
+
+      await vscodeWorkspace.openTextDocument(VscodeUri.parse(uri))
+      registeredModelUris.add(uri)
+    }
+    await registerModel(model)
 
     socket = new WebSocket(workspaceLspUrl(language))
     const jsonrpc = await import("vscode-ws-jsonrpc")
@@ -301,14 +312,15 @@ export async function startWorkspaceLspSession({
         )
         return workspaceLspDefinitionTargetFromResult(workspaceRoot, moduleDefinitions) ?? target
       },
+      registerModel,
       dispose: async () => {
         await languageClient?.stop()
-        socket?.close()
+        socket?.close(1000, "workspace LSP session disposed")
       },
     }
   } catch (error) {
     console.debug("workspace LSP unavailable", { language, uri: model.uri.toString(), error })
-    socket?.close()
+    socket?.close(1000, "workspace LSP session unavailable")
     await languageClient?.stop().catch(() => {})
     return null
   }
