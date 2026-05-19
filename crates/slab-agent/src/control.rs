@@ -10,6 +10,7 @@ use slab_types::ConversationMessage;
 use crate::{
     config::AgentConfig,
     error::AgentError,
+    hook::AgentHook,
     port::{AgentNotifyPort, AgentStorePort, LlmPort, ThreadStatus},
     thread::AgentThread,
     tool::ToolRouter,
@@ -37,12 +38,13 @@ pub struct AgentControl {
     store: Arc<dyn AgentStorePort>,
     notify: Arc<dyn AgentNotifyPort>,
     tool_router: Arc<ToolRouter>,
+    hooks: Arc<Vec<Arc<dyn AgentHook>>>,
     max_threads: usize,
     max_depth: u32,
 }
 
 impl AgentControl {
-    /// Create a new controller.
+    /// Create a new controller with no hooks.
     ///
     /// - `max_threads`: hard cap on concurrently active threads (across all depths).
     /// - `max_depth`: maximum allowed child nesting depth (inclusive, 0-based; root
@@ -55,12 +57,26 @@ impl AgentControl {
         max_threads: usize,
         max_depth: u32,
     ) -> Self {
+        Self::new_with_hooks(llm, store, notify, tool_router, max_threads, max_depth, vec![])
+    }
+
+    /// Create a new controller with a pre-registered set of hooks.
+    pub fn new_with_hooks(
+        llm: Arc<dyn LlmPort>,
+        store: Arc<dyn AgentStorePort>,
+        notify: Arc<dyn AgentNotifyPort>,
+        tool_router: Arc<ToolRouter>,
+        max_threads: usize,
+        max_depth: u32,
+        hooks: Vec<Arc<dyn AgentHook>>,
+    ) -> Self {
         Self {
             threads: Arc::new(RwLock::new(HashMap::new())),
             llm,
             store,
             notify,
             tool_router,
+            hooks: Arc::new(hooks),
             max_threads,
             max_depth,
         }
@@ -159,6 +175,7 @@ impl AgentControl {
         let store = Arc::clone(&self.store);
         let notify = Arc::clone(&self.notify);
         let tools = Arc::clone(&self.tool_router);
+        let hooks = Arc::clone(&self.hooks);
         let threads_cleanup = Arc::clone(&self.threads);
         let id_cleanup = thread_id.clone();
 
@@ -166,7 +183,7 @@ impl AgentControl {
         // The task removes itself from the registry when it finishes so that
         // `active_thread_count` stays accurate.
         let join_handle = tokio::spawn(async move {
-            let result = thread.run(messages, llm, store, notify, tools).await;
+            let result = thread.run(messages, llm, store, notify, tools, hooks).await;
             if let Err(ref e) = result {
                 warn!(thread_id = %id_cleanup, error = %e, "agent thread finished with error");
             }

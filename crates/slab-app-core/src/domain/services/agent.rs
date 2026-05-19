@@ -8,21 +8,28 @@ use std::sync::Arc;
 use slab_agent::config::AgentConfig;
 use slab_agent::control::AgentControl;
 use slab_agent::error::AgentError;
-use slab_agent::port::AgentStorePort;
+use slab_agent::port::{AgentStorePort, TurnEvent};
 use slab_types::ConversationMessage;
+use tokio::sync::broadcast;
 
 use crate::error::AppCoreError;
+use crate::infra::sse_notify::SseNotifyAdapter;
 
 /// Thin wrapper around [`AgentControl`] that exposes an application-layer API.
 #[derive(Clone)]
 pub struct AgentService {
     control: Arc<AgentControl>,
     store: Arc<dyn AgentStorePort>,
+    events: Arc<SseNotifyAdapter>,
 }
 
 impl AgentService {
-    pub fn new(control: Arc<AgentControl>, store: Arc<dyn AgentStorePort>) -> Self {
-        Self { control, store }
+    pub fn new(
+        control: Arc<AgentControl>,
+        store: Arc<dyn AgentStorePort>,
+        events: Arc<SseNotifyAdapter>,
+    ) -> Self {
+        Self { control, store, events }
     }
 
     /// Spawn a root agent thread.  Returns the new thread ID.
@@ -67,6 +74,24 @@ impl AgentService {
     /// Gracefully shut down a running agent thread.
     pub async fn shutdown(&self, thread_id: &str) -> Result<(), AppCoreError> {
         self.control.shutdown(thread_id).await.map_err(agent_err_to_server)
+    }
+
+    /// Subscribe to the turn-event stream for a thread.
+    ///
+    /// Returns a broadcast receiver that replays events emitted after the call.
+    pub fn subscribe_events(&self, thread_id: &str) -> broadcast::Receiver<TurnEvent> {
+        self.events.subscribe_events(thread_id)
+    }
+
+    /// Send an approval decision for a pending tool-call.
+    ///
+    /// Both `thread_id` (from the URL path) and `call_id` must match so that
+    /// approvals cannot be delivered to a different thread's pending call.
+    ///
+    /// Returns `true` if a pending approval with the given key was found and
+    /// the decision was delivered.
+    pub fn approve_call(&self, thread_id: &str, call_id: &str, approved: bool) -> bool {
+        self.events.approve_call(thread_id, call_id, approved)
     }
 
     /// Return the number of currently active threads.
