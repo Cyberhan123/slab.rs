@@ -1,5 +1,7 @@
 //! Single-turn execution logic (private to the crate).
 
+use std::sync::Arc;
+
 use chrono::Utc;
 use tracing::{debug, warn};
 use uuid::Uuid;
@@ -12,7 +14,8 @@ use slab_types::{
 use crate::{
     config::AgentConfig,
     error::AgentError,
-    port::{AgentStorePort, LlmPort, ToolCallRecord},
+    hook::{AgentHook, HookEvent, HookOutcome, dispatch_hooks},
+    port::{AgentNotifyPort, AgentStorePort, LlmPort, ToolCallRecord, TurnEvent},
     tool::{ToolContext, ToolRouter},
 };
 
@@ -28,6 +31,8 @@ pub(crate) struct TurnExecutionContext<'a> {
     pub llm: &'a dyn LlmPort,
     pub tools: &'a ToolRouter,
     pub store: &'a dyn AgentStorePort,
+    pub notify: &'a dyn AgentNotifyPort,
+    pub hooks: &'a [Arc<dyn AgentHook>],
 }
 
 pub(crate) async fn execute_turn(
@@ -56,6 +61,10 @@ pub(crate) async fn execute_turn(
     if response.tool_calls.is_empty() {
         // Model produced a final answer — no more turns required.
         let content = response.content.unwrap_or_default();
+        context
+            .notify
+            .on_turn_event(context.thread_id, &TurnEvent::TurnCompleted { text: content.clone() })
+            .await;
         messages.push(ConversationMessage {
             role: "assistant".to_owned(),
             content: ConversationMessageContent::Text(content),
@@ -64,6 +73,19 @@ pub(crate) async fn execute_turn(
             tool_calls: vec![],
         });
         return Ok(false);
+    }
+
+    // Emit assistant delta for any text alongside tool calls.
+    if let Some(ref text) = response.content {
+        if !text.is_empty() {
+            context
+                .notify
+                .on_turn_event(
+                    context.thread_id,
+                    &TurnEvent::AssistantDelta { text: text.clone() },
+                )
+                .await;
+        }
     }
 
     // Model requested tool calls — build the assistant message and execute.
@@ -98,6 +120,91 @@ pub(crate) async fn execute_turn(
     for tc in &response.tool_calls {
         let call_id = Uuid::new_v4().to_string();
 
+        // Parse arguments first so hooks receive a structured Value.
+        let parsed_args = match serde_json::from_str::<serde_json::Value>(&tc.arguments) {
+            Ok(v) => v,
+            Err(e) => {
+                warn!(
+                    thread_id = context.thread_id,
+                    tool = %tc.name,
+                    error = %e,
+                    "failed to parse tool call arguments as JSON"
+                );
+                let err_msg = format!("invalid tool call arguments: {e}");
+                context
+                    .notify
+                    .on_turn_event(
+                        context.thread_id,
+                        &TurnEvent::ToolCallOutput {
+                            call_id: call_id.clone(),
+                            output: err_msg.clone(),
+                        },
+                    )
+                    .await;
+                messages.push(ConversationMessage {
+                    role: "tool".to_owned(),
+                    content: ConversationMessageContent::Text(err_msg),
+                    name: None,
+                    tool_call_id: Some(tc.id.clone()),
+                    tool_calls: vec![],
+                });
+                continue;
+            }
+        };
+
+        // Run PreToolUse hooks — may block or modify args.
+        let effective_args = {
+            let pre_event = HookEvent::PreToolUse {
+                tool_name: tc.name.clone(),
+                arguments: parsed_args.clone(),
+            };
+            match dispatch_hooks(context.hooks, &pre_event).await {
+                HookOutcome::Block { reason } => {
+                    warn!(
+                        thread_id = context.thread_id,
+                        tool = %tc.name,
+                        reason,
+                        "tool call blocked by hook"
+                    );
+                    context
+                        .notify
+                        .on_turn_event(
+                            context.thread_id,
+                            &TurnEvent::ToolCallOutput {
+                                call_id: call_id.clone(),
+                                output: reason.clone(),
+                            },
+                        )
+                        .await;
+                    messages.push(ConversationMessage {
+                        role: "tool".to_owned(),
+                        content: ConversationMessageContent::Text(reason),
+                        name: None,
+                        tool_call_id: Some(tc.id.clone()),
+                        tool_calls: vec![],
+                    });
+                    continue;
+                }
+                HookOutcome::ModifyArgs { arguments } => arguments,
+                HookOutcome::Continue => parsed_args,
+            }
+        };
+
+        // Emit ToolCallStarted AFTER hooks so SSE consumers see the final
+        // effective arguments (hooks may have modified them).
+        context
+            .notify
+            .on_turn_event(
+                context.thread_id,
+                &TurnEvent::ToolCallStarted {
+                    tool_name: tc.name.clone(),
+                    call_id: call_id.clone(),
+                    arguments: serde_json::to_string(&effective_args)
+                        .unwrap_or_else(|_| tc.arguments.clone()),
+                },
+            )
+            .await;
+
         let record = ToolCallRecord {
             id: call_id.clone(),
             thread_id: context.thread_id.to_owned(),
@@ -118,30 +225,36 @@ pub(crate) async fn execute_turn(
                 warn!(thread_id = context.thread_id, tool = %tc.name, "tool not found");
                 (format!("tool not found: {}", tc.name), ToolCallStatus::Failed)
             }
-            Some(handler) => match serde_json::from_str::<serde_json::Value>(&tc.arguments) {
+            Some(handler) => match handler.execute(&ctx, &effective_args).await {
+                Ok(out) => (out.content, ToolCallStatus::Completed),
                 Err(e) => {
                     warn!(
                         thread_id = context.thread_id,
                         tool = %tc.name,
                         error = %e,
-                        "failed to parse tool call arguments as JSON"
+                        "tool execution failed"
                     );
-                    (format!("invalid tool call arguments: {e}"), ToolCallStatus::Failed)
+                    (e.to_string(), ToolCallStatus::Failed)
                 }
-                Ok(args) => match handler.execute(&ctx, &args).await {
-                    Ok(out) => (out.content, ToolCallStatus::Completed),
-                    Err(e) => {
-                        warn!(
-                            thread_id = context.thread_id,
-                            tool = %tc.name,
-                            error = %e,
-                            "tool execution failed"
-                        );
-                        (e.to_string(), ToolCallStatus::Failed)
-                    }
-                },
             },
         };
+
+        // Run PostToolUse hooks.
+        let post_event = HookEvent::PostToolUse {
+            tool_name: tc.name.clone(),
+            arguments: effective_args,
+            output: output.clone(),
+        };
+        dispatch_hooks(context.hooks, &post_event).await;
+
+        // Emit ToolCallOutput event.
+        context
+            .notify
+            .on_turn_event(
+                context.thread_id,
+                &TurnEvent::ToolCallOutput { call_id: call_id.clone(), output: output.clone() },
+            )
+            .await;
 
         let completed_at = Utc::now().to_rfc3339();
         if let Err(e) = context

@@ -65,6 +65,14 @@ slab-subtitle     = { path = "./crates/slab-subtitle", package = "slab-subtitle"
 slab-ggml-sys     = { path = "./crates/slab-ggml-sys", package = "slab-ggml-sys", version = "0.1.0" }
 slab-ggml         = { path = "./crates/slab-ggml", package = "slab-ggml", version = "0.1.0" }
 
+# codex upstream packages (via GitHub git deps)
+codex-file-watcher = { git = "https://github.com/openai/codex", package = "codex-file-watcher", rev = "b3ae3de4056f9417c968f8628cde55b428f309b8" }
+
+notify = "8"
+ignore = "0.4"
+shlex = "1"
+which = { version = "7", default-features = false }
+dashmap = "6"
 combine = "4.6.7"
 anyhow = "1.0.102"
 bindgen = "0.72.1"

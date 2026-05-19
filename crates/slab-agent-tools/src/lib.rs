@@ -3,13 +3,48 @@
 //! `slab-agent` owns the orchestration kernel and tool traits. This crate
 //! contains host-provided deterministic tools and registration helpers.
 
+use std::path::PathBuf;
+
 use async_trait::async_trait;
 use serde_json::Value;
 use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput, ToolRouter};
 
-/// Register all built-in host tools with the provided router.
+pub mod fs;
+pub mod fs_watch;
+pub mod grep;
+pub mod shell;
+
+pub use fs::{ListDirTool, ReadFileTool, WriteFileTool};
+pub use fs_watch::FsWatchTool;
+pub use grep::GrepTool;
+pub use shell::{ShellPolicy, ShellTool};
+
+/// Register only the minimal built-in tool (echo).
+///
+/// For the full production suite (shell, fs, grep, fs_watch) use
+/// [`register_all_tools`] instead.
 pub fn register_builtin_tools(router: &mut ToolRouter) {
     router.register(Box::new(EchoTool));
+}
+
+/// Register the full production tool suite.
+///
+/// - `shell_policy`: controls whether shell commands are allowed or blocked.
+/// - `workspace_root`: optional root directory for file/shell tools.
+pub fn register_all_tools(
+    router: &mut ToolRouter,
+    shell_policy: ShellPolicy,
+    workspace_root: Option<PathBuf>,
+) {
+    router.register(Box::new(EchoTool));
+    router.register(Box::new(ShellTool::new(shell_policy, workspace_root.clone())));
+    router.register(Box::new(ReadFileTool::new(workspace_root.clone())));
+    router.register(Box::new(WriteFileTool::new(workspace_root.clone())));
+    router.register(Box::new(ListDirTool::new(workspace_root.clone())));
+    router.register(Box::new(GrepTool::new(workspace_root)));
+    if let Some(watcher) = FsWatchTool::new() {
+        router.register(Box::new(watcher));
+    }
 }
 
 /// A trivial tool that echoes its `message` argument back to the agent.

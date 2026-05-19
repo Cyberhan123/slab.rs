@@ -136,3 +136,28 @@ pub struct AgentShutdownResponse {
     pub thread_id: String,
     pub shutdown: bool,
 }
+
+// ── Approve ───────────────────────────────────────────────────────────────────
+
+/// Request body for `POST /v1/agents/{id}/approve`.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct AgentApproveRequest {
+    /// The call ID of the pending tool call.
+    pub call_id: String,
+    /// `true` to approve the call, `false` to reject it.
+    pub approved: bool,
+}
+
+/// Response body for `POST /v1/agents/{id}/approve`.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AgentApproveResponse {
+    pub call_id: String,
+    pub delivered: bool,
+}
+
+/// Response body for `POST /v1/agents/{id}/interrupt`.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AgentInterruptResponse {
+    pub thread_id: String,
+    pub interrupted: bool,
+}
