@@ -28,6 +28,7 @@
     "@codingame/monaco-editor-react": "^28.0.0",
     "@codingame/monaco-editor-wrapper": "^29.0.0",
     "@codingame/monaco-vscode-accessibility-service-override": "^32.0.0",
+    "@codingame/monaco-vscode-api": "^32.0.0",
     "@codingame/monaco-vscode-configuration-editing-default-extension": "^32.0.0",
     "@codingame/monaco-vscode-configuration-service-override": "^32.0.0",
     "@codingame/monaco-vscode-cpp-default-extension": "^32.0.0",

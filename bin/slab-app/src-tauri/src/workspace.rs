@@ -126,6 +126,16 @@ pub enum WorkspaceFileKind {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkspacePathMetadata {
+    pub relative_path: String,
+    pub kind: WorkspaceFileKind,
+    pub size_bytes: u64,
+    pub modified_at: u64,
+    pub created_at: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceFileContent {
     pub relative_path: String,
     pub name: String,
@@ -296,6 +306,34 @@ pub fn workspace_read_directory(
     });
 
     Ok(WorkspaceDirectoryResponse { relative_path, entries, truncated })
+}
+
+#[tauri::command]
+pub fn workspace_stat_path(
+    state: State<'_, WorkspaceState>,
+    relative_path: String,
+) -> Result<WorkspacePathMetadata, String> {
+    let workspace = active_workspace(&state)?;
+    let relative_path = normalize_relative_path(&relative_path)?;
+    let root = PathBuf::from(&workspace.root_path);
+    let path = resolve_workspace_path(&root, &relative_path)?;
+    let metadata = fs::metadata(&path)
+        .map_err(|error| format!("failed to read path metadata {}: {error}", path.display()))?;
+    let kind = if metadata.is_dir() {
+        WorkspaceFileKind::Directory
+    } else if metadata.is_file() {
+        WorkspaceFileKind::File
+    } else {
+        return Err(format!("workspace path `{relative_path}` is not a file or directory"));
+    };
+
+    Ok(WorkspacePathMetadata {
+        relative_path,
+        kind,
+        size_bytes: if metadata.is_file() { metadata.len() } else { 0 },
+        modified_at: system_time_millis(metadata.modified()),
+        created_at: system_time_millis(metadata.created()),
+    })
 }
 
 #[tauri::command]
@@ -753,6 +791,13 @@ fn validate_plugin_id(plugin_id: &str) -> Result<(), String> {
 fn now_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn system_time_millis(time: Result<SystemTime, std::io::Error>) -> u64 {
+    time.ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
 }

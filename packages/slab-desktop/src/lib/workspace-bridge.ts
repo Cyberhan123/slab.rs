@@ -50,6 +50,14 @@ export type WorkspaceDirectoryResponse = {
   truncated: boolean
 }
 
+export type WorkspacePathMetadata = {
+  relativePath: string
+  kind: "directory" | "file"
+  sizeBytes: number
+  modifiedAt: number
+  createdAt: number
+}
+
 export type WorkspaceFileSearchResponse = {
   query: string
   entries: WorkspaceFileEntry[]
@@ -229,6 +237,14 @@ export async function workspaceReadFile(relativePath: string): Promise<Workspace
   }
 
   return invoke<WorkspaceFileContent>("workspace_read_file", { relativePath })
+}
+
+export async function workspaceStatPath(relativePath: string): Promise<WorkspacePathMetadata> {
+  if (!isTauri()) {
+    throw new Error("workspace files are only available in the desktop app")
+  }
+
+  return invoke<WorkspacePathMetadata>("workspace_stat_path", { relativePath })
 }
 
 export async function workspaceSearchFiles(query: string): Promise<WorkspaceFileSearchResponse> {

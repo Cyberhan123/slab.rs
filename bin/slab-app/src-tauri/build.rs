@@ -43,6 +43,7 @@ fn main() {
             "workspace_close",
             "workspace_read_directory",
             "workspace_read_file",
+            "workspace_stat_path",
             "workspace_search_files",
             "workspace_search_text",
             "workspace_create_file",

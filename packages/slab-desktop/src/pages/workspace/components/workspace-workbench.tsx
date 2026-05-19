@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from "react"
 import { useTranslation } from "@slab/i18n"
 import { Button } from "@slab/components/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@slab/components/tooltip"
@@ -26,6 +32,9 @@ import { WorkspaceDiffEditor } from "./workspace-diff-editor"
 import { WorkspaceGitPanel } from "./workspace-git-panel"
 import { WorkspaceSearchPanel } from "./workspace-search-panel"
 import { WorkspaceVscodePart } from "./workspace-vscode-part"
+
+const EXPLORER_MIN_WIDTH = 300
+const EXPLORER_MAX_WIDTH = 640
 
 export function WorkspaceWorkbench({
   activeFilePath,
@@ -74,7 +83,11 @@ export function WorkspaceWorkbench({
 }: WorkspacePageState) {
   const { t } = useTranslation()
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
+  const [explorerWidth, setExplorerWidth] = useState(380)
   const terminalThemeMode = editorTheme === "vs-dark" ? "dark" : "light"
+  const workspaceGridStyle = {
+    "--workspace-explorer-width": `${explorerWidth}px`,
+  } as CSSProperties
 
   useEffect(() => {
     if (!isDesktopTauri) {
@@ -111,6 +124,30 @@ export function WorkspaceWorkbench({
       setCommandPaletteOpen(false)
     }
   }, [workspace])
+
+  const handleStartExplorerResize = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = explorerWidth
+    const previousCursor = document.body.style.cursor
+    const previousUserSelect = document.body.style.userSelect
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      setExplorerWidth(Math.min(EXPLORER_MAX_WIDTH, Math.max(EXPLORER_MIN_WIDTH, startWidth + moveEvent.clientX - startX)))
+    }
+    const stopResize = () => {
+      window.removeEventListener("pointermove", handlePointerMove)
+      window.removeEventListener("pointerup", stopResize)
+      window.removeEventListener("pointercancel", stopResize)
+      document.body.style.cursor = previousCursor
+      document.body.style.userSelect = previousUserSelect
+    }
+
+    document.body.style.cursor = "col-resize"
+    document.body.style.userSelect = "none"
+    window.addEventListener("pointermove", handlePointerMove)
+    window.addEventListener("pointerup", stopResize)
+    window.addEventListener("pointercancel", stopResize)
+  }, [explorerWidth])
 
   const runEditorAction = useCallback(
     async (actionId: string) => {
@@ -242,92 +279,105 @@ export function WorkspaceWorkbench({
         </div>
       </div>
 
-      <div className="grid h-full min-h-0 flex-1 items-stretch gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-        <SoftPanel className="flex h-full min-h-0 flex-col gap-3 overflow-hidden rounded-[18px] px-3 py-3">
-          <div className="flex items-center justify-between gap-3 px-1">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <FolderKanban className="size-4 text-[var(--brand-teal)]" />
-              {t("pages.workspace.explorer.title")}
+      <div
+        className="grid h-full min-h-0 flex-1 items-stretch gap-4 lg:grid-cols-[var(--workspace-explorer-width)_minmax(0,1fr)]"
+        style={workspaceGridStyle}
+      >
+        <div className="relative min-h-0">
+          <SoftPanel className="flex h-full min-h-0 flex-col gap-3 overflow-hidden rounded-[18px] px-3 py-3">
+            <div className="flex items-center justify-between gap-3 px-1">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <FolderKanban className="size-4 text-[var(--brand-teal)]" />
+                {t("pages.workspace.explorer.title")}
+              </div>
+              {(explorerPanel === "search" && textSearchFetching) ||
+              (explorerPanel === "git" && gitStatusFetching) ? (
+                <Loader2 className="size-4 animate-spin text-muted-foreground" />
+              ) : null}
             </div>
-            {(explorerPanel === "search" && textSearchFetching) ||
-            (explorerPanel === "git" && gitStatusFetching) ? (
-              <Loader2 className="size-4 animate-spin text-muted-foreground" />
-            ) : null}
-          </div>
 
-          <div className="grid grid-cols-3 gap-1 rounded-full bg-[var(--surface-1)] p-1">
-            <button
-              type="button"
-              className={cn(
-                "flex h-8 items-center justify-center gap-1.5 rounded-full text-xs font-medium text-muted-foreground transition hover:text-foreground",
-                explorerPanel === "files" && "bg-background text-foreground shadow-sm",
-              )}
-              onClick={() => handleSelectExplorerPanel("files")}
-            >
-              <Files className="size-3.5" />
-              {t("pages.workspace.explorer.files")}
-            </button>
-            <button
-              type="button"
-              className={cn(
-                "flex h-8 items-center justify-center gap-1.5 rounded-full text-xs font-medium text-muted-foreground transition hover:text-foreground",
-                explorerPanel === "search" && "bg-background text-foreground shadow-sm",
-              )}
-              onClick={() => handleSelectExplorerPanel("search")}
-            >
-              <Search className="size-3.5" />
-              {t("pages.workspace.explorer.search")}
-            </button>
-            <button
-              type="button"
-              className={cn(
-                "flex h-8 items-center justify-center gap-1.5 rounded-full text-xs font-medium text-muted-foreground transition hover:text-foreground",
-                explorerPanel === "git" && "bg-background text-foreground shadow-sm",
-              )}
-              onClick={() => handleSelectExplorerPanel("git")}
-            >
-              <GitBranch className="size-3.5" />
-              {t("pages.workspace.explorer.git")}
-            </button>
-          </div>
+            <div className="grid grid-cols-3 gap-1 rounded-full bg-[var(--surface-1)] p-1">
+              <button
+                type="button"
+                className={cn(
+                  "flex h-8 items-center justify-center gap-1.5 rounded-full text-xs font-medium text-muted-foreground transition hover:text-foreground",
+                  explorerPanel === "files" && "bg-background text-foreground shadow-sm",
+                )}
+                onClick={() => handleSelectExplorerPanel("files")}
+              >
+                <Files className="size-3.5" />
+                {t("pages.workspace.explorer.files")}
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "flex h-8 items-center justify-center gap-1.5 rounded-full text-xs font-medium text-muted-foreground transition hover:text-foreground",
+                  explorerPanel === "search" && "bg-background text-foreground shadow-sm",
+                )}
+                onClick={() => handleSelectExplorerPanel("search")}
+              >
+                <Search className="size-3.5" />
+                {t("pages.workspace.explorer.search")}
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "flex h-8 items-center justify-center gap-1.5 rounded-full text-xs font-medium text-muted-foreground transition hover:text-foreground",
+                  explorerPanel === "git" && "bg-background text-foreground shadow-sm",
+                )}
+                onClick={() => handleSelectExplorerPanel("git")}
+              >
+                <GitBranch className="size-3.5" />
+                {t("pages.workspace.explorer.git")}
+              </button>
+            </div>
 
-          {explorerPanel === "files" ? (
-            <div className="h-full min-h-0 flex-1 overflow-hidden rounded-[12px] bg-[var(--surface-1)]">
-              <WorkspaceVscodePart part="explorer" workspaceRoot={workspace.rootPath} />
-            </div>
-          ) : explorerPanel === "search" ? (
-            <div className="h-full min-h-0 flex-1 overflow-hidden">
-              <WorkspaceSearchPanel
-                activeFilePath={activeFilePath}
-                fileFetching={fileSearchFetching}
-                fileResults={fileSearchResults}
-                fileTruncated={fileSearchTruncated}
-                query={textSearchQuery}
-                textFetching={textSearchFetching}
-                textResults={textSearchResults}
-                textTruncated={textSearchTruncated}
-                onOpenFile={handleOpenFile}
-                onOpenMatch={handleOpenTextSearchMatch}
-                onQueryChange={setTextSearchQuery}
-              />
-            </div>
-          ) : (
-            <div className="h-full min-h-0 flex-1 overflow-hidden">
-              <WorkspaceGitPanel
-                gitStatus={gitStatus}
-                gitStatusFetching={gitStatusFetching}
-                operationPending={gitOperationPending}
-                onCommit={handleGitCommit}
-                onDiscard={handleGitDiscard}
-                onRefresh={handleRefreshGitStatus}
-                onSelectDiff={handleSelectGitDiff}
-                onStage={handleGitStage}
-                selectedEntry={selectedGitDiffEntry}
-                onUnstage={handleGitUnstage}
-              />
-            </div>
-          )}
-        </SoftPanel>
+            {explorerPanel === "files" ? (
+              <div className="h-full min-h-0 flex-1 overflow-hidden rounded-[12px] bg-[var(--surface-1)]">
+                <WorkspaceVscodePart part="explorer" workspaceRoot={workspace.rootPath} />
+              </div>
+            ) : explorerPanel === "search" ? (
+              <div className="h-full min-h-0 flex-1 overflow-hidden">
+                <WorkspaceSearchPanel
+                  activeFilePath={activeFilePath}
+                  fileFetching={fileSearchFetching}
+                  fileResults={fileSearchResults}
+                  fileTruncated={fileSearchTruncated}
+                  query={textSearchQuery}
+                  textFetching={textSearchFetching}
+                  textResults={textSearchResults}
+                  textTruncated={textSearchTruncated}
+                  onOpenFile={handleOpenFile}
+                  onOpenMatch={handleOpenTextSearchMatch}
+                  onQueryChange={setTextSearchQuery}
+                />
+              </div>
+            ) : (
+              <div className="h-full min-h-0 flex-1 overflow-hidden">
+                <WorkspaceGitPanel
+                  gitStatus={gitStatus}
+                  gitStatusFetching={gitStatusFetching}
+                  operationPending={gitOperationPending}
+                  onCommit={handleGitCommit}
+                  onDiscard={handleGitDiscard}
+                  onRefresh={handleRefreshGitStatus}
+                  onSelectDiff={handleSelectGitDiff}
+                  onStage={handleGitStage}
+                  selectedEntry={selectedGitDiffEntry}
+                  onUnstage={handleGitUnstage}
+                />
+              </div>
+            )}
+          </SoftPanel>
+          <button
+            type="button"
+            aria-label="Resize file explorer"
+            className="absolute bottom-3 right-[-10px] top-3 z-10 hidden w-5 cursor-col-resize items-center justify-center rounded-full text-muted-foreground/70 transition hover:bg-muted/70 hover:text-foreground lg:flex"
+            onPointerDown={handleStartExplorerResize}
+          >
+            <span className="h-12 w-1 rounded-full bg-current" />
+          </button>
+        </div>
 
         <div className="flex h-full min-h-0 flex-col gap-4">
           <SoftPanel className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[18px] p-0">

@@ -35,6 +35,7 @@
     "allow-workspace-close",
     "allow-workspace-read-directory",
     "allow-workspace-read-file",
+    "allow-workspace-stat-path",
     "allow-workspace-search-files",
     "allow-workspace-search-text",
     "allow-workspace-create-file",

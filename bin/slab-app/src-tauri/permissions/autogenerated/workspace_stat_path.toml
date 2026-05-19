@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-workspace-stat-path"
+description = "Enables the workspace_stat_path command without any pre-configured scope."
+commands.allow = ["workspace_stat_path"]
+
+[[permission]]
+identifier = "deny-workspace-stat-path"
+description = "Denies the workspace_stat_path command without any pre-configured scope."
+commands.deny = ["workspace_stat_path"]
