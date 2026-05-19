@@ -31,7 +31,7 @@ import { WorkspaceConsolePanel } from "./workspace-console-panel"
 import { WorkspaceDiffEditor } from "./workspace-diff-editor"
 import { WorkspaceGitPanel } from "./workspace-git-panel"
 import { WorkspaceSearchPanel } from "./workspace-search-panel"
-import { WorkspaceVscodePart } from "./workspace-vscode-part"
+import { WorkspaceVscodePart } from "./workspace-vscode-part/index"
 
 const EXPLORER_MIN_WIDTH = 300
 const EXPLORER_MAX_WIDTH = 640
@@ -253,7 +253,7 @@ export function WorkspaceWorkbench({
   }
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col gap-4 overflow-hidden">
+    <div className="vs flex h-full min-h-0 w-full flex-col gap-4 overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 px-1">
         <div className="min-w-0">
           <div className="flex items-center gap-2">

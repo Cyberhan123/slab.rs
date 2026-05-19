@@ -1,0 +1,5 @@
+.slab-vscode-part * , .slab-vscode-part *::before, .slab-vscode-part *::after {
+  box-sizing:  revert;
+  padding: revert;
+  margin: revert;
+}
