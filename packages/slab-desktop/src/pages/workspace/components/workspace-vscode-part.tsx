@@ -19,17 +19,20 @@ export function WorkspaceVscodePart({ className, part, workspaceRoot }: Workspac
   useEffect(() => {
     let cancelled = false
     let disposable: { dispose(): void } | null = null
+    let stage = "initialize"
 
     setMountState("pending")
     setWorkspaceLspFileServiceRoot(workspaceRoot)
 
     void (async () => {
       await ensureWorkspaceLspServices(workspaceRoot)
+      stage = "load-views"
       const views = await import("@codingame/monaco-vscode-views-service-override")
       if (cancelled || !containerRef.current) {
         return
       }
 
+      stage = part === "explorer" ? "render-explorer" : "render-editor"
       if (part === "explorer") {
         disposable = views.renderSidebarPart(containerRef.current)
       } else {
@@ -41,7 +44,14 @@ export function WorkspaceVscodePart({ className, part, workspaceRoot }: Workspac
       if (!cancelled) {
         setMountState("failed")
       }
-      console.debug("workspace VS Code part unavailable", { part, workspaceRoot, error })
+      console.debug("workspace VS Code part unavailable", {
+        error: error instanceof Error
+          ? { message: error.message, name: error.name, stack: error.stack }
+          : String(error),
+        part,
+        stage,
+        workspaceRoot,
+      })
     })
 
     return () => {

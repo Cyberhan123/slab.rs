@@ -50,7 +50,13 @@ import {
   workspaceRenamePath,
   workspaceReadDirectory,
   workspaceReadFile,
+  workspaceStatPath,
   workspaceWriteFile,
+} from "@/lib/workspace-bridge"
+import type {
+  WorkspaceDirectoryResponse,
+  WorkspaceFileContent,
+  WorkspacePathMetadata,
 } from "@/lib/workspace-bridge"
 import {
   workspaceLspDefinitionTargetFromResult,
@@ -319,19 +325,25 @@ async function syncWorkspaceVscodeRoot(workspaceRoot: string) {
     return
   }
 
-  workspaceVscodeRoot = workspaceRoot
   if (!workspaceMonacoIsInitialized()) {
     return
   }
 
   const { getService, IWorkspaceContextService, IWorkspaceEditingService } = await import("@codingame/monaco-vscode-api")
   const contextService = await getService(IWorkspaceContextService)
-  const workspaceEditingService = await getService(IWorkspaceEditingService)
   const folders = contextService.getWorkspace().folders
+  const rootUri = URI.file(workspaceRoot)
+  if (folders.length === 1 && folders[0]?.uri.toString() === rootUri.toString()) {
+    workspaceVscodeRoot = workspaceRoot
+    return
+  }
+
+  const workspaceEditingService = await getService(IWorkspaceEditingService)
   await workspaceEditingService.updateFolders(0, folders.length, [{
     name: workspaceRoot.split(/[\\/]/).findLast(Boolean) ?? "Workspace",
-    uri: URI.file(workspaceRoot),
+    uri: rootUri,
   }], true)
+  workspaceVscodeRoot = workspaceRoot
 }
 
 function relativePathFromEditorInput(workspaceRoot: string, input: unknown) {
@@ -577,6 +589,14 @@ async function registerWorkspaceFileSystemOverlay() {
   const textDecoder = new TextDecoder()
   const noopDisposable = { dispose() {} }
   const changesEmitter = new Emitter<readonly IFileChange[]>()
+  const pendingDirectoryReads = new Map<string, Promise<WorkspaceDirectoryResponse>>()
+  const pendingFileReads = new Map<string, Promise<WorkspaceFileContent>>()
+  const pendingPathStats = new Map<string, Promise<WorkspacePathMetadata>>()
+  const clearWorkspaceFileSystemCache = () => {
+    pendingDirectoryReads.clear()
+    pendingFileReads.clear()
+    pendingPathStats.clear()
+  }
   const relativePathForResource = (resource: string) => {
     const workspaceRoot = currentWorkspaceFileService.root
     const relativePath = workspaceRoot
@@ -601,17 +621,32 @@ async function registerWorkspaceFileSystemOverlay() {
         recursive: Boolean(options.recursive),
         relativePath: relativePathForResource(resource.toString()),
       })
+      clearWorkspaceFileSystemCache()
       changesEmitter.fire([{ resource, type: FileChangeType.DELETED }])
     },
     async mkdir(resource) {
       await workspaceCreateDirectory({
         relativePath: relativePathForResource(resource.toString()),
       })
+      clearWorkspaceFileSystemCache()
       changesEmitter.fire([{ resource, type: FileChangeType.ADDED }])
     },
     async readdir(resource) {
       const relativePath = relativePathForResource(resource.toString())
-      const directory = await workspaceReadDirectory(relativePath, { includeIgnored: true })
+      const pendingDirectory = pendingDirectoryReads.get(relativePath)
+      const directoryPromise =
+        pendingDirectory ??
+        (async () => {
+          const nextDirectory = await workspaceReadDirectory(relativePath)
+          return nextDirectory
+        })().finally(() => {
+          pendingDirectoryReads.delete(relativePath)
+        })
+
+      if (!pendingDirectory) {
+        pendingDirectoryReads.set(relativePath, directoryPromise)
+      }
+      const directory = await directoryPromise
 
       return directory.entries.map((entry) => [
         entry.name,
@@ -619,7 +654,22 @@ async function registerWorkspaceFileSystemOverlay() {
       ])
     },
     async readFile(resource) {
-      const file = await workspaceReadFile(relativePathForResource(resource.toString()))
+      const relativePath = relativePathForResource(resource.toString())
+      const pendingFile = pendingFileReads.get(relativePath)
+      const filePromise =
+        pendingFile ??
+        (async () => {
+          const nextFile = await workspaceReadFile(relativePath)
+          return nextFile
+        })().finally(() => {
+          pendingFileReads.delete(relativePath)
+        })
+
+      if (!pendingFile) {
+        pendingFileReads.set(relativePath, filePromise)
+      }
+      const file = await filePromise
+
       return textEncoder.encode(file.content)
     },
     async rename(from, to) {
@@ -627,6 +677,7 @@ async function registerWorkspaceFileSystemOverlay() {
         fromRelativePath: relativePathForResource(from.toString()),
         toRelativePath: relativePathForResource(to.toString()),
       })
+      clearWorkspaceFileSystemCache()
       changesEmitter.fire([
         { resource: from, type: FileChangeType.DELETED },
         { resource: to, type: FileChangeType.ADDED },
@@ -644,28 +695,32 @@ async function registerWorkspaceFileSystemOverlay() {
       }
 
       try {
-        const file = await workspaceReadFile(relativePath)
+        const pendingStat = pendingPathStats.get(relativePath)
+        const metadataPromise =
+          pendingStat ??
+          (async () => {
+            const nextMetadata = await workspaceStatPath(relativePath)
+            return nextMetadata
+          })().finally(() => {
+            pendingPathStats.delete(relativePath)
+          })
+
+        if (!pendingStat) {
+          pendingPathStats.set(relativePath, metadataPromise)
+        }
+        const metadata = await metadataPromise
+
         return {
-          ctime: Date.now(),
-          mtime: Date.now(),
-          size: file.sizeBytes,
-          type: FileType.File,
+          ctime: metadata.createdAt || Date.now(),
+          mtime: metadata.modifiedAt || Date.now(),
+          size: metadata.sizeBytes,
+          type: metadata.kind === "directory" ? FileType.Directory : FileType.File,
         }
       } catch {
-        try {
-          await workspaceReadDirectory(relativePath, { includeIgnored: true })
-          return {
-            ctime: Date.now(),
-            mtime: Date.now(),
-            size: 0,
-            type: FileType.Directory,
-          }
-        } catch {
-          throw FileSystemProviderError.create(
-            "workspace LSP file was not found",
-            FileSystemProviderErrorCode.FileNotFound,
-          )
-        }
+        throw FileSystemProviderError.create(
+          "workspace LSP file was not found",
+          FileSystemProviderErrorCode.FileNotFound,
+        )
       }
     },
     watch() {
@@ -676,6 +731,7 @@ async function registerWorkspaceFileSystemOverlay() {
         content: textDecoder.decode(content),
         relativePath: relativePathForResource(resource.toString()),
       })
+      clearWorkspaceFileSystemCache()
       changesEmitter.fire([{ resource, type: FileChangeType.UPDATED }])
     },
   })

@@ -53,6 +53,7 @@ pub fn run() {
             workspace::workspace_close,
             workspace::workspace_read_directory,
             workspace::workspace_read_file,
+            workspace::workspace_stat_path,
             workspace::workspace_search_files,
             workspace_search::workspace_search_text,
             workspace_file_ops::workspace_create_file,
