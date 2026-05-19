@@ -85,10 +85,13 @@ impl AgentService {
 
     /// Send an approval decision for a pending tool-call.
     ///
-    /// Returns `true` if a pending approval with the given `call_id` was found
-    /// and the decision was delivered.
-    pub fn approve_call(&self, call_id: &str, approved: bool) -> bool {
-        self.events.approve_call(call_id, approved)
+    /// Both `thread_id` (from the URL path) and `call_id` must match so that
+    /// approvals cannot be delivered to a different thread's pending call.
+    ///
+    /// Returns `true` if a pending approval with the given key was found and
+    /// the decision was delivered.
+    pub fn approve_call(&self, thread_id: &str, call_id: &str, approved: bool) -> bool {
+        self.events.approve_call(thread_id, call_id, approved)
     }
 
     /// Return the number of currently active threads.

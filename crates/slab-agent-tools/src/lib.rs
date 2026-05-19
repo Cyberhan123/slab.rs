@@ -19,9 +19,10 @@ pub use fs_watch::FsWatchTool;
 pub use grep::GrepTool;
 pub use shell::{ShellPolicy, ShellTool};
 
-/// Register all built-in host tools with the provided router.
+/// Register only the minimal built-in tool (echo).
 ///
-/// Registers: echo, shell, read_file, write_file, list_dir, grep, fs_watch.
+/// For the full production suite (shell, fs, grep, fs_watch) use
+/// [`register_all_tools`] instead.
 pub fn register_builtin_tools(router: &mut ToolRouter) {
     router.register(Box::new(EchoTool));
 }
@@ -37,9 +38,9 @@ pub fn register_all_tools(
 ) {
     router.register(Box::new(EchoTool));
     router.register(Box::new(ShellTool::new(shell_policy, workspace_root.clone())));
-    router.register(Box::new(ReadFileTool));
-    router.register(Box::new(WriteFileTool));
-    router.register(Box::new(ListDirTool));
+    router.register(Box::new(ReadFileTool::new(workspace_root.clone())));
+    router.register(Box::new(WriteFileTool::new(workspace_root.clone())));
+    router.register(Box::new(ListDirTool::new(workspace_root.clone())));
     router.register(Box::new(GrepTool::new(workspace_root)));
     if let Some(watcher) = FsWatchTool::new() {
         router.register(Box::new(watcher));

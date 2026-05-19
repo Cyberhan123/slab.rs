@@ -160,10 +160,10 @@ async fn agent_shutdown(
 )]
 async fn agent_approve(
     State(service): State<AgentService>,
-    Path(_id): Path<String>,
+    Path(id): Path<String>,
     Json(req): Json<AgentApproveRequest>,
 ) -> Json<AgentApproveResponse> {
-    let delivered = service.approve_call(&req.call_id, req.approved);
+    let delivered = service.approve_call(&id, &req.call_id, req.approved);
     Json(AgentApproveResponse { call_id: req.call_id, delivered })
 }
 
@@ -253,6 +253,9 @@ fn turn_event_to_sse_data(event: &slab_agent::TurnEvent) -> String {
         }
         slab_agent::TurnEvent::TurnFailed { error } => {
             serde_json::json!({"type": "turn_failed", "error": error}).to_string()
+        }
+        slab_agent::TurnEvent::AgentStatus { status } => {
+            serde_json::json!({"type": "agent_status", "status": format!("{status:?}")}).to_string()
         }
     }
 }

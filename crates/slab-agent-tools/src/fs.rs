@@ -2,12 +2,72 @@
 //!
 //! These tools give the agent the ability to read files, write files, and list
 //! directory contents.  Inspired by the codex `file-system` module.
+//!
+//! When a `workspace_root` is configured all paths are interpreted as relative
+//! to that root and are validated to remain within it, preventing path-traversal
+//! out of the workspace.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use serde_json::Value;
 use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
+
+// ── Path validation helper ─────────────────────────────────────────────────────
+
+/// Resolve `path_str` within an optional `workspace_root`.
+///
+/// When a workspace root is provided:
+/// - Absolute paths are rejected.
+/// - The canonicalized resolved path must remain under the (canonicalized)
+///   workspace root.
+/// When no workspace root is provided the path is used as-is.
+fn resolve_path(workspace_root: Option<&Path>, path_str: &str) -> Result<PathBuf, AgentError> {
+    let path = PathBuf::from(path_str);
+    if let Some(root) = workspace_root {
+        if path.is_absolute() {
+            return Err(AgentError::ToolExecution(format!(
+                "absolute path '{path_str}' is not allowed when a workspace root is configured; \
+                 use a path relative to the workspace root"
+            )));
+        }
+        let resolved = root.join(&path);
+        // For existing paths: canonicalize and verify prefix.
+        // For not-yet-existing paths (e.g. write_file to a new location):
+        // canonicalize the deepest existing ancestor and check there.
+        let (canonical_resolved, canonical_root) = match (resolved.canonicalize(), root.canonicalize()) {
+            (Ok(r), Ok(cr)) => (r, cr),
+            (Err(_), Ok(cr)) => {
+                // Path doesn't exist yet — walk up to the deepest existing ancestor.
+                let mut ancestor = resolved.clone();
+                loop {
+                    if let Some(p) = ancestor.parent() {
+                        ancestor = p.to_path_buf();
+                        if let Ok(c) = ancestor.canonicalize() {
+                            break (c.join(resolved.strip_prefix(&ancestor).unwrap_or(&resolved)), cr);
+                        }
+                    } else {
+                        // Cannot canonicalize at all — fall back to string prefix check.
+                        break (resolved.clone(), cr);
+                    }
+                }
+            }
+            (_, Err(e)) => {
+                return Err(AgentError::ToolExecution(format!(
+                    "failed to canonicalize workspace root: {e}"
+                )));
+            }
+        };
+        if !canonical_resolved.starts_with(&canonical_root) {
+            return Err(AgentError::ToolExecution(format!(
+                "path '{path_str}' escapes the workspace root"
+            )));
+        }
+        Ok(root.join(&path))
+    } else {
+        Ok(path)
+    }
+}
 
 // ── ReadFileTool ──────────────────────────────────────────────────────────────
 
@@ -17,7 +77,7 @@ use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
 ///
 /// ```json
 /// {
-///   "path": "/absolute/or/relative/path",
+///   "path": "relative/or/absolute/path",
 ///   "start_line": 1,      // optional, 1-based, inclusive
 ///   "end_line": 100       // optional, 1-based, inclusive
 /// }
@@ -25,7 +85,15 @@ use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
 ///
 /// Lines beyond 1 000 are truncated and a `truncated: true` flag is included
 /// in the response.
-pub struct ReadFileTool;
+pub struct ReadFileTool {
+    pub workspace_root: Option<PathBuf>,
+}
+
+impl ReadFileTool {
+    pub fn new(workspace_root: Option<PathBuf>) -> Self {
+        Self { workspace_root }
+    }
+}
 
 #[async_trait]
 impl ToolHandler for ReadFileTool {
@@ -67,17 +135,19 @@ impl ToolHandler for ReadFileTool {
         _ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let path = arguments
+        let path_str = arguments
             .get("path")
             .and_then(Value::as_str)
             .ok_or_else(|| AgentError::ToolExecution("missing 'path' argument".into()))?;
 
+        let resolved = resolve_path(self.workspace_root.as_deref(), path_str)?;
+
         let start_line = arguments.get("start_line").and_then(Value::as_u64).unwrap_or(1) as usize;
         let end_line = arguments.get("end_line").and_then(Value::as_u64).map(|v| v as usize);
 
-        let raw = tokio::fs::read_to_string(path)
+        let raw = tokio::fs::read_to_string(&resolved)
             .await
-            .map_err(|e| AgentError::ToolExecution(format!("failed to read {path}: {e}")))?;
+            .map_err(|e| AgentError::ToolExecution(format!("failed to read {path_str}: {e}")))?;
 
         const MAX_LINES: usize = 1000;
 
@@ -85,15 +155,19 @@ impl ToolHandler for ReadFileTool {
         let all_lines: Vec<&str> = raw.lines().collect();
         let total = all_lines.len();
 
-        let slice_end = end_line.map(|e| e.min(total)).unwrap_or(total);
-        let slice_end = slice_end.min(start_idx + MAX_LINES);
+        // The requested end (exclusive upper bound in Vec indexing).
+        let requested_end = end_line.map(|e| e.min(total)).unwrap_or(total);
+        // Cap by MAX_LINES relative to the start.
+        let capped_end = requested_end.min(start_idx + MAX_LINES);
 
         let lines: Vec<&str> = all_lines
-            .get(start_idx..slice_end)
+            .get(start_idx..capped_end)
             .unwrap_or(&[])
             .to_vec();
 
-        let truncated = slice_end < total && end_line.map(|e| e >= total).unwrap_or(true);
+        // truncated is true when the MAX_LINES cap reduced the response,
+        // i.e. there are more lines available beyond what was returned.
+        let truncated = capped_end < requested_end;
 
         Ok(ToolOutput {
             content: serde_json::json!({
@@ -116,11 +190,19 @@ impl ToolHandler for ReadFileTool {
 ///
 /// ```json
 /// {
-///   "path": "/absolute/or/relative/path",
+///   "path": "relative/or/absolute/path",
 ///   "content": "file content here"
 /// }
 /// ```
-pub struct WriteFileTool;
+pub struct WriteFileTool {
+    pub workspace_root: Option<PathBuf>,
+}
+
+impl WriteFileTool {
+    pub fn new(workspace_root: Option<PathBuf>) -> Self {
+        Self { workspace_root }
+    }
+}
 
 #[async_trait]
 impl ToolHandler for WriteFileTool {
@@ -165,7 +247,7 @@ impl ToolHandler for WriteFileTool {
             .and_then(Value::as_str)
             .ok_or_else(|| AgentError::ToolExecution("missing 'content' argument".into()))?;
 
-        let path = PathBuf::from(path_str);
+        let path = resolve_path(self.workspace_root.as_deref(), path_str)?;
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|e| {
                 AgentError::ToolExecution(format!("failed to create directories for {path_str}: {e}"))
@@ -206,10 +288,18 @@ impl ToolHandler for WriteFileTool {
 ///
 /// ```json
 /// {
-///   "path": "/absolute/or/relative/directory"
+///   "path": "relative/or/absolute/directory"
 /// }
 /// ```
-pub struct ListDirTool;
+pub struct ListDirTool {
+    pub workspace_root: Option<PathBuf>,
+}
+
+impl ListDirTool {
+    pub fn new(workspace_root: Option<PathBuf>) -> Self {
+        Self { workspace_root }
+    }
+}
 
 #[async_trait]
 impl ToolHandler for ListDirTool {
@@ -246,7 +336,9 @@ impl ToolHandler for ListDirTool {
             .and_then(Value::as_str)
             .ok_or_else(|| AgentError::ToolExecution("missing 'path' argument".into()))?;
 
-        let mut read_dir = tokio::fs::read_dir(path_str)
+        let resolved = resolve_path(self.workspace_root.as_deref(), path_str)?;
+
+        let mut read_dir = tokio::fs::read_dir(&resolved)
             .await
             .map_err(|e| AgentError::ToolExecution(format!("failed to read dir {path_str}: {e}")))?;
 
@@ -288,5 +380,4 @@ impl ToolHandler for ListDirTool {
         })
     }
 }
-
 

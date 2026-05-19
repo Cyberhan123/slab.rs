@@ -94,7 +94,8 @@ pub struct ToolCallRecord {
 pub enum TurnEvent {
     /// A fragment of the assistant's text response.
     AssistantDelta { text: String },
-    /// The model requested a tool call.
+    /// The model requested a tool call.  Arguments reflect the final effective
+    /// values after [`PreToolUse`] hook modifications.
     ToolCallStarted { tool_name: String, call_id: String, arguments: String },
     /// A tool call produced output.
     ToolCallOutput { call_id: String, output: String },
@@ -104,6 +105,10 @@ pub enum TurnEvent {
     TurnCompleted { text: String },
     /// The turn failed with an error.
     TurnFailed { error: String },
+    /// The thread-level lifecycle status changed.  Distinct from turn-level
+    /// completion events so SSE consumers can track the full thread lifecycle
+    /// without receiving duplicate completion/failure payloads.
+    AgentStatus { status: ThreadStatus },
 }
 
 // ── Approval ──────────────────────────────────────────────────────────────────
