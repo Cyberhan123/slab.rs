@@ -56,7 +56,6 @@ import {
 import type {
   WorkspaceDirectoryResponse,
   WorkspaceFileContent,
-  WorkspacePathMetadata,
 } from "@/lib/workspace-bridge"
 import {
   workspaceLspDefinitionTargetFromResult,
@@ -141,6 +140,7 @@ let workspaceFileSystemOverlayRegistered = false
 let workspaceEditorOpenHandlerRegistered = false
 let workspaceVscodeServiceOverridesRegistered = false
 let workspaceVscodeRoot: string | null = null
+let clearWorkspaceFileSystemCache = () => {}
 
 export function workspaceLspModelUri(
   monaco: typeof Monaco,
@@ -155,7 +155,11 @@ export function setWorkspaceLspOpenFile(openFile: WorkspaceLspOpenFile | null) {
 }
 
 export function setWorkspaceLspFileServiceRoot(workspaceRoot: string | null) {
+  const previousWorkspaceRoot = currentWorkspaceFileService.root
   currentWorkspaceFileService = { root: workspaceRoot }
+  if (previousWorkspaceRoot !== workspaceRoot) {
+    clearWorkspaceFileSystemCache()
+  }
   if (workspaceRoot && workspaceMonacoIsInitialized()) {
     void syncWorkspaceVscodeRoot(workspaceRoot).catch((error) => {
       console.debug("workspace VS Code root sync failed", { workspaceRoot, error })
@@ -589,13 +593,67 @@ async function registerWorkspaceFileSystemOverlay() {
   const textDecoder = new TextDecoder()
   const noopDisposable = { dispose() {} }
   const changesEmitter = new Emitter<readonly IFileChange[]>()
-  const pendingDirectoryReads = new Map<string, Promise<WorkspaceDirectoryResponse>>()
+  type WorkspaceFileStat = {
+    ctime: number
+    mtime: number
+    size: number
+    type: number
+  }
+  const directoryCache = new Map<string, WorkspaceDirectoryResponse>()
+  const pendingDirectoryReads = new Map<string, { generation: number; promise: Promise<WorkspaceDirectoryResponse> }>()
   const pendingFileReads = new Map<string, Promise<WorkspaceFileContent>>()
-  const pendingPathStats = new Map<string, Promise<WorkspacePathMetadata>>()
-  const clearWorkspaceFileSystemCache = () => {
+  const pathStatCache = new Map<string, WorkspaceFileStat>()
+  const pendingPathStats = new Map<string, { generation: number; promise: Promise<WorkspaceFileStat> }>()
+  let cacheGeneration = 0
+  clearWorkspaceFileSystemCache = () => {
+    cacheGeneration += 1
+    directoryCache.clear()
     pendingDirectoryReads.clear()
     pendingFileReads.clear()
+    pathStatCache.clear()
     pendingPathStats.clear()
+  }
+  const loadWorkspaceDirectory = async (relativePath: string) => {
+    const cachedDirectory = directoryCache.get(relativePath)
+    if (cachedDirectory) {
+      return cachedDirectory
+    }
+
+    const generation = cacheGeneration
+    const pendingDirectory = pendingDirectoryReads.get(relativePath)
+    if (pendingDirectory?.generation === generation) {
+      return pendingDirectory.promise
+    }
+
+    const directoryPromise = workspaceReadDirectory(relativePath)
+      .then((nextDirectory) => {
+        if (generation === cacheGeneration) {
+          directoryCache.set(relativePath, nextDirectory)
+          const now = Date.now()
+          for (const entry of nextDirectory.entries) {
+            pathStatCache.set(entry.relativePath, {
+              ctime: entry.createdAt ?? now,
+              mtime: entry.modifiedAt ?? now,
+              size: entry.kind === "file" ? entry.sizeBytes ?? 0 : 0,
+              type: entry.kind === "directory" ? FileType.Directory : FileType.File,
+            })
+          }
+        }
+
+        return nextDirectory
+      })
+      .finally(() => {
+        const currentPendingDirectory = pendingDirectoryReads.get(relativePath)
+        if (
+          currentPendingDirectory?.generation === generation &&
+          currentPendingDirectory.promise === directoryPromise
+        ) {
+          pendingDirectoryReads.delete(relativePath)
+        }
+      })
+
+    pendingDirectoryReads.set(relativePath, { generation, promise: directoryPromise })
+    return directoryPromise
   }
   const relativePathForResource = (resource: string) => {
     const workspaceRoot = currentWorkspaceFileService.root
@@ -633,20 +691,7 @@ async function registerWorkspaceFileSystemOverlay() {
     },
     async readdir(resource) {
       const relativePath = relativePathForResource(resource.toString())
-      const pendingDirectory = pendingDirectoryReads.get(relativePath)
-      const directoryPromise =
-        pendingDirectory ??
-        (async () => {
-          const nextDirectory = await workspaceReadDirectory(relativePath)
-          return nextDirectory
-        })().finally(() => {
-          pendingDirectoryReads.delete(relativePath)
-        })
-
-      if (!pendingDirectory) {
-        pendingDirectoryReads.set(relativePath, directoryPromise)
-      }
-      const directory = await directoryPromise
+      const directory = await loadWorkspaceDirectory(relativePath)
 
       return directory.entries.map((entry) => [
         entry.name,
@@ -695,27 +740,52 @@ async function registerWorkspaceFileSystemOverlay() {
       }
 
       try {
+        const cachedStat = pathStatCache.get(relativePath)
+        if (cachedStat) {
+          return cachedStat
+        }
+
+        const separatorIndex = relativePath.lastIndexOf("/")
+        const parentRelativePath = separatorIndex === -1 ? "" : relativePath.slice(0, separatorIndex)
+        await loadWorkspaceDirectory(parentRelativePath).catch(() => null)
+        const directoryBackedStat = pathStatCache.get(relativePath)
+        if (directoryBackedStat) {
+          return directoryBackedStat
+        }
+
+        const generation = cacheGeneration
         const pendingStat = pendingPathStats.get(relativePath)
-        const metadataPromise =
-          pendingStat ??
-          (async () => {
-            const nextMetadata = await workspaceStatPath(relativePath)
-            return nextMetadata
-          })().finally(() => {
-            pendingPathStats.delete(relativePath)
+        if (pendingStat?.generation === generation) {
+          return await pendingStat.promise
+        }
+
+        const metadataPromise = workspaceStatPath(relativePath)
+          .then((metadata) => {
+            const nextStat = {
+              ctime: metadata.createdAt || Date.now(),
+              mtime: metadata.modifiedAt || Date.now(),
+              size: metadata.sizeBytes,
+              type: metadata.kind === "directory" ? FileType.Directory : FileType.File,
+            }
+
+            if (generation === cacheGeneration) {
+              pathStatCache.set(relativePath, nextStat)
+            }
+
+            return nextStat
+          })
+          .finally(() => {
+            const currentPendingStat = pendingPathStats.get(relativePath)
+            if (
+              currentPendingStat?.generation === generation &&
+              currentPendingStat.promise === metadataPromise
+            ) {
+              pendingPathStats.delete(relativePath)
+            }
           })
 
-        if (!pendingStat) {
-          pendingPathStats.set(relativePath, metadataPromise)
-        }
-        const metadata = await metadataPromise
-
-        return {
-          ctime: metadata.createdAt || Date.now(),
-          mtime: metadata.modifiedAt || Date.now(),
-          size: metadata.sizeBytes,
-          type: metadata.kind === "directory" ? FileType.Directory : FileType.File,
-        }
+        pendingPathStats.set(relativePath, { generation, promise: metadataPromise })
+        return await metadataPromise
       } catch {
         throw FileSystemProviderError.create(
           "workspace LSP file was not found",
