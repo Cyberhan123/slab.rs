@@ -82,6 +82,8 @@ all-smi = "0.20"
 sysinfo = { workspace = true }
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 validator = { version = "0.20", features = ["derive"] }
+dashmap = { workspace = true }
+tokio-stream = { workspace = true }
 
 # Optional: Axum state extractor integration
 axum = { workspace = true, optional = true }

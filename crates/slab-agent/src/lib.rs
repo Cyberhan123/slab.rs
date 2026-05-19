@@ -25,6 +25,7 @@
 pub mod config;
 pub mod control;
 pub mod error;
+pub mod hook;
 pub mod port;
 pub mod thread;
 pub mod tool;
@@ -37,5 +38,10 @@ mod tests;
 pub use config::AgentConfig;
 pub use control::AgentControl;
 pub use error::AgentError;
-pub use port::{AgentNotifyPort, AgentStorePort, LlmPort, LlmResponse, ThreadStatus};
+pub use hook::{AgentHook, HookEvent, HookOutcome};
+pub use port::{
+    AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
+    ThreadStatus, TurnEvent,
+};
 pub use tool::{ToolContext, ToolHandler, ToolOutput, ToolRouter};
+
