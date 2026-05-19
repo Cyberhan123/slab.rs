@@ -115,6 +115,12 @@ pub struct WorkspaceFileEntry {
     pub relative_path: String,
     pub kind: WorkspaceFileKind,
     pub has_children: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -282,6 +288,7 @@ pub fn workspace_read_directory(
         }
 
         let entry_relative_path = join_relative_path(&relative_path, &name);
+        let entry_metadata = entry.metadata().ok();
         entries.push(WorkspaceFileEntry {
             id: if entry_relative_path.is_empty() {
                 name.clone()
@@ -296,6 +303,15 @@ pub fn workspace_read_directory(
                 WorkspaceFileKind::File
             },
             has_children: file_type.is_dir(),
+            size_bytes: entry_metadata
+                .as_ref()
+                .map(|metadata| if metadata.is_file() { metadata.len() } else { 0 }),
+            modified_at: entry_metadata
+                .as_ref()
+                .map(|metadata| system_time_millis(metadata.modified())),
+            created_at: entry_metadata
+                .as_ref()
+                .map(|metadata| system_time_millis(metadata.created())),
         });
     }
 
@@ -757,6 +773,9 @@ fn search_workspace_files(
             relative_path: entry_relative_path,
             kind: WorkspaceFileKind::File,
             has_children: false,
+            size_bytes: None,
+            modified_at: None,
+            created_at: None,
         });
     }
 

@@ -61,7 +61,7 @@ export function WorkspaceVscodePart({ className, part, workspaceRoot }: Workspac
   }, [part, workspaceRoot])
 
   return (
-    <div className={cn("relative h-full min-h-0 w-full overflow-hidden", className)}>
+    <div className={cn("slab-vscode-part relative h-full min-h-0 w-full overflow-hidden", className)}>
       <div ref={containerRef} className="h-full min-h-0 w-full overflow-hidden" />
       {mountState === "pending" ? (
         <div className="absolute inset-0 flex items-center justify-center bg-background/40">

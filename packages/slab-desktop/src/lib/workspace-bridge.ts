@@ -42,6 +42,9 @@ export type WorkspaceFileEntry = {
   relativePath: string
   kind: "directory" | "file"
   hasChildren: boolean
+  sizeBytes?: number
+  modifiedAt?: number
+  createdAt?: number
 }
 
 export type WorkspaceDirectoryResponse = {
