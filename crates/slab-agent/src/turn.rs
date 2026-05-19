@@ -120,20 +120,7 @@ pub(crate) async fn execute_turn(
     for tc in &response.tool_calls {
         let call_id = Uuid::new_v4().to_string();
 
-        // Emit ToolCallStarted event.
-        context
-            .notify
-            .on_turn_event(
-                context.thread_id,
-                &TurnEvent::ToolCallStarted {
-                    tool_name: tc.name.clone(),
-                    call_id: call_id.clone(),
-                    arguments: tc.arguments.clone(),
-                },
-            )
-            .await;
-
-        // Parse arguments so hooks and the handler both get a Value.
+        // Parse arguments first so hooks receive a structured Value.
         let parsed_args = match serde_json::from_str::<serde_json::Value>(&tc.arguments) {
             Ok(v) => v,
             Err(e) => {
@@ -202,6 +189,21 @@ pub(crate) async fn execute_turn(
                 HookOutcome::Continue => parsed_args,
             }
         };
+
+        // Emit ToolCallStarted AFTER hooks so SSE consumers see the final
+        // effective arguments (hooks may have modified them).
+        context
+            .notify
+            .on_turn_event(
+                context.thread_id,
+                &TurnEvent::ToolCallStarted {
+                    tool_name: tc.name.clone(),
+                    call_id: call_id.clone(),
+                    arguments: serde_json::to_string(&effective_args)
+                        .unwrap_or_else(|_| tc.arguments.clone()),
+                },
+            )
+            .await;
 
         let record = ToolCallRecord {
             id: call_id.clone(),

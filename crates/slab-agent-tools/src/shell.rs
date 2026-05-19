@@ -15,11 +15,11 @@ use tracing::warn;
 
 // ── Shell policy ──────────────────────────────────────────────────────────────
 
-/// Policy that governs whether the shell tool executes a command, blocks it,
-/// or requests approval from an external operator (via [`ApprovalPort`]).
+/// Policy that governs whether the shell tool executes a command or blocks it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ShellPolicy {
-    /// Run all commands without restriction.
+    /// Run all commands without restriction (subject to the dangerous-command
+    /// heuristic).
     #[default]
     Allow,
     /// Block all commands without executing them.
@@ -164,24 +164,36 @@ impl ToolHandler for ShellTool {
         // Build the child process.
         let mut cmd = tokio::process::Command::new("sh");
         cmd.arg("-c").arg(command);
+        cmd.kill_on_drop(true); // ensure the process is killed if the future is dropped (e.g. on timeout)
         if let Some(ref root) = self.workspace_root {
             cmd.current_dir(root);
         }
 
-        // Execute with timeout.
-        let output = tokio::time::timeout(Duration::from_secs(timeout_secs), cmd.output()).await;
+        // Spawn, then wait with timeout.  Because kill_on_drop is set, the
+        // child is terminated automatically when the Child handle is dropped on
+        // timeout.
+        let child = cmd
+            .spawn()
+            .map_err(|e| AgentError::ToolExecution(format!("failed to spawn command: {e}")))?;
 
-        match output {
-            Err(_) => Ok(ToolOutput {
-                content: serde_json::json!({
-                    "stdout": "",
-                    "stderr": "command timed out",
-                    "exit_code": -1
+        let wait_result =
+            tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait_with_output())
+                .await;
+
+        match wait_result {
+            Err(_) => {
+                // Timeout elapsed; child.kill_on_drop drops the handle here.
+                Ok(ToolOutput {
+                    content: serde_json::json!({
+                        "stdout": "",
+                        "stderr": "command timed out",
+                        "exit_code": -1
+                    })
+                    .to_string(),
+                    metadata: None,
                 })
-                .to_string(),
-                metadata: None,
-            }),
-            Ok(Err(e)) => Err(AgentError::ToolExecution(format!("failed to spawn command: {e}"))),
+            }
+            Ok(Err(e)) => Err(AgentError::ToolExecution(format!("failed to wait on command: {e}"))),
             Ok(Ok(result)) => {
                 let stdout = String::from_utf8_lossy(&result.stdout).into_owned();
                 let stderr = String::from_utf8_lossy(&result.stderr).into_owned();

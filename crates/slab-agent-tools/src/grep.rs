@@ -97,7 +97,28 @@ impl ToolHandler for GrepTool {
             arguments.get("case_insensitive").and_then(Value::as_bool).unwrap_or(false);
 
         let search_root = if let Some(ref root) = self.workspace_root {
-            root.join(path_str)
+            // Reject absolute paths to prevent escaping the workspace.
+            if PathBuf::from(path_str).is_absolute() {
+                return Err(AgentError::ToolExecution(format!(
+                    "absolute path '{path_str}' is not allowed when a workspace root is configured; \
+                     use a path relative to the workspace root"
+                )));
+            }
+            let resolved = root.join(path_str);
+            // Verify the resolved path stays within the workspace root.
+            // For non-existent paths we fall back to a lexical prefix check.
+            let canonical_root =
+                root.canonicalize().map_err(|e| AgentError::ToolExecution(format!(
+                    "failed to canonicalize workspace root: {e}"
+                )))?;
+            if let Ok(canonical_resolved) = resolved.canonicalize() {
+                if !canonical_resolved.starts_with(&canonical_root) {
+                    return Err(AgentError::ToolExecution(format!(
+                        "path '{path_str}' escapes the workspace root"
+                    )));
+                }
+            }
+            resolved
         } else {
             PathBuf::from(path_str)
         };

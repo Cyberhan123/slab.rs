@@ -113,7 +113,7 @@ fn build_agent_control(
     let store_adapter: Arc<dyn slab_agent::port::AgentStorePort> = store;
 
     let mut tool_router = ToolRouter::new();
-    slab_agent_tools::register_all_tools(&mut tool_router, ShellPolicy::Allow, None);
+    slab_agent_tools::register_all_tools(&mut tool_router, ShellPolicy::Block, None);
 
     AgentControl::new(llm, store_adapter, notify, Arc::new(tool_router), 32, 4)
 }

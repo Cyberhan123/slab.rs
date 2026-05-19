@@ -4,11 +4,11 @@
 
 CREATE TABLE IF NOT EXISTS agent_thread_messages (
     id         TEXT    PRIMARY KEY,
-    thread_id  TEXT    NOT NULL,
+    thread_id  TEXT    NOT NULL REFERENCES agent_threads(id) ON DELETE CASCADE,
     turn_index INTEGER NOT NULL,
     role       TEXT    NOT NULL,
     content    TEXT    NOT NULL,
-    created_at INTEGER NOT NULL
+    created_at TEXT    NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_atm_thread

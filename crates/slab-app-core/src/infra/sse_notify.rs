@@ -9,7 +9,10 @@
 //!   Calling `subscribe_events()` returns a receiver that replays from the
 //!   current tail.
 //! - Pending approvals are stored as `oneshot::Sender<ApprovalDecision>` keyed
-//!   by `call_id`.  The HTTP approve handler looks up and fires the sender.
+//!   by `"<thread_id>:<call_id>"`.  The HTTP approve handler must supply both
+//!   the thread ID (from the URL path) and the call_id to prevent cross-thread
+//!   approval.  Requests that receive no decision within
+//!   [`APPROVAL_TIMEOUT_SECS`] are automatically rejected.
 
 use std::sync::Arc;
 
@@ -23,12 +26,15 @@ use tracing::{debug, warn};
 
 const CHANNEL_CAPACITY: usize = 256;
 
+/// How long (in seconds) to wait for an operator approval before auto-rejecting.
+const APPROVAL_TIMEOUT_SECS: u64 = 300;
+
 /// Shared state used by both the notify path and the HTTP handlers.
 #[derive(Clone, Default)]
 pub struct SseNotifyAdapter {
     /// Per-thread event broadcast channels.
     channels: Arc<DashMap<String, broadcast::Sender<TurnEvent>>>,
-    /// Pending approval requests: call_id → oneshot sender.
+    /// Pending approval requests: "<thread_id>:<call_id>" → oneshot sender.
     approvals: Arc<DashMap<String, oneshot::Sender<ApprovalDecision>>>,
 }
 
@@ -48,12 +54,17 @@ impl SseNotifyAdapter {
             .subscribe()
     }
 
-    /// Send an approval decision for a pending `call_id`.
+    /// Send an approval decision for a pending tool call.
     ///
-    /// Returns `true` if the approval channel was found and the decision was
-    /// delivered; `false` if no pending approval with that `call_id` exists.
-    pub fn approve_call(&self, call_id: &str, approved: bool) -> bool {
-        if let Some((_, tx)) = self.approvals.remove(call_id) {
+    /// Both `thread_id` (from the URL path) and `call_id` must match the
+    /// pending entry so that a caller cannot approve tool calls belonging to a
+    /// different thread.
+    ///
+    /// Returns `true` if the pending approval was found and the decision was
+    /// delivered; `false` if no matching pending approval exists.
+    pub fn approve_call(&self, thread_id: &str, call_id: &str, approved: bool) -> bool {
+        let key = approval_key(thread_id, call_id);
+        if let Some((_, tx)) = self.approvals.remove(&key) {
             let decision =
                 if approved { ApprovalDecision::Approved } else { ApprovalDecision::Rejected };
             tx.send(decision).is_ok()
@@ -70,27 +81,18 @@ impl SseNotifyAdapter {
     }
 }
 
+fn approval_key(thread_id: &str, call_id: &str) -> String {
+    format!("{thread_id}:{call_id}")
+}
+
 #[async_trait]
 impl AgentNotifyPort for SseNotifyAdapter {
     async fn on_status_change(&self, thread_id: &str, status: ThreadStatus) {
         debug!(thread_id, ?status, "agent status change");
-        // Convert to a TurnEvent-style notification so SSE subscribers see
-        // terminal transitions even if they only consume TurnEvent.
-        match status {
-            ThreadStatus::Completed => {
-                self.broadcast(
-                    thread_id,
-                    TurnEvent::TurnCompleted { text: String::new() },
-                );
-            }
-            ThreadStatus::Errored => {
-                self.broadcast(
-                    thread_id,
-                    TurnEvent::TurnFailed { error: "thread errored".into() },
-                );
-            }
-            _ => {}
-        }
+        // Emit a dedicated AgentStatus event so SSE consumers can track thread
+        // lifecycle without receiving synthetic TurnCompleted / TurnFailed
+        // payloads that duplicate what the turn loop already emits.
+        self.broadcast(thread_id, TurnEvent::AgentStatus { status });
     }
 
     async fn on_turn_event(&self, thread_id: &str, event: &TurnEvent) {
@@ -108,7 +110,8 @@ impl ApprovalPort for SseNotifyAdapter {
         command: &str,
     ) -> ApprovalDecision {
         let (tx, rx) = oneshot::channel();
-        self.approvals.insert(call_id.to_owned(), tx);
+        let key = approval_key(thread_id, call_id);
+        self.approvals.insert(key.clone(), tx);
 
         // Notify SSE subscribers that approval is needed.
         self.broadcast(
@@ -120,9 +123,27 @@ impl ApprovalPort for SseNotifyAdapter {
             },
         );
 
-        rx.await.map_err(|_| {
-            tracing::warn!(call_id, "approval channel closed without a decision; defaulting to Rejected");
-            ApprovalDecision::Rejected
-        }).unwrap_or(ApprovalDecision::Rejected)
+        // Wait for an operator decision, but auto-reject after the timeout so
+        // the agent turn is never permanently blocked.
+        let decision = tokio::time::timeout(
+            std::time::Duration::from_secs(APPROVAL_TIMEOUT_SECS),
+            rx,
+        )
+        .await;
+
+        // Always clean up the pending entry regardless of outcome.
+        self.approvals.remove(&key);
+
+        match decision {
+            Ok(Ok(d)) => d,
+            Ok(Err(_)) => {
+                warn!(call_id, thread_id, "approval channel closed without a decision; auto-rejecting");
+                ApprovalDecision::Rejected
+            }
+            Err(_elapsed) => {
+                warn!(call_id, thread_id, "approval request timed out after {APPROVAL_TIMEOUT_SECS}s; auto-rejecting");
+                ApprovalDecision::Rejected
+            }
+        }
     }
 }
