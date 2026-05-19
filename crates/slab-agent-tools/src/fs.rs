@@ -173,12 +173,11 @@ impl ToolHandler for WriteFileTool {
         }
 
         // Atomic write: write to a tmp path, then rename.
-        let tmp_path = path.with_extension(format!(
-            "{}.tmp",
-            path.extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("tmp")
-        ));
+        let tmp_path = {
+            let mut name = path.file_name().unwrap_or_default().to_owned();
+            name.push(".tmp");
+            path.with_file_name(name)
+        };
 
         tokio::fs::write(&tmp_path, content).await.map_err(|e| {
             AgentError::ToolExecution(format!("failed to write temp file: {e}"))

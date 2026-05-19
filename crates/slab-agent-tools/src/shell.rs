@@ -46,7 +46,10 @@ pub fn is_dangerous_command(cmd: &str) -> bool {
     }
 
     // Piping remote content directly into a privileged shell.
-    for pipe_shell in ["| sh", "| bash", "| zsh", "| sudo sh", "| sudo bash"] {
+    for pipe_shell in [
+        "| sh", "| bash", "| zsh", "| dash", "| fish", "| ksh",
+        "| sudo sh", "| sudo bash", "| sudo zsh",
+    ] {
         if trimmed.contains(pipe_shell) {
             return true;
         }

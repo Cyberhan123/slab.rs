@@ -135,7 +135,7 @@ fn grep_blocking(
     glob: Option<&str>,
 ) -> Result<Vec<serde_json::Value>, String> {
     let mut builder = ignore::WalkBuilder::new(root);
-    builder.hidden(false); // include dot-files by default
+    builder.hidden(false); // don't ignore hidden files (show dot-files)
 
     if let Some(g) = glob {
         let mut override_builder = ignore::overrides::OverrideBuilder::new(root);

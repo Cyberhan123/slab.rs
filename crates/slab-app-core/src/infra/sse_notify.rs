@@ -19,7 +19,7 @@ use slab_agent::port::{
     AgentNotifyPort, ApprovalDecision, ApprovalPort, ThreadStatus, TurnEvent,
 };
 use tokio::sync::{broadcast, oneshot};
-use tracing::debug;
+use tracing::{debug, warn};
 
 const CHANNEL_CAPACITY: usize = 256;
 
@@ -120,6 +120,9 @@ impl ApprovalPort for SseNotifyAdapter {
             },
         );
 
-        rx.await.unwrap_or(ApprovalDecision::Rejected)
+        rx.await.map_err(|_| {
+            tracing::warn!(call_id, "approval channel closed without a decision; defaulting to Rejected");
+            ApprovalDecision::Rejected
+        }).unwrap_or(ApprovalDecision::Rejected)
     }
 }
