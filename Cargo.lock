@@ -1443,16 +1443,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "codex-file-watcher"
-version = "0.0.0"
-source = "git+https://github.com/openai/codex?rev=b3ae3de4056f9417c968f8628cde55b428f309b8#b3ae3de4056f9417c968f8628cde55b428f309b8"
-dependencies = [
- "notify",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "color"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4911,6 +4901,17 @@ dependencies = [
  "arrayvec",
  "euclid",
  "smallvec",
+]
+
+[[package]]
+name = "landlock"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49fefd6652c57d68aaa32544a4c0e642929725bdc1fd929367cdeb673ab81088"
+dependencies = [
+ "enumflags2",
+ "libc",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -8985,13 +8986,13 @@ name = "slab-agent-tools"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "codex-file-watcher",
  "ignore",
  "regex",
  "serde",
  "serde_json",
  "shlex",
  "slab-agent",
+ "slab-file-watcher",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -9126,6 +9127,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "slab-file-watcher"
+version = "0.1.0"
+dependencies = [
+ "notify",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "slab-ggml"
 version = "0.1.0"
 dependencies = [
@@ -9179,6 +9190,20 @@ dependencies = [
  "toml 1.1.2+spec-1.1.0",
  "tracing",
  "zip 8.6.0",
+]
+
+[[package]]
+name = "slab-linux-sandbox"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "landlock",
+ "libc",
+ "serde",
+ "slab-sandboxing",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -9293,6 +9318,18 @@ dependencies = [
  "quote",
  "syn 2.0.117",
  "trybuild",
+]
+
+[[package]]
+name = "slab-sandboxing"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -9431,6 +9468,19 @@ dependencies = [
  "slab-utils",
  "sysinfo 0.39.1",
  "uuid",
+]
+
+[[package]]
+name = "slab-windows-sandbox"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "slab-sandboxing",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
