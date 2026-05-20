@@ -1,10 +1,16 @@
 use async_trait::async_trait;
+use slab_sandboxing::{
+    SandboxDriver, SandboxEnvironment, SandboxError, SandboxedCommand, SandboxedOutput,
+};
+#[cfg(target_os = "linux")]
 use tracing::debug;
-use slab_sandboxing::{SandboxDriver, SandboxEnvironment, SandboxError, SandboxedCommand, SandboxedOutput};
 
-use crate::bwrap::{build_bwrap_args, find_bwrap};
+#[cfg(target_os = "linux")]
+use crate::bwrap::build_bwrap_args;
+use crate::bwrap::find_bwrap;
 
 pub struct LinuxSandboxDriver {
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     env: SandboxEnvironment,
 }
 
@@ -26,13 +32,15 @@ impl SandboxDriver for LinuxSandboxDriver {
 
     async fn run(&self, cmd: SandboxedCommand) -> Result<SandboxedOutput, SandboxError> {
         #[cfg(not(target_os = "linux"))]
-        return Err(SandboxError::UnsupportedPlatform);
+        {
+            let _ = cmd;
+            return Err(SandboxError::UnsupportedPlatform);
+        }
 
         #[cfg(target_os = "linux")]
         {
-            let bwrap = find_bwrap().ok_or_else(|| {
-                SandboxError::BwrapNotAvailable("bwrap not found on PATH".into())
-            })?;
+            let bwrap = find_bwrap()
+                .ok_or_else(|| SandboxError::BwrapNotAvailable("bwrap not found on PATH".into()))?;
 
             // PR_SET_NO_NEW_PRIVS is a process-wide setting: once set it applies
             // to this process and all children spawned from it.  This is intentional
@@ -68,7 +76,10 @@ impl SandboxDriver for LinuxSandboxDriver {
                     .map_err(|_| SandboxError::Timeout)?
                     .map_err(|e| SandboxError::SpawnFailed(e.to_string()))?
             } else {
-                spawned.wait_with_output().await.map_err(|e| SandboxError::SpawnFailed(e.to_string()))?
+                spawned
+                    .wait_with_output()
+                    .await
+                    .map_err(|e| SandboxError::SpawnFailed(e.to_string()))?
             };
 
             Ok(SandboxedOutput {

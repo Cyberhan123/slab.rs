@@ -13,7 +13,10 @@ use crate::{
     config::AgentConfig,
     error::AgentError,
     hook::{AgentHook, HookEvent, dispatch_hooks},
-    port::{AgentNotifyPort, AgentStorePort, LlmPort, ThreadSnapshot, ThreadStatus, TurnEvent},
+    port::{
+        AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, ThreadSnapshot, ThreadStatus,
+        TurnEvent,
+    },
     tool::ToolRouter,
     turn::{TurnExecutionContext, execute_turn},
 };
@@ -69,6 +72,7 @@ impl AgentThread {
         llm: Arc<dyn LlmPort>,
         store: Arc<dyn AgentStorePort>,
         notify: Arc<dyn AgentNotifyPort>,
+        approval: Arc<dyn ApprovalPort>,
         tools: Arc<ToolRouter>,
         hooks: Arc<Vec<Arc<dyn AgentHook>>>,
     ) -> Result<String, AgentError> {
@@ -139,6 +143,7 @@ impl AgentThread {
                     tools: tools.as_ref(),
                     store: store.as_ref(),
                     notify: notify.as_ref(),
+                    approval: approval.as_ref(),
                     hooks: &hooks,
                 },
                 &mut messages,

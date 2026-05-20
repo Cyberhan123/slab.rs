@@ -15,8 +15,11 @@ use crate::{
     config::AgentConfig,
     error::AgentError,
     hook::{AgentHook, HookEvent, HookOutcome, dispatch_hooks},
-    port::{AgentNotifyPort, AgentStorePort, LlmPort, ToolCallRecord, TurnEvent},
-    tool::{ToolContext, ToolRouter},
+    port::{
+        AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, ToolCallRecord,
+        TurnEvent,
+    },
+    tool::{ToolContext, ToolHandler, ToolRouter},
 };
 
 /// Execute a single LLM turn.
@@ -32,6 +35,7 @@ pub(crate) struct TurnExecutionContext<'a> {
     pub tools: &'a ToolRouter,
     pub store: &'a dyn AgentStorePort,
     pub notify: &'a dyn AgentNotifyPort,
+    pub approval: &'a dyn ApprovalPort,
     pub hooks: &'a [Arc<dyn AgentHook>],
 }
 
@@ -80,10 +84,7 @@ pub(crate) async fn execute_turn(
         if !text.is_empty() {
             context
                 .notify
-                .on_turn_event(
-                    context.thread_id,
-                    &TurnEvent::AssistantDelta { text: text.clone() },
-                )
+                .on_turn_event(context.thread_id, &TurnEvent::AssistantDelta { text: text.clone() })
                 .await;
         }
     }
@@ -205,13 +206,22 @@ pub(crate) async fn execute_turn(
             )
             .await;
 
+        let handler = context.tools.get(&tc.name);
+        let approval_request =
+            handler.and_then(|handler| handler.approval_request(&effective_args));
+        let initial_status = if approval_request.is_some() {
+            ToolCallStatus::Pending
+        } else {
+            ToolCallStatus::Running
+        };
+
         let record = ToolCallRecord {
             id: call_id.clone(),
             thread_id: context.thread_id.to_owned(),
             tool_name: tc.name.clone(),
             arguments: tc.arguments.clone(),
             output: None,
-            status: ToolCallStatus::Running,
+            status: initial_status,
             created_at: now.clone(),
             completed_at: None,
         };
@@ -220,23 +230,21 @@ pub(crate) async fn execute_turn(
             warn!(error = %e, call_id, "failed to persist tool call record");
         }
 
-        let (output, call_status) = match context.tools.get(&tc.name) {
-            None => {
-                warn!(thread_id = context.thread_id, tool = %tc.name, "tool not found");
-                (format!("tool not found: {}", tc.name), ToolCallStatus::Failed)
-            }
-            Some(handler) => match handler.execute(&ctx, &effective_args).await {
-                Ok(out) => (out.content, ToolCallStatus::Completed),
-                Err(e) => {
-                    warn!(
-                        thread_id = context.thread_id,
-                        tool = %tc.name,
-                        error = %e,
-                        "tool execution failed"
-                    );
-                    (e.to_string(), ToolCallStatus::Failed)
+        let (output, call_status) = if let Some(request) = approval_request {
+            match context
+                .approval
+                .request_approval(context.thread_id, &call_id, &tc.name, &request.command)
+                .await
+            {
+                ApprovalDecision::Approved => {
+                    execute_tool_call(&tc.name, handler, &ctx, &effective_args).await
                 }
-            },
+                ApprovalDecision::Rejected => {
+                    ("tool call rejected by approval policy".to_string(), ToolCallStatus::Failed)
+                }
+            }
+        } else {
+            execute_tool_call(&tc.name, handler, &ctx, &effective_args).await
         };
 
         // Run PostToolUse hooks.
@@ -275,4 +283,24 @@ pub(crate) async fn execute_turn(
     }
 
     Ok(true)
+}
+
+async fn execute_tool_call(
+    tool_name: &str,
+    handler: Option<&dyn ToolHandler>,
+    ctx: &ToolContext,
+    arguments: &serde_json::Value,
+) -> (String, ToolCallStatus) {
+    let Some(handler) = handler else {
+        warn!(tool = tool_name, "tool not found");
+        return (format!("tool not found: {tool_name}"), ToolCallStatus::Failed);
+    };
+
+    match handler.execute(ctx, arguments).await {
+        Ok(out) => (out.content, ToolCallStatus::Completed),
+        Err(e) => {
+            warn!(tool = handler.name(), error = %e, "tool execution failed");
+            (e.to_string(), ToolCallStatus::Failed)
+        }
+    }
 }

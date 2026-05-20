@@ -9,11 +9,12 @@
 use std::sync::{Arc, Mutex};
 
 use crate::{
-    AgentControl, AgentError, ToolContext, ToolHandler, ToolOutput, ToolRouter,
+    AgentControl, AgentError, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput,
+    ToolRouter,
     config::AgentConfig,
     port::{
-        AgentNotifyPort, AgentStorePort, LlmPort, LlmResponse, ParsedToolCall, ThreadSnapshot,
-        ThreadStatus, ToolCallRecord, ToolSpec,
+        AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
+        ParsedToolCall, ThreadSnapshot, ThreadStatus, ToolCallRecord, ToolSpec,
     },
 };
 use async_trait::async_trait;
@@ -51,6 +52,48 @@ impl ToolHandler for TestEchoTool {
     ) -> Result<ToolOutput, AgentError> {
         let message = arguments.get("message").and_then(serde_json::Value::as_str).unwrap_or("");
         Ok(ToolOutput { content: message.to_owned(), metadata: None })
+    }
+}
+
+struct ApprovalEchoTool;
+
+#[async_trait]
+impl ToolHandler for ApprovalEchoTool {
+    fn name(&self) -> &str {
+        "echo"
+    }
+
+    fn description(&self) -> &str {
+        "Echo with approval."
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "message": { "type": "string" }
+            },
+            "required": ["message"]
+        })
+    }
+
+    fn approval_request(&self, arguments: &serde_json::Value) -> Option<ToolApprovalRequest> {
+        Some(ToolApprovalRequest {
+            command: arguments
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        })
+    }
+
+    async fn execute(
+        &self,
+        _ctx: &ToolContext,
+        arguments: &serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        let message = arguments.get("message").and_then(serde_json::Value::as_str).unwrap_or("");
+        Ok(ToolOutput { content: format!("approved: {message}"), metadata: None })
     }
 }
 
@@ -138,6 +181,48 @@ impl AgentStorePort for NoopStore {
     }
 }
 
+#[derive(Default)]
+struct RecordingStore {
+    inserted_statuses: Mutex<Vec<slab_types::agent::ToolCallStatus>>,
+    updated_statuses: Mutex<Vec<slab_types::agent::ToolCallStatus>>,
+}
+
+#[async_trait]
+impl AgentStorePort for RecordingStore {
+    async fn upsert_thread(&self, _snapshot: &ThreadSnapshot) -> Result<(), AgentError> {
+        Ok(())
+    }
+
+    async fn get_thread(&self, _id: &str) -> Result<Option<ThreadSnapshot>, AgentError> {
+        Ok(None)
+    }
+
+    async fn update_thread_status(
+        &self,
+        _id: &str,
+        _status: ThreadStatus,
+        _completion_text: Option<&str>,
+    ) -> Result<(), AgentError> {
+        Ok(())
+    }
+
+    async fn insert_tool_call(&self, record: &ToolCallRecord) -> Result<(), AgentError> {
+        self.inserted_statuses.lock().unwrap().push(record.status);
+        Ok(())
+    }
+
+    async fn update_tool_call(
+        &self,
+        _id: &str,
+        _output: Option<&str>,
+        status: slab_types::agent::ToolCallStatus,
+        _completed_at: &str,
+    ) -> Result<(), AgentError> {
+        self.updated_statuses.lock().unwrap().push(status);
+        Ok(())
+    }
+}
+
 // ── Mock notify ───────────────────────────────────────────────────────────────
 
 struct NoopNotify;
@@ -145,6 +230,19 @@ struct NoopNotify;
 #[async_trait]
 impl AgentNotifyPort for NoopNotify {
     async fn on_status_change(&self, _thread_id: &str, _status: ThreadStatus) {}
+}
+
+#[async_trait]
+impl ApprovalPort for NoopNotify {
+    async fn request_approval(
+        &self,
+        _thread_id: &str,
+        _call_id: &str,
+        _tool_name: &str,
+        _command: &str,
+    ) -> ApprovalDecision {
+        ApprovalDecision::Approved
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -159,7 +257,8 @@ async fn smoke_echo_tool_agent_completes() {
     let mut router = ToolRouter::new();
     router.register(Box::new(TestEchoTool));
 
-    let control = Arc::new(AgentControl::new(llm, store, notify, Arc::new(router), 8, 4));
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new(llm, store, notify, approval, Arc::new(router), 8, 4));
 
     // Spawn a root agent with a single user message.
     let messages = vec![ConversationMessage {
@@ -204,6 +303,55 @@ async fn smoke_echo_tool_agent_completes() {
 
     // By now the thread has been removed from the registry; verify the count.
     assert_eq!(control.active_thread_count().await, 0);
+}
+
+#[tokio::test]
+async fn approval_required_tool_is_recorded_pending_then_completed() {
+    let llm = Arc::new(MockLlm::new());
+    let store = Arc::new(RecordingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+
+    let mut router = ToolRouter::new();
+    router.register(Box::new(ApprovalEchoTool));
+
+    let approval = Arc::clone(&notify);
+    let control =
+        Arc::new(AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4));
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: slab_types::ConversationMessageContent::Text("Please echo".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+
+    let thread_id =
+        control.spawn("session-approval".into(), config, messages).await.expect("spawn");
+    let mut status_rx = control.subscribe(&thread_id).await.expect("subscribe");
+    let final_status = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            status_rx.changed().await.expect("status channel closed");
+            let status = *status_rx.borrow();
+            if matches!(status, ThreadStatus::Completed | ThreadStatus::Errored) {
+                break status;
+            }
+        }
+    })
+    .await
+    .expect("thread should finish");
+
+    assert_eq!(final_status, ThreadStatus::Completed);
+    assert_eq!(
+        store.inserted_statuses.lock().unwrap().as_slice(),
+        &[slab_types::agent::ToolCallStatus::Pending]
+    );
+    assert_eq!(
+        store.updated_statuses.lock().unwrap().as_slice(),
+        &[slab_types::agent::ToolCallStatus::Completed]
+    );
 }
 
 #[tokio::test]
@@ -321,7 +469,8 @@ async fn agent_control_enforces_thread_limit() {
     let router = Arc::new(ToolRouter::new());
 
     // Set max_threads to 1
-    let control = Arc::new(AgentControl::new(llm, store, notify, router, 1, 4));
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new(llm, store, notify, approval, router, 1, 4));
 
     let config = AgentConfig { model: "mock".into(), max_turns: 1, ..AgentConfig::default() };
 
@@ -358,7 +507,8 @@ async fn agent_control_enforces_depth_limit() {
     let router = Arc::new(ToolRouter::new());
 
     // Set max_depth to 0 (only root agents allowed)
-    let control = Arc::new(AgentControl::new(llm.clone(), store, notify, router, 8, 0));
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new(llm.clone(), store, notify, approval, router, 8, 0));
 
     let config = AgentConfig { model: "mock".into(), max_turns: 1, ..AgentConfig::default() };
 
@@ -410,7 +560,8 @@ async fn agent_propagates_llm_errors() {
     let notify = Arc::new(NoopNotify);
     let router = Arc::new(ToolRouter::new());
 
-    let control = Arc::new(AgentControl::new(llm, store, notify, router, 8, 4));
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new(llm, store, notify, approval, router, 8, 4));
 
     let config = AgentConfig { model: "mock".into(), max_turns: 1, ..AgentConfig::default() };
 
@@ -452,7 +603,8 @@ async fn agent_control_shutdown_nonexistent_thread_fails() {
     let notify = Arc::new(NoopNotify);
     let router = Arc::new(ToolRouter::new());
 
-    let control = Arc::new(AgentControl::new(llm, store, notify, router, 8, 4));
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new(llm, store, notify, approval, router, 8, 4));
 
     let result = control.shutdown("nonexistent-thread").await;
     assert!(
@@ -468,7 +620,8 @@ async fn agent_control_subscribe_to_nonexistent_thread_fails() {
     let notify = Arc::new(NoopNotify);
     let router = Arc::new(ToolRouter::new());
 
-    let control = Arc::new(AgentControl::new(llm, store, notify, router, 8, 4));
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new(llm, store, notify, approval, router, 8, 4));
 
     let result = control.subscribe("nonexistent-thread").await;
     assert!(

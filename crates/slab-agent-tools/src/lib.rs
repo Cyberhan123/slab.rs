@@ -3,47 +3,68 @@
 //! `slab-agent` owns the orchestration kernel and tool traits. This crate
 //! contains host-provided deterministic tools and registration helpers.
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use async_trait::async_trait;
 use serde_json::Value;
 use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput, ToolRouter};
+use slab_mcp::McpClient;
+use slab_sandboxing::SandboxDriver;
 
+pub mod apply_patch;
 pub mod fs;
 pub mod fs_watch;
+pub mod git;
 pub mod grep;
+pub mod mcp;
 pub mod shell;
 
+pub use apply_patch::ApplyPatchTool;
 pub use fs::{ListDirTool, ReadFileTool, WriteFileTool};
 pub use fs_watch::FsWatchTool;
+pub use git::{GitCommitTool, GitDiffTool, GitStatusTool};
 pub use grep::GrepTool;
+pub use mcp::{McpCallTool, McpProxyTool};
 pub use shell::{ShellPolicy, ShellTool};
 
 /// Register only the minimal built-in tool (echo).
 ///
-/// For the full production suite (shell, fs, grep, fs_watch) use
-/// [`register_all_tools`] instead.
+/// For the full production suite use [`register_all_tools`] instead.
 pub fn register_builtin_tools(router: &mut ToolRouter) {
     router.register(Box::new(EchoTool));
 }
 
 /// Register the full production tool suite.
-///
-/// - `shell_policy`: controls whether shell commands are allowed or blocked.
-/// - `workspace_root`: optional root directory for file/shell tools.
 pub fn register_all_tools(
     router: &mut ToolRouter,
     shell_policy: ShellPolicy,
+    sandbox_driver: Option<Arc<dyn SandboxDriver>>,
     workspace_root: Option<PathBuf>,
+    mcp_client: Option<Arc<McpClient>>,
+    git_tools: bool,
 ) {
     router.register(Box::new(EchoTool));
-    router.register(Box::new(ShellTool::new(shell_policy, workspace_root.clone())));
+    router.register(Box::new(ShellTool::new(shell_policy, workspace_root.clone(), sandbox_driver)));
     router.register(Box::new(ReadFileTool::new(workspace_root.clone())));
     router.register(Box::new(WriteFileTool::new(workspace_root.clone())));
     router.register(Box::new(ListDirTool::new(workspace_root.clone())));
-    router.register(Box::new(GrepTool::new(workspace_root)));
+    router.register(Box::new(GrepTool::new(workspace_root.clone())));
     if let Some(watcher) = FsWatchTool::new() {
         router.register(Box::new(watcher));
+    }
+    if let Some(root) = workspace_root {
+        router.register(Box::new(ApplyPatchTool::new(root.clone())));
+        if git_tools {
+            router.register(Box::new(GitStatusTool::new(root.clone())));
+            router.register(Box::new(GitDiffTool::new(root.clone())));
+            router.register(Box::new(GitCommitTool::new(root)));
+        }
+    }
+    if let Some(client) = mcp_client {
+        router.register(Box::new(McpCallTool::new(Arc::clone(&client))));
+        for spec in client.cached_tools_blocking() {
+            router.register(Box::new(McpProxyTool::new(Arc::clone(&client), spec)));
+        }
     }
 }
 
@@ -113,5 +134,39 @@ mod tests {
         let specs = router.tool_specs();
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0].name, "echo");
+    }
+
+    #[test]
+    fn register_all_tools_respects_workspace_and_git_switches() {
+        let mut router = ToolRouter::new();
+        register_all_tools(&mut router, ShellPolicy::Block, None, None, None, true);
+        assert!(router.get("shell").is_some());
+        assert!(router.get("apply_patch").is_none());
+        assert!(router.get("git_status").is_none());
+
+        let mut router = ToolRouter::new();
+        register_all_tools(
+            &mut router,
+            ShellPolicy::Block,
+            None,
+            Some(PathBuf::from(".")),
+            None,
+            false,
+        );
+        assert!(router.get("apply_patch").is_some());
+        assert!(router.get("git_status").is_none());
+
+        let mut router = ToolRouter::new();
+        register_all_tools(
+            &mut router,
+            ShellPolicy::Block,
+            None,
+            Some(PathBuf::from(".")),
+            None,
+            true,
+        );
+        assert!(router.get("git_status").is_some());
+        assert!(router.get("git_diff").is_some());
+        assert!(router.get("git_commit").is_some());
     }
 }

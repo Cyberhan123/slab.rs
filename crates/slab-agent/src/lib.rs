@@ -43,5 +43,4 @@ pub use port::{
     AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
     ThreadStatus, TurnEvent,
 };
-pub use tool::{ToolContext, ToolHandler, ToolOutput, ToolRouter};
-
+pub use tool::{ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput, ToolRouter};

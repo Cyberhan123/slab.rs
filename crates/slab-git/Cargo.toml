@@ -1,0 +1,16 @@
+[package]
+name = "slab-git"
+version.workspace = true
+edition.workspace = true
+description = "Git helpers for Slab agent and workspace integrations"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[dependencies]
+slab-file-system = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
