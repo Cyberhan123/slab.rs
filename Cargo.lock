@@ -1443,16 +1443,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "codex-file-watcher"
-version = "0.0.0"
-source = "git+https://github.com/openai/codex?rev=b3ae3de4056f9417c968f8628cde55b428f309b8#b3ae3de4056f9417c968f8628cde55b428f309b8"
-dependencies = [
- "notify",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "color"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8996,13 +8986,13 @@ name = "slab-agent-tools"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "codex-file-watcher",
  "ignore",
  "regex",
  "serde",
  "serde_json",
  "shlex",
  "slab-agent",
+ "slab-file-watcher",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -9134,6 +9124,16 @@ version = "0.1.0"
 dependencies = [
  "libloading 0.8.9",
  "slab-build-utils",
+]
+
+[[package]]
+name = "slab-file-watcher"
+version = "0.1.0"
+dependencies = [
+ "notify",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
