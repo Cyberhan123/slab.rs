@@ -1,26 +1,24 @@
 use std::fs;
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
+use slab_git::{GitCommitOptions, GitError, GitRepository};
 use tokio::process::Command as TokioCommand;
 use tokio::time::timeout;
 
 use crate::domain::models::{
     WorkspaceConsoleOutput, WorkspaceCreateDirectoryCommand, WorkspaceCreateFileCommand,
-    WorkspaceDeletePathCommand, WorkspaceGitDiffView, WorkspaceGitFileStatus,
-    WorkspaceGitOperationView, WorkspaceGitStatusEntry, WorkspaceGitStatusSummary,
-    WorkspaceGitStatusView, WorkspacePathView, WorkspaceRenamePathCommand, WorkspaceWriteFileCommand,
-    WorkspaceWriteFileView,
+    WorkspaceDeletePathCommand, WorkspaceGitDiffView, WorkspaceGitOperationView,
+    WorkspaceGitStatusView, WorkspacePathView, WorkspaceRenamePathCommand,
+    WorkspaceWriteFileCommand, WorkspaceWriteFileView,
 };
 use crate::error::AppCoreError;
 
 const CONSOLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_CONSOLE_COMMAND_BYTES: usize = 2_000;
 const MAX_CONSOLE_OUTPUT_BYTES: usize = 64 * 1024;
-const MAX_GIT_DIFF_BYTES: usize = 256 * 1024;
 const MAX_WRITE_FILE_BYTES: usize = 2 * 1024 * 1024;
 
 pub struct WorkspaceService;
@@ -74,7 +72,10 @@ impl WorkspaceService {
             )));
         }
         fs::create_dir_all(&path).map_err(|error| {
-            AppCoreError::Internal(format!("failed to create directory {}: {error}", path.display()))
+            AppCoreError::Internal(format!(
+                "failed to create directory {}: {error}",
+                path.display()
+            ))
         })?;
 
         Ok(WorkspacePathView { relative_path })
@@ -224,102 +225,41 @@ impl WorkspaceService {
     }
 
     pub fn git_status(root: impl AsRef<Path>) -> Result<WorkspaceGitStatusView, AppCoreError> {
-        let root = root.as_ref();
-        let status_output = match git_output(root, &["status", "--porcelain=v1", "-b"]) {
-            Ok(output) => output,
-            Err(error) if error.kind() == ErrorKind::NotFound => {
-                return Ok(WorkspaceGitStatusView {
-                    available: false,
-                    message: Some("Git is not available on PATH.".to_string()),
-                    ..WorkspaceGitStatusView::default()
-                });
-            }
-            Err(error) => {
-                return Err(AppCoreError::Internal(format!(
-                    "failed to run git status in {}: {error}",
-                    root.display()
-                )));
-            }
-        };
-
-        if !status_output.status.success() {
-            let message = String::from_utf8_lossy(&status_output.stderr).trim().to_owned();
-            return Ok(WorkspaceGitStatusView {
-                available: true,
-                message: Some(if message.is_empty() {
-                    "The workspace is not a Git repository.".to_string()
-                } else {
-                    message
-                }),
-                ..WorkspaceGitStatusView::default()
-            });
-        }
-
-        let repository_root = git_output(root, &["rev-parse", "--show-toplevel"])
-            .ok()
-            .filter(|output| output.status.success())
-            .and_then(|output| {
-                let root = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-                (!root.is_empty()).then_some(root)
-            });
-        let raw = String::from_utf8_lossy(&status_output.stdout);
-        Ok(parse_git_status(&raw, repository_root))
+        GitRepository::new(root.as_ref()).status().map_err(map_git_error)
     }
 
     pub fn git_stage(
         root: impl AsRef<Path>,
         path: &str,
     ) -> Result<WorkspaceGitOperationView, AppCoreError> {
-        let root = root.as_ref();
-        let relative_path = normalize_relative_path(path)?;
-        run_git_operation(root, &["add", "--", relative_path.as_str()])?;
-        Ok(WorkspaceGitOperationView { status: Self::git_status(root)? })
+        normalize_relative_path(path)?;
+        GitRepository::new(root.as_ref()).stage(path).map_err(map_git_error)
     }
 
     pub fn git_unstage(
         root: impl AsRef<Path>,
         path: &str,
     ) -> Result<WorkspaceGitOperationView, AppCoreError> {
-        let root = root.as_ref();
-        let relative_path = normalize_relative_path(path)?;
-        run_git_operation(root, &["restore", "--staged", "--", relative_path.as_str()])?;
-        Ok(WorkspaceGitOperationView { status: Self::git_status(root)? })
+        normalize_relative_path(path)?;
+        GitRepository::new(root.as_ref()).unstage(path).map_err(map_git_error)
     }
 
     pub fn git_discard(
         root: impl AsRef<Path>,
         path: &str,
     ) -> Result<WorkspaceGitOperationView, AppCoreError> {
-        let root = root.as_ref();
-        let relative_path = normalize_relative_path(path)?;
-        run_git_operation(
-            root,
-            &["restore", "--staged", "--worktree", "--", relative_path.as_str()],
-        )
-        .or_else(|_| run_git_operation(root, &["clean", "-fd", "--", relative_path.as_str()]))?;
-        Ok(WorkspaceGitOperationView { status: Self::git_status(root)? })
+        normalize_relative_path(path)?;
+        GitRepository::new(root.as_ref()).discard(path).map_err(map_git_error)
     }
 
     pub fn git_commit(
         root: impl AsRef<Path>,
         message: &str,
     ) -> Result<WorkspaceGitOperationView, AppCoreError> {
-        let root = root.as_ref();
-        let message = message.trim();
-        if message.is_empty() {
-            return Err(AppCoreError::BadRequest("commit message cannot be empty".to_string()));
-        }
-        let status = Self::git_status(root)?;
-        if should_stage_all_before_commit(&status) {
-            run_git_operation(root, &["add", "--all"])?;
-        }
-        run_git_operation(root, &["commit", "-m", message])?;
-        let status = Self::git_status(root)?;
-        if should_push_after_commit(&status) {
-            run_git_operation(root, &["push"])?;
-            return Ok(WorkspaceGitOperationView { status: Self::git_status(root)? });
-        }
-        Ok(WorkspaceGitOperationView { status })
+        let result = GitRepository::new(root.as_ref())
+            .commit(message, GitCommitOptions::workspace_default())
+            .map_err(map_git_error)?;
+        Ok(WorkspaceGitOperationView { status: result.status })
     }
 
     pub fn git_diff(
@@ -327,25 +267,8 @@ impl WorkspaceService {
         path: &str,
         staged: bool,
     ) -> Result<WorkspaceGitDiffView, AppCoreError> {
-        let root = root.as_ref();
-        let relative_path = normalize_relative_path(path)?;
-        let args = if staged {
-            vec!["diff", "--cached", "--", relative_path.as_str()]
-        } else {
-            vec!["diff", "--", relative_path.as_str()]
-        };
-        let output = git_output(root, &args)
-            .map_err(|error| AppCoreError::Internal(format!("failed to run git diff: {error}")))?;
-        if !output.status.success() {
-            return Err(git_command_error("git diff failed", &output));
-        }
-
-        let mut diff = decode_limited_output_with_limit(&output.stdout, MAX_GIT_DIFF_BYTES);
-        if diff.trim().is_empty() && !staged && is_untracked_git_path(root, &relative_path)? {
-            diff = git_untracked_file_diff(root, &relative_path)?;
-        }
-
-        Ok(WorkspaceGitDiffView { path: relative_path, staged, diff })
+        normalize_relative_path(path)?;
+        GitRepository::new(root.as_ref()).path_diff(path, staged).map_err(map_git_error)
     }
 
     pub async fn run_console_command(
@@ -396,48 +319,19 @@ impl WorkspaceService {
     }
 }
 
-fn git_output(root: &Path, args: &[&str]) -> std::io::Result<std::process::Output> {
-    Command::new("git").arg("-C").arg(root).args(args).output()
-}
-
-fn run_git_operation(root: &Path, args: &[&str]) -> Result<(), AppCoreError> {
-    let output = git_output(root, args)
-        .map_err(|error| AppCoreError::Internal(format!("failed to run git: {error}")))?;
-    if output.status.success() {
-        return Ok(());
+fn map_git_error(error: GitError) -> AppCoreError {
+    match error {
+        GitError::InvalidPath(message)
+        | GitError::CommandFailed(message)
+        | GitError::NotRepository(message) => AppCoreError::BadRequest(message),
+        GitError::GitUnavailable => {
+            AppCoreError::BadRequest("Git is not available on PATH".to_string())
+        }
+        GitError::RepositoryDiscovery(message) | GitError::RepositoryStatus(message) => {
+            AppCoreError::Internal(message)
+        }
+        GitError::Io(error) => AppCoreError::Internal(error.to_string()),
     }
-
-    Err(git_command_error("git operation failed", &output))
-}
-
-fn git_command_error(default_message: &str, output: &std::process::Output) -> AppCoreError {
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let message = if !stderr.is_empty() { stderr } else { stdout };
-    AppCoreError::BadRequest(if message.is_empty() { default_message.to_string() } else { message })
-}
-
-fn is_untracked_git_path(root: &Path, relative_path: &str) -> Result<bool, AppCoreError> {
-    let output =
-        git_output(root, &["ls-files", "--others", "--exclude-standard", "--", relative_path])
-            .map_err(|error| {
-                AppCoreError::Internal(format!("failed to inspect git path: {error}"))
-            })?;
-    if !output.status.success() {
-        return Err(git_command_error("git ls-files failed", &output));
-    }
-
-    Ok(!String::from_utf8_lossy(&output.stdout).trim().is_empty())
-}
-
-fn git_untracked_file_diff(root: &Path, relative_path: &str) -> Result<String, AppCoreError> {
-    let output = git_output(root, &["diff", "--no-index", "--", "/dev/null", relative_path])
-        .map_err(|error| AppCoreError::Internal(format!("failed to run git diff: {error}")))?;
-    if !output.status.success() && output.status.code() != Some(1) {
-        return Err(git_command_error("git diff failed", &output));
-    }
-
-    Ok(decode_limited_output_with_limit(&output.stdout, MAX_GIT_DIFF_BYTES))
 }
 
 #[cfg(windows)]
@@ -452,125 +346,6 @@ fn shell_command(command: &str) -> TokioCommand {
     let mut process = TokioCommand::new("sh");
     process.args(["-lc", command]);
     process
-}
-
-fn parse_git_status(raw: &str, repository_root: Option<String>) -> WorkspaceGitStatusView {
-    let mut branch = None;
-    let mut entries = Vec::new();
-    let mut summary = WorkspaceGitStatusSummary::default();
-
-    for line in raw.lines() {
-        if let Some(parsed_branch) = parse_branch_line(line) {
-            branch = Some(parsed_branch);
-            continue;
-        }
-
-        let Some(entry) = parse_status_line(line) else {
-            continue;
-        };
-        increment_summary(&mut summary, entry.status);
-        entries.push(entry);
-    }
-
-    WorkspaceGitStatusView {
-        available: true,
-        is_repository: true,
-        branch,
-        repository_root,
-        message: None,
-        summary,
-        entries,
-    }
-}
-
-fn parse_branch_line(line: &str) -> Option<String> {
-    let rest = line.strip_prefix("## ")?;
-    if let Some(branch) = rest.strip_prefix("No commits yet on ") {
-        return Some(branch.to_string());
-    }
-    if rest == "HEAD (no branch)" {
-        return Some("detached HEAD".to_string());
-    }
-
-    let without_tracking = rest.split("...").next().unwrap_or(rest);
-    let without_ahead = without_tracking.split(" [").next().unwrap_or(without_tracking);
-    let branch = without_ahead.trim();
-    (!branch.is_empty()).then_some(branch.to_string())
-}
-
-fn parse_status_line(line: &str) -> Option<WorkspaceGitStatusEntry> {
-    if line.len() < 4 {
-        return None;
-    }
-
-    let code = &line[..2];
-    let staged = code.chars().next().is_some_and(|status| status != ' ' && status != '?');
-    let path = line[3..].trim();
-    if path.is_empty() {
-        return None;
-    }
-
-    let status = classify_status(code);
-    let (original_path, path) = if matches!(status, WorkspaceGitFileStatus::Renamed)
-        || matches!(status, WorkspaceGitFileStatus::Copied)
-    {
-        match path.split_once(" -> ") {
-            Some((from, to)) => (Some(from.to_string()), to.to_string()),
-            None => (None, path.to_string()),
-        }
-    } else {
-        (None, path.to_string())
-    };
-
-    Some(WorkspaceGitStatusEntry { path, original_path, status, staged })
-}
-
-fn classify_status(code: &str) -> WorkspaceGitFileStatus {
-    let mut chars = code.chars();
-    let left = chars.next().unwrap_or(' ');
-    let right = chars.next().unwrap_or(' ');
-
-    if code == "??" {
-        return WorkspaceGitFileStatus::Untracked;
-    }
-    if left == 'U' || right == 'U' || (left == 'A' && right == 'A') || (left == 'D' && right == 'D')
-    {
-        return WorkspaceGitFileStatus::Conflicted;
-    }
-    if left == 'R' || right == 'R' {
-        return WorkspaceGitFileStatus::Renamed;
-    }
-    if left == 'C' || right == 'C' {
-        return WorkspaceGitFileStatus::Copied;
-    }
-    if left == 'A' || right == 'A' {
-        return WorkspaceGitFileStatus::Added;
-    }
-    if left == 'D' || right == 'D' {
-        return WorkspaceGitFileStatus::Deleted;
-    }
-
-    WorkspaceGitFileStatus::Modified
-}
-
-fn increment_summary(summary: &mut WorkspaceGitStatusSummary, status: WorkspaceGitFileStatus) {
-    match status {
-        WorkspaceGitFileStatus::Added => summary.added += 1,
-        WorkspaceGitFileStatus::Modified => summary.modified += 1,
-        WorkspaceGitFileStatus::Deleted => summary.deleted += 1,
-        WorkspaceGitFileStatus::Renamed => summary.renamed += 1,
-        WorkspaceGitFileStatus::Copied => summary.copied += 1,
-        WorkspaceGitFileStatus::Untracked => summary.untracked += 1,
-        WorkspaceGitFileStatus::Conflicted => summary.conflicted += 1,
-    }
-}
-
-fn should_stage_all_before_commit(status: &WorkspaceGitStatusView) -> bool {
-    !status.entries.is_empty() && status.entries.iter().all(|entry| !entry.staged)
-}
-
-fn should_push_after_commit(status: &WorkspaceGitStatusView) -> bool {
-    status.available && status.is_repository && status.entries.is_empty()
 }
 
 fn decode_limited_output(bytes: &[u8]) -> String {
@@ -641,8 +416,11 @@ fn resolve_workspace_path(root: &Path, relative_path: &str) -> Result<PathBuf, A
             root.display()
         ))
     })?;
-    let candidate =
-        if relative_path.is_empty() { canonical_root.clone() } else { canonical_root.join(relative_path) };
+    let candidate = if relative_path.is_empty() {
+        canonical_root.clone()
+    } else {
+        canonical_root.join(relative_path)
+    };
     let canonical_candidate = candidate.canonicalize().map_err(|error| {
         AppCoreError::Internal(format!(
             "failed to resolve workspace path {}: {error}",
@@ -681,41 +459,7 @@ fn content_hash(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        normalize_relative_path, parse_branch_line, parse_git_status, should_push_after_commit,
-        should_stage_all_before_commit,
-    };
-    use crate::domain::models::{
-        WorkspaceGitFileStatus, WorkspaceGitStatusEntry, WorkspaceGitStatusView,
-    };
-
-    #[test]
-    fn parses_branch_with_tracking_status() {
-        assert_eq!(parse_branch_line("## main...origin/main [ahead 1]"), Some("main".to_string()));
-    }
-
-    #[test]
-    fn parses_git_status_entries_and_summary() {
-        let status = parse_git_status(
-            "## feature/workspace\n M src/main.rs\nA  added.ts\nR  old.md -> new.md\n?? scratch.txt\nUU conflict.ts\n",
-            Some("C:/repo".to_string()),
-        );
-
-        assert!(status.available);
-        assert!(status.is_repository);
-        assert_eq!(status.branch.as_deref(), Some("feature/workspace"));
-        assert_eq!(status.repository_root.as_deref(), Some("C:/repo"));
-        assert_eq!(status.summary.modified, 1);
-        assert_eq!(status.summary.added, 1);
-        assert_eq!(status.summary.renamed, 1);
-        assert_eq!(status.summary.untracked, 1);
-        assert_eq!(status.summary.conflicted, 1);
-        assert_eq!(status.entries[2].path, "new.md");
-        assert_eq!(status.entries[2].original_path.as_deref(), Some("old.md"));
-        assert_eq!(status.entries[2].status, WorkspaceGitFileStatus::Renamed);
-        assert!(status.entries[1].staged);
-        assert!(!status.entries[3].staged);
-    }
+    use super::normalize_relative_path;
 
     #[test]
     fn normalize_relative_path_rejects_parent_segments() {
@@ -725,69 +469,5 @@ mod tests {
     #[test]
     fn normalize_relative_path_rejects_workspace_internals() {
         assert!(normalize_relative_path(".slab/settings.json").is_err());
-    }
-
-    #[test]
-    fn commit_auto_stages_only_when_index_is_empty() {
-        let unstaged_status = WorkspaceGitStatusView {
-            entries: vec![WorkspaceGitStatusEntry {
-                path: "src/main.rs".to_string(),
-                original_path: None,
-                status: WorkspaceGitFileStatus::Modified,
-                staged: false,
-            }],
-            ..WorkspaceGitStatusView::default()
-        };
-        let mixed_status = WorkspaceGitStatusView {
-            entries: vec![
-                WorkspaceGitStatusEntry {
-                    path: "src/main.rs".to_string(),
-                    original_path: None,
-                    status: WorkspaceGitFileStatus::Modified,
-                    staged: false,
-                },
-                WorkspaceGitStatusEntry {
-                    path: "README.md".to_string(),
-                    original_path: None,
-                    status: WorkspaceGitFileStatus::Modified,
-                    staged: true,
-                },
-            ],
-            ..WorkspaceGitStatusView::default()
-        };
-
-        assert!(should_stage_all_before_commit(&unstaged_status));
-        assert!(!should_stage_all_before_commit(&mixed_status));
-        assert!(!should_stage_all_before_commit(&WorkspaceGitStatusView::default()));
-    }
-
-    #[test]
-    fn commit_pushes_only_after_clean_commit_status() {
-        let clean_repository = WorkspaceGitStatusView {
-            available: true,
-            is_repository: true,
-            ..WorkspaceGitStatusView::default()
-        };
-        let dirty_repository = WorkspaceGitStatusView {
-            available: true,
-            is_repository: true,
-            entries: vec![WorkspaceGitStatusEntry {
-                path: "src/main.rs".to_string(),
-                original_path: None,
-                status: WorkspaceGitFileStatus::Modified,
-                staged: false,
-            }],
-            ..WorkspaceGitStatusView::default()
-        };
-        let unavailable_git = WorkspaceGitStatusView {
-            available: false,
-            is_repository: true,
-            ..WorkspaceGitStatusView::default()
-        };
-
-        assert!(should_push_after_commit(&clean_repository));
-        assert!(!should_push_after_commit(&dirty_repository));
-        assert!(!should_push_after_commit(&unavailable_git));
-        assert!(!should_push_after_commit(&WorkspaceGitStatusView::default()));
     }
 }

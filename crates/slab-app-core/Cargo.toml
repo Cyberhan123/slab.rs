@@ -28,6 +28,7 @@ slab-libfetch     = { workspace = true }
 slab-hub          = { workspace = true }
 slab-utils        = { workspace = true }
 slab-subtitle     = { workspace = true }
+slab-git          = { workspace = true }
 
 # Async runtime
 tokio   = { workspace = true }
