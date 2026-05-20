@@ -85,6 +85,61 @@ pub struct ToolCallRecord {
     pub completed_at: Option<String>,
 }
 
+// ── Turn streaming event ──────────────────────────────────────────────────────
+
+/// A streaming event emitted during a single LLM turn.
+///
+/// Modelled after the codex `app-server` item stream protocol.
+#[derive(Debug, Clone)]
+pub enum TurnEvent {
+    /// A fragment of the assistant's text response.
+    AssistantDelta { text: String },
+    /// The model requested a tool call.  Arguments reflect the final effective
+    /// values after [`PreToolUse`] hook modifications.
+    ToolCallStarted { tool_name: String, call_id: String, arguments: String },
+    /// A tool call produced output.
+    ToolCallOutput { call_id: String, output: String },
+    /// A tool call is waiting for explicit approval.
+    ApprovalRequired { call_id: String, tool_name: String, command: String },
+    /// The turn completed with a final assistant message.
+    TurnCompleted { text: String },
+    /// The turn failed with an error.
+    TurnFailed { error: String },
+    /// The thread-level lifecycle status changed.  Distinct from turn-level
+    /// completion events so SSE consumers can track the full thread lifecycle
+    /// without receiving duplicate completion/failure payloads.
+    AgentStatus { status: ThreadStatus },
+}
+
+// ── Approval ──────────────────────────────────────────────────────────────────
+
+/// Decision returned by an [`ApprovalPort`] implementation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalDecision {
+    Approved,
+    Rejected,
+}
+
+/// Port that lets the host review and approve sensitive tool calls before they
+/// are executed.
+///
+/// Typically implemented by the SSE notification adapter so that an external
+/// operator can inspect the command and send an approval via the HTTP API.
+#[async_trait]
+pub trait ApprovalPort: Send + Sync {
+    /// Request approval for a pending tool call.
+    ///
+    /// The call blocks until the host sends a decision (or the implementation
+    /// chooses to auto-approve / auto-reject after a timeout).
+    async fn request_approval(
+        &self,
+        thread_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        command: &str,
+    ) -> ApprovalDecision;
+}
+
 // ── Port traits ──────────────────────────────────────────────────────────────
 
 /// Port for calling chat completions.
@@ -134,11 +189,18 @@ pub trait AgentStorePort: Send + Sync {
     ) -> Result<(), AgentError>;
 }
 
-/// Port for status-change notifications.
+/// Port for status-change and turn-event notifications.
 ///
 /// The host provides an adapter that fans out to SSE streams, WebSockets, etc.
 #[async_trait]
 pub trait AgentNotifyPort: Send + Sync {
     /// Called whenever a thread transitions to a new [`ThreadStatus`].
     async fn on_status_change(&self, thread_id: &str, status: ThreadStatus);
+
+    /// Called for each [`TurnEvent`] emitted during an LLM turn.
+    ///
+    /// The default implementation is a no-op so existing adapters that only
+    /// care about status changes do not need to be updated.
+    async fn on_turn_event(&self, _thread_id: &str, _event: &TurnEvent) {}
 }
+

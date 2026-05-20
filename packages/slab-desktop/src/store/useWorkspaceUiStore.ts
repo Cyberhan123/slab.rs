@@ -42,7 +42,7 @@ export const defaultEditorSettings: WorkspaceEditorSettings = {
   fontSize: 13,
   tabSize: 2,
   wordWrap: 'on',
-  minimapEnabled: false,
+  minimapEnabled: true,
 };
 
 export const emptyWorkspaceUiSnapshot: WorkspaceUiSnapshot = {

@@ -80,12 +80,13 @@ impl AppState {
             Arc::clone(&store),
         ));
 
-        // Build the AgentControl with port adapters and register built-in tools.
+    // Build the AgentControl with port adapters and register built-in tools.
         let store_for_agent: Arc<dyn slab_agent::port::AgentStorePort> =
             Arc::clone(&store) as Arc<dyn slab_agent::port::AgentStorePort>;
-        let agent_control = Arc::new(build_agent_control(&context, Arc::clone(&store)));
+        let sse_notify = Arc::new(crate::infra::sse_notify::SseNotifyAdapter::new());
+        let agent_control = Arc::new(build_agent_control(&context, Arc::clone(&store), Arc::clone(&sse_notify)));
         let agent_service =
-            crate::domain::services::AgentService::new(agent_control, store_for_agent);
+            crate::domain::services::AgentService::new(agent_control, store_for_agent, Arc::clone(&sse_notify));
 
         let services = Arc::new(crate::domain::services::AppServices::new(
             (*context.model_state).clone(),
@@ -103,16 +104,16 @@ impl AppState {
 fn build_agent_control(
     ctx: &AppContext,
     store: Arc<crate::infra::db::AnyStore>,
+    notify: Arc<crate::infra::sse_notify::SseNotifyAdapter>,
 ) -> slab_agent::AgentControl {
-    use crate::infra::agent_adapter::{NoopNotifyAdapter, ServerLlmAdapter};
     use slab_agent::{AgentControl, ToolRouter};
+    use slab_agent_tools::ShellPolicy;
 
-    let llm = Arc::new(ServerLlmAdapter::new(Arc::clone(&ctx.model_state)));
+    let llm = Arc::new(crate::infra::agent_adapter::ServerLlmAdapter::new(Arc::clone(&ctx.model_state)));
     let store_adapter: Arc<dyn slab_agent::port::AgentStorePort> = store;
-    let notify = Arc::new(NoopNotifyAdapter);
 
     let mut tool_router = ToolRouter::new();
-    slab_agent_tools::register_builtin_tools(&mut tool_router);
+    slab_agent_tools::register_all_tools(&mut tool_router, ShellPolicy::Block, None);
 
     AgentControl::new(llm, store_adapter, notify, Arc::new(tool_router), 32, 4)
 }
