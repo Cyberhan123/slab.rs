@@ -1,6 +1,6 @@
-//! File-system watcher tool backed by `codex-file-watcher`.
+//! File-system watcher tool backed by `slab-file-watcher`.
 //!
-//! Wraps the `FileWatcher` from the upstream codex crate to provide a
+//! Wraps the `FileWatcher` from the local slab crate to provide a
 //! one-shot "wait for file changes" tool call.
 
 use std::path::PathBuf;
@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use codex_file_watcher::{FileWatcher, WatchPath};
+use slab_file_watcher::{FileWatcher, WatchPath};
 use serde_json::Value;
 use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
 
