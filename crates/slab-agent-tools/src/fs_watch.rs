@@ -94,7 +94,7 @@ impl ToolHandler for FsWatchTool {
         let watch_path = WatchPath { path: PathBuf::from(path_str), recursive };
 
         let (subscriber, mut rx) = self.watcher.add_subscriber();
-        let _registration = subscriber.register_paths(vec![watch_path]);
+        subscriber.register_paths(vec![watch_path]);
 
         let result = tokio::time::timeout(Duration::from_millis(timeout_ms), rx.recv()).await;
 
