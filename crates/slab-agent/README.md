@@ -8,6 +8,7 @@ Agent orchestration library for Slab.
 
 - Agent thread management and lifecycle control.
 - Tool routing and port-based orchestration abstractions.
+- Approval hooks for sensitive tool calls; host layers provide the approval transport.
 - Interfaces for composing multi-step AI workflows.
 
 Storage, HTTP transport, SSE/WebSocket, and model adapters are intentionally kept outside this crate and belong in `crates/slab-app-core` or `bin/slab-server`.

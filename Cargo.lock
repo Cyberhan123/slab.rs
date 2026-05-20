@@ -8992,7 +8992,12 @@ dependencies = [
  "serde_json",
  "shlex",
  "slab-agent",
+ "slab-file-system",
  "slab-file-watcher",
+ "slab-git",
+ "slab-mcp",
+ "slab-sandboxing",
+ "slab-shell-command",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -9127,6 +9132,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "slab-file-system"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "slab-file-watcher"
 version = "0.1.0"
 dependencies = [
@@ -9157,6 +9172,16 @@ version = "0.1.0"
 dependencies = [
  "libloading 0.8.9",
  "slab-build-utils",
+]
+
+[[package]]
+name = "slab-git"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "slab-file-system",
+ "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]
@@ -9227,6 +9252,19 @@ version = "0.1.0"
 dependencies = [
  "libloading 0.8.9",
  "slab-build-utils",
+]
+
+[[package]]
+name = "slab-mcp"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "slab-agent",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -9384,6 +9422,19 @@ dependencies = [
  "validator",
  "winapi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "slab-shell-command"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "slab-sandboxing",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

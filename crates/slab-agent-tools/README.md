@@ -8,6 +8,7 @@ Built-in tool adapters for `slab-agent`.
 
 - `slab-agent` keeps the orchestration kernel, tool traits, and routing abstractions.
 - `slab-agent-tools` owns concrete built-in tool implementations and the helper that registers them with a `ToolRouter`.
+- Shell execution, workspace-safe file operations, Git operations, and MCP protocol handling are delegated to the dedicated support crates.
 - Host layers can depend on this crate without moving storage, transport, or business logic into `slab-agent`.
 
 ## Type

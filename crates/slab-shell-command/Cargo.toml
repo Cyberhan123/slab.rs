@@ -1,8 +1,8 @@
 [package]
-name = "slab-windows-sandbox"
+name = "slab-shell-command"
 version.workspace = true
 edition.workspace = true
-description = "Windows Job Object sandbox driver for slab.rs"
+description = "Policy-aware shell command execution for Slab agent tools"
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
@@ -12,14 +12,7 @@ license.workspace = true
 slab-sandboxing = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
 tokio = { workspace = true }
-
-[target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.59", features = [
-    "Win32_Foundation",
-    "Win32_Security",
-    "Win32_System_JobObjects",
-    "Win32_System_Threading",
-] }
+tracing = { workspace = true }

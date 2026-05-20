@@ -29,6 +29,12 @@ pub struct ToolOutput {
     pub metadata: Option<serde_json::Value>,
 }
 
+/// Metadata returned by tools that require host approval before execution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolApprovalRequest {
+    pub command: String,
+}
+
 // ── ToolHandler trait ────────────────────────────────────────────────────────
 
 /// An individual tool that can be invoked by an agent.
@@ -42,6 +48,11 @@ pub trait ToolHandler: Send + Sync {
 
     /// JSON Schema describing the tool's parameter object.
     fn parameters_schema(&self) -> serde_json::Value;
+
+    /// Return approval metadata when this invocation requires host review.
+    fn approval_request(&self, _arguments: &serde_json::Value) -> Option<ToolApprovalRequest> {
+        None
+    }
 
     /// Execute the tool with the given parsed arguments.
     async fn execute(

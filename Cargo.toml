@@ -30,6 +30,10 @@ members = [
     "crates/slab-linux-sandbox",
     "crates/slab-windows-sandbox",
     "crates/slab-file-watcher",
+    "crates/slab-file-system",
+    "crates/slab-git",
+    "crates/slab-shell-command",
+    "crates/slab-mcp",
 ]
 
 exclude = [
@@ -72,6 +76,10 @@ slab-sandboxing   = { path = "./crates/slab-sandboxing", package = "slab-sandbox
 slab-linux-sandbox = { path = "./crates/slab-linux-sandbox", package = "slab-linux-sandbox", version = "0.1.0" }
 slab-windows-sandbox = { path = "./crates/slab-windows-sandbox", package = "slab-windows-sandbox", version = "0.1.0" }
 slab-file-watcher = { path = "./crates/slab-file-watcher", package = "slab-file-watcher", version = "0.1.0" }
+slab-file-system = { path = "./crates/slab-file-system", package = "slab-file-system", version = "0.1.0" }
+slab-git = { path = "./crates/slab-git", package = "slab-git", version = "0.1.0" }
+slab-shell-command = { path = "./crates/slab-shell-command", package = "slab-shell-command", version = "0.1.0" }
+slab-mcp = { path = "./crates/slab-mcp", package = "slab-mcp", version = "0.1.0" }
 
 notify = "8"
 ignore = "0.4"
