@@ -1,0 +1,24 @@
+[package]
+name = "slab-linux-sandbox"
+version.workspace = true
+edition.workspace = true
+description = "Linux bwrap/landlock sandbox driver for slab.rs"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[dependencies]
+slab-sandboxing = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+libc = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = { version = "0.4", optional = true }
+
+[features]
+legacy-landlock = ["dep:landlock"]

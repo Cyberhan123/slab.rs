@@ -26,6 +26,9 @@ members = [
     "crates/slab-ggml",
     "crates/slab-ggml-sys",
     "crates/slab-hub",
+    "crates/slab-sandboxing",
+    "crates/slab-linux-sandbox",
+    "crates/slab-windows-sandbox",
 ]
 
 exclude = [
@@ -64,6 +67,9 @@ slab-runtime-macros = { path = "./crates/slab-runtime-macros", package = "slab-r
 slab-subtitle     = { path = "./crates/slab-subtitle", package = "slab-subtitle", version = "0.1.0" }
 slab-ggml-sys     = { path = "./crates/slab-ggml-sys", package = "slab-ggml-sys", version = "0.1.0" }
 slab-ggml         = { path = "./crates/slab-ggml", package = "slab-ggml", version = "0.1.0" }
+slab-sandboxing   = { path = "./crates/slab-sandboxing", package = "slab-sandboxing", version = "0.1.0" }
+slab-linux-sandbox = { path = "./crates/slab-linux-sandbox", package = "slab-linux-sandbox", version = "0.1.0" }
+slab-windows-sandbox = { path = "./crates/slab-windows-sandbox", package = "slab-windows-sandbox", version = "0.1.0" }
 
 # codex upstream packages (via GitHub git deps)
 codex-file-watcher = { git = "https://github.com/openai/codex", package = "codex-file-watcher", rev = "b3ae3de4056f9417c968f8628cde55b428f309b8" }
@@ -149,3 +155,9 @@ windows = { version = "0.62.2", features = [
     "Win32_Foundation",
     "Win32_Graphics_Dxgi",
 ] }
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+landlock = "0.4"

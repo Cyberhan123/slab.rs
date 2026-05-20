@@ -4914,6 +4914,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "landlock"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49fefd6652c57d68aaa32544a4c0e642929725bdc1fd929367cdeb673ab81088"
+dependencies = [
+ "enumflags2",
+ "libc",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9182,6 +9193,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "slab-linux-sandbox"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "landlock",
+ "libc",
+ "serde",
+ "slab-sandboxing",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "slab-llama"
 version = "0.1.0"
 dependencies = [
@@ -9293,6 +9318,18 @@ dependencies = [
  "quote",
  "syn 2.0.117",
  "trybuild",
+]
+
+[[package]]
+name = "slab-sandboxing"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -9431,6 +9468,19 @@ dependencies = [
  "slab-utils",
  "sysinfo 0.39.1",
  "uuid",
+]
+
+[[package]]
+name = "slab-windows-sandbox"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "slab-sandboxing",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
