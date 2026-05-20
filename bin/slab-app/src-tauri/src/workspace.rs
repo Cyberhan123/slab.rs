@@ -115,6 +115,12 @@ pub struct WorkspaceFileEntry {
     pub relative_path: String,
     pub kind: WorkspaceFileKind,
     pub has_children: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -122,6 +128,16 @@ pub struct WorkspaceFileEntry {
 pub enum WorkspaceFileKind {
     Directory,
     File,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePathMetadata {
+    pub relative_path: String,
+    pub kind: WorkspaceFileKind,
+    pub size_bytes: u64,
+    pub modified_at: u64,
+    pub created_at: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -272,6 +288,7 @@ pub fn workspace_read_directory(
         }
 
         let entry_relative_path = join_relative_path(&relative_path, &name);
+        let entry_metadata = entry.metadata().ok();
         entries.push(WorkspaceFileEntry {
             id: if entry_relative_path.is_empty() {
                 name.clone()
@@ -286,6 +303,15 @@ pub fn workspace_read_directory(
                 WorkspaceFileKind::File
             },
             has_children: file_type.is_dir(),
+            size_bytes: entry_metadata
+                .as_ref()
+                .map(|metadata| if metadata.is_file() { metadata.len() } else { 0 }),
+            modified_at: entry_metadata
+                .as_ref()
+                .map(|metadata| system_time_millis(metadata.modified())),
+            created_at: entry_metadata
+                .as_ref()
+                .map(|metadata| system_time_millis(metadata.created())),
         });
     }
 
@@ -296,6 +322,34 @@ pub fn workspace_read_directory(
     });
 
     Ok(WorkspaceDirectoryResponse { relative_path, entries, truncated })
+}
+
+#[tauri::command]
+pub fn workspace_stat_path(
+    state: State<'_, WorkspaceState>,
+    relative_path: String,
+) -> Result<WorkspacePathMetadata, String> {
+    let workspace = active_workspace(&state)?;
+    let relative_path = normalize_relative_path(&relative_path)?;
+    let root = PathBuf::from(&workspace.root_path);
+    let path = resolve_workspace_path(&root, &relative_path)?;
+    let metadata = fs::metadata(&path)
+        .map_err(|error| format!("failed to read path metadata {}: {error}", path.display()))?;
+    let kind = if metadata.is_dir() {
+        WorkspaceFileKind::Directory
+    } else if metadata.is_file() {
+        WorkspaceFileKind::File
+    } else {
+        return Err(format!("workspace path `{relative_path}` is not a file or directory"));
+    };
+
+    Ok(WorkspacePathMetadata {
+        relative_path,
+        kind,
+        size_bytes: if metadata.is_file() { metadata.len() } else { 0 },
+        modified_at: system_time_millis(metadata.modified()),
+        created_at: system_time_millis(metadata.created()),
+    })
 }
 
 #[tauri::command]
@@ -719,6 +773,9 @@ fn search_workspace_files(
             relative_path: entry_relative_path,
             kind: WorkspaceFileKind::File,
             has_children: false,
+            size_bytes: None,
+            modified_at: None,
+            created_at: None,
         });
     }
 
@@ -753,6 +810,13 @@ fn validate_plugin_id(plugin_id: &str) -> Result<(), String> {
 fn now_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn system_time_millis(time: Result<SystemTime, std::io::Error>) -> u64 {
+    time.ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
 }

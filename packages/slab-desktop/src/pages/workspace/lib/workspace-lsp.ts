@@ -1,4 +1,6 @@
 import type * as Monaco from "monaco-editor"
+import type { IFileChange } from "@codingame/monaco-vscode-files-service-override"
+import { URI } from "@codingame/monaco-vscode-api/vscode/vs/base/common/uri"
 import {
   initialize as initializeMonacoWrapper,
   isInitialized as workspaceMonacoIsInitialized,
@@ -7,10 +9,30 @@ import {
 } from "@codingame/monaco-editor-wrapper"
 import "@codingame/monaco-editor-wrapper/features/extensionHostWorker"
 import "@codingame/monaco-editor-wrapper/features/search"
+import getAccessibilityServiceOverride from "@codingame/monaco-vscode-accessibility-service-override"
+import getConfigurationServiceOverride from "@codingame/monaco-vscode-configuration-service-override"
+import { whenReady as cppExtensionReady } from "@codingame/monaco-vscode-cpp-default-extension"
+import getDialogsServiceOverride from "@codingame/monaco-vscode-dialogs-service-override"
+import getExplorerServiceOverride from "@codingame/monaco-vscode-explorer-service-override"
 import getLifecycleServiceOverride from "@codingame/monaco-vscode-lifecycle-service-override"
+import { whenReady as goExtensionReady } from "@codingame/monaco-vscode-go-default-extension"
+import getKeybindingsServiceOverride from "@codingame/monaco-vscode-keybindings-service-override"
+import getLanguageDetectionWorkerServiceOverride from "@codingame/monaco-vscode-language-detection-worker-service-override"
+import getLanguagesServiceOverride from "@codingame/monaco-vscode-languages-service-override"
+import getMarkersServiceOverride from "@codingame/monaco-vscode-markers-service-override"
+import getModelServiceOverride from "@codingame/monaco-vscode-model-service-override"
 import getNotificationsServiceOverride from "@codingame/monaco-vscode-notifications-service-override"
 import getOutputServiceOverride from "@codingame/monaco-vscode-output-service-override"
 import getSearchServiceOverride from "@codingame/monaco-vscode-search-service-override"
+import { whenReady as sqlExtensionReady } from "@codingame/monaco-vscode-sql-default-extension"
+import getStorageServiceOverride from "@codingame/monaco-vscode-storage-service-override"
+import getTerminalServiceOverride from "@codingame/monaco-vscode-terminal-service-override"
+import getTextmateServiceOverride from "@codingame/monaco-vscode-textmate-service-override"
+import getThemeServiceOverride from "@codingame/monaco-vscode-theme-service-override"
+import { whenReady as setiThemeExtensionReady } from "@codingame/monaco-vscode-theme-seti-default-extension"
+import getViewsServiceOverride from "@codingame/monaco-vscode-views-service-override"
+import getWorkingCopyServiceOverride from "@codingame/monaco-vscode-working-copy-service-override"
+import { whenReady as xmlExtensionReady } from "@codingame/monaco-vscode-xml-default-extension"
 import { whenReady as emmetExtensionReady } from "@codingame/monaco-vscode-emmet-default-extension"
 import { whenReady as dockerExtensionReady } from "@codingame/monaco-vscode-docker-default-extension"
 import { whenReady as dotenvExtensionReady } from "@codingame/monaco-vscode-dotenv-default-extension"
@@ -23,9 +45,17 @@ import {
 } from "vscode-languageclient/browser.js"
 import { SERVER_BASE_URL } from "@slab/api/config"
 import {
+  workspaceCreateDirectory,
+  workspaceDeletePath,
+  workspaceRenamePath,
   workspaceReadDirectory,
   workspaceReadFile,
+  workspaceStatPath,
   workspaceWriteFile,
+} from "@/lib/workspace-bridge"
+import type {
+  WorkspaceDirectoryResponse,
+  WorkspaceFileContent,
 } from "@/lib/workspace-bridge"
 import {
   workspaceLspDefinitionTargetFromResult,
@@ -36,6 +66,7 @@ import {
   type WorkspaceLspDefinitionTarget,
   type WorkspaceLspOpenFileOptions,
 } from "./workspace-lsp-utils"
+import { slabTerminalBackend } from "./workspace-terminal-service"
 
 export {
   supportsWorkspaceLsp,
@@ -54,6 +85,7 @@ export type WorkspaceLspSession = {
     model: Monaco.editor.ITextModel,
     position: Monaco.IPosition,
   ) => Promise<WorkspaceLspDefinitionTarget | null>
+  registerModel: (model: Monaco.editor.ITextModel) => Promise<void>
   dispose: () => Promise<void>
 }
 
@@ -61,6 +93,16 @@ export type WorkspaceLspOpenFile = (
   relativePath: string,
   options?: WorkspaceLspOpenFileOptions,
 ) => Promise<Monaco.editor.IStandaloneCodeEditor | undefined>
+
+export type WorkspaceVscodeEditorFile = {
+  name: string
+  relativePath: string
+}
+
+export type WorkspaceVscodeEditorState = {
+  activeRelativePath: string | null
+  openFiles: WorkspaceVscodeEditorFile[]
+}
 
 type WorkspaceFileService = {
   root: string | null
@@ -97,6 +139,8 @@ let currentWorkspaceFileService: WorkspaceFileService = { root: null }
 let workspaceFileSystemOverlayRegistered = false
 let workspaceEditorOpenHandlerRegistered = false
 let workspaceVscodeServiceOverridesRegistered = false
+let workspaceVscodeRoot: string | null = null
+let clearWorkspaceFileSystemCache = () => {}
 
 export function workspaceLspModelUri(
   monaco: typeof Monaco,
@@ -111,40 +155,61 @@ export function setWorkspaceLspOpenFile(openFile: WorkspaceLspOpenFile | null) {
 }
 
 export function setWorkspaceLspFileServiceRoot(workspaceRoot: string | null) {
+  const previousWorkspaceRoot = currentWorkspaceFileService.root
   currentWorkspaceFileService = { root: workspaceRoot }
+  if (previousWorkspaceRoot !== workspaceRoot) {
+    clearWorkspaceFileSystemCache()
+  }
+  if (workspaceRoot && workspaceMonacoIsInitialized()) {
+    void syncWorkspaceVscodeRoot(workspaceRoot).catch((error) => {
+      console.debug("workspace VS Code root sync failed", { workspaceRoot, error })
+    })
+  }
 }
 
 export function workspaceLspServicesReady() {
   return workspaceMonacoIsInitialized()
 }
 
-export function ensureWorkspaceLspServices() {
+export function ensureWorkspaceLspServices(workspaceRoot?: string | null) {
+  if (workspaceRoot !== undefined) {
+    setWorkspaceLspFileServiceRoot(workspaceRoot)
+  }
+
   monacoVscodeApiReady ??= (async () => {
     if (!workspaceMonacoIsInitialized()) {
       registerWorkspaceVscodeServiceOverrides()
-      await initializeMonacoWrapper(undefined, {
+      if (!workspaceFileSystemOverlayRegistered) {
+        await registerWorkspaceFileSystemOverlay()
+        workspaceFileSystemOverlayRegistered = true
+      }
+      await initializeMonacoWrapper(workspaceWorkbenchOptions(currentWorkspaceFileService.root), {
         registerAdditionalExtensions: true,
         waitForDefaultExtensions: true,
       })
       // Load additional extensions not included in the default set
       await Promise.allSettled([
+        setiThemeExtensionReady(),
         emmetExtensionReady(),
         dockerExtensionReady(),
         dotenvExtensionReady(),
+        cppExtensionReady(),
+        goExtensionReady(),
+        sqlExtensionReady(),
+        xmlExtensionReady(),
       ])
     }
 
-    if (!workspaceFileSystemOverlayRegistered) {
-      await registerWorkspaceFileSystemOverlay()
-      workspaceFileSystemOverlayRegistered = true
+    if (currentWorkspaceFileService.root) {
+      await syncWorkspaceVscodeRoot(currentWorkspaceFileService.root)
     }
 
     if (!workspaceEditorOpenHandlerRegistered) {
       registerEditorOpenHandler(async (modelRef, options) => {
-        const workspaceRoot = currentWorkspaceFileService.root
+        const activeWorkspaceRoot = currentWorkspaceFileService.root
         const selection = editorSelection(options)
-        const relativePath = workspaceRoot
-          ? workspaceLspRelativePathFromUri(workspaceRoot, modelRef.object.textEditorModel.uri.toString())
+        const relativePath = activeWorkspaceRoot
+          ? workspaceLspRelativePathFromUri(activeWorkspaceRoot, modelRef.object.textEditorModel.uri.toString())
           : null
         if (relativePath === null || !currentOpenFile) {
           return null
@@ -166,7 +231,181 @@ export function ensureWorkspaceLspServices() {
     throw error
   })
 
-  return monacoVscodeApiReady
+  return monacoVscodeApiReady.then(async () => {
+    if (workspaceRoot) {
+      await syncWorkspaceVscodeRoot(workspaceRoot)
+    }
+  })
+}
+
+export async function openWorkspaceVscodeFile({
+  options,
+  relativePath,
+  workspaceRoot,
+}: {
+  options?: WorkspaceLspOpenFileOptions
+  relativePath: string
+  workspaceRoot: string
+}) {
+  await ensureWorkspaceLspServices(workspaceRoot)
+  const { getService, IEditorService } = await import("@codingame/monaco-vscode-api")
+  const editorService = await getService(IEditorService)
+  await editorService.openEditor({
+    resource: URI.parse(workspaceLspModelPath(workspaceRoot, relativePath)),
+    options: {
+      pinned: true,
+      revealIfOpened: true,
+      selection: options?.startLineNumber && options.startColumn
+        ? {
+            endColumn: options.endColumn ?? options.startColumn,
+            endLineNumber: options.endLineNumber ?? options.startLineNumber,
+            startColumn: options.startColumn,
+            startLineNumber: options.startLineNumber,
+          }
+        : undefined,
+    },
+  })
+}
+
+export async function watchWorkspaceVscodeActiveFile(
+  workspaceRoot: string,
+  onChange: (relativePath: string | null) => void,
+) {
+  return watchWorkspaceVscodeEditorState(workspaceRoot, (state) => {
+    onChange(state.activeRelativePath)
+  })
+}
+
+export async function watchWorkspaceVscodeEditorState(
+  workspaceRoot: string,
+  onChange: (state: WorkspaceVscodeEditorState) => void,
+) {
+  await ensureWorkspaceLspServices(workspaceRoot)
+  const { getService, IEditorService } = await import("@codingame/monaco-vscode-api")
+  const editorService = await getService(IEditorService)
+  const emitEditorState = () => {
+    onChange({
+      activeRelativePath: relativePathFromEditorInput(workspaceRoot, editorService.activeEditor),
+      openFiles: openFilesFromEditorInputs(workspaceRoot, editorService.editors),
+    })
+  }
+
+  emitEditorState()
+  const activeDisposable = editorService.onDidActiveEditorChange(emitEditorState)
+  const editorsDisposable = editorService.onDidEditorsChange(emitEditorState)
+  return {
+    dispose() {
+      activeDisposable.dispose()
+      editorsDisposable.dispose()
+    },
+  }
+}
+
+export async function runWorkspaceVscodeCommand(commandId: string, workspaceRoot?: string | null) {
+  await ensureWorkspaceLspServices(workspaceRoot)
+  const { commands } = await import("vscode")
+  await commands.executeCommand(commandId)
+}
+
+function workspaceWorkbenchOptions(workspaceRoot: string | null) {
+  if (!workspaceRoot) {
+    return undefined
+  }
+
+  return {
+    workspaceProvider: {
+      open: async () => false,
+      trusted: true,
+      workspace: {
+        folderUri: URI.file(workspaceRoot),
+        id: workspaceRoot,
+      },
+    },
+  }
+}
+
+async function syncWorkspaceVscodeRoot(workspaceRoot: string) {
+  if (workspaceVscodeRoot === workspaceRoot) {
+    return
+  }
+
+  if (!workspaceMonacoIsInitialized()) {
+    return
+  }
+
+  const { getService, IWorkspaceContextService, IWorkspaceEditingService } = await import("@codingame/monaco-vscode-api")
+  const contextService = await getService(IWorkspaceContextService)
+  const folders = contextService.getWorkspace().folders
+  const rootUri = URI.file(workspaceRoot)
+  if (folders.length === 1 && folders[0]?.uri.toString() === rootUri.toString()) {
+    workspaceVscodeRoot = workspaceRoot
+    return
+  }
+
+  const workspaceEditingService = await getService(IWorkspaceEditingService)
+  await workspaceEditingService.updateFolders(0, folders.length, [{
+    name: workspaceRoot.split(/[\\/]/).findLast(Boolean) ?? "Workspace",
+    uri: rootUri,
+  }], true)
+  workspaceVscodeRoot = workspaceRoot
+}
+
+function relativePathFromEditorInput(workspaceRoot: string, input: unknown) {
+  const resource = resourceFromEditorInput(input)
+  if (!resource) {
+    return null
+  }
+
+  return workspaceLspRelativePathFromUri(workspaceRoot, resource.toString())
+}
+
+function openFilesFromEditorInputs(workspaceRoot: string, inputs: readonly unknown[]) {
+  const seen = new Set<string>()
+  const files: WorkspaceVscodeEditorFile[] = []
+
+  for (const input of inputs) {
+    const relativePath = relativePathFromEditorInput(workspaceRoot, input)
+    if (!relativePath || seen.has(relativePath)) {
+      continue
+    }
+
+    seen.add(relativePath)
+    files.push({
+      relativePath,
+      name: relativePath.split("/").findLast(Boolean) ?? relativePath,
+    })
+  }
+
+  return files
+}
+
+function resourceFromEditorInput(input: unknown) {
+  if (!input || typeof input !== "object") {
+    return null
+  }
+
+  const record = input as Record<string, unknown>
+  const resource = record.resource
+  if (resource && typeof resource === "object" && "toString" in resource) {
+    return resource as { toString(): string }
+  }
+
+  const toUntyped = record.toUntyped
+  if (typeof toUntyped !== "function") {
+    return null
+  }
+
+  const untyped = toUntyped.call(input)
+  if (!untyped || typeof untyped !== "object") {
+    return null
+  }
+
+  const untypedResource = (untyped as Record<string, unknown>).resource
+  if (untypedResource && typeof untypedResource === "object" && "toString" in untypedResource) {
+    return untypedResource as { toString(): string }
+  }
+
+  return null
 }
 
 function registerWorkspaceVscodeServiceOverrides() {
@@ -175,10 +414,35 @@ function registerWorkspaceVscodeServiceOverrides() {
   }
 
   registerServices({
+    ...getAccessibilityServiceOverride(),
+    ...getConfigurationServiceOverride(),
+    ...getDialogsServiceOverride(),
+    ...getExplorerServiceOverride(),
+    ...getKeybindingsServiceOverride(),
+    ...getLanguageDetectionWorkerServiceOverride(),
+    ...getLanguagesServiceOverride(),
     ...getLifecycleServiceOverride(),
+    ...getMarkersServiceOverride(),
+    ...getModelServiceOverride(),
     ...getNotificationsServiceOverride(),
     ...getOutputServiceOverride(),
     ...getSearchServiceOverride(),
+    ...getStorageServiceOverride(),
+    ...getTerminalServiceOverride(slabTerminalBackend),
+    ...getTextmateServiceOverride(),
+    ...getThemeServiceOverride(),
+    ...getWorkingCopyServiceOverride(),
+    ...getViewsServiceOverride(undefined, undefined, (state) => ({
+      ...state,
+      editor: {
+        ...state.editor,
+        restoreEditors: false,
+      },
+      views: {
+        ...state.views,
+        defaults: ["workbench.explorer.fileView"],
+      },
+    })),
   })
   workspaceVscodeServiceOverridesRegistered = true
 }
@@ -211,7 +475,17 @@ export async function startWorkspaceLspSession({
     // vscode.workspace.textDocuments. Without this registration, MonacoLanguageClient
     // never sends textDocument/didOpen and the server returns nothing for hover/definition.
     const { workspace: vscodeWorkspace, Uri: VscodeUri } = await import("vscode")
-    await vscodeWorkspace.openTextDocument(VscodeUri.parse(model.uri.toString()))
+    const registeredModelUris = new Set<string>()
+    const registerModel = async (modelToRegister: Monaco.editor.ITextModel) => {
+      const uri = modelToRegister.uri.toString()
+      if (registeredModelUris.has(uri)) {
+        return
+      }
+
+      await vscodeWorkspace.openTextDocument(VscodeUri.parse(uri))
+      registeredModelUris.add(uri)
+    }
+    await registerModel(model)
 
     socket = new WebSocket(workspaceLspUrl(language))
     const jsonrpc = await import("vscode-ws-jsonrpc")
@@ -268,14 +542,15 @@ export async function startWorkspaceLspSession({
         )
         return workspaceLspDefinitionTargetFromResult(workspaceRoot, moduleDefinitions) ?? target
       },
+      registerModel,
       dispose: async () => {
         await languageClient?.stop()
-        socket?.close()
+        socket?.close(1000, "workspace LSP session disposed")
       },
     }
   } catch (error) {
     console.debug("workspace LSP unavailable", { language, uri: model.uri.toString(), error })
-    socket?.close()
+    socket?.close(1000, "workspace LSP session unavailable")
     await languageClient?.stop().catch(() => {})
     return null
   }
@@ -306,15 +581,80 @@ function editorSelection(options: unknown): WorkspaceLspOpenFileOptions | undefi
 
 async function registerWorkspaceFileSystemOverlay() {
   const {
+    FileChangeType,
     FileSystemProviderCapabilities,
     FileSystemProviderError,
     FileSystemProviderErrorCode,
     FileType,
     registerFileSystemOverlay,
   } = await import("@codingame/monaco-vscode-files-service-override")
+  const { Emitter } = await import("@codingame/monaco-vscode-api/vscode/vs/base/common/event")
   const textEncoder = new TextEncoder()
   const textDecoder = new TextDecoder()
   const noopDisposable = { dispose() {} }
+  const changesEmitter = new Emitter<readonly IFileChange[]>()
+  type WorkspaceFileStat = {
+    ctime: number
+    mtime: number
+    size: number
+    type: number
+  }
+  const directoryCache = new Map<string, WorkspaceDirectoryResponse>()
+  const pendingDirectoryReads = new Map<string, { generation: number; promise: Promise<WorkspaceDirectoryResponse> }>()
+  const pendingFileReads = new Map<string, Promise<WorkspaceFileContent>>()
+  const pathStatCache = new Map<string, WorkspaceFileStat>()
+  const pendingPathStats = new Map<string, { generation: number; promise: Promise<WorkspaceFileStat> }>()
+  let cacheGeneration = 0
+  clearWorkspaceFileSystemCache = () => {
+    cacheGeneration += 1
+    directoryCache.clear()
+    pendingDirectoryReads.clear()
+    pendingFileReads.clear()
+    pathStatCache.clear()
+    pendingPathStats.clear()
+  }
+  const loadWorkspaceDirectory = async (relativePath: string) => {
+    const cachedDirectory = directoryCache.get(relativePath)
+    if (cachedDirectory) {
+      return cachedDirectory
+    }
+
+    const generation = cacheGeneration
+    const pendingDirectory = pendingDirectoryReads.get(relativePath)
+    if (pendingDirectory?.generation === generation) {
+      return pendingDirectory.promise
+    }
+
+    const directoryPromise = workspaceReadDirectory(relativePath)
+      .then((nextDirectory) => {
+        if (generation === cacheGeneration) {
+          directoryCache.set(relativePath, nextDirectory)
+          const now = Date.now()
+          for (const entry of nextDirectory.entries) {
+            pathStatCache.set(entry.relativePath, {
+              ctime: entry.createdAt ?? now,
+              mtime: entry.modifiedAt ?? now,
+              size: entry.kind === "file" ? entry.sizeBytes ?? 0 : 0,
+              type: entry.kind === "directory" ? FileType.Directory : FileType.File,
+            })
+          }
+        }
+
+        return nextDirectory
+      })
+      .finally(() => {
+        const currentPendingDirectory = pendingDirectoryReads.get(relativePath)
+        if (
+          currentPendingDirectory?.generation === generation &&
+          currentPendingDirectory.promise === directoryPromise
+        ) {
+          pendingDirectoryReads.delete(relativePath)
+        }
+      })
+
+    pendingDirectoryReads.set(relativePath, { generation, promise: directoryPromise })
+    return directoryPromise
+  }
   const relativePathForResource = (resource: string) => {
     const workspaceRoot = currentWorkspaceFileService.root
     const relativePath = workspaceRoot
@@ -333,16 +673,25 @@ async function registerWorkspaceFileSystemOverlay() {
   registerFileSystemOverlay(100, {
     capabilities: FileSystemProviderCapabilities.FileReadWrite,
     onDidChangeCapabilities: () => noopDisposable,
-    onDidChangeFile: () => noopDisposable,
-    async delete() {
-      throw FileSystemProviderError.create("Not allowed", FileSystemProviderErrorCode.NoPermissions)
+    onDidChangeFile: changesEmitter.event,
+    async delete(resource, options) {
+      await workspaceDeletePath({
+        recursive: Boolean(options.recursive),
+        relativePath: relativePathForResource(resource.toString()),
+      })
+      clearWorkspaceFileSystemCache()
+      changesEmitter.fire([{ resource, type: FileChangeType.DELETED }])
     },
-    async mkdir() {
-      throw FileSystemProviderError.create("Not allowed", FileSystemProviderErrorCode.NoPermissions)
+    async mkdir(resource) {
+      await workspaceCreateDirectory({
+        relativePath: relativePathForResource(resource.toString()),
+      })
+      clearWorkspaceFileSystemCache()
+      changesEmitter.fire([{ resource, type: FileChangeType.ADDED }])
     },
     async readdir(resource) {
       const relativePath = relativePathForResource(resource.toString())
-      const directory = await workspaceReadDirectory(relativePath, { includeIgnored: true })
+      const directory = await loadWorkspaceDirectory(relativePath)
 
       return directory.entries.map((entry) => [
         entry.name,
@@ -350,11 +699,34 @@ async function registerWorkspaceFileSystemOverlay() {
       ])
     },
     async readFile(resource) {
-      const file = await workspaceReadFile(relativePathForResource(resource.toString()))
+      const relativePath = relativePathForResource(resource.toString())
+      const pendingFile = pendingFileReads.get(relativePath)
+      const filePromise =
+        pendingFile ??
+        (async () => {
+          const nextFile = await workspaceReadFile(relativePath)
+          return nextFile
+        })().finally(() => {
+          pendingFileReads.delete(relativePath)
+        })
+
+      if (!pendingFile) {
+        pendingFileReads.set(relativePath, filePromise)
+      }
+      const file = await filePromise
+
       return textEncoder.encode(file.content)
     },
-    async rename() {
-      throw FileSystemProviderError.create("Not allowed", FileSystemProviderErrorCode.NoPermissions)
+    async rename(from, to) {
+      await workspaceRenamePath({
+        fromRelativePath: relativePathForResource(from.toString()),
+        toRelativePath: relativePathForResource(to.toString()),
+      })
+      clearWorkspaceFileSystemCache()
+      changesEmitter.fire([
+        { resource: from, type: FileChangeType.DELETED },
+        { resource: to, type: FileChangeType.ADDED },
+      ])
     },
     async stat(resource) {
       const relativePath = relativePathForResource(resource.toString())
@@ -368,28 +740,57 @@ async function registerWorkspaceFileSystemOverlay() {
       }
 
       try {
-        const file = await workspaceReadFile(relativePath)
-        return {
-          ctime: Date.now(),
-          mtime: Date.now(),
-          size: file.sizeBytes,
-          type: FileType.File,
+        const cachedStat = pathStatCache.get(relativePath)
+        if (cachedStat) {
+          return cachedStat
         }
+
+        const separatorIndex = relativePath.lastIndexOf("/")
+        const parentRelativePath = separatorIndex === -1 ? "" : relativePath.slice(0, separatorIndex)
+        await loadWorkspaceDirectory(parentRelativePath).catch(() => null)
+        const directoryBackedStat = pathStatCache.get(relativePath)
+        if (directoryBackedStat) {
+          return directoryBackedStat
+        }
+
+        const generation = cacheGeneration
+        const pendingStat = pendingPathStats.get(relativePath)
+        if (pendingStat?.generation === generation) {
+          return await pendingStat.promise
+        }
+
+        const metadataPromise = workspaceStatPath(relativePath)
+          .then((metadata) => {
+            const nextStat = {
+              ctime: metadata.createdAt || Date.now(),
+              mtime: metadata.modifiedAt || Date.now(),
+              size: metadata.sizeBytes,
+              type: metadata.kind === "directory" ? FileType.Directory : FileType.File,
+            }
+
+            if (generation === cacheGeneration) {
+              pathStatCache.set(relativePath, nextStat)
+            }
+
+            return nextStat
+          })
+          .finally(() => {
+            const currentPendingStat = pendingPathStats.get(relativePath)
+            if (
+              currentPendingStat?.generation === generation &&
+              currentPendingStat.promise === metadataPromise
+            ) {
+              pendingPathStats.delete(relativePath)
+            }
+          })
+
+        pendingPathStats.set(relativePath, { generation, promise: metadataPromise })
+        return await metadataPromise
       } catch {
-        try {
-          await workspaceReadDirectory(relativePath, { includeIgnored: true })
-          return {
-            ctime: Date.now(),
-            mtime: Date.now(),
-            size: 0,
-            type: FileType.Directory,
-          }
-        } catch {
-          throw FileSystemProviderError.create(
-            "workspace LSP file was not found",
-            FileSystemProviderErrorCode.FileNotFound,
-          )
-        }
+        throw FileSystemProviderError.create(
+          "workspace LSP file was not found",
+          FileSystemProviderErrorCode.FileNotFound,
+        )
       }
     },
     watch() {
@@ -400,6 +801,8 @@ async function registerWorkspaceFileSystemOverlay() {
         content: textDecoder.decode(content),
         relativePath: relativePathForResource(resource.toString()),
       })
+      clearWorkspaceFileSystemCache()
+      changesEmitter.fire([{ resource, type: FileChangeType.UPDATED }])
     },
   })
 }

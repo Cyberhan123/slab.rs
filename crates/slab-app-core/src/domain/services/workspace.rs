@@ -9,9 +9,11 @@ use tokio::process::Command as TokioCommand;
 use tokio::time::timeout;
 
 use crate::domain::models::{
-    WorkspaceConsoleOutput, WorkspaceGitDiffView, WorkspaceGitFileStatus,
+    WorkspaceConsoleOutput, WorkspaceCreateDirectoryCommand, WorkspaceCreateFileCommand,
+    WorkspaceDeletePathCommand, WorkspaceGitDiffView, WorkspaceGitFileStatus,
     WorkspaceGitOperationView, WorkspaceGitStatusEntry, WorkspaceGitStatusSummary,
-    WorkspaceGitStatusView, WorkspaceWriteFileCommand, WorkspaceWriteFileView,
+    WorkspaceGitStatusView, WorkspacePathView, WorkspaceRenamePathCommand, WorkspaceWriteFileCommand,
+    WorkspaceWriteFileView,
 };
 use crate::error::AppCoreError;
 
@@ -24,6 +26,139 @@ const MAX_WRITE_FILE_BYTES: usize = 2 * 1024 * 1024;
 pub struct WorkspaceService;
 
 impl WorkspaceService {
+    pub fn create_file(
+        root: impl AsRef<Path>,
+        command: WorkspaceCreateFileCommand,
+    ) -> Result<WorkspacePathView, AppCoreError> {
+        let root = root.as_ref();
+        let relative_path = normalize_relative_path(&command.relative_path)?;
+        if relative_path.is_empty() {
+            return Err(AppCoreError::BadRequest("file path cannot be empty".to_string()));
+        }
+
+        let path = resolve_workspace_path_for_write(root, &relative_path)?;
+        if path.exists() {
+            return Err(AppCoreError::BadRequest(format!(
+                "workspace path `{relative_path}` already exists"
+            )));
+        }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                AppCoreError::Internal(format!(
+                    "failed to create directory {}: {error}",
+                    parent.display()
+                ))
+            })?;
+        }
+        fs::write(&path, []).map_err(|error| {
+            AppCoreError::Internal(format!("failed to create file {}: {error}", path.display()))
+        })?;
+
+        Ok(WorkspacePathView { relative_path })
+    }
+
+    pub fn create_directory(
+        root: impl AsRef<Path>,
+        command: WorkspaceCreateDirectoryCommand,
+    ) -> Result<WorkspacePathView, AppCoreError> {
+        let root = root.as_ref();
+        let relative_path = normalize_relative_path(&command.relative_path)?;
+        if relative_path.is_empty() {
+            return Err(AppCoreError::BadRequest("directory path cannot be empty".to_string()));
+        }
+
+        let path = resolve_workspace_path_for_write(root, &relative_path)?;
+        if path.exists() {
+            return Err(AppCoreError::BadRequest(format!(
+                "workspace path `{relative_path}` already exists"
+            )));
+        }
+        fs::create_dir_all(&path).map_err(|error| {
+            AppCoreError::Internal(format!("failed to create directory {}: {error}", path.display()))
+        })?;
+
+        Ok(WorkspacePathView { relative_path })
+    }
+
+    pub fn rename_path(
+        root: impl AsRef<Path>,
+        command: WorkspaceRenamePathCommand,
+    ) -> Result<WorkspacePathView, AppCoreError> {
+        let root = root.as_ref();
+        let from_relative_path = normalize_relative_path(&command.from_relative_path)?;
+        let to_relative_path = normalize_relative_path(&command.to_relative_path)?;
+        if from_relative_path.is_empty() || to_relative_path.is_empty() {
+            return Err(AppCoreError::BadRequest("workspace path cannot be empty".to_string()));
+        }
+
+        let from_path = resolve_workspace_path(root, &from_relative_path)?;
+        let to_path = resolve_workspace_path_for_write(root, &to_relative_path)?;
+        if to_path.exists() {
+            return Err(AppCoreError::BadRequest(format!(
+                "workspace path `{to_relative_path}` already exists"
+            )));
+        }
+        if let Some(parent) = to_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                AppCoreError::Internal(format!(
+                    "failed to create directory {}: {error}",
+                    parent.display()
+                ))
+            })?;
+        }
+        fs::rename(&from_path, &to_path).map_err(|error| {
+            AppCoreError::Internal(format!(
+                "failed to rename {} to {}: {error}",
+                from_path.display(),
+                to_path.display()
+            ))
+        })?;
+
+        Ok(WorkspacePathView { relative_path: to_relative_path })
+    }
+
+    pub fn delete_path(
+        root: impl AsRef<Path>,
+        command: WorkspaceDeletePathCommand,
+    ) -> Result<WorkspacePathView, AppCoreError> {
+        let root = root.as_ref();
+        let relative_path = normalize_relative_path(&command.relative_path)?;
+        if relative_path.is_empty() {
+            return Err(AppCoreError::BadRequest("workspace path cannot be empty".to_string()));
+        }
+
+        let path = resolve_workspace_path(root, &relative_path)?;
+        let metadata = fs::metadata(&path).map_err(|error| {
+            AppCoreError::Internal(format!(
+                "failed to read file metadata {}: {error}",
+                path.display()
+            ))
+        })?;
+        if metadata.is_dir() {
+            if command.recursive {
+                fs::remove_dir_all(&path).map_err(|error| {
+                    AppCoreError::Internal(format!(
+                        "failed to delete directory {}: {error}",
+                        path.display()
+                    ))
+                })?;
+            } else {
+                fs::remove_dir(&path).map_err(|error| {
+                    AppCoreError::Internal(format!(
+                        "failed to delete directory {}: {error}",
+                        path.display()
+                    ))
+                })?;
+            }
+        } else {
+            fs::remove_file(&path).map_err(|error| {
+                AppCoreError::Internal(format!("failed to delete file {}: {error}", path.display()))
+            })?;
+        }
+
+        Ok(WorkspacePathView { relative_path })
+    }
+
     pub fn write_file(
         root: impl AsRef<Path>,
         command: WorkspaceWriteFileCommand,
@@ -497,6 +632,30 @@ fn resolve_workspace_path_for_write(
     }
 
     Ok(candidate)
+}
+
+fn resolve_workspace_path(root: &Path, relative_path: &str) -> Result<PathBuf, AppCoreError> {
+    let canonical_root = root.canonicalize().map_err(|error| {
+        AppCoreError::Internal(format!(
+            "failed to resolve workspace root {}: {error}",
+            root.display()
+        ))
+    })?;
+    let candidate =
+        if relative_path.is_empty() { canonical_root.clone() } else { canonical_root.join(relative_path) };
+    let canonical_candidate = candidate.canonicalize().map_err(|error| {
+        AppCoreError::Internal(format!(
+            "failed to resolve workspace path {}: {error}",
+            candidate.display()
+        ))
+    })?;
+    if !canonical_candidate.starts_with(&canonical_root) {
+        return Err(AppCoreError::BadRequest(format!(
+            "workspace path `{relative_path}` escapes the workspace root"
+        )));
+    }
+
+    Ok(canonical_candidate)
 }
 
 fn existing_parent(path: &Path) -> Result<PathBuf, AppCoreError> {

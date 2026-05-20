@@ -3,6 +3,7 @@ mod plugins;
 mod setup;
 mod terminal;
 mod workspace;
+mod workspace_file_ops;
 mod workspace_search;
 
 use setup::ApiEndpointConfig;
@@ -52,8 +53,13 @@ pub fn run() {
             workspace::workspace_close,
             workspace::workspace_read_directory,
             workspace::workspace_read_file,
+            workspace::workspace_stat_path,
             workspace::workspace_search_files,
             workspace_search::workspace_search_text,
+            workspace_file_ops::workspace_create_file,
+            workspace_file_ops::workspace_create_directory,
+            workspace_file_ops::workspace_rename_path,
+            workspace_file_ops::workspace_delete_path,
             workspace::workspace_write_file,
             workspace::workspace_git_status,
             workspace::workspace_git_stage,

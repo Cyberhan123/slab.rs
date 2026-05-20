@@ -12,7 +12,8 @@ use slab_types::{ConversationMessage, ConversationMessageContent};
 use crate::{
     config::AgentConfig,
     error::AgentError,
-    port::{AgentNotifyPort, AgentStorePort, LlmPort, ThreadSnapshot, ThreadStatus},
+    hook::{AgentHook, HookEvent, dispatch_hooks},
+    port::{AgentNotifyPort, AgentStorePort, LlmPort, ThreadSnapshot, ThreadStatus, TurnEvent},
     tool::ToolRouter,
     turn::{TurnExecutionContext, execute_turn},
 };
@@ -69,6 +70,7 @@ impl AgentThread {
         store: Arc<dyn AgentStorePort>,
         notify: Arc<dyn AgentNotifyPort>,
         tools: Arc<ToolRouter>,
+        hooks: Arc<Vec<Arc<dyn AgentHook>>>,
     ) -> Result<String, AgentError> {
         let thread_id = self.id.clone();
         let now = Utc::now().to_rfc3339();
@@ -102,6 +104,9 @@ impl AgentThread {
             error!(thread_id, error = %e, "failed to persist running status");
         }
 
+        // Dispatch SessionStart hook.
+        dispatch_hooks(&hooks, &HookEvent::SessionStart { thread_id: thread_id.clone() }).await;
+
         // Inject system prompt as the first message, if not already present.
         if let Some(ref system_prompt) = self.config.system_prompt
             && !system_prompt.is_empty()
@@ -133,6 +138,8 @@ impl AgentThread {
                     llm: llm.as_ref(),
                     tools: tools.as_ref(),
                     store: store.as_ref(),
+                    notify: notify.as_ref(),
+                    hooks: &hooks,
                 },
                 &mut messages,
             )
@@ -161,7 +168,13 @@ impl AgentThread {
             }
         }
 
+        // Dispatch Stop hook regardless of outcome.
+        dispatch_hooks(&hooks, &HookEvent::Stop { thread_id: thread_id.clone() }).await;
+
         if let Some(err) = last_error {
+            notify
+                .on_turn_event(&thread_id, &TurnEvent::TurnFailed { error: err.to_string() })
+                .await;
             self.set_status(ThreadStatus::Errored, &notify).await;
             store
                 .update_thread_status(&thread_id, ThreadStatus::Errored, Some(&err.to_string()))

@@ -1,10 +1,9 @@
 import "@xterm/xterm/css/xterm.css"
 
-import { LocalEchoAddon } from "@gytx/xterm-local-echo"
 import { FitAddon } from "@xterm/addon-fit"
 import { Unicode11Addon } from "@xterm/addon-unicode11"
 import { WebLinksAddon } from "@xterm/addon-web-links"
-import { Terminal as XtermTerminal, type IDisposable, type ITerminalAddon, type ITheme } from "@xterm/xterm"
+import { Terminal as XtermTerminal, type IDisposable, type ITheme } from "@xterm/xterm"
 import { Plus, Terminal, Trash2, X } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
@@ -34,20 +33,6 @@ type TerminalControlMessage =
       cols: number
       rows: number
     }
-
-const localAutocompleteCommands = [
-  "bun",
-  "cargo",
-  "cd",
-  "clear",
-  "dir",
-  "git",
-  "ls",
-  "npm",
-  "pnpm",
-  "pwd",
-  "yarn",
-]
 
 const lightTheme: ITheme = {
   background: "#f8fafc",
@@ -282,7 +267,6 @@ function TerminalSessionPane({
     const disposables: IDisposable[] = []
     const terminal = new XtermTerminal({
       allowProposedApi: true,
-      convertEol: true,
       cursorBlink: true,
       disableStdin: false,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
@@ -291,18 +275,10 @@ function TerminalSessionPane({
       theme: initialThemeModeRef.current === "dark" ? darkTheme : lightTheme,
     })
     const fitAddon = new FitAddon()
-    const localEcho = new LocalEchoAddon({
-      enableAutocomplete: true,
-      enableIncompleteInput: true,
-      historySize: 50,
-      maxAutocompleteEntries: 80,
-    })
 
     terminal.loadAddon(fitAddon)
     terminal.loadAddon(new WebLinksAddon())
     terminal.loadAddon(new Unicode11Addon())
-    terminal.loadAddon(localEcho as unknown as ITerminalAddon)
-    localEcho.addAutocompleteHandler((index: number) => (index === 0 ? localAutocompleteCommands : []))
     terminal.unicode.activeVersion = "11"
     terminal.open(host)
     fitAddon.fit()

@@ -1,0 +1,66 @@
+{
+  "manifestVersion": 1,
+  "id": "native-language-servers",
+  "name": "Native Language Servers",
+  "version": "0.1.0",
+  "compatibility": {
+    "slab": ">=0.1.0",
+    "pluginApi": "^1.0.0"
+  },
+  "runtime": {
+    "ui": {
+      "entry": "ui/index.html"
+    }
+  },
+  "integrity": {
+    "filesSha256": {
+      "ui/index.html": "c69ef40e1afb5c0d398c08265e36e6f7adefaabded521569f917f5772551fda1"
+    }
+  },
+  "permissions": {
+    "network": {
+      "mode": "blocked",
+      "allowHosts": []
+    },
+    "lsp": [
+      "languageServer:declare"
+    ]
+  },
+  "contributes": {
+    "languageServers": [
+      {
+        "id": "native-language-servers.rust-analyzer",
+        "languages": [
+          "rust"
+        ],
+        "transport": {
+          "type": "stdio",
+          "command": "rust-analyzer"
+        }
+      },
+      {
+        "id": "native-language-servers.gopls",
+        "languages": [
+          "go"
+        ],
+        "transport": {
+          "type": "stdio",
+          "command": "gopls"
+        }
+      },
+      {
+        "id": "native-language-servers.pyright",
+        "languages": [
+          "python"
+        ],
+        "transport": {
+          "type": "stdio",
+          "command": "pyright-langserver",
+          "args": [
+            "--stdio"
+          ]
+        }
+      }
+    ]
+  }
+}

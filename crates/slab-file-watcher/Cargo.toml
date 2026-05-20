@@ -1,0 +1,15 @@
+[package]
+name = "slab-file-watcher"
+version.workspace = true
+edition.workspace = true
+description = "File-system change watcher for slab.rs (replaces codex-file-watcher)"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[dependencies]
+notify    = { workspace = true }
+tokio     = { workspace = true }
+tracing   = { workspace = true }
+thiserror = { workspace = true }
