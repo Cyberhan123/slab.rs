@@ -73,6 +73,10 @@ pub fn build_bwrap_args(
     }
 
     for denied in &env.permissions.denied_paths {
+        // Only apply deny rules for paths that currently exist.  Note: there is
+        // a TOCTOU window between this check and the bwrap spawn — paths created
+        // after this point will not be denied.  Callers should configure the
+        // sandbox before any untrusted process can create such paths.
         if denied.exists() {
             if denied.is_dir() {
                 args.push("--tmpfs".into());
