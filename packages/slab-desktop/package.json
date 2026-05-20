@@ -101,7 +101,7 @@
     "dayjs": "^1.11.20",
     "jszip": "~3.10.1",
     "katex": "^0.16.45",
-    "lucide-react": "^1.8.0",
+    "lucide-react": "^1.16.0",
     "markdown-it": "^14.1.1",
     "markdown-it-emoji": "^3.0.0",
     "markdown-it-katex": "^2.0.3",
