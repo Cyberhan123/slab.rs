@@ -75,11 +75,17 @@ impl Subscriber {
     /// Register the paths this subscriber wants to receive events for.
     ///
     /// Paths are watched on the underlying OS watcher immediately.
+    /// Any previously registered paths are unwatched first.
     pub fn register_paths(&self, paths: Vec<WatchPath>) {
         let mut subs = self.inner.subscribers.lock().unwrap();
         if let Some(entry) = subs.get_mut(&self.id) {
             let mut watcher_guard = self.inner._watcher.lock().unwrap();
             if let Some(ref mut w) = *watcher_guard {
+                for wp in &entry.watched_paths {
+                    if let Err(e) = w.unwatch(&wp.path) {
+                        warn!(path = %wp.path.display(), error = %e, "failed to unwatch path");
+                    }
+                }
                 for wp in &paths {
                     let mode = if wp.recursive {
                         RecursiveMode::Recursive
@@ -99,7 +105,17 @@ impl Subscriber {
 
 impl Drop for Subscriber {
     fn drop(&mut self) {
-        self.inner.subscribers.lock().unwrap().remove(&self.id);
+        let mut subs = self.inner.subscribers.lock().unwrap();
+        if let Some(entry) = subs.remove(&self.id) {
+            let mut watcher_guard = self.inner._watcher.lock().unwrap();
+            if let Some(ref mut w) = *watcher_guard {
+                for wp in &entry.watched_paths {
+                    if let Err(e) = w.unwatch(&wp.path) {
+                        warn!(path = %wp.path.display(), error = %e, "failed to unwatch path on drop");
+                    }
+                }
+            }
+        }
         debug!(subscriber_id = self.id, "removed subscriber");
     }
 }

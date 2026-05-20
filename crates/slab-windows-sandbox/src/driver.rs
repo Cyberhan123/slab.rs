@@ -29,8 +29,6 @@ impl SandboxDriver for WindowsSandboxDriver {
 
         #[cfg(target_os = "windows")]
         {
-            use std::os::windows::process::CommandExt;
-
             let program = cmd.argv.first().ok_or(SandboxError::EmptyCommand)?;
             let mut command = tokio::process::Command::new(program);
             command.args(&cmd.argv[1..]);
@@ -45,7 +43,7 @@ impl SandboxDriver for WindowsSandboxDriver {
 
             let spawned = command.spawn().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
 
-            debug!(pid = spawned.id(), "spawned process under Windows Job Object sandbox");
+            debug!(pid = spawned.id(), "spawned process (Windows Job Object containment not yet implemented)");
 
             let result = if let Some(timeout) = cmd.timeout {
                 tokio::time::timeout(timeout, spawned.wait_with_output())

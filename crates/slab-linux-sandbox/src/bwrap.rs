@@ -7,10 +7,10 @@ pub fn find_bwrap() -> Option<PathBuf> {
     let cwd = std::env::current_dir().ok();
 
     for dir in std::env::split_paths(&path_var) {
-        if let Some(ref cwd_path) = cwd {
-            if &dir == cwd_path {
-                continue;
-            }
+        if let Some(ref cwd_path) = cwd
+            && &dir == cwd_path
+        {
+            continue;
         }
         let candidate = dir.join("bwrap");
         if candidate.exists() {
@@ -74,9 +74,14 @@ pub fn build_bwrap_args(
 
     for denied in &env.permissions.denied_paths {
         if denied.exists() {
-            args.push("--bind".into());
-            args.push("/dev/null".into());
-            args.push(denied.display().to_string());
+            if denied.is_dir() {
+                args.push("--tmpfs".into());
+                args.push(denied.display().to_string());
+            } else {
+                args.push("--bind".into());
+                args.push("/dev/null".into());
+                args.push(denied.display().to_string());
+            }
         }
     }
 

@@ -34,8 +34,12 @@ impl SandboxDriver for LinuxSandboxDriver {
                 SandboxError::BwrapNotAvailable("bwrap not found on PATH".into())
             })?;
 
-            unsafe {
-                libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+            let ret = unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) };
+            if ret != 0 {
+                return Err(SandboxError::SetupFailed(format!(
+                    "PR_SET_NO_NEW_PRIVS failed: {}",
+                    std::io::Error::last_os_error()
+                )));
             }
 
             let bwrap_args = build_bwrap_args(&self.env, &cmd)?;
