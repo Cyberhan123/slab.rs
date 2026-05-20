@@ -1,12 +1,12 @@
 # slab-mcp
 
-MCP protocol helpers for Slab.
+MCP server management and tool aggregation helpers for Slab.
 
 ## Role
 
-`slab-mcp` owns the minimal MCP JSON-RPC protocol types, stdio client connection, cached tool discovery, tool calls, and exposing a `ToolRouter` through MCP server responses.
+`slab-mcp` owns multi-server MCP management for Slab. It keeps configured external MCP servers by name, aggregates their tool lists, caches discovered tools, and routes tool calls to the selected server.
 
-It does not register tools by itself. Host layers or `slab-agent-tools` decide which MCP clients are injected into an agent.
+It uses `crates/slab-mcp-client` for the low-level single-connection transport. It does not expose Slab as an MCP server; the standalone process entrypoint for that is `bin/slab-mcp-server`.
 
 ## Type
 

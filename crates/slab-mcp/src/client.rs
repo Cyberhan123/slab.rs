@@ -1,44 +1,34 @@
 use std::{
     collections::HashMap,
-    sync::{
-        Arc, RwLock as StdRwLock,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::{Arc, RwLock as StdRwLock},
 };
 
-use serde_json::{Value, json};
-use thiserror::Error;
-use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::{Child, ChildStdin, ChildStdout, Command},
-    sync::{Mutex, RwLock},
+use futures::future::{BoxFuture, FutureExt};
+use serde_json::Value;
+use slab_mcp_client::{
+    McpClientError as TransportError, McpTool as TransportTool, McpToolResult, StdioLaunchConfig,
+    StdioMcpClient,
 };
+use thiserror::Error;
+use tokio::sync::RwLock;
 use tracing::debug;
 
 use crate::{
     config::{McpClientConfig, McpServerLauncher},
-    protocol::{JsonRpcResponse, McpContent, McpToolResult, McpToolSpec, notification, request},
+    protocol::McpToolSpec,
 };
 
 #[derive(Debug, Error)]
 pub enum McpClientError {
     #[error("MCP server `{0}` is not connected")]
     ServerNotFound(String),
-    #[error("MCP server `{0}` has no stdin")]
-    MissingStdin(String),
-    #[error("MCP server `{0}` has no stdout")]
-    MissingStdout(String),
-    #[error("MCP protocol error: {0}")]
-    Protocol(String),
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("JSON error: {0}")]
-    Json(#[from] serde_json::Error),
+    #[error("MCP server `{server_name}` failed: {source}")]
+    Transport { server_name: String, source: TransportError },
 }
 
 #[derive(Default)]
 pub struct McpClient {
-    servers: RwLock<HashMap<String, Arc<StdioServer>>>,
+    servers: RwLock<HashMap<String, Arc<dyn ServerConnection>>>,
     cached_tools: StdRwLock<Vec<McpToolSpec>>,
 }
 
@@ -56,37 +46,24 @@ impl McpClient {
     }
 
     pub async fn connect_stdio(&self, launcher: McpServerLauncher) -> Result<(), McpClientError> {
-        let mut command = Command::new(&launcher.command);
-        command.args(&launcher.args);
-        for (key, value) in &launcher.env {
-            command.env(key, value);
-        }
-        command.stdin(std::process::Stdio::piped());
-        command.stdout(std::process::Stdio::piped());
+        let server_name = launcher.name.clone();
+        let server = StdioMcpClient::connect(StdioLaunchConfig {
+            command: launcher.command,
+            args: launcher.args,
+            env: launcher.env,
+        })
+        .await
+        .map_err(|source| transport_error(&server_name, source))?;
 
-        let mut child = command.spawn()?;
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| McpClientError::MissingStdin(launcher.name.clone()))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| McpClientError::MissingStdout(launcher.name.clone()))?;
-
-        let server = Arc::new(StdioServer {
-            name: launcher.name.clone(),
-            child: Mutex::new(child),
-            stdin: Mutex::new(stdin),
-            stdout: Mutex::new(BufReader::new(stdout)),
-            next_id: AtomicU64::new(1),
-        });
-        server.initialize().await?;
-        let tools = server.list_tools().await?;
-
-        self.servers.write().await.insert(launcher.name.clone(), server);
+        self.servers.write().await.insert(server_name.clone(), Arc::new(server));
         self.refresh_cached_tools().await?;
-        debug!(server = launcher.name, tool_count = tools.len(), "connected MCP stdio server");
+        let tool_count = self
+            .cached_tools()
+            .await
+            .into_iter()
+            .filter(|tool| tool.server_name == server_name)
+            .count();
+        debug!(server = server_name, tool_count, "connected MCP stdio server");
         Ok(())
     }
 
@@ -109,149 +86,195 @@ impl McpClient {
         tool_name: &str,
         arguments: Value,
     ) -> Result<McpToolResult, McpClientError> {
-        let servers = self.servers.read().await;
-        let server = servers
-            .get(server_name)
-            .ok_or_else(|| McpClientError::ServerNotFound(server_name.to_string()))?;
-        server.call_tool(tool_name, arguments).await
+        let server = self.server(server_name).await?;
+        server
+            .call_tool(tool_name, arguments)
+            .await
+            .map_err(|source| transport_error(server_name, source))
     }
 
     pub async fn ping(&self, server_name: &str) -> Result<(), McpClientError> {
-        let servers = self.servers.read().await;
-        let server = servers
-            .get(server_name)
-            .ok_or_else(|| McpClientError::ServerNotFound(server_name.to_string()))?;
-        server.request("ping", None).await.map(|_| ())
+        let server = self.server(server_name).await?;
+        server.ping().await.map_err(|source| transport_error(server_name, source))
     }
 
     async fn refresh_cached_tools(&self) -> Result<(), McpClientError> {
         let servers = self.servers.read().await;
         let mut tools = Vec::new();
-        for server in servers.values() {
-            tools.extend(server.list_tools().await?);
+        for (server_name, server) in servers.iter() {
+            let remote_tools =
+                server.list_tools().await.map_err(|source| transport_error(server_name, source))?;
+            tools.extend(remote_tools.into_iter().map(|tool| McpToolSpec {
+                server_name: server_name.clone(),
+                name: tool.name,
+                description: tool.description,
+                input_schema: tool.input_schema,
+            }));
         }
         if let Ok(mut cached_tools) = self.cached_tools.write() {
             *cached_tools = tools;
         }
         Ok(())
     }
-}
 
-struct StdioServer {
-    name: String,
-    child: Mutex<Child>,
-    stdin: Mutex<ChildStdin>,
-    stdout: Mutex<BufReader<ChildStdout>>,
-    next_id: AtomicU64,
-}
-
-impl StdioServer {
-    async fn initialize(&self) -> Result<(), McpClientError> {
-        self.request(
-            "initialize",
-            Some(json!({
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": { "name": "slab", "version": env!("CARGO_PKG_VERSION") }
-            })),
-        )
-        .await?;
-        self.notify("notifications/initialized", None).await
+    async fn server(&self, server_name: &str) -> Result<Arc<dyn ServerConnection>, McpClientError> {
+        let servers = self.servers.read().await;
+        servers
+            .get(server_name)
+            .cloned()
+            .ok_or_else(|| McpClientError::ServerNotFound(server_name.to_string()))
     }
 
-    async fn list_tools(&self) -> Result<Vec<McpToolSpec>, McpClientError> {
-        let result = self.request("tools/list", None).await?;
-        let raw_tools = result.get("tools").and_then(Value::as_array).cloned().unwrap_or_default();
-        let mut tools = Vec::new();
-        for raw in raw_tools {
-            let name = raw.get("name").and_then(Value::as_str).unwrap_or("").to_string();
-            if name.is_empty() {
-                continue;
-            }
-            tools.push(McpToolSpec {
-                server_name: self.name.clone(),
-                name,
-                description: raw.get("description").and_then(Value::as_str).map(str::to_string),
-                input_schema: raw.get("inputSchema").cloned().unwrap_or_else(|| json!({})),
-            });
-        }
-        Ok(tools)
+    #[cfg(test)]
+    async fn insert_server_for_test(&self, server_name: &str, server: Arc<dyn ServerConnection>) {
+        self.servers.write().await.insert(server_name.to_string(), server);
     }
+}
 
-    async fn call_tool(
-        &self,
-        tool_name: &str,
+fn transport_error(server_name: &str, source: TransportError) -> McpClientError {
+    McpClientError::Transport { server_name: server_name.to_string(), source }
+}
+
+trait ServerConnection: Send + Sync {
+    fn list_tools(&self) -> BoxFuture<'_, Result<Vec<TransportTool>, TransportError>>;
+
+    fn call_tool<'a>(
+        &'a self,
+        tool_name: &'a str,
         arguments: Value,
-    ) -> Result<McpToolResult, McpClientError> {
-        let result = self
-            .request(
-                "tools/call",
-                Some(json!({
-                    "name": tool_name,
-                    "arguments": arguments
-                })),
-            )
-            .await?;
-        parse_tool_result(result)
+    ) -> BoxFuture<'a, Result<McpToolResult, TransportError>>;
+
+    fn ping(&self) -> BoxFuture<'_, Result<(), TransportError>>;
+}
+
+impl ServerConnection for StdioMcpClient {
+    fn list_tools(&self) -> BoxFuture<'_, Result<Vec<TransportTool>, TransportError>> {
+        async move { StdioMcpClient::list_tools(self).await }.boxed()
     }
 
-    async fn request(&self, method: &str, params: Option<Value>) -> Result<Value, McpClientError> {
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let payload = serde_json::to_string(&request(id, method, params))?;
-        {
-            let mut stdin = self.stdin.lock().await;
-            stdin.write_all(payload.as_bytes()).await?;
-            stdin.write_all(b"\n").await?;
-            stdin.flush().await?;
-        }
-
-        let mut line = String::new();
-        let bytes = {
-            let mut stdout = self.stdout.lock().await;
-            stdout.read_line(&mut line).await?
-        };
-        if bytes == 0 {
-            let status = self.child.lock().await.try_wait()?;
-            return Err(McpClientError::Protocol(format!(
-                "MCP server `{}` closed stdout with status {status:?}",
-                self.name
-            )));
-        }
-        let response: JsonRpcResponse = serde_json::from_str(&line)?;
-        if let Some(error) = response.error {
-            return Err(McpClientError::Protocol(error.message));
-        }
-        response
-            .result
-            .ok_or_else(|| McpClientError::Protocol("response missing result".to_string()))
+    fn call_tool<'a>(
+        &'a self,
+        tool_name: &'a str,
+        arguments: Value,
+    ) -> BoxFuture<'a, Result<McpToolResult, TransportError>> {
+        async move { StdioMcpClient::call_tool(self, tool_name, arguments).await }.boxed()
     }
 
-    async fn notify(&self, method: &str, params: Option<Value>) -> Result<(), McpClientError> {
-        let payload = serde_json::to_string(&notification(method, params))?;
-        let mut stdin = self.stdin.lock().await;
-        stdin.write_all(payload.as_bytes()).await?;
-        stdin.write_all(b"\n").await?;
-        stdin.flush().await?;
-        Ok(())
+    fn ping(&self) -> BoxFuture<'_, Result<(), TransportError>> {
+        async move { StdioMcpClient::ping(self).await }.boxed()
     }
 }
 
-fn parse_tool_result(value: Value) -> Result<McpToolResult, McpClientError> {
-    let content = value
-        .get("content")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|item| {
-            let mut fields = item.as_object().cloned().unwrap_or_default();
-            let content_type = fields
-                .remove("type")
-                .and_then(|value| value.as_str().map(str::to_string))
-                .unwrap_or_else(|| "text".to_string());
-            McpContent { content_type, fields }
-        })
-        .collect();
-    let is_error = value.get("isError").and_then(Value::as_bool).unwrap_or(false);
-    Ok(McpToolResult { content, is_error })
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::sync::Mutex;
+
+    struct FakeServer {
+        tools: Vec<TransportTool>,
+        result: McpToolResult,
+        calls: Mutex<Vec<(String, Value)>>,
+    }
+
+    impl FakeServer {
+        fn new(tools: Vec<TransportTool>, result: McpToolResult) -> Self {
+            Self { tools, result, calls: Mutex::new(Vec::new()) }
+        }
+
+        fn calls(&self) -> Vec<(String, Value)> {
+            self.calls.lock().expect("calls").clone()
+        }
+    }
+
+    impl ServerConnection for FakeServer {
+        fn list_tools(&self) -> BoxFuture<'_, Result<Vec<TransportTool>, TransportError>> {
+            async move { Ok(self.tools.clone()) }.boxed()
+        }
+
+        fn call_tool<'a>(
+            &'a self,
+            tool_name: &'a str,
+            arguments: Value,
+        ) -> BoxFuture<'a, Result<McpToolResult, TransportError>> {
+            async move {
+                self.calls.lock().expect("calls").push((tool_name.to_string(), arguments));
+                Ok(self.result.clone())
+            }
+            .boxed()
+        }
+
+        fn ping(&self) -> BoxFuture<'_, Result<(), TransportError>> {
+            async move { Ok(()) }.boxed()
+        }
+    }
+
+    fn tool(name: &str) -> TransportTool {
+        TransportTool {
+            name: name.to_string(),
+            description: Some(format!("{name} description")),
+            input_schema: json!({ "type": "object" }),
+        }
+    }
+
+    fn text_result(text: &str) -> McpToolResult {
+        McpToolResult {
+            content: vec![slab_mcp_client::McpContent {
+                content_type: "text".to_string(),
+                fields: serde_json::Map::from_iter([("text".to_string(), json!(text))]),
+            }],
+            is_error: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn list_tools_aggregates_tools_by_server() {
+        let client = McpClient::new();
+        client
+            .insert_server_for_test(
+                "alpha",
+                Arc::new(FakeServer::new(vec![tool("echo")], text_result(""))),
+            )
+            .await;
+        client
+            .insert_server_for_test(
+                "beta",
+                Arc::new(FakeServer::new(vec![tool("search")], text_result(""))),
+            )
+            .await;
+
+        let mut tools = client.list_tools().await.expect("tools");
+        tools.sort_by(|left, right| left.server_name.cmp(&right.server_name));
+
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0].server_name, "alpha");
+        assert_eq!(tools[0].name, "echo");
+        assert_eq!(tools[1].server_name, "beta");
+        assert_eq!(tools[1].name, "search");
+        assert_eq!(client.cached_tools_blocking().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn call_tool_routes_to_named_server() {
+        let client = McpClient::new();
+        let server = Arc::new(FakeServer::new(vec![tool("echo")], text_result("hello")));
+        client.insert_server_for_test("alpha", server.clone()).await;
+
+        let result = client
+            .call_tool("alpha", "echo", json!({ "message": "hello" }))
+            .await
+            .expect("tool result");
+
+        assert_eq!(result.content[0].fields["text"], "hello");
+        assert_eq!(server.calls(), vec![("echo".to_string(), json!({ "message": "hello" }))]);
+    }
+
+    #[tokio::test]
+    async fn call_tool_returns_server_not_found() {
+        let client = McpClient::new();
+        let error =
+            client.call_tool("missing", "echo", json!({})).await.expect_err("missing server");
+
+        assert!(matches!(error, McpClientError::ServerNotFound(name) if name == "missing"));
+    }
 }

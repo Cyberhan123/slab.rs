@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "bin/slab-app/src-tauri",
     "bin/slab-windows-full-installer",
+    "bin/slab-mcp-server",
     "bin/slab-server",
     "bin/slab-runtime",
     "crates/slab-proto",
@@ -33,6 +34,7 @@ members = [
     "crates/slab-file-system",
     "crates/slab-git",
     "crates/slab-shell-command",
+    "crates/slab-mcp-client",
     "crates/slab-mcp",
 ]
 
@@ -79,7 +81,9 @@ slab-file-watcher = { path = "./crates/slab-file-watcher", package = "slab-file-
 slab-file-system = { path = "./crates/slab-file-system", package = "slab-file-system", version = "0.1.0" }
 slab-git = { path = "./crates/slab-git", package = "slab-git", version = "0.1.0" }
 slab-shell-command = { path = "./crates/slab-shell-command", package = "slab-shell-command", version = "0.1.0" }
+slab-mcp-client = { path = "./crates/slab-mcp-client", package = "slab-mcp-client", version = "0.1.0" }
 slab-mcp = { path = "./crates/slab-mcp", package = "slab-mcp", version = "0.1.0" }
+slab-mcp-server = { path = "./bin/slab-mcp-server", package = "slab-mcp-server", version = "0.1.0" }
 
 notify = "8"
 ignore = "0.4"

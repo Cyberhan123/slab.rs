@@ -1,18 +1,16 @@
 [package]
-name = "slab-mcp"
+name = "slab-mcp-client"
 version.workspace = true
 edition.workspace = true
-description = "MCP protocol client and server helpers for Slab"
+description = "Single-connection MCP client transport for Slab"
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
 license.workspace = true
 
 [dependencies]
-slab-mcp-client = { workspace = true }
-futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "process", "sync"] }
 tracing = { workspace = true }

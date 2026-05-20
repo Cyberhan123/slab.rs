@@ -10368,13 +10368,35 @@ dependencies = [
 name = "slab-mcp"
 version = "0.1.0"
 dependencies = [
- "async-trait",
+ "futures",
  "serde",
  "serde_json",
- "slab-agent",
+ "slab-mcp-client",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "slab-mcp-client"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "slab-mcp-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
