@@ -41,8 +41,6 @@ impl SandboxDriver for WindowsSandboxDriver {
                 command.current_dir(cwd);
             }
 
-            // CREATE_SUSPENDED so we can assign to a job object before it runs
-            command.creation_flags(0x00000004);
             command.kill_on_drop(true);
 
             let spawned = command.spawn().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
