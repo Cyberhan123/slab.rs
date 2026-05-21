@@ -27,6 +27,7 @@
     "test": "bun run test:frontend && bun run test:server && bun run test:rust",
     "test:frontend": "vitest run --project api --project plugin-sdk --project desktop --project desktop-browser --project components-browser",
     "test:rust": "vitest run --project rust",
+    "test:sandbox": "cargo test -p slab-sandboxing --test smoke -- --nocapture",
     "test:browser": "vitest run --project desktop-browser --project components-browser",
     "test:components": "vitest run --project components-browser",
     "test:run": "vitest run",

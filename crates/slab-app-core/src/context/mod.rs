@@ -112,17 +112,32 @@ fn build_agent_control(
 ) -> slab_agent::AgentControl {
     use slab_agent::{AgentControl, ToolRouter};
     use slab_agent_tools::ShellPolicy;
+    use slab_sandboxing::{SandboxEnvironment, SandboxPolicy, create_platform_driver};
 
     let llm =
         Arc::new(crate::infra::agent_adapter::ServerLlmAdapter::new(Arc::clone(&ctx.model_state)));
     let store_adapter: Arc<dyn slab_agent::port::AgentStorePort> = store;
+    let workspace_root =
+        crate::domain::services::workspace_root_from_settings_path(&ctx.config.settings_path);
+    let sandbox_driver = workspace_root.clone().and_then(|root| {
+        let env = SandboxEnvironment::new(Some(root), SandboxPolicy::WorkspaceWrite);
+        match create_platform_driver(env) {
+            Ok(driver) => available_sandbox_driver(driver),
+            Err(error) => {
+                tracing::warn!(%error, "sandbox driver is unavailable; shell tool stays blocked");
+                None
+            }
+        }
+    });
+    let shell_policy =
+        if sandbox_driver.is_some() { ShellPolicy::Allow } else { ShellPolicy::Block };
 
     let mut tool_router = ToolRouter::new();
     slab_agent_tools::register_all_tools(
         &mut tool_router,
-        ShellPolicy::Block,
-        None,
-        None,
+        shell_policy,
+        sandbox_driver,
+        workspace_root,
         None,
         false,
     );
@@ -131,6 +146,72 @@ fn build_agent_control(
     let approval_port: Arc<dyn slab_agent::ApprovalPort> = notify;
 
     AgentControl::new(llm, store_adapter, notify_port, approval_port, Arc::new(tool_router), 32, 4)
+}
+
+fn available_sandbox_driver(
+    driver: Arc<dyn slab_sandboxing::SandboxDriver>,
+) -> Option<Arc<dyn slab_sandboxing::SandboxDriver>> {
+    let status = driver.setup_status();
+    if !status.available {
+        tracing::warn!(
+            details = %status.details,
+            "sandbox driver is unavailable; shell tool stays blocked"
+        );
+        return None;
+    }
+    if status.degraded {
+        tracing::warn!(details = %status.details, "sandbox driver is degraded");
+    }
+    Some(driver)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use slab_sandboxing::{SandboxDriver, SandboxError, SandboxSetupStatus, SandboxedCommand};
+
+    use super::available_sandbox_driver;
+
+    struct StatusDriver {
+        status: SandboxSetupStatus,
+    }
+
+    #[async_trait]
+    impl SandboxDriver for StatusDriver {
+        async fn run(
+            &self,
+            _cmd: SandboxedCommand,
+        ) -> Result<slab_sandboxing::SandboxedOutput, SandboxError> {
+            unreachable!("status tests do not execute the sandbox driver")
+        }
+
+        fn name(&self) -> &str {
+            "status"
+        }
+
+        fn setup_status(&self) -> SandboxSetupStatus {
+            self.status.clone()
+        }
+    }
+
+    #[test]
+    fn unavailable_sandbox_driver_is_rejected() {
+        let driver = Arc::new(StatusDriver {
+            status: SandboxSetupStatus::unavailable("missing sandbox runtime"),
+        });
+
+        assert!(available_sandbox_driver(driver).is_none());
+    }
+
+    #[test]
+    fn degraded_available_sandbox_driver_is_allowed() {
+        let driver =
+            Arc::new(StatusDriver { status: SandboxSetupStatus::degraded("guard-only mode") });
+
+        assert!(available_sandbox_driver(driver).is_some());
+    }
 }
 
 #[cfg(feature = "axum")]

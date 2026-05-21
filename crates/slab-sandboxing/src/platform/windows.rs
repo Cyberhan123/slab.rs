@@ -1,21 +1,13 @@
 use async_trait::async_trait;
-use slab_sandboxing::{
-    SandboxDriver, SandboxEnvironment, SandboxError, SandboxedCommand, SandboxedOutput,
-};
-#[cfg(target_os = "windows")]
 use tracing::{debug, warn};
-#[cfg(target_os = "windows")]
-use windows_sys::Win32::{
-    Foundation::{CloseHandle, HANDLE},
-    System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-        SetInformationJobObject,
-    },
+
+use crate::{
+    SandboxCapabilities, SandboxDriver, SandboxEnvironment, SandboxError, SandboxIsolation,
+    SandboxPlatform, SandboxSetupStatus, SandboxedCommand, SandboxedOutput,
+    guard::validate_command,
 };
 
 pub struct WindowsSandboxDriver {
-    #[allow(dead_code)]
     env: SandboxEnvironment,
 }
 
@@ -40,17 +32,24 @@ impl SandboxDriver for WindowsSandboxDriver {
 
         #[cfg(target_os = "windows")]
         {
+            use std::process::Stdio;
+
+            use crate::driver::{command_env, wait_for_child};
+
+            validate_command(&self.env, &cmd)?;
+
             let program = cmd.argv.first().ok_or(SandboxError::EmptyCommand)?;
             let mut command = tokio::process::Command::new(program);
             command.args(&cmd.argv[1..]);
-            for (k, v) in &cmd.env {
-                command.env(k, v);
+            for (key, value) in command_env(&self.env, &cmd) {
+                command.env(key, value);
             }
             if let Some(ref cwd) = cmd.cwd {
                 command.current_dir(cwd);
             }
-
             command.kill_on_drop(true);
+            command.stdout(Stdio::piped());
+            command.stderr(Stdio::piped());
 
             let spawned = command.spawn().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
             let job = JobHandle::new()?;
@@ -58,34 +57,53 @@ impl SandboxDriver for WindowsSandboxDriver {
             let process_handle = spawned.raw_handle().ok_or_else(|| {
                 SandboxError::SetupFailed("spawned child has no process handle".to_string())
             })?;
-            job.assign_process(process_handle as HANDLE)?;
+            job.assign_process(process_handle as windows_sys::Win32::Foundation::HANDLE)?;
 
             debug!(pid = spawned.id(), "spawned process in Windows Job Object");
+            let output = wait_for_child(spawned, cmd.timeout).await?;
+            drop(job);
+            Ok(output)
+        }
+    }
 
-            let result = if let Some(timeout) = cmd.timeout {
-                tokio::time::timeout(timeout, spawned.wait_with_output())
-                    .await
-                    .map_err(|_| SandboxError::Timeout)?
-                    .map_err(|e| SandboxError::SpawnFailed(e.to_string()))?
+    async fn prepare(&self) -> Result<SandboxSetupStatus, SandboxError> {
+        Ok(self.setup_status())
+    }
+
+    fn capabilities(&self) -> SandboxCapabilities {
+        SandboxCapabilities {
+            platform: SandboxPlatform::Windows,
+            isolation: SandboxIsolation::Degraded,
+            filesystem: true,
+            network: true,
+            process_cleanup: true,
+            setup_required: self.env.permissions.platform.windows_setup_required,
+        }
+    }
+
+    fn setup_status(&self) -> SandboxSetupStatus {
+        #[cfg(target_os = "windows")]
+        {
+            if self.env.permissions.platform.windows_setup_required {
+                SandboxSetupStatus::degraded(
+                    "Windows elevated sandbox setup is required before full Codex-style token, ACL, and firewall isolation.",
+                )
             } else {
-                spawned
-                    .wait_with_output()
-                    .await
-                    .map_err(|e| SandboxError::SpawnFailed(e.to_string()))?
-            };
+                SandboxSetupStatus::degraded(
+                    "Windows Job Object cleanup and Slab policy guard are active; elevated token, ACL, and firewall setup has not been requested.",
+                )
+            }
+        }
 
-            Ok(SandboxedOutput {
-                exit_code: result.status.code().unwrap_or(-1),
-                stdout: result.stdout,
-                stderr: result.stderr,
-                timed_out: false,
-            })
+        #[cfg(not(target_os = "windows"))]
+        {
+            SandboxSetupStatus::unavailable("Windows sandbox is only available on Windows")
         }
     }
 }
 
 #[cfg(target_os = "windows")]
-struct JobHandle(HANDLE);
+struct JobHandle(windows_sys::Win32::Foundation::HANDLE);
 
 #[cfg(target_os = "windows")]
 unsafe impl Send for JobHandle {}
@@ -93,6 +111,8 @@ unsafe impl Send for JobHandle {}
 #[cfg(target_os = "windows")]
 impl JobHandle {
     fn new() -> Result<Self, SandboxError> {
+        use windows_sys::Win32::System::JobObjects::CreateJobObjectW;
+
         let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
         if handle.is_null() {
             return Err(SandboxError::SetupFailed(format!(
@@ -104,6 +124,11 @@ impl JobHandle {
     }
 
     fn configure_kill_on_close(&self) -> Result<(), SandboxError> {
+        use windows_sys::Win32::System::JobObjects::{
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JobObjectExtendedLimitInformation, SetInformationJobObject,
+        };
+
         let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
         info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         let ok = unsafe {
@@ -123,7 +148,12 @@ impl JobHandle {
         Ok(())
     }
 
-    fn assign_process(&self, process: HANDLE) -> Result<(), SandboxError> {
+    fn assign_process(
+        &self,
+        process: windows_sys::Win32::Foundation::HANDLE,
+    ) -> Result<(), SandboxError> {
+        use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
+
         let ok = unsafe { AssignProcessToJobObject(self.0, process) };
         if ok == 0 {
             let error = std::io::Error::last_os_error();
@@ -140,7 +170,7 @@ impl JobHandle {
 impl Drop for JobHandle {
     fn drop(&mut self) {
         unsafe {
-            CloseHandle(self.0);
+            windows_sys::Win32::Foundation::CloseHandle(self.0);
         }
     }
 }
