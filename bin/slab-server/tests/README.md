@@ -1,61 +1,56 @@
 # Server tests
 
-This directory keeps a legacy Python/pytest test suite and now supports
-Vitest-based migration tests.
+This directory contains the Vitest suite for `slab-server`.
 
-## Legacy Python tests (being phased out)
+## Test groups
 
-- Python unit/integration checks under `unit/`
-- Run with `pytest` (or `tests.sh`)
-- These are legacy compatibility checks and should be migrated to Vitest incrementally.
-
-## Vitest tests
-
-- Unit migration tests: `unit/**/*.unit.test.ts`
+- Unit tests: `unit/**/*.unit.test.ts`
 - Integration tests: `integration/**/*.integration.test.ts`
-- Unit tests self-start an isolated `slab-server` with temp settings/db/model dirs
-- The unit-test harness writes a minimal V2 `settings.json` that binds the HTTP server
-  to the test-selected port and disables managed runtime backends, so route-level tests
-  do not spend startup time launching local GGML children
-- Integration tests target `http://127.0.0.1:3000` by default
-- Override integration target base URL with `SLAB_SERVER_BASE_URL`
+- Smoke tests: `smoke/**/*.smoke.test.ts`
 
-Run the full migrated Vitest suite from the repo root:
+The shared harness starts an isolated `slab-server` with temp settings, database,
+and model config directories. It writes a minimal V2 `settings.json`, binds the
+server to a test-selected port, and disables managed GGML children so default
+route coverage stays offline and deterministic.
+
+Smoke tests may also target an existing server:
+
+```sh
+SLAB_SERVER_BASE_URL=http://127.0.0.1:3000 bun run test:smoke
+```
+
+## Commands
+
+Run the full Vitest project from the repo root:
 
 ```sh
 bun run test:server
 ```
 
-Run unit tests:
+Run the local suite from this directory:
 
 ```sh
-cd bin/slab-server/tests
+bun run test
 bun run test:unit
-```
-
-Run integration tests:
-
-```sh
-cd bin/slab-server/tests
 bun run test:integration
+bun run test:smoke
 ```
 
 Watch mode:
 
 ```sh
-cd bin/slab-server/tests
 bun run test:unit:watch
-```
-
-```sh
-cd bin/slab-server/tests
 bun run test:integration:watch
+bun run test:smoke:watch
 ```
 
-## Migration status
+## Smoke policy
 
-- `unit/server-basics.unit.test.ts` now covers the useful legacy checks from
-  `unit/test_basic.py` and `unit/test_security.py` against the current
-  `slab-server` API surface.
-- Remaining Python files are legacy compatibility tests and should be migrated
-  selectively instead of copied 1:1 when their covered routes still matter.
+The smoke suite covers the current `/v1/*` API boundary and `/health`. Runtime
+heavy routes assert stable validation, not-found, or error-envelope behavior
+instead of downloading models or requiring inference.
+
+Every documented current method/path in `/api-docs/openapi.json` must have either
+an executable smoke case or an explicit `it.todo` marker. Legacy llama-server
+compatibility scenarios that are not implemented in Slab are represented as
+future `/v1/*` TODO smoke presets rather than non-`/v1` routes.

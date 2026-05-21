@@ -8,6 +8,8 @@
     "test:unit:watch": "vitest --config vitest.config.ts unit/**/*.unit.test.ts",
     "test:integration": "vitest run --config vitest.config.ts integration/**/*.integration.test.ts",
     "test:integration:watch": "vitest --config vitest.config.ts integration/**/*.integration.test.ts",
+    "test:smoke": "vitest run --config vitest.config.ts smoke/**/*.smoke.test.ts",
+    "test:smoke:watch": "vitest --config vitest.config.ts smoke/**/*.smoke.test.ts",
     "test": "vitest run --config vitest.config.ts"
   },
   "devDependencies": {
