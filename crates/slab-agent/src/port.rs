@@ -85,11 +85,7 @@ pub struct ToolCallRecord {
     pub completed_at: Option<String>,
 }
 
-// ── Turn streaming event ──────────────────────────────────────────────────────
-
 /// A streaming event emitted during a single LLM turn.
-///
-/// Modelled after the codex `app-server` item stream protocol.
 #[derive(Debug, Clone)]
 pub enum TurnEvent {
     /// A fragment of the assistant's text response.

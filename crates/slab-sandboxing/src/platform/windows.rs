@@ -86,7 +86,7 @@ impl SandboxDriver for WindowsSandboxDriver {
         {
             if self.env.permissions.platform.windows_setup_required {
                 SandboxSetupStatus::degraded(
-                    "Windows elevated sandbox setup is required before full Codex-style token, ACL, and firewall isolation.",
+                    "Windows elevated sandbox setup is required before full token, ACL, and firewall isolation.",
                 )
             } else {
                 SandboxSetupStatus::degraded(

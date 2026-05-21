@@ -1,4 +1,4 @@
-//! Agent hook system (modelled after `codex-hooks`).
+//! Agent hook system
 //!
 //! Hooks let host code intercept tool calls before and after execution,
 //! as well as session-start and stop events.

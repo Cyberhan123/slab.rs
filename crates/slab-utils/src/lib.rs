@@ -2,3 +2,8 @@ pub mod cab;
 pub mod loader;
 pub mod path;
 pub mod pty;
+pub mod fuzzy_match;
+pub mod time;
+pub mod sleep_inhibitor;
+pub mod json;
+pub mod string;

@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used)]
-
+// this file is copied from https://github.com/openai/codex codex-utils-pty, which is MIT licensed. See the original source for license details:
 // This file is copied from https://github.com/wezterm/wezterm (MIT license).
 // Copyright (c) 2018-Present Wez Furlong
 // Permission is hereby granted, free of charge, to any person obtaining a copy
