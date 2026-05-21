@@ -23,6 +23,13 @@ slab-llama-sys = { workspace = true }
 slab-whisper-sys = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 uuid = { workspace = true }
+dirs = { workspace = true }
+dunce = { workspace = true }
+schemars = { workspace = true }
+ts-rs = { workspace = true, features = [
+    "serde-json-impl",
+    "no-serde-warnings",
+] }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

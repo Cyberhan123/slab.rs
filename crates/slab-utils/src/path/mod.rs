@@ -1,3 +1,5 @@
+pub mod absolute;
+
 use std::path::{Component, Path};
 
 use anyhow::{Result, bail};
