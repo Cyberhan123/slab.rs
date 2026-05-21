@@ -242,53 +242,7 @@ impl From<AbsolutePathBuf> for PathBuf {
 
 /// Helpers for constructing absolute paths in tests.
 pub mod test_support {
-    use super::AbsolutePathBuf;
-    use std::path::Path;
-    use std::path::PathBuf;
-
-    /// Creates a platform-absolute [`PathBuf`] from a Unix-style absolute test path.
-    ///
-    /// On Windows, `/tmp/example` maps to `C:\tmp\example`.
-    pub fn test_path_buf(unix_path: &str) -> PathBuf {
-        if cfg!(windows) {
-            let mut path = PathBuf::from(r"C:\");
-            path.extend(
-                unix_path
-                    .trim_start_matches('/')
-                    .split('/')
-                    .filter(|segment| !segment.is_empty()),
-            );
-            path
-        } else {
-            PathBuf::from(unix_path)
-        }
-    }
-
-    /// Extension methods for converting paths into [`AbsolutePathBuf`] values in tests.
-    pub trait PathExt {
-        /// Converts an already absolute path into an [`AbsolutePathBuf`].
-        fn abs(&self) -> AbsolutePathBuf;
-    }
-
-    impl PathExt for Path {
-        #[expect(clippy::expect_used)]
-        fn abs(&self) -> AbsolutePathBuf {
-            AbsolutePathBuf::from_absolute_path_checked(self)
-                .expect("path should already be absolute")
-        }
-    }
-
-    /// Extension methods for converting path buffers into [`AbsolutePathBuf`] values in tests.
-    pub trait PathBufExt {
-        /// Converts an already absolute path buffer into an [`AbsolutePathBuf`].
-        fn abs(&self) -> AbsolutePathBuf;
-    }
-
-    impl PathBufExt for PathBuf {
-        fn abs(&self) -> AbsolutePathBuf {
-            self.as_path().abs()
-        }
-    }
+  
 }
 
 impl TryFrom<&Path> for AbsolutePathBuf {
@@ -371,12 +325,59 @@ impl<'de> Deserialize<'de> for AbsolutePathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::test_path_buf;
     use pretty_assertions::assert_eq;
     use std::fs;
     #[cfg(unix)]
     use std::process::Command;
     use tempfile::tempdir;
+
+      use super::AbsolutePathBuf;
+    use std::path::Path;
+    use std::path::PathBuf;
+
+    /// Creates a platform-absolute [`PathBuf`] from a Unix-style absolute test path.
+    ///
+    /// On Windows, `/tmp/example` maps to `C:\tmp\example`.
+    pub fn test_path_buf(unix_path: &str) -> PathBuf {
+        if cfg!(windows) {
+            let mut path = PathBuf::from(r"C:\");
+            path.extend(
+                unix_path
+                    .trim_start_matches('/')
+                    .split('/')
+                    .filter(|segment| !segment.is_empty()),
+            );
+            path
+        } else {
+            PathBuf::from(unix_path)
+        }
+    }
+
+    /// Extension methods for converting paths into [`AbsolutePathBuf`] values in tests.
+    pub trait PathExt {
+        /// Converts an already absolute path into an [`AbsolutePathBuf`].
+        fn abs(&self) -> AbsolutePathBuf;
+    }
+
+    impl PathExt for Path {
+        #[expect(clippy::expect_used)]
+        fn abs(&self) -> AbsolutePathBuf {
+            AbsolutePathBuf::from_absolute_path_checked(self)
+                .expect("path should already be absolute")
+        }
+    }
+
+    /// Extension methods for converting path buffers into [`AbsolutePathBuf`] values in tests.
+    pub trait PathBufExt {
+        /// Converts an already absolute path buffer into an [`AbsolutePathBuf`].
+        fn abs(&self) -> AbsolutePathBuf;
+    }
+
+    impl PathBufExt for PathBuf {
+        fn abs(&self) -> AbsolutePathBuf {
+            self.as_path().abs()
+        }
+    }
 
     #[test]
     fn create_with_absolute_path_ignores_base_path() {
