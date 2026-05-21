@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
-use slab_file_system::FileSystemError;
+use slab_file::FileSystemError;
 use slab_git::{GitCommitOptions, GitError, GitRepository};
 use slab_utils::pty::spawn_pipe_process_no_stdin;
 use tokio::sync::mpsc;
@@ -182,13 +182,13 @@ impl WorkspaceService {
             return Ok(WorkspaceFileSearchView { query, entries: Vec::new(), truncated: false });
         }
 
-        let mut options = slab_file_search::FileSearchOptions::new(root.as_ref(), &query);
+        let mut options = slab_file::search::FileSearchOptions::new(root.as_ref(), &query);
         options.limit = MAX_SEARCH_RESULTS;
         options.include_dirs = false;
         options.include_hidden = false;
         options.extra_ignore_names =
             IGNORED_DIR_NAMES.iter().map(|name| (*name).to_string()).collect();
-        let snapshot = slab_file_search::run(options)
+        let snapshot = slab_file::search::run(options)
             .map_err(|error| AppCoreError::Internal(error.to_string()))?;
         let entries = snapshot
             .matches

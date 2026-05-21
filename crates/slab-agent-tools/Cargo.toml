@@ -10,8 +10,7 @@ license.workspace = true
 
 [dependencies]
 slab-agent    = { workspace = true }
-slab-file-system = { workspace = true }
-slab-file-watcher = { workspace = true }
+slab-file = { workspace = true }
 slab-git = { workspace = true }
 slab-mcp = { workspace = true }
 slab-sandboxing = { workspace = true }

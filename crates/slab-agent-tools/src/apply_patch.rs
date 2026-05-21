@@ -49,9 +49,9 @@ impl ToolHandler for ApplyPatchTool {
             .and_then(Value::as_str)
             .ok_or_else(|| AgentError::ToolExecution("missing 'patch' argument".into()))?;
 
-        let result = match slab_file_system::apply_unified_patch(&self.workspace_root, patch) {
+        let result = match slab_file::apply_unified_patch(&self.workspace_root, patch) {
             Ok(result) => result,
-            Err(error) => slab_file_system::PatchApplyResult {
+            Err(error) => slab_file::PatchApplyResult {
                 applied_files: Vec::new(),
                 result: "error".to_string(),
                 error_message: Some(error.to_string()),

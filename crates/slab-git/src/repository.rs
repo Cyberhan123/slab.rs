@@ -195,7 +195,7 @@ impl GitRepository {
 }
 
 fn validate_relative_path(path: &str) -> Result<String, GitError> {
-    let normalized = slab_file_system::normalize_relative_path(path)
+    let normalized = slab_file::normalize_relative_path(path)
         .map_err(|error| GitError::InvalidPath(error.to_string()))?;
     if GIT_INTERNAL_PATH.is_match(&normalized) {
         return Err(GitError::InvalidPath("Git internals cannot be edited".to_string()));

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use async_trait::async_trait;
-use slab_file_system::{
+use slab_file::{
     CopyOptions, DirectoryEntry, ExecutorFileSystem, FileMetadata, FileSystemError,
     FileSystemSandboxContext, FileSystemSandboxPolicy, RemoveOptions,
 };
@@ -30,7 +30,7 @@ impl LocalExecutorFileSystem {
     }
 
     pub fn resolve_existing(&self, relative_path: &str) -> Result<PathBuf, FileSystemError> {
-        slab_file_system::resolve_path(self.context.workspace_root.as_deref(), relative_path)
+        slab_file::resolve_path(self.context.workspace_root.as_deref(), relative_path)
     }
 
     pub fn read_file_bytes(&self, relative_path: &str) -> Result<Vec<u8>, FileSystemError> {
@@ -69,7 +69,7 @@ impl ExecutorFileSystem for LocalExecutorFileSystem {
         context: &FileSystemSandboxContext,
         path: &str,
     ) -> Result<Vec<u8>, FileSystemError> {
-        let path = slab_file_system::resolve_path(context.workspace_root.as_deref(), path)?;
+        let path = slab_file::resolve_path(context.workspace_root.as_deref(), path)?;
         Ok(tokio::fs::read(path).await?)
     }
 
@@ -79,7 +79,7 @@ impl ExecutorFileSystem for LocalExecutorFileSystem {
         path: &str,
         content: &[u8],
     ) -> Result<(), FileSystemError> {
-        let path = slab_file_system::resolve_path(context.workspace_root.as_deref(), path)?;
+        let path = slab_file::resolve_path(context.workspace_root.as_deref(), path)?;
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
@@ -92,7 +92,7 @@ impl ExecutorFileSystem for LocalExecutorFileSystem {
         context: &FileSystemSandboxContext,
         path: &str,
     ) -> Result<(), FileSystemError> {
-        let path = slab_file_system::resolve_path(context.workspace_root.as_deref(), path)?;
+        let path = slab_file::resolve_path(context.workspace_root.as_deref(), path)?;
         tokio::fs::create_dir_all(path).await?;
         Ok(())
     }
@@ -102,7 +102,7 @@ impl ExecutorFileSystem for LocalExecutorFileSystem {
         context: &FileSystemSandboxContext,
         path: &str,
     ) -> Result<FileMetadata, FileSystemError> {
-        let path = slab_file_system::resolve_path(context.workspace_root.as_deref(), path)?;
+        let path = slab_file::resolve_path(context.workspace_root.as_deref(), path)?;
         metadata_for_path(&path)
     }
 
@@ -112,8 +112,8 @@ impl ExecutorFileSystem for LocalExecutorFileSystem {
         path: &str,
     ) -> Result<Vec<DirectoryEntry>, FileSystemError> {
         let root = context.workspace_root.as_deref();
-        let relative_path = slab_file_system::normalize_relative_path(path)?;
-        let directory = slab_file_system::resolve_path(root, &relative_path)?;
+        let relative_path = slab_file::normalize_relative_path(path)?;
+        let directory = slab_file::resolve_path(root, &relative_path)?;
         let mut read_dir = tokio::fs::read_dir(directory).await?;
         let mut entries = Vec::new();
         while let Some(entry) = read_dir.next_entry().await? {
@@ -135,7 +135,7 @@ impl ExecutorFileSystem for LocalExecutorFileSystem {
         path: &str,
         options: RemoveOptions,
     ) -> Result<(), FileSystemError> {
-        let path = slab_file_system::resolve_path(context.workspace_root.as_deref(), path)?;
+        let path = slab_file::resolve_path(context.workspace_root.as_deref(), path)?;
         let metadata = tokio::fs::metadata(&path).await?;
         if metadata.is_dir() {
             if options.recursive {
@@ -156,8 +156,8 @@ impl ExecutorFileSystem for LocalExecutorFileSystem {
         to: &str,
         options: CopyOptions,
     ) -> Result<(), FileSystemError> {
-        let from = slab_file_system::resolve_path(context.workspace_root.as_deref(), from)?;
-        let to = slab_file_system::resolve_path(context.workspace_root.as_deref(), to)?;
+        let from = slab_file::resolve_path(context.workspace_root.as_deref(), from)?;
+        let to = slab_file::resolve_path(context.workspace_root.as_deref(), to)?;
         if to.exists() && !options.overwrite {
             return Err(FileSystemError::InvalidPath(to.display().to_string()));
         }

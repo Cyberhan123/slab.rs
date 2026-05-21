@@ -73,7 +73,7 @@ Keep this file focused on always-on constraints. For module-specific role, stack
 - Agent control plane: `crates/slab-agent/README.md`
 - Built-in agent tools: `crates/slab-agent-tools/README.md`
 - Agent shell execution: `crates/slab-shell-command/README.md`
-- Agent filesystem helpers: `crates/slab-file-system/README.md`
+- Agent filesystem helpers: `crates/slab-file/README.md`
 - Agent Git helpers: `crates/slab-git/README.md`
 - Agent MCP protocol helpers: `crates/slab-mcp/README.md`
 - Model hub abstraction: `crates/slab-hub/README.md`

@@ -1,8 +1,8 @@
 [package]
-name = "slab-file-search"
+name = "slab-file"
 version.workspace = true
 edition.workspace = true
-description = "Gitignore-aware fuzzy file search for Slab workspaces"
+description = "Workspace-safe filesystem helpers, search, and watcher support for Slab"
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
@@ -10,10 +10,15 @@ license.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+async-trait = { workspace = true }
 crossbeam-channel = { workspace = true }
 ignore = { workspace = true }
+notify = { workspace = true }
 nucleo = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
