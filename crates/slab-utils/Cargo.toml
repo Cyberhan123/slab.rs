@@ -30,9 +30,12 @@ ts-rs = { workspace = true, features = [
     "serde-json-impl",
     "no-serde-warnings",
 ] }
+tracing = { workspace = true }
+regex-lite = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+tempfile = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 filedescriptor = { workspace = true }
@@ -50,6 +53,12 @@ winapi = { workspace = true, features = [
     "winnt",
 ] }
 windows = { workspace = true }
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Power",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+] }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

@@ -9014,6 +9014,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "regex-lite"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cab834c73d247e67f4fae452806d17d3c7501756d98c8808d7c9c7aa7d18f973"
+
+[[package]]
 name = "regex-syntax"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10626,6 +10632,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "dirs",
+ "dunce",
  "filedescriptor",
  "hex",
  "lazy_static",
@@ -10634,6 +10642,8 @@ dependencies = [
  "log",
  "portable-pty",
  "pretty_assertions",
+ "regex-lite",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -10642,10 +10652,14 @@ dependencies = [
  "slab-ggml-sys",
  "slab-llama-sys",
  "slab-whisper-sys",
+ "tempfile",
  "tokio",
+ "tracing",
+ "ts-rs",
  "uuid",
  "winapi",
  "windows 0.62.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
