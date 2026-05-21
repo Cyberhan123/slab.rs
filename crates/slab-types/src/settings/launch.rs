@@ -27,12 +27,7 @@ use crate::{DESKTOP_API_BIND, DESKTOP_API_HOST, DESKTOP_API_PORT};
     parse_err_fn = parse_runtime_transport_mode_error
 )]
 pub enum RuntimeTransportMode {
-    #[strum(
-        to_string = "http",
-        serialize = "http",
-        serialize = "both",
-        ascii_case_insensitive
-    )]
+    #[strum(to_string = "http", serialize = "http", serialize = "both", ascii_case_insensitive)]
     #[default]
     Http,
     #[strum(to_string = "ipc", serialize = "ipc", ascii_case_insensitive)]

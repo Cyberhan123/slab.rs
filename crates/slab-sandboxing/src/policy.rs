@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -59,7 +59,10 @@ impl ExecPolicy {
                 }
             }
             SandboxPolicy::ReadOnly => {
-                if matches!(tool_name, "write_file" | "shell" | "exec" | "run_command" | "git_commit") {
+                if matches!(
+                    tool_name,
+                    "write_file" | "shell" | "exec" | "run_command" | "git_commit"
+                ) {
                     ExecPolicy::Deny
                 } else {
                     ExecPolicy::AutoApprove

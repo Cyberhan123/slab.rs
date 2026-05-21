@@ -58,9 +58,8 @@ pub(crate) fn parse_transport_endpoint(raw: &str) -> Result<TransportEndpoint> {
 pub(crate) fn http_probe_authority(raw: &str) -> Result<String> {
     let trimmed = raw.trim();
     let url = parse_http_connect_url(trimmed)?;
-    let host = url
-        .host_str()
-        .ok_or_else(|| anyhow!("HTTP endpoint '{trimmed}' is missing a host"))?;
+    let host =
+        url.host_str().ok_or_else(|| anyhow!("HTTP endpoint '{trimmed}' is missing a host"))?;
     let port = url.port_or_known_default();
 
     Ok(match port {
@@ -100,13 +99,10 @@ fn parse_http_connect_url(raw: &str) -> Result<Url> {
         bail!("HTTP endpoint is empty");
     }
 
-    let candidate = if trimmed.contains("://") {
-        trimmed.to_owned()
-    } else {
-        format!("http://{trimmed}")
-    };
-    let url = Url::parse(&candidate)
-        .with_context(|| format!("invalid HTTP endpoint '{trimmed}'"))?;
+    let candidate =
+        if trimmed.contains("://") { trimmed.to_owned() } else { format!("http://{trimmed}") };
+    let url =
+        Url::parse(&candidate).with_context(|| format!("invalid HTTP endpoint '{trimmed}'"))?;
     ensure_http_scheme(url, trimmed)
 }
 
@@ -154,10 +150,7 @@ mod tests {
 
     #[test]
     fn http_probe_authority_extracts_host_and_port() {
-        assert_eq!(
-            http_probe_authority("http://127.0.0.1:50052/v1").unwrap(),
-            "127.0.0.1:50052"
-        );
+        assert_eq!(http_probe_authority("http://127.0.0.1:50052/v1").unwrap(), "127.0.0.1:50052");
     }
 
     #[test]

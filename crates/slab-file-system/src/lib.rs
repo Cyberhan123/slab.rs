@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -39,6 +40,108 @@ pub struct PatchApplyResult {
     pub applied_files: Vec<String>,
     pub result: String,
     pub error_message: Option<String>,
+}
+
+/// Sandbox policy metadata attached to filesystem operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FileSystemSandboxPolicy {
+    #[default]
+    ReadOnly,
+    WorkspaceWrite,
+    DangerFullAccess,
+}
+
+/// Filesystem permission context supplied by host layers.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FileSystemSandboxContext {
+    pub policy: FileSystemSandboxPolicy,
+    pub cwd: Option<PathBuf>,
+    pub workspace_root: Option<PathBuf>,
+    pub readable_roots: Vec<PathBuf>,
+    pub writable_roots: Vec<PathBuf>,
+    pub denied_paths: Vec<PathBuf>,
+}
+
+/// Metadata returned by filesystem implementations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileMetadata {
+    pub is_file: bool,
+    pub is_directory: bool,
+    pub is_symlink: bool,
+    pub size_bytes: u64,
+    pub modified_at: u64,
+    pub created_at: u64,
+}
+
+/// Directory entry returned by filesystem implementations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectoryEntry {
+    pub name: String,
+    pub path: String,
+    pub metadata: FileMetadata,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveOptions {
+    pub recursive: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyOptions {
+    pub overwrite: bool,
+}
+
+/// Abstract filesystem access used by local and remote execution environments.
+#[async_trait]
+pub trait ExecutorFileSystem: Send + Sync {
+    async fn read_file(
+        &self,
+        context: &FileSystemSandboxContext,
+        path: &str,
+    ) -> Result<Vec<u8>, FileSystemError>;
+
+    async fn write_file(
+        &self,
+        context: &FileSystemSandboxContext,
+        path: &str,
+        content: &[u8],
+    ) -> Result<(), FileSystemError>;
+
+    async fn create_directory(
+        &self,
+        context: &FileSystemSandboxContext,
+        path: &str,
+    ) -> Result<(), FileSystemError>;
+
+    async fn get_metadata(
+        &self,
+        context: &FileSystemSandboxContext,
+        path: &str,
+    ) -> Result<FileMetadata, FileSystemError>;
+
+    async fn read_directory(
+        &self,
+        context: &FileSystemSandboxContext,
+        path: &str,
+    ) -> Result<Vec<DirectoryEntry>, FileSystemError>;
+
+    async fn remove(
+        &self,
+        context: &FileSystemSandboxContext,
+        path: &str,
+        options: RemoveOptions,
+    ) -> Result<(), FileSystemError>;
+
+    async fn copy(
+        &self,
+        context: &FileSystemSandboxContext,
+        from: &str,
+        to: &str,
+        options: CopyOptions,
+    ) -> Result<(), FileSystemError>;
 }
 
 pub fn normalize_relative_path(raw: &str) -> Result<String, FileSystemError> {

@@ -69,8 +69,8 @@ mod tests {
 
     #[tokio::test]
     async fn ui_state_store_round_trips_values() {
-        let options =
-            sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:").expect("sqlite options");
+        let options = sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")
+            .expect("sqlite options");
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(1)
             .connect_with(options)

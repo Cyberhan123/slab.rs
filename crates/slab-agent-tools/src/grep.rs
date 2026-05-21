@@ -87,10 +87,7 @@ impl ToolHandler for GrepTool {
             .ok_or_else(|| AgentError::ToolExecution("missing 'pattern' argument".into()))?
             .to_owned();
 
-        let path_str = arguments
-            .get("path")
-            .and_then(Value::as_str)
-            .unwrap_or(".");
+        let path_str = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
 
         let glob_str = arguments.get("glob").and_then(Value::as_str).map(str::to_owned);
         let case_insensitive =
@@ -107,10 +104,9 @@ impl ToolHandler for GrepTool {
             let resolved = root.join(path_str);
             // Verify the resolved path stays within the workspace root.
             // For non-existent paths we fall back to a lexical prefix check.
-            let canonical_root =
-                root.canonicalize().map_err(|e| AgentError::ToolExecution(format!(
-                    "failed to canonicalize workspace root: {e}"
-                )))?;
+            let canonical_root = root.canonicalize().map_err(|e| {
+                AgentError::ToolExecution(format!("failed to canonicalize workspace root: {e}"))
+            })?;
             if let Ok(canonical_resolved) = resolved.canonicalize() {
                 if !canonical_resolved.starts_with(&canonical_root) {
                     return Err(AgentError::ToolExecution(format!(
@@ -130,13 +126,14 @@ impl ToolHandler for GrepTool {
             .map_err(|e| AgentError::ToolExecution(format!("invalid regex '{pattern}': {e}")))?;
 
         // Run the blocking scan on a dedicated thread so we don't block the async runtime.
-        let results =
-            tokio::task::spawn_blocking(move || grep_blocking(&search_root, &re, glob_str.as_deref()))
-                .await
-                .map_err(|e| AgentError::ToolExecution(format!("grep task panicked: {e}")))?;
+        let results = tokio::task::spawn_blocking(move || {
+            grep_blocking(&search_root, &re, glob_str.as_deref())
+        })
+        .await
+        .map_err(|e| AgentError::ToolExecution(format!("grep task panicked: {e}")))?;
 
-        let results = results
-            .map_err(|e| AgentError::ToolExecution(format!("grep failed: {e}")))?;
+        let results =
+            results.map_err(|e| AgentError::ToolExecution(format!("grep failed: {e}")))?;
 
         Ok(ToolOutput {
             content: serde_json::json!({

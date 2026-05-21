@@ -69,7 +69,10 @@ impl SandboxDriver for PassThroughDriver {
                 .map_err(|_| SandboxError::Timeout)?
                 .map_err(|e| SandboxError::SpawnFailed(e.to_string()))?
         } else {
-            spawned.wait_with_output().await.map_err(|e| SandboxError::SpawnFailed(e.to_string()))?
+            spawned
+                .wait_with_output()
+                .await
+                .map_err(|e| SandboxError::SpawnFailed(e.to_string()))?
         };
 
         Ok(SandboxedOutput {

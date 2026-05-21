@@ -86,8 +86,8 @@ mod tests {
 
     #[tokio::test]
     async fn state_store_round_trips_selection_after_migration() {
-        let options =
-            sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:").expect("sqlite options");
+        let options = sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")
+            .expect("sqlite options");
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(1)
             .connect_with(options)

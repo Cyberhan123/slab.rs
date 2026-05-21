@@ -18,9 +18,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use dashmap::DashMap;
-use slab_agent::port::{
-    AgentNotifyPort, ApprovalDecision, ApprovalPort, ThreadStatus, TurnEvent,
-};
+use slab_agent::port::{AgentNotifyPort, ApprovalDecision, ApprovalPort, ThreadStatus, TurnEvent};
 use tokio::sync::{broadcast, oneshot};
 use tracing::{debug, warn};
 
@@ -125,11 +123,8 @@ impl ApprovalPort for SseNotifyAdapter {
 
         // Wait for an operator decision, but auto-reject after the timeout so
         // the agent turn is never permanently blocked.
-        let decision = tokio::time::timeout(
-            std::time::Duration::from_secs(APPROVAL_TIMEOUT_SECS),
-            rx,
-        )
-        .await;
+        let decision =
+            tokio::time::timeout(std::time::Duration::from_secs(APPROVAL_TIMEOUT_SECS), rx).await;
 
         // Always clean up the pending entry regardless of outcome.
         self.approvals.remove(&key);
@@ -137,11 +132,18 @@ impl ApprovalPort for SseNotifyAdapter {
         match decision {
             Ok(Ok(d)) => d,
             Ok(Err(_)) => {
-                warn!(call_id, thread_id, "approval channel closed without a decision; auto-rejecting");
+                warn!(
+                    call_id,
+                    thread_id, "approval channel closed without a decision; auto-rejecting"
+                );
                 ApprovalDecision::Rejected
             }
             Err(_elapsed) => {
-                warn!(call_id, thread_id, "approval request timed out after {APPROVAL_TIMEOUT_SECS}s; auto-rejecting");
+                warn!(
+                    call_id,
+                    thread_id,
+                    "approval request timed out after {APPROVAL_TIMEOUT_SECS}s; auto-rejecting"
+                );
                 ApprovalDecision::Rejected
             }
         }

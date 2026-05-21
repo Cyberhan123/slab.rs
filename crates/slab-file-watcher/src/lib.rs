@@ -8,4 +8,7 @@ mod error;
 mod watcher;
 
 pub use error::WatcherError;
-pub use watcher::{FileEvent, FileEventKind, FileWatcher, Subscriber, WatchPath};
+pub use watcher::{
+    FileEvent, FileEventKind, FileWatcher, FileWatcherSubscriber, Subscriber,
+    ThrottledWatchReceiver, WatchPath,
+};

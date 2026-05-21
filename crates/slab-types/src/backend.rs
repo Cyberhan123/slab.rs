@@ -9,17 +9,7 @@ use crate::error::SlabTypeError;
 /// Canonical backend identifiers exposed on the runtime boundary today.
 #[non_exhaustive]
 #[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    Display,
-    EnumString,
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, Display, EnumString,
 )]
 #[serde(rename_all = "snake_case")]
 #[strum(
