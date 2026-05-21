@@ -4,7 +4,10 @@ import type {
   RustVitestProjectOptions,
 } from "./types.ts";
 
-const runtimeTestFile = fileURLToPath(new URL("./runtime/rust.test.ts", import.meta.url));
+const runtimeTestFile = fileURLToPath(new URL("./runtime/rust.test.ts", import.meta.url)).replaceAll(
+  "\\",
+  "/",
+);
 
 export function createRustVitestProject(
   options: RustVitestProjectOptions = {},
