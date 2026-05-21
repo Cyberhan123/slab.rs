@@ -29,8 +29,7 @@ slab-hub          = { workspace = true }
 slab-utils        = { workspace = true }
 slab-subtitle     = { workspace = true }
 slab-git          = { workspace = true }
-slab-file-search  = { workspace = true }
-slab-file-system  = { workspace = true }
+slab-file         = { workspace = true }
 slab-sandboxing   = { workspace = true }
 
 # Async runtime

@@ -1,4 +1,4 @@
-//! Gitignore-aware fuzzy file search.
+//! Gitignore-aware fuzzy file search helpers.
 
 use std::collections::HashSet;
 use std::path::PathBuf;

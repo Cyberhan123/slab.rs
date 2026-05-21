@@ -543,11 +543,8 @@ mod tests {
 
     fn temp_root(name: &str) -> PathBuf {
         let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "slab_file_system_{name}_{}_{}",
-            std::process::id(),
-            nonce
-        ));
+        let root =
+            std::env::temp_dir().join(format!("slab_file_{name}_{}_{}", std::process::id(), nonce));
         fs::create_dir_all(&root).expect("create temp root");
         root
     }

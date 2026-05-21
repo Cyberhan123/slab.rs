@@ -1,14 +1,26 @@
+//! File-system change watcher.
+//!
+//! A lightweight wrapper around the `notify` crate that provides a
+//! subscriber-based API compatible with the `codex-file-watcher` interface
+//! used by `slab-agent-tools`.
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tracing::{debug, warn};
 
-use crate::error::WatcherError;
+/// Errors produced by the file watcher.
+#[derive(Debug, Error)]
+pub enum WatcherError {
+    #[error("notify error: {0}")]
+    Notify(#[from] notify::Error),
+}
 
 /// A path to watch along with its recursion mode.
 #[derive(Debug, Clone)]

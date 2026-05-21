@@ -10116,8 +10116,7 @@ dependencies = [
  "serde_json",
  "shlex",
  "slab-agent",
- "slab-file-system",
- "slab-file-watcher",
+ "slab-file",
  "slab-git",
  "slab-mcp",
  "slab-sandboxing",
@@ -10193,8 +10192,7 @@ dependencies = [
  "sha2 0.11.0",
  "slab-agent",
  "slab-agent-tools",
- "slab-file-search",
- "slab-file-system",
+ "slab-file",
  "slab-git",
  "slab-hub",
  "slab-libfetch",
@@ -10261,35 +10259,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "slab-file-search"
+name = "slab-file"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "crossbeam-channel",
  "ignore",
+ "notify",
  "nucleo",
  "pretty_assertions",
  "serde",
- "tempfile",
-]
-
-[[package]]
-name = "slab-file-system"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "serde",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "slab-file-watcher"
-version = "0.1.0"
-dependencies = [
- "notify",
- "pretty_assertions",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -10331,7 +10311,7 @@ dependencies = [
  "schemars 1.2.1",
  "serde",
  "similar",
- "slab-file-system",
+ "slab-file",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

@@ -29,9 +29,7 @@ members = [
     "crates/slab-hub",
     "crates/slab-sandboxing",
     "crates/slab-macos-sandbox",
-    "crates/slab-file-watcher",
-    "crates/slab-file-search",
-    "crates/slab-file-system",
+    "crates/slab-file",
     "crates/slab-git",
     "crates/slab-shell-command",
     "crates/slab-mcp-client",
@@ -76,9 +74,7 @@ slab-ggml-sys     = { path = "./crates/slab-ggml-sys", package = "slab-ggml-sys"
 slab-ggml         = { path = "./crates/slab-ggml", package = "slab-ggml", version = "0.1.0" }
 slab-sandboxing   = { path = "./crates/slab-sandboxing", package = "slab-sandboxing", version = "0.1.0" }
 slab-macos-sandbox = { path = "./crates/slab-macos-sandbox", package = "slab-macos-sandbox", version = "0.1.0" }
-slab-file-watcher = { path = "./crates/slab-file-watcher", package = "slab-file-watcher", version = "0.1.0" }
-slab-file-search = { path = "./crates/slab-file-search", package = "slab-file-search", version = "0.1.0" }
-slab-file-system = { path = "./crates/slab-file-system", package = "slab-file-system", version = "0.1.0" }
+slab-file = { path = "./crates/slab-file", package = "slab-file", version = "0.1.0" }
 slab-git = { path = "./crates/slab-git", package = "slab-git", version = "0.1.0" }
 slab-shell-command = { path = "./crates/slab-shell-command", package = "slab-shell-command", version = "0.1.0" }
 slab-mcp-client = { path = "./crates/slab-mcp-client", package = "slab-mcp-client", version = "0.1.0" }

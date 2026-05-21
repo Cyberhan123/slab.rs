@@ -11,7 +11,7 @@ license.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 chrono = { workspace = true }
-slab-file-system = { workspace = true }
+slab-file = { workspace = true }
 gix = { workspace = true }
 once_cell = { workspace = true }
 regex = { workspace = true }

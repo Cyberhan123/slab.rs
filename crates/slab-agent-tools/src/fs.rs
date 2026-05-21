@@ -48,7 +48,7 @@ impl ToolHandler for ReadFileTool {
         let path = string_arg(arguments, "path")?;
         let start_line = arguments.get("start_line").and_then(Value::as_u64).unwrap_or(1) as usize;
         let end_line = arguments.get("end_line").and_then(Value::as_u64).map(|v| v as usize);
-        let raw = slab_file_system::read_to_string(self.workspace_root.as_deref(), path)
+        let raw = slab_file::read_to_string(self.workspace_root.as_deref(), path)
             .await
             .map_err(to_tool_error)?;
 
@@ -110,7 +110,7 @@ impl ToolHandler for WriteFileTool {
     ) -> Result<ToolOutput, AgentError> {
         let path = string_arg(arguments, "path")?;
         let content = string_arg(arguments, "content")?;
-        slab_file_system::write_string(self.workspace_root.as_deref(), path, content)
+        slab_file::write_string(self.workspace_root.as_deref(), path, content)
             .await
             .map_err(to_tool_error)?;
 
@@ -161,7 +161,7 @@ impl ToolHandler for ListDirTool {
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
         let path = string_arg(arguments, "path")?;
-        let entries = slab_file_system::list_dir(self.workspace_root.as_deref(), path)
+        let entries = slab_file::list_dir(self.workspace_root.as_deref(), path)
             .await
             .map_err(to_tool_error)?;
 
@@ -179,6 +179,6 @@ fn string_arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, AgentErro
         .ok_or_else(|| AgentError::ToolExecution(format!("missing '{name}' argument")))
 }
 
-fn to_tool_error(error: slab_file_system::FileSystemError) -> AgentError {
+fn to_tool_error(error: slab_file::FileSystemError) -> AgentError {
     AgentError::ToolExecution(error.to_string())
 }
