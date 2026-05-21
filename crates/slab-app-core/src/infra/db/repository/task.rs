@@ -128,20 +128,33 @@ impl TaskStore for AnyStore {
             .bind(id)
             .fetch_optional(&self.pool)
             .await?;
-        Ok(row.map(|(id, task_type, status, model_id, input_data, result_data, error_msg, core_task_id, created_at, updated_at)| {
-            TaskRecord {
+        Ok(row.map(
+            |(
                 id,
                 task_type,
-                status: decode_task_status(&status),
+                status,
                 model_id,
                 input_data,
-                result_data: decode_task_payload(result_data),
+                result_data,
                 error_msg,
                 core_task_id,
                 created_at,
                 updated_at,
-            }
-        }))
+            )| {
+                TaskRecord {
+                    id,
+                    task_type,
+                    status: decode_task_status(&status),
+                    model_id,
+                    input_data,
+                    result_data: decode_task_payload(result_data),
+                    error_msg,
+                    core_task_id,
+                    created_at,
+                    updated_at,
+                }
+            },
+        ))
     }
 
     async fn list_tasks(&self, task_type: Option<&str>) -> Result<Vec<TaskRecord>, sqlx::Error> {
@@ -163,20 +176,33 @@ impl TaskStore for AnyStore {
         };
         Ok(rows
             .into_iter()
-            .map(|(id, task_type, status, model_id, input_data, result_data, error_msg, core_task_id, created_at, updated_at)| {
-                TaskRecord {
+            .map(
+                |(
                     id,
                     task_type,
-                    status: decode_task_status(&status),
+                    status,
                     model_id,
                     input_data,
-                    result_data: decode_task_payload(result_data),
+                    result_data,
                     error_msg,
                     core_task_id,
                     created_at,
                     updated_at,
-                }
-            })
+                )| {
+                    TaskRecord {
+                        id,
+                        task_type,
+                        status: decode_task_status(&status),
+                        model_id,
+                        input_data,
+                        result_data: decode_task_payload(result_data),
+                        error_msg,
+                        core_task_id,
+                        created_at,
+                        updated_at,
+                    }
+                },
+            )
             .collect())
     }
 

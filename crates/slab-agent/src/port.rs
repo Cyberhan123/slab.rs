@@ -203,4 +203,3 @@ pub trait AgentNotifyPort: Send + Sync {
     /// care about status changes do not need to be updated.
     async fn on_turn_event(&self, _thread_id: &str, _event: &TurnEvent) {}
 }
-

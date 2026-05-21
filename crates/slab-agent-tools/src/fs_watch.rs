@@ -8,9 +8,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use slab_file_watcher::{FileWatcher, WatchPath};
 use serde_json::Value;
 use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
+use slab_file_watcher::{FileWatcher, WatchPath};
 
 /// Watch a path for file-system changes and return the list of changed paths.
 ///
@@ -102,11 +102,8 @@ impl ToolHandler for FsWatchTool {
             Err(_) => (vec![], true),
             Ok(None) => (vec![], false),
             Ok(Some(event)) => {
-                let paths: Vec<String> = event
-                    .paths
-                    .into_iter()
-                    .filter_map(|p| p.to_str().map(str::to_owned))
-                    .collect();
+                let paths: Vec<String> =
+                    event.paths.into_iter().filter_map(|p| p.to_str().map(str::to_owned)).collect();
                 (paths, false)
             }
         };

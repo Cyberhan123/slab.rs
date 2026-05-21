@@ -1,18 +1,17 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::fs::{self, File};
-use std::io::Read;
-use std::path::{Component, Path, PathBuf};
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use dirs_next::config_dir;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use slab_app_core::domain::models::{
-    WorkspaceConsoleOutput, WorkspaceGitCommitCommand, WorkspaceGitDiffCommand,
-    WorkspaceGitDiffView, WorkspaceGitOperationView, WorkspaceGitPathCommand,
-    WorkspaceGitStatusView, WorkspaceWriteFileCommand, WorkspaceWriteFileView,
+    WorkspaceConsoleOutput, WorkspaceDirectoryView, WorkspaceFileContent, WorkspaceFileSearchView,
+    WorkspaceGitCommitCommand, WorkspaceGitDiffCommand, WorkspaceGitDiffView,
+    WorkspaceGitOperationView, WorkspaceGitPathCommand, WorkspaceGitStatusView,
+    WorkspacePathMetadata, WorkspaceWriteFileCommand, WorkspaceWriteFileView,
 };
 use slab_app_core::domain::services::WorkspaceService;
 use slab_types::{settings::SettingsDocument, sqlite_url_for_path};
@@ -26,7 +25,6 @@ const WORKSPACE_CONFIG_FILE: &str = "workspace.json";
 const SETTINGS_FILE: &str = "settings.json";
 const DATABASE_FILE: &str = "slab.db";
 const MAX_RECENT_WORKSPACES: usize = 10;
-const MAX_DIRECTORY_ENTRIES: usize = 500;
 pub(crate) const MAX_FILE_BYTES: u64 = 1024 * 1024;
 pub(crate) const MAX_SEARCH_RESULTS: usize = 100;
 const IGNORED_DIR_NAMES: &[&str] = &[
@@ -89,65 +87,6 @@ pub struct WorkspaceStateResponse {
     pub current: Option<WorkspaceInfo>,
     pub recent: Vec<RecentWorkspace>,
     pub config: Option<WorkspaceConfig>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceDirectoryResponse {
-    pub relative_path: String,
-    pub entries: Vec<WorkspaceFileEntry>,
-    pub truncated: bool,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceFileSearchResponse {
-    pub query: String,
-    pub entries: Vec<WorkspaceFileEntry>,
-    pub truncated: bool,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceFileEntry {
-    pub id: String,
-    pub name: String,
-    pub relative_path: String,
-    pub kind: WorkspaceFileKind,
-    pub has_children: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub size_bytes: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub modified_at: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<u64>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum WorkspaceFileKind {
-    Directory,
-    File,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspacePathMetadata {
-    pub relative_path: String,
-    pub kind: WorkspaceFileKind,
-    pub size_bytes: u64,
-    pub modified_at: u64,
-    pub created_at: u64,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceFileContent {
-    pub relative_path: String,
-    pub name: String,
-    pub content: String,
-    pub size_bytes: u64,
-    pub content_hash: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -258,70 +197,14 @@ pub fn workspace_read_directory(
     state: State<'_, WorkspaceState>,
     relative_path: Option<String>,
     include_ignored: Option<bool>,
-) -> Result<WorkspaceDirectoryResponse, String> {
+) -> Result<WorkspaceDirectoryView, String> {
     let workspace = active_workspace(&state)?;
-    let relative_path = normalize_relative_path(relative_path.as_deref().unwrap_or(""))?;
-    let root = PathBuf::from(&workspace.root_path);
-    let directory = resolve_workspace_path(&root, &relative_path)?;
-    if !directory.is_dir() {
-        return Err(format!("workspace path `{relative_path}` is not a directory"));
-    }
-
-    let mut entries = Vec::new();
-    let mut truncated = false;
-    let include_ignored = include_ignored.unwrap_or(false);
-    let max_entries = if include_ignored { usize::MAX } else { MAX_DIRECTORY_ENTRIES };
-    for entry in fs::read_dir(&directory)
-        .map_err(|error| format!("failed to read directory {}: {error}", directory.display()))?
-    {
-        if entries.len() >= max_entries {
-            truncated = true;
-            break;
-        }
-
-        let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
-        let file_type =
-            entry.file_type().map_err(|error| format!("failed to read file type: {error}"))?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if should_hide_entry(&name, file_type.is_dir(), include_ignored) {
-            continue;
-        }
-
-        let entry_relative_path = join_relative_path(&relative_path, &name);
-        let entry_metadata = entry.metadata().ok();
-        entries.push(WorkspaceFileEntry {
-            id: if entry_relative_path.is_empty() {
-                name.clone()
-            } else {
-                entry_relative_path.clone()
-            },
-            name,
-            relative_path: entry_relative_path,
-            kind: if file_type.is_dir() {
-                WorkspaceFileKind::Directory
-            } else {
-                WorkspaceFileKind::File
-            },
-            has_children: file_type.is_dir(),
-            size_bytes: entry_metadata
-                .as_ref()
-                .map(|metadata| if metadata.is_file() { metadata.len() } else { 0 }),
-            modified_at: entry_metadata
-                .as_ref()
-                .map(|metadata| system_time_millis(metadata.modified())),
-            created_at: entry_metadata
-                .as_ref()
-                .map(|metadata| system_time_millis(metadata.created())),
-        });
-    }
-
-    entries.sort_by(|left, right| match (&left.kind, &right.kind) {
-        (WorkspaceFileKind::Directory, WorkspaceFileKind::File) => std::cmp::Ordering::Less,
-        (WorkspaceFileKind::File, WorkspaceFileKind::Directory) => std::cmp::Ordering::Greater,
-        _ => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
-    });
-
-    Ok(WorkspaceDirectoryResponse { relative_path, entries, truncated })
+    WorkspaceService::read_directory(
+        PathBuf::from(workspace.root_path),
+        relative_path.as_deref(),
+        include_ignored.unwrap_or(false),
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -330,26 +213,8 @@ pub fn workspace_stat_path(
     relative_path: String,
 ) -> Result<WorkspacePathMetadata, String> {
     let workspace = active_workspace(&state)?;
-    let relative_path = normalize_relative_path(&relative_path)?;
-    let root = PathBuf::from(&workspace.root_path);
-    let path = resolve_workspace_path(&root, &relative_path)?;
-    let metadata = fs::metadata(&path)
-        .map_err(|error| format!("failed to read path metadata {}: {error}", path.display()))?;
-    let kind = if metadata.is_dir() {
-        WorkspaceFileKind::Directory
-    } else if metadata.is_file() {
-        WorkspaceFileKind::File
-    } else {
-        return Err(format!("workspace path `{relative_path}` is not a file or directory"));
-    };
-
-    Ok(WorkspacePathMetadata {
-        relative_path,
-        kind,
-        size_bytes: if metadata.is_file() { metadata.len() } else { 0 },
-        modified_at: system_time_millis(metadata.modified()),
-        created_at: system_time_millis(metadata.created()),
-    })
+    WorkspaceService::stat_path(PathBuf::from(workspace.root_path), &relative_path)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -358,67 +223,18 @@ pub fn workspace_read_file(
     relative_path: String,
 ) -> Result<WorkspaceFileContent, String> {
     let workspace = active_workspace(&state)?;
-    let relative_path = normalize_relative_path(&relative_path)?;
-    let root = PathBuf::from(&workspace.root_path);
-    let path = resolve_workspace_path(&root, &relative_path)?;
-    if !path.is_file() {
-        return Err(format!("workspace path `{relative_path}` is not a file"));
-    }
-
-    let metadata = fs::metadata(&path)
-        .map_err(|error| format!("failed to read file metadata {}: {error}", path.display()))?;
-    if metadata.len() > MAX_FILE_BYTES {
-        return Err(format!(
-            "file is too large to preview ({} bytes, limit {} bytes)",
-            metadata.len(),
-            MAX_FILE_BYTES
-        ));
-    }
-
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    File::open(&path)
-        .map_err(|error| format!("failed to open file {}: {error}", path.display()))?
-        .take(MAX_FILE_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|error| format!("failed to read file {}: {error}", path.display()))?;
-    if bytes.contains(&0) {
-        return Err("binary files cannot be previewed".to_string());
-    }
-    let content = String::from_utf8(bytes).map_err(|_| "file is not valid UTF-8".to_string())?;
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(relative_path.as_str())
-        .to_owned();
-
-    let content_hash = content_hash(content.as_bytes());
-
-    Ok(WorkspaceFileContent {
-        relative_path,
-        name,
-        size_bytes: metadata.len(),
-        content,
-        content_hash,
-    })
+    WorkspaceService::read_file(PathBuf::from(workspace.root_path), &relative_path)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 pub fn workspace_search_files(
     state: State<'_, WorkspaceState>,
     query: String,
-) -> Result<WorkspaceFileSearchResponse, String> {
+) -> Result<WorkspaceFileSearchView, String> {
     let workspace = active_workspace(&state)?;
-    let query = query.trim().to_lowercase();
-    if query.is_empty() {
-        return Ok(WorkspaceFileSearchResponse { query, entries: Vec::new(), truncated: false });
-    }
-
-    let root = PathBuf::from(&workspace.root_path);
-    let mut entries = Vec::new();
-    let mut truncated = false;
-    search_workspace_files(&root, "", &query, &mut entries, &mut truncated)?;
-
-    Ok(WorkspaceFileSearchResponse { query, entries, truncated })
+    WorkspaceService::search_files(PathBuf::from(workspace.root_path), &query)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -676,49 +492,6 @@ fn write_json_file<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
         .map_err(|error| format!("failed to write JSON file {}: {error}", path.display()))
 }
 
-fn normalize_relative_path(raw: &str) -> Result<String, String> {
-    let trimmed = raw.trim().trim_matches(['/', '\\']);
-    if trimmed.is_empty() {
-        return Ok(String::new());
-    }
-
-    let mut parts = Vec::new();
-    for component in Path::new(trimmed).components() {
-        match component {
-            Component::Normal(segment) => {
-                let segment = segment.to_string_lossy();
-                if segment == SLAB_DIR_NAME {
-                    return Err(
-                        "workspace internals cannot be opened from the file tree".to_string()
-                    );
-                }
-                parts.push(segment.to_string());
-            }
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(format!("workspace path `{raw}` is invalid"));
-            }
-        }
-    }
-
-    Ok(parts.join("/"))
-}
-
-fn resolve_workspace_path(root: &Path, relative_path: &str) -> Result<PathBuf, String> {
-    let candidate =
-        if relative_path.is_empty() { root.to_path_buf() } else { root.join(relative_path) };
-    let canonical_root = root
-        .canonicalize()
-        .map_err(|error| format!("failed to resolve workspace root {}: {error}", root.display()))?;
-    let canonical_candidate = candidate.canonicalize().map_err(|error| {
-        format!("failed to resolve workspace path {}: {error}", candidate.display())
-    })?;
-    if !canonical_candidate.starts_with(&canonical_root) {
-        return Err(format!("workspace path `{relative_path}` escapes the workspace root"));
-    }
-    Ok(canonical_candidate)
-}
-
 pub(crate) fn join_relative_path(parent: &str, name: &str) -> String {
     if parent.is_empty() { name.to_owned() } else { format!("{parent}/{name}") }
 }
@@ -727,59 +500,6 @@ pub(crate) fn should_hide_entry(name: &str, is_directory: bool, include_ignored:
     !include_ignored
         && is_directory
         && IGNORED_DIR_NAMES.iter().any(|ignored| ignored.eq_ignore_ascii_case(name))
-}
-
-fn search_workspace_files(
-    directory: &Path,
-    relative_path: &str,
-    query: &str,
-    entries: &mut Vec<WorkspaceFileEntry>,
-    truncated: &mut bool,
-) -> Result<(), String> {
-    if entries.len() >= MAX_SEARCH_RESULTS {
-        *truncated = true;
-        return Ok(());
-    }
-
-    for entry in fs::read_dir(directory)
-        .map_err(|error| format!("failed to read directory {}: {error}", directory.display()))?
-    {
-        if entries.len() >= MAX_SEARCH_RESULTS {
-            *truncated = true;
-            break;
-        }
-
-        let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
-        let file_type =
-            entry.file_type().map_err(|error| format!("failed to read file type: {error}"))?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if should_hide_entry(&name, file_type.is_dir(), false) {
-            continue;
-        }
-
-        let entry_relative_path = join_relative_path(relative_path, &name);
-        if file_type.is_dir() {
-            search_workspace_files(&entry.path(), &entry_relative_path, query, entries, truncated)?;
-            continue;
-        }
-
-        if !entry_relative_path.to_lowercase().contains(query) {
-            continue;
-        }
-
-        entries.push(WorkspaceFileEntry {
-            id: entry_relative_path.clone(),
-            name,
-            relative_path: entry_relative_path,
-            kind: WorkspaceFileKind::File,
-            has_children: false,
-            size_bytes: None,
-            modified_at: None,
-            created_at: None,
-        });
-    }
-
-    Ok(())
 }
 
 #[cfg(windows)]
@@ -814,34 +534,11 @@ fn now_millis() -> u64 {
         .unwrap_or(0)
 }
 
-fn system_time_millis(time: Result<SystemTime, std::io::Error>) -> u64 {
-    time.ok()
-        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or(0)
-}
-
-fn content_hash(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{normalize_relative_path, validate_plugin_id};
+    use super::validate_plugin_id;
     use slab_types::sqlite_url_for_path;
     use std::path::Path;
-
-    #[test]
-    fn normalize_relative_path_rejects_workspace_internals() {
-        assert!(normalize_relative_path(".slab/settings.json").is_err());
-    }
-
-    #[test]
-    fn normalize_relative_path_rejects_parent_segments() {
-        assert!(normalize_relative_path("../secret.txt").is_err());
-    }
 
     #[test]
     fn validate_plugin_id_accepts_manifest_style_ids() {

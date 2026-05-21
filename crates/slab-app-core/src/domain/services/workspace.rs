@@ -4,26 +4,209 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
+use slab_file_system::FileSystemError;
 use slab_git::{GitCommitOptions, GitError, GitRepository};
 use tokio::process::Command as TokioCommand;
 use tokio::time::timeout;
 
 use crate::domain::models::{
     WorkspaceConsoleOutput, WorkspaceCreateDirectoryCommand, WorkspaceCreateFileCommand,
-    WorkspaceDeletePathCommand, WorkspaceGitDiffView, WorkspaceGitOperationView,
-    WorkspaceGitStatusView, WorkspacePathView, WorkspaceRenamePathCommand,
+    WorkspaceDeletePathCommand, WorkspaceDirectoryView, WorkspaceFileContent, WorkspaceFileEntry,
+    WorkspaceFileKind, WorkspaceFileSearchView, WorkspaceGitDiffView, WorkspaceGitOperationView,
+    WorkspaceGitStatusView, WorkspacePathMetadata, WorkspacePathView, WorkspaceRenamePathCommand,
     WorkspaceWriteFileCommand, WorkspaceWriteFileView,
 };
 use crate::error::AppCoreError;
 
+use super::workspace_file_system::LocalExecutorFileSystem;
+
 const CONSOLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_CONSOLE_COMMAND_BYTES: usize = 2_000;
 const MAX_CONSOLE_OUTPUT_BYTES: usize = 64 * 1024;
+const MAX_DIRECTORY_ENTRIES: usize = 500;
+const MAX_FILE_BYTES: u64 = 1024 * 1024;
+const MAX_SEARCH_RESULTS: usize = 100;
 const MAX_WRITE_FILE_BYTES: usize = 2 * 1024 * 1024;
+const SLAB_DIR_NAME: &str = ".slab";
+const IGNORED_DIR_NAMES: &[&str] = &[
+    SLAB_DIR_NAME,
+    ".git",
+    ".hg",
+    ".svn",
+    ".idea",
+    ".vscode",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    ".next",
+    ".turbo",
+    ".cache",
+];
 
 pub struct WorkspaceService;
 
 impl WorkspaceService {
+    pub fn read_directory(
+        root: impl AsRef<Path>,
+        relative_path: Option<&str>,
+        include_ignored: bool,
+    ) -> Result<WorkspaceDirectoryView, AppCoreError> {
+        let relative_path = normalize_relative_path(relative_path.unwrap_or(""))?;
+        let fs = LocalExecutorFileSystem::new(root.as_ref()).map_err(map_fs_error)?;
+        let metadata = fs.metadata_sync(&relative_path).map_err(map_fs_error)?;
+        if !metadata.is_directory {
+            return Err(AppCoreError::BadRequest(format!(
+                "workspace path `{relative_path}` is not a directory"
+            )));
+        }
+
+        let max_entries = if include_ignored { usize::MAX } else { MAX_DIRECTORY_ENTRIES };
+        let mut entries = Vec::new();
+        let mut truncated = false;
+        for entry in fs.read_directory_sync(&relative_path).map_err(map_fs_error)? {
+            if should_hide_entry(&entry.name, entry.metadata.is_directory, include_ignored) {
+                continue;
+            }
+            if entries.len() >= max_entries {
+                truncated = true;
+                break;
+            }
+
+            entries.push(WorkspaceFileEntry {
+                id: entry.path.clone(),
+                name: entry.name,
+                relative_path: entry.path,
+                kind: if entry.metadata.is_directory {
+                    WorkspaceFileKind::Directory
+                } else {
+                    WorkspaceFileKind::File
+                },
+                has_children: entry.metadata.is_directory,
+                size_bytes: Some(if entry.metadata.is_file {
+                    entry.metadata.size_bytes
+                } else {
+                    0
+                }),
+                modified_at: Some(entry.metadata.modified_at),
+                created_at: Some(entry.metadata.created_at),
+            });
+        }
+
+        entries.sort_by(|left, right| match (&left.kind, &right.kind) {
+            (WorkspaceFileKind::Directory, WorkspaceFileKind::File) => std::cmp::Ordering::Less,
+            (WorkspaceFileKind::File, WorkspaceFileKind::Directory) => std::cmp::Ordering::Greater,
+            (WorkspaceFileKind::Directory, WorkspaceFileKind::Directory)
+            | (WorkspaceFileKind::File, WorkspaceFileKind::File) => {
+                left.name.to_lowercase().cmp(&right.name.to_lowercase())
+            }
+        });
+
+        Ok(WorkspaceDirectoryView { relative_path, entries, truncated })
+    }
+
+    pub fn stat_path(
+        root: impl AsRef<Path>,
+        relative_path: &str,
+    ) -> Result<WorkspacePathMetadata, AppCoreError> {
+        let relative_path = normalize_relative_path(relative_path)?;
+        let fs = LocalExecutorFileSystem::new(root.as_ref()).map_err(map_fs_error)?;
+        let metadata = fs.metadata_sync(&relative_path).map_err(map_fs_error)?;
+        let kind = if metadata.is_directory {
+            WorkspaceFileKind::Directory
+        } else if metadata.is_file {
+            WorkspaceFileKind::File
+        } else {
+            return Err(AppCoreError::BadRequest(format!(
+                "workspace path `{relative_path}` is not a file or directory"
+            )));
+        };
+
+        Ok(WorkspacePathMetadata {
+            relative_path,
+            kind,
+            size_bytes: if metadata.is_file { metadata.size_bytes } else { 0 },
+            modified_at: metadata.modified_at,
+            created_at: metadata.created_at,
+        })
+    }
+
+    pub fn read_file(
+        root: impl AsRef<Path>,
+        relative_path: &str,
+    ) -> Result<WorkspaceFileContent, AppCoreError> {
+        let relative_path = normalize_relative_path(relative_path)?;
+        let fs = LocalExecutorFileSystem::new(root.as_ref()).map_err(map_fs_error)?;
+        let metadata = fs.metadata_sync(&relative_path).map_err(map_fs_error)?;
+        if !metadata.is_file {
+            return Err(AppCoreError::BadRequest(format!(
+                "workspace path `{relative_path}` is not a file"
+            )));
+        }
+        if metadata.size_bytes > MAX_FILE_BYTES {
+            return Err(AppCoreError::BadRequest(format!(
+                "file is too large to preview ({} bytes, limit {} bytes)",
+                metadata.size_bytes, MAX_FILE_BYTES
+            )));
+        }
+
+        let bytes = fs.read_file_bytes(&relative_path).map_err(map_fs_error)?;
+        if bytes.contains(&0) {
+            return Err(AppCoreError::BadRequest("binary files cannot be previewed".to_string()));
+        }
+        let content = String::from_utf8(bytes)
+            .map_err(|_| AppCoreError::BadRequest("file is not valid UTF-8".to_string()))?;
+        let name = Path::new(&relative_path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(relative_path.as_str())
+            .to_owned();
+        let content_hash = content_hash(content.as_bytes());
+
+        Ok(WorkspaceFileContent {
+            relative_path,
+            name,
+            content,
+            size_bytes: metadata.size_bytes,
+            content_hash,
+        })
+    }
+
+    pub fn search_files(
+        root: impl AsRef<Path>,
+        query: &str,
+    ) -> Result<WorkspaceFileSearchView, AppCoreError> {
+        let query = query.trim().to_lowercase();
+        if query.is_empty() {
+            return Ok(WorkspaceFileSearchView { query, entries: Vec::new(), truncated: false });
+        }
+
+        let mut options = slab_file_search::FileSearchOptions::new(root.as_ref(), &query);
+        options.limit = MAX_SEARCH_RESULTS;
+        options.include_dirs = false;
+        options.include_hidden = false;
+        options.extra_ignore_names =
+            IGNORED_DIR_NAMES.iter().map(|name| (*name).to_string()).collect();
+        let snapshot = slab_file_search::run(options)
+            .map_err(|error| AppCoreError::Internal(error.to_string()))?;
+        let entries = snapshot
+            .matches
+            .into_iter()
+            .map(|matched| WorkspaceFileEntry {
+                id: matched.relative_path.clone(),
+                name: matched.name,
+                relative_path: matched.relative_path,
+                kind: WorkspaceFileKind::File,
+                has_children: false,
+                size_bytes: None,
+                modified_at: None,
+                created_at: None,
+            })
+            .collect();
+
+        Ok(WorkspaceFileSearchView { query, entries, truncated: snapshot.truncated })
+    }
+
     pub fn create_file(
         root: impl AsRef<Path>,
         command: WorkspaceCreateFileCommand,
@@ -319,6 +502,21 @@ impl WorkspaceService {
     }
 }
 
+fn map_fs_error(error: FileSystemError) -> AppCoreError {
+    match error {
+        FileSystemError::AbsolutePath(message)
+        | FileSystemError::PathEscapesRoot(message)
+        | FileSystemError::InvalidPath(message) => AppCoreError::BadRequest(message),
+        FileSystemError::Root(error) | FileSystemError::Io(error) => {
+            AppCoreError::Internal(error.to_string())
+        }
+        FileSystemError::InvalidPatch(message) => AppCoreError::BadRequest(message),
+        FileSystemError::PatchMismatch { path, line } => {
+            AppCoreError::BadRequest(format!("patch does not apply to `{path}` at line {line}"))
+        }
+    }
+}
+
 fn map_git_error(error: GitError) -> AppCoreError {
     match error {
         GitError::InvalidPath(message)
@@ -365,7 +563,7 @@ fn decode_limited_output_with_limit(bytes: &[u8], limit: usize) -> String {
 fn normalize_relative_path(raw: &str) -> Result<String, AppCoreError> {
     let normalized = slab_utils::path::normalize_relative_path_allow_empty(raw)
         .map_err(|_| AppCoreError::BadRequest(format!("workspace path `{raw}` is invalid")))?;
-    if normalized.split('/').any(|segment| segment == ".slab") {
+    if normalized.split('/').any(|segment| segment == SLAB_DIR_NAME) {
         return Err(AppCoreError::BadRequest(
             "workspace internals cannot be edited from the file tree".to_string(),
         ));
@@ -451,6 +649,12 @@ fn existing_parent(path: &Path) -> Result<PathBuf, AppCoreError> {
     })
 }
 
+fn should_hide_entry(name: &str, is_directory: bool, include_ignored: bool) -> bool {
+    !include_ignored
+        && is_directory
+        && IGNORED_DIR_NAMES.iter().any(|ignored| ignored.eq_ignore_ascii_case(name))
+}
+
 fn content_hash(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
@@ -459,7 +663,9 @@ fn content_hash(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_relative_path;
+    use std::fs;
+
+    use super::{WorkspaceService, normalize_relative_path};
 
     #[test]
     fn normalize_relative_path_rejects_parent_segments() {
@@ -469,5 +675,31 @@ mod tests {
     #[test]
     fn normalize_relative_path_rejects_workspace_internals() {
         assert!(normalize_relative_path(".slab/settings.json").is_err());
+    }
+
+    #[test]
+    fn read_directory_hides_ignored_workspace_directories() {
+        let root = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(root.path().join("src")).expect("src");
+        fs::create_dir_all(root.path().join("node_modules")).expect("node modules");
+
+        let view = WorkspaceService::read_directory(root.path(), None, false).expect("directory");
+
+        assert_eq!(view.entries.len(), 1);
+        assert_eq!(view.entries[0].relative_path, "src");
+    }
+
+    #[test]
+    fn search_files_uses_gitignore() {
+        let root = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(root.path().join("src")).expect("src");
+        fs::write(root.path().join(".gitignore"), "ignored.rs\n").expect("gitignore");
+        fs::write(root.path().join("src").join("workspace_search.rs"), "").expect("source");
+        fs::write(root.path().join("src").join("ignored.rs"), "").expect("ignored");
+
+        let view = WorkspaceService::search_files(root.path(), "wss").expect("search");
+
+        assert_eq!(view.entries.len(), 1);
+        assert_eq!(view.entries[0].relative_path, "src/workspace_search.rs");
     }
 }

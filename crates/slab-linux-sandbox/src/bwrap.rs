@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use slab_sandboxing::{NetworkPolicy, SandboxEnvironment, SandboxError, SandboxedCommand};
+use std::path::PathBuf;
 
 /// Find the bwrap binary on PATH, excluding the current working directory.
 pub fn find_bwrap() -> Option<PathBuf> {

@@ -22,7 +22,15 @@ use slab_app_core::domain::services::AgentService;
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(spawn_agent, agent_input, agent_status, agent_shutdown, agent_approve, agent_interrupt, agent_events),
+    paths(
+        spawn_agent,
+        agent_input,
+        agent_status,
+        agent_shutdown,
+        agent_approve,
+        agent_interrupt,
+        agent_events
+    ),
     components(schemas(
         SpawnAgentRequest,
         SpawnAgentResponse,
@@ -231,14 +239,12 @@ fn turn_event_to_sse_data(event: &slab_agent::TurnEvent) -> String {
             })
             .to_string()
         }
-        slab_agent::TurnEvent::ToolCallOutput { call_id, output } => {
-            serde_json::json!({
-                "type": "tool_call_output",
-                "call_id": call_id,
-                "output": output
-            })
-            .to_string()
-        }
+        slab_agent::TurnEvent::ToolCallOutput { call_id, output } => serde_json::json!({
+            "type": "tool_call_output",
+            "call_id": call_id,
+            "output": output
+        })
+        .to_string(),
         slab_agent::TurnEvent::ApprovalRequired { call_id, tool_name, command } => {
             serde_json::json!({
                 "type": "approval_required",

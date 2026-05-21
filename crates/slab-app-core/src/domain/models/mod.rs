@@ -74,9 +74,10 @@ pub use ui_state::{DeleteUiStateView, UiStateValueView, UpdateUiStateCommand};
 pub use video::{DecodedVideoInitImage, VideoGenerationCommand};
 pub use workspace::{
     WorkspaceConsoleOutput, WorkspaceCreateDirectoryCommand, WorkspaceCreateFileCommand,
-    WorkspaceDeletePathCommand, WorkspaceGitCommitCommand, WorkspaceGitDiffCommand,
+    WorkspaceDeletePathCommand, WorkspaceDirectoryView, WorkspaceFileContent, WorkspaceFileEntry,
+    WorkspaceFileKind, WorkspaceFileSearchView, WorkspaceGitCommitCommand, WorkspaceGitDiffCommand,
     WorkspaceGitDiffView, WorkspaceGitFileStatus, WorkspaceGitOperationView,
     WorkspaceGitPathCommand, WorkspaceGitStatusEntry, WorkspaceGitStatusSummary,
-    WorkspaceGitStatusView, WorkspacePathView, WorkspaceRenamePathCommand, WorkspaceWriteFileCommand,
-    WorkspaceWriteFileView,
+    WorkspaceGitStatusView, WorkspacePathMetadata, WorkspacePathView, WorkspaceRenamePathCommand,
+    WorkspaceWriteFileCommand, WorkspaceWriteFileView,
 };

@@ -33,6 +33,65 @@ pub struct WorkspaceWriteFileView {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkspaceDirectoryView {
+    pub relative_path: String,
+    pub entries: Vec<WorkspaceFileEntry>,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFileSearchView {
+    pub query: String,
+    pub entries: Vec<WorkspaceFileEntry>,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFileEntry {
+    pub id: String,
+    pub name: String,
+    pub relative_path: String,
+    pub kind: WorkspaceFileKind,
+    pub has_children: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceFileKind {
+    Directory,
+    File,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePathMetadata {
+    pub relative_path: String,
+    pub kind: WorkspaceFileKind,
+    pub size_bytes: u64,
+    pub modified_at: u64,
+    pub created_at: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFileContent {
+    pub relative_path: String,
+    pub name: String,
+    pub content: String,
+    pub size_bytes: u64,
+    pub content_hash: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceCreateFileCommand {
     pub relative_path: String,
 }

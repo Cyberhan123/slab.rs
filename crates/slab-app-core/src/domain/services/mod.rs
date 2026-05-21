@@ -17,6 +17,7 @@ mod task;
 mod ui_state;
 mod video;
 mod workspace;
+mod workspace_file_system;
 mod workspace_lsp;
 
 pub use agent::AgentService;

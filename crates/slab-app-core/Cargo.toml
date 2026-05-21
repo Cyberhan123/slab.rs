@@ -29,6 +29,8 @@ slab-hub          = { workspace = true }
 slab-utils        = { workspace = true }
 slab-subtitle     = { workspace = true }
 slab-git          = { workspace = true }
+slab-file-search  = { workspace = true }
+slab-file-system  = { workspace = true }
 
 # Async runtime
 tokio   = { workspace = true }
@@ -88,3 +90,6 @@ tokio-stream = { workspace = true }
 
 # Optional: Axum state extractor integration
 axum = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

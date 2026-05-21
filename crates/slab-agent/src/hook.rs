@@ -13,24 +13,13 @@ use serde_json::Value;
 pub enum HookEvent {
     /// Dispatched before a tool call is executed.  Handlers may block the
     /// call or modify its arguments.
-    PreToolUse {
-        tool_name: String,
-        arguments: Value,
-    },
+    PreToolUse { tool_name: String, arguments: Value },
     /// Dispatched after a tool call has completed.
-    PostToolUse {
-        tool_name: String,
-        arguments: Value,
-        output: String,
-    },
+    PostToolUse { tool_name: String, arguments: Value, output: String },
     /// Dispatched when a new agent session (thread) starts.
-    SessionStart {
-        thread_id: String,
-    },
+    SessionStart { thread_id: String },
     /// Dispatched when an agent session terminates (success, error, or shutdown).
-    Stop {
-        thread_id: String,
-    },
+    Stop { thread_id: String },
 }
 
 // ── Hook outcome ──────────────────────────────────────────────────────────────
@@ -67,7 +56,10 @@ pub trait AgentHook: Send + Sync {
 /// For all other events, hooks are run in order and the first non-`Continue`
 /// outcome is returned.  Returns `HookOutcome::Continue` if every hook
 /// continues.
-pub async fn dispatch_hooks(hooks: &[std::sync::Arc<dyn AgentHook>], event: &HookEvent) -> HookOutcome {
+pub async fn dispatch_hooks(
+    hooks: &[std::sync::Arc<dyn AgentHook>],
+    event: &HookEvent,
+) -> HookOutcome {
     for hook in hooks {
         let outcome = hook.on_event(event).await;
         match outcome {
