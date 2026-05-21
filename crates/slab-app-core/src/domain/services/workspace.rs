@@ -1,12 +1,13 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 use slab_file_system::FileSystemError;
 use slab_git::{GitCommitOptions, GitError, GitRepository};
-use tokio::process::Command as TokioCommand;
+use slab_utils::pty::spawn_pipe_process_no_stdin;
+use tokio::sync::mpsc;
 use tokio::time::timeout;
 
 use crate::domain::models::{
@@ -468,17 +469,27 @@ impl WorkspaceService {
             )));
         }
 
-        let mut process = shell_command(command);
-        process.current_dir(root.as_ref());
-        process.stdout(Stdio::piped());
-        process.stderr(Stdio::piped());
-        process.kill_on_drop(true);
-
-        let output = match timeout(CONSOLE_TIMEOUT, process.output()).await {
-            Ok(result) => result.map_err(|error| {
+        let (program, args) = shell_command(command);
+        let env: HashMap<String, String> = std::env::vars().collect();
+        let spawned = spawn_pipe_process_no_stdin(&program, &args, root.as_ref(), &env, &None)
+            .await
+            .map_err(|error| {
                 AppCoreError::Internal(format!("failed to run workspace command: {error}"))
-            })?,
+            })?;
+        let session = spawned.session;
+        let stdout_task = tokio::spawn(collect_limited_output(spawned.stdout_rx));
+        let stderr_task = tokio::spawn(collect_limited_output(spawned.stderr_rx));
+
+        let console_output = async {
+            let exit_code = spawned.exit_rx.await.unwrap_or(-1);
+            let stdout = stdout_task.await.unwrap_or_default();
+            let stderr = stderr_task.await.unwrap_or_default();
+            (exit_code, stdout, stderr)
+        };
+        let (exit_code, stdout, stderr) = match timeout(CONSOLE_TIMEOUT, console_output).await {
+            Ok(output) => output,
             Err(_) => {
+                session.terminate();
                 return Ok(WorkspaceConsoleOutput {
                     command: command.to_string(),
                     exit_code: None,
@@ -494,9 +505,9 @@ impl WorkspaceService {
 
         Ok(WorkspaceConsoleOutput {
             command: command.to_string(),
-            exit_code: output.status.code(),
-            stdout: decode_limited_output(&output.stdout),
-            stderr: decode_limited_output(&output.stderr),
+            exit_code: (exit_code >= 0).then_some(exit_code),
+            stdout: decode_limited_output(&stdout),
+            stderr: decode_limited_output(&stderr),
             timed_out: false,
         })
     }
@@ -533,21 +544,37 @@ fn map_git_error(error: GitError) -> AppCoreError {
 }
 
 #[cfg(windows)]
-fn shell_command(command: &str) -> TokioCommand {
-    let mut process = TokioCommand::new("powershell.exe");
-    process.args(["-NoLogo", "-NoProfile", "-Command", command]);
-    process
+fn shell_command(command: &str) -> (String, Vec<String>) {
+    (
+        "powershell.exe".to_owned(),
+        vec![
+            "-NoLogo".to_owned(),
+            "-NoProfile".to_owned(),
+            "-Command".to_owned(),
+            command.to_owned(),
+        ],
+    )
 }
 
 #[cfg(not(windows))]
-fn shell_command(command: &str) -> TokioCommand {
-    let mut process = TokioCommand::new("sh");
-    process.args(["-lc", command]);
-    process
+fn shell_command(command: &str) -> (String, Vec<String>) {
+    ("sh".to_owned(), vec!["-lc".to_owned(), command.to_owned()])
 }
 
 fn decode_limited_output(bytes: &[u8]) -> String {
     decode_limited_output_with_limit(bytes, MAX_CONSOLE_OUTPUT_BYTES)
+}
+
+async fn collect_limited_output(mut rx: mpsc::Receiver<Vec<u8>>) -> Vec<u8> {
+    let mut output = Vec::new();
+    let limit = MAX_CONSOLE_OUTPUT_BYTES + 1;
+    while let Some(chunk) = rx.recv().await {
+        if output.len() < limit {
+            let remaining = limit - output.len();
+            output.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+        }
+    }
+    output
 }
 
 fn decode_limited_output_with_limit(bytes: &[u8], limit: usize) -> String {
