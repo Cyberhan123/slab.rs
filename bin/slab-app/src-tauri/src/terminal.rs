@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -9,8 +8,8 @@ use axum::extract::{Path as AxumPath, State};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use futures::{SinkExt, StreamExt};
-use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
+use slab_utils::pty::{ProcessHandle, TerminalSize, spawn_pty_process};
 use tauri::Manager;
 use tauri::State as TauriState;
 use tokio::sync::mpsc;
@@ -137,38 +136,33 @@ async fn handle_terminal_socket(state: TerminalServerInner, session_id: String, 
 }
 
 async fn run_terminal_session(root_path: PathBuf, socket: WebSocket) -> Result<(), String> {
-    let pty_system = native_pty_system();
-    let pair = pty_system
-        .openpty(PtySize {
-            rows: DEFAULT_ROWS,
-            cols: DEFAULT_COLS,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|error| format!("failed to open workspace terminal pty: {error}"))?;
-    let mut command = shell_command();
-    command.cwd(terminal_cwd(&root_path));
-    configure_prompt(&mut command);
-    let mut child = pair
-        .slave
-        .spawn_command(command)
-        .map_err(|error| format!("failed to spawn workspace shell: {error}"))?;
-    let reader = pair
-        .master
-        .try_clone_reader()
-        .map_err(|error| format!("failed to open terminal reader: {error}"))?;
-    let writer = pair
-        .master
-        .take_writer()
-        .map_err(|error| format!("failed to open terminal writer: {error}"))?;
-    let master = Arc::new(Mutex::new(pair.master));
-    let writer = Arc::new(Mutex::new(writer));
-    let (output_tx, mut output_rx) = mpsc::unbounded_channel();
-    spawn_pty_reader(reader, output_tx);
+    let (program, args) = shell_command();
+    let mut env: HashMap<String, String> = std::env::vars().collect();
+    configure_prompt(&mut env);
+    let spawned = spawn_pty_process(
+        &program,
+        &args,
+        &terminal_cwd(&root_path),
+        &env,
+        &None,
+        TerminalSize { rows: DEFAULT_ROWS, cols: DEFAULT_COLS },
+    )
+    .await
+    .map_err(|error| format!("failed to spawn workspace shell: {error}"))?;
+    let session = spawned.session;
+    let writer = session.writer_sender();
+    let mut output_rx = spawned.stdout_rx;
+    let mut exit_rx = spawned.exit_rx;
 
     let (mut socket_sender, mut socket_receiver) = socket.split();
     loop {
         tokio::select! {
+            exit = &mut exit_rx => {
+                if let Ok(code) = exit {
+                    log::debug!("workspace terminal process exited with code {code}");
+                }
+                break;
+            }
             output = output_rx.recv() => {
                 let Some(output) = output else {
                     break;
@@ -181,11 +175,11 @@ async fn run_terminal_session(root_path: PathBuf, socket: WebSocket) -> Result<(
                 match message {
                     Some(Ok(Message::Text(text))) => {
                         if let Ok(message) = serde_json::from_str::<TerminalClientMessage>(text.as_str()) {
-                            handle_client_message(message, Arc::clone(&master), Arc::clone(&writer)).await;
+                            handle_client_message(message, &session, &writer).await;
                         }
                     }
                     Some(Ok(Message::Binary(data))) => {
-                        write_pty(Arc::clone(&writer), data.to_vec()).await;
+                        write_process(&writer, data.to_vec()).await;
                     }
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Ok(_)) => {}
@@ -198,89 +192,55 @@ async fn run_terminal_session(root_path: PathBuf, socket: WebSocket) -> Result<(
         }
     }
 
-    let _ = child.kill();
+    session.terminate();
     Ok(())
 }
 
 async fn handle_client_message(
     message: TerminalClientMessage,
-    master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    session: &ProcessHandle,
+    writer: &mpsc::Sender<Vec<u8>>,
 ) {
     match message {
         TerminalClientMessage::Input { data } => {
-            write_pty(writer, data.into_bytes()).await;
+            write_process(writer, data.into_bytes()).await;
         }
         TerminalClientMessage::Resize { cols, rows } => {
             let cols = cols.max(1);
             let rows = rows.max(1);
-            let result = tokio::task::spawn_blocking(move || {
-                let master = master.lock().map_err(|_| "failed to lock terminal pty")?;
-                master
-                    .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
-                    .map_err(|error| error.to_string())
-            })
-            .await;
-            match result {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => log::warn!("workspace terminal resize failed: {error}"),
-                Err(error) => log::warn!("workspace terminal resize task failed: {error}"),
+            if let Err(error) = session.resize(TerminalSize { rows, cols }) {
+                log::warn!("workspace terminal resize failed: {error}");
             }
         }
     }
 }
 
-async fn write_pty(writer: Arc<Mutex<Box<dyn Write + Send>>>, data: Vec<u8>) {
-    let result = tokio::task::spawn_blocking(move || {
-        let mut writer = writer.lock().map_err(|_| "failed to lock terminal writer")?;
-        writer.write_all(&data).map_err(|error| error.to_string())?;
-        writer.flush().map_err(|error| error.to_string())
-    })
-    .await;
-    match result {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => log::warn!("workspace terminal input failed: {error}"),
-        Err(error) => log::warn!("workspace terminal input task failed: {error}"),
+async fn write_process(writer: &mpsc::Sender<Vec<u8>>, data: Vec<u8>) {
+    if writer.send(data).await.is_err() {
+        log::warn!("workspace terminal input failed: process stdin is closed");
     }
-}
-
-fn spawn_pty_reader(mut reader: Box<dyn Read + Send>, output_tx: mpsc::UnboundedSender<Vec<u8>>) {
-    std::thread::spawn(move || {
-        let mut buffer = [0_u8; 8192];
-        loop {
-            match reader.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(size) => {
-                    if output_tx.send(buffer[..size].to_vec()).is_err() {
-                        break;
-                    }
-                }
-                Err(error) if error.kind() == ErrorKind::Interrupted => {}
-                Err(_) => break,
-            }
-        }
-    });
 }
 
 #[cfg(windows)]
-fn shell_command() -> CommandBuilder {
-    let mut command = CommandBuilder::new("powershell.exe");
-    command.arg("-NoLogo");
-    command
+fn shell_command() -> (String, Vec<String>) {
+    ("powershell.exe".to_owned(), vec!["-NoLogo".to_owned()])
 }
 
 #[cfg(not(windows))]
-fn shell_command() -> CommandBuilder {
+fn shell_command() -> (String, Vec<String>) {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
-    CommandBuilder::new(shell)
+    (shell, Vec::new())
 }
 
 #[cfg(windows)]
-fn configure_prompt(_command: &mut CommandBuilder) {}
+fn configure_prompt(_env: &mut HashMap<String, String>) {}
 
 #[cfg(not(windows))]
-fn configure_prompt(command: &mut CommandBuilder) {
-    command.env("PS1", "\\[\\e[36m\\]\\w\\[\\e[0m\\] \\[\\e[32m\\]>\\[\\e[0m\\] ");
+fn configure_prompt(env: &mut HashMap<String, String>) {
+    env.insert(
+        "PS1".to_owned(),
+        "\\[\\e[36m\\]\\w\\[\\e[0m\\] \\[\\e[32m\\]>\\[\\e[0m\\] ".to_owned(),
+    );
 }
 
 #[cfg(windows)]
