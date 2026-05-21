@@ -25,7 +25,7 @@ hf-hub            = { workspace = true }
 # Async runtime
 tokio   = { workspace = true }
 futures = { workspace = true }
-tokio-stream = { workspace = true }
+tokio-stream = { workspace = true, features = ["sync"] }
 bytes   = { workspace = true }
 
 # Web framework + middleware

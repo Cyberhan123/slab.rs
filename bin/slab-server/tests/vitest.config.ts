@@ -5,6 +5,7 @@ export default defineProject({
     name: "slab-server-tests",
     include: [
       "integration/**/*.integration.test.ts",
+      "smoke/**/*.smoke.test.ts",
       "unit/**/*.unit.test.ts"
     ],
     testTimeout: 120000,

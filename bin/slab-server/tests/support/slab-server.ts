@@ -91,6 +91,7 @@ async function killProcessTree(child: ChildProcessWithoutNullStreams): Promise<v
 
 export interface SlabServerTestHarnessOptions {
   adminToken?: string;
+  externalBaseUrl?: string;
 }
 
 export interface JsonResponse<T> {
@@ -101,6 +102,7 @@ export interface JsonResponse<T> {
 export interface SlabServerTestHarness {
   readonly baseUrl: string;
   request(path: string, init?: RequestInit): Promise<Response>;
+  requestFormData(path: string, body: FormData, init?: Omit<RequestInit, "body">): Promise<Response>;
   requestJson<T>(path: string, init?: RequestInit): Promise<JsonResponse<T>>;
   stop(): Promise<void>;
 }
@@ -108,6 +110,21 @@ export interface SlabServerTestHarness {
 export async function startSlabServerHarness(
   options: SlabServerTestHarnessOptions = {}
 ): Promise<SlabServerTestHarness> {
+  const externalBaseUrl = options.externalBaseUrl?.trim().replace(/\/+$/, "");
+  if (externalBaseUrl) {
+    return {
+      baseUrl: externalBaseUrl,
+      request: (path, init) => fetch(`${externalBaseUrl}${path}`, init),
+      requestFormData: (path, body, init) => fetch(`${externalBaseUrl}${path}`, { ...init, body }),
+      async requestJson<T>(path: string, init?: RequestInit) {
+        const response = await fetch(`${externalBaseUrl}${path}`, init);
+        const body = (await response.json()) as T;
+        return { response, body };
+      },
+      stop: async () => {}
+    };
+  }
+
   const port = await findFreePort();
   const rootDir = mkdtempSync(join(tmpdir(), "slab-server-vitest-"));
   const settingsDir = join(rootDir, "config");
@@ -202,7 +219,8 @@ export async function startSlabServerHarness(
           return {
             baseUrl,
             request: (path, init) => fetch(`${baseUrl}${path}`, init),
-            async requestJson(path, init) {
+            requestFormData: (path, body, init) => fetch(`${baseUrl}${path}`, { ...init, body }),
+            async requestJson<T>(path: string, init?: RequestInit) {
               const response = await fetch(`${baseUrl}${path}`, init);
               const body = (await response.json()) as T;
               return { response, body };
