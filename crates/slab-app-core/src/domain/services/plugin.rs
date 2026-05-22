@@ -325,6 +325,11 @@ impl PluginService {
         }
 
         Ok(serde_json::from_str(&response.output_text).unwrap_or_else(|_| {
+            tracing::debug!(
+                plugin_id = plugin_id,
+                method = method,
+                "plugin returned non-JSON output; wrapping as JSON string"
+            );
             serde_json::Value::String(response.output_text)
         }))
     }
