@@ -30,6 +30,9 @@ impl JsWorkerHandle {
             );
         }
 
-        bail!("js runtime dispatch is not available for plugin `{}` yet", request.plugin_id)
+        bail!(
+            "js runtime dispatch is not implemented for plugin `{}` in this build",
+            request.plugin_id
+        )
     }
 }

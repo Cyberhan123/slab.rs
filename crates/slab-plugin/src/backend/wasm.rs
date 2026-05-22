@@ -80,9 +80,13 @@ fn build_extism_plugin(plugin: &LoadedPlugin) -> Result<Plugin, PluginError> {
     manifest = manifest
         .with_allowed_path(plugin.root_dir.to_string_lossy().to_string(), plugin.root_dir.clone());
 
-    if plugin.manifest.permissions.network.mode == PluginNetworkMode::Allowlist
-        && !plugin.manifest.permissions.network.allow_hosts.is_empty()
-    {
+    if plugin.manifest.permissions.network.mode == PluginNetworkMode::Allowlist {
+        if plugin.manifest.permissions.network.allow_hosts.is_empty() {
+            return Err(PluginError::Runtime(format!(
+                "plugin `{}` uses allowlist network mode but no allowHosts are configured",
+                plugin.manifest.id
+            )));
+        }
         manifest = manifest.with_allowed_hosts(
             plugin.manifest.permissions.network.allow_hosts.clone().into_iter(),
         );

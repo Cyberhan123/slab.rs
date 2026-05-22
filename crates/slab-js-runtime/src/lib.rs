@@ -14,6 +14,7 @@ pub struct JsRuntime {
     workers: DashMap<String, JsWorkerHandle>,
 }
 
+#[derive(Clone)]
 pub struct JsCallRequest {
     pub plugin_id: String,
     pub module_path: PathBuf,
@@ -32,15 +33,17 @@ impl JsRuntime {
     }
 
     pub async fn call(&self, req: JsCallRequest) -> Result<JsCallResponse> {
-        if let Some(worker) = self.workers.get(&req.plugin_id) {
-            return worker.call(req).await;
+        match self.workers.entry(req.plugin_id.clone()) {
+            dashmap::mapref::entry::Entry::Occupied(entry) => {
+                let worker = entry.get().clone();
+                worker.call(req).await
+            }
+            dashmap::mapref::entry::Entry::Vacant(entry) => {
+                let worker = JsWorkerHandle::new(req.module_path.clone(), req.permissions.clone());
+                entry.insert(worker.clone());
+                worker.call(req).await
+            }
         }
-
-        let plugin_id = req.plugin_id.clone();
-        let worker = JsWorkerHandle::new(req.module_path.clone(), req.permissions.clone());
-        let response = worker.call(req).await?;
-        self.workers.insert(plugin_id, worker);
-        Ok(response)
     }
 
     pub fn unload(&self, plugin_id: &str) {
