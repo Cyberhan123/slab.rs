@@ -3,6 +3,7 @@ mod registry;
 mod runtime;
 mod types;
 mod view;
+mod ws_client;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -21,8 +22,8 @@ pub use view::PluginViewManager;
 
 pub use registry::PluginRegistryState;
 use registry::resolve_plugins_root;
-pub use runtime::PluginRuntimeManager;
 use runtime::execute_plugin_api_request_async;
+use ws_client::PluginRpcWsClient;
 
 const HOST_THEME_EVENT_NAME: &str = "plugin://host/theme";
 
@@ -67,9 +68,9 @@ pub fn init<R: Runtime>(
 ) -> Result<(), String> {
     log::info!("resolved plugins root to {}", plugins_root.display());
     let registry = PluginRegistryState::new(plugins_root)?;
-    let runtime = PluginRuntimeManager::new(api_endpoint)?;
+    let ws_client = PluginRpcWsClient::new(api_endpoint);
     app.manage(registry);
-    app.manage(runtime);
+    app.manage(ws_client);
     app.manage(PluginViewManager::default());
     app.manage(PluginThemeState::default());
     Ok(())
@@ -111,19 +112,16 @@ pub fn plugin_unmount_view(
 }
 
 #[tauri::command]
-pub fn plugin_call(
-    app_handle: AppHandle,
+pub async fn plugin_call(
     webview: Webview,
-    registry: State<'_, PluginRegistryState>,
-    runtime: State<'_, PluginRuntimeManager>,
+    runtime_client: State<'_, PluginRpcWsClient>,
     request: PluginCallRequest,
 ) -> Result<PluginCallResponse, String> {
     if let Some(caller_plugin_id) = caller_plugin_id(&webview) {
         ensure_same_plugin_call(&caller_plugin_id, &request.plugin_id)?;
     }
 
-    let plugin = registry.get_plugin(&request.plugin_id)?;
-    runtime.call_plugin(&app_handle, &plugin, &request)
+    runtime_client.call(&request).await
 }
 
 #[tauri::command]

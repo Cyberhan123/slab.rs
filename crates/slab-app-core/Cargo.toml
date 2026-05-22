@@ -33,6 +33,7 @@ slab-subtitle     = { workspace = true }
 slab-git          = { workspace = true }
 slab-file         = { workspace = true }
 slab-sandboxing   = { workspace = true }
+slab-plugin       = { workspace = true }
 
 # Async runtime
 tokio   = { workspace = true }

@@ -33,10 +33,12 @@ impl TryFrom<RawPluginManifest> for PluginManifest {
 
     fn try_from(raw: RawPluginManifest) -> Result<Self, Self::Error> {
         let runtime = match (raw.runtime, raw.ui) {
-            (Some(runtime), _) => {
-                PluginRuntimeManifest { ui: runtime.ui, wasm: runtime.wasm.or(raw.wasm) }
-            }
-            (None, Some(ui)) => PluginRuntimeManifest { ui, wasm: raw.wasm },
+            (Some(runtime), _) => PluginRuntimeManifest {
+                ui: runtime.ui,
+                wasm: runtime.wasm.or(raw.wasm),
+                js: runtime.js.or(raw.js),
+            },
+            (None, Some(ui)) => PluginRuntimeManifest { ui, wasm: raw.wasm, js: raw.js },
             (None, None) => return Err("missing runtime.ui or legacy ui entry".to_string()),
         };
 
@@ -75,6 +77,8 @@ struct RawPluginManifest {
     ui: Option<PluginUiManifest>,
     #[serde(default)]
     wasm: Option<PluginWasmManifest>,
+    #[serde(default)]
+    js: Option<PluginJsManifest>,
     integrity: PluginIntegrityManifest,
     #[serde(default)]
     contributes: Option<PluginContributesManifest>,
@@ -99,6 +103,8 @@ pub struct PluginRuntimeManifest {
     pub ui: PluginUiManifest,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub wasm: Option<PluginWasmManifest>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub js: Option<PluginJsManifest>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
@@ -108,6 +114,11 @@ pub struct PluginUiManifest {
 
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 pub struct PluginWasmManifest {
+    pub entry: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct PluginJsManifest {
     pub entry: String,
 }
 

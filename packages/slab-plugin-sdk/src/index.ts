@@ -33,6 +33,19 @@ export type SlabPluginPickFileResponse = {
   path: string | null;
 };
 
+export type PluginUIHandle =
+  | {
+      kind: "tauri";
+      pluginId: string;
+      webviewLabel?: string;
+      _targetWindow: Window;
+    }
+  | {
+      kind: "browser";
+      pluginId: string;
+      iframe: HTMLIFrameElement;
+    };
+
 export type SlabPluginEventPayload = {
   pluginId: string;
   topic: string;
@@ -288,4 +301,63 @@ export function createSlabPluginSdk(target?: Window) {
 
 export function getSlabPluginSdk(target?: Window): SlabPluginSdk {
   return createSlabPluginSdk(target);
+}
+
+export function mountPluginUI(
+  pluginId: string,
+  entry: string,
+  container: HTMLElement,
+): PluginUIHandle {
+  const targetWindow = resolveWindow(container.ownerDocument.defaultView ?? window);
+  const tauriCore = targetWindow["__TAURI__"]?.core;
+  const hasTrustedTauriContext = Boolean(
+    (targetWindow as Window & { __TAURI_INTERNALS__?: unknown })["__TAURI_INTERNALS__"],
+  );
+  if (hasTrustedTauriContext && tauriCore && typeof tauriCore.invoke === "function") {
+    const bounds = container.getBoundingClientRect();
+    const handle: PluginUIHandle = { kind: "tauri", pluginId, _targetWindow: targetWindow };
+    void tauriCore
+      .invoke<{ webviewLabel: string }>("plugin_mount_view", {
+        request: {
+          pluginId,
+          bounds: {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height,
+          },
+        },
+      })
+      .then((response) => {
+        if (handle.kind === "tauri") {
+          handle.webviewLabel = response.webviewLabel;
+        }
+      });
+    return handle;
+  }
+
+  const iframe = container.ownerDocument.createElement("iframe");
+  iframe.src = entry;
+  iframe.style.width = "100%";
+  iframe.style.height = "100%";
+  iframe.style.border = "0";
+  iframe.setAttribute("sandbox", "allow-scripts allow-forms");
+  container.appendChild(iframe);
+  return { kind: "browser", pluginId, iframe };
+}
+
+export function unmountPluginUI(handle: PluginUIHandle): void {
+  if (handle.kind === "tauri") {
+    const targetWindow = handle._targetWindow as TauriPluginWindow;
+    const tauriCore = targetWindow["__TAURI__"]?.core;
+    const hasTrustedTauriContext = Boolean(
+      (targetWindow as Window & { __TAURI_INTERNALS__?: unknown })["__TAURI_INTERNALS__"],
+    );
+    if (hasTrustedTauriContext && tauriCore && typeof tauriCore.invoke === "function") {
+      void tauriCore.invoke("plugin_unmount_view", { request: { pluginId: handle.pluginId } });
+    }
+    return;
+  }
+
+  handle.iframe.remove();
 }
