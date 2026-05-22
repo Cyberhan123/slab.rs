@@ -1,4 +1,4 @@
-//! `slab-types` - shared semantic types, JSON schema definitions, and the PMID catalog.
+//! `slab-types` - shared semantic types and contract definitions.
 //!
 //! # Modules
 //! - [`agent`] shared agent lifecycle and tool-call status enums.
@@ -9,7 +9,6 @@
 //! - [`error`] crate-level error type.
 //! - [`plugin`] shared plugin manifest and contribution contracts.
 //! - [`runtime`] shared runtime model and load specifications.
-//! - [`settings`] PMID catalog and typed configuration snapshots for the settings system.
 //! - [`sqlite`] SQLite URL formatting helpers shared by desktop and server crates.
 
 pub mod agent;
@@ -22,7 +21,6 @@ pub mod error;
 pub mod load_config;
 pub mod plugin;
 pub mod runtime;
-pub mod settings;
 pub mod sqlite;
 
 pub use agent::{AgentThreadStatus, ToolCallStatus};

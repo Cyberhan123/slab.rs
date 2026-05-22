@@ -2,6 +2,7 @@ use std::process::Stdio;
 use std::sync::OnceLock;
 
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
 use tracing::{info, warn};
 
@@ -11,6 +12,24 @@ use crate::domain::models::{AcceptedOperation, FfmpegConvertCommand, TaskProgres
 use crate::error::AppCoreError;
 
 const FFMPEG_PROGRESS_LOG_LIMIT: usize = 240;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FfmpegConvertInputData {
+    source_path: String,
+    output_format: String,
+    output_path: Option<String>,
+}
+
+#[derive(Serialize)]
+struct FfmpegProgressPayload {
+    progress: TaskProgress,
+}
+
+#[derive(Serialize)]
+struct FfmpegSuccessPayload {
+    output_path: String,
+    progress: TaskProgress,
+}
 
 #[derive(Clone)]
 pub struct FfmpegService {
@@ -26,12 +45,14 @@ impl FfmpegService {
         &self,
         req: FfmpegConvertCommand,
     ) -> Result<AcceptedOperation, AppCoreError> {
-        let input_data = serde_json::json!({
-            "source_path": req.source_path,
-            "output_format": req.output_format,
-            "output_path": req.output_path,
-        })
-        .to_string();
+        let input = FfmpegConvertInputData {
+            source_path: req.source_path,
+            output_format: req.output_format,
+            output_path: req.output_path,
+        };
+        let input_data = serde_json::to_string(&input).map_err(|error| {
+            AppCoreError::Internal(format!("failed to serialize ffmpeg input data: {error}"))
+        })?;
 
         let operation_id = self
             .state
@@ -45,7 +66,7 @@ impl FfmpegService {
                         return;
                     }
 
-                    let input: serde_json::Value = match serde_json::from_str(&input_data) {
+                    let input: FfmpegConvertInputData = match serde_json::from_str(&input_data) {
                         Ok(value) => value,
                         Err(error) => {
                             warn!(task_id = %operation_id, error = %error, "invalid stored input_data for ffmpeg task");
@@ -57,12 +78,9 @@ impl FfmpegService {
                         }
                     };
 
-                    let source_path = input["source_path"].as_str().unwrap_or("").to_owned();
-                    let output_format = input["output_format"].as_str().unwrap_or("out").to_owned();
-                    let output_path = input["output_path"]
-                        .as_str()
-                        .map(str::to_owned)
-                        .unwrap_or_else(|| {
+                    let source_path = input.source_path;
+                    let output_format = input.output_format;
+                    let output_path = input.output_path.unwrap_or_else(|| {
                             let base = std::path::Path::new(&source_path)
                                 .file_stem()
                                 .and_then(|stem| stem.to_str())
@@ -260,18 +278,16 @@ impl FfmpegProgressState {
     }
 
     fn to_payload(&self) -> String {
-        serde_json::json!({
-            "progress": self.to_progress(),
-        })
-        .to_string()
+        serde_json::to_string(&FfmpegProgressPayload { progress: self.to_progress() })
+            .unwrap_or_default()
     }
 
     fn to_success_payload(&self) -> String {
-        serde_json::json!({
-            "output_path": self.output_path.clone(),
-            "progress": self.to_progress(),
+        serde_json::to_string(&FfmpegSuccessPayload {
+            output_path: self.output_path.clone(),
+            progress: self.to_progress(),
         })
-        .to_string()
+        .unwrap_or_default()
     }
 
     fn failure_message(&self, status: String) -> String {

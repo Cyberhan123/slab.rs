@@ -18,7 +18,7 @@
     "build:windows-installer": "cargo make build-windows-full-installer",
     "dev:desktop": "bun run --cwd packages/slab-desktop dev",
     "gen:api": "bun ./scripts/gen/generate-openapi.ts",
-    "gen:schemas": "cargo run -p slab-model-pack --bin generate_manifest_schema && cargo run -p slab-types --bin generate_settings_document_schema",
+    "gen:schemas": "cargo run -p slab-model-pack --bin generate_manifest_schema && cargo run -p slab-config --bin generate_settings_document_schema",
     "gen:plugin-packs": "bun ./scripts/plugins/generate-plugin-packs.ts",
     "gen:model-packs": "bun ./scripts/models/pack-models.ts",
     "color:oklch": "bun ./scripts/design/figma-color-to-oklch.ts",

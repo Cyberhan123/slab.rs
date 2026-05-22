@@ -16,6 +16,7 @@ slab-mcp = { workspace = true }
 slab-sandboxing = { workspace = true }
 slab-shell-command = { workspace = true }
 slab-types = { workspace = true }
+slab-config = { workspace = true }
 async-trait   = { workspace = true }
 serde         = { workspace = true }
 serde_json    = { workspace = true }

@@ -1230,7 +1230,7 @@ mod tests {
         let mut providers = BTreeMap::new();
         providers.insert(
             "openai-main".to_owned(),
-            slab_types::settings::CloudProviderConfig {
+            slab_config::CloudProviderConfig {
                 id: "openai-main".to_owned(),
                 name: "OpenAI".to_owned(),
                 api_base: "https://api.openai.com/v1".to_owned(),

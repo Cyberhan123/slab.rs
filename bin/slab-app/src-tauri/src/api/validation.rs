@@ -1,11 +1,11 @@
 use serde::Serialize;
-use slab_app_core::error::AppCoreError;
+use slab_app_core::error::{AppCoreError, AppCoreErrorData};
 use validator::Validate;
 
 #[derive(Serialize)]
 struct TauriErrorPayload {
     code: u16,
-    data: Option<serde_json::Value>,
+    data: Option<AppCoreErrorData>,
     message: String,
     status: u16,
 }
@@ -55,7 +55,7 @@ fn encode_error(
     status: u16,
     code: u16,
     message: String,
-    data: Option<serde_json::Value>,
+    data: Option<AppCoreErrorData>,
 ) -> String {
     serde_json::to_string(&TauriErrorPayload { code, data, message, status }).unwrap_or_else(|_| {
         format!(r#"{{"code":5002,"data":null,"message":"internal error","status":500}}"#)

@@ -9,11 +9,11 @@ use crate::config::default_output_dir_for_settings_path;
 use crate::context::WorkerState;
 use crate::domain::models::{
     AcceptedOperation, TaskResult, TaskStatus, VIDEO_GENERATION_TASK_TYPE, VideoGenerationCommand,
-    VideoGenerationTaskView,
+    VideoGenerationRequestData, VideoGenerationResultData, VideoGenerationTaskView,
 };
 use crate::domain::ports::{RuntimeDiffusionVideoRequest, RuntimeRawImageInput};
 use crate::domain::services::media_task::{
-    cleanup_dir, parse_json_value, read_managed_file, save_rgb_png,
+    cleanup_dir, parse_json_payload, read_managed_file, save_rgb_png, serialize_json_payload,
 };
 use crate::error::AppCoreError;
 use crate::infra::db::{
@@ -66,25 +66,25 @@ impl VideoService {
             None
         };
 
-        let input_json = serde_json::json!({
-            "model_id": req.model_id,
-            "model": req.model,
-            "prompt": req.prompt,
-            "negative_prompt": req.negative_prompt,
-            "width": req.width,
-            "height": req.height,
-            "video_frames": req.video_frames,
-            "fps": req.fps,
-            "cfg_scale": req.cfg_scale,
-            "guidance": req.guidance,
-            "steps": req.steps,
-            "seed": req.seed,
-            "sample_method": req.sample_method,
-            "scheduler": req.scheduler,
-            "strength": req.strength,
-            "reference_image_path": reference_image_path,
-        })
-        .to_string();
+        let request_data = VideoGenerationRequestData {
+            model_id: req.model_id.clone(),
+            model: req.model.clone(),
+            prompt: req.prompt.clone(),
+            negative_prompt: req.negative_prompt.clone(),
+            width: req.width,
+            height: req.height,
+            video_frames: req.video_frames,
+            fps: req.fps,
+            cfg_scale: req.cfg_scale,
+            guidance: req.guidance,
+            steps: req.steps,
+            seed: req.seed,
+            sample_method: req.sample_method.clone(),
+            scheduler: req.scheduler.clone(),
+            strength: req.strength,
+            reference_image_path: reference_image_path.clone(),
+        };
+        let input_json = serialize_json_payload(&request_data)?;
 
         let fps = req.fps;
         let runtime_request = RuntimeDiffusionVideoRequest {
@@ -270,8 +270,10 @@ impl VideoService {
                     Ok(output) if output.status.success() => {
                         let video_path = output_path.to_string_lossy().into_owned();
                         info!(task_id = %operation_id, video_path = %video_path, "video generation succeeded");
-                        let persisted_result =
-                            serde_json::json!({ "video_path": video_path }).to_string();
+                        let persisted_result = serde_json::to_string(&VideoGenerationResultData {
+                            video_path: Some(video_path.clone()),
+                        })
+                        .unwrap_or_default();
                         let task_result = TaskResult {
                             image: None,
                             images: None,
@@ -393,8 +395,8 @@ fn map_video_view(row: VideoGenerationTaskViewRecord) -> VideoGenerationTaskView
             .video_path
             .as_ref()
             .map(|_| format!("/v1/video/generations/{}/artifact", row.task.task_id)),
-        request_data: parse_json_value(&row.task.request_data),
-        result_data: row.task.result_data.as_deref().map(parse_json_value),
+        request_data: parse_json_payload(&row.task.request_data),
+        result_data: row.task.result_data.as_deref().map(parse_json_payload),
         created_at: row.state.task_created_at.to_rfc3339(),
         updated_at: row.state.task_updated_at.to_rfc3339(),
     }

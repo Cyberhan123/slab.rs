@@ -932,7 +932,7 @@ mod tests {
 
         ResolvedLaunchSpec {
             profile: LaunchProfile::Desktop,
-            transport: slab_types::settings::RuntimeTransportMode::Http,
+            transport: slab_config::RuntimeTransportMode::Http,
             runtime_log_dir: "C:/runtime/logs".into(),
             runtime_ipc_dir: None,
             extra_dirs: Vec::new(),
@@ -946,7 +946,7 @@ mod tests {
         ResolvedRuntimeChildSpec {
             backend,
             grpc_bind_address: bind_address.to_owned(),
-            transport: slab_types::settings::RuntimeTransportMode::Http,
+            transport: slab_config::RuntimeTransportMode::Http,
             queue_capacity: 64,
             backend_capacity: 4,
             lib_dir: None,

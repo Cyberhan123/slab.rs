@@ -3,8 +3,10 @@ use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
 use crate::domain::models::{
-    AudioTranscriptionCommand, AudioTranscriptionTaskView, TranscribeDecodeOptions,
-    TranscribeVadOptions,
+    AudioTranscriptionCommand,
+    AudioTranscriptionRequestData as DomainAudioTranscriptionRequestData,
+    AudioTranscriptionResultData as DomainAudioTranscriptionResultData, AudioTranscriptionTaskView,
+    TranscribeDecodeOptions, TranscribeVadOptions,
 };
 use crate::schemas::tasks::TimedTextSegmentResponse;
 use crate::schemas::tasks::{TaskProgressResponse, TaskStatus};
@@ -220,6 +222,84 @@ fn normalize_optional_text(value: Option<String>) -> Option<String> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TranscribeVadOptionsResponse {
+    pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threshold: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_speech_duration_ms: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_silence_duration_ms: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_speech_duration_s: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speech_pad_ms: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub samples_overlap: Option<f32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TranscribeDecodeOptionsResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset_ms: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_context: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_timestamps: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_timestamps: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub split_on_word: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suppress_nst: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub word_thold: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_len: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature_inc: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entropy_thold: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logprob_thold: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_speech_thold: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tdrz_enable: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct AudioTranscriptionRequestData {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    pub source_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detect_language: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vad: Option<TranscribeVadOptionsResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decode: Option<TranscribeDecodeOptionsResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct AudioTranscriptionResultData {
+    pub text: String,
+    pub segments: Vec<TimedTextSegmentResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AudioTranscriptionTaskResponse {
     pub task_id: String,
     pub task_type: String,
@@ -239,16 +319,16 @@ pub struct AudioTranscriptionTaskResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detect_language: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub vad_json: Option<serde_json::Value>,
+    pub vad_json: Option<TranscribeVadOptionsResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub decode_json: Option<serde_json::Value>,
+    pub decode_json: Option<TranscribeDecodeOptionsResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transcript_text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub segments: Option<Vec<TimedTextSegmentResponse>>,
-    pub request_data: serde_json::Value,
+    pub request_data: AudioTranscriptionRequestData,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub result_data: Option<serde_json::Value>,
+    pub result_data: Option<AudioTranscriptionResultData>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -267,14 +347,72 @@ impl From<AudioTranscriptionTaskView> for AudioTranscriptionTaskResponse {
             language: value.language,
             prompt: value.prompt,
             detect_language: value.detect_language,
-            vad_json: value.vad_json,
-            decode_json: value.decode_json,
+            vad_json: value.vad_json.map(Into::into),
+            decode_json: value.decode_json.map(Into::into),
             transcript_text: value.transcript_text,
             segments: value.segments.map(|segments| segments.into_iter().map(Into::into).collect()),
-            request_data: value.request_data,
-            result_data: value.result_data,
+            request_data: value.request_data.into(),
+            result_data: value.result_data.map(Into::into),
             created_at: value.created_at,
             updated_at: value.updated_at,
         }
+    }
+}
+
+impl From<TranscribeVadOptions> for TranscribeVadOptionsResponse {
+    fn from(value: TranscribeVadOptions) -> Self {
+        Self {
+            enabled: value.enabled,
+            model_path: value.model_path,
+            threshold: value.threshold,
+            min_speech_duration_ms: value.min_speech_duration_ms,
+            min_silence_duration_ms: value.min_silence_duration_ms,
+            max_speech_duration_s: value.max_speech_duration_s,
+            speech_pad_ms: value.speech_pad_ms,
+            samples_overlap: value.samples_overlap,
+        }
+    }
+}
+
+impl From<TranscribeDecodeOptions> for TranscribeDecodeOptionsResponse {
+    fn from(value: TranscribeDecodeOptions) -> Self {
+        Self {
+            offset_ms: value.offset_ms,
+            duration_ms: value.duration_ms,
+            no_context: value.no_context,
+            no_timestamps: value.no_timestamps,
+            token_timestamps: value.token_timestamps,
+            split_on_word: value.split_on_word,
+            suppress_nst: value.suppress_nst,
+            word_thold: value.word_thold,
+            max_len: value.max_len,
+            max_tokens: value.max_tokens,
+            temperature: value.temperature,
+            temperature_inc: value.temperature_inc,
+            entropy_thold: value.entropy_thold,
+            logprob_thold: value.logprob_thold,
+            no_speech_thold: value.no_speech_thold,
+            tdrz_enable: value.tdrz_enable,
+        }
+    }
+}
+
+impl From<DomainAudioTranscriptionRequestData> for AudioTranscriptionRequestData {
+    fn from(value: DomainAudioTranscriptionRequestData) -> Self {
+        Self {
+            model_id: value.model_id,
+            source_path: value.source_path,
+            language: value.language,
+            prompt: value.prompt,
+            detect_language: value.detect_language,
+            vad: value.vad.map(Into::into),
+            decode: value.decode.map(Into::into),
+        }
+    }
+}
+
+impl From<DomainAudioTranscriptionResultData> for AudioTranscriptionResultData {
+    fn from(value: DomainAudioTranscriptionResultData) -> Self {
+        Self { text: value.text, segments: value.segments.into_iter().map(Into::into).collect() }
     }
 }

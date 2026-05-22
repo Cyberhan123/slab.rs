@@ -23,6 +23,11 @@ pub struct SessionMessageView {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct DeleteSessionView {
+    pub deleted: bool,
+}
+
 impl From<&ChatSession> for SessionView {
     fn from(session: &ChatSession) -> Self {
         Self {

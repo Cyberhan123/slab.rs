@@ -3,7 +3,9 @@ use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
 use crate::domain::models::{
-    DecodedVideoInitImage, VideoGenerationCommand, VideoGenerationTaskView,
+    DecodedVideoInitImage, VideoGenerationCommand,
+    VideoGenerationRequestData as DomainVideoGenerationRequestData,
+    VideoGenerationResultData as DomainVideoGenerationResultData, VideoGenerationTaskView,
 };
 use crate::error::AppCoreError;
 use crate::schemas::tasks::{TaskProgressResponse, TaskStatus};
@@ -187,6 +189,42 @@ fn decode_init_image(data_uri: &str) -> Result<DecodedVideoInitImage, AppCoreErr
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct VideoGenerationRequestData {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    pub model: String,
+    pub prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub negative_prompt: Option<String>,
+    pub width: u32,
+    pub height: u32,
+    pub video_frames: i32,
+    pub fps: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cfg_scale: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guidance: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub steps: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sample_method: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduler: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strength: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference_image_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct VideoGenerationResultData {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct VideoGenerationTaskResponse {
     pub task_id: String,
     pub task_type: String,
@@ -210,9 +248,9 @@ pub struct VideoGenerationTaskResponse {
     pub reference_image_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub video_url: Option<String>,
-    pub request_data: serde_json::Value,
+    pub request_data: VideoGenerationRequestData,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub result_data: Option<serde_json::Value>,
+    pub result_data: Option<VideoGenerationResultData>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -236,10 +274,39 @@ impl From<VideoGenerationTaskView> for VideoGenerationTaskResponse {
             fps: value.fps,
             reference_image_url: value.reference_image_url,
             video_url: value.video_url,
-            request_data: value.request_data,
-            result_data: value.result_data,
+            request_data: value.request_data.into(),
+            result_data: value.result_data.map(Into::into),
             created_at: value.created_at,
             updated_at: value.updated_at,
         }
+    }
+}
+
+impl From<DomainVideoGenerationRequestData> for VideoGenerationRequestData {
+    fn from(value: DomainVideoGenerationRequestData) -> Self {
+        Self {
+            model_id: value.model_id,
+            model: value.model,
+            prompt: value.prompt,
+            negative_prompt: value.negative_prompt,
+            width: value.width,
+            height: value.height,
+            video_frames: value.video_frames,
+            fps: value.fps,
+            cfg_scale: value.cfg_scale,
+            guidance: value.guidance,
+            steps: value.steps,
+            seed: value.seed,
+            sample_method: value.sample_method,
+            scheduler: value.scheduler,
+            strength: value.strength,
+            reference_image_path: value.reference_image_path,
+        }
+    }
+}
+
+impl From<DomainVideoGenerationResultData> for VideoGenerationResultData {
+    fn from(value: DomainVideoGenerationResultData) -> Self {
+        Self { video_path: value.video_path }
     }
 }

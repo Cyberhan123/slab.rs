@@ -6,7 +6,8 @@ pub mod ffmpeg;
 pub mod images;
 pub mod models;
 pub mod session;
-pub mod settings;
+#[path = "settings/mod.rs"]
+pub mod configuration_routes;
 pub mod setup;
 pub mod system;
 pub mod tasks;

@@ -8,7 +8,8 @@ mod template;
 use chrono::Utc;
 use futures::StreamExt;
 use futures::stream::{self, BoxStream};
-use serde_json::{Value, json};
+use serde::Serialize;
+use serde_json::Value;
 use slab_types::RuntimeBackendId;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
@@ -23,6 +24,7 @@ use crate::domain::models::{
     assistant_message_from_text_response, serialize_session_message,
 };
 use crate::error::AppCoreError;
+use crate::error::AppCoreErrorData;
 use crate::infra::db::{ChatMessage, ChatStore};
 
 const LLAMA_BACKEND_ID: RuntimeBackendId = RuntimeBackendId::GgmlLlama;
@@ -42,6 +44,67 @@ struct StreamedAssistantContent {
     reasoning: String,
     usage: Option<TextGenerationUsage>,
     saw_error: bool,
+}
+
+#[derive(Serialize)]
+struct ChatCompletionChunkPayload<'a> {
+    id: &'a str,
+    #[serde(rename = "object")]
+    object_type: &'static str,
+    created: i64,
+    model: &'a str,
+    system_fingerprint: &'static str,
+    choices: Vec<ChatCompletionChunkChoice<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    usage: Option<&'a TextGenerationUsage>,
+}
+
+#[derive(Serialize)]
+struct ChatCompletionChunkChoice<'a> {
+    index: u32,
+    delta: ChatCompletionChunkDelta<'a>,
+    finish_reason: Option<&'a str>,
+}
+
+#[derive(Default, Serialize)]
+struct ChatCompletionChunkDelta<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    role: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_content: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct TextCompletionChunkPayload<'a> {
+    id: &'a str,
+    #[serde(rename = "object")]
+    object_type: &'static str,
+    created: i64,
+    model: &'a str,
+    system_fingerprint: &'static str,
+    choices: Vec<TextCompletionChunkChoice<'a>>,
+}
+
+#[derive(Serialize)]
+struct TextCompletionChunkChoice<'a> {
+    index: u32,
+    text: &'a str,
+    finish_reason: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct ChatStreamErrorPayload<'a> {
+    error: ChatStreamErrorBody<'a>,
+}
+
+#[derive(Serialize)]
+struct ChatStreamErrorBody<'a> {
+    message: &'a str,
+    #[serde(rename = "type")]
+    error_type: &'static str,
+    code: Option<&'static str>,
 }
 
 #[derive(Clone)]
@@ -71,83 +134,85 @@ impl ChatService {
 
 /// Build an OpenAI-compatible `chat.completion.chunk` SSE data payload.
 fn build_chunk(id: &str, created: i64, model: &str, token: &str) -> String {
-    serde_json::json!({
-        "id": id,
-        "object": "chat.completion.chunk",
-        "created": created,
-        "model": model,
-        "system_fingerprint": SYSTEM_FINGERPRINT,
-        "choices": [{
-            "index": 0,
-            "delta": { "content": token },
-            "finish_reason": null
-        }]
+    serialize_chunk(&ChatCompletionChunkPayload {
+        id,
+        object_type: "chat.completion.chunk",
+        created,
+        model,
+        system_fingerprint: SYSTEM_FINGERPRINT,
+        choices: vec![ChatCompletionChunkChoice {
+            index: 0,
+            delta: ChatCompletionChunkDelta { content: Some(token), ..Default::default() },
+            finish_reason: None,
+        }],
+        usage: None,
     })
-    .to_string()
 }
 
 /// Build an OpenAI-compatible initial SSE chunk that announces the assistant role.
 fn build_role_chunk(id: &str, created: i64, model: &str) -> String {
-    serde_json::json!({
-        "id": id,
-        "object": "chat.completion.chunk",
-        "created": created,
-        "model": model,
-        "system_fingerprint": SYSTEM_FINGERPRINT,
-        "choices": [{
-            "index": 0,
-            "delta": { "role": "assistant" },
-            "finish_reason": null
-        }]
+    serialize_chunk(&ChatCompletionChunkPayload {
+        id,
+        object_type: "chat.completion.chunk",
+        created,
+        model,
+        system_fingerprint: SYSTEM_FINGERPRINT,
+        choices: vec![ChatCompletionChunkChoice {
+            index: 0,
+            delta: ChatCompletionChunkDelta { role: Some("assistant"), ..Default::default() },
+            finish_reason: None,
+        }],
+        usage: None,
     })
-    .to_string()
 }
 
 /// Build an OpenAI-compatible reasoning SSE chunk payload.
 fn build_reasoning_chunk(id: &str, created: i64, model: &str, token: &str) -> String {
-    serde_json::json!({
-        "id": id,
-        "object": "chat.completion.chunk",
-        "created": created,
-        "model": model,
-        "system_fingerprint": SYSTEM_FINGERPRINT,
-        "choices": [{
-            "index": 0,
-            "delta": { "reasoning_content": token },
-            "finish_reason": null
-        }]
+    serialize_chunk(&ChatCompletionChunkPayload {
+        id,
+        object_type: "chat.completion.chunk",
+        created,
+        model,
+        system_fingerprint: SYSTEM_FINGERPRINT,
+        choices: vec![ChatCompletionChunkChoice {
+            index: 0,
+            delta: ChatCompletionChunkDelta {
+                reasoning_content: Some(token),
+                ..Default::default()
+            },
+            finish_reason: None,
+        }],
+        usage: None,
     })
-    .to_string()
 }
 
 /// Build an OpenAI-compatible final SSE chunk with a finish reason.
 fn build_finish_chunk(id: &str, created: i64, model: &str, finish_reason: &str) -> String {
-    serde_json::json!({
-        "id": id,
-        "object": "chat.completion.chunk",
-        "created": created,
-        "model": model,
-        "system_fingerprint": SYSTEM_FINGERPRINT,
-        "choices": [{
-            "index": 0,
-            "delta": {},
-            "finish_reason": finish_reason
-        }]
+    serialize_chunk(&ChatCompletionChunkPayload {
+        id,
+        object_type: "chat.completion.chunk",
+        created,
+        model,
+        system_fingerprint: SYSTEM_FINGERPRINT,
+        choices: vec![ChatCompletionChunkChoice {
+            index: 0,
+            delta: ChatCompletionChunkDelta::default(),
+            finish_reason: Some(finish_reason),
+        }],
+        usage: None,
     })
-    .to_string()
 }
 
 fn build_usage_chunk(id: &str, created: i64, model: &str, usage: &TextGenerationUsage) -> String {
-    serde_json::json!({
-        "id": id,
-        "object": "chat.completion.chunk",
-        "created": created,
-        "model": model,
-        "system_fingerprint": SYSTEM_FINGERPRINT,
-        "choices": [],
-        "usage": usage_to_json(usage)
+    serialize_chunk(&ChatCompletionChunkPayload {
+        id,
+        object_type: "chat.completion.chunk",
+        created,
+        model,
+        system_fingerprint: SYSTEM_FINGERPRINT,
+        choices: Vec::new(),
+        usage: Some(usage),
     })
-    .to_string()
 }
 
 fn build_text_completion_chunk(
@@ -157,19 +222,14 @@ fn build_text_completion_chunk(
     index: u32,
     text: &str,
 ) -> String {
-    serde_json::json!({
-        "id": id,
-        "object": "text_completion",
-        "created": created,
-        "model": model,
-        "system_fingerprint": SYSTEM_FINGERPRINT,
-        "choices": [{
-            "index": index,
-            "text": text,
-            "finish_reason": null
-        }]
+    serialize_chunk(&TextCompletionChunkPayload {
+        id,
+        object_type: "text_completion",
+        created,
+        model,
+        system_fingerprint: SYSTEM_FINGERPRINT,
+        choices: vec![TextCompletionChunkChoice { index, text, finish_reason: None }],
     })
-    .to_string()
 }
 
 fn build_text_completion_finish_chunk(
@@ -179,42 +239,29 @@ fn build_text_completion_finish_chunk(
     index: u32,
     finish_reason: &str,
 ) -> String {
-    serde_json::json!({
-        "id": id,
-        "object": "text_completion",
-        "created": created,
-        "model": model,
-        "system_fingerprint": SYSTEM_FINGERPRINT,
-        "choices": [{
-            "index": index,
-            "text": "",
-            "finish_reason": finish_reason
-        }]
+    serialize_chunk(&TextCompletionChunkPayload {
+        id,
+        object_type: "text_completion",
+        created,
+        model,
+        system_fingerprint: SYSTEM_FINGERPRINT,
+        choices: vec![TextCompletionChunkChoice {
+            index,
+            text: "",
+            finish_reason: Some(finish_reason),
+        }],
     })
-    .to_string()
 }
 
 fn build_error_chunk(message: &str) -> String {
-    serde_json::json!({
-        "error": {
-            "message": message,
-            "type": "server_error",
-            "code": null
-        }
+    serialize_chunk(&ChatStreamErrorPayload {
+        error: ChatStreamErrorBody { message, error_type: "server_error", code: None },
     })
-    .to_string()
 }
 
-fn usage_to_json(usage: &TextGenerationUsage) -> serde_json::Value {
-    serde_json::json!({
-        "prompt_tokens": usage.prompt_tokens,
-        "completion_tokens": usage.completion_tokens,
-        "total_tokens": usage.total_tokens,
-        "prompt_tokens_details": {
-            "cached_tokens": usage.prompt_tokens_details.cached_tokens,
-        },
-        "estimated": usage.estimated,
-    })
+fn serialize_chunk<T: Serialize>(payload: &T) -> String {
+    serde_json::to_string(payload)
+        .unwrap_or_else(|_| r#"{"error":{"message":"failed to serialize stream chunk","type":"server_error","code":null}}"#.to_owned())
 }
 
 pub(super) fn estimate_token_count(text: &str) -> u32 {
@@ -476,11 +523,7 @@ fn validate_cloud_structured_output(
 fn unsupported_chat_parameter(param: &str, message: impl Into<String>) -> AppCoreError {
     AppCoreError::BadRequestData {
         message: message.into(),
-        data: json!({
-            "error_type": "invalid_request_error",
-            "code": "unsupported_chat_parameter",
-            "param": param,
-        }),
+        data: AppCoreErrorData::unsupported_chat_parameter(param),
     }
 }
 

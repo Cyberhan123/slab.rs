@@ -6,7 +6,7 @@ use axum::{Json, Router};
 use utoipa::OpenApi;
 
 use crate::api::v1::session::schema::{
-    CreateSessionRequest, MessageResponse, SessionIdPath, SessionResponse,
+    CreateSessionRequest, DeleteSessionResponse, MessageResponse, SessionIdPath, SessionResponse,
 };
 use crate::api::validation::{ValidatedJson, validate};
 use crate::error::ServerError;
@@ -16,7 +16,13 @@ use slab_app_core::domain::services::SessionService;
 #[derive(OpenApi)]
 #[openapi(
     paths(create_session, list_sessions, delete_session, list_session_messages),
-    components(schemas(CreateSessionRequest, SessionResponse, MessageResponse, SessionIdPath))
+    components(schemas(
+        CreateSessionRequest,
+        SessionResponse,
+        MessageResponse,
+        DeleteSessionResponse,
+        SessionIdPath
+    ))
 )]
 pub struct SessionApi;
 
@@ -68,7 +74,7 @@ async fn list_sessions(
     tag = "sessions",
     params(SessionIdPath),
     responses(
-        (status = 200, description = "Session deleted", body = serde_json::Value),
+        (status = 200, description = "Session deleted", body = DeleteSessionResponse),
         (status = 400, description = "Bad request"),
         (status = 500, description = "Backend error"),
     )
@@ -76,9 +82,9 @@ async fn list_sessions(
 async fn delete_session(
     State(service): State<SessionService>,
     Path(params): Path<SessionIdPath>,
-) -> Result<Json<serde_json::Value>, ServerError> {
+) -> Result<Json<DeleteSessionResponse>, ServerError> {
     let params = validate(params)?;
-    Ok(Json(service.delete_session(&params.id).await?))
+    Ok(Json(service.delete_session(&params.id).await?.into()))
 }
 
 #[utoipa::path(

@@ -19,7 +19,7 @@ use crate::infra::model_packs;
 
 use super::{ModelService, download, pack, runtime};
 
-pub(super) type CloudProviderConfig = slab_types::settings::CloudProviderConfig;
+pub(super) type CloudProviderConfig = slab_config::CloudProviderConfig;
 
 impl ModelService {
     pub async fn create_model(

@@ -29,7 +29,7 @@ use crate::infra::endpoint::{ensure_http_base_url, join_http_url_path};
 
 use super::GeneratedChatOutput;
 
-type CloudProviderConfig = slab_types::settings::CloudProviderConfig;
+type CloudProviderConfig = slab_config::CloudProviderConfig;
 
 #[derive(Debug, Clone)]
 struct ResolvedCloudModel {

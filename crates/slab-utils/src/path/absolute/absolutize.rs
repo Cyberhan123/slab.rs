@@ -37,20 +37,12 @@ fn normalize_path(path: &Path) -> PathBuf {
         }
     }
 
-    if normalized.as_os_str().is_empty() {
-        PathBuf::from(".")
-    } else {
-        normalized
-    }
+    if normalized.as_os_str().is_empty() { PathBuf::from(".") } else { normalized }
 }
 
 #[cfg(not(windows))]
 fn path_with_base(path: &Path, base_path: &Path) -> PathBuf {
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        base_path.join(path)
-    }
+    if path.is_absolute() { path.to_path_buf() } else { base_path.join(path) }
 }
 
 #[cfg(windows)]
@@ -73,11 +65,7 @@ fn path_with_base(path: &Path, base_path: &Path) -> PathBuf {
     }
 
     let skip_base_prefix = matches!(base_path.components().next(), Some(Component::Prefix(_)));
-    for component in base_path
-        .components()
-        .skip(usize::from(skip_base_prefix))
-        .chain(components)
-    {
+    for component in base_path.components().skip(usize::from(skip_base_prefix)).chain(components) {
         path.push(component.as_os_str());
     }
     path

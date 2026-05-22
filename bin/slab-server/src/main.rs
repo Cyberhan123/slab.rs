@@ -22,10 +22,10 @@ use tracing_subscriber::util::SubscriberInitExt;
 use slab_app_core::config::{Config, default_model_config_dir_for_settings_path};
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::PmidService;
+use slab_app_core::infra::config_migration::migrate_legacy_settings_if_needed;
 use slab_app_core::infra::db::{AnyStore, TaskStore};
 use slab_app_core::infra::rpc::gateway::GrpcGateway;
 use slab_app_core::infra::runtime::{ManagedRuntimeHost, ManagedRuntimeHostStartOptions};
-use slab_app_core::infra::settings::migrate_legacy_settings_if_needed;
 use slab_app_core::runtime_supervisor::RuntimeSupervisorStatus;
 
 #[derive(Parser, Debug, Clone, Default)]

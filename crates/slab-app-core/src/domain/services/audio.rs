@@ -7,14 +7,16 @@ use uuid::Uuid;
 use crate::context::WorkerState;
 use crate::domain::models::{
     AUDIO_TRANSCRIPTION_TASK_TYPE, AcceptedOperation, AudioTranscriptionCommand,
-    AudioTranscriptionTaskView, TaskResult, TaskStatus, TranscribeDecodeOptions,
-    TranscribeVadOptions,
+    AudioTranscriptionRequestData, AudioTranscriptionResultData, AudioTranscriptionTaskView,
+    TaskResult, TaskStatus, TranscribeDecodeOptions, TranscribeVadOptions,
 };
 use crate::domain::ports::{
     RuntimeTranscriptionDecodeOptions, RuntimeTranscriptionRequest, RuntimeTranscriptionVadOptions,
     RuntimeTranscriptionVadParams,
 };
-use crate::domain::services::media_task::parse_json_value;
+use crate::domain::services::media_task::{
+    parse_json_payload, parse_json_payload_optional, serialize_json_payload,
+};
 use crate::error::AppCoreError;
 use crate::infra::db::{
     AudioTranscriptionTaskViewRecord, MediaTaskStore, NewAudioTranscriptionTaskRecord, TaskRecord,
@@ -62,16 +64,16 @@ impl AudioService {
             decode,
         };
 
-        let request_data = serde_json::json!({
-            "model_id": req.model_id,
-            "source_path": req.path,
-            "language": req.language,
-            "prompt": req.prompt,
-            "detect_language": req.detect_language,
-            "vad": req.vad,
-            "decode": req.decode,
-        })
-        .to_string();
+        let request_payload = AudioTranscriptionRequestData {
+            model_id: req.model_id.clone(),
+            source_path: req.path.clone(),
+            language: req.language.clone(),
+            prompt: req.prompt.clone(),
+            detect_language: req.detect_language,
+            vad: req.vad.clone(),
+            decode: req.decode.clone(),
+        };
+        let request_data = serialize_json_payload(&request_payload)?;
 
         let operation_id = Uuid::new_v4().to_string();
         let now = chrono::Utc::now();
@@ -137,8 +139,13 @@ impl AudioService {
                     Ok(response) => {
                         let text = response.text;
                         let segments = response.segments;
-                        let persisted_result =
-                            serde_json::json!({ "text": text, "segments": segments }).to_string();
+                        let persisted_result = serde_json::to_string(
+                            &AudioTranscriptionResultData {
+                                text: text.clone(),
+                                segments: segments.clone(),
+                            },
+                        )
+                        .unwrap_or_default();
                         let task_payload = serde_json::to_string(&TaskResult {
                             image: None,
                             images: None,
@@ -299,19 +306,19 @@ fn map_audio_view(row: AudioTranscriptionTaskViewRecord) -> AudioTranscriptionTa
         language: row.task.language,
         prompt: row.task.prompt,
         detect_language: row.task.detect_language,
-        vad_json: row.task.vad_json.as_deref().map(parse_json_value),
-        decode_json: row.task.decode_json.as_deref().map(parse_json_value),
+        vad_json: row.task.vad_json.as_deref().and_then(parse_json_payload_optional),
+        decode_json: row.task.decode_json.as_deref().and_then(parse_json_payload_optional),
         transcript_text: row.task.transcript_text,
         segments: row.task.result_data.as_deref().and_then(parse_result_segments),
-        request_data: parse_json_value(&row.task.request_data),
-        result_data: row.task.result_data.as_deref().map(parse_json_value),
+        request_data: parse_json_payload(&row.task.request_data),
+        result_data: row.task.result_data.as_deref().map(parse_json_payload),
         created_at: row.state.task_created_at.to_rfc3339(),
         updated_at: row.state.task_updated_at.to_rfc3339(),
     }
 }
 
 fn parse_result_segments(raw: &str) -> Option<Vec<crate::domain::models::TimedTextSegment>> {
-    serde_json::from_str::<TaskResult>(raw).ok()?.segments
+    Some(serde_json::from_str::<AudioTranscriptionResultData>(raw).ok()?.segments)
 }
 
 fn to_json_string<T: serde::Serialize>(value: &T) -> String {

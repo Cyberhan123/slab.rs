@@ -49,10 +49,7 @@ impl AbsolutePathBuf {
         let expanded = Self::maybe_expand_home_directory(path.as_ref());
         let expanded = normalize_path_for_platform(&expanded);
         let base_path = normalize_path_for_platform(base_path.as_ref());
-        Self(absolutize::absolutize_from(
-            expanded.as_ref(),
-            base_path.as_ref(),
-        ))
+        Self(absolutize::absolutize_from(expanded.as_ref(), base_path.as_ref()))
     }
 
     pub fn from_absolute_path<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
@@ -71,10 +68,7 @@ impl AbsolutePathBuf {
             ));
         }
 
-        Ok(Self(absolutize::absolutize_from(
-            expanded.as_ref(),
-            Path::new("/"),
-        )))
+        Ok(Self(absolutize::absolutize_from(expanded.as_ref(), Path::new("/"))))
     }
 
     pub fn current_dir() -> std::io::Result<Self> {
@@ -84,10 +78,7 @@ impl AbsolutePathBuf {
     /// Construct an absolute path from `path`, resolving relative paths against
     /// the process current working directory.
     pub fn relative_to_current_dir<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
-        Ok(Self::resolve_path_against_base(
-            path,
-            std::env::current_dir()?,
-        ))
+        Ok(Self::resolve_path_against_base(path, std::env::current_dir()?))
     }
 
     pub fn join<P: AsRef<Path>>(&self, path: P) -> Self {
@@ -100,20 +91,14 @@ impl AbsolutePathBuf {
 
     pub fn parent(&self) -> Option<Self> {
         self.0.parent().map(|p| {
-            debug_assert!(
-                p.is_absolute(),
-                "parent of AbsolutePathBuf must be absolute"
-            );
+            debug_assert!(p.is_absolute(), "parent of AbsolutePathBuf must be absolute");
             Self(p.to_path_buf())
         })
     }
 
     pub fn ancestors(&self) -> impl Iterator<Item = Self> + '_ {
         self.0.ancestors().map(|p| {
-            debug_assert!(
-                p.is_absolute(),
-                "ancestor of AbsolutePathBuf must be absolute"
-            );
+            debug_assert!(p.is_absolute(), "ancestor of AbsolutePathBuf must be absolute");
             Self(p.to_path_buf())
         })
     }
@@ -241,9 +226,7 @@ impl From<AbsolutePathBuf> for PathBuf {
 }
 
 /// Helpers for constructing absolute paths in tests.
-pub mod test_support {
-  
-}
+pub mod test_support {}
 
 impl TryFrom<&Path> for AbsolutePathBuf {
     type Error = std::io::Error;
@@ -315,9 +298,7 @@ impl<'de> Deserialize<'de> for AbsolutePathBuf {
             None if path.is_absolute() => {
                 Self::from_absolute_path(path).map_err(SerdeError::custom)
             }
-            None => Err(SerdeError::custom(
-                "AbsolutePathBuf deserialized without a base path",
-            )),
+            None => Err(SerdeError::custom("AbsolutePathBuf deserialized without a base path")),
         })
     }
 }
@@ -331,7 +312,7 @@ mod tests {
     use std::process::Command;
     use tempfile::tempdir;
 
-      use super::AbsolutePathBuf;
+    use super::AbsolutePathBuf;
     use std::path::Path;
     use std::path::PathBuf;
 
@@ -342,10 +323,7 @@ mod tests {
         if cfg!(windows) {
             let mut path = PathBuf::from(r"C:\");
             path.extend(
-                unix_path
-                    .trim_start_matches('/')
-                    .split('/')
-                    .filter(|segment| !segment.is_empty()),
+                unix_path.trim_start_matches('/').split('/').filter(|segment| !segment.is_empty()),
             );
             path
         } else {
@@ -424,10 +402,7 @@ mod tests {
         .expect("absolute path should not require current dir");
 
         std::env::set_current_dir(original_cwd).expect("restore cwd");
-        assert_eq!(
-            path.as_path(),
-            test_path_buf("/tmp/slab-home/plugins/cache")
-        );
+        assert_eq!(path.as_path(), test_path_buf("/tmp/slab-home/plugins/cache"));
     }
 
     #[test]
@@ -456,10 +431,7 @@ mod tests {
             normalize_windows_device_path(r"\\.\UNC\server\share\workspace"),
             Some(r"\\server\share\workspace".to_string())
         );
-        assert_eq!(
-            normalize_windows_device_path(r"\\?\GLOBALROOT\Device"),
-            None
-        );
+        assert_eq!(normalize_windows_device_path(r"\\?\GLOBALROOT\Device"), None);
     }
 
     #[cfg(target_os = "windows")]
@@ -469,10 +441,7 @@ mod tests {
             AbsolutePathBuf::from_absolute_path_checked(r"\\?\D:\c\x\worktrees\2508\swift-base")
                 .expect("verbatim drive path should be absolute");
 
-        assert_eq!(
-            path.as_path(),
-            Path::new(r"D:\c\x\worktrees\2508\swift-base")
-        );
+        assert_eq!(path.as_path(), Path::new(r"D:\c\x\worktrees\2508\swift-base"));
     }
 
     #[test]
@@ -502,10 +471,7 @@ mod tests {
             AbsolutePathBuf::from_absolute_path(temp_dir.path().join("one/../two/./file.txt"))
                 .expect("absolute path");
         assert_eq!(
-            abs_path_buf
-                .canonicalize()
-                .expect("path should canonicalize")
-                .as_path(),
+            abs_path_buf.canonicalize().expect("path should canonicalize").as_path(),
             dunce::canonicalize(temp_dir.path().join("two").join("file.txt"))
                 .expect("expected path should canonicalize")
                 .as_path()
@@ -527,10 +493,7 @@ mod tests {
             AbsolutePathBuf::from_absolute_path_checked(test_path_buf("/tmp/one/two"))
                 .expect("absolute path");
 
-        let ancestors = abs_path_buf
-            .ancestors()
-            .map(|path| path.to_path_buf())
-            .collect::<Vec<_>>();
+        let ancestors = abs_path_buf.ancestors().map(|path| path.to_path_buf()).collect::<Vec<_>>();
 
         let expected = vec![
             test_path_buf("/tmp/one/two"),
@@ -546,10 +509,7 @@ mod tests {
     fn relative_to_current_dir_resolves_relative_path() -> std::io::Result<()> {
         let current_dir = std::env::current_dir()?;
         let abs_path_buf = AbsolutePathBuf::relative_to_current_dir("file.txt")?;
-        assert_eq!(
-            abs_path_buf.as_path(),
-            current_dir.join("file.txt").as_path()
-        );
+        assert_eq!(abs_path_buf.as_path(), current_dir.join("file.txt").as_path());
         Ok(())
     }
 
@@ -563,10 +523,7 @@ mod tests {
             serde_json::from_str::<AbsolutePathBuf>(&format!(r#""{relative_path}""#))
                 .expect("failed to deserialize")
         };
-        assert_eq!(
-            abs_path_buf.as_path(),
-            base_dir.join(relative_path).as_path()
-        );
+        assert_eq!(abs_path_buf.as_path(), base_dir.join(relative_path).as_path());
     }
 
     #[test]

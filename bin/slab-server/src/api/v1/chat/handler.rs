@@ -8,7 +8,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::StreamExt;
-use serde_json::json;
 use utoipa::OpenApi;
 
 use crate::api::v1::chat::schema::{
@@ -17,7 +16,8 @@ use crate::api::v1::chat::schema::{
     ChatModelOption, ChatModelSource, ChatPromptTokensDetails, ChatReasoningEffort,
     ChatResponseFormat, ChatResponseFormatType, ChatResponseJsonSchema, ChatStreamOptions,
     ChatThinkingConfig, ChatThinkingType, ChatToolCall, ChatToolFunction, ChatVerbosity,
-    CompletionChoice, CompletionRequest, CompletionResponse, OpenAiErrorResponse, StopSequences,
+    CompletionChoice, CompletionRequest, CompletionResponse, OpenAiError, OpenAiErrorResponse,
+    StopSequences,
 };
 use crate::api::validation::ValidatedJson;
 use crate::error::ServerError;
@@ -160,9 +160,9 @@ fn openai_error_response(error: ServerError) -> Response {
         ServerError::BadRequestData { message, data } => (
             StatusCode::BAD_REQUEST,
             message,
-            string_field(&data, "error_type").unwrap_or_else(|| "invalid_request_error".to_owned()),
-            string_field(&data, "code").or(Some("bad_request".to_owned())),
-            string_field(&data, "param"),
+            data.error_type().to_owned(),
+            Some(data.code().to_owned()),
+            Some(data.param().to_owned()),
         ),
         ServerError::BackendNotReady(message) => (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -194,20 +194,6 @@ fn openai_error_response(error: ServerError) -> Response {
         ),
     };
 
-    (
-        status,
-        Json(json!({
-            "error": {
-                "message": message,
-                "type": error_type,
-                "param": param,
-                "code": code,
-            }
-        })),
-    )
+    (status, Json(OpenAiErrorResponse { error: OpenAiError { message, error_type, param, code } }))
         .into_response()
-}
-
-fn string_field(value: &serde_json::Value, field: &str) -> Option<String> {
-    value.get(field).and_then(serde_json::Value::as_str).map(str::to_owned)
 }

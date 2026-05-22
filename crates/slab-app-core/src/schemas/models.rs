@@ -7,7 +7,8 @@ use validator::{Validate, ValidationError};
 
 use crate::domain::models::{
     AvailableModelsQuery as DomainAvailableModelsQuery,
-    CreateModelCommand as DomainCreateModelCommand,
+    AvailableModelsView as DomainAvailableModelsView,
+    CreateModelCommand as DomainCreateModelCommand, DeletedModelView as DomainDeletedModelView,
     DownloadModelCommand as DomainDownloadModelCommand, ListModelsFilter as DomainListModelsFilter,
     ManagedModelBackendId as DomainManagedModelBackendId,
     ModelConfigDocument as DomainModelConfigDocument,
@@ -296,6 +297,20 @@ pub struct ListAvailableQuery {
     pub repo_id: String,
 }
 
+/// Response for `DELETE /v1/models/{id}`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DeleteModelResponse {
+    pub id: String,
+    pub status: String,
+}
+
+/// Response for `GET /v1/models/available`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct AvailableModelsResponse {
+    pub repo_id: String,
+    pub files: Vec<String>,
+}
+
 // ---------------------------------------------------------------------------
 // List query
 // ---------------------------------------------------------------------------
@@ -573,6 +588,18 @@ impl From<DomainModelSpec> for ModelSpecResponse {
             local_path: spec.local_path,
             context_window: spec.context_window,
         }
+    }
+}
+
+impl From<DomainDeletedModelView> for DeleteModelResponse {
+    fn from(view: DomainDeletedModelView) -> Self {
+        Self { id: view.id, status: view.status }
+    }
+}
+
+impl From<DomainAvailableModelsView> for AvailableModelsResponse {
+    fn from(view: DomainAvailableModelsView) -> Self {
+        Self { repo_id: view.repo_id, files: view.files }
     }
 }
 

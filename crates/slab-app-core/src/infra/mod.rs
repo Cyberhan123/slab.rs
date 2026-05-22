@@ -1,8 +1,9 @@
 pub mod agent_adapter;
+#[path = "settings.rs"]
+pub mod config_migration;
 pub mod db;
 pub(crate) mod endpoint;
 pub mod model_packs;
 pub mod rpc;
 pub mod runtime;
-pub mod settings;
 pub mod sse_notify;

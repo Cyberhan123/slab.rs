@@ -1,7 +1,7 @@
 //! Grep tool — gitignore-aware pattern search.
 //!
 //! Uses the `ignore` crate (which powers ripgrep) for directory traversal and
-//! `regex` for line-level matching. 
+//! `regex` for line-level matching.
 
 use std::path::PathBuf;
 

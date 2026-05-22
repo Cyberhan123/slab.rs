@@ -218,10 +218,10 @@ mod tests {
 
 #[cfg(feature = "axum")]
 mod axum_extractors {
-    use crate::context::{AppConfig, AppState, ModelState, WorkerState};
+    use crate::context::{AppState, ModelState, WorkerState};
     use crate::domain::services::{
         AgentService, AudioService, BackendService, ChatService, FfmpegService, ImageService,
-        ModelService, PluginService, PmidService, SessionService, SettingsService, SetupService,
+        ModelService, PluginService, SessionService, SettingsService, SetupService,
         SubtitleService, SystemService, TaskApplicationService, UiStateService, VideoService,
         WorkspaceLspService,
     };
@@ -237,18 +237,6 @@ mod axum_extractors {
     impl FromRef<Arc<AppState>> for WorkerState {
         fn from_ref(input: &Arc<AppState>) -> Self {
             (*input.context.worker_state).clone()
-        }
-    }
-
-    impl FromRef<Arc<AppState>> for AppConfig {
-        fn from_ref(input: &Arc<AppState>) -> Self {
-            (*input.context.config).clone()
-        }
-    }
-
-    impl FromRef<Arc<AppState>> for PmidService {
-        fn from_ref(input: &Arc<AppState>) -> Self {
-            (*input.context.pmid).clone()
         }
     }
 
