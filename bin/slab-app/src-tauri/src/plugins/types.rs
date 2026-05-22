@@ -8,10 +8,10 @@ pub use slab_types::plugin::{
     PluginAgentCapabilityContribution, PluginCapabilityKind, PluginCapabilityTransport,
     PluginCapabilityTransportType, PluginCommandContribution, PluginCompatibilityManifest,
     PluginContributesManifest, PluginFilePermissions, PluginInfo, PluginIntegrityManifest,
-    PluginLanguageServerContribution, PluginLanguageServerTransport, PluginManifest,
-    PluginNetworkManifest, PluginNetworkMode, PluginPermissionsManifest, PluginRouteContribution,
-    PluginRuntimeManifest, PluginSettingsContribution, PluginSidebarContribution, PluginUiManifest,
-    PluginWasmManifest,
+    PluginJsManifest, PluginLanguageServerContribution, PluginLanguageServerTransport,
+    PluginManifest, PluginNetworkManifest, PluginNetworkMode, PluginPermissionsManifest,
+    PluginRouteContribution, PluginRuntimeManifest, PluginSettingsContribution,
+    PluginSidebarContribution, PluginUiManifest, PluginWasmManifest,
 };
 
 #[derive(Debug, Clone, Deserialize)]

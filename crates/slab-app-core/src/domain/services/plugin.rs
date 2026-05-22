@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
 use reqwest::Url;
@@ -13,6 +14,7 @@ use crate::context::ModelState;
 use crate::domain::models::{InstallPluginCommand, PluginView};
 use crate::error::AppCoreError;
 use crate::infra::db::{PluginStateRecord, PluginStateStore};
+use slab_plugin::{PluginCallRequest, PluginRegistry, PluginRuntime};
 use slab_types::plugin::{
     PluginAgentCapabilityContribution, PluginCommandContribution, PluginLanguageServerContribution,
     PluginLanguageServerTransport, PluginManifest, PluginNetworkMode, PluginPermissionsManifest,
@@ -32,11 +34,17 @@ const IGNORED_PLUGIN_ROOT_NAMES: &[&str] = &["dist", ".git", "node_modules"];
 #[derive(Clone)]
 pub struct PluginService {
     state: ModelState,
+    registry: Arc<Mutex<Option<Arc<PluginRegistry>>>>,
+    runtime: Arc<PluginRuntime>,
 }
 
 impl PluginService {
     pub fn new(state: ModelState) -> Self {
-        Self { state }
+        Self {
+            state,
+            registry: Arc::new(Mutex::new(None)),
+            runtime: Arc::new(PluginRuntime::default()),
+        }
     }
 
     pub async fn list_plugins(&self) -> Result<Vec<PluginView>, AppCoreError> {
@@ -283,6 +291,67 @@ impl PluginService {
         Ok(())
     }
 
+    pub async fn dispatch_rpc(
+        &self,
+        plugin_id: &str,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, AppCoreError> {
+        self.ensure_plugin_state(plugin_id).await?;
+
+        let registry = self.plugin_registry()?;
+        registry.refresh().map_err(AppCoreError::Internal)?;
+        let plugin = registry.get_plugin(plugin_id).map_err(AppCoreError::BadRequest)?;
+
+        let input = serde_json::to_string(&params).map_err(|error| {
+            AppCoreError::BadRequest(format!(
+                "failed to serialize plugin params for `{plugin_id}`: {error}"
+            ))
+        })?;
+
+        let request = PluginCallRequest {
+            plugin_id: plugin_id.to_owned(),
+            function: method.to_owned(),
+            input,
+        };
+        let response = self.runtime.call(&plugin, &request).await.map_err(|error| {
+            AppCoreError::BadRequest(format!(
+                "plugin `{plugin_id}` call `{method}` failed: {error}"
+            ))
+        })?;
+
+        if response.output_text.trim().is_empty() {
+            return Ok(serde_json::Value::Null);
+        }
+
+        Ok(serde_json::from_str(&response.output_text).unwrap_or_else(|_| {
+            tracing::debug!(
+                plugin_id = plugin_id,
+                method = method,
+                "plugin returned non-JSON output; wrapping as JSON string"
+            );
+            serde_json::Value::String(response.output_text)
+        }))
+    }
+
+    fn plugin_registry(&self) -> Result<Arc<PluginRegistry>, AppCoreError> {
+        let mut guard = self
+            .registry
+            .lock()
+            .map_err(|_| AppCoreError::Internal("failed to lock plugin registry".to_string()))?;
+
+        if let Some(registry) = guard.as_ref() {
+            return Ok(Arc::clone(registry));
+        }
+
+        let registry = Arc::new(
+            PluginRegistry::new(self.state.config().plugins_dir.clone())
+                .map_err(AppCoreError::Internal)?,
+        );
+        *guard = Some(Arc::clone(&registry));
+        Ok(registry)
+    }
+
     async fn ensure_plugin_state(&self, plugin_id: &str) -> Result<(), AppCoreError> {
         let scans = self.scan_and_sync().await?;
         let scan = scans
@@ -294,6 +363,13 @@ impl PluginService {
                 "plugin '{plugin_id}' is invalid: {}",
                 scan.error.clone().unwrap_or_else(|| "unknown plugin validation error".to_owned())
             )));
+        }
+        if let Some(state) = self.state.store().get_plugin_state(plugin_id).await? {
+            if !state.enabled {
+                return Err(AppCoreError::BadRequest(format!(
+                    "plugin '{plugin_id}' is disabled"
+                )));
+            }
         }
         Ok(())
     }
@@ -624,6 +700,14 @@ fn validate_plugin_manifest(root_dir: &Path, manifest: &PluginManifest) -> Resul
             &manifest.integrity.files_sha256,
             &wasm.entry,
             "runtime.wasm.entry",
+        )?;
+    }
+    if let Some(js) = &manifest.runtime.js {
+        validate_declared_file(
+            root_dir,
+            &manifest.integrity.files_sha256,
+            &js.entry,
+            "runtime.js.entry",
         )?;
     }
 
