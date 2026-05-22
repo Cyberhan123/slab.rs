@@ -48,16 +48,16 @@ genai      = { workspace = true }
 reqwest    = { workspace = true }
 
 # Database (SQLite; swappable via trait)
-sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-rustls", "migrate", "chrono", "uuid", "_sqlite"] }
+sqlx = { workspace = true, features = ["sqlite", "runtime-tokio-rustls", "migrate", "chrono", "uuid", "_sqlite"] }
 
 # IDs & time
 uuid   = { workspace = true }
 chrono = { workspace = true }
 
 # OpenAPI / Swagger
-utoipa            = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
-utoipa-axum       = { version = "0.2" }
-utoipa-swagger-ui = { version = "9", features = ["axum","cache"] }
+utoipa            = { workspace = true, features = ["axum_extras", "uuid", "chrono"] }
+utoipa-axum       = { workspace = true }
+utoipa-swagger-ui = { workspace = true, features = ["axum","cache"] }
 
 # Logging
 tracing            = { workspace = true }
@@ -67,7 +67,7 @@ tracing-appender   = { workspace = true }
 # Error handling
 thiserror = { workspace = true }
 anyhow    = { workspace = true }
-validator = { version = "0.20", features = ["derive"] }
+validator = { workspace = true, features = ["derive"] }
 
 # Misc
 async-trait   = { workspace = true }
@@ -75,9 +75,9 @@ base64    = { workspace = true }
 bytemuck  = { workspace = true }
 strum = { workspace = true }
 clap = { workspace = true }
-all-smi = "0.20"
+all-smi = { workspace = true }
 image     = { workspace = true }
-dirs-next = "2.0.0"
-jsonschema = { version = "0.46.5", default-features = false }
-windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
+dirs-next = { workspace = true }
+jsonschema = { workspace = true }
+windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
 ffmpeg-sidecar = { workspace = true, features = ["download_ffmpeg"] }

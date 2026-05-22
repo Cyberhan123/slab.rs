@@ -6,6 +6,10 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod sys_bindings;
+
+pub use sys_bindings::generate_vendor_sys_bindings;
+
 #[derive(Debug, Clone)]
 pub struct ArtifactLayout {
     pub name: String,

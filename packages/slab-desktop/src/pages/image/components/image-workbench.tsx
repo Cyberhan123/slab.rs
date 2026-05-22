@@ -284,6 +284,7 @@ export function ImageWorkbench({
                             ref={initImageInputRef}
                             type="file"
                             accept="image/png,image/jpeg"
+                            aria-label={t('pages.image.workbench.initImage.chooseTitle')}
                             className="hidden"
                             onChange={handleInitImageChange}
                           />

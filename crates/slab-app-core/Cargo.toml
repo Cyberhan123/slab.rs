@@ -14,6 +14,7 @@ axum = ["dep:axum"]
 
 [build-dependencies]
 serde_json = { workspace = true }
+slab-build-utils = { workspace = true }
 slab-utils = { workspace = true }
 
 [dependencies]
@@ -46,7 +47,7 @@ tower            = { workspace = true }
 hyper-util       = { workspace = true }
 
 # OpenAPI schema derives (no HTTP/axum dependency)
-utoipa = { version = "5", features = ["uuid", "chrono"] }
+utoipa = { workspace = true, features = ["uuid", "chrono"] }
 
 # Serialization
 serde      = { workspace = true }
@@ -56,7 +57,7 @@ genai      = { workspace = true }
 reqwest    = { workspace = true }
 
 # Database (SQLite)
-sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-rustls", "migrate", "chrono", "uuid", "_sqlite"] }
+sqlx = { workspace = true, features = ["sqlite", "runtime-tokio-rustls", "migrate", "chrono", "uuid", "_sqlite"] }
 
 # IDs & time
 uuid   = { workspace = true }
@@ -79,13 +80,13 @@ regex       = { workspace = true }
 image       = { workspace = true }
 sha2        = { workspace = true }
 zip         = { workspace = true }
-dirs-next   = "2.0.0"
-jsonschema  = { version = "0.46.5", default-features = false }
+dirs-next   = { workspace = true }
+jsonschema  = { workspace = true }
 ffmpeg-sidecar = { workspace = true, features = ["download_ffmpeg"] }
-all-smi = "0.20"
+all-smi = { workspace = true }
 sysinfo = { workspace = true }
-windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
-validator = { version = "0.20", features = ["derive"] }
+windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
+validator = { workspace = true, features = ["derive"] }
 dashmap = { workspace = true }
 tokio-stream = { workspace = true }
 

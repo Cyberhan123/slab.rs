@@ -20,36 +20,36 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 slab-build-utils = { workspace = true }
-tauri-build = { version = "2", features = [] }
+tauri-build = { workspace = true, features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["unstable"] }
-tauri-plugin-opener = "2"
-tauri-plugin-mcp-bridge = "0.11"
-tauri-plugin-log = "2"
+tauri = { workspace = true, features = ["unstable"] }
+tauri-plugin-opener = { workspace = true }
+tauri-plugin-mcp-bridge = { workspace = true }
+tauri-plugin-log = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tauri-plugin-dialog = "2"
+tauri-plugin-dialog = { workspace = true }
 axum = { workspace = true, features = ["ws"] }
 futures = { workspace = true }
 reqwest = { workspace = true, features = ["blocking"] }
 tokio = { workspace = true }
-tauri-plugin-shell = "2"
+tauri-plugin-shell = { workspace = true }
 log = { workspace = true }
 slab-app-core = { workspace = true }
 slab-types = { workspace = true }
 slab-config = { workspace = true }
 slab-utils = { workspace = true }
-extism = "1.21.0"
-sha2 = "0.11"
+extism = { workspace = true }
+sha2 = { workspace = true }
 hex = { workspace = true }
-mime_guess = "2.0"
-percent-encoding = "2.3"
+mime_guess = { workspace = true }
+percent-encoding = { workspace = true }
 base64 = { workspace = true }
-dirs-next = "2.0.0"
-validator = "0.20"
+dirs-next = { workspace = true }
+validator = { workspace = true }
 uuid = { workspace = true }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-window-state = "2"
-tauri-plugin-decorum = { git = "https://github.com/clearlysid/tauri-plugin-decorum.git", rev = "9f1f73636821c3cb8b940524214b940b7999ef6e" }
+tauri-plugin-window-state = { workspace = true }
+tauri-plugin-decorum = { workspace = true }
