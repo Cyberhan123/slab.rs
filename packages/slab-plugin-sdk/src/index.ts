@@ -307,11 +307,15 @@ export function mountPluginUI(
   entry: string,
   container: HTMLElement,
 ): PluginUIHandle {
-  const core = resolveWindow(container.ownerDocument.defaultView ?? window)["__TAURI__"]?.core;
-  if (core && typeof core.invoke === "function") {
+  const targetWindow = resolveWindow(container.ownerDocument.defaultView ?? window);
+  const tauriCore = targetWindow["__TAURI__"]?.core;
+  const hasTrustedTauriContext = Boolean(
+    (targetWindow as Window & { __TAURI_INTERNALS__?: unknown })["__TAURI_INTERNALS__"],
+  );
+  if (hasTrustedTauriContext && tauriCore && typeof tauriCore.invoke === "function") {
     const bounds = container.getBoundingClientRect();
     const handle: PluginUIHandle = { kind: "tauri", pluginId };
-    void core
+    void tauriCore
       .invoke<{ webviewLabel: string }>("plugin_mount_view", {
         request: {
           pluginId,
@@ -336,16 +340,20 @@ export function mountPluginUI(
   iframe.style.width = "100%";
   iframe.style.height = "100%";
   iframe.style.border = "0";
-  iframe.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms");
+  iframe.setAttribute("sandbox", "allow-scripts allow-forms");
   container.appendChild(iframe);
   return { kind: "browser", pluginId, iframe };
 }
 
 export function unmountPluginUI(handle: PluginUIHandle): void {
   if (handle.kind === "tauri") {
-    const core = resolveWindow()["__TAURI__"]?.core;
-    if (core && typeof core.invoke === "function") {
-      void core.invoke("plugin_unmount_view", { request: { pluginId: handle.pluginId } });
+    const targetWindow = resolveWindow();
+    const tauriCore = targetWindow["__TAURI__"]?.core;
+    const hasTrustedTauriContext = Boolean(
+      (targetWindow as Window & { __TAURI_INTERNALS__?: unknown })["__TAURI_INTERNALS__"],
+    );
+    if (hasTrustedTauriContext && tauriCore && typeof tauriCore.invoke === "function") {
+      void tauriCore.invoke("plugin_unmount_view", { request: { pluginId: handle.pluginId } });
     }
     return;
   }

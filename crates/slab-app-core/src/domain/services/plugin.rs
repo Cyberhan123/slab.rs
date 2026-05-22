@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
 use reqwest::Url;
@@ -33,11 +34,17 @@ const IGNORED_PLUGIN_ROOT_NAMES: &[&str] = &["dist", ".git", "node_modules"];
 #[derive(Clone)]
 pub struct PluginService {
     state: ModelState,
+    registry: Arc<Mutex<Option<Arc<PluginRegistry>>>>,
+    runtime: Arc<PluginRuntime>,
 }
 
 impl PluginService {
     pub fn new(state: ModelState) -> Self {
-        Self { state }
+        Self {
+            state,
+            registry: Arc::new(Mutex::new(None)),
+            runtime: Arc::new(PluginRuntime::default()),
+        }
     }
 
     pub async fn list_plugins(&self) -> Result<Vec<PluginView>, AppCoreError> {
@@ -292,8 +299,7 @@ impl PluginService {
     ) -> Result<serde_json::Value, AppCoreError> {
         self.scan_and_sync().await?;
 
-        let registry = PluginRegistry::new(self.state.config().plugins_dir.clone())
-            .map_err(AppCoreError::Internal)?;
+        let registry = self.plugin_registry()?;
         registry.refresh().map_err(AppCoreError::Internal)?;
         let plugin = registry.get_plugin(plugin_id).map_err(AppCoreError::BadRequest)?;
 
@@ -308,8 +314,7 @@ impl PluginService {
             function: method.to_owned(),
             input,
         };
-        let runtime = PluginRuntime::default();
-        let response = runtime.call(&plugin, &request).await.map_err(|error| {
+        let response = self.runtime.call(&plugin, &request).await.map_err(|error| {
             AppCoreError::BadRequest(format!(
                 "plugin `{plugin_id}` call `{method}` failed: {error}"
             ))
@@ -324,6 +329,24 @@ impl PluginService {
                 "plugin `{plugin_id}` returned non-json response for `{method}`: {error}"
             ))
         })
+    }
+
+    fn plugin_registry(&self) -> Result<Arc<PluginRegistry>, AppCoreError> {
+        let mut guard = self
+            .registry
+            .lock()
+            .map_err(|_| AppCoreError::Internal("failed to lock plugin registry".to_string()))?;
+
+        if let Some(registry) = guard.as_ref() {
+            return Ok(Arc::clone(registry));
+        }
+
+        let registry = Arc::new(
+            PluginRegistry::new(self.state.config().plugins_dir.clone())
+                .map_err(AppCoreError::Internal)?,
+        );
+        *guard = Some(Arc::clone(&registry));
+        Ok(registry)
     }
 
     async fn ensure_plugin_state(&self, plugin_id: &str) -> Result<(), AppCoreError> {
