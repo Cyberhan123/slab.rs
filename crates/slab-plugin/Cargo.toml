@@ -1,0 +1,22 @@
+[package]
+name = "slab-plugin"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+slab-types = { workspace = true }
+slab-config = { workspace = true }
+slab-js-runtime = { workspace = true }
+extism = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+reqwest = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+hex = { workspace = true }
+sha2 = { workspace = true }
+percent-encoding = "2.3"

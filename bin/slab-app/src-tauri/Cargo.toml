@@ -40,7 +40,9 @@ slab-app-core = { workspace = true }
 slab-types = { workspace = true }
 slab-config = { workspace = true }
 slab-utils = { workspace = true }
-extism = "1.21.0"
+slab-plugin = { workspace = true }
+tokio-tungstenite = { workspace = true }
+url = "2"
 sha2 = "0.11"
 hex = { workspace = true }
 mime_guess = "2.0"
