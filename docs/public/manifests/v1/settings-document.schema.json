@@ -13,6 +13,105 @@
       },
       "type": "object"
     },
+    "AgentSettingsConfig": {
+      "description": "Agent-specific settings.",
+      "properties": {
+        "tools": {
+          "$ref": "#/$defs/AgentToolsConfig",
+          "default": {
+            "websearch": {
+              "default_provider": "duckduckgo",
+              "providers": {
+                "arxiv": {},
+                "brave": {
+                  "auth": {}
+                },
+                "duckduckgo": {},
+                "exa": {
+                  "auth": {}
+                },
+                "google": {
+                  "auth": {}
+                },
+                "searxng": {},
+                "serpapi": {
+                  "auth": {}
+                },
+                "tavily": {
+                  "auth": {}
+                }
+              }
+            }
+          }
+        }
+      },
+      "type": "object"
+    },
+    "AgentToolsConfig": {
+      "description": "Agent tool settings.",
+      "properties": {
+        "websearch": {
+          "$ref": "#/$defs/AgentWebSearchConfig",
+          "default": {
+            "default_provider": "duckduckgo",
+            "providers": {
+              "arxiv": {},
+              "brave": {
+                "auth": {}
+              },
+              "duckduckgo": {},
+              "exa": {
+                "auth": {}
+              },
+              "google": {
+                "auth": {}
+              },
+              "searxng": {},
+              "serpapi": {
+                "auth": {}
+              },
+              "tavily": {
+                "auth": {}
+              }
+            }
+          }
+        }
+      },
+      "type": "object"
+    },
+    "AgentWebSearchConfig": {
+      "description": "Agent web search tool configuration.",
+      "properties": {
+        "default_provider": {
+          "$ref": "#/$defs/WebSearchProviderId",
+          "default": "duckduckgo"
+        },
+        "providers": {
+          "$ref": "#/$defs/WebSearchProvidersConfig",
+          "default": {
+            "arxiv": {},
+            "brave": {
+              "auth": {}
+            },
+            "duckduckgo": {},
+            "exa": {
+              "auth": {}
+            },
+            "google": {
+              "auth": {}
+            },
+            "searxng": {},
+            "serpapi": {
+              "auth": {}
+            },
+            "tavily": {
+              "auth": {}
+            }
+          }
+        }
+      },
+      "type": "object"
+    },
     "AutoUnloadConfig": {
       "description": "Automatic model-unload settings.",
       "properties": {
@@ -865,6 +964,222 @@
         }
       },
       "type": "object"
+    },
+    "WebSearchArxivProviderConfig": {
+      "type": "object"
+    },
+    "WebSearchBraveProviderConfig": {
+      "properties": {
+        "auth": {
+          "$ref": "#/$defs/ProviderAuthConfig",
+          "default": {}
+        }
+      },
+      "type": "object"
+    },
+    "WebSearchDuckDuckGoProviderConfig": {
+      "properties": {
+        "base_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "use_lite": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "user_agent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "WebSearchExaProviderConfig": {
+      "properties": {
+        "auth": {
+          "$ref": "#/$defs/ProviderAuthConfig",
+          "default": {}
+        },
+        "base_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "include_contents": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "WebSearchGoogleProviderConfig": {
+      "properties": {
+        "auth": {
+          "$ref": "#/$defs/ProviderAuthConfig",
+          "default": {}
+        },
+        "base_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cx": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "WebSearchProviderId": {
+      "description": "Supported `websearch` crate providers.",
+      "enum": [
+        "duckduckgo",
+        "arxiv",
+        "google",
+        "tavily",
+        "exa",
+        "serpapi",
+        "brave",
+        "searxng"
+      ],
+      "type": "string"
+    },
+    "WebSearchProvidersConfig": {
+      "description": "Provider-specific configuration for the agent web search tool.",
+      "properties": {
+        "arxiv": {
+          "$ref": "#/$defs/WebSearchArxivProviderConfig",
+          "default": {}
+        },
+        "brave": {
+          "$ref": "#/$defs/WebSearchBraveProviderConfig",
+          "default": {
+            "auth": {}
+          }
+        },
+        "duckduckgo": {
+          "$ref": "#/$defs/WebSearchDuckDuckGoProviderConfig",
+          "default": {}
+        },
+        "exa": {
+          "$ref": "#/$defs/WebSearchExaProviderConfig",
+          "default": {
+            "auth": {}
+          }
+        },
+        "google": {
+          "$ref": "#/$defs/WebSearchGoogleProviderConfig",
+          "default": {
+            "auth": {}
+          }
+        },
+        "searxng": {
+          "$ref": "#/$defs/WebSearchSearxngProviderConfig",
+          "default": {}
+        },
+        "serpapi": {
+          "$ref": "#/$defs/WebSearchSerpApiProviderConfig",
+          "default": {
+            "auth": {}
+          }
+        },
+        "tavily": {
+          "$ref": "#/$defs/WebSearchTavilyProviderConfig",
+          "default": {
+            "auth": {}
+          }
+        }
+      },
+      "type": "object"
+    },
+    "WebSearchSearxngProviderConfig": {
+      "properties": {
+        "base_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "WebSearchSerpApiProviderConfig": {
+      "properties": {
+        "auth": {
+          "$ref": "#/$defs/ProviderAuthConfig",
+          "default": {}
+        },
+        "base_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "engine": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "WebSearchTavilyProviderConfig": {
+      "properties": {
+        "auth": {
+          "$ref": "#/$defs/ProviderAuthConfig",
+          "default": {}
+        },
+        "base_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "include_answer": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "include_images": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "include_raw_content": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "search_depth": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
     }
   },
   "$id": "https://slab.reorgix.com/manifests/v1/settings-document.schema.json",
@@ -878,6 +1193,36 @@
         "string",
         "null"
       ]
+    },
+    "agent": {
+      "$ref": "#/$defs/AgentSettingsConfig",
+      "default": {
+        "tools": {
+          "websearch": {
+            "default_provider": "duckduckgo",
+            "providers": {
+              "arxiv": {},
+              "brave": {
+                "auth": {}
+              },
+              "duckduckgo": {},
+              "exa": {
+                "auth": {}
+              },
+              "google": {
+                "auth": {}
+              },
+              "searxng": {},
+              "serpapi": {
+                "auth": {}
+              },
+              "tavily": {
+                "auth": {}
+              }
+            }
+          }
+        }
+      }
     },
     "database": {
       "$ref": "#/$defs/DatabaseConfig",

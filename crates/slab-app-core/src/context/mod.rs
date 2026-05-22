@@ -133,6 +133,7 @@ fn build_agent_control(
         if sandbox_driver.is_some() { ShellPolicy::Allow } else { ShellPolicy::Block };
 
     let mut tool_router = ToolRouter::new();
+    let web_search_config = ctx.pmid.config().agent.tools.websearch;
     slab_agent_tools::register_all_tools(
         &mut tool_router,
         shell_policy,
@@ -140,6 +141,7 @@ fn build_agent_control(
         workspace_root,
         None,
         false,
+        web_search_config,
     );
 
     let notify_port: Arc<dyn slab_agent::AgentNotifyPort> = notify.clone();

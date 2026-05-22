@@ -9,6 +9,7 @@ use slab_types::settings::{
     RuntimeConfig, RuntimeLlamaConfig, RuntimeModelAutoUnloadConfig, RuntimeWhisperConfig,
     RuntimeWorkerConfig, ServerLaunchProfileConfig, SettingsDocument, SetupBackendsConfig,
     SetupConfig, SetupFfmpegConfig, provider_registry_json_schema, string_list_json_schema,
+    websearch_providers_json_schema,
 };
 
 use crate::domain::models::{
@@ -101,6 +102,7 @@ fn load_config(settings: &SettingsDocument) -> PmidConfig {
                 dir: normalize_string(settings.runtime.ggml.install_dir.clone()),
             },
         },
+        agent: settings.agent.clone(),
         runtime: RuntimeConfig {
             model_cache_dir: normalize_string(settings.models.cache_dir.clone()),
             llama: RuntimeLlamaConfig {
@@ -404,6 +406,19 @@ fn empty_sections() -> Vec<SettingsSectionView> {
             }],
         },
         SettingsSectionView {
+            id: "agent".to_owned(),
+            title: "Agent".to_owned(),
+            description_md: "Agent tool configuration used by built-in deterministic tools."
+                .to_owned(),
+            subsections: vec![SettingsSubsectionView {
+                id: "websearch".to_owned(),
+                title: "Web Search".to_owned(),
+                description_md: "Configure the agent web search provider defaults and credentials."
+                    .to_owned(),
+                properties: Vec::new(),
+            }],
+        },
+        SettingsSectionView {
             id: "server".to_owned(),
             title: "Server".to_owned(),
             description_md: "HTTP gateway configuration, access control, and API tooling."
@@ -471,6 +486,7 @@ fn section_location(path: &str) -> (&'static str, &'static str) {
         _ if path.starts_with("database.") => ("database", "general"),
         _ if path.starts_with("logging.") => ("logging", "general"),
         _ if path.starts_with("tools.ffmpeg.") => ("tools", "ffmpeg"),
+        _ if path.starts_with("agent.tools.websearch.") => ("agent", "websearch"),
         _ if path.starts_with("runtime.ggml.backends.llama.") => ("runtime", "llama"),
         _ if path.starts_with("runtime.ggml.backends.whisper.") => ("runtime", "whisper"),
         _ if path.starts_with("runtime.ggml.backends.diffusion.") => ("runtime", "diffusion"),
@@ -493,6 +509,9 @@ fn section_location(path: &str) -> (&'static str, &'static str) {
 fn value_type(path: &str, effective: &Value, default: &Value) -> SettingValueType {
     if path == "providers.registry" || path == "server.cors.allowed_origins" {
         return SettingValueType::Array;
+    }
+    if path == "agent.tools.websearch.providers" {
+        return SettingValueType::Object;
     }
     if path.ends_with(".enabled")
         || path.ends_with(".json")
@@ -533,6 +552,16 @@ fn enum_values(path: &str) -> Option<Vec<String>> {
             Some(vec!["managed_children".to_owned(), "external_endpoints".to_owned()])
         }
         "runtime.transport" => Some(vec!["http".to_owned(), "ipc".to_owned()]),
+        "agent.tools.websearch.default_provider" => Some(vec![
+            "duckduckgo".to_owned(),
+            "arxiv".to_owned(),
+            "google".to_owned(),
+            "tavily".to_owned(),
+            "exa".to_owned(),
+            "serpapi".to_owned(),
+            "brave".to_owned(),
+            "searxng".to_owned(),
+        ]),
         "models.download_source" => {
             Some(vec!["auto".to_owned(), "hugging_face".to_owned(), "model_scope".to_owned()])
         }
@@ -555,6 +584,7 @@ fn minimum_value(path: &str) -> Option<i64> {
 fn json_schema(path: &str) -> Option<Value> {
     match path {
         "providers.registry" => Some(provider_registry_json_schema()),
+        "agent.tools.websearch.providers" => Some(websearch_providers_json_schema()),
         "server.cors.allowed_origins" => Some(string_list_json_schema("Allowed Origins")),
         _ => None,
     }
@@ -565,7 +595,7 @@ fn secret(path: &str) -> bool {
 }
 
 fn multiline(path: &str) -> bool {
-    path == "providers.registry"
+    path == "providers.registry" || path == "agent.tools.websearch.providers"
 }
 
 fn property_label(path: &str) -> String {
@@ -578,6 +608,8 @@ fn property_label(path: &str) -> String {
         "runtime.mode" => "Runtime Mode".to_owned(),
         "runtime.transport" => "Transport".to_owned(),
         "runtime.sessions.state_dir" => "Session State Directory".to_owned(),
+        "agent.tools.websearch.default_provider" => "Default Provider".to_owned(),
+        "agent.tools.websearch.providers" => "Web Search Providers".to_owned(),
         _ if path.ends_with(".flash_attn") => "Flash Attention".to_owned(),
         "providers.registry" => "Provider Registry".to_owned(),
         "models.cache_dir" => "Model Cache Directory".to_owned(),
@@ -604,6 +636,12 @@ fn property_description(path: &str) -> String {
         "tools.ffmpeg.enabled" => "Enable FFmpeg integration for media tooling.".to_owned(),
         "tools.ffmpeg.auto_download" => "Download FFmpeg automatically when it is missing.".to_owned(),
         "tools.ffmpeg.install_dir" => "Optional install directory for the FFmpeg sidecar.".to_owned(),
+        "agent.tools.websearch.default_provider" => {
+            "Provider used by the agent web_search tool when the tool call omits provider.".to_owned()
+        }
+        "agent.tools.websearch.providers" => {
+            "Provider-specific credentials and options for the agent web_search tool.".to_owned()
+        }
         "runtime.mode" => "Choose whether runtimes are launched as managed child processes or discovered through explicit endpoints.".to_owned(),
         "runtime.transport" => "Transport protocol used between the gateway and runtime workers.".to_owned(),
         "runtime.sessions.state_dir" => "Directory used for persisted runtime-backed session state.".to_owned(),
@@ -860,6 +898,97 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
 
         assert_eq!(persisted.general.language, InterfaceLanguagePreference::ZhCn);
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn document_view_includes_agent_web_search_settings() {
+        let path = temp_settings_path();
+        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&SettingsDocument::default()).expect("serialize"),
+        )
+        .expect("write");
+
+        let service = PmidService::load_from_path(path.clone()).await.expect("pmid service");
+        let document = service.document().await;
+        let agent_section =
+            document.sections.iter().find(|section| section.id == "agent").expect("agent section");
+        let websearch_subsection = agent_section
+            .subsections
+            .iter()
+            .find(|subsection| subsection.id == "websearch")
+            .expect("websearch subsection");
+        let default_provider = websearch_subsection
+            .properties
+            .iter()
+            .find(|property| property.pmid == "agent.tools.websearch.default_provider")
+            .expect("default provider property");
+        let providers = websearch_subsection
+            .properties
+            .iter()
+            .find(|property| property.pmid == "agent.tools.websearch.providers")
+            .expect("providers property");
+        let provider_enum = default_provider.schema.enum_values.as_ref().expect("provider enum");
+        let schema = providers.schema.json_schema.as_ref().expect("providers schema");
+
+        assert_eq!(agent_section.title, "Agent");
+        assert_eq!(websearch_subsection.title, "Web Search");
+        assert!(provider_enum.contains(&"duckduckgo".to_owned()));
+        assert!(provider_enum.contains(&"searxng".to_owned()));
+        assert_eq!(providers.schema.value_type, SettingValueType::Object);
+        assert!(providers.schema.multiline);
+        assert_eq!(schema["$defs"]["webSearchAuth"]["properties"]["api_key"]["writeOnly"], true);
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn update_websearch_providers_refreshes_cached_snapshot() {
+        let path = temp_settings_path();
+        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&SettingsDocument::default()).expect("serialize"),
+        )
+        .expect("write");
+
+        let service = PmidService::load_from_path(path.clone()).await.expect("pmid service");
+
+        service
+            .update_setting(
+                "agent.tools.websearch.providers",
+                UpdateSettingCommand {
+                    op: crate::domain::models::UpdateSettingOperation::Set,
+                    value: Some(json!({
+                        "google": {
+                            "auth": { "api_key_env": "GOOGLE_SEARCH_API_KEY" },
+                            "cx": "search-engine-id"
+                        }
+                    })),
+                },
+            )
+            .await
+            .expect("update");
+
+        let config = service.config();
+        let persisted: SettingsDocument =
+            serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
+
+        assert_eq!(
+            config.agent.tools.websearch.providers.google.cx.as_deref(),
+            Some("search-engine-id")
+        );
+        assert_eq!(
+            config.agent.tools.websearch.providers.google.auth.api_key_env.as_deref(),
+            Some("GOOGLE_SEARCH_API_KEY")
+        );
+        assert_eq!(
+            persisted.agent.tools.websearch.providers.google.cx.as_deref(),
+            Some("search-engine-id")
+        );
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }

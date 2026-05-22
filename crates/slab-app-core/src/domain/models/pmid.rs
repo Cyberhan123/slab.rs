@@ -14,6 +14,14 @@ mod tests {
             PMID.runtime.ggml.backends.llama.context_length().as_str(),
             "runtime.ggml.backends.llama.context_length"
         );
+        assert_eq!(
+            PMID.agent.tools.websearch.default_provider().as_str(),
+            "agent.tools.websearch.default_provider"
+        );
+        assert_eq!(
+            PMID.agent.tools.websearch.providers().as_str(),
+            "agent.tools.websearch.providers"
+        );
     }
 
     #[test]
@@ -22,6 +30,8 @@ mod tests {
             PMID.all().into_iter().map(SettingPmid::into_string).collect();
 
         assert_eq!(actual.len(), PMID.all().len());
+        assert!(actual.contains("agent.tools.websearch.default_provider"));
+        assert!(actual.contains("agent.tools.websearch.providers"));
         assert!(actual.contains("providers.registry"));
         assert!(actual.contains("server.swagger.enabled"));
     }

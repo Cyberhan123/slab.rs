@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::launch::LaunchConfig;
+use super::{document::AgentSettingsConfig, launch::LaunchConfig};
 
 const fn default_flash_attn_enabled() -> bool {
     true
@@ -45,6 +45,7 @@ pub struct CloudProviderConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct PmidConfig {
     pub setup: SetupConfig,
+    pub agent: AgentSettingsConfig,
     pub runtime: RuntimeConfig,
     pub launch: LaunchConfig,
     pub chat: ChatConfig,

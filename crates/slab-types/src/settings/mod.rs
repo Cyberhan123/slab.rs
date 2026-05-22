@@ -10,26 +10,30 @@ pub use config::{
     SetupConfig, SetupFfmpegConfig,
 };
 pub use document::{
-    AdminConfig, AutoUnloadConfig, CapacityConfig, CapacityOverrideConfig, CorsConfig,
-    DatabaseConfig, EndpointConfig, FfmpegToolConfig, GeneralSettingsConfig,
-    GgmlRuntimeBackendsConfig, GgmlRuntimeFamilyConfig, HttpEndpointConfig,
-    InterfaceLanguagePreference, IpcEndpointConfig, LlamaRuntimeLeafConfig, LoggingConfig,
-    LoggingOverrideConfig, ModelDownloadSourcePreference, ModelSettingsConfig,
+    AdminConfig, AgentSettingsConfig, AgentToolsConfig, AgentWebSearchConfig, AutoUnloadConfig,
+    CapacityConfig, CapacityOverrideConfig, CorsConfig, DatabaseConfig, EndpointConfig,
+    FfmpegToolConfig, GeneralSettingsConfig, GgmlRuntimeBackendsConfig, GgmlRuntimeFamilyConfig,
+    HttpEndpointConfig, InterfaceLanguagePreference, IpcEndpointConfig, LlamaRuntimeLeafConfig,
+    LoggingConfig, LoggingOverrideConfig, ModelDownloadSourcePreference, ModelSettingsConfig,
     PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL, ProviderAuthConfig, ProviderDefaultsConfig,
     ProviderFamily, ProviderRegistryEntry, ProvidersConfig, RuntimeLeafConfig, RuntimeMode,
     RuntimeSessionsConfig, RuntimeSettingsConfig, ServerSettingsConfig, SettingsDocument,
     SingleRuntimeFamilyConfig, SourceConfig, SwaggerConfig, ToolsConfig,
-    provider_registry_json_schema, render_settings_document_json_schema,
-    settings_document_json_schema, string_list_json_schema,
+    WebSearchArxivProviderConfig, WebSearchBraveProviderConfig, WebSearchDuckDuckGoProviderConfig,
+    WebSearchExaProviderConfig, WebSearchGoogleProviderConfig, WebSearchProviderId,
+    WebSearchProvidersConfig, WebSearchSearxngProviderConfig, WebSearchSerpApiProviderConfig,
+    WebSearchTavilyProviderConfig, provider_registry_json_schema,
+    render_settings_document_json_schema, settings_document_json_schema, string_list_json_schema,
+    websearch_providers_json_schema,
 };
 pub use launch::{
     DesktopLaunchProfileConfig, LaunchBackendConfig, LaunchBackendsConfig, LaunchConfig,
     LaunchProfilesConfig, RuntimeTransportMode, ServerLaunchProfileConfig,
 };
 pub use pmid::{
-    AdminPmids, AutoUnloadPmids, CapacityPmids, CorsPmids, DatabasePmids, EndpointPmids,
-    FfmpegToolPmids, GeneralPmids, GgmlBackendPmids, GgmlRuntimePmids, LlamaRuntimePmids,
-    ModelsPmids, PMID, ProvidersPmids, RuntimeBackendLeafPmids, RuntimePmids, RuntimeSessionsPmids,
-    ServerPmids, SettingPmid, SettingsPmidCatalog, SingleRuntimeFamilyPmids, SourcePmids,
-    SwaggerPmids, ToolsPmids,
+    AdminPmids, AgentPmids, AgentToolsPmids, AgentWebSearchPmids, AutoUnloadPmids, CapacityPmids,
+    CorsPmids, DatabasePmids, EndpointPmids, FfmpegToolPmids, GeneralPmids, GgmlBackendPmids,
+    GgmlRuntimePmids, LlamaRuntimePmids, ModelsPmids, PMID, ProvidersPmids,
+    RuntimeBackendLeafPmids, RuntimePmids, RuntimeSessionsPmids, ServerPmids, SettingPmid,
+    SettingsPmidCatalog, SingleRuntimeFamilyPmids, SourcePmids, SwaggerPmids, ToolsPmids,
 };
