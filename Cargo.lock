@@ -5986,6 +5986,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonrpc-core"
+version = "18.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14f7f76aef2d054868398427f6c54943cf3d1caa9a7ec7d0c38d69df97a965eb"
+dependencies = [
+ "futures",
+ "futures-executor",
+ "futures-util",
+ "log",
+ "serde",
+ "serde_derive",
+ "serde_json",
+]
+
+[[package]]
 name = "jsonschema"
 version = "0.46.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10448,7 +10463,6 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "dirs-next",
- "extism",
  "futures",
  "hex",
  "log",
@@ -10461,6 +10475,7 @@ dependencies = [
  "slab-app-core",
  "slab-build-utils",
  "slab-config",
+ "slab-plugin",
  "slab-types",
  "slab-utils",
  "tauri",
@@ -10473,6 +10488,8 @@ dependencies = [
  "tauri-plugin-shell",
  "tauri-plugin-window-state",
  "tokio",
+ "tokio-tungstenite 0.29.0",
+ "url",
  "uuid",
  "validator",
 ]
@@ -10513,6 +10530,7 @@ dependencies = [
  "slab-hub",
  "slab-libfetch",
  "slab-model-pack",
+ "slab-plugin",
  "slab-proto",
  "slab-runtime-core",
  "slab-sandboxing",
@@ -10671,6 +10689,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "slab-js-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dashmap",
+ "jsonrpc-core",
+ "serde",
+ "serde_json",
+ "slab-types",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "slab-libfetch"
 version = "0.1.0"
 dependencies = [
@@ -10765,6 +10798,28 @@ dependencies = [
  "slab-types",
  "thiserror 2.0.18",
  "zip 8.6.0",
+]
+
+[[package]]
+name = "slab-plugin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "extism",
+ "hex",
+ "percent-encoding",
+ "reqwest 0.13.3",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "slab-config",
+ "slab-js-runtime",
+ "slab-types",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -10886,6 +10941,7 @@ dependencies = [
  "http-body-util",
  "hyper-util",
  "image",
+ "jsonrpc-core",
  "jsonschema",
  "parity-tokio-ipc",
  "reqwest 0.13.3",

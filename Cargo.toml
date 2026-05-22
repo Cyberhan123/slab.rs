@@ -35,6 +35,8 @@ members = [
     "crates/slab-shell-command",
     "crates/slab-mcp-client",
     "crates/slab-mcp",
+    "crates/slab-plugin",
+    "crates/slab-js-runtime",
 ]
 
 exclude = [
@@ -82,6 +84,8 @@ slab-shell-command = { path = "./crates/slab-shell-command", package = "slab-she
 slab-mcp-client = { path = "./crates/slab-mcp-client", package = "slab-mcp-client", version = "0.1.0" }
 slab-mcp = { path = "./crates/slab-mcp", package = "slab-mcp", version = "0.1.0" }
 slab-mcp-server = { path = "./bin/slab-mcp-server", package = "slab-mcp-server", version = "0.1.0" }
+slab-plugin = { path = "./crates/slab-plugin", package = "slab-plugin", version = "0.1.0" }
+slab-js-runtime = { path = "./crates/slab-js-runtime", package = "slab-js-runtime", version = "0.1.0" }
 
 notify = "8"
 ignore = "0.4"
@@ -163,6 +167,9 @@ parity-tokio-ipc = "0.9"
 winapi = { version = "0.3.9", features = ["winerror"] }
 tokio-stream = "0.1"
 tokio-tungstenite = "0.29.0"
+jsonrpc-core = "18"
+extism = "1"
+deno = "2"
 # Utilities
 async-trait = "0.1"
 bytemuck = "1"

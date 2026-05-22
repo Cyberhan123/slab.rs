@@ -13,6 +13,7 @@ use crate::context::ModelState;
 use crate::domain::models::{InstallPluginCommand, PluginView};
 use crate::error::AppCoreError;
 use crate::infra::db::{PluginStateRecord, PluginStateStore};
+use slab_plugin::{PluginCallRequest, PluginRegistry, PluginRuntime};
 use slab_types::plugin::{
     PluginAgentCapabilityContribution, PluginCommandContribution, PluginLanguageServerContribution,
     PluginLanguageServerTransport, PluginManifest, PluginNetworkMode, PluginPermissionsManifest,
@@ -281,6 +282,48 @@ impl PluginService {
         }
         self.state.store().delete_plugin_state(plugin_id).await?;
         Ok(())
+    }
+
+    pub async fn dispatch_rpc(
+        &self,
+        plugin_id: &str,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, AppCoreError> {
+        self.scan_and_sync().await?;
+
+        let registry = PluginRegistry::new(self.state.config().plugins_dir.clone())
+            .map_err(AppCoreError::Internal)?;
+        registry.refresh().map_err(AppCoreError::Internal)?;
+        let plugin = registry.get_plugin(plugin_id).map_err(AppCoreError::BadRequest)?;
+
+        let input = serde_json::to_string(&params).map_err(|error| {
+            AppCoreError::BadRequest(format!(
+                "failed to serialize plugin params for `{plugin_id}`: {error}"
+            ))
+        })?;
+
+        let request = PluginCallRequest {
+            plugin_id: plugin_id.to_owned(),
+            function: method.to_owned(),
+            input,
+        };
+        let runtime = PluginRuntime::default();
+        let response = runtime.call(&plugin, &request).await.map_err(|error| {
+            AppCoreError::BadRequest(format!(
+                "plugin `{plugin_id}` call `{method}` failed: {error}"
+            ))
+        })?;
+
+        if response.output_text.trim().is_empty() {
+            return Ok(serde_json::Value::Null);
+        }
+
+        serde_json::from_str(&response.output_text).map_err(|error| {
+            AppCoreError::BadRequest(format!(
+                "plugin `{plugin_id}` returned non-json response for `{method}`: {error}"
+            ))
+        })
     }
 
     async fn ensure_plugin_state(&self, plugin_id: &str) -> Result<(), AppCoreError> {
@@ -624,6 +667,14 @@ fn validate_plugin_manifest(root_dir: &Path, manifest: &PluginManifest) -> Resul
             &manifest.integrity.files_sha256,
             &wasm.entry,
             "runtime.wasm.entry",
+        )?;
+    }
+    if let Some(js) = &manifest.runtime.js {
+        validate_declared_file(
+            root_dir,
+            &manifest.integrity.files_sha256,
+            &js.entry,
+            "runtime.js.entry",
         )?;
     }
 
