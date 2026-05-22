@@ -14,6 +14,6 @@ path = "src/lib.rs"
 [dependencies]
 combine = { workspace = true }
 thiserror = { workspace = true }
-itertools = "0.14.0"
-encoding_rs = "0.8.35"
-chardet = "0.2.4"
+itertools = { workspace = true }
+encoding_rs = { workspace = true }
+chardet = { workspace = true }

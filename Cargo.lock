@@ -5126,7 +5126,6 @@ checksum = "aef3982638978efa195ff11b305f51f1f22f4f0a6cabee7af79b383ebee6a213"
 dependencies = [
  "dirs",
  "futures",
- "http 1.4.0",
  "indicatif 0.18.4",
  "libc",
  "log",
@@ -10507,6 +10506,7 @@ dependencies = [
  "sha2 0.11.0",
  "slab-agent",
  "slab-agent-tools",
+ "slab-build-utils",
  "slab-config",
  "slab-file",
  "slab-git",
@@ -10861,7 +10861,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10991,7 +10991,7 @@ dependencies = [
  "uuid",
  "winapi",
  "windows 0.62.2",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

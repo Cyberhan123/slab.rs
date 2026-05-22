@@ -141,6 +141,7 @@ export function WorkspaceGitPanel({
           onChange={(event) => setCommitMessage(event.target.value)}
           className="mt-3 h-8 w-full rounded-[8px] border border-border/60 bg-background px-2 text-xs outline-none transition focus:border-[var(--brand-teal)]"
           placeholder={t("pages.workspace.git.commitPlaceholder")}
+          aria-label={t("pages.workspace.git.commitPlaceholder")}
           disabled={operationPending || !hasChanges}
         />
         <div className="mt-2">

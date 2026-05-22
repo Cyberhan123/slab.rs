@@ -20,6 +20,6 @@ thiserror = { workspace = true }
 async-trait = { workspace = true }
 strum = { workspace = true }
 
-hf-hub = { version = "0.5.0", default-features = false, features = ["tokio", "native-tls"], optional = true }
-models-cat = { version = "0.1.0", default-features = false, features = ["tokio"], optional = true }
-huggingface-hub = { version = "0.0.0", default-features = false, optional = true }
+hf-hub = { workspace = true, default-features = false, features = ["tokio", "native-tls"], optional = true }
+models-cat = { workspace = true, default-features = false, features = ["tokio"], optional = true }
+huggingface-hub = { workspace = true, default-features = false, optional = true }

@@ -1,30 +1,8 @@
 #![allow(clippy::uninlined_format_args)]
 
-use slab_build_utils::{
-    configure_bindgen_builder, ensure_vendor_layout, generate_or_copy_bindings,
-};
-use std::env;
-use std::path::PathBuf;
+use slab_build_utils::generate_vendor_sys_bindings;
 
 fn main() {
-    println!("cargo:rerun-if-changed=wrapper.h");
-    println!("cargo:rerun-if-changed=src/bindings.rs");
-
-    let layout =
-        ensure_vendor_layout("llama", &["ggml"]).expect("Failed to prepare llama vendor layout");
-    let ggml_include_path = &layout
-        .artifact("ggml")
-        .expect("ggml dependency should be present in vendor layout")
-        .include_dir;
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let fallback_source = PathBuf::from("src").join("bindings.rs");
-
-    let builder = configure_bindgen_builder(
-        "wrapper.h",
-        [&layout.primary.include_dir, ggml_include_path],
-        "LlamaLib",
-    );
-
-    generate_or_copy_bindings(builder, &out_dir, &fallback_source)
+    generate_vendor_sys_bindings("llama", &["ggml"], "LlamaLib", &[])
         .expect("failed to prepare llama bindings");
 }

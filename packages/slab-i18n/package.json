@@ -12,8 +12,8 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "i18next": "^26.2.0",
-    "react-i18next": "^17.0.4"
+    "i18next": "catalog:",
+    "react-i18next": "catalog:"
   },
   "license": "AGPL-3.0-only"
 }

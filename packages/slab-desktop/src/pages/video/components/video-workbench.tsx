@@ -335,6 +335,7 @@ export function VideoWorkbench({
                   ref={initImageInputRef}
                   type="file"
                   accept="image/png,image/jpeg"
+                  aria-label={t('pages.video.workbench.fields.referenceImage')}
                   className="hidden"
                   onChange={handleInitImageChange}
                 />
@@ -515,6 +516,7 @@ export function VideoWorkbench({
                     <video
                       src={videoPath}
                       controls
+                      aria-label={t('pages.video.workbench.stage.renderStatus')}
                       autoPlay
                       loop
                       className={cn(
@@ -652,6 +654,7 @@ export function VideoWorkbench({
                     <video
                       src={resolveMediaUrl(selectedHistoryTask.video_url) ?? undefined}
                       controls
+                      aria-label={t('pages.video.history.detailTitle')}
                       className="max-h-[62vh] w-full bg-[var(--media-canvas)] object-contain"
                     />
                   ) : (
