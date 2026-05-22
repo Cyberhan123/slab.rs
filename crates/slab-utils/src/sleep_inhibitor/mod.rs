@@ -35,11 +35,7 @@ pub struct SleepInhibitor {
 
 impl SleepInhibitor {
     pub fn new(enabled: bool) -> Self {
-        Self {
-            enabled,
-            turn_running: false,
-            platform: imp::SleepInhibitor::new(),
-        }
+        Self { enabled, turn_running: false, platform: imp::SleepInhibitor::new() }
     }
 
     /// Update the active turn state; turns sleep prevention on/off as needed.

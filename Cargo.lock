@@ -10427,6 +10427,7 @@ dependencies = [
  "serde_json",
  "shlex",
  "slab-agent",
+ "slab-config",
  "slab-file",
  "slab-git",
  "slab-mcp",
@@ -10459,6 +10460,7 @@ dependencies = [
  "sha2 0.11.0",
  "slab-app-core",
  "slab-build-utils",
+ "slab-config",
  "slab-types",
  "slab-utils",
  "tauri",
@@ -10505,6 +10507,7 @@ dependencies = [
  "sha2 0.11.0",
  "slab-agent",
  "slab-agent-tools",
+ "slab-config",
  "slab-file",
  "slab-git",
  "slab-hub",
@@ -10544,6 +10547,27 @@ dependencies = [
  "slab-libfetch",
  "slab-model-pack",
  "tokio",
+]
+
+[[package]]
+name = "slab-config"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "dirs-next",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "slab-types",
+ "strum",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "utoipa",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10869,6 +10893,7 @@ dependencies = [
  "serde_json",
  "slab-agent",
  "slab-app-core",
+ "slab-config",
  "slab-libfetch",
  "slab-proto",
  "slab-runtime-core",

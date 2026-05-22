@@ -2,15 +2,21 @@
 
 use axum::routing::get;
 use axum::{Json, Router};
-use serde_json::{Value, json};
+use serde::Serialize;
 use std::sync::Arc;
-use utoipa::OpenApi;
+use utoipa::{OpenApi, ToSchema};
 
 use slab_app_core::context::AppState;
 
 #[derive(OpenApi)]
-#[openapi(paths(get_health))]
+#[openapi(paths(get_health), components(schemas(HealthResponse)))]
 pub struct HealthApi;
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct HealthResponse {
+    pub status: String,
+    pub version: String,
+}
 
 /// Register health-check routes.
 pub fn router() -> Router<Arc<AppState>> {
@@ -26,14 +32,11 @@ pub fn router() -> Router<Arc<AppState>> {
     path = "/health",
     tag = "health",
     responses(
-        (status = 200, description = "Server is healthy", body = Value)
+        (status = 200, description = "Server is healthy", body = HealthResponse)
     )
 )]
-pub async fn get_health() -> Json<Value> {
-    Json(json!({
-        "status":  "ok",
-        "version": env!("CARGO_PKG_VERSION"),
-    }))
+pub async fn get_health() -> Json<HealthResponse> {
+    Json(HealthResponse { status: "ok".to_owned(), version: env!("CARGO_PKG_VERSION").to_owned() })
 }
 
 //  Tests
@@ -45,12 +48,12 @@ mod test {
     #[tokio::test]
     async fn health_response_has_ok_status() {
         let Json(body) = get_health().await;
-        assert_eq!(body["status"], "ok");
+        assert_eq!(body.status, "ok");
     }
 
     #[tokio::test]
     async fn health_response_has_version() {
         let Json(body) = get_health().await;
-        assert!(!body["version"].as_str().unwrap_or("").is_empty());
+        assert!(!body.version.is_empty());
     }
 }

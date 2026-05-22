@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::Value;
 use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
-use slab_types::settings::{
+use slab_config::{
     AgentWebSearchConfig, ProviderAuthConfig, WebSearchDuckDuckGoProviderConfig,
     WebSearchProviderId,
 };

@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use slab_app_core::context::AppState;
 use slab_app_core::schemas::models::{
-    CreateModelRequest, DownloadModelRequest, ListAvailableQuery, ListModelsQuery,
-    LoadModelRequest, ModelConfigDocumentResponse, ModelStatusResponse, SwitchModelRequest,
-    UnifiedModelResponse, UnloadModelRequest, UpdateModelConfigSelectionRequest,
-    UpdateModelRequest,
+    AvailableModelsResponse, CreateModelRequest, DeleteModelResponse, DownloadModelRequest,
+    ListAvailableQuery, ListModelsQuery, LoadModelRequest, ModelConfigDocumentResponse,
+    ModelStatusResponse, SwitchModelRequest, UnifiedModelResponse, UnloadModelRequest,
+    UpdateModelConfigSelectionRequest, UpdateModelRequest,
 };
 use slab_app_core::schemas::tasks::OperationAcceptedResponse;
 
@@ -101,10 +101,10 @@ pub async fn update_model_config_selection(
 pub async fn delete_model(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
-) -> Result<serde_json::Value, String> {
+) -> Result<DeleteModelResponse, String> {
     validate_id(&id)?;
     let view = state.services.model.delete_model(&id).await.map_err(map_err)?;
-    Ok(serde_json::json!({ "id": view.id, "status": view.status }))
+    Ok(view.into())
 }
 
 #[tauri::command(async)]
@@ -147,9 +147,9 @@ pub async fn download_model(
 pub async fn list_available_models(
     state: tauri::State<'_, Arc<AppState>>,
     query: ListAvailableQuery,
-) -> Result<serde_json::Value, String> {
+) -> Result<AvailableModelsResponse, String> {
     let query = validate(query)?;
     let response =
         state.services.model.list_available_models(query.into()).await.map_err(map_err)?;
-    Ok(serde_json::json!({ "repo_id": response.repo_id, "files": response.files }))
+    Ok(response.into())
 }

@@ -24,6 +24,7 @@ slab-agent-tools  = { workspace = true }
 slab-proto        = { workspace = true }
 slab-model-pack   = { workspace = true }
 slab-types        = { workspace = true }
+slab-config       = { workspace = true }
 slab-libfetch     = { workspace = true }
 slab-hub          = { workspace = true }
 slab-utils        = { workspace = true }

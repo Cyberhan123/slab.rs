@@ -2,7 +2,9 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::context::ModelState;
-use crate::domain::models::{CreateSessionCommand, SessionMessageView, SessionView};
+use crate::domain::models::{
+    CreateSessionCommand, DeleteSessionView, SessionMessageView, SessionView,
+};
 use crate::error::AppCoreError;
 use crate::infra::db::{ChatSession, ChatStore, SessionStore};
 
@@ -37,9 +39,9 @@ impl SessionService {
         Ok(sessions.into_iter().map(|session| SessionView::from(&session)).collect())
     }
 
-    pub async fn delete_session(&self, id: &str) -> Result<serde_json::Value, AppCoreError> {
+    pub async fn delete_session(&self, id: &str) -> Result<DeleteSessionView, AppCoreError> {
         self.state.store().delete_session(id).await?;
-        Ok(serde_json::json!({ "deleted": true }))
+        Ok(DeleteSessionView { deleted: true })
     }
 
     pub async fn list_session_messages(

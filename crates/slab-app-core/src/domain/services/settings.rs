@@ -17,7 +17,7 @@ impl SettingsService {
     }
 
     pub async fn get_setting(&self, pmid: &str) -> Result<SettingPropertyView, AppCoreError> {
-        self.state.pmid().property(pmid).await
+        self.state.pmid().property(pmid).await.map_err(Into::into)
     }
 
     pub async fn update_setting(
@@ -25,6 +25,6 @@ impl SettingsService {
         pmid: &str,
         command: UpdateSettingCommand,
     ) -> Result<SettingPropertyView, AppCoreError> {
-        self.state.pmid().update_setting(pmid, command).await
+        self.state.pmid().update_setting(pmid, command).await.map_err(Into::into)
     }
 }

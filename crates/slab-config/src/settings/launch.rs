@@ -1,11 +1,8 @@
-use std::str::FromStr;
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString};
 
-use crate::error::SlabTypeError;
-use crate::{DESKTOP_API_BIND, DESKTOP_API_HOST, DESKTOP_API_PORT};
+use slab_types::{DESKTOP_API_BIND, DESKTOP_API_HOST, DESKTOP_API_PORT, SlabTypeError};
 
 /// Shared runtime transport modes supported by the supervisor and gateway.
 #[derive(
@@ -139,7 +136,7 @@ impl Default for DesktopLaunchProfileConfig {
 #[cfg(test)]
 mod tests {
     use super::{RuntimeTransportMode, ServerLaunchProfileConfig};
-    use crate::{DESKTOP_API_BIND, DESKTOP_API_HOST, DESKTOP_API_PORT};
+    use slab_types::{DESKTOP_API_BIND, DESKTOP_API_HOST, DESKTOP_API_PORT};
     use std::str::FromStr;
 
     #[test]

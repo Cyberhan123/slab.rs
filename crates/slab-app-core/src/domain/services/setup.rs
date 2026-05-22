@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use futures::StreamExt;
+use serde::Serialize;
 use slab_types::RuntimeBackendId;
 use slab_utils::cab::{
     PackagedPayloadManifest, RuntimeVariant, SelectedPayloadFile, SelectedPayloadManifest,
@@ -46,6 +47,21 @@ enum ProvisionStep {
     InstallPayload = 4,
     EnsureFfmpeg = 5,
     RestartRuntime = 6,
+}
+
+#[derive(Serialize)]
+struct SetupProvisionResult {
+    initialized: bool,
+    variant: String,
+    version: String,
+    ffmpeg_path: PathBuf,
+    target_dir: PathBuf,
+    backends: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct SetupProgressPayload {
+    progress: TaskProgress,
 }
 
 impl ProvisionStep {
@@ -296,15 +312,17 @@ impl SetupService {
             })
             .unwrap_or_default();
 
-        Ok(serde_json::json!({
-            "initialized": true,
-            "variant": variant.as_str(),
-            "version": version,
-            "ffmpeg_path": ffmpeg_path,
-            "target_dir": target_dir,
-            "backends": backends,
+        serde_json::to_string(&SetupProvisionResult {
+            initialized: true,
+            variant: variant.as_str().to_owned(),
+            version: version.to_owned(),
+            ffmpeg_path,
+            target_dir: target_dir.to_path_buf(),
+            backends,
         })
-        .to_string())
+        .map_err(|error| {
+            AppCoreError::Internal(format!("failed to serialize setup provision result: {error}"))
+        })
     }
 
     async fn download_required_cabs(
@@ -615,8 +633,8 @@ async fn publish_progress(
     step: u32,
     step_count: u32,
 ) -> Result<(), AppCoreError> {
-    let payload = serde_json::json!({
-        "progress": TaskProgress {
+    let payload = serde_json::to_string(&SetupProgressPayload {
+        progress: TaskProgress {
             label: Some(label.into()),
             message: None,
             current,
@@ -625,9 +643,11 @@ async fn publish_progress(
             step: Some(step),
             step_count: Some(step_count),
             logs: None,
-        }
+        },
     })
-    .to_string();
+    .map_err(|error| {
+        AppCoreError::Internal(format!("failed to serialize setup progress: {error}"))
+    })?;
 
     operation.update_status(TaskStatus::Running, Some(&payload), None).await
 }

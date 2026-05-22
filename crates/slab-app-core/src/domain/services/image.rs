@@ -9,11 +9,12 @@ use crate::config::default_output_dir_for_settings_path;
 use crate::context::WorkerState;
 use crate::domain::models::{
     AcceptedOperation, IMAGE_GENERATION_TASK_TYPE, ImageGenerationCommand, ImageGenerationMode,
-    ImageGenerationTaskView, TaskResult, TaskStatus,
+    ImageGenerationRequestData, ImageGenerationResultData, ImageGenerationTaskView, TaskResult,
+    TaskStatus,
 };
 use crate::domain::ports::{RuntimeDiffusionImageRequest, RuntimeRawImageInput};
 use crate::domain::services::media_task::{
-    cleanup_dir, parse_json_value, read_managed_file, save_rgb_png,
+    cleanup_dir, parse_json_payload, read_managed_file, save_rgb_png, serialize_json_payload,
 };
 use crate::error::AppCoreError;
 use crate::infra::db::{
@@ -74,27 +75,30 @@ impl ImageService {
             None
         };
 
-        let input_json = serde_json::json!({
-            "model_id": req.model_id,
-            "prompt": req.prompt,
-            "negative_prompt": req.negative_prompt,
-            "n": req.n,
-            "width": req.width,
-            "height": req.height,
-            "model": req.model,
-            "mode": req.mode,
-            "cfg_scale": req.cfg_scale,
-            "guidance": req.guidance,
-            "steps": req.steps,
-            "seed": req.seed,
-            "sample_method": req.sample_method,
-            "scheduler": req.scheduler,
-            "clip_skip": req.clip_skip,
-            "strength": req.strength,
-            "eta": req.eta,
-            "reference_image_path": reference_image_path,
-        })
-        .to_string();
+        let request_data = ImageGenerationRequestData {
+            model_id: req.model_id.clone(),
+            prompt: req.prompt.clone(),
+            negative_prompt: req.negative_prompt.clone(),
+            n: req.n,
+            width: req.width,
+            height: req.height,
+            model: req.model.clone(),
+            mode: match req.mode {
+                ImageGenerationMode::Txt2Img => "Txt2Img".to_owned(),
+                ImageGenerationMode::Img2Img => "Img2Img".to_owned(),
+            },
+            cfg_scale: req.cfg_scale,
+            guidance: req.guidance,
+            steps: req.steps,
+            seed: req.seed,
+            sample_method: req.sample_method.clone(),
+            scheduler: req.scheduler.clone(),
+            clip_skip: req.clip_skip,
+            strength: req.strength,
+            eta: req.eta,
+            reference_image_path: reference_image_path.clone(),
+        };
+        let input_json = serialize_json_payload(&request_data)?;
 
         let runtime_request = RuntimeDiffusionImageRequest {
             model: req.model.clone(),
@@ -218,11 +222,11 @@ impl ImageService {
                     }
 
                     let primary_image_path = artifact_paths.first().cloned();
-                    let persisted_result = serde_json::json!({
-                        "primary_image_path": primary_image_path,
-                        "artifact_paths": artifact_paths,
+                    let persisted_result = serde_json::to_string(&ImageGenerationResultData {
+                        primary_image_path: primary_image_path.clone(),
+                        artifact_paths: artifact_paths.clone(),
                     })
-                    .to_string();
+                    .unwrap_or_default();
                     let task_result = TaskResult {
                         image: Some(format!("/v1/images/generations/{operation_id}/artifacts/0")),
                         images: Some(
@@ -375,8 +379,8 @@ fn map_image_view(row: ImageGenerationTaskViewRecord) -> ImageGenerationTaskView
                 format!("/v1/images/generations/{}/artifacts/{index}", row.task.task_id)
             })
             .collect(),
-        request_data: parse_json_value(&row.task.request_data),
-        result_data: row.task.result_data.as_deref().map(parse_json_value),
+        request_data: parse_json_payload(&row.task.request_data),
+        result_data: row.task.result_data.as_deref().map(parse_json_payload),
         created_at: row.state.task_created_at.to_rfc3339(),
         updated_at: row.state.task_updated_at.to_rfc3339(),
     }

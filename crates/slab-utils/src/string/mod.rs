@@ -31,22 +31,14 @@ pub fn sanitize_metric_tag_value(value: &str) -> String {
     let sanitized: String = value
         .chars()
         .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-' | '/') {
-                ch
-            } else {
-                '_'
-            }
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-' | '/') { ch } else { '_' }
         })
         .collect();
     let trimmed = sanitized.trim_matches('_');
     if trimmed.is_empty() || trimmed.chars().all(|ch| !ch.is_ascii_alphanumeric()) {
         return "unspecified".to_string();
     }
-    if trimmed.len() <= MAX_LEN {
-        trimmed.to_string()
-    } else {
-        trimmed[..MAX_LEN].to_string()
-    }
+    if trimmed.len() <= MAX_LEN { trimmed.to_string() } else { trimmed[..MAX_LEN].to_string() }
 }
 
 /// Find all UUIDs in a string.
@@ -128,10 +120,7 @@ mod tests {
     #[test]
     fn find_uuids_handles_non_ascii_without_overlap() {
         let input = "🙂 55e5d6f7-8a7f-4d2a-8d88-123456789012abc";
-        assert_eq!(
-            find_uuids(input),
-            vec!["55e5d6f7-8a7f-4d2a-8d88-123456789012".to_string()]
-        );
+        assert_eq!(find_uuids(input), vec!["55e5d6f7-8a7f-4d2a-8d88-123456789012".to_string()]);
     }
 
     #[test]
@@ -148,10 +137,7 @@ mod tests {
 
     #[test]
     fn normalize_markdown_hash_location_suffix_converts_single_location() {
-        assert_eq!(
-            normalize_markdown_hash_location_suffix("#L74C3"),
-            Some(":74:3".to_string())
-        );
+        assert_eq!(normalize_markdown_hash_location_suffix("#L74C3"), Some(":74:3".to_string()));
     }
 
     #[test]

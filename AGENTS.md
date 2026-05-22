@@ -69,6 +69,7 @@ Keep this file focused on always-on constraints. For module-specific role, stack
 - HTTP gateway: `bin/slab-server/README.md`
 - Runtime worker: `bin/slab-runtime/README.md`
 - Windows full installer: `bin/slab-windows-full-installer/README.md`
+- Shared settings/config library: `crates/slab-config/README.md`
 - Shared business logic: `crates/slab-app-core/README.md`
 - Agent control plane: `crates/slab-agent/README.md`
 - Built-in agent tools: `crates/slab-agent-tools/README.md`

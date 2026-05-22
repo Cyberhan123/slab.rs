@@ -2,12 +2,13 @@ pub mod agent;
 pub mod audio;
 pub mod backend;
 pub mod chat;
+#[path = "settings/mod.rs"]
+pub mod configuration_routes;
 pub mod ffmpeg;
 pub mod images;
 pub mod models;
 pub mod plugins;
 pub mod session;
-pub mod settings;
 pub mod setup;
 pub mod subtitles;
 pub mod system;
@@ -41,7 +42,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .merge(ffmpeg::router())
         .merge(system::router())
         .merge(tasks::router())
-        .merge(settings::router(state.clone()))
+        .merge(configuration_routes::router(state.clone()))
         .merge(subtitles::router())
         .merge(ui_state::router())
         .merge(setup::router())
@@ -62,7 +63,7 @@ pub fn api_docs() -> utoipa::openapi::OpenApi {
     spec.merge(ffmpeg::FfmpegApi::openapi());
     spec.merge(system::SystemApi::openapi());
     spec.merge(tasks::TasksApi::openapi());
-    spec.merge(settings::SettingsApi::openapi());
+    spec.merge(configuration_routes::SettingsApi::openapi());
     spec.merge(subtitles::SubtitleApi::openapi());
     spec.merge(ui_state::UiStateApi::openapi());
     spec.merge(setup::SetupApi::openapi());

@@ -47,10 +47,7 @@ pub fn fuzzy_match(haystack: &str, needle: &str) -> Option<(Vec<usize>, i32)> {
         0usize
     } else {
         let target_orig = result_orig_indices[0];
-        lowered_to_orig_char_idx
-            .iter()
-            .position(|&oi| oi == target_orig)
-            .unwrap_or(0)
+        lowered_to_orig_char_idx.iter().position(|&oi| oi == target_orig).unwrap_or(0)
     };
     // last defaults to first for single-hit; score = extra span between first/last hit
     // minus needle len (≥0).

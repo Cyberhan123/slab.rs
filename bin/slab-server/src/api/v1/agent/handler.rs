@@ -7,6 +7,7 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::stream::StreamExt;
+use serde::Serialize;
 use tokio_stream::wrappers::BroadcastStream;
 use utoipa::OpenApi;
 
@@ -217,7 +218,7 @@ async fn agent_events(
                 let data = turn_event_to_sse_data(&event);
                 Event::default().data(data)
             }
-            Err(_) => Event::default().data(r#"{"type":"lagged"}"#),
+            Err(_) => Event::default().data(serialize_agent_sse_event(&AgentSseEvent::Lagged)),
         };
         Ok::<Event, std::convert::Infallible>(event)
     });
@@ -225,43 +226,42 @@ async fn agent_events(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum AgentSseEvent<'a> {
+    AssistantDelta { text: &'a str },
+    ToolCallStarted { tool_name: &'a str, call_id: &'a str, arguments: &'a str },
+    ToolCallOutput { call_id: &'a str, output: &'a str },
+    ApprovalRequired { call_id: &'a str, tool_name: &'a str, command: &'a str },
+    TurnCompleted { text: &'a str },
+    TurnFailed { error: &'a str },
+    AgentStatus { status: String },
+    Lagged,
+}
+
+fn serialize_agent_sse_event(event: &AgentSseEvent<'_>) -> String {
+    serde_json::to_string(event).unwrap_or_else(|_| {
+        r#"{"type":"turn_failed","error":"failed to serialize event"}"#.to_owned()
+    })
+}
+
 fn turn_event_to_sse_data(event: &slab_agent::TurnEvent) -> String {
-    match event {
-        slab_agent::TurnEvent::AssistantDelta { text } => {
-            serde_json::json!({"type": "assistant_delta", "text": text}).to_string()
-        }
+    let event = match event {
+        slab_agent::TurnEvent::AssistantDelta { text } => AgentSseEvent::AssistantDelta { text },
         slab_agent::TurnEvent::ToolCallStarted { tool_name, call_id, arguments } => {
-            serde_json::json!({
-                "type": "tool_call_started",
-                "tool_name": tool_name,
-                "call_id": call_id,
-                "arguments": arguments
-            })
-            .to_string()
+            AgentSseEvent::ToolCallStarted { tool_name, call_id, arguments }
         }
-        slab_agent::TurnEvent::ToolCallOutput { call_id, output } => serde_json::json!({
-            "type": "tool_call_output",
-            "call_id": call_id,
-            "output": output
-        })
-        .to_string(),
+        slab_agent::TurnEvent::ToolCallOutput { call_id, output } => {
+            AgentSseEvent::ToolCallOutput { call_id, output }
+        }
         slab_agent::TurnEvent::ApprovalRequired { call_id, tool_name, command } => {
-            serde_json::json!({
-                "type": "approval_required",
-                "call_id": call_id,
-                "tool_name": tool_name,
-                "command": command
-            })
-            .to_string()
+            AgentSseEvent::ApprovalRequired { call_id, tool_name, command }
         }
-        slab_agent::TurnEvent::TurnCompleted { text } => {
-            serde_json::json!({"type": "turn_completed", "text": text}).to_string()
-        }
-        slab_agent::TurnEvent::TurnFailed { error } => {
-            serde_json::json!({"type": "turn_failed", "error": error}).to_string()
-        }
+        slab_agent::TurnEvent::TurnCompleted { text } => AgentSseEvent::TurnCompleted { text },
+        slab_agent::TurnEvent::TurnFailed { error } => AgentSseEvent::TurnFailed { error },
         slab_agent::TurnEvent::AgentStatus { status } => {
-            serde_json::json!({"type": "agent_status", "status": format!("{status:?}")}).to_string()
+            AgentSseEvent::AgentStatus { status: format!("{status:?}") }
         }
-    }
+    };
+    serialize_agent_sse_event(&event)
 }

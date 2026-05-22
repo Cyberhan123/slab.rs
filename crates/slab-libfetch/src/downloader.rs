@@ -1,10 +1,16 @@
 use crate::error::FetchError;
 use flate2::read::GzDecoder;
 use reqwest::Client;
+use serde::Deserialize;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tar::Archive;
+
+#[derive(Debug, Deserialize)]
+struct GitHubLatestReleaseResponse {
+    tag_name: String,
+}
 
 pub struct Downloader {
     pub repo: String,
@@ -81,13 +87,13 @@ impl Downloader {
             .await?
             .error_for_status()?;
 
-        let json: serde_json::Value = resp.json().await?;
-        json["tag_name"]
-            .as_str()
-            .ok_or_else(|| FetchError::InvalidResponse {
+        let release: GitHubLatestReleaseResponse = resp.json().await?;
+        if release.tag_name.trim().is_empty() {
+            return Err(FetchError::InvalidResponse {
                 message: "tag_name not found in GitHub API response".to_string(),
-            })
-            .map(|s| s.to_string())
+            });
+        }
+        Ok(release.tag_name)
     }
 
     /// Build the download URL for a release asset.

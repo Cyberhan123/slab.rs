@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use slab_config::ModelDownloadSourcePreference;
 use slab_hub::{DownloadProgress, DownloadProgressUpdate};
-use slab_types::settings::ModelDownloadSourcePreference;
 use tracing::{info, warn};
 
 use crate::context::ModelState;
@@ -45,6 +45,16 @@ struct ModelDownloadTaskCandidate {
     artifacts: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     primary_artifact_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ModelDownloadProgressPayload {
+    progress: TaskProgress,
+}
+
+#[derive(Serialize)]
+struct ModelDownloadResultPayload {
+    local_path: String,
 }
 
 #[derive(Debug, Clone)]
@@ -137,7 +147,8 @@ impl ModelDownloadProgressReporter {
             return;
         }
 
-        let payload = serde_json::json!({ "progress": progress }).to_string();
+        let payload =
+            serde_json::to_string(&ModelDownloadProgressPayload { progress }).unwrap_or_default();
         let task_id = self.task_id.clone();
         let store = Arc::clone(&self.store);
 
@@ -489,7 +500,10 @@ impl ModelService {
                     .invalidate_model_replay(&model_id, "model download updated catalog local_path")
                     .await;
 
-                let result_json = serde_json::json!({ "local_path": local_path }).to_string();
+                let result_json = serde_json::to_string(&ModelDownloadResultPayload {
+                    local_path: local_path.clone(),
+                })
+                .unwrap_or_default();
                 if let Err(db_error) = operation.mark_succeeded(&result_json).await {
                     warn!(task_id = %operation_id, error = %db_error, "failed to persist model download success");
                 }

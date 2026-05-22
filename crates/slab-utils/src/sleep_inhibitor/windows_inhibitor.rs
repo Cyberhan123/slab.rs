@@ -63,9 +63,7 @@ impl PowerRequest {
         let context = REASON_CONTEXT {
             Version: POWER_REQUEST_CONTEXT_VERSION,
             Flags: POWER_REQUEST_CONTEXT_SIMPLE_STRING,
-            Reason: REASON_CONTEXT_0 {
-                SimpleReasonString: wide_reason.as_mut_ptr(),
-            },
+            Reason: REASON_CONTEXT_0 { SimpleReasonString: wide_reason.as_mut_ptr() },
         };
         // SAFETY: `context` points to a valid `REASON_CONTEXT` for the duration
         // of the call and Windows copies the relevant data before returning.
@@ -88,10 +86,7 @@ impl PowerRequest {
             return Err(format!("PowerSetRequest failed: {error}"));
         }
 
-        Ok(Self {
-            handle,
-            request_type,
-        })
+        Ok(Self { handle, request_type })
     }
 }
 

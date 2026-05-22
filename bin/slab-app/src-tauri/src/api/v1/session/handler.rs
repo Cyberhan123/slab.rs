@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use slab_app_core::context::AppState;
-use slab_app_core::schemas::session::{CreateSessionRequest, MessageResponse, SessionResponse};
+use slab_app_core::schemas::session::{
+    CreateSessionRequest, DeleteSessionResponse, MessageResponse, SessionResponse,
+};
 
 use crate::api::validation::{map_err, validate, validate_id};
 
@@ -26,9 +28,9 @@ pub async fn create_session(
 pub async fn delete_session(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
-) -> Result<serde_json::Value, String> {
+) -> Result<DeleteSessionResponse, String> {
     validate_id(&id)?;
-    state.services.session.delete_session(&id).await.map_err(map_err)
+    Ok(state.services.session.delete_session(&id).await.map_err(map_err)?.into())
 }
 
 #[tauri::command(async)]

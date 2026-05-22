@@ -35,8 +35,10 @@ pub use chat::{
 pub use ffmpeg::FfmpegConvertCommand;
 pub use image::{DecodedImageInput, ImageGenerationCommand, ImageGenerationMode};
 pub use media_task::{
-    AUDIO_TRANSCRIPTION_TASK_TYPE, AudioTranscriptionTaskView, IMAGE_GENERATION_TASK_TYPE,
-    ImageGenerationTaskView, VIDEO_GENERATION_TASK_TYPE, VideoGenerationTaskView,
+    AUDIO_TRANSCRIPTION_TASK_TYPE, AudioTranscriptionRequestData, AudioTranscriptionResultData,
+    AudioTranscriptionTaskView, IMAGE_GENERATION_TASK_TYPE, ImageGenerationRequestData,
+    ImageGenerationResultData, ImageGenerationTaskView, VIDEO_GENERATION_TASK_TYPE,
+    VideoGenerationRequestData, VideoGenerationResultData, VideoGenerationTaskView,
 };
 pub use model::{
     AvailableModelsQuery, AvailableModelsView, CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
@@ -54,11 +56,11 @@ pub use model::{
 };
 pub use plugin::{InstallPluginCommand, PluginView};
 pub use pmid::PMID;
-pub use session::{CreateSessionCommand, SessionMessageView, SessionView};
+pub use session::{CreateSessionCommand, DeleteSessionView, SessionMessageView, SessionView};
 pub use settings::{
-    SettingPropertySchema, SettingPropertyView, SettingValidationErrorData, SettingValueType,
-    SettingsDocumentView, SettingsSectionView, SettingsSubsectionView, UpdateSettingCommand,
-    UpdateSettingOperation,
+    SettingPropertySchema, SettingPropertyView, SettingValidationErrorData, SettingValue,
+    SettingValueType, SettingsDocumentView, SettingsSectionView, SettingsSubsectionView,
+    UpdateSettingCommand, UpdateSettingOperation,
 };
 pub use setup::{CompleteSetupCommand, ComponentStatus, EnvironmentStatus};
 pub use subtitle::{

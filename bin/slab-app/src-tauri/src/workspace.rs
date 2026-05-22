@@ -14,7 +14,8 @@ use slab_app_core::domain::models::{
     WorkspacePathMetadata, WorkspaceWriteFileCommand, WorkspaceWriteFileView,
 };
 use slab_app_core::domain::services::WorkspaceService;
-use slab_types::{settings::SettingsDocument, sqlite_url_for_path};
+use slab_config::SettingsDocument;
+use slab_types::sqlite_url_for_path;
 use tauri::{AppHandle, Manager, Runtime, State};
 
 use crate::plugins;

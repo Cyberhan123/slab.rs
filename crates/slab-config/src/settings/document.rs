@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::launch::RuntimeTransportMode;
-use crate::DESKTOP_API_BIND;
+use slab_types::DESKTOP_API_BIND;
 
 pub const PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL: &str =
     "https://slab.reorgix.com/manifests/v1/settings-document.schema.json";

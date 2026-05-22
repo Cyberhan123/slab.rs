@@ -3,7 +3,9 @@ use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
 use crate::domain::models::{
-    DecodedImageInput, ImageGenerationCommand, ImageGenerationMode, ImageGenerationTaskView,
+    DecodedImageInput, ImageGenerationCommand, ImageGenerationMode,
+    ImageGenerationRequestData as DomainImageGenerationRequestData,
+    ImageGenerationResultData as DomainImageGenerationResultData, ImageGenerationTaskView,
 };
 use crate::error::AppCoreError;
 use crate::schemas::tasks::{TaskProgressResponse, TaskStatus};
@@ -242,6 +244,47 @@ fn decode_init_image(data_uri: &str) -> Result<DecodedImageInput, AppCoreError> 
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ImageGenerationRequestData {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    pub prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub negative_prompt: Option<String>,
+    pub n: u32,
+    pub width: u32,
+    pub height: u32,
+    pub model: String,
+    pub mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cfg_scale: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guidance: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub steps: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sample_method: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduler: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clip_skip: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strength: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub eta: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference_image_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ImageGenerationResultData {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary_image_path: Option<String>,
+    pub artifact_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ImageGenerationTaskResponse {
     pub task_id: String,
     pub task_type: String,
@@ -266,9 +309,9 @@ pub struct ImageGenerationTaskResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub primary_image_url: Option<String>,
     pub image_urls: Vec<String>,
-    pub request_data: serde_json::Value,
+    pub request_data: ImageGenerationRequestData,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub result_data: Option<serde_json::Value>,
+    pub result_data: Option<ImageGenerationResultData>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -293,10 +336,41 @@ impl From<ImageGenerationTaskView> for ImageGenerationTaskResponse {
             reference_image_url: value.reference_image_url,
             primary_image_url: value.primary_image_url,
             image_urls: value.image_urls,
-            request_data: value.request_data,
-            result_data: value.result_data,
+            request_data: value.request_data.into(),
+            result_data: value.result_data.map(Into::into),
             created_at: value.created_at,
             updated_at: value.updated_at,
         }
+    }
+}
+
+impl From<DomainImageGenerationRequestData> for ImageGenerationRequestData {
+    fn from(value: DomainImageGenerationRequestData) -> Self {
+        Self {
+            model_id: value.model_id,
+            prompt: value.prompt,
+            negative_prompt: value.negative_prompt,
+            n: value.n,
+            width: value.width,
+            height: value.height,
+            model: value.model,
+            mode: value.mode,
+            cfg_scale: value.cfg_scale,
+            guidance: value.guidance,
+            steps: value.steps,
+            seed: value.seed,
+            sample_method: value.sample_method,
+            scheduler: value.scheduler,
+            clip_skip: value.clip_skip,
+            strength: value.strength,
+            eta: value.eta,
+            reference_image_path: value.reference_image_path,
+        }
+    }
+}
+
+impl From<DomainImageGenerationResultData> for ImageGenerationResultData {
+    fn from(value: DomainImageGenerationResultData) -> Self {
+        Self { primary_image_path: value.primary_image_path, artifact_paths: value.artifact_paths }
     }
 }

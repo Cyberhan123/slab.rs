@@ -4,5 +4,5 @@
 //! the HTTP server uses the same shared DTOs as the Tauri IPC bridge.
 
 pub use slab_app_core::schemas::session::{
-    CreateSessionRequest, MessageResponse, SessionIdPath, SessionResponse,
+    CreateSessionRequest, DeleteSessionResponse, MessageResponse, SessionIdPath, SessionResponse,
 };

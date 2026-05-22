@@ -1,10 +1,10 @@
-pub use slab_types::settings::PMID;
+pub use slab_config::PMID;
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
-    use slab_types::settings::{PMID, SettingPmid};
+    use slab_config::{PMID, SettingPmid};
 
     #[test]
     fn current_pmids_include_expected_paths() {

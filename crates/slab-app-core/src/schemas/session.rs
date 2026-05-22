@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
-use crate::domain::models::{CreateSessionCommand, SessionMessageView, SessionView};
+use crate::domain::models::{
+    CreateSessionCommand, DeleteSessionView, SessionMessageView, SessionView,
+};
 
 #[derive(Debug, Clone, Deserialize, ToSchema, IntoParams, Validate)]
 pub struct SessionIdPath {
@@ -45,6 +47,12 @@ pub struct MessageResponse {
     pub created_at: String,
 }
 
+/// Response for `DELETE /v1/sessions/{id}`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DeleteSessionResponse {
+    pub deleted: bool,
+}
+
 // ── conversions ───────────────────────────────────────────────────────────────
 
 impl From<SessionView> for SessionResponse {
@@ -68,6 +76,12 @@ impl From<SessionMessageView> for MessageResponse {
             content: message.content,
             created_at: message.created_at,
         }
+    }
+}
+
+impl From<DeleteSessionView> for DeleteSessionResponse {
+    fn from(view: DeleteSessionView) -> Self {
+        Self { deleted: view.deleted }
     }
 }
 

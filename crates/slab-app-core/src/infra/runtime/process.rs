@@ -76,7 +76,7 @@ async fn runtime_endpoint_ready(
     child_spec: &ResolvedRuntimeChildSpec,
 ) -> Result<bool, AppCoreError> {
     match child_spec.transport {
-        slab_types::settings::RuntimeTransportMode::Http => {
+        slab_config::RuntimeTransportMode::Http => {
             let target = normalize_http_probe_target(&child_spec.grpc_bind_address)?;
             match tokio::time::timeout(
                 RUNTIME_CHILD_READY_CONNECT_TIMEOUT,
@@ -91,7 +91,7 @@ async fn runtime_endpoint_ready(
                 Ok(Err(_)) | Err(_) => Ok(false),
             }
         }
-        slab_types::settings::RuntimeTransportMode::Ipc => {
+        slab_config::RuntimeTransportMode::Ipc => {
             let target = normalize_ipc_probe_target(&child_spec.grpc_bind_address)?;
             match tokio::time::timeout(
                 RUNTIME_CHILD_READY_CONNECT_TIMEOUT,
@@ -347,8 +347,8 @@ impl RuntimeChildSpawner for TokioRuntimeSpawner {
 mod tests {
     use super::{runtime_endpoint_ready, wait_for_runtime_child_ready};
     use crate::launch::ResolvedRuntimeChildSpec;
+    use slab_config::RuntimeTransportMode;
     use slab_types::RuntimeBackendId;
-    use slab_types::settings::RuntimeTransportMode;
     use std::path::PathBuf;
     use std::process::Stdio;
     use tokio::process::Command as TokioCommand;

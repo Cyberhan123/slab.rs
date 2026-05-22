@@ -11,10 +11,10 @@ use validator::Validate;
 const MAX_MODEL_PACK_SIZE: usize = 10 * 1024 * 1024 * 1024; // 10GB
 
 use crate::api::v1::models::schema::{
-    CreateModelRequest, DownloadModelRequest, ListAvailableQuery, ListModelsQuery,
-    LoadModelRequest, ModelConfigDocumentResponse, ModelStatusResponse, SwitchModelRequest,
-    UnifiedModelResponse, UnloadModelRequest, UpdateModelConfigSelectionRequest,
-    UpdateModelRequest,
+    AvailableModelsResponse, CreateModelRequest, DeleteModelResponse, DownloadModelRequest,
+    ListAvailableQuery, ListModelsQuery, LoadModelRequest, ModelConfigDocumentResponse,
+    ModelStatusResponse, SwitchModelRequest, UnifiedModelResponse, UnloadModelRequest,
+    UpdateModelConfigSelectionRequest, UpdateModelRequest,
 };
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::api::validation::{ValidatedJson, ValidatedQuery, validate};
@@ -56,6 +56,8 @@ struct ImportModelPackMultipartRequest {
         ModelStatusResponse,
         SwitchModelRequest,
         DownloadModelRequest,
+        DeleteModelResponse,
+        AvailableModelsResponse,
         ListAvailableQuery,
         ListModelsQuery,
         UnifiedModelResponse,
@@ -251,7 +253,7 @@ async fn update_model_config_selection(
         ("id" = String, Path, description = "Model ID")
     ),
     responses(
-        (status = 200, description = "Model deleted", body = serde_json::Value),
+        (status = 200, description = "Model deleted", body = DeleteModelResponse),
         (status = 404, description = "Model not found"),
         (status = 500, description = "Backend error"),
     )
@@ -259,13 +261,10 @@ async fn update_model_config_selection(
 async fn delete_model(
     State(service): State<ModelService>,
     Path(params): Path<ModelIdPath>,
-) -> Result<Json<serde_json::Value>, ServerError> {
+) -> Result<Json<DeleteModelResponse>, ServerError> {
     let params = validate(params)?;
     let view = service.delete_model(&params.id).await?;
-    Ok(Json(serde_json::json!({
-        "id": view.id,
-        "status": view.status,
-    })))
+    Ok(Json(view.into()))
 }
 
 #[utoipa::path(
@@ -329,7 +328,7 @@ async fn unload_model(
     tag = "models",
     params(ListAvailableQuery),
     responses(
-        (status = 200, description = "List of available files in a HuggingFace repo", body = serde_json::Value),
+        (status = 200, description = "List of available files in a HuggingFace repo", body = AvailableModelsResponse),
         (status = 400, description = "Bad request"),
         (status = 500, description = "Backend error"),
     )
@@ -337,12 +336,9 @@ async fn unload_model(
 async fn list_available_models(
     State(service): State<ModelService>,
     ValidatedQuery(query): ValidatedQuery<ListAvailableQuery>,
-) -> Result<Json<serde_json::Value>, ServerError> {
+) -> Result<Json<AvailableModelsResponse>, ServerError> {
     let response = service.list_available_models(query.into()).await?;
-    Ok(Json(serde_json::json!({
-        "repo_id": response.repo_id,
-        "files": response.files,
-    })))
+    Ok(Json(response.into()))
 }
 
 #[utoipa::path(

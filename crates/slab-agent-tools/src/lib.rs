@@ -8,9 +8,9 @@ use std::{path::PathBuf, sync::Arc};
 use async_trait::async_trait;
 use serde_json::Value;
 use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput, ToolRouter};
+use slab_config::AgentWebSearchConfig;
 use slab_mcp::McpClient;
 use slab_sandboxing::SandboxDriver;
-use slab_types::settings::AgentWebSearchConfig;
 
 pub mod apply_patch;
 pub mod fs;

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use slab_types::settings::RuntimeModelAutoUnloadConfig;
+use slab_config::RuntimeModelAutoUnloadConfig;
 use slab_types::{RuntimeBackendId, RuntimeBackendLoadSpec};
 use tracing::{debug, info, warn};
 

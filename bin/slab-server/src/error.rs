@@ -12,6 +12,7 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
+use slab_app_core::error::AppCoreErrorData;
 use thiserror::Error;
 use tracing::error;
 use validator::{ValidationErrors, ValidationErrorsKind};
@@ -20,7 +21,7 @@ use validator::{ValidationErrors, ValidationErrorsKind};
 #[derive(Serialize)]
 struct ErrorResponse {
     code: u16,
-    data: Option<serde_json::Value>,
+    data: Option<AppCoreErrorData>,
     message: String,
 }
 
@@ -57,7 +58,7 @@ pub enum ServerError {
 
     /// The caller sent an invalid or malformed request with structured details.
     #[error("bad request: {message}")]
-    BadRequestData { message: String, data: serde_json::Value },
+    BadRequestData { message: String, data: AppCoreErrorData },
 
     /// Backend not initialized or ready.
     #[error("backend not ready: {0}")]
@@ -83,7 +84,7 @@ impl IntoResponse for ServerError {
             ServerError::NotFound(m) => (
                 StatusCode::NOT_FOUND,
                 error_codes::NOT_FOUND,
-                None as Option<serde_json::Value>,
+                None as Option<AppCoreErrorData>,
                 m.clone(),
             ),
             ServerError::BadRequest(m) => {
