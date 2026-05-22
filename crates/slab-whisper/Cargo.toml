@@ -19,7 +19,7 @@ log = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
-rand = "0.10.1"
+rand = { workspace = true }
 
 [features]
 default = ["tracing_backend"]

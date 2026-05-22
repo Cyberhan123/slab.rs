@@ -107,7 +107,7 @@
     return path === base || path.startsWith(`${base}/`);
   }
 
-  // ../../node_modules/openapi-fetch/dist/index.mjs
+  // ../../node_modules/.bun/openapi-fetch@0.17.0/node_modules/openapi-fetch/dist/index.mjs
   var PATH_PARAM_RE = /\{[^{}]+\}/g;
   var supportsRequestInitExt = () => {
     return typeof process === "object" && Number.parseInt(process?.versions?.node?.substring(0, 2)) >= 18 && process.versions.undici;
@@ -658,14 +658,14 @@
     return target ?? window;
   }
   function requireCore(target) {
-    const core = resolveWindow(target).__TAURI__?.core;
+    const core = resolveWindow(target)["__TAURI__"]?.core;
     if (!core || typeof core.invoke !== "function") {
       throw new Error("Slab plugin host bridge is not available in this webview.");
     }
     return core;
   }
   function resolveEventApi(target) {
-    const eventApi = resolveWindow(target).__TAURI__?.event;
+    const eventApi = resolveWindow(target)["__TAURI__"]?.event;
     return eventApi && typeof eventApi.listen === "function" ? eventApi : null;
   }
   function serializeJsonRequest(request) {
