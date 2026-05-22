@@ -297,7 +297,7 @@ impl PluginService {
         method: &str,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, AppCoreError> {
-        self.scan_and_sync().await?;
+        self.ensure_plugin_state(plugin_id).await?;
 
         let registry = self.plugin_registry()?;
         registry.refresh().map_err(AppCoreError::Internal)?;
@@ -324,11 +324,9 @@ impl PluginService {
             return Ok(serde_json::Value::Null);
         }
 
-        serde_json::from_str(&response.output_text).map_err(|error| {
-            AppCoreError::BadRequest(format!(
-                "plugin `{plugin_id}` returned non-json response for `{method}`: {error}"
-            ))
-        })
+        Ok(serde_json::from_str(&response.output_text).unwrap_or_else(|_| {
+            serde_json::Value::String(response.output_text)
+        }))
     }
 
     fn plugin_registry(&self) -> Result<Arc<PluginRegistry>, AppCoreError> {
@@ -360,6 +358,13 @@ impl PluginService {
                 "plugin '{plugin_id}' is invalid: {}",
                 scan.error.clone().unwrap_or_else(|| "unknown plugin validation error".to_owned())
             )));
+        }
+        if let Some(state) = self.state.store().get_plugin_state(plugin_id).await? {
+            if !state.enabled {
+                return Err(AppCoreError::BadRequest(format!(
+                    "plugin '{plugin_id}' is disabled"
+                )));
+            }
         }
         Ok(())
     }
