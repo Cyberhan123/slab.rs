@@ -38,6 +38,7 @@ export type PluginUIHandle =
       kind: "tauri";
       pluginId: string;
       webviewLabel?: string;
+      _targetWindow: Window;
     }
   | {
       kind: "browser";
@@ -314,7 +315,7 @@ export function mountPluginUI(
   );
   if (hasTrustedTauriContext && tauriCore && typeof tauriCore.invoke === "function") {
     const bounds = container.getBoundingClientRect();
-    const handle: PluginUIHandle = { kind: "tauri", pluginId };
+    const handle: PluginUIHandle = { kind: "tauri", pluginId, _targetWindow: targetWindow };
     void tauriCore
       .invoke<{ webviewLabel: string }>("plugin_mount_view", {
         request: {
@@ -347,7 +348,7 @@ export function mountPluginUI(
 
 export function unmountPluginUI(handle: PluginUIHandle): void {
   if (handle.kind === "tauri") {
-    const targetWindow = resolveWindow();
+    const targetWindow = handle._targetWindow as TauriPluginWindow;
     const tauriCore = targetWindow["__TAURI__"]?.core;
     const hasTrustedTauriContext = Boolean(
       (targetWindow as Window & { __TAURI_INTERNALS__?: unknown })["__TAURI_INTERNALS__"],

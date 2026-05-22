@@ -20,8 +20,10 @@ impl JsPluginBackend {
 
 #[async_trait]
 impl PluginBackend for JsPluginBackend {
-    fn accepts(&self, plugin: &LoadedPlugin) -> bool {
-        plugin.js_entry_path.is_some()
+    fn accepts(&self, _plugin: &LoadedPlugin) -> bool {
+        // JS runtime dispatch is not yet implemented; disable routing to this backend
+        // to avoid calls silently reaching the stub worker.
+        false
     }
 
     async fn call(
