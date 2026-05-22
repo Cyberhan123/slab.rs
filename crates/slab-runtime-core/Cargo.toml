@@ -19,5 +19,5 @@ async-trait = { workspace = true }
 bytes = { workspace = true }
 
 [dev-dependencies]
-trybuild = "1.0"
+trybuild = { workspace = true }
 tracing-test = { workspace = true }

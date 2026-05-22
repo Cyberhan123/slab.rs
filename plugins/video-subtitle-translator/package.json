@@ -9,16 +9,16 @@
   "dependencies": {
     "@slab/plugin-sdk": "workspace:*",
     "@slab/plugin-ui": "workspace:*",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "react": "catalog:",
+    "react-dom": "catalog:"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.3.0",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.2",
-    "typescript": "~6.0.3",
-    "vite": "^8.0.13"
+    "@tailwindcss/vite": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
   },
   "license": "AGPL-3.0-only"
 }
