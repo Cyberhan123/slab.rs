@@ -639,6 +639,66 @@ pub(crate) fn settings_document_to_json_value(document: &SettingsDocument) -> Va
                 }
             }
         },
+        "agent": {
+            "tools": {
+                "websearch": {
+                    "default_provider": document.agent.tools.websearch.default_provider,
+                    "providers": {
+                        "duckduckgo": {
+                            "base_url": document.agent.tools.websearch.providers.duckduckgo.base_url,
+                            "user_agent": document.agent.tools.websearch.providers.duckduckgo.user_agent,
+                            "use_lite": document.agent.tools.websearch.providers.duckduckgo.use_lite,
+                        },
+                        "arxiv": {},
+                        "google": {
+                            "auth": {
+                                "api_key": document.agent.tools.websearch.providers.google.auth.api_key,
+                                "api_key_env": document.agent.tools.websearch.providers.google.auth.api_key_env,
+                            },
+                            "cx": document.agent.tools.websearch.providers.google.cx,
+                            "base_url": document.agent.tools.websearch.providers.google.base_url,
+                        },
+                        "tavily": {
+                            "auth": {
+                                "api_key": document.agent.tools.websearch.providers.tavily.auth.api_key,
+                                "api_key_env": document.agent.tools.websearch.providers.tavily.auth.api_key_env,
+                            },
+                            "base_url": document.agent.tools.websearch.providers.tavily.base_url,
+                            "search_depth": document.agent.tools.websearch.providers.tavily.search_depth,
+                            "include_answer": document.agent.tools.websearch.providers.tavily.include_answer,
+                            "include_images": document.agent.tools.websearch.providers.tavily.include_images,
+                            "include_raw_content": document.agent.tools.websearch.providers.tavily.include_raw_content,
+                        },
+                        "exa": {
+                            "auth": {
+                                "api_key": document.agent.tools.websearch.providers.exa.auth.api_key,
+                                "api_key_env": document.agent.tools.websearch.providers.exa.auth.api_key_env,
+                            },
+                            "base_url": document.agent.tools.websearch.providers.exa.base_url,
+                            "model": document.agent.tools.websearch.providers.exa.model,
+                            "include_contents": document.agent.tools.websearch.providers.exa.include_contents,
+                        },
+                        "serpapi": {
+                            "auth": {
+                                "api_key": document.agent.tools.websearch.providers.serpapi.auth.api_key,
+                                "api_key_env": document.agent.tools.websearch.providers.serpapi.auth.api_key_env,
+                            },
+                            "engine": document.agent.tools.websearch.providers.serpapi.engine,
+                            "base_url": document.agent.tools.websearch.providers.serpapi.base_url,
+                        },
+                        "brave": {
+                            "auth": {
+                                "api_key": document.agent.tools.websearch.providers.brave.auth.api_key,
+                                "api_key_env": document.agent.tools.websearch.providers.brave.auth.api_key_env,
+                            },
+                        },
+                        "searxng": {
+                            "base_url": document.agent.tools.websearch.providers.searxng.base_url,
+                        },
+                    }
+                }
+            }
+        },
         "runtime": {
             "mode": document.runtime.mode,
             "transport": document.runtime.transport,

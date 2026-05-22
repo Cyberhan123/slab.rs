@@ -36,6 +36,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/agents/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["agent_approve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["agent_events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/agents/{id}/input": {
         parameters: {
             query?: never;
@@ -46,6 +78,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["agent_input"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{id}/interrupt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["agent_interrupt"];
         delete?: never;
         options?: never;
         head?: never;
@@ -895,6 +943,18 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Request body for `POST /v1/agents/{id}/approve`. */
+        AgentApproveRequest: {
+            /** @description `true` to approve the call, `false` to reject it. */
+            approved: boolean;
+            /** @description The call ID of the pending tool call. */
+            call_id: string;
+        };
+        /** @description Response body for `POST /v1/agents/{id}/approve`. */
+        AgentApproveResponse: {
+            call_id: string;
+            delivered: boolean;
+        };
         /** @description Agent configuration provided by the caller. */
         AgentConfigInput: {
             allowed_tools?: string[] | null;
@@ -917,6 +977,11 @@ export interface components {
             /** @description `true` if the input was accepted. */
             accepted: boolean;
             message: string;
+        };
+        /** @description Response body for `POST /v1/agents/{id}/interrupt`. */
+        AgentInterruptResponse: {
+            interrupted: boolean;
+            thread_id: string;
         };
         /** @description Response body for `POST /v1/agents/{id}/shutdown`. */
         AgentShutdownResponse: {
@@ -2440,6 +2505,54 @@ export interface operations {
             };
         };
     };
+    agent_approve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Agent thread ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentApproveRequest"];
+            };
+        };
+        responses: {
+            /** @description Approval decision delivered */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentApproveResponse"];
+                };
+            };
+        };
+    };
+    agent_events: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Agent thread ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SSE stream of turn events */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     agent_input: {
         parameters: {
             query?: never;
@@ -2458,6 +2571,36 @@ export interface operations {
         responses: {
             /** @description Not implemented */
             501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    agent_interrupt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Agent thread ID to interrupt */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Thread interrupted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentInterruptResponse"];
+                };
+            };
+            /** @description Thread not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

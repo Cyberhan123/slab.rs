@@ -37,6 +37,7 @@ pub struct SettingsPmidCatalog {
     pub database: DatabasePmids,
     pub logging: LoggingPmids,
     pub tools: ToolsPmids,
+    pub agent: AgentPmids,
     pub runtime: RuntimePmids,
     pub providers: ProvidersPmids,
     pub models: ModelsPmids,
@@ -51,6 +52,7 @@ impl SettingsPmidCatalog {
             database: DatabasePmids,
             logging: LoggingPmids::new("logging"),
             tools: ToolsPmids::new(),
+            agent: AgentPmids::new(),
             runtime: RuntimePmids::new(),
             providers: ProvidersPmids,
             models: ModelsPmids::new(),
@@ -71,6 +73,8 @@ impl SettingsPmidCatalog {
             self.tools.ffmpeg.install_dir(),
             self.tools.ffmpeg.source.version(),
             self.tools.ffmpeg.source.artifact(),
+            self.agent.tools.websearch.default_provider(),
+            self.agent.tools.websearch.providers(),
             self.runtime.mode(),
             self.runtime.transport(),
             self.runtime.sessions.state_dir(),
@@ -318,6 +322,53 @@ impl FfmpegToolPmids {
 impl Default for FfmpegToolPmids {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AgentPmids {
+    pub tools: AgentToolsPmids,
+}
+
+impl AgentPmids {
+    pub const fn new() -> Self {
+        Self { tools: AgentToolsPmids::new() }
+    }
+}
+
+impl Default for AgentPmids {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AgentToolsPmids {
+    pub websearch: AgentWebSearchPmids,
+}
+
+impl AgentToolsPmids {
+    pub const fn new() -> Self {
+        Self { websearch: AgentWebSearchPmids }
+    }
+}
+
+impl Default for AgentToolsPmids {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AgentWebSearchPmids;
+
+impl AgentWebSearchPmids {
+    pub fn default_provider(self) -> SettingPmid {
+        SettingPmid::from_path("agent.tools.websearch.default_provider")
+    }
+
+    pub fn providers(self) -> SettingPmid {
+        SettingPmid::from_path("agent.tools.websearch.providers")
     }
 }
 
@@ -721,6 +772,8 @@ mod tests {
         assert!(unique.contains("runtime.ggml.backends.llama.flash_attn"));
         assert!(unique.contains("runtime.ggml.backends.whisper.flash_attn"));
         assert!(unique.contains("runtime.ggml.backends.diffusion.flash_attn"));
+        assert!(unique.contains("agent.tools.websearch.default_provider"));
+        assert!(unique.contains("agent.tools.websearch.providers"));
         assert!(unique.contains("providers.registry"));
         assert!(unique.contains("server.cloud_http_trace"));
     }

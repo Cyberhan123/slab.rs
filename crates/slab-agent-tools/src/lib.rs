@@ -10,6 +10,7 @@ use serde_json::Value;
 use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput, ToolRouter};
 use slab_mcp::McpClient;
 use slab_sandboxing::SandboxDriver;
+use slab_types::settings::AgentWebSearchConfig;
 
 pub mod apply_patch;
 pub mod fs;
@@ -18,6 +19,7 @@ pub mod git;
 pub mod grep;
 pub mod mcp;
 pub mod shell;
+pub mod web_search;
 
 pub use apply_patch::ApplyPatchTool;
 pub use fs::{ListDirTool, ReadFileTool, WriteFileTool};
@@ -26,6 +28,7 @@ pub use git::{GitCommitTool, GitDiffTool, GitStatusTool};
 pub use grep::GrepTool;
 pub use mcp::{McpCallTool, McpProxyTool};
 pub use shell::{ShellPolicy, ShellTool};
+pub use web_search::WebSearchTool;
 
 /// Register only the minimal built-in tool (echo).
 ///
@@ -42,6 +45,7 @@ pub fn register_all_tools(
     workspace_root: Option<PathBuf>,
     mcp_client: Option<Arc<McpClient>>,
     git_tools: bool,
+    web_search_config: AgentWebSearchConfig,
 ) {
     router.register(Box::new(EchoTool));
     router.register(Box::new(ShellTool::new(shell_policy, workspace_root.clone(), sandbox_driver)));
@@ -49,6 +53,7 @@ pub fn register_all_tools(
     router.register(Box::new(WriteFileTool::new(workspace_root.clone())));
     router.register(Box::new(ListDirTool::new(workspace_root.clone())));
     router.register(Box::new(GrepTool::new(workspace_root.clone())));
+    router.register(Box::new(WebSearchTool::new(web_search_config)));
     if let Some(watcher) = FsWatchTool::new() {
         router.register(Box::new(watcher));
     }
@@ -139,8 +144,17 @@ mod tests {
     #[test]
     fn register_all_tools_respects_workspace_and_git_switches() {
         let mut router = ToolRouter::new();
-        register_all_tools(&mut router, ShellPolicy::Block, None, None, None, true);
+        register_all_tools(
+            &mut router,
+            ShellPolicy::Block,
+            None,
+            None,
+            None,
+            true,
+            AgentWebSearchConfig::default(),
+        );
         assert!(router.get("shell").is_some());
+        assert!(router.get("web_search").is_some());
         assert!(router.get("apply_patch").is_none());
         assert!(router.get("git_status").is_none());
 
@@ -152,6 +166,7 @@ mod tests {
             Some(PathBuf::from(".")),
             None,
             false,
+            AgentWebSearchConfig::default(),
         );
         assert!(router.get("apply_patch").is_some());
         assert!(router.get("git_status").is_none());
@@ -164,6 +179,7 @@ mod tests {
             Some(PathBuf::from(".")),
             None,
             true,
+            AgentWebSearchConfig::default(),
         );
         assert!(router.get("git_status").is_some());
         assert!(router.get("git_diff").is_some());

@@ -87,6 +87,8 @@ pub struct SettingsDocument {
     #[serde(default)]
     pub tools: ToolsConfig,
     #[serde(default)]
+    pub agent: AgentSettingsConfig,
+    #[serde(default)]
     pub runtime: RuntimeSettingsConfig,
     #[serde(default)]
     pub providers: ProvidersConfig,
@@ -107,6 +109,7 @@ impl Default for SettingsDocument {
             database: DatabaseConfig::default(),
             logging: LoggingConfig::default(),
             tools: ToolsConfig::default(),
+            agent: AgentSettingsConfig::default(),
             runtime: RuntimeSettingsConfig::default(),
             providers: ProvidersConfig::default(),
             models: ModelSettingsConfig::default(),
@@ -273,6 +276,186 @@ impl Default for FfmpegToolConfig {
             source: SourceConfig::default(),
         }
     }
+}
+
+/// Agent-specific settings.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct AgentSettingsConfig {
+    #[serde(default)]
+    pub tools: AgentToolsConfig,
+}
+
+/// Agent tool settings.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct AgentToolsConfig {
+    #[serde(default)]
+    pub websearch: AgentWebSearchConfig,
+}
+
+/// Supported `websearch` crate providers.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WebSearchProviderId {
+    #[default]
+    Duckduckgo,
+    Arxiv,
+    Google,
+    Tavily,
+    Exa,
+    Serpapi,
+    Brave,
+    Searxng,
+}
+
+impl WebSearchProviderId {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Duckduckgo => "duckduckgo",
+            Self::Arxiv => "arxiv",
+            Self::Google => "google",
+            Self::Tavily => "tavily",
+            Self::Exa => "exa",
+            Self::Serpapi => "serpapi",
+            Self::Brave => "brave",
+            Self::Searxng => "searxng",
+        }
+    }
+}
+
+impl std::fmt::Display for WebSearchProviderId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for WebSearchProviderId {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "duckduckgo" => Ok(Self::Duckduckgo),
+            "arxiv" => Ok(Self::Arxiv),
+            "google" => Ok(Self::Google),
+            "tavily" => Ok(Self::Tavily),
+            "exa" => Ok(Self::Exa),
+            "serpapi" => Ok(Self::Serpapi),
+            "brave" => Ok(Self::Brave),
+            "searxng" => Ok(Self::Searxng),
+            _ => Err(format!("unsupported web search provider '{value}'")),
+        }
+    }
+}
+
+/// Agent web search tool configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct AgentWebSearchConfig {
+    #[serde(default)]
+    pub default_provider: WebSearchProviderId,
+    #[serde(default)]
+    pub providers: WebSearchProvidersConfig,
+}
+
+impl Default for AgentWebSearchConfig {
+    fn default() -> Self {
+        Self {
+            default_provider: WebSearchProviderId::Duckduckgo,
+            providers: WebSearchProvidersConfig::default(),
+        }
+    }
+}
+
+/// Provider-specific configuration for the agent web search tool.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct WebSearchProvidersConfig {
+    #[serde(default)]
+    pub duckduckgo: WebSearchDuckDuckGoProviderConfig,
+    #[serde(default)]
+    pub arxiv: WebSearchArxivProviderConfig,
+    #[serde(default)]
+    pub google: WebSearchGoogleProviderConfig,
+    #[serde(default)]
+    pub tavily: WebSearchTavilyProviderConfig,
+    #[serde(default)]
+    pub exa: WebSearchExaProviderConfig,
+    #[serde(default)]
+    pub serpapi: WebSearchSerpApiProviderConfig,
+    #[serde(default)]
+    pub brave: WebSearchBraveProviderConfig,
+    #[serde(default)]
+    pub searxng: WebSearchSearxngProviderConfig,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct WebSearchDuckDuckGoProviderConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_lite: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct WebSearchArxivProviderConfig {}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct WebSearchGoogleProviderConfig {
+    #[serde(default)]
+    pub auth: ProviderAuthConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cx: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct WebSearchTavilyProviderConfig {
+    #[serde(default)]
+    pub auth: ProviderAuthConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_depth: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include_answer: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include_images: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include_raw_content: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct WebSearchExaProviderConfig {
+    #[serde(default)]
+    pub auth: ProviderAuthConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include_contents: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct WebSearchSerpApiProviderConfig {
+    #[serde(default)]
+    pub auth: ProviderAuthConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct WebSearchBraveProviderConfig {
+    #[serde(default)]
+    pub auth: ProviderAuthConfig,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct WebSearchSearxngProviderConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
 }
 
 /// Runtime topology mode.
@@ -765,6 +948,116 @@ pub fn provider_registry_json_schema() -> Value {
     })
 }
 
+pub fn websearch_providers_json_schema() -> Value {
+    json!({
+        "type": "object",
+        "title": "Web Search Providers",
+        "default": {},
+        "properties": {
+            "duckduckgo": {
+                "type": "object",
+                "title": "DuckDuckGo",
+                "properties": {
+                    "base_url": { "type": ["string", "null"], "default": null },
+                    "user_agent": { "type": ["string", "null"], "default": null },
+                    "use_lite": { "type": ["boolean", "null"], "default": null }
+                }
+            },
+            "arxiv": {
+                "type": "object",
+                "title": "ArXiv",
+                "default": {},
+                "properties": {}
+            },
+            "google": {
+                "type": "object",
+                "title": "Google Custom Search",
+                "properties": {
+                    "auth": { "$ref": "#/$defs/webSearchAuth" },
+                    "cx": { "type": ["string", "null"], "default": null },
+                    "base_url": { "type": ["string", "null"], "default": null }
+                }
+            },
+            "tavily": {
+                "type": "object",
+                "title": "Tavily",
+                "properties": {
+                    "auth": { "$ref": "#/$defs/webSearchAuth" },
+                    "base_url": { "type": ["string", "null"], "default": null },
+                    "search_depth": {
+                        "type": ["string", "null"],
+                        "enum": ["basic", "advanced", null],
+                        "default": null
+                    },
+                    "include_answer": { "type": ["boolean", "null"], "default": null },
+                    "include_images": { "type": ["boolean", "null"], "default": null },
+                    "include_raw_content": { "type": ["boolean", "null"], "default": null }
+                }
+            },
+            "exa": {
+                "type": "object",
+                "title": "Exa",
+                "properties": {
+                    "auth": { "$ref": "#/$defs/webSearchAuth" },
+                    "base_url": { "type": ["string", "null"], "default": null },
+                    "model": {
+                        "type": ["string", "null"],
+                        "enum": ["keyword", "embeddings", null],
+                        "default": null
+                    },
+                    "include_contents": { "type": ["boolean", "null"], "default": null }
+                }
+            },
+            "serpapi": {
+                "type": "object",
+                "title": "SerpAPI",
+                "properties": {
+                    "auth": { "$ref": "#/$defs/webSearchAuth" },
+                    "engine": { "type": ["string", "null"], "default": null },
+                    "base_url": { "type": ["string", "null"], "default": null }
+                }
+            },
+            "brave": {
+                "type": "object",
+                "title": "Brave",
+                "properties": {
+                    "auth": { "$ref": "#/$defs/webSearchAuth" }
+                }
+            },
+            "searxng": {
+                "type": "object",
+                "title": "SearXNG",
+                "properties": {
+                    "base_url": { "type": ["string", "null"], "default": null }
+                }
+            }
+        },
+        "$defs": {
+            "webSearchAuth": {
+                "type": "object",
+                "title": "Authentication",
+                "default": {
+                    "api_key": null,
+                    "api_key_env": null
+                },
+                "properties": {
+                    "api_key": {
+                        "type": ["string", "null"],
+                        "title": "API Key",
+                        "writeOnly": true,
+                        "default": null
+                    },
+                    "api_key_env": {
+                        "type": ["string", "null"],
+                        "title": "API Key Environment Variable",
+                        "default": null
+                    }
+                }
+            }
+        }
+    })
+}
+
 pub fn string_list_json_schema(title: &str) -> Value {
     json!({
         "type": "array",
@@ -791,6 +1084,10 @@ mod tests {
         assert_eq!(settings.schema.as_deref(), Some(PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL));
         assert_eq!(settings.schema_version, 2);
         assert_eq!(settings.general.language, InterfaceLanguagePreference::Auto);
+        assert_eq!(
+            settings.agent.tools.websearch.default_provider,
+            WebSearchProviderId::Duckduckgo
+        );
         assert_eq!(settings.runtime.transport, RuntimeTransportMode::Ipc);
         assert_eq!(settings.server.address, DESKTOP_API_BIND);
         assert!(settings.runtime.logging.level.is_none());
@@ -851,5 +1148,22 @@ mod tests {
                 .and_then(|value| value.get("writeOnly")),
             Some(&Value::Bool(true))
         );
+    }
+
+    #[test]
+    fn generated_websearch_schema_marks_api_keys_write_only() {
+        let schema = websearch_providers_json_schema();
+        let api_key = schema
+            .get("$defs")
+            .and_then(Value::as_object)
+            .and_then(|defs| defs.get("webSearchAuth"))
+            .and_then(Value::as_object)
+            .and_then(|auth| auth.get("properties"))
+            .and_then(Value::as_object)
+            .and_then(|properties| properties.get("api_key"))
+            .and_then(Value::as_object)
+            .expect("api key schema");
+
+        assert_eq!(api_key.get("writeOnly"), Some(&Value::Bool(true)));
     }
 }
