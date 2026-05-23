@@ -30,11 +30,7 @@ pub struct JsWorkerHandle {
 }
 
 impl JsWorkerHandle {
-    pub fn new(
-        module_path: PathBuf,
-        _permissions: JsPluginPermissions,
-        config: JsRuntimeConfig,
-    ) -> Result<Self> {
+    pub fn new(module_path: PathBuf, config: JsRuntimeConfig) -> Result<Self> {
         if !module_path.is_file() {
             bail!("js module entry does not exist at {}", module_path.display());
         }
@@ -126,10 +122,7 @@ fn execute_js_call(
     var params = {params_json};
     var result = target(params);
     return JSON.stringify(result !== undefined ? result : null);
-}})()"#,
-            source = source,
-            method_json = method_json,
-            params_json = params_json,
+}})()"#
         );
 
         let result: String = ctx

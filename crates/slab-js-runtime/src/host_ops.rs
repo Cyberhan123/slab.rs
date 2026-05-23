@@ -210,8 +210,7 @@ fn build_upstream_url(base_url: &str, path: &str) -> Result<String, String> {
 fn collect_response_headers(headers: &reqwest::header::HeaderMap) -> HashMap<String, String> {
     let mut result = HashMap::new();
     for (name, value) in headers {
-        if matches!(name.as_str().to_ascii_lowercase().as_str(), "connection" | "transfer-encoding")
-        {
+        if matches!(name.as_str(), "connection" | "transfer-encoding") {
             continue;
         }
         if let Ok(v) = value.to_str() {
