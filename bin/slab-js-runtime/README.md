@@ -1,5 +1,7 @@
 # slab-js-runtime
 
+> Some of the code comes from https://github.com/rscarson/rustyscript, but for easier dependency management and upgrades, I've moved it to src/infra/deno.
+
 `slab-js-runtime` is the supervised JavaScript plugin execution sidecar owned
 by `slab-server`. It communicates over line-delimited JSON-RPC 2.0 on stdio and
 keeps Deno crate API churn out of `slab-app-core`, `slab-server`, and
