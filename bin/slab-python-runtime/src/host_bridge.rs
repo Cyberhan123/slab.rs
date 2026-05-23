@@ -1,7 +1,7 @@
 //! Host bridge module exposed to Python plugins as `import slab`.
 //!
-//! Injects a `slab` object into the plugin's local namespace.  Plugins access
-//! it simply by referencing `slab` (the object is pre-bound to the `locals`
+//! Injects a `slab` object into the plugin's execution namespace.  Plugins access
+//! it simply by referencing `slab` (the object is pre-bound to the namespace
 //! dict before the plugin source is executed, no actual `import` statement is
 //! required or permitted).
 //!
@@ -18,7 +18,7 @@ use std::ffi::CString;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-/// Inject a `slab` binding into `locals` for the current plugin call.
+/// Inject a `slab` binding into the execution namespace for the current plugin call.
 ///
 /// After this call, the plugin source can reference `slab.plugin_id`,
 /// `slab.api`, and `slab.ui` without any import statement.
@@ -26,7 +26,7 @@ pub fn inject(
     py: Python<'_>,
     plugin_id: &str,
     api_base: &str,
-    locals: &Bound<'_, PyDict>,
+    namespace: &Bound<'_, PyDict>,
 ) -> PyResult<()> {
     // Sanitise values used inside the Python string (no injection risk: we
     // only need to produce valid Python string literals from Rust-controlled
@@ -35,8 +35,7 @@ pub fn inject(
     let api_base_py = format!("{api_base:?}");
 
     let setup = format!(
-        r#"
-import json
+        r#"import json
 import urllib.request
 import urllib.error
 import time as _time
@@ -83,9 +82,8 @@ del _SlabApi, _SlabUi, _Slab
 "#
     );
 
-    let globals = PyDict::new(py);
     let code = CString::new(setup.as_str())
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
-    py.run(&code, Some(&globals), Some(locals))?;
+    py.run(&code, Some(namespace), Some(namespace))?;
     Ok(())
 }
