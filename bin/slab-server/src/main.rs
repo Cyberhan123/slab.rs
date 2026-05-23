@@ -69,6 +69,8 @@ struct SupervisorArgs {
     backend_capacity: Option<usize>,
     #[arg(long = "lib-dir", hide = true)]
     lib_dir: Option<PathBuf>,
+    #[arg(long = "print-openapi", hide = true, action = clap::ArgAction::SetTrue)]
+    print_openapi: bool,
 }
 
 impl SupervisorArgs {
@@ -183,6 +185,13 @@ impl SupervisorArgs {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mut args = SupervisorArgs::parse();
+    if args.print_openapi {
+        let docs = api::doc::get_docs();
+        serde_json::to_writer_pretty(std::io::stdout(), &docs)?;
+        println!();
+        return Ok(());
+    }
+
     let mut cfg = Config::from_env();
     args.validate_no_legacy_launch_overrides()?;
     args.apply_bootstrap_config(&mut cfg);

@@ -8,6 +8,7 @@ use tracing::{info, warn};
 
 use crate::error::AppCoreError;
 use crate::infra::endpoint::{http_probe_authority, normalize_ipc_endpoint_path};
+use crate::infra::process_supervisor::resolve_sibling_sidecar_exe;
 use crate::launch::ResolvedRuntimeChildSpec;
 
 use super::supervisor::{RuntimeChildExit, RuntimeChildHandle, RuntimeChildSpawner};
@@ -30,46 +31,7 @@ impl TokioRuntimeSpawner {
 }
 
 pub fn resolve_runtime_exe(server_exe: &Path) -> Result<PathBuf, AppCoreError> {
-    let parent = server_exe.parent().ok_or_else(|| {
-        AppCoreError::Internal("failed to resolve server executable parent directory".to_owned())
-    })?;
-    let server_name = server_exe.file_name().and_then(|name| name.to_str()).ok_or_else(|| {
-        AppCoreError::Internal("server executable name is not valid UTF-8".to_owned())
-    })?;
-    let ext = if cfg!(windows) { ".exe" } else { "" };
-
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Some(rest) = server_name.strip_prefix("slab-server-") {
-        candidates.push(parent.join(format!("slab-runtime-{rest}")));
-    }
-    candidates.push(parent.join(format!("slab-runtime{ext}")));
-
-    if let Ok(entries) = std::fs::read_dir(parent) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-                continue;
-            };
-            if cfg!(windows) {
-                if name.starts_with("slab-runtime-") && name.ends_with(".exe") {
-                    candidates.push(path);
-                }
-            } else if name.starts_with("slab-runtime-") {
-                candidates.push(path);
-            }
-        }
-    }
-
-    for candidate in candidates {
-        if candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-
-    Err(AppCoreError::Internal(format!(
-        "slab-runtime executable not found near {}. Build and bundle slab-runtime sidecar first.",
-        server_exe.display()
-    )))
+    resolve_sibling_sidecar_exe(server_exe, "slab-runtime")
 }
 
 async fn runtime_endpoint_ready(

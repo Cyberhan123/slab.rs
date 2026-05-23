@@ -35,24 +35,26 @@ Directories under `plugins/` without `plugin.json` are not treated as plugins.
 ## JS Backend Runtime
 
 Plugins can expose backend functions by providing a `runtime.js.entry` in
-`plugin.json`. The JS backend runs in an embedded QuickJS engine (via
-`rquickjs`) with the following host bridge available at `globalThis.Slab`:
+`plugin.json`. The JS backend runs in the supervised `bin/slab-js-runtime`
+sidecar. It is Deno-based, supports ESM/TypeScript entry files, and exposes
+the following host bridge at `globalThis.Slab`:
 
 ```javascript
 // Available in all JS plugin backends:
 Slab.pluginId      // string - the plugin's id
-Slab.api.request({ method, path, headers, body })  // synchronous HTTP to slab API
-Slab.ui.emit(topic, data)                          // emit event to host UI
+await Slab.api.request({ method, path, headers, body })  // JSON-RPC to slab-server
+await Slab.ui.emit(topic, data)                          // emit event to host UI
 ```
 
 ### Plugin module format
 
-Backend JS files use CommonJS module format:
+Backend JS files use ESM named exports. `runtime.js.entry` may point to
+`.ts`, `.tsx`, `.js`, or `.mjs`. CommonJS `module.exports` is not supported.
 
 ```javascript
-function myFunction(params) {
+export async function myFunction(params) {
     // Use Slab.api.request() for host API calls
-    var result = Slab.api.request({
+    const result = await Slab.api.request({
         method: "POST",
         path: "/v1/chat/completions",
         headers: { "Content-Type": "application/json" },
@@ -60,26 +62,25 @@ function myFunction(params) {
     });
     return JSON.parse(result.body);
 }
-
-module.exports = { myFunction: myFunction };
 ```
 
-### Deno compatibility
+### Runtime permissions
 
-The embedded runtime uses CommonJS (`module.exports`) format. Plugins that
-also need to run in Deno can use a simple build step (e.g. esbuild/rollup)
-to bundle ES modules into a single CommonJS file, or use the CommonJS format
-directly (which Deno supports via `--compat` or `require()` in Deno 2+).
-
-The `Slab.*` API surface is identical between the embedded engine and a Deno
-polyfill, so the plugin logic itself requires no modification across runtimes.
+The runtime starts with no ambient file or network access. Module loading can
+read files under the plugin package root, but `Deno.readFile` and
+`Deno.writeFile` require host-issued per-call grants and matching
+`permissions.files.read` or `permissions.files.write` labels. `fetch` is
+allowed only when `permissions.network.mode` is `allowlist` and the target host
+is listed in `permissions.network.allowHosts`. Local Slab API origins are
+blocked for `fetch`; use `Slab.api.request` so `slab-server` can re-authorize
+the call against `permissions.slabApi`.
 
 ### Supported backends
 
 | Backend | Engine | Use case |
 |---------|--------|----------|
 | WASM | Extism (Wasmtime) | High-performance, sandboxed, polyglot (Rust, Go, C, etc.) |
-| JS | QuickJS (rquickjs) | Lightweight scripting, Deno-compatible API, rapid iteration |
+| JS | slab-js-runtime (Deno crates) | TypeScript/ESM plugin logic with declared permissions |
 | Frontend-only | Tauri WebView | UI-only plugins with no backend logic |
 
 ## Manifest v1

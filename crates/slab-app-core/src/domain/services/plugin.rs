@@ -15,12 +15,14 @@ use crate::domain::models::{InstallPluginCommand, PluginView};
 use crate::error::AppCoreError;
 use crate::infra::db::{PluginStateRecord, PluginStateStore};
 use crate::infra::endpoint::ensure_http_base_url;
+use crate::infra::plugin_runtime::{PluginEventBus, PluginJsRuntimeClient};
 use slab_plugin::{PluginCallRequest, PluginRegistry, PluginRuntime};
 use slab_types::plugin::{
     PluginAgentCapabilityContribution, PluginCommandContribution, PluginLanguageServerContribution,
     PluginLanguageServerTransport, PluginManifest, PluginNetworkMode, PluginPermissionsManifest,
     PluginRouteContribution, PluginSettingsContribution, PluginSidebarContribution,
 };
+use slab_types::{PluginRuntimeCallRequest, PluginRuntimeFileGrant};
 
 const SOURCE_KIND_DEV: &str = "dev";
 const SOURCE_KIND_IMPORT_PACK: &str = "import_pack";
@@ -37,6 +39,8 @@ pub struct PluginService {
     state: ModelState,
     registry: Arc<Mutex<Option<Arc<PluginRegistry>>>>,
     runtime: Arc<PluginRuntime>,
+    js_runtime: PluginJsRuntimeClient,
+    event_bus: PluginEventBus,
 }
 
 impl PluginService {
@@ -44,8 +48,24 @@ impl PluginService {
         let runtime = ensure_http_base_url(state.config().bind_address.as_str())
             .map(PluginRuntime::with_api_base_url)
             .unwrap_or_else(|_| PluginRuntime::default());
+        let event_bus = PluginEventBus::new();
+        let api_base_url = ensure_http_base_url(state.config().bind_address.as_str())
+            .unwrap_or_else(|_| slab_types::DESKTOP_API_ORIGIN.to_owned());
+        let js_runtime = PluginJsRuntimeClient::for_current_server(api_base_url, event_bus.clone());
 
-        Self { state, registry: Arc::new(Mutex::new(None)), runtime: Arc::new(runtime) }
+        Self {
+            state,
+            registry: Arc::new(Mutex::new(None)),
+            runtime: Arc::new(runtime),
+            js_runtime,
+            event_bus,
+        }
+    }
+
+    pub fn subscribe_events(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<slab_types::PluginEventPayload> {
+        self.event_bus.subscribe()
     }
 
     pub async fn list_plugins(&self) -> Result<Vec<PluginView>, AppCoreError> {
@@ -303,6 +323,27 @@ impl PluginService {
         let registry = self.plugin_registry()?;
         registry.refresh().map_err(AppCoreError::Internal)?;
         let plugin = registry.get_plugin(plugin_id).map_err(AppCoreError::BadRequest)?;
+
+        if let Some(js_entry) = plugin.manifest.runtime.js.as_ref() {
+            let request = PluginRuntimeCallRequest {
+                call_id: Uuid::new_v4().to_string(),
+                plugin_id: plugin_id.to_owned(),
+                root_dir: plugin.root_dir.to_string_lossy().into_owned(),
+                entry: js_entry.entry.clone(),
+                export_name: method.to_owned(),
+                params,
+                permissions: plugin.manifest.permissions.clone(),
+                file_grants: Vec::<PluginRuntimeFileGrant>::new(),
+                blocked_fetch_origins: Vec::new(),
+            };
+            return self.js_runtime.call(request).await.map(|response| response.result).map_err(
+                |error| {
+                    AppCoreError::BadRequest(format!(
+                        "plugin `{plugin_id}` JS call `{method}` failed: {error}"
+                    ))
+                },
+            );
+        }
 
         let input = serde_json::to_string(&params).map_err(|error| {
             AppCoreError::BadRequest(format!(
@@ -702,12 +743,13 @@ fn validate_plugin_manifest(root_dir: &Path, manifest: &PluginManifest) -> Resul
         )?;
     }
     if let Some(js) = &manifest.runtime.js {
-        validate_declared_file(
+        let entry = validate_declared_file(
             root_dir,
             &manifest.integrity.files_sha256,
             &js.entry,
             "runtime.js.entry",
         )?;
+        validate_js_entry_extension(&entry)?;
     }
 
     if manifest.permissions.network.mode == PluginNetworkMode::Blocked
@@ -1023,6 +1065,18 @@ fn validate_declared_file(
         ));
     }
     Ok(normalized_path)
+}
+
+fn validate_js_entry_extension(entry: &str) -> Result<(), String> {
+    let extension = Path::new(entry)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if matches!(extension.as_str(), "ts" | "tsx" | "js" | "mjs") {
+        return Ok(());
+    }
+    Err("runtime.js.entry must use .ts, .tsx, .js, or .mjs".to_owned())
 }
 
 fn normalize_relative_path(raw: &str) -> Result<String, String> {

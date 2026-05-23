@@ -7,7 +7,10 @@ export type PluginIntegrityMap = Record<string, string>;
 const ALWAYS_INCLUDED_DIRS = ["ui", "schemas"] as const;
 const OPTIONAL_INCLUDED_FILES = ["wasm/plugin.wasm", "package.json"] as const;
 
-export async function computePluginIntegrity(pluginDir: string): Promise<PluginIntegrityMap> {
+export async function computePluginIntegrity(
+  pluginDir: string,
+  additionalFiles: string[] = [],
+): Promise<PluginIntegrityMap> {
   const root = path.resolve(pluginDir);
   const directoryEntries = await Promise.all(
     ALWAYS_INCLUDED_DIRS.map(async (relativeDir) => {
@@ -16,7 +19,7 @@ export async function computePluginIntegrity(pluginDir: string): Promise<PluginI
     }),
   );
   const optionalEntries = await Promise.all(
-    OPTIONAL_INCLUDED_FILES.map(async (relativeFile) => {
+    [...OPTIONAL_INCLUDED_FILES, ...additionalFiles].map(async (relativeFile) => {
       const absoluteFile = path.join(root, relativeFile);
       return (await isFile(absoluteFile)) ? toRelativeKey(root, absoluteFile) : null;
     }),
@@ -40,7 +43,7 @@ export async function updatePluginManifestIntegrity(pluginDir: string): Promise<
   const root = path.resolve(pluginDir);
   const manifestPath = path.join(root, "plugin.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
-  const filesSha256 = await computePluginIntegrity(root);
+  const filesSha256 = await computePluginIntegrity(root, manifestRuntimeEntries(manifest));
 
   manifest.integrity = {
     ...(typeof manifest.integrity === "object" && manifest.integrity
@@ -51,6 +54,25 @@ export async function updatePluginManifestIntegrity(pluginDir: string): Promise<
 
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   return filesSha256;
+}
+
+function manifestRuntimeEntries(manifest: Record<string, unknown>): string[] {
+  const runtime = asRecord(manifest.runtime);
+  if (!runtime) {
+    return [];
+  }
+
+  return ["ui", "wasm", "js"]
+    .map((runtimeKey) => asRecord(runtime[runtimeKey])?.entry)
+    .filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
+    .map((entry) => entry.split(/[\\/]+/).join("/"));
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
 }
 
 async function collectFiles(root: string, currentDir: string): Promise<string[]> {

@@ -11,6 +11,7 @@ license.workspace = true
 [features]
 default = []
 axum = ["dep:axum"]
+gpu-telemetry = ["dep:all-smi"]
 
 [build-dependencies]
 serde_json = { workspace = true }
@@ -58,7 +59,7 @@ genai      = { workspace = true }
 reqwest    = { workspace = true }
 
 # Database (SQLite)
-sqlx = { workspace = true, features = ["sqlite", "runtime-tokio-rustls", "migrate", "chrono", "uuid", "_sqlite"] }
+sqlx = { workspace = true, features = ["sqlite", "runtime-tokio-rustls", "migrate", "chrono", "uuid"] }
 
 # IDs & time
 uuid   = { workspace = true }
@@ -84,7 +85,7 @@ zip         = { workspace = true }
 dirs-next   = { workspace = true }
 jsonschema  = { workspace = true }
 ffmpeg-sidecar = { workspace = true, features = ["download_ffmpeg"] }
-all-smi = { workspace = true }
+all-smi = { workspace = true, optional = true }
 sysinfo = { workspace = true }
 windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
 validator = { workspace = true, features = ["derive"] }

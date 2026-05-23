@@ -1,6 +1,5 @@
-// video-subtitle-translator backend plugin entry
-// This module runs in the embedded QuickJS runtime or Deno.
-// It provides the `translateVideo` function callable via pluginCall transport.
+// video-subtitle-translator backend plugin entry.
+// This module runs in slab-js-runtime as ESM.
 
 /**
  * Translate subtitles for a video file.
@@ -12,10 +11,10 @@
  * @param {string} [params.modelId] - Model to use for translation
  * @returns {object} Result with subtitle file path
  */
-function translateVideo(params) {
-    var videoPath = params.videoPath;
-    var targetLanguage = params.targetLanguage;
-    var sourceLanguage = params.sourceLanguage || "auto";
+export async function translateVideo(params) {
+    const videoPath = params.videoPath;
+    const targetLanguage = params.targetLanguage;
+    const sourceLanguage = params.sourceLanguage || "auto";
 
     if (!videoPath) {
         throw new Error("videoPath is required");
@@ -25,7 +24,7 @@ function translateVideo(params) {
     }
 
     // Step 1: Transcribe audio using slab API
-    var transcribeResult = Slab.api.request({
+    const transcribeResult = await Slab.api.request({
         method: "POST",
         path: "/v1/audio/transcriptions",
         headers: { "Content-Type": "application/json" },
@@ -39,15 +38,15 @@ function translateVideo(params) {
         throw new Error("Transcription failed: " + transcribeResult.body);
     }
 
-    var transcription = JSON.parse(transcribeResult.body);
+    const transcription = JSON.parse(transcribeResult.body);
 
     // Step 2: Translate segments using chat completion
-    var segments = transcription.segments || [];
-    var translatedSegments = [];
+    const segments = transcription.segments || [];
+    const translatedSegments = [];
 
-    for (var i = 0; i < segments.length; i++) {
-        var segment = segments[i];
-        var translateResult = Slab.api.request({
+    for (let i = 0; i < segments.length; i++) {
+        const segment = segments[i];
+        const translateResult = await Slab.api.request({
             method: "POST",
             path: "/v1/chat/completions",
             headers: { "Content-Type": "application/json" },
@@ -66,8 +65,8 @@ function translateVideo(params) {
         });
 
         if (translateResult.status === 200) {
-            var chatResp = JSON.parse(translateResult.body);
-            var translated =
+            const chatResp = JSON.parse(translateResult.body);
+            const translated =
                 chatResp.choices &&
                 chatResp.choices[0] &&
                 chatResp.choices[0].message &&
@@ -84,7 +83,7 @@ function translateVideo(params) {
     }
 
     // Step 3: Render subtitle file
-    var renderResult = Slab.api.request({
+    const renderResult = await Slab.api.request({
         method: "POST",
         path: "/v1/subtitle/render",
         headers: { "Content-Type": "application/json" },
@@ -99,10 +98,10 @@ function translateVideo(params) {
         throw new Error("Subtitle render failed: " + renderResult.body);
     }
 
-    var renderResp = JSON.parse(renderResult.body);
+    const renderResp = JSON.parse(renderResult.body);
 
     // Emit progress event
-    Slab.ui.emit("translateVideo.complete", {
+    await Slab.ui.emit("translateVideo.complete", {
         videoPath: videoPath,
         outputPath: renderResp.outputPath,
         segmentCount: translatedSegments.length,
@@ -114,5 +113,3 @@ function translateVideo(params) {
         targetLanguage: targetLanguage,
     };
 }
-
-module.exports = { translateVideo: translateVideo };

@@ -68,7 +68,8 @@ pub fn init<R: Runtime>(
 ) -> Result<(), String> {
     log::info!("resolved plugins root to {}", plugins_root.display());
     let registry = PluginRegistryState::new(plugins_root)?;
-    let ws_client = PluginRpcWsClient::new(api_endpoint);
+    let ws_client = PluginRpcWsClient::new(api_endpoint.clone());
+    ws_client::spawn_plugin_event_listener(app.handle().clone(), api_endpoint);
     app.manage(registry);
     app.manage(ws_client);
     app.manage(PluginViewManager::default());

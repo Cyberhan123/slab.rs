@@ -15,6 +15,8 @@ slab-*-sys/target/
 ## Vendor cache
 vendor/*
 !vendor/slab-artifacts.toml
+!vendor/all-smi-luwen-if-0.7.9/
+!vendor/all-smi-luwen-if-0.7.9/**
 
 ## SQLite Databases
 *.db

@@ -6,7 +6,6 @@ edition.workspace = true
 [dependencies]
 slab-types = { workspace = true }
 slab-config = { workspace = true }
-slab-js-runtime = { workspace = true }
 extism = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

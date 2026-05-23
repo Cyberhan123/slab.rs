@@ -275,9 +275,12 @@ fn validate_and_load_plugin(
     };
 
     let js_entry_path = match manifest.runtime.js.as_ref() {
-        Some(js) => Some(
-            validate_declared_file(plugin_dir, &files_sha256, &js.entry, "runtime.js.entry")?.1,
-        ),
+        Some(js) => {
+            let (entry, path) =
+                validate_declared_file(plugin_dir, &files_sha256, &js.entry, "runtime.js.entry")?;
+            validate_js_entry_extension(&entry)?;
+            Some(path)
+        }
         None => None,
     };
 
@@ -308,6 +311,18 @@ fn validate_declared_file(
     }
 
     Ok((normalized_path, file_path))
+}
+
+fn validate_js_entry_extension(entry: &str) -> Result<(), String> {
+    let extension = Path::new(entry)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if matches!(extension.as_str(), "ts" | "tsx" | "js" | "mjs") {
+        return Ok(());
+    }
+    Err("runtime.js.entry must use .ts, .tsx, .js, or .mjs".to_owned())
 }
 
 fn compute_file_sha256(path: &Path) -> Result<String, String> {
