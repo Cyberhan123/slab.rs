@@ -35,15 +35,20 @@ PythonRuntime
 
 ## Static Embedding
 
-Populate an `EmbeddedStdlib` before calling `interpreter::init`:
+Populate an `EmbeddedStdlib` and pass it through `PythonRuntimeConfig`:
 
 ```rust
-use slab_python_runtime::EmbeddedStdlib;
+use slab_python_runtime::{EmbeddedStdlib, PythonRuntime, PythonRuntimeConfig};
 
-let mut stdlib = EmbeddedStdlib::default();
-stdlib
+let mut embedded_stdlib = EmbeddedStdlib::default();
+embedded_stdlib
     .add("mypackage.utils", include_bytes!("../python/mypackage/utils.py"))
     .add("mypackage.models", include_bytes!("../python/mypackage/models.py"));
+
+let runtime = PythonRuntime::with_config(PythonRuntimeConfig {
+    embedded_stdlib,
+    ..PythonRuntimeConfig::default()
+});
 ```
 
 The bytes are `include_bytes!` – they are linked directly into the binary,

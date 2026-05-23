@@ -32,7 +32,7 @@ use pyo3::types::{PyBytes, PyDict};
 /// let mut stdlib = EmbeddedStdlib::default();
 /// stdlib.add("mypackage.utils", include_bytes!("../python/mypackage/utils.py"));
 /// ```
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct EmbeddedStdlib {
     modules: HashMap<&'static str, &'static [u8]>,
 }
@@ -57,8 +57,7 @@ pub fn register(py: Python<'_>, stdlib: &EmbeddedStdlib) -> PyResult<()> {
 
     // The finder and loader are written in Python for correctness and
     // simplicity. The Rust side only supplies the data.
-    let setup = r#"
-import sys
+    let setup = r#"import sys
 import importlib.abc
 import importlib.machinery
 
@@ -106,9 +105,17 @@ class _EmbeddedFinder(importlib.abc.MetaPathFinder):
         pass
 
 
-# Insert before all other finders so embedded modules take priority.
-sys.meta_path.insert(0, _EmbeddedFinder(_slab_embedded_modules))
-del _EmbeddedFinder, _EmbeddedLoader
+_slab_finder = next(
+    (finder for finder in sys.meta_path if getattr(finder, '_slab_embedded_finder', False)),
+    None,
+)
+if _slab_finder is None:
+    _slab_finder = _EmbeddedFinder(_slab_embedded_modules)
+    _slab_finder._slab_embedded_finder = True
+    sys.meta_path.insert(0, _slab_finder)
+else:
+    _slab_finder._modules = _slab_embedded_modules
+del _slab_finder, _EmbeddedFinder, _EmbeddedLoader
 "#;
 
     let globals = PyDict::new(py);

@@ -232,7 +232,10 @@ fn authorize_slab_api_request(
         path.starts_with(prefix)
     });
     if !authorized {
-        return Err(format!("request to `{}` is not covered by plugin slab API permissions", request.path));
+        return Err(format!(
+            "request to `{}` is not covered by plugin slab API permissions",
+            request.path
+        ));
     }
     Ok(())
 }
@@ -247,10 +250,8 @@ fn execute_plugin_api_request_blocking(
         .map_err(|e| format!("invalid HTTP method `{}`: {e}", request.method))?;
     let url = build_upstream_url(base_url, &request.path)?;
     let headers = sanitize_request_headers(&request.headers)?;
-    let mut request_builder = client
-        .request(method, url)
-        .headers(headers)
-        .timeout(Duration::from_millis(timeout_ms));
+    let mut request_builder =
+        client.request(method, url).headers(headers).timeout(Duration::from_millis(timeout_ms));
     if let Some(body) = &request.body {
         request_builder = request_builder.body(body.clone());
     }
@@ -262,7 +263,11 @@ fn execute_plugin_api_request_blocking(
     if bytes.len() > MAX_API_RESPONSE_BYTES {
         return Err(format!("API response body exceeds {MAX_API_RESPONSE_BYTES} bytes limit"));
     }
-    Ok(PluginApiResponse { status, headers: resp_headers, body: String::from_utf8_lossy(&bytes).to_string() })
+    Ok(PluginApiResponse {
+        status,
+        headers: resp_headers,
+        body: String::from_utf8_lossy(&bytes).to_string(),
+    })
 }
 
 fn build_upstream_url(base_url: &str, path: &str) -> Result<String, String> {
@@ -279,11 +284,12 @@ fn sanitize_request_headers(headers: &HashMap<String, String>) -> Result<HeaderM
     let mut clean = HeaderMap::new();
     for (name, value) in headers {
         let lower = name.to_ascii_lowercase();
-        if matches!(lower.as_str(), "host" | "connection" | "content-length" | "transfer-encoding") {
+        if matches!(lower.as_str(), "host" | "connection" | "content-length" | "transfer-encoding")
+        {
             continue;
         }
-        let header_name = HeaderName::from_str(name)
-            .map_err(|e| format!("invalid header name `{name}`: {e}"))?;
+        let header_name =
+            HeaderName::from_str(name).map_err(|e| format!("invalid header name `{name}`: {e}"))?;
         let header_value = HeaderValue::from_str(value)
             .map_err(|e| format!("invalid header value for `{name}`: {e}"))?;
         clean.insert(header_name, header_value);
@@ -294,7 +300,8 @@ fn sanitize_request_headers(headers: &HashMap<String, String>) -> Result<HeaderM
 fn collect_response_headers(headers: &HeaderMap) -> HashMap<String, String> {
     let mut result = HashMap::new();
     for (name, value) in headers {
-        if matches!(name.as_str().to_ascii_lowercase().as_str(), "connection" | "transfer-encoding") {
+        if matches!(name.as_str().to_ascii_lowercase().as_str(), "connection" | "transfer-encoding")
+        {
             continue;
         }
         if let Ok(value) = value.to_str() {

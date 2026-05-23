@@ -18,7 +18,6 @@ use tracing::debug;
 
 use crate::host_bridge;
 use crate::interpreter;
-use crate::vfs::EmbeddedStdlib;
 use crate::{PythonCallRequest, PythonCallResponse, PythonRuntimeConfig};
 
 const PYTHON_EXECUTION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -37,7 +36,7 @@ impl PythonWorkerHandle {
 
         // Ensure CPython is initialised once per process.  Subsequent calls to
         // `interpreter::init` are idempotent.
-        interpreter::init(EmbeddedStdlib::default())?;
+        interpreter::init(config.embedded_stdlib.clone())?;
 
         debug!("created Python worker for module {}", module_path.display());
 
@@ -84,53 +83,54 @@ fn execute_python_call(
     let origin = module_path.display().to_string();
 
     Python::with_gil(|py| {
-        let globals = PyDict::new(py);
-        let locals = PyDict::new(py);
+        let namespace = PyDict::new(py);
 
         // Inject the slab host bridge so plugins can `import slab`.
-        host_bridge::inject(py, plugin_id, &config.api_base_url, &locals)
+        host_bridge::inject(py, plugin_id, &config.api_base_url, &namespace)
             .map_err(|e| anyhow::anyhow!("host bridge injection failed: {e}"))?;
 
         // Execute the plugin source in the prepared namespace.
         let source_c = CString::new(source.as_str())
             .map_err(|e| anyhow::anyhow!("null byte in plugin source: {e}"))?;
-        py.run(&source_c, Some(&globals), Some(&locals))
+        py.run(&source_c, Some(&namespace), Some(&namespace))
             .map_err(|e| anyhow::anyhow!("plugin execution error in {origin}: {e}"))?;
 
-        // Retrieve the requested function from globals (after exec it lands there).
-        let func = globals
+        let func = namespace
             .get_item(function)
             .map_err(|e| anyhow::anyhow!("{e}"))?
             .ok_or_else(|| anyhow::anyhow!("plugin does not export function `{function}`"))?;
 
         // Run with a signal-based timeout via Python's `signal` module.
         let timeout_code = format!(
-            r#"
-import signal, json
+            r#"import threading
+if threading.current_thread() is threading.main_thread():
+    import signal
 
-def _slab_timeout_handler(signum, frame):
-    raise TimeoutError("Python plugin timed out after {timeout_secs}s")
+    def _slab_timeout_handler(signum, frame):
+        raise TimeoutError("Python plugin timed out after {timeout_secs}s")
 
-_slab_old_handler = signal.signal(signal.SIGALRM, _slab_timeout_handler)
-signal.alarm({timeout_secs})
-try:
-    _slab_result = json.dumps(_slab_fn(json.loads(_slab_params)))
-finally:
-    signal.alarm(0)
-    signal.signal(signal.SIGALRM, _slab_old_handler)
+    _slab_old_handler = signal.signal(signal.SIGALRM, _slab_timeout_handler)
+    signal.alarm({timeout_secs})
+    try:
+        _slab_result = _slab_fn(_slab_params)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, _slab_old_handler)
+else:
+    _slab_result = _slab_fn(_slab_params)
 "#
         );
 
-        locals.set_item("_slab_fn", &func)?;
-        locals.set_item("_slab_params", &params_json)?;
+        namespace.set_item("_slab_fn", &func)?;
+        namespace.set_item("_slab_params", &params_json)?;
 
         // SIGALRM is Unix-only; on other platforms fall back to a plain call.
         let result_json: String = if cfg!(unix) {
             let timeout_c = CString::new(timeout_code.as_str())
                 .map_err(|e| anyhow::anyhow!("null byte in timeout code: {e}"))?;
-            py.run(&timeout_c, Some(&globals), Some(&locals))
+            py.run(&timeout_c, Some(&namespace), Some(&namespace))
                 .map_err(|e| anyhow::anyhow!("plugin execution error in {origin}: {e}"))?;
-            locals
+            namespace
                 .get_item("_slab_result")
                 .map_err(|e| anyhow::anyhow!("{e}"))?
                 .ok_or_else(|| anyhow::anyhow!("plugin function returned no result"))?

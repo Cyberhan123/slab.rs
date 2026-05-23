@@ -21,11 +21,16 @@ use worker::PythonWorkerHandle;
 pub struct PythonRuntimeConfig {
     /// Base URL for the slab HTTP API (e.g. `http://127.0.0.1:3000`).
     pub api_base_url: String,
+    /// Python source modules to register in the embedded stdlib VFS.
+    pub embedded_stdlib: EmbeddedStdlib,
 }
 
 impl Default for PythonRuntimeConfig {
     fn default() -> Self {
-        Self { api_base_url: DESKTOP_API_ORIGIN.to_owned() }
+        Self {
+            api_base_url: DESKTOP_API_ORIGIN.to_owned(),
+            embedded_stdlib: EmbeddedStdlib::default(),
+        }
     }
 }
 
