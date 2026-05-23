@@ -34,6 +34,7 @@ struct ImportPluginPackMultipartRequest {
         install_plugin,
         import_plugin_pack,
         plugin_rpc,
+        plugin_events,
         enable_plugin,
         disable_plugin,
         start_plugin,
@@ -57,6 +58,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/plugins/install", post(install_plugin))
         .route("/plugins/import-pack", post(import_plugin_pack))
         .route("/plugins/rpc", get(plugin_rpc))
+        .route("/plugins/events", get(plugin_events))
         .route("/plugins/{id}", get(get_plugin).delete(delete_plugin))
         .route("/plugins/{id}/enable", post(enable_plugin))
         .route("/plugins/{id}/disable", post(disable_plugin))
@@ -116,6 +118,39 @@ async fn plugin_rpc(
     State(service): State<PluginService>,
 ) -> impl IntoResponse {
     ws.on_upgrade(move |socket| plugin_rpc_socket(socket, service))
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/plugins/events",
+    tag = "plugins",
+    responses((status = 101, description = "WebSocket upgrade for plugin UI events"))
+)]
+async fn plugin_events(
+    ws: WebSocketUpgrade,
+    State(service): State<PluginService>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| plugin_events_socket(socket, service))
+}
+
+async fn plugin_events_socket(mut socket: WebSocket, service: PluginService) {
+    let mut events = service.subscribe_events();
+    loop {
+        match events.recv().await {
+            Ok(event) => {
+                let Ok(payload) = serde_json::to_string(&event) else {
+                    continue;
+                };
+                if socket.send(Message::Text(payload.into())).await.is_err() {
+                    break;
+                }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                tracing::warn!(skipped, "plugin event subscriber lagged");
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+        }
+    }
 }
 
 async fn plugin_rpc_socket(mut socket: WebSocket, service: PluginService) {

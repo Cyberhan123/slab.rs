@@ -8,9 +8,11 @@ HTTP gateway for the Slab inference stack, built with [axum](https://github.com/
 
 - Serves the `/v1` REST API (chat, models, audio, images, tasks, sessions, settings, setup, system, backend, agent, ffmpeg, video).
 - Serves `/v1/workspace/lsp/{language}` WebSocket sessions for workspace LSP JSON-RPC forwarding.
+- Serves `/v1/plugins/rpc` for plugin JSON-RPC calls and `/v1/plugins/events` for plugin UI event fan-out.
 - Publishes an OpenAPI schema at `/api-docs/openapi.json`.
 - Delegates all business logic to `crates/slab-app-core`; it adds only axum `FromRef` extractors (`state_extractors.rs`) and HTTP error mapping (`error.rs`).
 - Launches and monitors `bin/slab-runtime` through the shared `crates/slab-app-core::runtime_supervisor` using a `tokio::process` adapter.
+- Owns the supervised `bin/slab-js-runtime` sidecar through `crates/slab-app-core` for Deno/ESM/TS plugin calls.
 - Proxies inference requests to `bin/slab-runtime` via gRPC through `GrpcGateway`, while keeping the HTTP host alive if an individual backend runtime crashes and needs to restart.
 
 ## Type

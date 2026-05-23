@@ -8,6 +8,7 @@
 //!   [`common::Timestamp`].
 //! - [`error`] crate-level error type.
 //! - [`plugin`] shared plugin manifest and contribution contracts.
+//! - [`plugin_runtime`] shared JS plugin runtime JSON-RPC contracts.
 //! - [`runtime`] shared runtime model and load specifications.
 //! - [`sqlite`] SQLite URL formatting helpers shared by desktop and server crates.
 
@@ -20,6 +21,7 @@ pub mod desktop_api;
 pub mod error;
 pub mod load_config;
 pub mod plugin;
+pub mod plugin_runtime;
 pub mod runtime;
 pub mod sqlite;
 
@@ -51,6 +53,11 @@ pub use plugin::{
     PluginManifest, PluginNetworkManifest, PluginNetworkMode, PluginPermissionsManifest,
     PluginRouteContribution, PluginRuntimeManifest, PluginSettingsContribution,
     PluginSidebarContribution, PluginUiManifest, PluginWasmManifest,
+};
+pub use plugin_runtime::{
+    PluginApiRequest, PluginApiResponse, PluginEventPayload, PluginRuntimeApiHostRequest,
+    PluginRuntimeCallRequest, PluginRuntimeCallResponse, PluginRuntimeFileAccess,
+    PluginRuntimeFileGrant, PluginRuntimeUiEmitRequest,
 };
 pub use runtime::{
     Capability, DiffusionLoadOptions, DriverDescriptor, DriverHints, DriverLoadStyle, ModelFamily,

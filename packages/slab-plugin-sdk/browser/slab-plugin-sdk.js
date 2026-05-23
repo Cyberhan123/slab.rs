@@ -40,6 +40,8 @@
   // src/index.ts
   var exports_src = {};
   __export(exports_src, {
+    unmountPluginUI: () => unmountPluginUI,
+    mountPluginUI: () => mountPluginUI,
     getSlabPluginSdk: () => getSlabPluginSdk,
     createSlabPluginSdk: () => createSlabPluginSdk,
     createSlabPluginApiFetch: () => createSlabPluginApiFetch,
@@ -787,5 +789,50 @@
   }
   function getSlabPluginSdk(target) {
     return createSlabPluginSdk(target);
+  }
+  function mountPluginUI(pluginId, entry, container) {
+    const targetWindow = resolveWindow(container.ownerDocument.defaultView ?? window);
+    const tauriCore = targetWindow["__TAURI__"]?.core;
+    const hasTrustedTauriContext = Boolean(targetWindow["__TAURI_INTERNALS__"]);
+    if (hasTrustedTauriContext && tauriCore && typeof tauriCore.invoke === "function") {
+      const bounds = container.getBoundingClientRect();
+      const handle = { kind: "tauri", pluginId, _targetWindow: targetWindow };
+      tauriCore.invoke("plugin_mount_view", {
+        request: {
+          pluginId,
+          bounds: {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height
+          }
+        }
+      }).then((response) => {
+        if (handle.kind === "tauri") {
+          handle.webviewLabel = response.webviewLabel;
+        }
+      });
+      return handle;
+    }
+    const iframe = container.ownerDocument.createElement("iframe");
+    iframe.src = entry;
+    iframe.style.width = "100%";
+    iframe.style.height = "100%";
+    iframe.style.border = "0";
+    iframe.setAttribute("sandbox", "allow-scripts allow-forms");
+    container.appendChild(iframe);
+    return { kind: "browser", pluginId, iframe };
+  }
+  function unmountPluginUI(handle) {
+    if (handle.kind === "tauri") {
+      const targetWindow = handle._targetWindow;
+      const tauriCore = targetWindow["__TAURI__"]?.core;
+      const hasTrustedTauriContext = Boolean(targetWindow["__TAURI_INTERNALS__"]);
+      if (hasTrustedTauriContext && tauriCore && typeof tauriCore.invoke === "function") {
+        tauriCore.invoke("plugin_unmount_view", { request: { pluginId: handle.pluginId } });
+      }
+      return;
+    }
+    handle.iframe.remove();
   }
 })();

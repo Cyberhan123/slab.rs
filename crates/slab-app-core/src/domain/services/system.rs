@@ -1,4 +1,5 @@
 use crate::domain::models::{GpuDeviceSnapshot, GpuStatusSnapshot};
+#[cfg(feature = "gpu-telemetry")]
 use all_smi::AllSmi;
 use chrono::Utc;
 use tracing::{debug, warn};
@@ -43,6 +44,7 @@ impl SystemService {
     }
 }
 
+#[cfg(feature = "gpu-telemetry")]
 fn memory_usage_percent(used: u64, total: u64) -> f64 {
     if total == 0 {
         return 0.0;
@@ -50,6 +52,7 @@ fn memory_usage_percent(used: u64, total: u64) -> f64 {
     ((used as f64) / (total as f64) * 100.0).clamp(0.0, 100.0)
 }
 
+#[cfg(feature = "gpu-telemetry")]
 fn collect_gpu_devices() -> Result<Vec<GpuDeviceSnapshot>, String> {
     let all_smi = AllSmi::new().map_err(|err| err.to_string())?;
     let devices = all_smi
@@ -70,4 +73,9 @@ fn collect_gpu_devices() -> Result<Vec<GpuDeviceSnapshot>, String> {
         .collect();
 
     Ok(devices)
+}
+
+#[cfg(not(feature = "gpu-telemetry"))]
+fn collect_gpu_devices() -> Result<Vec<GpuDeviceSnapshot>, String> {
+    Err("GPU telemetry backend is disabled in this build".to_owned())
 }

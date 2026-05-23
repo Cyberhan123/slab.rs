@@ -46,7 +46,7 @@ When fixing bugs, it's essential to start with first principles to find the root
 ## Hard Constraints
 
 - Keep inference behind `bin/slab-app -> bin/slab-server -> crates/slab-app-core runtime supervisor -> GrpcGateway -> bin/slab-runtime -> crates/slab-runtime-core`; the desktop host starts `slab-server`, product API traffic stays on HTTP, and Tauri commands stay host-only.
-- Keep plugin dispatch behind `bin/slab-app -> bin/slab-server /v1/plugins/rpc (WebSocket JSON-RPC 2.0) -> crates/slab-app-core -> crates/slab-plugin -> backend`.
+- Keep plugin dispatch behind `bin/slab-app -> bin/slab-server /v1/plugins/rpc (WebSocket JSON-RPC 2.0) -> crates/slab-app-core`; JS calls go through supervised `bin/slab-js-runtime`, while WASM/frontend fallback stays behind `crates/slab-plugin`.
 - Extend the existing `/v1/*` API surface instead of adding a parallel API tree.
 - Keep long-running AI work in task-oriented flows when the feature already follows that model.
 - Prefer `crates/slab-types` and `crates/slab-proto` for contracts that cross crate boundaries.
@@ -75,7 +75,7 @@ Keep this file focused on always-on constraints. For module-specific role, stack
 - Shared settings/config library: `crates/slab-config/README.md`
 - Shared business logic: `crates/slab-app-core/README.md`
 - Plugin runtime dispatch: `crates/slab-plugin/README.md`
-- JavaScript plugin runtime: `crates/slab-js-runtime/README.md`
+- JavaScript plugin runtime: `bin/slab-js-runtime/README.md`
 - Agent control plane: `crates/slab-agent/README.md`
 - Built-in agent tools: `crates/slab-agent-tools/README.md`
 - Agent shell execution: `crates/slab-shell-command/README.md`

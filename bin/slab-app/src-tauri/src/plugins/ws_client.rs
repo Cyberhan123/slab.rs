@@ -4,17 +4,56 @@ use base64::Engine;
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
-use super::types::{PluginCallRequest, PluginCallResponse};
+use super::types::{PluginCallRequest, PluginCallResponse, PluginEventPayload};
 use crate::setup::ApiEndpointConfig;
 
 pub struct PluginRpcWsClient {
     endpoint: String,
     connection: Mutex<Option<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>>>,
     request_id: AtomicU64,
+}
+
+pub fn spawn_plugin_event_listener<R: Runtime>(
+    app_handle: AppHandle<R>,
+    api_endpoint: ApiEndpointConfig,
+) {
+    let endpoint = format!("{}/v1/plugins/events", to_ws_origin(&api_endpoint.api_origin));
+    tauri::async_runtime::spawn(async move {
+        loop {
+            match connect_async(&endpoint).await {
+                Ok((mut socket, _)) => {
+                    while let Some(frame) = socket.next().await {
+                        let Ok(frame) = frame else {
+                            break;
+                        };
+                        let Message::Text(text) = frame else {
+                            continue;
+                        };
+                        match serde_json::from_str::<PluginEventPayload>(&text) {
+                            Ok(payload) => {
+                                let event_name = format!("plugin://{}/event", payload.plugin_id);
+                                if let Err(error) = app_handle.emit(&event_name, payload) {
+                                    log::warn!("failed to emit plugin event to UI: {error}");
+                                }
+                            }
+                            Err(error) => {
+                                log::warn!("failed to parse plugin event payload: {error}");
+                            }
+                        }
+                    }
+                }
+                Err(error) => {
+                    log::debug!("plugin event websocket unavailable: {error}");
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    });
 }
 
 impl PluginRpcWsClient {
