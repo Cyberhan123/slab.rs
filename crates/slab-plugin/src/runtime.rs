@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use slab_js_runtime::JsRuntime;
+use slab_js_runtime::{JsRuntime, JsRuntimeConfig};
 
 use crate::backend::frontend::FrontendPluginBackend;
 use crate::backend::js::JsPluginBackend;
@@ -52,6 +52,17 @@ impl PluginRuntime {
     pub fn with_default_backends(js_runtime: Arc<JsRuntime>) -> Self {
         Self::new(vec![
             Box::new(WasmPluginBackend::new()),
+            Box::new(JsPluginBackend::new(js_runtime)),
+            Box::new(FrontendPluginBackend),
+        ])
+    }
+
+    pub fn with_api_base_url(api_base_url: String) -> Self {
+        let js_runtime = Arc::new(JsRuntime::with_config(JsRuntimeConfig {
+            api_base_url: api_base_url.clone(),
+        }));
+        Self::new(vec![
+            Box::new(WasmPluginBackend::new().with_api_base_url(api_base_url)),
             Box::new(JsPluginBackend::new(js_runtime)),
             Box::new(FrontendPluginBackend),
         ])

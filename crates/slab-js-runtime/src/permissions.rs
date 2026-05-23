@@ -4,6 +4,7 @@ use slab_types::{PluginNetworkMode, PluginPermissionsManifest};
 pub struct JsPluginPermissions {
     pub network_mode: PluginNetworkMode,
     pub allow_hosts: Vec<String>,
+    pub slab_api: Vec<String>,
     pub file_read: Vec<String>,
     pub file_write: Vec<String>,
 }
@@ -13,6 +14,7 @@ impl Default for JsPluginPermissions {
         Self {
             network_mode: PluginNetworkMode::Blocked,
             allow_hosts: Vec::new(),
+            slab_api: Vec::new(),
             file_read: Vec::new(),
             file_write: Vec::new(),
         }
@@ -24,6 +26,7 @@ impl From<&PluginPermissionsManifest> for JsPluginPermissions {
         Self {
             network_mode: value.network.mode.clone(),
             allow_hosts: value.network.allow_hosts.clone(),
+            slab_api: value.slab_api.clone(),
             file_read: value.files.read.clone(),
             file_write: value.files.write.clone(),
         }
