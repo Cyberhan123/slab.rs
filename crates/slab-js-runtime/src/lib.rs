@@ -58,11 +58,8 @@ impl JsRuntime {
         let worker = match self.workers.entry(req.plugin_id.clone()) {
             dashmap::mapref::entry::Entry::Occupied(entry) => entry.get().clone(),
             dashmap::mapref::entry::Entry::Vacant(entry) => {
-                let handle = Arc::new(JsWorkerHandle::new(
-                    req.module_path.clone(),
-                    req.permissions.clone(),
-                    self.config.clone(),
-                )?);
+                let handle =
+                    Arc::new(JsWorkerHandle::new(req.module_path.clone(), self.config.clone())?);
                 entry.insert(handle.clone());
                 handle
             }
