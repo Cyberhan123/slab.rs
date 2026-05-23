@@ -10,6 +10,7 @@ Required files:
 - `ui/index.html` or the configured `runtime.ui.entry`
 - any schema/assets referenced by `integrity.filesSha256`
 - `wasm/plugin.wasm` or the configured `runtime.wasm.entry` when the plugin exposes WASM functions
+- `dist/plugin.js` or the configured `runtime.js.entry` when the plugin exposes JS backend functions
 
 ## Frontend build model
 
@@ -30,6 +31,53 @@ directories that contain `plugin.json`, refresh `plugin.json`
 
 Helper scripts now live under the repo-root `scripts/plugins/` directory.
 Directories under `plugins/` without `plugin.json` are not treated as plugins.
+
+## JS Backend Runtime
+
+Plugins can expose backend functions by providing a `runtime.js.entry` in
+`plugin.json`. The JS backend runs in an embedded QuickJS engine (via
+`rquickjs`) with the following host bridge available at `globalThis.Slab`:
+
+```javascript
+// Available in all JS plugin backends:
+Slab.pluginId      // string - the plugin's id
+Slab.api.request({ method, path, headers, body })  // synchronous HTTP to slab API
+Slab.ui.emit(topic, data)                          // emit event to host UI
+```
+
+### Plugin module format
+
+Backend JS files use CommonJS module format:
+
+```javascript
+function myFunction(params) {
+    // Use Slab.api.request() for host API calls
+    var result = Slab.api.request({
+        method: "POST",
+        path: "/v1/chat/completions",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: [{ role: "user", content: params.text }] })
+    });
+    return JSON.parse(result.body);
+}
+
+module.exports = { myFunction: myFunction };
+```
+
+### Deno compatibility
+
+The `Slab.*` API surface is designed for compatibility with Deno. Plugins
+can be developed and tested locally with `deno run` by providing a Deno-side
+polyfill for `globalThis.Slab`, then run in the embedded QuickJS engine at
+production time without modification.
+
+### Supported backends
+
+| Backend | Engine | Use case |
+|---------|--------|----------|
+| WASM | Extism (Wasmtime) | High-performance, sandboxed, polyglot (Rust, Go, C, etc.) |
+| JS | QuickJS (rquickjs) | Lightweight scripting, Deno-compatible API, rapid iteration |
+| Frontend-only | Tauri WebView | UI-only plugins with no backend logic |
 
 ## Manifest v1
 
