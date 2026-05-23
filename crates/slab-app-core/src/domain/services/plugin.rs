@@ -14,6 +14,7 @@ use crate::context::ModelState;
 use crate::domain::models::{InstallPluginCommand, PluginView};
 use crate::error::AppCoreError;
 use crate::infra::db::{PluginStateRecord, PluginStateStore};
+use crate::infra::endpoint::ensure_http_base_url;
 use slab_plugin::{PluginCallRequest, PluginRegistry, PluginRuntime};
 use slab_types::plugin::{
     PluginAgentCapabilityContribution, PluginCommandContribution, PluginLanguageServerContribution,
@@ -40,11 +41,11 @@ pub struct PluginService {
 
 impl PluginService {
     pub fn new(state: ModelState) -> Self {
-        Self {
-            state,
-            registry: Arc::new(Mutex::new(None)),
-            runtime: Arc::new(PluginRuntime::default()),
-        }
+        let runtime = ensure_http_base_url(state.config().bind_address.as_str())
+            .map(PluginRuntime::with_api_base_url)
+            .unwrap_or_else(|_| PluginRuntime::default());
+
+        Self { state, registry: Arc::new(Mutex::new(None)), runtime: Arc::new(runtime) }
     }
 
     pub async fn list_plugins(&self) -> Result<Vec<PluginView>, AppCoreError> {
@@ -366,9 +367,7 @@ impl PluginService {
         }
         if let Some(state) = self.state.store().get_plugin_state(plugin_id).await? {
             if !state.enabled {
-                return Err(AppCoreError::BadRequest(format!(
-                    "plugin '{plugin_id}' is disabled"
-                )));
+                return Err(AppCoreError::BadRequest(format!("plugin '{plugin_id}' is disabled")));
             }
         }
         Ok(())

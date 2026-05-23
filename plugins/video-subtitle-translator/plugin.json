@@ -10,10 +10,14 @@
   "runtime": {
     "ui": {
       "entry": "ui/index.html"
+    },
+    "js": {
+      "entry": "dist/plugin.js"
     }
   },
   "integrity": {
     "filesSha256": {
+      "dist/plugin.js": "da696706d39b42fc93f6f8d0c99533b24981eec018304e5b19204d99d9fb3c43",
       "package.json": "abce014d98d1f5336875be3a2e2c7eee824e92a70e4b9b8ae4e69cdfd8a9ec82",
       "schemas/settings.schema.json": "3f3bcdf747ec558b8254d5cc25129b0e07fe6850ad674ede66ab4fd6a475bdcd",
       "schemas/translate-video-input.schema.json": "357b67fabe4f1fc6c5e2807fbd9bef4a649fbf3eb9ab2107c98fe6c3930abbcb",
