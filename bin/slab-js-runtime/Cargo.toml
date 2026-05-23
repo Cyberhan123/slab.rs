@@ -8,20 +8,324 @@ keywords.workspace = true
 categories.workspace = true
 license.workspace = true
 
+[features]
+default = ["worker", "safe_extensions"]
+
+#
+# Feature groups
+#
+
+#
+# Extensions that are safe to use in a sandboxed environment
+# These extensions do not provide access to the network or filesystem
+safe_extensions = ["web_stub", "console", "url", "crypto"]
+
+#
+# Enables all available extensions, except for node support
+# These extensions are not safe to use in a sandboxed environment without additional restrictions
+# (See [WebPermissions])
+all_extensions = ["network_extensions", "io_extensions"]
+
+#
+# Extensions that provide access to the network. Also enables URL imports from JS
+# These extensions are not safe to use in a sandboxed environment without additional restrictions
+# (See [WebPermissions])
+network_extensions = [
+    "web",
+    "webstorage",
+    "websocket",
+    "http",
+    "url",
+    "crypto",
+    "console",
+    "broadcast_channel",
+    "url_import",
+]
+
+#
+# Extensions that provide access to the filesystem. Also enables file imports from JS
+# These extensions are not safe to use in a sandboxed environment without additional restrictions
+# (See [FsPermissions])
+io_extensions = [
+    "web",
+    "webstorage",
+    "fs",
+    "io",
+    "cache",
+    "console",
+    "ffi",
+    "webgpu",
+    "kv",
+    "cron",
+    "fs_import",
+]
+
+#
+# Additional features that are not part of the core runtime
+# These features are safe to use in a sandboxed environment without additional restrictions
+extra_features = ["worker", "snapshot_builder"]
+
+#
+# Highly experimental NodeJS compatibility layer. Enables all other extensions
+# Enables the use of the node and npm modules
+# CJS support not yet implemented
+# These extensions are not safe to use in a sandboxed environment without additional restrictions
+# (See [NodePermissions])
+node_experimental = [
+    "deno_node",
+    "deno_resolver",
+    "node_resolver",
+    "deno_npm",
+    "deno_semver",
+    "deno_napi",
+    "deno_runtime",
+    "deno_process",
+    "deno_package_json",
+    "deno_bundle_runtime",
+    "checksum",
+    "sys_traits",
+    "all_extensions",
+]
+
+# By default, an extension stub is included in the runtime if the `web` feature is disabled
+# It provides a minimal set of APIs for parts of the runtime, such as timers and the DOM exception class
+# It maintains sandboxing by not providing access to the network or filesystem
+#
+# It does however require the webidl extension to be enabled
+# By disabling this feature, you can opt out of the web stub extension, and the webidl extension
+#
+# The primary use-case for this is for creating a runtime using a deno_core version incompatible with the deno extensions
+#
+# Note that by turning off both web_stub and web, btoa/atob and timer APIs will not be available
+web_stub = ["webidl", "base64-simd"]
+
+#
+# Each feature in this section corresponds to a different deno extension
+# I have annotated each with the section of the w3c spec that it implements
+#
+
+# [https://html.spec.whatwg.org/multipage/web-messaging.html]
+broadcast_channel = ["deno_broadcast_channel", "web", "webidl", "uuid"]
+
+# [https://w3c.github.io/ServiceWorker/#cache-interface]
+cache = ["deno_cache", "webidl", "web"]
+
+# [https://console.spec.whatwg.org/]
+console = ["deno_console", "deno_terminal"]
+
+# Implements scheduled tasks (crons) API 
+cron = ["deno_cron", "console"]
+
+# [https://www.w3.org/TR/WebCryptoAPI/]
+crypto = ["deno_crypto", "webidl"]
+
+# Dynamic library ffi
+ffi = ["deno_ffi", "web"]
+
+# Provides ops for interacting with the file system.
+fs = ["deno_fs", "web", "io"]
+
+# [https://fetch.spec.whatwg.org/]
+http = ["deno_http", "web", "websocket"]
+
+# [https://github.com/denoland/denokv/blob/main/proto/kv-connect.md]
+kv = ["deno_kv", "web", "console"]
+
+# Provides IO primitives for other Deno extensions (stdio streams, etc)
+io = [
+    "deno_io",
+    "deno_process",
+    "web",
+    "rustyline",
+    "winapi",
+    "nix",
+    "libc",
+    "once_cell",
+]
+
+# [https://url.spec.whatwg.org/]
+# [https://wicg.github.io/urlpattern/]
+url = ["deno_url", "webidl"]
+
+# Timers, events, text encoder/decoder, telemetry
+# [https://w3c.github.io/FileAPI]
+# [https://fetch.spec.whatwg.org/]
+web = [
+    "deno_web",
+    "deno_tls",
+    "deno_fetch",
+    "deno_net",
+    "dep:http",
+    "deno_permissions",
+    "deno_telemetry",
+    "deno_fs",
+    "webidl",
+    "console",
+    "url",
+    "crypto",
+    "url_import",
+    "fs_import",
+    "hyper-util",
+    "rustls",
+    "sys_traits",
+]
+
+# [https://gpuweb.github.io/gpuweb/]
+webgpu = ["deno_webgpu", "web"]
+
+# [https://webidl.spec.whatwg.org/]
+webidl = ["deno_webidl"]
+
+# [https://html.spec.whatwg.org/multipage/webstorage.html]
+webstorage = ["deno_webstorage", "webidl"]
+
+# [https://websockets.spec.whatwg.org/]
+websocket = ["deno_websocket", "web"]
+
+# Features for the module loader
+# - fs_import allows arbitrary file imports
+# - url_import allows importing from the web
+#
+# Both fs_import and url_import will break sandboxing
+fs_import = []
+url_import = ["reqwest"]
+
+# Enables the use of the SnapshotBuilder runtime
+# It is used to create a snapshot of a runtime for faster startup times
+snapshot_builder = []
+
+# Enables the threaded worker API
+worker = []
+
+# Grants access to op_whitelist::get_whitelist
+# Used in CI to prevent vulnerabilities!
+op_whitelist = []
+
+#
+# End of feature definitions
+#
+
+
 [dependencies]
 anyhow = { workspace = true }
-async-trait = { workspace = true }
 base64 = { workspace = true }
-deno_ast = { workspace = true }
-deno_error = { workspace = true }
-deno_core = { workspace = true }
 futures = { workspace = true }
-reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 slab-types = { workspace = true }
 thiserror = { workspace = true }
+
+maybe_path = "0.1.3"
+
+
+# Used for NodeJS compatibility and other features
+async-trait = { workspace = true }
+
+# Used to generate identifiers for callbacks
+paste = "1.0.15"
+
+# The deno runtime itself, and the webidl extension for the web APIs
+deno_core = { workspace = true }
+deno_error = { workspace = true }
+deno_features = { workspace = true }
+
+# For transpiling typescript
+deno_ast = { workspace = true, features = ["transpiling", "cjs"] }
+deno_media_type = { workspace = true, features = ["module_specifier"] }
+
+# Runtime for async tasks
 tokio = { workspace = true }
+tokio-util = { workspace = true }
+
+# For web
+hyper-util = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
+
+# For URL imports
+# Upgraded to support axum 0.8+
+reqwest = { workspace = true, optional = true, default-features = false, features = [
+    "blocking",
+    "rustls-tls",
+] }
+http = { workspace = true, optional = true }
+deno_permissions = { workspace = true, optional = true }
+
+
+#
+# Dependencies for the various extension features
+#
+
+deno_broadcast_channel = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true, features = ["v4"] }
+
+deno_bundle_runtime = { workspace = true, optional = true }
+deno_cache = { workspace = true, optional = true }
+deno_console = { workspace = true, optional = true }
+deno_cron = { workspace = true, optional = true }
+deno_crypto = { workspace = true, optional = true }
+deno_fetch = { workspace = true, optional = true }
+deno_ffi = { workspace = true, optional = true }
+deno_fs = { workspace = true, optional = true, features = ["sync_fs"] }
+deno_http = { workspace = true, optional = true }
+deno_kv = { workspace = true, optional = true }
+deno_net = { workspace = true, optional = true }
+deno_node = { workspace = true, optional = true }
+deno_tls = { workspace = true, optional = true }
+deno_url = { workspace = true, optional = true }
+
+deno_web = { workspace = true, optional = true }
+deno_webidl = { workspace = true, optional = true }
+deno_webstorage = { workspace = true, optional = true }
+deno_websocket = { workspace = true, optional = true }
+deno_webgpu = { workspace = true, optional = true }
+
+deno_io = { workspace = true, optional = true }
+deno_telemetry = { workspace = true, optional = true }
+
+# Dependencies for the IO feature
+rustyline = { workspace = true, optional = true }
+winapi = { workspace = true, optional = true, features = [
+    "commapi",
+    "knownfolders",
+    "mswsock",
+    "objbase",
+    "psapi",
+    "shlobj",
+    "tlhelp32",
+    "winbase",
+    "winerror",
+    "winuser",
+    "winsock2",
+    "processenv",
+    "wincon",
+    "wincontypes",
+    "consoleapi",
+] }
+nix = { workspace = true, optional = true, features = ["term"] }
+libc = { workspace = true, optional = true }
+once_cell = { workspace = true, optional = true }
+
+# Dependencies for the web stub feature
+base64-simd = { workspace = true, optional = true }
+
+# Dependencies for the node feature
+deno_resolver = { workspace = true, optional = true }
+node_resolver = { workspace = true, optional = true, features = ["sync"] }
+deno_runtime = { workspace = true, optional = true, features = [
+    "exclude_runtime_main_js",
+] }
+deno_terminal = { workspace = true, optional = true }
+deno_semver = { workspace = true, optional = true }
+deno_napi = { workspace = true, optional = true }
+deno_npm = { workspace = true, optional = true }
+deno_process = { workspace = true, optional = true }
+deno_package_json = { workspace = true, optional = true }
+checksum = { workspace = true, optional = true }
+sys_traits = { workspace = true, optional = true, features = [
+    "libc",
+    "real",
+    "winapi",
+] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
