@@ -19,8 +19,8 @@ pub struct GGmlLib {
 impl GGmlLib {
     pub unsafe fn new<P1, P2>(base_path: P1, loader_path: P2) -> Result<Self, libloading::Error>
     where
-        P1: AsRef<std::ffi::OsStr>,
-        P2: AsRef<std::ffi::OsStr>,
+        P1: libloading::AsFilename,
+        P2: libloading::AsFilename,
     {
         Ok(Self {
             base: unsafe { GGmlBaseLib::new(base_path)? },

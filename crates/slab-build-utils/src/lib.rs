@@ -103,6 +103,25 @@ pub fn generate_or_copy_bindings(
         }
     }
 
+    patch_libloading_filename_bounds(&output_path)?;
+
+    Ok(())
+}
+
+fn patch_libloading_filename_bounds(output_path: &Path) -> Result<()> {
+    let bindings = fs::read_to_string(output_path)
+        .with_context(|| format!("failed to read generated bindings {}", output_path.display()))?;
+    let patched = bindings.replace(
+        "P: AsRef<::std::ffi::OsStr>,",
+        "P: ::libloading::AsFilename,",
+    );
+
+    if patched != bindings {
+        fs::write(output_path, patched).with_context(|| {
+            format!("failed to patch generated bindings {}", output_path.display())
+        })?;
+    }
+
     Ok(())
 }
 

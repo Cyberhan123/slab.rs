@@ -52,7 +52,10 @@ winapi = { workspace = true, features = [
     "winerror",
     "winnt",
 ] }
-windows = { workspace = true }
+windows = { workspace = true, features = [
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Graphics_Dxgi",
+] }
 windows-sys = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_System_Power",

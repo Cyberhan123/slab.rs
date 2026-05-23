@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use deno_core::{extension, op2, serde_json, v8, Extension, OpState};
 
@@ -16,7 +16,11 @@ mod callbacks;
 /// * `state` - The runtime's state, into which the function will be put
 /// * `callback` - The function to register
 #[op2]
-fn op_register_entrypoint(state: &mut OpState, #[global] callback: v8::Global<v8::Function>) {
+fn op_register_entrypoint(
+    _scope: &mut v8::PinScope,
+    state: &mut OpState,
+    #[scoped] callback: v8::Global<v8::Function>,
+) {
     state.put(callback);
 }
 
@@ -38,21 +42,27 @@ fn call_registered_function(
     Err(Error::ValueNotCallable(name.to_string()))
 }
 
-#[op2(async)]
+#[op2]
 #[serde]
-fn call_registered_function_async(
+async fn call_registered_function_async(
     #[string] name: String,
     #[serde] args: Vec<serde_json::Value>,
-    state: &mut OpState,
-) -> impl std::future::Future<Output = Result<serde_json::Value, Error>> {
-    if state.has::<AsyncFnCache>() {
-        let table = state.borrow_mut::<AsyncFnCache>();
-        if let Some(callback) = table.get(&name) {
-            return callback(args);
+    state: Rc<RefCell<OpState>>,
+) -> Result<serde_json::Value, Error> {
+    let callback = {
+        let state = state.borrow();
+        if !state.has::<AsyncFnCache>() {
+            None
+        } else {
+            let table = state.borrow::<AsyncFnCache>();
+            table.get(&name).map(|callback| callback(args))
         }
-    }
+    };
 
-    Box::pin(std::future::ready(Err(Error::ValueNotCallable(name))))
+    match callback {
+        Some(callback) => callback.await,
+        None => Err(Error::ValueNotCallable(name)),
+    }
 }
 
 #[op2(fast)]

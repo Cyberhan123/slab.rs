@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::{future::Future, pin::Pin, rc::Rc};
+use std::{cell::RefCell, future::Future, pin::Pin, rc::Rc};
 
 use crate::Error;
 use deno_core::{op2, serde_json, v8, OpState};
@@ -166,7 +166,7 @@ rs_fn! {
     }
 }
 
-#[op2(async)]
+#[op2]
 #[serde]
 pub async fn run_rscallback<T: RsCallback>(
     #[serde] args: T::Arguments,
@@ -176,16 +176,19 @@ pub async fn run_rscallback<T: RsCallback>(
 
 type CallbackTable = std::collections::HashMap<String, Rc<Box<dyn RsStoredCallback>>>;
 
-#[op2(async)]
+#[op2]
 #[serde]
-pub fn rscallback(
-    #[string] name: &str,
+pub async fn rscallback(
+    #[string] name: String,
     #[serde] args: deno_core::serde_json::Value,
-    state: &mut OpState,
-) -> impl std::future::Future<Output = Result<serde_json::Value, Error>> {
-    let callback = state
-        .try_borrow::<CallbackTable>()
-        .and_then(|t| t.get(name).cloned())
-        .ok_or_else(|| Error::ValueNotCallable(name.to_string()));
-    async move { callback?.call(args).await }
+    state: Rc<RefCell<OpState>>,
+) -> Result<serde_json::Value, Error> {
+    let callback = {
+        let state = state.borrow();
+        state
+            .try_borrow::<CallbackTable>()
+            .and_then(|t| t.get(&name).cloned())
+            .ok_or_else(|| Error::ValueNotCallable(name.clone()))
+    }?;
+    callback.call(args).await
 }
