@@ -13,3 +13,5 @@ thiserror = { workspace = true }
 dashmap = { workspace = true }
 jsonrpc-core = { workspace = true }
 slab-types = { workspace = true }
+rquickjs = { workspace = true }
+reqwest = { workspace = true }
