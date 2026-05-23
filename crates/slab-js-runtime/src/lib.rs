@@ -1,7 +1,9 @@
+mod host_ops;
 mod permissions;
 mod worker;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Result;
 use dashmap::DashMap;
@@ -10,8 +12,19 @@ use serde_json::Value;
 pub use permissions::JsPluginPermissions;
 use worker::JsWorkerHandle;
 
+/// Configuration for the JS runtime's host environment.
+#[derive(Clone, Default)]
+pub struct JsRuntimeConfig {
+    /// Base URL for the slab HTTP API (e.g. "http://127.0.0.1:3000").
+    pub api_base_url: Option<String>,
+    /// Allowed slab API permission prefixes for the current plugin call.
+    pub slab_api_permissions: Vec<String>,
+}
+
+/// The top-level JS plugin runtime managing per-plugin workers.
 pub struct JsRuntime {
-    workers: DashMap<String, JsWorkerHandle>,
+    workers: DashMap<String, Arc<JsWorkerHandle>>,
+    config: JsRuntimeConfig,
 }
 
 #[derive(Clone)]
@@ -29,21 +42,27 @@ pub struct JsCallResponse {
 
 impl JsRuntime {
     pub fn new() -> Self {
-        Self { workers: DashMap::new() }
+        Self { workers: DashMap::new(), config: JsRuntimeConfig::default() }
+    }
+
+    pub fn with_config(config: JsRuntimeConfig) -> Self {
+        Self { workers: DashMap::new(), config }
     }
 
     pub async fn call(&self, req: JsCallRequest) -> Result<JsCallResponse> {
-        match self.workers.entry(req.plugin_id.clone()) {
-            dashmap::mapref::entry::Entry::Occupied(entry) => {
-                let worker = entry.get().clone();
-                worker.call(req).await
-            }
+        let worker = match self.workers.entry(req.plugin_id.clone()) {
+            dashmap::mapref::entry::Entry::Occupied(entry) => entry.get().clone(),
             dashmap::mapref::entry::Entry::Vacant(entry) => {
-                let worker = JsWorkerHandle::new(req.module_path.clone(), req.permissions.clone());
-                entry.insert(worker.clone());
-                worker.call(req).await
+                let handle = Arc::new(JsWorkerHandle::new(
+                    req.module_path.clone(),
+                    req.permissions.clone(),
+                    self.config.clone(),
+                )?);
+                entry.insert(handle.clone());
+                handle
             }
-        }
+        };
+        worker.call(req).await
     }
 
     pub fn unload(&self, plugin_id: &str) {
