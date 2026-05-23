@@ -37,6 +37,7 @@ members = [
     "crates/slab-mcp-client",
     "crates/slab-mcp",
     "crates/slab-plugin",
+    "bin/slab-python-runtime",
 ]
 
 exclude = [
@@ -86,6 +87,7 @@ slab-mcp = { path = "./crates/slab-mcp", package = "slab-mcp", version = "0.1.0"
 slab-mcp-server = { path = "./bin/slab-mcp-server", package = "slab-mcp-server", version = "0.1.0" }
 slab-plugin = { path = "./crates/slab-plugin", package = "slab-plugin", version = "0.1.0" }
 slab-js-runtime = { path = "./bin/slab-js-runtime", package = "slab-js-runtime", version = "0.1.0" }
+slab-python-runtime = { path = "./bin/slab-python-runtime", package = "slab-python-runtime", version = "0.1.0" }
 
 notify = "8"
 ignore = "0.4"
@@ -100,6 +102,7 @@ bindgen = "0.72.1"
 flate2 = "1.1.9"
 libloading = "0.8.9"
 reqwest = { version = "0.13.3", features = ["stream", "native-tls", "json", "blocking"] }
+pyo3 = { version = "0.23", features = ["auto-initialize", "abi3-py39"] }
 websearch = "0.1.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
