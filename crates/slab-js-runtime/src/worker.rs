@@ -89,6 +89,8 @@ fn execute_js_call(
 
         // Serialize params for injection into JS
         let params_json = serde_json::to_string(params)?;
+        // Safely serialize method name as a JSON string for use in bracket notation
+        let method_json = serde_json::to_string(method)?;
 
         // Build a self-contained script that loads the module and calls the function.
         let call_script = format!(
@@ -97,16 +99,17 @@ fn execute_js_call(
     var module = {{ exports: exports }};
     {source}
     var mod = module.exports;
-    var target = mod["{method}"] || (mod.default && mod.default["{method}"]);
+    var fnName = {method_json};
+    var target = mod[fnName] || (mod.default && mod.default[fnName]);
     if (typeof target !== "function") {{
-        throw new Error("Plugin does not export function: {method}");
+        throw new Error("Plugin does not export function: " + fnName);
     }}
     var params = {params_json};
     var result = target(params);
     return JSON.stringify(result !== undefined ? result : null);
 }})()"#,
             source = source,
-            method = method.replace('\\', "\\\\").replace('"', "\\\""),
+            method_json = method_json,
             params_json = params_json,
         );
 
@@ -232,7 +235,8 @@ fn inject_slab_bridge(
         delete Slab.ui.__impl;
     })()"#;
 
-    let _: String = ctx.eval(bridge_js).unwrap_or_default();
+    ctx.eval::<rquickjs::Value, _>(bridge_js)
+        .map_err(|e| anyhow::anyhow!("failed to evaluate bridge JS: {e}"))?;
 
     Ok(())
 }
