@@ -82,7 +82,7 @@ fn execute_python_call(
     let timeout_secs = PYTHON_EXECUTION_TIMEOUT.as_secs();
     let origin = module_path.display().to_string();
 
-    Python::with_gil(|py| {
+    Python::attach(|py| {
         let namespace = PyDict::new(py);
 
         // Inject the slab host bridge so plugins can `import slab`.

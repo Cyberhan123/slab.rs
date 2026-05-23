@@ -166,7 +166,6 @@ web = [
     "url_import",
     "fs_import",
     "hyper-util",
-    "rustls",
     "sys_traits",
 ]
 
@@ -188,7 +187,7 @@ websocket = ["deno_websocket", "web"]
 #
 # Both fs_import and url_import will break sandboxing
 fs_import = []
-url_import = ["reqwest"]
+url_import = []
 
 # Enables the use of the SnapshotBuilder runtime
 # It is used to create a snapshot of a runtime for faster startup times
@@ -239,13 +238,12 @@ tokio-util = { workspace = true }
 
 # For web
 hyper-util = { workspace = true, optional = true }
-rustls = { workspace = true, optional = true }
 
 # For URL imports
 # Upgraded to support axum 0.8+
-reqwest = { workspace = true, optional = true, default-features = false, features = [
+reqwest = { workspace = true, features = [
     "blocking",
-    "rustls-tls",
+    "native-tls",
 ] }
 http = { workspace = true, optional = true }
 deno_permissions = { workspace = true, optional = true }

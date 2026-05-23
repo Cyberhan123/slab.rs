@@ -309,16 +309,16 @@ pub mod js_value;
 pub mod module_loader;
 pub mod static_runtime;
 
-mod async_bridge;
-mod ext;
-mod inner_runtime;
+pub(crate) mod async_bridge;
+pub(crate) mod ext;
+pub(crate) mod inner_runtime;
 mod module;
 mod module_handle;
 mod module_wrapper;
 mod runtime;
-mod traits;
-mod transpiler;
-mod utilities;
+pub(crate) mod traits;
+pub(crate) mod transpiler;
+pub(crate) mod utilities;
 
 /// Re-exports of the deno extension crates used by this library
 pub mod extensions {
@@ -446,9 +446,9 @@ use deno_ast::{
     SourceMapOption, TranspileModuleOptions, TranspileOptions,
 };
 use deno_core::{
-    Extension, JsRuntime, ModuleLoadOptions, ModuleLoadReferrer, ModuleLoadResponse, ModuleLoader,
+    JsRuntime, ModuleLoadOptions, ModuleLoadReferrer, ModuleLoadResponse, ModuleLoader,
     ModuleSource, ModuleSourceCode, ModuleSpecifier, ModuleType, OpState, ResolutionKind,
-    RuntimeOptions, error::ModuleLoaderError, op2, resolve_import,
+    RuntimeOptions as DenoRuntimeOptions, error::ModuleLoaderError, op2, resolve_import,
 };
 use deno_error::JsErrorBox;
 use reqwest::Url;
@@ -585,12 +585,12 @@ async fn execute_call(
     let state = RuntimeState { context, host, http, result: result.clone() };
 
     let source_maps = Rc::new(RefCell::new(HashMap::new()));
-    let mut runtime = JsRuntime::new(RuntimeOptions {
+    let mut runtime = JsRuntime::new(DenoRuntimeOptions {
         module_loader: Some(Rc::new(SlabModuleLoader {
             root_dir: root_dir.clone(),
             source_maps: source_maps.clone(),
         })),
-        extensions: vec![slab_extension()],
+        extensions: vec![slab_extension::init()],
         ..Default::default()
     });
     runtime.op_state().borrow_mut().put(state);
@@ -620,23 +620,20 @@ async fn execute_call(
     Ok(result)
 }
 
-fn slab_extension() -> Extension {
-    Extension {
-        name: "slab_plugin_runtime",
-        ops: std::borrow::Cow::Owned(vec![
-            op_slab_plugin_id(),
-            op_slab_set_result(),
-            op_slab_api_request(),
-            op_slab_ui_emit(),
-            op_slab_fetch(),
-            op_slab_read_file(),
-            op_slab_write_file(),
-            op_slab_decode_utf8(),
-            op_slab_encode_utf8(),
-        ]),
-        ..Default::default()
-    }
-}
+deno_core::extension!(
+    slab_extension,
+    ops = [
+        op_slab_plugin_id,
+        op_slab_set_result,
+        op_slab_api_request,
+        op_slab_ui_emit,
+        op_slab_fetch,
+        op_slab_read_file,
+        op_slab_write_file,
+        op_slab_decode_utf8,
+        op_slab_encode_utf8,
+    ],
+);
 
 fn build_wrapper_module(
     entry_specifier: &str,

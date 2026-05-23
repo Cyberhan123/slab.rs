@@ -1,5 +1,5 @@
 use libloading::Library;
-use std::ffi::{OsStr, c_char};
+use std::ffi::c_char;
 
 use crate::{ggml_backend_dev_t, ggml_backend_dev_type, ggml_backend_reg_t, ggml_backend_t};
 
@@ -40,7 +40,7 @@ pub struct GGmlLoaderLib {
 }
 
 impl GGmlLoaderLib {
-    pub unsafe fn new<P: AsRef<OsStr>>(path: P) -> Result<Self, libloading::Error> {
+    pub unsafe fn new(path: impl libloading::AsFilename) -> Result<Self, libloading::Error> {
         let library = ::libloading::Library::new(path)?;
         Self::from_library(library)
     }
