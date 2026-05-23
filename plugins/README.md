@@ -66,10 +66,13 @@ module.exports = { myFunction: myFunction };
 
 ### Deno compatibility
 
-The `Slab.*` API surface is designed for compatibility with Deno. Plugins
-can be developed and tested locally with `deno run` by providing a Deno-side
-polyfill for `globalThis.Slab`, then run in the embedded QuickJS engine at
-production time without modification.
+The embedded runtime uses CommonJS (`module.exports`) format. Plugins that
+also need to run in Deno can use a simple build step (e.g. esbuild/rollup)
+to bundle ES modules into a single CommonJS file, or use the CommonJS format
+directly (which Deno supports via `--compat` or `require()` in Deno 2+).
+
+The `Slab.*` API surface is identical between the embedded engine and a Deno
+polyfill, so the plugin logic itself requires no modification across runtimes.
 
 ### Supported backends
 

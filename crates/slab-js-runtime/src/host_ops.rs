@@ -1,8 +1,8 @@
-//! Host operations exposed to JS plugins via the Deno ops system.
+//! Host operations exposed to JS plugins via the QuickJS bridge.
 //!
 //! These ops mirror the host functions available to WASM plugins:
-//! - `op_slab_api_request`: Make HTTP requests to the slab API
-//! - `op_slab_ui_emit`: Emit events to the host UI
+//! - `slab_api_request`: Make HTTP requests to the slab API
+//! - `slab_ui_emit`: Emit events to the host UI
 
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
