@@ -61,7 +61,7 @@ pub fn execute_api_request(
     api_permissions: &[String],
     request: &PluginApiRequest,
 ) -> Result<PluginApiResponse, String> {
-    authorize_api_request(api_permissions, &request.path)?;
+    authorize_api_request(api_permissions, request)?;
 
     let timeout_ms = request.timeout_ms.unwrap_or(DEFAULT_HTTP_TIMEOUT_MS).min(MAX_HTTP_TIMEOUT_MS);
     let method = reqwest::Method::from_bytes(request.method.as_bytes())
@@ -114,23 +114,87 @@ pub fn create_event_payload(plugin_id: &str, request: &PluginEmitRequest) -> Plu
     }
 }
 
-fn authorize_api_request(allowed: &[String], path: &str) -> Result<(), String> {
+fn authorize_api_request(allowed: &[String], request: &PluginApiRequest) -> Result<(), String> {
     if allowed.is_empty() {
         return Err(format!(
-            "plugin has no slab API permissions; request to `{path}` is not allowed"
+            "plugin has no slab API permissions; request {} {} is not allowed",
+            request.method, request.path
         ));
     }
-    let path = path.trim_start_matches('/');
-    let authorized = allowed.iter().any(|prefix| {
-        let prefix = prefix.trim_start_matches('/');
-        path.starts_with(prefix)
-    });
-    if !authorized {
+
+    let Some(required_permission) =
+        required_slab_api_permission(request.method.as_str(), request.path.as_str())
+    else {
         return Err(format!(
-            "request to `{path}` is not covered by plugin slab API permissions"
+            "plugin API request {} {} is not part of the allowed plugin API surface",
+            request.method, request.path
         ));
+    };
+
+    if allowed.iter().any(|permission| permission == required_permission) {
+        return Ok(());
     }
-    Ok(())
+
+    Err(format!(
+        "plugin API request {} {} requires permissions.slabApi `{required_permission}`",
+        request.method, request.path
+    ))
+}
+
+fn required_slab_api_permission(method: &str, path: &str) -> Option<&'static str> {
+    let method = method.to_ascii_uppercase();
+    let path = path.split('?').next().unwrap_or(path);
+
+    match method.as_str() {
+        "GET" if path_matches(path, "/v1/models") => Some("models:read"),
+        "POST" if path == "/v1/models/load" => Some("models:load"),
+        "POST" if path == "/v1/ffmpeg/convert" => Some("ffmpeg:convert"),
+        "POST" if path == "/v1/audio/transcriptions" => Some("audio:transcribe"),
+        "POST" if path == "/v1/subtitles/render" => Some("subtitle:render"),
+        "POST" if path == "/v1/chat/completions" => Some("chat:complete"),
+        "GET" if path_matches(path, "/v1/tasks") => Some("tasks:read"),
+        "POST" if path.starts_with("/v1/tasks/") && path.ends_with("/cancel") => {
+            Some("tasks:cancel")
+        }
+        _ => None,
+    }
+}
+
+fn path_matches(path: &str, base: &str) -> bool {
+    path == base || path.starts_with(&format!("{base}/"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PluginApiRequest, authorize_api_request};
+
+    fn request(method: &str, path: &str) -> PluginApiRequest {
+        PluginApiRequest {
+            method: method.to_string(),
+            path: path.to_string(),
+            headers: Default::default(),
+            body: None,
+            timeout_ms: None,
+        }
+    }
+
+    #[test]
+    fn slab_api_permissions_use_permission_ids() {
+        let req = request("POST", "/v1/chat/completions");
+        assert!(authorize_api_request(&["chat:complete".to_string()], &req).is_ok());
+    }
+
+    #[test]
+    fn slab_api_permissions_reject_missing_permission_id() {
+        let req = request("POST", "/v1/chat/completions");
+        assert!(authorize_api_request(&["models:read".to_string()], &req).is_err());
+    }
+
+    #[test]
+    fn slab_api_permissions_reject_unknown_surface() {
+        let req = request("DELETE", "/v1/chat/completions");
+        assert!(authorize_api_request(&["chat:complete".to_string()], &req).is_err());
+    }
 }
 
 fn build_upstream_url(base_url: &str, path: &str) -> Result<String, String> {
@@ -143,15 +207,11 @@ fn build_upstream_url(base_url: &str, path: &str) -> Result<String, String> {
     Ok(format!("{}{}", base_url.trim_end_matches('/'), path))
 }
 
-fn collect_response_headers(
-    headers: &reqwest::header::HeaderMap,
-) -> HashMap<String, String> {
+fn collect_response_headers(headers: &reqwest::header::HeaderMap) -> HashMap<String, String> {
     let mut result = HashMap::new();
     for (name, value) in headers {
-        if matches!(
-            name.as_str().to_ascii_lowercase().as_str(),
-            "connection" | "transfer-encoding"
-        ) {
+        if matches!(name.as_str().to_ascii_lowercase().as_str(), "connection" | "transfer-encoding")
+        {
             continue;
         }
         if let Ok(v) = value.to_str() {

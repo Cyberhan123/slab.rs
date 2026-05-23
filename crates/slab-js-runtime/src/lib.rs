@@ -8,17 +8,22 @@ use std::sync::Arc;
 use anyhow::Result;
 use dashmap::DashMap;
 use serde_json::Value;
+use slab_types::DESKTOP_API_ORIGIN;
 
 pub use permissions::JsPluginPermissions;
 use worker::JsWorkerHandle;
 
 /// Configuration for the JS runtime's host environment.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct JsRuntimeConfig {
-    /// Base URL for the slab HTTP API (e.g. "http://127.0.0.1:3000").
-    pub api_base_url: Option<String>,
-    /// Allowed slab API permission prefixes for the current plugin call.
-    pub slab_api_permissions: Vec<String>,
+    /// Base URL for the slab HTTP API (e.g. `http://127.0.0.1:3000`).
+    pub api_base_url: String,
+}
+
+impl Default for JsRuntimeConfig {
+    fn default() -> Self {
+        Self { api_base_url: DESKTOP_API_ORIGIN.to_owned() }
+    }
 }
 
 /// The top-level JS plugin runtime managing per-plugin workers.

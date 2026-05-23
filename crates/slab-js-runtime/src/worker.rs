@@ -6,6 +6,9 @@
 //! executed by the embedded engine at runtime.
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 use rquickjs::{Context, Function, Object, Runtime};
@@ -15,18 +18,21 @@ use tracing::debug;
 use crate::host_ops::{PluginApiRequest, create_event_payload, execute_api_request};
 use crate::{JsCallRequest, JsCallResponse, JsPluginPermissions, JsRuntimeConfig};
 
+const QUICKJS_MEMORY_LIMIT_BYTES: usize = 64 * 1024 * 1024;
+const QUICKJS_MAX_STACK_BYTES: usize = 1024 * 1024;
+const QUICKJS_GC_THRESHOLD_BYTES: usize = 8 * 1024 * 1024;
+const QUICKJS_EXECUTION_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// A handle to a running JS plugin worker backed by QuickJS.
 pub struct JsWorkerHandle {
     module_path: PathBuf,
-    #[allow(dead_code)]
-    permissions: JsPluginPermissions,
     config: JsRuntimeConfig,
 }
 
 impl JsWorkerHandle {
     pub fn new(
         module_path: PathBuf,
-        permissions: JsPluginPermissions,
+        _permissions: JsPluginPermissions,
         config: JsRuntimeConfig,
     ) -> Result<Self> {
         if !module_path.is_file() {
@@ -35,7 +41,7 @@ impl JsWorkerHandle {
 
         debug!("created JS worker for module {}", module_path.display());
 
-        Ok(Self { module_path, permissions, config })
+        Ok(Self { module_path, config })
     }
 
     pub async fn call(&self, request: JsCallRequest) -> Result<JsCallResponse> {
@@ -53,7 +59,7 @@ impl JsWorkerHandle {
         let params = request.params.clone();
         let plugin_id = request.plugin_id.clone();
         let config = self.config.clone();
-        let permissions = self.permissions.clone();
+        let permissions = request.permissions.clone();
 
         // Execute on a blocking thread since QuickJS runtime is !Send
         let result = tokio::task::spawn_blocking(move || {
@@ -72,16 +78,29 @@ fn execute_js_call(
     params: &Value,
     plugin_id: &str,
     config: &JsRuntimeConfig,
-    _permissions: &JsPluginPermissions,
+    permissions: &JsPluginPermissions,
 ) -> Result<Value> {
-    let rt = Runtime::new()
-        .map_err(|e| anyhow::anyhow!("failed to create QuickJS runtime: {e}"))?;
-    let ctx = Context::full(&rt)
-        .map_err(|e| anyhow::anyhow!("failed to create QuickJS context: {e}"))?;
+    let rt =
+        Runtime::new().map_err(|e| anyhow::anyhow!("failed to create QuickJS runtime: {e}"))?;
+    rt.set_memory_limit(QUICKJS_MEMORY_LIMIT_BYTES);
+    rt.set_max_stack_size(QUICKJS_MAX_STACK_BYTES);
+    rt.set_gc_threshold(QUICKJS_GC_THRESHOLD_BYTES);
+    let timed_out = Arc::new(AtomicBool::new(false));
+    let timed_out_for_interrupt = Arc::clone(&timed_out);
+    let deadline = Instant::now() + QUICKJS_EXECUTION_TIMEOUT;
+    rt.set_interrupt_handler(Some(Box::new(move || {
+        let is_timed_out = Instant::now() >= deadline;
+        if is_timed_out {
+            timed_out_for_interrupt.store(true, Ordering::Relaxed);
+        }
+        is_timed_out
+    })));
+    let ctx =
+        Context::full(&rt).map_err(|e| anyhow::anyhow!("failed to create QuickJS context: {e}"))?;
 
-    ctx.with(|ctx| {
+    let result = ctx.with(|ctx| {
         // Inject the Slab host bridge
-        inject_slab_bridge(&ctx, plugin_id, config)?;
+        inject_slab_bridge(&ctx, plugin_id, config, permissions)?;
 
         // Read the plugin module source
         let source = std::fs::read_to_string(module_path)
@@ -115,10 +134,7 @@ fn execute_js_call(
 
         let result: String = ctx
             .eval(call_script)
-            .map_err(|e| anyhow::anyhow!(
-                "JS execution error in {}: {e}",
-                module_path.display()
-            ))?;
+            .map_err(|e| anyhow::anyhow!("JS execution error in {}: {e}", module_path.display()))?;
 
         let value: Value = match serde_json::from_str(&result) {
             Ok(v) => v,
@@ -126,7 +142,17 @@ fn execute_js_call(
         };
 
         Ok(value)
-    })
+    });
+
+    match result {
+        Ok(value) => Ok(value),
+        Err(_error) if timed_out.load(Ordering::Relaxed) => Err(anyhow::anyhow!(
+            "JS execution timed out after {}ms in {}",
+            QUICKJS_EXECUTION_TIMEOUT.as_millis(),
+            module_path.display()
+        )),
+        Err(error) => Err(error),
+    }
 }
 
 /// Inject `globalThis.Slab` with host API bridge functions.
@@ -138,6 +164,7 @@ fn inject_slab_bridge(
     ctx: &rquickjs::Ctx<'_>,
     plugin_id: &str,
     config: &JsRuntimeConfig,
+    permissions: &JsPluginPermissions,
 ) -> Result<()> {
     let globals = ctx.globals();
 
@@ -157,66 +184,57 @@ fn inject_slab_bridge(
         .map_err(|e| anyhow::anyhow!("failed to create api object: {e}"))?;
 
     // __apiRequestImpl(optionsJson: String) -> String
-    let api_base_url = config.api_base_url.clone().unwrap_or_default();
-    let api_permissions = config.slab_api_permissions.clone();
-    let request_impl = Function::new(
-        ctx.clone(),
-        move |options_json: String| -> rquickjs::Result<String> {
-            let req: PluginApiRequest = serde_json::from_str(&options_json).map_err(|_| {
-                rquickjs::Error::new_from_js("string", "PluginApiRequest")
-            })?;
+    let api_base_url = config.api_base_url.clone();
+    let api_permissions = permissions.slab_api.clone();
+    let request_impl =
+        Function::new(ctx.clone(), move |options_json: String| -> rquickjs::Result<String> {
+            let req: PluginApiRequest = serde_json::from_str(&options_json)
+                .map_err(|_| rquickjs::Error::new_from_js("string", "PluginApiRequest"))?;
 
             if api_base_url.is_empty() {
-                return Err(rquickjs::Error::new_from_js(
+                return Err(rquickjs::Error::new_from_js_message(
                     "undefined",
                     "api_base_url",
+                    "slab.api.request is not available: no API base URL configured",
                 ));
             }
 
-            let response = execute_api_request(&api_base_url, &api_permissions, &req)
-                .map_err(|_| rquickjs::Error::new_from_js("request", "response"))?;
+            let response =
+                execute_api_request(&api_base_url, &api_permissions, &req).map_err(|error| {
+                    rquickjs::Error::new_from_js_message("request", "response", error)
+                })?;
 
             serde_json::to_string(&response)
                 .map_err(|_| rquickjs::Error::new_from_js("response", "json"))
-        },
-    )
-    .map_err(|e| anyhow::anyhow!("failed to create __apiRequestImpl: {e}"))?;
+        })
+        .map_err(|e| anyhow::anyhow!("failed to create __apiRequestImpl: {e}"))?;
 
     api.set("__impl", request_impl)
         .map_err(|e| anyhow::anyhow!("failed to set api.__impl: {e}"))?;
-    slab.set("api", api)
-        .map_err(|e| anyhow::anyhow!("failed to set Slab.api: {e}"))?;
+    slab.set("api", api).map_err(|e| anyhow::anyhow!("failed to set Slab.api: {e}"))?;
 
     // Slab.ui object
-    let ui = Object::new(ctx.clone())
-        .map_err(|e| anyhow::anyhow!("failed to create ui object: {e}"))?;
+    let ui =
+        Object::new(ctx.clone()).map_err(|e| anyhow::anyhow!("failed to create ui object: {e}"))?;
 
     // __emitImpl(requestJson: String) -> String
     let emit_plugin_id = plugin_id.to_string();
-    let emit_impl = Function::new(
-        ctx.clone(),
-        move |request_json: String| -> rquickjs::Result<String> {
-            let emit_req: crate::host_ops::PluginEmitRequest =
-                serde_json::from_str(&request_json).map_err(|_| {
-                    rquickjs::Error::new_from_js("string", "PluginEmitRequest")
-                })?;
+    let emit_impl =
+        Function::new(ctx.clone(), move |request_json: String| -> rquickjs::Result<String> {
+            let emit_req: crate::host_ops::PluginEmitRequest = serde_json::from_str(&request_json)
+                .map_err(|_| rquickjs::Error::new_from_js("string", "PluginEmitRequest"))?;
 
             let payload = create_event_payload(&emit_plugin_id, &emit_req);
 
             serde_json::to_string(&payload)
                 .map_err(|_| rquickjs::Error::new_from_js("payload", "json"))
-        },
-    )
-    .map_err(|e| anyhow::anyhow!("failed to create __emitImpl: {e}"))?;
+        })
+        .map_err(|e| anyhow::anyhow!("failed to create __emitImpl: {e}"))?;
 
-    ui.set("__impl", emit_impl)
-        .map_err(|e| anyhow::anyhow!("failed to set ui.__impl: {e}"))?;
-    slab.set("ui", ui)
-        .map_err(|e| anyhow::anyhow!("failed to set Slab.ui: {e}"))?;
+    ui.set("__impl", emit_impl).map_err(|e| anyhow::anyhow!("failed to set ui.__impl: {e}"))?;
+    slab.set("ui", ui).map_err(|e| anyhow::anyhow!("failed to set Slab.ui: {e}"))?;
 
-    globals
-        .set("Slab", slab)
-        .map_err(|e| anyhow::anyhow!("failed to set globalThis.Slab: {e}"))?;
+    globals.set("Slab", slab).map_err(|e| anyhow::anyhow!("failed to set globalThis.Slab: {e}"))?;
 
     // Install high-level JS wrappers that serialize/deserialize for the user
     let bridge_js = r#"(function() {
