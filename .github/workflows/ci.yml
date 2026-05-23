@@ -53,7 +53,8 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libssl-dev \
-            pkg-config
+            pkg-config \
+            python3-dev
 
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
