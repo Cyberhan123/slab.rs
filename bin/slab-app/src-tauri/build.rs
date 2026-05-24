@@ -23,6 +23,8 @@ fn main() {
         .expect("failed to sync slab-runtime sidecar");
     sync_tauri_sidecar("slab-js-runtime", &target, &workspace_target_dir, &manifest_dir)
         .expect("failed to sync slab-js-runtime sidecar");
+    sync_tauri_sidecar("slab-python-runtime", &target, &workspace_target_dir, &manifest_dir)
+        .expect("failed to sync slab-python-runtime sidecar");
     sync_tauri_bundled_plugins(&manifest_dir).expect("failed to sync bundled plugins");
     if !skip_vendor_runtime_sync {
         sync_tauri_vendor_runtime_artifacts(&target, &manifest_dir)

@@ -283,6 +283,19 @@ fn validate_and_load_plugin(
         }
         None => None,
     };
+    let python_entry_path = match manifest.runtime.python.as_ref() {
+        Some(python) => {
+            let (entry, path) = validate_declared_file(
+                plugin_dir,
+                &files_sha256,
+                &python.entry,
+                "runtime.python.entry",
+            )?;
+            validate_python_entry_extension(&entry)?;
+            Some(path)
+        }
+        None => None,
+    };
 
     Ok(LoadedPlugin {
         manifest,
@@ -290,6 +303,7 @@ fn validate_and_load_plugin(
         ui_entry,
         wasm_entry_path,
         js_entry_path,
+        python_entry_path,
         files_sha256,
     })
 }
@@ -323,6 +337,18 @@ fn validate_js_entry_extension(entry: &str) -> Result<(), String> {
         return Ok(());
     }
     Err("runtime.js.entry must use .ts, .tsx, .js, or .mjs".to_owned())
+}
+
+fn validate_python_entry_extension(entry: &str) -> Result<(), String> {
+    let extension = Path::new(entry)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if extension == "py" {
+        return Ok(());
+    }
+    Err("runtime.python.entry must use .py".to_owned())
 }
 
 fn compute_file_sha256(path: &Path) -> Result<String, String> {

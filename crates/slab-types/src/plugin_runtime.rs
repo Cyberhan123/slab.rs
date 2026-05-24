@@ -92,3 +92,49 @@ pub struct PluginEventPayload {
     pub data: Value,
     pub ts: u64,
 }
+
+pub fn authorize_plugin_slab_api_request(
+    allowed: &[String],
+    request: &PluginApiRequest,
+) -> Result<(), String> {
+    let Some(required_permission) =
+        required_plugin_slab_api_permission(&request.method, &request.path)
+    else {
+        return Err(format!(
+            "plugin API request {} {} is not part of the allowed plugin API surface",
+            request.method, request.path
+        ));
+    };
+
+    if allowed.iter().any(|permission| permission == required_permission) {
+        return Ok(());
+    }
+
+    Err(format!(
+        "plugin API request {} {} requires permissions.slabApi `{required_permission}`",
+        request.method, request.path
+    ))
+}
+
+pub fn required_plugin_slab_api_permission(method: &str, path: &str) -> Option<&'static str> {
+    let method = method.to_ascii_uppercase();
+    let path = path.split('?').next().unwrap_or(path);
+
+    match method.as_str() {
+        "GET" if plugin_path_matches(path, "/v1/models") => Some("models:read"),
+        "POST" if path == "/v1/models/load" => Some("models:load"),
+        "POST" if path == "/v1/ffmpeg/convert" => Some("ffmpeg:convert"),
+        "POST" if path == "/v1/audio/transcriptions" => Some("audio:transcribe"),
+        "POST" if path == "/v1/subtitles/render" => Some("subtitle:render"),
+        "POST" if path == "/v1/chat/completions" => Some("chat:complete"),
+        "GET" if plugin_path_matches(path, "/v1/tasks") => Some("tasks:read"),
+        "POST" if path.starts_with("/v1/tasks/") && path.ends_with("/cancel") => {
+            Some("tasks:cancel")
+        }
+        _ => None,
+    }
+}
+
+fn plugin_path_matches(path: &str, base: &str) -> bool {
+    path == base || path.starts_with(&format!("{base}/"))
+}

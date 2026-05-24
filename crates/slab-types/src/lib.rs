@@ -51,13 +51,14 @@ pub use plugin::{
     PluginContributesManifest, PluginFilePermissions, PluginInfo, PluginIntegrityManifest,
     PluginJsManifest, PluginLanguageServerContribution, PluginLanguageServerTransport,
     PluginManifest, PluginNetworkManifest, PluginNetworkMode, PluginPermissionsManifest,
-    PluginRouteContribution, PluginRuntimeManifest, PluginSettingsContribution,
-    PluginSidebarContribution, PluginUiManifest, PluginWasmManifest,
+    PluginPythonManifest, PluginRouteContribution, PluginRuntimeManifest,
+    PluginSettingsContribution, PluginSidebarContribution, PluginUiManifest, PluginWasmManifest,
 };
 pub use plugin_runtime::{
     PluginApiRequest, PluginApiResponse, PluginEventPayload, PluginRuntimeApiHostRequest,
     PluginRuntimeCallRequest, PluginRuntimeCallResponse, PluginRuntimeFileAccess,
-    PluginRuntimeFileGrant, PluginRuntimeUiEmitRequest,
+    PluginRuntimeFileGrant, PluginRuntimeUiEmitRequest, authorize_plugin_slab_api_request,
+    required_plugin_slab_api_permission,
 };
 pub use runtime::{
     Capability, DiffusionLoadOptions, DriverDescriptor, DriverHints, DriverLoadStyle, ModelFamily,

@@ -1,89 +1,149 @@
 //! Host bridge module exposed to Python plugins as `import slab`.
-//!
-//! Injects a `slab` object into the plugin's execution namespace.  Plugins access
-//! it simply by referencing `slab` (the object is pre-bound to the namespace
-//! dict before the plugin source is executed, no actual `import` statement is
-//! required or permitted).
-//!
-//! The bridge is implemented as Python code evaluated by the interpreter, which
-//! keeps the PyO3 API surface minimal and avoids complex closure lifetimes.
-//!
-//! Available API inside plugins:
-//! - `slab.plugin_id`  — the plugin's ID string
-//! - `slab.api.request(method, path, *, headers=None, body=None, timeout_ms=None)` — HTTP to slab API
-//! - `slab.ui.emit(topic, data=None)` — emit an event payload (returns JSON string)
 
-use std::ffi::CString;
+use std::collections::HashMap;
+use std::sync::Arc;
 
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyModule};
+use serde_json::Value;
+use slab_types::{PluginApiRequest, PluginRuntimeApiHostRequest, PluginRuntimeUiEmitRequest};
+use tokio::runtime::Handle;
 
-/// Inject a `slab` binding into the execution namespace for the current plugin call.
-///
-/// After this call, the plugin source can reference `slab.plugin_id`,
-/// `slab.api`, and `slab.ui` without any import statement.
+use crate::domain::RuntimeHost;
+
+/// Inject the per-call `slab` module into `sys.modules` and the execution namespace.
 pub fn inject(
     py: Python<'_>,
     plugin_id: &str,
-    api_base: &str,
+    call_id: &str,
+    host: Arc<dyn RuntimeHost>,
+    runtime_handle: Handle,
     namespace: &Bound<'_, PyDict>,
 ) -> PyResult<()> {
-    // Sanitise values used inside the Python string (no injection risk: we
-    // only need to produce valid Python string literals from Rust-controlled
-    // strings that are already validated before reaching here).
-    let plugin_id_py = format!("{plugin_id:?}"); // Rust Debug format → Python string literal
-    let api_base_py = format!("{api_base:?}");
+    let api = Py::new(
+        py,
+        SlabApiBridge {
+            plugin_id: plugin_id.to_owned(),
+            call_id: call_id.to_owned(),
+            host: host.clone(),
+            runtime_handle: runtime_handle.clone(),
+        },
+    )?;
+    let ui = Py::new(
+        py,
+        SlabUiBridge {
+            plugin_id: plugin_id.to_owned(),
+            call_id: call_id.to_owned(),
+            host,
+            runtime_handle,
+        },
+    )?;
 
-    let setup = format!(
-        r#"import json
-import urllib.request
-import urllib.error
-import time as _time
+    let slab = PyModule::new(py, "slab")?;
+    slab.add("plugin_id", plugin_id)?;
+    slab.add("api", api)?;
+    slab.add("ui", ui)?;
 
-class _SlabApi:
-    def __init__(self, base_url):
-        self._base_url = base_url.rstrip('/')
-
-    def request(self, method, path, headers=None, body=None, timeout_ms=None):
-        if not path.startswith('/'):
-            raise ValueError("slab.api.request: path must start with '/'")
-        if '://' in path or path.startswith('//'):
-            raise ValueError("slab.api.request: absolute URLs are not allowed")
-        url = self._base_url + path
-        timeout = min(timeout_ms or 15000, 60000) / 1000.0
-        data = body.encode('utf-8') if body else None
-        req = urllib.request.Request(url, data=data, headers=headers or {{}}, method=method)
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return {{'status': resp.status, 'headers': dict(resp.headers), 'body': resp.read().decode('utf-8')}}
-        except urllib.error.HTTPError as e:
-            return {{'status': e.code, 'headers': dict(e.headers), 'body': e.read().decode('utf-8')}}
-
-class _SlabUi:
-    def __init__(self, plugin_id):
-        self._plugin_id = plugin_id
-
-    def emit(self, topic, data=None):
-        return json.dumps({{
-            'plugin_id': self._plugin_id,
-            'topic': topic,
-            'data': data,
-            'ts': int(_time.time() * 1000),
-        }})
-
-class _Slab:
-    def __init__(self, plugin_id, api_base_url):
-        self.plugin_id = plugin_id
-        self.api = _SlabApi(api_base_url)
-        self.ui = _SlabUi(plugin_id)
-
-slab = _Slab({plugin_id_py}, {api_base_py})
-del _SlabApi, _SlabUi, _Slab
-"#
-    );
-
-    let code = CString::new(setup.as_str())
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
-    py.run(&code, Some(namespace), Some(namespace))?;
+    let sys = PyModule::import(py, "sys")?;
+    let modules = sys.getattr("modules")?.cast_into::<PyDict>()?;
+    modules.set_item("slab", &slab)?;
+    namespace.set_item("slab", slab)?;
     Ok(())
+}
+
+#[pyclass]
+struct SlabApiBridge {
+    plugin_id: String,
+    call_id: String,
+    host: Arc<dyn RuntimeHost>,
+    runtime_handle: Handle,
+}
+
+#[pymethods]
+impl SlabApiBridge {
+    #[pyo3(signature = (method, path, headers=None, body=None, timeout_ms=None))]
+    fn request(
+        &self,
+        py: Python<'_>,
+        method: String,
+        path: String,
+        headers: Option<HashMap<String, String>>,
+        body: Option<String>,
+        timeout_ms: Option<u64>,
+    ) -> PyResult<Py<PyAny>> {
+        let request = PluginRuntimeApiHostRequest {
+            call_id: self.call_id.clone(),
+            plugin_id: self.plugin_id.clone(),
+            request: PluginApiRequest {
+                method,
+                path,
+                headers: headers.unwrap_or_default(),
+                body,
+                timeout_ms,
+            },
+        };
+        let params = serde_json::to_value(request)
+            .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+        let response = self.host_request("slab.api.request", params)?;
+        json_value_to_py(py, response)
+    }
+}
+
+#[pyclass]
+struct SlabUiBridge {
+    plugin_id: String,
+    call_id: String,
+    host: Arc<dyn RuntimeHost>,
+    runtime_handle: Handle,
+}
+
+#[pymethods]
+impl SlabUiBridge {
+    #[pyo3(signature = (topic, data=None))]
+    fn emit(&self, py: Python<'_>, topic: String, data: Option<Py<PyAny>>) -> PyResult<Py<PyAny>> {
+        let data = match data {
+            Some(data) => py_to_json_value(py, data)?,
+            None => Value::Null,
+        };
+        let request = PluginRuntimeUiEmitRequest {
+            call_id: self.call_id.clone(),
+            plugin_id: self.plugin_id.clone(),
+            topic,
+            data,
+        };
+        let params = serde_json::to_value(request)
+            .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+        let response = self.host_request("slab.ui.emit", params)?;
+        json_value_to_py(py, response)
+    }
+}
+
+impl SlabApiBridge {
+    fn host_request(&self, method: &str, params: Value) -> PyResult<Value> {
+        self.runtime_handle
+            .block_on(self.host.request(method, params))
+            .map_err(PyRuntimeError::new_err)
+    }
+}
+
+impl SlabUiBridge {
+    fn host_request(&self, method: &str, params: Value) -> PyResult<Value> {
+        self.runtime_handle
+            .block_on(self.host.request(method, params))
+            .map_err(PyRuntimeError::new_err)
+    }
+}
+
+fn json_value_to_py(py: Python<'_>, value: Value) -> PyResult<Py<PyAny>> {
+    let json = PyModule::import(py, "json")?;
+    let text = serde_json::to_string(&value)
+        .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+    Ok(json.call_method1("loads", (text,))?.unbind())
+}
+
+fn py_to_json_value(py: Python<'_>, value: Py<PyAny>) -> PyResult<Value> {
+    let json = PyModule::import(py, "json")?;
+    let text: String = json.call_method1("dumps", (value,))?.extract()?;
+    serde_json::from_str(&text).map_err(|error| PyValueError::new_err(error.to_string()))
 }

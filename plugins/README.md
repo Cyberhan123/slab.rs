@@ -11,6 +11,7 @@ Required files:
 - any schema/assets referenced by `integrity.filesSha256`
 - `wasm/plugin.wasm` or the configured `runtime.wasm.entry` when the plugin exposes WASM functions
 - `dist/plugin.js` or the configured `runtime.js.entry` when the plugin exposes JS backend functions
+- `python/plugin.py` or the configured `runtime.python.entry` when the plugin exposes Python backend functions
 
 ## Frontend build model
 
@@ -75,12 +76,39 @@ is listed in `permissions.network.allowHosts`. Local Slab API origins are
 blocked for `fetch`; use `Slab.api.request` so `slab-server` can re-authorize
 the call against `permissions.slabApi`.
 
+## Python Backend Runtime
+
+Plugins can expose backend functions by providing `runtime.python.entry` in
+`plugin.json`. The Python backend runs in the supervised
+`bin/slab-python-runtime` sidecar. It supports a single `.py` entry file and
+pure Python stdlib imports through the embedded importlib VFS.
+
+Python functions use the same `plugin.call` semantics as JS and WASM: the
+function receives the JSON `params` value and returns a JSON-serializable value.
+The runtime also accepts the old JSON-string function shape during the
+transition.
+
+```python
+import slab
+
+def my_function(params):
+    result = slab.api.request("GET", "/v1/models")
+    slab.ui.emit("example.finished", {"modelCount": len(result["body"])})
+    return {"status": result["status"], "params": params}
+```
+
+Python plugins have no ambient file, network, subprocess, or `ctypes` access in
+the first version. Use `slab.api.request` for host API calls and
+`slab.ui.emit` for UI events so the host can apply the same authorization path
+used by JS and WASM backends.
+
 ### Supported backends
 
 | Backend | Engine | Use case |
 |---------|--------|----------|
 | WASM | Extism (Wasmtime) | High-performance, sandboxed, polyglot (Rust, Go, C, etc.) |
 | JS | slab-js-runtime (Deno crates) | TypeScript/ESM plugin logic with declared permissions |
+| Python | slab-python-runtime (CPython/PyO3) | Pure Python plugin logic with embedded stdlib access |
 | Frontend-only | Tauri WebView | UI-only plugins with no backend logic |
 
 ## Manifest v1
@@ -100,12 +128,14 @@ assets from host-controlled extension points and agent-facing capabilities:
   },
   "runtime": {
     "ui": { "entry": "ui/index.html" },
-    "wasm": { "entry": "wasm/plugin.wasm" }
+    "wasm": { "entry": "wasm/plugin.wasm" },
+    "python": { "entry": "python/plugin.py" }
   },
   "integrity": {
     "filesSha256": {
       "ui/index.html": "<sha256>",
       "wasm/plugin.wasm": "<sha256>",
+      "python/plugin.py": "<sha256>",
       "schemas/input.schema.json": "<sha256>"
     }
   },
@@ -182,6 +212,7 @@ the v1 runtime/permissions shape:
   "version": "0.1.0",
   "ui": { "entry": "ui/index.html" },
   "wasm": { "entry": "wasm/plugin.wasm" },
+  "python": { "entry": "python/plugin.py" },
   "integrity": {
     "filesSha256": {
       "ui/index.html": "<sha256>",

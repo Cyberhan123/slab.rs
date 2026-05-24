@@ -37,8 +37,11 @@ impl TryFrom<RawPluginManifest> for PluginManifest {
                 ui: runtime.ui,
                 wasm: runtime.wasm.or(raw.wasm),
                 js: runtime.js.or(raw.js),
+                python: runtime.python.or(raw.python),
             },
-            (None, Some(ui)) => PluginRuntimeManifest { ui, wasm: raw.wasm, js: raw.js },
+            (None, Some(ui)) => {
+                PluginRuntimeManifest { ui, wasm: raw.wasm, js: raw.js, python: raw.python }
+            }
             (None, None) => return Err("missing runtime.ui or legacy ui entry".to_string()),
         };
 
@@ -79,6 +82,8 @@ struct RawPluginManifest {
     wasm: Option<PluginWasmManifest>,
     #[serde(default)]
     js: Option<PluginJsManifest>,
+    #[serde(default)]
+    python: Option<PluginPythonManifest>,
     integrity: PluginIntegrityManifest,
     #[serde(default)]
     contributes: Option<PluginContributesManifest>,
@@ -105,6 +110,8 @@ pub struct PluginRuntimeManifest {
     pub wasm: Option<PluginWasmManifest>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub js: Option<PluginJsManifest>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub python: Option<PluginPythonManifest>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
@@ -119,6 +126,11 @@ pub struct PluginWasmManifest {
 
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 pub struct PluginJsManifest {
+    pub entry: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct PluginPythonManifest {
     pub entry: String,
 }
 
