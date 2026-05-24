@@ -1,4 +1,5 @@
 pub mod api;
+mod bundle;
 mod domain;
 mod host_bridge;
 mod interpreter;
@@ -15,6 +16,7 @@ use anyhow::{Result, bail};
 use dashmap::DashMap;
 use slab_types::{PluginRuntimeCallRequest, PluginRuntimeCallResponse};
 
+use bundle::load_python_bundle;
 pub use domain::RuntimeHost;
 pub use permissions::PythonPluginPermissions;
 pub use vfs::EmbeddedStdlib;
@@ -61,17 +63,18 @@ impl PythonRuntime {
         &self,
         request: PluginRuntimeCallRequest,
     ) -> Result<PluginRuntimeCallResponse> {
-        let module_path = resolve_python_entry(&request.root_dir, &request.entry)?;
+        let resolved_entry =
+            resolve_python_entry(&request.root_dir, &request.entry, request.bundle.as_deref())?;
         let worker = match self.workers.entry(request.plugin_id.clone()) {
-            dashmap::mapref::entry::Entry::Occupied(entry) => entry.get().clone(),
-            dashmap::mapref::entry::Entry::Vacant(entry) => {
+            dashmap::mapref::entry::Entry::Occupied(worker_entry) => worker_entry.get().clone(),
+            dashmap::mapref::entry::Entry::Vacant(worker_entry) => {
                 let handle =
-                    Arc::new(PythonWorkerHandle::new(module_path.clone(), self.config.clone())?);
-                entry.insert(handle.clone());
+                    Arc::new(PythonWorkerHandle::new(resolved_entry.clone(), self.config.clone())?);
+                worker_entry.insert(handle.clone());
                 handle
             }
         };
-        worker.call(request, module_path).await
+        worker.call(request, resolved_entry).await
     }
 
     pub fn unload(&self, plugin_id: &str) {
@@ -85,7 +88,25 @@ impl Default for PythonRuntime {
     }
 }
 
-fn resolve_python_entry(root_dir: &str, entry: &str) -> Result<PathBuf> {
+#[derive(Clone)]
+pub(crate) enum ResolvedPythonEntry {
+    File { path: PathBuf },
+    Bundle { entry_source: String, modules: EmbeddedStdlib, path: PathBuf },
+}
+
+impl ResolvedPythonEntry {
+    pub fn cache_key(&self) -> String {
+        match self {
+            Self::File { path } | Self::Bundle { path, .. } => path.to_string_lossy().into_owned(),
+        }
+    }
+}
+
+fn resolve_python_entry(
+    root_dir: &str,
+    entry: &str,
+    bundle: Option<&str>,
+) -> Result<ResolvedPythonEntry> {
     let entry_path = Path::new(entry);
     if entry_path.is_absolute() {
         bail!("runtime.python.entry must be relative to the plugin root");
@@ -97,6 +118,32 @@ fn resolve_python_entry(root_dir: &str, entry: &str) -> Result<PathBuf> {
     let root = PathBuf::from(root_dir).canonicalize().map_err(|error| {
         anyhow::anyhow!("failed to canonicalize plugin root `{root_dir}`: {error}")
     })?;
+
+    if let Some(bundle) = bundle {
+        let bundle_path = Path::new(bundle);
+        if bundle_path.is_absolute() {
+            bail!("runtime.python.bundle must be relative to the plugin root");
+        }
+        if bundle_path.extension().and_then(|extension| extension.to_str()) != Some("slabpy") {
+            bail!("runtime.python.bundle must use .slabpy");
+        }
+        let bundle_path = root.join(bundle_path).canonicalize().map_err(|error| {
+            anyhow::anyhow!("failed to canonicalize Python bundle `{bundle}`: {error}")
+        })?;
+        if !bundle_path.starts_with(&root) {
+            bail!("runtime.python.bundle must stay inside the plugin root");
+        }
+        if !bundle_path.is_file() {
+            bail!("Python bundle does not exist at {}", bundle_path.display());
+        }
+        let bundle = load_python_bundle(&bundle_path)?;
+        return Ok(ResolvedPythonEntry::Bundle {
+            entry_source: bundle.entry_source,
+            modules: bundle.modules,
+            path: bundle_path,
+        });
+    }
+
     let module_path = root.join(entry_path).canonicalize().map_err(|error| {
         anyhow::anyhow!("failed to canonicalize Python entry `{entry}`: {error}")
     })?;
@@ -106,5 +153,5 @@ fn resolve_python_entry(root_dir: &str, entry: &str) -> Result<PathBuf> {
     if !module_path.is_file() {
         bail!("Python module entry does not exist at {}", module_path.display());
     }
-    Ok(module_path)
+    Ok(ResolvedPythonEntry::File { path: module_path })
 }

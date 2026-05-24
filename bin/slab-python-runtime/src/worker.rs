@@ -1,7 +1,6 @@
 //! Python plugin worker: runs a single plugin call inside CPython via PyO3.
 
 use std::ffi::CString;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,46 +12,42 @@ use tokio::runtime::Handle;
 use tracing::debug;
 
 use crate::host_bridge;
-use crate::{PythonRuntimeConfig, interpreter, security};
+use crate::{PythonRuntimeConfig, ResolvedPythonEntry, interpreter, security};
 
 const PYTHON_EXECUTION_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A handle to a Python plugin worker.
 pub struct PythonWorkerHandle {
-    module_path: PathBuf,
+    entry: ResolvedPythonEntry,
     config: Arc<PythonRuntimeConfig>,
 }
 
 impl PythonWorkerHandle {
-    pub fn new(module_path: PathBuf, config: PythonRuntimeConfig) -> Result<Self> {
-        if !module_path.is_file() {
-            bail!("Python module entry does not exist at {}", module_path.display());
-        }
-
+    pub fn new(entry: ResolvedPythonEntry, config: PythonRuntimeConfig) -> Result<Self> {
         interpreter::init(config.embedded_stdlib.clone())?;
-        debug!("created Python worker for module {}", module_path.display());
+        debug!("created Python worker for {}", entry.cache_key());
 
-        Ok(Self { module_path, config: Arc::new(config) })
+        Ok(Self { entry, config: Arc::new(config) })
     }
 
     pub async fn call(
         &self,
         request: PluginRuntimeCallRequest,
-        module_path: PathBuf,
+        entry: ResolvedPythonEntry,
     ) -> Result<PluginRuntimeCallResponse> {
-        if self.module_path != module_path {
+        if self.entry.cache_key() != entry.cache_key() {
             bail!(
                 "Python module path mismatch for plugin `{}`: expected {}, got {}",
                 request.plugin_id,
-                self.module_path.display(),
-                module_path.display()
+                self.entry.cache_key(),
+                entry.cache_key()
             );
         }
 
         let config = Arc::clone(&self.config);
         let runtime_handle = Handle::current();
         let result = tokio::task::spawn_blocking(move || {
-            execute_python_call(&module_path, request, &config, runtime_handle)
+            execute_python_call(&entry, request, &config, runtime_handle)
         })
         .await??;
 
@@ -61,16 +56,26 @@ impl PythonWorkerHandle {
 }
 
 fn execute_python_call(
-    module_path: &Path,
+    entry: &ResolvedPythonEntry,
     request: PluginRuntimeCallRequest,
     config: &PythonRuntimeConfig,
     runtime_handle: Handle,
 ) -> Result<serde_json::Value> {
-    let source = std::fs::read_to_string(module_path)
-        .map_err(|error| anyhow::anyhow!("failed to read plugin module: {error}"))?;
+    let mut embedded_modules = config.embedded_stdlib.clone();
+    let (source, origin) = match entry {
+        ResolvedPythonEntry::File { path } => {
+            let source = std::fs::read_to_string(path)
+                .map_err(|error| anyhow::anyhow!("failed to read plugin module: {error}"))?;
+            (source, path.display().to_string())
+        }
+        ResolvedPythonEntry::Bundle { entry_source, modules, path } => {
+            embedded_modules.extend(modules.clone());
+            (entry_source.clone(), path.display().to_string())
+        }
+    };
+    interpreter::init(embedded_modules)?;
     let params_json = serde_json::to_string(&request.params)?;
     let timeout_secs = PYTHON_EXECUTION_TIMEOUT.as_secs();
-    let origin = module_path.display().to_string();
 
     Python::attach(|py| {
         let namespace = PyDict::new(py);

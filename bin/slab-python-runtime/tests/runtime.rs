@@ -2,6 +2,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 
+use base64::Engine as _;
 use serde_json::{Value, json};
 use slab_python_runtime::{PythonRuntime, PythonRuntimeConfig, RuntimeHost};
 use slab_types::{
@@ -120,12 +121,75 @@ def blocked_socket(params):
     assert_stdio_json_rpc(temp.path());
 }
 
+#[tokio::test]
+async fn executes_slabpy_bundle_with_embedded_modules() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("python")).unwrap();
+    write_bundle(
+        &temp.path().join("python/backend.slabpy"),
+        json!({
+            "format": "slab.python.bundle.v1",
+            "entryModule": "plugin",
+            "nativeExtensions": [],
+            "modules": [
+                {
+                    "name": "plugin",
+                    "isPackage": false,
+                    "sourceBase64": encode_source(
+                        "import slab\nfrom helper import inc\n\ndef run(params):\n    api = slab.api.request('GET', '/v1/models')\n    slab.ui.emit('bundled.done', {'value': params['value']})\n    return {'value': inc(params['value']), 'api': api['body']}\n"
+                    )
+                },
+                {
+                    "name": "helper",
+                    "isPackage": false,
+                    "sourceBase64": encode_source("def inc(value):\n    return value + 1\n")
+                }
+            ]
+        }),
+    );
+
+    let host = Arc::new(RecordingHost::default());
+    let runtime =
+        PythonRuntime::with_config(PythonRuntimeConfig { host, ..PythonRuntimeConfig::default() });
+    let mut request = request(temp.path(), "run", json!({ "value": 4 }));
+    request.entry = "python/plugin.py".to_owned();
+    request.bundle = Some("python/backend.slabpy".to_owned());
+
+    let response = runtime.call(request).await.unwrap();
+
+    assert_eq!(response.result, json!({ "value": 5, "api": "GET /v1/models" }));
+}
+
+#[tokio::test]
+async fn rejects_python_bundle_with_native_extensions() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("python")).unwrap();
+    write_bundle(
+        &temp.path().join("python/backend.slabpy"),
+        json!({
+            "format": "slab.python.bundle.v1",
+            "entryModule": "plugin",
+            "nativeExtensions": ["native.pyd"],
+            "modules": []
+        }),
+    );
+
+    let runtime = PythonRuntime::new();
+    let mut request = request(temp.path(), "run", Value::Null);
+    request.entry = "python/plugin.py".to_owned();
+    request.bundle = Some("python/backend.slabpy".to_owned());
+    let error = runtime.call(request).await.unwrap_err().to_string();
+
+    assert!(error.contains("unsupported native extensions"));
+}
+
 fn request(root: &std::path::Path, export_name: &str, params: Value) -> PluginRuntimeCallRequest {
     PluginRuntimeCallRequest {
         call_id: format!("call-{export_name}"),
         plugin_id: "test.plugin".to_owned(),
         root_dir: root.to_string_lossy().into_owned(),
         entry: "plugin.py".to_owned(),
+        bundle: None,
         export_name: export_name.to_owned(),
         params,
         permissions: PluginPermissionsManifest::default(),
@@ -181,4 +245,12 @@ def run(params):
 
     let _ = child.kill();
     let _ = child.wait();
+}
+
+fn encode_source(source: &str) -> String {
+    base64::engine::general_purpose::STANDARD.encode(source.as_bytes())
+}
+
+fn write_bundle(path: &std::path::Path, bundle: Value) {
+    std::fs::write(path, serde_json::to_string(&bundle).unwrap()).unwrap();
 }

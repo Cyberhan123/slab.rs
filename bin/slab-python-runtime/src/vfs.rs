@@ -1,9 +1,8 @@
-//! Virtual filesystem for statically embedded Python source modules.
+//! Virtual filesystem for embedded Python source modules.
 //!
-//! `EmbeddedStdlib` maps fully-qualified Python module names to source bytes
-//! bundled with `include_bytes!`. At interpreter startup, [`register`] injects
-//! a `sys.meta_path` finder so embedded modules and packages can load before
-//! the real filesystem.
+//! `EmbeddedStdlib` maps fully-qualified Python module names to source bytes.
+//! At interpreter startup, [`register`] injects a `sys.meta_path` finder so
+//! embedded modules and packages can load before the real filesystem.
 
 use std::collections::HashMap;
 use std::ffi::CString;
@@ -11,16 +10,16 @@ use std::ffi::CString;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct EmbeddedModule {
-    source: &'static [u8],
+    source: Vec<u8>,
     is_package: bool,
 }
 
-/// A static map of fully-qualified Python module names to source bytes.
+/// A map of fully-qualified Python module names to embedded source bytes.
 #[derive(Clone, Default)]
 pub struct EmbeddedStdlib {
-    modules: HashMap<&'static str, EmbeddedModule>,
+    modules: HashMap<String, EmbeddedModule>,
 }
 
 impl EmbeddedStdlib {
@@ -31,13 +30,29 @@ impl EmbeddedStdlib {
 
     /// Register a non-package module by its fully-qualified name.
     pub fn add_module(&mut self, name: &'static str, source: &'static [u8]) -> &mut Self {
+        self.add_owned_module(name.to_owned(), source.to_vec())
+    }
+
+    /// Register a non-package module from owned source bytes.
+    pub fn add_owned_module(&mut self, name: String, source: Vec<u8>) -> &mut Self {
         self.modules.insert(name, EmbeddedModule { source, is_package: false });
         self
     }
 
     /// Register a package `__init__.py` by its fully-qualified package name.
     pub fn add_package(&mut self, name: &'static str, source: &'static [u8]) -> &mut Self {
+        self.add_owned_package(name.to_owned(), source.to_vec())
+    }
+
+    /// Register a package `__init__.py` from owned source bytes.
+    pub fn add_owned_package(&mut self, name: String, source: Vec<u8>) -> &mut Self {
         self.modules.insert(name, EmbeddedModule { source, is_package: true });
+        self
+    }
+
+    /// Merge another embedded source map into this one.
+    pub fn extend(&mut self, other: EmbeddedStdlib) -> &mut Self {
+        self.modules.extend(other.modules);
         self
     }
 }
@@ -46,7 +61,7 @@ impl EmbeddedStdlib {
 pub fn register(py: Python<'_>, stdlib: &EmbeddedStdlib) -> PyResult<()> {
     let py_modules = PyDict::new(py);
     for (name, module) in &stdlib.modules {
-        py_modules.set_item(*name, (PyBytes::new(py, module.source), module.is_package))?;
+        py_modules.set_item(name, (PyBytes::new(py, &module.source), module.is_package))?;
     }
 
     let setup = r#"import sys
@@ -118,7 +133,7 @@ if _slab_finder is None:
     _slab_finder._slab_embedded_finder = True
     sys.meta_path.insert(0, _slab_finder)
 else:
-    _slab_finder._modules = _slab_embedded_modules
+    _slab_finder._modules.update(_slab_embedded_modules)
 del _slab_finder
 "#;
 

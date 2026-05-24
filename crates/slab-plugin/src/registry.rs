@@ -7,7 +7,9 @@ use std::sync::RwLock;
 use percent_encoding::percent_decode_str;
 use sha2::{Digest, Sha256};
 
-use crate::types::{LoadedPlugin, PluginInfo, PluginManifest, PluginNetworkMode};
+use crate::types::{
+    LoadedPlugin, PluginInfo, PluginLanguageServerTransport, PluginManifest, PluginNetworkMode,
+};
 
 const IGNORED_PLUGIN_ROOT_NAMES: &[&str] = &["dist", ".git", "node_modules"];
 
@@ -241,23 +243,11 @@ fn validate_and_load_plugin(
         ));
     }
 
-    let mut files_sha256 = HashMap::new();
-    for (raw_path, expected_hash) in &manifest.integrity.files_sha256 {
-        let normalized_path = normalize_relative_path(raw_path)?;
-        let file_path = plugin_dir.join(&normalized_path);
-        if !file_path.is_file() {
-            return Err(format!("integrity target `{normalized_path}` does not exist as a file"));
-        }
-
-        let computed_hash = compute_file_sha256(&file_path)?;
-        if !expected_hash.eq_ignore_ascii_case(&computed_hash) {
-            return Err(format!(
-                "integrity mismatch on `{normalized_path}`: expected {expected_hash}, got {computed_hash}"
-            ));
-        }
-
-        files_sha256.insert(normalized_path, expected_hash.to_ascii_lowercase());
-    }
+    let files_sha256 = if manifest.integrity.files_sha256.is_empty() {
+        compute_development_files_sha256(plugin_dir, &manifest)?
+    } else {
+        validate_integrity_files(plugin_dir, &manifest.integrity.files_sha256)?
+    };
 
     let ui_entry = validate_declared_file(
         plugin_dir,
@@ -285,14 +275,28 @@ fn validate_and_load_plugin(
     };
     let python_entry_path = match manifest.runtime.python.as_ref() {
         Some(python) => {
-            let (entry, path) = validate_declared_file(
-                plugin_dir,
-                &files_sha256,
-                &python.entry,
-                "runtime.python.entry",
-            )?;
+            let entry = normalize_relative_path(&python.entry)?;
             validate_python_entry_extension(&entry)?;
-            Some(path)
+            if let Some(bundle) = &python.bundle {
+                let (bundle, path) = validate_declared_file(
+                    plugin_dir,
+                    &files_sha256,
+                    bundle,
+                    "runtime.python.bundle",
+                )?;
+                validate_python_bundle_extension(&bundle)?;
+                Some(path)
+            } else {
+                Some(
+                    validate_declared_file(
+                        plugin_dir,
+                        &files_sha256,
+                        &python.entry,
+                        "runtime.python.entry",
+                    )?
+                    .1,
+                )
+            }
         }
         None => None,
     };
@@ -305,6 +309,109 @@ fn validate_and_load_plugin(
         js_entry_path,
         python_entry_path,
         files_sha256,
+    })
+}
+
+fn validate_integrity_files(
+    plugin_dir: &Path,
+    declared_files: &HashMap<String, String>,
+) -> Result<HashMap<String, String>, String> {
+    let mut files_sha256 = HashMap::new();
+    for (raw_path, expected_hash) in declared_files {
+        let normalized_path = normalize_relative_path(raw_path)?;
+        let file_path = plugin_dir.join(&normalized_path);
+        if !file_path.is_file() {
+            return Err(format!("integrity target `{normalized_path}` does not exist as a file"));
+        }
+
+        let computed_hash = compute_file_sha256(&file_path)?;
+        if !expected_hash.eq_ignore_ascii_case(&computed_hash) {
+            return Err(format!(
+                "integrity mismatch on `{normalized_path}`: expected {expected_hash}, got {computed_hash}"
+            ));
+        }
+
+        files_sha256.insert(normalized_path, expected_hash.to_ascii_lowercase());
+    }
+    Ok(files_sha256)
+}
+
+fn compute_development_files_sha256(
+    plugin_dir: &Path,
+    manifest: &PluginManifest,
+) -> Result<HashMap<String, String>, String> {
+    let mut paths = Vec::new();
+    collect_directory_files(plugin_dir, "ui", &mut paths)?;
+    collect_directory_files(plugin_dir, "schemas", &mut paths)?;
+    paths.push(manifest.runtime.ui.entry.clone());
+    if let Some(wasm) = &manifest.runtime.wasm {
+        paths.push(wasm.entry.clone());
+    }
+    if let Some(js) = &manifest.runtime.js {
+        paths.push(js.entry.clone());
+    }
+    if let Some(python) = &manifest.runtime.python {
+        if let Some(bundle) = &python.bundle {
+            paths.push(bundle.clone());
+        } else {
+            paths.push(python.entry.clone());
+        }
+    }
+    if has_node_package_language_server(manifest) && plugin_dir.join("package.json").is_file() {
+        paths.push("package.json".to_owned());
+    }
+
+    paths.sort();
+    paths.dedup();
+
+    let mut files_sha256 = HashMap::new();
+    for raw_path in paths {
+        let normalized_path = normalize_relative_path(&raw_path)?;
+        let file_path = plugin_dir.join(&normalized_path);
+        if file_path.is_file() {
+            files_sha256.insert(normalized_path, compute_file_sha256(&file_path)?);
+        }
+    }
+    Ok(files_sha256)
+}
+
+fn collect_directory_files(
+    plugin_dir: &Path,
+    relative_dir: &str,
+    output: &mut Vec<String>,
+) -> Result<(), String> {
+    let root = plugin_dir.join(relative_dir);
+    if !root.is_dir() {
+        return Ok(());
+    }
+    collect_directory_files_inner(plugin_dir, &root, output)
+}
+
+fn collect_directory_files_inner(
+    plugin_dir: &Path,
+    current_dir: &Path,
+    output: &mut Vec<String>,
+) -> Result<(), String> {
+    for entry in fs::read_dir(current_dir)
+        .map_err(|error| format!("failed to scan {}: {error}", current_dir.display()))?
+    {
+        let entry = entry.map_err(|error| format!("failed to read plugin file entry: {error}"))?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_directory_files_inner(plugin_dir, &path, output)?;
+        } else if path.is_file() {
+            let relative_path = path
+                .strip_prefix(plugin_dir)
+                .map_err(|error| format!("failed to relativize {}: {error}", path.display()))?;
+            output.push(relative_path.to_string_lossy().replace('\\', "/"));
+        }
+    }
+    Ok(())
+}
+
+fn has_node_package_language_server(manifest: &PluginManifest) -> bool {
+    manifest.contributes.language_servers.iter().any(|provider| {
+        matches!(&provider.transport, PluginLanguageServerTransport::NodePackage { .. })
     })
 }
 
@@ -349,6 +456,18 @@ fn validate_python_entry_extension(entry: &str) -> Result<(), String> {
         return Ok(());
     }
     Err("runtime.python.entry must use .py".to_owned())
+}
+
+fn validate_python_bundle_extension(entry: &str) -> Result<(), String> {
+    let extension = Path::new(entry)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if extension == "slabpy" {
+        return Ok(());
+    }
+    Err("runtime.python.bundle must use .slabpy".to_owned())
 }
 
 fn compute_file_sha256(path: &Path) -> Result<String, String> {

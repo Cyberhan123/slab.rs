@@ -343,6 +343,7 @@ impl PluginService {
                 plugin_id: plugin_id.to_owned(),
                 root_dir: plugin.root_dir.to_string_lossy().into_owned(),
                 entry: js_entry.entry.clone(),
+                bundle: None,
                 export_name: method.to_owned(),
                 params,
                 permissions: plugin.manifest.permissions.clone(),
@@ -363,6 +364,7 @@ impl PluginService {
                 plugin_id: plugin_id.to_owned(),
                 root_dir: plugin.root_dir.to_string_lossy().into_owned(),
                 entry: python_entry.entry.clone(),
+                bundle: python_entry.bundle.clone(),
                 export_name: method.to_owned(),
                 params,
                 permissions: plugin.manifest.permissions.clone(),
@@ -722,7 +724,7 @@ fn scan_plugin_dir(
         }
     };
     let plugin_id = manifest.id.clone();
-    if let Err(error) = validate_plugin_manifest(root_dir, &manifest) {
+    if let Err(error) = validate_plugin_manifest(root_dir, &manifest, default_source_kind) {
         return Ok(ScannedPlugin {
             id: plugin_id,
             root_dir: root_dir.to_path_buf(),
@@ -745,7 +747,11 @@ fn scan_plugin_dir(
     Ok(scanned)
 }
 
-fn validate_plugin_manifest(root_dir: &Path, manifest: &PluginManifest) -> Result<(), String> {
+fn validate_plugin_manifest(
+    root_dir: &Path,
+    manifest: &PluginManifest,
+    source_kind: &str,
+) -> Result<(), String> {
     if !is_valid_plugin_id(&manifest.id) {
         return Err(format!(
             "invalid plugin id `{}`: use lowercase letters, numbers, '-' or '_' and length 2..64",
@@ -769,6 +775,7 @@ fn validate_plugin_manifest(root_dir: &Path, manifest: &PluginManifest) -> Resul
         &manifest.integrity.files_sha256,
         &manifest.runtime.ui.entry,
         "runtime.ui.entry",
+        source_kind,
     )?;
     if let Some(wasm) = &manifest.runtime.wasm {
         validate_declared_file(
@@ -776,6 +783,7 @@ fn validate_plugin_manifest(root_dir: &Path, manifest: &PluginManifest) -> Resul
             &manifest.integrity.files_sha256,
             &wasm.entry,
             "runtime.wasm.entry",
+            source_kind,
         )?;
     }
     if let Some(js) = &manifest.runtime.js {
@@ -784,17 +792,31 @@ fn validate_plugin_manifest(root_dir: &Path, manifest: &PluginManifest) -> Resul
             &manifest.integrity.files_sha256,
             &js.entry,
             "runtime.js.entry",
+            source_kind,
         )?;
         validate_js_entry_extension(&entry)?;
     }
     if let Some(python) = &manifest.runtime.python {
-        let entry = validate_declared_file(
-            root_dir,
-            &manifest.integrity.files_sha256,
-            &python.entry,
-            "runtime.python.entry",
-        )?;
+        let entry = normalize_relative_path(&python.entry)?;
         validate_python_entry_extension(&entry)?;
+        if let Some(bundle) = &python.bundle {
+            let bundle = validate_declared_file(
+                root_dir,
+                &manifest.integrity.files_sha256,
+                bundle,
+                "runtime.python.bundle",
+                source_kind,
+            )?;
+            validate_python_bundle_extension(&bundle)?;
+        } else {
+            validate_declared_file(
+                root_dir,
+                &manifest.integrity.files_sha256,
+                &python.entry,
+                "runtime.python.entry",
+                source_kind,
+            )?;
+        }
     }
 
     if manifest.permissions.network.mode == PluginNetworkMode::Blocked
@@ -803,11 +825,15 @@ fn validate_plugin_manifest(root_dir: &Path, manifest: &PluginManifest) -> Resul
         return Err("permissions.network.allowHosts must be empty when mode is blocked".to_owned());
     }
 
-    validate_contributions(root_dir, manifest)?;
+    validate_contributions(root_dir, manifest, source_kind)?;
     Ok(())
 }
 
-fn validate_contributions(root_dir: &Path, manifest: &PluginManifest) -> Result<(), String> {
+fn validate_contributions(
+    root_dir: &Path,
+    manifest: &PluginManifest,
+    source_kind: &str,
+) -> Result<(), String> {
     validate_duplicate_ids(
         "contributes.routes",
         manifest.contributes.routes.iter().map(|route| &route.id),
@@ -881,16 +907,16 @@ fn validate_contributions(root_dir: &Path, manifest: &PluginManifest) -> Result<
     let path_prefix = format!("/plugins/{}", manifest.id);
 
     for route in &manifest.contributes.routes {
-        validate_route(root_dir, route, manifest, &path_prefix)?;
+        validate_route(root_dir, route, manifest, &path_prefix, source_kind)?;
     }
     for command in &manifest.contributes.commands {
         validate_command(command, &route_ids)?;
     }
     for setting in &manifest.contributes.settings {
-        validate_setting(root_dir, setting, manifest)?;
+        validate_setting(root_dir, setting, manifest, source_kind)?;
     }
     for capability in &manifest.contributes.agent_capabilities {
-        validate_agent_capability(root_dir, capability, manifest)?;
+        validate_agent_capability(root_dir, capability, manifest, source_kind)?;
     }
     for provider in &manifest.contributes.language_servers {
         validate_language_server(provider)?;
@@ -907,6 +933,7 @@ fn validate_route(
     route: &PluginRouteContribution,
     manifest: &PluginManifest,
     path_prefix: &str,
+    source_kind: &str,
 ) -> Result<(), String> {
     if !(route.path == *path_prefix || route.path.starts_with(&format!("{path_prefix}/"))) {
         return Err(format!("route `{}` must use a path inside `{path_prefix}`", route.id));
@@ -917,6 +944,7 @@ fn validate_route(
             &manifest.integrity.files_sha256,
             entry,
             "contributes.routes[].entry",
+            source_kind,
         )?;
     }
     Ok(())
@@ -956,12 +984,14 @@ fn validate_setting(
     root_dir: &Path,
     setting: &PluginSettingsContribution,
     manifest: &PluginManifest,
+    source_kind: &str,
 ) -> Result<(), String> {
     validate_declared_file(
         root_dir,
         &manifest.integrity.files_sha256,
         &setting.schema,
         "contributes.settings[].schema",
+        source_kind,
     )?;
     Ok(())
 }
@@ -970,6 +1000,7 @@ fn validate_agent_capability(
     root_dir: &Path,
     capability: &PluginAgentCapabilityContribution,
     manifest: &PluginManifest,
+    source_kind: &str,
 ) -> Result<(), String> {
     if let Some(input_schema) = &capability.input_schema {
         validate_declared_file(
@@ -977,6 +1008,7 @@ fn validate_agent_capability(
             &manifest.integrity.files_sha256,
             input_schema,
             "contributes.agentCapabilities[].inputSchema",
+            source_kind,
         )?;
     }
     if let Some(output_schema) = &capability.output_schema {
@@ -985,6 +1017,7 @@ fn validate_agent_capability(
             &manifest.integrity.files_sha256,
             output_schema,
             "contributes.agentCapabilities[].outputSchema",
+            source_kind,
         )?;
     }
     if capability.expose_as_mcp_tool {
@@ -1093,21 +1126,24 @@ fn validate_declared_file(
     files_sha256: &HashMap<String, String>,
     raw_path: &str,
     context: &str,
+    source_kind: &str,
 ) -> Result<String, String> {
     let normalized_path = normalize_relative_path(raw_path)?;
-    let expected_hash = files_sha256.get(&normalized_path).ok_or_else(|| {
-        format!("{context} `{normalized_path}` is missing from integrity.filesSha256")
-    })?;
     let file_path = root_dir.join(&normalized_path);
     if !file_path.is_file() {
         return Err(format!("{context} `{normalized_path}` does not exist on disk"));
     }
-    let actual_hash = hash_file_hex(&file_path)
-        .map_err(|error| format!("failed to hash `{normalized_path}`: {error}"))?;
-    if actual_hash != *expected_hash {
-        return Err(format!(
-            "integrity.filesSha256 mismatch for `{normalized_path}`: expected {expected_hash}, got {actual_hash}"
-        ));
+    if source_kind != SOURCE_KIND_DEV {
+        let expected_hash = files_sha256.get(&normalized_path).ok_or_else(|| {
+            format!("{context} `{normalized_path}` is missing from integrity.filesSha256")
+        })?;
+        let actual_hash = hash_file_hex(&file_path)
+            .map_err(|error| format!("failed to hash `{normalized_path}`: {error}"))?;
+        if actual_hash != *expected_hash {
+            return Err(format!(
+                "integrity.filesSha256 mismatch for `{normalized_path}`: expected {expected_hash}, got {actual_hash}"
+            ));
+        }
     }
     Ok(normalized_path)
 }
@@ -1134,6 +1170,18 @@ fn validate_python_entry_extension(entry: &str) -> Result<(), String> {
         return Ok(());
     }
     Err("runtime.python.entry must use .py".to_owned())
+}
+
+fn validate_python_bundle_extension(entry: &str) -> Result<(), String> {
+    let extension = Path::new(entry)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if extension == "slabpy" {
+        return Ok(());
+    }
+    Err("runtime.python.bundle must use .slabpy".to_owned())
 }
 
 fn normalize_relative_path(raw: &str) -> Result<String, String> {
@@ -1407,7 +1455,8 @@ fn ensure_path_within(path: &Path, root: &Path) -> Result<(), AppCoreError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        hash_bytes_hex, locate_plugin_root, normalize_relative_path, scan_plugin_dir, scan_plugins,
+        SOURCE_KIND_IMPORT_PACK, hash_bytes_hex, locate_plugin_root, normalize_relative_path,
+        scan_plugin_dir, scan_plugins,
     };
     use serde_json::json;
     use std::fs;
@@ -1455,6 +1504,55 @@ mod tests {
     }
 
     #[test]
+    fn scan_plugin_dir_accepts_dev_manifest_without_integrity() {
+        let root = temp_dir("scan-dev-without-integrity");
+        let plugin_root = root.join("example-plugin");
+        write(&plugin_root.join("ui/index.html"), "<html></html>");
+        write(
+            &plugin_root.join("plugin.json"),
+            &serde_json::to_string_pretty(&json!({
+                "manifestVersion": 1,
+                "id": "example-plugin",
+                "name": "Example Plugin",
+                "version": "0.1.0",
+                "runtime": { "ui": { "entry": "ui/index.html" } },
+                "permissions": { "network": { "mode": "blocked", "allowHosts": [] } }
+            }))
+            .expect("manifest json"),
+        );
+
+        let scanned = scan_plugin_dir(&plugin_root, "dev").expect("scan plugin");
+
+        assert!(scanned.valid, "{:?}", scanned.error);
+    }
+
+    #[test]
+    fn scan_plugin_dir_rejects_pack_manifest_without_integrity() {
+        let root = temp_dir("scan-pack-without-integrity");
+        let plugin_root = root.join("example-plugin");
+        write(&plugin_root.join("ui/index.html"), "<html></html>");
+        write(
+            &plugin_root.join("plugin.json"),
+            &serde_json::to_string_pretty(&json!({
+                "manifestVersion": 1,
+                "id": "example-plugin",
+                "name": "Example Plugin",
+                "version": "0.1.0",
+                "runtime": { "ui": { "entry": "ui/index.html" } },
+                "permissions": { "network": { "mode": "blocked", "allowHosts": [] } }
+            }))
+            .expect("manifest json"),
+        );
+
+        let scanned = scan_plugin_dir(&plugin_root, SOURCE_KIND_IMPORT_PACK).expect("scan plugin");
+
+        assert!(!scanned.valid);
+        assert!(
+            scanned.error.as_deref().expect("validation error").contains("integrity.filesSha256")
+        );
+    }
+
+    #[test]
     fn scan_plugin_dir_accepts_python_backend_entry() {
         let root = temp_dir("scan-python");
         let plugin_root = root.join("python-plugin");
@@ -1488,6 +1586,44 @@ mod tests {
 
         assert!(scanned.valid);
         assert!(scanned.manifest.unwrap().runtime.python.is_some());
+    }
+
+    #[test]
+    fn scan_plugin_dir_accepts_pack_python_bundle_without_source_entry() {
+        let root = temp_dir("scan-python-bundle");
+        let plugin_root = root.join("python-plugin");
+        write(&plugin_root.join("ui/index.html"), "<html></html>");
+        write(&plugin_root.join("python/backend.slabpy"), "{}");
+        let html_hash = hash_bytes_hex(b"<html></html>");
+        let bundle_hash = hash_bytes_hex(b"{}");
+        write(
+            &plugin_root.join("plugin.json"),
+            &serde_json::to_string_pretty(&json!({
+                "manifestVersion": 1,
+                "id": "python-plugin",
+                "name": "Python Plugin",
+                "version": "0.1.0",
+                "runtime": {
+                    "ui": { "entry": "ui/index.html" },
+                    "python": {
+                        "entry": "python/plugin.py",
+                        "bundle": "python/backend.slabpy"
+                    }
+                },
+                "integrity": {
+                    "filesSha256": {
+                        "ui/index.html": html_hash,
+                        "python/backend.slabpy": bundle_hash
+                    }
+                },
+                "permissions": { "network": { "mode": "blocked", "allowHosts": [] } }
+            }))
+            .expect("manifest json"),
+        );
+
+        let scanned = scan_plugin_dir(&plugin_root, SOURCE_KIND_IMPORT_PACK).expect("scan plugin");
+
+        assert!(scanned.valid, "{:?}", scanned.error);
     }
 
     #[test]

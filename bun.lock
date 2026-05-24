@@ -239,6 +239,7 @@
       "devDependencies": {
         "@types/bun": "catalog:",
         "@types/node": "catalog:",
+        "jszip": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
       },

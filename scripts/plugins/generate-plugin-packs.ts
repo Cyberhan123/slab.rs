@@ -1,17 +1,36 @@
-import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { deflateRawSync } from "node:zlib";
 
-import { updatePluginManifestIntegrity } from "../../packages/slab-plugin-sdk/src/integrity.ts";
+import { build as viteBuild } from "vite";
 
-type CliOptions = {
+import { computePluginIntegrity } from "../../packages/slab-plugin-sdk/src/integrity.ts";
+
+export type CliOptions = {
   outDir: string;
   pluginIds: Set<string>;
   pluginsDir: string;
 };
 
 type PluginManifest = {
+  contributes?: {
+    languageServers?: Array<{
+      transport?: {
+        type?: string;
+      };
+    }>;
+  };
   id: string;
   integrity?: {
     filesSha256?: Record<string, string>;
@@ -28,10 +47,24 @@ type PluginManifest = {
       entry?: unknown;
     };
     python?: {
+      bundle?: unknown;
       entry?: unknown;
     };
   };
   version: string;
+};
+
+type PythonBundle = {
+  entryModule: string;
+  format: "slab.python.bundle.v1";
+  modules: PythonBundleModule[];
+  nativeExtensions: string[];
+};
+
+type PythonBundleModule = {
+  isPackage: boolean;
+  name: string;
+  sourceBase64: string;
 };
 
 type ZipEntry = {
@@ -41,6 +74,7 @@ type ZipEntry = {
 
 const DEFAULT_OUT_DIR = "plugins/dist";
 const PACKAGE_EXTENSION = ".plugin.slab";
+const PYTHON_NATIVE_EXTENSIONS = new Set([".dll", ".dylib", ".pyd", ".so"]);
 const CRC32_TABLE = (() => {
   const table = new Uint32Array(256);
   for (let index = 0; index < 256; index += 1) {
@@ -56,26 +90,28 @@ const CRC32_TABLE = (() => {
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../..");
 
-const options = parseArgs(process.argv.slice(2));
-const pluginDirs = await discoverPluginDirs(options.pluginsDir, options.pluginIds);
-
-if (pluginDirs.length === 0) {
-  throw new Error(`No plugin manifests were found under ${options.pluginsDir}.`);
+if (isMainModule()) {
+  const archivePaths = await generatePluginPacks(parseArgs(process.argv.slice(2)));
+  console.log(`Generated ${archivePaths.length} plugin pack(s).`);
+  for (const archivePath of archivePaths) {
+    console.log(`- ${path.relative(repoRoot, archivePath)}`);
+  }
 }
 
-await rm(options.outDir, { force: true, recursive: true });
-await mkdir(options.outDir, { recursive: true });
+export async function generatePluginPacks(options: CliOptions): Promise<string[]> {
+  const pluginDirs = await discoverPluginDirs(options.pluginsDir, options.pluginIds);
 
-const archivePaths = await Promise.all(
-  pluginDirs.map(async (pluginDir) => packagePlugin(pluginDir, options.outDir)),
-);
+  if (pluginDirs.length === 0) {
+    throw new Error(`No plugin manifests were found under ${options.pluginsDir}.`);
+  }
 
-console.log(`Generated ${archivePaths.length} plugin pack(s).`);
-for (const archivePath of archivePaths) {
-  console.log(`- ${path.relative(repoRoot, archivePath)}`);
+  await rm(options.outDir, { force: true, recursive: true });
+  await mkdir(options.outDir, { recursive: true });
+
+  return Promise.all(pluginDirs.map((pluginDir) => packagePlugin(pluginDir, options.outDir)));
 }
 
-function parseArgs(argv: string[]): CliOptions {
+export function parseArgs(argv: string[]): CliOptions {
   const pluginIds = new Set<string>();
   let outDir = path.join(repoRoot, DEFAULT_OUT_DIR);
   let pluginsDir = path.join(repoRoot, "plugins");
@@ -153,59 +189,197 @@ async function discoverPluginDirs(
 }
 
 async function packagePlugin(pluginDir: string, outDir: string): Promise<string> {
-  await updatePluginManifestIntegrity(pluginDir);
+  const sourceManifestPath = path.join(pluginDir, "plugin.json");
+  const sourceManifest = JSON.parse(await readFile(sourceManifestPath, "utf8")) as PluginManifest;
+  validateManifest(sourceManifest, pluginDir);
 
-  const manifestPath = path.join(pluginDir, "plugin.json");
-  const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as PluginManifest;
+  const stagingRoot = await mkdtemp(path.join(os.tmpdir(), "slab-plugin-pack-"));
+  try {
+    const stagingPluginDir = path.join(stagingRoot, sourceManifest.id);
+    await mkdir(stagingPluginDir, { recursive: true });
 
-  validateManifest(manifest, pluginDir);
+    const packageManifest = JSON.parse(JSON.stringify(sourceManifest)) as PluginManifest;
+    delete packageManifest.integrity;
 
-  const runtimeEntries = [
-    manifest.runtime?.ui?.entry,
-    manifest.runtime?.wasm?.entry,
-    manifest.runtime?.js?.entry,
-    manifest.runtime?.python?.entry,
-  ].filter((entry): entry is string => typeof entry === "string");
-  await ensureRuntimeEntriesExist(pluginDir, runtimeEntries);
+    await stagePluginFiles(pluginDir, stagingPluginDir, packageManifest);
 
-  const fileMap = manifest.integrity?.filesSha256 ?? {};
-  const packageFiles = ["plugin.json", ...Object.keys(fileMap)].toSorted((left, right) =>
-    left.localeCompare(right),
-  );
+    const additionalFiles = runtimePackageFiles(packageManifest);
+    if (hasNodePackageLanguageServer(packageManifest)) {
+      additionalFiles.push("package.json");
+    }
+    const filesSha256 = await computePluginIntegrity(stagingPluginDir, additionalFiles);
+    packageManifest.integrity = { filesSha256 };
+    await writeFile(
+      path.join(stagingPluginDir, "plugin.json"),
+      `${JSON.stringify(packageManifest, null, 2)}\n`,
+      "utf8",
+    );
 
-  const archiveEntries = await Promise.all(
-    packageFiles.map(async (relativePath) => {
-      const absolutePath = path.join(pluginDir, fromPosix(relativePath));
-      if (!(await isFile(absolutePath))) {
-        throw new Error(
-          `Plugin '${manifest.id}' references a missing packaged file: ${relativePath}`,
-        );
-      }
+    const packageFiles = ["plugin.json", ...Object.keys(filesSha256)].toSorted((left, right) =>
+      left.localeCompare(right),
+    );
+    const archiveEntries = await Promise.all(
+      packageFiles.map(async (relativePath) => ({
+        bytes: new Uint8Array(await readFile(path.join(stagingPluginDir, fromPosix(relativePath)))),
+        path: toPosix(path.join(sourceManifest.id, relativePath)),
+      })),
+    );
 
-      return {
-        bytes: new Uint8Array(await readFile(absolutePath)),
-        path: toPosix(path.join(manifest.id, relativePath)),
-      };
-    }),
-  );
-
-  const archiveName = `${manifest.id}-${manifest.version}${PACKAGE_EXTENSION}`;
-  const archivePath = path.join(outDir, archiveName);
-  await writeFile(archivePath, createZipArchive(archiveEntries));
-  return archivePath;
+    const archiveName = `${sourceManifest.id}-${sourceManifest.version}${PACKAGE_EXTENSION}`;
+    const archivePath = path.join(outDir, archiveName);
+    await writeFile(archivePath, createZipArchive(archiveEntries));
+    return archivePath;
+  } finally {
+    await rm(stagingRoot, { force: true, recursive: true });
+  }
 }
 
-async function ensureRuntimeEntriesExist(pluginDir: string, runtimeEntries: string[]) {
-  await Promise.all(
-    runtimeEntries.map(async (relativePath) => {
-      const absolutePath = path.join(pluginDir, fromPosix(relativePath));
-      if (!(await isFile(absolutePath))) {
-        throw new Error(
-          `Plugin '${path.basename(pluginDir)}' is missing runtime asset '${relativePath}'.`,
-        );
-      }
-    }),
+async function stagePluginFiles(
+  sourcePluginDir: string,
+  stagingPluginDir: string,
+  manifest: PluginManifest,
+): Promise<void> {
+  const uiEntry = asString(manifest.runtime?.ui?.entry);
+  if (!uiEntry) {
+    throw new Error(`Plugin '${manifest.id}' is missing runtime.ui.entry.`);
+  }
+  await copyDirectoryIfExists(sourcePluginDir, stagingPluginDir, "ui");
+  await ensureStagedFile(stagingPluginDir, uiEntry, `runtime.ui.entry '${uiEntry}'`);
+
+  await copyDirectoryIfExists(sourcePluginDir, stagingPluginDir, "schemas");
+
+  const wasmEntry = asString(manifest.runtime?.wasm?.entry);
+  if (wasmEntry) {
+    await copyRuntimeFile(sourcePluginDir, stagingPluginDir, wasmEntry);
+  }
+
+  const jsEntry = asString(manifest.runtime?.js?.entry);
+  if (jsEntry) {
+    await stageJsBackend(sourcePluginDir, stagingPluginDir, manifest, jsEntry);
+  }
+
+  const pythonEntry = asString(manifest.runtime?.python?.entry);
+  if (pythonEntry) {
+    await stagePythonBackend(sourcePluginDir, stagingPluginDir, manifest, pythonEntry);
+  }
+
+  if (hasNodePackageLanguageServer(manifest)) {
+    await copyRuntimeFile(sourcePluginDir, stagingPluginDir, "package.json");
+  }
+}
+
+async function stageJsBackend(
+  sourcePluginDir: string,
+  stagingPluginDir: string,
+  manifest: PluginManifest,
+  jsEntry: string,
+): Promise<void> {
+  if (isPrebuiltJsEntry(jsEntry)) {
+    await copyRuntimeFile(sourcePluginDir, stagingPluginDir, jsEntry);
+    return;
+  }
+
+  const entryPath = path.join(sourcePluginDir, fromPosix(jsEntry));
+  if (!(await isFile(entryPath))) {
+    throw new Error(`Plugin '${manifest.id}' is missing JS backend entry '${jsEntry}'.`);
+  }
+
+  const outDir = path.join(stagingPluginDir, "dist");
+  await viteBuild({
+    build: {
+      emptyOutDir: true,
+      minify: false,
+      outDir,
+      rollupOptions: {
+        output: {
+          entryFileNames: "plugin.js",
+          format: "es",
+          inlineDynamicImports: true,
+        },
+      },
+      ssr: entryPath,
+      target: "esnext",
+    },
+    configFile: false,
+    logLevel: "warn",
+    root: sourcePluginDir,
+    ssr: {
+      noExternal: true,
+    },
+  });
+
+  if (!manifest.runtime?.js) {
+    throw new Error(`Plugin '${manifest.id}' has no runtime.js manifest section.`);
+  }
+  manifest.runtime.js.entry = "dist/plugin.js";
+  await ensureStagedFile(stagingPluginDir, "dist/plugin.js", "compiled JS backend");
+}
+
+async function stagePythonBackend(
+  sourcePluginDir: string,
+  stagingPluginDir: string,
+  manifest: PluginManifest,
+  pythonEntry: string,
+): Promise<void> {
+  if (!manifest.runtime?.python) {
+    throw new Error(`Plugin '${manifest.id}' has no runtime.python manifest section.`);
+  }
+
+  const configuredBundle = asString(manifest.runtime.python.bundle);
+  if (configuredBundle) {
+    await copyRuntimeFile(sourcePluginDir, stagingPluginDir, configuredBundle);
+    return;
+  }
+
+  const bundlePath = "python/backend.slabpy";
+  const bundle = await buildPythonBundle(sourcePluginDir, pythonEntry);
+  const absoluteBundlePath = path.join(stagingPluginDir, fromPosix(bundlePath));
+  await mkdir(path.dirname(absoluteBundlePath), { recursive: true });
+  await writeFile(absoluteBundlePath, `${JSON.stringify(bundle)}\n`, "utf8");
+  manifest.runtime.python.bundle = bundlePath;
+}
+
+async function buildPythonBundle(
+  sourcePluginDir: string,
+  pythonEntry: string,
+): Promise<PythonBundle> {
+  const entryPath = path.join(sourcePluginDir, fromPosix(pythonEntry));
+  if (!(await isFile(entryPath))) {
+    throw new Error(`Python backend entry '${pythonEntry}' does not exist.`);
+  }
+
+  const moduleRoot = path.dirname(entryPath);
+  const files = await collectFiles(moduleRoot);
+  const nativeExtensions = files
+    .filter((filePath) => PYTHON_NATIVE_EXTENSIONS.has(path.extname(filePath).toLowerCase()))
+    .map((filePath) => toPosix(path.relative(sourcePluginDir, filePath)))
+    .toSorted((left, right) => left.localeCompare(right));
+  if (nativeExtensions.length > 0) {
+    throw new Error(
+      `Python backend contains native extensions that cannot be bundled yet: ${nativeExtensions.join(
+        ", ",
+      )}`,
+    );
+  }
+
+  const modules = await Promise.all(
+    files
+      .filter((filePath) => path.extname(filePath).toLowerCase() === ".py")
+      .toSorted((left, right) => left.localeCompare(right))
+      .map(async (filePath) => ({
+        isPackage: path.basename(filePath) === "__init__.py",
+        name: pythonModuleName(moduleRoot, filePath),
+        sourceBase64: Buffer.from(await readFile(filePath)).toString("base64"),
+      })),
   );
+  const entryModule = pythonModuleName(moduleRoot, entryPath);
+
+  return {
+    entryModule,
+    format: "slab.python.bundle.v1",
+    modules,
+    nativeExtensions: [],
+  };
 }
 
 function validateManifest(manifest: PluginManifest, pluginDir: string): void {
@@ -220,12 +394,126 @@ function validateManifest(manifest: PluginManifest, pluginDir: string): void {
   }
 }
 
+function hasNodePackageLanguageServer(manifest: PluginManifest): boolean {
+  return (
+    manifest.contributes?.languageServers?.some(
+      (provider) => provider.transport?.type === "nodePackage",
+    ) ?? false
+  );
+}
+
+function runtimePackageFiles(manifest: PluginManifest): string[] {
+  const entries = [
+    asString(manifest.runtime?.ui?.entry),
+    asString(manifest.runtime?.wasm?.entry),
+    asString(manifest.runtime?.js?.entry),
+  ].filter((entry): entry is string => Boolean(entry));
+  const python = manifest.runtime?.python;
+  const pythonBundle = asString(python?.bundle);
+  const pythonEntry = asString(python?.entry);
+  if (pythonBundle) {
+    entries.push(pythonBundle);
+  } else if (pythonEntry) {
+    entries.push(pythonEntry);
+  }
+  return entries.map((entry) => entry.split(/[\\/]+/).join("/"));
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function isPrebuiltJsEntry(entry: string): boolean {
+  const normalized = entry.split(/[\\/]+/).join("/");
+  return normalized.startsWith("dist/") && /\.(mjs|js)$/i.test(normalized);
+}
+
+async function copyDirectoryIfExists(
+  sourceRoot: string,
+  destRoot: string,
+  relativeDir: string,
+): Promise<void> {
+  const sourceDir = path.join(sourceRoot, fromPosix(relativeDir));
+  if (!(await isDirectory(sourceDir))) {
+    return;
+  }
+
+  const files = await collectFiles(sourceDir);
+  await Promise.all(
+    files.map(async (sourcePath) => {
+      const relativePath = path.relative(sourceRoot, sourcePath);
+      const destPath = path.join(destRoot, relativePath);
+      await mkdir(path.dirname(destPath), { recursive: true });
+      await copyFile(sourcePath, destPath);
+    }),
+  );
+}
+
+async function copyRuntimeFile(
+  sourceRoot: string,
+  destRoot: string,
+  relativePath: string,
+): Promise<void> {
+  const sourcePath = path.join(sourceRoot, fromPosix(relativePath));
+  if (!(await isFile(sourcePath))) {
+    throw new Error(`Plugin asset '${relativePath}' does not exist.`);
+  }
+
+  const destPath = path.join(destRoot, fromPosix(relativePath));
+  await mkdir(path.dirname(destPath), { recursive: true });
+  await copyFile(sourcePath, destPath);
+}
+
+async function ensureStagedFile(root: string, relativePath: string, label: string): Promise<void> {
+  if (!(await isFile(path.join(root, fromPosix(relativePath))))) {
+    throw new Error(`${label} was not staged at '${relativePath}'.`);
+  }
+}
+
+async function collectFiles(root: string): Promise<string[]> {
+  const rows = await readdir(root, { withFileTypes: true });
+  const files = await Promise.all(
+    rows.map(async (row) => {
+      const absolutePath = path.join(root, row.name);
+      if (row.isDirectory()) {
+        return collectFiles(absolutePath);
+      }
+      if (row.isFile()) {
+        return [absolutePath];
+      }
+      return [];
+    }),
+  );
+  return files.flat();
+}
+
+function pythonModuleName(moduleRoot: string, filePath: string): string {
+  const relativePath = toPosix(path.relative(moduleRoot, filePath));
+  const withoutExtension = relativePath.replace(/\.py$/i, "");
+  const withoutInit = withoutExtension.endsWith("/__init__")
+    ? withoutExtension.slice(0, -"/__init__".length)
+    : withoutExtension;
+  const moduleName = withoutInit.split("/").filter(Boolean).join(".");
+  if (!moduleName) {
+    throw new Error(`Python module path '${relativePath}' cannot be bundled as a module.`);
+  }
+  return moduleName;
+}
+
 function fromPosix(relativePath: string): string {
   return relativePath.split("/").join(path.sep);
 }
 
 function toPosix(relativePath: string): string {
   return relativePath.split(path.sep).join("/");
+}
+
+async function isDirectory(filePath: string): Promise<boolean> {
+  try {
+    return (await stat(filePath)).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 async function isFile(filePath: string): Promise<boolean> {
@@ -306,4 +594,8 @@ function crc32(bytes: Uint8Array): number {
     crc = CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
   }
   return (crc ^ 0xffffffff) >>> 0;
+}
+
+function isMainModule(): boolean {
+  return Boolean(process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href);
 }

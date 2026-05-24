@@ -15102,6 +15102,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.22.1",
  "dashmap 6.2.1",
  "pyo3",
  "serde",

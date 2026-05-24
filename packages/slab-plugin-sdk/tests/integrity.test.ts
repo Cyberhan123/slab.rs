@@ -13,6 +13,7 @@ describe("plugin integrity", () => {
       await writePluginFile(root, "ui/assets/app.js", "console.log('plugin');");
       await writePluginFile(root, "schemas/input.schema.json", "{\"type\":\"object\"}");
       await writePluginFile(root, "wasm/plugin.wasm", "wasm");
+      await writePluginFile(root, "package.json", "{}");
       await writePluginFile(root, "src/ignored.ts", "ignored");
 
       const hashes = await computePluginIntegrity(root);
@@ -23,6 +24,7 @@ describe("plugin integrity", () => {
         "ui/index.html",
         "wasm/plugin.wasm",
       ]);
+      expect(hashes["package.json"]).toBeUndefined();
       expect(hashes["src/ignored.ts"]).toBeUndefined();
       expect(hashes["ui/index.html"]).toMatch(/^[a-f0-9]{64}$/);
     } finally {
@@ -51,6 +53,38 @@ describe("plugin integrity", () => {
 
       expect(Object.keys(manifest.integrity.filesSha256)).toEqual([
         "schemas/settings.schema.json",
+        "ui/index.html",
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("hashes python bundle instead of python source when a bundle is declared", async () => {
+    const root = await createTempPlugin("python-bundle");
+    try {
+      await writePluginFile(root, "ui/index.html", "<!doctype html>");
+      await writePluginFile(root, "python/plugin.py", "def run(params): return params");
+      await writePluginFile(root, "python/backend.slabpy", "{}");
+      await writeFile(
+        path.join(root, "plugin.json"),
+        JSON.stringify({
+          manifestVersion: 1,
+          id: "sample",
+          name: "Sample",
+          version: "0.1.0",
+          runtime: {
+            ui: { entry: "ui/index.html" },
+            python: { entry: "python/plugin.py", bundle: "python/backend.slabpy" },
+          },
+        }),
+      );
+
+      await updatePluginManifestIntegrity(root);
+      const manifest = JSON.parse(await readFile(path.join(root, "plugin.json"), "utf8"));
+
+      expect(Object.keys(manifest.integrity.filesSha256)).toEqual([
+        "python/backend.slabpy",
         "ui/index.html",
       ]);
     } finally {

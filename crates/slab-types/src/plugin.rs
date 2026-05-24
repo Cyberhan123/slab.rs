@@ -57,7 +57,7 @@ impl TryFrom<RawPluginManifest> for PluginManifest {
             version: raw.version,
             compatibility: raw.compatibility.unwrap_or_default(),
             runtime,
-            integrity: raw.integrity,
+            integrity: raw.integrity.unwrap_or_default(),
             contributes: raw.contributes.unwrap_or_default(),
             permissions,
         })
@@ -84,7 +84,8 @@ struct RawPluginManifest {
     js: Option<PluginJsManifest>,
     #[serde(default)]
     python: Option<PluginPythonManifest>,
-    integrity: PluginIntegrityManifest,
+    #[serde(default)]
+    integrity: Option<PluginIntegrityManifest>,
     #[serde(default)]
     contributes: Option<PluginContributesManifest>,
     #[serde(default)]
@@ -132,11 +133,14 @@ pub struct PluginJsManifest {
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 pub struct PluginPythonManifest {
     pub entry: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, ToSchema)]
 pub struct PluginIntegrityManifest {
     #[serde(rename = "filesSha256")]
+    #[serde(default)]
     pub files_sha256: HashMap<String, String>,
 }
 
@@ -359,4 +363,48 @@ pub struct PluginInfo {
     pub allow_hosts: Vec<String>,
     pub contributions: PluginContributesManifest,
     pub permissions: PluginPermissionsManifest,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::PluginManifest;
+
+    #[test]
+    fn manifest_integrity_defaults_to_empty_map() {
+        let manifest = serde_json::from_value::<PluginManifest>(json!({
+            "manifestVersion": 1,
+            "id": "dev-plugin",
+            "name": "Dev Plugin",
+            "version": "0.1.0",
+            "runtime": { "ui": { "entry": "ui/index.html" } }
+        }))
+        .expect("manifest should deserialize without integrity");
+
+        assert!(manifest.integrity.files_sha256.is_empty());
+    }
+
+    #[test]
+    fn python_runtime_accepts_bundle_path() {
+        let manifest = serde_json::from_value::<PluginManifest>(json!({
+            "manifestVersion": 1,
+            "id": "python-plugin",
+            "name": "Python Plugin",
+            "version": "0.1.0",
+            "runtime": {
+                "ui": { "entry": "ui/index.html" },
+                "python": {
+                    "entry": "python/plugin.py",
+                    "bundle": "python/backend.slabpy"
+                }
+            }
+        }))
+        .expect("manifest should deserialize with python bundle");
+
+        assert_eq!(
+            manifest.runtime.python.expect("python runtime").bundle.as_deref(),
+            Some("python/backend.slabpy")
+        );
+    }
 }
