@@ -60,7 +60,8 @@ pub use logging::GgmlLogLevel;
 pub use model_params::LlamaModelParams;
 pub use runtime::{
     LlamaInferenceOutput, LlamaInferenceParams, LlamaLoadConfig, LlamaLogitBias, LlamaRuntime,
-    LlamaRuntimeError, LlamaSessionSnapshot, LlamaStopInfo, SessionId, StreamChunk, StreamHandle,
+    LlamaRuntimeError, LlamaSamplingOptions, LlamaSessionSnapshot, LlamaStopInfo, SessionId,
+    StreamChunk, StreamHandle,
 };
 pub use token::{LlamaPos, LlamaSeqId, LlamaToken};
 

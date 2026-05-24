@@ -36,7 +36,7 @@ mod turn;
 mod tests;
 
 pub use config::AgentConfig;
-pub use control::AgentControl;
+pub use control::{AgentControl, AgentControlLimits};
 pub use error::AgentError;
 pub use hook::{AgentHook, HookEvent, HookOutcome};
 pub use port::{

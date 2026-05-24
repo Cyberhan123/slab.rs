@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use deno_core::{extension, Extension};
+use deno_core::{Extension, extension};
 use deno_resolver::npm::DenoInNpmPackageChecker;
 use resolvers::{RustyNpmPackageFolderResolver, RustyResolver};
 use sys_traits::impls::RealSys;
@@ -15,7 +15,7 @@ extension!(
     init_node,
     deps = [rustyscript],
     esm_entry_point = "ext:init_node/init_node.js",
-    esm = [ dir "src/ext/node", "init_node.js" ],
+    esm = [ dir "src/infra/deno/ext/node", "init_node.js" ],
 );
 impl ExtensionTrait<()> for init_node {
     fn init((): ()) -> Extension {
@@ -32,8 +32,5 @@ impl ExtensionTrait<Arc<RustyResolver>> for deno_node::deno_node {
 }
 
 pub fn extensions(resolver: Arc<RustyResolver>, is_snapshot: bool) -> Vec<Extension> {
-    vec![
-        deno_node::deno_node::build(resolver, is_snapshot),
-        init_node::build((), is_snapshot),
-    ]
+    vec![deno_node::deno_node::build(resolver, is_snapshot), init_node::build((), is_snapshot)]
 }

@@ -106,12 +106,12 @@ impl ToolHandler for GrepTool {
             let canonical_root = root.canonicalize().map_err(|e| {
                 AgentError::ToolExecution(format!("failed to canonicalize workspace root: {e}"))
             })?;
-            if let Ok(canonical_resolved) = resolved.canonicalize() {
-                if !canonical_resolved.starts_with(&canonical_root) {
-                    return Err(AgentError::ToolExecution(format!(
-                        "path '{path_str}' escapes the workspace root"
-                    )));
-                }
+            if let Ok(canonical_resolved) = resolved.canonicalize()
+                && !canonical_resolved.starts_with(&canonical_root)
+            {
+                return Err(AgentError::ToolExecution(format!(
+                    "path '{path_str}' escapes the workspace root"
+                )));
             }
             resolved
         } else {

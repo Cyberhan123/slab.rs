@@ -179,20 +179,17 @@ async fn wait_for_runtime_child_ready(
             return Ok(());
         }
 
-        match child.try_wait().map_err(|error| {
+        if let Some(status) = child.try_wait().map_err(|error| {
             AppCoreError::Internal(format!(
                 "failed to inspect runtime child '{}' startup state: {error}",
                 child_spec.backend.canonical_id()
             ))
         })? {
-            Some(status) => {
-                return Err(AppCoreError::Internal(format!(
-                    "runtime child '{}' exited before gRPC endpoint '{}' became ready: {status}",
-                    child_spec.backend.canonical_id(),
-                    child_spec.grpc_bind_address
-                )));
-            }
-            None => {}
+            return Err(AppCoreError::Internal(format!(
+                "runtime child '{}' exited before gRPC endpoint '{}' became ready: {status}",
+                child_spec.backend.canonical_id(),
+                child_spec.grpc_bind_address
+            )));
         }
 
         if started_at.elapsed() >= RUNTIME_CHILD_READY_TIMEOUT {

@@ -254,11 +254,7 @@ impl OpWhitelist {
 
     /// Get a list of all unsafe ops in a runtime
     pub fn unsafe_ops(&self, rt: &mut crate::Runtime) -> Vec<&str> {
-        rt.deno_runtime()
-            .op_names()
-            .into_iter()
-            .filter(|op| !self.contains_op(op))
-            .collect()
+        rt.deno_runtime().op_names().into_iter().filter(|op| !self.contains_op(op)).collect()
     }
 }
 

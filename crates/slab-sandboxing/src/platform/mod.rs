@@ -15,17 +15,17 @@ pub fn create_platform_driver(
 ) -> Result<Arc<dyn SandboxDriver>, SandboxError> {
     #[cfg(target_os = "windows")]
     {
-        return Ok(Arc::new(WindowsSandboxDriver::new(env)));
+        Ok(Arc::new(WindowsSandboxDriver::new(env)))
     }
 
     #[cfg(target_os = "linux")]
     {
-        return Ok(Arc::new(LinuxSandboxDriver::new(env)));
+        Ok(Arc::new(LinuxSandboxDriver::new(env)))
     }
 
     #[cfg(target_os = "macos")]
     {
-        return Ok(Arc::new(MacosSandboxDriver::new(env)));
+        Ok(Arc::new(MacosSandboxDriver::new(env)))
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]

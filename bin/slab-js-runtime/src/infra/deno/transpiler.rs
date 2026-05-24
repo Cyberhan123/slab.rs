@@ -53,13 +53,9 @@ pub fn transpile(
         })
         .map_err(|e| TranspileError::ParseErrors(ParseDiagnosticsError(vec![e])))?;
 
-        let transpile_options = deno_ast::TranspileOptions {
-            ..Default::default()
-        };
+        let transpile_options = deno_ast::TranspileOptions { ..Default::default() };
 
-        let transpile_mod_options = deno_ast::TranspileModuleOptions {
-            ..Default::default()
-        };
+        let transpile_mod_options = deno_ast::TranspileModuleOptions { ..Default::default() };
 
         let emit_options = deno_ast::EmitOptions {
             remove_comments: false,

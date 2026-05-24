@@ -1,7 +1,7 @@
 use crate::infra::backends::ggml;
 use slab_llama::{
     Llama, LlamaContextParams, LlamaInferenceOutput, LlamaLogitBias, LlamaModel, LlamaModelParams,
-    LlamaRuntime, LlamaSessionSnapshot, LlamaStopInfo,
+    LlamaRuntime, LlamaSamplingOptions, LlamaSessionSnapshot, LlamaStopInfo,
 };
 use slab_runtime_core::backend::{
     StreamChunk as BaseStreamChunk, StreamHandle as BaseStreamHandle,
@@ -475,19 +475,11 @@ impl GGMLLlamaEngine {
 
     async fn prepare_managed_session(
         &self,
-        session_key: Option<String>,
+        request: &LlamaDispatchRequest,
         full_prompt: String,
-        gbnf: Option<String>,
-        temperature: Option<f32>,
-        top_p: Option<f32>,
-        top_k: Option<i32>,
-        min_p: Option<f32>,
-        repetition_penalty: Option<f32>,
-        presence_penalty: Option<f32>,
-        ignore_eos: bool,
         logit_bias: &[LlamaLogitBias],
     ) -> Result<PreparedSession, ggml::EngineError> {
-        let Some(key) = session_key else {
+        let Some(key) = request.session_key.clone() else {
             return Ok(PreparedSession {
                 key: None,
                 sid: None,
@@ -501,27 +493,26 @@ impl GGMLLlamaEngine {
 
         {
             let mut bindings = self.session_bindings.lock().await;
-            plan = plan_session_reuse(&key, bindings.get(&key), &full_prompt, gbnf.as_deref())
+            plan = plan_session_reuse(&key, bindings.get(&key), &full_prompt, request.gbnf.as_deref())
                 .map_err(ggml::EngineError::from)?;
             bindings.insert(key.clone(), SessionBinding::Busy);
         }
 
+        let options = LlamaSamplingOptions {
+            gbnf: request.gbnf.clone(),
+            temperature: request.temperature,
+            top_p: request.top_p,
+            top_k: request.top_k,
+            min_p: request.min_p,
+            repetition_penalty: request.repetition_penalty,
+            presence_penalty: request.presence_penalty,
+            ignore_eos: request.ignore_eos,
+            logit_bias: logit_bias.to_vec(),
+        };
+
         let (sid, delta_prompt, cached_tokens) = match plan {
             SessionReusePlan::CreateFresh { delta_prompt, cached_tokens } => {
-                match self
-                    .create_session_with_options(
-                        gbnf.clone(),
-                        temperature,
-                        top_p,
-                        top_k,
-                        min_p,
-                        repetition_penalty,
-                        presence_penalty,
-                        ignore_eos,
-                        logit_bias.to_vec(),
-                    )
-                    .await
-                {
+                match self.create_session_with_options(options.clone()).await {
                     Ok(sid) => (Some(sid), delta_prompt, cached_tokens),
                     Err(error) => {
                         self.session_bindings.lock().await.remove(&key);
@@ -530,21 +521,7 @@ impl GGMLLlamaEngine {
                 }
             }
             SessionReusePlan::RestoreSnapshot { snapshot, delta_prompt, cached_tokens } => {
-                match self
-                    .create_session_from_snapshot(
-                        snapshot,
-                        gbnf.clone(),
-                        temperature,
-                        top_p,
-                        top_k,
-                        min_p,
-                        repetition_penalty,
-                        presence_penalty,
-                        ignore_eos,
-                        logit_bias.to_vec(),
-                    )
-                    .await
-                {
+                match self.create_session_from_snapshot(snapshot, options).await {
                     Ok(sid) => (Some(sid), delta_prompt, cached_tokens),
                     Err(error) => {
                         self.session_bindings.lock().await.remove(&key);
@@ -632,24 +609,11 @@ impl GGMLLlamaEngine {
         let prompt = request.prompt.clone();
         let max_tokens = request.max_tokens;
         let gbnf = request.gbnf.clone();
-        let session_key = request.session_key.clone();
         let commit_gbnf = request.gbnf.clone();
         let stop_sequences = request.stop_sequences.clone();
         let logit_bias = self.resolve_logit_bias(request.logit_bias.as_ref())?;
         let prepared = self
-            .prepare_managed_session(
-                session_key,
-                prompt,
-                gbnf.clone(),
-                request.temperature,
-                request.top_p,
-                request.top_k,
-                request.min_p,
-                request.repetition_penalty,
-                request.presence_penalty,
-                request.ignore_eos,
-                &logit_bias,
-            )
+            .prepare_managed_session(&request, prompt, &logit_bias)
             .await?;
 
         match self
@@ -710,24 +674,11 @@ impl GGMLLlamaEngine {
         let prompt = request.prompt.clone();
         let max_tokens = request.max_tokens;
         let gbnf = request.gbnf.clone();
-        let session_key = request.session_key.clone();
         let commit_gbnf = request.gbnf.clone();
         let stop_sequences = request.stop_sequences.clone();
         let logit_bias = self.resolve_logit_bias(request.logit_bias.as_ref())?;
         let prepared = self
-            .prepare_managed_session(
-                session_key,
-                prompt,
-                gbnf.clone(),
-                request.temperature,
-                request.top_p,
-                request.top_k,
-                request.min_p,
-                request.repetition_penalty,
-                request.presence_penalty,
-                request.ignore_eos,
-                &logit_bias,
-            )
+            .prepare_managed_session(&request, prompt, &logit_bias)
             .await?;
 
         let (mut llama_rx, sid) = match self
@@ -914,10 +865,12 @@ impl GGMLLlamaEngine {
 
             let effectively_completed = completed || stop_matched;
 
-            if effectively_completed && !forward_failed && !stream_error {
-                if forward_thinking_delta(&stream_tx, thinking_state.finish()).await.is_err() {
-                    forward_failed = true;
-                }
+            if effectively_completed
+                && !forward_failed
+                && !stream_error
+                && forward_thinking_delta(&stream_tx, thinking_state.finish()).await.is_err()
+            {
+                forward_failed = true;
             }
 
             if effectively_completed && !forward_failed && !stream_error && !cancelled {
@@ -991,29 +944,11 @@ impl GGMLLlamaEngine {
     /// Create a new session with optional GBNF and sampling overrides.
     pub async fn create_session_with_options(
         &self,
-        gbnf: Option<String>,
-        temperature: Option<f32>,
-        top_p: Option<f32>,
-        top_k: Option<i32>,
-        min_p: Option<f32>,
-        repetition_penalty: Option<f32>,
-        presence_penalty: Option<f32>,
-        ignore_eos: bool,
-        logit_bias: Vec<LlamaLogitBias>,
+        options: LlamaSamplingOptions,
     ) -> Result<SessionId, ggml::EngineError> {
         let engine = self.require_engine()?;
         engine
-            .create_session_with_options(
-                gbnf,
-                temperature,
-                top_p,
-                top_k,
-                min_p,
-                repetition_penalty,
-                presence_penalty,
-                ignore_eos,
-                logit_bias,
-            )
+            .create_session_with_options(options)
             .await
             .map_err(GGMLLlamaEngineError::from)
             .map_err(Into::into)
@@ -1022,30 +957,11 @@ impl GGMLLlamaEngine {
     async fn create_session_from_snapshot(
         &self,
         snapshot: LlamaSessionSnapshot,
-        gbnf: Option<String>,
-        temperature: Option<f32>,
-        top_p: Option<f32>,
-        top_k: Option<i32>,
-        min_p: Option<f32>,
-        repetition_penalty: Option<f32>,
-        presence_penalty: Option<f32>,
-        ignore_eos: bool,
-        logit_bias: Vec<LlamaLogitBias>,
+        options: LlamaSamplingOptions,
     ) -> Result<SessionId, ggml::EngineError> {
         let engine = self.require_engine()?;
         engine
-            .create_session_from_snapshot(
-                snapshot,
-                gbnf,
-                temperature,
-                top_p,
-                top_k,
-                min_p,
-                repetition_penalty,
-                presence_penalty,
-                ignore_eos,
-                logit_bias,
-            )
+            .create_session_from_snapshot(snapshot, options)
             .await
             .map_err(GGMLLlamaEngineError::from)
             .map_err(Into::into)
@@ -1137,17 +1053,12 @@ impl GGMLLlamaEngine {
         let sid = match session_id {
             Some(sid) => sid,
             None => {
-                self.create_session_with_options(
+                self.create_session_with_options(LlamaSamplingOptions {
                     gbnf,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
                     ignore_eos,
-                    logit_bias.to_vec(),
-                )
+                    logit_bias: logit_bias.to_vec(),
+                    ..LlamaSamplingOptions::default()
+                })
                 .await?
             }
         };
@@ -1225,17 +1136,12 @@ impl GGMLLlamaEngine {
         let sid = match session_id {
             Some(sid) => sid,
             None => {
-                self.create_session_with_options(
+                self.create_session_with_options(LlamaSamplingOptions {
                     gbnf,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
                     ignore_eos,
-                    logit_bias.to_vec(),
-                )
+                    logit_bias: logit_bias.to_vec(),
+                    ..LlamaSamplingOptions::default()
+                })
                 .await?
             }
         };

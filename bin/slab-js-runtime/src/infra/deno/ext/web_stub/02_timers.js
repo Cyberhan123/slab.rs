@@ -25,6 +25,8 @@ function opNow() {
   return (hr[0] * 1000 + hr[1] / 1e6);
 }
 
+const activeTimers = new Map();
+
 // ---------------------------------------------------------------------------
 
 function checkThis(thisArg) {
@@ -61,6 +63,7 @@ function setTimeout(callback, timeout = 0, ...args) {
   }
   const unboundCallback = callback;
   const asyncContext = getAsyncContext();
+  let timer;
   callback = () => {
     const oldContext = getAsyncContext();
     try {
@@ -68,15 +71,15 @@ function setTimeout(callback, timeout = 0, ...args) {
       ReflectApply(unboundCallback, globalThis, args);
     } finally {
       setAsyncContext(oldContext);
+      if (timer) {
+        activeTimers.delete(timer._timerId);
+      }
     }
   };
   timeout = webidl.converters.long(timeout);
-  return core.queueUserTimer(
-    core.getTimerDepth() + 1,
-    false,
-    timeout,
-    callback,
-  );
+  timer = core.createTimer(callback, timeout, undefined, false, true, false);
+  activeTimers.set(timer._timerId, timer);
+  return timer._timerId;
 }
 
 /**
@@ -100,12 +103,9 @@ function setInterval(callback, timeout = 0, ...args) {
     }
   };
   timeout = webidl.converters.long(timeout);
-  return core.queueUserTimer(
-    core.getTimerDepth() + 1,
-    true,
-    timeout,
-    callback,
-  );
+  const timer = core.createTimer(callback, timeout, undefined, true, true, false);
+  activeTimers.set(timer._timerId, timer);
+  return timer._timerId;
 }
 
 /**
@@ -114,7 +114,11 @@ function setInterval(callback, timeout = 0, ...args) {
 function clearTimeout(id = 0) {
   checkThis(this);
   id = webidl.converters.long(id);
-  core.cancelTimer(id);
+  const timer = activeTimers.get(id);
+  if (timer) {
+    core.cancelTimer(timer);
+    activeTimers.delete(id);
+  }
 }
 
 /**
@@ -123,21 +127,31 @@ function clearTimeout(id = 0) {
 function clearInterval(id = 0) {
   checkThis(this);
   id = webidl.converters.long(id);
-  core.cancelTimer(id);
+  const timer = activeTimers.get(id);
+  if (timer) {
+    core.cancelTimer(timer);
+    activeTimers.delete(id);
+  }
 }
 
 /**
  * Mark a timer as not blocking event loop exit.
  */
 function unrefTimer(id) {
-  core.unrefTimer(id);
+  const timer = typeof id === "number" ? activeTimers.get(id) : id;
+  if (timer) {
+    core.unrefTimer(timer);
+  }
 }
 
 /**
  * Mark a timer as blocking event loop exit.
  */
 function refTimer(id) {
-  core.refTimer(id);
+  const timer = typeof id === "number" ? activeTimers.get(id) : id;
+  if (timer) {
+    core.refTimer(timer);
+  }
 }
 
 // Defer to avoid starving the event loop. Not using queueMicrotask()

@@ -1,4 +1,4 @@
-use deno_core::{extension, Extension};
+use deno_core::{Extension, extension};
 
 use super::ExtensionTrait;
 
@@ -10,7 +10,7 @@ extension!(
     init_cache,
     deps = [rustyscript],
     esm_entry_point = "ext:init_cache/init_cache.js",
-    esm = [ dir "src/ext/cache", "init_cache.js" ],
+    esm = [ dir "src/infra/deno/ext/cache", "init_cache.js" ],
 );
 impl ExtensionTrait<()> for init_cache {
     fn init((): ()) -> Extension {
@@ -24,10 +24,7 @@ impl ExtensionTrait<Option<deno_cache::CreateCache>> for deno_cache::deno_cache 
 }
 
 pub fn extensions(options: Option<deno_cache::CreateCache>, is_snapshot: bool) -> Vec<Extension> {
-    vec![
-        deno_cache::deno_cache::build(options, is_snapshot),
-        init_cache::build((), is_snapshot),
-    ]
+    vec![deno_cache::deno_cache::build(options, is_snapshot), init_cache::build((), is_snapshot)]
 }
 
 /*

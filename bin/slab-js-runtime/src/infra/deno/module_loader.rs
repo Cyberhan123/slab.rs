@@ -4,7 +4,7 @@
 
 use std::{borrow::Cow, cell::RefCell, path::PathBuf, rc::Rc};
 
-use deno_core::{error::ModuleLoaderError, ModuleLoader, ModuleSpecifier};
+use deno_core::{ModuleLoader, ModuleSpecifier, error::ModuleLoaderError};
 
 mod inner_loader;
 use inner_loader::InnerRustyLoader;
@@ -142,9 +142,8 @@ mod test {
     #[tokio::test]
     async fn test_loader() {
         let mut cache_provider = MemoryModuleCacheProvider::default();
-        let specifier = "file:///test.ts"
-            .to_module_specifier(&std::env::current_dir().unwrap())
-            .unwrap();
+        let specifier =
+            "file:///test.ts".to_module_specifier(&std::env::current_dir().unwrap()).unwrap();
         let source = ModuleSource::new(
             ModuleType::JavaScript,
             ModuleSourceCode::String("console.log('Hello, World!')".to_string().into()),
@@ -153,9 +152,7 @@ mod test {
         );
 
         cache_provider.set(&specifier, source.clone(&specifier));
-        let cached_source = cache_provider
-            .get(&specifier)
-            .expect("Expected to get cached source");
+        let cached_source = cache_provider.get(&specifier).expect("Expected to get cached source");
 
         let loader = RustyLoader::new(LoaderOptions {
             cache_provider: Some(Box::new(cache_provider)),
@@ -206,9 +203,7 @@ mod test {
             match specifier.scheme() {
                 "test" => {
                     self.i += 1;
-                    Some(Ok(
-                        ModuleSpecifier::parse(&format!("test://{}", self.i)).unwrap()
-                    ))
+                    Some(Ok(ModuleSpecifier::parse(&format!("test://{}", self.i)).unwrap()))
                 }
                 _ => None,
             }
@@ -242,9 +237,7 @@ mod test {
         ];
 
         for expected in expected_responses {
-            let specifier = loader
-                .resolve("test://anything", "", ResolutionKind::Import)
-                .unwrap();
+            let specifier = loader.resolve("test://anything", "", ResolutionKind::Import).unwrap();
             let response = loader.load(
                 &specifier,
                 None,
@@ -269,7 +262,7 @@ mod test {
         }
     }
 
-    /// Test backward compatibility for ImportProvider trait
+    /// Test backward compatibility for `ImportProvider` trait.
     #[test]
     fn test_import_provider_backward_compat() {
         use deno_core::RequestedModuleType;

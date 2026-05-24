@@ -417,10 +417,9 @@ fn canonical_or_lexical(path: &Path) -> PathBuf {
     }
     if let Some(parent) = path.parent()
         && let Ok(parent) = dunce::canonicalize(parent)
+        && let Some(name) = path.file_name()
     {
-        if let Some(name) = path.file_name() {
-            return normalize_lexically(&parent.join(name));
-        }
+        return normalize_lexically(&parent.join(name));
     }
     normalize_lexically(path)
 }

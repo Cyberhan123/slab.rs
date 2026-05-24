@@ -130,7 +130,7 @@ fn find_models_cat_downloaded_path(
         snapshot_dirs.push((modified, path));
     }
 
-    snapshot_dirs.sort_by(|a, b| b.0.cmp(&a.0));
+    snapshot_dirs.sort_by_key(|entry| std::cmp::Reverse(entry.0));
 
     Ok(snapshot_dirs.into_iter().find_map(|(_, snapshot_dir)| {
         let candidate = snapshot_dir.join(target);

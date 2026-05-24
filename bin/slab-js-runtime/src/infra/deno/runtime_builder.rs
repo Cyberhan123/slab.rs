@@ -1,11 +1,11 @@
-use crate::{module_loader::ImportProvider, Error, RuntimeOptions};
+use crate::{Error, RuntimeOptions, module_loader::ImportProvider};
 
 /// A builder for creating a new runtime
 ///
 /// Just a helper wrapper around `RuntimeOptions` for `Runtime` and `SnapshotBuilder`
 ///
 /// # Example
-/// ```no_run
+/// ```ignore
 /// use rustyscript::RuntimeBuilder;
 ///
 /// let runtime = RuntimeBuilder::new()
@@ -247,18 +247,11 @@ impl RuntimeBuilder {
     #[cfg_attr(docsrs, doc(cfg(feature = "web")))]
     #[must_use]
     pub fn with_web_unsafely_ignored_certificate_errors(mut self, domain: impl ToString) -> Self {
-        match &mut self
-            .0
-            .extension_options
-            .web
-            .unsafely_ignore_certificate_errors
-        {
+        match &mut self.0.extension_options.web.unsafely_ignore_certificate_errors {
             Some(vec) => vec.push(domain.to_string()),
             None => {
-                self.0
-                    .extension_options
-                    .web
-                    .unsafely_ignore_certificate_errors = Some(vec![domain.to_string()]);
+                self.0.extension_options.web.unsafely_ignore_certificate_errors =
+                    Some(vec![domain.to_string()]);
             }
         }
 

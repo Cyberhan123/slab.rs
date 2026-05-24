@@ -170,28 +170,19 @@ impl Error {
             // Format all the parts using the options
             //
 
-            let line_number_part = if options.include_line_number {
-                format!("{row}:")
-            } else {
-                String::new()
-            };
+            let line_number_part =
+                if options.include_line_number { format!("{row}:") } else { String::new() };
 
-            let col_number_part = if options.include_column_number {
-                format!("{col}:")
-            } else {
-                String::new()
-            };
+            let col_number_part =
+                if options.include_column_number { format!("{col}:") } else { String::new() };
 
             let source_line_part = match line {
                 Some(s) => format!("| {s}\n| {padding}^\n"),
                 None => String::new(),
             };
 
-            let msg_part = msg_lines
-                .into_iter()
-                .map(|l| format!("= {l}"))
-                .collect::<Vec<_>>()
-                .join("\n");
+            let msg_part =
+                msg_lines.into_iter().map(|l| format!("= {l}")).collect::<Vec<_>>().join("\n");
 
             let position_part = format!("{line_number_part}{col_number_part}");
             let position_part = match filename {
@@ -201,7 +192,7 @@ impl Error {
             };
 
             // Combine all the parts
-            format!("{position_part}{source_line_part}{msg_part}",)
+            format!("{position_part}{source_line_part}{msg_part}")
         } else {
             self.to_string()
         };
@@ -237,9 +228,7 @@ mod error_macro {
 }
 
 #[cfg(feature = "node_experimental")]
-map_error!(node_resolver::analyze::TranslateCjsToEsmError, |e| {
-    Error::Runtime(e.to_string())
-});
+map_error!(node_resolver::analyze::TranslateCjsToEsmError, |e| { Error::Runtime(e.to_string()) });
 
 map_error!(deno_ast::TranspileError, |e| Error::Runtime(e.to_string()));
 map_error!(deno_core::error::CoreError, |e| {
@@ -252,38 +241,22 @@ map_error!(deno_core::error::CoreError, |e| {
 map_error!(std::cell::BorrowMutError, |e| Error::Runtime(e.to_string()));
 map_error!(std::io::Error, |e| Error::ModuleNotFound(e.to_string()));
 map_error!(deno_core::v8::DataError, |e| Error::Runtime(e.to_string()));
-map_error!(deno_core::ModuleResolutionError, |e| Error::Runtime(
-    e.to_string()
-));
-map_error!(deno_core::url::ParseError, |e| Error::Runtime(
-    e.to_string()
-));
-map_error!(deno_core::serde_json::Error, |e| Error::JsonDecode(
-    e.to_string()
-));
-map_error!(deno_core::serde_v8::Error, |e| Error::JsonDecode(
-    e.to_string()
-));
+map_error!(deno_core::ModuleResolutionError, |e| Error::Runtime(e.to_string()));
+map_error!(deno_core::url::ParseError, |e| Error::Runtime(e.to_string()));
+map_error!(deno_core::serde_json::Error, |e| Error::JsonDecode(e.to_string()));
+map_error!(deno_core::serde_v8::Error, |e| Error::JsonDecode(e.to_string()));
 
-map_error!(deno_core::anyhow::Error, |e| {
-    Error::Runtime(e.to_string())
-});
+map_error!(deno_core::anyhow::Error, |e| { Error::Runtime(e.to_string()) });
 
-map_error!(tokio::time::error::Elapsed, |e| {
-    Error::Timeout(e.to_string())
-});
-map_error!(tokio::task::JoinError, |e| {
-    Error::Timeout(e.to_string())
-});
-map_error!(deno_core::futures::channel::oneshot::Canceled, |e| {
-    Error::Timeout(e.to_string())
-});
+map_error!(tokio::time::error::Elapsed, |e| { Error::Timeout(e.to_string()) });
+map_error!(tokio::task::JoinError, |e| { Error::Timeout(e.to_string()) });
+map_error!(deno_core::futures::channel::oneshot::Canceled, |e| { Error::Timeout(e.to_string()) });
 
 // Note: BroadcastChannelError mapping removed - no longer exported from deno_web
 
 #[cfg(test)]
 mod test {
-    use crate::{error::ErrorFormattingOptions, Module, Runtime, RuntimeOptions, Undefined};
+    use crate::{Module, Runtime, RuntimeOptions, Undefined, error::ErrorFormattingOptions};
 
     #[test]
     #[rustfmt::skip]

@@ -21,7 +21,7 @@ impl Function {
     #[must_use]
     pub fn is_async(&self) -> bool {
         // Safe because we aren't applying this to an isolate
-        let unsafe_f = unsafe { v8::Handle::get_unchecked(&self.0 .0) };
+        let unsafe_f = unsafe { v8::Handle::get_unchecked(&self.0.0) };
         unsafe_f.is_async_function()
     }
 
@@ -62,9 +62,7 @@ impl Function {
     where
         T: serde::de::DeserializeOwned,
     {
-        runtime
-            .call_stored_function_async(module_context, self, args)
-            .await
+        runtime.call_stored_function_async(module_context, self, args).await
     }
 
     /// Calls this function. See [`crate::Runtime::call_stored_function_immediate`]
@@ -89,7 +87,7 @@ impl Function {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{js_value::Promise, json_args, Module, Runtime, RuntimeOptions};
+    use crate::{Module, Runtime, RuntimeOptions, js_value::Promise, json_args};
 
     #[test]
     fn test_function() {
@@ -109,9 +107,8 @@ mod test {
         assert_eq!(value, 42);
 
         let f2: Function = runtime.get_value(Some(&handle), "f2").unwrap();
-        let value: Promise<usize> = f2
-            .call_immediate(&mut runtime, Some(&handle), &json_args!())
-            .unwrap();
+        let value: Promise<usize> =
+            f2.call_immediate(&mut runtime, Some(&handle), &json_args!()).unwrap();
         let value = value.into_value(&mut runtime).unwrap();
         assert_eq!(value, 42);
     }

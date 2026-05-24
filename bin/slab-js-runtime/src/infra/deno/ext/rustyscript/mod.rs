@@ -1,9 +1,9 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use deno_core::{extension, op2, serde_json, v8, Extension, OpState};
+use deno_core::{Extension, OpState, extension, op2, serde_json, v8};
 
 use super::ExtensionTrait;
-use crate::{error::Error, RsAsyncFunction, RsFunction};
+use crate::{RsAsyncFunction, RsFunction, error::Error};
 
 type FnCache = HashMap<String, Box<dyn RsFunction>>;
 type AsyncFnCache = HashMap<String, Box<dyn RsAsyncFunction>>;
@@ -51,11 +51,11 @@ async fn call_registered_function_async(
 ) -> Result<serde_json::Value, Error> {
     let callback = {
         let state = state.borrow();
-        if !state.has::<AsyncFnCache>() {
-            None
-        } else {
+        if state.has::<AsyncFnCache>() {
             let table = state.borrow::<AsyncFnCache>();
             table.get(&name).map(|callback| callback(args))
+        } else {
+            None
         }
     };
 
@@ -74,7 +74,7 @@ extension!(
     rustyscript,
     ops = [op_register_entrypoint, call_registered_function, call_registered_function_async],
     esm_entry_point = "ext:rustyscript/rustyscript.js",
-    esm = [ dir "src/ext/rustyscript", "rustyscript.js" ],
+    esm = [ dir "src/infra/deno/ext/rustyscript", "rustyscript.js" ],
     middleware = |op| match op.name {
         "op_panic" => op.with_implementation_from(&op_panic2()),
         _ => op,

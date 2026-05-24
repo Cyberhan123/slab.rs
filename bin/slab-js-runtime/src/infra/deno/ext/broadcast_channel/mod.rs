@@ -1,4 +1,4 @@
-use deno_core::{extension, Extension};
+use deno_core::{Extension, extension};
 use deno_web::InMemoryBroadcastChannel;
 
 use super::ExtensionTrait;
@@ -12,13 +12,13 @@ extension!(
     init_broadcast_channel,
     deps = [rustyscript],
     esm_entry_point = "ext:init_broadcast_channel/init_broadcast_channel.js",
-    esm = [ dir "src/ext/broadcast_channel", "init_broadcast_channel.js" ],
+    esm = [ dir "src/infra/deno/ext/broadcast_channel", "init_broadcast_channel.js" ],
 );
 
 extension!(
     deno_broadcast_channel,
     deps = [deno_web],
-    esm = [ dir "src/ext/broadcast_channel", "01_broadcast_channel.js" ],
+    esm = [ dir "src/infra/deno/ext/broadcast_channel", "01_broadcast_channel.js" ],
 );
 
 impl ExtensionTrait<()> for init_broadcast_channel {
@@ -46,7 +46,7 @@ pub fn extensions(_channel: InMemoryBroadcastChannel, is_snapshot: bool) -> Vec<
 mod test {
     use deno_core::PollEventLoopOptions;
 
-    use crate::{module, BroadcastChannelWrapper, Module, Runtime, RuntimeOptions};
+    use crate::{BroadcastChannelWrapper, Module, Runtime, RuntimeOptions, module};
 
     static TEST_MOD: Module = module!(
         "test.js",
@@ -73,9 +73,7 @@ mod test {
 
         let channel = BroadcastChannelWrapper::new(&channel, "my_channel").unwrap();
 
-        tokio_runtime
-            .block_on(runtime.load_module_async(&TEST_MOD))
-            .unwrap();
+        tokio_runtime.block_on(runtime.load_module_async(&TEST_MOD)).unwrap();
 
         channel.send_sync(&mut runtime, "foo").unwrap();
 

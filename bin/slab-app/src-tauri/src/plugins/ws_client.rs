@@ -101,7 +101,7 @@ impl PluginRpcWsClient {
 
             let response: RpcResponse = serde_json::from_str(&text)
                 .map_err(|error| format!("failed to parse plugin RPC response: {error}"))?;
-            if response.id != Value::from(id) {
+            if response.id.as_u64() != Some(id) {
                 continue;
             }
 

@@ -2,7 +2,7 @@
 //! It creates a safe, thread-local runtime static.
 //!
 //! Can be used with default `RuntimeOptions` like so:
-//! ```rust
+//! ```ignore
 //! use rustyscript::{RuntimeOptions, Error, static_runtime};
 //! use std::time::Duration;
 //!
@@ -16,7 +16,7 @@
 //! ```
 //!
 //! Or with custom `RuntimeOptions`:
-//! ```rust
+//! ```ignore
 //! use rustyscript::{Error, RuntimeOptions, static_runtime};
 //! use std::time::Duration;
 //!
@@ -63,7 +63,7 @@ impl StaticRuntimeLock<'_> {
 ///
 /// # Example
 /// Can be used with default `RuntimeOptions` like so:
-/// ```rust
+/// ```ignore
 /// use rustyscript::{Error, static_runtime};
 ///
 /// static_runtime!(MY_DEFAULT_RUNTIME);
@@ -76,7 +76,7 @@ impl StaticRuntimeLock<'_> {
 /// ```
 ///
 /// Or with custom `RuntimeOptions`:
-/// ```rust
+/// ```ignore
 /// use rustyscript::{Error, RuntimeOptions, static_runtime};
 /// use std::time::Duration;
 ///
@@ -103,16 +103,12 @@ impl StaticRuntime {
     /// WARNING: This method should not be used directly, use the `static_runtime!` macro instead  
     /// Using this function will not encase the runtime in a `thread_local`, making it potentially unsafe
     pub const fn new(init_options: fn() -> RuntimeOptions) -> Self {
-        Self {
-            init_options,
-            cell: OnceCell::new(),
-        }
+        Self { init_options, cell: OnceCell::new() }
     }
 
     /// Get a reference to the runtime instance
     fn cell_ref(&self) -> &RefCell<Result<Runtime, Error>> {
-        self.cell
-            .get_or_init(|| RefCell::new(Runtime::new((self.init_options)())))
+        self.cell.get_or_init(|| RefCell::new(Runtime::new((self.init_options)())))
     }
 
     /// Get a lock for the runtime instance
@@ -126,14 +122,10 @@ impl StaticRuntime {
 
         // Safety: We only get a lock if the runtime is initialized
         if let Err(e) = rt_mut.borrow_mut().as_ref() {
-            return Err(Error::Runtime(format!(
-                "Could not initialize static runtime: {e}"
-            )));
+            return Err(Error::Runtime(format!("Could not initialize static runtime: {e}")));
         }
 
-        Ok(StaticRuntimeLock {
-            lock: rt_mut.borrow_mut(),
-        })
+        Ok(StaticRuntimeLock { lock: rt_mut.borrow_mut() })
     }
 
     /// Perform an operation on the runtime instance
@@ -148,9 +140,7 @@ impl StaticRuntime {
         let rt_mut = self.cell_ref();
         match rt_mut.borrow_mut().as_mut() {
             Ok(rt) => Ok(callback(rt)),
-            Err(e) => Err(Error::Runtime(format!(
-                "Could not initialize static runtime: {e}"
-            ))),
+            Err(e) => Err(Error::Runtime(format!("Could not initialize static runtime: {e}"))),
         }
     }
 }
@@ -162,7 +152,7 @@ impl StaticRuntime {
 /// The second argument is an optional block that should return a `RuntimeOptions` instance
 ///
 /// Can be used with default `RuntimeOptions` like so:
-/// ```rust
+/// ```ignore
 /// use rustyscript::{RuntimeOptions, Error, static_runtime};
 /// use std::time::Duration;
 ///
@@ -176,7 +166,7 @@ impl StaticRuntime {
 /// ```
 ///
 /// Or with custom `RuntimeOptions`:
-/// ```rust
+/// ```ignore
 /// use rustyscript::{Error, RuntimeOptions, static_runtime};
 /// use std::time::Duration;
 ///
@@ -236,10 +226,7 @@ mod test {
 
     static_runtime!(MY_DEFAULT_RUNTIME);
     static_runtime!(MY_CUSTOM_RUNTIME, {
-        RuntimeOptions {
-            timeout: Duration::from_secs(5),
-            ..Default::default()
-        }
+        RuntimeOptions { timeout: Duration::from_secs(5), ..Default::default() }
     });
 
     #[test]

@@ -80,13 +80,13 @@ pub(crate) async fn execute_turn(
     }
 
     // Emit assistant delta for any text alongside tool calls.
-    if let Some(ref text) = response.content {
-        if !text.is_empty() {
-            context
-                .notify
-                .on_turn_event(context.thread_id, &TurnEvent::AssistantDelta { text: text.clone() })
-                .await;
-        }
+    if let Some(ref text) = response.content
+        && !text.is_empty()
+    {
+        context
+            .notify
+            .on_turn_event(context.thread_id, &TurnEvent::AssistantDelta { text: text.clone() })
+            .await;
     }
 
     // Model requested tool calls — build the assistant message and execute.

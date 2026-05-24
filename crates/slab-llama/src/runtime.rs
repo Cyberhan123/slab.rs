@@ -63,6 +63,19 @@ pub struct LlamaLogitBias {
     pub bias: f32,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LlamaSamplingOptions {
+    pub gbnf: Option<String>,
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub top_k: Option<i32>,
+    pub min_p: Option<f32>,
+    pub repetition_penalty: Option<f32>,
+    pub presence_penalty: Option<f32>,
+    pub ignore_eos: bool,
+    pub logit_bias: Vec<LlamaLogitBias>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LlamaStopInfo {
     pub finish_reason: String,
@@ -219,27 +232,11 @@ impl Utf8PieceBuffer {
 
 enum GlobalCommand {
     CreateSession {
-        grammar: Option<String>,
-        temperature: Option<f32>,
-        top_p: Option<f32>,
-        top_k: Option<i32>,
-        min_p: Option<f32>,
-        repetition_penalty: Option<f32>,
-        presence_penalty: Option<f32>,
-        ignore_eos: bool,
-        logit_bias: Vec<LlamaLogitBias>,
+        options: LlamaSamplingOptions,
         reply_tx: oneshot::Sender<Result<SessionId, LlamaRuntimeError>>,
     },
     CreateSessionFromSnapshot {
-        grammar: Option<String>,
-        temperature: Option<f32>,
-        top_p: Option<f32>,
-        top_k: Option<i32>,
-        min_p: Option<f32>,
-        repetition_penalty: Option<f32>,
-        presence_penalty: Option<f32>,
-        ignore_eos: bool,
-        logit_bias: Vec<LlamaLogitBias>,
+        options: LlamaSamplingOptions,
         snapshot: LlamaSessionSnapshot,
         reply_tx: oneshot::Sender<Result<SessionId, LlamaRuntimeError>>,
     },
@@ -281,15 +278,7 @@ impl MasterWorkerState {
         while let Some(cmd) = self.global_rx.recv().await {
             match cmd {
                 GlobalCommand::CreateSession {
-                    grammar,
-                    temperature,
-                    top_p,
-                    top_k,
-                    min_p,
-                    repetition_penalty,
-                    presence_penalty,
-                    ignore_eos,
-                    logit_bias,
+                    options,
                     reply_tx,
                 } => {
                     let session_id = self.next_session_id;
@@ -301,15 +290,7 @@ impl MasterWorkerState {
                     if self.worker_txs[worker_id]
                         .send(WorkerCommand::CreateSession {
                             session_id,
-                            grammar,
-                            temperature,
-                            top_p,
-                            top_k,
-                            min_p,
-                            repetition_penalty,
-                            presence_penalty,
-                            ignore_eos,
-                            logit_bias,
+                            options,
                             snapshot: None,
                             reply_tx: ack_tx,
                         })
@@ -334,15 +315,7 @@ impl MasterWorkerState {
                 }
 
                 GlobalCommand::CreateSessionFromSnapshot {
-                    grammar,
-                    temperature,
-                    top_p,
-                    top_k,
-                    min_p,
-                    repetition_penalty,
-                    presence_penalty,
-                    ignore_eos,
-                    logit_bias,
+                    options,
                     snapshot,
                     reply_tx,
                 } => {
@@ -354,15 +327,7 @@ impl MasterWorkerState {
                     if self.worker_txs[worker_id]
                         .send(WorkerCommand::CreateSession {
                             session_id,
-                            grammar,
-                            temperature,
-                            top_p,
-                            top_k,
-                            min_p,
-                            repetition_penalty,
-                            presence_penalty,
-                            ignore_eos,
-                            logit_bias,
+                            options,
                             snapshot: Some(snapshot),
                             reply_tx: ack_tx,
                         })
@@ -552,15 +517,7 @@ impl MasterWorkerState {
 pub(super) enum WorkerCommand {
     CreateSession {
         session_id: SessionId,
-        grammar: Option<String>,
-        temperature: Option<f32>,
-        top_p: Option<f32>,
-        top_k: Option<i32>,
-        min_p: Option<f32>,
-        repetition_penalty: Option<f32>,
-        presence_penalty: Option<f32>,
-        ignore_eos: bool,
-        logit_bias: Vec<LlamaLogitBias>,
+        options: LlamaSamplingOptions,
         snapshot: Option<LlamaSessionSnapshot>,
         reply_tx: oneshot::Sender<Result<(), LlamaRuntimeError>>,
     },
@@ -780,15 +737,7 @@ impl InferenceWorkerState {
         match cmd {
             WorkerCommand::CreateSession {
                 session_id,
-                grammar,
-                temperature,
-                top_p,
-                top_k,
-                min_p,
-                repetition_penalty,
-                presence_penalty,
-                ignore_eos,
-                logit_bias,
+                options,
                 snapshot,
                 reply_tx,
             } => {
@@ -805,17 +754,7 @@ impl InferenceWorkerState {
                     return;
                 };
 
-                let sampler = self.model.new_sampler_with_options(
-                    grammar.as_deref(),
-                    temperature,
-                    top_p,
-                    top_k,
-                    min_p,
-                    repetition_penalty,
-                    presence_penalty,
-                    ignore_eos,
-                    &logit_bias,
-                );
+                let sampler = self.model.new_sampler_with_options(&options);
                 let mut state = SessionState {
                     seq_id,
                     n_past: 0,
@@ -1237,44 +1176,27 @@ impl LlamaRuntime {
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub async fn create_session(&self) -> Result<SessionId, LlamaRuntimeError> {
-        self.create_session_with_options(None, None, None, None, None, None, None, false, vec![])
-            .await
+        self.create_session_with_options(LlamaSamplingOptions::default()).await
     }
 
     pub async fn create_session_with_gbnf(
         &self,
         gbnf: Option<String>,
     ) -> Result<SessionId, LlamaRuntimeError> {
-        self.create_session_with_options(gbnf, None, None, None, None, None, None, false, vec![])
-            .await
+        self.create_session_with_options(LlamaSamplingOptions {
+            gbnf,
+            ..LlamaSamplingOptions::default()
+        })
+        .await
     }
 
     pub async fn create_session_with_options(
         &self,
-        gbnf: Option<String>,
-        temperature: Option<f32>,
-        top_p: Option<f32>,
-        top_k: Option<i32>,
-        min_p: Option<f32>,
-        repetition_penalty: Option<f32>,
-        presence_penalty: Option<f32>,
-        ignore_eos: bool,
-        logit_bias: Vec<LlamaLogitBias>,
+        options: LlamaSamplingOptions,
     ) -> Result<SessionId, LlamaRuntimeError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.global_tx
-            .send(GlobalCommand::CreateSession {
-                grammar: gbnf,
-                temperature,
-                top_p,
-                top_k,
-                min_p,
-                repetition_penalty,
-                presence_penalty,
-                ignore_eos,
-                logit_bias,
-                reply_tx,
-            })
+            .send(GlobalCommand::CreateSession { options, reply_tx })
             .await
             .map_err(|_| LlamaRuntimeError::WorkerShutdown)?;
         reply_rx.await.map_err(|_| LlamaRuntimeError::WorkerShutdown)?
@@ -1283,28 +1205,12 @@ impl LlamaRuntime {
     pub async fn create_session_from_snapshot(
         &self,
         snapshot: LlamaSessionSnapshot,
-        gbnf: Option<String>,
-        temperature: Option<f32>,
-        top_p: Option<f32>,
-        top_k: Option<i32>,
-        min_p: Option<f32>,
-        repetition_penalty: Option<f32>,
-        presence_penalty: Option<f32>,
-        ignore_eos: bool,
-        logit_bias: Vec<LlamaLogitBias>,
+        options: LlamaSamplingOptions,
     ) -> Result<SessionId, LlamaRuntimeError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.global_tx
             .send(GlobalCommand::CreateSessionFromSnapshot {
-                grammar: gbnf,
-                temperature,
-                top_p,
-                top_k,
-                min_p,
-                repetition_penalty,
-                presence_penalty,
-                ignore_eos,
-                logit_bias,
+                options,
                 snapshot,
                 reply_tx,
             })
@@ -1406,7 +1312,7 @@ mod tests {
         let mut buffer = Utf8PieceBuffer::default();
 
         assert_eq!(
-            buffer.push(&[b'a']).expect("ASCII should flush immediately"),
+            buffer.push(b"a").expect("ASCII should flush immediately"),
             Some("a".to_owned())
         );
         assert_eq!(buffer.push(&[0xE4]).expect("partial UTF-8 should buffer"), None);

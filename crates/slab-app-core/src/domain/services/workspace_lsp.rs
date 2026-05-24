@@ -204,7 +204,7 @@ fn provider_matches_language(
 
 fn builtin_language_server_provider(language_id: &str) -> Option<PluginLanguageServerContribution> {
     for (id, languages, command, args) in BUILTIN_LANGUAGE_SERVER_PROVIDERS {
-        if !languages.iter().any(|language| *language == language_id) {
+        if !languages.contains(&language_id) {
             continue;
         }
 

@@ -498,8 +498,10 @@ mod tests {
 
     #[tokio::test]
     async fn missing_provider_credentials_fail_before_network() {
-        let mut config = AgentWebSearchConfig::default();
-        config.default_provider = WebSearchProviderId::Google;
+        let mut config = AgentWebSearchConfig {
+            default_provider: WebSearchProviderId::Google,
+            ..AgentWebSearchConfig::default()
+        };
         config.providers.google.cx = Some("cx".to_owned());
         let tool = WebSearchTool::new(config);
         let error = tool

@@ -123,11 +123,8 @@ impl ThrottledWatchReceiver {
     pub async fn recv(&mut self) -> Option<Vec<FileEvent>> {
         let first = self.rx.recv().await?;
         let mut events = vec![first];
-        loop {
-            match timeout(self.debounce, self.rx.recv()).await {
-                Ok(Some(event)) => events.push(event),
-                Ok(None) | Err(_) => break,
-            }
+        while let Ok(Some(event)) = timeout(self.debounce, self.rx.recv()).await {
+            events.push(event);
         }
         Some(events)
     }

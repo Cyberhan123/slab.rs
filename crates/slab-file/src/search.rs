@@ -333,11 +333,11 @@ fn fuzzy_match(query: &str, candidates: &[FileCandidate]) -> Vec<FileMatch> {
     let mut matched = Vec::new();
 
     for candidate in candidates {
-        let mut haystack = candidate.relative_path.clone();
+        let haystack = candidate.relative_path.clone();
         let mut buf = Vec::new();
         let mut indices = Vec::new();
         let Some(score) =
-            pattern.indices(Utf32Str::new(&mut haystack, &mut buf), &mut matcher, &mut indices)
+            pattern.indices(Utf32Str::new(&haystack, &mut buf), &mut matcher, &mut indices)
         else {
             continue;
         };

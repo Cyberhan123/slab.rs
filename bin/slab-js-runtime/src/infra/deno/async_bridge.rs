@@ -71,11 +71,7 @@ impl AsyncBridge {
     ) -> Self {
         let heap_exhausted_token = CancellationToken::new();
         let tokio = TokioRuntime::Owned(tokio);
-        Self {
-            tokio,
-            timeout,
-            heap_exhausted_token,
-        }
+        Self { tokio, timeout, heap_exhausted_token }
     }
 
     /// Creates a new instance with the provided options and a borrowed tokio runtime handle.
@@ -85,11 +81,7 @@ impl AsyncBridge {
     ) -> Self {
         let heap_exhausted_token = CancellationToken::new();
         let tokio = TokioRuntime::Borrowed(handle);
-        Self {
-            tokio,
-            timeout,
-            heap_exhausted_token,
-        }
+        Self { tokio, timeout, heap_exhausted_token }
     }
 
     /// Access the underlying tokio runtime used for blocking operations

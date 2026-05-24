@@ -341,6 +341,7 @@ fn parse_ffmpeg_time_ms(line: &str) -> Option<u64> {
     parse_ffmpeg_timestamp_captures(&captures)
 }
 
+#[cfg(test)]
 fn parse_ffmpeg_timestamp_ms(value: &str) -> Option<u64> {
     let captures = ffmpeg_timestamp_regex().captures(value.trim())?;
     parse_ffmpeg_timestamp_captures(&captures)
@@ -378,6 +379,7 @@ fn ffmpeg_time_regex() -> &'static Regex {
     })
 }
 
+#[cfg(test)]
 fn ffmpeg_timestamp_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {

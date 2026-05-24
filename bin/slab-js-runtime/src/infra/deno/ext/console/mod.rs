@@ -1,4 +1,4 @@
-use deno_core::{extension, Extension};
+use deno_core::{Extension, extension};
 
 use super::ExtensionTrait;
 
@@ -6,7 +6,7 @@ extension!(
     init_console,
     deps = [rustyscript, deno_web],
     esm_entry_point = "ext:init_console/init_console.js",
-    esm = [ dir "src/ext/console", "init_console.js" ],
+    esm = [ dir "src/infra/deno/ext/console", "init_console.js" ],
 );
 impl ExtensionTrait<()> for init_console {
     fn init((): ()) -> Extension {

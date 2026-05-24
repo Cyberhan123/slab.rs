@@ -1,4 +1,4 @@
-use deno_core::{extension, Extension};
+use deno_core::{Extension, extension};
 
 use super::ExtensionTrait;
 
@@ -6,7 +6,7 @@ extension!(
     init_ffi,
     deps = [rustyscript],
     esm_entry_point = "ext:init_ffi/init_ffi.js",
-    esm = [ dir "src/ext/ffi", "init_ffi.js" ],
+    esm = [ dir "src/infra/deno/ext/ffi", "init_ffi.js" ],
 );
 
 impl ExtensionTrait<()> for init_ffi {
@@ -22,8 +22,5 @@ impl ExtensionTrait<()> for deno_ffi::deno_ffi {
 }
 
 pub fn extensions(is_snapshot: bool) -> Vec<Extension> {
-    vec![
-        deno_ffi::deno_ffi::build((), is_snapshot),
-        init_ffi::build((), is_snapshot),
-    ]
+    vec![deno_ffi::deno_ffi::build((), is_snapshot), init_ffi::build((), is_snapshot)]
 }

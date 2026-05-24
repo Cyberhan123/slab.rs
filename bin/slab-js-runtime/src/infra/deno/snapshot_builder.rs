@@ -4,9 +4,9 @@ use deno_core::{JsRuntimeForSnapshot, PollEventLoopOptions};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    Error, Module, ModuleHandle,
     async_bridge::{AsyncBridge, AsyncBridgeExt, TokioRuntime},
     inner_runtime::{InnerRuntime, RuntimeOptions},
-    Error, Module, ModuleHandle,
 };
 
 /// A more restricted version of the `Runtime` struct that is used to create a snapshot of the runtime state
@@ -418,9 +418,7 @@ impl SnapshotBuilder {
         T: deno_core::serde::de::DeserializeOwned,
     {
         let function = self.inner.get_function_by_name(module_context, name)?;
-        let result = self
-            .inner
-            .call_function_by_ref(module_context, &function, args)?;
+        let result = self.inner.call_function_by_ref(module_context, &function, args)?;
         let result = self.inner.resolve_with_event_loop(result).await?;
         self.inner.decode_value(result)
     }
@@ -467,9 +465,7 @@ impl SnapshotBuilder {
         T: deno_core::serde::de::DeserializeOwned,
     {
         self.block_on(|runtime| async move {
-            runtime
-                .call_function_async(module_context, name, args)
-                .await
+            runtime.call_function_async(module_context, name, args).await
         })
     }
 
@@ -515,9 +511,7 @@ impl SnapshotBuilder {
         T: deno_core::serde::de::DeserializeOwned,
     {
         let function = self.inner.get_function_by_name(module_context, name)?;
-        let result = self
-            .inner
-            .call_function_by_ref(module_context, &function, args)?;
+        let result = self.inner.call_function_by_ref(module_context, &function, args)?;
         self.inner.decode_value(result)
     }
 
@@ -665,9 +659,7 @@ impl SnapshotBuilder {
     pub fn load_module(&mut self, module: &Module) -> Result<ModuleHandle, Error> {
         self.block_on(|runtime| async move {
             let handle = runtime.load_module_async(module).await;
-            runtime
-                .await_event_loop(PollEventLoopOptions::default(), None)
-                .await?;
+            runtime.await_event_loop(PollEventLoopOptions::default(), None).await?;
             handle
         })
     }
@@ -735,9 +727,7 @@ impl SnapshotBuilder {
     ) -> Result<ModuleHandle, Error> {
         self.block_on(move |runtime| async move {
             let handle = runtime.load_modules_async(module, side_modules).await;
-            runtime
-                .await_event_loop(PollEventLoopOptions::default(), None)
-                .await?;
+            runtime.await_event_loop(PollEventLoopOptions::default(), None).await?;
             handle
         })
     }

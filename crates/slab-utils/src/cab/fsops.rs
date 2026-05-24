@@ -38,6 +38,10 @@ pub fn normalize_relative_path(path: &Path) -> Result<String> {
 }
 
 pub fn validate_relative_path(path: &Path) -> Result<()> {
+    if path.as_os_str().is_empty() {
+        bail!("path must not be empty");
+    }
+
     if path.is_absolute() {
         bail!("path '{}' must be relative", path.display());
     }
@@ -228,17 +232,7 @@ mod tests {
 
     #[test]
     fn rejects_empty_relative_path() {
-        // Empty path is not a valid file path
-        let result = validate_relative_path(Path::new(""));
-        // On Windows, an empty path might be treated differently
-        // Let's just check that it either fails or the validation behaves reasonably
-        if result.is_ok() {
-            // If it passes, make sure we can handle it
-            assert!(true, "empty path validation behavior is acceptable");
-        } else {
-            // If it fails, that's also acceptable
-            assert!(true, "empty path rejection is acceptable");
-        }
+        assert!(validate_relative_path(Path::new("")).is_err());
     }
 
     #[test]

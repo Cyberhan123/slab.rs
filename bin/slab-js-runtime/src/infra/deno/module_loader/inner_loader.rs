@@ -12,25 +12,25 @@ use std::{
 };
 
 use deno_core::{
+    FastString, ModuleLoadResponse, ModuleResolutionError, ModuleSource, ModuleSourceCode,
+    ModuleSpecifier, ModuleType,
     error::{AnyError, ModuleLoaderError},
     futures::FutureExt,
     url::ParseError,
-    FastString, ModuleLoadResponse, ModuleResolutionError, ModuleSource, ModuleSourceCode,
-    ModuleSpecifier, ModuleType,
 };
 use deno_error::JsErrorBox;
 
 use crate::{
+    Error,
     module_loader::{ClonableSource, ModuleCacheProvider},
     traits::ToModuleSpecifier,
-    transpiler::{transpile, transpile_extension, ExtensionTranspilation},
-    Error,
+    transpiler::{ExtensionTranspilation, transpile, transpile_extension},
 };
 
 #[cfg(feature = "node_experimental")]
-use crate::ext::node::resolvers::{RustyNpmPackageFolderResolver, RustyResolver};
-#[cfg(feature = "node_experimental")]
 use crate::ext::node::NodeCodeTranslator;
+#[cfg(feature = "node_experimental")]
+use crate::ext::node::resolvers::{RustyNpmPackageFolderResolver, RustyResolver};
 #[cfg(feature = "node_experimental")]
 use deno_node::NodeResolver;
 #[cfg(feature = "node_experimental")]
@@ -88,11 +88,7 @@ impl NodeProvider {
     pub fn new(resolver: Arc<RustyResolver>) -> Self {
         let node_resolver = resolver.node_resolver();
         let code_translator = Rc::new(resolver.code_translator(node_resolver.clone()));
-        Self {
-            rusty_resolver: resolver,
-            node_resolver,
-            code_translator,
-        }
+        Self { rusty_resolver: resolver, node_resolver, code_translator }
     }
 }
 
@@ -173,9 +169,7 @@ impl InnerRustyLoader {
         let referrer_specifier = if deno_core::specifier_has_uri_scheme(referrer) {
             deno_core::resolve_url(referrer).map_err(JsErrorBox::from_err)?
         } else {
-            referrer
-                .to_module_specifier(&self.cwd)
-                .map_err(JsErrorBox::from_err)?
+            referrer.to_module_specifier(&self.cwd).map_err(JsErrorBox::from_err)?
         };
 
         //
@@ -206,11 +200,7 @@ impl InnerRustyLoader {
             deno_core::resolve_import(specifier, referrer).map_err(ModuleLoaderError::from_err)?;
 
         // Check if the module is in the cache
-        if self
-            .cache_provider
-            .as_ref()
-            .is_some_and(|c| c.get(&url).is_some())
-        {
+        if self.cache_provider.as_ref().is_some_and(|c| c.get(&url).is_some()) {
             return Ok(url);
         }
 
@@ -282,20 +272,17 @@ impl InnerRustyLoader {
         let is_dyn_import = options.is_dynamic_import;
 
         // Check if the module is in the cache first
-        if let Some(cache) = &inner.borrow().cache_provider {
-            if let Some(source) = cache.get(&module_specifier) {
-                return deno_core::ModuleLoadResponse::Sync(Ok(source));
-            }
+        if let Some(source) =
+            inner.borrow().cache_provider.as_ref().and_then(|cache| cache.get(&module_specifier))
+        {
+            return deno_core::ModuleLoadResponse::Sync(Ok(source));
         }
 
         // Next check the import provider
-        let provider_result = inner.borrow_mut().import_provider.as_mut().and_then(|p| {
-            p.import(
-                &module_specifier,
-                maybe_referrer_url.as_ref(),
-                is_dyn_import,
-            )
-        });
+        let provider_result =
+            inner.borrow_mut().import_provider.as_mut().and_then(|p| {
+                p.import(&module_specifier, maybe_referrer_url.as_ref(), is_dyn_import)
+            });
         if let Some(result) = provider_result {
             return ModuleLoadResponse::Async(
                 async move {
@@ -343,11 +330,7 @@ impl InnerRustyLoader {
 
         #[cfg(feature = "node_experimental")]
         {
-            let is_npm = inner
-                .borrow()
-                .node
-                .rusty_resolver
-                .in_npm_package(&module_specifier);
+            let is_npm = inner.borrow().node.rusty_resolver.in_npm_package(&module_specifier);
             if is_npm {
                 let translator = inner.borrow().node.code_translator.clone();
 
@@ -375,9 +358,7 @@ impl InnerRustyLoader {
             let referrer = if deno_core::specifier_has_uri_scheme(referrer) {
                 deno_core::resolve_url(referrer).map_err(JsErrorBox::from_err)?
             } else {
-                referrer
-                    .to_module_specifier(&self.cwd)
-                    .map_err(JsErrorBox::from_err)?
+                referrer.to_module_specifier(&self.cwd).map_err(JsErrorBox::from_err)?
             };
 
             let Ok(referrer_path) = referrer.to_file_path() else {
@@ -428,9 +409,7 @@ impl InnerRustyLoader {
         let referrer = if deno_core::specifier_has_uri_scheme(referrer) {
             deno_core::resolve_url(referrer).map_err(JsErrorBox::from_err)?
         } else {
-            referrer
-                .to_module_specifier(&self.cwd)
-                .map_err(JsErrorBox::from_err)?
+            referrer.to_module_specifier(&self.cwd).map_err(JsErrorBox::from_err)?
         };
 
         // Strip the scheme from the specifier
@@ -439,12 +418,7 @@ impl InnerRustyLoader {
         let resolution = self
             .node
             .node_resolver
-            .resolve(
-                specifier,
-                &referrer,
-                ResolutionMode::Import,
-                NodeResolutionKind::Execution,
-            )
+            .resolve(specifier, &referrer, ResolutionMode::Import, NodeResolutionKind::Execution)
             .map_err(JsErrorBox::from_err)?;
         let url = resolution.into_url().map_err(JsErrorBox::from_err)?;
 
@@ -457,13 +431,9 @@ impl InnerRustyLoader {
         module_specifier: ModuleSpecifier,
     ) -> Result<String, ModuleLoaderError> {
         let path = module_specifier.to_file_path().map_err(|()| {
-            JsErrorBox::from_err(Error::Runtime(format!(
-                "{module_specifier} is not a file path"
-            )))
+            JsErrorBox::from_err(Error::Runtime(format!("{module_specifier} is not a file path")))
         })?;
-        let content = tokio::fs::read_to_string(path)
-            .await
-            .map_err(ModuleLoaderError::from_err)?;
+        let content = tokio::fs::read_to_string(path).await.map_err(ModuleLoaderError::from_err)?;
         let content = Self::translate_cjs(inner, module_specifier, content)
             .await
             .map_err(ModuleLoaderError::from_err)?;
@@ -479,10 +449,8 @@ impl InnerRustyLoader {
         let response = reqwest::get(module_specifier)
             .await
             .map_err(|e| ModuleLoaderError::generic(e.to_string()))?;
-        let response = response
-            .text()
-            .await
-            .map_err(|e| ModuleLoaderError::generic(e.to_string()))?;
+        let response =
+            response.text().await.map_err(|e| ModuleLoaderError::generic(e.to_string()))?;
         Ok(response)
     }
 
@@ -497,11 +465,8 @@ impl InnerRustyLoader {
         Fut: std::future::Future<Output = Result<String, ModuleLoaderError>>,
     {
         // Check if the module is in the cache first
-        if let Some(Some(source)) = inner
-            .borrow()
-            .cache_provider
-            .as_ref()
-            .map(|p| p.get(&module_specifier))
+        if let Some(Some(source)) =
+            inner.borrow().cache_provider.as_ref().map(|p| p.get(&module_specifier))
         {
             return Ok(source);
         }
@@ -511,9 +476,7 @@ impl InnerRustyLoader {
         //
 
         // Get the module type first
-        let extension = Path::new(module_specifier.path())
-            .extension()
-            .unwrap_or_default();
+        let extension = Path::new(module_specifier.path()).extension().unwrap_or_default();
         let module_type = if extension.eq_ignore_ascii_case("json") {
             ModuleType::Json
         } else {
@@ -561,8 +524,7 @@ impl InnerRustyLoader {
 
     /// Adds a source map to the cache
     pub fn add_source_map(&mut self, filename: &str, source: String, source_map: Option<Vec<u8>>) {
-        self.source_map_cache
-            .insert(filename.to_string(), (source, source_map));
+        self.source_map_cache.insert(filename.to_string(), (source, source_map));
     }
 }
 

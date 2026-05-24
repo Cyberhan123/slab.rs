@@ -12,7 +12,7 @@ use crate::{
     error::AgentError,
     hook::AgentHook,
     port::{AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, ThreadStatus},
-    thread::AgentThread,
+    thread::{AgentThread, AgentThreadRuntime},
     tool::ToolRouter,
 };
 
@@ -32,6 +32,14 @@ struct ThreadEntry {
 ///
 /// Inject the port adapters at construction time; the controller owns them for
 /// its lifetime and shares them (via [`Arc`]) with every thread it spawns.
+#[derive(Clone, Copy, Debug)]
+pub struct AgentControlLimits {
+    /// Hard cap on concurrently active threads across all nesting levels.
+    pub max_threads: usize,
+    /// Maximum allowed child nesting depth (inclusive, root threads are depth 0).
+    pub max_depth: u32,
+}
+
 pub struct AgentControl {
     threads: Arc<RwLock<HashMap<String, ThreadEntry>>>,
     llm: Arc<dyn LlmPort>,
@@ -65,8 +73,7 @@ impl AgentControl {
             notify,
             approval,
             tool_router,
-            max_threads,
-            max_depth,
+            AgentControlLimits { max_threads, max_depth },
             vec![],
         )
     }
@@ -78,8 +85,7 @@ impl AgentControl {
         notify: Arc<dyn AgentNotifyPort>,
         approval: Arc<dyn ApprovalPort>,
         tool_router: Arc<ToolRouter>,
-        max_threads: usize,
-        max_depth: u32,
+        limits: AgentControlLimits,
         hooks: Vec<Arc<dyn AgentHook>>,
     ) -> Self {
         Self {
@@ -90,8 +96,8 @@ impl AgentControl {
             approval,
             tool_router,
             hooks: Arc::new(hooks),
-            max_threads,
-            max_depth,
+            max_threads: limits.max_threads,
+            max_depth: limits.max_depth,
         }
     }
 
@@ -192,12 +198,13 @@ impl AgentControl {
         let hooks = Arc::clone(&self.hooks);
         let threads_cleanup = Arc::clone(&self.threads);
         let id_cleanup = thread_id.clone();
+        let runtime = AgentThreadRuntime { llm, store, notify, approval, tools, hooks };
 
         // Spawn the thread task first to obtain the AbortHandle.
         // The task removes itself from the registry when it finishes so that
         // `active_thread_count` stays accurate.
         let join_handle = tokio::spawn(async move {
-            let result = thread.run(messages, llm, store, notify, approval, tools, hooks).await;
+            let result = thread.run(messages, runtime).await;
             if let Err(ref e) = result {
                 warn!(thread_id = %id_cleanup, error = %e, "agent thread finished with error");
             }

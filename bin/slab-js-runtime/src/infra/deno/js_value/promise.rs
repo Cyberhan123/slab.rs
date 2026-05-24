@@ -1,11 +1,11 @@
 use deno_core::{
-    v8::{self, PromiseState},
     PollEventLoopOptions,
+    v8::{self, PromiseState},
 };
 use serde::Deserialize;
 
 use super::V8Value;
-use crate::{async_bridge::AsyncBridgeExt, Error};
+use crate::{Error, async_bridge::AsyncBridgeExt};
 
 /// A Deserializable javascript promise, that can be stored and used later
 /// Must live as long as the runtime it was birthed from
@@ -29,10 +29,9 @@ where
         self,
         runtime: &mut deno_core::JsRuntime,
     ) -> Result<T, crate::Error> {
-        let future = runtime.resolve(self.0 .0);
-        let result = runtime
-            .with_event_loop_future(future, PollEventLoopOptions::default())
-            .await?;
+        let future = runtime.resolve(self.0.0);
+        let result =
+            runtime.with_event_loop_future(future, PollEventLoopOptions::default()).await?;
         let context = runtime.main_context();
         let isolate = runtime.v8_isolate();
         let scope = std::pin::pin!(v8::HandleScope::new(isolate));
@@ -106,7 +105,7 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{js_value::Function, json_args, Module, Runtime, RuntimeOptions};
+    use crate::{Module, Runtime, RuntimeOptions, js_value::Function, json_args};
 
     #[test]
     fn test_promise() {
@@ -121,9 +120,8 @@ mod test {
         let handle = runtime.load_module(&module).unwrap();
 
         let f: Function = runtime.get_value(Some(&handle), "f").unwrap();
-        let value: Promise<usize> = f
-            .call_immediate(&mut runtime, Some(&handle), &json_args!())
-            .unwrap();
+        let value: Promise<usize> =
+            f.call_immediate(&mut runtime, Some(&handle), &json_args!()).unwrap();
         let value = value.into_value(&mut runtime).unwrap();
         assert_eq!(value, 42);
     }

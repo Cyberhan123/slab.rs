@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use deno_core::{extension, Extension};
+use deno_core::{Extension, extension};
 
 use super::ExtensionTrait;
 
@@ -8,7 +8,7 @@ extension!(
     init_webstorage,
     deps = [rustyscript],
     esm_entry_point = "ext:init_webstorage/init_webstorage.js",
-    esm = [ dir "src/ext/webstorage", "init_webstorage.js" ],
+    esm = [ dir "src/infra/deno/ext/webstorage", "init_webstorage.js" ],
 );
 impl ExtensionTrait<()> for init_webstorage {
     fn init((): ()) -> Extension {

@@ -1,4 +1,4 @@
-use deno_core::{v8, ModuleId};
+use deno_core::{ModuleId, v8};
 
 use crate::Module;
 
@@ -17,11 +17,7 @@ impl ModuleHandle {
         module_id: ModuleId,
         entrypoint: Option<v8::Global<v8::Function>>,
     ) -> Self {
-        Self {
-            module_id,
-            entrypoint,
-            module: module.clone(),
-        }
+        Self { module_id, entrypoint, module: module.clone() }
     }
 
     /// Create a new module handle from raw parts

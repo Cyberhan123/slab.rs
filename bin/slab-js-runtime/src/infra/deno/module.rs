@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// # Example
 ///
-/// ```rust
+/// ```ignore
 /// use rustyscript::{ module, Module };
 ///
 /// const MY_SCRIPT: Module = module!(
@@ -101,7 +101,7 @@ impl Module {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// use rustyscript::Module;
     ///
     /// let module = Module::new("module.js", "console.log('Hello, World!');");
@@ -128,17 +128,14 @@ impl Module {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// use rustyscript::Module;
     ///
     /// let module = Module::new("module.js", "console.log('Hello, World!');");
     /// ```
     #[must_use]
     pub const fn new_static(filename: &'static str, contents: &'static str) -> Self {
-        Self {
-            filename: MaybePathBuf::new_str(filename),
-            contents: Cow::Borrowed(contents),
-        }
+        Self { filename: MaybePathBuf::new_str(filename), contents: Cow::Borrowed(contents) }
     }
 
     /// Loads a `Module` instance from a file with the given filename.
@@ -155,7 +152,7 @@ impl Module {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// use rustyscript::Module;
     ///
     /// # fn main() -> Result<(), rustyscript::Error> {
@@ -184,7 +181,7 @@ impl Module {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// use rustyscript::Module;
     ///
     /// # fn main() -> Result<(), rustyscript::Error> {
@@ -198,10 +195,8 @@ impl Module {
             let file = file?;
             if let Some(filename) = file.path().to_str() {
                 // Skip non-js files
-                let extension = Path::new(&filename)
-                    .extension()
-                    .and_then(OsStr::to_str)
-                    .unwrap_or_default();
+                let extension =
+                    Path::new(&filename).extension().and_then(OsStr::to_str).unwrap_or_default();
                 if !["js", "ts"].contains(&extension) {
                     continue;
                 }
@@ -220,7 +215,7 @@ impl Module {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// use rustyscript::Module;
     ///
     /// let module = Module::new("module.js", "console.log('Hello, World!');");
@@ -238,7 +233,7 @@ impl Module {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// use rustyscript::Module;
     ///
     /// let module = Module::new("module.js", "console.log('Hello, World!');");
@@ -263,18 +258,18 @@ mod test_module {
 
     #[test]
     fn test_load_module() {
-        let module =
-            Module::load("src/ext/rustyscript/rustyscript.js").expect("Failed to load module");
+        let module = Module::load("src/infra/deno/ext/rustyscript/rustyscript.js")
+            .expect("Failed to load module");
         assert_eq!(
             module.filename().to_str().unwrap(),
-            "src/ext/rustyscript/rustyscript.js"
+            "src/infra/deno/ext/rustyscript/rustyscript.js"
         );
     }
 
     #[test]
     fn test_load_dir() {
-        let modules =
-            Module::load_dir("src/ext/rustyscript").expect("Failed to load modules from directory");
+        let modules = Module::load_dir("src/infra/deno/ext/rustyscript")
+            .expect("Failed to load modules from directory");
         assert!(!modules.is_empty());
     }
 }
