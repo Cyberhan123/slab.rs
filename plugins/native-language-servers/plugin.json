@@ -12,11 +12,6 @@
       "entry": "ui/index.html"
     }
   },
-  "integrity": {
-    "filesSha256": {
-      "ui/index.html": "c69ef40e1afb5c0d398c08265e36e6f7adefaabded521569f917f5772551fda1"
-    }
-  },
   "permissions": {
     "network": {
       "mode": "blocked",

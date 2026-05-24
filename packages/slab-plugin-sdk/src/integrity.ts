@@ -5,7 +5,7 @@ import path from "node:path";
 export type PluginIntegrityMap = Record<string, string>;
 
 const ALWAYS_INCLUDED_DIRS = ["ui", "schemas"] as const;
-const OPTIONAL_INCLUDED_FILES = ["wasm/plugin.wasm", "package.json"] as const;
+const OPTIONAL_INCLUDED_FILES = ["wasm/plugin.wasm"] as const;
 
 export async function computePluginIntegrity(
   pluginDir: string,
@@ -62,10 +62,17 @@ function manifestRuntimeEntries(manifest: Record<string, unknown>): string[] {
     return [];
   }
 
-  return ["ui", "wasm", "js", "python"]
+  const entries = ["ui", "wasm", "js"]
     .map((runtimeKey) => asRecord(runtime[runtimeKey])?.entry)
-    .filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
-    .map((entry) => entry.split(/[\\/]+/).join("/"));
+    .filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+  const python = asRecord(runtime.python);
+  const pythonBundle = python?.bundle;
+  if (typeof pythonBundle === "string" && pythonBundle.length > 0) {
+    entries.push(pythonBundle);
+  } else if (typeof python?.entry === "string" && python.entry.length > 0) {
+    entries.push(python.entry);
+  }
+  return entries.map((entry) => entry.split(/[\\/]+/).join("/"));
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

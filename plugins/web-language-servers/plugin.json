@@ -12,12 +12,6 @@
       "entry": "ui/index.html"
     }
   },
-  "integrity": {
-    "filesSha256": {
-      "package.json": "a4ee809052a825459c04bccdfa0f68300576654cc5714d512a80becaf1bc9045",
-      "ui/index.html": "a7267a2f04635154f05db2667baa9cc4f74943023f70f5e7e2a62e9a432887fb"
-    }
-  },
   "permissions": {
     "network": {
       "mode": "blocked",

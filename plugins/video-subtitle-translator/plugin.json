@@ -15,18 +15,6 @@
       "entry": "dist/plugin.js"
     }
   },
-  "integrity": {
-    "filesSha256": {
-      "dist/plugin.js": "dae351803db633037ccaf8d2f128015b2cd81127ac227f97110f316daff87174",
-      "package.json": "6cdb4a502952841c0ef7885c7ed04962601b88d674b93ea3640f52310f0869aa",
-      "schemas/settings.schema.json": "3f3bcdf747ec558b8254d5cc25129b0e07fe6850ad674ede66ab4fd6a475bdcd",
-      "schemas/translate-video-input.schema.json": "357b67fabe4f1fc6c5e2807fbd9bef4a649fbf3eb9ab2107c98fe6c3930abbcb",
-      "schemas/translate-video-output.schema.json": "6697352c730fb2bac9fe73d04db2d5425765e926e2e76d23a5e77075144389cd",
-      "ui/assets/index-BT_yQD79.js": "ecf8e256f33a3b429a3d1066ad2e827703fe7950b6ae9815003634525ec0645c",
-      "ui/assets/index-BXp6kx12.css": "66965f7ca96d7f68445fbdc71c5460173a8cd1bb5ddbfadbcc2485773bfd47fb",
-      "ui/index.html": "ca46397667c85235566f5af361d0710f2953dafbe3972a6079c29491b33d1c63"
-    }
-  },
   "permissions": {
     "network": {
       "mode": "blocked",

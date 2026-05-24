@@ -1140,6 +1140,7 @@ mod tests {
             plugin_id: "test-plugin".to_owned(),
             root_dir: root_dir.to_string_lossy().into_owned(),
             entry: entry.to_owned(),
+            bundle: None,
             export_name: export_name.to_owned(),
             params: json!({ "name": "Slab" }),
             permissions: PluginPermissionsManifest::default(),

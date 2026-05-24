@@ -13,6 +13,8 @@ pub struct PluginRuntimeCallRequest {
     pub plugin_id: String,
     pub root_dir: String,
     pub entry: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle: Option<String>,
     pub export_name: String,
     #[serde(default)]
     pub params: Value,
