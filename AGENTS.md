@@ -88,6 +88,8 @@ Keep this file focused on always-on constraints. For module-specific role, stack
 - Desktop frontend: `packages/slab-desktop/README.md`
 - Shared UI primitives: `packages/slab-components/README.md`
 - Plugin author SDK: `packages/slab-plugin-sdk/README.md`
+- Plugin packaging CLI: `packages/slab-plugin-cli/README.md`
+- Python plugin SDK: `python/slab-python-sdk/README.md`
 - Plugin workspace and manifest model: `plugins/README.md`
 - When a crate or package already has its own `README.md` under `crates/*`, `packages/*`, or `bin/*`, prefer that local README over expanding `AGENTS.md`.
 

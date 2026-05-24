@@ -11,6 +11,8 @@ desktop.ini
 /testdata/whisper
 slab-libfetch/target/
 slab-*-sys/target/
+__pycache__/
+*.py[cod]
 
 ## Vendor cache
 vendor/*

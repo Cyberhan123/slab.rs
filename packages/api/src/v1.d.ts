@@ -1100,7 +1100,6 @@ export interface components {
             /** @description Human-readable status string. */
             status: string;
         };
-        /** @description Path parameters for model-management routes. */
         BackendTypeQuery: {
             /** @description One of `"ggml.llama"`, `"ggml.whisper"`, or `"ggml.diffusion"`. */
             backend_id: string;
@@ -2986,12 +2985,12 @@ export interface operations {
     };
     backend_status: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
+            query: {
                 /** @description One of `"ggml.llama"`, `"ggml.whisper"`, or `"ggml.diffusion"`. */
                 backend_id: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -3420,11 +3419,11 @@ export interface operations {
     };
     list_available_models: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
+            query: {
                 repo_id: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -4506,11 +4505,11 @@ export interface operations {
     };
     list_tasks: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                type: string | null;
+            query?: {
+                type?: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;

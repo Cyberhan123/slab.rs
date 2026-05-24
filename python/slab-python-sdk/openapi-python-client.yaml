@@ -1,0 +1,4 @@
+project_name_override: slab-python-sdk
+package_name_override: slab_api_client
+package_version_override: 0.1.0
+generate_all_tags: true

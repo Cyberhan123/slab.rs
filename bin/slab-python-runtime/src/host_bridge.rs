@@ -62,6 +62,11 @@ struct SlabApiBridge {
 
 #[pymethods]
 impl SlabApiBridge {
+    fn client(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let bridge = PyModule::import(py, "slab_api_client.bridge")?;
+        Ok(bridge.call_method0("create_client")?.unbind())
+    }
+
     #[pyo3(signature = (method, path, headers=None, body=None, timeout_ms=None))]
     fn request(
         &self,

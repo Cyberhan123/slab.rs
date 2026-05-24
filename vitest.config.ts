@@ -8,6 +8,7 @@ export default defineConfig({
       "packages/slab-desktop/vitest.browser.config.ts",
       "packages/slab-components/vitest.config.ts",
       "packages/slab-plugin-sdk/vitest.config.ts",
+      "packages/slab-plugin-cli/vitest.config.ts",
       "packages/vitest-rust-reporter/vitest.config.ts",
       "bin/slab-server/tests/vitest.config.ts",
     ],
