@@ -24,6 +24,12 @@ type PluginManifest = {
     wasm?: {
       entry?: unknown;
     };
+    js?: {
+      entry?: unknown;
+    };
+    python?: {
+      entry?: unknown;
+    };
   };
   version: string;
 };
@@ -154,9 +160,12 @@ async function packagePlugin(pluginDir: string, outDir: string): Promise<string>
 
   validateManifest(manifest, pluginDir);
 
-  const runtimeEntries = [manifest.runtime?.ui?.entry, manifest.runtime?.wasm?.entry].filter(
-    (entry): entry is string => typeof entry === "string",
-  );
+  const runtimeEntries = [
+    manifest.runtime?.ui?.entry,
+    manifest.runtime?.wasm?.entry,
+    manifest.runtime?.js?.entry,
+    manifest.runtime?.python?.entry,
+  ].filter((entry): entry is string => typeof entry === "string");
   await ensureRuntimeEntriesExist(pluginDir, runtimeEntries);
 
   const fileMap = manifest.integrity?.filesSha256 ?? {};

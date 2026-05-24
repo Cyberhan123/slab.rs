@@ -1,17 +1,21 @@
+pub mod api;
+mod domain;
 mod host_bridge;
 mod interpreter;
 mod permissions;
+mod security;
+mod stdlib;
 mod vfs;
 mod worker;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use dashmap::DashMap;
-use serde_json::Value;
-use slab_types::DESKTOP_API_ORIGIN;
+use slab_types::{PluginRuntimeCallRequest, PluginRuntimeCallResponse};
 
+pub use domain::RuntimeHost;
 pub use permissions::PythonPluginPermissions;
 pub use vfs::EmbeddedStdlib;
 use worker::PythonWorkerHandle;
@@ -19,8 +23,8 @@ use worker::PythonWorkerHandle;
 /// Configuration for the Python runtime's host environment.
 #[derive(Clone)]
 pub struct PythonRuntimeConfig {
-    /// Base URL for the slab HTTP API (e.g. `http://127.0.0.1:3000`).
-    pub api_base_url: String,
+    /// Callback transport used by the Python `slab` bridge.
+    pub host: Arc<dyn RuntimeHost>,
     /// Python source modules to register in the embedded stdlib VFS.
     pub embedded_stdlib: EmbeddedStdlib,
 }
@@ -28,8 +32,8 @@ pub struct PythonRuntimeConfig {
 impl Default for PythonRuntimeConfig {
     fn default() -> Self {
         Self {
-            api_base_url: DESKTOP_API_ORIGIN.to_owned(),
-            embedded_stdlib: EmbeddedStdlib::default(),
+            host: Arc::new(domain::DenyRuntimeHost),
+            embedded_stdlib: stdlib::default_embedded_stdlib(),
         }
     }
 }
@@ -38,19 +42,6 @@ impl Default for PythonRuntimeConfig {
 pub struct PythonRuntime {
     workers: DashMap<String, Arc<PythonWorkerHandle>>,
     config: PythonRuntimeConfig,
-}
-
-#[derive(Clone)]
-pub struct PythonCallRequest {
-    pub plugin_id: String,
-    pub module_path: PathBuf,
-    pub function: String,
-    pub params: Value,
-    pub permissions: PythonPluginPermissions,
-}
-
-pub struct PythonCallResponse {
-    pub result: Value,
 }
 
 impl PythonRuntime {
@@ -62,19 +53,25 @@ impl PythonRuntime {
         Self { workers: DashMap::new(), config }
     }
 
-    pub async fn call(&self, req: PythonCallRequest) -> Result<PythonCallResponse> {
-        let worker = match self.workers.entry(req.plugin_id.clone()) {
+    pub fn initialize(&self) -> Result<()> {
+        interpreter::init(self.config.embedded_stdlib.clone())
+    }
+
+    pub async fn call(
+        &self,
+        request: PluginRuntimeCallRequest,
+    ) -> Result<PluginRuntimeCallResponse> {
+        let module_path = resolve_python_entry(&request.root_dir, &request.entry)?;
+        let worker = match self.workers.entry(request.plugin_id.clone()) {
             dashmap::mapref::entry::Entry::Occupied(entry) => entry.get().clone(),
             dashmap::mapref::entry::Entry::Vacant(entry) => {
-                let handle = Arc::new(PythonWorkerHandle::new(
-                    req.module_path.clone(),
-                    self.config.clone(),
-                )?);
+                let handle =
+                    Arc::new(PythonWorkerHandle::new(module_path.clone(), self.config.clone())?);
                 entry.insert(handle.clone());
                 handle
             }
         };
-        worker.call(req).await
+        worker.call(request, module_path).await
     }
 
     pub fn unload(&self, plugin_id: &str) {
@@ -86,4 +83,28 @@ impl Default for PythonRuntime {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn resolve_python_entry(root_dir: &str, entry: &str) -> Result<PathBuf> {
+    let entry_path = Path::new(entry);
+    if entry_path.is_absolute() {
+        bail!("runtime.python.entry must be relative to the plugin root");
+    }
+    if entry_path.extension().and_then(|extension| extension.to_str()) != Some("py") {
+        bail!("runtime.python.entry must use .py");
+    }
+
+    let root = PathBuf::from(root_dir).canonicalize().map_err(|error| {
+        anyhow::anyhow!("failed to canonicalize plugin root `{root_dir}`: {error}")
+    })?;
+    let module_path = root.join(entry_path).canonicalize().map_err(|error| {
+        anyhow::anyhow!("failed to canonicalize Python entry `{entry}`: {error}")
+    })?;
+    if !module_path.starts_with(&root) {
+        bail!("runtime.python.entry must stay inside the plugin root");
+    }
+    if !module_path.is_file() {
+        bail!("Python module entry does not exist at {}", module_path.display());
+    }
+    Ok(module_path)
 }

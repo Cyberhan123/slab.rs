@@ -3,7 +3,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use slab_types::{PluginApiRequest, PluginApiResponse};
+use slab_types::{PluginApiRequest, PluginApiResponse, authorize_plugin_slab_api_request};
 
 const DEFAULT_HTTP_TIMEOUT_MS: u64 = 15_000;
 const MAX_HTTP_TIMEOUT_MS: u64 = 60_000;
@@ -13,22 +13,7 @@ pub(super) fn authorize_slab_api_request(
     allowed: &[String],
     request: &PluginApiRequest,
 ) -> Result<(), String> {
-    let Some(required_permission) = required_slab_api_permission(&request.method, &request.path)
-    else {
-        return Err(format!(
-            "plugin API request {} {} is not part of the allowed plugin API surface",
-            request.method, request.path
-        ));
-    };
-
-    if allowed.iter().any(|permission| permission == required_permission) {
-        return Ok(());
-    }
-
-    Err(format!(
-        "plugin API request {} {} requires permissions.slabApi `{required_permission}`",
-        request.method, request.path
-    ))
+    authorize_plugin_slab_api_request(allowed, request)
 }
 
 pub(super) async fn execute_plugin_api_request(
@@ -63,29 +48,6 @@ pub(super) async fn execute_plugin_api_request(
     }
 
     Ok(PluginApiResponse { status, headers, body: String::from_utf8_lossy(&bytes).to_string() })
-}
-
-fn required_slab_api_permission(method: &str, path: &str) -> Option<&'static str> {
-    let method = method.to_ascii_uppercase();
-    let path = path.split('?').next().unwrap_or(path);
-
-    match method.as_str() {
-        "GET" if path_matches(path, "/v1/models") => Some("models:read"),
-        "POST" if path == "/v1/models/load" => Some("models:load"),
-        "POST" if path == "/v1/ffmpeg/convert" => Some("ffmpeg:convert"),
-        "POST" if path == "/v1/audio/transcriptions" => Some("audio:transcribe"),
-        "POST" if path == "/v1/subtitles/render" => Some("subtitle:render"),
-        "POST" if path == "/v1/chat/completions" => Some("chat:complete"),
-        "GET" if path_matches(path, "/v1/tasks") => Some("tasks:read"),
-        "POST" if path.starts_with("/v1/tasks/") && path.ends_with("/cancel") => {
-            Some("tasks:cancel")
-        }
-        _ => None,
-    }
-}
-
-fn path_matches(path: &str, base: &str) -> bool {
-    path == base || path.starts_with(&format!("{base}/"))
 }
 
 fn build_upstream_url(base_url: &str, path: &str) -> Result<String, String> {

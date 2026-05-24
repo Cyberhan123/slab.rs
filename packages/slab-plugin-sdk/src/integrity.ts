@@ -62,7 +62,7 @@ function manifestRuntimeEntries(manifest: Record<string, unknown>): string[] {
     return [];
   }
 
-  return ["ui", "wasm", "js"]
+  return ["ui", "wasm", "js", "python"]
     .map((runtimeKey) => asRecord(runtime[runtimeKey])?.entry)
     .filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
     .map((entry) => entry.split(/[\\/]+/).join("/"));

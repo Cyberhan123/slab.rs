@@ -15,7 +15,9 @@ use crate::domain::models::{InstallPluginCommand, PluginView};
 use crate::error::AppCoreError;
 use crate::infra::db::{PluginStateRecord, PluginStateStore};
 use crate::infra::endpoint::ensure_http_base_url;
-use crate::infra::plugin_runtime::{PluginEventBus, PluginJsRuntimeClient};
+use crate::infra::plugin_runtime::{
+    PluginEventBus, PluginSidecarRuntimeClient, PluginSidecarRuntimeKind,
+};
 use slab_plugin::{PluginCallRequest, PluginRegistry, PluginRuntime};
 use slab_types::plugin::{
     PluginAgentCapabilityContribution, PluginCommandContribution, PluginLanguageServerContribution,
@@ -39,7 +41,8 @@ pub struct PluginService {
     state: ModelState,
     registry: Arc<Mutex<Option<Arc<PluginRegistry>>>>,
     runtime: Arc<PluginRuntime>,
-    js_runtime: PluginJsRuntimeClient,
+    js_runtime: PluginSidecarRuntimeClient,
+    python_runtime: PluginSidecarRuntimeClient,
     event_bus: PluginEventBus,
 }
 
@@ -51,13 +54,23 @@ impl PluginService {
         let event_bus = PluginEventBus::new();
         let api_base_url = ensure_http_base_url(state.config().bind_address.as_str())
             .unwrap_or_else(|_| slab_types::DESKTOP_API_ORIGIN.to_owned());
-        let js_runtime = PluginJsRuntimeClient::for_current_server(api_base_url, event_bus.clone());
+        let js_runtime = PluginSidecarRuntimeClient::for_current_server(
+            PluginSidecarRuntimeKind::JavaScript,
+            api_base_url.clone(),
+            event_bus.clone(),
+        );
+        let python_runtime = PluginSidecarRuntimeClient::for_current_server(
+            PluginSidecarRuntimeKind::Python,
+            api_base_url,
+            event_bus.clone(),
+        );
 
         Self {
             state,
             registry: Arc::new(Mutex::new(None)),
             runtime: Arc::new(runtime),
             js_runtime,
+            python_runtime,
             event_bus,
         }
     }
@@ -343,6 +356,29 @@ impl PluginService {
                     ))
                 },
             );
+        }
+        if let Some(python_entry) = plugin.manifest.runtime.python.as_ref() {
+            let request = PluginRuntimeCallRequest {
+                call_id: Uuid::new_v4().to_string(),
+                plugin_id: plugin_id.to_owned(),
+                root_dir: plugin.root_dir.to_string_lossy().into_owned(),
+                entry: python_entry.entry.clone(),
+                export_name: method.to_owned(),
+                params,
+                permissions: plugin.manifest.permissions.clone(),
+                file_grants: Vec::<PluginRuntimeFileGrant>::new(),
+                blocked_fetch_origins: Vec::new(),
+            };
+            return self
+                .python_runtime
+                .call(request)
+                .await
+                .map(|response| response.result)
+                .map_err(|error| {
+                    AppCoreError::BadRequest(format!(
+                        "plugin `{plugin_id}` Python call `{method}` failed: {error}"
+                    ))
+                });
         }
 
         let input = serde_json::to_string(&params).map_err(|error| {
@@ -751,6 +787,15 @@ fn validate_plugin_manifest(root_dir: &Path, manifest: &PluginManifest) -> Resul
         )?;
         validate_js_entry_extension(&entry)?;
     }
+    if let Some(python) = &manifest.runtime.python {
+        let entry = validate_declared_file(
+            root_dir,
+            &manifest.integrity.files_sha256,
+            &python.entry,
+            "runtime.python.entry",
+        )?;
+        validate_python_entry_extension(&entry)?;
+    }
 
     if manifest.permissions.network.mode == PluginNetworkMode::Blocked
         && !manifest.permissions.network.allow_hosts.is_empty()
@@ -1079,6 +1124,18 @@ fn validate_js_entry_extension(entry: &str) -> Result<(), String> {
     Err("runtime.js.entry must use .ts, .tsx, .js, or .mjs".to_owned())
 }
 
+fn validate_python_entry_extension(entry: &str) -> Result<(), String> {
+    let extension = Path::new(entry)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if extension == "py" {
+        return Ok(());
+    }
+    Err("runtime.python.entry must use .py".to_owned())
+}
+
 fn normalize_relative_path(raw: &str) -> Result<String, String> {
     slab_utils::path::normalize_relative_path(raw).map_err(|error| error.to_string())
 }
@@ -1395,6 +1452,42 @@ mod tests {
         let scanned = scan_plugin_dir(&plugin_root, "dev").expect("scan plugin");
         assert!(scanned.valid);
         assert_eq!(scanned.id, "example-plugin");
+    }
+
+    #[test]
+    fn scan_plugin_dir_accepts_python_backend_entry() {
+        let root = temp_dir("scan-python");
+        let plugin_root = root.join("python-plugin");
+        write(&plugin_root.join("ui/index.html"), "<html></html>");
+        write(&plugin_root.join("python/plugin.py"), "def run(params):\n    return params\n");
+        let html_hash = hash_bytes_hex(b"<html></html>");
+        let python_hash = hash_bytes_hex(b"def run(params):\n    return params\n");
+        write(
+            &plugin_root.join("plugin.json"),
+            &serde_json::to_string_pretty(&json!({
+                "manifestVersion": 1,
+                "id": "python-plugin",
+                "name": "Python Plugin",
+                "version": "0.1.0",
+                "runtime": {
+                    "ui": { "entry": "ui/index.html" },
+                    "python": { "entry": "python/plugin.py" }
+                },
+                "integrity": {
+                    "filesSha256": {
+                        "ui/index.html": html_hash,
+                        "python/plugin.py": python_hash
+                    }
+                },
+                "permissions": { "network": { "mode": "blocked", "allowHosts": [] } }
+            }))
+            .expect("manifest json"),
+        );
+
+        let scanned = scan_plugin_dir(&plugin_root, "dev").expect("scan plugin");
+
+        assert!(scanned.valid);
+        assert!(scanned.manifest.unwrap().runtime.python.is_some());
     }
 
     #[test]

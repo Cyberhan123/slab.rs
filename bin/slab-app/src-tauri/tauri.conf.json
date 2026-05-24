@@ -48,7 +48,8 @@
     "externalBin": [
       "binaries/slab-server",
       "binaries/slab-runtime",
-      "binaries/slab-js-runtime"
+      "binaries/slab-js-runtime",
+      "binaries/slab-python-runtime"
     ],
     "copyright": "Copyright (c) 2026 CyberHan",
     "category": "Utility"

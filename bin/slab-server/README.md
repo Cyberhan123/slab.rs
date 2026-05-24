@@ -12,7 +12,7 @@ HTTP gateway for the Slab inference stack, built with [axum](https://github.com/
 - Publishes an OpenAPI schema at `/api-docs/openapi.json`.
 - Delegates all business logic to `crates/slab-app-core`; it adds only axum `FromRef` extractors (`state_extractors.rs`) and HTTP error mapping (`error.rs`).
 - Launches and monitors `bin/slab-runtime` through the shared `crates/slab-app-core::runtime_supervisor` using a `tokio::process` adapter.
-- Owns the supervised `bin/slab-js-runtime` sidecar through `crates/slab-app-core` for Deno/ESM/TS plugin calls.
+- Owns the supervised `bin/slab-js-runtime` and `bin/slab-python-runtime` sidecars through `crates/slab-app-core` for JS and Python plugin calls.
 - Proxies inference requests to `bin/slab-runtime` via gRPC through `GrpcGateway`, while keeping the HTTP host alive if an individual backend runtime crashes and needs to restart.
 
 ## Type

@@ -1,113 +1,59 @@
 # slab-python-runtime
 
-Sandboxed Python plugin runtime for slab, powered by CPython via [PyO3](https://pyo3.rs).
+Sandboxed Python plugin backend for Slab, powered by CPython through PyO3.
 
-## Overview
+## Role
 
-This crate provides the embedded Python execution engine for plugins that
-declare a `runtime.python.entry` in their `plugin.json`.  It uses CPython
-through PyO3 and delivers:
+This binary is a supervised stdio sidecar used by `crates/slab-app-core` when a
+plugin declares `runtime.python.entry` in `plugin.json`. It speaks
+line-delimited JSON-RPC 2.0:
 
-- **Static embedding** — Python standard-library `.py` files are bundled
-  as `&'static [u8]` bytes inside the binary.  No `.py` files need to exist
-  on the real filesystem at runtime.
-- **Virtual-filesystem loader** — a custom `importlib.abc.MetaPathFinder` /
-  `Loader` pair is registered at `sys.meta_path[0]` before any user code
-  runs.  Embedded modules take priority over the real filesystem.
-- **Host bridge** (`slab`) — injected into the plugin's execution namespace
-  so plugins can call the slab HTTP API and emit UI events without any
-  third-party import.
-- **Per-plugin isolation** — each plugin worker gets a fresh `globals` /
-  `locals` dict; state does not leak across calls.
-- **Execution timeout** — SIGALRM-based (Unix) or best-effort (other
-  platforms).
-
-## Architecture
-
-```
-PythonRuntime
-  └─ PythonWorkerHandle  (per plugin)
-       └─ Python::with_gil
-            ├─ interpreter::init  →  vfs::register  →  sys.meta_path[0]
-            ├─ host_bridge::inject  →  slab object in locals
-            └─ py.run(plugin_source)  →  fn(json_params) → json_result
-```
-
-## Static Embedding
-
-Populate an `EmbeddedStdlib` and pass it through `PythonRuntimeConfig`:
-
-```rust
-use slab_python_runtime::{EmbeddedStdlib, PythonRuntime, PythonRuntimeConfig};
-
-let mut embedded_stdlib = EmbeddedStdlib::default();
-embedded_stdlib
-    .add("mypackage.utils", include_bytes!("../python/mypackage/utils.py"))
-    .add("mypackage.models", include_bytes!("../python/mypackage/models.py"));
-
-let runtime = PythonRuntime::with_config(PythonRuntimeConfig {
-    embedded_stdlib,
-    ..PythonRuntimeConfig::default()
-});
-```
-
-The bytes are `include_bytes!` – they are linked directly into the binary,
-so no `.py` files are needed at runtime.
-
-## Virtual Filesystem
-
-`vfs::register` injects the following Python code once at startup:
-
-```python
-class _EmbeddedFinder(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path, target=None):
-        src = self._modules.get(fullname)
-        if src is None:
-            return None
-        loader = _EmbeddedLoader(fullname, src)
-        return importlib.machinery.ModuleSpec(fullname, loader, ...)
-
-sys.meta_path.insert(0, _EmbeddedFinder(_slab_embedded_modules))
-```
-
-The `_slab_embedded_modules` dict is built from the `EmbeddedStdlib` map
-on the Rust side and passed as a Python `dict[str, bytes]`.
-
-## Host Bridge
-
-Available to plugins at `slab` (no import statement needed):
-
-```python
-slab.plugin_id               # str — the plugin's ID
-slab.api.request(            # synchronous HTTP to the slab API
-    method, path,
-    headers=None,
-    body=None,
-    timeout_ms=None,
-) → {"status": int, "headers": dict, "body": str}
-
-slab.ui.emit(topic, data=None)  # emit UI event; returns JSON string
-```
+- `runtime.ready` is sent on startup.
+- `plugin.call` receives `PluginRuntimeCallRequest`.
+- The response is `PluginRuntimeCallResponse`.
+- `slab.api.request` and `slab.ui.emit` are runtime-to-host callbacks; the
+  runtime does not call the Slab HTTP API directly.
 
 ## Plugin module format
 
+`runtime.python.entry` must point to a `.py` file inside the plugin package.
+The exported function receives a JSON value and returns a JSON-serializable
+value:
+
 ```python
-import json
+import slab
 
-def my_function(params_json):
-    params = json.loads(params_json)
-    result = slab.api.request("GET", "/v1/models")
-    return json.dumps(result)
+def summarize(params):
+    models = slab.api.request("GET", "/v1/models")
+    slab.ui.emit("summary.finished", {"modelCount": len(models["body"])})
+    return {"status": models["status"], "input": params}
 ```
 
-## Build requirements
+For compatibility during the transition, functions that accept a JSON string
+and return a JSON string are still supported. New plugins should use direct
+JSON values.
 
-CPython development headers must be installed:
+## Embedded stdlib
 
-```sh
-# Ubuntu / Debian
-sudo apt-get install python3-dev
+`build.rs` generates an embedded pure-Python stdlib table from
+`SLAB_PYTHON_STDLIB_DIR`, `PYO3_PYTHON`, or the local `python`/`python3`/`py -3`
+installation. At runtime a custom `importlib.abc.MetaPathFinder` and `Loader`
+are registered at `sys.meta_path[0]`, so embedded modules and packages load
+before the real filesystem.
 
-# macOS
-brew install python3
-```
+The VFS supports package `__init__.py`, module origins, package
+`submodule_search_locations`, and cache invalidation hooks.
+
+## Security model
+
+The first version supports plugin `.py` files and pure Python stdlib modules
+only. It does not support third-party wheels, native extensions, pip installs,
+or plugin-provided package trees.
+
+Ambient file, network, subprocess, and `ctypes` access is blocked with Python
+audit hooks and restricted builtins. Slab API access and UI events must go
+through the `slab` host bridge so app-core can re-authorize each callback.
+
+## Type
+
+Rust binary and library.

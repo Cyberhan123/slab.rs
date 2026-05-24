@@ -1,19 +1,9 @@
-//! Virtual filesystem for embedding Python source modules statically.
+//! Virtual filesystem for statically embedded Python source modules.
 //!
-//! `EmbeddedStdlib` holds a collection of fully-qualified Python module names
-//! mapped to their source bytes (bundled into the binary via `include_bytes!`
-//! or inserted at runtime).
-//!
-//! At interpreter startup, [`register`] injects an `_EmbeddedFinder` class
-//! into `sys.meta_path` (at position 0) so the embedded modules take
-//! precedence over the real filesystem. This is the mechanism that enables
-//! static embedding: no `.py` files need to exist on disk at runtime.
-//!
-//! # Python-side design
-//!
-//! The finder and loader are implemented as pure Python classes and evaluated
-//! once per interpreter via `Python::run_bound`. The Rust side only provides
-//! the module-name → bytes mapping through a `PyDict`.
+//! `EmbeddedStdlib` maps fully-qualified Python module names to source bytes
+//! bundled with `include_bytes!`. At interpreter startup, [`register`] injects
+//! a `sys.meta_path` finder so embedded modules and packages can load before
+//! the real filesystem.
 
 use std::collections::HashMap;
 use std::ffi::CString;
@@ -21,58 +11,68 @@ use std::ffi::CString;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
-/// A static map of fully-qualified Python module names to their source bytes.
-///
-/// Populate this before calling [`register`] with every `.py` file that
-/// should be loadable without touching the real filesystem.
-///
-/// # Example
-///
-/// ```rust,ignore
-/// let mut stdlib = EmbeddedStdlib::default();
-/// stdlib.add("mypackage.utils", include_bytes!("../python/mypackage/utils.py"));
-/// ```
+#[derive(Clone, Copy)]
+struct EmbeddedModule {
+    source: &'static [u8],
+    is_package: bool,
+}
+
+/// A static map of fully-qualified Python module names to source bytes.
 #[derive(Clone, Default)]
 pub struct EmbeddedStdlib {
-    modules: HashMap<&'static str, &'static [u8]>,
+    modules: HashMap<&'static str, EmbeddedModule>,
 }
 
 impl EmbeddedStdlib {
-    /// Register a module by its fully-qualified name and its source bytes.
+    /// Register a non-package module by its fully-qualified name.
     pub fn add(&mut self, name: &'static str, source: &'static [u8]) -> &mut Self {
-        self.modules.insert(name, source);
+        self.add_module(name, source)
+    }
+
+    /// Register a non-package module by its fully-qualified name.
+    pub fn add_module(&mut self, name: &'static str, source: &'static [u8]) -> &mut Self {
+        self.modules.insert(name, EmbeddedModule { source, is_package: false });
+        self
+    }
+
+    /// Register a package `__init__.py` by its fully-qualified package name.
+    pub fn add_package(&mut self, name: &'static str, source: &'static [u8]) -> &mut Self {
+        self.modules.insert(name, EmbeddedModule { source, is_package: true });
         self
     }
 }
 
 /// Register the embedded stdlib as the first entry in `sys.meta_path`.
-///
-/// Must be called while holding the GIL, before any user code imports modules.
 pub fn register(py: Python<'_>, stdlib: &EmbeddedStdlib) -> PyResult<()> {
-    // Build a Python dict: str -> bytes
     let py_modules = PyDict::new(py);
-    for (name, src) in &stdlib.modules {
-        py_modules.set_item(*name, PyBytes::new(py, src))?;
+    for (name, module) in &stdlib.modules {
+        py_modules.set_item(*name, (PyBytes::new(py, module.source), module.is_package))?;
     }
 
-    // The finder and loader are written in Python for correctness and
-    // simplicity. The Rust side only supplies the data.
     let setup = r#"import sys
 import importlib.abc
 import importlib.machinery
 
 class _EmbeddedLoader(importlib.abc.Loader):
-    """Loads a Python module from statically embedded source bytes."""
+    """Loads a Python module or package from statically embedded source bytes."""
 
-    def __init__(self, fullname, source_bytes):
+    def __init__(self, fullname, source_bytes, is_package):
         self._fullname = fullname
         self._source = source_bytes
+        self._is_package = is_package
 
     def create_module(self, spec):
-        return None  # use default module creation
+        return None
 
     def exec_module(self, module):
         origin = '<embedded:{}>'.format(self._fullname)
+        module.__file__ = origin
+        module.__loader__ = self
+        if self._is_package:
+            module.__package__ = self._fullname
+            module.__path__ = []
+        else:
+            module.__package__ = self._fullname.rpartition('.')[0]
         code = compile(self._source.decode('utf-8'), origin, 'exec')
         exec(code, module.__dict__)
 
@@ -80,26 +80,30 @@ class _EmbeddedLoader(importlib.abc.Loader):
         return self._source.decode('utf-8')
 
     def is_package(self, fullname):
-        return False
+        return self._is_package
 
 
 class _EmbeddedFinder(importlib.abc.MetaPathFinder):
     """A sys.meta_path finder that resolves modules from embedded bytes."""
 
     def __init__(self, modules):
-        # modules: dict[str, bytes]
         self._modules = modules
 
     def find_spec(self, fullname, path, target=None):
-        src = self._modules.get(fullname)
-        if src is None:
+        entry = self._modules.get(fullname)
+        if entry is None:
             return None
-        loader = _EmbeddedLoader(fullname, src)
-        return importlib.machinery.ModuleSpec(
+        src, is_package = entry
+        loader = _EmbeddedLoader(fullname, src, is_package)
+        spec = importlib.machinery.ModuleSpec(
             fullname,
             loader,
             origin='<embedded:{}>'.format(fullname),
+            is_package=is_package,
         )
+        if is_package:
+            spec.submodule_search_locations = []
+        return spec
 
     def invalidate_caches(self):
         pass
@@ -115,7 +119,7 @@ if _slab_finder is None:
     sys.meta_path.insert(0, _slab_finder)
 else:
     _slab_finder._modules = _slab_embedded_modules
-del _slab_finder, _EmbeddedFinder, _EmbeddedLoader
+del _slab_finder
 "#;
 
     let globals = PyDict::new(py);
