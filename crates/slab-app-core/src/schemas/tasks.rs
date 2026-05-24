@@ -54,6 +54,7 @@ pub struct TimedTextSegmentResponse {
 }
 
 #[derive(Deserialize, ToSchema, IntoParams, Validate)]
+#[into_params(parameter_in = Query)]
 pub struct TaskTypeQuery {
     #[serde(rename = "type")]
     #[validate(custom(

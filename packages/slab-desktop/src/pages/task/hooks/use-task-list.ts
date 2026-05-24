@@ -19,11 +19,7 @@ export function useTaskList() {
     error: tasksError,
     isLoading: tasksLoading,
     refetch: refetchTasks,
-  } = api.useQuery('get', '/v1/tasks', {
-    params: {
-      path: { type: null },
-    },
-  });
+  } = api.useQuery('get', '/v1/tasks');
 
   const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
   const getTaskResultMutation = api.useMutation('get', '/v1/tasks/{id}/result');

@@ -230,6 +230,24 @@
         "react-i18next": "catalog:",
       },
     },
+    "packages/slab-plugin-cli": {
+      "name": "@slab/plugin-cli",
+      "version": "0.1.0",
+      "bin": {
+        "slab-plugin-cli": "./src/cli.ts",
+      },
+      "dependencies": {
+        "@slab/plugin-sdk": "workspace:*",
+        "vite": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "@types/node": "catalog:",
+        "jszip": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "packages/slab-plugin-sdk": {
       "name": "@slab/plugin-sdk",
       "version": "0.1.0",
@@ -1227,6 +1245,8 @@
     "@slab/i18n": ["@slab/i18n@workspace:packages/slab-i18n"],
 
     "@slab/models": ["@slab/models@workspace:models"],
+
+    "@slab/plugin-cli": ["@slab/plugin-cli@workspace:packages/slab-plugin-cli"],
 
     "@slab/plugin-sdk": ["@slab/plugin-sdk@workspace:packages/slab-plugin-sdk"],
 

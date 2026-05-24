@@ -4,8 +4,8 @@ use validator::Validate;
 
 use crate::domain::models::{BackendStatusQuery, BackendStatusView};
 
-/// Path parameters for model-management routes.
 #[derive(Debug, Deserialize, ToSchema, IntoParams, Validate)]
+#[into_params(parameter_in = Query)]
 pub struct BackendTypeQuery {
     /// One of `"ggml.llama"`, `"ggml.whisper"`, or `"ggml.diffusion"`.
     #[validate(custom(

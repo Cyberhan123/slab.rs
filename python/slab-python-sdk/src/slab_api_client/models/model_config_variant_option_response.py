@@ -1,0 +1,159 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any, TypeVar, cast
+
+from attrs import define as _attrs_define
+from attrs import field as _attrs_field
+
+from ..types import UNSET, Unset
+
+T = TypeVar("T", bound="ModelConfigVariantOptionResponse")
+
+
+@_attrs_define
+class ModelConfigVariantOptionResponse:
+    """
+    Attributes:
+        id (str):
+        is_default (bool):
+        label (str):
+        description (None | str | Unset):
+        filename (None | str | Unset):
+        local_path (None | str | Unset):
+        repo_id (None | str | Unset):
+    """
+
+    id: str
+    is_default: bool
+    label: str
+    description: None | str | Unset = UNSET
+    filename: None | str | Unset = UNSET
+    local_path: None | str | Unset = UNSET
+    repo_id: None | str | Unset = UNSET
+    additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        id = self.id
+
+        is_default = self.is_default
+
+        label = self.label
+
+        description: None | str | Unset
+        if isinstance(self.description, Unset):
+            description = UNSET
+        else:
+            description = self.description
+
+        filename: None | str | Unset
+        if isinstance(self.filename, Unset):
+            filename = UNSET
+        else:
+            filename = self.filename
+
+        local_path: None | str | Unset
+        if isinstance(self.local_path, Unset):
+            local_path = UNSET
+        else:
+            local_path = self.local_path
+
+        repo_id: None | str | Unset
+        if isinstance(self.repo_id, Unset):
+            repo_id = UNSET
+        else:
+            repo_id = self.repo_id
+
+        field_dict: dict[str, Any] = {}
+        field_dict.update(self.additional_properties)
+        field_dict.update(
+            {
+                "id": id,
+                "is_default": is_default,
+                "label": label,
+            }
+        )
+        if description is not UNSET:
+            field_dict["description"] = description
+        if filename is not UNSET:
+            field_dict["filename"] = filename
+        if local_path is not UNSET:
+            field_dict["local_path"] = local_path
+        if repo_id is not UNSET:
+            field_dict["repo_id"] = repo_id
+
+        return field_dict
+
+    @classmethod
+    def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        d = dict(src_dict)
+        id = d.pop("id")
+
+        is_default = d.pop("is_default")
+
+        label = d.pop("label")
+
+        def _parse_description(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        description = _parse_description(d.pop("description", UNSET))
+
+        def _parse_filename(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        filename = _parse_filename(d.pop("filename", UNSET))
+
+        def _parse_local_path(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        local_path = _parse_local_path(d.pop("local_path", UNSET))
+
+        def _parse_repo_id(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        repo_id = _parse_repo_id(d.pop("repo_id", UNSET))
+
+        model_config_variant_option_response = cls(
+            id=id,
+            is_default=is_default,
+            label=label,
+            description=description,
+            filename=filename,
+            local_path=local_path,
+            repo_id=repo_id,
+        )
+
+        model_config_variant_option_response.additional_properties = d
+        return model_config_variant_option_response
+
+    @property
+    def additional_keys(self) -> list[str]:
+        return list(self.additional_properties.keys())
+
+    def __getitem__(self, key: str) -> Any:
+        return self.additional_properties[key]
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self.additional_properties[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        del self.additional_properties[key]
+
+    def __contains__(self, key: str) -> bool:
+        return key in self.additional_properties

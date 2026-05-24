@@ -289,6 +289,7 @@ pub struct DownloadModelRequest {
 
 /// Query parameters for listing files in a HuggingFace repo.
 #[derive(Debug, IntoParams, Deserialize, ToSchema, Validate)]
+#[into_params(parameter_in = Query)]
 pub struct ListAvailableQuery {
     #[validate(custom(
         function = "crate::schemas::validation::validate_non_blank",

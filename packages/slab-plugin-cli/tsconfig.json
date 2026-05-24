@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@slab/plugin-sdk": ["../slab-plugin-sdk/src/index.ts"],
+      "@slab/plugin-sdk/*": ["../slab-plugin-sdk/src/*"]
+    },
+    "types": ["bun", "node"]
+  },
+  "include": ["src", "tests", "vitest.config.ts"]
+}

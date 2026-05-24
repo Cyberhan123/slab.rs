@@ -25,11 +25,13 @@ Repository plugins can be built with Vite, React, and TypeScript. Use
 ABI. `@slab/plugin-ui` intentionally exposes only a safe component subset
 instead of the full `@slab/components` surface.
 
-Run `bun run gen:plugin-packs` from the repo root to scan `plugins/*` for
-directories that contain `plugin.json`, build staged runtime artifacts, write
-`integrity.filesSha256` only into the staged package manifest, and emit
-`.plugin.slab` archives to `plugins/dist/`. Source `plugin.json` files do not
-need `integrity.filesSha256` during development.
+Use `slab-plugin-cli pack --plugin-dir <plugin> --out-dir <dist>` to package a
+single third-party plugin. Run `bun run gen:plugin-packs` from the repo root to
+scan `plugins/*` for built-in plugin directories that contain `plugin.json`,
+delegate each package build to the CLI, write `integrity.filesSha256` only into
+the staged package manifest, and emit `.plugin.slab` archives to
+`plugins/dist/`. Source `plugin.json` files do not need `integrity.filesSha256`
+during development.
 
 Helper scripts now live under the repo-root `scripts/plugins/` directory.
 Directories under `plugins/` without `plugin.json` are not treated as plugins.
@@ -102,7 +104,10 @@ def my_function(params):
 Python plugins have no ambient file, network, subprocess, or `ctypes` access in
 the first version. Use `slab.api.request` for host API calls and
 `slab.ui.emit` for UI events so the host can apply the same authorization path
-used by JS and WASM backends.
+used by JS and WASM backends. Plugin authors can install `slab-python-sdk` for
+type hints and the generated `slab_api_client`; inside Slab, `slab.api.client()`
+returns that generated client backed by the host-authorized bridge rather than
+direct HTTP.
 
 ### Supported backends
 

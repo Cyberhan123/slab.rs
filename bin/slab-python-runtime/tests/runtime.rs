@@ -23,10 +23,15 @@ impl RuntimeHost for RecordingHost {
             "slab.api.request" => {
                 let request: PluginRuntimeApiHostRequest =
                     serde_json::from_value(params).map_err(|error| error.to_string())?;
+                let body = if request.call_id == "call-generated_client" {
+                    "{\"items\":[\"model-a\"]}".to_owned()
+                } else {
+                    format!("{} {}", request.request.method, request.request.path)
+                };
                 Ok(serde_json::to_value(PluginApiResponse {
                     status: 200,
                     headers: Default::default(),
-                    body: format!("{} {}", request.request.method, request.request.path),
+                    body,
                 })
                 .map_err(|error| error.to_string())?)
             }
@@ -158,6 +163,84 @@ async fn executes_slabpy_bundle_with_embedded_modules() {
     let response = runtime.call(request).await.unwrap();
 
     assert_eq!(response.result, json!({ "value": 5, "api": "GET /v1/models" }));
+}
+
+#[tokio::test]
+async fn exposes_generated_python_api_client_through_slab_bridge() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("python")).unwrap();
+    write_bundle(
+        &temp.path().join("python/backend.slabpy"),
+        json!({
+            "format": "slab.python.bundle.v1",
+            "entryModule": "plugin",
+            "nativeExtensions": [],
+            "modules": [
+                {
+                    "name": "plugin",
+                    "isPackage": false,
+                    "sourceBase64": encode_source(
+                        "import slab\nfrom slab_api_client.api.models import list_models\n\ndef run(params):\n    client = slab.api.client()\n    return list_models.sync(client=client)\n"
+                    )
+                },
+                {
+                    "name": "slab_api_client",
+                    "isPackage": true,
+                    "sourceBase64": encode_source("")
+                },
+                {
+                    "name": "slab_api_client.api",
+                    "isPackage": true,
+                    "sourceBase64": encode_source("")
+                },
+                {
+                    "name": "slab_api_client.api.models",
+                    "isPackage": true,
+                    "sourceBase64": encode_source("")
+                },
+                {
+                    "name": "slab_api_client.api.models.list_models",
+                    "isPackage": false,
+                    "sourceBase64": encode_source(
+                        "def sync(*, client):\n    response = client.get_httpx_client().request(method='get', url='/v1/models')\n    return response.json()\n"
+                    )
+                },
+                {
+                    "name": "slab_api_client.bridge",
+                    "isPackage": false,
+                    "sourceBase64": encode_source(include_str!(
+                        "../../../python/slab-python-sdk/src/slab_api_client/bridge.py"
+                    ))
+                },
+                {
+                    "name": "slab_api_client.client",
+                    "isPackage": false,
+                    "sourceBase64": encode_source(
+                        "class Client:\n    def __init__(self, base_url, headers=None, raise_on_unexpected_status=False):\n        self.raise_on_unexpected_status = raise_on_unexpected_status\n        self._client = None\n        self._async_client = None\n    def set_httpx_client(self, client):\n        self._client = client\n        return self\n    def set_async_httpx_client(self, client):\n        self._async_client = client\n        return self\n    def get_httpx_client(self):\n        return self._client\n"
+                    )
+                },
+                {
+                    "name": "httpx",
+                    "isPackage": false,
+                    "sourceBase64": encode_source(
+                        "import json\n\nclass BaseTransport:\n    pass\n\nclass AsyncBaseTransport:\n    pass\n\nclass URL:\n    def __init__(self, value):\n        self.raw_path = value.encode('ascii')\n\nclass Request:\n    def __init__(self, method, url, headers=None, content=b''):\n        self.method = method\n        self.url = URL(url)\n        self.headers = headers or {}\n        self.content = content\n\nclass Response:\n    def __init__(self, status_code, headers=None, content=b'', request=None):\n        self.status_code = status_code\n        self.headers = headers or {}\n        self.content = content\n        self.request = request\n    def json(self):\n        return json.loads(self.content.decode('utf-8'))\n\nclass Client:\n    def __init__(self, base_url='', headers=None, transport=None, **kwargs):\n        self.headers = headers or {}\n        self.transport = transport\n    def request(self, method, url, **kwargs):\n        content = kwargs.get('content') or b''\n        request = Request(method.upper(), url, kwargs.get('headers') or self.headers, content)\n        return self.transport.handle_request(request)\n\nclass AsyncClient(Client):\n    async def request(self, method, url, **kwargs):\n        content = kwargs.get('content') or b''\n        request = Request(method.upper(), url, kwargs.get('headers') or self.headers, content)\n        return await self.transport.handle_async_request(request)\n"
+                    )
+                }
+            ]
+        }),
+    );
+
+    let host = Arc::new(RecordingHost::default());
+    let runtime =
+        PythonRuntime::with_config(PythonRuntimeConfig { host, ..PythonRuntimeConfig::default() });
+    let mut request = request(temp.path(), "run", Value::Null);
+    request.call_id = "call-generated_client".to_owned();
+    request.entry = "python/plugin.py".to_owned();
+    request.bundle = Some("python/backend.slabpy".to_owned());
+
+    let response = runtime.call(request).await.unwrap();
+
+    assert_eq!(response.result, json!({ "items": ["model-a"] }));
 }
 
 #[tokio::test]
