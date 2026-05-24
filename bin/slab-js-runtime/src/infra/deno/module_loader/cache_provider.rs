@@ -23,10 +23,9 @@ impl ClonableSource for ModuleSource {
                 }
             },
             specifier,
-            self.code_cache.as_ref().map(|c| SourceCodeCacheInfo {
-                hash: c.hash,
-                data: c.data.clone(),
-            }),
+            self.code_cache
+                .as_ref()
+                .map(|c| SourceCodeCacheInfo { hash: c.hash, data: c.data.clone() }),
         )
     }
 }

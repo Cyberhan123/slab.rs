@@ -1,8 +1,8 @@
 use std::{borrow::Cow, path::Path};
 
 use deno_core::{
-    v8::{self, HandleScope},
     ModuleSpecifier,
+    v8::{self, HandleScope},
 };
 
 use crate::Error;
@@ -75,9 +75,7 @@ impl ToV8String for str {
         // This is safe because the HandleScope is already on the stack and pinned.
         // This pattern is used throughout the codebase for V8 API compatibility.
         let scope_ref: &v8::PinnedRef<HandleScope<'a>> = unsafe {
-            std::mem::transmute::<&HandleScope<'a>, &v8::PinnedRef<HandleScope<'a>>>(
-                std::ptr::from_mut(scope).as_ref().unwrap(),
-            )
+            &*std::ptr::from_mut(scope).cast_const().cast::<v8::PinnedRef<HandleScope<'a>>>()
         };
         v8::String::new(scope_ref, self).ok_or_else(|| Error::V8Encoding(self.to_string()))
     }

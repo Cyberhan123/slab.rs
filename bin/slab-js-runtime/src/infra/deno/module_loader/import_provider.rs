@@ -1,4 +1,4 @@
-use deno_core::{error::ModuleLoaderError, ModuleSource, ModuleSpecifier, RequestedModuleType};
+use deno_core::{ModuleSource, ModuleSpecifier, RequestedModuleType, error::ModuleLoaderError};
 
 /// A trait that can be implemented to modify the behavior of the module loader
 /// Allows for custom schemes, caching, and more granular permissions
@@ -49,12 +49,7 @@ pub trait ImportProvider {
     ) -> Option<Result<String, ModuleLoaderError>> {
         // Call the old method for backward compatibility
         #[allow(deprecated)]
-        self.import_with_type(
-            specifier,
-            referrer,
-            is_dyn_import,
-            RequestedModuleType::None,
-        )
+        self.import_with_type(specifier, referrer, is_dyn_import, RequestedModuleType::None)
     }
 
     /// Retrieve a JavaScript/TypeScript module from a given URL (deprecated version)

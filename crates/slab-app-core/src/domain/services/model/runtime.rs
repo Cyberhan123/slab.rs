@@ -266,18 +266,20 @@ async fn load_model_with_state(
     let load_spec = build_backend_load_spec(
         resolved_target.backend_id,
         &resolved_target.model_path,
-        num_workers,
-        context_length,
-        resolved_target
-            .pack_load_defaults
-            .as_ref()
-            .and_then(|defaults| defaults.chat_template_source.clone()),
-        resolved_target
-            .pack_load_defaults
-            .as_ref()
-            .and_then(|defaults| defaults.gbnf_source.clone()),
-        flash_attn,
-        diffusion,
+        BackendLoadSpecOptions {
+            num_workers,
+            context_length,
+            chat_template: resolved_target
+                .pack_load_defaults
+                .as_ref()
+                .and_then(|defaults| defaults.chat_template_source.clone()),
+            gbnf: resolved_target
+                .pack_load_defaults
+                .as_ref()
+                .and_then(|defaults| defaults.gbnf_source.clone()),
+            flash_attn,
+            diffusion,
+        },
     )?;
     let response = state.auto_unload().load_model_with_pressure_control(&load_spec).await?;
     state
@@ -292,17 +294,29 @@ async fn load_model_with_state(
     decode_model_status(response)
 }
 
-fn build_backend_load_spec(
-    backend_id: RuntimeBackendId,
-    model_path: &str,
+struct BackendLoadSpecOptions {
     num_workers: u32,
     context_length: u32,
     chat_template: Option<String>,
     gbnf: Option<String>,
     flash_attn: bool,
     diffusion: Option<DiffusionLoadOptions>,
+}
+
+fn build_backend_load_spec(
+    backend_id: RuntimeBackendId,
+    model_path: &str,
+    options: BackendLoadSpecOptions,
 ) -> Result<RuntimeBackendLoadSpec, AppCoreError> {
     let model_path = PathBuf::from(model_path);
+    let BackendLoadSpecOptions {
+        num_workers,
+        context_length,
+        chat_template,
+        gbnf,
+        flash_attn,
+        diffusion,
+    } = options;
 
     match backend_id {
         RuntimeBackendId::GgmlLlama => Ok(RuntimeBackendLoadSpec::GgmlLlama(GgmlLlamaLoadConfig {

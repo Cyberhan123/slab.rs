@@ -314,57 +314,50 @@ async fn load_model_once(
     match req {
         ModelLoadRpcRequest::GgmlLlama(req) => {
             let (mut client, request_id) = ggml_llama_client(channel);
-            let result = client.load_model(req).await.map_err(|status| {
-                log_grpc_error("load_model", &request_id, &status);
-                status
+            let result = client.load_model(req).await.inspect_err(|status| {
+                log_grpc_error("load_model", &request_id, status);
             });
             (result, request_id)
         }
         ModelLoadRpcRequest::GgmlWhisper(req) => {
             let (mut client, request_id) = ggml_whisper_client(channel);
-            let result = client.load_model(req).await.map_err(|status| {
-                log_grpc_error("load_model", &request_id, &status);
-                status
+            let result = client.load_model(req).await.inspect_err(|status| {
+                log_grpc_error("load_model", &request_id, status);
             });
             (result, request_id)
         }
         ModelLoadRpcRequest::GgmlDiffusion(req) => {
             let (mut client, request_id) = ggml_diffusion_client(channel);
-            let result = client.load_model(req).await.map_err(|status| {
-                log_grpc_error("load_model", &request_id, &status);
-                status
+            let result = client.load_model(req).await.inspect_err(|status| {
+                log_grpc_error("load_model", &request_id, status);
             });
             (result, request_id)
         }
         ModelLoadRpcRequest::CandleLlama(req) => {
             let (mut client, request_id) = candle_transformers_client(channel);
-            let result = client.load_llama_model(req).await.map_err(|status| {
-                log_grpc_error("load_llama_model", &request_id, &status);
-                status
+            let result = client.load_llama_model(req).await.inspect_err(|status| {
+                log_grpc_error("load_llama_model", &request_id, status);
             });
             (result, request_id)
         }
         ModelLoadRpcRequest::CandleWhisper(req) => {
             let (mut client, request_id) = candle_transformers_client(channel);
-            let result = client.load_whisper_model(req).await.map_err(|status| {
-                log_grpc_error("load_whisper_model", &request_id, &status);
-                status
+            let result = client.load_whisper_model(req).await.inspect_err(|status| {
+                log_grpc_error("load_whisper_model", &request_id, status);
             });
             (result, request_id)
         }
         ModelLoadRpcRequest::CandleDiffusion(req) => {
             let (mut client, request_id) = candle_diffusion_client(channel);
-            let result = client.load_model(req).await.map_err(|status| {
-                log_grpc_error("load_model", &request_id, &status);
-                status
+            let result = client.load_model(req).await.inspect_err(|status| {
+                log_grpc_error("load_model", &request_id, status);
             });
             (result, request_id)
         }
         ModelLoadRpcRequest::OnnxText(req) => {
             let (mut client, request_id) = onnx_client(channel);
-            let result = client.load_text_model(req).await.map_err(|status| {
-                log_grpc_error("load_text_model", &request_id, &status);
-                status
+            let result = client.load_text_model(req).await.inspect_err(|status| {
+                log_grpc_error("load_text_model", &request_id, status);
             });
             (result, request_id)
         }
@@ -393,57 +386,50 @@ async fn unload_model_once(
     let value = match backend_id {
         RuntimeBackendId::GgmlLlama => {
             let (mut client, request_id) = ggml_llama_client(channel);
-            let result = client.unload_model(req).await.map_err(|status| {
-                log_grpc_error("unload_model", &request_id, &status);
-                status
+            let result = client.unload_model(req).await.inspect_err(|status| {
+                log_grpc_error("unload_model", &request_id, status);
             });
             (result, request_id)
         }
         RuntimeBackendId::GgmlWhisper => {
             let (mut client, request_id) = ggml_whisper_client(channel);
-            let result = client.unload_model(req).await.map_err(|status| {
-                log_grpc_error("unload_model", &request_id, &status);
-                status
+            let result = client.unload_model(req).await.inspect_err(|status| {
+                log_grpc_error("unload_model", &request_id, status);
             });
             (result, request_id)
         }
         RuntimeBackendId::GgmlDiffusion => {
             let (mut client, request_id) = ggml_diffusion_client(channel);
-            let result = client.unload_model(req).await.map_err(|status| {
-                log_grpc_error("unload_model", &request_id, &status);
-                status
+            let result = client.unload_model(req).await.inspect_err(|status| {
+                log_grpc_error("unload_model", &request_id, status);
             });
             (result, request_id)
         }
         RuntimeBackendId::CandleLlama => {
             let (mut client, request_id) = candle_transformers_client(channel);
-            let result = client.unload_llama_model(req).await.map_err(|status| {
-                log_grpc_error("unload_llama_model", &request_id, &status);
-                status
+            let result = client.unload_llama_model(req).await.inspect_err(|status| {
+                log_grpc_error("unload_llama_model", &request_id, status);
             });
             (result, request_id)
         }
         RuntimeBackendId::CandleWhisper => {
             let (mut client, request_id) = candle_transformers_client(channel);
-            let result = client.unload_whisper_model(req).await.map_err(|status| {
-                log_grpc_error("unload_whisper_model", &request_id, &status);
-                status
+            let result = client.unload_whisper_model(req).await.inspect_err(|status| {
+                log_grpc_error("unload_whisper_model", &request_id, status);
             });
             (result, request_id)
         }
         RuntimeBackendId::CandleDiffusion => {
             let (mut client, request_id) = candle_diffusion_client(channel);
-            let result = client.unload_model(req).await.map_err(|status| {
-                log_grpc_error("unload_model", &request_id, &status);
-                status
+            let result = client.unload_model(req).await.inspect_err(|status| {
+                log_grpc_error("unload_model", &request_id, status);
             });
             (result, request_id)
         }
         RuntimeBackendId::Onnx => {
             let (mut client, request_id) = onnx_client(channel);
-            let result = client.unload_text_model(req).await.map_err(|status| {
-                log_grpc_error("unload_text_model", &request_id, &status);
-                status
+            let result = client.unload_text_model(req).await.inspect_err(|status| {
+                log_grpc_error("unload_text_model", &request_id, status);
             });
             (result, request_id)
         }

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use deno_core::{extension, Extension};
+use deno_core::{Extension, extension};
 
 use super::ExtensionTrait;
 
@@ -10,9 +10,9 @@ pub use options::WebOptions;
 mod permissions;
 pub(crate) use permissions::PermissionsContainer;
 pub use permissions::{
-    to_permissions_options, AllowlistWebPermissions, CheckedPath, DefaultWebPermissions,
-    PermissionCheckError, PermissionDeniedError, PermissionsOptions, SystemsPermissionKind,
-    WebPermissions,
+    AllowlistWebPermissions, CheckedPath, DefaultWebPermissions, PermissionCheckError,
+    PermissionDeniedError, PermissionsOptions, SystemsPermissionKind, WebPermissions,
+    to_permissions_options,
 };
 
 /// Stub for a node op deno_net expects to find
@@ -30,7 +30,7 @@ extension!(
     init_fetch,
     deps = [rustyscript],
     esm_entry_point = "ext:init_fetch/init_fetch.js",
-    esm = [ dir "src/ext/web", "init_fetch.js" ],
+    esm = [ dir "src/infra/deno/ext/web", "init_fetch.js" ],
 );
 impl ExtensionTrait<WebOptions> for init_fetch {
     fn init(options: WebOptions) -> Extension {
@@ -61,7 +61,7 @@ extension!(
     deps = [rustyscript],
     ops = [op_tls_peer_certificate],
     esm_entry_point = "ext:init_net/init_net.js",
-    esm = [ dir "src/ext/web", "init_net.js" ],
+    esm = [ dir "src/infra/deno/ext/web", "init_net.js" ],
 );
 
 #[cfg(feature = "node_experimental")]
@@ -69,7 +69,7 @@ extension!(
     init_net,
     deps = [rustyscript],
     esm_entry_point = "ext:init_net/init_net.js",
-    esm = [ dir "src/ext/web", "init_net.js" ],
+    esm = [ dir "src/infra/deno/ext/web", "init_net.js" ],
 );
 
 impl ExtensionTrait<WebOptions> for init_net {
@@ -92,7 +92,7 @@ extension!(
     init_telemetry,
     deps = [rustyscript],
     esm_entry_point = "ext:init_telemetry/init_telemetry.js",
-    esm = [ dir "src/ext/web", "init_telemetry.js" ],
+    esm = [ dir "src/infra/deno/ext/web", "init_telemetry.js" ],
 );
 impl ExtensionTrait<()> for init_telemetry {
     fn init((): ()) -> Extension {
@@ -110,7 +110,7 @@ extension!(
     init_web,
     deps = [rustyscript],
     esm_entry_point = "ext:init_web/init_web.js",
-    esm = [ dir "src/ext/web", "init_web.js", "init_errors.js" ],
+    esm = [ dir "src/infra/deno/ext/web", "init_web.js", "init_errors.js" ],
     options = {
         permissions: Arc<dyn WebPermissions>
     },
@@ -135,11 +135,7 @@ impl ExtensionTrait<WebOptions> for init_web {
 
 impl ExtensionTrait<WebOptions> for deno_web::deno_web {
     fn init(options: WebOptions) -> Extension {
-        deno_web::deno_web::init(
-            options.blob_store,
-            options.base_url,
-            options.broadcast_channel,
-        )
+        deno_web::deno_web::init(options.blob_store, options.base_url, options.broadcast_channel)
     }
 }
 

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde_json::{Value, json};
 
 use crate::manifest::ModelPackManifest;
@@ -28,7 +30,32 @@ pub fn generate_manifest_schema() -> Value {
         properties.as_object_mut().expect("manifest schema properties should be an object");
     properties.insert("$schema".into(), json!({ "type": "string" }));
 
+    sort_json_object_keys(&mut schema);
+
     schema
+}
+
+fn sort_json_object_keys(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            for child in map.values_mut() {
+                sort_json_object_keys(child);
+            }
+
+            let sorted = std::mem::take(map)
+                .into_iter()
+                .collect::<BTreeMap<_, _>>()
+                .into_iter()
+                .collect();
+            *map = sorted;
+        }
+        Value::Array(values) => {
+            for child in values {
+                sort_json_object_keys(child);
+            }
+        }
+        _ => {}
+    }
 }
 
 pub fn render_manifest_schema() -> String {

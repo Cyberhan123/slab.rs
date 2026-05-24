@@ -944,16 +944,16 @@ fn validate_chat_completion_request(
     }
 
     if request.continue_generation {
-        if let Some(max_tokens) = request.max_tokens {
-            if max_tokens > MAX_CONTINUE_GENERATION_TOKENS {
-                return Err(validation_error(
-                    "max_tokens_too_large",
-                    &format!(
-                        "max_tokens ({}) is too large for continue_generation; maximum is {}",
-                        max_tokens, MAX_CONTINUE_GENERATION_TOKENS
-                    ),
-                ));
-            }
+        if let Some(max_tokens) = request.max_tokens
+            && max_tokens > MAX_CONTINUE_GENERATION_TOKENS
+        {
+            return Err(validation_error(
+                "max_tokens_too_large",
+                &format!(
+                    "max_tokens ({}) is too large for continue_generation; maximum is {}",
+                    max_tokens, MAX_CONTINUE_GENERATION_TOKENS
+                ),
+            ));
         }
 
         let Some(last_message) =

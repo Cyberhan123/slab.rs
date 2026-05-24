@@ -1,4 +1,4 @@
-use deno_core::{extension, Extension};
+use deno_core::{Extension, extension};
 
 use super::ExtensionTrait;
 
@@ -14,7 +14,7 @@ extension!(
     init_http,
     deps = [rustyscript],
     esm_entry_point = "ext:init_http/init_http.js",
-    esm = [ dir "src/ext/http", "init_http.js" ],
+    esm = [ dir "src/infra/deno/ext/http", "init_http.js" ],
 );
 impl ExtensionTrait<()> for init_http {
     fn init((): ()) -> Extension {

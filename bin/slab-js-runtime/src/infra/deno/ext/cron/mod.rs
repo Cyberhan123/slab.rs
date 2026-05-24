@@ -1,4 +1,4 @@
-use deno_core::{extension, Extension};
+use deno_core::{Extension, extension};
 use deno_cron::local::LocalCronHandler;
 
 use super::ExtensionTrait;
@@ -7,7 +7,7 @@ extension!(
     init_cron,
     deps = [rustyscript],
     esm_entry_point = "ext:init_cron/init_cron.js",
-    esm = [ dir "src/ext/cron", "init_cron.js" ],
+    esm = [ dir "src/infra/deno/ext/cron", "init_cron.js" ],
 );
 impl ExtensionTrait<()> for init_cron {
     fn init((): ()) -> Extension {
@@ -21,8 +21,5 @@ impl ExtensionTrait<()> for deno_cron::deno_cron {
 }
 
 pub fn extensions(is_snapshot: bool) -> Vec<Extension> {
-    vec![
-        deno_cron::deno_cron::build((), is_snapshot),
-        init_cron::build((), is_snapshot),
-    ]
+    vec![deno_cron::deno_cron::build((), is_snapshot), init_cron::build((), is_snapshot)]
 }

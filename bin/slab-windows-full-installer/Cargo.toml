@@ -8,6 +8,11 @@ keywords.workspace = true
 categories.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "slab-windows-full-installer"
+path = "src/main.rs"
+test = false
+
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }

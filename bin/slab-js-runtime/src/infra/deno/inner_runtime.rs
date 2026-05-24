@@ -9,19 +9,19 @@ use std::{
 };
 
 use deno_core::{
-    futures::FutureExt, serde_json, serde_v8::from_v8, v8, JsRuntime, JsRuntimeForSnapshot,
-    PollEventLoopOptions,
+    JsRuntime, JsRuntimeForSnapshot, PollEventLoopOptions, futures::FutureExt, serde_json,
+    serde_v8::from_v8, v8,
 };
 use deno_features::FeatureChecker;
 use serde::de::DeserializeOwned;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    ext,
+    Error, ExtensionOptions, Module, ModuleHandle, ext,
     module_loader::{LoaderOptions, RustyLoader},
     traits::{ToDefinedValue, ToModuleSpecifier},
     transpiler::transpile,
-    utilities, Error, ExtensionOptions, Module, ModuleHandle,
+    utilities,
 };
 
 fn safe_prepare_stack_trace_callback<'s>(
@@ -29,10 +29,9 @@ fn safe_prepare_stack_trace_callback<'s>(
     error: v8::Local<'s, v8::Value>,
     _callsites: v8::Local<'s, v8::Array>,
 ) -> v8::Local<'s, v8::Value> {
-    let message = error.to_string(scope).map_or_else(
-        || "Uncaught Error".to_string(),
-        |s| s.to_rust_string_lossy(scope),
-    );
+    let message = error
+        .to_string(scope)
+        .map_or_else(|| "Uncaught Error".to_string(), |s| s.to_rust_string_lossy(scope));
 
     v8::String::new(scope, &message).map_or_else(|| v8::undefined(scope).into(), Into::into)
 }
@@ -106,10 +105,7 @@ fn decode_args_to_globals(
     let json = deno_core::serde_json::to_string(args)?;
 
     // Use execute_script to parse the JSON and get the result
-    let script = format!(
-        "JSON.parse('{}')",
-        json.replace('\\', "\\\\").replace('\'', "\\'")
-    );
+    let script = format!("JSON.parse('{}')", json.replace('\\', "\\\\").replace('\'', "\\'"));
     let args = runtime.execute_script("<decode_args>", script)?;
 
     let context = runtime.main_context();
@@ -125,7 +121,10 @@ fn decode_args_to_globals(
         let len = arr.length();
         let mut result = Vec::with_capacity(len as usize);
         for i in 0..len {
-            let index = v8::Integer::new(&context_scope, i as i32);
+            let index = v8::Integer::new(
+                &context_scope,
+                i32::try_from(i).expect("array index exceeds i32"),
+            );
             if let Some(arg) = arr.get(&context_scope, index.into()) {
                 let isolate: &v8::Isolate = &context_scope;
                 result.push(v8::Global::new(isolate, arg));
@@ -291,37 +290,26 @@ impl<RT: RuntimeTrait> InnerRuntime<RT> {
 
         let mut feature_checker = FeatureChecker::default();
         feature_checker.set_exit_cb(Box::new(|_, _| {}));
-        deno_runtime
-            .rt_mut()
-            .op_state()
-            .borrow_mut()
-            .put(Arc::new(feature_checker));
+        deno_runtime.rt_mut().op_state().borrow_mut().put(Arc::new(feature_checker));
 
         // Add a callback to terminate the runtime if the max_heap_size limit is approached
         if options.max_heap_size.is_some() {
             let isolate_handle = deno_runtime.rt_mut().v8_isolate().thread_safe_handle();
 
-            deno_runtime
-                .rt_mut()
-                .add_near_heap_limit_callback(move |current_value, _| {
-                    isolate_handle.terminate_execution();
+            deno_runtime.rt_mut().add_near_heap_limit_callback(move |current_value, _| {
+                isolate_handle.terminate_execution();
 
-                    // Signal the outer runtime to cancel block_on future (avoid hanging) and return friendly error
-                    heap_exhausted_token.cancel();
+                // Signal the outer runtime to cancel block_on future (avoid hanging) and return friendly error
+                heap_exhausted_token.cancel();
 
-                    // Spike the heap limit while terminating to avoid segfaulting
-                    // Callback may fire multiple times if memory usage increases quicker then termination finalizes
-                    5 * current_value
-                });
+                // Spike the heap limit while terminating to avoid segfaulting
+                // Callback may fire multiple times if memory usage increases quicker then termination finalizes
+                5 * current_value
+            });
         }
 
         let default_entrypoint = options.default_entrypoint;
-        Ok(Self {
-            module_loader,
-            deno_runtime,
-            cwd,
-            default_entrypoint,
-        })
+        Ok(Self { module_loader, deno_runtime, cwd, default_entrypoint })
     }
 
     /// Destroy the `RustyScript` runtime, returning the deno RT instance
@@ -358,10 +346,10 @@ impl<RT: RuntimeTrait> InnerRuntime<RT> {
         T: 'static,
     {
         let state = self.deno_runtime().op_state();
-        if let Ok(mut state) = state.try_borrow_mut() {
-            if state.has::<T>() {
-                return Some(state.take());
-            }
+        if let Ok(mut state) = state.try_borrow_mut()
+            && state.has::<T>()
+        {
+            return Some(state.take());
         }
 
         None
@@ -484,9 +472,7 @@ impl<RT: RuntimeTrait> InnerRuntime<RT> {
     /// A `Result` containing the non-null value extracted or an error (`Error`)
     pub fn get_global_value(&mut self, name: &str) -> Result<v8::Global<v8::Value>, Error> {
         // Use execute_script to get the global value - this avoids scope lifetime issues
-        let result = self
-            .deno_runtime()
-            .execute_script("<get_global_value>", name.to_string())?;
+        let result = self.deno_runtime().execute_script("<get_global_value>", name.to_string())?;
 
         // Check if the value is undefined
         let isolate = self.deno_runtime().v8_isolate();
@@ -513,9 +499,7 @@ impl<RT: RuntimeTrait> InnerRuntime<RT> {
         module_context: &ModuleHandle,
         name: &str,
     ) -> Result<v8::Global<v8::Value>, Error> {
-        let module_namespace = self
-            .deno_runtime()
-            .get_module_namespace(module_context.id())?;
+        let module_namespace = self.deno_runtime().get_module_namespace(module_context.id())?;
 
         let context = self.deno_runtime().main_context();
         let isolate = self.deno_runtime().v8_isolate();
@@ -582,9 +566,7 @@ impl<RT: RuntimeTrait> InnerRuntime<RT> {
         // If it's not found, try the global context
         match result {
             Some(result) => Ok(result),
-            None => self
-                .get_global_value(name)
-                .map_err(|_| Error::ValueNotFound(name.to_string())),
+            None => self.get_global_value(name).map_err(|_| Error::ValueNotFound(name.to_string())),
         }
     }
 
@@ -612,9 +594,8 @@ impl<RT: RuntimeTrait> InnerRuntime<RT> {
         let pinned = std::pin::pin!(v8::HandleScope::new(isolate));
         let scope = pinned.init();
         let local_value = v8::Local::<v8::Value>::new(&scope, value);
-        let f: v8::Local<v8::Function> = local_value
-            .try_into()
-            .or::<Error>(Err(Error::ValueNotCallable(name.to_string())))?;
+        let f: v8::Local<v8::Function> =
+            local_value.try_into().or::<Error>(Err(Error::ValueNotCallable(name.to_string())))?;
 
         // Return it as a global
         let isolate: &v8::Isolate = &scope;
@@ -629,10 +610,7 @@ impl<RT: RuntimeTrait> InnerRuntime<RT> {
     ) -> Result<v8::Global<v8::Value>, Error> {
         // Get the receiver (namespace object or undefined)
         let receiver = if let Some(module_context) = module_context {
-            Some(
-                self.deno_runtime()
-                    .get_module_namespace(module_context.id())?,
-            )
+            Some(self.deno_runtime().get_module_namespace(module_context.id())?)
         } else {
             None
         };
@@ -775,19 +753,19 @@ impl<RT: RuntimeTrait> InnerRuntime<RT> {
             let pinned = std::pin::pin!(v8::HandleScope::new(isolate));
             let scope = pinned.init();
             let default_export = v8::Local::new(&scope, default_export);
-            if default_export.is_function() {
-                if let Ok(f) = v8::Local::<v8::Function>::try_from(default_export) {
-                    let isolate: &v8::Isolate = &scope;
-                    return Ok(Some(v8::Global::new(isolate, f)));
-                }
+            if default_export.is_function()
+                && let Ok(f) = v8::Local::<v8::Function>::try_from(default_export)
+            {
+                let isolate: &v8::Isolate = &scope;
+                return Ok(Some(v8::Global::new(isolate, f)));
             }
         }
 
         // Try to get an entrypoint from the default entrypoint
-        if let Some(default) = default.as_deref() {
-            if let Ok(f) = self.get_function_by_name(Some(module_context), default) {
-                return Ok(Some(f));
-            }
+        if let Some(default) = default.as_deref()
+            && let Ok(f) = self.get_function_by_name(Some(module_context), default)
+        {
+            return Ok(Some(f));
         }
 
         Ok(None)
@@ -805,9 +783,7 @@ impl<RT: RuntimeTrait> InnerRuntime<RT> {
         side_modules: Vec<&Module>,
     ) -> Result<ModuleHandle, Error> {
         if main_module.is_none() && side_modules.is_empty() {
-            return Err(Error::Runtime(
-                "Internal error: attempt to load no modules".to_string(),
-            ));
+            return Err(Error::Runtime("Internal error: attempt to load no modules".to_string()));
         }
 
         let mut module_handle_stub = ModuleHandle::default();
@@ -820,10 +796,7 @@ impl<RT: RuntimeTrait> InnerRuntime<RT> {
 
             // Now CJS translation, for node
             #[cfg(feature = "node_experimental")]
-            let code = self
-                .module_loader
-                .translate_cjs(&module_specifier, &code)
-                .await?;
+            let code = self.module_loader.translate_cjs(&module_specifier, &code).await?;
 
             let fast_code = deno_core::FastString::from(code.clone());
 
@@ -840,8 +813,7 @@ impl<RT: RuntimeTrait> InnerRuntime<RT> {
             );
 
             let mod_load = self.deno_runtime().mod_evaluate(s_modid);
-            self.with_event_loop_future(mod_load, PollEventLoopOptions::default())
-                .await?;
+            self.with_event_loop_future(mod_load, PollEventLoopOptions::default()).await?;
             module_handle_stub = ModuleHandle::new(side_module, s_modid, None);
         }
 
@@ -853,10 +825,7 @@ impl<RT: RuntimeTrait> InnerRuntime<RT> {
 
             // Now CJS translation, for node
             #[cfg(feature = "node_experimental")]
-            let code = self
-                .module_loader
-                .translate_cjs(&module_specifier, &code)
-                .await?;
+            let code = self.module_loader.translate_cjs(&module_specifier, &code).await?;
 
             let fast_code = deno_core::FastString::from(code.clone());
 
@@ -874,19 +843,14 @@ impl<RT: RuntimeTrait> InnerRuntime<RT> {
 
             // Finish execution
             let mod_load = self.deno_runtime().mod_evaluate(module_id);
-            self.with_event_loop_future(mod_load, PollEventLoopOptions::default())
-                .await?;
+            self.with_event_loop_future(mod_load, PollEventLoopOptions::default()).await?;
             module_handle_stub = ModuleHandle::new(module, module_id, None);
         }
 
         // Try to get the default entrypoint
         let entrypoint = self.get_module_entrypoint(&mut module_handle_stub)?;
 
-        Ok(ModuleHandle::new(
-            module_handle_stub.module(),
-            module_handle_stub.id(),
-            entrypoint,
-        ))
+        Ok(ModuleHandle::new(module_handle_stub.module(), module_handle_stub.id(), entrypoint))
     }
 }
 
@@ -914,11 +878,7 @@ mod test_inner_runtime {
             .build()
             .unwrap();
         tokio
-            .block_on(async move {
-                tokio::time::timeout(timeout, f())
-                    .await
-                    .expect("Test failed")
-            })
+            .block_on(async move { tokio::time::timeout(timeout, f()).await.expect("Test failed") })
             .expect("Timed out")
     }
 
@@ -1012,9 +972,7 @@ mod test_inner_runtime {
         let rt = &mut runtime;
         let module = run_async_task(|| async move { rt.load_modules(Some(&module), vec![]).await });
 
-        let result = runtime
-            .get_value_ref(Some(&module), "v")
-            .expect("Could not find global");
+        let result = runtime.get_value_ref(Some(&module), "v").expect("Could not find global");
         assert_v8!(result, 5, usize, runtime);
     }
 
@@ -1024,17 +982,11 @@ mod test_inner_runtime {
             InnerRuntime::<JsRuntime>::new(RuntimeOptions::default(), CancellationToken::new())
                 .expect("Could not load runtime");
         runtime
-            .register_function(
-                "test",
-                sync_callback!(|a: i64, b: i64| { Ok::<i64, Error>(a + b) }),
-            )
+            .register_function("test", sync_callback!(|a: i64, b: i64| { Ok::<i64, Error>(a + b) }))
             .expect("Could not register function");
 
         run_async_task(|| async move {
-            let v = runtime
-                .eval("rustyscript.functions.test(2, 3)")
-                .await
-                .expect("failed to eval");
+            let v = runtime.eval("rustyscript.functions.test(2, 3)").await.expect("failed to eval");
             assert_v8!(v, 5, usize, runtime);
             Ok(())
         });
@@ -1060,9 +1012,8 @@ mod test_inner_runtime {
                 .await
                 .expect("failed to eval");
 
-            let result: Promise<u32> = runtime
-                .decode_value(result)
-                .expect("Could not decode promise");
+            let result: Promise<u32> =
+                runtime.decode_value(result).expect("Could not decode promise");
 
             let result: u32 = result.resolve(runtime.deno_runtime()).await?;
             assert_eq!(result, 2);
@@ -1081,10 +1032,7 @@ mod test_inner_runtime {
             let result = runtime.eval("btoa('foo')").await.expect("failed to eval");
             assert_v8!(result, "Zm9v", String, runtime);
 
-            let result = runtime
-                .eval("atob(btoa('foo'))")
-                .await
-                .expect("failed to eval");
+            let result = runtime.eval("atob(btoa('foo'))").await.expect("failed to eval");
             assert_v8!(result, "foo", String, runtime);
 
             Ok(())
@@ -1109,28 +1057,18 @@ mod test_inner_runtime {
         let rt = &mut runtime;
         let module = run_async_task(|| async move { rt.load_modules(Some(&module), vec![]).await });
 
-        let v = runtime
-            .get_value_ref(None, "a")
-            .expect("Could not find global");
+        let v = runtime.get_value_ref(None, "a").expect("Could not find global");
         assert_v8!(v, 2, usize, runtime);
 
-        let v = runtime
-            .get_value_ref(Some(&module), "a")
-            .expect("Could not find global");
+        let v = runtime.get_value_ref(Some(&module), "a").expect("Could not find global");
         assert_v8!(v, 2, usize, runtime);
 
-        let v = runtime
-            .get_value_ref(Some(&module), "b")
-            .expect("Could not find export");
+        let v = runtime.get_value_ref(Some(&module), "b").expect("Could not find export");
         assert_v8!(v, "test", String, runtime);
 
-        runtime
-            .get_value_ref(Some(&module), "c")
-            .expect_err("Could not detect null");
+        runtime.get_value_ref(Some(&module), "c").expect_err("Could not detect null");
 
-        runtime
-            .get_value_ref(Some(&module), "d")
-            .expect_err("Could not detect undeclared");
+        runtime.get_value_ref(Some(&module), "d").expect_err("Could not detect undeclared");
     }
 
     #[test]
@@ -1151,18 +1089,12 @@ mod test_inner_runtime {
         let rt = &mut runtime;
         let module = run_async_task(|| async move { rt.load_modules(Some(&module), vec![]).await });
 
-        runtime
-            .get_function_by_name(Some(&module), "fna")
-            .expect("Did not find global");
-        runtime
-            .get_function_by_name(Some(&module), "fnb")
-            .expect("Did not find export");
+        runtime.get_function_by_name(Some(&module), "fna").expect("Did not find global");
+        runtime.get_function_by_name(Some(&module), "fnb").expect("Did not find export");
         runtime
             .get_function_by_name(Some(&module), "fnc")
             .expect_err("Did not detect non-function");
-        runtime
-            .get_function_by_name(Some(&module), "fnd")
-            .expect_err("Did not detect undefined");
+        runtime.get_function_by_name(Some(&module), "fnd").expect_err("Did not detect undefined");
     }
 
     #[test]
@@ -1206,9 +1138,7 @@ mod test_inner_runtime {
                 .call_function_by_ref(Some(&handle), &f, json_args!())
                 .expect("Did not allow undefined return");
 
-            let f = runtime
-                .get_function_by_name(Some(&handle), "will_err")
-                .unwrap();
+            let f = runtime.get_function_by_name(Some(&handle), "will_err").unwrap();
             runtime
                 .call_function_by_ref(Some(&handle), &f, json_args!())
                 .expect_err("Did not catch error");
@@ -1264,8 +1194,7 @@ mod test_inner_runtime {
         let rt = &mut runtime;
         let module = run_async_task(|| async move {
             let h = rt.load_modules(Some(&module), vec![]).await;
-            rt.await_event_loop(PollEventLoopOptions::default(), None)
-                .await?;
+            rt.await_event_loop(PollEventLoopOptions::default(), None).await?;
             h
         });
 
@@ -1394,9 +1323,7 @@ mod test_inner_runtime {
         }
 
         let structure = runtime.get_value_ref(Some(&module), "test").unwrap();
-        let structure: TestStruct = runtime
-            .decode_value(structure)
-            .expect("Could not deserialize");
+        let structure: TestStruct = runtime.decode_value(structure).expect("Could not deserialize");
 
         let isolate = runtime.deno_runtime().v8_isolate();
         let function = structure.func.as_global(isolate);
@@ -1465,9 +1392,8 @@ mod test_inner_runtime {
         let rt = &mut runtime;
         let module = run_async_task(|| async move { rt.load_modules(Some(&module), vec![]).await });
 
-        let function = runtime
-            .get_function_by_name(Some(&module), "test")
-            .expect("Could not get function");
+        let function =
+            runtime.get_function_by_name(Some(&module), "test").expect("Could not get function");
 
         run_async_task(|| async move {
             let value = runtime

@@ -363,9 +363,8 @@ impl CandleLlamaEngine {
         // a deadlock while the lock is held.
         let device = Device::Cpu;
         let max_new_tokens = max_tokens.min(4096);
-        let mut forward_pos = all_tokens.len().saturating_sub(1);
 
-        for _ in 0..max_new_tokens {
+        for (forward_pos, _) in (all_tokens.len().saturating_sub(1)..).zip(0..max_new_tokens) {
             let input = match CandleTensor::new(all_tokens.as_slice(), &device)
                 .and_then(|t| t.unsqueeze(0))
             {
@@ -426,7 +425,6 @@ impl CandleLlamaEngine {
             }
 
             all_tokens.push(next_token);
-            forward_pos += 1;
 
             if !send(StreamChunk::Token(token_text)) {
                 break;

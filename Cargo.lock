@@ -7879,6 +7879,7 @@ checksum = "aef3982638978efa195ff11b305f51f1f22f4f0a6cabee7af79b383ebee6a213"
 dependencies = [
  "dirs",
  "futures",
+ "http 1.4.0",
  "indicatif 0.18.4",
  "libc",
  "log",

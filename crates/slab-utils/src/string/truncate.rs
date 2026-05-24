@@ -145,7 +145,6 @@ fn assemble_truncated_output(prefix: &str, suffix: &str, marker: &str) -> String
 }
 
 #[cfg(test)]
-
 mod tests {
     use super::split_string;
     use super::truncate_middle_chars;

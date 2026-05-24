@@ -8,6 +8,14 @@ keywords.workspace = true
 categories.workspace = true
 license.workspace = true
 
+[lib]
+doctest = false
+
+[[bin]]
+name = "slab-js-runtime"
+path = "src/main.rs"
+doctest = false
+
 [features]
 default = ["worker", "safe_extensions"]
 

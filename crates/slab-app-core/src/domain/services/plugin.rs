@@ -406,10 +406,10 @@ impl PluginService {
                 scan.error.clone().unwrap_or_else(|| "unknown plugin validation error".to_owned())
             )));
         }
-        if let Some(state) = self.state.store().get_plugin_state(plugin_id).await? {
-            if !state.enabled {
-                return Err(AppCoreError::BadRequest(format!("plugin '{plugin_id}' is disabled")));
-            }
+        if let Some(state) = self.state.store().get_plugin_state(plugin_id).await?
+            && !state.enabled
+        {
+            return Err(AppCoreError::BadRequest(format!("plugin '{plugin_id}' is disabled")));
         }
         Ok(())
     }

@@ -2,7 +2,7 @@
 //! It is used when the `web` feature is disabled.
 //!
 //! It provides a minimal set of APIs that are required for a few other extensions.
-use deno_core::{extension, Extension};
+use deno_core::{Extension, extension};
 
 use super::ExtensionTrait;
 
@@ -12,12 +12,18 @@ use timers::StartTime;
 
 extension!(
     deno_web,
+    deps = [rustyscript, deno_webidl],
     ops = [
         timers::op_now, timers::op_defer,
         encoding::op_base64_decode, encoding::op_base64_atob, encoding::op_base64_encode, encoding::op_base64_btoa,
     ],
     esm_entry_point = "ext:deno_web/init_stub.js",
-    esm = [ dir "src/ext/web_stub", "init_stub.js", "00_url.js", "01_console.js", "01_dom_exception.js", "01_urlpattern.js", "02_timers.js", "05_base64.js" ],
+    esm = [ dir "src/infra/deno/ext/web_stub", "init_stub.js", "00_url.js", "01_console.js", "01_dom_exception.js", "01_urlpattern.js", "02_timers.js", "05_base64.js" ],
+    lazy_loaded_js = [
+        dir "src/infra/deno/ext/web_stub",
+        "ext:deno_web/01_console.js" = "01_console_lazy.js",
+        "ext:deno_web/01_dom_exception.js" = "01_dom_exception_lazy.js",
+    ],
     state = |state| {
         state.put(StartTime::default());
     }

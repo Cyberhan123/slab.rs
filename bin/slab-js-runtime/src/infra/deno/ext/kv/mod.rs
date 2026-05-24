@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use deno_core::{extension, Extension};
+use deno_core::{Extension, extension};
 use deno_kv::{dynamic::MultiBackendDbHandler, remote::RemoteDbHandler, sqlite::SqliteDbHandler};
 
 use super::ExtensionTrait;
@@ -9,7 +9,7 @@ extension!(
     init_kv,
     deps = [rustyscript],
     esm_entry_point = "ext:init_kv/init_kv.js",
-    esm = [ dir "src/ext/kv", "init_kv.js" ],
+    esm = [ dir "src/infra/deno/ext/kv", "init_kv.js" ],
 );
 impl ExtensionTrait<()> for init_kv {
     fn init((): ()) -> Extension {
@@ -23,22 +23,14 @@ impl ExtensionTrait<KvStore> for deno_kv::deno_kv {
 }
 
 pub fn extensions(store: KvStore, is_snapshot: bool) -> Vec<Extension> {
-    vec![
-        deno_kv::deno_kv::build(store, is_snapshot),
-        init_kv::build((), is_snapshot),
-    ]
+    vec![deno_kv::deno_kv::build(store, is_snapshot), init_kv::build((), is_snapshot)]
 }
 
 #[derive(Clone)]
 enum KvStoreBuilder {
-    Local {
-        path: Option<PathBuf>,
-        rng_seed: Option<u64>,
-    },
+    Local { path: Option<PathBuf>, rng_seed: Option<u64> },
 
-    Remote {
-        http_options: deno_kv::remote::HttpOptions,
-    },
+    Remote { http_options: deno_kv::remote::HttpOptions },
 }
 
 /// Configuration for the key-value store

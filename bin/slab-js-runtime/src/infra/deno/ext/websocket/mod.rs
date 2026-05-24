@@ -1,4 +1,4 @@
-use deno_core::{extension, Extension};
+use deno_core::{Extension, extension};
 
 use super::ExtensionTrait;
 
@@ -6,7 +6,7 @@ extension!(
     init_websocket,
     deps = [rustyscript],
     esm_entry_point = "ext:init_websocket/init_websocket.js",
-    esm = [ dir "src/ext/websocket", "init_websocket.js" ],
+    esm = [ dir "src/infra/deno/ext/websocket", "init_websocket.js" ],
 );
 
 impl ExtensionTrait<()> for init_websocket {

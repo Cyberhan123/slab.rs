@@ -117,14 +117,6 @@ impl Default for PluginThemeSnapshot {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginEmitRequest {
-    pub topic: String,
-    #[serde(default)]
-    pub data: Value,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginEventPayload {

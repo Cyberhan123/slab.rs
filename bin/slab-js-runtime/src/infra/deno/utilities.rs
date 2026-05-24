@@ -2,7 +2,7 @@ use std::path::Path;
 
 use deno_core::ModuleSpecifier;
 
-use crate::{traits::ToModuleSpecifier, Error, Module, ModuleWrapper, Runtime, RuntimeOptions};
+use crate::{Error, Module, ModuleWrapper, Runtime, RuntimeOptions, traits::ToModuleSpecifier};
 
 /// Evaluate a piece of non-ECMAScript-module JavaScript code
 ///
@@ -22,7 +22,7 @@ use crate::{traits::ToModuleSpecifier, Error, Module, ModuleWrapper, Runtime, Ru
 ///
 /// # Example
 ///
-/// ```rust
+/// ```ignore
 /// let result: i64 = rustyscript::evaluate("5 + 5").expect("The expression was invalid!");
 /// assert_eq!(10, result);
 /// ```
@@ -48,7 +48,7 @@ where
 ///
 /// # Example
 ///
-/// ```rust
+/// ```ignore
 /// assert!(rustyscript::validate("5 + 5").expect("Something went wrong!"));
 /// ```
 pub fn validate(javascript: &str) -> Result<bool, Error> {
@@ -76,7 +76,7 @@ pub fn validate(javascript: &str) -> Result<bool, Error> {
 ///
 /// # Example
 ///
-/// ```no_run
+/// ```ignore
 /// let mut module = rustyscript::import("js/my_module.js").expect("Something went wrong!");
 /// ```
 pub fn import(path: &str) -> Result<ModuleWrapper, Error> {
@@ -98,7 +98,7 @@ pub fn import(path: &str) -> Result<ModuleWrapper, Error> {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```ignore
 /// rustyscript::resolve_path("test.js", None).expect("Something went wrong!");
 /// ```
 pub fn resolve_path(
@@ -137,7 +137,7 @@ mod runtime_macros {
     /// You can also just pass a &tuple directly, or an &array, or even a single value
     ///
     /// # Example
-    /// ```rust
+    /// ```ignore
     /// use rustyscript::{ Runtime, RuntimeOptions, Module, json_args };
     /// use std::time::Duration;
     ///
@@ -174,7 +174,7 @@ mod runtime_macros {
     /// Benchmarks place the performance difference at nearly 1,000 times slower!
     ///
     /// # Example
-    /// ```rust
+    /// ```ignore
     /// use rustyscript::{ Runtime, RuntimeOptions, Module, big_json_args };
     /// use std::time::Duration;
     ///
@@ -208,7 +208,7 @@ mod runtime_macros {
     /// Takes care of deserializing arguments and serializing the result
     ///
     /// # Example
-    /// ```rust
+    /// ```ignore
     /// use rustyscript::{ Error, sync_callback };
     /// let add = sync_callback!(
     ///     |a: i64, b: i64| {
@@ -237,7 +237,7 @@ mod runtime_macros {
     /// Takes care of deserializing arguments and serializing the result
     ///
     /// # Example
-    /// ```rust
+    /// ```ignore
     /// use rustyscript::{ Error, async_callback };
     /// let add = async_callback!(
     ///     |a: i64, b: i64| async move {
@@ -276,10 +276,7 @@ mod test_runtime {
 
         let add2 = async_callback!(|a: i64, b: i64| async move { Ok::<i64, Error>(a + b) });
 
-        let args = vec![
-            serde_json::Value::Number(5.into()),
-            serde_json::Value::Number(5.into()),
-        ];
+        let args = vec![serde_json::Value::Number(5.into()), serde_json::Value::Number(5.into())];
         let result = add(&args).unwrap();
         assert_eq!(serde_json::Value::Number(10.into()), result);
 
@@ -301,9 +298,8 @@ mod test_runtime {
 
     #[test]
     fn test_resolve_path() {
-        assert!(resolve_path("test.js", None)
-            .expect("invalid path")
-            .to_string()
-            .ends_with("test.js"));
+        assert!(
+            resolve_path("test.js", None).expect("invalid path").to_string().ends_with("test.js")
+        );
     }
 }

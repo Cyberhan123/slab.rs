@@ -23,4 +23,4 @@ serde = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-hf-hub = { workspace = true }
+hf-hub = { workspace = true, features = ["ureq", "native-tls"] }

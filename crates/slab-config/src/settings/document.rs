@@ -842,6 +842,29 @@ impl Default for SwaggerConfig {
     }
 }
 
+fn sort_json_object_keys(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            for child in map.values_mut() {
+                sort_json_object_keys(child);
+            }
+
+            let sorted = std::mem::take(map)
+                .into_iter()
+                .collect::<BTreeMap<_, _>>()
+                .into_iter()
+                .collect();
+            *map = sorted;
+        }
+        Value::Array(values) => {
+            for child in values {
+                sort_json_object_keys(child);
+            }
+        }
+        _ => {}
+    }
+}
+
 pub fn settings_document_json_schema() -> Value {
     let mut schema = serde_json::to_value(schema_for!(SettingsDocument))
         .expect("SettingsDocument schema should serialize");
@@ -857,6 +880,8 @@ pub fn settings_document_json_schema() -> Value {
         "description".into(),
         Value::String("Schema for the persisted settings document used by Slab hosts.".into()),
     );
+
+    sort_json_object_keys(&mut schema);
 
     schema
 }

@@ -331,32 +331,6 @@ mod tests {
         }
     }
 
-    /// Extension methods for converting paths into [`AbsolutePathBuf`] values in tests.
-    pub trait PathExt {
-        /// Converts an already absolute path into an [`AbsolutePathBuf`].
-        fn abs(&self) -> AbsolutePathBuf;
-    }
-
-    impl PathExt for Path {
-        #[expect(clippy::expect_used)]
-        fn abs(&self) -> AbsolutePathBuf {
-            AbsolutePathBuf::from_absolute_path_checked(self)
-                .expect("path should already be absolute")
-        }
-    }
-
-    /// Extension methods for converting path buffers into [`AbsolutePathBuf`] values in tests.
-    pub trait PathBufExt {
-        /// Converts an already absolute path buffer into an [`AbsolutePathBuf`].
-        fn abs(&self) -> AbsolutePathBuf;
-    }
-
-    impl PathBufExt for PathBuf {
-        fn abs(&self) -> AbsolutePathBuf {
-            self.as_path().abs()
-        }
-    }
-
     #[test]
     fn create_with_absolute_path_ignores_base_path() {
         let base_dir = tempdir().expect("base dir");

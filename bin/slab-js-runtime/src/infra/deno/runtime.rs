@@ -4,10 +4,10 @@ use deno_core::PollEventLoopOptions;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    Error, Module, ModuleHandle,
     async_bridge::{AsyncBridge, AsyncBridgeExt, TokioRuntime},
     inner_runtime::{InnerRuntime, RsAsyncFunction, RsFunction},
     js_value::Function,
-    Error, Module, ModuleHandle,
 };
 
 /// Represents the set of options accepted by the runtime constructor
@@ -46,7 +46,7 @@ impl Runtime {
     /// A `Result` containing either the initialized runtime instance on success (`Ok`) or an error on failure (`Err`).
     ///
     /// # Example
-    /// ```no_run
+    /// ```ignore
     /// use rustyscript::{ json_args, Runtime, RuntimeOptions, Module };
     /// use std::time::Duration;
     ///
@@ -230,7 +230,7 @@ impl Runtime {
     }
 
     /// Remove and return a value from the state, if one exists
-    /// ```no_run
+    /// ```ignore
     /// use rustyscript::{ Runtime };
     ///
     /// # fn main() -> Result<(), rustyscript::Error> {
@@ -254,7 +254,7 @@ impl Runtime {
     /// # Errors
     /// Can fail if the inner state cannot be borrowed mutably
     ///
-    /// ```no_run
+    /// ```ignore
     /// use rustyscript::{ Runtime };
     ///
     /// # fn main() -> Result<(), rustyscript::Error> {
@@ -278,7 +278,7 @@ impl Runtime {
     /// # Errors
     /// Since this function borrows the state, it can fail if the state cannot be borrowed mutably
     ///
-    /// ```no_run
+    /// ```ignore
     /// use rustyscript::{ Runtime, Module, serde_json::Value };
     ///
     /// # fn main() -> Result<(), rustyscript::Error> {
@@ -307,7 +307,7 @@ impl Runtime {
     /// # Errors
     /// Since this function borrows the state, it can fail if the state cannot be borrowed mutably
     ///
-    /// ```no_run
+    /// ```ignore
     /// use rustyscript::{ Runtime, Module, serde_json::Value, async_callback, Error };
     ///
     /// # fn main() -> Result<(), rustyscript::Error> {
@@ -358,7 +358,7 @@ impl Runtime {
     /// Can fail if the expression cannot be evaluated, or if the result cannot be deserialized into the requested type
     ///
     /// # Example
-    /// ```no_run
+    /// ```ignore
     /// use rustyscript::{ Runtime, Error };
     ///
     /// # fn main() -> Result<(), Error> {
@@ -493,9 +493,7 @@ impl Runtime {
     {
         let isolate = self.deno_runtime().v8_isolate();
         let function = function.as_global(isolate);
-        let result = self
-            .inner
-            .call_function_by_ref(module_context, &function, args)?;
+        let result = self.inner.call_function_by_ref(module_context, &function, args)?;
         let result = self.inner.resolve_with_event_loop(result).await?;
         self.inner.decode_value(result)
     }
@@ -530,9 +528,7 @@ impl Runtime {
         T: deno_core::serde::de::DeserializeOwned,
     {
         self.block_on(|runtime| async move {
-            runtime
-                .call_stored_function_async(module_context, function, args)
-                .await
+            runtime.call_stored_function_async(module_context, function, args).await
         })
     }
 
@@ -567,9 +563,7 @@ impl Runtime {
     {
         let isolate = self.deno_runtime().v8_isolate();
         let function = function.as_global(isolate);
-        let result = self
-            .inner
-            .call_function_by_ref(module_context, &function, args)?;
+        let result = self.inner.call_function_by_ref(module_context, &function, args)?;
         self.inner.decode_value(result)
     }
 
@@ -606,9 +600,7 @@ impl Runtime {
         T: deno_core::serde::de::DeserializeOwned,
     {
         let function = self.inner.get_function_by_name(module_context, name)?;
-        let result = self
-            .inner
-            .call_function_by_ref(module_context, &function, args)?;
+        let result = self.inner.call_function_by_ref(module_context, &function, args)?;
         let result = self.inner.resolve_with_event_loop(result).await?;
         self.inner.decode_value(result)
     }
@@ -635,7 +627,7 @@ impl Runtime {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```ignore
     /// use rustyscript::{ json_args, Runtime, Module, Error };
     ///
     /// # fn main() -> Result<(), Error> {
@@ -656,9 +648,7 @@ impl Runtime {
         T: deno_core::serde::de::DeserializeOwned,
     {
         self.block_on(|runtime| async move {
-            runtime
-                .call_function_async(module_context, name, args)
-                .await
+            runtime.call_function_async(module_context, name, args).await
         })
     }
 
@@ -684,7 +674,7 @@ impl Runtime {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```ignore
     /// use rustyscript::{ json_args, Runtime, Module, Error };
     ///
     /// # fn main() -> Result<(), Error> {
@@ -705,9 +695,7 @@ impl Runtime {
         T: deno_core::serde::de::DeserializeOwned,
     {
         let function = self.inner.get_function_by_name(module_context, name)?;
-        let result = self
-            .inner
-            .call_function_by_ref(module_context, &function, args)?;
+        let result = self.inner.call_function_by_ref(module_context, &function, args)?;
         self.inner.decode_value(result)
     }
 
@@ -730,7 +718,7 @@ impl Runtime {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```ignore
     /// use rustyscript::{ Runtime, Module, Error };
     ///
     /// # fn main() -> Result<(), Error> {
@@ -802,7 +790,7 @@ impl Runtime {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```ignore
     /// use rustyscript::{ Runtime, Module, Error };
     ///
     /// # fn main() -> Result<(), Error> {
@@ -844,7 +832,7 @@ impl Runtime {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```ignore
     /// // Create a module with filename and contents
     /// use rustyscript::{Runtime, Module, Error};
     ///
@@ -858,9 +846,7 @@ impl Runtime {
     pub fn load_module(&mut self, module: &Module) -> Result<ModuleHandle, Error> {
         self.block_on(|runtime| async move {
             let handle = runtime.load_module_async(module).await;
-            runtime
-                .await_event_loop(PollEventLoopOptions::default(), None)
-                .await?;
+            runtime.await_event_loop(PollEventLoopOptions::default(), None).await?;
             handle
         })
     }
@@ -910,7 +896,7 @@ impl Runtime {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```ignore
     /// // Create a module with filename and contents
     /// use rustyscript::{Runtime, Module, Error};
     ///
@@ -928,9 +914,7 @@ impl Runtime {
     ) -> Result<ModuleHandle, Error> {
         self.block_on(move |runtime| async move {
             let handle = runtime.load_modules_async(module, side_modules).await;
-            runtime
-                .await_event_loop(PollEventLoopOptions::default(), None)
-                .await?;
+            runtime.await_event_loop(PollEventLoopOptions::default(), None).await?;
             handle
         })
     }
@@ -985,7 +969,7 @@ impl Runtime {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```ignore
     /// use rustyscript::{json_args, Runtime, Module, Error};
     ///
     /// # fn main() -> Result<(), Error> {
@@ -1041,9 +1025,7 @@ impl Runtime {
         T: deno_core::serde::de::DeserializeOwned,
     {
         if let Some(entrypoint) = module_context.entrypoint() {
-            let result = self
-                .inner
-                .call_function_by_ref(Some(module_context), entrypoint, args)?;
+            let result = self.inner.call_function_by_ref(Some(module_context), entrypoint, args)?;
             let result = self.inner.resolve_with_event_loop(result).await?;
             self.inner.decode_value(result)
         } else {
@@ -1071,7 +1053,7 @@ impl Runtime {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```ignore
     /// use rustyscript::{json_args, Runtime, Module, Error};
     ///
     /// # fn main() -> Result<(), Error> {
@@ -1094,9 +1076,7 @@ impl Runtime {
     {
         if let Some(entrypoint) = module_context.entrypoint() {
             let result = self.block_on(|runtime| async move {
-                runtime
-                    .inner
-                    .call_function_by_ref(Some(module_context), entrypoint, args)
+                runtime.inner.call_function_by_ref(Some(module_context), entrypoint, args)
             })?;
             self.inner.decode_value(result)
         } else {
@@ -1124,7 +1104,7 @@ impl Runtime {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```ignore
     /// // Create a module with filename and contents
     /// use rustyscript::{json_args, Runtime, Module, Error};
     ///
@@ -1189,25 +1169,17 @@ mod test_runtime {
 
         let mut runtime =
             Runtime::new(RuntimeOptions::default()).expect("Could not create the runtime");
-        let module = runtime
-            .load_modules(&module, vec![])
-            .expect("Could not load module");
+        let module = runtime.load_modules(&module, vec![]).expect("Could not load module");
 
         assert_eq!(
             2,
-            runtime
-                .get_value::<usize>(Some(&module), "a")
-                .expect("Could not find global")
+            runtime.get_value::<usize>(Some(&module), "a").expect("Could not find global")
         );
         assert_eq!(
             "test",
-            runtime
-                .get_value::<String>(Some(&module), "b")
-                .expect("Could not find export")
+            runtime.get_value::<String>(Some(&module), "b").expect("Could not find export")
         );
-        runtime
-            .get_value::<Undefined>(Some(&module), "c")
-            .expect_err("Could not detect null");
+        runtime.get_value::<Undefined>(Some(&module), "c").expect_err("Could not detect null");
         runtime
             .get_value::<Undefined>(Some(&module), "d")
             .expect_err("Could not detect undeclared");
@@ -1223,9 +1195,7 @@ mod test_runtime {
             export default () => 2;
         ",
         );
-        let module = runtime
-            .load_modules(&module, vec![])
-            .expect("Could not load module");
+        let module = runtime.load_modules(&module, vec![]).expect("Could not load module");
         assert_ne!(0, module.id());
 
         let mut runtime =
@@ -1243,15 +1213,10 @@ mod test_runtime {
             rustyscript.register_entrypoint(() => value);
         ",
         );
-        runtime
-            .load_module(&module1)
-            .expect("Could not load modules");
-        let module = runtime
-            .load_module(&module2)
-            .expect("Could not load modules");
-        let value: usize = runtime
-            .call_entrypoint(&module, json_args!())
-            .expect("Could not call exported fn");
+        runtime.load_module(&module1).expect("Could not load modules");
+        let module = runtime.load_module(&module2).expect("Could not load modules");
+        let value: usize =
+            runtime.call_entrypoint(&module, json_args!()).expect("Could not call exported fn");
         assert_eq!(2, value);
 
         let mut runtime = Runtime::new(RuntimeOptions {
@@ -1265,9 +1230,7 @@ mod test_runtime {
             await new Promise(r => setTimeout(r, 2000));
         ",
         );
-        runtime
-            .load_modules(&module, vec![])
-            .expect_err("Did not interupt after timeout");
+        runtime.load_modules(&module, vec![]).expect_err("Did not interupt after timeout");
     }
 
     #[test]
@@ -1280,9 +1243,7 @@ mod test_runtime {
             rustyscript.register_entrypoint(() => 2);
         ",
         );
-        let module = runtime
-            .load_modules(&module, vec![])
-            .expect("Could not load module");
+        let module = runtime.load_modules(&module, vec![]).expect("Could not load module");
         assert_ne!(0, module.id());
 
         let mut runtime =
@@ -1300,12 +1261,10 @@ mod test_runtime {
             rustyscript.register_entrypoint(() => value);
         ",
         );
-        let module = runtime
-            .load_modules(&module2, vec![&module1])
-            .expect("Could not load modules");
-        let value: usize = runtime
-            .call_entrypoint(&module, json_args!())
-            .expect("Could not call exported fn");
+        let module =
+            runtime.load_modules(&module2, vec![&module1]).expect("Could not load modules");
+        let value: usize =
+            runtime.call_entrypoint(&module, json_args!()).expect("Could not call exported fn");
         assert_eq!(2, value);
 
         let mut runtime = Runtime::new(RuntimeOptions {
@@ -1319,9 +1278,7 @@ mod test_runtime {
             await new Promise(r => setTimeout(r, 5000));
         ",
         );
-        runtime
-            .load_modules(&module, vec![])
-            .expect_err("Did not interupt after timeout");
+        runtime.load_modules(&module, vec![]).expect_err("Did not interupt after timeout");
     }
 
     #[test]
@@ -1334,12 +1291,9 @@ mod test_runtime {
             rustyscript.register_entrypoint(() => 2);
         ",
         );
-        let module = runtime
-            .load_modules(&module, vec![])
-            .expect("Could not load module");
-        let value: usize = runtime
-            .call_entrypoint(&module, json_args!())
-            .expect("Could not call registered fn");
+        let module = runtime.load_modules(&module, vec![]).expect("Could not load module");
+        let value: usize =
+            runtime.call_entrypoint(&module, json_args!()).expect("Could not call registered fn");
         assert_eq!(2, value);
 
         let mut runtime = Runtime::new(RuntimeOptions {
@@ -1353,12 +1307,9 @@ mod test_runtime {
             export const load = () => 2;
         ",
         );
-        let module = runtime
-            .load_modules(&module, vec![])
-            .expect("Could not load module");
-        let value: usize = runtime
-            .call_entrypoint(&module, json_args!())
-            .expect("Could not call exported fn");
+        let module = runtime.load_modules(&module, vec![]).expect("Could not load module");
+        let value: usize =
+            runtime.call_entrypoint(&module, json_args!()).expect("Could not call exported fn");
         assert_eq!(2, value);
 
         let mut runtime =
@@ -1369,9 +1320,7 @@ mod test_runtime {
             export const load = () => 2;
         ",
         );
-        let module = runtime
-            .load_modules(&module, vec![])
-            .expect("Could not load module");
+        let module = runtime.load_modules(&module, vec![]).expect("Could not load module");
         runtime
             .call_entrypoint::<Undefined>(&module, json_args!())
             .expect_err("Did not detect no entrypoint");
@@ -1419,9 +1368,7 @@ mod test_runtime {
 
         let mut runtime =
             Runtime::new(RuntimeOptions::default()).expect("Could not create the runtime");
-        let module = runtime
-            .load_modules(&module, vec![])
-            .expect("Could not load module");
+        let module = runtime.load_modules(&module, vec![]).expect("Could not load module");
 
         let result: usize = runtime
             .call_function(Some(&module), "fna", json_args!(2))
@@ -1451,12 +1398,8 @@ mod test_runtime {
             ..Default::default()
         })
         .expect("Could not create the runtime");
-        let module = Module::new(
-            "test.js",
-            "const largeArray = new Array(40 * 1024 * 1024).fill('a');",
-        );
-        runtime
-            .load_modules(&module, vec![])
-            .expect_err("Did not detect heap exhaustion");
+        let module =
+            Module::new("test.js", "const largeArray = new Array(40 * 1024 * 1024).fill('a');");
+        runtime.load_modules(&module, vec![]).expect_err("Did not detect heap exhaustion");
     }
 }

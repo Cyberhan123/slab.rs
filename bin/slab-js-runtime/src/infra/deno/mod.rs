@@ -35,7 +35,7 @@
 //! - Load a javascript module,
 //! - Call a function registered as the entrypoint
 //! - Return the resulting value
-//! ```rust
+//! ```ignore
 //! use rustyscript::{json_args, Runtime, Module, Error};
 //!
 //! # fn main() -> Result<(), Error> {
@@ -65,12 +65,12 @@
 //! ----
 //!
 //! If all you need is the result of a single javascript expression, you can use:
-//! ```rust
+//! ```ignore
 //! let result: i64 = rustyscript::evaluate("5 + 5").expect("The expression was invalid!");
 //! ```
 //!
 //! Or to just import a single module for use:
-//! ```no_run
+//! ```ignore
 //! use rustyscript::{json_args, import};
 //! let mut module = import("js/my_module.js").expect("Something went wrong!");
 //! let value: String = module.call("exported_function_name", json_args!()).expect("Could not get a value!");
@@ -81,7 +81,7 @@
 //! ----
 //!
 //! A more detailed version of the crate's usage can be seen below, which breaks down the steps instead of using the one-liner [`Runtime::execute_module`]:
-//! ```rust
+//! ```ignore
 //! use rustyscript::{json_args, Runtime, RuntimeOptions, Module, Error, Undefined};
 //! use std::time::Duration;
 //!
@@ -121,7 +121,7 @@
 //! for using [`crate::js_value::Promise`]
 //!
 //! Rust functions can also be registered to be called from javascript:
-//! ```rust
+//! ```ignore
 //! use rustyscript::{ Runtime, Module, serde_json::Value };
 //!
 //! # fn main() -> Result<(), rustyscript::Error> {
@@ -143,7 +143,7 @@
 //! Asynchronous JS can be called in 2 ways;
 //!
 //! The first is to use the 'async' keyword in JS, and then call the function using [`Runtime::call_function_async`]
-//! ```rust
+//! ```ignore
 //! use rustyscript::{ Runtime, Module, json_args };
 //!
 //! # fn main() -> Result<(), rustyscript::Error> {
@@ -168,7 +168,7 @@
 //! ```
 //!
 //! The second is to use [`crate::js_value::Promise`]
-//! ```rust
+//! ```ignore
 //! use rustyscript::{ Runtime, Module, js_value::Promise, json_args };
 //!
 //! # fn main() -> Result<(), rustyscript::Error> {
@@ -395,14 +395,14 @@ pub use ext::kv::{KvConfig, KvStore};
 #[cfg_attr(docsrs, doc(cfg(feature = "node_experimental")))]
 pub use ext::node::resolvers::RustyResolver;
 
+pub use ext::ExtensionOptions;
 #[cfg(feature = "web")]
 #[cfg_attr(docsrs, doc(cfg(feature = "web")))]
 pub use ext::web::{
-    to_permissions_options, AllowlistWebPermissions, CheckedPath, DefaultWebPermissions,
-    PermissionCheckError, PermissionDeniedError, PermissionsOptions, SystemsPermissionKind,
-    WebOptions, WebPermissions,
+    AllowlistWebPermissions, CheckedPath, DefaultWebPermissions, PermissionCheckError,
+    PermissionDeniedError, PermissionsOptions, SystemsPermissionKind, WebOptions, WebPermissions,
+    to_permissions_options,
 };
-pub use ext::ExtensionOptions;
 
 // Expose some important stuff from us
 pub use async_bridge::TokioRuntime;
@@ -468,12 +468,14 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_FETCH_RESPONSE_BYTES: usize = 1024 * 1024;
 const BOOTSTRAP_JS: &str = include_str!("bootstrap.js");
 
+/// Executes JavaScript plugins inside the embedded Deno runtime.
 pub struct DenoPluginExecutor {
     host: Arc<dyn RuntimeHost>,
     http: reqwest::Client,
 }
 
 impl DenoPluginExecutor {
+    /// Creates a new executor bound to the provided runtime host.
     pub fn new(host: Arc<dyn RuntimeHost>) -> Self {
         let http = reqwest::Client::builder().timeout(FETCH_TIMEOUT).build().unwrap_or_default();
         Self { host, http }
@@ -497,7 +499,7 @@ impl PluginExecutor for DenoPluginExecutor {
                 tokio::time::timeout(EXECUTION_TIMEOUT, execute_call(request, host, http))
                     .await
                     .map_err(|_| {
-                        anyhow!("JS plugin execution timed out after {:?}", EXECUTION_TIMEOUT)
+                        anyhow!("JS plugin execution timed out after {EXECUTION_TIMEOUT:?}")
                     })?
             })
         })
@@ -597,8 +599,8 @@ async fn execute_call(
     runtime.execute_script("slab:bootstrap", BOOTSTRAP_JS)?;
 
     let main_module = ModuleSpecifier::from_file_path(root_dir.join("__slab_plugin_call__.mjs"))
-        .map_err(|_| anyhow!("failed to build plugin wrapper module URL"))?;
-    let entry_specifier = ModuleSpecifier::from_file_path(&entry_path).map_err(|_| {
+        .map_err(|()| anyhow!("failed to build plugin wrapper module URL"))?;
+    let entry_specifier = ModuleSpecifier::from_file_path(&entry_path).map_err(|()| {
         anyhow!("failed to convert entry path to file URL: {}", entry_path.display())
     })?;
     let wrapper = build_wrapper_module(
@@ -609,7 +611,7 @@ async fn execute_call(
 
     let mod_id = runtime.load_main_es_module_from_code(&main_module, wrapper).await?;
     let evaluation = runtime.mod_evaluate(mod_id);
-    runtime.run_event_loop(Default::default()).await?;
+    runtime.run_event_loop(deno_core::PollEventLoopOptions::default()).await?;
     evaluation.await?;
 
     let result = result
@@ -671,11 +673,11 @@ impl ModuleLoader for SlabModuleLoader {
     ) -> Result<ModuleSpecifier, ModuleLoaderError> {
         let resolved = resolve_import(specifier, referrer).map_err(JsErrorBox::from_err)?;
         if resolved.scheme() != "file" {
-            return Err(JsErrorBox::generic("Only file:// module imports are supported.").into());
+            return Err(JsErrorBox::generic("Only file:// module imports are supported."));
         }
         let path = resolved
             .to_file_path()
-            .map_err(|_| JsErrorBox::generic("Invalid file module specifier."))?;
+            .map_err(|()| JsErrorBox::generic("Invalid file module specifier."))?;
         ensure_path_within_root(&self.root_dir, &path)
             .map_err(|error| JsErrorBox::generic(error.to_string()))?;
         let _ = kind;
@@ -706,7 +708,7 @@ fn load_module(
 ) -> Result<ModuleSource, ModuleLoaderError> {
     let path = module_specifier
         .to_file_path()
-        .map_err(|_| JsErrorBox::generic("Only file:// module imports are supported."))?;
+        .map_err(|()| JsErrorBox::generic("Only file:// module imports are supported."))?;
     ensure_path_within_root(&root_dir, &path)
         .map_err(|error| JsErrorBox::generic(error.to_string()))?;
 
@@ -721,8 +723,7 @@ fn load_module(
             return Err(JsErrorBox::generic(format!(
                 "Unsupported plugin module extension {:?}",
                 path.extension()
-            ))
-            .into());
+            )));
         }
     };
 
@@ -1232,8 +1233,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
             use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+            let (mut socket, _) = listener.accept().await.unwrap();
             let mut buffer = [0u8; 1024];
             let _ = socket.read(&mut buffer).await.unwrap();
             socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok").await.unwrap();
@@ -1243,8 +1245,7 @@ mod tests {
         std::fs::write(
             dir.path().join("plugin.ts"),
             format!(
-                "export async function run() {{ const r = await fetch('http://{}'); return await r.text(); }}",
-                addr
+                "export async function run() {{ const r = await fetch('http://{addr}'); return await r.text(); }}"
             ),
         )
         .unwrap();
@@ -1268,7 +1269,7 @@ mod tests {
         let dir = tempdir().unwrap();
         std::fs::write(
             dir.path().join("plugin.ts"),
-            format!("export async function run() {{ await fetch('http://{}'); }}", addr),
+            format!("export async function run() {{ await fetch('http://{addr}'); }}"),
         )
         .unwrap();
 

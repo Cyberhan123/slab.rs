@@ -10,7 +10,7 @@ use crate::error::LlamaError;
 use crate::llama_adapter::LlamaLoraAdapter;
 use crate::llama_context::LlamaContext;
 use crate::llama_sampler::SamplerChainBuilder;
-use crate::runtime::LlamaLogitBias;
+use crate::runtime::{LlamaLogitBias, LlamaSamplingOptions};
 use crate::token::LlamaToken;
 
 /// Inner (non-Clone) model data.  Wrapped in Arc so that LlamaContext can keep
@@ -508,50 +508,42 @@ impl LlamaModel {
     ///
     /// [`new_sampler`]: LlamaModel::new_sampler
     pub fn new_sampler_with_gbnf(&self, gbnf: Option<&str>) -> LlamaSampler {
-        self.new_sampler_with_options(gbnf, None, None, None, None, None, None, false, &[])
+        self.new_sampler_with_options(&LlamaSamplingOptions {
+            gbnf: gbnf.map(str::to_owned),
+            ..LlamaSamplingOptions::default()
+        })
     }
 
     /// Create a sampler chain with optional GBNF constraint and explicit
     /// sampling overrides.
     ///
     /// When an override is `None`, the builder default is used.
-    pub fn new_sampler_with_options(
-        &self,
-        gbnf: Option<&str>,
-        temperature: Option<f32>,
-        top_p: Option<f32>,
-        top_k: Option<i32>,
-        min_p: Option<f32>,
-        repetition_penalty: Option<f32>,
-        presence_penalty: Option<f32>,
-        ignore_eos: bool,
-        logit_bias: &[LlamaLogitBias],
-    ) -> LlamaSampler {
+    pub fn new_sampler_with_options(&self, options: &LlamaSamplingOptions) -> LlamaSampler {
         let mut builder = SamplerChainBuilder::new(Arc::clone(&self.inner.lib));
-        if let Some(t) = temperature {
+        if let Some(t) = options.temperature {
             builder.temperature = t;
         }
-        if let Some(p) = top_p {
+        if let Some(p) = options.top_p {
             builder.top_p = p;
         }
-        if let Some(k) = top_k {
+        if let Some(k) = options.top_k {
             builder.top_k = k;
         }
-        if let Some(p) = min_p {
+        if let Some(p) = options.min_p {
             builder.min_p = p;
         }
-        if let Some(penalty) = repetition_penalty {
+        if let Some(penalty) = options.repetition_penalty {
             builder.repeat_penalty = penalty;
         }
-        if let Some(penalty) = presence_penalty {
+        if let Some(penalty) = options.presence_penalty {
             builder.presence_penalty = penalty;
         }
         let raw_logit_bias =
-            collect_sampler_logit_bias(logit_bias, ignore_eos, self.eog_logit_bias());
+            collect_sampler_logit_bias(&options.logit_bias, options.ignore_eos, self.eog_logit_bias());
         if !raw_logit_bias.is_empty() {
             builder.set_logit_bias(self.n_vocab(), raw_logit_bias);
         }
-        match gbnf {
+        match options.gbnf.as_deref() {
             None | Some("") => builder.build(),
             Some(gbnf_str) => builder.build_with_grammar(self.vocab(), gbnf_str),
         }

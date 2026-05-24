@@ -39,6 +39,15 @@ pub struct AgentThread {
     pub(crate) status_tx: Arc<watch::Sender<ThreadStatus>>,
 }
 
+pub(crate) struct AgentThreadRuntime {
+    pub llm: Arc<dyn LlmPort>,
+    pub store: Arc<dyn AgentStorePort>,
+    pub notify: Arc<dyn AgentNotifyPort>,
+    pub approval: Arc<dyn ApprovalPort>,
+    pub tools: Arc<ToolRouter>,
+    pub hooks: Arc<Vec<Arc<dyn AgentHook>>>,
+}
+
 impl AgentThread {
     /// Create a new thread and return it together with a status [`watch::Receiver`].
     pub fn new(
@@ -66,16 +75,12 @@ impl AgentThread {
     /// an error occurs.
     ///
     /// Returns the final assistant text on success.
-    pub async fn run(
+    pub(crate) async fn run(
         self,
         mut messages: Vec<ConversationMessage>,
-        llm: Arc<dyn LlmPort>,
-        store: Arc<dyn AgentStorePort>,
-        notify: Arc<dyn AgentNotifyPort>,
-        approval: Arc<dyn ApprovalPort>,
-        tools: Arc<ToolRouter>,
-        hooks: Arc<Vec<Arc<dyn AgentHook>>>,
+        runtime: AgentThreadRuntime,
     ) -> Result<String, AgentError> {
+        let AgentThreadRuntime { llm, store, notify, approval, tools, hooks } = runtime;
         let thread_id = self.id.clone();
         let now = Utc::now().to_rfc3339();
 

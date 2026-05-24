@@ -39,7 +39,7 @@ fn build_permissions(
 extension!(
     init_runtime,
     esm_entry_point = "ext:init_runtime/init_runtime.js",
-    esm = [ dir "src/ext/runtime",  "init_runtime.js" ],
+    esm = [ dir "src/infra/deno/ext/runtime",  "init_runtime.js" ],
     state = |state| {
         let options = BootstrapOptions {
             args: vec![

@@ -29,7 +29,7 @@ async fn platform_driver_reports_capabilities() {
     let (_workspace, driver) = smoke_workspace(SandboxPolicy::WorkspaceWrite);
     let capabilities = driver.capabilities();
 
-    assert!(matches!(driver.setup_status().available, true));
+    assert!(driver.setup_status().available);
     assert!(capabilities.filesystem || capabilities.isolation as u8 > 0);
 }
 

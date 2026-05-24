@@ -1,6 +1,6 @@
 use deno_core::{serde_json, v8, v8::GetPropertyNamesArgs};
 
-use crate::{js_value::Function, Error, Module, ModuleHandle, Runtime, RuntimeOptions};
+use crate::{Error, Module, ModuleHandle, Runtime, RuntimeOptions, js_value::Function};
 
 /// A wrapper type representing a runtime instance loaded with a single module
 ///
@@ -27,10 +27,7 @@ impl ModuleWrapper {
     pub fn new_from_module(module: &Module, options: RuntimeOptions) -> Result<Self, Error> {
         let mut runtime = Runtime::new(options)?;
         let module_context = runtime.load_module(module)?;
-        Ok(Self {
-            module_context,
-            runtime,
-        })
+        Ok(Self { module_context, runtime })
     }
 
     /// Creates a new `ModuleWrapper` from a file path and runtime options.
@@ -95,9 +92,7 @@ impl ModuleWrapper {
     where
         T: serde::de::DeserializeOwned,
     {
-        self.runtime
-            .get_value_async(Some(&self.module_context), name)
-            .await
+        self.runtime.get_value_async(Some(&self.module_context), name).await
     }
 
     /// Retrieves a value from the module by name and deserializes it.
@@ -118,8 +113,7 @@ impl ModuleWrapper {
     where
         T: serde::de::DeserializeOwned,
     {
-        self.runtime
-            .get_value_immediate(Some(&self.module_context), name)
+        self.runtime.get_value_immediate(Some(&self.module_context), name)
     }
 
     /// Checks if a value in the module with the given name is callable as a JavaScript function.
@@ -152,8 +146,7 @@ impl ModuleWrapper {
     where
         T: serde::de::DeserializeOwned,
     {
-        self.runtime
-            .call_function(Some(&self.module_context), name, args)
+        self.runtime.call_function(Some(&self.module_context), name, args)
     }
 
     /// Calls a function in the module with the given name and arguments and deserializes the result.
@@ -175,9 +168,7 @@ impl ModuleWrapper {
         name: &str,
         args: &impl serde::ser::Serialize,
     ) -> Result<serde_json::Value, Error> {
-        self.runtime
-            .call_function_async(Some(&self.module_context), name, args)
-            .await
+        self.runtime.call_function_async(Some(&self.module_context), name, args).await
     }
 
     /// Calls a function in the module with the given name and arguments and deserializes the result.  
@@ -200,8 +191,7 @@ impl ModuleWrapper {
         name: &str,
         args: &impl serde::ser::Serialize,
     ) -> Result<serde_json::Value, Error> {
-        self.runtime
-            .call_function_immediate(Some(&self.module_context), name, args)
+        self.runtime.call_function_immediate(Some(&self.module_context), name, args)
     }
 
     /// Calls a function using the module's runtime that was previously stored as a Function object
@@ -226,8 +216,7 @@ impl ModuleWrapper {
     where
         T: serde::de::DeserializeOwned,
     {
-        self.runtime
-            .call_stored_function(Some(&self.module_context), function, args)
+        self.runtime.call_stored_function(Some(&self.module_context), function, args)
     }
 
     /// Calls a function using the module's runtime that was previously stored as a Function object
@@ -249,9 +238,7 @@ impl ModuleWrapper {
         function: &Function,
         args: &impl serde::ser::Serialize,
     ) -> Result<serde_json::Value, Error> {
-        self.runtime
-            .call_stored_function_async(Some(&self.module_context), function, args)
-            .await
+        self.runtime.call_stored_function_async(Some(&self.module_context), function, args).await
     }
 
     /// Calls a function using the module's runtime that was previously stored as a Function object
@@ -275,8 +262,7 @@ impl ModuleWrapper {
         function: &Function,
         args: &impl serde::ser::Serialize,
     ) -> Result<serde_json::Value, Error> {
-        self.runtime
-            .call_stored_function_immediate(Some(&self.module_context), function, args)
+        self.runtime.call_stored_function_immediate(Some(&self.module_context), function, args)
     }
 
     /// Retrieves the names of the module's exports.
@@ -286,10 +272,8 @@ impl ModuleWrapper {
     /// A `Vec` of `String` containing the names of the keys.
     pub fn keys(&mut self) -> Vec<String> {
         let mut keys: Vec<String> = Vec::new();
-        if let Ok(namespace) = self
-            .runtime
-            .deno_runtime()
-            .get_module_namespace(self.module_context.id())
+        if let Ok(namespace) =
+            self.runtime.deno_runtime().get_module_namespace(self.module_context.id())
         {
             let context = self.runtime.deno_runtime().main_context();
             let isolate = self.runtime.deno_runtime().v8_isolate();
@@ -303,11 +287,11 @@ impl ModuleWrapper {
                 global.get_property_names(&context_scope, GetPropertyNamesArgs::default())
             {
                 for i in 0..keys_obj.length() {
-                    if let Ok(key_index) = deno_core::serde_v8::to_v8(&mut context_scope, i) {
-                        if let Some(key_name_v8) = keys_obj.get(&context_scope, key_index) {
-                            let name = key_name_v8.to_rust_string_lossy(&context_scope);
-                            keys.push(name);
-                        }
+                    if let Ok(key_index) = deno_core::serde_v8::to_v8(&mut context_scope, i)
+                        && let Some(key_name_v8) = keys_obj.get(&context_scope, key_index)
+                    {
+                        let name = key_name_v8.to_rust_string_lossy(&context_scope);
+                        keys.push(name);
                     }
                 }
             }
@@ -335,9 +319,7 @@ mod test_runtime {
 
         let mut module = ModuleWrapper::new_from_module(&module, RuntimeOptions::default())
             .expect("Could not create wrapper");
-        let value: usize = module
-            .call("func", json_args!())
-            .expect("Could not call function");
+        let value: usize = module.call("func", json_args!()).expect("Could not call function");
         assert_eq!(4, value);
     }
 
