@@ -32,6 +32,9 @@ ts-rs = { workspace = true, features = [
 ] }
 tracing = { workspace = true }
 regex-lite = { workspace = true }
+assert_cmd = { workspace = true }
+runfiles = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
