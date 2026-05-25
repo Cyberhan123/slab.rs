@@ -15,7 +15,8 @@ pub use document::{
     FfmpegToolConfig, GeneralSettingsConfig, GgmlRuntimeBackendsConfig, GgmlRuntimeFamilyConfig,
     HttpEndpointConfig, InterfaceLanguagePreference, IpcEndpointConfig, LlamaRuntimeLeafConfig,
     LoggingConfig, LoggingOverrideConfig, ModelDownloadSourcePreference, ModelSettingsConfig,
-    PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL, ProviderAuthConfig, ProviderDefaultsConfig,
+    PluginJsRuntimeTransport, PluginSettingsConfig, PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL,
+    ProviderAuthConfig, ProviderDefaultsConfig,
     ProviderFamily, ProviderRegistryEntry, ProvidersConfig, RuntimeLeafConfig, RuntimeMode,
     RuntimeSessionsConfig, RuntimeSettingsConfig, ServerSettingsConfig, SettingsDocument,
     SingleRuntimeFamilyConfig, SourceConfig, SwaggerConfig, ToolsConfig,
@@ -33,7 +34,7 @@ pub use launch::{
 pub use pmid::{
     AdminPmids, AgentPmids, AgentToolsPmids, AgentWebSearchPmids, AutoUnloadPmids, CapacityPmids,
     CorsPmids, DatabasePmids, EndpointPmids, FfmpegToolPmids, GeneralPmids, GgmlBackendPmids,
-    GgmlRuntimePmids, LlamaRuntimePmids, ModelsPmids, PMID, ProvidersPmids,
+    GgmlRuntimePmids, LlamaRuntimePmids, ModelsPmids, PMID, PluginPmids, ProvidersPmids,
     RuntimeBackendLeafPmids, RuntimePmids, RuntimeSessionsPmids, ServerPmids, SettingPmid,
     SettingsPmidCatalog, SingleRuntimeFamilyPmids, SourcePmids, SwaggerPmids, ToolsPmids,
 };

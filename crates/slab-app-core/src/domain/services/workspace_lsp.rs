@@ -434,6 +434,7 @@ mod tests {
         resolve_language_server_command, workspace_root_from_settings_path,
     };
     use crate::config::Config;
+    use slab_config::PluginJsRuntimeTransport;
     use slab_types::plugin::PluginLanguageServerTransport;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -462,6 +463,7 @@ mod tests {
             settings_path,
             model_config_dir: root.join("models"),
             plugins_dir: root.join("plugins"),
+            plugin_js_runtime_transport: PluginJsRuntimeTransport::Stdio,
         }
     }
 

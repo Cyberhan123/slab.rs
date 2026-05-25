@@ -161,6 +161,7 @@ impl SettingsPmidCatalog {
             self.models.auto_unload.min_free_gpu_memory_bytes(),
             self.models.auto_unload.max_pressure_evictions_per_load(),
             self.plugin.install_dir(),
+            self.plugin.js_runtime_transport(),
             self.server.address(),
             self.server.logging.level(),
             self.server.logging.json(),
@@ -692,6 +693,10 @@ pub struct PluginPmids;
 impl PluginPmids {
     pub fn install_dir(self) -> SettingPmid {
         SettingPmid::from_path("plugin.install_dir")
+    }
+
+    pub fn js_runtime_transport(self) -> SettingPmid {
+        SettingPmid::from_path("plugin.js_runtime_transport")
     }
 }
 

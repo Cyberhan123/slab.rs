@@ -4,7 +4,7 @@ use dirs_next::config_dir;
 use slab_types::{DESKTOP_API_BIND, sqlite_url_for_path};
 use std::path::{Path, PathBuf};
 
-use crate::SettingsDocument;
+use crate::{PluginJsRuntimeTransport, SettingsDocument};
 
 /// Runtime configuration for slab-server.
 ///
@@ -94,6 +94,9 @@ pub struct Config {
 
     /// Root directory containing installed runtime plugins.
     pub plugins_dir: PathBuf,
+
+    /// Transport used when app-core talks to the JS plugin sidecar runtime.
+    pub plugin_js_runtime_transport: PluginJsRuntimeTransport,
 }
 
 pub type AppConfig = Config;
@@ -140,6 +143,8 @@ impl Config {
             model_config_dir,
             plugins_dir: plugin_install_dir_from_settings(&settings_path)
                 .unwrap_or_else(|| default_plugin_install_dir_for_settings_path(&settings_path)),
+            plugin_js_runtime_transport: plugin_js_runtime_transport_from_settings(&settings_path)
+                .unwrap_or_default(),
         }
     }
 }
@@ -183,8 +188,7 @@ pub fn default_plugins_dir() -> PathBuf {
 }
 
 fn plugin_install_dir_from_settings(settings_path: &Path) -> Option<PathBuf> {
-    let raw = std::fs::read_to_string(settings_path).ok()?;
-    let document: SettingsDocument = serde_json::from_str(&raw).ok()?;
+    let document = settings_document_from_path(settings_path)?;
     document
         .plugin
         .install_dir
@@ -192,6 +196,18 @@ fn plugin_install_dir_from_settings(settings_path: &Path) -> Option<PathBuf> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
+}
+
+fn plugin_js_runtime_transport_from_settings(
+    settings_path: &Path,
+) -> Option<PluginJsRuntimeTransport> {
+    let document = settings_document_from_path(settings_path)?;
+    Some(document.plugin.js_runtime_transport)
+}
+
+fn settings_document_from_path(settings_path: &Path) -> Option<SettingsDocument> {
+    let raw = std::fs::read_to_string(settings_path).ok()?;
+    serde_json::from_str(&raw).ok()
 }
 
 pub fn default_plugin_install_dir_for_settings_path(settings_path: &Path) -> PathBuf {

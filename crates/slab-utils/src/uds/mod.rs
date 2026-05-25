@@ -27,6 +27,12 @@ pub async fn is_stale_socket_path(socket_path: impl AsRef<Path>) -> IoResult<boo
     platform::is_stale_socket_path(socket_path.as_ref()).await
 }
 
+/// Connects to `socket_path` and relays the current process stdin/stdout over
+/// the socket until either side closes.
+pub async fn relay_stdio_to_socket(socket_path: impl AsRef<Path>) -> anyhow::Result<()> {
+    stdio_to_uds::run(socket_path.as_ref()).await
+}
+
 /// Async Unix domain socket listener.
 pub struct UnixListener {
     inner: platform::Listener,
