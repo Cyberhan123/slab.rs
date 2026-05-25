@@ -7,9 +7,15 @@
 on stdio for JS plugin calls and keeps Deno crate API churn out of
 `slab-app-core`, `slab-server`, and `slab-plugin`.
 
+The runtime now uses a unified full Deno runtime path for plugin and LSP
+execution. Plugin transport can be stdio or Unix-domain-socket based, while the
+runtime core stays shared.
+
 CLI modes:
 
 - `slab-js-runtime`: plugin JSON-RPC mode for `plugin.call`.
+- `slab-js-runtime --socket <path>`: plugin JSON-RPC mode over a connected UDS
+  stream.
 - `slab-js-runtime lsp --entry <bundle> -- <server args...>`: raw stdio LSP
   mode for built-in web language-server bundles. The runtime imports the
   bundled module, exposes the server args to it, and leaves stdin/stdout owned

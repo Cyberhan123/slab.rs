@@ -82,7 +82,7 @@ pub mod cron;
 pub mod napi;
 #[cfg(feature = "node_experimental")]
 pub mod node;
-#[cfg(all(feature = "node_experimental", feature = "deno_runtime"))]
+#[cfg(feature = "node_experimental")]
 pub mod runtime;
 
 /// Options for configuring extensions
@@ -270,8 +270,6 @@ pub(crate) fn all_extensions(
         extensions.extend(napi::extensions(is_snapshot));
 
         extensions.extend(node::extensions(options.node_resolver.clone(), is_snapshot));
-
-        #[cfg(feature = "deno_runtime")]
         extensions.extend(runtime::extensions(&options, shared_array_buffer_store, is_snapshot));
     }
 

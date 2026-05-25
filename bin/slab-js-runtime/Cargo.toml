@@ -81,6 +81,7 @@ extra_features = ["worker", "snapshot_builder"]
 # These extensions are not safe to use in a sandboxed environment without additional restrictions
 # (See [NodePermissions])
 node_experimental = [
+    "deno_runtime",
     "deno_node",
     "deno_node_sqlite",
     "deno_resolver",
@@ -221,6 +222,7 @@ base64 = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+slab-utils = { workspace = true }
 slab-types = { workspace = true }
 thiserror = { workspace = true }
 

@@ -773,12 +773,30 @@ const fn default_max_pressure_evictions_per_load() -> u32 {
 }
 
 /// Runtime plugin installation settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct PluginSettingsConfig {
     /// Directory containing installed runtime plugin packages. Defaults to the `plugins`
     /// directory next to `settings.json`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub install_dir: Option<String>,
+    /// Transport mode used for JS sidecar communication.
+    #[serde(default)]
+    pub js_runtime_transport: PluginJsRuntimeTransport,
+}
+
+impl Default for PluginSettingsConfig {
+    fn default() -> Self {
+        Self { install_dir: None, js_runtime_transport: PluginJsRuntimeTransport::default() }
+    }
+}
+
+/// Runtime transport used for JS plugin sidecar communication.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginJsRuntimeTransport {
+    #[default]
+    Stdio,
+    Uds,
 }
 
 /// Server-only settings.

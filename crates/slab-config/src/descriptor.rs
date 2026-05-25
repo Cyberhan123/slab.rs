@@ -323,6 +323,9 @@ pub(crate) fn setting_descriptor(pmid: &str) -> Option<SettingDescriptor> {
             models.auto_unload.max_pressure_evictions_per_load
         ),
         "plugin.install_dir" => descriptor!("plugin.install_dir", plugin.install_dir),
+        "plugin.js_runtime_transport" => {
+            descriptor!("plugin.js_runtime_transport", plugin.js_runtime_transport)
+        }
         "server.address" => descriptor!("server.address", server.address),
         "server.logging.level" => descriptor!("server.logging.level", server.logging.level),
         "server.logging.json" => descriptor!("server.logging.json", server.logging.json),

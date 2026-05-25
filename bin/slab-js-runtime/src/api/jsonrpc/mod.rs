@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{
     Arc,
     atomic::{AtomicU64, Ordering},
@@ -6,11 +7,12 @@ use std::sync::{
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{Mutex, mpsc, oneshot};
 
-use crate::application::PluginExecutor;
+use crate::application::PluginRuntimeServer;
 use crate::domain::RuntimeHost;
+use slab_utils::uds::UnixStream;
 
 #[derive(Debug, Deserialize)]
 struct JsonRpcIncoming {
@@ -71,28 +73,16 @@ pub struct JsonRpcRuntimeHost {
 }
 
 impl JsonRpcRuntimeHost {
-    pub fn new() -> Self {
-        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
-        tokio::spawn(async move {
-            let mut stdout = tokio::io::stdout();
-            while let Some(line) = rx.recv().await {
-                if stdout.write_all(line.as_bytes()).await.is_err() {
-                    break;
-                }
-                if stdout.write_all(b"\n").await.is_err() {
-                    break;
-                }
-                if stdout.flush().await.is_err() {
-                    break;
-                }
-            }
-        });
-
-        Self {
-            outbound: tx,
-            pending: Arc::new(Mutex::new(HashMap::new())),
-            next_id: Arc::new(AtomicU64::new(1)),
-        }
+    pub fn new() -> (Self, mpsc::UnboundedReceiver<String>) {
+        let (tx, rx) = mpsc::unbounded_channel::<String>();
+        (
+            Self {
+                outbound: tx,
+                pending: Arc::new(Mutex::new(HashMap::new())),
+                next_id: Arc::new(AtomicU64::new(1)),
+            },
+            rx,
+        )
     }
 
     async fn resolve_response(&self, response: JsonRpcIncoming) {
@@ -139,12 +129,6 @@ impl JsonRpcRuntimeHost {
     }
 }
 
-impl Default for JsonRpcRuntimeHost {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[async_trait::async_trait]
 impl RuntimeHost for JsonRpcRuntimeHost {
     async fn request(&self, method: &str, params: Value) -> Result<Value, String> {
@@ -163,18 +147,47 @@ impl RuntimeHost for JsonRpcRuntimeHost {
 
 pub async fn serve_stdio(
     host: Arc<JsonRpcRuntimeHost>,
-    executor: Arc<dyn PluginExecutor>,
+    server: Arc<PluginRuntimeServer>,
+    outbound: mpsc::UnboundedReceiver<String>,
 ) -> anyhow::Result<()> {
-    host.send_notification(
-        "runtime.ready",
-        serde_json::json!({
-            "runtime": "slab-js-runtime",
-            "engine": "deno"
-        }),
-    );
+    tokio::spawn(drain_outbound(outbound, tokio::io::stdout()));
+
+    host.send_notification("runtime.ready", server.ready_payload());
 
     let stdin = tokio::io::stdin();
-    let mut lines = BufReader::new(stdin).lines();
+    let lines = BufReader::new(stdin);
+    serve_reader(host, server, lines).await
+}
+
+pub async fn serve_uds(
+    host: Arc<JsonRpcRuntimeHost>,
+    server: Arc<PluginRuntimeServer>,
+    outbound: mpsc::UnboundedReceiver<String>,
+    socket_path: &Path,
+) -> anyhow::Result<()> {
+    let stream = UnixStream::connect(socket_path).await.map_err(|error| {
+        anyhow::anyhow!(
+            "failed to connect runtime JSON-RPC socket {}: {error}",
+            socket_path.display()
+        )
+    })?;
+    let (socket_reader, socket_writer) = tokio::io::split(stream);
+    tokio::spawn(drain_outbound(outbound, socket_writer));
+
+    host.send_notification("runtime.ready", server.ready_payload());
+    let lines = BufReader::new(socket_reader);
+    serve_reader(host, server, lines).await
+}
+
+async fn serve_reader<R>(
+    host: Arc<JsonRpcRuntimeHost>,
+    server: Arc<PluginRuntimeServer>,
+    reader: R,
+) -> anyhow::Result<()>
+where
+    R: AsyncBufRead + Unpin,
+{
+    let mut lines = reader.lines();
     while let Some(line) = lines.next_line().await? {
         let incoming = match serde_json::from_str::<JsonRpcIncoming>(&line) {
             Ok(incoming) => incoming,
@@ -201,34 +214,35 @@ pub async fn serve_stdio(
             continue;
         }
 
-        match method.as_str() {
-            "plugin.call" => {
-                let Some(id) = id else {
-                    continue;
-                };
-                let host = host.clone();
-                let executor = executor.clone();
-                tokio::spawn(async move {
-                    let result = match serde_json::from_value(incoming.params) {
-                        Ok(request) => executor
-                            .execute(request)
-                            .await
-                            .and_then(|response| serde_json::to_value(response).map_err(Into::into))
-                            .map_err(|error| error.to_string()),
-                        Err(error) => Err(format!("invalid plugin.call params: {error}")),
-                    };
-                    host.send_response(id, result);
-                });
-            }
-            _ => {
-                if let Some(id) = id {
-                    host.send_response(id, Err(format!("unknown runtime method `{method}`")));
-                }
-            }
-        }
+        let Some(id) = id else {
+            continue;
+        };
+        let host = host.clone();
+        let server = server.clone();
+        tokio::spawn(async move {
+            let result = server.handle_request(&method, incoming.params).await;
+            host.send_response(id, result);
+        });
     }
 
     Ok(())
+}
+
+async fn drain_outbound<W>(mut outbound: mpsc::UnboundedReceiver<String>, mut writer: W)
+where
+    W: AsyncWrite + Unpin,
+{
+    while let Some(line) = outbound.recv().await {
+        if writer.write_all(line.as_bytes()).await.is_err() {
+            break;
+        }
+        if writer.write_all(b"\n").await.is_err() {
+            break;
+        }
+        if writer.flush().await.is_err() {
+            break;
+        }
+    }
 }
 
 fn id_key(id: &Value) -> String {

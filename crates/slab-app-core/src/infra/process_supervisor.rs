@@ -31,6 +31,7 @@ pub(crate) struct SupervisedProcessExit {
 pub(crate) struct SupervisedStdioProcessConfig {
     pub label: String,
     pub executable: PathBuf,
+    pub arguments: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -47,6 +48,7 @@ impl SupervisedStdioProcess {
         exit_handler: ExitHandler,
     ) -> Result<Self, AppCoreError> {
         let mut command = TokioCommand::new(&config.executable);
+        command.args(&config.arguments);
         command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut process = command.spawn().map_err(|error| {
             AppCoreError::Internal(format!(

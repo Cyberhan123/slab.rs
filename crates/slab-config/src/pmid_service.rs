@@ -611,6 +611,7 @@ fn property_label(path: &str) -> String {
         "models.config_dir" => "Model Config Directory".to_owned(),
         "models.download_source" => "Model Source".to_owned(),
         "plugin.install_dir" => "Plugin Install Directory".to_owned(),
+        "plugin.js_runtime_transport" => "JS Runtime Transport".to_owned(),
         "server.address" => "Bind Address".to_owned(),
         "server.admin.token" => "Admin Token".to_owned(),
         "server.cors.allowed_origins" => "Allowed Origins".to_owned(),
@@ -647,6 +648,9 @@ fn property_description(path: &str) -> String {
         "plugin.install_dir" => {
             "Directory used as the plugin installation source for runtime registration. Defaults to the plugins directory next to settings.json.".to_owned()
         },
+        "plugin.js_runtime_transport" => {
+            "Transport used by slab-app-core when communicating with the JavaScript plugin sidecar runtime.".to_owned()
+        }
         "models.auto_unload.enabled" => "Unload idle models automatically to reclaim memory.".to_owned(),
         "models.auto_unload.idle_minutes" => "Idle timeout in minutes before auto-unload triggers.".to_owned(),
         "models.auto_unload.min_free_system_memory_bytes" => {

@@ -12,37 +12,6 @@ mod cjs_translator;
 pub mod resolvers;
 pub use cjs_translator::NodeCodeTranslator;
 
-#[cfg(not(feature = "deno_runtime"))]
-#[deno_core::op2(fast)]
-fn op_bootstrap_color_depth() -> i32 {
-    24
-}
-
-#[cfg(not(feature = "deno_runtime"))]
-#[deno_core::op2(fast)]
-fn op_current_thread_cpu_usage(#[buffer] out: &mut [f64]) {
-    if out.len() >= 2 {
-        out[0] = 0.0;
-        out[1] = 0.0;
-    }
-}
-
-#[cfg(not(feature = "deno_runtime"))]
-extension!(
-    runtime,
-    ops = [
-        op_bootstrap_color_depth,
-        op_current_thread_cpu_usage,
-    ],
-    esm = [ dir "src/infra/deno/ext/node/runtime_stub", "98_global_scope_shared.js" ],
-);
-#[cfg(not(feature = "deno_runtime"))]
-impl ExtensionTrait<()> for runtime {
-    fn init((): ()) -> Extension {
-        runtime::init()
-    }
-}
-
 extension!(
     init_node,
     deps = [rustyscript, deno_web],
@@ -82,17 +51,11 @@ impl ExtensionTrait<Arc<RustyResolver>> for deno_process {
 }
 
 pub fn extensions(resolver: Arc<RustyResolver>, is_snapshot: bool) -> Vec<Extension> {
-    let mut extensions = Vec::new();
-
-    #[cfg(not(feature = "deno_runtime"))]
-    extensions.push(runtime::build((), is_snapshot));
-
-    extensions.extend([
+    vec![
         deno_os::deno_os::build(None, is_snapshot),
         deno_process::build(resolver.clone(), is_snapshot),
         deno_node_sqlite::deno_node_sqlite::build((), is_snapshot),
         deno_node::deno_node::build(resolver, is_snapshot),
         init_node::build((), is_snapshot),
-    ]);
-    extensions
+    ]
 }
