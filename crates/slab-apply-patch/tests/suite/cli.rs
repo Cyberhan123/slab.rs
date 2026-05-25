@@ -3,7 +3,7 @@ use std::fs;
 use tempfile::tempdir;
 
 fn apply_patch_command() -> anyhow::Result<Command> {
-    Ok(Command::new(slab_utils::cargo_bin(
+    Ok(Command::new(slab_utils::cargo_bin::cargo_bin(
         "apply_patch",
     )?))
 }

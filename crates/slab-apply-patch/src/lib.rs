@@ -1,17 +1,22 @@
 mod invocation;
+mod local_fs;
 mod parser;
 mod seek_sequence;
 mod streaming_parser;
 
 use std::collections::HashMap;
 use std::io;
+use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 
 use anyhow::Context;
 use anyhow::Result;
 use slab_file::ExecutorFileSystem;
+use slab_file::FileSystemError;
+use slab_file::FileMetadata;
 use slab_file::FileSystemSandboxContext;
+use slab_file::FileSystemSandboxPolicy;
 use slab_file::RemoveOptions;
 use slab_utils::path::absolute::AbsolutePathBuf;
 pub use parser::Hunk;
@@ -27,18 +32,61 @@ pub use invocation::maybe_parse_apply_patch_verified;
 pub use invocation::verify_apply_patch_args;
 
 use crate::invocation::ExtractHeredocError;
+pub(crate) use local_fs::LOCAL_FS;
 
 /// Detailed instructions for gpt-4.1 on how to use the `apply_patch` tool.
 pub const APPLY_PATCH_TOOL_INSTRUCTIONS: &str = include_str!("../apply_patch_tool_instructions.md");
 
-/// Special argv[1] flag used when the Codex executable self-invokes to run the
-/// internal `apply_patch` path.
-///
-/// Although this constant lives in `codex-apply-patch` (to avoid forcing
-/// `codex-arg0` to depend on `codex-core`), it remains part of the "codex core"
-/// process-invocation contract for the standalone `apply_patch` command
-/// surface.
-pub const CODEX_CORE_APPLY_PATCH_ARG1: &str = "--codex-run-as-apply-patch";
+pub fn main() -> ! {
+    let mut args = std::env::args();
+    let _program_name = args.next();
+    let patch = match args.next() {
+        Some(patch) => patch,
+        None => {
+            let mut patch = String::new();
+            std::io::stdin()
+                .read_to_string(&mut patch)
+                .expect("failed to read patch from stdin");
+            patch
+        }
+    };
+
+    let cwd = AbsolutePathBuf::from_absolute_path(
+        std::env::current_dir().expect("failed to determine current directory"),
+    )
+    .expect("current directory should be absolute");
+    let root_path = cwd.as_path().to_path_buf();
+    let sandbox = FileSystemSandboxContext {
+        policy: FileSystemSandboxPolicy::WorkspaceWrite,
+        cwd: Some(root_path.clone()),
+        workspace_root: Some(root_path),
+        readable_roots: Vec::new(),
+        writable_roots: Vec::new(),
+        denied_paths: Vec::new(),
+    };
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build tokio runtime");
+
+    let mut stdout = std::io::stdout();
+    let mut stderr = std::io::stderr();
+    let result = runtime.block_on(apply_patch(
+        &patch,
+        &cwd,
+        &mut stdout,
+        &mut stderr,
+        LOCAL_FS.as_ref(),
+        Some(&sandbox),
+    ));
+
+    match result {
+        Ok(_) => std::process::exit(0),
+        Err(_) => std::process::exit(1),
+    }
+}
+
 
 #[derive(Debug, Error, PartialEq)]
 pub enum ApplyPatchError {
@@ -272,6 +320,114 @@ impl ApplyPatchFailure {
     }
 }
 
+fn filesystem_path_string(
+    path_abs: &AbsolutePathBuf,
+    cwd: &AbsolutePathBuf,
+    sandbox: Option<&FileSystemSandboxContext>,
+) -> String {
+    if sandbox.is_some()
+        && let Ok(relative_path) = path_abs.as_path().strip_prefix(cwd.as_path())
+    {
+        return relative_path.to_string_lossy().into_owned();
+    }
+
+    path_abs.as_path().to_string_lossy().into_owned()
+}
+
+fn file_system_error_to_io(error: FileSystemError) -> io::Error {
+    match error {
+        FileSystemError::Io(error) => error,
+        FileSystemError::Root(error) => io::Error::other(error),
+        FileSystemError::AbsolutePath(message)
+        | FileSystemError::PathEscapesRoot(message)
+        | FileSystemError::InvalidPath(message)
+        | FileSystemError::InvalidPatch(message) => {
+            io::Error::new(io::ErrorKind::InvalidInput, message)
+        }
+        FileSystemError::PatchMismatch { path, line } => io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("patch does not apply to `{path}` at line {line}"),
+        ),
+    }
+}
+
+async fn read_file_text_from_fs(
+    path_abs: &AbsolutePathBuf,
+    cwd: &AbsolutePathBuf,
+    fs: &dyn ExecutorFileSystem,
+    sandbox: Option<&FileSystemSandboxContext>,
+) -> io::Result<String> {
+    let default_context;
+    let context = if let Some(context) = sandbox {
+        context
+    } else {
+        default_context = FileSystemSandboxContext::default();
+        &default_context
+    };
+    let path = filesystem_path_string(path_abs, cwd, sandbox);
+    let bytes = fs.read_file(context, &path).await.map_err(file_system_error_to_io)?;
+    String::from_utf8(bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
+async fn write_file_text_to_fs(
+    path_abs: &AbsolutePathBuf,
+    cwd: &AbsolutePathBuf,
+    content: &str,
+    fs: &dyn ExecutorFileSystem,
+    sandbox: Option<&FileSystemSandboxContext>,
+) -> io::Result<()> {
+    let default_context;
+    let context = if let Some(context) = sandbox {
+        context
+    } else {
+        default_context = FileSystemSandboxContext::default();
+        &default_context
+    };
+    let path = filesystem_path_string(path_abs, cwd, sandbox);
+    fs.write_file(context, &path, content.as_bytes())
+        .await
+        .map_err(file_system_error_to_io)?;
+    Ok(())
+}
+
+async fn remove_path_from_fs(
+    path_abs: &AbsolutePathBuf,
+    cwd: &AbsolutePathBuf,
+    recursive: bool,
+    fs: &dyn ExecutorFileSystem,
+    sandbox: Option<&FileSystemSandboxContext>,
+) -> io::Result<()> {
+    let default_context;
+    let context = if let Some(context) = sandbox {
+        context
+    } else {
+        default_context = FileSystemSandboxContext::default();
+        &default_context
+    };
+    let path = filesystem_path_string(path_abs, cwd, sandbox);
+    fs.remove(context, &path, RemoveOptions { recursive })
+        .await
+        .map_err(file_system_error_to_io)?;
+    Ok(())
+}
+
+async fn get_metadata_from_fs(
+    path_abs: &AbsolutePathBuf,
+    cwd: &AbsolutePathBuf,
+    fs: &dyn ExecutorFileSystem,
+    sandbox: Option<&FileSystemSandboxContext>,
+) -> io::Result<FileMetadata> {
+    let default_context;
+    let context = if let Some(context) = sandbox {
+        context
+    } else {
+        default_context = FileSystemSandboxContext::default();
+        &default_context
+    };
+    let path = filesystem_path_string(path_abs, cwd, sandbox);
+    Ok(fs.get_metadata(context, &path).await.map_err(file_system_error_to_io)?)
+}
+
 /// Applies the patch and prints the result to stdout/stderr.
 pub async fn apply_patch(
     patch: &str,
@@ -393,15 +549,10 @@ async fn apply_hunks_to_files(
         match hunk {
             Hunk::AddFile { contents, .. } => {
                 let overwritten_content =
-                    read_optional_file_text_for_delta(&path_abs, fs, sandbox, &mut delta.exact)
+                    read_optional_file_text_for_delta(&path_abs, cwd, fs, sandbox, &mut delta.exact)
                         .await;
                 try_write!(
-                    write_file_with_missing_parent_retry(
-                        fs,
-                        &path_abs,
-                        contents.clone().into_bytes(),
-                        sandbox,
-                    )
+                    write_file_with_missing_parent_retry(fs, &path_abs, cwd, contents, sandbox)
                     .await
                 );
                 delta.changes.push(AppliedPatchChange {
@@ -414,28 +565,22 @@ async fn apply_hunks_to_files(
                 added.push(affected_path);
             }
             Hunk::DeleteFile { .. } => {
-                note_existing_path_delta_support(&path_abs, fs, sandbox, &mut delta.exact).await;
-                let deleted_content = fs.read_file_text(&path_abs, sandbox).await.ok();
+                note_existing_path_delta_support(&path_abs, cwd, fs, sandbox, &mut delta.exact)
+                    .await;
+                let deleted_content = read_file_text_from_fs(&path_abs, cwd, fs, sandbox).await.ok();
                 if deleted_content.is_none() {
                     delta.exact = false;
                 }
-                ensure_not_directory(&path_abs, fs, sandbox)
+                ensure_not_directory(&path_abs, cwd, fs, sandbox)
                     .await
                     .with_context(|| format!("Failed to delete file {}", path_abs.display()))?;
-                if let Err(error) = fs
-                    .remove(
-                        &path_abs,
-                        RemoveOptions {
-                            recursive: false,
-                            force: false,
-                        },
-                        sandbox,
-                    )
+                if let Err(error) = remove_path_from_fs(&path_abs, cwd, false, fs, sandbox)
                     .await
                     .with_context(|| format!("Failed to delete file {}", path_abs.display()))
                 {
                     delta.exact &= remove_failure_was_side_effect_free(
                         &path_abs,
+                        cwd,
                         deleted_content.as_deref(),
                         fs,
                         sandbox,
@@ -454,21 +599,23 @@ async fn apply_hunks_to_files(
             Hunk::UpdateFile {
                 move_path, chunks, ..
             } => {
-                note_existing_path_delta_support(&path_abs, fs, sandbox, &mut delta.exact).await;
+                note_existing_path_delta_support(&path_abs, cwd, fs, sandbox, &mut delta.exact)
+                    .await;
                 let AppliedPatch {
                     original_contents,
                     new_contents,
-                } = derive_new_contents_from_chunks(&path_abs, chunks, fs, sandbox).await?;
+                } = derive_new_contents_from_chunks(&path_abs, cwd, chunks, fs, sandbox).await?;
                 if let Some(dest) = move_path {
                     let dest_abs = AbsolutePathBuf::resolve_path_against_base(dest, cwd);
                     let overwritten_move_content =
-                        read_optional_file_text_for_delta(&dest_abs, fs, sandbox, &mut delta.exact)
+                        read_optional_file_text_for_delta(&dest_abs, cwd, fs, sandbox, &mut delta.exact)
                             .await;
                     try_write!(
                         write_file_with_missing_parent_retry(
                             fs,
                             &dest_abs,
-                            new_contents.clone().into_bytes(),
+                            cwd,
+                            &new_contents,
                             sandbox,
                         )
                         .await
@@ -481,20 +628,12 @@ async fn apply_hunks_to_files(
                             overwritten_content: overwritten_move_content.clone(),
                         },
                     });
-                    ensure_not_directory(&path_abs, fs, sandbox)
+                    ensure_not_directory(&path_abs, cwd, fs, sandbox)
                         .await
                         .with_context(|| {
                             format!("Failed to remove original {}", path_abs.display())
                         })?;
-                    if let Err(error) = fs
-                        .remove(
-                            &path_abs,
-                            RemoveOptions {
-                                recursive: false,
-                                force: false,
-                            },
-                            sandbox,
-                        )
+                    if let Err(error) = remove_path_from_fs(&path_abs, cwd, false, fs, sandbox)
                         .await
                         .with_context(|| {
                             format!("Failed to remove original {}", path_abs.display())
@@ -502,6 +641,7 @@ async fn apply_hunks_to_files(
                     {
                         delta.exact &= remove_failure_was_side_effect_free(
                             &path_abs,
+                            cwd,
                             Some(&original_contents),
                             fs,
                             sandbox,
@@ -521,7 +661,7 @@ async fn apply_hunks_to_files(
                     modified.push(affected_path);
                 } else {
                     try_write!(
-                        fs.write_file(&path_abs, new_contents.clone().into_bytes(), sandbox)
+                        write_file_text_to_fs(&path_abs, cwd, &new_contents, fs, sandbox)
                             .await
                             .with_context(|| format!(
                                 "Failed to write file {}",
@@ -551,10 +691,11 @@ async fn apply_hunks_to_files(
 
 async fn ensure_not_directory(
     path: &AbsolutePathBuf,
+    cwd: &AbsolutePathBuf,
     fs: &dyn ExecutorFileSystem,
     sandbox: Option<&FileSystemSandboxContext>,
 ) -> io::Result<()> {
-    let metadata = fs.get_metadata(path, sandbox).await?;
+    let metadata = get_metadata_from_fs(path, cwd, fs, sandbox).await?;
     if metadata.is_directory {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -566,13 +707,13 @@ async fn ensure_not_directory(
 
 async fn remove_failure_was_side_effect_free(
     path: &AbsolutePathBuf,
+    cwd: &AbsolutePathBuf,
     expected_content: Option<&str>,
     fs: &dyn ExecutorFileSystem,
     sandbox: Option<&FileSystemSandboxContext>,
 ) -> bool {
     match expected_content {
-        Some(expected_content) => fs
-            .read_file_text(path, sandbox)
+        Some(expected_content) => read_file_text_from_fs(path, cwd, fs, sandbox)
             .await
             .is_ok_and(|content| content == expected_content),
         None => false,
@@ -581,12 +722,13 @@ async fn remove_failure_was_side_effect_free(
 
 async fn read_optional_file_text_for_delta(
     path: &AbsolutePathBuf,
+    cwd: &AbsolutePathBuf,
     fs: &dyn ExecutorFileSystem,
     sandbox: Option<&FileSystemSandboxContext>,
     exact: &mut bool,
 ) -> Option<String> {
-    note_existing_path_delta_support(path, fs, sandbox, exact).await;
-    match fs.read_file_text(path, sandbox).await {
+    note_existing_path_delta_support(path, cwd, fs, sandbox, exact).await;
+    match read_file_text_from_fs(path, cwd, fs, sandbox).await {
         Ok(content) => Some(content),
         Err(source) if source.kind() == io::ErrorKind::NotFound => None,
         Err(_) => {
@@ -598,11 +740,12 @@ async fn read_optional_file_text_for_delta(
 
 async fn note_existing_path_delta_support(
     path: &AbsolutePathBuf,
+    cwd: &AbsolutePathBuf,
     fs: &dyn ExecutorFileSystem,
     sandbox: Option<&FileSystemSandboxContext>,
     exact: &mut bool,
 ) {
-    match fs.get_metadata(path, sandbox).await {
+    match get_metadata_from_fs(path, cwd, fs, sandbox).await {
         Ok(metadata) if metadata.is_file && !metadata.is_symlink => {}
         Ok(_) => *exact = false,
         Err(source) if source.kind() == io::ErrorKind::NotFound => {}
@@ -613,18 +756,23 @@ async fn note_existing_path_delta_support(
 async fn write_file_with_missing_parent_retry(
     fs: &dyn ExecutorFileSystem,
     path_abs: &AbsolutePathBuf,
-    contents: Vec<u8>,
+    cwd: &AbsolutePathBuf,
+    contents: &str,
     sandbox: Option<&FileSystemSandboxContext>,
 ) -> anyhow::Result<()> {
-    match fs.write_file(path_abs, contents.clone(), sandbox).await {
+    match write_file_text_to_fs(path_abs, cwd, contents, fs, sandbox).await {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
             if let Some(parent_abs) = path_abs.parent() {
-                fs.create_directory(
-                    &parent_abs,
-                    CreateDirectoryOptions { recursive: true },
-                    sandbox,
-                )
+                let default_context;
+                let context = if let Some(context) = sandbox {
+                    context
+                } else {
+                    default_context = FileSystemSandboxContext::default();
+                    &default_context
+                };
+                let parent_path = filesystem_path_string(&parent_abs, cwd, sandbox);
+                fs.create_directory(context, &parent_path)
                 .await
                 .with_context(|| {
                     format!(
@@ -633,7 +781,7 @@ async fn write_file_with_missing_parent_retry(
                     )
                 })?;
             }
-            fs.write_file(path_abs, contents, sandbox)
+            write_file_text_to_fs(path_abs, cwd, contents, fs, sandbox)
                 .await
                 .with_context(|| format!("Failed to write file {}", path_abs.display()))?;
             Ok(())
@@ -653,11 +801,12 @@ struct AppliedPatch {
 /// applying the chunks to the file at `path`.
 async fn derive_new_contents_from_chunks(
     path_abs: &AbsolutePathBuf,
+    cwd: &AbsolutePathBuf,
     chunks: &[UpdateFileChunk],
     fs: &dyn ExecutorFileSystem,
     sandbox: Option<&FileSystemSandboxContext>,
 ) -> std::result::Result<AppliedPatch, ApplyPatchError> {
-    let original_contents = fs.read_file_text(path_abs, sandbox).await.map_err(|err| {
+    let original_contents = read_file_text_from_fs(path_abs, cwd, fs, sandbox).await.map_err(|err| {
         ApplyPatchError::IoError(IoError {
             context: format!("Failed to read file to update {}", path_abs.display()),
             source: err,
@@ -816,15 +965,17 @@ pub struct ApplyPatchFileUpdate {
 
 pub async fn unified_diff_from_chunks(
     path_abs: &AbsolutePathBuf,
+    cwd: &AbsolutePathBuf,
     chunks: &[UpdateFileChunk],
     fs: &dyn ExecutorFileSystem,
     sandbox: Option<&FileSystemSandboxContext>,
 ) -> std::result::Result<ApplyPatchFileUpdate, ApplyPatchError> {
-    unified_diff_from_chunks_with_context(path_abs, chunks, /*context*/ 1, fs, sandbox).await
+    unified_diff_from_chunks_with_context(path_abs, cwd, chunks, /*context*/ 1, fs, sandbox).await
 }
 
 pub async fn unified_diff_from_chunks_with_context(
     path_abs: &AbsolutePathBuf,
+    cwd: &AbsolutePathBuf,
     chunks: &[UpdateFileChunk],
     context: usize,
     fs: &dyn ExecutorFileSystem,
@@ -833,7 +984,7 @@ pub async fn unified_diff_from_chunks_with_context(
     let AppliedPatch {
         original_contents,
         new_contents,
-    } = derive_new_contents_from_chunks(path_abs, chunks, fs, sandbox).await?;
+    } = derive_new_contents_from_chunks(path_abs, cwd, chunks, fs, sandbox).await?;
     let text_diff = TextDiff::from_lines(&original_contents, &new_contents);
     let unified_diff = text_diff.unified_diff().context_radius(context).to_string();
     Ok(ApplyPatchFileUpdate {
@@ -865,6 +1016,7 @@ pub fn print_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::LOCAL_FS;
     use slab_utils::path::absolute::test_support::PathExt;
     use pretty_assertions::assert_eq;
     use std::fs;
@@ -1368,13 +1520,9 @@ mod tests {
             [Hunk::UpdateFile { chunks, .. }] => chunks,
             _ => panic!("Expected a single UpdateFile hunk"),
         };
+        let cwd = AbsolutePathBuf::from_absolute_path(dir.path()).unwrap();
         let path_abs = path.as_path().abs();
-        let diff = unified_diff_from_chunks(
-            &path_abs,
-            update_file_chunks,
-            LOCAL_FS.as_ref(),
-            /*sandbox*/ None,
-        )
+        let diff = unified_diff_from_chunks(&path_abs, &cwd, update_file_chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
         .await
         .unwrap();
         let expected_diff = r#"@@ -1,4 +1,4 @@
@@ -1416,11 +1564,11 @@ mod tests {
             _ => panic!("Expected a single UpdateFile hunk"),
         };
 
+        let cwd = AbsolutePathBuf::from_absolute_path(dir.path()).unwrap();
         let path_abs = path.as_path().abs();
-        let diff =
-            unified_diff_from_chunks(&path_abs, chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
-                .await
-                .unwrap();
+        let diff = unified_diff_from_chunks(&path_abs, &cwd, chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
+            .await
+            .unwrap();
         let expected_diff = r#"@@ -1,2 +1,2 @@
 -foo
 +FOO
@@ -1458,11 +1606,11 @@ mod tests {
             _ => panic!("Expected a single UpdateFile hunk"),
         };
 
+        let cwd = AbsolutePathBuf::from_absolute_path(dir.path()).unwrap();
         let path_abs = path.as_path().abs();
-        let diff =
-            unified_diff_from_chunks(&path_abs, chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
-                .await
-                .unwrap();
+        let diff = unified_diff_from_chunks(&path_abs, &cwd, chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
+            .await
+            .unwrap();
         let expected_diff = r#"@@ -2,2 +2,2 @@
  bar
 -baz
@@ -1498,11 +1646,11 @@ mod tests {
             _ => panic!("Expected a single UpdateFile hunk"),
         };
 
+        let cwd = AbsolutePathBuf::from_absolute_path(dir.path()).unwrap();
         let path_abs = path.as_path().abs();
-        let diff =
-            unified_diff_from_chunks(&path_abs, chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
-                .await
-                .unwrap();
+        let diff = unified_diff_from_chunks(&path_abs, &cwd, chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
+            .await
+            .unwrap();
         let expected_diff = r#"@@ -3 +3,2 @@
  baz
 +quux
@@ -1549,11 +1697,11 @@ mod tests {
             _ => panic!("Expected a single UpdateFile hunk"),
         };
 
+        let cwd = AbsolutePathBuf::from_absolute_path(dir.path()).unwrap();
         let path_abs = path.as_path().abs();
-        let diff =
-            unified_diff_from_chunks(&path_abs, chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
-                .await
-                .unwrap();
+        let diff = unified_diff_from_chunks(&path_abs, &cwd, chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
+            .await
+            .unwrap();
 
         let expected_diff = r#"@@ -1,6 +1,7 @@
  a

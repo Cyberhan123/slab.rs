@@ -30,7 +30,6 @@ members = [
     "crates/slab-ggml-sys",
     "crates/slab-hub",
     "crates/slab-sandboxing",
-    "crates/slab-macos-sandbox",
     "crates/slab-file",
     "crates/slab-git",
     "crates/slab-shell-command",
@@ -79,7 +78,6 @@ slab-subtitle = { path = "./crates/slab-subtitle", package = "slab-subtitle", ve
 slab-ggml-sys = { path = "./crates/slab-ggml-sys", package = "slab-ggml-sys", version = "0.1.0" }
 slab-ggml = { path = "./crates/slab-ggml", package = "slab-ggml", version = "0.1.0" }
 slab-sandboxing = { path = "./crates/slab-sandboxing", package = "slab-sandboxing", version = "0.1.0" }
-slab-macos-sandbox = { path = "./crates/slab-macos-sandbox", package = "slab-macos-sandbox", version = "0.1.0" }
 slab-file = { path = "./crates/slab-file", package = "slab-file", version = "0.1.0" }
 slab-git = { path = "./crates/slab-git", package = "slab-git", version = "0.1.0" }
 slab-shell-command = { path = "./crates/slab-shell-command", package = "slab-shell-command", version = "0.1.0" }
@@ -219,6 +217,9 @@ deno_error = { version = "0.7.1", features = [
 # Utilities
 async-trait = "0.1"
 bytemuck = "1"
+async_io = { package = "async-io", version = "2.6.0" }
+tokio_util = { package = "tokio-util", version = "0.7.18" }
+uds_windows = "1.2.1"
 strum = { version = "0.28.0", features = ["derive"] }
 clap = { version = "4.6.1", features = ["derive"] }
 protoc-bin-vendored = "3"
