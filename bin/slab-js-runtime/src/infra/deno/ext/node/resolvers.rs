@@ -20,14 +20,14 @@ use deno_resolver::npm::{
 };
 use deno_semver::package::PackageReq;
 use node_resolver::{
+    DenoIsBuiltInNodeModuleChecker, InNpmPackageChecker, NodeConditionOptions, NodeResolutionCache,
+    NpmPackageFolderResolver, PackageJsonResolver, UrlOrPath, UrlOrPathRef,
     analyze::{CjsModuleExportAnalyzer, NodeCodeTranslatorMode},
     cache::NodeResolutionSys,
     errors::{
         PackageFolderResolveError, PackageFolderResolveErrorKind, PackageJsonLoadError,
         PackageNotFoundError,
     },
-    DenoIsBuiltInNodeModuleChecker, InNpmPackageChecker, NodeConditionOptions, NodeResolutionCache,
-    NpmPackageFolderResolver, PackageJsonResolver, UrlOrPath, UrlOrPathRef,
 };
 use serde::{Deserialize, Serialize};
 use sys_traits::impls::RealSys;
@@ -88,10 +88,7 @@ impl RustyResolver {
             RealSys,
         );
 
-        NodeCodeTranslator::new(
-            module_export_analyzer.into(),
-            NodeCodeTranslatorMode::ModuleLoader,
-        )
+        NodeCodeTranslator::new(module_export_analyzer.into(), NodeCodeTranslatorMode::ModuleLoader)
     }
 
     /// Returns a node resolver for the resolver
@@ -148,10 +145,7 @@ impl RustyResolver {
     }*/
 
     fn get_known_is_cjs(&self, specifier: &ModuleSpecifier) -> Option<bool> {
-        self.known
-            .read()
-            .ok()
-            .and_then(|k| k.get(specifier).copied())
+        self.known.read().ok().and_then(|k| k.get(specifier).copied())
     }
 
     fn set_is_cjs(&self, specifier: &ModuleSpecifier, value: bool) {
@@ -208,6 +202,7 @@ impl RustyResolver {
             | MediaType::Mts
             | MediaType::Mjs
             | MediaType::Html
+            | MediaType::Markdown
             | MediaType::Sql
             | MediaType::Dmts => false,
 
@@ -318,17 +313,13 @@ impl RustyNpmPackageFolderResolver {
         let options = ByonmNpmResolverCreateOptions {
             sys: NodeResolutionSys::new(RealSys, Some(resolution_cache.clone())),
             root_node_modules_dir: base_dir.clone(),
+            search_stop_dir: None,
             pkg_json_resolver: pjson.clone(),
         };
 
         let byonm = ByonmNpmResolver::new(options);
 
-        Self {
-            byonm,
-            pjson,
-            resolution_cache,
-            base_dir,
-        }
+        Self { byonm, pjson, resolution_cache, base_dir }
     }
 
     pub fn npm_resolver(&self) -> ByonmNpmResolver<RealSys> {
@@ -362,24 +353,19 @@ impl NpmPackageFolderResolver for RustyNpmPackageFolderResolver {
         };
 
         let request = PackageReq::from_str(specifier).map_err(|_| {
-            let e = Box::new(PackageFolderResolveErrorKind::PackageNotFound(
-                PackageNotFoundError {
+            let e =
+                Box::new(PackageFolderResolveErrorKind::PackageNotFound(PackageNotFoundError {
                     package_name: specifier.to_string(),
                     referrer: UrlOrPath::Url(referrer_url.clone()),
                     referrer_extra: None,
-                },
-            ));
+                }));
             PackageFolderResolveError(e)
         })?;
 
-        let p = self
-            .byonm
-            .resolve_pkg_folder_from_deno_module_req(&request, referrer_url);
+        let p = self.byonm.resolve_pkg_folder_from_deno_module_req(&request, referrer_url);
         match p {
             Ok(p) => Ok(p),
-            Err(_) => self
-                .byonm
-                .resolve_package_folder_from_package(specifier, referrer),
+            Err(_) => self.byonm.resolve_package_folder_from_package(specifier, referrer),
         }
     }
 
@@ -445,17 +431,12 @@ pub struct RustyNodeResolutionCache {
 }
 impl Default for RustyNodeResolutionCache {
     fn default() -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(RustyNodeResolutionCacheInner::default())),
-        }
+        Self { inner: Arc::new(RwLock::new(RustyNodeResolutionCacheInner::default())) }
     }
 }
 impl NodeResolutionCache for RustyNodeResolutionCache {
     fn get_canonicalized(&self, path: &Path) -> Option<Result<PathBuf, std::io::Error>> {
-        self.inner
-            .read()
-            .ok()
-            .and_then(|i| i.get_canonicalized(path))
+        self.inner.read().ok().and_then(|i| i.get_canonicalized(path))
     }
 
     fn set_canonicalized(&self, from: PathBuf, to: &std::io::Result<PathBuf>) {
@@ -481,8 +462,7 @@ pub struct RustyNodeResolutionCacheInner {
 impl RustyNodeResolutionCacheInner {
     fn get_canonicalized(&self, path: &Path) -> Option<Result<PathBuf, std::io::Error>> {
         self.cache.get(path).map(|(t, _)| {
-            t.clone()
-                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Not found."))
+            t.clone().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Not found."))
         })
     }
 
@@ -526,11 +506,8 @@ pub enum NpmProcessStateKind {
 }
 impl NpmProcessStateProvider for RustyResolver {
     fn get_npm_process_state(&self) -> String {
-        let modules_path = self
-            .folder_resolver
-            .base_dir()
-            .as_ref()
-            .map(|p| p.to_string_lossy().to_string());
+        let modules_path =
+            self.folder_resolver.base_dir().as_ref().map(|p| p.to_string_lossy().to_string());
         let state = NpmProcessState {
             kind: NpmProcessStateKind::Byonm,
             local_node_modules_path: modules_path,
@@ -545,10 +522,7 @@ impl NodeRequireLoader for RequireLoader {
     fn load_text_file_lossy(&self, path: &Path) -> Result<FastString, JsErrorBox> {
         let media_type = MediaType::from_path(path);
         let path = CheckedPath::unsafe_new(Cow::Borrowed(path));
-        let text = self
-            .0
-            .read_text_file_lossy_sync(&path)
-            .map_err(JsErrorBox::from_err)?;
+        let text = self.0.read_text_file_lossy_sync(&path).map_err(JsErrorBox::from_err)?;
         Ok(text.into_owned().into())
     }
 
@@ -557,9 +531,8 @@ impl NodeRequireLoader for RequireLoader {
         permissions: &mut PermissionsContainer,
         path: Cow<'a, Path>,
     ) -> Result<Cow<'a, Path>, JsErrorBox> {
-        let is_in_node_modules = path
-            .components()
-            .all(|c| c.as_os_str().to_ascii_lowercase() != NODE_MODULES_DIR);
+        let is_in_node_modules =
+            path.components().all(|c| c.as_os_str().to_ascii_lowercase() != NODE_MODULES_DIR);
         if is_in_node_modules {
             permissions
                 .check_open(path, OpenAccessKind::Read, None)

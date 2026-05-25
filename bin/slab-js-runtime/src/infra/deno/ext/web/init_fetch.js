@@ -1,12 +1,14 @@
-import * as headers from "ext:deno_fetch/20_headers.js";
-import * as formData from "ext:deno_fetch/21_formdata.js";
-import * as httpClient from "ext:deno_fetch/22_http_client.js";
-import * as request from "ext:deno_fetch/23_request.js";
-import * as response from "ext:deno_fetch/23_response.js";
-import * as fetch from "ext:deno_fetch/26_fetch.js";
-import * as eventSource from "ext:deno_fetch/27_eventsource.js";
+import { core } from "ext:core/mod.js";
 
-Deno.core.setWasmStreamingCallback(fetch.handleWasmStreaming);
+const headers = core.loadExtScript("ext:deno_fetch/20_headers.js");
+const formData = core.loadExtScript("ext:deno_fetch/21_formdata.js");
+const httpClient = core.loadExtScript("ext:deno_fetch/22_http_client.js");
+const request = core.loadExtScript("ext:deno_fetch/23_request.js");
+const response = core.loadExtScript("ext:deno_fetch/23_response.js");
+const fetch = core.loadExtScript("ext:deno_fetch/26_fetch.js");
+const eventSource = core.loadExtScript("ext:deno_fetch/27_eventsource.js");
+
+core.setWasmStreamingCallback(fetch.handleWasmStreaming);
 
 import {applyToGlobal, writeable, nonEnumerable} from 'ext:rustyscript/rustyscript.js';
 

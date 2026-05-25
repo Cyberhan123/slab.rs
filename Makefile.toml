@@ -1,6 +1,6 @@
 [tasks.dev]
 workspace = false
-dependencies = ["build-runtime-dev","build-server-dev", "build-plugin-packs", "run-tauri"]
+dependencies = ["build-runtime-dev","build-js-runtime-dev","build-server-dev", "build-language-servers", "build-plugin-packs", "run-tauri"]
 
 [tasks.release]
 workspace = false
@@ -17,13 +17,15 @@ end
 
 [tasks.release-default]
 workspace = false
-dependencies = ["build-runtime-release","build-server-release", "build-tauri-release"]
+dependencies = ["build-runtime-release","build-js-runtime-release","build-server-release", "build-language-servers", "build-tauri-release"]
 
 [tasks.release-windows]
 workspace = false
 dependencies = [
     "build-runtime-release",
+    "build-js-runtime-release",
     "build-server-release",
+    "build-language-servers",
     "stage-windows-release-payloads",
     "build-windows-full-installer",
     "build-tauri-release-windows",
@@ -31,7 +33,7 @@ dependencies = [
 
 [tasks.debug]
 workspace = false
-dependencies = ["build-runtime-dev","build-server-dev", "build-plugin-packs", "build-tauri-debug"]
+dependencies = ["build-runtime-dev","build-js-runtime-dev","build-server-dev", "build-language-servers", "build-plugin-packs", "build-tauri-debug"]
 
 [tasks.check]
 workspace = false
@@ -53,6 +55,11 @@ workspace = false
 command = "cargo"
 args = ["build", "-p", "slab-runtime"]
 
+[tasks.build-js-runtime-dev]
+workspace = false
+command = "cargo"
+args = ["build", "-p", "slab-js-runtime"]
+
 [tasks.build-server-release]
 workspace = false
 command = "cargo"
@@ -62,6 +69,11 @@ args = ["build", "--release", "-p", "slab-server"]
 workspace = false
 command = "cargo"
 args = ["build", "--release", "-p", "slab-runtime"]
+
+[tasks.build-js-runtime-release]
+workspace = false
+command = "cargo"
+args = ["build", "--release", "-p", "slab-js-runtime"]
 
 [tasks.run-tauri]
 workspace = false
@@ -98,6 +110,12 @@ cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
 workspace = false
 command = "bun"
 args = ["run", "gen:plugin-packs"]
+cwd = "${CARGO_MAKE_WORKING_DIRECTORY}"
+
+[tasks.build-language-servers]
+workspace = false
+command = "bun"
+args = ["run", "build:language-servers"]
 cwd = "${CARGO_MAKE_WORKING_DIRECTORY}"
 
 [tasks.build-tauri-release]

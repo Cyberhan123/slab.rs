@@ -2,32 +2,30 @@
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::cast_possible_truncation)]
 use std::io::Error;
+use std::os::windows::io::RawHandle;
 use std::sync::Arc;
 
+use deno_core::OpState;
 use deno_core::op2;
 use deno_core::parking_lot::Mutex;
-use deno_core::OpState;
-use deno_error::builtin_classes::GENERIC_ERROR;
 use deno_error::JsErrorBox;
 use deno_error::JsErrorClass;
+use deno_error::builtin_classes::GENERIC_ERROR;
 use deno_io::WinTtyState;
-use rustyline::config::Configurer;
-use rustyline::error::ReadlineError;
 use rustyline::Cmd;
 use rustyline::Editor;
 use rustyline::KeyCode;
 use rustyline::KeyEvent;
 use rustyline::Modifiers;
+use rustyline::config::Configurer;
+use rustyline::error::ReadlineError;
 use winapi::shared::minwindef::FALSE;
 use winapi::um::consoleapi;
 
 use winapi::shared::minwindef::DWORD;
 use winapi::um::wincon;
 
-deno_core::extension!(
-    deno_tty,
-    ops = [op_set_raw, op_console_size, op_read_line_prompt],
-);
+deno_core::extension!(deno_tty, ops = [op_set_raw, op_console_size, op_read_line_prompt],);
 
 #[derive(Debug, thiserror::Error, deno_error::JsError)]
 pub enum TtyError {
@@ -77,7 +75,7 @@ fn op_set_raw(state: &mut OpState, rid: u32, is_raw: bool, cbreak: bool) -> Resu
     // Copyright (c) 2015 Katsu Kawakami & Rustyline authors. MIT license.
     // Copyright (c) 2019 Timon. MIT license.
 
-    let handle = handle_or_fd;
+    let handle = winapi_handle(handle_or_fd);
 
     if cbreak {
         return Err(TtyError::Other(JsErrorBox::not_supported()));
@@ -89,11 +87,8 @@ fn op_set_raw(state: &mut OpState, rid: u32, is_raw: bool, cbreak: bool) -> Resu
         return Err(TtyError::Io(Error::last_os_error()));
     }
 
-    let new_mode = if is_raw {
-        mode_raw_input_on(original_mode)
-    } else {
-        mode_raw_input_off(original_mode)
-    };
+    let new_mode =
+        if is_raw { mode_raw_input_on(original_mode) } else { mode_raw_input_off(original_mode) };
 
     let stdin_state = state.borrow::<Arc<Mutex<WinTtyState>>>();
     let mut stdin_state = stdin_state.lock();
@@ -125,11 +120,7 @@ fn op_set_raw(state: &mut OpState, rid: u32, is_raw: bool, cbreak: bool) -> Resu
             let active_screen_buffer = unsafe {
                 /* Save screen state before sending the VK_RETURN event */
                 let handle = winapi::um::fileapi::CreateFileW(
-                    "conout$"
-                        .encode_utf16()
-                        .chain(Some(0))
-                        .collect::<Vec<_>>()
-                        .as_ptr(),
+                    "conout$".encode_utf16().chain(Some(0)).collect::<Vec<_>>().as_ptr(),
                     winapi::um::winnt::GENERIC_READ | winapi::um::winnt::GENERIC_WRITE,
                     winapi::um::winnt::FILE_SHARE_READ | winapi::um::winnt::FILE_SHARE_WRITE,
                     std::ptr::null_mut(),
@@ -204,11 +195,10 @@ pub struct ConsoleSize {
     pub rows: u32,
 }
 
-fn console_size_from_fd(
-    handle: std::os::windows::io::RawHandle,
-) -> Result<ConsoleSize, std::io::Error> {
+fn console_size_from_fd(handle: RawHandle) -> Result<ConsoleSize, std::io::Error> {
     // SAFETY: winapi calls
     unsafe {
+        let handle = winapi_handle(handle);
         let mut bufinfo: winapi::um::wincon::CONSOLE_SCREEN_BUFFER_INFO = std::mem::zeroed();
 
         if winapi::um::wincon::GetConsoleScreenBufferInfo(handle, &raw mut bufinfo) == 0 {
@@ -236,7 +226,6 @@ deno_error::js_error_wrapper!(ReadlineError, JsReadlineError, |err| {
         ReadlineError::Io(e) => e.get_class(),
         ReadlineError::Eof
         | ReadlineError::Interrupted
-        | ReadlineError::WindowResized
         | ReadlineError::Decode(_)
         | ReadlineError::SystemError(_)
         | _ => GENERIC_ERROR.into(),
@@ -252,7 +241,7 @@ pub fn op_read_line_prompt(
     let mut editor =
         Editor::<(), rustyline::history::DefaultHistory>::new().expect("Failed to create editor.");
 
-    editor.set_keyseq_timeout(1);
+    editor.set_keyseq_timeout(Some(1));
     editor.bind_sequence(KeyEvent(KeyCode::Esc, Modifiers::empty()), Cmd::Interrupt);
 
     let read_result = editor.readline_with_initial(prompt_text, (default_value, ""));
@@ -268,4 +257,8 @@ pub fn op_read_line_prompt(
         Err(ReadlineError::Eof) => Ok(None),
         Err(err) => Err(JsReadlineError(err)),
     }
+}
+
+fn winapi_handle(handle: RawHandle) -> winapi::shared::ntdef::HANDLE {
+    handle.cast::<winapi::ctypes::c_void>()
 }

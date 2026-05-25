@@ -24,9 +24,9 @@
 //! The parser below is a little more lenient than the explicit spec and allows for
 //! leading/trailing whitespace around patch markers.
 use crate::ApplyPatchArgs;
-use slab_utils::AbsolutePathBuf;
+use slab_utils::path::absolute::AbsolutePathBuf;
 #[cfg(test)]
-use slab_utils::test_support::PathBufExt;
+use slab_utils::path::absolute::test_support::PathBufExt;
 use std::path::Path;
 use std::path::PathBuf;
 

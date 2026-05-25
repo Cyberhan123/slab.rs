@@ -1,6 +1,7 @@
+import { core } from "ext:core/mod.js";
 
-import * as net from "ext:deno_net/01_net.js";
-import * as tls from "ext:deno_net/02_tls.js";
+const net = core.loadExtScript("ext:deno_net/01_net.js");
+const tls = core.loadExtScript("ext:deno_net/02_tls.js");
 
 globalThis.Deno.connect = net.connect;
 globalThis.Deno.listen = net.listen;

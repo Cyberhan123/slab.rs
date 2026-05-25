@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use slab_file::ExecutorFileSystem;
-use slab_utils::AbsolutePathBuf;
+use slab_utils::path::absolute::AbsolutePathBuf;
 use tree_sitter::Parser;
 use tree_sitter::Query;
 use tree_sitter::QueryCursor;
@@ -389,8 +389,7 @@ mod tests {
     use super::*;
     use crate::unified_diff_from_chunks;
     use assert_matches::assert_matches;
-    use codex_exec_server::LOCAL_FS;
-    use codex_utils_absolute_path::test_support::PathExt;
+    use slab_utils::path::absolute::test_support::PathExt;
     use pretty_assertions::assert_eq;
     use std::fs;
     use std::path::PathBuf;

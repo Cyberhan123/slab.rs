@@ -35,7 +35,7 @@ regex-lite = { workspace = true }
 assert_cmd = { workspace = true }
 runfiles = { workspace = true }
 thiserror = { workspace = true }
-
+async_io = { workspace = true }
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 tempfile = { workspace = true }

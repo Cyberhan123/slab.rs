@@ -9,18 +9,21 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use crate::context::AppConfig;
 use crate::domain::services::PluginService;
 use crate::error::AppCoreError;
+use crate::infra::process_supervisor::resolve_sibling_sidecar_exe;
 use slab_types::plugin::{PluginLanguageServerContribution, PluginLanguageServerTransport};
 
-const BUILTIN_LANGUAGE_SERVER_PROVIDERS: &[(&str, &[&str], &str, &[&str])] = &[
+const SLAB_JS_RUNTIME_COMMAND: &str = "slab-js-runtime";
+const BUILTIN_WEB_LANGUAGE_SERVER_PROVIDERS: &[(&str, &[&str], &str)] = &[
     (
         "builtin.typescript",
         &["typescript", "javascript", "typescriptreact", "javascriptreact"],
-        "typescript-language-server",
-        &["--stdio"],
+        "typescript",
     ),
-    ("builtin.json", &["json", "jsonc"], "vscode-json-language-server", &["--stdio"]),
-    ("builtin.css", &["css", "less", "scss"], "vscode-css-language-server", &["--stdio"]),
-    ("builtin.html", &["html"], "vscode-html-language-server", &["--stdio"]),
+    ("builtin.json", &["json", "jsonc"], "json"),
+    ("builtin.css", &["css", "less", "scss"], "css"),
+    ("builtin.html", &["html"], "html"),
+];
+const BUILTIN_NATIVE_LANGUAGE_SERVER_PROVIDERS: &[(&str, &[&str], &str, &[&str])] = &[
     ("builtin.pyright", &["python"], "pyright-langserver", &["--stdio"]),
     ("builtin.clangd", &["c", "cpp"], "clangd", &[]),
     ("builtin.gopls", &["go"], "gopls", &[]),
@@ -82,7 +85,7 @@ impl WorkspaceLspService {
             }
         }
 
-        Ok(builtin_language_server_provider(&language_id)
+        Ok(builtin_language_server_provider(&language_id, &self.config)
             .map(|contribution| WorkspaceLspProvider { contribution, install_root: None }))
     }
 
@@ -202,8 +205,27 @@ fn provider_matches_language(
     provider.languages.iter().any(|language| normalize_language_id(language) == language_id)
 }
 
-fn builtin_language_server_provider(language_id: &str) -> Option<PluginLanguageServerContribution> {
-    for (id, languages, command, args) in BUILTIN_LANGUAGE_SERVER_PROVIDERS {
+fn builtin_language_server_provider(
+    language_id: &str,
+    config: &AppConfig,
+) -> Option<PluginLanguageServerContribution> {
+    for (id, languages, bundle) in BUILTIN_WEB_LANGUAGE_SERVER_PROVIDERS {
+        if !languages.contains(&language_id) {
+            continue;
+        }
+
+        return Some(PluginLanguageServerContribution {
+            id: (*id).to_owned(),
+            languages: languages.iter().map(|language| (*language).to_owned()).collect(),
+            transport: PluginLanguageServerTransport::Stdio {
+                command: SLAB_JS_RUNTIME_COMMAND.to_owned(),
+                args: builtin_web_language_server_args(config, bundle),
+                env: HashMap::new(),
+            },
+        });
+    }
+
+    for (id, languages, command, args) in BUILTIN_NATIVE_LANGUAGE_SERVER_PROVIDERS {
         if !languages.contains(&language_id) {
             continue;
         }
@@ -220,6 +242,21 @@ fn builtin_language_server_provider(language_id: &str) -> Option<PluginLanguageS
     }
 
     None
+}
+
+fn builtin_web_language_server_args(config: &AppConfig, bundle: &str) -> Vec<String> {
+    vec![
+        "lsp".to_owned(),
+        "--entry".to_owned(),
+        builtin_web_language_server_entry(config, bundle).to_string_lossy().into_owned(),
+        "--".to_owned(),
+        "--stdio".to_owned(),
+    ]
+}
+
+fn builtin_web_language_server_entry(config: &AppConfig, bundle: &str) -> PathBuf {
+    let relative = Path::new("language-servers").join("web").join(format!("{bundle}.mjs"));
+    config.lib_dir.as_ref().map_or(relative.clone(), |lib_dir| lib_dir.join(relative))
 }
 
 struct LanguageServerCommandResolution {
@@ -240,13 +277,27 @@ fn resolve_language_server_command(
         provider_root,
     );
 
-    let command = searched_locations
-        .iter()
-        .find(|candidate| candidate.is_file())
-        .map(|candidate| candidate.as_os_str().to_owned())
+    let command = resolve_sibling_language_server_sidecar(command)
+        .map(|path| path.into_os_string())
+        .or_else(|| {
+            searched_locations
+                .iter()
+                .find(|candidate| candidate.is_file())
+                .map(|candidate| candidate.as_os_str().to_owned())
+        })
         .unwrap_or_else(|| OsString::from(command));
 
     LanguageServerCommandResolution { command, searched_locations }
+}
+
+fn resolve_sibling_language_server_sidecar(command: &str) -> Option<PathBuf> {
+    if command != SLAB_JS_RUNTIME_COMMAND {
+        return None;
+    }
+
+    std::env::current_exe()
+        .ok()
+        .and_then(|server_exe| resolve_sibling_sidecar_exe(&server_exe, command).ok())
 }
 
 fn language_server_command_candidates(
@@ -319,7 +370,7 @@ fn relative_command_roots(workspace_root: &Path, provider_root: Option<&Path>) -
 
 fn language_server_search_dirs(
     workspace_root: &Path,
-    config: &AppConfig,
+    _config: &AppConfig,
     provider_root: Option<&Path>,
 ) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
@@ -333,32 +384,6 @@ fn language_server_search_dirs(
         push_unique_dir(&mut dirs, &mut seen, provider_root.to_path_buf());
     }
 
-    if let Some(lib_dir) = &config.lib_dir {
-        push_unique_dir(&mut dirs, &mut seen, lib_dir.join("language-servers").join("bin"));
-        push_unique_dir(
-            &mut dirs,
-            &mut seen,
-            lib_dir.join("language-servers").join("node_modules").join(".bin"),
-        );
-        push_unique_dir(&mut dirs, &mut seen, lib_dir.join("language-servers"));
-        push_unique_dir(&mut dirs, &mut seen, lib_dir.join("bin"));
-        push_unique_dir(&mut dirs, &mut seen, lib_dir.join("node_modules").join(".bin"));
-        push_unique_dir(&mut dirs, &mut seen, lib_dir.clone());
-    }
-
-    push_unique_dir(&mut dirs, &mut seen, config.plugins_dir.join("node_modules").join(".bin"));
-    push_unique_dir(&mut dirs, &mut seen, config.plugins_dir.join("bin"));
-    push_unique_dir(&mut dirs, &mut seen, config.plugins_dir.clone());
-    if let Ok(entries) = std::fs::read_dir(&config.plugins_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                push_unique_dir(&mut dirs, &mut seen, path.join("node_modules").join(".bin"));
-                push_unique_dir(&mut dirs, &mut seen, path.join("bin"));
-            }
-        }
-    }
-
     if let Ok(current_dir) = std::env::current_dir() {
         push_node_bin_ancestors(&mut dirs, &mut seen, &current_dir);
     }
@@ -366,9 +391,6 @@ fn language_server_search_dirs(
     if let Ok(current_exe) = std::env::current_exe()
         && let Some(exe_dir) = current_exe.parent()
     {
-        push_unique_dir(&mut dirs, &mut seen, exe_dir.join("language-servers").join("bin"));
-        push_unique_dir(&mut dirs, &mut seen, exe_dir.join("bin"));
-        push_unique_dir(&mut dirs, &mut seen, exe_dir.join("node_modules").join(".bin"));
         push_unique_dir(&mut dirs, &mut seen, exe_dir.to_path_buf());
     }
 
@@ -412,6 +434,7 @@ mod tests {
         resolve_language_server_command, workspace_root_from_settings_path,
     };
     use crate::config::Config;
+    use slab_types::plugin::PluginLanguageServerTransport;
     use std::fs;
     use std::path::{Path, PathBuf};
 
@@ -477,9 +500,37 @@ mod tests {
 
     #[test]
     fn builtin_provider_matches_supported_language() {
-        let provider = builtin_language_server_provider("typescript").expect("provider");
+        let root = temp_dir("builtin-provider");
+        let settings_path = root.join(".slab").join("settings.json");
+        let config = test_config(settings_path);
+
+        let provider = builtin_language_server_provider("typescript", &config).expect("provider");
 
         assert_eq!(provider.id, "builtin.typescript");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn builtin_web_provider_runs_through_slab_js_runtime_lsp_mode() {
+        let root = temp_dir("builtin-web-provider");
+        let settings_path = root.join(".slab").join("settings.json");
+        let config = test_config(settings_path);
+
+        let provider = builtin_language_server_provider("json", &config).expect("provider");
+
+        let PluginLanguageServerTransport::Stdio { command, args, .. } = provider.transport else {
+            panic!("expected stdio transport");
+        };
+        assert_eq!(command, "slab-js-runtime");
+        assert_eq!(args[0], "lsp");
+        assert_eq!(args[1], "--entry");
+        assert!(
+            Path::new(&args[2])
+                .ends_with(Path::new("language-servers").join("web").join("json.mjs"))
+        );
+        assert_eq!(args[3], "--");
+        assert_eq!(args[4], "--stdio");
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -501,7 +552,7 @@ mod tests {
     }
 
     #[test]
-    fn resolves_packaged_lib_dir_language_server() {
+    fn ignores_packaged_native_language_server_payloads() {
         let root = temp_dir("lib-dir");
         let settings_path = root.join(".slab").join("settings.json");
         let config = test_config(settings_path);
@@ -516,12 +567,13 @@ mod tests {
 
         let resolution = resolve_language_server_command("rust-analyzer", &root, &config, None);
 
-        assert_eq!(PathBuf::from(resolution.command), binary);
+        assert_eq!(resolution.command, "rust-analyzer");
+        assert!(!resolution.searched_locations.contains(&binary));
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
-    fn resolves_packaged_language_server_node_modules_bin() {
+    fn ignores_packaged_language_server_node_modules_bin() {
         let root = temp_dir("lib-dir-node-modules");
         let settings_path = root.join(".slab").join("settings.json");
         let config = test_config(settings_path);
@@ -538,7 +590,8 @@ mod tests {
         let resolution =
             resolve_language_server_command("typescript-language-server", &root, &config, None);
 
-        assert_eq!(PathBuf::from(resolution.command), binary);
+        assert_eq!(resolution.command, "typescript-language-server");
+        assert!(!resolution.searched_locations.contains(&binary));
         let _ = fs::remove_dir_all(root);
     }
 

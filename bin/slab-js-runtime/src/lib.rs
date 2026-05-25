@@ -3,6 +3,7 @@ pub mod application;
 pub mod bootstrap;
 pub mod domain;
 pub mod infra;
+pub mod lsp;
 
 pub use deno_core;
 pub use infra::deno::*;

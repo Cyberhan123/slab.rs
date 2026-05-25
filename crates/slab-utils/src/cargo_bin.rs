@@ -23,11 +23,7 @@ pub enum CargoBinError {
     #[error("CARGO_BIN_EXE env var {key} resolved to {path:?}, but it does not exist")]
     ResolvedPathDoesNotExist { key: String, path: PathBuf },
     #[error("could not locate binary {name:?}; tried env vars {env_keys:?}; {fallback}")]
-    NotFound {
-        name: String,
-        env_keys: Vec<String>,
-        fallback: String,
-    },
+    NotFound { name: String, env_keys: Vec<String>, fallback: String },
 }
 
 /// Returns an absolute path to a binary target built for the current test run.
@@ -88,10 +84,9 @@ pub fn runfiles_available() -> bool {
 fn resolve_bin_from_env(key: &str, value: OsString) -> Result<PathBuf, CargoBinError> {
     let raw = PathBuf::from(&value);
     if runfiles_available() {
-        let runfiles = runfiles::Runfiles::create().map_err(|err| CargoBinError::CurrentExe {
-            source: std::io::Error::other(err),
-        })?;
-        if let Some(mut resolved) = runfiles::rlocation!(runfiles, &raw) {
+        let runfiles = runfiles::Runfiles::create()
+            .map_err(|err| CargoBinError::CurrentExe { source: std::io::Error::other(err) })?;
+        if let Some(mut resolved) = rlocation(&runfiles, &raw) {
             if !resolved.is_absolute() {
                 resolved = std::env::current_dir()
                     .map_err(|source| CargoBinError::CurrentDir { source })?
@@ -105,10 +100,7 @@ fn resolve_bin_from_env(key: &str, value: OsString) -> Result<PathBuf, CargoBinE
         return Ok(raw);
     }
 
-    Err(CargoBinError::ResolvedPathDoesNotExist {
-        key: key.to_owned(),
-        path: raw,
-    })
+    Err(CargoBinError::ResolvedPathDoesNotExist { key: key.to_owned(), path: raw })
 }
 
 /// Macro that derives the path to a test resource at runtime, the value of
@@ -153,7 +145,7 @@ pub fn resolve_bazel_runfile(
         }
     };
     let runfile_path = normalize_runfile_path(&runfile_path);
-    if let Some(resolved) = runfiles::rlocation!(runfiles, &runfile_path)
+    if let Some(resolved) = rlocation(&runfiles, &runfile_path)
         && resolved.exists()
     {
         return Ok(resolved);
@@ -174,19 +166,15 @@ pub fn repo_root() -> io::Result<PathBuf> {
     let marker = if runfiles_available() {
         let runfiles = runfiles::Runfiles::create()
             .map_err(|err| io::Error::other(format!("failed to create runfiles: {err}")))?;
-        let marker_path = option_env!("SLAB_REPO_ROOT_MARKER")
-            .map(PathBuf::from)
-            .ok_or_else(|| {
+        let marker_path =
+            option_env!("SLAB_REPO_ROOT_MARKER").map(PathBuf::from).ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::NotFound,
                     "SLAB_REPO_ROOT_MARKER was not set at compile time",
                 )
             })?;
-        runfiles::rlocation!(runfiles, &marker_path).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                "repo_root.marker not available in runfiles",
-            )
+        rlocation(&runfiles, &marker_path).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "repo_root.marker not available in runfiles")
         })?
     } else {
         resolve_cargo_runfile(Path::new("repo_root.marker"))?
@@ -222,10 +210,12 @@ fn normalize_runfile_path(path: &Path) -> PathBuf {
         }
     }
 
-    components
-        .into_iter()
-        .fold(PathBuf::new(), |mut acc, component| {
-            acc.push(component.as_os_str());
-            acc
-        })
+    components.into_iter().fold(PathBuf::new(), |mut acc, component| {
+        acc.push(component.as_os_str());
+        acc
+    })
+}
+
+fn rlocation(runfiles: &runfiles::Runfiles, path: &Path) -> Option<PathBuf> {
+    runfiles.rlocation_from(path, option_env!("REPOSITORY_NAME").unwrap_or("_main"))
 }

@@ -12,6 +12,8 @@ use crate::types::{
 };
 
 const IGNORED_PLUGIN_ROOT_NAMES: &[&str] = &["dist", ".git", "node_modules"];
+const BUILTIN_LANGUAGE_SERVER_PLUGIN_IDS: &[&str] =
+    &["native-language-servers", "web-language-servers"];
 
 #[derive(Default)]
 struct PluginRegistrySnapshot {
@@ -182,6 +184,9 @@ fn scan_plugins(root_dir: &Path) -> Result<PluginRegistrySnapshot, String> {
         }
 
         let folder_name = entry.file_name().to_string_lossy().to_string();
+        if is_builtin_language_server_plugin_id(&folder_name) {
+            continue;
+        }
         if IGNORED_PLUGIN_ROOT_NAMES.iter().any(|ignored| ignored == &folder_name.as_str()) {
             continue;
         }
@@ -226,6 +231,10 @@ fn scan_plugins(root_dir: &Path) -> Result<PluginRegistrySnapshot, String> {
     }
 
     Ok(PluginRegistrySnapshot { loaded, invalid })
+}
+
+fn is_builtin_language_server_plugin_id(plugin_id: &str) -> bool {
+    BUILTIN_LANGUAGE_SERVER_PLUGIN_IDS.iter().any(|id| *id == plugin_id)
 }
 
 fn validate_and_load_plugin(
