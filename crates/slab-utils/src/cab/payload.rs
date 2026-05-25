@@ -217,11 +217,6 @@ pub fn build_runtime_payload_plan(
             .extend(files);
     }
 
-    package_files
-        .get_mut(&RuntimeVariant::Base)
-        .expect("base package initialized")
-        .extend(resolve_optional_language_server_tree(&vendor_root.join("language-servers"))?);
-
     let ggml_packages = resolve_ggml_runtime_packages(
         &vendor_root.join("ggml").join("manifests.json"),
         &vendor_root.join("ggml"),
@@ -352,32 +347,6 @@ fn resolve_vendor_runtime_tree(root: &Path) -> Result<Vec<ResolvedPayloadFile>> 
     Ok(resolved)
 }
 
-fn resolve_optional_language_server_tree(root: &Path) -> Result<Vec<ResolvedPayloadFile>> {
-    if !root.is_dir() {
-        return Ok(Vec::new());
-    }
-
-    let files = collect_files_recursive(root)?;
-    let mut resolved = Vec::with_capacity(files.len());
-    for source_path in files {
-        let relative = source_path.strip_prefix(root).with_context(|| {
-            format!("failed to strip language-server root for {}", source_path.display())
-        })?;
-        let relative = normalize_relative_path(relative)?;
-        let metadata = fs::metadata(&source_path)
-            .with_context(|| format!("failed to read metadata for {}", source_path.display()))?;
-        resolved.push(ResolvedPayloadFile {
-            source_path: source_path.clone(),
-            source_relative_path: format!("resources/libs/language-servers/{relative}"),
-            dest_relative_path: format!("language-servers/{relative}"),
-            size: metadata.len(),
-            sha256: sha256_file(&source_path)?,
-        });
-    }
-
-    Ok(resolved)
-}
-
 fn dedupe_payload_files(files: Vec<ResolvedPayloadFile>) -> Result<Vec<ResolvedPayloadFile>> {
     let mut deduped = BTreeMap::new();
 
@@ -428,34 +397,5 @@ mod tests {
             selected_packages(RuntimeVariant::Hip),
             vec![RuntimeVariant::Base, RuntimeVariant::Hip]
         );
-    }
-
-    #[test]
-    fn optional_language_server_tree_maps_into_resources_subdir() {
-        let root = std::env::temp_dir()
-            .join(format!("slab-language-server-payload-{}", uuid::Uuid::new_v4()));
-        let server = root.join("bin").join("rust-analyzer.exe");
-        fs::create_dir_all(server.parent().expect("parent")).unwrap();
-        fs::write(&server, b"server").unwrap();
-
-        let files = resolve_optional_language_server_tree(&root).unwrap();
-
-        assert_eq!(files.len(), 1);
-        assert_eq!(
-            files[0].source_relative_path,
-            "resources/libs/language-servers/bin/rust-analyzer.exe"
-        );
-        assert_eq!(files[0].dest_relative_path, "language-servers/bin/rust-analyzer.exe");
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn missing_language_server_tree_is_not_required() {
-        let root = std::env::temp_dir()
-            .join(format!("slab-missing-language-server-payload-{}", uuid::Uuid::new_v4()));
-
-        let files = resolve_optional_language_server_tree(&root).unwrap();
-
-        assert!(files.is_empty());
     }
 }

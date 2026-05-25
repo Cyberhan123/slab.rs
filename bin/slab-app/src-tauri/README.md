@@ -8,6 +8,7 @@ This crate is the native host process for the Slab desktop shell. It:
 
 - Launches `bin/slab-server` as a local sidecar and waits for its HTTP health endpoint before the frontend starts issuing product API requests.
 - Bundles `slab-server`, `slab-runtime`, `slab-js-runtime`, and `slab-python-runtime` sidecars; `slab-server` owns runtime supervision after launch.
+- Bundles built-in web workspace LSP assets under `resources/libs/language-servers/web`; native LSP tools are resolved from the user's machine and are not bundled.
 - Mounts local plugin webviews from the repo `plugins/` directory in development, and reads installed plugins from the writable app-data `plugins/` directory in packaged apps.
 - Listens to `slab-server` plugin event WebSocket messages and emits `plugin://{id}/event` to the desktop UI.
 - Keeps product API traffic on HTTP; Tauri commands are reserved for host-only features such as plugin runtime integration.

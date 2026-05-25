@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "bun run --filter @slab/desktop dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run --filter @slab/desktop build",
+    "beforeBuildCommand": "bun run --filter web-language-servers build && bun run --filter @slab/desktop build",
     "frontendDist": "../../../packages/slab-desktop/dist"
   },
   "app": {

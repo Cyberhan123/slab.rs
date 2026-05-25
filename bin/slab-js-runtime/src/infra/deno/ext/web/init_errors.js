@@ -1,10 +1,13 @@
 // Copyright 2018-2024 the Deno authors. All rights reserved. MIT license.
 
-import * as event from 'ext:deno_web/02_event.js';
-import { DOMException } from "ext:deno_web/01_dom_exception.js";
-import { DedicatedWorkerGlobalScope } from 'ext:deno_web/04_global_interfaces.js';
 import { core, primordials, internals } from "ext:core/mod.js";
 import { op_set_format_exception_callback } from "ext:core/ops";
+
+const event = core.loadExtScript("ext:deno_web/02_event.js");
+const { DOMException } = core.loadExtScript("ext:deno_web/01_dom_exception.js");
+const { DedicatedWorkerGlobalScope } = core.loadExtScript(
+	"ext:deno_web/04_global_interfaces.js",
+);
 
 const { BadResource, Interrupted, NotCapable } = core;
 
@@ -14,12 +17,12 @@ const {
 	ObjectPrototypeIsPrototypeOf,
 } = primordials;
 
-import {
+const {
 	getDefaultInspectOptions,
 	getStderrNoColor,
 	inspectArgs,
 	quoteString,
-} from "ext:deno_web/01_console.js";
+} = core.loadExtScript("ext:deno_web/01_console.js");
 
 class NotFound extends Error {
 	constructor(msg) {

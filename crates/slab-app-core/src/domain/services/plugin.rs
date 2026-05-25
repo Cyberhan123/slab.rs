@@ -35,6 +35,8 @@ const RUNTIME_STATUS_STOPPED: &str = "stopped";
 const RUNTIME_STATUS_ERROR: &str = "error";
 const DEFAULT_PACKAGE_SOURCE_ID: &str = "direct";
 const IGNORED_PLUGIN_ROOT_NAMES: &[&str] = &["dist", ".git", "node_modules"];
+const BUILTIN_LANGUAGE_SERVER_PLUGIN_IDS: &[&str] =
+    &["native-language-servers", "web-language-servers"];
 
 #[derive(Clone)]
 pub struct PluginService {
@@ -98,6 +100,9 @@ impl PluginService {
             .collect::<Vec<_>>();
 
         for (plugin_id, state) in &states {
+            if is_builtin_language_server_plugin_id(plugin_id) {
+                continue;
+            }
             if scans.iter().any(|scan| scan.id == *plugin_id) {
                 continue;
             }
@@ -187,6 +192,12 @@ impl PluginService {
             .manifest
             .as_ref()
             .ok_or_else(|| AppCoreError::BadRequest("plugin pack is missing plugin.json".into()))?;
+        if is_builtin_language_server_plugin_id(&manifest.id) {
+            return Err(AppCoreError::BadRequest(format!(
+                "plugin '{}' is built in and cannot be installed as a plugin",
+                manifest.id
+            )));
+        }
         if let Some(expected_plugin_id) = expected_plugin_id
             && manifest.id != expected_plugin_id
         {
@@ -675,6 +686,10 @@ fn scan_plugins(root_dir: &Path) -> Result<Vec<ScannedPlugin>, AppCoreError> {
         if !path.is_dir() {
             continue;
         }
+        let folder_name = entry.file_name().to_string_lossy().to_string();
+        if is_builtin_language_server_plugin_id(&folder_name) {
+            continue;
+        }
         if IGNORED_PLUGIN_ROOT_NAMES.iter().any(|ignored| entry.file_name() == *ignored) {
             continue;
         }
@@ -745,6 +760,10 @@ fn scan_plugin_dir(
         manifest_hash: Some(manifest_hash),
     };
     Ok(scanned)
+}
+
+fn is_builtin_language_server_plugin_id(plugin_id: &str) -> bool {
+    BUILTIN_LANGUAGE_SERVER_PLUGIN_IDS.iter().any(|id| *id == plugin_id)
 }
 
 fn validate_plugin_manifest(

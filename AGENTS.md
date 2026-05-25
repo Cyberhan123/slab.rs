@@ -54,6 +54,7 @@ When fixing bugs, it's essential to start with first principles to find the root
 - Keep `crates/slab-agent` pure; built-in deterministic tools belong in `crates/slab-agent-tools`, and plugin/API capability adapters are registered by host/app-core layers.
 - Preserve Tauri CSP, capabilities, permissions, sidecar boundaries, and plugin sandboxing unless the task explicitly changes them.
 - Keep workspace LSP traffic behind `packages/slab-desktop -> bin/slab-server /v1/workspace/lsp/* -> crates/slab-app-core`; `slab-app-core` owns provider resolution and LSP process spawning, and the desktop host must not add a second LSP bridge.
+- Web workspace LSP providers are built-in Slab assets: `plugins/web-language-servers` is a build-only package that emits `resources/libs/language-servers/web/*.mjs`, and `slab-app-core` launches them through `bin/slab-js-runtime lsp --entry <bundle> -- <args>`. Native workspace LSP providers are declarations only and resolve `rust-analyzer`, `gopls`, `pyright-langserver`, and similar tools from existing search paths or `PATH`; do not bundle those binaries into plugin packs or installer payloads unless the task explicitly changes this.
 - Keep Tauri child WebViews as the default third-party plugin UI runtime; do not make Module Federation the default plugin model.
 - Keep `plugin.json` as the static source of truth. `manifestVersion: 1` separates runtime assets, `contributes.*`, `permissions.*`, and agent capabilities.
 - JS plugin runtime calls follow JSON-RPC 2.0 conventions.
@@ -103,6 +104,7 @@ bun run lint
 bun run lint:fix
 bun run test
 bun run build:desktop
+bun run build:language-servers
 bun run dev:app
 bun run gen:api
 bun run gen:plugin-packs

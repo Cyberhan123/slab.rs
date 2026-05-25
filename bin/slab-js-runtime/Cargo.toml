@@ -17,7 +17,8 @@ path = "src/main.rs"
 doctest = false
 
 [features]
-default = ["worker", "safe_extensions"]
+default = ["worker", "safe_extensions", "lsp_runtime"]
+lsp_runtime = ["node_experimental"]
 
 #
 # Feature groups
@@ -74,25 +75,25 @@ io_extensions = [
 extra_features = ["worker", "snapshot_builder"]
 
 #
-# Highly experimental NodeJS compatibility layer. Enables all other extensions
+# Highly experimental NodeJS compatibility layer.
 # Enables the use of the node and npm modules
 # CJS support not yet implemented
 # These extensions are not safe to use in a sandboxed environment without additional restrictions
 # (See [NodePermissions])
 node_experimental = [
     "deno_node",
+    "deno_node_sqlite",
     "deno_resolver",
     "node_resolver",
     "deno_npm",
     "deno_semver",
     "deno_napi",
-    "deno_runtime",
     "deno_process",
     "deno_package_json",
-    "deno_bundle_runtime",
-    "checksum",
+    "deno_os",
     "sys_traits",
-    "all_extensions",
+    "fs",
+    "io",
 ]
 
 # By default, an extension stub is included in the runtime if the `web` feature is disabled
@@ -161,6 +162,7 @@ url = ["deno_url", "webidl"]
 web = [
     "deno_web",
     "deno_tls",
+    "rustls",
     "deno_fetch",
     "deno_net",
     "dep:http",
@@ -235,6 +237,7 @@ paste = "1.0.15"
 deno_core = { workspace = true }
 deno_error = { workspace = true }
 deno_features = { workspace = true }
+rustls = { workspace = true, optional = true }
 
 # For transpiling typescript
 deno_ast = { workspace = true, features = ["transpiling", "cjs"] }
@@ -276,6 +279,8 @@ deno_http = { workspace = true, optional = true }
 deno_kv = { workspace = true, optional = true }
 deno_net = { workspace = true, optional = true }
 deno_node = { workspace = true, optional = true }
+deno_node_sqlite = { workspace = true, optional = true }
+deno_os = { workspace = true, optional = true }
 deno_tls = { workspace = true, optional = true }
 deno_url = { workspace = true, optional = true }
 

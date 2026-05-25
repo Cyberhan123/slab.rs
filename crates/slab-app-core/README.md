@@ -13,7 +13,7 @@ HTTP-free business logic library for Slab.
 - `model_auto_unload` - automatic model eviction to manage memory.
 - `schemas/` - shared request/response DTO types used by HTTP consumers.
 
-Workspace LSP provider resolution, workspace-root validation, and language-server process spawning live here so `bin/slab-server` can stay limited to HTTP/WebSocket routing. Built-in providers resolve first from the workspace `node_modules/.bin`, then packaged `resources/libs/language-servers/{bin,node_modules/.bin}`, plugin server folders, and finally `PATH`.
+Workspace LSP provider resolution, workspace-root validation, and language-server process spawning live here so `bin/slab-server` can stay limited to HTTP/WebSocket routing. Built-in web providers launch `bin/slab-js-runtime lsp --entry <bundle> -- --stdio` against bundled `resources/libs/language-servers/web/*.mjs` assets. Built-in native providers only declare commands such as `rust-analyzer`, `gopls`, and `pyright-langserver --stdio`; those binaries are resolved from existing search paths or `PATH` and are not shipped by the installer. Valid and enabled third-party plugins may still contribute additional providers through `contributes.languageServers`.
 
 JS plugin runtime gateway/client logic also lives here. `PluginService` dispatches JS plugin calls to the supervised `bin/slab-js-runtime` sidecar over stdio JSON-RPC, while `crates/slab-plugin` remains registry/WASM/frontend focused and does not depend on Deno implementation details.
 

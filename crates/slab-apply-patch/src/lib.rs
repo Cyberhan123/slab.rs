@@ -1,7 +1,6 @@
 mod invocation;
 mod parser;
 mod seek_sequence;
-mod standalone_executable;
 mod streaming_parser;
 
 use std::collections::HashMap;
@@ -11,11 +10,10 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use anyhow::Result;
-use slab_file::CreateDirectoryOptions;
 use slab_file::ExecutorFileSystem;
 use slab_file::FileSystemSandboxContext;
 use slab_file::RemoveOptions;
-use slab_utils::AbsolutePathBuf;
+use slab_utils::path::absolute::AbsolutePathBuf;
 pub use parser::Hunk;
 pub use parser::ParseError;
 use parser::ParseError::*;
@@ -27,7 +25,6 @@ use thiserror::Error;
 
 pub use invocation::maybe_parse_apply_patch_verified;
 pub use invocation::verify_apply_patch_args;
-pub use standalone_executable::main;
 
 use crate::invocation::ExtractHeredocError;
 
@@ -868,8 +865,7 @@ pub fn print_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codex_exec_server::LOCAL_FS;
-    use codex_utils_absolute_path::test_support::PathExt;
+    use slab_utils::path::absolute::test_support::PathExt;
     use pretty_assertions::assert_eq;
     use std::fs;
     use std::string::ToString;

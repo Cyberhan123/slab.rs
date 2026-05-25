@@ -111,10 +111,7 @@ pub fn generate_or_copy_bindings(
 fn patch_libloading_filename_bounds(output_path: &Path) -> Result<()> {
     let bindings = fs::read_to_string(output_path)
         .with_context(|| format!("failed to read generated bindings {}", output_path.display()))?;
-    let patched = bindings.replace(
-        "P: AsRef<::std::ffi::OsStr>,",
-        "P: ::libloading::AsFilename,",
-    );
+    let patched = bindings.replace("P: AsRef<::std::ffi::OsStr>,", "P: ::libloading::AsFilename,");
 
     if patched != bindings {
         fs::write(output_path, patched).with_context(|| {
@@ -192,7 +189,7 @@ pub fn sync_tauri_vendor_runtime_artifacts(target: &str, tauri_manifest_dir: &Pa
         sync_runtime_tree(target, &source_root, &resources_dir, &mut expected_files)?;
     }
 
-    sync_optional_language_server_tree(&vendor_dir, &resources_dir, &mut expected_files)?;
+    retain_existing_web_language_server_tree(&resources_dir, &mut expected_files)?;
 
     if !found_runtime_sources {
         println!(
@@ -403,25 +400,21 @@ fn sync_runtime_tree(
     sync_runtime_tree_inner(target, src_root, src_root, dst_root, expected)
 }
 
-fn sync_optional_language_server_tree(
-    vendor_dir: &Path,
+fn retain_existing_web_language_server_tree(
     resources_dir: &Path,
     expected: &mut HashSet<PathBuf>,
 ) -> Result<()> {
-    let source_root = vendor_dir.join("language-servers");
+    let source_root = resources_dir.join("language-servers").join("web");
     println!("cargo:rerun-if-changed={}", source_root.display());
     if !source_root.exists() {
         return Ok(());
     }
 
-    let destination_root = resources_dir.join("language-servers");
-    sync_directory_tree(&source_root, &source_root, &destination_root, expected)
+    retain_existing_resource_tree(&source_root, expected)
 }
 
-fn sync_directory_tree(
-    root: &Path,
+fn retain_existing_resource_tree(
     current_dir: &Path,
-    dst_root: &Path,
     expected: &mut HashSet<PathBuf>,
 ) -> Result<()> {
     let entries = fs::read_dir(current_dir)
@@ -431,41 +424,12 @@ fn sync_directory_tree(
         let entry = entry.with_context(|| {
             format!("failed to read entry under resource directory {}", current_dir.display())
         })?;
-        let src_path = entry.path();
-        let relative = src_path.strip_prefix(root).with_context(|| {
-            format!("failed to compute resource relative path for {}", src_path.display())
-        })?;
-        let dst_path = dst_root.join(relative);
-
-        if src_path.is_dir() {
-            fs::create_dir_all(&dst_path).with_context(|| {
-                format!("failed to create resource directory {}", dst_path.display())
-            })?;
-            sync_directory_tree(root, &src_path, dst_root, expected)?;
-            continue;
+        let path = entry.path();
+        if path.is_dir() {
+            retain_existing_resource_tree(&path, expected)?;
+        } else if path.is_file() {
+            expected.insert(path);
         }
-
-        if !src_path.is_file() {
-            continue;
-        }
-
-        if let Some(parent) = dst_path.parent() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!("failed to create resource parent directory {}", parent.display())
-            })?;
-        }
-
-        if should_copy_file(&src_path, &dst_path) {
-            fs::copy(&src_path, &dst_path).with_context(|| {
-                format!(
-                    "failed to copy resource file {} -> {}",
-                    src_path.display(),
-                    dst_path.display()
-                )
-            })?;
-        }
-
-        expected.insert(dst_path);
     }
 
     Ok(())
@@ -654,7 +618,9 @@ fn copy_fallback_bindings(fallback_source: &Path, output_path: &Path) -> Result<
 
 #[cfg(test)]
 mod tests {
-    use super::{clang_include_arg, copy_fallback_bindings, sync_optional_language_server_tree};
+    use super::{
+        clang_include_arg, copy_fallback_bindings, retain_existing_web_language_server_tree,
+    };
     use std::collections::HashSet;
     use std::env;
     use std::fs;
@@ -702,22 +668,18 @@ mod tests {
     }
 
     #[test]
-    fn sync_optional_language_server_tree_copies_payload_under_resources() {
+    fn retain_existing_web_language_server_tree_marks_payload_expected() {
         let root = temp_dir("language-server-sync");
-        let vendor_dir = root.join("vendor");
         let resources_dir = root.join("resources").join("libs");
-        let server = vendor_dir.join("language-servers").join("bin").join("rust-analyzer.exe");
-        let synced_server =
-            resources_dir.join("language-servers").join("bin").join("rust-analyzer.exe");
+        let server = resources_dir.join("language-servers").join("web").join("typescript.mjs");
         let mut expected = HashSet::new();
 
         fs::create_dir_all(server.parent().expect("server parent")).unwrap();
         fs::write(&server, "server").unwrap();
 
-        sync_optional_language_server_tree(&vendor_dir, &resources_dir, &mut expected).unwrap();
+        retain_existing_web_language_server_tree(&resources_dir, &mut expected).unwrap();
 
-        assert_eq!(fs::read_to_string(&synced_server).unwrap(), "server");
-        assert!(expected.contains(&synced_server));
+        assert!(expected.contains(&server));
         fs::remove_dir_all(root).unwrap();
     }
 

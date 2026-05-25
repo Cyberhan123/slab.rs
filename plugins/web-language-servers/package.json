@@ -2,6 +2,9 @@
   "name": "web-language-servers",
   "version": "0.1.0",
   "private": true,
+  "scripts": {
+    "build": "vite build"
+  },
   "dependencies": {
     "typescript": "catalog:language-servers",
     "typescript-language-server": "catalog:language-servers",

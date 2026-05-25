@@ -36,6 +36,25 @@ during development.
 Helper scripts now live under the repo-root `scripts/plugins/` directory.
 Directories under `plugins/` without `plugin.json` are not treated as plugins.
 
+## Built-in workspace LSP assets
+
+`plugins/web-language-servers` is no longer a user-installable plugin. It is a
+build-only Bun/Vite package that emits bundled JS language-server entries to
+`bin/slab-app/src-tauri/resources/libs/language-servers/web/` for Slab's
+built-in TypeScript/JavaScript, JSON, CSS/LESS/SCSS, and HTML workspace LSP
+support.
+
+`plugins/native-language-servers` is not packaged or shown as a plugin. Native
+workspace LSP providers are declared in `slab-app-core` and resolve tools such
+as `rust-analyzer`, `gopls`, and `pyright-langserver` from the existing process
+search paths or `PATH`. Those binaries are not shipped in plugin packs or the
+installer payload.
+
+Third-party plugins may still contribute workspace LSP providers through
+`permissions.lsp` and `contributes.languageServers`; `bun run gen:plugin-packs`
+skips the built-in language-server directories and only packages real plugin
+manifests.
+
 ## JS Backend Runtime
 
 Plugins can expose backend functions by providing a `runtime.js.entry` in

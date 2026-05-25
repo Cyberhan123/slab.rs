@@ -8,3 +8,4 @@ pub mod sleep_inhibitor;
 pub mod string;
 pub mod time;
 pub mod cargo_bin;
+pub mod uds;

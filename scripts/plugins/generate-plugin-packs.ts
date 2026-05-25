@@ -13,6 +13,10 @@ export type CliOptions = {
 };
 
 const DEFAULT_OUT_DIR = "plugins/dist";
+const BUILTIN_LANGUAGE_SERVER_PLUGIN_IDS = new Set([
+  "native-language-servers",
+  "web-language-servers",
+]);
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../..");
@@ -87,6 +91,15 @@ async function discoverPluginDirs(
   pluginsDir: string,
   pluginIds: Set<string>,
 ): Promise<string[]> {
+  const builtinIds = [...pluginIds].filter((pluginId) =>
+    BUILTIN_LANGUAGE_SERVER_PLUGIN_IDS.has(pluginId),
+  );
+  if (builtinIds.length > 0) {
+    throw new Error(
+      `Built-in language server(s) are not packaged as plugins: ${builtinIds.join(", ")}`,
+    );
+  }
+
   const rows = await readdir(pluginsDir, { withFileTypes: true });
   const directories = rows
     .filter((row) => row.isDirectory())
@@ -94,6 +107,9 @@ async function discoverPluginDirs(
   const candidates = await Promise.all(
     directories.map(async (pluginDir) => {
       const pluginId = path.basename(pluginDir);
+      if (BUILTIN_LANGUAGE_SERVER_PLUGIN_IDS.has(pluginId)) {
+        return null;
+      }
       if (pluginIds.size > 0 && !pluginIds.has(pluginId)) {
         return null;
       }

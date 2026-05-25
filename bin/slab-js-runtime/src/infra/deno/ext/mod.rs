@@ -2,8 +2,8 @@
 #![allow(clippy::derivable_impls)]
 
 use deno_core::{
-    v8::{BackingStore, SharedRef},
     CrossIsolateStore, Extension,
+    v8::{BackingStore, SharedRef},
 };
 
 pub mod rustyscript;
@@ -23,11 +23,7 @@ trait ExtensionTrait<A> {
     /// Builds an extension
     fn build(options: A, is_snapshot: bool) -> Extension {
         let ext: Extension = Self::init(options);
-        if is_snapshot {
-            Self::for_warmup(ext)
-        } else {
-            ext
-        }
+        if is_snapshot { Self::for_warmup(ext) } else { ext }
     }
 }
 
@@ -82,11 +78,11 @@ pub mod kv;
 #[cfg(feature = "cron")]
 pub mod cron;
 
-#[cfg(feature = "node_experimental")]
+#[cfg(all(feature = "node_experimental", feature = "deno_napi"))]
 pub mod napi;
 #[cfg(feature = "node_experimental")]
 pub mod node;
-#[cfg(feature = "node_experimental")]
+#[cfg(all(feature = "node_experimental", feature = "deno_runtime"))]
 pub mod runtime;
 
 /// Options for configuring extensions
@@ -167,12 +163,16 @@ impl Default for ExtensionOptions {
         Self {
             #[cfg(feature = "web")]
             web: {
-                let mut web_options = web::WebOptions::default();
                 #[cfg(feature = "broadcast_channel")]
                 {
+                    let mut web_options = web::WebOptions::default();
                     web_options.broadcast_channel = broadcast_channel.clone();
+                    web_options
                 }
-                web_options
+                #[cfg(not(feature = "broadcast_channel"))]
+                {
+                    web::WebOptions::default()
+                }
             },
 
             #[cfg(feature = "crypto")]
@@ -227,10 +227,8 @@ pub(crate) fn all_extensions(
     extensions.extend(console::extensions(is_snapshot));
 
     #[cfg(feature = "broadcast_channel")]
-    extensions.extend(broadcast_channel::extensions(
-        options.broadcast_channel.clone(),
-        is_snapshot,
-    ));
+    extensions
+        .extend(broadcast_channel::extensions(options.broadcast_channel.clone(), is_snapshot));
 
     #[cfg(feature = "cache")]
     extensions.extend(cache::extensions(options.cache.clone(), is_snapshot));
@@ -242,10 +240,8 @@ pub(crate) fn all_extensions(
     extensions.extend(io::extensions(options.io_pipes.clone(), is_snapshot));
 
     #[cfg(feature = "webstorage")]
-    extensions.extend(webstorage::extensions(
-        options.webstorage_origin_storage_dir.clone(),
-        is_snapshot,
-    ));
+    extensions
+        .extend(webstorage::extensions(options.webstorage_origin_storage_dir.clone(), is_snapshot));
 
     #[cfg(feature = "websocket")]
     extensions.extend(websocket::extensions(is_snapshot));
@@ -270,14 +266,13 @@ pub(crate) fn all_extensions(
 
     #[cfg(feature = "node_experimental")]
     {
+        #[cfg(feature = "deno_napi")]
         extensions.extend(napi::extensions(is_snapshot));
+
         extensions.extend(node::extensions(options.node_resolver.clone(), is_snapshot));
 
-        extensions.extend(runtime::extensions(
-            &options,
-            shared_array_buffer_store,
-            is_snapshot,
-        ));
+        #[cfg(feature = "deno_runtime")]
+        extensions.extend(runtime::extensions(&options, shared_array_buffer_store, is_snapshot));
     }
 
     extensions.extend(user_extensions);
