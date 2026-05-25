@@ -36,6 +36,8 @@ assert_cmd = { workspace = true }
 runfiles = { workspace = true }
 thiserror = { workspace = true }
 async_io = { workspace = true }
+tokio_util = { workspace = true, features = ["compat"] }
+uds_windows = { workspace = true }
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 tempfile = { workspace = true }

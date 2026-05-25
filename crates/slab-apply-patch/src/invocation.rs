@@ -135,7 +135,7 @@ pub async fn maybe_parse_apply_patch_verified(
     argv: &[String],
     cwd: &AbsolutePathBuf,
     fs: &dyn ExecutorFileSystem,
-    sandbox: Option<&codex_exec_server::FileSystemSandboxContext>,
+    sandbox: Option<&slab_file::FileSystemSandboxContext>,
 ) -> MaybeApplyPatchVerified {
     // Detect a raw patch body passed directly as the command or as the body of a shell
     // script. In these cases, report an explicit error rather than applying the patch.
@@ -162,7 +162,7 @@ pub async fn verify_apply_patch_args(
     args: ApplyPatchArgs,
     cwd: &AbsolutePathBuf,
     fs: &dyn ExecutorFileSystem,
-    sandbox: Option<&codex_exec_server::FileSystemSandboxContext>,
+    sandbox: Option<&slab_file::FileSystemSandboxContext>,
 ) -> MaybeApplyPatchVerified {
     let ApplyPatchArgs {
         patch,
@@ -185,13 +185,34 @@ pub async fn verify_apply_patch_args(
                 );
             }
             Hunk::DeleteFile { .. } => {
-                let content = match fs.read_file_text(&path, sandbox).await {
-                    Ok(content) => content,
+                let default_context;
+                let context = if let Some(context) = sandbox {
+                    context
+                } else {
+                    default_context = slab_file::FileSystemSandboxContext::default();
+                    &default_context
+                };
+                let path_string = path.as_path().to_string_lossy().into_owned();
+                let content = match fs.read_file(context, &path_string).await {
+                    Ok(content) => match String::from_utf8(content) {
+                        Ok(content) => content,
+                        Err(error) => {
+                            return MaybeApplyPatchVerified::CorrectnessError(
+                                ApplyPatchError::IoError(IoError {
+                                    context: format!("Failed to read {}", path.display()),
+                                    source: std::io::Error::new(
+                                        std::io::ErrorKind::InvalidData,
+                                        error,
+                                    ),
+                                }),
+                            );
+                        }
+                    },
                     Err(e) => {
                         return MaybeApplyPatchVerified::CorrectnessError(
                             ApplyPatchError::IoError(IoError {
                                 context: format!("Failed to read {}", path.display()),
-                                source: e,
+                                source: std::io::Error::other(e),
                             }),
                         );
                     }
@@ -208,7 +229,7 @@ pub async fn verify_apply_patch_args(
                     unified_diff,
                     content: contents,
                     ..
-                } = match unified_diff_from_chunks(&path, &chunks, fs, sandbox).await {
+                } = match unified_diff_from_chunks(&path, &effective_cwd, &chunks, fs, sandbox).await {
                     Ok(diff) => diff,
                     Err(e) => {
                         return MaybeApplyPatchVerified::CorrectnessError(e);
@@ -387,6 +408,7 @@ fn extract_apply_patch_from_bash(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::LOCAL_FS;
     use crate::unified_diff_from_chunks;
     use assert_matches::assert_matches;
     use slab_utils::path::absolute::test_support::PathExt;
@@ -686,6 +708,7 @@ PATCH"#,
         let dir = tempdir().unwrap();
         let path = dir.path().join("last.txt");
         fs::write(&path, "foo\nbar\nbaz\n").unwrap();
+        let cwd = AbsolutePathBuf::from_absolute_path(dir.path()).unwrap();
 
         let patch = wrap_patch(&format!(
             r#"*** Update File: {}
@@ -706,7 +729,7 @@ PATCH"#,
 
         let path_abs = path.as_path().abs();
         let diff =
-            unified_diff_from_chunks(&path_abs, chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
+            unified_diff_from_chunks(&path_abs, &cwd, chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
                 .await
                 .unwrap();
         let expected_diff = r#"@@ -2,2 +2,2 @@
@@ -728,6 +751,7 @@ PATCH"#,
         let dir = tempdir().unwrap();
         let path = dir.path().join("insert.txt");
         fs::write(&path, "foo\nbar\nbaz\n").unwrap();
+        let cwd = AbsolutePathBuf::from_absolute_path(dir.path()).unwrap();
 
         let patch = wrap_patch(&format!(
             r#"*** Update File: {}
@@ -746,7 +770,7 @@ PATCH"#,
 
         let path_abs = path.as_path().abs();
         let diff =
-            unified_diff_from_chunks(&path_abs, chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
+            unified_diff_from_chunks(&path_abs, &cwd, chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
                 .await
                 .unwrap();
         let expected_diff = r#"@@ -3 +3,2 @@

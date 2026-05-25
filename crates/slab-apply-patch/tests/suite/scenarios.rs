@@ -1,4 +1,3 @@
-use std::env;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
 use std::fs;
@@ -9,9 +8,7 @@ use tempfile::tempdir;
 
 #[test]
 fn test_apply_patch_scenarios() -> anyhow::Result<()> {
-    let scenarios_dir = env::home_dir()?
-        .join(".slab")
-        .join("apply-patch")
+    let scenarios_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
         .join("scenarios");
@@ -42,7 +39,7 @@ fn run_apply_patch_scenario(dir: &Path) -> anyhow::Result<()> {
     // Run apply_patch in the temporary directory. We intentionally do not assert
     // on the exit status here; the scenarios are specified purely in terms of
     // final filesystem state, which we compare below.
-    Command::new(slab_utils::cargo_bin("apply_patch")?)
+    Command::new(slab_utils::cargo_bin::cargo_bin("apply_patch")?)
         .arg(patch)
         .current_dir(tmp.path())
         .output()?;
