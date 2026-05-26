@@ -13,8 +13,8 @@ use utoipa::OpenApi;
 
 use crate::api::v1::agent::schema::{
     AgentApproveRequest, AgentApproveResponse, AgentInputRequest, AgentInputResponse,
-    AgentInterruptResponse, AgentShutdownResponse, AgentStatusResponse, SpawnAgentRequest,
-    SpawnAgentResponse,
+    AgentInterruptResponse, AgentShutdownResponse, AgentStatusResponse, AgentThreadMessageResponse,
+    AgentThreadResponse, SpawnAgentRequest, SpawnAgentResponse,
 };
 use crate::api::validation::ValidatedJson;
 use crate::error::ServerError;
@@ -26,6 +26,8 @@ use slab_app_core::domain::services::AgentService;
     paths(
         spawn_agent,
         agent_input,
+        list_agent_session_threads,
+        list_agent_thread_messages,
         agent_status,
         agent_shutdown,
         agent_approve,
@@ -42,6 +44,8 @@ use slab_app_core::domain::services::AgentService;
         AgentApproveRequest,
         AgentApproveResponse,
         AgentInterruptResponse,
+        AgentThreadResponse,
+        AgentThreadMessageResponse,
         crate::api::v1::agent::schema::AgentConfigInput,
         crate::api::v1::agent::schema::MessageInput,
         crate::api::v1::agent::schema::AgentStatusValue,
@@ -52,7 +56,9 @@ pub struct AgentApi;
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/agents/spawn", post(spawn_agent))
+        .route("/agents/session/{session_id}/threads", get(list_agent_session_threads))
         .route("/agents/{id}/input", post(agent_input))
+        .route("/agents/{id}/messages", get(list_agent_thread_messages))
         .route("/agents/{id}/status", get(agent_status))
         .route("/agents/{id}/shutdown", post(agent_shutdown))
         .route("/agents/{id}/approve", post(agent_approve))
@@ -83,6 +89,48 @@ async fn spawn_agent(
 
     let thread_id = service.spawn(req.session_id, req.config.into(), messages).await?;
     Ok((axum::http::StatusCode::CREATED, Json(SpawnAgentResponse { thread_id })))
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/agents/session/{session_id}/threads",
+    tag = "agents",
+    params(
+        ("session_id" = String, Path, description = "Chat session ID")
+    ),
+    responses(
+        (status = 200, description = "Agent threads for the session", body = Vec<AgentThreadResponse>),
+        (status = 500, description = "Internal error"),
+    )
+)]
+async fn list_agent_session_threads(
+    State(service): State<AgentService>,
+    Path(session_id): Path<String>,
+) -> Result<Json<Vec<AgentThreadResponse>>, ServerError> {
+    let threads =
+        service.list_session_threads(&session_id).await?.into_iter().map(Into::into).collect();
+    Ok(Json(threads))
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/agents/{id}/messages",
+    tag = "agents",
+    params(
+        ("id" = String, Path, description = "Agent thread ID")
+    ),
+    responses(
+        (status = 200, description = "Persisted agent thread messages", body = Vec<AgentThreadMessageResponse>),
+        (status = 404, description = "Thread not found"),
+        (status = 500, description = "Internal error"),
+    )
+)]
+async fn list_agent_thread_messages(
+    State(service): State<AgentService>,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<AgentThreadMessageResponse>>, ServerError> {
+    let messages = service.list_thread_messages(&id).await?.into_iter().map(Into::into).collect();
+    Ok(Json(messages))
 }
 
 #[utoipa::path(

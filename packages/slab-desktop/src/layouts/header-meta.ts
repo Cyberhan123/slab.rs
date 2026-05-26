@@ -1,6 +1,5 @@
 import {
   BotMessageSquare,
-  Bot,
   ClipboardList,
   Film,
   Info,
@@ -37,20 +36,15 @@ export const PAGE_HEADER_META = {
     subtitle: "Project and runtime information",
     icon: Info,
   },
-  agent: {
-    title: "Agent",
-    subtitle: "Run tool-enabled agent threads",
-    icon: Bot,
+  assistant: {
+    title: "Assistant",
+    subtitle: "Talk with AI Assistants",
+    icon: BotMessageSquare,
   },
   audio: {
     title: "Audio",
     subtitle: "Transcribe and process audio files",
     icon: Mic,
-  },
-  chat: {
-    title: "Assistant",
-    subtitle: "Talk with AI Assistants",
-    icon: BotMessageSquare,
   },
   hub: {
     title: "Hub",

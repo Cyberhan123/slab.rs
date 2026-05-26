@@ -10,11 +10,11 @@ export const APP_LANGUAGE_STORAGE_KEY = 'slab.ui.language';
 
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 export type AppLanguagePreference = (typeof APP_LANGUAGE_PREFERENCES)[number];
-export const DEFAULT_CHAT_LABELS = [
-  enUS.pages.chat.runtime.newChat,
-  enUS.pages.chat.runtime.newConversation,
-  zhCN.pages.chat.runtime.newChat,
-  zhCN.pages.chat.runtime.newConversation,
+export const DEFAULT_ASSISTANT_LABELS = [
+  enUS.pages.assistant.runtime.newChat,
+  enUS.pages.assistant.runtime.newConversation,
+  zhCN.pages.assistant.runtime.newChat,
+  zhCN.pages.assistant.runtime.newConversation,
 ] as const;
 export const LEGACY_DEFAULT_CHAT_LABELS = ['New Conversation', '新对话'] as const;
 

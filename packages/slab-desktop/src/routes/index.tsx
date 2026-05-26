@@ -1,7 +1,6 @@
 import { lazy, Suspense } from "react";
-import { useRoutes } from "react-router-dom";
-import Chat from "@/pages/chat";
-import Agent from "@/pages/agent";
+import { Navigate, useRoutes } from "react-router-dom";
+import Assistant from "@/pages/assistant";
 import About from "@/pages/about";
 import Settings from "@/pages/settings";
 import { ThemePreview } from "@/components/theme-preview";
@@ -55,8 +54,8 @@ function AppRoutes() {
       path: '/',
       element: <Layout />,
       children: [
-        { index: true, element: <Chat /> },
-        { path: 'agent', element: <Agent /> },
+        { index: true, element: <Assistant /> },
+        { path: 'agent', element: <Navigate to="/" replace /> },
         { path: 'image', element: <Image /> },
         { path: 'audio', element: <Audio /> },
         { path: 'video', element: <Video /> },

@@ -28,9 +28,8 @@ export type HeaderSearchControl = {
 export type HeaderControl = HeaderSelectControl;
 
 export const HEADER_SELECT_KEYS = {
-  agentModel: 'agent:model',
+  assistantModel: 'assistant:model',
   audioModel: 'audio:model',
-  chatModel: 'chat:model',
   imageModel: 'image:model',
   videoModel: 'video:model',
 } as const;

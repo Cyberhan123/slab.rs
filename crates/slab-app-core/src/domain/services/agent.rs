@@ -8,7 +8,7 @@ use std::sync::Arc;
 use slab_agent::config::AgentConfig;
 use slab_agent::control::AgentControl;
 use slab_agent::error::AgentError;
-use slab_agent::port::AgentStorePort;
+use slab_agent::port::{AgentStorePort, ThreadMessageRecord, ThreadSnapshot};
 use slab_types::ConversationMessage;
 
 use crate::error::AppCoreError;
@@ -78,6 +78,38 @@ impl AgentService {
     /// Append user input to an existing agent thread and run the next turn.
     pub async fn send_input(&self, thread_id: &str, content: String) -> Result<(), AppCoreError> {
         self.control.send_input(thread_id, content).await.map_err(agent_err_to_server)
+    }
+
+    /// List persisted root agent threads for a chat session, newest first.
+    pub async fn list_session_threads(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<ThreadSnapshot>, AppCoreError> {
+        self.store
+            .list_session_threads(session_id)
+            .await
+            .map_err(|e| AppCoreError::Internal(e.to_string()))
+    }
+
+    /// List persisted messages for a thread in replay order.
+    pub async fn list_thread_messages(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<ThreadMessageRecord>, AppCoreError> {
+        if self
+            .store
+            .get_thread(thread_id)
+            .await
+            .map_err(|e| AppCoreError::Internal(e.to_string()))?
+            .is_none()
+        {
+            return Err(AppCoreError::NotFound(format!("agent thread not found: {thread_id}")));
+        }
+
+        self.store
+            .list_thread_messages(thread_id)
+            .await
+            .map_err(|e| AppCoreError::Internal(e.to_string()))
     }
 
     /// Subscribe to the turn-event stream for a thread.

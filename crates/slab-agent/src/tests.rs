@@ -161,6 +161,13 @@ impl AgentStorePort for NoopStore {
         Ok(None)
     }
 
+    async fn list_session_threads(
+        &self,
+        _session_id: &str,
+    ) -> Result<Vec<ThreadSnapshot>, AgentError> {
+        Ok(Vec::new())
+    }
+
     async fn update_thread_status(
         &self,
         _id: &str,
@@ -210,6 +217,13 @@ impl AgentStorePort for RecordingStore {
 
     async fn get_thread(&self, _id: &str) -> Result<Option<ThreadSnapshot>, AgentError> {
         Ok(None)
+    }
+
+    async fn list_session_threads(
+        &self,
+        _session_id: &str,
+    ) -> Result<Vec<ThreadSnapshot>, AgentError> {
+        Ok(Vec::new())
     }
 
     async fn update_thread_status(
@@ -264,6 +278,20 @@ impl AgentStorePort for PersistingStore {
 
     async fn get_thread(&self, id: &str) -> Result<Option<ThreadSnapshot>, AgentError> {
         Ok(self.snapshots.lock().unwrap().get(id).cloned())
+    }
+
+    async fn list_session_threads(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<ThreadSnapshot>, AgentError> {
+        Ok(self
+            .snapshots
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|snapshot| snapshot.session_id == session_id && snapshot.parent_id.is_none())
+            .cloned()
+            .collect())
     }
 
     async fn update_thread_status(

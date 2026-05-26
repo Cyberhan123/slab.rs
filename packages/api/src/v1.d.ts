@@ -20,6 +20,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/agents/session/{session_id}/threads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_agent_session_threads"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/agents/spawn": {
         parameters: {
             query?: never;
@@ -94,6 +110,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["agent_interrupt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_agent_thread_messages"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1030,6 +1062,29 @@ export interface components {
          * @enum {string}
          */
         AgentStatusValue: "pending" | "running" | "completed" | "errored" | "shutdown";
+        /** @description Persisted agent thread message. */
+        AgentThreadMessageResponse: {
+            content: string;
+            created_at: string;
+            id: string;
+            role: string;
+            thread_id: string;
+            /** Format: int32 */
+            turn_index: number;
+        };
+        /** @description Persisted agent thread summary. */
+        AgentThreadResponse: {
+            completion_text?: string | null;
+            created_at: string;
+            /** Format: int32 */
+            depth: number;
+            id: string;
+            parent_id?: string | null;
+            role_name?: string | null;
+            session_id: string;
+            status: components["schemas"]["AgentStatusValue"];
+            updated_at: string;
+        };
         AudioTranscriptionRequest: {
             decode?: null | components["schemas"]["TranscribeDecodeRequest"];
             /**
@@ -2631,6 +2686,36 @@ export interface operations {
             };
         };
     };
+    list_agent_session_threads: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Chat session ID */
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agent threads for the session */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentThreadResponse"][];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     spawn_agent: {
         parameters: {
             query?: never;
@@ -2795,6 +2880,43 @@ export interface operations {
             };
             /** @description Thread not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_agent_thread_messages: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Agent thread ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Persisted agent thread messages */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentThreadMessageResponse"][];
+                };
+            };
+            /** @description Thread not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Internal error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -175,6 +175,12 @@ pub trait AgentStorePort: Send + Sync {
     /// Retrieve a thread snapshot by ID.
     async fn get_thread(&self, id: &str) -> Result<Option<ThreadSnapshot>, AgentError>;
 
+    /// Return root thread snapshots for a chat session, newest first.
+    async fn list_session_threads(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<ThreadSnapshot>, AgentError>;
+
     /// Update only the status (and optional completion text) of an existing thread.
     async fn update_thread_status(
         &self,

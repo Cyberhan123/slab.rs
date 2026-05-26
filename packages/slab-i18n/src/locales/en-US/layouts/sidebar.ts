@@ -1,6 +1,5 @@
 export const sidebar = {
   items: {
-    agent: 'Agent',
     assistant: 'Assistant',
     image: 'Image',
     video: 'Video',

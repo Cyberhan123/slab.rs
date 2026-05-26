@@ -73,6 +73,27 @@ export const useHeaderUiStore = create<HeaderUiState>()(
     {
       name: 'header-ui',
       storage: createJSONStorage(() => createUiStateStorage()),
+      migrate: (persisted) => {
+        if (!persisted || typeof persisted !== 'object' || !('selections' in persisted)) {
+          return persisted;
+        }
+
+        const state = persisted as PersistedHeaderUiState;
+        if (
+          state.selections['assistant:model'] ||
+          !state.selections['chat:model']
+        ) {
+          return state;
+        }
+
+        return {
+          ...state,
+          selections: {
+            ...state.selections,
+            'assistant:model': state.selections['chat:model'],
+          },
+        };
+      },
       partialize: ({ selections }) => ({
         selections,
       }),

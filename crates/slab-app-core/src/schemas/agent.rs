@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use slab_agent::config::AgentConfig;
+use slab_agent::port::{ThreadMessageRecord, ThreadSnapshot};
 use slab_types::agent::AgentThreadStatus;
 use utoipa::ToSchema;
 use validator::Validate;
@@ -79,6 +80,62 @@ pub struct SpawnAgentResponse {
     pub thread_id: String,
 }
 
+/// Persisted agent thread summary.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct AgentThreadResponse {
+    pub id: String,
+    pub session_id: String,
+    pub parent_id: Option<String>,
+    pub depth: u32,
+    pub status: AgentStatusValue,
+    pub role_name: Option<String>,
+    pub completion_text: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Persisted agent thread message.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct AgentThreadMessageResponse {
+    pub id: String,
+    pub thread_id: String,
+    pub turn_index: u32,
+    pub role: String,
+    pub content: String,
+    pub created_at: String,
+}
+
+impl From<ThreadSnapshot> for AgentThreadResponse {
+    fn from(thread: ThreadSnapshot) -> Self {
+        Self {
+            id: thread.id,
+            session_id: thread.session_id,
+            parent_id: thread.parent_id,
+            depth: thread.depth,
+            status: thread.status.into(),
+            role_name: thread.role_name,
+            completion_text: thread.completion_text,
+            created_at: thread.created_at,
+            updated_at: thread.updated_at,
+        }
+    }
+}
+
+impl From<ThreadMessageRecord> for AgentThreadMessageResponse {
+    fn from(record: ThreadMessageRecord) -> Self {
+        let message = record.message;
+        let content = message.rendered_text();
+        Self {
+            id: record.id,
+            thread_id: record.thread_id,
+            turn_index: record.turn_index,
+            role: message.role,
+            content,
+            created_at: record.created_at,
+        }
+    }
+}
+
 // ── Input ─────────────────────────────────────────────────────────────────────
 
 /// Request body for `POST /v1/agents/{id}/input`.
@@ -107,7 +164,7 @@ pub struct AgentStatusResponse {
 }
 
 /// Serialisable mirror of [`AgentThreadStatus`].
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentStatusValue {
     Pending,

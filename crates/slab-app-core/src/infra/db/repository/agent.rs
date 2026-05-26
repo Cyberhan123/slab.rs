@@ -133,6 +133,24 @@ impl AgentStorePort for SqlxStore {
         Ok(row.map(Into::into))
     }
 
+    async fn list_session_threads(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<ThreadSnapshot>, slab_agent::AgentError> {
+        let rows: Vec<AgentThreadRow> = sqlx::query_as(
+            "SELECT id, session_id, parent_id, depth, status, role_name, \
+             config_json, completion_text, created_at, updated_at \
+             FROM agent_threads WHERE session_id = ?1 AND parent_id IS NULL \
+             ORDER BY updated_at DESC, created_at DESC, id ASC",
+        )
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
+
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
     async fn update_thread_status(
         &self,
         id: &str,
