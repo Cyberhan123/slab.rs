@@ -15,6 +15,10 @@ pub enum AgentError {
     #[error("thread limit exceeded: {current}/{max}")]
     ThreadLimitExceeded { current: usize, max: usize },
 
+    /// A caller attempted to start another turn while the thread is still active.
+    #[error("thread is busy: {0}")]
+    ThreadBusy(String),
+
     /// Spawning a child would exceed the configured nesting-depth limit.
     #[error("depth limit exceeded: {current}/{max}")]
     DepthLimitExceeded { current: u32, max: u32 },

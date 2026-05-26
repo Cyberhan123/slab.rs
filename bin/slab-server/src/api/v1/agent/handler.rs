@@ -6,7 +6,7 @@ use axum::extract::{Path, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use futures::stream::StreamExt;
+use futures::stream::{self, StreamExt};
 use serde::Serialize;
 use tokio_stream::wrappers::BroadcastStream;
 use utoipa::OpenApi;
@@ -94,22 +94,21 @@ async fn spawn_agent(
     ),
     request_body = AgentInputRequest,
     responses(
-        (status = 501, description = "Not implemented"),
+        (status = 202, description = "Input accepted", body = AgentInputResponse),
+        (status = 404, description = "Thread not found"),
+        (status = 429, description = "Thread is already running"),
+        (status = 500, description = "Internal error"),
     )
 )]
 async fn agent_input(
-    State(_service): State<AgentService>,
-    Path(_id): Path<String>,
-    Json(req): Json<AgentInputRequest>,
+    State(service): State<AgentService>,
+    Path(id): Path<String>,
+    ValidatedJson(req): ValidatedJson<AgentInputRequest>,
 ) -> Result<(axum::http::StatusCode, Json<AgentInputResponse>), ServerError> {
-    let _content = req.content;
+    service.send_input(&id, req.content).await?;
     Ok((
-        axum::http::StatusCode::NOT_IMPLEMENTED,
-        Json(AgentInputResponse {
-            accepted: false,
-            message: "send_input is not yet implemented; the agent runs autonomously once spawned"
-                .into(),
-        }),
+        axum::http::StatusCode::ACCEPTED,
+        Json(AgentInputResponse { accepted: true, message: "input accepted".into() }),
     ))
 }
 
@@ -211,17 +210,25 @@ async fn agent_events(
     State(service): State<AgentService>,
     Path(id): Path<String>,
 ) -> Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>> {
-    let rx = service.subscribe_events(&id);
-    let stream = BroadcastStream::new(rx).map(|msg| {
+    let subscription = service.subscribe_events(&id);
+    let replay = stream::iter(subscription.replay.into_iter().map(|envelope| {
+        Ok::<Event, std::convert::Infallible>(
+            Event::default()
+                .id(envelope.id.to_string())
+                .data(turn_event_to_sse_data(&envelope.event)),
+        )
+    }));
+    let live = BroadcastStream::new(subscription.receiver).map(|msg| {
         let event = match msg {
-            Ok(event) => {
-                let data = turn_event_to_sse_data(&event);
-                Event::default().data(data)
+            Ok(envelope) => {
+                let data = turn_event_to_sse_data(&envelope.event);
+                Event::default().id(envelope.id.to_string()).data(data)
             }
             Err(_) => Event::default().data(serialize_agent_sse_event(&AgentSseEvent::Lagged)),
         };
         Ok::<Event, std::convert::Infallible>(event)
     });
+    let stream = replay.chain(live);
 
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
@@ -260,7 +267,7 @@ fn turn_event_to_sse_data(event: &slab_agent::TurnEvent) -> String {
         slab_agent::TurnEvent::TurnCompleted { text } => AgentSseEvent::TurnCompleted { text },
         slab_agent::TurnEvent::TurnFailed { error } => AgentSseEvent::TurnFailed { error },
         slab_agent::TurnEvent::AgentStatus { status } => {
-            AgentSseEvent::AgentStatus { status: format!("{status:?}") }
+            AgentSseEvent::AgentStatus { status: status.to_string() }
         }
     };
     serialize_agent_sse_event(&event)

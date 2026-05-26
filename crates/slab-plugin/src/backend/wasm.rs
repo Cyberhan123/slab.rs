@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
@@ -24,22 +24,17 @@ const MAX_API_RESPONSE_BYTES: usize = 1024 * 1024;
 #[derive(Clone)]
 struct WasmHostContext {
     plugin_id: String,
-    blocking_http_client: BlockingHttpClient,
     api_base_url: Option<String>,
     slab_api_permissions: Vec<String>,
 }
 
 extism::host_fn!(slab_api_request(context: WasmHostContext; payload: String) -> String {
     let context = context.get()?;
-    let (blocking_http_client, api_base_url, slab_api_permissions) = {
+    let (api_base_url, slab_api_permissions) = {
         let guard = context
             .lock()
             .map_err(|_| extism::Error::msg("failed to lock wasm host context"))?;
-        (
-            guard.blocking_http_client.clone(),
-            guard.api_base_url.clone(),
-            guard.slab_api_permissions.clone(),
-        )
+        (guard.api_base_url.clone(), guard.slab_api_permissions.clone())
     };
 
     let base_url = api_base_url.ok_or_else(|| {
@@ -52,6 +47,10 @@ extism::host_fn!(slab_api_request(context: WasmHostContext; payload: String) -> 
     authorize_plugin_slab_api_request(&slab_api_permissions, &api_request)
         .map_err(extism::Error::msg)?;
 
+    let blocking_http_client = BlockingHttpClient::builder()
+        .timeout(Duration::from_millis(DEFAULT_HTTP_TIMEOUT_MS))
+        .build()
+        .map_err(|e| extism::Error::msg(format!("failed to initialize API HTTP client: {e}")))?;
     let response = execute_plugin_api_request_blocking(&blocking_http_client, &base_url, &api_request)
         .map_err(extism::Error::msg)?;
 
@@ -91,18 +90,13 @@ struct RuntimeInstance {
 }
 
 pub struct WasmPluginBackend {
-    instances: Mutex<HashMap<String, RuntimeInstance>>,
-    blocking_http_client: BlockingHttpClient,
+    instances: Arc<Mutex<HashMap<String, RuntimeInstance>>>,
     api_base_url: Option<String>,
 }
 
 impl WasmPluginBackend {
     pub fn new() -> Self {
-        let blocking_http_client = BlockingHttpClient::builder()
-            .timeout(Duration::from_millis(DEFAULT_HTTP_TIMEOUT_MS))
-            .build()
-            .unwrap_or_default();
-        Self { instances: Mutex::new(HashMap::new()), blocking_http_client, api_base_url: None }
+        Self { instances: Arc::new(Mutex::new(HashMap::new())), api_base_url: None }
     }
 
     pub fn with_api_base_url(mut self, url: String) -> Self {
@@ -128,46 +122,48 @@ impl PluginBackend for WasmPluginBackend {
         plugin: &LoadedPlugin,
         request: &PluginCallRequest,
     ) -> Result<PluginCallResponse, PluginError> {
-        let mut guard = self
-            .instances
-            .lock()
-            .map_err(|_| PluginError::Runtime("failed to lock wasm runtime manager".to_string()))?;
+        let instances = Arc::clone(&self.instances);
+        let api_base_url = self.api_base_url.clone();
+        let plugin = plugin.clone();
+        let request = request.clone();
 
-        if !guard.contains_key(&plugin.manifest.id) {
-            let runtime = RuntimeInstance {
-                plugin: build_extism_plugin(
-                    plugin,
-                    self.blocking_http_client.clone(),
-                    self.api_base_url.clone(),
-                )?,
-            };
-            guard.insert(plugin.manifest.id.clone(), runtime);
-        }
-
-        let runtime = guard.get_mut(&plugin.manifest.id).ok_or_else(|| {
-            PluginError::Runtime("failed to acquire initialized wasm runtime".to_string())
-        })?;
-
-        let output = runtime
-            .plugin
-            .call::<_, Vec<u8>>(request.function.as_str(), request.input.as_bytes())
-            .map_err(|error| {
-                PluginError::Runtime(format!(
-                    "failed to call function `{}` on plugin `{}`: {error}",
-                    request.function, request.plugin_id
-                ))
+        tokio::task::spawn_blocking(move || {
+            let mut guard = instances.lock().map_err(|_| {
+                PluginError::Runtime("failed to lock wasm runtime manager".to_string())
             })?;
 
-        Ok(PluginCallResponse {
-            output_text: String::from_utf8_lossy(&output).to_string(),
-            output_base64: base64::engine::general_purpose::STANDARD.encode(output),
+            if !guard.contains_key(&plugin.manifest.id) {
+                let runtime =
+                    RuntimeInstance { plugin: build_extism_plugin(&plugin, api_base_url.clone())? };
+                guard.insert(plugin.manifest.id.clone(), runtime);
+            }
+
+            let runtime = guard.get_mut(&plugin.manifest.id).ok_or_else(|| {
+                PluginError::Runtime("failed to acquire initialized wasm runtime".to_string())
+            })?;
+
+            let output = runtime
+                .plugin
+                .call::<_, Vec<u8>>(request.function.as_str(), request.input.as_bytes())
+                .map_err(|error| {
+                    PluginError::Runtime(format!(
+                        "failed to call function `{}` on plugin `{}`: {error}",
+                        request.function, request.plugin_id
+                    ))
+                })?;
+
+            Ok(PluginCallResponse {
+                output_text: String::from_utf8_lossy(&output).to_string(),
+                output_base64: base64::engine::general_purpose::STANDARD.encode(output),
+            })
         })
+        .await
+        .map_err(|error| PluginError::Runtime(format!("wasm runtime task failed: {error}")))?
     }
 }
 
 fn build_extism_plugin(
     plugin: &LoadedPlugin,
-    blocking_http_client: BlockingHttpClient,
     api_base_url: Option<String>,
 ) -> Result<Plugin, PluginError> {
     let wasm_entry_path = plugin.wasm_entry_path.as_ref().ok_or_else(|| {
@@ -192,7 +188,6 @@ fn build_extism_plugin(
 
     let context = WasmHostContext {
         plugin_id: plugin.manifest.id.clone(),
-        blocking_http_client,
         api_base_url,
         slab_api_permissions: plugin.manifest.permissions.slab_api.clone(),
     };

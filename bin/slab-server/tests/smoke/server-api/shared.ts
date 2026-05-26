@@ -38,6 +38,7 @@ export const executableSmokeOperations = [
   { method: "get", path: "/health" },
   { method: "post", path: "/v1/agents/spawn" },
   { method: "get", path: "/v1/agents/{id}/status" },
+  { method: "post", path: "/v1/agents/{id}/input" },
   { method: "post", path: "/v1/agents/{id}/shutdown" },
   { method: "post", path: "/v1/agents/{id}/approve" },
   { method: "post", path: "/v1/agents/{id}/interrupt" },
@@ -70,8 +71,10 @@ export const executableSmokeOperations = [
   { method: "get", path: "/v1/models/{id}/config-document" },
   { method: "put", path: "/v1/models/{id}/config-selection" },
   { method: "get", path: "/v1/plugins" },
+  { method: "get", path: "/v1/plugins/events" },
   { method: "post", path: "/v1/plugins/import-pack" },
   { method: "post", path: "/v1/plugins/install" },
+  { method: "get", path: "/v1/plugins/rpc" },
   { method: "delete", path: "/v1/plugins/{id}" },
   { method: "get", path: "/v1/plugins/{id}" },
   { method: "post", path: "/v1/plugins/{id}/disable" },
@@ -104,7 +107,6 @@ export const executableSmokeOperations = [
 ] as const satisfies readonly SmokeOperation[];
 
 export const todoSmokeOperations = [
-  { method: "post", path: "/v1/agents/{id}/input" },
   { method: "post", path: "/v1/setup/provision" },
   { method: "post", path: "/v1/tasks/{id}/restart" }
 ] as const satisfies readonly SmokeOperation[];

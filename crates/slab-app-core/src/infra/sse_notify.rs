@@ -5,16 +5,15 @@
 //!
 //! # Design
 //!
-//! - One `broadcast::Sender<TurnEvent>` per thread, stored in a [`DashMap`].
-//!   Calling `subscribe_events()` returns a receiver that replays from the
-//!   current tail.
+//! - One replaying event channel per thread, stored in a [`DashMap`].
+//!   Calling `subscribe_events()` returns recent events plus a live receiver.
 //! - Pending approvals are stored as `oneshot::Sender<ApprovalDecision>` keyed
 //!   by `"<thread_id>:<call_id>"`.  The HTTP approve handler must supply both
 //!   the thread ID (from the URL path) and the call_id to prevent cross-thread
 //!   approval.  Requests that receive no decision within
 //!   [`APPROVAL_TIMEOUT_SECS`] are automatically rejected.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use dashmap::DashMap;
@@ -30,10 +29,58 @@ const APPROVAL_TIMEOUT_SECS: u64 = 300;
 /// Shared state used by both the notify path and the HTTP handlers.
 #[derive(Clone, Default)]
 pub struct SseNotifyAdapter {
-    /// Per-thread event broadcast channels.
-    channels: Arc<DashMap<String, broadcast::Sender<TurnEvent>>>,
+    /// Per-thread event channels with a bounded replay history.
+    channels: Arc<DashMap<String, EventChannel>>,
     /// Pending approval requests: "<thread_id>:<call_id>" → oneshot sender.
     approvals: Arc<DashMap<String, oneshot::Sender<ApprovalDecision>>>,
+}
+
+/// Replay plus live receiver for an agent event stream.
+pub struct AgentEventSubscription {
+    pub replay: Vec<AgentEventEnvelope>,
+    pub receiver: broadcast::Receiver<AgentEventEnvelope>,
+}
+
+#[derive(Clone)]
+pub struct AgentEventEnvelope {
+    pub id: u64,
+    pub event: TurnEvent,
+}
+
+#[derive(Clone)]
+struct EventChannel {
+    sender: broadcast::Sender<AgentEventEnvelope>,
+    state: Arc<Mutex<EventChannelState>>,
+}
+
+#[derive(Default)]
+struct EventChannelState {
+    next_id: u64,
+    history: Vec<AgentEventEnvelope>,
+}
+
+impl EventChannel {
+    fn new() -> Self {
+        let (sender, _) = broadcast::channel(CHANNEL_CAPACITY);
+        Self { sender, state: Arc::new(Mutex::new(EventChannelState::default())) }
+    }
+
+    fn subscribe(&self) -> AgentEventSubscription {
+        let state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let receiver = self.sender.subscribe();
+        AgentEventSubscription { replay: state.history.clone(), receiver }
+    }
+
+    fn send(&self, event: TurnEvent) {
+        let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let envelope = AgentEventEnvelope { id: state.next_id, event };
+        state.next_id += 1;
+        if state.history.len() >= CHANNEL_CAPACITY {
+            state.history.remove(0);
+        }
+        state.history.push(envelope.clone());
+        let _ = self.sender.send(envelope);
+    }
 }
 
 impl SseNotifyAdapter {
@@ -43,13 +90,10 @@ impl SseNotifyAdapter {
 
     /// Subscribe to the event stream for `thread_id`.
     ///
-    /// Creates the channel on first call.  The returned receiver will receive
-    /// all events emitted *after* the subscription point.
-    pub fn subscribe_events(&self, thread_id: &str) -> broadcast::Receiver<TurnEvent> {
-        self.channels
-            .entry(thread_id.to_owned())
-            .or_insert_with(|| broadcast::channel(CHANNEL_CAPACITY).0)
-            .subscribe()
+    /// Creates the channel on first call.  The returned subscription includes
+    /// recent events emitted before the subscription and all later live events.
+    pub fn subscribe_events(&self, thread_id: &str) -> AgentEventSubscription {
+        self.channel(thread_id).subscribe()
     }
 
     /// Send an approval decision for a pending tool call.
@@ -72,10 +116,11 @@ impl SseNotifyAdapter {
     }
 
     fn broadcast(&self, thread_id: &str, event: TurnEvent) {
-        if let Some(tx) = self.channels.get(thread_id) {
-            // Ignore send errors — they just mean all subscribers have dropped.
-            let _ = tx.send(event);
-        }
+        self.channel(thread_id).send(event);
+    }
+
+    fn channel(&self, thread_id: &str) -> EventChannel {
+        self.channels.entry(thread_id.to_owned()).or_insert_with(EventChannel::new).clone()
     }
 }
 
@@ -147,5 +192,26 @@ impl ApprovalPort for SseNotifyAdapter {
                 ApprovalDecision::Rejected
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use slab_agent::port::TurnEvent;
+
+    use super::SseNotifyAdapter;
+
+    #[test]
+    fn subscribe_events_replays_events_emitted_before_subscription() {
+        let adapter = SseNotifyAdapter::new();
+        adapter.broadcast("thread-1", TurnEvent::TurnCompleted { text: "done".into() });
+
+        let subscription = adapter.subscribe_events("thread-1");
+
+        assert_eq!(subscription.replay.len(), 1);
+        assert!(matches!(
+            &subscription.replay[0].event,
+            TurnEvent::TurnCompleted { text } if text == "done"
+        ));
     }
 }

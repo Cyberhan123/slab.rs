@@ -6,7 +6,10 @@
 //! 2. Second call (after the tool result is appended) → returns a plain-text
 //!    final answer so the loop terminates.
 
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use crate::{
     AgentControl, AgentError, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput,
@@ -14,7 +17,8 @@ use crate::{
     config::AgentConfig,
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
-        ParsedToolCall, ThreadSnapshot, ThreadStatus, ToolCallRecord, ToolSpec,
+        ParsedToolCall, ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolCallRecord,
+        ToolSpec,
     },
 };
 use async_trait::async_trait;
@@ -179,6 +183,17 @@ impl AgentStorePort for NoopStore {
     ) -> Result<(), AgentError> {
         Ok(())
     }
+
+    async fn insert_thread_message(&self, _record: &ThreadMessageRecord) -> Result<(), AgentError> {
+        Ok(())
+    }
+
+    async fn list_thread_messages(
+        &self,
+        _thread_id: &str,
+    ) -> Result<Vec<ThreadMessageRecord>, AgentError> {
+        Ok(Vec::new())
+    }
 }
 
 #[derive(Default)]
@@ -221,6 +236,81 @@ impl AgentStorePort for RecordingStore {
         self.updated_statuses.lock().unwrap().push(status);
         Ok(())
     }
+
+    async fn insert_thread_message(&self, _record: &ThreadMessageRecord) -> Result<(), AgentError> {
+        Ok(())
+    }
+
+    async fn list_thread_messages(
+        &self,
+        _thread_id: &str,
+    ) -> Result<Vec<ThreadMessageRecord>, AgentError> {
+        Ok(Vec::new())
+    }
+}
+
+#[derive(Default)]
+struct PersistingStore {
+    snapshots: Mutex<HashMap<String, ThreadSnapshot>>,
+    messages: Mutex<Vec<ThreadMessageRecord>>,
+}
+
+#[async_trait]
+impl AgentStorePort for PersistingStore {
+    async fn upsert_thread(&self, snapshot: &ThreadSnapshot) -> Result<(), AgentError> {
+        self.snapshots.lock().unwrap().insert(snapshot.id.clone(), snapshot.clone());
+        Ok(())
+    }
+
+    async fn get_thread(&self, id: &str) -> Result<Option<ThreadSnapshot>, AgentError> {
+        Ok(self.snapshots.lock().unwrap().get(id).cloned())
+    }
+
+    async fn update_thread_status(
+        &self,
+        id: &str,
+        status: ThreadStatus,
+        completion_text: Option<&str>,
+    ) -> Result<(), AgentError> {
+        if let Some(snapshot) = self.snapshots.lock().unwrap().get_mut(id) {
+            snapshot.status = status;
+            snapshot.completion_text = completion_text.map(str::to_owned);
+        }
+        Ok(())
+    }
+
+    async fn insert_tool_call(&self, _record: &ToolCallRecord) -> Result<(), AgentError> {
+        Ok(())
+    }
+
+    async fn update_tool_call(
+        &self,
+        _id: &str,
+        _output: Option<&str>,
+        _status: slab_types::agent::ToolCallStatus,
+        _completed_at: &str,
+    ) -> Result<(), AgentError> {
+        Ok(())
+    }
+
+    async fn insert_thread_message(&self, record: &ThreadMessageRecord) -> Result<(), AgentError> {
+        self.messages.lock().unwrap().push(record.clone());
+        Ok(())
+    }
+
+    async fn list_thread_messages(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<ThreadMessageRecord>, AgentError> {
+        Ok(self
+            .messages
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|record| record.thread_id == thread_id)
+            .cloned()
+            .collect())
+    }
 }
 
 // ── Mock notify ───────────────────────────────────────────────────────────────
@@ -246,6 +336,41 @@ impl ApprovalPort for NoopNotify {
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
+
+async fn wait_for_persisted_status(
+    store: &PersistingStore,
+    thread_id: &str,
+    expected: ThreadStatus,
+) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let status =
+                store.snapshots.lock().unwrap().get(thread_id).map(|snapshot| snapshot.status);
+            if status == Some(expected) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("persisted status did not reach expected value");
+}
+
+async fn wait_for_persisted_message(store: &PersistingStore, thread_id: &str, text: &str) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let found = store.messages.lock().unwrap().iter().any(|record| {
+                record.thread_id == thread_id && record.message.rendered_text().contains(text)
+            });
+            if found {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("persisted message did not appear");
+}
 
 #[tokio::test]
 async fn smoke_echo_tool_agent_completes() {
@@ -351,6 +476,50 @@ async fn approval_required_tool_is_recorded_pending_then_completed() {
     assert_eq!(
         store.updated_statuses.lock().unwrap().as_slice(),
         &[slab_types::agent::ToolCallStatus::Completed]
+    );
+}
+
+#[tokio::test]
+async fn send_input_replays_persisted_thread_messages() {
+    let llm = Arc::new(MockLlm::new());
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+
+    let mut router = ToolRouter::new();
+    router.register(Box::new(TestEchoTool));
+
+    let approval = Arc::clone(&notify);
+    let control =
+        Arc::new(AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4));
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: slab_types::ConversationMessageContent::Text("first prompt".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+
+    let thread_id = control.spawn("session-replay".into(), config, messages).await.expect("spawn");
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+
+    control.send_input(&thread_id, "second prompt".into()).await.expect("send input");
+    wait_for_persisted_message(&store, &thread_id, "second prompt").await;
+
+    let records = store.messages.lock().unwrap();
+    assert!(
+        records
+            .iter()
+            .filter(|record| record.thread_id == thread_id)
+            .any(|record| record.message.rendered_text().contains("first prompt"))
+    );
+    assert!(
+        records
+            .iter()
+            .filter(|record| record.thread_id == thread_id)
+            .any(|record| record.message.rendered_text().contains("second prompt"))
     );
 }
 
