@@ -104,11 +104,6 @@ impl ExtensionTrait<()> for deno_web_worker {
 }
 
 use deno_process::deno_process;
-impl ExtensionTrait<Arc<RustyResolver>> for deno_process {
-    fn init(resolver: Arc<RustyResolver>) -> Extension {
-        deno_process::init(Some(resolver))
-    }
-}
 
 use deno_runtime::deno_os::{ExitCode, deno_os};
 impl ExtensionTrait<()> for deno_os {
@@ -174,7 +169,7 @@ impl WebWorkerCallbackOptions {
             shared_array_buffer_store,
             node_resolver: options.node_resolver.clone(),
             root_cert_store_provider: options.web.root_cert_store_provider.clone(),
-            broadcast_channel: options.broadcast_channel.clone(),
+            broadcast_channel: options.web.broadcast_channel.clone(),
             unsafely_ignore_certificate_errors: options
                 .web
                 .unsafely_ignore_certificate_errors
@@ -232,7 +227,6 @@ fn create_web_worker_callback(options: WebWorkerCallbackOptions) -> Arc<CreateWe
                     .map(std::num::NonZero::get)
                     .unwrap_or(1),
                 log_level: WorkerLogLevel::default(),
-                enable_op_summary_metrics: false,
                 enable_testing_features: false,
                 locale: deno_core::v8::icu::get_language_tag(),
                 location: Some(args.main_module),
@@ -252,9 +246,13 @@ fn create_web_worker_callback(options: WebWorkerCallbackOptions) -> Arc<CreateWe
                 no_legacy_abort: false,
                 is_standalone: false,
                 auto_serve: false,
+                node_cluster_unique_id: None,
+                node_cluster_sched_policy: None,
             },
             extensions: vec![],
             startup_snapshot: None,
+            residual_lazy_js_sources: &[],
+            residual_lazy_esm_sources: &[],
             unsafely_ignore_certificate_errors: options.unsafely_ignore_certificate_errors.clone(),
             seed: options.seed,
             create_web_worker_cb,
@@ -267,6 +265,7 @@ fn create_web_worker_callback(options: WebWorkerCallbackOptions) -> Arc<CreateWe
             maybe_worker_metadata: None,
             create_params: None,
             enable_stack_trace_arg_in_ops: false,
+            maybe_cpu_prof_config: None,
             maybe_coverage_dir: None,
         };
         WebWorker::bootstrap_from_options(services, options)
