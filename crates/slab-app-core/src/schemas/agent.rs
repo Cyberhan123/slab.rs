@@ -82,9 +82,10 @@ pub struct SpawnAgentResponse {
 // ── Input ─────────────────────────────────────────────────────────────────────
 
 /// Request body for `POST /v1/agents/{id}/input`.
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, ToSchema, Validate)]
 pub struct AgentInputRequest {
     /// Plain-text message to append to the agent thread's conversation.
+    #[validate(custom(function = "validate_non_blank", message = "content must not be blank"))]
     pub content: String,
 }
 

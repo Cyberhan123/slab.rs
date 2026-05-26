@@ -18,7 +18,7 @@ use crate::{
         TurnEvent,
     },
     tool::ToolRouter,
-    turn::{TurnExecutionContext, execute_turn},
+    turn::{TurnExecutionContext, execute_turn, persist_thread_message},
 };
 
 /// A single agent conversation thread.
@@ -57,6 +57,16 @@ impl AgentThread {
         config: AgentConfig,
     ) -> (Self, watch::Receiver<ThreadStatus>) {
         let id = Uuid::new_v4().to_string();
+        Self::new_with_id(id, session_id, parent_id, depth, config)
+    }
+
+    pub(crate) fn new_with_id(
+        id: String,
+        session_id: String,
+        parent_id: Option<String>,
+        depth: u32,
+        config: AgentConfig,
+    ) -> (Self, watch::Receiver<ThreadStatus>) {
         let (status_tx_inner, status_rx) = watch::channel(ThreadStatus::Pending);
         let status_tx = Arc::new(status_tx_inner);
         let thread = Self { id, session_id, parent_id, depth, config, status_tx };
@@ -79,6 +89,8 @@ impl AgentThread {
         self,
         mut messages: Vec<ConversationMessage>,
         runtime: AgentThreadRuntime,
+        starting_turn_index: u32,
+        persist_messages_from: Option<usize>,
     ) -> Result<String, AgentError> {
         let AgentThreadRuntime { llm, store, notify, approval, tools, hooks } = runtime;
         let thread_id = self.id.clone();
@@ -117,7 +129,8 @@ impl AgentThread {
         dispatch_hooks(&hooks, &HookEvent::SessionStart { thread_id: thread_id.clone() }).await;
 
         // Inject system prompt as the first message, if not already present.
-        if let Some(ref system_prompt) = self.config.system_prompt
+        if starting_turn_index == 0
+            && let Some(ref system_prompt) = self.config.system_prompt
             && !system_prompt.is_empty()
             && messages.first().map(|m| m.role.as_str()) != Some("system")
         {
@@ -133,10 +146,18 @@ impl AgentThread {
             );
         }
 
+        if let Some(start) = persist_messages_from {
+            for message in messages.iter().skip(start) {
+                persist_thread_message(store.as_ref(), &thread_id, starting_turn_index, message)
+                    .await;
+            }
+        }
+
         let mut completion_text: Option<String> = None;
         let mut last_error: Option<AgentError> = None;
 
-        'turns: for turn_index in 0..self.config.max_turns {
+        'turns: for turn_offset in 0..self.config.max_turns {
+            let turn_index = starting_turn_index + turn_offset;
             debug!(thread_id, turn_index, "starting turn");
             match execute_turn(
                 TurnExecutionContext {

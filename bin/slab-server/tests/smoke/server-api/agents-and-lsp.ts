@@ -25,6 +25,17 @@ export function registerAgentsAndLspSmoke(getServer: () => SlabServerTestHarness
         )
       );
       await expectError(server, "/v1/agents/missing-agent/status", 404);
+      await expectError(
+        server,
+        "/v1/agents/missing-agent/input",
+        404,
+        jsonInit(
+          {
+            content: "resume this agent"
+          } satisfies Schema["AgentInputRequest"],
+          { method: "POST" }
+        )
+      );
       await expectError(server, "/v1/agents/missing-agent/shutdown", 404, { method: "POST" });
       await expectError(server, "/v1/agents/missing-agent/interrupt", 404, { method: "POST" });
 

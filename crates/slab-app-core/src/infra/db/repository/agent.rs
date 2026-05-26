@@ -2,8 +2,9 @@
 
 use async_trait::async_trait;
 use slab_agent::port::ThreadStatus;
-use slab_agent::port::{AgentStorePort, ThreadSnapshot, ToolCallRecord};
+use slab_agent::port::{AgentStorePort, ThreadMessageRecord, ThreadSnapshot, ToolCallRecord};
 use slab_types::agent::ToolCallStatus;
+use slab_types::{ConversationMessage, ConversationMessageContent};
 
 use super::SqlxStore;
 
@@ -33,6 +34,16 @@ struct AgentThreadRow {
     updated_at: String,
 }
 
+#[derive(sqlx::FromRow)]
+struct AgentThreadMessageRow {
+    id: String,
+    thread_id: String,
+    turn_index: i64,
+    role: String,
+    content: String,
+    created_at: String,
+}
+
 impl From<AgentThreadRow> for ThreadSnapshot {
     fn from(r: AgentThreadRow) -> Self {
         ThreadSnapshot {
@@ -46,6 +57,29 @@ impl From<AgentThreadRow> for ThreadSnapshot {
             completion_text: r.completion_text,
             created_at: r.created_at,
             updated_at: r.updated_at,
+        }
+    }
+}
+
+impl AgentThreadMessageRow {
+    fn into_record(self) -> ThreadMessageRecord {
+        let message =
+            serde_json::from_str::<ConversationMessage>(&self.content).unwrap_or_else(|_| {
+                ConversationMessage {
+                    role: self.role,
+                    content: ConversationMessageContent::Text(self.content),
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: Vec::new(),
+                }
+            });
+
+        ThreadMessageRecord {
+            id: self.id,
+            thread_id: self.thread_id,
+            turn_index: self.turn_index as u32,
+            message,
+            created_at: self.created_at,
         }
     }
 }
@@ -66,7 +100,7 @@ impl AgentStorePort for SqlxStore {
                role_name=excluded.role_name, \
                config_json=excluded.config_json, \
                completion_text=excluded.completion_text, \
-               created_at=excluded.created_at, \
+               created_at=agent_threads.created_at, \
                updated_at=excluded.updated_at",
         )
         .bind(&snapshot.id)
@@ -161,5 +195,45 @@ impl AgentStorePort for SqlxStore {
         .await
         .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
         Ok(())
+    }
+
+    async fn insert_thread_message(
+        &self,
+        record: &ThreadMessageRecord,
+    ) -> Result<(), slab_agent::AgentError> {
+        let content = serde_json::to_string(&record.message)
+            .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
+        sqlx::query(
+            "INSERT INTO agent_thread_messages \
+             (id, thread_id, turn_index, role, content, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )
+        .bind(&record.id)
+        .bind(&record.thread_id)
+        .bind(record.turn_index as i64)
+        .bind(&record.message.role)
+        .bind(content)
+        .bind(&record.created_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn list_thread_messages(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<ThreadMessageRecord>, slab_agent::AgentError> {
+        let rows: Vec<AgentThreadMessageRow> = sqlx::query_as(
+            "SELECT id, thread_id, turn_index, role, content, created_at \
+             FROM agent_thread_messages WHERE thread_id = ?1 \
+             ORDER BY turn_index ASC, created_at ASC, id ASC",
+        )
+        .bind(thread_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
+
+        Ok(rows.into_iter().map(AgentThreadMessageRow::into_record).collect())
     }
 }

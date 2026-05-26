@@ -8,12 +8,11 @@ use std::sync::Arc;
 use slab_agent::config::AgentConfig;
 use slab_agent::control::AgentControl;
 use slab_agent::error::AgentError;
-use slab_agent::port::{AgentStorePort, TurnEvent};
+use slab_agent::port::AgentStorePort;
 use slab_types::ConversationMessage;
-use tokio::sync::broadcast;
 
 use crate::error::AppCoreError;
-use crate::infra::sse_notify::SseNotifyAdapter;
+use crate::infra::sse_notify::{AgentEventSubscription, SseNotifyAdapter};
 
 /// Thin wrapper around [`AgentControl`] that exposes an application-layer API.
 #[derive(Clone)]
@@ -76,10 +75,15 @@ impl AgentService {
         self.control.shutdown(thread_id).await.map_err(agent_err_to_server)
     }
 
+    /// Append user input to an existing agent thread and run the next turn.
+    pub async fn send_input(&self, thread_id: &str, content: String) -> Result<(), AppCoreError> {
+        self.control.send_input(thread_id, content).await.map_err(agent_err_to_server)
+    }
+
     /// Subscribe to the turn-event stream for a thread.
     ///
     /// Returns a broadcast receiver that replays events emitted after the call.
-    pub fn subscribe_events(&self, thread_id: &str) -> broadcast::Receiver<TurnEvent> {
+    pub fn subscribe_events(&self, thread_id: &str) -> AgentEventSubscription {
         self.events.subscribe_events(thread_id)
     }
 
@@ -109,6 +113,9 @@ fn agent_err_to_server(e: AgentError) -> AppCoreError {
         AgentError::ThreadLimitExceeded { current, max } => AppCoreError::TooManyRequests(format!(
             "thread limit exceeded: {current}/{max} concurrent threads active"
         )),
+        AgentError::ThreadBusy(id) => {
+            AppCoreError::TooManyRequests(format!("agent thread is already running: {id}"))
+        }
         AgentError::DepthLimitExceeded { current, max } => {
             AppCoreError::BadRequest(format!("depth limit exceeded: {current}/{max}"))
         }

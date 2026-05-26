@@ -16,8 +16,8 @@ use crate::{
     error::AgentError,
     hook::{AgentHook, HookEvent, HookOutcome, dispatch_hooks},
     port::{
-        AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, ToolCallRecord,
-        TurnEvent,
+        AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort,
+        ThreadMessageRecord, ToolCallRecord, TurnEvent,
     },
     tool::{ToolContext, ToolHandler, ToolRouter},
 };
@@ -69,13 +69,16 @@ pub(crate) async fn execute_turn(
             .notify
             .on_turn_event(context.thread_id, &TurnEvent::TurnCompleted { text: content.clone() })
             .await;
-        messages.push(ConversationMessage {
+        let message = ConversationMessage {
             role: "assistant".to_owned(),
             content: ConversationMessageContent::Text(content),
             name: None,
             tool_call_id: None,
             tool_calls: vec![],
-        });
+        };
+        persist_thread_message(context.store, context.thread_id, context.turn_index, &message)
+            .await;
+        messages.push(message);
         return Ok(false);
     }
 
@@ -103,13 +106,21 @@ pub(crate) async fn execute_turn(
         })
         .collect();
 
-    messages.push(ConversationMessage {
+    let assistant_message = ConversationMessage {
         role: "assistant".to_owned(),
         content: ConversationMessageContent::Text(response.content.unwrap_or_default()),
         name: None,
         tool_call_id: None,
         tool_calls: assistant_tool_calls,
-    });
+    };
+    persist_thread_message(
+        context.store,
+        context.thread_id,
+        context.turn_index,
+        &assistant_message,
+    )
+    .await;
+    messages.push(assistant_message);
 
     let ctx = ToolContext {
         thread_id: context.thread_id.to_owned(),
@@ -142,13 +153,21 @@ pub(crate) async fn execute_turn(
                         },
                     )
                     .await;
-                messages.push(ConversationMessage {
+                let message = ConversationMessage {
                     role: "tool".to_owned(),
                     content: ConversationMessageContent::Text(err_msg),
                     name: None,
                     tool_call_id: Some(tc.id.clone()),
                     tool_calls: vec![],
-                });
+                };
+                persist_thread_message(
+                    context.store,
+                    context.thread_id,
+                    context.turn_index,
+                    &message,
+                )
+                .await;
+                messages.push(message);
                 continue;
             }
         };
@@ -177,13 +196,21 @@ pub(crate) async fn execute_turn(
                             },
                         )
                         .await;
-                    messages.push(ConversationMessage {
+                    let message = ConversationMessage {
                         role: "tool".to_owned(),
                         content: ConversationMessageContent::Text(reason),
                         name: None,
                         tool_call_id: Some(tc.id.clone()),
                         tool_calls: vec![],
-                    });
+                    };
+                    persist_thread_message(
+                        context.store,
+                        context.thread_id,
+                        context.turn_index,
+                        &message,
+                    )
+                    .await;
+                    messages.push(message);
                     continue;
                 }
                 HookOutcome::ModifyArgs { arguments } => arguments,
@@ -273,16 +300,37 @@ pub(crate) async fn execute_turn(
             warn!(error = %e, call_id, "failed to update tool call record");
         }
 
-        messages.push(ConversationMessage {
+        let message = ConversationMessage {
             role: "tool".to_owned(),
             content: ConversationMessageContent::Text(output),
             name: None,
             tool_call_id: Some(tc.id.clone()),
             tool_calls: vec![],
-        });
+        };
+        persist_thread_message(context.store, context.thread_id, context.turn_index, &message)
+            .await;
+        messages.push(message);
     }
 
     Ok(true)
+}
+
+pub(crate) async fn persist_thread_message(
+    store: &dyn AgentStorePort,
+    thread_id: &str,
+    turn_index: u32,
+    message: &ConversationMessage,
+) {
+    let record = ThreadMessageRecord {
+        id: Uuid::new_v4().to_string(),
+        thread_id: thread_id.to_owned(),
+        turn_index,
+        message: message.clone(),
+        created_at: Utc::now().to_rfc3339(),
+    };
+    if let Err(e) = store.insert_thread_message(&record).await {
+        warn!(error = %e, thread_id, "failed to persist thread message");
+    }
 }
 
 async fn execute_tool_call(

@@ -126,7 +126,7 @@ sequenceDiagram
    │ spawn process
    ▼
 [slab-server] (Core Daemon)
-   ├── 1. Load Configuration (setting.json)
+   ├── 1. Load Configuration (settings.json)
    ├── 2. Initialize Infrastructure
    │      ├── Connect MCP Servers (via rmcp)
    │      └── Register Tools to ToolRegistry
@@ -135,7 +135,7 @@ sequenceDiagram
 
 ```
 
-* **配置加载**：读取 `setting.json`，确立全局路由、模型映射、默认安全策略（`approval_policy`）及沙箱边界。
+* **配置加载**：读取 `settings.json`，确立全局路由、模型映射、默认安全策略（`approval_policy`）及沙箱边界。
 * **MCP 服务连接**：初始化远程/本地 MCP 客户端，通过 `rmcp` 协议完成握手，动态获取外部扩展工具元数据。
 * **工具注册表 (ToolRegistry)**：合并内部原生工具（如 `slab-shell-command`, `apply_patch`）与 MCP 动态工具，构建统一的工具检索树。
 * **沙箱策略确立**：根据当前 OS（macOS/Linux/Windows）初始化 `slab-sandboxing` 底层引擎，预加载安全白名单。
@@ -278,7 +278,7 @@ Sandbox Spawn       Unified Diff         Remote Request
 * *输出捕获*：所有输出通过虚拟终端（PTY）实时捕获，保留 `stdout/stderr` 的原生结构。
 
 
-* **原子文件补丁 (`apply_patch`)**：通过 `slab-apply-patch` 组件直接解析标准 `unified diff`。在内存中完成冲突检验后，以原子事务形式直接写入文件系统，规避经由 Shell 带来的间接命令注入风险。
+* **原子文件补丁 (`apply_patch`)**：通过 `slab-apply-patch` 组件直接解析标准 `diff`。在内存中完成冲突检验后，以原子事务形式直接写入文件系统，规避经由 Shell 带来的间接命令注入风险。
 * **MCP 协议桥接**：通过 `rmcp` 协议对远程或独立进程的 MCP Server 发起标准的 JSON-RPC 调用。
 
 ### 4. 结果回填

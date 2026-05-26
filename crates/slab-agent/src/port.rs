@@ -85,6 +85,17 @@ pub struct ToolCallRecord {
     pub completed_at: Option<String>,
 }
 
+/// Persisted conversation message for an agent thread.
+#[derive(Debug, Clone)]
+pub struct ThreadMessageRecord {
+    pub id: String,
+    pub thread_id: String,
+    pub turn_index: u32,
+    pub message: ConversationMessage,
+    /// RFC 3339 creation timestamp.
+    pub created_at: String,
+}
+
 /// A streaming event emitted during a single LLM turn.
 #[derive(Debug, Clone)]
 pub enum TurnEvent {
@@ -183,6 +194,15 @@ pub trait AgentStorePort: Send + Sync {
         status: ToolCallStatus,
         completed_at: &str,
     ) -> Result<(), AgentError>;
+
+    /// Insert a conversation message for a thread.
+    async fn insert_thread_message(&self, record: &ThreadMessageRecord) -> Result<(), AgentError>;
+
+    /// Return persisted conversation messages for a thread in replay order.
+    async fn list_thread_messages(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<ThreadMessageRecord>, AgentError>;
 }
 
 /// Port for status-change and turn-event notifications.

@@ -16,6 +16,11 @@ export function registerPluginsSmoke(getServer: () => SlabServerTestHarness): vo
       expect(plugins.response.ok).toBe(true);
       expect(Array.isArray(plugins.body)).toBe(true);
 
+      for (const path of ["/v1/plugins/events", "/v1/plugins/rpc"]) {
+        const upgradeMissing = await server.request(path);
+        expect(upgradeMissing.status).not.toBe(404);
+      }
+
       await expectError(server, "/v1/plugins/missing-plugin", 404);
       await expectError(
         server,

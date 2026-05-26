@@ -5,7 +5,7 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{RwLock, watch};
 use tracing::warn;
 
-use slab_types::ConversationMessage;
+use slab_types::{ConversationMessage, ConversationMessageContent};
 
 use crate::{
     config::AgentConfig,
@@ -110,7 +110,7 @@ impl AgentControl {
         config: AgentConfig,
         messages: Vec<ConversationMessage>,
     ) -> Result<String, AgentError> {
-        self.spawn_inner(session_id, None, 0, config, messages).await
+        self.spawn_inner(session_id, None, 0, config, messages, 0, Some(0)).await
     }
 
     /// Spawn a child agent thread with an explicit parent and depth.
@@ -128,7 +128,52 @@ impl AgentControl {
         if depth > self.max_depth {
             return Err(AgentError::DepthLimitExceeded { current: depth, max: self.max_depth });
         }
-        self.spawn_inner(session_id, Some(parent_id), depth, config, messages).await
+        self.spawn_inner(session_id, Some(parent_id), depth, config, messages, 0, Some(0)).await
+    }
+
+    /// Append user input to a persisted thread and run another agent turn.
+    pub async fn send_input(&self, thread_id: &str, content: String) -> Result<(), AgentError> {
+        if self.threads.read().await.contains_key(thread_id) {
+            return Err(AgentError::ThreadBusy(thread_id.to_owned()));
+        }
+
+        let snapshot = self
+            .store
+            .get_thread(thread_id)
+            .await?
+            .ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))?;
+        let config = serde_json::from_str::<AgentConfig>(&snapshot.config_json).map_err(|e| {
+            AgentError::Internal(format!("failed to deserialize agent config: {e}"))
+        })?;
+        let mut records = self.store.list_thread_messages(thread_id).await?;
+        records.sort_by(|left, right| {
+            left.turn_index
+                .cmp(&right.turn_index)
+                .then_with(|| left.created_at.cmp(&right.created_at))
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        let starting_turn_index =
+            records.iter().map(|record| record.turn_index).max().map_or(0, |index| index + 1);
+        let mut messages = records.into_iter().map(|record| record.message).collect::<Vec<_>>();
+        let persist_from = messages.len();
+        messages.push(ConversationMessage {
+            role: "user".to_owned(),
+            content: ConversationMessageContent::Text(content),
+            name: None,
+            tool_call_id: None,
+            tool_calls: vec![],
+        });
+
+        let (thread, status_rx) = AgentThread::new_with_id(
+            snapshot.id.clone(),
+            snapshot.session_id,
+            snapshot.parent_id,
+            snapshot.depth,
+            config,
+        );
+        self.start_thread(thread, status_rx, messages, starting_turn_index, Some(persist_from))
+            .await?;
+        Ok(())
     }
 
     /// Get a [`watch::Receiver`] that emits the latest status for the given thread.
@@ -185,8 +230,22 @@ impl AgentControl {
         depth: u32,
         config: AgentConfig,
         messages: Vec<ConversationMessage>,
+        starting_turn_index: u32,
+        persist_messages_from: Option<usize>,
     ) -> Result<String, AgentError> {
         let (thread, status_rx) = AgentThread::new(session_id, parent_id, depth, config);
+        self.start_thread(thread, status_rx, messages, starting_turn_index, persist_messages_from)
+            .await
+    }
+
+    async fn start_thread(
+        &self,
+        thread: AgentThread,
+        status_rx: watch::Receiver<ThreadStatus>,
+        messages: Vec<ConversationMessage>,
+        starting_turn_index: u32,
+        persist_messages_from: Option<usize>,
+    ) -> Result<String, AgentError> {
         let thread_id = thread.id.clone();
         let status_tx = Arc::clone(&thread.status_tx);
 
@@ -204,7 +263,8 @@ impl AgentControl {
         // The task removes itself from the registry when it finishes so that
         // `active_thread_count` stays accurate.
         let join_handle = tokio::spawn(async move {
-            let result = thread.run(messages, runtime).await;
+            let result =
+                thread.run(messages, runtime, starting_turn_index, persist_messages_from).await;
             if let Err(ref e) = result {
                 warn!(thread_id = %id_cleanup, error = %e, "agent thread finished with error");
             }

@@ -62,3 +62,13 @@ impl Default for PluginRuntime {
         Self::with_default_backends()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::PluginRuntime;
+
+    #[tokio::test]
+    async fn default_runtime_can_be_constructed_inside_tokio_context() {
+        let _runtime = PluginRuntime::default();
+    }
+}

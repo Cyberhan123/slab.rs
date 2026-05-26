@@ -1,5 +1,6 @@
 export const sidebar = {
   items: {
+    agent: 'Agent',
     workspace: '工作区',
     assistant: '助手',
     image: '图像',

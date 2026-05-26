@@ -1,4 +1,5 @@
 import { audio } from './audio';
+import { agent } from './agent';
 import { chat } from './chat';
 import { hub } from './hub';
 import { image } from './image';
@@ -10,6 +11,7 @@ import { workspace } from './workspace';
 
 export const pages = {
   audio,
+  agent,
   chat,
   hub,
   image,
