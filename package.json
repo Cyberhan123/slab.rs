@@ -15,7 +15,7 @@
     "check": "bun run check:frontend && bun run check:rust",
     "build:desktop": "bun run --cwd packages/slab-desktop build",
     "build:language-servers": "bun run --cwd plugins/web-language-servers build",
-    "build:app": "cargo build --release -p slab-server --features gpu-telemetry && cargo build --release -p slab-runtime && cargo build --release -p slab-js-runtime && cargo build --release -p slab-python-runtime && bun run build:language-servers && bun run gen:plugin-packs && bun run --cwd bin/slab-app build",
+    "build:app": "cargo build --release -p slab-server && cargo build --release -p slab-runtime && cargo build --release -p slab-js-runtime && cargo build --release -p slab-python-runtime && bun run build:language-servers && bun run gen:plugin-packs && bun run --cwd bin/slab-app build",
     "build:windows-installer": "cargo make build-windows-full-installer",
     "dev:desktop": "bun run --cwd packages/slab-desktop dev",
     "gen:api": "bun ./scripts/gen/generate-openapi.ts",

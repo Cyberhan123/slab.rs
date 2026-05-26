@@ -110,7 +110,10 @@ mod tests {
     async fn rejects_unknown_methods() {
         let server = PluginRuntimeServer::new(Arc::new(StubExecutor));
 
-        let error = server.handle_request("runtime.nope", Value::Null).await.unwrap_err();
+        let error = server
+            .handle_request("runtime.nope", serde_json::Value::Null)
+            .await
+            .unwrap_err();
 
         assert_eq!(error, "unknown runtime method `runtime.nope`");
     }

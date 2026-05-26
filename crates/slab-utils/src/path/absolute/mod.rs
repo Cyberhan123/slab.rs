@@ -354,7 +354,7 @@ impl<'de> Deserialize<'de> for AbsolutePathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::test_path_buf;
+    use crate::path::absolute::test_support::test_path_buf;
     use pretty_assertions::assert_eq;
     use std::fs;
     #[cfg(unix)]
