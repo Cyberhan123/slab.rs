@@ -12,19 +12,19 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use anyhow::Result;
-use slab_file::ExecutorFileSystem;
-use slab_file::FileSystemError;
-use slab_file::FileMetadata;
-use slab_file::FileSystemSandboxContext;
-use slab_file::FileSystemSandboxPolicy;
-use slab_file::RemoveOptions;
-use slab_utils::path::absolute::AbsolutePathBuf;
 pub use parser::Hunk;
 pub use parser::ParseError;
 use parser::ParseError::*;
 pub use parser::UpdateFileChunk;
 pub use parser::parse_patch;
 use similar::TextDiff;
+use slab_file::ExecutorFileSystem;
+use slab_file::FileMetadata;
+use slab_file::FileSystemError;
+use slab_file::FileSystemSandboxContext;
+use slab_file::FileSystemSandboxPolicy;
+use slab_file::RemoveOptions;
+use slab_utils::path::absolute::AbsolutePathBuf;
 pub use streaming_parser::StreamingPatchParser;
 use thiserror::Error;
 
@@ -44,9 +44,7 @@ pub fn main() -> ! {
         Some(patch) => patch,
         None => {
             let mut patch = String::new();
-            std::io::stdin()
-                .read_to_string(&mut patch)
-                .expect("failed to read patch from stdin");
+            std::io::stdin().read_to_string(&mut patch).expect("failed to read patch from stdin");
             patch
         }
     };
@@ -87,7 +85,6 @@ pub fn main() -> ! {
     }
 }
 
-
 #[derive(Debug, Error, PartialEq)]
 pub enum ApplyPatchError {
     #[error(transparent)]
@@ -106,10 +103,7 @@ pub enum ApplyPatchError {
 
 impl From<std::io::Error> for ApplyPatchError {
     fn from(err: std::io::Error) -> Self {
-        ApplyPatchError::IoError(IoError {
-            context: "I/O error".to_string(),
-            source: err,
-        })
+        ApplyPatchError::IoError(IoError { context: "I/O error".to_string(), source: err })
     }
 }
 
@@ -206,10 +200,7 @@ impl ApplyPatchAction {
     /// creating a feature flag for this.)
     pub fn new_add_for_test(path: &AbsolutePathBuf, content: String) -> Self {
         #[expect(clippy::expect_used)]
-        let filename = path
-            .file_name()
-            .expect("path should not be empty")
-            .to_string_lossy();
+        let filename = path.file_name().expect("path should not be empty").to_string_lossy();
         let patch = format!(
             r#"*** Begin Patch
 *** Update File: {filename}
@@ -219,11 +210,7 @@ impl ApplyPatchAction {
         );
         let changes = HashMap::from([(path.to_path_buf(), ApplyPatchFileChange::Add { content })]);
         #[expect(clippy::expect_used)]
-        Self {
-            changes,
-            cwd: path.parent().expect("path should have parent"),
-            patch,
-        }
+        Self { changes, cwd: path.parent().expect("path should have parent"), patch }
     }
 }
 
@@ -384,9 +371,7 @@ async fn write_file_text_to_fs(
         &default_context
     };
     let path = filesystem_path_string(path_abs, cwd, sandbox);
-    fs.write_file(context, &path, content.as_bytes())
-        .await
-        .map_err(file_system_error_to_io)?;
+    fs.write_file(context, &path, content.as_bytes()).await.map_err(file_system_error_to_io)?;
     Ok(())
 }
 
@@ -446,21 +431,13 @@ pub async fn apply_patch(
                         .map_err(ApplyPatchError::from)
                         .map_err(ApplyPatchFailure::without_delta)?;
                 }
-                InvalidHunkError {
-                    message,
-                    line_number,
-                } => {
-                    writeln!(
-                        stderr,
-                        "Invalid patch hunk on line {line_number}: {message}"
-                    )
-                    .map_err(ApplyPatchError::from)
-                    .map_err(ApplyPatchFailure::without_delta)?;
+                InvalidHunkError { message, line_number } => {
+                    writeln!(stderr, "Invalid patch hunk on line {line_number}: {message}")
+                        .map_err(ApplyPatchError::from)
+                        .map_err(ApplyPatchFailure::without_delta)?;
                 }
             }
-            return Err(ApplyPatchFailure::without_delta(
-                ApplyPatchError::ParseError(e),
-            ));
+            return Err(ApplyPatchFailure::without_delta(ApplyPatchError::ParseError(e)));
         }
     };
 
@@ -548,12 +525,17 @@ async fn apply_hunks_to_files(
         let path_abs = hunk.resolve_path(cwd);
         match hunk {
             Hunk::AddFile { contents, .. } => {
-                let overwritten_content =
-                    read_optional_file_text_for_delta(&path_abs, cwd, fs, sandbox, &mut delta.exact)
-                        .await;
+                let overwritten_content = read_optional_file_text_for_delta(
+                    &path_abs,
+                    cwd,
+                    fs,
+                    sandbox,
+                    &mut delta.exact,
+                )
+                .await;
                 try_write!(
                     write_file_with_missing_parent_retry(fs, &path_abs, cwd, contents, sandbox)
-                    .await
+                        .await
                 );
                 delta.changes.push(AppliedPatchChange {
                     path: path_abs.into_path_buf(),
@@ -567,7 +549,8 @@ async fn apply_hunks_to_files(
             Hunk::DeleteFile { .. } => {
                 note_existing_path_delta_support(&path_abs, cwd, fs, sandbox, &mut delta.exact)
                     .await;
-                let deleted_content = read_file_text_from_fs(&path_abs, cwd, fs, sandbox).await.ok();
+                let deleted_content =
+                    read_file_text_from_fs(&path_abs, cwd, fs, sandbox).await.ok();
                 if deleted_content.is_none() {
                     delta.exact = false;
                 }
@@ -596,20 +579,21 @@ async fn apply_hunks_to_files(
                 }
                 deleted.push(affected_path);
             }
-            Hunk::UpdateFile {
-                move_path, chunks, ..
-            } => {
+            Hunk::UpdateFile { move_path, chunks, .. } => {
                 note_existing_path_delta_support(&path_abs, cwd, fs, sandbox, &mut delta.exact)
                     .await;
-                let AppliedPatch {
-                    original_contents,
-                    new_contents,
-                } = derive_new_contents_from_chunks(&path_abs, cwd, chunks, fs, sandbox).await?;
+                let AppliedPatch { original_contents, new_contents } =
+                    derive_new_contents_from_chunks(&path_abs, cwd, chunks, fs, sandbox).await?;
                 if let Some(dest) = move_path {
                     let dest_abs = AbsolutePathBuf::resolve_path_against_base(dest, cwd);
-                    let overwritten_move_content =
-                        read_optional_file_text_for_delta(&dest_abs, cwd, fs, sandbox, &mut delta.exact)
-                            .await;
+                    let overwritten_move_content = read_optional_file_text_for_delta(
+                        &dest_abs,
+                        cwd,
+                        fs,
+                        sandbox,
+                        &mut delta.exact,
+                    )
+                    .await;
                     try_write!(
                         write_file_with_missing_parent_retry(
                             fs,
@@ -628,16 +612,13 @@ async fn apply_hunks_to_files(
                             overwritten_content: overwritten_move_content.clone(),
                         },
                     });
-                    ensure_not_directory(&path_abs, cwd, fs, sandbox)
-                        .await
-                        .with_context(|| {
-                            format!("Failed to remove original {}", path_abs.display())
-                        })?;
-                    if let Err(error) = remove_path_from_fs(&path_abs, cwd, false, fs, sandbox)
-                        .await
-                        .with_context(|| {
-                            format!("Failed to remove original {}", path_abs.display())
-                        })
+                    ensure_not_directory(&path_abs, cwd, fs, sandbox).await.with_context(|| {
+                        format!("Failed to remove original {}", path_abs.display())
+                    })?;
+                    if let Err(error) =
+                        remove_path_from_fs(&path_abs, cwd, false, fs, sandbox).await.with_context(
+                            || format!("Failed to remove original {}", path_abs.display()),
+                        )
                     {
                         delta.exact &= remove_failure_was_side_effect_free(
                             &path_abs,
@@ -682,11 +663,7 @@ async fn apply_hunks_to_files(
             }
         }
     }
-    Ok(AffectedPaths {
-        added,
-        modified,
-        deleted,
-    })
+    Ok(AffectedPaths { added, modified, deleted })
 }
 
 async fn ensure_not_directory(
@@ -697,10 +674,7 @@ async fn ensure_not_directory(
 ) -> io::Result<()> {
     let metadata = get_metadata_from_fs(path, cwd, fs, sandbox).await?;
     if metadata.is_directory {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "path is a directory",
-        ));
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "path is a directory"));
     }
     Ok(())
 }
@@ -772,13 +746,8 @@ async fn write_file_with_missing_parent_retry(
                     &default_context
                 };
                 let parent_path = filesystem_path_string(&parent_abs, cwd, sandbox);
-                fs.create_directory(context, &parent_path)
-                .await
-                .with_context(|| {
-                    format!(
-                        "Failed to create parent directories for {}",
-                        path_abs.display()
-                    )
+                fs.create_directory(context, &parent_path).await.with_context(|| {
+                    format!("Failed to create parent directories for {}", path_abs.display())
                 })?;
             }
             write_file_text_to_fs(path_abs, cwd, contents, fs, sandbox)
@@ -806,12 +775,13 @@ async fn derive_new_contents_from_chunks(
     fs: &dyn ExecutorFileSystem,
     sandbox: Option<&FileSystemSandboxContext>,
 ) -> std::result::Result<AppliedPatch, ApplyPatchError> {
-    let original_contents = read_file_text_from_fs(path_abs, cwd, fs, sandbox).await.map_err(|err| {
-        ApplyPatchError::IoError(IoError {
-            context: format!("Failed to read file to update {}", path_abs.display()),
-            source: err,
-        })
-    })?;
+    let original_contents =
+        read_file_text_from_fs(path_abs, cwd, fs, sandbox).await.map_err(|err| {
+            ApplyPatchError::IoError(IoError {
+                context: format!("Failed to read file to update {}", path_abs.display()),
+                source: err,
+            })
+        })?;
 
     let mut original_lines: Vec<String> = original_contents.split('\n').map(String::from).collect();
 
@@ -828,10 +798,7 @@ async fn derive_new_contents_from_chunks(
         new_lines.push(String::new());
     }
     let new_contents = new_lines.join("\n");
-    Ok(AppliedPatch {
-        original_contents,
-        new_contents,
-    })
+    Ok(AppliedPatch { original_contents, new_contents })
 }
 
 /// Compute a list of replacements needed to transform `original_lines` into the
@@ -981,10 +948,8 @@ pub async fn unified_diff_from_chunks_with_context(
     fs: &dyn ExecutorFileSystem,
     sandbox: Option<&FileSystemSandboxContext>,
 ) -> std::result::Result<ApplyPatchFileUpdate, ApplyPatchError> {
-    let AppliedPatch {
-        original_contents,
-        new_contents,
-    } = derive_new_contents_from_chunks(path_abs, cwd, chunks, fs, sandbox).await?;
+    let AppliedPatch { original_contents, new_contents } =
+        derive_new_contents_from_chunks(path_abs, cwd, chunks, fs, sandbox).await?;
     let text_diff = TextDiff::from_lines(&original_contents, &new_contents);
     let unified_diff = text_diff.unified_diff().context_radius(context).to_string();
     Ok(ApplyPatchFileUpdate {
@@ -1017,8 +982,8 @@ pub fn print_summary(
 mod tests {
     use super::*;
     use crate::LOCAL_FS;
-    use slab_utils::path::absolute::test_support::PathExt;
     use pretty_assertions::assert_eq;
+    use slab_utils::path::absolute::test_support::PathExt;
     use std::fs;
     use std::string::ToString;
     use tempfile::tempdir;
@@ -1053,10 +1018,7 @@ mod tests {
         // Verify expected stdout and stderr outputs.
         let stdout_str = String::from_utf8(stdout).unwrap();
         let stderr_str = String::from_utf8(stderr).unwrap();
-        let expected_out = format!(
-            "Success. Updated the following files:\nA {}\n",
-            path.display()
-        );
+        let expected_out = format!("Success. Updated the following files:\nA {}\n", path.display());
         assert_eq!(stdout_str, expected_out);
         assert_eq!(stderr_str, "");
         let contents = fs::read_to_string(path).unwrap();
@@ -1115,14 +1077,8 @@ mod tests {
         assert_eq!(fs::read_to_string(&absolute_add).unwrap(), "absolute add\n");
         assert!(!relative_delete.exists());
         assert!(!absolute_delete.exists());
-        assert_eq!(
-            fs::read_to_string(&relative_update).unwrap(),
-            "relative new\n"
-        );
-        assert_eq!(
-            fs::read_to_string(&absolute_update).unwrap(),
-            "absolute new\n"
-        );
+        assert_eq!(fs::read_to_string(&relative_update).unwrap(), "relative new\n");
+        assert_eq!(fs::read_to_string(&absolute_update).unwrap(), "absolute new\n");
         assert_eq!(String::from_utf8(stderr).unwrap(), "");
         assert_eq!(
             String::from_utf8(stdout).unwrap(),
@@ -1155,10 +1111,7 @@ mod tests {
         .unwrap();
         let stdout_str = String::from_utf8(stdout).unwrap();
         let stderr_str = String::from_utf8(stderr).unwrap();
-        let expected_out = format!(
-            "Success. Updated the following files:\nD {}\n",
-            path.display()
-        );
+        let expected_out = format!("Success. Updated the following files:\nD {}\n", path.display());
         assert_eq!(stdout_str, expected_out);
         assert_eq!(stderr_str, "");
         assert!(!path.exists());
@@ -1192,10 +1145,7 @@ mod tests {
         // Validate modified file contents and expected stdout/stderr.
         let stdout_str = String::from_utf8(stdout).unwrap();
         let stderr_str = String::from_utf8(stderr).unwrap();
-        let expected_out = format!(
-            "Success. Updated the following files:\nM {}\n",
-            path.display()
-        );
+        let expected_out = format!("Success. Updated the following files:\nM {}\n", path.display());
         assert_eq!(stdout_str, expected_out);
         assert_eq!(stderr_str, "");
         let contents = fs::read_to_string(&path).unwrap();
@@ -1232,10 +1182,7 @@ mod tests {
         // Validate move semantics and expected stdout/stderr.
         let stdout_str = String::from_utf8(stdout).unwrap();
         let stderr_str = String::from_utf8(stderr).unwrap();
-        let expected_out = format!(
-            "Success. Updated the following files:\nM {}\n",
-            dest.display()
-        );
+        let expected_out = format!("Success. Updated the following files:\nM {}\n", dest.display());
         assert_eq!(stdout_str, expected_out);
         assert_eq!(stderr_str, "");
         assert!(!src.exists());
@@ -1335,10 +1282,7 @@ mod tests {
         .unwrap();
         let stdout_str = String::from_utf8(stdout).unwrap();
         let stderr_str = String::from_utf8(stderr).unwrap();
-        let expected_out = format!(
-            "Success. Updated the following files:\nM {}\n",
-            path.display()
-        );
+        let expected_out = format!("Success. Updated the following files:\nM {}\n", path.display());
         assert_eq!(stdout_str, expected_out);
         assert_eq!(stderr_str, "");
         let contents = fs::read_to_string(&path).unwrap();
@@ -1395,10 +1339,7 @@ mod tests {
         let stdout_str = String::from_utf8(stdout).unwrap();
         let stderr_str = String::from_utf8(stderr).unwrap();
 
-        let expected_out = format!(
-            "Success. Updated the following files:\nM {}\n",
-            path.display()
-        );
+        let expected_out = format!("Success. Updated the following files:\nM {}\n", path.display());
         assert_eq!(stdout_str, expected_out);
         assert_eq!(stderr_str, "");
 
@@ -1436,10 +1377,7 @@ mod tests {
         .await
         .unwrap();
         let contents = fs::read_to_string(path).unwrap();
-        assert_eq!(
-            contents,
-            "line1\nline2-replacement\nafter-context\nsecond-line\n"
-        );
+        assert_eq!(contents, "line1\nline2-replacement\nafter-context\nsecond-line\n");
     }
 
     /// Ensure that patches authored with ASCII characters can update lines that
@@ -1486,10 +1424,7 @@ mod tests {
 
         // Ensure success summary lists the file as modified.
         let stdout_str = String::from_utf8(stdout).unwrap();
-        let expected_out = format!(
-            "Success. Updated the following files:\nM {}\n",
-            path.display()
-        );
+        let expected_out = format!("Success. Updated the following files:\nM {}\n", path.display());
         assert_eq!(stdout_str, expected_out);
 
         // No stderr expected.
@@ -1522,7 +1457,13 @@ mod tests {
         };
         let cwd = AbsolutePathBuf::from_absolute_path(dir.path()).unwrap();
         let path_abs = path.as_path().abs();
-        let diff = unified_diff_from_chunks(&path_abs, &cwd, update_file_chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
+        let diff = unified_diff_from_chunks(
+            &path_abs,
+            &cwd,
+            update_file_chunks,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
         .await
         .unwrap();
         let expected_diff = r#"@@ -1,4 +1,4 @@
@@ -1566,9 +1507,15 @@ mod tests {
 
         let cwd = AbsolutePathBuf::from_absolute_path(dir.path()).unwrap();
         let path_abs = path.as_path().abs();
-        let diff = unified_diff_from_chunks(&path_abs, &cwd, chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
-            .await
-            .unwrap();
+        let diff = unified_diff_from_chunks(
+            &path_abs,
+            &cwd,
+            chunks,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .unwrap();
         let expected_diff = r#"@@ -1,2 +1,2 @@
 -foo
 +FOO
@@ -1608,9 +1555,15 @@ mod tests {
 
         let cwd = AbsolutePathBuf::from_absolute_path(dir.path()).unwrap();
         let path_abs = path.as_path().abs();
-        let diff = unified_diff_from_chunks(&path_abs, &cwd, chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
-            .await
-            .unwrap();
+        let diff = unified_diff_from_chunks(
+            &path_abs,
+            &cwd,
+            chunks,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .unwrap();
         let expected_diff = r#"@@ -2,2 +2,2 @@
  bar
 -baz
@@ -1648,9 +1601,15 @@ mod tests {
 
         let cwd = AbsolutePathBuf::from_absolute_path(dir.path()).unwrap();
         let path_abs = path.as_path().abs();
-        let diff = unified_diff_from_chunks(&path_abs, &cwd, chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
-            .await
-            .unwrap();
+        let diff = unified_diff_from_chunks(
+            &path_abs,
+            &cwd,
+            chunks,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .unwrap();
         let expected_diff = r#"@@ -3 +3,2 @@
  baz
 +quux
@@ -1699,9 +1658,15 @@ mod tests {
 
         let cwd = AbsolutePathBuf::from_absolute_path(dir.path()).unwrap();
         let path_abs = path.as_path().abs();
-        let diff = unified_diff_from_chunks(&path_abs, &cwd, chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
-            .await
-            .unwrap();
+        let diff = unified_diff_from_chunks(
+            &path_abs,
+            &cwd,
+            chunks,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .unwrap();
 
         let expected_diff = r#"@@ -1,6 +1,7 @@
  a

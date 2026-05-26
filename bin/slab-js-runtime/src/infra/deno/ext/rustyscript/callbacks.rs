@@ -3,7 +3,7 @@
 use std::{cell::RefCell, future::Future, pin::Pin, rc::Rc};
 
 use crate::Error;
-use deno_core::{op2, serde_json, v8, OpState};
+use deno_core::{OpState, op2, serde_json, v8};
 use paste::paste;
 
 pub trait RsStoredCallback: 'static {

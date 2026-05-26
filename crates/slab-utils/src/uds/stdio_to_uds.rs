@@ -3,8 +3,8 @@
 use std::io;
 use std::path::Path;
 
-use anyhow::Context;
 use super::UnixStream;
+use anyhow::Context;
 use tokio::io::AsyncWriteExt;
 
 /// Connects to the Unix Domain Socket at `socket_path` and relays data between

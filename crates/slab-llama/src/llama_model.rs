@@ -538,8 +538,11 @@ impl LlamaModel {
         if let Some(penalty) = options.presence_penalty {
             builder.presence_penalty = penalty;
         }
-        let raw_logit_bias =
-            collect_sampler_logit_bias(&options.logit_bias, options.ignore_eos, self.eog_logit_bias());
+        let raw_logit_bias = collect_sampler_logit_bias(
+            &options.logit_bias,
+            options.ignore_eos,
+            self.eog_logit_bias(),
+        );
         if !raw_logit_bias.is_empty() {
             builder.set_logit_bias(self.n_vocab(), raw_logit_bias);
         }

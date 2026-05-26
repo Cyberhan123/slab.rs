@@ -56,10 +56,7 @@ fn test_apply_patch_cli_applies_multiple_chunks() -> anyhow::Result<()> {
         .success()
         .stdout("Success. Updated the following files:\nM multi.txt\n");
 
-    assert_eq!(
-        fs::read_to_string(&target_path)?,
-        "line1\nchanged2\nline3\nchanged4\n"
-    );
+    assert_eq!(fs::read_to_string(&target_path)?, "line1\nchanged2\nline3\nchanged4\n");
 
     Ok(())
 }
@@ -126,10 +123,7 @@ fn test_apply_patch_cli_rejects_missing_file_delete() -> anyhow::Result<()> {
         .arg("*** Begin Patch\n*** Delete File: missing.txt\n*** End Patch")
         .assert()
         .failure()
-        .stderr(format!(
-            "Failed to delete file {}\n",
-            missing_path.display()
-        ));
+        .stderr(format!("Failed to delete file {}\n", missing_path.display()));
 
     Ok(())
 }
@@ -216,10 +210,7 @@ fn test_apply_patch_cli_delete_directory_fails() -> anyhow::Result<()> {
         .arg("*** Begin Patch\n*** Delete File: dir\n*** End Patch")
         .assert()
         .failure()
-        .stderr(format!(
-            "Failed to delete file {}\n",
-            expected_dir.display()
-        ));
+        .stderr(format!("Failed to delete file {}\n", expected_dir.display()));
 
     Ok(())
 }

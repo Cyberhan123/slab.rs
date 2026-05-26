@@ -42,11 +42,8 @@ fn sort_json_object_keys(value: &mut Value) {
                 sort_json_object_keys(child);
             }
 
-            let sorted = std::mem::take(map)
-                .into_iter()
-                .collect::<BTreeMap<_, _>>()
-                .into_iter()
-                .collect();
+            let sorted =
+                std::mem::take(map).into_iter().collect::<BTreeMap<_, _>>().into_iter().collect();
             *map = sorted;
         }
         Value::Array(values) => {

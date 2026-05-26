@@ -2,8 +2,8 @@
 //! This module helps deno implement timers and performance APIs.
 use std::time::Instant;
 
-use deno_core::op2;
 use deno_core::OpState;
+use deno_core::op2;
 
 pub struct StartTime(Instant);
 

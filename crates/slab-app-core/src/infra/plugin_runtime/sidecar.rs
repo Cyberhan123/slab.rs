@@ -331,7 +331,11 @@ async fn spawn_runtime_child_stdio(
     )
     .await?;
 
-    Ok(RuntimeChild { process: process.clone(), outbound: RuntimeOutbound::Stdio(process), pending })
+    Ok(RuntimeChild {
+        process: process.clone(),
+        outbound: RuntimeOutbound::Stdio(process),
+        pending,
+    })
 }
 
 async fn spawn_runtime_child_uds(
@@ -350,19 +354,13 @@ async fn spawn_runtime_child_uds(
     let stdout_handler = Arc::new(move |_line: String, _process: SupervisedStdioProcess| {
         Box::pin(async {}) as std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
     });
-    let exit_handler = create_exit_handler(
-        pending.clone(),
-        inner.kind.process_label(),
-        Some(socket_path.clone()),
-    );
+    let exit_handler =
+        create_exit_handler(pending.clone(), inner.kind.process_label(), Some(socket_path.clone()));
     let process = SupervisedStdioProcess::spawn(
         SupervisedStdioProcessConfig {
             label: inner.kind.process_label().to_owned(),
             executable: inner.runtime_exe.clone(),
-            arguments: vec![
-                "--socket".to_owned(),
-                socket_path.to_string_lossy().to_string(),
-            ],
+            arguments: vec!["--socket".to_owned(), socket_path.to_string_lossy().to_string()],
         },
         stdout_handler,
         exit_handler,
@@ -576,7 +574,9 @@ fn runtime_transport_mode(
     }
 }
 
-async fn prepare_runtime_socket_path(kind: PluginSidecarRuntimeKind) -> Result<PathBuf, AppCoreError> {
+async fn prepare_runtime_socket_path(
+    kind: PluginSidecarRuntimeKind,
+) -> Result<PathBuf, AppCoreError> {
     let socket_dir = std::env::temp_dir().join("slab-runtime").join("plugin-runtime");
     prepare_private_socket_directory(&socket_dir).await.map_err(|error| {
         AppCoreError::Internal(format!(
@@ -587,11 +587,8 @@ async fn prepare_runtime_socket_path(kind: PluginSidecarRuntimeKind) -> Result<P
     })?;
 
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
-    let socket_path = socket_dir.join(format!(
-        "{}-{}-{now}.sock",
-        kind.process_label(),
-        std::process::id()
-    ));
+    let socket_path =
+        socket_dir.join(format!("{}-{}-{now}.sock", kind.process_label(), std::process::id()));
 
     if tokio::fs::try_exists(&socket_path).await.unwrap_or(false)
         && is_stale_socket_path(&socket_path).await.unwrap_or(false)
@@ -624,7 +621,10 @@ mod tests {
     #[test]
     fn runtime_transport_mode_uses_configured_js_transport() {
         assert!(matches!(
-            runtime_transport_mode(PluginSidecarRuntimeKind::JavaScript, PluginSidecarTransport::Uds),
+            runtime_transport_mode(
+                PluginSidecarRuntimeKind::JavaScript,
+                PluginSidecarTransport::Uds
+            ),
             super::RuntimeTransportMode::Uds
         ));
         assert!(matches!(
@@ -660,7 +660,8 @@ mod tests {
         let pending: PendingMap = std::sync::Arc::new(Mutex::new(HashMap::new()));
         let (tx, rx) = oneshot::channel();
         pending.lock().await.insert("test-call".to_owned(), tx);
-        let exit_handler = create_exit_handler(pending, "slab-js-runtime", Some(socket_path.clone()));
+        let exit_handler =
+            create_exit_handler(pending, "slab-js-runtime", Some(socket_path.clone()));
 
         exit_handler(SupervisedProcessExit { status: Some("1".to_owned()), error: None }).await;
 

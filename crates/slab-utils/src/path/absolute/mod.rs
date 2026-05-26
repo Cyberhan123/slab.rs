@@ -238,10 +238,7 @@ pub mod test_support {
         if cfg!(windows) {
             let mut path = PathBuf::from(r"C:\");
             path.extend(
-                unix_path
-                    .trim_start_matches('/')
-                    .split('/')
-                    .filter(|segment| !segment.is_empty()),
+                unix_path.trim_start_matches('/').split('/').filter(|segment| !segment.is_empty()),
             );
             path
         } else {

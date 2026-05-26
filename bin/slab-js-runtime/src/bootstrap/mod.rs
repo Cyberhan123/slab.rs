@@ -110,10 +110,9 @@ mod tests {
 
     #[test]
     fn parses_plugin_mode_socket() {
-        let command = RuntimeCommand::parse(
-            ["--socket", "runtime.sock"].into_iter().map(str::to_owned),
-        )
-        .unwrap();
+        let command =
+            RuntimeCommand::parse(["--socket", "runtime.sock"].into_iter().map(str::to_owned))
+                .unwrap();
 
         let RuntimeCommand::PluginJsonRpc { socket } = command else {
             panic!("expected plugin mode");

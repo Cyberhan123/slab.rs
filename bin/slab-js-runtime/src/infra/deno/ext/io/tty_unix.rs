@@ -6,28 +6,25 @@
 #![allow(dead_code)]
 // Copyright 2018-2025 the Deno authors. MIT license.
 
-use deno_core::op2;
 use deno_core::OpState;
 use deno_core::ResourceId;
-use deno_error::builtin_classes::GENERIC_ERROR;
+use deno_core::op2;
 use deno_error::JsErrorBox;
 use deno_error::JsErrorClass;
+use deno_error::builtin_classes::GENERIC_ERROR;
 use nix::sys::termios;
-use rustyline::config::Configurer;
-use rustyline::error::ReadlineError;
 use rustyline::Cmd;
 use rustyline::Editor;
 use rustyline::KeyCode;
 use rustyline::KeyEvent;
 use rustyline::Modifiers;
+use rustyline::config::Configurer;
+use rustyline::error::ReadlineError;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Error;
 
-deno_core::extension!(
-    deno_tty,
-    ops = [op_set_raw, op_console_size, op_read_line_prompt],
-);
+deno_core::extension!(deno_tty, ops = [op_set_raw, op_console_size, op_read_line_prompt],);
 
 #[derive(Default, Clone)]
 struct TtyModeStore(std::rc::Rc<RefCell<HashMap<ResourceId, termios::Termios>>>);
@@ -206,10 +203,7 @@ fn console_size_from_fd(fd: std::os::unix::prelude::RawFd) -> Result<ConsoleSize
         if libc::ioctl(fd, libc::TIOCGWINSZ, &mut size as *mut _) != 0 {
             return Err(Error::last_os_error());
         }
-        Ok(ConsoleSize {
-            cols: size.ws_col as u32,
-            rows: size.ws_row as u32,
-        })
+        Ok(ConsoleSize { cols: size.ws_col as u32, rows: size.ws_row as u32 })
     }
 }
 

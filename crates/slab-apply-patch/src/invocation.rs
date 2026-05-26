@@ -164,25 +164,16 @@ pub async fn verify_apply_patch_args(
     fs: &dyn ExecutorFileSystem,
     sandbox: Option<&slab_file::FileSystemSandboxContext>,
 ) -> MaybeApplyPatchVerified {
-    let ApplyPatchArgs {
-        patch,
-        hunks,
-        workdir,
-        ..
-    } = args;
-    let effective_cwd = workdir
-        .as_ref()
-        .map(|dir| cwd.join(Path::new(dir)))
-        .unwrap_or_else(|| cwd.clone());
+    let ApplyPatchArgs { patch, hunks, workdir, .. } = args;
+    let effective_cwd =
+        workdir.as_ref().map(|dir| cwd.join(Path::new(dir))).unwrap_or_else(|| cwd.clone());
     let mut changes = HashMap::new();
     for hunk in hunks {
         let path = hunk.resolve_path(&effective_cwd);
         match hunk {
             Hunk::AddFile { contents, .. } => {
-                changes.insert(
-                    path.into_path_buf(),
-                    ApplyPatchFileChange::Add { content: contents },
-                );
+                changes
+                    .insert(path.into_path_buf(), ApplyPatchFileChange::Add { content: contents });
             }
             Hunk::DeleteFile { .. } => {
                 let default_context;
@@ -217,24 +208,18 @@ pub async fn verify_apply_patch_args(
                         );
                     }
                 };
-                changes.insert(
-                    path.into_path_buf(),
-                    ApplyPatchFileChange::Delete { content },
-                );
+                changes.insert(path.into_path_buf(), ApplyPatchFileChange::Delete { content });
             }
-            Hunk::UpdateFile {
-                move_path, chunks, ..
-            } => {
-                let ApplyPatchFileUpdate {
-                    unified_diff,
-                    content: contents,
-                    ..
-                } = match unified_diff_from_chunks(&path, &effective_cwd, &chunks, fs, sandbox).await {
-                    Ok(diff) => diff,
-                    Err(e) => {
-                        return MaybeApplyPatchVerified::CorrectnessError(e);
-                    }
-                };
+            Hunk::UpdateFile { move_path, chunks, .. } => {
+                let ApplyPatchFileUpdate { unified_diff, content: contents, .. } =
+                    match unified_diff_from_chunks(&path, &effective_cwd, &chunks, fs, sandbox)
+                        .await
+                    {
+                        Ok(diff) => diff,
+                        Err(e) => {
+                            return MaybeApplyPatchVerified::CorrectnessError(e);
+                        }
+                    };
                 changes.insert(
                     path.into_path_buf(),
                     ApplyPatchFileChange::Update {
@@ -246,11 +231,7 @@ pub async fn verify_apply_patch_args(
             }
         }
     }
-    MaybeApplyPatchVerified::Body(ApplyPatchAction {
-        changes,
-        patch,
-        cwd: effective_cwd,
-    })
+    MaybeApplyPatchVerified::Body(ApplyPatchAction { changes, patch, cwd: effective_cwd })
 }
 
 /// Extract the heredoc body (and optional `cd` workdir) from a `bash -lc` script
@@ -346,12 +327,8 @@ fn extract_apply_patch_from_bash(
 
     let lang = BASH.into();
     let mut parser = Parser::new();
-    parser
-        .set_language(&lang)
-        .map_err(ExtractHeredocError::FailedToLoadBashGrammar)?;
-    let tree = parser
-        .parse(src, None)
-        .ok_or(ExtractHeredocError::FailedToParsePatchIntoAst)?;
+    parser.set_language(&lang).map_err(ExtractHeredocError::FailedToLoadBashGrammar)?;
+    let tree = parser.parse(src, None).ok_or(ExtractHeredocError::FailedToParsePatchIntoAst)?;
 
     let bytes = src.as_bytes();
     let root = tree.root_node();
@@ -387,10 +364,8 @@ fn extract_apply_patch_from_bash(
                         .node
                         .utf8_text(bytes)
                         .map_err(ExtractHeredocError::HeredocNotUtf8)?;
-                    let trimmed = raw
-                        .strip_prefix('\'')
-                        .and_then(|s| s.strip_suffix('\''))
-                        .unwrap_or(raw);
+                    let trimmed =
+                        raw.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')).unwrap_or(raw);
                     cd_path = Some(trimmed.to_string());
                 }
                 _ => {}
@@ -411,8 +386,8 @@ mod tests {
     use crate::LOCAL_FS;
     use crate::unified_diff_from_chunks;
     use assert_matches::assert_matches;
-    use slab_utils::path::absolute::test_support::PathExt;
     use pretty_assertions::assert_eq;
+    use slab_utils::path::absolute::test_support::PathExt;
     use std::fs;
     use std::path::PathBuf;
     use std::string::ToString;
@@ -461,10 +436,7 @@ mod tests {
     }
 
     fn expected_single_add() -> Vec<Hunk> {
-        vec![Hunk::AddFile {
-            path: PathBuf::from("foo"),
-            contents: "hi\n".to_string(),
-        }]
+        vec![Hunk::AddFile { path: PathBuf::from("foo"), contents: "hi\n".to_string() }]
     }
 
     fn assert_match_args(args: Vec<String>, expected_workdir: Option<&str>) {
@@ -484,10 +456,7 @@ mod tests {
 
     fn assert_not_match(script: &str) {
         let args = args_bash(script);
-        assert_matches!(
-            maybe_parse_apply_patch(&args),
-            MaybeApplyPatch::NotApplyPatch
-        );
+        assert_matches!(maybe_parse_apply_patch(&args), MaybeApplyPatch::NotApplyPatch);
     }
 
     #[tokio::test]
@@ -622,10 +591,7 @@ PATCH"#,
     #[tokio::test]
     async fn test_powershell_heredoc_no_profile() {
         let script = heredoc_script("");
-        assert_match_args(
-            args_powershell_no_profile(&script),
-            /*expected_workdir*/ None,
-        );
+        assert_match_args(args_powershell_no_profile(&script), /*expected_workdir*/ None);
     }
     #[tokio::test]
     async fn test_pwsh_heredoc() {
@@ -728,10 +694,15 @@ PATCH"#,
         };
 
         let path_abs = path.as_path().abs();
-        let diff =
-            unified_diff_from_chunks(&path_abs, &cwd, chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
-                .await
-                .unwrap();
+        let diff = unified_diff_from_chunks(
+            &path_abs,
+            &cwd,
+            chunks,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .unwrap();
         let expected_diff = r#"@@ -2,2 +2,2 @@
  bar
 -baz
@@ -769,10 +740,15 @@ PATCH"#,
         };
 
         let path_abs = path.as_path().abs();
-        let diff =
-            unified_diff_from_chunks(&path_abs, &cwd, chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
-                .await
-                .unwrap();
+        let diff = unified_diff_from_chunks(
+            &path_abs,
+            &cwd,
+            chunks,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .unwrap();
         let expected_diff = r#"@@ -3 +3,2 @@
  baz
 +quux
@@ -875,17 +851,12 @@ PATCH"#,
         assert_eq!(action.cwd.as_path(), worktree_dir.as_path());
 
         let source_path = worktree_dir.join(source_name);
-        let change = action
-            .changes()
-            .get(source_path.as_path())
-            .expect("source file change present");
+        let change =
+            action.changes().get(source_path.as_path()).expect("source file change present");
 
         match change {
             ApplyPatchFileChange::Update { move_path, .. } => {
-                assert_eq!(
-                    move_path.as_deref(),
-                    Some(worktree_dir.join(dest_name).as_path())
-                );
+                assert_eq!(move_path.as_deref(), Some(worktree_dir.join(dest_name).as_path()));
             }
             other => panic!("expected update change, got {other:?}"),
         }
@@ -926,11 +897,8 @@ PATCH"#,
 
         let session_dir = tempdir().unwrap();
         fs::write(session_dir.path().join("target.txt"), "target\n").unwrap();
-        symlink(
-            session_dir.path().join("target.txt"),
-            session_dir.path().join("link.txt"),
-        )
-        .unwrap();
+        symlink(session_dir.path().join("target.txt"), session_dir.path().join("link.txt"))
+            .unwrap();
         let argv = vec![
             "apply_patch".to_string(),
             "*** Begin Patch\n*** Delete File: link.txt\n*** End Patch".to_string(),

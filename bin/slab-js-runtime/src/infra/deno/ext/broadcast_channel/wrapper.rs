@@ -54,12 +54,12 @@ use std::time::Duration;
 
 use deno_core::parking_lot::Mutex;
 use deno_web::InMemoryBroadcastChannel;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::{big_json_args, Error, Runtime};
+use crate::{Error, Runtime, big_json_args};
 
 /// Message type matching deno_web's internal InMemoryChannelMessage structure
 #[derive(Clone, Debug)]
@@ -119,13 +119,7 @@ impl BroadcastChannelWrapper {
         let uuid = Uuid::new_v4();
         let name = name.to_string();
 
-        Ok(Self {
-            sender,
-            receiver,
-            cancel_tx,
-            name,
-            uuid,
-        })
+        Ok(Self { sender, receiver, cancel_tx, name, uuid })
     }
 
     /// Get the name of this channel
@@ -149,9 +143,7 @@ impl BroadcastChannelWrapper {
     /// Will return an error if the message cannot be serialized or sent
     pub async fn send<T: Serialize>(&self, runtime: &mut Runtime, data: T) -> Result<(), Error> {
         // Serialize through JavaScript for compatibility
-        let data: Vec<u8> = runtime
-            .call_function_async(None, "broadcast_serialize", &data)
-            .await?;
+        let data: Vec<u8> = runtime.call_function_async(None, "broadcast_serialize", &data).await?;
 
         let message = InMemoryChannelMessage {
             name: Arc::new(self.name.clone()),
@@ -284,9 +276,7 @@ impl IsolatedBroadcastChannel {
     #[must_use]
     pub fn new() -> Self {
         let (sender, _) = broadcast::channel(256);
-        Self {
-            sender: Arc::new(Mutex::new(sender)),
-        }
+        Self { sender: Arc::new(Mutex::new(sender)) }
     }
 
     /// Subscribe to this channel, creating a wrapper for sending/receiving messages
@@ -330,13 +320,7 @@ impl IsolatedBroadcastChannelWrapper {
         let uuid = Uuid::new_v4();
         let name = name.to_string();
 
-        Ok(Self {
-            channel: channel.clone(),
-            receiver,
-            cancel_tx,
-            name,
-            uuid,
-        })
+        Ok(Self { channel: channel.clone(), receiver, cancel_tx, name, uuid })
     }
 
     /// Get the name of this channel
@@ -360,9 +344,7 @@ impl IsolatedBroadcastChannelWrapper {
     /// Will return an error if the message cannot be serialized or sent
     pub async fn send<T: Serialize>(&self, runtime: &mut Runtime, data: T) -> Result<(), Error> {
         // Serialize through JavaScript for compatibility
-        let data: Vec<u8> = runtime
-            .call_function_async(None, "broadcast_serialize", &data)
-            .await?;
+        let data: Vec<u8> = runtime.call_function_async(None, "broadcast_serialize", &data).await?;
 
         let message = IsolatedChannelMessage {
             name: Arc::new(self.name.clone()),

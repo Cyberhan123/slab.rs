@@ -87,7 +87,6 @@ pub struct CreateDirectoryOptions {
     pub recursive: bool,
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoveOptions {

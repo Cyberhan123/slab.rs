@@ -277,10 +277,7 @@ impl MasterWorkerState {
     async fn run(mut self) {
         while let Some(cmd) = self.global_rx.recv().await {
             match cmd {
-                GlobalCommand::CreateSession {
-                    options,
-                    reply_tx,
-                } => {
+                GlobalCommand::CreateSession { options, reply_tx } => {
                     let session_id = self.next_session_id;
                     self.next_session_id += 1;
                     let worker_id = self.next_worker % self.worker_txs.len();
@@ -314,11 +311,7 @@ impl MasterWorkerState {
                     }
                 }
 
-                GlobalCommand::CreateSessionFromSnapshot {
-                    options,
-                    snapshot,
-                    reply_tx,
-                } => {
+                GlobalCommand::CreateSessionFromSnapshot { options, snapshot, reply_tx } => {
                     let session_id = self.next_session_id;
                     self.next_session_id += 1;
                     let worker_id = snapshot.worker_id % self.worker_txs.len();
@@ -735,12 +728,7 @@ impl InferenceWorkerState {
 
     fn handle_command(&mut self, cmd: WorkerCommand) {
         match cmd {
-            WorkerCommand::CreateSession {
-                session_id,
-                options,
-                snapshot,
-                reply_tx,
-            } => {
+            WorkerCommand::CreateSession { session_id, options, snapshot, reply_tx } => {
                 let seq_id = if let Some(reused) = self.free_seq_ids.pop() {
                     reused
                 } else if self.next_seq_id < self.max_seq_id_exclusive {
@@ -1209,11 +1197,7 @@ impl LlamaRuntime {
     ) -> Result<SessionId, LlamaRuntimeError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.global_tx
-            .send(GlobalCommand::CreateSessionFromSnapshot {
-                options,
-                snapshot,
-                reply_tx,
-            })
+            .send(GlobalCommand::CreateSessionFromSnapshot { options, snapshot, reply_tx })
             .await
             .map_err(|_| LlamaRuntimeError::WorkerShutdown)?;
         reply_rx.await.map_err(|_| LlamaRuntimeError::WorkerShutdown)?

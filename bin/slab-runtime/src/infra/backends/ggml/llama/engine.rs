@@ -493,8 +493,9 @@ impl GGMLLlamaEngine {
 
         {
             let mut bindings = self.session_bindings.lock().await;
-            plan = plan_session_reuse(&key, bindings.get(&key), &full_prompt, request.gbnf.as_deref())
-                .map_err(ggml::EngineError::from)?;
+            plan =
+                plan_session_reuse(&key, bindings.get(&key), &full_prompt, request.gbnf.as_deref())
+                    .map_err(ggml::EngineError::from)?;
             bindings.insert(key.clone(), SessionBinding::Busy);
         }
 
@@ -612,9 +613,7 @@ impl GGMLLlamaEngine {
         let commit_gbnf = request.gbnf.clone();
         let stop_sequences = request.stop_sequences.clone();
         let logit_bias = self.resolve_logit_bias(request.logit_bias.as_ref())?;
-        let prepared = self
-            .prepare_managed_session(&request, prompt, &logit_bias)
-            .await?;
+        let prepared = self.prepare_managed_session(&request, prompt, &logit_bias).await?;
 
         match self
             .inference(
@@ -677,9 +676,7 @@ impl GGMLLlamaEngine {
         let commit_gbnf = request.gbnf.clone();
         let stop_sequences = request.stop_sequences.clone();
         let logit_bias = self.resolve_logit_bias(request.logit_bias.as_ref())?;
-        let prepared = self
-            .prepare_managed_session(&request, prompt, &logit_bias)
-            .await?;
+        let prepared = self.prepare_managed_session(&request, prompt, &logit_bias).await?;
 
         let (mut llama_rx, sid) = match self
             .inference_stream(

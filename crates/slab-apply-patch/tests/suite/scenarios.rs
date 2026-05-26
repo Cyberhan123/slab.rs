@@ -8,10 +8,8 @@ use tempfile::tempdir;
 
 #[test]
 fn test_apply_patch_scenarios() -> anyhow::Result<()> {
-    let scenarios_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("scenarios");
+    let scenarios_dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("scenarios");
     for scenario in fs::read_dir(scenarios_dir)? {
         let scenario = scenario?;
         let path = scenario.path();

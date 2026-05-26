@@ -1,5 +1,5 @@
 // Copyright 2018-2024 the Deno authors. All rights reserved. MIT license.
-use deno_core::{op2, v8, ByteString, ToJsBuffer};
+use deno_core::{ByteString, ToJsBuffer, op2, v8};
 
 #[derive(Debug, thiserror::Error, deno_error::JsError)]
 #[allow(dead_code)]

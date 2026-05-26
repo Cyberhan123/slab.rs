@@ -91,18 +91,13 @@ impl StreamingPatchParser {
         }
         if let Some(path) = trimmed.strip_prefix(ADD_FILE_MARKER) {
             self.ensure_update_hunk_is_not_empty(trimmed)?;
-            self.state.hunks.push(AddFile {
-                path: PathBuf::from(path),
-                contents: String::new(),
-            });
+            self.state.hunks.push(AddFile { path: PathBuf::from(path), contents: String::new() });
             self.state.mode = StreamingParserMode::AddFile;
             return Ok(true);
         }
         if let Some(path) = trimmed.strip_prefix(DELETE_FILE_MARKER) {
             self.ensure_update_hunk_is_not_empty(trimmed)?;
-            self.state.hunks.push(DeleteFile {
-                path: PathBuf::from(path),
-            });
+            self.state.hunks.push(DeleteFile { path: PathBuf::from(path) });
             self.state.mode = StreamingParserMode::DeleteFile;
             return Ok(true);
         }
@@ -113,9 +108,8 @@ impl StreamingPatchParser {
                 move_path: None,
                 chunks: Vec::new(),
             });
-            self.state.mode = StreamingParserMode::UpdateFile {
-                hunk_line_number: self.line_number,
-            };
+            self.state.mode =
+                StreamingParserMode::UpdateFile { hunk_line_number: self.line_number };
             return Ok(true);
         }
         Ok(false)
@@ -218,10 +212,7 @@ impl StreamingPatchParser {
                     return Ok(());
                 }
 
-                if let Some(UpdateFile {
-                    move_path, chunks, ..
-                }) = self.state.hunks.last_mut()
-                {
+                if let Some(UpdateFile { move_path, chunks, .. }) = self.state.hunks.last_mut() {
                     if chunks.is_empty()
                         && move_path.is_none()
                         && let Some(move_to_path) = update_line.strip_prefix(MOVE_TO_MARKER)
@@ -415,15 +406,10 @@ mod tests {
         );
 
         let mut parser = StreamingPatchParser::default();
-        assert_eq!(
-            parser.push_delta("*** Begin Patch\n*** Delete File: gone.txt"),
-            Ok(Vec::new())
-        );
+        assert_eq!(parser.push_delta("*** Begin Patch\n*** Delete File: gone.txt"), Ok(Vec::new()));
         assert_eq!(
             parser.push_delta("\n"),
-            Ok(vec![DeleteFile {
-                path: PathBuf::from("gone.txt"),
-            }])
+            Ok(vec![DeleteFile { path: PathBuf::from("gone.txt") }])
         );
 
         let mut parser = StreamingPatchParser::default();
@@ -432,13 +418,8 @@ mod tests {
                 "*** Begin Patch\n*** Add File: src/one.txt\n+one\n*** Delete File: src/two.txt\n",
             ),
             Ok(vec![
-                AddFile {
-                    path: PathBuf::from("src/one.txt"),
-                    contents: "one\n".to_string(),
-                },
-                DeleteFile {
-                    path: PathBuf::from("src/two.txt"),
-                },
+                AddFile { path: PathBuf::from("src/one.txt"), contents: "one\n".to_string() },
+                DeleteFile { path: PathBuf::from("src/two.txt") },
             ])
         );
     }
@@ -463,10 +444,7 @@ mod tests {
         );
 
         let mut parser = StreamingPatchParser::default();
-        assert_eq!(
-            parser.push_delta("*** Begin Patch\n*** Environment ID:   \n"),
-            Ok(vec![])
-        );
+        assert_eq!(parser.push_delta("*** Begin Patch\n*** Environment ID:   \n"), Ok(vec![]));
     }
 
     #[test]
@@ -540,23 +518,11 @@ mod tests {
                 .map(|hunk| match hunk {
                     AddFile { .. } => "add",
                     DeleteFile { .. } => "delete",
-                    UpdateFile {
-                        move_path: Some(_), ..
-                    } => "move-update",
-                    UpdateFile {
-                        move_path: None, ..
-                    } => "update",
+                    UpdateFile { move_path: Some(_), .. } => "move-update",
+                    UpdateFile { move_path: None, .. } => "update",
                 })
                 .collect::<Vec<_>>(),
-            vec![
-                "add",
-                "update",
-                "delete",
-                "move-update",
-                "add",
-                "update",
-                "delete"
-            ]
+            vec!["add", "update", "delete", "move-update", "add", "update", "delete"]
         );
     }
 
@@ -675,17 +641,11 @@ mod tests {
         let mut parser = StreamingPatchParser::default();
         assert_eq!(
             parser.push_delta("*** Begin Patch\n*** Add File: file.txt\n+hello\n*** End Patch"),
-            Ok(vec![AddFile {
-                path: PathBuf::from("file.txt"),
-                contents: "hello\n".to_string(),
-            }])
+            Ok(vec![AddFile { path: PathBuf::from("file.txt"), contents: "hello\n".to_string() }])
         );
         assert_eq!(
             parser.finish(),
-            Ok(vec![AddFile {
-                path: PathBuf::from("file.txt"),
-                contents: "hello\n".to_string(),
-            }])
+            Ok(vec![AddFile { path: PathBuf::from("file.txt"), contents: "hello\n".to_string() }])
         );
 
         let mut parser = StreamingPatchParser::default();
@@ -724,10 +684,7 @@ mod tests {
         let mut parser = StreamingPatchParser::default();
         assert_eq!(
             parser.push_delta("*** Begin Patch\n*** Add File: file.txt\n+hello\n"),
-            Ok(vec![AddFile {
-                path: PathBuf::from("file.txt"),
-                contents: "hello\n".to_string(),
-            }])
+            Ok(vec![AddFile { path: PathBuf::from("file.txt"), contents: "hello\n".to_string() }])
         );
         assert_eq!(
             parser.finish(),

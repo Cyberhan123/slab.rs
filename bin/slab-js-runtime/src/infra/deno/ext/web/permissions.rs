@@ -290,11 +290,7 @@ impl WebPermissions for AllowlistWebPermissions {
         port: Option<u16>,
         api_name: &str,
     ) -> Result<(), PermissionCheckError> {
-        if self.borrow().hosts.contains(host) {
-            Ok(())
-        } else {
-            Err(oops(host))
-        }
+        if self.borrow().hosts.contains(host) { Ok(()) } else { Err(oops(host)) }
     }
 
     fn check_vsock(&self, cid: u32, port: u32, api_name: &str) -> Result<(), PermissionCheckError> {
@@ -310,11 +306,7 @@ impl WebPermissions for AllowlistWebPermissions {
         url: &deno_core::url::Url,
         api_name: &str,
     ) -> Result<(), PermissionCheckError> {
-        if self.borrow().url.contains(url.as_str()) {
-            Ok(())
-        } else {
-            Err(oops(url))
-        }
+        if self.borrow().url.contains(url.as_str()) { Ok(()) } else { Err(oops(url)) }
     }
 
     fn check_read<'a>(
@@ -362,11 +354,7 @@ impl WebPermissions for AllowlistWebPermissions {
     }
 
     fn check_read_all(&self, api_name: Option<&str>) -> Result<(), PermissionCheckError> {
-        if self.borrow().read_all {
-            Ok(())
-        } else {
-            Err(oops("read_all"))
-        }
+        if self.borrow().read_all { Ok(()) } else { Err(oops("read_all")) }
     }
 
     fn check_read_blind(
@@ -383,11 +371,7 @@ impl WebPermissions for AllowlistWebPermissions {
     }
 
     fn check_write_all(&self, api_name: &str) -> Result<(), PermissionCheckError> {
-        if self.borrow().write_all {
-            Ok(())
-        } else {
-            Err(oops("write_all"))
-        }
+        if self.borrow().write_all { Ok(()) } else { Err(oops("write_all")) }
     }
 
     fn check_write_blind(
@@ -414,27 +398,15 @@ impl WebPermissions for AllowlistWebPermissions {
         kind: SystemsPermissionKind,
         api_name: &str,
     ) -> Result<(), PermissionCheckError> {
-        if self.borrow().sys.contains(&kind) {
-            Ok(())
-        } else {
-            Err(oops(kind.as_str()))
-        }
+        if self.borrow().sys.contains(&kind) { Ok(()) } else { Err(oops(kind.as_str())) }
     }
 
     fn check_env(&self, var: &str) -> Result<(), PermissionCheckError> {
-        if self.borrow().envs.contains(var) {
-            Ok(())
-        } else {
-            Err(oops(var))
-        }
+        if self.borrow().envs.contains(var) { Ok(()) } else { Err(oops(var)) }
     }
 
     fn check_exec(&self) -> Result<(), PermissionCheckError> {
-        if self.borrow().exec {
-            Ok(())
-        } else {
-            Err(oops("ffi"))
-        }
+        if self.borrow().exec { Ok(()) } else { Err(oops("ffi")) }
     }
 }
 

@@ -1,4 +1,5 @@
 pub mod cab;
+pub mod cargo_bin;
 pub mod fuzzy_match;
 pub mod json;
 pub mod loader;
@@ -7,5 +8,4 @@ pub mod pty;
 pub mod sleep_inhibitor;
 pub mod string;
 pub mod time;
-pub mod cargo_bin;
 pub mod uds;

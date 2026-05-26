@@ -94,15 +94,8 @@ impl Hunk {
         match self {
             Hunk::AddFile { path, .. } => path,
             Hunk::DeleteFile { path } => path,
-            Hunk::UpdateFile {
-                move_path: Some(path),
-                ..
-            } => path,
-            Hunk::UpdateFile {
-                path,
-                move_path: None,
-                ..
-            } => path,
+            Hunk::UpdateFile { move_path: Some(path), .. } => path,
+            Hunk::UpdateFile { path, move_path: None, .. } => path,
         }
     }
 }
@@ -126,11 +119,7 @@ pub struct UpdateFileChunk {
 }
 
 pub fn parse_patch(patch: &str) -> Result<ApplyPatchArgs, ParseError> {
-    let mode = if PARSE_IN_STRICT_MODE {
-        ParseMode::Strict
-    } else {
-        ParseMode::Lenient
-    };
+    let mode = if PARSE_IN_STRICT_MODE { ParseMode::Strict } else { ParseMode::Lenient };
     parse_patch_text(patch, mode)
 }
 
@@ -190,12 +179,7 @@ fn parse_patch_text(patch: &str, mode: ParseMode) -> Result<ApplyPatchArgs, Pars
         remaining_lines = &remaining_lines[hunk_lines..]
     }
     let patch = patch_lines.join("\n");
-    Ok(ApplyPatchArgs {
-        hunks,
-        patch,
-        workdir: None,
-        environment_id,
-    })
+    Ok(ApplyPatchArgs { hunks, patch, workdir: None, environment_id })
 }
 
 fn parse_environment_id_preamble<'a>(
@@ -209,9 +193,7 @@ fn parse_environment_id_preamble<'a>(
     };
     let environment_id = environment_id.trim();
     if environment_id.is_empty() {
-        return Err(InvalidPatchError(
-            "apply_patch environment_id cannot be empty".to_string(),
-        ));
+        return Err(InvalidPatchError("apply_patch environment_id cannot be empty".to_string()));
     }
     Ok((Some(environment_id.to_string()), &hunk_lines[1..], 3))
 }
@@ -297,26 +279,13 @@ fn parse_one_hunk(lines: &[&str], line_number: usize) -> Result<(Hunk, usize), P
                 break;
             }
         }
-        return Ok((
-            AddFile {
-                path: PathBuf::from(path),
-                contents,
-            },
-            parsed_lines,
-        ));
+        return Ok((AddFile { path: PathBuf::from(path), contents }, parsed_lines));
     } else if let Some(path) = first_line.strip_prefix(DELETE_FILE_MARKER) {
-        return Ok((
-            DeleteFile {
-                path: PathBuf::from(path),
-            },
-            1,
-        ));
+        return Ok((DeleteFile { path: PathBuf::from(path) }, 1));
     } else if let Some(path) = first_line.strip_prefix(UPDATE_FILE_MARKER) {
         let mut remaining_lines = &lines[1..];
         let mut parsed_lines = 1;
-        let move_path = remaining_lines
-            .first()
-            .and_then(|x| x.strip_prefix(MOVE_TO_MARKER));
+        let move_path = remaining_lines.first().and_then(|x| x.strip_prefix(MOVE_TO_MARKER));
 
         if move_path.is_some() {
             remaining_lines = &remaining_lines[1..];
@@ -525,15 +494,7 @@ fn test_update_file_chunk() {
     );
     assert_eq!(
         parse_update_file_chunk(
-            &[
-                "@@ change_context",
-                "",
-                " context",
-                "-remove",
-                "+add",
-                " context2",
-                "*** End Patch",
-            ],
+            &["@@ change_context", "", " context", "-remove", "+add", " context2", "*** End Patch",],
             /*line_number*/ 123,
             /*allow_missing_context*/ false,
         ),
@@ -579,34 +540,21 @@ fn test_update_file_chunk() {
 fn test_parse_patch() {
     assert_eq!(
         parse_patch_text("bad", ParseMode::Strict),
-        Err(InvalidPatchError(
-            "The first line of the patch must be '*** Begin Patch'".to_string()
-        ))
+        Err(InvalidPatchError("The first line of the patch must be '*** Begin Patch'".to_string()))
     );
     assert_eq!(
         parse_patch_text("*** Begin Patch\nbad", ParseMode::Strict),
-        Err(InvalidPatchError(
-            "The last line of the patch must be '*** End Patch'".to_string()
-        ))
+        Err(InvalidPatchError("The last line of the patch must be '*** End Patch'".to_string()))
     );
 
     assert_eq!(
         parse_patch_text(
-            concat!(
-                "*** Begin Patch",
-                " ",
-                "\n*** Add File: foo\n+hi\n",
-                " ",
-                "*** End Patch"
-            ),
+            concat!("*** Begin Patch", " ", "\n*** Add File: foo\n+hi\n", " ", "*** End Patch"),
             ParseMode::Strict
         )
         .unwrap()
         .hunks,
-        vec![AddFile {
-            path: PathBuf::from("foo"),
-            contents: "hi\n".to_string()
-        }]
+        vec![AddFile { path: PathBuf::from("foo"), contents: "hi\n".to_string() }]
     );
     assert_eq!(
         parse_patch_text(
@@ -648,13 +596,8 @@ fn test_parse_patch() {
         .unwrap()
         .hunks,
         vec![
-            AddFile {
-                path: PathBuf::from("path/add.py"),
-                contents: "abc\ndef\n".to_string()
-            },
-            DeleteFile {
-                path: PathBuf::from("path/delete.py")
-            },
+            AddFile { path: PathBuf::from("path/add.py"), contents: "abc\ndef\n".to_string() },
+            DeleteFile { path: PathBuf::from("path/delete.py") },
             UpdateFile {
                 path: PathBuf::from("path/update.py"),
                 move_path: Some(PathBuf::from("path/update2.py")),
@@ -692,10 +635,7 @@ fn test_parse_patch() {
                     is_end_of_file: false
                 }],
             },
-            AddFile {
-                path: PathBuf::from("other.py"),
-                contents: "content\n".to_string()
-            }
+            AddFile { path: PathBuf::from("other.py"), contents: "content\n".to_string() }
         ]
     );
 
@@ -745,17 +685,10 @@ fn test_parse_patch_accepts_relative_and_absolute_hunk_paths() {
     );
 
     assert_eq!(
-        parse_patch_text(&patch_text, ParseMode::Strict)
-            .unwrap()
-            .hunks,
+        parse_patch_text(&patch_text, ParseMode::Strict).unwrap().hunks,
         vec![
-            AddFile {
-                path: PathBuf::from("relative-add.py"),
-                contents: "content\n".to_string()
-            },
-            DeleteFile {
-                path: absolute_delete.to_path_buf()
-            },
+            AddFile { path: PathBuf::from("relative-add.py"), contents: "content\n".to_string() },
+            DeleteFile { path: absolute_delete.to_path_buf() },
             UpdateFile {
                 path: absolute_update.to_path_buf(),
                 move_path: None,
@@ -781,18 +714,10 @@ fn test_hunk_resolve_path_accepts_relative_and_absolute_paths() {
 
     for (hunk, expected_path) in [
         (
-            AddFile {
-                path: PathBuf::from("relative-add.py"),
-                contents: String::new(),
-            },
+            AddFile { path: PathBuf::from("relative-add.py"), contents: String::new() },
             cwd.join("relative-add.py"),
         ),
-        (
-            DeleteFile {
-                path: PathBuf::from("relative-delete.py"),
-            },
-            cwd.join("relative-delete.py"),
-        ),
+        (DeleteFile { path: PathBuf::from("relative-delete.py") }, cwd.join("relative-delete.py")),
         (
             UpdateFile {
                 path: PathBuf::from("relative-update.py"),
@@ -801,25 +726,10 @@ fn test_hunk_resolve_path_accepts_relative_and_absolute_paths() {
             },
             cwd.join("relative-update.py"),
         ),
+        (AddFile { path: absolute_add.to_path_buf(), contents: String::new() }, absolute_add),
+        (DeleteFile { path: absolute_delete.to_path_buf() }, absolute_delete),
         (
-            AddFile {
-                path: absolute_add.to_path_buf(),
-                contents: String::new(),
-            },
-            absolute_add,
-        ),
-        (
-            DeleteFile {
-                path: absolute_delete.to_path_buf(),
-            },
-            absolute_delete,
-        ),
-        (
-            UpdateFile {
-                path: absolute_update.to_path_buf(),
-                move_path: None,
-                chunks: Vec::new(),
-            },
+            UpdateFile { path: absolute_update.to_path_buf(), move_path: None, chunks: Vec::new() },
             absolute_update,
         ),
     ] {
@@ -910,9 +820,7 @@ fn test_parse_patch_lenient() {
     );
     assert_eq!(
         parse_patch_text(&patch_text_with_missing_closing_heredoc, ParseMode::Lenient),
-        Err(InvalidPatchError(
-            "The last line of the patch must be '*** End Patch'".to_string()
-        ))
+        Err(InvalidPatchError("The last line of the patch must be '*** End Patch'".to_string()))
     );
 }
 
@@ -947,8 +855,6 @@ fn test_parse_patch_environment_id_preamble() {
              *** End Patch",
             ParseMode::Strict
         ),
-        Err(InvalidPatchError(
-            "apply_patch environment_id cannot be empty".to_string()
-        ))
+        Err(InvalidPatchError("apply_patch environment_id cannot be empty".to_string()))
     );
 }
