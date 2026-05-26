@@ -223,8 +223,7 @@ fn create_web_worker_callback(options: WebWorkerCallbackOptions) -> Arc<CreateWe
             bootstrap: BootstrapOptions {
                 deno_version: env!("CARGO_PKG_VERSION").to_string(),
                 args: vec![],
-                cpu_count: std::thread::available_parallelism()
-                    .map_or(1, std::num::NonZero::get),
+                cpu_count: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
                 log_level: WorkerLogLevel::default(),
                 enable_testing_features: false,
                 locale: deno_core::v8::icu::get_language_tag(),
