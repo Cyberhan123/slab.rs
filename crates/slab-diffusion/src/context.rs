@@ -1,3 +1,4 @@
+use crate::SharedDiffusionLib;
 use crate::error::DiffusionError;
 use crate::params::{
     ContextParams, Image, ImgParams, InnerImgParams, InnerVideoParams, SampleMethod, Scheduler,
@@ -12,7 +13,7 @@ use std::sync::Arc;
 /// is freed when this value is dropped.
 pub struct Context {
     pub(crate) ctx: *mut slab_diffusion_sys::sd_ctx_t,
-    pub(crate) lib: Arc<slab_diffusion_sys::DiffusionLib>,
+    pub(crate) lib: Arc<SharedDiffusionLib>,
     pub(crate) _params: ContextParams,
 }
 
@@ -29,7 +30,7 @@ impl Context {
     }
 
     fn collect_images(
-        lib: &slab_diffusion_sys::DiffusionLib,
+        lib: &SharedDiffusionLib,
         images_ptr: *mut slab_diffusion_sys::sd_image_t,
         image_count: usize,
     ) -> Vec<Image> {
@@ -120,7 +121,7 @@ impl Drop for Context {
 unsafe impl Send for Context {}
 // SAFETY: All methods on Context that access the raw pointer take &self (shared
 // reference). The native library does not mutate the context through shared references
-// in a way that would cause data races, and the Arc<DiffusionLib> itself is Send + Sync.
+// in a way that would cause data races, and the Arc<SharedDiffusionLib> itself is Send + Sync.
 unsafe impl Sync for Context {}
 
 impl std::fmt::Debug for Context {

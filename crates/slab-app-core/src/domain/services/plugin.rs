@@ -770,7 +770,7 @@ fn scan_plugin_dir(
 }
 
 fn is_builtin_language_server_plugin_id(plugin_id: &str) -> bool {
-    BUILTIN_LANGUAGE_SERVER_PLUGIN_IDS.iter().any(|id| *id == plugin_id)
+    BUILTIN_LANGUAGE_SERVER_PLUGIN_IDS.contains(&plugin_id)
 }
 
 fn validate_plugin_manifest(

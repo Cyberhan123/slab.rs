@@ -9,6 +9,7 @@ use slab_ggml::GGML;
 use slab_ggml::load_runtime_with_ggml_sidecar;
 use std::ffi::CStr;
 use std::fmt;
+use std::ops::Deref;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -17,6 +18,23 @@ pub use error::DiffusionError;
 pub use logging::DiffusionLogLevel;
 pub use params::*;
 pub use upscaler::UpscalerContext;
+
+pub(crate) struct SharedDiffusionLib(pub(crate) slab_diffusion_sys::DiffusionLib);
+
+// SAFETY: The loaded stable-diffusion symbol table is treated as immutable and
+// can be shared across threads.
+unsafe impl Send for SharedDiffusionLib {}
+// SAFETY: The loaded stable-diffusion symbol table is treated as immutable and
+// can be shared across threads.
+unsafe impl Sync for SharedDiffusionLib {}
+
+impl Deref for SharedDiffusionLib {
+    type Target = slab_diffusion_sys::DiffusionLib;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// A handle to the dynamically-loaded `stable-diffusion` shared library.
 ///
@@ -52,7 +70,7 @@ pub use upscaler::UpscalerContext;
 /// ```
 #[derive(Clone)]
 pub struct Diffusion {
-    pub(crate) lib: Arc<slab_diffusion_sys::DiffusionLib>,
+    pub(crate) lib: Arc<SharedDiffusionLib>,
     pub(crate) _ggml_lib: Option<Arc<GGML>>,
 }
 
@@ -68,7 +86,7 @@ impl Diffusion {
             slab_diffusion_sys::DiffusionLib,
         >(lib_dir, "stable-diffusion")?;
 
-        let diffusion = Self { lib: Arc::new(diffusion_lib), _ggml_lib: ggml };
+        let diffusion = Self { lib: Arc::new(SharedDiffusionLib(diffusion_lib)), _ggml_lib: ggml };
         diffusion.install_logging_hook();
         Ok(diffusion)
     }

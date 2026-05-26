@@ -410,7 +410,7 @@ async fn get_metadata_from_fs(
         &default_context
     };
     let path = filesystem_path_string(path_abs, cwd, sandbox);
-    Ok(fs.get_metadata(context, &path).await.map_err(file_system_error_to_io)?)
+    fs.get_metadata(context, &path).await.map_err(file_system_error_to_io)
 }
 
 /// Applies the patch and prints the result to stdout/stderr.
@@ -889,7 +889,7 @@ fn compute_replacements(
         }
     }
 
-    replacements.sort_by(|(lhs_idx, _, _), (rhs_idx, _, _)| lhs_idx.cmp(rhs_idx));
+    replacements.sort_by_key(|(lhs_idx, _, _)| *lhs_idx);
 
     Ok(replacements)
 }

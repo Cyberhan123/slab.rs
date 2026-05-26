@@ -10,12 +10,30 @@ use slab_ggml_sys::GGmlLib;
 use slab_utils::loader::{RuntimeLibrary, load_runtime_library_from_dir};
 use std::ffi::CStr;
 use std::fmt;
+use std::ops::Deref;
 use std::path::Path;
 use std::sync::Arc;
 
+pub(crate) struct SharedGGmlLib(GGmlLib);
+
+/// Safety: The loaded ggml symbol table is treated as immutable and may be
+/// shared across threads.
+unsafe impl Send for SharedGGmlLib {}
+/// Safety: The loaded ggml symbol table is treated as immutable and may be
+/// shared across threads.
+unsafe impl Sync for SharedGGmlLib {}
+
+impl Deref for SharedGGmlLib {
+    type Target = GGmlLib;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 #[derive(Clone)]
 pub struct GGML {
-    pub(crate) lib: Arc<GGmlLib>,
+    pub(crate) lib: Arc<SharedGGmlLib>,
 }
 
 /// Safety: `GGML` is thread-safe because it only contains an `Arc` to the underlying library,
@@ -33,7 +51,7 @@ impl GGML {
         let path = path.as_ref();
         let lib_dir = path.parent().ok_or(GGMLError::NotParentDir)?;
         let lib = unsafe { <GGmlLib as RuntimeLibrary>::load_from_dir(lib_dir, path)? };
-        Ok(Self { lib: Arc::new(lib) })
+        Ok(Self { lib: Arc::new(SharedGGmlLib(lib)) })
     }
 
     /// Load the `ggml` shared library from a unified runtime library directory.
@@ -136,7 +154,7 @@ impl fmt::Debug for GGML {
 impl RuntimeLibrary for GGML {
     unsafe fn load_from_dir(lib_dir: &Path, path: &Path) -> Result<Self, libloading::Error> {
         let lib = unsafe { <GGmlLib as RuntimeLibrary>::load_from_dir(lib_dir, path)? };
-        Ok(Self { lib: Arc::new(lib) })
+        Ok(Self { lib: Arc::new(SharedGGmlLib(lib)) })
     }
 }
 

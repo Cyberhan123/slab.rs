@@ -132,6 +132,8 @@ struct CallContext {
 }
 
 type PendingMap = Arc<Mutex<HashMap<String, oneshot::Sender<Result<Value, String>>>>>;
+type ExitHandlerFuture = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
+type ExitHandler = dyn Fn(SupervisedProcessExit) -> ExitHandlerFuture + Send + Sync;
 
 #[derive(Debug, Deserialize)]
 struct JsonRpcIncoming {
@@ -536,11 +538,7 @@ fn create_exit_handler(
     pending: PendingMap,
     exit_label: &'static str,
     socket_path: Option<PathBuf>,
-) -> Arc<
-    dyn Fn(SupervisedProcessExit) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
-        + Send
-        + Sync,
-> {
+) -> Arc<ExitHandler> {
     Arc::new(move |exit: SupervisedProcessExit| {
         let pending = pending.clone();
         let socket_path = socket_path.clone();
@@ -557,7 +555,7 @@ fn create_exit_handler(
             for (_, sender) in pending.drain() {
                 let _ = sender.send(Err(message.clone()));
             }
-        }) as std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+        })
     })
 }
 

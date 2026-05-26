@@ -26,6 +26,16 @@ struct ThreadEntry {
     abort: tokio::task::AbortHandle,
 }
 
+struct SpawnRequest {
+    session_id: String,
+    parent_id: Option<String>,
+    depth: u32,
+    config: AgentConfig,
+    messages: Vec<ConversationMessage>,
+    starting_turn_index: u32,
+    persist_messages_from: Option<usize>,
+}
+
 // ── AgentControl ─────────────────────────────────────────────────────────────
 
 /// Top-level controller that owns and coordinates all active agent threads.
@@ -110,7 +120,16 @@ impl AgentControl {
         config: AgentConfig,
         messages: Vec<ConversationMessage>,
     ) -> Result<String, AgentError> {
-        self.spawn_inner(session_id, None, 0, config, messages, 0, Some(0)).await
+        self.spawn_inner(SpawnRequest {
+            session_id,
+            parent_id: None,
+            depth: 0,
+            config,
+            messages,
+            starting_turn_index: 0,
+            persist_messages_from: Some(0),
+        })
+        .await
     }
 
     /// Spawn a child agent thread with an explicit parent and depth.
@@ -128,7 +147,16 @@ impl AgentControl {
         if depth > self.max_depth {
             return Err(AgentError::DepthLimitExceeded { current: depth, max: self.max_depth });
         }
-        self.spawn_inner(session_id, Some(parent_id), depth, config, messages, 0, Some(0)).await
+        self.spawn_inner(SpawnRequest {
+            session_id,
+            parent_id: Some(parent_id),
+            depth,
+            config,
+            messages,
+            starting_turn_index: 0,
+            persist_messages_from: Some(0),
+        })
+        .await
     }
 
     /// Append user input to a persisted thread and run another agent turn.
@@ -223,16 +251,17 @@ impl AgentControl {
 
     // ── private helpers ──────────────────────────────────────────────────────
 
-    async fn spawn_inner(
-        &self,
-        session_id: String,
-        parent_id: Option<String>,
-        depth: u32,
-        config: AgentConfig,
-        messages: Vec<ConversationMessage>,
-        starting_turn_index: u32,
-        persist_messages_from: Option<usize>,
-    ) -> Result<String, AgentError> {
+    async fn spawn_inner(&self, request: SpawnRequest) -> Result<String, AgentError> {
+        let SpawnRequest {
+            session_id,
+            parent_id,
+            depth,
+            config,
+            messages,
+            starting_turn_index,
+            persist_messages_from,
+        } = request;
+
         let (thread, status_rx) = AgentThread::new(session_id, parent_id, depth, config);
         self.start_thread(thread, status_rx, messages, starting_turn_index, persist_messages_from)
             .await

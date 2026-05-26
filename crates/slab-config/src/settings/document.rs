@@ -773,7 +773,7 @@ const fn default_max_pressure_evictions_per_load() -> u32 {
 }
 
 /// Runtime plugin installation settings.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
 pub struct PluginSettingsConfig {
     /// Directory containing installed runtime plugin packages. Defaults to the `plugins`
     /// directory next to `settings.json`.
@@ -782,12 +782,6 @@ pub struct PluginSettingsConfig {
     /// Transport mode used for JS sidecar communication.
     #[serde(default)]
     pub js_runtime_transport: PluginJsRuntimeTransport,
-}
-
-impl Default for PluginSettingsConfig {
-    fn default() -> Self {
-        Self { install_dir: None, js_runtime_transport: PluginJsRuntimeTransport::default() }
-    }
 }
 
 /// Runtime transport used for JS plugin sidecar communication.

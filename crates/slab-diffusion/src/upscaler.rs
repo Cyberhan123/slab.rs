@@ -5,11 +5,12 @@ use slab_diffusion_sys::upscaler_ctx_t;
 
 use crate::Diffusion;
 use crate::DiffusionError;
+use crate::SharedDiffusionLib;
 use crate::params::{Image, image_view, owned_image_from_raw};
 
 pub struct UpscalerContext {
     pub(crate) fp: *mut upscaler_ctx_t,
-    pub(crate) lib: Arc<slab_diffusion_sys::DiffusionLib>,
+    pub(crate) lib: Arc<SharedDiffusionLib>,
     _esrgan_path: CString,
     _device: Option<CString>,
 }
@@ -80,7 +81,7 @@ impl UpscalerContext {
 unsafe impl Send for UpscalerContext {}
 // SAFETY: All methods on UpscalerContext that access the raw pointer take &self
 // (shared reference). The native library does not mutate the context through shared
-// references in a way that would cause data races, and the Arc<DiffusionLib> itself
+// references in a way that would cause data races, and the Arc<SharedDiffusionLib> itself
 // is Send + Sync.
 unsafe impl Sync for UpscalerContext {}
 
