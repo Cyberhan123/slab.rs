@@ -1,7 +1,7 @@
-//! SSE notification adapter for real-time agent event streaming.
+//! Agent event hub for real-time agent event streaming.
 //!
-//! [`SseNotifyAdapter`] implements both [`AgentNotifyPort`] (for status changes
-//! and turn events) and [`ApprovalPort`] (for interactive command approval).
+//! [`AgentEventHub`] implements both [`AgentNotifyPort`] (for status changes and
+//! turn events) and [`ApprovalPort`] (for interactive command approval).
 //!
 //! # Design
 //!
@@ -31,7 +31,7 @@ const APPROVAL_TIMEOUT_SECS: u64 = 300;
 
 /// Shared state used by both the notify path and the HTTP handlers.
 #[derive(Clone, Default)]
-pub struct SseNotifyAdapter {
+pub struct AgentEventHub {
     /// Per-thread event channels with a bounded replay history.
     channels: Arc<DashMap<String, EventChannel>>,
     /// Pending approval requests: "<thread_id>:<call_id>" → oneshot sender.
@@ -86,7 +86,7 @@ impl EventChannel {
     }
 }
 
-impl SseNotifyAdapter {
+impl AgentEventHub {
     pub fn new() -> Self {
         Self::default()
     }
@@ -132,7 +132,7 @@ fn approval_key(thread_id: &str, call_id: &str) -> String {
 }
 
 #[async_trait]
-impl AgentNotifyPort for SseNotifyAdapter {
+impl AgentNotifyPort for AgentEventHub {
     async fn on_status_change(&self, thread_id: &str, status: ThreadStatus) {
         debug!(thread_id, ?status, "agent status change");
         self.broadcast(
@@ -147,7 +147,7 @@ impl AgentNotifyPort for SseNotifyAdapter {
 }
 
 #[async_trait]
-impl ApprovalPort for SseNotifyAdapter {
+impl ApprovalPort for AgentEventHub {
     async fn request_approval(
         &self,
         thread_id: &str,
@@ -208,11 +208,11 @@ impl ApprovalPort for SseNotifyAdapter {
 mod tests {
     use slab_agent::port::TurnEvent;
 
-    use super::SseNotifyAdapter;
+    use super::AgentEventHub;
 
     #[test]
     fn subscribe_events_replays_events_emitted_before_subscription() {
-        let adapter = SseNotifyAdapter::new();
+        let adapter = AgentEventHub::new();
         adapter.broadcast(
             "thread-1",
             TurnEvent::Response {

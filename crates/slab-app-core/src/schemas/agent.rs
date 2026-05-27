@@ -1,33 +1,14 @@
-//! Request and response schemas for the `/v1/agents/*` routes.
+//! Request and response schemas for the `/v1/agents/responses` route.
 
 use serde::{Deserialize, Serialize};
 use slab_agent::config::AgentConfig;
 use slab_agent::port::{ThreadMessageRecord, ThreadSnapshot};
 use slab_types::agent::AgentThreadStatus;
 use utoipa::ToSchema;
-use validator::Validate;
-
-use crate::schemas::validation::validate_non_blank;
-
-// ── Spawn ─────────────────────────────────────────────────────────────────────
-
-/// Request body for `POST /v1/agents/spawn`.
-#[derive(Debug, Deserialize, ToSchema, Validate)]
-pub struct SpawnAgentRequest {
-    /// Chat session ID that backs this agent thread.
-    #[validate(custom(function = "validate_non_blank", message = "session_id must not be blank"))]
-    pub session_id: String,
-    /// Agent runtime configuration (model, temperature, etc.).
-    #[serde(default)]
-    pub config: AgentConfigInput,
-    /// Initial messages to seed the agent's conversation.
-    #[serde(default)]
-    #[validate(nested)]
-    pub messages: Vec<MessageInput>,
-}
+use validator::{Validate, ValidationError, ValidationErrors};
 
 /// Agent configuration provided by the caller.
-#[derive(Debug, Default, Deserialize, ToSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, ToSchema)]
 pub struct AgentConfigInput {
     pub model: Option<String>,
     pub system_prompt: Option<String>,
@@ -54,9 +35,8 @@ impl From<AgentConfigInput> for AgentConfig {
 }
 
 /// A single message in the initial conversation.
-#[derive(Debug, Deserialize, ToSchema, Validate)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 pub struct MessageInput {
-    #[validate(custom(function = "validate_non_blank", message = "role must not be blank"))]
     pub role: String,
     pub content: String,
 }
@@ -73,11 +53,168 @@ impl From<MessageInput> for slab_types::ConversationMessage {
     }
 }
 
-/// Response body for `POST /v1/agents/spawn`.
+/// Client message accepted by `GET` WebSocket and `POST /v1/agents/responses`.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(tag = "type")]
+pub enum AgentResponsesClientMessage {
+    #[serde(rename = "agent.session.restore")]
+    SessionRestore {
+        #[serde(default)]
+        request_id: Option<String>,
+        session_id: String,
+    },
+    #[serde(rename = "agent.response.create")]
+    ResponseCreate {
+        #[serde(default)]
+        request_id: Option<String>,
+        session_id: String,
+        #[serde(default)]
+        config: AgentConfigInput,
+        #[serde(default)]
+        messages: Vec<MessageInput>,
+    },
+    #[serde(rename = "agent.input")]
+    Input {
+        #[serde(default)]
+        request_id: Option<String>,
+        thread_id: String,
+        content: String,
+    },
+    #[serde(rename = "agent.approval.resolve")]
+    ApprovalResolve {
+        #[serde(default)]
+        request_id: Option<String>,
+        thread_id: String,
+        call_id: String,
+        approved: bool,
+    },
+    #[serde(rename = "agent.interrupt")]
+    Interrupt {
+        #[serde(default)]
+        request_id: Option<String>,
+        thread_id: String,
+    },
+    #[serde(rename = "agent.shutdown")]
+    Shutdown {
+        #[serde(default)]
+        request_id: Option<String>,
+        thread_id: String,
+    },
+}
+
+impl AgentResponsesClientMessage {
+    pub fn action(&self) -> AgentResponsesAction {
+        match self {
+            Self::SessionRestore { .. } => AgentResponsesAction::SessionRestore,
+            Self::ResponseCreate { .. } => AgentResponsesAction::ResponseCreate,
+            Self::Input { .. } => AgentResponsesAction::Input,
+            Self::ApprovalResolve { .. } => AgentResponsesAction::ApprovalResolve,
+            Self::Interrupt { .. } => AgentResponsesAction::Interrupt,
+            Self::Shutdown { .. } => AgentResponsesAction::Shutdown,
+        }
+    }
+
+    pub fn request_id(&self) -> Option<&str> {
+        match self {
+            Self::SessionRestore { request_id, .. }
+            | Self::ResponseCreate { request_id, .. }
+            | Self::Input { request_id, .. }
+            | Self::ApprovalResolve { request_id, .. }
+            | Self::Interrupt { request_id, .. }
+            | Self::Shutdown { request_id, .. } => request_id.as_deref(),
+        }
+    }
+}
+
+impl Validate for AgentResponsesClientMessage {
+    fn validate(&self) -> Result<(), ValidationErrors> {
+        let mut errors = ValidationErrors::new();
+        match self {
+            Self::SessionRestore { session_id, .. } => {
+                add_non_blank(&mut errors, "session_id", session_id);
+            }
+            Self::ResponseCreate { session_id, messages, .. } => {
+                add_non_blank(&mut errors, "session_id", session_id);
+                for message in messages {
+                    add_non_blank(&mut errors, "role", &message.role);
+                }
+            }
+            Self::Input { thread_id, content, .. } => {
+                add_non_blank(&mut errors, "thread_id", thread_id);
+                add_non_blank(&mut errors, "content", content);
+            }
+            Self::ApprovalResolve { thread_id, call_id, .. } => {
+                add_non_blank(&mut errors, "thread_id", thread_id);
+                add_non_blank(&mut errors, "call_id", call_id);
+            }
+            Self::Interrupt { thread_id, .. } | Self::Shutdown { thread_id, .. } => {
+                add_non_blank(&mut errors, "thread_id", thread_id);
+            }
+        }
+
+        if errors.is_empty() { Ok(()) } else { Err(errors) }
+    }
+}
+
+fn add_non_blank(errors: &mut ValidationErrors, field: &'static str, value: &str) {
+    if !value.trim().is_empty() {
+        return;
+    }
+
+    let mut error = ValidationError::new("required");
+    error.message = Some(format!("{field} must not be blank").into());
+    errors.add(field, error);
+}
+
+/// Client action acknowledged by `/v1/agents/responses`.
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentResponsesAction {
+    SessionRestore,
+    ResponseCreate,
+    Input,
+    ApprovalResolve,
+    Interrupt,
+    Shutdown,
+}
+
+/// Server message returned by `POST /v1/agents/responses` and emitted on the
+/// WebSocket control channel. Agent response events are sent as raw
+/// `AgentStreamEvent` frames.
 #[derive(Debug, Serialize, ToSchema)]
-pub struct SpawnAgentResponse {
-    /// Unique ID of the newly created agent thread.
-    pub thread_id: String,
+#[serde(tag = "type")]
+pub enum AgentResponsesServerMessage {
+    #[serde(rename = "agent.ack")]
+    Ack {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
+        action: AgentResponsesAction,
+        accepted: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        thread_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        status: Option<AgentStatusValue>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        delivered: Option<bool>,
+    },
+    #[serde(rename = "agent.session.restored")]
+    SessionRestored {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
+        session_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        thread: Option<AgentThreadResponse>,
+        messages: Vec<AgentThreadMessageResponse>,
+    },
+    #[serde(rename = "agent.error")]
+    Error {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
+        code: String,
+        message: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        thread_id: Option<String>,
+    },
 }
 
 /// Persisted agent thread summary.
@@ -136,34 +273,7 @@ impl From<ThreadMessageRecord> for AgentThreadMessageResponse {
     }
 }
 
-// ── Input ─────────────────────────────────────────────────────────────────────
-
-/// Request body for `POST /v1/agents/{id}/input`.
-#[derive(Debug, Deserialize, ToSchema, Validate)]
-pub struct AgentInputRequest {
-    /// Plain-text message to append to the agent thread's conversation.
-    #[validate(custom(function = "validate_non_blank", message = "content must not be blank"))]
-    pub content: String,
-}
-
-/// Response body for `POST /v1/agents/{id}/input`.
-#[derive(Debug, Serialize, ToSchema)]
-pub struct AgentInputResponse {
-    /// `true` if the input was accepted.
-    pub accepted: bool,
-    pub message: String,
-}
-
-// ── Status ────────────────────────────────────────────────────────────────────
-
-/// Response body for `GET /v1/agents/{id}/status`.
-#[derive(Debug, Serialize, ToSchema)]
-pub struct AgentStatusResponse {
-    pub thread_id: String,
-    pub status: AgentStatusValue,
-}
-
-/// Serialisable mirror of [`AgentThreadStatus`].
+/// Serializable mirror of [`AgentThreadStatus`].
 #[derive(Debug, Clone, Copy, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentStatusValue {
@@ -188,38 +298,4 @@ impl From<AgentThreadStatus> for AgentStatusValue {
             AgentThreadStatus::Shutdown => Self::Shutdown,
         }
     }
-}
-
-// ── Shutdown ──────────────────────────────────────────────────────────────────
-
-/// Response body for `POST /v1/agents/{id}/shutdown`.
-#[derive(Debug, Serialize, ToSchema)]
-pub struct AgentShutdownResponse {
-    pub thread_id: String,
-    pub shutdown: bool,
-}
-
-// ── Approve ───────────────────────────────────────────────────────────────────
-
-/// Request body for `POST /v1/agents/{id}/approve`.
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct AgentApproveRequest {
-    /// The call ID of the pending tool call.
-    pub call_id: String,
-    /// `true` to approve the call, `false` to reject it.
-    pub approved: bool,
-}
-
-/// Response body for `POST /v1/agents/{id}/approve`.
-#[derive(Debug, Serialize, ToSchema)]
-pub struct AgentApproveResponse {
-    pub call_id: String,
-    pub delivered: bool,
-}
-
-/// Response body for `POST /v1/agents/{id}/interrupt`.
-#[derive(Debug, Serialize, ToSchema)]
-pub struct AgentInterruptResponse {
-    pub thread_id: String,
-    pub interrupted: bool,
 }

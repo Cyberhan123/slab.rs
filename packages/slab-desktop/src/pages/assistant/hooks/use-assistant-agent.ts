@@ -10,13 +10,18 @@ import {
   isEphemeralConversationKey,
   stripTrailingAssistantTurnArtifacts,
   toAssistantRequestMessages,
+  type AgentResponsesClientMessage,
+  type AgentResponsesServerMessage,
   type AgentStatus,
   type AssistantMessageRecord,
   type AssistantRuntimePresets,
   type AssistantThought,
 } from '../assistant-context'
 import { useAssistantLocale } from '../assistant-locale'
-import { parseAssistantAgentStreamEvent } from '../lib/assistant-agent-events'
+import {
+  parseAssistantAgentServerMessage,
+  parseAssistantAgentStreamEvent,
+} from '../lib/assistant-agent-events'
 import {
   projectAgentThreadMessages,
   projectSessionMessages,
@@ -117,6 +122,60 @@ function withThoughts(
   ]
 }
 
+function agentResponsesWebSocketUrl() {
+  const endpoint = new URL(SERVER_BASE_URL)
+  endpoint.protocol = endpoint.protocol === 'https:' ? 'wss:' : 'ws:'
+  endpoint.pathname = '/v1/agents/responses'
+  endpoint.search = ''
+  endpoint.hash = ''
+  return endpoint.toString()
+}
+
+function agentResponsesSseUrl(threadId: string) {
+  const endpoint = new URL(SERVER_BASE_URL)
+  endpoint.pathname = '/v1/agents/responses'
+  endpoint.search = ''
+  endpoint.searchParams.set('transport', 'sse')
+  endpoint.searchParams.set('thread_id', threadId)
+  endpoint.hash = ''
+  return endpoint.toString()
+}
+
+function agentEventKey(data: string): string | null {
+  try {
+    const value = JSON.parse(data) as unknown
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      'thread_id' in value &&
+      'sequence_number' in value
+    ) {
+      const threadId = (value as { thread_id?: unknown }).thread_id
+      const sequenceNumber = (value as { sequence_number?: unknown }).sequence_number
+      if (typeof threadId === 'string' && typeof sequenceNumber === 'number') {
+        return `${threadId}:${sequenceNumber}`
+      }
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
+function serverMessageThreadId(message: AgentResponsesServerMessage): string | null {
+  switch (message.type) {
+    case 'agent.ack':
+      return message.thread_id ?? null
+    case 'agent.session.restored':
+      return message.thread?.id ?? null
+    case 'agent.error':
+      return message.thread_id ?? null
+    default:
+      return null
+  }
+}
+
 export function useAssistantAgent({
   beforeRequest,
   model,
@@ -133,48 +192,17 @@ export function useAssistantAgent({
   const [thoughts, setThoughts] = useState<AssistantThought[]>([])
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
   const [eventsConnected, setEventsConnected] = useState(false)
+  const [restoreComplete, setRestoreComplete] = useState(!canLoadSession)
   const eventSourceRef = useRef<EventSource | null>(null)
+  const socketRef = useRef<WebSocket | null>(null)
+  const threadIdRef = useRef<string | null>(null)
+  const transportRef = useRef<'none' | 'sse' | 'websocket'>('none')
   const seenEventIdsRef = useRef<Set<string>>(new Set())
   const sessionRef = useRef(resolvedSessionId)
-
-  const {
-    data: sessionThreads,
-    isLoading: isThreadsLoading,
-    refetch: refetchSessionThreads,
-  } = api.useQuery(
-    'get',
-    '/v1/agents/session/{session_id}/threads',
-    {
-      params: {
-        path: {
-          session_id: resolvedSessionId,
-        },
-      },
-    },
-    {
-      enabled: canLoadSession,
-      retry: false,
-    }
-  )
-  const restoredThreadId = sessionThreads?.[0]?.id ?? null
-
-  const {
-    data: threadMessages,
-    isLoading: isThreadMessagesLoading,
-  } = api.useQuery(
-    'get',
-    '/v1/agents/{id}/messages',
-    {
-      params: {
-        path: {
-          id: restoredThreadId ?? '',
-        },
-      },
-    },
-    {
-      enabled: Boolean(restoredThreadId),
-      retry: false,
-    }
+  const handleTransportPayloadRef = useRef<(data: string) => void>(() => {})
+  const openSseRef = useRef<(threadId: string) => void>(() => {})
+  const postAgentCommandRef = useRef<(command: AgentResponsesClientMessage) => Promise<void>>(
+    async () => {}
   )
 
   const {
@@ -191,24 +219,19 @@ export function useAssistantAgent({
       },
     },
     {
-      enabled: canLoadSession && !restoredThreadId && !isThreadsLoading,
+      enabled: canLoadSession && restoreComplete && !threadId,
       retry: false,
     }
   )
 
-  const spawnMutation = api.useMutation('post', '/v1/agents/spawn')
-  const inputMutation = api.useMutation('post', '/v1/agents/{id}/input')
-  const approveMutation = api.useMutation('post', '/v1/agents/{id}/approve')
-  const interruptMutation = api.useMutation('post', '/v1/agents/{id}/interrupt')
+  const responsesMutation = api.useMutation('post', '/v1/agents/responses')
 
-  const isRequesting =
-    isBusyStatus(status) ||
-    spawnMutation.isPending ||
-    inputMutation.isPending ||
-    approveMutation.isPending
-  const isHistoryLoading =
-    isThreadsLoading ||
-    (restoredThreadId ? isThreadMessagesLoading : isSessionMessagesLoading)
+  const isRequesting = isBusyStatus(status) || responsesMutation.isPending
+  const isHistoryLoading = !restoreComplete || (!threadId && isSessionMessagesLoading)
+
+  useEffect(() => {
+    threadIdRef.current = threadId
+  }, [threadId])
 
   const replaceThought = useCallback((nextThought: AssistantThought) => {
     setThoughts((current) => {
@@ -356,7 +379,6 @@ export function useAssistantAgent({
               thought.status === 'loading' ? { ...thought, status: 'abort' } : thought
             )
           )
-          void refetchSessionThreads()
           break
         case 'lagged':
           replaceThought({
@@ -387,7 +409,6 @@ export function useAssistantAgent({
             )
           )
           completeAssistantTurn(event.text)
-          void refetchSessionThreads()
           break
         case 'turn_failed':
           setStatus('errored')
@@ -406,20 +427,123 @@ export function useAssistantAgent({
       appendAssistantError,
       completeAssistantTurn,
       locale.eventStreamLagged,
-      refetchSessionThreads,
       replaceThought,
       updateThoughtStatus,
     ]
   )
 
+  const handleServerMessage = useCallback(
+    (message: AgentResponsesServerMessage) => {
+      switch (message.type) {
+        case 'agent.ack':
+          if (message.thread_id) {
+            setThreadId(message.thread_id)
+          }
+          if (message.status) {
+            setStatus(message.status)
+          }
+          if (message.action === 'approval_resolve' && message.delivered === false) {
+            toast.error(locale.approvalNotDelivered)
+          }
+          break
+        case 'agent.session.restored':
+          setRestoreComplete(true)
+          setActiveConversation(message.session_id)
+          setThreadId(message.thread?.id ?? null)
+          setMessages(projectAgentThreadMessages(message.messages))
+          setStatus(message.thread?.status ?? null)
+          break
+        case 'agent.error':
+          setRestoreComplete(true)
+          setStatus('errored')
+          appendAssistantError(message.message)
+          toast.error(locale.requestFailed, {
+            description: message.message,
+          })
+          break
+      }
+    },
+    [appendAssistantError, locale.approvalNotDelivered, locale.requestFailed]
+  )
+
+  const handleTransportPayload = useCallback(
+    (data: string) => {
+      const serverMessage = parseAssistantAgentServerMessage(data)
+      if (serverMessage) {
+        handleServerMessage(serverMessage)
+        return
+      }
+
+      const key = agentEventKey(data)
+      if (key) {
+        if (seenEventIdsRef.current.has(key)) {
+          return
+        }
+        seenEventIdsRef.current.add(key)
+      }
+      handleAgentEvent(data)
+    },
+    [handleAgentEvent, handleServerMessage]
+  )
+
+  const openSse = useCallback(
+    (nextThreadId: string) => {
+      eventSourceRef.current?.close()
+      const source = new EventSource(agentResponsesSseUrl(nextThreadId))
+      eventSourceRef.current = source
+      transportRef.current = 'sse'
+      source.addEventListener('open', () => setEventsConnected(true))
+      source.addEventListener('error', () => setEventsConnected(false))
+      source.addEventListener('message', (message: MessageEvent<string>) => {
+        handleTransportPayload(message.data)
+      })
+    },
+    [handleTransportPayload]
+  )
+
+  const postAgentCommand = useCallback(
+    async (command: AgentResponsesClientMessage) => {
+      const response = await responsesMutation.mutateAsync({
+        body: command,
+      })
+      handleServerMessage(response)
+      const nextThreadId = serverMessageThreadId(response)
+      if (nextThreadId) {
+        openSse(nextThreadId)
+      }
+    },
+    [handleServerMessage, openSse, responsesMutation]
+  )
+
   useEffect(() => {
-    if (sessionRef.current === resolvedSessionId) {
+    handleTransportPayloadRef.current = handleTransportPayload
+  }, [handleTransportPayload])
+
+  useEffect(() => {
+    openSseRef.current = openSse
+  }, [openSse])
+
+  useEffect(() => {
+    postAgentCommandRef.current = postAgentCommand
+  }, [postAgentCommand])
+
+  const sendAgentCommand = useCallback(async (command: AgentResponsesClientMessage) => {
+    const socket = socketRef.current
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(command))
       return
     }
 
+    await postAgentCommandRef.current(command)
+  }, [])
+
+  useEffect(() => {
     sessionRef.current = resolvedSessionId
+    socketRef.current?.close()
     eventSourceRef.current?.close()
+    socketRef.current = null
     eventSourceRef.current = null
+    transportRef.current = 'none'
     seenEventIdsRef.current.clear()
     setActiveConversation(undefined)
     setMessages([])
@@ -428,72 +552,92 @@ export function useAssistantAgent({
     setThoughts([])
     setPendingApproval(null)
     setEventsConnected(false)
-  }, [resolvedSessionId])
+    setRestoreComplete(!canLoadSession)
 
-  useEffect(() => {
-    if (isRequesting || isHistoryLoading) {
-      return
-    }
-
-    if (restoredThreadId) {
-      setThreadId(restoredThreadId)
-      setMessages(projectAgentThreadMessages(threadMessages))
-      setStatus(sessionThreads?.[0]?.status ?? null)
-      return
-    }
-
-    setThreadId(null)
-    setMessages(projectSessionMessages(sessionMessages))
-    setStatus(null)
-  }, [
-    isHistoryLoading,
-    isRequesting,
-    restoredThreadId,
-    sessionMessages,
-    sessionThreads,
-    threadMessages,
-  ])
-
-  useEffect(() => {
-    seenEventIdsRef.current.clear()
-  }, [threadId])
-
-  useEffect(() => {
-    if (!threadId) {
-      setEventsConnected(false)
+    if (!canLoadSession) {
       return undefined
     }
 
-    const source = new EventSource(
-      `${SERVER_BASE_URL}/v1/agents/${encodeURIComponent(threadId)}/events`
-    )
-    const handleOpen = () => setEventsConnected(true)
-    const handleError = () => setEventsConnected(false)
-    const handleMessage = (message: MessageEvent<string>) => {
-      const eventId = message.lastEventId || message.data
-      if (seenEventIdsRef.current.has(eventId)) {
+    const socket = new WebSocket(agentResponsesWebSocketUrl())
+    socketRef.current = socket
+    transportRef.current = 'websocket'
+    let opened = false
+    let fallbackStarted = false
+    let disposed = false
+
+    const fallbackRestore = () => {
+      if (fallbackStarted || disposed) {
+        return
+      }
+      fallbackStarted = true
+      transportRef.current = 'none'
+      void postAgentCommandRef.current({
+        request_id: nextId('request'),
+        session_id: resolvedSessionId,
+        type: 'agent.session.restore',
+      })
+    }
+
+    socket.addEventListener('open', () => {
+      opened = true
+      setEventsConnected(true)
+      socket.send(
+        JSON.stringify({
+          request_id: nextId('request'),
+          session_id: resolvedSessionId,
+          type: 'agent.session.restore',
+        } satisfies AgentResponsesClientMessage)
+      )
+    })
+    socket.addEventListener('message', (event) => {
+      handleTransportPayloadRef.current(String(event.data))
+    })
+    socket.addEventListener('error', () => {
+      setEventsConnected(false)
+      if (!opened) {
+        fallbackRestore()
+      }
+    })
+    socket.addEventListener('close', () => {
+      if (socketRef.current === socket) {
+        socketRef.current = null
+      }
+      if (transportRef.current === 'websocket') {
+        transportRef.current = 'none'
+      }
+      setEventsConnected(false)
+      if (!opened) {
+        fallbackRestore()
         return
       }
 
-      seenEventIdsRef.current.add(eventId)
-      handleAgentEvent(message.data)
-    }
-    eventSourceRef.current = source
-    source.addEventListener('open', handleOpen)
-    source.addEventListener('error', handleError)
-    source.addEventListener('message', handleMessage)
+      const activeThreadId = threadIdRef.current
+      if (activeThreadId) {
+        openSseRef.current(activeThreadId)
+      }
+    })
 
     return () => {
-      source.removeEventListener('open', handleOpen)
-      source.removeEventListener('error', handleError)
-      source.removeEventListener('message', handleMessage)
-      source.close()
-      if (eventSourceRef.current === source) {
-        eventSourceRef.current = null
+      disposed = true
+      socket.close()
+      eventSourceRef.current?.close()
+      if (socketRef.current === socket) {
+        socketRef.current = null
       }
+      eventSourceRef.current = null
+      transportRef.current = 'none'
       setEventsConnected(false)
     }
-  }, [handleAgentEvent, threadId])
+  }, [canLoadSession, resolvedSessionId])
+
+  useEffect(() => {
+    if (isRequesting || isHistoryLoading || threadId) {
+      return
+    }
+
+    setMessages(projectSessionMessages(sessionMessages))
+    setStatus(null)
+  }, [isHistoryLoading, isRequesting, sessionMessages, threadId])
 
   const handleSubmit = useCallback(
     async (value: string) => {
@@ -529,27 +673,21 @@ export function useAssistantAgent({
             ...messages.map((message) => message.message),
             userMessage.message,
           ])
-          const response = await spawnMutation.mutateAsync({
-            body: {
-              config: toAgentConfig(model, runtimePresets),
-              messages: requestMessages,
-              session_id: resolvedSessionId,
-            },
+          await sendAgentCommand({
+            config: toAgentConfig(model, runtimePresets),
+            messages: requestMessages,
+            request_id: nextId('request'),
+            session_id: resolvedSessionId,
+            type: 'agent.response.create',
           })
-
-          setThreadId(response.thread_id)
           return
         }
 
-        await inputMutation.mutateAsync({
-          body: {
-            content: prompt,
-          },
-          params: {
-            path: {
-              id: threadId,
-            },
-          },
+        await sendAgentCommand({
+          content: prompt,
+          request_id: nextId('request'),
+          thread_id: threadId,
+          type: 'agent.input',
         })
         setStatus('running')
       } catch (error) {
@@ -565,14 +703,13 @@ export function useAssistantAgent({
       appendAssistantError,
       beforeRequest,
       canLoadSession,
-      inputMutation,
       isRequesting,
       locale.requestFailed,
       messages,
       model,
       resolvedSessionId,
       runtimePresets,
-      spawnMutation,
+      sendAgentCommand,
       threadId,
     ]
   )
@@ -588,21 +725,13 @@ export function useAssistantAgent({
       updateThoughtStatus(decision.callId, approved ? 'loading' : 'abort')
 
       try {
-        const response = await approveMutation.mutateAsync({
-          body: {
-            approved,
-            call_id: decision.callId,
-          },
-          params: {
-            path: {
-              id: threadId,
-            },
-          },
+        await sendAgentCommand({
+          approved,
+          call_id: decision.callId,
+          request_id: nextId('request'),
+          thread_id: threadId,
+          type: 'agent.approval.resolve',
         })
-
-        if (!response.delivered) {
-          toast.error(locale.approvalNotDelivered)
-        }
       } catch (error) {
         toast.error(locale.approvalFailed, {
           description: getErrorMessage(error),
@@ -610,10 +739,9 @@ export function useAssistantAgent({
       }
     },
     [
-      approveMutation,
       locale.approvalFailed,
-      locale.approvalNotDelivered,
       pendingApproval,
+      sendAgentCommand,
       threadId,
       updateThoughtStatus,
     ]
@@ -624,14 +752,11 @@ export function useAssistantAgent({
       return
     }
 
-    void interruptMutation
-      .mutateAsync({
-        params: {
-          path: {
-            id: threadId,
-          },
-        },
-      })
+    void sendAgentCommand({
+      request_id: nextId('request'),
+      thread_id: threadId,
+      type: 'agent.interrupt',
+    })
       .then(() => {
         setStatus('interrupting')
         setThoughts((current) =>
@@ -645,7 +770,7 @@ export function useAssistantAgent({
           description: getErrorMessage(error),
         })
       })
-  }, [interruptMutation, isRequesting, locale.interruptFailed, threadId])
+  }, [isRequesting, locale.interruptFailed, sendAgentCommand, threadId])
 
   const messagesWithThoughts = useMemo(
     () => withThoughts(messages, thoughts),

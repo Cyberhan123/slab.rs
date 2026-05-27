@@ -1,4 +1,5 @@
 pub mod agent_adapter;
+pub mod agent_event_hub;
 #[path = "settings.rs"]
 pub mod config_migration;
 pub mod db;
@@ -8,4 +9,3 @@ pub mod plugin_runtime;
 pub(crate) mod process_supervisor;
 pub mod rpc;
 pub mod runtime;
-pub mod sse_notify;

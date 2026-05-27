@@ -36,15 +36,8 @@ const documentedMethods: readonly HttpMethod[] = ["delete", "get", "post", "put"
 
 export const executableSmokeOperations = [
   { method: "get", path: "/health" },
-  { method: "post", path: "/v1/agents/spawn" },
-  { method: "get", path: "/v1/agents/{id}/status" },
-  { method: "get", path: "/v1/agents/session/{session_id}/threads" },
-  { method: "get", path: "/v1/agents/{id}/messages" },
-  { method: "post", path: "/v1/agents/{id}/input" },
-  { method: "post", path: "/v1/agents/{id}/shutdown" },
-  { method: "post", path: "/v1/agents/{id}/approve" },
-  { method: "post", path: "/v1/agents/{id}/interrupt" },
-  { method: "get", path: "/v1/agents/{id}/events" },
+  { method: "get", path: "/v1/agents/responses" },
+  { method: "post", path: "/v1/agents/responses" },
   { method: "get", path: "/v1/audio/transcriptions" },
   { method: "post", path: "/v1/audio/transcriptions" },
   { method: "get", path: "/v1/audio/transcriptions/{id}" },

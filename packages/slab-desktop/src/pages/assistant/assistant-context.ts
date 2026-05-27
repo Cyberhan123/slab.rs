@@ -4,6 +4,8 @@
 export {
   DEFAULT_CONVERSATION_KEY,
   isEphemeralConversationKey,
+  type AgentResponsesClientMessage,
+  type AgentResponsesServerMessage,
   type AgentStatus,
   type AgentThreadMessageResponse,
   type AgentThreadResponse,

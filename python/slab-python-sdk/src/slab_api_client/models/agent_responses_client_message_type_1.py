@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
+from ..models.agent_responses_client_message_type_1_type import (
+    AgentResponsesClientMessageType1Type,
+)
 from ..types import UNSET, Unset
 
 if TYPE_CHECKING:
@@ -13,26 +16,31 @@ if TYPE_CHECKING:
     from ..models.message_input import MessageInput
 
 
-T = TypeVar("T", bound="SpawnAgentRequest")
+T = TypeVar("T", bound="AgentResponsesClientMessageType1")
 
 
 @_attrs_define
-class SpawnAgentRequest:
-    """Request body for `POST /v1/agents/spawn`.
-
+class AgentResponsesClientMessageType1:
+    """
     Attributes:
-        session_id (str): Chat session ID that backs this agent thread.
+        session_id (str):
+        type_ (AgentResponsesClientMessageType1Type):
         config (AgentConfigInput | Unset): Agent configuration provided by the caller.
-        messages (list[MessageInput] | Unset): Initial messages to seed the agent's conversation.
+        messages (list[MessageInput] | Unset):
+        request_id (None | str | Unset):
     """
 
     session_id: str
+    type_: AgentResponsesClientMessageType1Type
     config: AgentConfigInput | Unset = UNSET
     messages: list[MessageInput] | Unset = UNSET
+    request_id: None | str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         session_id = self.session_id
+
+        type_ = self.type_.value
 
         config: dict[str, Any] | Unset = UNSET
         if not isinstance(self.config, Unset):
@@ -45,17 +53,26 @@ class SpawnAgentRequest:
                 messages_item = messages_item_data.to_dict()
                 messages.append(messages_item)
 
+        request_id: None | str | Unset
+        if isinstance(self.request_id, Unset):
+            request_id = UNSET
+        else:
+            request_id = self.request_id
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update(
             {
                 "session_id": session_id,
+                "type": type_,
             }
         )
         if config is not UNSET:
             field_dict["config"] = config
         if messages is not UNSET:
             field_dict["messages"] = messages
+        if request_id is not UNSET:
+            field_dict["request_id"] = request_id
 
         return field_dict
 
@@ -66,6 +83,8 @@ class SpawnAgentRequest:
 
         d = dict(src_dict)
         session_id = d.pop("session_id")
+
+        type_ = AgentResponsesClientMessageType1Type(d.pop("type"))
 
         _config = d.pop("config", UNSET)
         config: AgentConfigInput | Unset
@@ -83,14 +102,25 @@ class SpawnAgentRequest:
 
                 messages.append(messages_item)
 
-        spawn_agent_request = cls(
+        def _parse_request_id(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        request_id = _parse_request_id(d.pop("request_id", UNSET))
+
+        agent_responses_client_message_type_1 = cls(
             session_id=session_id,
+            type_=type_,
             config=config,
             messages=messages,
+            request_id=request_id,
         )
 
-        spawn_agent_request.additional_properties = d
-        return spawn_agent_request
+        agent_responses_client_message_type_1.additional_properties = d
+        return agent_responses_client_message_type_1
 
     @property
     def additional_keys(self) -> list[str]:

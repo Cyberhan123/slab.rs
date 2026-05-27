@@ -21,7 +21,7 @@ class AgentThreadResponse:
         depth (int):
         id (str):
         session_id (str):
-        status (AgentStatusValue): Serialisable mirror of [`AgentThreadStatus`].
+        status (AgentStatusValue): Serializable mirror of [`AgentThreadStatus`].
         updated_at (str):
         completion_text (None | str | Unset):
         parent_id (None | str | Unset):

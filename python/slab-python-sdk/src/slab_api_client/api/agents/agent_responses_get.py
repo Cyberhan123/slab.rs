@@ -1,23 +1,31 @@
 from http import HTTPStatus
 from typing import Any
-from urllib.parse import quote
 
 import httpx
 
 from ... import errors
 from ...client import AuthenticatedClient, Client
-from ...types import Response
+from ...types import UNSET, Response, Unset
 
 
 def _get_kwargs(
-    id: str,
+    *,
+    transport: str | Unset = UNSET,
+    thread_id: str | Unset = UNSET,
 ) -> dict[str, Any]:
+
+    params: dict[str, Any] = {}
+
+    params["transport"] = transport
+
+    params["thread_id"] = thread_id
+
+    params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/v1/agents/{id}/events".format(
-            id=quote(str(id), safe=""),
-        ),
+        "url": "/v1/agents/responses",
+        "params": params,
     }
 
     return _kwargs
@@ -26,7 +34,13 @@ def _get_kwargs(
 def _parse_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
 ) -> Any | None:
+    if response.status_code == 101:
+        return None
+
     if response.status_code == 200:
+        return None
+
+    if response.status_code == 400:
         return None
 
     if client.raise_on_unexpected_status:
@@ -47,13 +61,15 @@ def _build_response(
 
 
 def sync_detailed(
-    id: str,
     *,
     client: AuthenticatedClient | Client,
+    transport: str | Unset = UNSET,
+    thread_id: str | Unset = UNSET,
 ) -> Response[Any]:
     """
     Args:
-        id (str):
+        transport (str | Unset):
+        thread_id (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -64,7 +80,8 @@ def sync_detailed(
     """
 
     kwargs = _get_kwargs(
-        id=id,
+        transport=transport,
+        thread_id=thread_id,
     )
 
     response = client.get_httpx_client().request(
@@ -75,13 +92,15 @@ def sync_detailed(
 
 
 async def asyncio_detailed(
-    id: str,
     *,
     client: AuthenticatedClient | Client,
+    transport: str | Unset = UNSET,
+    thread_id: str | Unset = UNSET,
 ) -> Response[Any]:
     """
     Args:
-        id (str):
+        transport (str | Unset):
+        thread_id (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -92,7 +111,8 @@ async def asyncio_detailed(
     """
 
     kwargs = _get_kwargs(
-        id=id,
+        transport=transport,
+        thread_id=thread_id,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)

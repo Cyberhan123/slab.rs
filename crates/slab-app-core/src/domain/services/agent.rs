@@ -12,21 +12,27 @@ use slab_agent::port::{AgentStorePort, ThreadMessageRecord, ThreadSnapshot};
 use slab_types::ConversationMessage;
 
 use crate::error::AppCoreError;
-use crate::infra::sse_notify::{AgentEventSubscription, SseNotifyAdapter};
+use crate::infra::agent_event_hub::{AgentEventHub, AgentEventSubscription};
 
 /// Thin wrapper around [`AgentControl`] that exposes an application-layer API.
 #[derive(Clone)]
 pub struct AgentService {
     control: Arc<AgentControl>,
     store: Arc<dyn AgentStorePort>,
-    events: Arc<SseNotifyAdapter>,
+    events: Arc<AgentEventHub>,
+}
+
+/// Persisted session state restored by the unified agent responses route.
+pub struct RestoredAgentSession {
+    pub thread: Option<ThreadSnapshot>,
+    pub messages: Vec<ThreadMessageRecord>,
 }
 
 impl AgentService {
     pub fn new(
         control: Arc<AgentControl>,
         store: Arc<dyn AgentStorePort>,
-        events: Arc<SseNotifyAdapter>,
+        events: Arc<AgentEventHub>,
     ) -> Self {
         Self { control, store, events }
     }
@@ -94,6 +100,19 @@ impl AgentService {
             .list_session_threads(session_id)
             .await
             .map_err(|e| AppCoreError::Internal(e.to_string()))
+    }
+
+    /// Restore the latest root thread for a chat session and its persisted messages.
+    pub async fn restore_session(
+        &self,
+        session_id: &str,
+    ) -> Result<RestoredAgentSession, AppCoreError> {
+        let thread = self.list_session_threads(session_id).await?.into_iter().next();
+        let messages = match thread.as_ref() {
+            Some(thread) => self.list_thread_messages(&thread.id).await?,
+            None => Vec::new(),
+        };
+        Ok(RestoredAgentSession { thread, messages })
     }
 
     /// List persisted messages for a thread in replay order.

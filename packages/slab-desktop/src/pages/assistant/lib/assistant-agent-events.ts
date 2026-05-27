@@ -1,4 +1,4 @@
-import type { AgentStatus } from './assistant-types'
+import type { AgentResponsesServerMessage, AgentStatus } from './assistant-types'
 
 export type AssistantAgentStreamEvent =
   | { type: 'agent_status'; status: AgentStatus }
@@ -76,6 +76,30 @@ export function parseAssistantAgentStreamEvent(data: string): AssistantAgentStre
     case 'response.metrics':
     case 'response.background':
       return null
+    default:
+      return null
+  }
+}
+
+export function parseAssistantAgentServerMessage(
+  data: string
+): AgentResponsesServerMessage | null {
+  let value: unknown
+  try {
+    value = JSON.parse(data)
+  } catch {
+    return null
+  }
+
+  if (!isRecord(value) || typeof value.type !== 'string') {
+    return null
+  }
+
+  switch (value.type) {
+    case 'agent.ack':
+    case 'agent.session.restored':
+    case 'agent.error':
+      return value as AgentResponsesServerMessage
     default:
       return null
   }

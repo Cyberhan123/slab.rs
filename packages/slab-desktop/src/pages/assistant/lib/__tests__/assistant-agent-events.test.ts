@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseAssistantAgentStreamEvent } from '../assistant-agent-events'
+import {
+  parseAssistantAgentServerMessage,
+  parseAssistantAgentStreamEvent,
+} from '../assistant-agent-events'
 
 describe('assistant agent SSE parser', () => {
   it.each([
@@ -56,5 +59,29 @@ describe('assistant agent SSE parser', () => {
         '{"thread_id":"thread-1","sequence_number":9,"type":"response.metrics","metrics":{"name":"turn","duration_ms":1}}'
       )
     ).toBeNull()
+  })
+
+  it('parses agent transport control messages', () => {
+    expect(
+      parseAssistantAgentServerMessage(
+        '{"type":"agent.ack","action":"approval_resolve","accepted":false,"delivered":false,"thread_id":"thread-1"}'
+      )
+    ).toMatchObject({
+      accepted: false,
+      action: 'approval_resolve',
+      delivered: false,
+      thread_id: 'thread-1',
+      type: 'agent.ack',
+    })
+    expect(
+      parseAssistantAgentServerMessage(
+        '{"type":"agent.session.restored","session_id":"session-1","messages":[]}'
+      )
+    ).toMatchObject({
+      messages: [],
+      session_id: 'session-1',
+      type: 'agent.session.restored',
+    })
+    expect(parseAssistantAgentServerMessage('{"type":"response.output_text.delta"}')).toBeNull()
   })
 })

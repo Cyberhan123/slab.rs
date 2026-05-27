@@ -11,59 +11,69 @@ export function registerAgentsAndLspSmoke(getServer: () => SlabServerTestHarness
       server = getServer();
     });
 
-    it("covers agent control and workspace LSP routes without running agent work", async () => {
+    it("covers unified agent responses and workspace LSP routes without running agent work", async () => {
       await expectError(
         server,
-        "/v1/agents/spawn",
+        "/v1/agents/responses",
         400,
         jsonInit(
           {
+            messages: [],
             session_id: "",
-            messages: []
-          } satisfies Schema["SpawnAgentRequest"],
+            type: "agent.response.create"
+          } satisfies Schema["AgentResponsesClientMessage"],
           { method: "POST" }
         )
       );
-      await expectError(server, "/v1/agents/missing-agent/status", 404);
-      const sessionThreads = await expectJson<Schema["AgentThreadResponse"][]>(
+
+      const restored = await expectJson<Schema["AgentResponsesServerMessage"]>(
         server,
-        "/v1/agents/session/missing-session/threads"
+        "/v1/agents/responses",
+        jsonInit(
+          {
+            session_id: "missing-session",
+            type: "agent.session.restore"
+          } satisfies Schema["AgentResponsesClientMessage"],
+          { method: "POST" }
+        )
       );
-      expect(sessionThreads.response.ok).toBe(true);
-      expect(sessionThreads.body).toEqual([]);
-      await expectError(server, "/v1/agents/missing-agent/messages", 404);
+      expect(restored.response.ok).toBe(true);
+      expect(restored.body).toMatchObject({
+        messages: [],
+        session_id: "missing-session",
+        type: "agent.session.restored"
+      });
+
       await expectError(
         server,
-        "/v1/agents/missing-agent/input",
+        "/v1/agents/responses",
         404,
         jsonInit(
           {
-            content: "resume this agent"
-          } satisfies Schema["AgentInputRequest"],
+            content: "resume this agent",
+            thread_id: "missing-agent",
+            type: "agent.input"
+          } satisfies Schema["AgentResponsesClientMessage"],
           { method: "POST" }
         )
       );
-      await expectError(server, "/v1/agents/missing-agent/shutdown", 404, { method: "POST" });
-      await expectError(server, "/v1/agents/missing-agent/interrupt", 404, { method: "POST" });
 
-      const approval = await expectJson<Schema["AgentApproveResponse"]>(
+      const sseMissingThread = await expectError(
         server,
-        "/v1/agents/missing-agent/approve",
-        jsonInit(
-          {
-            approved: true,
-            call_id: "missing-call"
-          } satisfies Schema["AgentApproveRequest"],
-          { method: "POST" }
-        )
+        "/v1/agents/responses?transport=sse",
+        400
       );
-      expect(approval.response.ok).toBe(true);
-      expect(approval.body.delivered).toBe(false);
+      expect(sseMissingThread.message).toContain("thread_id");
 
-      const events = await server.request("/v1/agents/missing-agent/events");
+      const events = await server.request(
+        "/v1/agents/responses?transport=sse&thread_id=missing-agent"
+      );
       expect(events.ok).toBe(true);
       expect(events.headers.get("content-type")).toContain("text/event-stream");
       await events.body?.cancel();
+
+      const oldAgentRoute = await server.request("/v1/agents/missing-agent/events");
+      expect(oldAgentRoute.status).toBe(404);
 
       const lspUpgradeMissing = await server.request("/v1/workspace/lsp/typescript");
       expect(lspUpgradeMissing.status).not.toBe(404);

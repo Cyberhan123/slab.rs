@@ -83,13 +83,16 @@ impl AppState {
         // Build the AgentControl with port adapters and register built-in tools.
         let store_for_agent: Arc<dyn slab_agent::port::AgentStorePort> =
             Arc::clone(&store) as Arc<dyn slab_agent::port::AgentStorePort>;
-        let sse_notify = Arc::new(crate::infra::sse_notify::SseNotifyAdapter::new());
-        let agent_control =
-            Arc::new(build_agent_control(&context, Arc::clone(&store), Arc::clone(&sse_notify)));
+        let agent_event_hub = Arc::new(crate::infra::agent_event_hub::AgentEventHub::new());
+        let agent_control = Arc::new(build_agent_control(
+            &context,
+            Arc::clone(&store),
+            Arc::clone(&agent_event_hub),
+        ));
         let agent_service = crate::domain::services::AgentService::new(
             agent_control,
             store_for_agent,
-            Arc::clone(&sse_notify),
+            Arc::clone(&agent_event_hub),
         );
 
         let services = Arc::new(crate::domain::services::AppServices::new(
@@ -108,7 +111,7 @@ impl AppState {
 fn build_agent_control(
     ctx: &AppContext,
     store: Arc<crate::infra::db::AnyStore>,
-    notify: Arc<crate::infra::sse_notify::SseNotifyAdapter>,
+    notify: Arc<crate::infra::agent_event_hub::AgentEventHub>,
 ) -> slab_agent::AgentControl {
     use slab_agent::{AgentControl, ToolRouter};
     use slab_agent_tools::ShellPolicy;

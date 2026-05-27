@@ -9,6 +9,8 @@ export type AgentStatus = components['schemas']['AgentStatusValue']
 export type AgentThreadResponse = components['schemas']['AgentThreadResponse']
 export type AgentThreadMessageResponse = components['schemas']['AgentThreadMessageResponse']
 export type AssistantAgentRequestMessage = components['schemas']['MessageInput']
+export type AgentResponsesClientMessage = components['schemas']['AgentResponsesClientMessage']
+export type AgentResponsesServerMessage = components['schemas']['AgentResponsesServerMessage']
 
 export type AssistantRequestErrorType = AssistantApiError['type']
 

@@ -20,144 +20,16 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/agents/session/{session_id}/threads": {
+    "/v1/agents/responses": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["list_agent_session_threads"];
+        get: operations["agent_responses_get"];
         put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agents/spawn": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["spawn_agent"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agents/{id}/approve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["agent_approve"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agents/{id}/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["agent_events"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agents/{id}/input": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["agent_input"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agents/{id}/interrupt": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["agent_interrupt"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agents/{id}/messages": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_agent_thread_messages"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agents/{id}/shutdown": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["agent_shutdown"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agents/{id}/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["agent_status"];
-        put?: never;
-        post?: never;
+        post: operations["agent_responses_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1007,18 +879,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @description Request body for `POST /v1/agents/{id}/approve`. */
-        AgentApproveRequest: {
-            /** @description `true` to approve the call, `false` to reject it. */
-            approved: boolean;
-            /** @description The call ID of the pending tool call. */
-            call_id: string;
-        };
-        /** @description Response body for `POST /v1/agents/{id}/approve`. */
-        AgentApproveResponse: {
-            call_id: string;
-            delivered: boolean;
-        };
         /** @description Agent configuration provided by the caller. */
         AgentConfigInput: {
             allowed_tools?: string[] | null;
@@ -1031,34 +891,79 @@ export interface components {
             /** Format: float */
             temperature?: number | null;
         };
-        /** @description Request body for `POST /v1/agents/{id}/input`. */
-        AgentInputRequest: {
-            /** @description Plain-text message to append to the agent thread's conversation. */
+        /**
+         * @description Client action acknowledged by `/v1/agents/responses`.
+         * @enum {string}
+         */
+        AgentResponsesAction: "session_restore" | "response_create" | "input" | "approval_resolve" | "interrupt" | "shutdown";
+        /** @description Client message accepted by `GET` WebSocket and `POST /v1/agents/responses`. */
+        AgentResponsesClientMessage: {
+            request_id?: string | null;
+            session_id: string;
+            /** @enum {string} */
+            type: "agent.session.restore";
+        } | {
+            config?: components["schemas"]["AgentConfigInput"];
+            messages?: components["schemas"]["MessageInput"][];
+            request_id?: string | null;
+            session_id: string;
+            /** @enum {string} */
+            type: "agent.response.create";
+        } | {
             content: string;
-        };
-        /** @description Response body for `POST /v1/agents/{id}/input`. */
-        AgentInputResponse: {
-            /** @description `true` if the input was accepted. */
-            accepted: boolean;
-            message: string;
-        };
-        /** @description Response body for `POST /v1/agents/{id}/interrupt`. */
-        AgentInterruptResponse: {
-            interrupted: boolean;
+            request_id?: string | null;
             thread_id: string;
-        };
-        /** @description Response body for `POST /v1/agents/{id}/shutdown`. */
-        AgentShutdownResponse: {
-            shutdown: boolean;
+            /** @enum {string} */
+            type: "agent.input";
+        } | {
+            approved: boolean;
+            call_id: string;
+            request_id?: string | null;
             thread_id: string;
-        };
-        /** @description Response body for `GET /v1/agents/{id}/status`. */
-        AgentStatusResponse: {
-            status: components["schemas"]["AgentStatusValue"];
+            /** @enum {string} */
+            type: "agent.approval.resolve";
+        } | {
+            request_id?: string | null;
             thread_id: string;
+            /** @enum {string} */
+            type: "agent.interrupt";
+        } | {
+            request_id?: string | null;
+            thread_id: string;
+            /** @enum {string} */
+            type: "agent.shutdown";
         };
         /**
-         * @description Serialisable mirror of [`AgentThreadStatus`].
+         * @description Server message returned by `POST /v1/agents/responses` and emitted on the
+         *     WebSocket control channel. Agent response events are sent as raw
+         *     `AgentStreamEvent` frames.
+         */
+        AgentResponsesServerMessage: {
+            accepted: boolean;
+            action: components["schemas"]["AgentResponsesAction"];
+            delivered?: boolean | null;
+            request_id?: string | null;
+            status?: null | components["schemas"]["AgentStatusValue"];
+            thread_id?: string | null;
+            /** @enum {string} */
+            type: "agent.ack";
+        } | {
+            messages: components["schemas"]["AgentThreadMessageResponse"][];
+            request_id?: string | null;
+            session_id: string;
+            thread?: null | components["schemas"]["AgentThreadResponse"];
+            /** @enum {string} */
+            type: "agent.session.restored";
+        } | {
+            code: string;
+            message: string;
+            request_id?: string | null;
+            thread_id?: string | null;
+            /** @enum {string} */
+            type: "agent.error";
+        };
+        /**
+         * @description Serializable mirror of [`AgentThreadStatus`].
          * @enum {string}
          */
         AgentStatusValue: "pending" | "running" | "interrupting" | "interrupted" | "completed" | "errored" | "shutdown";
@@ -2232,20 +2137,6 @@ export interface components {
             /** @description Whether the packaged runtime payload is already present under `resources/libs`. */
             runtime_payload_installed: boolean;
         };
-        /** @description Request body for `POST /v1/agents/spawn`. */
-        SpawnAgentRequest: {
-            /** @description Agent runtime configuration (model, temperature, etc.). */
-            config?: components["schemas"]["AgentConfigInput"];
-            /** @description Initial messages to seed the agent's conversation. */
-            messages?: components["schemas"]["MessageInput"][];
-            /** @description Chat session ID that backs this agent thread. */
-            session_id: string;
-        };
-        /** @description Response body for `POST /v1/agents/spawn`. */
-        SpawnAgentResponse: {
-            /** @description Unique ID of the newly created agent thread. */
-            thread_id: string;
-        };
         StopPluginRequest: {
             lastError?: string | null;
         };
@@ -2686,57 +2577,33 @@ export interface operations {
             };
         };
     };
-    list_agent_session_threads: {
+    agent_responses_get: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Chat session ID */
-                session_id: string;
+            query?: {
+                /** @description Use `sse` for the fallback event stream */
+                transport?: string;
+                /** @description Agent thread ID for SSE fallback */
+                thread_id?: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Agent threads for the session */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentThreadResponse"][];
-                };
-            };
-            /** @description Internal error */
-            500: {
+            /** @description WebSocket upgrade for bidirectional agent responses */
+            101: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-        };
-    };
-    spawn_agent: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SpawnAgentRequest"];
-            };
-        };
-        responses: {
-            /** @description Agent thread spawned */
-            201: {
+            /** @description SSE fallback stream of agent response events */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["SpawnAgentResponse"];
-                };
+                content?: never;
             };
             /** @description Bad request */
             400: {
@@ -2745,94 +2612,36 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Thread limit exceeded */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Internal error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
         };
     };
-    agent_approve: {
+    agent_responses_post: {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                /** @description Agent thread ID */
-                id: string;
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AgentApproveRequest"];
+                "application/json": components["schemas"]["AgentResponsesClientMessage"];
             };
         };
         responses: {
-            /** @description Approval decision delivered */
+            /** @description Agent response command accepted */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AgentApproveResponse"];
+                    "application/json": components["schemas"]["AgentResponsesServerMessage"];
                 };
             };
-        };
-    };
-    agent_events: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Agent thread ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description SSE stream of turn events */
-            200: {
+            /** @description Bad request */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-        };
-    };
-    agent_input: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Agent thread ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AgentInputRequest"];
-            };
-        };
-        responses: {
-            /** @description Input accepted */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentInputResponse"];
-                };
             };
             /** @description Thread not found */
             404: {
@@ -2843,147 +2652,6 @@ export interface operations {
             };
             /** @description Thread is already running */
             429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Internal error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    agent_interrupt: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Agent thread ID to interrupt */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Thread interrupted */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentInterruptResponse"];
-                };
-            };
-            /** @description Thread not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    list_agent_thread_messages: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Agent thread ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Persisted agent thread messages */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentThreadMessageResponse"][];
-                };
-            };
-            /** @description Thread not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Internal error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    agent_shutdown: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Agent thread ID to shut down */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Agent thread shut down */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentShutdownResponse"];
-                };
-            };
-            /** @description Thread not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Internal error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    agent_status: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Agent thread ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Agent thread status */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentStatusResponse"];
-                };
-            };
-            /** @description Thread not found */
-            404: {
                 headers: {
                     [name: string]: unknown;
                 };
