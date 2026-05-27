@@ -1,6 +1,6 @@
-pub mod compaction;
-pub mod resource;
-pub mod response;
+mod compaction;
+mod resource;
+mod response;
 
 pub use compaction::*;
 pub use resource::*;

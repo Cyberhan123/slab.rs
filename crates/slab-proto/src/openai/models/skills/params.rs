@@ -31,7 +31,7 @@ pub mod inline_skill_param {
     /// Defines an inline skill for this request.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
     #[derive(Default)]
-    pub(crate) enum Type {
+    pub enum Type {
         #[serde(rename = "inline")]
         #[default]
         Inline,
@@ -67,7 +67,7 @@ pub mod inline_skill_source_param {
     /// The type of the inline skill source. Must be `base64`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
     #[derive(Default)]
-    pub(crate) enum Type {
+    pub enum Type {
         #[serde(rename = "base64")]
         #[default]
         Base64,
@@ -126,7 +126,7 @@ pub mod skill_reference_param {
     /// References a skill created with the /v1/skills endpoint.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
     #[derive(Default)]
-    pub(crate) enum Type {
+    pub enum Type {
         #[serde(rename = "skill_reference")]
         #[default]
         SkillReference,

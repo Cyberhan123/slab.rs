@@ -30,7 +30,7 @@ impl ResponseFileSearchCallCompletedEvent {
 /// The type of the event. Always `response.file_search_call.completed`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ResponseFileSearchCallCompletedEventType {
+pub enum ResponseFileSearchCallCompletedEventType {
     #[serde(rename = "response.file_search_call.completed")]
     #[default]
     ResponseFileSearchCallCompleted,
@@ -67,7 +67,7 @@ impl ResponseFileSearchCallInProgressEvent {
 /// The type of the event. Always `response.file_search_call.in_progress`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ResponseFileSearchCallInProgressEventType {
+pub enum ResponseFileSearchCallInProgressEventType {
     #[serde(rename = "response.file_search_call.in_progress")]
     #[default]
     ResponseFileSearchCallInProgress,
@@ -104,7 +104,7 @@ impl ResponseFileSearchCallSearchingEvent {
 /// The type of the event. Always `response.file_search_call.searching`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ResponseFileSearchCallSearchingEventType {
+pub enum ResponseFileSearchCallSearchingEventType {
     #[serde(rename = "response.file_search_call.searching")]
     #[default]
     ResponseFileSearchCallSearching,

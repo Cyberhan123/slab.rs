@@ -37,7 +37,7 @@ impl CustomToolCall {
 /// The type of the custom tool call. Always `custom_tool_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum CustomToolCallType {
+pub enum CustomToolCallType {
     #[serde(rename = "custom_tool_call")]
     #[default]
     CustomToolCall,
@@ -72,7 +72,7 @@ impl CustomToolCallOutput {
 /// The type of the custom tool call output. Always `custom_tool_call_output`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum CustomToolCallOutputType {
+pub enum CustomToolCallOutputType {
     #[serde(rename = "custom_tool_call_output")]
     #[default]
     CustomToolCallOutput,
@@ -136,7 +136,7 @@ impl CustomToolCallOutputResource {
 /// The type of the custom tool call output. Always `custom_tool_call_output`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum CustomToolCallOutputResourceType {
+pub enum CustomToolCallOutputResourceType {
     #[serde(rename = "custom_tool_call_output")]
     #[default]
     CustomToolCallOutput,
@@ -195,7 +195,7 @@ impl CustomToolCallResource {
 /// The type of the custom tool call. Always `custom_tool_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum CustomToolCallResourceType {
+pub enum CustomToolCallResourceType {
     #[serde(rename = "custom_tool_call")]
     #[default]
     CustomToolCall,
@@ -223,7 +223,7 @@ impl CustomToolChatCompletions {
 /// The type of the custom tool. Always `custom`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum CustomToolChatCompletionsType {
+pub enum CustomToolChatCompletionsType {
     #[serde(rename = "custom")]
     #[default]
     Custom,
@@ -257,7 +257,7 @@ impl CustomToolParam {
 /// The type of the custom tool. Always `custom`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum CustomToolParamType {
+pub enum CustomToolParamType {
     #[serde(rename = "custom")]
     #[default]
     Custom,

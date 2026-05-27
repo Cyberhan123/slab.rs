@@ -2,7 +2,7 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 use super::misc::Reason;
-use super::misc::Status;
+use super::misc::ResponseStatus;
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Response {
     /// Unique identifier for this Response.
@@ -90,7 +90,7 @@ pub struct Response {
     pub truncation: Option<ResponseTruncation>,
     /// The status of the response generation. One of `completed`, `failed`, `in_progress`, `cancelled`, `queued`, or `incomplete`.
     #[serde(rename = "status", skip_serializing_if = "Option::is_none")]
-    pub status: Option<Status>,
+    pub status: Option<ResponseStatus>,
     /// Unix timestamp (in seconds) of when this Response was completed. Only present when the status is `completed`.
     #[serde(
         rename = "completed_at",
@@ -177,7 +177,7 @@ impl Response {
 /// The object type of this resource - always set to `response`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ResponseObject {
+pub enum ResponseObject {
     #[serde(rename = "response")]
     #[default]
     Response,
@@ -186,7 +186,7 @@ pub(crate) enum ResponseObject {
 /// The retention policy for the prompt cache. Set to `24h` to enable extended prompt caching, which keeps cached prefixes active for longer, up to a maximum of 24 hours. [Learn more](/docs/guides/prompt-caching#prompt-cache-retention).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ResponsePromptCacheRetention {
+pub enum ResponsePromptCacheRetention {
     #[serde(rename = "in_memory")]
     #[default]
     InMemory,
@@ -197,7 +197,7 @@ pub(crate) enum ResponsePromptCacheRetention {
 /// The truncation strategy to use for the model response. - `auto`: If the input to this Response exceeds   the model's context window size, the model will truncate the   response to fit the context window by dropping items from the beginning of the conversation. - `disabled` (default): If the input size will exceed the context window   size for a model, the request will fail with a 400 error.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ResponseTruncation {
+pub enum ResponseTruncation {
     #[serde(rename = "auto")]
     #[default]
     Auto,
@@ -285,7 +285,7 @@ impl ResponseProperties {
 /// The truncation strategy to use for the model response. - `auto`: If the input to this Response exceeds   the model's context window size, the model will truncate the   response to fit the context window by dropping items from the beginning of the conversation. - `disabled` (default): If the input size will exceed the context window   size for a model, the request will fail with a 400 error.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ResponsePropertiesTruncation {
+pub enum ResponsePropertiesTruncation {
     #[serde(rename = "auto")]
     #[default]
     Auto,
@@ -372,7 +372,7 @@ impl ModelResponseProperties {
 /// The retention policy for the prompt cache. Set to `24h` to enable extended prompt caching, which keeps cached prefixes active for longer, up to a maximum of 24 hours. [Learn more](/docs/guides/prompt-caching#prompt-cache-retention).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ModelResponsePropertiesPromptCacheRetention {
+pub enum ModelResponsePropertiesPromptCacheRetention {
     #[serde(rename = "in_memory")]
     #[default]
     InMemory,
@@ -445,7 +445,7 @@ impl ResponseItemList {
 /// The type of object returned, must be `list`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ResponseItemListObject {
+pub enum ResponseItemListObject {
     #[serde(rename = "list")]
     #[default]
     List,

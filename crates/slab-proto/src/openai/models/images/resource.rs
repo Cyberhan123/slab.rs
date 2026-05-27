@@ -62,7 +62,7 @@ impl ImagesResponse {
 
 // The background parameter used for the image generation. Either `transparent` or `opaque`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default)]
-pub(crate) enum ImagesResponseBackground {
+pub enum ImagesResponseBackground {
     #[serde(rename = "transparent")]
     #[default]
     Transparent,
@@ -73,7 +73,7 @@ pub(crate) enum ImagesResponseBackground {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImagesResponseOutputFormat {
+pub enum ImagesResponseOutputFormat {
     #[serde(rename = "png")]
     #[default]
     Png,
@@ -86,7 +86,7 @@ pub(crate) enum ImagesResponseOutputFormat {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImagesResponseSize {
+pub enum ImagesResponseSize {
     #[serde(rename = "1024x1024")]
     #[default]
     Variant1024x1024,
@@ -101,7 +101,7 @@ pub(crate) enum ImagesResponseSize {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImagesResponseQuality {
+pub enum ImagesResponseQuality {
     #[serde(rename = "low")]
     #[default]
     Low,

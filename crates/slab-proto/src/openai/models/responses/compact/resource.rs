@@ -8,7 +8,7 @@ pub struct CompactResource {
     pub id: String,
     /// The object type. Always `response.compaction`.
     #[serde(rename = "object")]
-    pub object: Object,
+    pub object: CompactResponseObject,
     /// The compacted list of output items.
     #[serde(rename = "output")]
     pub output: Vec<models::ItemField>,
@@ -23,7 +23,7 @@ pub struct CompactResource {
 impl CompactResource {
     pub fn new(
         id: String,
-        object: Object,
+        object: CompactResponseObject,
         output: Vec<models::ItemField>,
         created_at: i32,
         usage: models::ResponseUsage,
@@ -34,7 +34,7 @@ impl CompactResource {
 /// The object type. Always `response.compaction`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub enum Object {
+pub enum CompactResponseObject {
     #[serde(rename = "response.compaction")]
     #[default]
     ResponseCompaction,

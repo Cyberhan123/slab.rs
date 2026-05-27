@@ -1,18 +1,18 @@
-pub mod annotation;
-pub mod attachment;
-pub mod content;
-pub mod detail;
-pub mod input;
+mod annotation;
+mod attachment;
+mod content;
+mod detail;
+mod input;
 
-pub mod message;
-pub mod misc;
-pub mod output;
-pub mod prediction;
-pub mod response;
-pub mod search;
-pub mod status;
-pub mod task;
-pub mod tracing;
+mod message;
+mod misc;
+mod output;
+mod prediction;
+mod response;
+mod search;
+mod status;
+mod task;
+mod tracing;
 
 pub use annotation::*;
 pub use attachment::*;

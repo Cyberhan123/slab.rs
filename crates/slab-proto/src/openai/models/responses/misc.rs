@@ -111,7 +111,7 @@ impl ResponseOutputText {
 /// Type discriminator that is always `output_text`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ResponseOutputTextType {
+pub enum ResponseOutputTextType {
     #[serde(rename = "output_text")]
     #[default]
     OutputText,
@@ -180,7 +180,7 @@ pub enum Reason {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum Status {
+pub enum ResponseStatus {
     #[serde(rename = "completed")]
     #[default]
     Completed,

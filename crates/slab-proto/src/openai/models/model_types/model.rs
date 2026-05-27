@@ -78,20 +78,20 @@ impl ModelIdsShared {
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ListModelsResponse {
     #[serde(rename = "object")]
-    pub object: Object,
+    pub object: ListModelsResponseObject,
     #[serde(rename = "data")]
     pub data: Vec<models::Model>,
 }
 
 impl ListModelsResponse {
-    pub fn new(object: Object, data: Vec<models::Model>) -> ListModelsResponse {
+    pub fn new(object: ListModelsResponseObject, data: Vec<models::Model>) -> ListModelsResponse {
         ListModelsResponse { object, data }
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub enum Object {
+pub enum ListModelsResponseObject {
     #[serde(rename = "list")]
     #[default]
     List,

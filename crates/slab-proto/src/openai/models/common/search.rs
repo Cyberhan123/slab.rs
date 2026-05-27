@@ -48,7 +48,7 @@ impl std::fmt::Display for SearchContextSize {
 pub struct Filters {
     /// Specifies the comparison operator: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `nin`. - `eq`: equals - `ne`: not equal - `gt`: greater than - `gte`: greater than or equal - `lt`: less than - `lte`: less than or equal - `in`: in - `nin`: not in
     #[serde(rename = "type")]
-    pub r#type: Type,
+    pub r#type: SearchType,
     /// The key to compare against the value.
     #[serde(rename = "key")]
     pub key: String,
@@ -61,7 +61,7 @@ pub struct Filters {
 
 impl Filters {
     pub fn new(
-        r#type: Type,
+        r#type: SearchType,
         key: String,
         value: models::ComparisonFilterValue,
         filters: Vec<models::ComparisonFilter>,
@@ -72,7 +72,7 @@ impl Filters {
 /// Specifies the comparison operator: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `nin`. - `eq`: equals - `ne`: not equal - `gt`: greater than - `gte`: greater than or equal - `lt`: less than - `lte`: less than or equal - `in`: in - `nin`: not in
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum Type {
+pub enum SearchType {
     #[serde(rename = "eq")]
     #[default]
     Eq,

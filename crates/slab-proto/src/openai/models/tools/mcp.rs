@@ -35,7 +35,7 @@ impl McpApprovalRequest {
 /// The type of the item. Always `mcp_approval_request`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum McpApprovalRequestType {
+pub enum McpApprovalRequestType {
     #[serde(rename = "mcp_approval_request")]
     #[default]
     McpApprovalRequest,
@@ -84,7 +84,7 @@ impl McpApprovalResponse {
 /// The type of the item. Always `mcp_approval_response`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum McpApprovalResponseType {
+pub enum McpApprovalResponseType {
     #[serde(rename = "mcp_approval_response")]
     #[default]
     McpApprovalResponse,
@@ -129,7 +129,7 @@ impl McpApprovalResponseResource {
 /// The type of the item. Always `mcp_approval_response`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum McpApprovalResponseResourceType {
+pub enum McpApprovalResponseResourceType {
     #[serde(rename = "mcp_approval_response")]
     #[default]
     McpApprovalResponse,
@@ -174,7 +174,7 @@ impl McpListTools {
 /// The type of the item. Always `mcp_list_tools`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum McpListToolsType {
+pub enum McpListToolsType {
     #[serde(rename = "mcp_list_tools")]
     #[default]
     McpListTools,
@@ -282,7 +282,7 @@ impl McpTool {
 /// The type of the MCP tool. Always `mcp`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum McpToolType {
+pub enum McpToolType {
     #[serde(rename = "mcp")]
     #[default]
     Mcp,
@@ -389,7 +389,7 @@ impl McpToolCall {
 /// The type of the item. Always `mcp_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum McpToolCallType {
+pub enum McpToolCallType {
     #[serde(rename = "mcp_call")]
     #[default]
     McpCall,

@@ -102,7 +102,7 @@ impl FunctionShellCall {
 /// The type of the item. Always `shell_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum FunctionShellCallType {
+pub enum FunctionShellCallType {
     #[serde(rename = "shell_call")]
     #[default]
     ShellCall,
@@ -165,7 +165,7 @@ impl FunctionShellCallItemParam {
 /// The type of the item. Always `shell_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum FunctionShellCallItemParamType {
+pub enum FunctionShellCallItemParamType {
     #[serde(rename = "shell_call")]
     #[default]
     ShellCall,
@@ -244,7 +244,7 @@ impl FunctionShellCallOutput {
 /// The type of the shell call output. Always `shell_call_output`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum FunctionShellCallOutputType {
+pub enum FunctionShellCallOutputType {
     #[serde(rename = "shell_call_output")]
     #[default]
     ShellCallOutput,
@@ -328,7 +328,7 @@ impl FunctionShellCallOutputExitOutcome {
 /// The outcome type. Always `exit`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum FunctionShellCallOutputExitOutcomeType {
+pub enum FunctionShellCallOutputExitOutcomeType {
     #[serde(rename = "exit")]
     #[default]
     Exit,
@@ -357,7 +357,7 @@ impl FunctionShellCallOutputExitOutcomeParam {
 /// The outcome type. Always `exit`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum FunctionShellCallOutputExitOutcomeParamType {
+pub enum FunctionShellCallOutputExitOutcomeParamType {
     #[serde(rename = "exit")]
     #[default]
     Exit,
@@ -421,7 +421,7 @@ impl FunctionShellCallOutputItemParam {
 /// The type of the item. Always `shell_call_output`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum FunctionShellCallOutputItemParamType {
+pub enum FunctionShellCallOutputItemParamType {
     #[serde(rename = "shell_call_output")]
     #[default]
     ShellCallOutput,
@@ -486,7 +486,7 @@ impl FunctionShellCallOutputTimeoutOutcome {
 /// The outcome type. Always `timeout`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum FunctionShellCallOutputTimeoutOutcomeType {
+pub enum FunctionShellCallOutputTimeoutOutcomeType {
     #[serde(rename = "timeout")]
     #[default]
     Timeout,
@@ -511,7 +511,7 @@ impl FunctionShellCallOutputTimeoutOutcomeParam {
 /// The outcome type. Always `timeout`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum FunctionShellCallOutputTimeoutOutcomeParamType {
+pub enum FunctionShellCallOutputTimeoutOutcomeParamType {
     #[serde(rename = "timeout")]
     #[default]
     Timeout,
@@ -564,7 +564,7 @@ impl FunctionShellToolParam {
 /// The type of the shell tool. Always `shell`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum FunctionShellToolParamType {
+pub enum FunctionShellToolParamType {
     #[serde(rename = "shell")]
     #[default]
     Shell,
@@ -589,7 +589,7 @@ impl LocalEnvironmentParam {
 /// Use a local computer environment.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum LocalEnvironmentParamType {
+pub enum LocalEnvironmentParamType {
     #[serde(rename = "local")]
     #[default]
     Local,
@@ -612,7 +612,7 @@ impl LocalEnvironmentResource {
 /// The environment type. Always `local`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum LocalEnvironmentResourceType {
+pub enum LocalEnvironmentResourceType {
     #[serde(rename = "local")]
     #[default]
     Local,
@@ -676,7 +676,7 @@ impl LocalShellExecAction {
 /// The type of the local shell action. Always `exec`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum LocalShellExecActionType {
+pub enum LocalShellExecActionType {
     #[serde(rename = "exec")]
     #[default]
     Exec,
@@ -716,7 +716,7 @@ impl LocalShellToolCall {
 /// The type of the local shell call. Always `local_shell_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum LocalShellToolCallType {
+pub enum LocalShellToolCallType {
     #[serde(rename = "local_shell_call")]
     #[default]
     LocalShellCall,
@@ -725,7 +725,7 @@ pub(crate) enum LocalShellToolCallType {
 /// The status of the local shell call.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum LocalShellToolCallStatus {
+pub enum LocalShellToolCallStatus {
     #[serde(rename = "in_progress")]
     #[default]
     InProgress,
@@ -770,7 +770,7 @@ impl LocalShellToolCallOutput {
 /// The type of the local shell tool call output. Always `local_shell_call_output`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum LocalShellToolCallOutputType {
+pub enum LocalShellToolCallOutputType {
     #[serde(rename = "local_shell_call_output")]
     #[default]
     LocalShellCallOutput,
@@ -779,7 +779,7 @@ pub(crate) enum LocalShellToolCallOutputType {
 /// The status of the item. One of `in_progress`, `completed`, or `incomplete`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum LocalShellToolCallOutputStatus {
+pub enum LocalShellToolCallOutputStatus {
     #[serde(rename = "in_progress")]
     #[default]
     InProgress,
@@ -806,7 +806,7 @@ impl LocalShellToolParam {
 /// The type of the local shell tool. Always `local_shell`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum LocalShellToolParamType {
+pub enum LocalShellToolParamType {
     #[serde(rename = "local_shell")]
     #[default]
     LocalShell,

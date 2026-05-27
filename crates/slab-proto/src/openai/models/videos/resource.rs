@@ -81,7 +81,7 @@ impl VideoResource {
 /// The object type, which is always `video`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum VideoResourceObject {
+pub enum VideoResourceObject {
     #[serde(rename = "video")]
     #[default]
     Video,
@@ -114,7 +114,7 @@ impl DeletedVideoResource {
 /// The object type that signals the deletion response.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum DeletedVideoResourceObject {
+pub enum DeletedVideoResourceObject {
     #[serde(rename = "video.deleted")]
     #[default]
     VideoDeleted,
@@ -200,7 +200,7 @@ impl VideoListResource {
 /// The type of object returned, must be `list`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum VideoListResourceObject {
+pub enum VideoListResourceObject {
     #[serde(rename = "list")]
     #[default]
     List,

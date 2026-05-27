@@ -17,7 +17,7 @@ impl PcmaAudioFormat {
 /// The audio format. Always `audio/pcma`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum PcmaAudioFormatType {
+pub enum PcmaAudioFormatType {
     #[serde(rename = "audio/pcma")]
     #[default]
     AudioSlashPcma,
@@ -40,7 +40,7 @@ impl PcmuAudioFormat {
 /// The audio format. Always `audio/pcmu`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum PcmuAudioFormatType {
+pub enum PcmuAudioFormatType {
     #[serde(rename = "audio/pcmu")]
     #[default]
     AudioSlashPcmu,
@@ -67,7 +67,7 @@ impl PcmAudioFormat {
 /// The audio format. Always `audio/pcm`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum PcmAudioFormatType {
+pub enum PcmAudioFormatType {
     #[serde(rename = "audio/pcm")]
     #[default]
     AudioSlashPcm,
@@ -76,7 +76,7 @@ pub(crate) enum PcmAudioFormatType {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub enum Format {
+pub enum AudioFormat {
     #[serde(rename = "mp3")]
     #[default]
     Mp3,
@@ -89,7 +89,7 @@ pub enum Format {
 /// The format of the output, in one of these options: `json`, `text`, `srt`, `verbose_json`, `vtt`, or `diarized_json`. For `gpt-4o-transcribe` and `gpt-4o-mini-transcribe`, the only supported format is `json`. For `gpt-4o-transcribe-diarize`, the supported formats are `json`, `text`, and `diarized_json`, with `diarized_json` required to receive speaker annotations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub enum AudioResponseFormat {
+pub enum TranscriptionResponseFormat {
     #[serde(rename = "json")]
     #[default]
     Json,
@@ -105,7 +105,7 @@ pub enum AudioResponseFormat {
     DiarizedJson,
 }
 
-impl std::fmt::Display for AudioResponseFormat {
+impl std::fmt::Display for TranscriptionResponseFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::Json => write!(f, "json"),
@@ -121,7 +121,7 @@ impl std::fmt::Display for AudioResponseFormat {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub enum ResponseFormat {
+pub enum AudioResponseFormat {
     #[serde(rename = "mp3")]
     #[default]
     Mp3,

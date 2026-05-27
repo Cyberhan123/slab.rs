@@ -1,7 +1,7 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-use super::params::Moderation;
+use super::params::ImageParamsModeration;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EditImageBodyJsonParam {
@@ -40,7 +40,7 @@ pub struct EditImageBodyJsonParam {
         with = "::serde_with::rust::double_option",
         skip_serializing_if = "Option::is_none"
     )]
-    pub quality: Option<Option<Quality>>,
+    pub quality: Option<Option<ImageEditQuality>>,
     /// Controls fidelity to the original input image(s).
     #[serde(
         rename = "input_fidelity",
@@ -83,7 +83,7 @@ pub struct EditImageBodyJsonParam {
         with = "::serde_with::rust::double_option",
         skip_serializing_if = "Option::is_none"
     )]
-    pub moderation: Option<Option<Moderation>>,
+    pub moderation: Option<Option<ImageParamsModeration>>,
     /// Background behavior for generated image output.
     #[serde(
         rename = "background",
@@ -136,7 +136,7 @@ impl EditImageBodyJsonParam {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum Quality {
+pub enum ImageEditQuality {
     #[serde(rename = "low")]
     #[default]
     Low,
@@ -173,7 +173,7 @@ pub enum EditImageInputFidelity {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum EditImageBodySize {
+pub enum EditImageBodySize {
     #[serde(rename = "auto")]
     #[default]
     Auto,
@@ -189,7 +189,7 @@ pub(crate) enum EditImageBodySize {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum EditImageBodyOutputFormat {
+pub enum EditImageBodyOutputFormat {
     #[serde(rename = "png")]
     #[default]
     Png,
@@ -203,7 +203,7 @@ pub(crate) enum EditImageBodyOutputFormat {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum EditImageBodyBackground {
+pub enum EditImageBodyBackground {
     #[serde(rename = "transparent")]
     #[default]
     Transparent,
@@ -268,7 +268,7 @@ impl ImageEditCompletedEvent {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageEditCompletedEventType {
+pub enum ImageEditCompletedEventType {
     #[serde(rename = "image_edit.completed")]
     #[default]
     ImageEditCompleted,
@@ -278,7 +278,7 @@ pub(crate) enum ImageEditCompletedEventType {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageEditCompletedEventSize {
+pub enum ImageEditCompletedEventSize {
     #[serde(rename = "1024x1024")]
     #[default]
     Variant1024x1024,
@@ -294,7 +294,7 @@ pub(crate) enum ImageEditCompletedEventSize {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageEditCompletedEventQuality {
+pub enum ImageEditCompletedEventQuality {
     #[serde(rename = "low")]
     #[default]
     Low,
@@ -310,7 +310,7 @@ pub(crate) enum ImageEditCompletedEventQuality {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageEditCompletedEventBackground {
+pub enum ImageEditCompletedEventBackground {
     #[serde(rename = "transparent")]
     #[default]
     Transparent,
@@ -324,7 +324,7 @@ pub(crate) enum ImageEditCompletedEventBackground {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageEditCompletedEventOutputFormat {
+pub enum ImageEditCompletedEventOutputFormat {
     #[serde(rename = "png")]
     #[default]
     Png,
@@ -390,7 +390,7 @@ impl ImageEditPartialImageEvent {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageEditPartialImageEventType {
+pub enum ImageEditPartialImageEventType {
     #[serde(rename = "image_edit.partial_image")]
     #[default]
     ImageEditPartialImage,
@@ -400,7 +400,7 @@ pub(crate) enum ImageEditPartialImageEventType {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageEditPartialImageEventSize {
+pub enum ImageEditPartialImageEventSize {
     #[serde(rename = "1024x1024")]
     #[default]
     Variant1024x1024,
@@ -416,7 +416,7 @@ pub(crate) enum ImageEditPartialImageEventSize {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageEditPartialImageEventQuality {
+pub enum ImageEditPartialImageEventQuality {
     #[serde(rename = "low")]
     #[default]
     Low,
@@ -432,7 +432,7 @@ pub(crate) enum ImageEditPartialImageEventQuality {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageEditPartialImageEventBackground {
+pub enum ImageEditPartialImageEventBackground {
     #[serde(rename = "transparent")]
     #[default]
     Transparent,
@@ -446,7 +446,7 @@ pub(crate) enum ImageEditPartialImageEventBackground {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageEditPartialImageEventOutputFormat {
+pub enum ImageEditPartialImageEventOutputFormat {
     #[serde(rename = "png")]
     #[default]
     Png,

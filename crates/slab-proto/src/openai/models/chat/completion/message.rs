@@ -90,7 +90,7 @@ pub struct ChatCompletionMessageListDataInner {
     pub refusal: String,
     /// The role of the author of this message.
     #[serde(rename = "role")]
-    pub role: Role,
+    pub role: ChatCompletionMessageRole,
     /// The identifier of the chat message.
     #[serde(rename = "id")]
     pub id: String,
@@ -124,7 +124,7 @@ impl ChatCompletionMessageListDataInner {
     pub fn new(
         content: String,
         refusal: String,
-        role: Role,
+        role: ChatCompletionMessageRole,
         id: String,
     ) -> ChatCompletionMessageListDataInner {
         ChatCompletionMessageListDataInner {
@@ -143,7 +143,7 @@ impl ChatCompletionMessageListDataInner {
 /// The role of the author of this message.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub enum Role {
+pub enum ChatCompletionMessageRole {
     #[serde(rename = "assistant")]
     #[default]
     Assistant,
@@ -155,7 +155,7 @@ pub enum Role {
 pub struct ChatCompletionMessageList {
     /// The type of this object. It is always set to \"list\".
     #[serde(rename = "object")]
-    pub object: Object,
+    pub object: ChatCompletionMessageObject,
     /// An array of chat completion message objects.
     #[serde(rename = "data")]
     pub data: Vec<models::ChatCompletionMessageListDataInner>,
@@ -173,7 +173,7 @@ pub struct ChatCompletionMessageList {
 impl ChatCompletionMessageList {
     /// An object representing a list of chat completion messages.
     pub fn new(
-        object: Object,
+        object: ChatCompletionMessageObject,
         data: Vec<models::ChatCompletionMessageListDataInner>,
         first_id: String,
         last_id: String,
@@ -185,7 +185,7 @@ impl ChatCompletionMessageList {
 /// The type of this object. It is always set to \"list\".
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub enum Object {
+pub enum ChatCompletionMessageObject {
     #[serde(rename = "list")]
     #[default]
     List,

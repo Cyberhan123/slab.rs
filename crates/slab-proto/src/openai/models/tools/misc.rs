@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub enum Background {
+pub enum ToolBackground {
     #[serde(rename = "transparent")]
     #[default]
     Transparent,
@@ -15,7 +15,7 @@ pub enum Background {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub enum Moderation {
+pub enum ToolModeration {
     #[serde(rename = "auto")]
     #[default]
     Auto,
@@ -27,7 +27,7 @@ pub enum Moderation {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub enum OutputFormat {
+pub enum ToolOutputFormat {
     #[serde(rename = "png")]
     #[default]
     Png,
@@ -41,7 +41,7 @@ pub enum OutputFormat {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub enum Quality {
+pub enum ToolQuality {
     #[serde(rename = "low")]
     #[default]
     Low,
@@ -57,7 +57,7 @@ pub enum Quality {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum Status {
+pub enum ToolStatus {
     #[serde(rename = "in_progress")]
     #[default]
     InProgress,

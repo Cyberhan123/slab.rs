@@ -1,10 +1,10 @@
-pub mod automatic_thread_titling;
-pub mod body;
-pub mod file_upload;
-pub mod history;
-pub mod rate_limits;
-pub mod resource;
-pub mod status;
+mod automatic_thread_titling;
+mod body;
+mod file_upload;
+mod history;
+mod rate_limits;
+mod resource;
+mod status;
 
 pub use automatic_thread_titling::*;
 pub use body::*;

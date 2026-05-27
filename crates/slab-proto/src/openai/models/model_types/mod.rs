@@ -1,6 +1,6 @@
-pub mod misc;
-pub mod model;
-pub mod reasoning;
+mod misc;
+mod model;
+mod reasoning;
 
 pub use misc::*;
 pub use model::*;

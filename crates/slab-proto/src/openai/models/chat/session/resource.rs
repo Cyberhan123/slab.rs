@@ -9,7 +9,7 @@ pub struct ChatSessionResource {
     pub id: String,
     /// Type discriminator that is always `chatkit.session`.
     #[serde(rename = "object")]
-    pub object: Object,
+    pub object: ChatSessionObject,
     /// Unix timestamp (in seconds) for when the session expires.
     #[serde(rename = "expires_at")]
     pub expires_at: i32,
@@ -40,7 +40,7 @@ impl ChatSessionResource {
     /// Represents a ChatKit session and its resolved configuration.
     pub fn new(
         id: String,
-        object: Object,
+        object: ChatSessionObject,
         expires_at: i32,
         client_secret: String,
         workflow: models::ChatkitWorkflow,
@@ -67,7 +67,7 @@ impl ChatSessionResource {
 /// Type discriminator that is always `chatkit.session`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub enum Object {
+pub enum ChatSessionObject {
     #[serde(rename = "chatkit.session")]
     #[default]
     ChatkitSession,

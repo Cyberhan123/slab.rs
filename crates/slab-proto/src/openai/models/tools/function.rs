@@ -42,7 +42,7 @@ impl FunctionTool {
 /// The type of the function tool. Always `function`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum FunctionToolType {
+pub enum FunctionToolType {
     #[serde(rename = "function")]
     #[default]
     Function,
@@ -96,7 +96,7 @@ impl FunctionToolCall {
 /// The type of the function tool call. Always `function_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum FunctionToolCallType {
+pub enum FunctionToolCallType {
     #[serde(rename = "function_call")]
     #[default]
     FunctionCall,
@@ -105,7 +105,7 @@ pub(crate) enum FunctionToolCallType {
 /// The status of the item. One of `in_progress`, `completed`, or `incomplete`. Populated when items are returned via API.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum FunctionToolCallStatus {
+pub enum FunctionToolCallStatus {
     #[serde(rename = "in_progress")]
     #[default]
     InProgress,
@@ -147,7 +147,7 @@ impl FunctionToolCallOutput {
 /// The type of the function tool call output. Always `function_call_output`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum FunctionToolCallOutputType {
+pub enum FunctionToolCallOutputType {
     #[serde(rename = "function_call_output")]
     #[default]
     FunctionCallOutput,
@@ -156,7 +156,7 @@ pub(crate) enum FunctionToolCallOutputType {
 /// The status of the item. One of `in_progress`, `completed`, or `incomplete`. Populated when items are returned via API.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum FunctionToolCallOutputStatus {
+pub enum FunctionToolCallOutputStatus {
     #[serde(rename = "in_progress")]
     #[default]
     InProgress,
@@ -224,7 +224,7 @@ impl FunctionToolCallOutputResource {
 /// The type of the function tool call output. Always `function_call_output`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum FunctionToolCallOutputResourceType {
+pub enum FunctionToolCallOutputResourceType {
     #[serde(rename = "function_call_output")]
     #[default]
     FunctionCallOutput,
@@ -283,7 +283,7 @@ impl FunctionToolCallResource {
 /// The type of the function tool call. Always `function_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum FunctionToolCallResourceType {
+pub enum FunctionToolCallResourceType {
     #[serde(rename = "function_call")]
     #[default]
     FunctionCall,
@@ -336,7 +336,7 @@ impl FunctionToolParam {
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum FunctionToolParamType {
+pub enum FunctionToolParamType {
     #[serde(rename = "function")]
     #[default]
     Function,
@@ -440,7 +440,7 @@ impl FunctionCallOutputItemParam {
 /// The type of the function tool call output. Always `function_call_output`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum FunctionCallOutputItemParamType {
+pub enum FunctionCallOutputItemParamType {
     #[serde(rename = "function_call_output")]
     #[default]
     FunctionCallOutput,
@@ -453,7 +453,7 @@ pub enum FunctionCallOutputItemParamOutput {
     /// A JSON string of the output of the function tool call.
     String(String),
     /// An array of content outputs (text, image, file) for the function tool call.
-    ArrayVecFunctionCallOutputItemParam_output_oneOf_inner(
+    ArrayVecFunctionCallOutputItemParamOutputOneOfInner(
         Vec<models::FunctionCallOutputItemParamOutputOneOfInner>,
     ),
 }

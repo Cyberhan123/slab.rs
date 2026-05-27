@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 pub struct ChatCompletionResponseMessageAnnotationsInner {
     /// The type of the URL citation. Always `url_citation`.
     #[serde(rename = "type")]
-    pub r#type: Type,
+    pub r#type: ChatCompletionResponseMessageType,
     #[serde(rename = "url_citation")]
     pub url_citation: Box<models::ChatCompletionResponseMessageAnnotationsInnerUrlCitation>,
 }
@@ -14,7 +14,7 @@ pub struct ChatCompletionResponseMessageAnnotationsInner {
 impl ChatCompletionResponseMessageAnnotationsInner {
     /// A URL citation when using web search.
     pub fn new(
-        r#type: Type,
+        r#type: ChatCompletionResponseMessageType,
         url_citation: models::ChatCompletionResponseMessageAnnotationsInnerUrlCitation,
     ) -> ChatCompletionResponseMessageAnnotationsInner {
         ChatCompletionResponseMessageAnnotationsInner {
@@ -26,7 +26,7 @@ impl ChatCompletionResponseMessageAnnotationsInner {
 /// The type of the URL citation. Always `url_citation`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum Type {
+pub enum ChatCompletionResponseMessageType {
     #[serde(rename = "url_citation")]
     #[default]
     UrlCitation,

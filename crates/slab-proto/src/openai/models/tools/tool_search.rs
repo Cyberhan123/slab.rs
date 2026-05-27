@@ -40,7 +40,7 @@ impl ToolSearchCall {
 /// The type of the item. Always `tool_search_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ToolSearchCallType {
+pub enum ToolSearchCallType {
     #[serde(rename = "tool_search_call")]
     #[default]
     ToolSearchCall,
@@ -102,7 +102,7 @@ impl ToolSearchCallItemParam {
 /// The item type. Always `tool_search_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ToolSearchCallItemParamType {
+pub enum ToolSearchCallItemParamType {
     #[serde(rename = "tool_search_call")]
     #[default]
     ToolSearchCall,
@@ -169,7 +169,7 @@ impl ToolSearchOutput {
 /// The type of the item. Always `tool_search_output`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ToolSearchOutputType {
+pub enum ToolSearchOutputType {
     #[serde(rename = "tool_search_output")]
     #[default]
     ToolSearchOutput,
@@ -231,7 +231,7 @@ impl ToolSearchOutputItemParam {
 /// The item type. Always `tool_search_output`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ToolSearchOutputItemParamType {
+pub enum ToolSearchOutputItemParamType {
     #[serde(rename = "tool_search_output")]
     #[default]
     ToolSearchOutput,
@@ -273,7 +273,7 @@ impl ToolSearchToolParam {
 /// The type of the tool. Always `tool_search`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ToolSearchToolParamType {
+pub enum ToolSearchToolParamType {
     #[serde(rename = "tool_search")]
     #[default]
     ToolSearch,

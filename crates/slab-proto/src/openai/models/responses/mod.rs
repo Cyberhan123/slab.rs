@@ -1,11 +1,11 @@
-pub mod client_events;
+mod client_events;
 pub mod compact;
-pub mod create;
-pub mod events;
-pub mod format;
-pub mod misc;
-pub mod response;
-pub mod streaming;
+mod create;
+mod events;
+mod format;
+mod misc;
+mod response;
+mod streaming;
 
 pub use client_events::*;
 pub use compact::*;

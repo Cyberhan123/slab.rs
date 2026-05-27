@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::openai::models::_stubs::CompletionUsage;
-use crate::openai::models::chat::completion::stream::ChatCompletionStreamOptions;
-use crate::openai::models::common::misc::StopConfiguration;
+use crate::openai::models::ChatCompletionStreamOptions;
+use crate::openai::models::StopConfiguration;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CreateCompletionRequest {

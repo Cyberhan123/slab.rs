@@ -5,21 +5,21 @@ use serde::{Deserialize, Serialize};
 pub struct PredictionContent {
     /// The type of the predicted content you want to provide. This type is currently always `content`.
     #[serde(rename = "type")]
-    pub r#type: Type,
+    pub r#type: PredictionType,
     #[serde(rename = "content")]
     pub content: Box<models::PredictionContentContent>,
 }
 
 impl PredictionContent {
     /// Static predicted output content, such as the content of a text file that is being regenerated.
-    pub fn new(r#type: Type, content: models::PredictionContentContent) -> PredictionContent {
+    pub fn new(r#type: PredictionType, content: models::PredictionContentContent) -> PredictionContent {
         PredictionContent { r#type, content: Box::new(content) }
     }
 }
 /// The type of the predicted content you want to provide. This type is currently always `content`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum Type {
+pub enum PredictionType {
     #[serde(rename = "content")]
     #[default]
     Content,

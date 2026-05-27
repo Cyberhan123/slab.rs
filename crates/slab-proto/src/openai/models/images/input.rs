@@ -37,7 +37,7 @@ impl InputImageContent {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum InputImageContentType {
+pub enum InputImageContentType {
     #[serde(rename = "input_image")]
     #[default]
     InputImage,
@@ -84,7 +84,7 @@ impl InputImageContentParamAutoParam {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum InputImageContentParamType {
+pub enum InputImageContentParamType {
     #[serde(rename = "input_image")]
     #[default]
     InputImage,

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub struct ResponsesClientEvent {
     /// The type of the client event. Always `response.create`.
     #[serde(rename = "type")]
-    pub r#type: Type,
+    pub r#type: ResponseClientEventType,
     /// Set of 16 key-value pairs that can be attached to an object. This can be useful for storing additional information about the object in a structured format, and querying for objects via API or the dashboard.  Keys are strings with a maximum length of 64 characters. Values are strings with a maximum length of 512 characters.
     #[serde(rename = "metadata", skip_serializing_if = "Option::is_none")]
     pub metadata: Option<std::collections::HashMap<String, String>>,
@@ -104,7 +104,7 @@ pub struct ResponsesClientEvent {
 
 impl ResponsesClientEvent {
     /// Client events accepted by the Responses WebSocket server.
-    pub fn new(r#type: Type) -> ResponsesClientEvent {
+    pub fn new(r#type: ResponseClientEventType) -> ResponsesClientEvent {
         ResponsesClientEvent {
             r#type,
             metadata: None,
@@ -153,7 +153,7 @@ impl ResponsesClientEvent {
     serde::Deserialize,
 )]
 #[derive(Default)]
-pub enum Type {
+pub enum ResponseClientEventType {
     #[serde(rename = "response.create")]
     #[default]
     ResponseCreate,

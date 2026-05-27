@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 pub struct ChatCompletionDeleted {
     /// The type of object being deleted.
     #[serde(rename = "object")]
-    pub object: Object,
+    pub object: DeletedChatCompletionObject,
     /// The ID of the chat completion that was deleted.
     #[serde(rename = "id")]
     pub id: String,
@@ -14,14 +14,14 @@ pub struct ChatCompletionDeleted {
 }
 
 impl ChatCompletionDeleted {
-    pub fn new(object: Object, id: String, deleted: bool) -> ChatCompletionDeleted {
+    pub fn new(object: DeletedChatCompletionObject, id: String, deleted: bool) -> ChatCompletionDeleted {
         ChatCompletionDeleted { object, id, deleted }
     }
 }
 /// The type of object being deleted.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub enum Object {
+pub enum DeletedChatCompletionObject {
     #[serde(rename = "chat.completion.deleted")]
     #[default]
     ChatCompletionDeleted,

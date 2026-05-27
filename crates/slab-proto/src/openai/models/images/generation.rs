@@ -104,7 +104,7 @@ impl CreateImageRequest {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum Quality {
+pub enum Quality {
     #[serde(rename = "standard")]
     #[default]
     Standard,
@@ -136,7 +136,7 @@ pub enum ResponseFormat {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum OutputFormat {
+pub enum OutputFormat {
     #[serde(rename = "png")]
     #[default]
     Png,
@@ -150,7 +150,7 @@ pub(crate) enum OutputFormat {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum Moderation {
+pub enum Moderation {
     #[serde(rename = "low")]
     #[default]
     Low,
@@ -162,7 +162,7 @@ pub(crate) enum Moderation {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum Background {
+pub enum Background {
     #[serde(rename = "transparent")]
     #[default]
     Transparent,
@@ -269,7 +269,7 @@ impl ImageGenCompletedEvent {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageGenCompletedEventType {
+pub enum ImageGenCompletedEventType {
     #[serde(rename = "image_generation.completed")]
     #[default]
     ImageGenerationCompleted,
@@ -279,7 +279,7 @@ pub(crate) enum ImageGenCompletedEventType {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageGenCompletedEventSize {
+pub enum ImageGenCompletedEventSize {
     #[serde(rename = "1024x1024")]
     #[default]
     Variant1024x1024,
@@ -295,7 +295,7 @@ pub(crate) enum ImageGenCompletedEventSize {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageGenCompletedEventQuality {
+pub enum ImageGenCompletedEventQuality {
     #[serde(rename = "low")]
     #[default]
     Low,
@@ -311,7 +311,7 @@ pub(crate) enum ImageGenCompletedEventQuality {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageGenCompletedEventBackground {
+pub enum ImageGenCompletedEventBackground {
     #[serde(rename = "transparent")]
     #[default]
     Transparent,
@@ -325,7 +325,7 @@ pub(crate) enum ImageGenCompletedEventBackground {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageGenCompletedEventOutputFormat {
+pub enum ImageGenCompletedEventOutputFormat {
     #[serde(rename = "png")]
     #[default]
     Png,
@@ -425,7 +425,7 @@ impl ImageGenPartialImageEvent {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageGenPartialImageEventType {
+pub enum ImageGenPartialImageEventType {
     #[serde(rename = "image_generation.partial_image")]
     #[default]
     ImageGenerationPartialImage,
@@ -435,7 +435,7 @@ pub(crate) enum ImageGenPartialImageEventType {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageGenPartialImageEventSize {
+pub enum ImageGenPartialImageEventSize {
     #[serde(rename = "1024x1024")]
     #[default]
     Variant1024x1024,
@@ -451,7 +451,7 @@ pub(crate) enum ImageGenPartialImageEventSize {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageGenPartialImageEventQuality {
+pub enum ImageGenPartialImageEventQuality {
     #[serde(rename = "low")]
     #[default]
     Low,
@@ -467,7 +467,7 @@ pub(crate) enum ImageGenPartialImageEventQuality {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageGenPartialImageEventBackground {
+pub enum ImageGenPartialImageEventBackground {
     #[serde(rename = "transparent")]
     #[default]
     Transparent,
@@ -481,7 +481,7 @@ pub(crate) enum ImageGenPartialImageEventBackground {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageGenPartialImageEventOutputFormat {
+pub enum ImageGenPartialImageEventOutputFormat {
     #[serde(rename = "png")]
     #[default]
     Png,

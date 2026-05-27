@@ -1,11 +1,11 @@
-pub mod format;
-pub mod input;
-pub mod misc;
-pub mod speech;
-pub mod transcript_events;
-pub mod transcription;
-pub mod vad;
-pub mod voice;
+mod format;
+mod input;
+mod misc;
+mod speech;
+mod transcript_events;
+mod transcription;
+mod vad;
+mod voice;
 
 pub use format::*;
 pub use input::*;

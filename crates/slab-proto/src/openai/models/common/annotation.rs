@@ -39,7 +39,7 @@ impl UrlAnnotation {
 /// Type discriminator that is always `url` for this annotation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum UrlAnnotationType {
+pub enum UrlAnnotationType {
     #[serde(rename = "url")]
     #[default]
     Url,
@@ -65,7 +65,7 @@ impl UrlAnnotationSource {
 /// Type discriminator that is always `url`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum UrlAnnotationSourceType {
+pub enum UrlAnnotationSourceType {
     #[serde(rename = "url")]
     #[default]
     Url,
@@ -106,7 +106,7 @@ impl UrlCitationBody {
 /// The type of the URL citation. Always `url_citation`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum UrlCitationBodyType {
+pub enum UrlCitationBodyType {
     #[serde(rename = "url_citation")]
     #[default]
     UrlCitation,

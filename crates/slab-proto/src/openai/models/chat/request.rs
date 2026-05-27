@@ -1,9 +1,9 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-use super::meta::Format;
+use super::meta::ChatMetaFormat;
 use super::meta::Modalities;
-use super::meta::PromptCacheRetention;
+use super::meta::ChatMetaPromptCacheRetention;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CreateChatCompletionRequest {
@@ -48,7 +48,7 @@ pub struct CreateChatCompletionRequest {
     pub service_tier: Option<Option<models::ServiceTier>>,
     /// The retention policy for the prompt cache. Set to `24h` to enable extended prompt caching, which keeps cached prefixes active for longer, up to a maximum of 24 hours. [Learn more](/docs/guides/prompt-caching#prompt-cache-retention).
     #[serde(rename = "prompt_cache_retention", skip_serializing_if = "Option::is_none")]
-    pub prompt_cache_retention: Option<PromptCacheRetention>,
+    pub prompt_cache_retention: Option<ChatMetaPromptCacheRetention>,
     /// Output types that you would like the model to generate. Most models are capable of generating text, which is the default:  `[\"text\"]`  The `gpt-4o-audio-preview` model can also be used to [generate audio](/docs/guides/audio). To request that this model generate both text and audio responses, you can use:  `[\"text\", \"audio\"]`
     #[serde(
         rename = "modalities",
@@ -187,14 +187,14 @@ pub struct CreateChatCompletionRequestAllOfAudio {
     pub voice: Box<models::VoiceIdsOrCustomVoice>,
     /// Specifies the output audio format. Must be one of `wav`, `mp3`, `flac`, `opus`, or `pcm16`.
     #[serde(rename = "format")]
-    pub format: Format,
+    pub format: ChatMetaFormat,
 }
 
 impl CreateChatCompletionRequestAllOfAudio {
     /// Parameters for audio output. Required when audio output is requested with `modalities: [\"audio\"]`. [Learn more](/docs/guides/audio).
     pub fn new(
         voice: models::VoiceIdsOrCustomVoice,
-        format: Format,
+        format: ChatMetaFormat,
     ) -> CreateChatCompletionRequestAllOfAudio {
         CreateChatCompletionRequestAllOfAudio { voice: Box::new(voice), format }
     }

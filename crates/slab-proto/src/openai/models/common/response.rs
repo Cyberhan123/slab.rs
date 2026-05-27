@@ -79,7 +79,7 @@ impl TextResponseFormatJsonSchema {
 /// The type of response format being defined. Always `json_schema`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum TextResponseFormatJsonSchemaType {
+pub enum TextResponseFormatJsonSchemaType {
     #[serde(rename = "json_schema")]
     #[default]
     JsonSchema,

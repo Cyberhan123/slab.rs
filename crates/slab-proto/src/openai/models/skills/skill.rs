@@ -51,7 +51,7 @@ pub mod skill_resource {
     /// The object type, which is `skill`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
     #[derive(Default)]
-    pub(crate) enum Object {
+    pub enum Object {
         #[serde(rename = "skill")]
         #[default]
         Skill,
@@ -97,7 +97,7 @@ pub mod skill_list_resource {
     /// The type of object returned, must be `list`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
     #[derive(Default)]
-    pub(crate) enum Object {
+    pub enum Object {
         #[serde(rename = "list")]
         #[default]
         List,
@@ -151,7 +151,7 @@ pub mod skill_version_resource {
     /// The object type, which is `skill.version`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
     #[derive(Default)]
-    pub(crate) enum Object {
+    pub enum Object {
         #[serde(rename = "skill.version")]
         #[default]
         SkillVersion,
@@ -197,7 +197,7 @@ pub mod skill_version_list_resource {
     /// The type of object returned, must be `list`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
     #[derive(Default)]
-    pub(crate) enum Object {
+    pub enum Object {
         #[serde(rename = "list")]
         #[default]
         List,
@@ -227,7 +227,7 @@ pub mod deleted_skill_resource {
     }
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
     #[derive(Default)]
-    pub(crate) enum Object {
+    pub enum Object {
         #[serde(rename = "skill.deleted")]
         #[default]
         SkillDeleted,
@@ -265,7 +265,7 @@ pub mod deleted_skill_version_resource {
     }
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
     #[derive(Default)]
-    pub(crate) enum Object {
+    pub enum Object {
         #[serde(rename = "skill.version.deleted")]
         #[default]
         SkillVersionDeleted,

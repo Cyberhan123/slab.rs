@@ -17,7 +17,7 @@ pub struct CreateChatCompletionResponse {
     pub model: String,
     /// The object type, which is always `chat.completion`.
     #[serde(rename = "object")]
-    pub object: Object,
+    pub object: ChatResponseObject,
     #[serde(
         rename = "service_tier",
         default,
@@ -39,7 +39,7 @@ impl CreateChatCompletionResponse {
         choices: Vec<models::CreateChatCompletionResponseChoicesInner>,
         created: i32,
         model: String,
-        object: Object,
+        object: ChatResponseObject,
     ) -> CreateChatCompletionResponse {
         CreateChatCompletionResponse {
             id,
@@ -56,7 +56,7 @@ impl CreateChatCompletionResponse {
 /// The object type, which is always `chat.completion`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum Object {
+pub enum ChatResponseObject {
     #[serde(rename = "chat.completion")]
     #[default]
     ChatCompletion,
@@ -95,7 +95,7 @@ impl CreateChatCompletionResponseChoicesInner {
 /// The reason the model stopped generating tokens. This will be `stop` if the model hit a natural stop point or a provided stop sequence, `length` if the maximum number of tokens specified in the request was reached, `content_filter` if content was omitted due to a flag from our content filters, `tool_calls` if the model called a tool, or `function_call` (deprecated) if the model called a function.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum FinishReason {
+pub enum FinishReason {
     #[serde(rename = "stop")]
     #[default]
     Stop,

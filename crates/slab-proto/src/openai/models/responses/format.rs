@@ -17,7 +17,7 @@ impl ResponseFormatJsonObject {
 /// The type of response format being defined. Always `json_object`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ResponseFormatJsonObjectType {
+pub enum ResponseFormatJsonObjectType {
     #[serde(rename = "json_object")]
     #[default]
     JsonObject,
@@ -45,7 +45,7 @@ impl ResponseFormatJsonSchema {
 /// The type of response format being defined. Always `json_schema`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ResponseFormatJsonSchemaType {
+pub enum ResponseFormatJsonSchemaType {
     #[serde(rename = "json_schema")]
     #[default]
     JsonSchema,
@@ -68,7 +68,7 @@ impl ResponseFormatText {
 /// The type of response format being defined. Always `text`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ResponseFormatTextType {
+pub enum ResponseFormatTextType {
     #[serde(rename = "text")]
     #[default]
     Text,
@@ -97,7 +97,7 @@ impl ResponseFormatTextGrammar {
 /// The type of response format being defined. Always `grammar`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ResponseFormatTextGrammarType {
+pub enum ResponseFormatTextGrammarType {
     #[serde(rename = "grammar")]
     #[default]
     Grammar,
@@ -120,7 +120,7 @@ impl ResponseFormatTextPython {
 /// The type of response format being defined. Always `python`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ResponseFormatTextPythonType {
+pub enum ResponseFormatTextPythonType {
     #[serde(rename = "python")]
     #[default]
     Python,

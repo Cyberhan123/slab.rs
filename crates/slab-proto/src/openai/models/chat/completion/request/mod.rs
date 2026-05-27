@@ -1,5 +1,5 @@
-pub mod assistant;
-pub mod message;
+mod assistant;
+mod message;
 
 pub use assistant::*;
 pub use message::*;

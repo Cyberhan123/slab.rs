@@ -71,7 +71,7 @@ impl std::fmt::Display for ReasoningEffort {
 }
 
 
-use crate::openai::models::common::status::Status;
+use crate::models::Status;
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ReasoningItem {
     /// The type of the object. Always `reasoning`.
@@ -139,7 +139,7 @@ impl ReasoningTextContent {
 /// The type of the reasoning text. Always `reasoning_text`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ReasoningTextContentType {
+pub enum ReasoningTextContentType {
     #[serde(rename = "reasoning_text")]
     #[default]
     ReasoningText,

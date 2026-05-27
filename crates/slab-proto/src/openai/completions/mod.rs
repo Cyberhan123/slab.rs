@@ -1,3 +1,4 @@
-pub mod completions;
+#[path = "completions.rs"]
+mod model;
 
-pub use completions::*;
+pub use model::*;

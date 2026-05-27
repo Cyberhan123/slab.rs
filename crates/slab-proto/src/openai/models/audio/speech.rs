@@ -1,7 +1,7 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-use super::format::ResponseFormat;
+use super::format::AudioResponseFormat;
 use super::format::StreamFormat;
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CreateSpeechRequest {
@@ -18,7 +18,7 @@ pub struct CreateSpeechRequest {
     pub instructions: Option<String>,
     /// The format to audio in. Supported formats are `mp3`, `opus`, `aac`, `flac`, `wav`, and `pcm`.
     #[serde(rename = "response_format", skip_serializing_if = "Option::is_none")]
-    pub response_format: Option<ResponseFormat>,
+    pub response_format: Option<AudioResponseFormat>,
     /// The speed of the generated audio. Select a value from `0.25` to `4.0`. `1.0` is the default.
     #[serde(rename = "speed", skip_serializing_if = "Option::is_none")]
     pub speed: Option<f64>,
@@ -79,7 +79,7 @@ impl SpeechAudioDeltaEvent {
 /// The type of the event. Always `speech.audio.delta`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum SpeechAudioDeltaEventType {
+pub enum SpeechAudioDeltaEventType {
     #[serde(rename = "speech.audio.delta")]
     #[default]
     SpeechAudioDelta,
@@ -107,7 +107,7 @@ impl SpeechAudioDoneEvent {
 /// The type of the event. Always `speech.audio.done`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum SpeechAudioDoneEventType {
+pub enum SpeechAudioDoneEventType {
     #[serde(rename = "speech.audio.done")]
     #[default]
     SpeechAudioDone,

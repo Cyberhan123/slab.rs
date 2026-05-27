@@ -39,7 +39,7 @@ impl TaskGroupItem {
 /// Type discriminator that is always `chatkit.thread_item`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum TaskGroupItemObject {
+pub enum TaskGroupItemObject {
     #[serde(rename = "chatkit.thread_item")]
     #[default]
     ChatkitThreadItem,
@@ -48,7 +48,7 @@ pub(crate) enum TaskGroupItemObject {
 /// Type discriminator that is always `chatkit.task_group`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum TaskGroupItemType {
+pub enum TaskGroupItemType {
     #[serde(rename = "chatkit.task_group")]
     #[default]
     ChatkitTaskGroup,
@@ -125,7 +125,7 @@ impl TaskItem {
 /// Type discriminator that is always `chatkit.thread_item`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum TaskItemObject {
+pub enum TaskItemObject {
     #[serde(rename = "chatkit.thread_item")]
     #[default]
     ChatkitThreadItem,
@@ -134,7 +134,7 @@ pub(crate) enum TaskItemObject {
 /// Type discriminator that is always `chatkit.task`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum TaskItemType {
+pub enum TaskItemType {
     #[serde(rename = "chatkit.task")]
     #[default]
     ChatkitTask,

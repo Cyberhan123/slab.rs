@@ -119,7 +119,7 @@ impl DoneEvent {
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum DoneEventEvent {
+pub enum DoneEventEvent {
     #[serde(rename = "done")]
     #[default]
     Done,
@@ -142,7 +142,7 @@ impl ErrorEvent {
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ErrorEventEvent {
+pub enum ErrorEventEvent {
     #[serde(rename = "error")]
     #[default]
     Error,

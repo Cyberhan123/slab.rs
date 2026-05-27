@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
     #[derive(Default)]
-    pub(crate) enum Moderation {
+    pub enum ImageParamsModeration {
         #[serde(rename = "auto")]
         #[default]
         Auto,
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
     #[derive(Default)]
-    pub enum Status {
+    pub enum ImageParamsStatus {
         #[serde(rename = "in_progress")]
         #[default]
         InProgress,

@@ -23,7 +23,7 @@ impl VoiceConsentDeletedResource {
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum VoiceConsentDeletedResourceObject {
+pub enum VoiceConsentDeletedResourceObject {
     #[serde(rename = "audio.voice_consent")]
     #[default]
     AudioVoiceConsent,
@@ -65,7 +65,7 @@ impl VoiceConsentListResource {
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum VoiceConsentListResourceObject {
+pub enum VoiceConsentListResourceObject {
     #[serde(rename = "list")]
     #[default]
     List,
@@ -106,7 +106,7 @@ impl VoiceConsentResource {
 /// The object type, which is always `audio.voice_consent`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum VoiceConsentResourceObject {
+pub enum VoiceConsentResourceObject {
     #[serde(rename = "audio.voice_consent")]
     #[default]
     AudioVoiceConsent,
@@ -180,7 +180,7 @@ impl VoiceResource {
 /// The object type, which is always `audio.voice`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum VoiceResourceObject {
+pub enum VoiceResourceObject {
     #[serde(rename = "audio.voice")]
     #[default]
     AudioVoice,

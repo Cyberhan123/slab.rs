@@ -44,7 +44,7 @@ impl KeyPressAction {
 /// Specifies the event type. For a keypress action, this property is always set to `keypress`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum KeyPressActionType {
+pub enum KeyPressActionType {
     #[serde(rename = "keypress")]
     #[default]
     Keypress,
@@ -81,7 +81,7 @@ impl MoveParam {
 /// Specifies the event type. For a move action, this property is always set to `move`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum MoveParamType {
+pub enum MoveParamType {
     #[serde(rename = "move")]
     #[default]
     Move,
@@ -104,7 +104,7 @@ impl ScreenshotParam {
 /// Specifies the event type. For a screenshot action, this property is always set to `screenshot`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ScreenshotParamType {
+pub enum ScreenshotParamType {
     #[serde(rename = "screenshot")]
     #[default]
     Screenshot,
@@ -153,7 +153,7 @@ impl ScrollParam {
 /// Specifies the event type. For a scroll action, this property is always set to `scroll`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ScrollParamType {
+pub enum ScrollParamType {
     #[serde(rename = "scroll")]
     #[default]
     Scroll,
@@ -176,7 +176,7 @@ impl WaitParam {
 /// Specifies the event type. For a wait action, this property is always set to `wait`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum WaitParamType {
+pub enum WaitParamType {
     #[serde(rename = "wait")]
     #[default]
     Wait,

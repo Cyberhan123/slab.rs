@@ -60,24 +60,24 @@ impl SubmitToolOutputsRunRequestToolOutputsInner {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum SubmitToolOutputsRunRequestToolOutputsInnerConnectorId {
+pub enum SubmitToolOutputsRunRequestToolOutputsInnerConnectorId {
     #[serde(rename = "connector_dropbox")]
     #[default]
-    ConnectorDropbox,
+    Dropbox,
     #[serde(rename = "connector_gmail")]
-    ConnectorGmail,
+    Gmail,
     #[serde(rename = "connector_googlecalendar")]
-    ConnectorGooglecalendar,
+    Googlecalendar,
     #[serde(rename = "connector_googledrive")]
-    ConnectorGoogledrive,
+    Googledrive,
     #[serde(rename = "connector_microsoftteams")]
-    ConnectorMicrosoftteams,
+    Microsoftteams,
     #[serde(rename = "connector_outlookcalendar")]
-    ConnectorOutlookcalendar,
+    Outlookcalendar,
     #[serde(rename = "connector_outlookemail")]
-    ConnectorOutlookemail,
+    Outlookemail,
     #[serde(rename = "connector_sharepoint")]
-    ConnectorSharepoint,
+    Sharepoint,
 }
 
 
@@ -85,7 +85,7 @@ pub(crate) enum SubmitToolOutputsRunRequestToolOutputsInnerConnectorId {
 pub struct NamespaceToolParam {
     /// The type of the tool. Always `namespace`.
     #[serde(rename = "type")]
-    pub r#type: Type,
+    pub r#type: ToolCoreType,
     /// The namespace name used in tool calls (for example, `crm`).
     #[serde(rename = "name")]
     pub name: String,
@@ -100,7 +100,7 @@ pub struct NamespaceToolParam {
 impl NamespaceToolParam {
     /// Groups function/custom tools under a shared namespace.
     pub fn new(
-        r#type: Type,
+        r#type: ToolCoreType,
         name: String,
         description: String,
         tools: Vec<models::NamespaceToolParamToolsInner>,
@@ -111,7 +111,7 @@ impl NamespaceToolParam {
 /// The type of the tool. Always `namespace`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum Type {
+pub enum ToolCoreType {
     #[serde(rename = "namespace")]
     #[default]
     Namespace,

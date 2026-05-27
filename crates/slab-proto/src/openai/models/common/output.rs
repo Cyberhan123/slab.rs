@@ -102,7 +102,7 @@ pub struct OutputMessage {
     pub id: String,
     /// The type of the output message. Always `message`.
     #[serde(rename = "type")]
-    pub r#type: Type,
+    pub r#type: CommonOutputType,
     /// The role of the output message. Always `assistant`.
     #[serde(rename = "role")]
     pub role: OutputMessageRole,
@@ -125,7 +125,7 @@ impl OutputMessage {
     /// An output message from the model.
     pub fn new(
         id: String,
-        r#type: Type,
+        r#type: CommonOutputType,
         role: OutputMessageRole,
         content: Vec<models::OutputMessageContent>,
         status: Status,
@@ -136,7 +136,7 @@ impl OutputMessage {
 /// The type of the output message. Always `message`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum Type {
+pub enum CommonOutputType {
     #[serde(rename = "message")]
     #[default]
     Message,
@@ -145,7 +145,7 @@ pub(crate) enum Type {
 /// The role of the output message. Always `assistant`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum OutputMessageRole {
+pub enum OutputMessageRole {
     #[serde(rename = "assistant")]
     #[default]
     Assistant,

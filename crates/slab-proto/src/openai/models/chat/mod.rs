@@ -1,11 +1,11 @@
-pub mod completion;
-pub mod message;
-pub mod meta;
-pub mod request;
-pub mod response;
-pub mod session;
-pub mod stream;
-pub mod update;
+mod completion;
+mod message;
+mod meta;
+mod request;
+mod response;
+mod session;
+mod stream;
+mod update;
 
 pub use completion::*;
 pub use message::*;

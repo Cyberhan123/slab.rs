@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub enum Format {
+pub enum ChatMetaFormat {
     #[serde(rename = "wav")]
     #[default]
     Wav,
@@ -32,7 +32,7 @@ pub enum Modalities {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub enum PromptCacheRetention {
+pub enum ChatMetaPromptCacheRetention {
     #[serde(rename = "in_memory")]
     #[default]
     InMemory,

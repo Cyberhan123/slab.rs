@@ -1,5 +1,5 @@
 use crate::models;
-use crate::openai::models::common::search::SearchContextSize;
+use crate::openai::models::SearchContextSize;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -43,7 +43,7 @@ impl WebSearchActionFind {
 /// The action type.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum WebSearchActionFindType {
+pub enum WebSearchActionFindType {
     #[serde(rename = "find_in_page")]
     #[default]
     FindInPage,
@@ -74,7 +74,7 @@ impl WebSearchActionOpenPage {
 /// The action type.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum WebSearchActionOpenPageType {
+pub enum WebSearchActionOpenPageType {
     #[serde(rename = "open_page")]
     #[default]
     OpenPage,
@@ -106,7 +106,7 @@ impl WebSearchActionSearch {
 /// The action type.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum WebSearchActionSearchType {
+pub enum WebSearchActionSearchType {
     #[serde(rename = "search")]
     #[default]
     Search,
@@ -167,7 +167,7 @@ impl WebSearchApproximateLocation {
 /// The type of location approximation. Always `approximate`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum WebSearchApproximateLocationType {
+pub enum WebSearchApproximateLocationType {
     #[serde(rename = "approximate")]
     #[default]
     Approximate,
@@ -254,7 +254,7 @@ impl WebSearchPreviewTool {
 /// The type of the web search tool. One of `web_search_preview` or `web_search_preview_2025_03_11`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum WebSearchPreviewToolType {
+pub enum WebSearchPreviewToolType {
     #[serde(rename = "web_search_preview")]
     #[default]
     WebSearchPreview,
@@ -282,7 +282,7 @@ impl WebSearchSource {
 /// The type of source. Always `url`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum WebSearchSourceType {
+pub enum WebSearchSourceType {
     #[serde(rename = "url")]
     #[default]
     Url,
@@ -322,7 +322,7 @@ impl WebSearchTool {
 /// The type of the web search tool. One of `web_search` or `web_search_2025_08_26`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum WebSearchToolType {
+pub enum WebSearchToolType {
     #[serde(rename = "web_search")]
     #[default]
     WebSearch,
@@ -331,7 +331,7 @@ pub(crate) enum WebSearchToolType {
 }
 
 
-use super::misc::Status;
+use super::misc::ToolStatus;
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchToolCall {
     /// The unique ID of the web search tool call.
@@ -342,7 +342,7 @@ pub struct WebSearchToolCall {
     pub r#type: WebSearchToolCallType,
     /// The status of the web search tool call.
     #[serde(rename = "status")]
-    pub status: Status,
+    pub status: ToolStatus,
     #[serde(rename = "action")]
     pub action: Box<models::WebSearchToolCallAction>,
 }
@@ -352,7 +352,7 @@ impl WebSearchToolCall {
     pub fn new(
         id: String,
         r#type: WebSearchToolCallType,
-        status: Status,
+        status: ToolStatus,
         action: models::WebSearchToolCallAction,
     ) -> WebSearchToolCall {
         WebSearchToolCall { id, r#type, status, action: Box::new(action) }
@@ -361,7 +361,7 @@ impl WebSearchToolCall {
 /// The type of the web search tool call. Always `web_search_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum WebSearchToolCallType {
+pub enum WebSearchToolCallType {
     #[serde(rename = "web_search_call")]
     #[default]
     WebSearchCall,
@@ -439,7 +439,7 @@ impl WebSearchUserLocation {
 /// The type of location approximation. Always `approximate`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum WebSearchUserLocationType {
+pub enum WebSearchUserLocationType {
     #[serde(rename = "approximate")]
     #[default]
     Approximate,

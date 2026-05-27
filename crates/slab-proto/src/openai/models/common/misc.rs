@@ -248,7 +248,7 @@ impl TopLogProb {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ClientToolCallItemObject {
+pub enum ClientToolCallItemObject {
     #[serde(rename = "chatkit.thread_item")]
     #[default]
     ChatkitThreadItem,
@@ -257,7 +257,7 @@ pub(crate) enum ClientToolCallItemObject {
 /// Type discriminator that is always `chatkit.client_tool_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ClientToolCallItemType {
+pub enum ClientToolCallItemType {
     #[serde(rename = "chatkit.client_tool_call")]
     #[default]
     ChatkitClientToolCall,
@@ -302,7 +302,7 @@ impl OtherChunkingStrategyResponseParam {
 /// Always `other`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum OtherChunkingStrategyResponseParamType {
+pub enum OtherChunkingStrategyResponseParamType {
     #[serde(rename = "other")]
     #[default]
     Other,
@@ -474,7 +474,7 @@ impl SpecificApplyPatchParam {
 /// The tool to call. Always `apply_patch`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum SpecificApplyPatchParamType {
+pub enum SpecificApplyPatchParamType {
     #[serde(rename = "apply_patch")]
     #[default]
     ApplyPatch,
@@ -497,7 +497,7 @@ impl SpecificFunctionShellParam {
 /// The tool to call. Always `shell`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum SpecificFunctionShellParamType {
+pub enum SpecificFunctionShellParamType {
     #[serde(rename = "shell")]
     #[default]
     Shell,
@@ -536,7 +536,7 @@ impl TypeParam {
 /// Specifies the event type. For a type action, this property is always set to `type`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum TypeParamType {
+pub enum TypeParamType {
     #[serde(rename = "type")]
     #[default]
     TypeParamType,
@@ -604,7 +604,7 @@ impl WidgetMessageItem {
 /// Type discriminator that is always `chatkit.thread_item`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum WidgetMessageItemObject {
+pub enum WidgetMessageItemObject {
     #[serde(rename = "chatkit.thread_item")]
     #[default]
     ChatkitThreadItem,
@@ -613,7 +613,7 @@ pub(crate) enum WidgetMessageItemObject {
 /// Type discriminator that is always `chatkit.widget`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum WidgetMessageItemType {
+pub enum WidgetMessageItemType {
     #[serde(rename = "chatkit.widget")]
     #[default]
     ChatkitWidget,

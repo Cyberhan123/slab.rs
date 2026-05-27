@@ -16,7 +16,7 @@ impl ActiveStatus {
 /// ActiveStatus discriminator that is always `active`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ActiveStatusType {
+pub enum ActiveStatusType {
     #[serde(rename = "active")]
     #[default]
     Active,
@@ -42,7 +42,7 @@ impl ClosedStatus {
 /// ClosedStatus discriminator that is always `closed`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ClosedStatusType {
+pub enum ClosedStatusType {
     #[serde(rename = "closed")]
     #[default]
     Closed,
@@ -68,7 +68,7 @@ impl LockedStatus {
 /// LockedStatus discriminator that is always `locked`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum LockedStatusType {
+pub enum LockedStatusType {
     #[serde(rename = "locked")]
     #[default]
     Locked,
@@ -77,7 +77,7 @@ pub(crate) enum LockedStatusType {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum Status {
+pub enum Status {
     #[serde(rename = "in_progress")]
     #[default]
     InProgress,

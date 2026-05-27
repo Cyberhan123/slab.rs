@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 pub struct ChatCompletionAllowedToolsChoice {
     /// Allowed tool configuration type. Always `allowed_tools`.
     #[serde(rename = "type")]
-    pub r#type: Type,
+    pub r#type: ChatCompletionAllowedType,
     #[serde(rename = "allowed_tools")]
     pub allowed_tools: Box<models::ChatCompletionAllowedTools>,
 }
@@ -14,7 +14,7 @@ pub struct ChatCompletionAllowedToolsChoice {
 impl ChatCompletionAllowedToolsChoice {
     /// Constrains the tools available to the model to a pre-defined set.
     pub fn new(
-        r#type: Type,
+        r#type: ChatCompletionAllowedType,
         allowed_tools: models::ChatCompletionAllowedTools,
     ) -> ChatCompletionAllowedToolsChoice {
         ChatCompletionAllowedToolsChoice { r#type, allowed_tools: Box::new(allowed_tools) }
@@ -23,7 +23,7 @@ impl ChatCompletionAllowedToolsChoice {
 /// Allowed tool configuration type. Always `allowed_tools`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub enum Type {
+pub enum ChatCompletionAllowedType {
     #[serde(rename = "allowed_tools")]
     #[default]
     AllowedTools,

@@ -33,7 +33,7 @@ impl CreateTranscriptionRequestChunkingStrategy {
 /// Must be set to `server_vad` to enable manual chunking using server side VAD.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum CreateTranscriptionRequestChunkingStrategyType {
+pub enum CreateTranscriptionRequestChunkingStrategyType {
     #[serde(rename = "server_vad")]
     #[default]
     ServerVad,
@@ -71,7 +71,7 @@ impl CreateTranscriptionResponseDiarizedJson {
 /// The type of task that was run. Always `transcribe`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum CreateTranscriptionResponseDiarizedJsonTask {
+pub enum CreateTranscriptionResponseDiarizedJsonTask {
     #[serde(rename = "transcribe")]
     #[default]
     Transcribe,
@@ -190,7 +190,7 @@ impl TranscriptionDiarizedSegment {
 /// The type of the segment. Always `transcript.text.segment`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum TranscriptionDiarizedSegmentType {
+pub enum TranscriptionDiarizedSegmentType {
     #[serde(rename = "transcript.text.segment")]
     #[default]
     TranscriptTextSegment,

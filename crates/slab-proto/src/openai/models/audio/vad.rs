@@ -24,7 +24,7 @@ impl VadConfig {
 /// Must be set to `server_vad` to enable manual chunking using server side VAD.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum VadConfigType {
+pub enum VadConfigType {
     #[serde(rename = "server_vad")]
     #[default]
     ServerVad,
@@ -57,7 +57,7 @@ impl SemanticVad {
 /// Type of turn detection, `semantic_vad` to turn on Semantic VAD.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum SemanticVadType {
+pub enum SemanticVadType {
     #[serde(rename = "semantic_vad")]
     #[default]
     SemanticVad,
@@ -112,7 +112,7 @@ impl ServerVad {
 /// Type of turn detection, `server_vad` to turn on simple Server VAD.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub(crate) enum ServerVadType {
+pub enum ServerVadType {
     #[serde(rename = "server_vad")]
     #[default]
     ServerVad,

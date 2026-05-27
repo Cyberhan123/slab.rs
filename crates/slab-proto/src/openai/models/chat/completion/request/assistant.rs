@@ -57,7 +57,7 @@ impl Default for ChatCompletionRequestAssistantMessageContent {
 pub struct ChatCompletionRequestAssistantMessage {
     /// The role of the messages author, in this case `assistant`.
     #[serde(rename = "role")]
-    pub role: Role,
+    pub role: ChatCompletionRequestRole,
     #[serde(
         rename = "content",
         default,
@@ -98,7 +98,7 @@ pub struct ChatCompletionRequestAssistantMessage {
 
 impl ChatCompletionRequestAssistantMessage {
     /// Messages sent by the model in response to user messages.
-    pub fn new(role: Role) -> ChatCompletionRequestAssistantMessage {
+    pub fn new(role: ChatCompletionRequestRole) -> ChatCompletionRequestAssistantMessage {
         ChatCompletionRequestAssistantMessage {
             role,
             content: None,
@@ -113,7 +113,7 @@ impl ChatCompletionRequestAssistantMessage {
 /// The role of the messages author, in this case `assistant`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
-pub enum Role {
+pub enum ChatCompletionRequestRole {
     #[serde(rename = "assistant")]
     #[default]
     Assistant,

@@ -1,3 +1,4 @@
-pub mod embeddings;
+#[path = "embeddings.rs"]
+mod model;
 
-pub use embeddings::*;
+pub use model::*;

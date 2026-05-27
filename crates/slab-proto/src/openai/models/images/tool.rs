@@ -1,7 +1,7 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-use super::params::Moderation;
+use super::params::ImageParamsModeration;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImageGenTool {
@@ -23,7 +23,7 @@ pub struct ImageGenTool {
     pub output_compression: Option<i32>,
     /// Moderation level for the generated image. Default: `auto`.
     #[serde(rename = "moderation", skip_serializing_if = "Option::is_none")]
-    pub moderation: Option<Moderation>,
+    pub moderation: Option<ImageParamsModeration>,
     /// Background type for the generated image. One of `transparent`, `opaque`, or `auto`. Default: `auto`.
     #[serde(rename = "background", skip_serializing_if = "Option::is_none")]
     pub background: Option<ImageGenToolBackground>,
@@ -67,7 +67,7 @@ impl ImageGenTool {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageGenToolType {
+pub enum ImageGenToolType {
     #[serde(rename = "image_generation")]
     #[default]
     ImageGeneration,
@@ -77,7 +77,7 @@ pub(crate) enum ImageGenToolType {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageGenToolQuality {
+pub enum ImageGenToolQuality {
     #[serde(rename = "low")]
     #[default]
     Low,
@@ -93,7 +93,7 @@ pub(crate) enum ImageGenToolQuality {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageGenToolOutputFormat {
+pub enum ImageGenToolOutputFormat {
     #[serde(rename = "png")]
     #[default]
     Png,
@@ -107,7 +107,7 @@ pub(crate) enum ImageGenToolOutputFormat {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageGenToolBackground {
+pub enum ImageGenToolBackground {
     #[serde(rename = "transparent")]
     #[default]
     Transparent,
@@ -117,7 +117,7 @@ pub(crate) enum ImageGenToolBackground {
     Auto,
 }
 
-use super::params::Status;
+use super::params::ImageParamsStatus;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImageGenToolCall {
@@ -129,7 +129,7 @@ pub struct ImageGenToolCall {
     pub id: String,
     /// The status of the image generation call.
     #[serde(rename = "status")]
-    pub status: Status,
+    pub status: ImageParamsStatus,
     /// The generated image encoded in base64.
     #[serde(rename = "result", deserialize_with = "Option::deserialize")]
     pub result: Option<String>,
@@ -140,7 +140,7 @@ impl ImageGenToolCall {
     pub fn new(
         r#type: ImageGenToolCallType,
         id: String,
-        status: Status,
+        status: ImageParamsStatus,
         result: Option<String>,
     ) -> ImageGenToolCall {
         ImageGenToolCall { r#type, id, status, result }
@@ -150,7 +150,7 @@ impl ImageGenToolCall {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
-pub(crate) enum ImageGenToolCallType {
+pub enum ImageGenToolCallType {
     #[serde(rename = "image_generation_call")]
     #[default]
     ImageGenerationCall,

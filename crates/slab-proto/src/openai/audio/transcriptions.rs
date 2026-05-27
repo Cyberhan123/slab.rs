@@ -1,6 +1,6 @@
 // /audio/transcriptions
-pub use crate::openai::models::audio::transcription::AudioTranscription;
-pub use crate::openai::models::audio::transcription::CreateTranscriptionResponseDiarizedJson;
-pub use crate::openai::models::audio::transcription::TranscriptionDiarizedSegment;
-pub use crate::openai::models::audio::transcription::TranscriptionSegment;
-pub use crate::openai::models::audio::transcription::TranscriptionWord;
+pub use crate::openai::models::AudioTranscription;
+pub use crate::openai::models::CreateTranscriptionResponseDiarizedJson;
+pub use crate::openai::models::TranscriptionDiarizedSegment;
+pub use crate::openai::models::TranscriptionSegment;
+pub use crate::openai::models::TranscriptionWord;
