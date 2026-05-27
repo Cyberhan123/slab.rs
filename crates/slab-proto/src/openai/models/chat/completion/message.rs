@@ -1,4 +1,4 @@
-use crate::models;
+use crate::openai::models;
 use serde::{Deserialize, Serialize};
 
 /// ChatCompletionMessageCustomToolCallCustom : The custom tool that the model called.

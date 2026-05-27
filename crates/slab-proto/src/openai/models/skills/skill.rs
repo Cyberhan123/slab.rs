@@ -60,7 +60,7 @@ pub mod skill_resource {
 }
 
 pub mod skill_list_resource {
-    use crate::models;
+    use crate::openai::models;
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -158,7 +158,7 @@ pub mod skill_version_resource {
 }
 
 pub mod skill_version_list_resource {
-    use crate::models;
+    use crate::openai::models;
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]

@@ -2,7 +2,7 @@
  * OpenAI API - Merged type definitions
  */
 
-use crate::models;
+use crate::openai::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]

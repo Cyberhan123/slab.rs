@@ -4,7 +4,10 @@ use super::*;
 fn completions_post_request_deserializes() {
     let request: CreateCompletionRequest = assert_json_deserializes(COMPLETIONS_REQUEST);
 
-    assert_eq!(request.prompt.as_ref().and_then(|value| value.as_str()), Some("Write a haiku about tests."));
+    assert_eq!(
+        request.prompt.as_ref().and_then(|value| value.as_str()),
+        Some("Write a haiku about tests.")
+    );
 }
 
 #[test]

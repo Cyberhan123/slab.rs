@@ -1,4 +1,4 @@
-use crate::models;
+use crate::openai::models;
 use serde::{Deserialize, Serialize};
 
 /// ChatCompletionRequestSystemMessageContent : The contents of the system message.

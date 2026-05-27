@@ -1,4 +1,4 @@
-use crate::models;
+use crate::openai::models;
 use serde::{Deserialize, Serialize};
 
 /// ChatSessionResource : Represents a ChatKit session and its resolved configuration.

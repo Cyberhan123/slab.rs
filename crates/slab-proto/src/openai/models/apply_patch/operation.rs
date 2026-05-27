@@ -1,4 +1,4 @@
-use crate::models;
+use crate::openai::models;
 use serde::{Deserialize, Serialize};
 
 /// ApplyPatchOperationParam : One of the create_file, delete_file, or update_file operations supplied to the apply_patch tool.

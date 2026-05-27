@@ -1,4 +1,4 @@
-use crate::models;
+use crate::openai::models;
 use serde::{Deserialize, Serialize};
 
 // GenerateSummary not yet generated; use serde_json::Value as placeholder
@@ -71,7 +71,6 @@ impl std::fmt::Display for ReasoningEffort {
     }
 }
 
-use crate::models::Status;
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ReasoningItem {
     /// The type of the object. Always `reasoning`.
@@ -96,7 +95,7 @@ pub struct ReasoningItem {
     pub content: Option<Vec<models::ReasoningTextContent>>,
     /// The status of the item. One of `in_progress`, `completed`, or `incomplete`. Populated when items are returned via API.
     #[serde(rename = "status", skip_serializing_if = "Option::is_none")]
-    pub status: Option<Status>,
+    pub status: Option<models::Status>,
 }
 
 impl ReasoningItem {

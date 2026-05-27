@@ -1,4 +1,4 @@
-use crate::models;
+use crate::openai::models;
 use serde::{Deserialize, Serialize};
 
 /// ChatCompletionRequestAssistantMessageAudio : Data about a previous audio response from the model. [Learn more](/docs/guides/audio).

@@ -1,4 +1,4 @@
-use crate::models;
+use crate::openai::models;
 use crate::openai::models::SearchContextSize;
 use serde::{Deserialize, Serialize};
 

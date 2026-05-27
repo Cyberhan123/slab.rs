@@ -1,4 +1,4 @@
-use crate::models;
+use crate::openai::models;
 use serde::{Deserialize, Serialize};
 
 /// ChatCompletionResponseMessageAnnotationsInner : A URL citation when using web search.

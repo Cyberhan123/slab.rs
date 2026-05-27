@@ -1,5 +1,5 @@
 pub mod create_chat_completion_stream_response {
-    use crate::models;
+    use crate::openai::models;
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -67,7 +67,7 @@ pub mod create_chat_completion_stream_response {
 }
 
 pub mod create_chat_completion_stream_response_choices_inner {
-    use crate::models;
+    use crate::openai::models;
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -118,7 +118,7 @@ pub mod create_chat_completion_stream_response_choices_inner {
 }
 
 pub mod create_chat_completion_stream_response_choices_inner_logprobs {
-    use crate::models;
+    use crate::openai::models;
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]

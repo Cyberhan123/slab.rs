@@ -1,4 +1,4 @@
-use crate::models;
+use crate::openai::models;
 use serde::{Deserialize, Serialize};
 
 /// ChatCompletionStreamOptions : Options for streaming response. Only set this when you set `stream: true`.

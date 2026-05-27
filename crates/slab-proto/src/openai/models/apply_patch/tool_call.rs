@@ -1,4 +1,4 @@
-use crate::models;
+use crate::openai::models;
 use serde::{Deserialize, Serialize};
 
 /// ApplyPatchToolCallItemParam : A tool call representing a request to create, delete, or update files using diff patches.

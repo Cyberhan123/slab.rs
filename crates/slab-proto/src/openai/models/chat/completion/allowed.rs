@@ -1,4 +1,4 @@
-use crate::models;
+use crate::openai::models;
 use serde::{Deserialize, Serialize};
 
 /// ChatCompletionAllowedToolsChoice : Constrains the tools available to the model to a pre-defined set.

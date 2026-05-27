@@ -1,5 +1,5 @@
 use super::misc::Rate;
-use crate::models;
+use crate::openai::models;
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PcmaAudioFormat {

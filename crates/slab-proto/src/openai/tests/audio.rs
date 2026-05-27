@@ -19,10 +19,7 @@ fn audio_transcriptions_post_diarized_response_deserializes() {
     let diarized: CreateTranscriptionResponseDiarizedJson =
         assert_json_deserializes(AUDIO_TRANSCRIPTION_DIARIZED_RESPONSE);
 
-    assert_eq!(
-        diarized.task,
-        CreateTranscriptionResponseDiarizedJsonTask::Transcribe
-    );
+    assert_eq!(diarized.task, CreateTranscriptionResponseDiarizedJsonTask::Transcribe);
     assert_eq!(diarized.segments.len(), 1);
 }
 

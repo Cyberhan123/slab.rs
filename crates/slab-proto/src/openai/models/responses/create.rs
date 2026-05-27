@@ -1,5 +1,5 @@
 pub mod create_response {
-    use crate::models;
+    use crate::openai::models;
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -206,7 +206,7 @@ pub mod create_response {
 }
 
 pub mod create_model_response_properties {
-    use crate::models;
+    use crate::openai::models;
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
