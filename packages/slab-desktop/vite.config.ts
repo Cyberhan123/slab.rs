@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import importMetaUrlPlugin from "@codingame/esbuild-import-meta-url-plugin";
+import fs from "node:fs";
 import path from "path";
 
 const host = process.env.TAURI_DEV_HOST;
@@ -46,7 +47,7 @@ export default defineConfig(async () => ({
       apply: 'serve',
       configureServer(server) {
         return () => {
-          server.middlewares.use(async (req, res, next) => {
+          server.middlewares.use((req, res, next) => {
             if (req.originalUrl != null) {
               const pathname = new URL(req.originalUrl, import.meta.url).pathname
               if (pathname.endsWith('.html')) {
@@ -54,6 +55,7 @@ export default defineConfig(async () => ({
                 res.writeHead(200)
                 res.write(fs.readFileSync(path.join(__dirname, pathname)))
                 res.end()
+                return
               }
             }
 

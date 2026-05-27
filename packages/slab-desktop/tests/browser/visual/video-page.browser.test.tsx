@@ -24,11 +24,11 @@ vi.mock('@/hooks/use-global-header-meta', () => ({
   usePageHeaderControl: vi.fn<() => void>(),
 }));
 
-function createVideoViewModel(overrides = {}) {
-  const createVoidMock = () => vi.fn<(...args: unknown[]) => void>();
-  const createAsyncVoidMock = () =>
-    vi.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined);
+const createVoidMock = () => vi.fn<(...args: unknown[]) => void>();
+const createAsyncVoidMock = () =>
+  vi.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined);
 
+function createVideoViewModel(overrides = {}) {
   return {
     advancedOpen: false,
     cfgScale: 7,

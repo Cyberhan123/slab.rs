@@ -16,6 +16,7 @@ export default defineProject({
     browser: {
       enabled: true,
       headless: true,
+      api: { host: "127.0.0.1", port: 64116 },
       provider: playwright({
         actionTimeout: 5_000,
       }),

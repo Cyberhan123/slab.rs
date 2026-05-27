@@ -9,16 +9,15 @@ const statusBadge = (
   busy = false,
 ) => (
   <Badge
+    asChild
     variant={variant}
     data-status={status}
     className="gap-1.5 px-3 py-1.5"
-    role="status"
-    aria-live="polite"
-    aria-atomic="true"
-    aria-busy={busy || undefined}
   >
-    <div className={dotClassName} />
-    {label}
+    <output aria-live="polite" aria-atomic="true" aria-busy={busy || undefined}>
+      <span className={dotClassName} />
+      {label}
+    </output>
   </Badge>
 );
 
