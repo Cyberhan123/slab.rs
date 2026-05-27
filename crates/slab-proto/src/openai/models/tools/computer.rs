@@ -42,14 +42,14 @@ impl KeyPressAction {
     }
 }
 /// Specifies the event type. For a keypress action, this property is always set to `keypress`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum KeyPressActionType {
     #[serde(rename = "keypress")]
     #[default]
     Keypress,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MoveParam {
@@ -79,14 +79,14 @@ impl MoveParam {
     }
 }
 /// Specifies the event type. For a move action, this property is always set to `move`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum MoveParamType {
     #[serde(rename = "move")]
     #[default]
     Move,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ScreenshotParam {
@@ -102,14 +102,14 @@ impl ScreenshotParam {
     }
 }
 /// Specifies the event type. For a screenshot action, this property is always set to `screenshot`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ScreenshotParamType {
     #[serde(rename = "screenshot")]
     #[default]
     Screenshot,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ScrollParam {
@@ -151,14 +151,14 @@ impl ScrollParam {
     }
 }
 /// Specifies the event type. For a scroll action, this property is always set to `scroll`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ScrollParamType {
     #[serde(rename = "scroll")]
     #[default]
     Scroll,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WaitParam {
@@ -174,11 +174,11 @@ impl WaitParam {
     }
 }
 /// Specifies the event type. For a wait action, this property is always set to `wait`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum WaitParamType {
     #[serde(rename = "wait")]
     #[default]
     Wait,
 }
-

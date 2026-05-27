@@ -44,8 +44,9 @@ impl ResponseReasoningSummaryPartAddedEvent {
 }
 
 /// The type of the event. Always `response.reasoning_summary_part.added`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ReasoningSummaryPartAddedType {
     #[serde(rename = "response.reasoning_summary_part.added")]
     #[default]
@@ -115,8 +116,9 @@ impl ResponseReasoningSummaryPartDoneEvent {
 }
 
 /// The type of the event. Always `response.reasoning_summary_part.done`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ReasoningSummaryPartDoneType {
     #[serde(rename = "response.reasoning_summary_part.done")]
     #[default]
@@ -141,8 +143,9 @@ impl ResponseReasoningSummaryPartDoneEventPart {
 }
 
 /// The type of the summary part. Always `summary_text`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum SummaryTextType {
     #[serde(rename = "summary_text")]
     #[default]
@@ -193,8 +196,9 @@ impl ResponseReasoningSummaryTextDeltaEvent {
 }
 
 /// The type of the event. Always `response.reasoning_summary_text.delta`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ReasoningSummaryTextDeltaType {
     #[serde(rename = "response.reasoning_summary_text.delta")]
     #[default]
@@ -245,8 +249,9 @@ impl ResponseReasoningSummaryTextDoneEvent {
 }
 
 /// The type of the event. Always `response.reasoning_summary_text.done`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ReasoningSummaryTextDoneType {
     #[serde(rename = "response.reasoning_summary_text.done")]
     #[default]
@@ -297,8 +302,9 @@ impl ResponseReasoningTextDeltaEvent {
 }
 
 /// The type of the event. Always `response.reasoning_text.delta`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ReasoningTextDeltaType {
     #[serde(rename = "response.reasoning_text.delta")]
     #[default]
@@ -349,8 +355,9 @@ impl ResponseReasoningTextDoneEvent {
 }
 
 /// The type of the event. Always `response.reasoning_text.done`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ReasoningTextDoneType {
     #[serde(rename = "response.reasoning_text.done")]
     #[default]

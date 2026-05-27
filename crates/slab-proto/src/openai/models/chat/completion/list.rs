@@ -34,11 +34,11 @@ impl ChatCompletionList {
     }
 }
 /// The type of this object. It is always set to \"list\".
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum Object {
     #[serde(rename = "list")]
     #[default]
     List,
 }
-

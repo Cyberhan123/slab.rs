@@ -1,5 +1,5 @@
 pub mod skill_resource {
-    
+
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -49,15 +49,14 @@ pub mod skill_resource {
         }
     }
     /// The object type, which is `skill`.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
+    #[derive(
+        Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+    )]
     pub enum Object {
         #[serde(rename = "skill")]
         #[default]
         Skill,
     }
-
-    
 }
 
 pub mod skill_list_resource {
@@ -95,19 +94,18 @@ pub mod skill_list_resource {
         }
     }
     /// The type of object returned, must be `list`.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
+    #[derive(
+        Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+    )]
     pub enum Object {
         #[serde(rename = "list")]
         #[default]
         List,
     }
-
-    
 }
 
 pub mod skill_version_resource {
-    
+
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -149,15 +147,14 @@ pub mod skill_version_resource {
         }
     }
     /// The object type, which is `skill.version`.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
+    #[derive(
+        Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+    )]
     pub enum Object {
         #[serde(rename = "skill.version")]
         #[default]
         SkillVersion,
     }
-
-    
 }
 
 pub mod skill_version_list_resource {
@@ -195,19 +192,18 @@ pub mod skill_version_list_resource {
         }
     }
     /// The type of object returned, must be `list`.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
+    #[derive(
+        Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+    )]
     pub enum Object {
         #[serde(rename = "list")]
         #[default]
         List,
     }
-
-    
 }
 
 pub mod deleted_skill_resource {
-    
+
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -225,19 +221,18 @@ pub mod deleted_skill_resource {
             DeletedSkillResource { object, deleted, id }
         }
     }
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
+    #[derive(
+        Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+    )]
     pub enum Object {
         #[serde(rename = "skill.deleted")]
         #[default]
         SkillDeleted,
     }
-
-    
 }
 
 pub mod deleted_skill_version_resource {
-    
+
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -263,15 +258,14 @@ pub mod deleted_skill_version_resource {
             DeletedSkillVersionResource { object, deleted, id, version }
         }
     }
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
+    #[derive(
+        Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+    )]
     pub enum Object {
         #[serde(rename = "skill.version.deleted")]
         #[default]
         SkillVersionDeleted,
     }
-
-    
 }
 
 pub use deleted_skill_resource::DeletedSkillResource;

@@ -40,14 +40,14 @@ impl FunctionTool {
     }
 }
 /// The type of the function tool. Always `function`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum FunctionToolType {
     #[serde(rename = "function")]
     #[default]
     Function,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionToolCall {
@@ -94,8 +94,9 @@ impl FunctionToolCall {
     }
 }
 /// The type of the function tool call. Always `function_call`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum FunctionToolCallType {
     #[serde(rename = "function_call")]
     #[default]
@@ -103,8 +104,9 @@ pub enum FunctionToolCallType {
 }
 
 /// The status of the item. One of `in_progress`, `completed`, or `incomplete`. Populated when items are returned via API.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum FunctionToolCallStatus {
     #[serde(rename = "in_progress")]
     #[default]
@@ -114,7 +116,6 @@ pub enum FunctionToolCallStatus {
     #[serde(rename = "incomplete")]
     Incomplete,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionToolCallOutput {
@@ -145,8 +146,9 @@ impl FunctionToolCallOutput {
     }
 }
 /// The type of the function tool call output. Always `function_call_output`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum FunctionToolCallOutputType {
     #[serde(rename = "function_call_output")]
     #[default]
@@ -154,8 +156,9 @@ pub enum FunctionToolCallOutputType {
 }
 
 /// The status of the item. One of `in_progress`, `completed`, or `incomplete`. Populated when items are returned via API.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum FunctionToolCallOutputStatus {
     #[serde(rename = "in_progress")]
     #[default]
@@ -165,7 +168,6 @@ pub enum FunctionToolCallOutputStatus {
     #[serde(rename = "incomplete")]
     Incomplete,
 }
-
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -222,14 +224,14 @@ impl FunctionToolCallOutputResource {
     }
 }
 /// The type of the function tool call output. Always `function_call_output`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum FunctionToolCallOutputResourceType {
     #[serde(rename = "function_call_output")]
     #[default]
     FunctionCallOutput,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionToolCallResource {
@@ -281,14 +283,14 @@ impl FunctionToolCallResource {
     }
 }
 /// The type of the function tool call. Always `function_call`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum FunctionToolCallResourceType {
     #[serde(rename = "function_call")]
     #[default]
     FunctionCall,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionToolParam {
@@ -334,14 +336,14 @@ impl FunctionToolParam {
         }
     }
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum FunctionToolParamType {
     #[serde(rename = "function")]
     #[default]
     Function,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionObject {
@@ -370,8 +372,9 @@ impl FunctionObject {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum FunctionCallItemStatus {
     #[serde(rename = "in_progress")]
     #[default]
@@ -391,7 +394,6 @@ impl std::fmt::Display for FunctionCallItemStatus {
         }
     }
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionCallOutputItemParam {
@@ -438,14 +440,14 @@ impl FunctionCallOutputItemParam {
     }
 }
 /// The type of the function tool call output. Always `function_call_output`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum FunctionCallOutputItemParamType {
     #[serde(rename = "function_call_output")]
     #[default]
     FunctionCallOutput,
 }
-
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -481,8 +483,9 @@ impl Default for FunctionCallOutputItemParamOutputOneOfInner {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum FunctionCallOutputStatusEnum {
     #[serde(rename = "in_progress")]
     #[default]
@@ -503,9 +506,9 @@ impl std::fmt::Display for FunctionCallOutputStatusEnum {
     }
 }
 
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum FunctionCallStatus {
     #[serde(rename = "in_progress")]
     #[default]
@@ -525,7 +528,6 @@ impl std::fmt::Display for FunctionCallStatus {
         }
     }
 }
-
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]

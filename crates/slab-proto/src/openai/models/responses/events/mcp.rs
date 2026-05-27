@@ -33,8 +33,9 @@ impl ResponseMcpCallArgumentsDeltaEvent {
 }
 
 /// The type of the event. Always 'response.mcp_call_arguments.delta'.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum McpCallArgumentsDeltaType {
     #[serde(rename = "response.mcp_call_arguments.delta")]
     #[default]
@@ -80,8 +81,9 @@ impl ResponseMcpCallArgumentsDoneEvent {
 }
 
 /// The type of the event. Always 'response.mcp_call_arguments.done'.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum McpCallArgumentsDoneType {
     #[serde(rename = "response.mcp_call_arguments.done")]
     #[default]
@@ -117,8 +119,9 @@ impl ResponseMcpCallCompletedEvent {
 }
 
 /// The type of the event. Always 'response.mcp_call.completed'.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum McpCallCompletedType {
     #[serde(rename = "response.mcp_call.completed")]
     #[default]
@@ -154,8 +157,9 @@ impl ResponseMcpCallFailedEvent {
 }
 
 /// The type of the event. Always 'response.mcp_call.failed'.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum McpCallFailedType {
     #[serde(rename = "response.mcp_call.failed")]
     #[default]
@@ -191,8 +195,9 @@ impl ResponseMcpCallInProgressEvent {
 }
 
 /// The type of the event. Always 'response.mcp_call.in_progress'.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum McpCallInProgressType {
     #[serde(rename = "response.mcp_call.in_progress")]
     #[default]
@@ -228,8 +233,9 @@ impl ResponseMcpListToolsCompletedEvent {
 }
 
 /// The type of the event. Always 'response.mcp_list_tools.completed'.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum McpListToolsCompletedType {
     #[serde(rename = "response.mcp_list_tools.completed")]
     #[default]
@@ -265,8 +271,9 @@ impl ResponseMcpListToolsFailedEvent {
 }
 
 /// The type of the event. Always 'response.mcp_list_tools.failed'.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum McpListToolsFailedType {
     #[serde(rename = "response.mcp_list_tools.failed")]
     #[default]
@@ -302,8 +309,9 @@ impl ResponseMcpListToolsInProgressEvent {
 }
 
 /// The type of the event. Always 'response.mcp_list_tools.in_progress'.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum McpListToolsInProgressType {
     #[serde(rename = "response.mcp_list_tools.in_progress")]
     #[default]

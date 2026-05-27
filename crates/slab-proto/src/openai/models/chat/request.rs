@@ -2,8 +2,8 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 use super::meta::ChatMetaFormat;
-use super::meta::Modalities;
 use super::meta::ChatMetaPromptCacheRetention;
+use super::meta::Modalities;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CreateChatCompletionRequest {

@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ChatMetaFormat {
     #[serde(rename = "wav")]
     #[default]
@@ -18,9 +19,9 @@ pub enum ChatMetaFormat {
     Pcm16,
 }
 
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum Modalities {
     #[serde(rename = "text")]
     #[default]
@@ -29,9 +30,9 @@ pub enum Modalities {
     Audio,
 }
 
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ChatMetaPromptCacheRetention {
     #[serde(rename = "in_memory")]
     #[default]
@@ -39,5 +40,3 @@ pub enum ChatMetaPromptCacheRetention {
     #[serde(rename = "24h")]
     Variant24h,
 }
-
-

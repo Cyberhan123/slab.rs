@@ -24,14 +24,14 @@ impl ChatCompletionResponseMessageAnnotationsInner {
     }
 }
 /// The type of the URL citation. Always `url_citation`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ChatCompletionResponseMessageType {
     #[serde(rename = "url_citation")]
     #[default]
     UrlCitation,
 }
-
 
 /// ChatCompletionResponseMessageAudio : If the audio output modality is requested, this object contains data about the audio response from the model. [Learn more](/docs/guides/audio).
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -162,11 +162,11 @@ impl ChatCompletionResponseMessage {
     }
 }
 /// The role of the author of this message.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum Role {
     #[serde(rename = "assistant")]
     #[default]
     Assistant,
 }
-

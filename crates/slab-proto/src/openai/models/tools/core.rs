@@ -58,8 +58,9 @@ impl SubmitToolOutputsRunRequestToolOutputsInner {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum SubmitToolOutputsRunRequestToolOutputsInnerConnectorId {
     #[serde(rename = "connector_dropbox")]
     #[default]
@@ -79,7 +80,6 @@ pub enum SubmitToolOutputsRunRequestToolOutputsInnerConnectorId {
     #[serde(rename = "connector_sharepoint")]
     Sharepoint,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NamespaceToolParam {
@@ -109,14 +109,14 @@ impl NamespaceToolParam {
     }
 }
 /// The type of the tool. Always `namespace`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ToolCoreType {
     #[serde(rename = "namespace")]
     #[default]
     Namespace,
 }
-
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]

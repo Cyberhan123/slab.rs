@@ -21,14 +21,14 @@ impl ChatCompletionAllowedToolsChoice {
     }
 }
 /// Allowed tool configuration type. Always `allowed_tools`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ChatCompletionAllowedType {
     #[serde(rename = "allowed_tools")]
     #[default]
     AllowedTools,
 }
-
 
 /// ChatCompletionAllowedTools : Constrains the tools available to the model to a pre-defined set.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -51,8 +51,9 @@ impl ChatCompletionAllowedTools {
     }
 }
 /// Constrains the tools available to the model to a pre-defined set.  `auto` allows the model to pick from among the allowed tools and generate a message.  `required` requires the model to call one or more of the allowed tools.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum Mode {
     #[serde(rename = "auto")]
     #[default]
@@ -60,4 +61,3 @@ pub enum Mode {
     #[serde(rename = "required")]
     Required,
 }
-

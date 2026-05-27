@@ -151,8 +151,8 @@ impl ResponsesClientEvent {
     Hash,
     serde::Serialize,
     serde::Deserialize,
+    Default,
 )]
-#[derive(Default)]
 pub enum ResponseClientEventType {
     #[serde(rename = "response.create")]
     #[default]
@@ -171,8 +171,8 @@ pub enum ResponseClientEventType {
     Hash,
     serde::Serialize,
     serde::Deserialize,
+    Default,
 )]
-#[derive(Default)]
 pub enum PromptCacheRetention {
     #[serde(rename = "in_memory")]
     #[default]
@@ -193,8 +193,8 @@ pub enum PromptCacheRetention {
     Hash,
     serde::Serialize,
     serde::Deserialize,
+    Default,
 )]
-#[derive(Default)]
 pub enum Truncation {
     #[serde(rename = "auto")]
     #[default]
@@ -353,8 +353,8 @@ impl ResponsesClientEventResponseCreate {
     Hash,
     serde::Serialize,
     serde::Deserialize,
+    Default,
 )]
-#[derive(Default)]
 pub enum ResponseCreateEventType {
     #[serde(rename = "response.create")]
     #[default]
@@ -373,8 +373,8 @@ pub enum ResponseCreateEventType {
     Hash,
     serde::Serialize,
     serde::Deserialize,
+    Default,
 )]
-#[derive(Default)]
 pub enum ResponseCreatePromptCacheRetention {
     #[serde(rename = "in_memory")]
     #[default]
@@ -395,8 +395,8 @@ pub enum ResponseCreatePromptCacheRetention {
     Hash,
     serde::Serialize,
     serde::Deserialize,
+    Default,
 )]
-#[derive(Default)]
 pub enum ResponseCreateTruncation {
     #[serde(rename = "auto")]
     #[default]
@@ -543,8 +543,8 @@ impl ResponsesServerEvent {
     Hash,
     serde::Serialize,
     serde::Deserialize,
+    Default,
 )]
-#[derive(Default)]
 pub enum ServerEventType {
     #[serde(rename = "response.custom_tool_call_input.done")]
     #[default]

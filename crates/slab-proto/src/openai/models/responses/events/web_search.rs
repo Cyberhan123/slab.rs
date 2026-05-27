@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum WebSearchCompletedType {
     #[serde(rename = "response.web_search_call.completed")]
     #[default]
@@ -36,8 +37,9 @@ impl ResponseWebSearchCallCompletedEvent {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum WebSearchInProgressType {
     #[serde(rename = "response.web_search_call.in_progress")]
     #[default]
@@ -72,8 +74,9 @@ impl ResponseWebSearchCallInProgressEvent {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum WebSearchSearchingType {
     #[serde(rename = "response.web_search_call.searching")]
     #[default]

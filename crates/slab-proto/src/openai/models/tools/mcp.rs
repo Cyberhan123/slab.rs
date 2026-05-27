@@ -33,14 +33,14 @@ impl McpApprovalRequest {
     }
 }
 /// The type of the item. Always `mcp_approval_request`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum McpApprovalRequestType {
     #[serde(rename = "mcp_approval_request")]
     #[default]
     McpApprovalRequest,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct McpApprovalResponse {
@@ -82,14 +82,14 @@ impl McpApprovalResponse {
     }
 }
 /// The type of the item. Always `mcp_approval_response`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum McpApprovalResponseType {
     #[serde(rename = "mcp_approval_response")]
     #[default]
     McpApprovalResponse,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct McpApprovalResponseResource {
@@ -127,14 +127,14 @@ impl McpApprovalResponseResource {
     }
 }
 /// The type of the item. Always `mcp_approval_response`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum McpApprovalResponseResourceType {
     #[serde(rename = "mcp_approval_response")]
     #[default]
     McpApprovalResponse,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct McpListTools {
@@ -172,14 +172,14 @@ impl McpListTools {
     }
 }
 /// The type of the item. Always `mcp_list_tools`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum McpListToolsType {
     #[serde(rename = "mcp_list_tools")]
     #[default]
     McpListTools,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct McpListToolsTool {
@@ -280,8 +280,9 @@ impl McpTool {
     }
 }
 /// The type of the MCP tool. Always `mcp`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum McpToolType {
     #[serde(rename = "mcp")]
     #[default]
@@ -387,17 +388,18 @@ impl McpToolCall {
     }
 }
 /// The type of the item. Always `mcp_call`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum McpToolCallType {
     #[serde(rename = "mcp_call")]
     #[default]
     McpCall,
 }
 
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum McpToolCallStatus {
     #[serde(rename = "in_progress")]
     #[default]
@@ -423,7 +425,6 @@ impl std::fmt::Display for McpToolCallStatus {
         }
     }
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct McpToolFilter {

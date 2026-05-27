@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ToolBackground {
     #[serde(rename = "transparent")]
     #[default]
@@ -12,9 +13,9 @@ pub enum ToolBackground {
     Auto,
 }
 
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ToolModeration {
     #[serde(rename = "auto")]
     #[default]
@@ -25,8 +26,9 @@ pub enum ToolModeration {
 
 // Background type for the generated image. One of `transparent`, `opaque`, or `auto`. Default: `auto`.
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ToolOutputFormat {
     #[serde(rename = "png")]
     #[default]
@@ -39,8 +41,9 @@ pub enum ToolOutputFormat {
 
 // Moderation level for the generated image. Default: `auto`.
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ToolQuality {
     #[serde(rename = "low")]
     #[default]
@@ -55,8 +58,9 @@ pub enum ToolQuality {
 
 // The output format of the generated image. One of `png`, `webp`, or `jpeg`. Default: `png`.
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ToolStatus {
     #[serde(rename = "in_progress")]
     #[default]
@@ -68,4 +72,3 @@ pub enum ToolStatus {
     #[serde(rename = "failed")]
     Failed,
 }
-

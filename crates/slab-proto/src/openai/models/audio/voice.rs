@@ -21,14 +21,14 @@ impl VoiceConsentDeletedResource {
         VoiceConsentDeletedResource { id, object, deleted }
     }
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum VoiceConsentDeletedResourceObject {
     #[serde(rename = "audio.voice_consent")]
     #[default]
     AudioVoiceConsent,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VoiceConsentListResource {
@@ -63,14 +63,14 @@ impl VoiceConsentListResource {
         VoiceConsentListResource { object, data, has_more, first_id: None, last_id: None }
     }
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum VoiceConsentListResourceObject {
     #[serde(rename = "list")]
     #[default]
     List,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VoiceConsentResource {
@@ -104,14 +104,14 @@ impl VoiceConsentResource {
     }
 }
 /// The object type, which is always `audio.voice_consent`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum VoiceConsentResourceObject {
     #[serde(rename = "audio.voice_consent")]
     #[default]
     AudioVoiceConsent,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VoiceIdsOrCustomVoice {
@@ -178,14 +178,14 @@ impl VoiceResource {
     }
 }
 /// The object type, which is always `audio.voice`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum VoiceResourceObject {
     #[serde(rename = "audio.voice")]
     #[default]
     AudioVoice,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UpdateVoiceConsentRequest {

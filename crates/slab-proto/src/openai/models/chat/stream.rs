@@ -56,15 +56,14 @@ pub mod create_chat_completion_stream_response {
         }
     }
     /// The object type, which is always `chat.completion.chunk`.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
+    #[derive(
+        Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+    )]
     pub enum Object {
         #[serde(rename = "chat.completion.chunk")]
         #[default]
         ChatCompletionChunk,
     }
-
-    
 }
 
 pub mod create_chat_completion_stream_response_choices_inner {
@@ -100,8 +99,9 @@ pub mod create_chat_completion_stream_response_choices_inner {
         }
     }
     /// The reason the model stopped generating tokens. This will be `stop` if the model hit a natural stop point or a provided stop sequence, `length` if the maximum number of tokens specified in the request was reached, `content_filter` if content was omitted due to a flag from our content filters, `tool_calls` if the model called a tool, or `function_call` (deprecated) if the model called a function.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
+    #[derive(
+        Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+    )]
     pub enum FinishReason {
         #[serde(rename = "stop")]
         #[default]
@@ -115,8 +115,6 @@ pub mod create_chat_completion_stream_response_choices_inner {
         #[serde(rename = "function_call")]
         FunctionCall,
     }
-
-    
 }
 
 pub mod create_chat_completion_stream_response_choices_inner_logprobs {

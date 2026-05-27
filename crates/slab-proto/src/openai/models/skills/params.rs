@@ -29,19 +29,18 @@ pub mod inline_skill_param {
         }
     }
     /// Defines an inline skill for this request.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
+    #[derive(
+        Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+    )]
     pub enum Type {
         #[serde(rename = "inline")]
         #[default]
         Inline,
     }
-
-    
 }
 
 pub mod inline_skill_source_param {
-    
+
     use serde::{Deserialize, Serialize};
 
     use super::media_type::MediaType;
@@ -65,20 +64,20 @@ pub mod inline_skill_source_param {
         }
     }
     /// The type of the inline skill source. Must be `base64`.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
+    #[derive(
+        Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+    )]
     pub enum Type {
         #[serde(rename = "base64")]
         #[default]
         Base64,
     }
 
-    
     // The media type of the inline skill payload. Must be `application/zip`.
 }
 
 pub mod local_skill_param {
-    
+
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -102,7 +101,7 @@ pub mod local_skill_param {
 }
 
 pub mod skill_reference_param {
-    
+
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -124,30 +123,28 @@ pub mod skill_reference_param {
         }
     }
     /// References a skill created with the /v1/skills endpoint.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
+    #[derive(
+        Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+    )]
     pub enum Type {
         #[serde(rename = "skill_reference")]
         #[default]
         SkillReference,
     }
-
-    
 }
 
 pub mod media_type {
-    
+
     use serde::{Deserialize, Serialize};
 
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
+    #[derive(
+        Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+    )]
     pub enum MediaType {
         #[serde(rename = "application/zip")]
         #[default]
         ApplicationSlashZip,
     }
-
-    
 }
 
 pub use inline_skill_param::InlineSkillParam;

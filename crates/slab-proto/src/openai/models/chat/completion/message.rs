@@ -43,14 +43,14 @@ impl ChatCompletionMessageCustomToolCall {
     }
 }
 /// The type of the tool. Always `custom`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ChatCompletionMessageCustomToolCallType {
     #[serde(rename = "custom")]
     #[default]
     Custom,
 }
-
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -69,8 +69,9 @@ impl Default for ChatCompletionMessageListDataInnerAllOfContentPartsInner {
     }
 }
 /// The type of the content part.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ChatCompletionMessageListDataInnerAllOfContentPartsInnerType {
     #[serde(rename = "text")]
     #[default]
@@ -78,7 +79,6 @@ pub enum ChatCompletionMessageListDataInnerAllOfContentPartsInnerType {
     #[serde(rename = "image_url")]
     ImageUrl,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ChatCompletionMessageListDataInner {
@@ -141,14 +141,14 @@ impl ChatCompletionMessageListDataInner {
     }
 }
 /// The role of the author of this message.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ChatCompletionMessageRole {
     #[serde(rename = "assistant")]
     #[default]
     Assistant,
 }
-
 
 /// ChatCompletionMessageList : An object representing a list of chat completion messages.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -183,14 +183,14 @@ impl ChatCompletionMessageList {
     }
 }
 /// The type of this object. It is always set to \"list\".
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ChatCompletionMessageObject {
     #[serde(rename = "list")]
     #[default]
     List,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ChatCompletionMessageToolCallChunkFunction {
@@ -228,14 +228,14 @@ impl ChatCompletionMessageToolCallChunk {
     }
 }
 /// The type of the tool. Currently, only `function` is supported.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ChatCompletionMessageToolCallChunkType {
     #[serde(rename = "function")]
     #[default]
     Function,
 }
-
 
 /// ChatCompletionMessageToolCallFunction : The function that the model called.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -279,14 +279,14 @@ impl ChatCompletionMessageToolCall {
     }
 }
 /// The type of the tool. Currently, only `function` is supported.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ChatCompletionMessageToolCallType {
     #[serde(rename = "function")]
     #[default]
     Function,
 }
-
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]

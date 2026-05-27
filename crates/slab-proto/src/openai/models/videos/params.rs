@@ -23,8 +23,9 @@ impl VideoReferenceInputParam {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum VideoSeconds {
     #[serde(rename = "4")]
     #[default]
@@ -45,9 +46,9 @@ impl std::fmt::Display for VideoSeconds {
     }
 }
 
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum VideoSize {
     #[serde(rename = "720x1280")]
     #[default]
@@ -71,9 +72,9 @@ impl std::fmt::Display for VideoSize {
     }
 }
 
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum VideoStatus {
     #[serde(rename = "queued")]
     #[default]
@@ -96,4 +97,3 @@ impl std::fmt::Display for VideoStatus {
         }
     }
 }
-

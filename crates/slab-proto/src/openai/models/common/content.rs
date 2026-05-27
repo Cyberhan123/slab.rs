@@ -42,14 +42,14 @@ impl TextContent {
 }
 
 /// The type of the text content. Always `text`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum TextContentType {
     #[serde(rename = "text")]
     #[default]
     Text,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OutputTextContent {
@@ -78,14 +78,14 @@ impl OutputTextContent {
     }
 }
 /// The type of the output text. Always `output_text`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum OutputTextContentType {
     #[serde(rename = "output_text")]
     #[default]
     OutputText,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SummaryTextContent {
@@ -104,14 +104,14 @@ impl SummaryTextContent {
     }
 }
 /// The type of the object. Always `summary_text`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum SummaryTextContentType {
     #[serde(rename = "summary_text")]
     #[default]
     SummaryText,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RefusalContent {
@@ -130,11 +130,11 @@ impl RefusalContent {
     }
 }
 /// The type of the refusal. Always `refusal`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum RefusalContentType {
     #[serde(rename = "refusal")]
     #[default]
     Refusal,
 }
-

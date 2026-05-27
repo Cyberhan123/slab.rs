@@ -38,14 +38,14 @@ impl ToolSearchCall {
     }
 }
 /// The type of the item. Always `tool_search_call`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ToolSearchCallType {
     #[serde(rename = "tool_search_call")]
     #[default]
     ToolSearchCall,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolSearchCallItemParam {
@@ -100,17 +100,18 @@ impl ToolSearchCallItemParam {
     }
 }
 /// The item type. Always `tool_search_call`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ToolSearchCallItemParamType {
     #[serde(rename = "tool_search_call")]
     #[default]
     ToolSearchCall,
 }
 
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ToolSearchExecutionType {
     #[serde(rename = "server")]
     #[default]
@@ -127,7 +128,6 @@ impl std::fmt::Display for ToolSearchExecutionType {
         }
     }
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolSearchOutput {
@@ -167,14 +167,14 @@ impl ToolSearchOutput {
     }
 }
 /// The type of the item. Always `tool_search_output`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ToolSearchOutputType {
     #[serde(rename = "tool_search_output")]
     #[default]
     ToolSearchOutput,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolSearchOutputItemParam {
@@ -229,14 +229,14 @@ impl ToolSearchOutputItemParam {
     }
 }
 /// The item type. Always `tool_search_output`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ToolSearchOutputItemParamType {
     #[serde(rename = "tool_search_output")]
     #[default]
     ToolSearchOutput,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolSearchToolParam {
@@ -271,11 +271,11 @@ impl ToolSearchToolParam {
     }
 }
 /// The type of the tool. Always `tool_search`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ToolSearchToolParamType {
     #[serde(rename = "tool_search")]
     #[default]
     ToolSearch,
 }
-

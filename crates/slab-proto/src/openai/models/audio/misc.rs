@@ -21,8 +21,9 @@ impl OutputAudio {
         OutputAudio { r#type, data, transcript }
     }
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum NoiseReductionType {
     #[serde(rename = "near_field")]
     #[default]
@@ -40,9 +41,9 @@ impl std::fmt::Display for NoiseReductionType {
     }
 }
 
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum Eagerness {
     #[serde(rename = "low")]
     #[default]
@@ -55,12 +56,20 @@ pub enum Eagerness {
     Auto,
 }
 
-
 #[repr(i64)]
 #[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize_repr, Deserialize_repr,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Serialize_repr,
+    Deserialize_repr,
+    Default,
 )]
-#[derive(Default)]
 pub enum Rate {
     #[default]
     Variant24000 = 24000,

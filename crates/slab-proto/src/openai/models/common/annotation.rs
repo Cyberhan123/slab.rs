@@ -37,14 +37,14 @@ impl UrlAnnotation {
     }
 }
 /// Type discriminator that is always `url` for this annotation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum UrlAnnotationType {
     #[serde(rename = "url")]
     #[default]
     Url,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UrlAnnotationSource {
@@ -63,14 +63,14 @@ impl UrlAnnotationSource {
     }
 }
 /// Type discriminator that is always `url`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum UrlAnnotationSourceType {
     #[serde(rename = "url")]
     #[default]
     Url,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UrlCitationBody {
@@ -104,11 +104,11 @@ impl UrlCitationBody {
     }
 }
 /// The type of the URL citation. Always `url_citation`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum UrlCitationBodyType {
     #[serde(rename = "url_citation")]
     #[default]
     UrlCitation,
 }
-

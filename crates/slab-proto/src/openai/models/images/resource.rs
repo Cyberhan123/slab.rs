@@ -61,7 +61,9 @@ impl ImagesResponse {
 }
 
 // The background parameter used for the image generation. Either `transparent` or `opaque`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ImagesResponseBackground {
     #[serde(rename = "transparent")]
     #[default]

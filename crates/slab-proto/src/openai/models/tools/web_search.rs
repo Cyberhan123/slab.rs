@@ -41,14 +41,14 @@ impl WebSearchActionFind {
     }
 }
 /// The action type.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum WebSearchActionFindType {
     #[serde(rename = "find_in_page")]
     #[default]
     FindInPage,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchActionOpenPage {
@@ -72,14 +72,14 @@ impl WebSearchActionOpenPage {
     }
 }
 /// The action type.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum WebSearchActionOpenPageType {
     #[serde(rename = "open_page")]
     #[default]
     OpenPage,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchActionSearch {
@@ -104,14 +104,14 @@ impl WebSearchActionSearch {
     }
 }
 /// The action type.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum WebSearchActionSearchType {
     #[serde(rename = "search")]
     #[default]
     Search,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchApproximateLocation {
@@ -165,17 +165,18 @@ impl WebSearchApproximateLocation {
     }
 }
 /// The type of location approximation. Always `approximate`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum WebSearchApproximateLocationType {
     #[serde(rename = "approximate")]
     #[default]
     Approximate,
 }
 
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum WebSearchContextSize {
     #[serde(rename = "low")]
     #[default]
@@ -195,7 +196,6 @@ impl std::fmt::Display for WebSearchContextSize {
         }
     }
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchLocation {
@@ -252,8 +252,9 @@ impl WebSearchPreviewTool {
     }
 }
 /// The type of the web search tool. One of `web_search_preview` or `web_search_preview_2025_03_11`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum WebSearchPreviewToolType {
     #[serde(rename = "web_search_preview")]
     #[default]
@@ -261,7 +262,6 @@ pub enum WebSearchPreviewToolType {
     #[serde(rename = "web_search_preview_2025_03_11")]
     WebSearchPreview20250311,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchSource {
@@ -280,14 +280,14 @@ impl WebSearchSource {
     }
 }
 /// The type of source. Always `url`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum WebSearchSourceType {
     #[serde(rename = "url")]
     #[default]
     Url,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchTool {
@@ -320,8 +320,9 @@ impl WebSearchTool {
     }
 }
 /// The type of the web search tool. One of `web_search` or `web_search_2025_08_26`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum WebSearchToolType {
     #[serde(rename = "web_search")]
     #[default]
@@ -329,7 +330,6 @@ pub enum WebSearchToolType {
     #[serde(rename = "web_search_2025_08_26")]
     WebSearch20250826,
 }
-
 
 use super::misc::ToolStatus;
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -359,8 +359,9 @@ impl WebSearchToolCall {
     }
 }
 /// The type of the web search tool call. Always `web_search_call`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum WebSearchToolCallType {
     #[serde(rename = "web_search_call")]
     #[default]
@@ -405,8 +406,9 @@ impl WebSearchToolFilters {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum WebSearchToolSearchContextSize {
     #[serde(rename = "low")]
     #[default]
@@ -416,7 +418,6 @@ pub enum WebSearchToolSearchContextSize {
     #[serde(rename = "high")]
     High,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchUserLocation {
@@ -437,11 +438,11 @@ impl WebSearchUserLocation {
     }
 }
 /// The type of location approximation. Always `approximate`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum WebSearchUserLocationType {
     #[serde(rename = "approximate")]
     #[default]
     Approximate,
 }
-

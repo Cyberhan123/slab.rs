@@ -117,14 +117,14 @@ impl DoneEvent {
         DoneEvent { event, data }
     }
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum DoneEventEvent {
     #[serde(rename = "done")]
     #[default]
     Done,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ErrorEvent {
@@ -140,14 +140,14 @@ impl ErrorEvent {
         ErrorEvent { event, data: Box::new(data) }
     }
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ErrorEventEvent {
     #[serde(rename = "error")]
     #[default]
     Error,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseStreamOptions {
@@ -163,11 +163,11 @@ impl ResponseStreamOptions {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum Data {
     #[serde(rename = "[DONE]")]
     #[default]
     LeftSquareBracketDoneRightSquareBracket,
 }
-

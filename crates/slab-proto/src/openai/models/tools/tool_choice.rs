@@ -39,8 +39,9 @@ impl ToolChoiceAllowed {
     }
 }
 /// Allowed tool configuration type. Always `allowed_tools`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ToolChoiceAllowedType {
     #[serde(rename = "allowed_tools")]
     #[default]
@@ -48,8 +49,9 @@ pub enum ToolChoiceAllowedType {
 }
 
 /// Constrains the tools available to the model to a pre-defined set.  `auto` allows the model to pick from among the allowed tools and generate a message.  `required` requires the model to call one or more of the allowed tools.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ToolChoiceAllowedMode {
     #[serde(rename = "auto")]
     #[default]
@@ -57,7 +59,6 @@ pub enum ToolChoiceAllowedMode {
     #[serde(rename = "required")]
     Required,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolChoiceCustom {
@@ -76,14 +77,14 @@ impl ToolChoiceCustom {
     }
 }
 /// For custom tool calling, the type is always `custom`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ToolChoiceCustomType {
     #[serde(rename = "custom")]
     #[default]
     Custom,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolChoiceFunction {
@@ -102,14 +103,14 @@ impl ToolChoiceFunction {
     }
 }
 /// For function calling, the type is always `function`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ToolChoiceFunctionType {
     #[serde(rename = "function")]
     #[default]
     Function,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolChoiceMcp {
@@ -136,17 +137,18 @@ impl ToolChoiceMcp {
     }
 }
 /// For MCP tools, the type is always `mcp`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ToolChoiceMcpType {
     #[serde(rename = "mcp")]
     #[default]
     Mcp,
 }
 
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ToolChoiceOptions {
     #[serde(rename = "none")]
     #[default]
@@ -166,7 +168,6 @@ impl std::fmt::Display for ToolChoiceOptions {
         }
     }
 }
-
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -200,8 +201,9 @@ impl ToolChoiceTypes {
     }
 }
 /// The type of hosted tool the model should to use. Learn more about [built-in tools](/docs/guides/tools).  Allowed values are: - `file_search` - `web_search_preview` - `computer` - `computer_use_preview` - `computer_use` - `code_interpreter` - `image_generation`
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ToolChoiceTypesType {
     #[serde(rename = "file_search")]
     #[default]
@@ -221,4 +223,3 @@ pub enum ToolChoiceTypesType {
     #[serde(rename = "code_interpreter")]
     CodeInterpreter,
 }
-

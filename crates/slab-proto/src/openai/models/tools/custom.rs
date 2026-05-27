@@ -35,14 +35,14 @@ impl CustomToolCall {
     }
 }
 /// The type of the custom tool call. Always `custom_tool_call`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum CustomToolCallType {
     #[serde(rename = "custom_tool_call")]
     #[default]
     CustomToolCall,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CustomToolCallOutput {
@@ -70,14 +70,14 @@ impl CustomToolCallOutput {
     }
 }
 /// The type of the custom tool call output. Always `custom_tool_call_output`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum CustomToolCallOutputType {
     #[serde(rename = "custom_tool_call_output")]
     #[default]
     CustomToolCallOutput,
 }
-
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -134,14 +134,14 @@ impl CustomToolCallOutputResource {
     }
 }
 /// The type of the custom tool call output. Always `custom_tool_call_output`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum CustomToolCallOutputResourceType {
     #[serde(rename = "custom_tool_call_output")]
     #[default]
     CustomToolCallOutput,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CustomToolCallResource {
@@ -193,14 +193,14 @@ impl CustomToolCallResource {
     }
 }
 /// The type of the custom tool call. Always `custom_tool_call`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum CustomToolCallResourceType {
     #[serde(rename = "custom_tool_call")]
     #[default]
     CustomToolCall,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CustomToolChatCompletions {
@@ -221,14 +221,14 @@ impl CustomToolChatCompletions {
     }
 }
 /// The type of the custom tool. Always `custom`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum CustomToolChatCompletionsType {
     #[serde(rename = "custom")]
     #[default]
     Custom,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CustomToolParam {
@@ -255,14 +255,14 @@ impl CustomToolParam {
     }
 }
 /// The type of the custom tool. Always `custom`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum CustomToolParamType {
     #[serde(rename = "custom")]
     #[default]
     Custom,
 }
-
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -310,4 +310,3 @@ impl Default for CustomToolPropertiesFormat {
         Self::TextFormat(Default::default())
     }
 }
-

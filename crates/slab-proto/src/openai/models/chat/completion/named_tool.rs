@@ -34,14 +34,14 @@ impl ChatCompletionNamedToolChoiceCustom {
     }
 }
 /// For custom tool calling, the type is always `custom`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ChatCompletionNamedToolChoiceCustomType {
     #[serde(rename = "custom")]
     #[default]
     Custom,
 }
-
 
 /// ChatCompletionNamedToolChoice : Specifies a tool the model should use. Use to force the model to call a specific function.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -63,11 +63,11 @@ impl ChatCompletionNamedToolChoice {
     }
 }
 /// For function calling, the type is always `function`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ChatCompletionNamedToolChoiceType {
     #[serde(rename = "function")]
     #[default]
     Function,
 }
-

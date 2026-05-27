@@ -77,14 +77,14 @@ impl SpeechAudioDeltaEvent {
     }
 }
 /// The type of the event. Always `speech.audio.delta`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum SpeechAudioDeltaEventType {
     #[serde(rename = "speech.audio.delta")]
     #[default]
     SpeechAudioDelta,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SpeechAudioDoneEvent {
@@ -105,14 +105,14 @@ impl SpeechAudioDoneEvent {
     }
 }
 /// The type of the event. Always `speech.audio.done`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum SpeechAudioDoneEventType {
     #[serde(rename = "speech.audio.done")]
     #[default]
     SpeechAudioDone,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SpeechAudioDoneEventUsage {

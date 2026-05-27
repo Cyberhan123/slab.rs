@@ -12,19 +12,22 @@ pub struct PredictionContent {
 
 impl PredictionContent {
     /// Static predicted output content, such as the content of a text file that is being regenerated.
-    pub fn new(r#type: PredictionType, content: models::PredictionContentContent) -> PredictionContent {
+    pub fn new(
+        r#type: PredictionType,
+        content: models::PredictionContentContent,
+    ) -> PredictionContent {
         PredictionContent { r#type, content: Box::new(content) }
     }
 }
 /// The type of the predicted content you want to provide. This type is currently always `content`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum PredictionType {
     #[serde(rename = "content")]
     #[default]
     Content,
 }
-
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]

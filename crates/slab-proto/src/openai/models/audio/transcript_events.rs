@@ -24,14 +24,14 @@ impl TranscriptTextDeltaEvent {
     }
 }
 /// The type of the event. Always `transcript.text.delta`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum TranscriptTextDeltaEventType {
     #[serde(rename = "transcript.text.delta")]
     #[default]
     TranscriptTextDelta,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TranscriptTextDeltaEventLogprobsInner {
@@ -74,14 +74,14 @@ impl TranscriptTextDoneEvent {
     }
 }
 /// The type of the event. Always `transcript.text.done`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum TranscriptTextDoneEventType {
     #[serde(rename = "transcript.text.done")]
     #[default]
     TranscriptTextDone,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TranscriptTextSegmentEvent {
@@ -119,14 +119,14 @@ impl TranscriptTextSegmentEvent {
     }
 }
 /// The type of the event. Always `transcript.text.segment`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum TranscriptTextSegmentEventType {
     #[serde(rename = "transcript.text.segment")]
     #[default]
     TranscriptTextSegment,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TranscriptTextUsageDuration {
@@ -148,14 +148,14 @@ impl TranscriptTextUsageDuration {
     }
 }
 /// The type of the usage object. Always `duration` for this variant.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum TranscriptTextUsageDurationType {
     #[serde(rename = "duration")]
     #[default]
     Duration,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TranscriptTextUsageTokens {
@@ -193,14 +193,14 @@ impl TranscriptTextUsageTokens {
     }
 }
 /// The type of the usage object. Always `tokens` for this variant.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum TranscriptTextUsageTokensType {
     #[serde(rename = "tokens")]
     #[default]
     Tokens,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TranscriptTextUsageTokensInputTokenDetails {

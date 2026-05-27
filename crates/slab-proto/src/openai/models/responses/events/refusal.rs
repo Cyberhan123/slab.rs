@@ -44,8 +44,9 @@ impl ResponseRefusalDeltaEvent {
 }
 
 /// The type of the event. Always `response.refusal.delta`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum RefusalDeltaType {
     #[serde(rename = "response.refusal.delta")]
     #[default]
@@ -96,8 +97,9 @@ impl ResponseRefusalDoneEvent {
 }
 
 /// The type of the event. Always `response.refusal.done`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum RefusalDoneType {
     #[serde(rename = "response.refusal.done")]
     #[default]

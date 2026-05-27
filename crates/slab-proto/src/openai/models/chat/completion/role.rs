@@ -2,8 +2,9 @@ use serde::{Deserialize, Serialize};
 
 /// ChatCompletionRole : The role of the author of a message
 /// The role of the author of a message
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ChatCompletionRole {
     #[serde(rename = "developer")]
     #[default]
@@ -32,4 +33,3 @@ impl std::fmt::Display for ChatCompletionRole {
         }
     }
 }
-

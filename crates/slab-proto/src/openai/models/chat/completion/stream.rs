@@ -78,8 +78,9 @@ impl ChatCompletionStreamResponseDelta {
     }
 }
 /// The role of the author of this message.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ChatCompletionStreamRole {
     #[serde(rename = "developer")]
     #[default]
@@ -93,4 +94,3 @@ pub enum ChatCompletionStreamRole {
     #[serde(rename = "tool")]
     Tool,
 }
-

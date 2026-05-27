@@ -35,14 +35,14 @@ impl InputTextContent {
     }
 }
 /// The type of the input item. Always `input_text`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum InputTextContentType {
     #[serde(rename = "input_text")]
     #[default]
     InputText,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputTextContentParam {
@@ -61,14 +61,14 @@ impl InputTextContentParam {
     }
 }
 /// The type of the input item. Always `input_text`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum InputTextContentParamType {
     #[serde(rename = "input_text")]
     #[default]
     InputText,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputFileContent {
@@ -111,14 +111,14 @@ impl InputFileContent {
     }
 }
 /// The type of the input item. Always `input_file`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum InputFileContentType {
     #[serde(rename = "input_file")]
     #[default]
     InputFile,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputFileContentParam {
@@ -176,17 +176,18 @@ impl InputFileContentParam {
     }
 }
 /// The type of the input item. Always `input_file`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum InputFileContentParamType {
     #[serde(rename = "input_file")]
     #[default]
     InputFile,
 }
 
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum InputFidelity {
     #[serde(rename = "high")]
     #[default]
@@ -203,7 +204,6 @@ impl std::fmt::Display for InputFidelity {
         }
     }
 }
-
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -246,8 +246,9 @@ impl InputMessage {
     }
 }
 /// The role of the message input. One of `user`, `system`, or `developer`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum InputMessageRole {
     #[serde(rename = "user")]
     #[default]
@@ -259,8 +260,9 @@ pub enum InputMessageRole {
 }
 
 /// The type of the message input. Always set to `message`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum InputMessageType {
     #[serde(rename = "message")]
     #[default]
@@ -268,8 +270,9 @@ pub enum InputMessageType {
 }
 
 /// The status of item. One of `in_progress`, `completed`, or `incomplete`. Populated when items are returned via API.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum InputMessageStatus {
     #[serde(rename = "in_progress")]
     #[default]
@@ -279,7 +282,6 @@ pub enum InputMessageStatus {
     #[serde(rename = "incomplete")]
     Incomplete,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputMessageResource {
@@ -310,8 +312,9 @@ impl InputMessageResource {
     }
 }
 /// The role of the message input. One of `user`, `system`, or `developer`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum InputMessageResourceRole {
     #[serde(rename = "user")]
     #[default]
@@ -323,8 +326,9 @@ pub enum InputMessageResourceRole {
 }
 
 /// The type of the message input. Always set to `message`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum InputMessageResourceType {
     #[serde(rename = "message")]
     #[default]
@@ -332,8 +336,9 @@ pub enum InputMessageResourceType {
 }
 
 /// The status of item. One of `in_progress`, `completed`, or `incomplete`. Populated when items are returned via API.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum InputMessageResourceStatus {
     #[serde(rename = "in_progress")]
     #[default]
@@ -343,7 +348,6 @@ pub enum InputMessageResourceStatus {
     #[serde(rename = "incomplete")]
     Incomplete,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputMessagesItemReference {
@@ -364,14 +368,14 @@ impl InputMessagesItemReference {
     }
 }
 /// The type of input messages. Always `item_reference`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum InputMessagesItemReferenceType {
     #[serde(rename = "item_reference")]
     #[default]
     ItemReference,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputMessagesTemplate {
@@ -392,14 +396,14 @@ impl InputMessagesTemplate {
     }
 }
 /// The type of input messages. Always `template`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum InputMessagesTemplateType {
     #[serde(rename = "template")]
     #[default]
     Template,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TemplateInputMessages {
@@ -420,14 +424,14 @@ impl TemplateInputMessages {
     }
 }
 /// The type of input messages. Always `template`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum TemplateInputMessagesType {
     #[serde(rename = "template")]
     #[default]
     Template,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ItemReferenceInputMessages {
@@ -448,14 +452,14 @@ impl ItemReferenceInputMessages {
     }
 }
 /// The type of input messages. Always `item_reference`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ItemReferenceInputMessagesType {
     #[serde(rename = "item_reference")]
     #[default]
     ItemReference,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ItemReferenceParam {
@@ -479,14 +483,14 @@ impl ItemReferenceParam {
     }
 }
 /// The type of item to reference. Always `item_reference`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ItemReferenceParamType {
     #[serde(rename = "item_reference")]
     #[default]
     ItemReference,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SimpleInputMessage {

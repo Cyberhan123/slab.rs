@@ -2,8 +2,9 @@ use serde::{Deserialize, Serialize};
 
 /// ApplyPatchCallOutputStatusParam : Outcome values reported for apply_patch tool call outputs.
 /// Outcome values reported for apply_patch tool call outputs.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ApplyPatchCallOutputStatusParam {
     #[serde(rename = "completed")]
     #[default]
@@ -21,9 +22,9 @@ impl std::fmt::Display for ApplyPatchCallOutputStatusParam {
     }
 }
 
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ApplyPatchCallOutputStatus {
     #[serde(rename = "completed")]
     #[default]
@@ -41,11 +42,11 @@ impl std::fmt::Display for ApplyPatchCallOutputStatus {
     }
 }
 
-
 /// ApplyPatchCallStatusParam : ApplyPatchCallOutputStatus values reported for apply_patch tool calls.
 /// ApplyPatchCallOutputStatus values reported for apply_patch tool calls.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ApplyPatchCallStatusParam {
     #[serde(rename = "in_progress")]
     #[default]
@@ -63,9 +64,9 @@ impl std::fmt::Display for ApplyPatchCallStatusParam {
     }
 }
 
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ApplyPatchCallStatus {
     #[serde(rename = "in_progress")]
     #[default]
@@ -82,4 +83,3 @@ impl std::fmt::Display for ApplyPatchCallStatus {
         }
     }
 }
-

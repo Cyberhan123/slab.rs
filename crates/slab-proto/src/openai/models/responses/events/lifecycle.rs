@@ -26,8 +26,9 @@ impl ResponseCompletedEvent {
 }
 
 /// The type of the event. Always `response.completed`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ResponseCompletedType {
     #[serde(rename = "response.completed")]
     #[default]
@@ -59,8 +60,9 @@ impl ResponseCreatedEvent {
 }
 
 /// The type of the event. Always `response.created`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ResponseCreatedType {
     #[serde(rename = "response.created")]
     #[default]
@@ -100,8 +102,9 @@ impl ResponseErrorEvent {
 }
 
 /// The type of the event. Always `error`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ErrorType {
     #[serde(rename = "error")]
     #[default]
@@ -133,8 +136,9 @@ impl ResponseFailedEvent {
 }
 
 /// The type of the event. Always `response.failed`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ResponseFailedType {
     #[serde(rename = "response.failed")]
     #[default]
@@ -166,8 +170,9 @@ impl ResponseInProgressEvent {
 }
 
 /// The type of the event. Always `response.in_progress`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ResponseInProgressType {
     #[serde(rename = "response.in_progress")]
     #[default]
@@ -199,8 +204,9 @@ impl ResponseIncompleteEvent {
 }
 
 /// The type of the event. Always `response.incomplete`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ResponseIncompleteType {
     #[serde(rename = "response.incomplete")]
     #[default]
@@ -232,8 +238,9 @@ impl ResponseQueuedEvent {
 }
 
 /// The type of the event. Always 'response.queued'.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ResponseQueuedType {
     #[serde(rename = "response.queued")]
     #[default]

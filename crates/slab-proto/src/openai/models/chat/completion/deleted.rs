@@ -14,16 +14,20 @@ pub struct ChatCompletionDeleted {
 }
 
 impl ChatCompletionDeleted {
-    pub fn new(object: DeletedChatCompletionObject, id: String, deleted: bool) -> ChatCompletionDeleted {
+    pub fn new(
+        object: DeletedChatCompletionObject,
+        id: String,
+        deleted: bool,
+    ) -> ChatCompletionDeleted {
         ChatCompletionDeleted { object, id, deleted }
     }
 }
 /// The type of object being deleted.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum DeletedChatCompletionObject {
     #[serde(rename = "chat.completion.deleted")]
     #[default]
     ChatCompletionDeleted,
 }
-

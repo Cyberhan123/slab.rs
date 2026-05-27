@@ -32,11 +32,11 @@ impl CompactResource {
     }
 }
 /// The object type. Always `response.compaction`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum CompactResponseObject {
     #[serde(rename = "response.compaction")]
     #[default]
     ResponseCompaction,
 }
-

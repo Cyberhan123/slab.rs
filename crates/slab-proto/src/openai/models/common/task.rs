@@ -37,8 +37,9 @@ impl TaskGroupItem {
     }
 }
 /// Type discriminator that is always `chatkit.thread_item`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum TaskGroupItemObject {
     #[serde(rename = "chatkit.thread_item")]
     #[default]
@@ -46,14 +47,14 @@ pub enum TaskGroupItemObject {
 }
 
 /// Type discriminator that is always `chatkit.task_group`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum TaskGroupItemType {
     #[serde(rename = "chatkit.task_group")]
     #[default]
     ChatkitTaskGroup,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TaskGroupTask {
@@ -123,8 +124,9 @@ impl TaskItem {
     }
 }
 /// Type discriminator that is always `chatkit.thread_item`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum TaskItemObject {
     #[serde(rename = "chatkit.thread_item")]
     #[default]
@@ -132,17 +134,18 @@ pub enum TaskItemObject {
 }
 
 /// Type discriminator that is always `chatkit.task`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum TaskItemType {
     #[serde(rename = "chatkit.task")]
     #[default]
     ChatkitTask,
 }
 
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum TaskType {
     #[serde(rename = "custom")]
     #[default]
@@ -159,4 +162,3 @@ impl std::fmt::Display for TaskType {
         }
     }
 }
-

@@ -14,14 +14,14 @@ impl ActiveStatus {
     }
 }
 /// ActiveStatus discriminator that is always `active`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ActiveStatusType {
     #[serde(rename = "active")]
     #[default]
     Active,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ClosedStatus {
@@ -40,14 +40,14 @@ impl ClosedStatus {
     }
 }
 /// ClosedStatus discriminator that is always `closed`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ClosedStatusType {
     #[serde(rename = "closed")]
     #[default]
     Closed,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LockedStatus {
@@ -66,17 +66,18 @@ impl LockedStatus {
     }
 }
 /// LockedStatus discriminator that is always `locked`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum LockedStatusType {
     #[serde(rename = "locked")]
     #[default]
     Locked,
 }
 
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum Status {
     #[serde(rename = "in_progress")]
     #[default]
@@ -87,9 +88,9 @@ pub enum Status {
     Incomplete,
 }
 
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ClientToolCallStatus {
     #[serde(rename = "in_progress")]
     #[default]
@@ -106,4 +107,3 @@ impl std::fmt::Display for ClientToolCallStatus {
         }
     }
 }
-

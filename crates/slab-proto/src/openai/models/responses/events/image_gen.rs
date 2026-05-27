@@ -29,8 +29,9 @@ impl ResponseImageGenCallCompletedEvent {
 }
 
 /// The type of the event. Always 'response.image_generation_call.completed'.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ImageGenCallCompletedType {
     #[serde(rename = "response.image_generation_call.completed")]
     #[default]
@@ -66,8 +67,9 @@ impl ResponseImageGenCallGeneratingEvent {
 }
 
 /// The type of the event. Always 'response.image_generation_call.generating'.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ImageGenCallGeneratingType {
     #[serde(rename = "response.image_generation_call.generating")]
     #[default]
@@ -103,8 +105,9 @@ impl ResponseImageGenCallInProgressEvent {
 }
 
 /// The type of the event. Always 'response.image_generation_call.in_progress'.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ImageGenCallInProgressType {
     #[serde(rename = "response.image_generation_call.in_progress")]
     #[default]
@@ -155,8 +158,9 @@ impl ResponseImageGenCallPartialImageEvent {
 }
 
 /// The type of the event. Always 'response.image_generation_call.partial_image'.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ImageGenCallPartialImageType {
     #[serde(rename = "response.image_generation_call.partial_image")]
     #[default]

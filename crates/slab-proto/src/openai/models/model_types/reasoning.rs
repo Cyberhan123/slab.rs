@@ -39,8 +39,9 @@ impl Reasoning {
 }
 // A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. One of `auto`, `concise`, or `detailed`.  `concise` is supported for `computer-use-preview` models and all reasoning models after `gpt-5`.
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ReasoningEffort {
     #[serde(rename = "none")]
     #[default]
@@ -69,7 +70,6 @@ impl std::fmt::Display for ReasoningEffort {
         }
     }
 }
-
 
 use crate::models::Status;
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -110,8 +110,9 @@ impl ReasoningItem {
     }
 }
 /// The type of the object. Always `reasoning`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ReasoningItemType {
     #[serde(rename = "reasoning")]
     #[default]
@@ -137,11 +138,11 @@ impl ReasoningTextContent {
     }
 }
 /// The type of the reasoning text. Always `reasoning_text`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ReasoningTextContentType {
     #[serde(rename = "reasoning_text")]
     #[default]
     ReasoningText,
 }
-

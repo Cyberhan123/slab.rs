@@ -79,14 +79,14 @@ impl VideoResource {
     }
 }
 /// The object type, which is always `video`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum VideoResourceObject {
     #[serde(rename = "video")]
     #[default]
     Video,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DeletedVideoResource {
@@ -112,14 +112,14 @@ impl DeletedVideoResource {
     }
 }
 /// The object type that signals the deletion response.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum DeletedVideoResourceObject {
     #[serde(rename = "video.deleted")]
     #[default]
     VideoDeleted,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VideoCharacterResource {
@@ -144,8 +144,9 @@ impl VideoCharacterResource {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum VideoContentVariant {
     #[serde(rename = "video")]
     #[default]
@@ -165,7 +166,6 @@ impl std::fmt::Display for VideoContentVariant {
         }
     }
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VideoListResource {
@@ -198,11 +198,11 @@ impl VideoListResource {
     }
 }
 /// The type of object returned, must be `list`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum VideoListResourceObject {
     #[serde(rename = "list")]
     #[default]
     List,
 }
-

@@ -17,14 +17,14 @@ impl InputAudio {
     }
 }
 /// The type of the input item. Always `input_audio`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum AudioInputType {
     #[serde(rename = "input_audio")]
     #[default]
     InputAudio,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputAudioInputAudio {
@@ -42,8 +42,9 @@ impl InputAudioInputAudio {
     }
 }
 // The format of the audio data. Currently supported formats are `mp3` and `wav`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum AudioInputFormat {
     #[serde(rename = "mp3")]
     #[default]
@@ -51,4 +52,3 @@ pub enum AudioInputFormat {
     #[serde(rename = "wav")]
     Wav,
 }
-

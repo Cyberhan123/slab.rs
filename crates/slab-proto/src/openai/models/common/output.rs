@@ -134,8 +134,9 @@ impl OutputMessage {
     }
 }
 /// The type of the output message. Always `message`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum CommonOutputType {
     #[serde(rename = "message")]
     #[default]
@@ -143,14 +144,14 @@ pub enum CommonOutputType {
 }
 
 /// The role of the output message. Always `assistant`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum OutputMessageRole {
     #[serde(rename = "assistant")]
     #[default]
     Assistant,
 }
-
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -214,5 +215,3 @@ impl Default for ItemResource {
         Self::InputMessageResource(Default::default())
     }
 }
-
-

@@ -17,8 +17,9 @@ impl ResponseError {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ResponseErrorCode {
     #[serde(rename = "server_error")]
     #[default]
@@ -84,7 +85,6 @@ impl std::fmt::Display for ResponseErrorCode {
     }
 }
 
-
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseOutputText {
     /// Type discriminator that is always `output_text`.
@@ -109,14 +109,14 @@ impl ResponseOutputText {
     }
 }
 /// Type discriminator that is always `output_text`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ResponseOutputTextType {
     #[serde(rename = "output_text")]
     #[default]
     OutputText,
 }
-
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -167,8 +167,9 @@ impl ResponseTextParam {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum Reason {
     #[serde(rename = "max_output_tokens")]
     #[default]
@@ -177,9 +178,9 @@ pub enum Reason {
     ContentFilter,
 }
 
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ResponseStatus {
     #[serde(rename = "completed")]
     #[default]
@@ -195,7 +196,6 @@ pub enum ResponseStatus {
     #[serde(rename = "incomplete")]
     Incomplete,
 }
-
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseLogProb {
