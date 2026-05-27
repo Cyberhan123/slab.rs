@@ -37,40 +37,76 @@ pub mod model_object {
 }
 pub use model_object::Object as ModelObject;
 
-#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ModelIds {}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ModelIds {
+    StringValue(String),
+}
 
 impl ModelIds {
     pub fn new() -> ModelIds {
-        ModelIds {}
+        ModelIds::StringValue(String::new())
     }
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ModelIdsCompaction {}
+impl Default for ModelIds {
+    fn default() -> Self {
+        Self::StringValue(String::new())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ModelIdsCompaction {
+    StringValue(String),
+}
 
 impl ModelIdsCompaction {
     /// Model ID used to generate the response, like `gpt-5` or `o3`. OpenAI offers a wide range of models with different capabilities, performance characteristics, and price points. Refer to the [model guide](/docs/models) to browse and compare available models.
     pub fn new() -> ModelIdsCompaction {
-        ModelIdsCompaction {}
+        ModelIdsCompaction::StringValue(String::new())
     }
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ModelIdsResponses {}
+impl Default for ModelIdsCompaction {
+    fn default() -> Self {
+        Self::StringValue(String::new())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ModelIdsResponses {
+    StringValue(String),
+}
 
 impl ModelIdsResponses {
     pub fn new() -> ModelIdsResponses {
-        ModelIdsResponses {}
+        ModelIdsResponses::StringValue(String::new())
     }
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ModelIdsShared {}
+impl Default for ModelIdsResponses {
+    fn default() -> Self {
+        Self::StringValue(String::new())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ModelIdsShared {
+    StringValue(String),
+}
 
 impl ModelIdsShared {
     pub fn new() -> ModelIdsShared {
-        ModelIdsShared {}
+        ModelIdsShared::StringValue(String::new())
+    }
+}
+
+impl Default for ModelIdsShared {
+    fn default() -> Self {
+        Self::StringValue(String::new())
     }
 }
 

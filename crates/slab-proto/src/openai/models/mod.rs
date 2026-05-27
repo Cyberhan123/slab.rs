@@ -12,6 +12,7 @@ pub mod responses;
 pub mod skills;
 pub mod tools;
 pub mod videos;
+pub mod embeddings;
 
 // Re-export all types for backward compatibility
 pub use _stubs::*;
@@ -25,3 +26,4 @@ pub use responses::*;
 pub use skills::*;
 pub use tools::*;
 pub use videos::*;
+pub use embeddings::*;

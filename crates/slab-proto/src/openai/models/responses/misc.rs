@@ -238,12 +238,12 @@ pub struct ResponseUsage {
     /// The number of input tokens.
     #[serde(rename = "input_tokens")]
     pub input_tokens: i32,
-    #[serde(rename = "input_tokens_details")]
+    #[serde(rename = "input_tokens_details", default)]
     pub input_tokens_details: Box<models::ResponseUsageInputTokensDetails>,
     /// The number of output tokens.
     #[serde(rename = "output_tokens")]
     pub output_tokens: i32,
-    #[serde(rename = "output_tokens_details")]
+    #[serde(rename = "output_tokens_details", default)]
     pub output_tokens_details: Box<models::ResponseUsageOutputTokensDetails>,
     /// The total number of tokens used.
     #[serde(rename = "total_tokens")]

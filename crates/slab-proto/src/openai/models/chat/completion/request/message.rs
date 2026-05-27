@@ -429,19 +429,13 @@ pub enum ChatCompletionRequestMessageContentPartTextType {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "role")]
+#[serde(untagged)]
 pub enum ChatCompletionRequestMessage {
-    #[serde(rename = "ChatCompletionRequestDeveloperMessage")]
     ChatCompletionRequestDeveloperMessage(Box<models::ChatCompletionRequestDeveloperMessage>),
-    #[serde(rename = "ChatCompletionRequestSystemMessage")]
     ChatCompletionRequestSystemMessage(Box<models::ChatCompletionRequestSystemMessage>),
-    #[serde(rename = "ChatCompletionRequestUserMessage")]
     ChatCompletionRequestUserMessage(Box<models::ChatCompletionRequestUserMessage>),
-    #[serde(rename = "ChatCompletionRequestAssistantMessage")]
     ChatCompletionRequestAssistantMessage(Box<models::ChatCompletionRequestAssistantMessage>),
-    #[serde(rename = "ChatCompletionRequestToolMessage")]
     ChatCompletionRequestToolMessage(Box<models::ChatCompletionRequestToolMessage>),
-    #[serde(rename = "ChatCompletionRequestFunctionMessage")]
     ChatCompletionRequestFunctionMessage(Box<models::ChatCompletionRequestFunctionMessage>),
 }
 

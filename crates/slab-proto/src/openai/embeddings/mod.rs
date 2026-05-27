@@ -1,4 +1,3 @@
-#[path = "embeddings.rs"]
-mod model;
+mod embeddings;
 
-pub use model::*;
+pub use embeddings::*;

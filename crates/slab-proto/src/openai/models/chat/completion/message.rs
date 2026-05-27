@@ -289,11 +289,9 @@ pub enum ChatCompletionMessageToolCallType {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[serde(untagged)]
 pub enum ChatCompletionMessageToolCallsInner {
-    #[serde(rename = "ChatCompletionMessageToolCall")]
     ChatCompletionMessageToolCall(Box<models::ChatCompletionMessageToolCall>),
-    #[serde(rename = "ChatCompletionMessageCustomToolCall")]
     ChatCompletionMessageCustomToolCall(Box<models::ChatCompletionMessageCustomToolCall>),
 }
 
