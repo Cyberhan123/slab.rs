@@ -11,6 +11,7 @@ use slab_types::agent::ToolCallStatus;
 
 use crate::config::AgentConfig;
 use crate::error::AgentError;
+use crate::event::{AgentEventKind, ToolRiskAssessment};
 
 /// Thread lifecycle status, re-exported from `slab_types` for convenience.
 pub type ThreadStatus = slab_types::agent::AgentThreadStatus;
@@ -99,23 +100,7 @@ pub struct ThreadMessageRecord {
 /// A streaming event emitted during a single LLM turn.
 #[derive(Debug, Clone)]
 pub enum TurnEvent {
-    /// A fragment of the assistant's text response.
-    AssistantDelta { text: String },
-    /// The model requested a tool call.  Arguments reflect the final effective
-    /// values after [`PreToolUse`] hook modifications.
-    ToolCallStarted { tool_name: String, call_id: String, arguments: String },
-    /// A tool call produced output.
-    ToolCallOutput { call_id: String, output: String },
-    /// A tool call is waiting for explicit approval.
-    ApprovalRequired { call_id: String, tool_name: String, command: String },
-    /// The turn completed with a final assistant message.
-    TurnCompleted { text: String },
-    /// The turn failed with an error.
-    TurnFailed { error: String },
-    /// The thread-level lifecycle status changed.  Distinct from turn-level
-    /// completion events so SSE consumers can track the full thread lifecycle
-    /// without receiving duplicate completion/failure payloads.
-    AgentStatus { status: ThreadStatus },
+    Response { turn_index: Option<u32>, event: AgentEventKind },
 }
 
 // ── Approval ──────────────────────────────────────────────────────────────────
@@ -144,6 +129,7 @@ pub trait ApprovalPort: Send + Sync {
         call_id: &str,
         tool_name: &str,
         command: &str,
+        risk: Option<ToolRiskAssessment>,
     ) -> ApprovalDecision;
 }
 

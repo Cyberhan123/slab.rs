@@ -68,7 +68,12 @@ pub fn register_all_tools(
     if let Some(client) = mcp_client {
         router.register(Box::new(McpCallTool::new(Arc::clone(&client))));
         for spec in client.cached_tools_blocking() {
-            router.register(Box::new(McpProxyTool::new(Arc::clone(&client), spec)));
+            let tool = McpProxyTool::new(Arc::clone(&client), spec);
+            if router.get(tool.name()).is_some() {
+                tracing::warn!(tool = tool.name(), "skipping conflicting MCP proxy tool");
+                continue;
+            }
+            router.register(Box::new(tool));
         }
     }
 }

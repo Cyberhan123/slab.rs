@@ -1061,7 +1061,7 @@ export interface components {
          * @description Serialisable mirror of [`AgentThreadStatus`].
          * @enum {string}
          */
-        AgentStatusValue: "pending" | "running" | "completed" | "errored" | "shutdown";
+        AgentStatusValue: "pending" | "running" | "interrupting" | "interrupted" | "completed" | "errored" | "shutdown";
         /** @description Persisted agent thread message. */
         AgentThreadMessageResponse: {
             content: string;

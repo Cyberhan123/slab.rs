@@ -73,6 +73,7 @@ impl SettingsPmidCatalog {
             self.tools.ffmpeg.install_dir(),
             self.tools.ffmpeg.source.version(),
             self.tools.ffmpeg.source.artifact(),
+            self.agent.tools.mcp.enabled(),
             self.agent.tools.websearch.default_provider(),
             self.agent.tools.websearch.providers(),
             self.runtime.mode(),
@@ -345,18 +346,28 @@ impl Default for AgentPmids {
 
 #[derive(Debug, Clone, Copy)]
 pub struct AgentToolsPmids {
+    pub mcp: AgentMcpPmids,
     pub websearch: AgentWebSearchPmids,
 }
 
 impl AgentToolsPmids {
     pub const fn new() -> Self {
-        Self { websearch: AgentWebSearchPmids }
+        Self { mcp: AgentMcpPmids, websearch: AgentWebSearchPmids }
     }
 }
 
 impl Default for AgentToolsPmids {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AgentMcpPmids;
+
+impl AgentMcpPmids {
+    pub fn enabled(self) -> SettingPmid {
+        SettingPmid::from_path("agent.tools.mcp.enabled")
     }
 }
 
@@ -777,6 +788,7 @@ mod tests {
         assert!(unique.contains("runtime.ggml.backends.llama.flash_attn"));
         assert!(unique.contains("runtime.ggml.backends.whisper.flash_attn"));
         assert!(unique.contains("runtime.ggml.backends.diffusion.flash_attn"));
+        assert!(unique.contains("agent.tools.mcp.enabled"));
         assert!(unique.contains("agent.tools.websearch.default_provider"));
         assert!(unique.contains("agent.tools.websearch.providers"));
         assert!(unique.contains("providers.registry"));

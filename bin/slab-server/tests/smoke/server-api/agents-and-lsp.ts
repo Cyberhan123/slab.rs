@@ -25,6 +25,13 @@ export function registerAgentsAndLspSmoke(getServer: () => SlabServerTestHarness
         )
       );
       await expectError(server, "/v1/agents/missing-agent/status", 404);
+      const sessionThreads = await expectJson<Schema["AgentThreadResponse"][]>(
+        server,
+        "/v1/agents/session/missing-session/threads"
+      );
+      expect(sessionThreads.response.ok).toBe(true);
+      expect(sessionThreads.body).toEqual([]);
+      await expectError(server, "/v1/agents/missing-agent/messages", 404);
       await expectError(
         server,
         "/v1/agents/missing-agent/input",

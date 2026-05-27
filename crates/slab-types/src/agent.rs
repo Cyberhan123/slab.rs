@@ -19,6 +19,10 @@ pub enum AgentThreadStatus {
     Pending,
     /// Actively executing turns.
     Running,
+    /// A caller requested cancellation for the current turn.
+    Interrupting,
+    /// The current turn was cancelled and the thread may accept more input.
+    Interrupted,
     /// Finished successfully.
     Completed,
     /// Terminated due to an error.

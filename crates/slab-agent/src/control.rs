@@ -3,15 +3,19 @@
 use std::{collections::HashMap, sync::Arc};
 
 use tokio::sync::{RwLock, watch};
+use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use slab_types::{ConversationMessage, ConversationMessageContent};
 
 use crate::{
+    compact::{CompactPort, NoopCompactPort},
     config::AgentConfig,
     error::AgentError,
+    event::{AgentEventKind, AgentResponseRef},
     hook::AgentHook,
     port::{AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, ThreadStatus},
+    risk::{BasicToolRiskAnalyzer, ToolRiskAnalyzer},
     thread::{AgentThread, AgentThreadRuntime},
     tool::ToolRouter,
 };
@@ -24,6 +28,7 @@ struct ThreadEntry {
     /// after the spawned task has been aborted.
     status_tx: Arc<watch::Sender<ThreadStatus>>,
     abort: tokio::task::AbortHandle,
+    cancellation: CancellationToken,
 }
 
 struct SpawnRequest {
@@ -58,6 +63,8 @@ pub struct AgentControl {
     approval: Arc<dyn ApprovalPort>,
     tool_router: Arc<ToolRouter>,
     hooks: Arc<Vec<Arc<dyn AgentHook>>>,
+    compact: Arc<dyn CompactPort>,
+    risk: Arc<dyn ToolRiskAnalyzer>,
     max_threads: usize,
     max_depth: u32,
 }
@@ -106,6 +113,34 @@ impl AgentControl {
             approval,
             tool_router,
             hooks: Arc::new(hooks),
+            compact: Arc::new(NoopCompactPort::default()),
+            risk: Arc::new(BasicToolRiskAnalyzer),
+            max_threads: limits.max_threads,
+            max_depth: limits.max_depth,
+        }
+    }
+
+    /// Create a new controller with explicit compact and risk-analysis ports.
+    pub fn new_with_ports(
+        llm: Arc<dyn LlmPort>,
+        store: Arc<dyn AgentStorePort>,
+        notify: Arc<dyn AgentNotifyPort>,
+        approval: Arc<dyn ApprovalPort>,
+        tool_router: Arc<ToolRouter>,
+        limits: AgentControlLimits,
+        compact: Arc<dyn CompactPort>,
+        risk: Arc<dyn ToolRiskAnalyzer>,
+    ) -> Self {
+        Self {
+            threads: Arc::new(RwLock::new(HashMap::new())),
+            llm,
+            store,
+            notify,
+            approval,
+            tool_router,
+            hooks: Arc::new(Vec::new()),
+            compact,
+            risk,
             max_threads: limits.max_threads,
             max_depth: limits.max_depth,
         }
@@ -170,6 +205,12 @@ impl AgentControl {
             .get_thread(thread_id)
             .await?
             .ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))?;
+        if snapshot.status == ThreadStatus::Shutdown {
+            return Err(AgentError::ThreadNotResumable {
+                id: thread_id.to_owned(),
+                status: snapshot.status,
+            });
+        }
         let config = serde_json::from_str::<AgentConfig>(&snapshot.config_json).map_err(|e| {
             AgentError::Internal(format!("failed to deserialize agent config: {e}"))
         })?;
@@ -244,6 +285,42 @@ impl AgentControl {
         Ok(())
     }
 
+    /// Cancel the current turn while keeping the thread available for later input.
+    pub async fn interrupt(&self, thread_id: &str) -> Result<(), AgentError> {
+        let guard = self.threads.read().await;
+        let entry =
+            guard.get(thread_id).ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))?;
+        let status_tx = Arc::clone(&entry.status_tx);
+        let cancellation = entry.cancellation.clone();
+        drop(guard);
+
+        if let Err(err) = status_tx.send(ThreadStatus::Interrupting) {
+            warn!(?err, thread_id, "failed to send Interrupting status");
+        }
+        cancellation.cancel();
+        self.notify.on_status_change(thread_id, ThreadStatus::Interrupting).await;
+        self.notify
+            .on_turn_event(
+                thread_id,
+                &crate::port::TurnEvent::Response {
+                    turn_index: None,
+                    event: AgentEventKind::ResponseCancelled {
+                        response: AgentResponseRef {
+                            id: thread_id.to_owned(),
+                            status: ThreadStatus::Interrupting,
+                        },
+                        reason: "interrupt requested".to_owned(),
+                    },
+                },
+            )
+            .await;
+        self.store
+            .update_thread_status(thread_id, ThreadStatus::Interrupting, Some("interrupting"))
+            .await
+            .ok();
+        Ok(())
+    }
+
     /// Return the number of currently active (not yet completed) threads.
     pub async fn active_thread_count(&self) -> usize {
         self.threads.read().await.len()
@@ -284,9 +361,22 @@ impl AgentControl {
         let approval = Arc::clone(&self.approval);
         let tools = Arc::clone(&self.tool_router);
         let hooks = Arc::clone(&self.hooks);
+        let compact = Arc::clone(&self.compact);
+        let risk = Arc::clone(&self.risk);
+        let cancellation = CancellationToken::new();
         let threads_cleanup = Arc::clone(&self.threads);
         let id_cleanup = thread_id.clone();
-        let runtime = AgentThreadRuntime { llm, store, notify, approval, tools, hooks };
+        let runtime = AgentThreadRuntime {
+            llm,
+            store,
+            notify,
+            approval,
+            tools,
+            hooks,
+            compact,
+            risk,
+            cancellation: cancellation.clone(),
+        };
 
         // Spawn the thread task first to obtain the AbortHandle.
         // The task removes itself from the registry when it finishes so that
@@ -314,7 +404,7 @@ impl AgentControl {
                 max: self.max_threads,
             });
         }
-        guard.insert(thread_id.clone(), ThreadEntry { status_rx, status_tx, abort });
+        guard.insert(thread_id.clone(), ThreadEntry { status_rx, status_tx, abort, cancellation });
         drop(guard);
 
         Ok(thread_id)

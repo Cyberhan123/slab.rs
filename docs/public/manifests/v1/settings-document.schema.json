@@ -13,12 +13,25 @@
       },
       "type": "object"
     },
+    "AgentMcpConfig": {
+      "description": "Agent MCP tool integration settings.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "AgentSettingsConfig": {
       "description": "Agent-specific settings.",
       "properties": {
         "tools": {
           "$ref": "#/$defs/AgentToolsConfig",
           "default": {
+            "mcp": {
+              "enabled": false
+            },
             "websearch": {
               "default_provider": "duckduckgo",
               "providers": {
@@ -50,6 +63,12 @@
     "AgentToolsConfig": {
       "description": "Agent tool settings.",
       "properties": {
+        "mcp": {
+          "$ref": "#/$defs/AgentMcpConfig",
+          "default": {
+            "enabled": false
+          }
+        },
         "websearch": {
           "$ref": "#/$defs/AgentWebSearchConfig",
           "default": {
@@ -566,6 +585,14 @@
       },
       "type": "object"
     },
+    "PluginJsRuntimeTransport": {
+      "description": "Runtime transport used for JS plugin sidecar communication.",
+      "enum": [
+        "stdio",
+        "uds"
+      ],
+      "type": "string"
+    },
     "PluginSettingsConfig": {
       "description": "Runtime plugin installation settings.",
       "properties": {
@@ -575,6 +602,11 @@
             "string",
             "null"
           ]
+        },
+        "js_runtime_transport": {
+          "$ref": "#/$defs/PluginJsRuntimeTransport",
+          "default": "stdio",
+          "description": "Transport mode used for JS sidecar communication."
         }
       },
       "type": "object"
@@ -1198,6 +1230,9 @@
       "$ref": "#/$defs/AgentSettingsConfig",
       "default": {
         "tools": {
+          "mcp": {
+            "enabled": false
+          },
           "websearch": {
             "default_provider": "duckduckgo",
             "providers": {
@@ -1258,7 +1293,9 @@
     },
     "plugin": {
       "$ref": "#/$defs/PluginSettingsConfig",
-      "default": {}
+      "default": {
+        "js_runtime_transport": "stdio"
+      }
     },
     "providers": {
       "$ref": "#/$defs/ProvidersConfig",

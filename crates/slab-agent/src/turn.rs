@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use chrono::Utc;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
@@ -14,11 +15,13 @@ use slab_types::{
 use crate::{
     config::AgentConfig,
     error::AgentError,
+    event::{AgentEventKind, AgentMetrics, ToolExecutionStatus},
     hook::{AgentHook, HookEvent, HookOutcome, dispatch_hooks},
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort,
         ThreadMessageRecord, ToolCallRecord, TurnEvent,
     },
+    risk::ToolRiskAnalyzer,
     tool::{ToolContext, ToolHandler, ToolRouter},
 };
 
@@ -37,12 +40,19 @@ pub(crate) struct TurnExecutionContext<'a> {
     pub notify: &'a dyn AgentNotifyPort,
     pub approval: &'a dyn ApprovalPort,
     pub hooks: &'a [Arc<dyn AgentHook>],
+    pub risk: &'a dyn ToolRiskAnalyzer,
+    pub cancellation: &'a CancellationToken,
 }
 
 pub(crate) async fn execute_turn(
     context: TurnExecutionContext<'_>,
     messages: &mut Vec<ConversationMessage>,
 ) -> Result<bool, AgentError> {
+    let turn_started_at = std::time::Instant::now();
+    if context.cancellation.is_cancelled() {
+        return Err(AgentError::Interrupted);
+    }
+
     // Build the list of allowed tool specs for this turn.
     let tool_specs: Vec<_> = if context.config.allowed_tools.is_empty() {
         context.tools.tool_specs()
@@ -57,17 +67,36 @@ pub(crate) async fn execute_turn(
 
     debug!(thread_id = context.thread_id, turn_index = context.turn_index, "executing turn");
 
-    let response = context
-        .llm
-        .chat_completion(&context.config.model, messages, &tool_specs, context.config)
-        .await?;
+    let response = tokio::select! {
+        response = context.llm.chat_completion(
+            &context.config.model,
+            messages,
+            &tool_specs,
+            context.config,
+        ) => response?,
+        _ = context.cancellation.cancelled() => return Err(AgentError::Interrupted),
+    };
+    if context.cancellation.is_cancelled() {
+        return Err(AgentError::Interrupted);
+    }
 
     if response.tool_calls.is_empty() {
         // Model produced a final answer — no more turns required.
         let content = response.content.unwrap_or_default();
         context
             .notify
-            .on_turn_event(context.thread_id, &TurnEvent::TurnCompleted { text: content.clone() })
+            .on_turn_event(
+                context.thread_id,
+                &TurnEvent::Response {
+                    turn_index: Some(context.turn_index),
+                    event: AgentEventKind::ResponseOutputTextDone {
+                        item_id: assistant_item_id(context.turn_index),
+                        output_index: 0,
+                        content_index: 0,
+                        text: content.clone(),
+                    },
+                },
+            )
             .await;
         let message = ConversationMessage {
             role: "assistant".to_owned(),
@@ -79,6 +108,7 @@ pub(crate) async fn execute_turn(
         persist_thread_message(context.store, context.thread_id, context.turn_index, &message)
             .await;
         messages.push(message);
+        emit_turn_metrics(&context, turn_started_at, true).await;
         return Ok(false);
     }
 
@@ -88,7 +118,18 @@ pub(crate) async fn execute_turn(
     {
         context
             .notify
-            .on_turn_event(context.thread_id, &TurnEvent::AssistantDelta { text: text.clone() })
+            .on_turn_event(
+                context.thread_id,
+                &TurnEvent::Response {
+                    turn_index: Some(context.turn_index),
+                    event: AgentEventKind::ResponseOutputTextDelta {
+                        item_id: assistant_item_id(context.turn_index),
+                        output_index: 0,
+                        content_index: 0,
+                        delta: text.clone(),
+                    },
+                },
+            )
             .await;
     }
 
@@ -130,6 +171,9 @@ pub(crate) async fn execute_turn(
     let now = Utc::now().to_rfc3339();
 
     for tc in &response.tool_calls {
+        if context.cancellation.is_cancelled() {
+            return Err(AgentError::Interrupted);
+        }
         let call_id = Uuid::new_v4().to_string();
 
         // Parse arguments first so hooks receive a structured Value.
@@ -147,9 +191,14 @@ pub(crate) async fn execute_turn(
                     .notify
                     .on_turn_event(
                         context.thread_id,
-                        &TurnEvent::ToolCallOutput {
-                            call_id: call_id.clone(),
-                            output: err_msg.clone(),
+                        &TurnEvent::Response {
+                            turn_index: Some(context.turn_index),
+                            event: AgentEventKind::ResponseToolCallOutput {
+                                item_id: tc.id.clone(),
+                                call_id: call_id.clone(),
+                                output: err_msg.clone(),
+                                status: ToolExecutionStatus::Failed,
+                            },
                         },
                     )
                     .await;
@@ -190,9 +239,14 @@ pub(crate) async fn execute_turn(
                         .notify
                         .on_turn_event(
                             context.thread_id,
-                            &TurnEvent::ToolCallOutput {
-                                call_id: call_id.clone(),
-                                output: reason.clone(),
+                            &TurnEvent::Response {
+                                turn_index: Some(context.turn_index),
+                                event: AgentEventKind::ResponseToolCallOutput {
+                                    item_id: tc.id.clone(),
+                                    call_id: call_id.clone(),
+                                    output: reason.clone(),
+                                    status: ToolExecutionStatus::Failed,
+                                },
                             },
                         )
                         .await;
@@ -217,6 +271,7 @@ pub(crate) async fn execute_turn(
                 HookOutcome::Continue => parsed_args,
             }
         };
+        let risk = context.risk.analyze(&tc.name, &effective_args).await;
 
         // Emit ToolCallStarted AFTER hooks so SSE consumers see the final
         // effective arguments (hooks may have modified them).
@@ -224,11 +279,17 @@ pub(crate) async fn execute_turn(
             .notify
             .on_turn_event(
                 context.thread_id,
-                &TurnEvent::ToolCallStarted {
-                    tool_name: tc.name.clone(),
-                    call_id: call_id.clone(),
-                    arguments: serde_json::to_string(&effective_args)
-                        .unwrap_or_else(|_| tc.arguments.clone()),
+                &TurnEvent::Response {
+                    turn_index: Some(context.turn_index),
+                    event: AgentEventKind::ResponseFunctionCallArgumentsDone {
+                        item_id: tc.id.clone(),
+                        call_id: call_id.clone(),
+                        name: tc.name.clone(),
+                        output_index: 0,
+                        arguments: serde_json::to_string(&effective_args)
+                            .unwrap_or_else(|_| tc.arguments.clone()),
+                        risk: Some(risk.clone()),
+                    },
                 },
             )
             .await;
@@ -258,21 +319,72 @@ pub(crate) async fn execute_turn(
         }
 
         let (output, call_status) = if let Some(request) = approval_request {
-            match context
-                .approval
-                .request_approval(context.thread_id, &call_id, &tc.name, &request.command)
-                .await
-            {
+            let decision = tokio::select! {
+                decision = context.approval.request_approval(
+                    context.thread_id,
+                    &call_id,
+                    &tc.name,
+                    &request.command,
+                    Some(risk.clone()),
+                ) => decision,
+                _ = context.cancellation.cancelled() => return Err(AgentError::Interrupted),
+            };
+            match decision {
                 ApprovalDecision::Approved => {
-                    execute_tool_call(&tc.name, handler, &ctx, &effective_args).await
+                    context
+                        .notify
+                        .on_turn_event(
+                            context.thread_id,
+                            &TurnEvent::Response {
+                                turn_index: Some(context.turn_index),
+                                event: AgentEventKind::ResponseToolCallApprovalResolved {
+                                    item_id: tc.id.clone(),
+                                    call_id: call_id.clone(),
+                                    tool_name: tc.name.clone(),
+                                    approved: true,
+                                },
+                            },
+                        )
+                        .await;
+                    if context.cancellation.is_cancelled() {
+                        return Err(AgentError::Interrupted);
+                    }
+                    tokio::select! {
+                        result = execute_tool_call(&tc.name, handler, &ctx, &effective_args) => result,
+                        _ = context.cancellation.cancelled() => return Err(AgentError::Interrupted),
+                    }
                 }
                 ApprovalDecision::Rejected => {
+                    context
+                        .notify
+                        .on_turn_event(
+                            context.thread_id,
+                            &TurnEvent::Response {
+                                turn_index: Some(context.turn_index),
+                                event: AgentEventKind::ResponseToolCallApprovalResolved {
+                                    item_id: tc.id.clone(),
+                                    call_id: call_id.clone(),
+                                    tool_name: tc.name.clone(),
+                                    approved: false,
+                                },
+                            },
+                        )
+                        .await;
                     ("tool call rejected by approval policy".to_string(), ToolCallStatus::Failed)
                 }
             }
         } else {
-            execute_tool_call(&tc.name, handler, &ctx, &effective_args).await
+            if context.cancellation.is_cancelled() {
+                return Err(AgentError::Interrupted);
+            }
+            tokio::select! {
+                result = execute_tool_call(&tc.name, handler, &ctx, &effective_args) => result,
+                _ = context.cancellation.cancelled() => return Err(AgentError::Interrupted),
+            }
         };
+        if context.cancellation.is_cancelled() {
+            return Err(AgentError::Interrupted);
+        }
 
         // Run PostToolUse hooks.
         let post_event = HookEvent::PostToolUse {
@@ -287,7 +399,21 @@ pub(crate) async fn execute_turn(
             .notify
             .on_turn_event(
                 context.thread_id,
-                &TurnEvent::ToolCallOutput { call_id: call_id.clone(), output: output.clone() },
+                &TurnEvent::Response {
+                    turn_index: Some(context.turn_index),
+                    event: AgentEventKind::ResponseToolCallOutput {
+                        item_id: tc.id.clone(),
+                        call_id: call_id.clone(),
+                        output: output.clone(),
+                        status: match call_status {
+                            ToolCallStatus::Pending | ToolCallStatus::Running => {
+                                ToolExecutionStatus::Failed
+                            }
+                            ToolCallStatus::Completed => ToolExecutionStatus::Completed,
+                            ToolCallStatus::Failed => ToolExecutionStatus::Failed,
+                        },
+                    },
+                },
             )
             .await;
 
@@ -312,6 +438,7 @@ pub(crate) async fn execute_turn(
         messages.push(message);
     }
 
+    emit_turn_metrics(&context, turn_started_at, true).await;
     Ok(true)
 }
 
@@ -351,4 +478,31 @@ async fn execute_tool_call(
             (e.to_string(), ToolCallStatus::Failed)
         }
     }
+}
+
+async fn emit_turn_metrics(
+    context: &TurnExecutionContext<'_>,
+    started_at: std::time::Instant,
+    success: bool,
+) {
+    context
+        .notify
+        .on_turn_event(
+            context.thread_id,
+            &TurnEvent::Response {
+                turn_index: Some(context.turn_index),
+                event: AgentEventKind::ResponseMetrics {
+                    metrics: AgentMetrics {
+                        name: "agent_turn".to_owned(),
+                        duration_ms: started_at.elapsed().as_millis(),
+                        success: Some(success),
+                    },
+                },
+            },
+        )
+        .await;
+}
+
+fn assistant_item_id(turn_index: u32) -> String {
+    format!("assistant-{turn_index}")
 }

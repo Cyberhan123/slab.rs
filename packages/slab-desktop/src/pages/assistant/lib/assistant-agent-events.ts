@@ -7,6 +7,7 @@ export type AssistantAgentStreamEvent =
   | { type: 'lagged' }
   | { type: 'tool_call_output'; call_id: string; output: string }
   | { type: 'tool_call_started'; tool_name: string; call_id: string; arguments: string }
+  | { type: 'turn_cancelled'; reason: string }
   | { type: 'turn_completed'; text: string }
   | { type: 'turn_failed'; error: string }
 
@@ -26,11 +27,11 @@ export function parseAssistantAgentStreamEvent(data: string): AssistantAgentStre
   }
 
   switch (value.type) {
-    case 'agent_status':
+    case 'agent.status':
       return typeof value.status === 'string'
         ? { type: 'agent_status', status: value.status as AgentStatus }
         : null
-    case 'approval_required':
+    case 'response.tool_call.approval_required':
       return typeof value.call_id === 'string' &&
         typeof value.tool_name === 'string' &&
         typeof value.command === 'string'
@@ -41,29 +42,40 @@ export function parseAssistantAgentStreamEvent(data: string): AssistantAgentStre
             command: value.command,
           }
         : null
-    case 'assistant_delta':
-      return typeof value.text === 'string' ? { type: 'assistant_delta', text: value.text } : null
-    case 'lagged':
+    case 'response.output_text.delta':
+      return typeof value.delta === 'string' ? { type: 'assistant_delta', text: value.delta } : null
+    case 'agent.stream.lagged':
       return { type: 'lagged' }
-    case 'tool_call_output':
+    case 'response.tool_call.output':
       return typeof value.call_id === 'string' && typeof value.output === 'string'
         ? { type: 'tool_call_output', call_id: value.call_id, output: value.output }
         : null
-    case 'tool_call_started':
-      return typeof value.tool_name === 'string' &&
+    case 'response.function_call_arguments.done':
+      return typeof value.name === 'string' &&
         typeof value.call_id === 'string' &&
         typeof value.arguments === 'string'
         ? {
             type: 'tool_call_started',
-            tool_name: value.tool_name,
+            tool_name: value.name,
             call_id: value.call_id,
             arguments: value.arguments,
           }
         : null
-    case 'turn_completed':
+    case 'response.cancelled':
+      return typeof value.reason === 'string'
+        ? { type: 'turn_cancelled', reason: value.reason }
+        : null
+    case 'response.output_text.done':
+    case 'response.completed':
       return typeof value.text === 'string' ? { type: 'turn_completed', text: value.text } : null
-    case 'turn_failed':
+    case 'response.failed':
       return typeof value.error === 'string' ? { type: 'turn_failed', error: value.error } : null
+    case 'response.context.compact_started':
+    case 'response.context.compact_completed':
+    case 'response.context.compact_skipped':
+    case 'response.metrics':
+    case 'response.background':
+      return null
     default:
       return null
   }

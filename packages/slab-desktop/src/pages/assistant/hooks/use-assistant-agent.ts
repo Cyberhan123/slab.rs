@@ -45,7 +45,7 @@ function nextId(prefix: string) {
 }
 
 function isBusyStatus(status: AgentStatus | null) {
-  return status === 'pending' || status === 'running'
+  return status === 'pending' || status === 'running' || status === 'interrupting'
 }
 
 function toAgentConfig(model: string, runtimePresets?: AssistantRuntimePresets | null) {
@@ -348,6 +348,16 @@ export function useAssistantAgent({
         case 'assistant_delta':
           appendAssistantDelta(event.text)
           break
+        case 'turn_cancelled':
+          setStatus('interrupted')
+          setPendingApproval(null)
+          setThoughts((current) =>
+            current.map((thought) =>
+              thought.status === 'loading' ? { ...thought, status: 'abort' } : thought
+            )
+          )
+          void refetchSessionThreads()
+          break
         case 'lagged':
           replaceThought({
             id: nextId('lagged'),
@@ -623,7 +633,7 @@ export function useAssistantAgent({
         },
       })
       .then(() => {
-        setStatus('shutdown')
+        setStatus('interrupting')
         setThoughts((current) =>
           current.map((thought) =>
             thought.status === 'loading' ? { ...thought, status: 'abort' } : thought

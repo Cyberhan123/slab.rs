@@ -595,9 +595,12 @@ pub fn settings_document_to_json_value(document: &SettingsDocument) -> Value {
                 }
             }
         },
-        "agent": {
-            "tools": {
-                "websearch": {
+            "agent": {
+                "tools": {
+                    "mcp": {
+                        "enabled": document.agent.tools.mcp.enabled,
+                    },
+                    "websearch": {
                     "default_provider": document.agent.tools.websearch.default_provider,
                     "providers": {
                         "duckduckgo": {

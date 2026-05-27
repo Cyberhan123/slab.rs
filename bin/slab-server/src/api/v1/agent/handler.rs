@@ -7,7 +7,6 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::stream::{self, StreamExt};
-use serde::Serialize;
 use tokio_stream::wrappers::BroadcastStream;
 use utoipa::OpenApi;
 
@@ -239,7 +238,7 @@ async fn agent_interrupt(
     State(service): State<AgentService>,
     Path(id): Path<String>,
 ) -> Result<Json<AgentInterruptResponse>, ServerError> {
-    service.shutdown(&id).await?;
+    service.interrupt(&id).await?;
     Ok(Json(AgentInterruptResponse { thread_id: id, interrupted: true }))
 }
 
@@ -259,20 +258,31 @@ async fn agent_events(
     Path(id): Path<String>,
 ) -> Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>> {
     let subscription = service.subscribe_events(&id);
-    let replay = stream::iter(subscription.replay.into_iter().map(|envelope| {
+    let replay_id = id.clone();
+    let replay = stream::iter(subscription.replay.into_iter().map(move |envelope| {
         Ok::<Event, std::convert::Infallible>(
-            Event::default()
-                .id(envelope.id.to_string())
-                .data(turn_event_to_sse_data(&envelope.event)),
+            Event::default().id(envelope.id.to_string()).data(turn_event_to_sse_data(
+                &replay_id,
+                envelope.id,
+                &envelope.event,
+            )),
         )
     }));
-    let live = BroadcastStream::new(subscription.receiver).map(|msg| {
+    let live_id = id.clone();
+    let live = BroadcastStream::new(subscription.receiver).map(move |msg| {
         let event = match msg {
             Ok(envelope) => {
-                let data = turn_event_to_sse_data(&envelope.event);
+                let data = turn_event_to_sse_data(&live_id, envelope.id, &envelope.event);
                 Event::default().id(envelope.id.to_string()).data(data)
             }
-            Err(_) => Event::default().data(serialize_agent_sse_event(&AgentSseEvent::Lagged)),
+            Err(_) => Event::default().data(serialize_agent_stream_event(
+                &slab_agent::AgentStreamEvent::new(
+                    live_id.clone(),
+                    None,
+                    0,
+                    slab_agent::AgentEventKind::AgentStreamLagged,
+                ),
+            )),
         };
         Ok::<Event, std::convert::Infallible>(event)
     });
@@ -281,42 +291,49 @@ async fn agent_events(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
-#[derive(Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum AgentSseEvent<'a> {
-    AssistantDelta { text: &'a str },
-    ToolCallStarted { tool_name: &'a str, call_id: &'a str, arguments: &'a str },
-    ToolCallOutput { call_id: &'a str, output: &'a str },
-    ApprovalRequired { call_id: &'a str, tool_name: &'a str, command: &'a str },
-    TurnCompleted { text: &'a str },
-    TurnFailed { error: &'a str },
-    AgentStatus { status: String },
-    Lagged,
-}
-
-fn serialize_agent_sse_event(event: &AgentSseEvent<'_>) -> String {
+fn serialize_agent_stream_event(event: &slab_agent::AgentStreamEvent) -> String {
     serde_json::to_string(event).unwrap_or_else(|_| {
-        r#"{"type":"turn_failed","error":"failed to serialize event"}"#.to_owned()
+        r#"{"type":"response.failed","error":"failed to serialize event"}"#.to_owned()
     })
 }
 
-fn turn_event_to_sse_data(event: &slab_agent::TurnEvent) -> String {
-    let event = match event {
-        slab_agent::TurnEvent::AssistantDelta { text } => AgentSseEvent::AssistantDelta { text },
-        slab_agent::TurnEvent::ToolCallStarted { tool_name, call_id, arguments } => {
-            AgentSseEvent::ToolCallStarted { tool_name, call_id, arguments }
-        }
-        slab_agent::TurnEvent::ToolCallOutput { call_id, output } => {
-            AgentSseEvent::ToolCallOutput { call_id, output }
-        }
-        slab_agent::TurnEvent::ApprovalRequired { call_id, tool_name, command } => {
-            AgentSseEvent::ApprovalRequired { call_id, tool_name, command }
-        }
-        slab_agent::TurnEvent::TurnCompleted { text } => AgentSseEvent::TurnCompleted { text },
-        slab_agent::TurnEvent::TurnFailed { error } => AgentSseEvent::TurnFailed { error },
-        slab_agent::TurnEvent::AgentStatus { status } => {
-            AgentSseEvent::AgentStatus { status: status.to_string() }
-        }
-    };
-    serialize_agent_sse_event(&event)
+fn turn_event_to_sse_data(
+    thread_id: &str,
+    sequence_number: u64,
+    event: &slab_agent::TurnEvent,
+) -> String {
+    let slab_agent::TurnEvent::Response { turn_index, event } = event;
+    serialize_agent_stream_event(&slab_agent::AgentStreamEvent::new(
+        thread_id.to_owned(),
+        *turn_index,
+        sequence_number,
+        event.clone(),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn turn_event_serializes_response_style_envelope() {
+        let data = super::turn_event_to_sse_data(
+            "thread-1",
+            7,
+            &slab_agent::TurnEvent::Response {
+                turn_index: Some(2),
+                event: slab_agent::AgentEventKind::ResponseOutputTextDone {
+                    item_id: "item-1".to_owned(),
+                    output_index: 0,
+                    content_index: 0,
+                    text: "done".to_owned(),
+                },
+            },
+        );
+        let value: serde_json::Value = serde_json::from_str(&data).expect("json");
+
+        assert_eq!(value["thread_id"], "thread-1");
+        assert_eq!(value["turn_index"], 2);
+        assert_eq!(value["sequence_number"], 7);
+        assert_eq!(value["type"], "response.output_text.done");
+        assert_eq!(value["text"], "done");
+    }
 }

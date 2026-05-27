@@ -75,6 +75,11 @@ impl AgentService {
         self.control.shutdown(thread_id).await.map_err(agent_err_to_server)
     }
 
+    /// Interrupt the currently running turn while keeping the thread resumable.
+    pub async fn interrupt(&self, thread_id: &str) -> Result<(), AppCoreError> {
+        self.control.interrupt(thread_id).await.map_err(agent_err_to_server)
+    }
+
     /// Append user input to an existing agent thread and run the next turn.
     pub async fn send_input(&self, thread_id: &str, content: String) -> Result<(), AppCoreError> {
         self.control.send_input(thread_id, content).await.map_err(agent_err_to_server)
@@ -147,6 +152,9 @@ fn agent_err_to_server(e: AgentError) -> AppCoreError {
         )),
         AgentError::ThreadBusy(id) => {
             AppCoreError::TooManyRequests(format!("agent thread is already running: {id}"))
+        }
+        AgentError::ThreadNotResumable { id, status } => {
+            AppCoreError::BadRequest(format!("agent thread cannot be resumed: {id} is {status}"))
         }
         AgentError::DepthLimitExceeded { current, max } => {
             AppCoreError::BadRequest(format!("depth limit exceeded: {current}/{max}"))

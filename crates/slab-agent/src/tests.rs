@@ -15,10 +15,11 @@ use crate::{
     AgentControl, AgentError, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput,
     ToolRouter,
     config::AgentConfig,
+    event::AgentEventKind,
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
         ParsedToolCall, ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolCallRecord,
-        ToolSpec,
+        ToolSpec, TurnEvent,
     },
 };
 use async_trait::async_trait;
@@ -350,6 +351,39 @@ impl AgentNotifyPort for NoopNotify {
     async fn on_status_change(&self, _thread_id: &str, _status: ThreadStatus) {}
 }
 
+#[derive(Default)]
+struct RecordingNotify {
+    events: Mutex<Vec<TurnEvent>>,
+}
+
+#[async_trait]
+impl AgentNotifyPort for RecordingNotify {
+    async fn on_status_change(&self, _thread_id: &str, status: ThreadStatus) {
+        self.events.lock().unwrap().push(TurnEvent::Response {
+            turn_index: None,
+            event: AgentEventKind::AgentStatus { status },
+        });
+    }
+
+    async fn on_turn_event(&self, _thread_id: &str, event: &TurnEvent) {
+        self.events.lock().unwrap().push(event.clone());
+    }
+}
+
+#[async_trait]
+impl ApprovalPort for RecordingNotify {
+    async fn request_approval(
+        &self,
+        _thread_id: &str,
+        _call_id: &str,
+        _tool_name: &str,
+        _command: &str,
+        _risk: Option<crate::ToolRiskAssessment>,
+    ) -> ApprovalDecision {
+        ApprovalDecision::Approved
+    }
+}
+
 #[async_trait]
 impl ApprovalPort for NoopNotify {
     async fn request_approval(
@@ -358,6 +392,7 @@ impl ApprovalPort for NoopNotify {
         _call_id: &str,
         _tool_name: &str,
         _command: &str,
+        _risk: Option<crate::ToolRiskAssessment>,
     ) -> ApprovalDecision {
         ApprovalDecision::Approved
     }
@@ -439,7 +474,10 @@ async fn smoke_echo_tool_agent_completes() {
             let status = *status_rx.borrow();
             if matches!(
                 status,
-                ThreadStatus::Completed | ThreadStatus::Errored | ThreadStatus::Shutdown
+                ThreadStatus::Completed
+                    | ThreadStatus::Errored
+                    | ThreadStatus::Shutdown
+                    | ThreadStatus::Interrupted
             ) {
                 return status;
             }
@@ -505,6 +543,62 @@ async fn approval_required_tool_is_recorded_pending_then_completed() {
         store.updated_statuses.lock().unwrap().as_slice(),
         &[slab_types::agent::ToolCallStatus::Completed]
     );
+}
+
+#[tokio::test]
+async fn response_style_events_include_text_tool_and_metrics() {
+    let llm = Arc::new(MockLlm::new());
+    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
+    let notify = Arc::new(RecordingNotify::default());
+
+    let mut router = ToolRouter::new();
+    router.register(Box::new(ApprovalEchoTool));
+
+    let approval = Arc::clone(&notify);
+    let control =
+        Arc::new(AgentControl::new(llm, store, notify.clone(), approval, Arc::new(router), 8, 4));
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: slab_types::ConversationMessageContent::Text("Please echo".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+
+    let thread_id = control.spawn("session-events".into(), config, messages).await.expect("spawn");
+    let mut status_rx = control.subscribe(&thread_id).await.expect("subscribe");
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            status_rx.changed().await.expect("status channel closed");
+            if *status_rx.borrow() == ThreadStatus::Completed {
+                return;
+            }
+        }
+    })
+    .await
+    .expect("thread should complete");
+
+    let events = notify.events.lock().unwrap();
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            TurnEvent::Response {
+                event: AgentEventKind::ResponseFunctionCallArgumentsDone { risk: Some(_), .. },
+                ..
+            }
+        )
+    }));
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            TurnEvent::Response { event: AgentEventKind::ResponseOutputTextDone { .. }, .. }
+        )
+    }));
+    assert!(events.iter().any(|event| {
+        matches!(event, TurnEvent::Response { event: AgentEventKind::ResponseMetrics { .. }, .. })
+    }));
 }
 
 #[tokio::test]
@@ -750,6 +844,26 @@ impl LlmPort for FailingLlm {
     }
 }
 
+struct SlowLlm;
+
+#[async_trait]
+impl LlmPort for SlowLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+    ) -> Result<LlmResponse, AgentError> {
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        Ok(LlmResponse {
+            content: Some("too late".into()),
+            tool_calls: Vec::new(),
+            finish_reason: Some("stop".into()),
+        })
+    }
+}
+
 #[tokio::test]
 async fn agent_propagates_llm_errors() {
     let llm = Arc::new(FailingLlm);
@@ -789,6 +903,69 @@ async fn agent_propagates_llm_errors() {
     .expect("agent should error within timeout");
 
     assert_eq!(final_status, ThreadStatus::Errored, "agent should error when LLM fails");
+}
+
+#[tokio::test]
+async fn interrupt_cancels_running_turn_and_allows_follow_up_input() {
+    let llm = Arc::new(SlowLlm);
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = Arc::new(ToolRouter::new());
+
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new(llm, store_port, notify, approval, router, 8, 4));
+
+    let config = AgentConfig { model: "mock".into(), max_turns: 1, ..AgentConfig::default() };
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: slab_types::ConversationMessageContent::Text("slow".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+
+    let thread_id =
+        control.spawn("session-interrupt".into(), config, messages).await.expect("spawn");
+    control.interrupt(&thread_id).await.expect("interrupt");
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Interrupted).await;
+
+    assert_eq!(control.active_thread_count().await, 0);
+    let result = control.send_input(&thread_id, "continue".into()).await;
+    assert!(result.is_ok(), "interrupted thread should accept follow-up input");
+    let _ = control.shutdown(&thread_id).await;
+}
+
+#[tokio::test]
+async fn shutdown_prevents_follow_up_input() {
+    let llm = Arc::new(SlowLlm);
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = Arc::new(ToolRouter::new());
+
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new(llm, store_port, notify, approval, router, 8, 4));
+
+    let config = AgentConfig { model: "mock".into(), max_turns: 1, ..AgentConfig::default() };
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: slab_types::ConversationMessageContent::Text("slow".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+
+    let thread_id =
+        control.spawn("session-shutdown".into(), config, messages).await.expect("spawn");
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Running).await;
+    control.shutdown(&thread_id).await.expect("shutdown");
+
+    let result = control.send_input(&thread_id, "continue".into()).await;
+    assert!(
+        matches!(result, Err(AgentError::ThreadNotResumable { .. })),
+        "shutdown thread should reject follow-up input"
+    );
 }
 
 // ── Thread lifecycle tests ─────────────────────────────────────────────────────────────

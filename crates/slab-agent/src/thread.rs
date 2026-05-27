@@ -9,14 +9,19 @@ use uuid::Uuid;
 
 use slab_types::{ConversationMessage, ConversationMessageContent};
 
+use tokio_util::sync::CancellationToken;
+
 use crate::{
+    compact::{CompactOutcome, CompactPort, compact_skipped_event},
     config::AgentConfig,
     error::AgentError,
+    event::{AgentEventKind, AgentMetrics, AgentResponseRef},
     hook::{AgentHook, HookEvent, dispatch_hooks},
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, ThreadSnapshot, ThreadStatus,
         TurnEvent,
     },
+    risk::ToolRiskAnalyzer,
     tool::ToolRouter,
     turn::{TurnExecutionContext, execute_turn, persist_thread_message},
 };
@@ -46,6 +51,9 @@ pub(crate) struct AgentThreadRuntime {
     pub approval: Arc<dyn ApprovalPort>,
     pub tools: Arc<ToolRouter>,
     pub hooks: Arc<Vec<Arc<dyn AgentHook>>>,
+    pub compact: Arc<dyn CompactPort>,
+    pub risk: Arc<dyn ToolRiskAnalyzer>,
+    pub cancellation: CancellationToken,
 }
 
 impl AgentThread {
@@ -92,9 +100,20 @@ impl AgentThread {
         starting_turn_index: u32,
         persist_messages_from: Option<usize>,
     ) -> Result<String, AgentError> {
-        let AgentThreadRuntime { llm, store, notify, approval, tools, hooks } = runtime;
+        let AgentThreadRuntime {
+            llm,
+            store,
+            notify,
+            approval,
+            tools,
+            hooks,
+            compact,
+            risk,
+            cancellation,
+        } = runtime;
         let thread_id = self.id.clone();
         let now = Utc::now().to_rfc3339();
+        let started_at = std::time::Instant::now();
 
         // Fail early if the config cannot be serialized — a swallowed error here
         // would silently persist an empty config_json and make debugging impossible.
@@ -155,10 +174,27 @@ impl AgentThread {
 
         let mut completion_text: Option<String> = None;
         let mut last_error: Option<AgentError> = None;
+        let mut interrupted = false;
 
         'turns: for turn_offset in 0..self.config.max_turns {
+            if cancellation.is_cancelled() {
+                interrupted = true;
+                break 'turns;
+            }
             let turn_index = starting_turn_index + turn_offset;
             debug!(thread_id, turn_index, "starting turn");
+            self.emit_response_event(
+                &notify,
+                turn_index,
+                AgentEventKind::ResponseInProgress {
+                    response: AgentResponseRef {
+                        id: thread_id.clone(),
+                        status: ThreadStatus::Running,
+                    },
+                },
+            )
+            .await;
+            self.maybe_compact(&notify, compact.as_ref(), &mut messages, turn_index).await;
             match execute_turn(
                 TurnExecutionContext {
                     thread_id: &thread_id,
@@ -171,6 +207,8 @@ impl AgentThread {
                     notify: notify.as_ref(),
                     approval: approval.as_ref(),
                     hooks: &hooks,
+                    risk: risk.as_ref(),
+                    cancellation: &cancellation,
                 },
                 &mut messages,
             )
@@ -192,6 +230,10 @@ impl AgentThread {
                     }
                 }
                 Err(e) => {
+                    if matches!(e, AgentError::Interrupted) {
+                        interrupted = true;
+                        break 'turns;
+                    }
                     error!(thread_id, turn_index, error = %e, "turn failed");
                     last_error = Some(e);
                     break 'turns;
@@ -202,10 +244,45 @@ impl AgentThread {
         // Dispatch Stop hook regardless of outcome.
         dispatch_hooks(&hooks, &HookEvent::Stop { thread_id: thread_id.clone() }).await;
 
+        if interrupted {
+            self.emit_response_event(
+                &notify,
+                starting_turn_index,
+                AgentEventKind::ResponseCancelled {
+                    response: AgentResponseRef {
+                        id: thread_id.clone(),
+                        status: ThreadStatus::Interrupted,
+                    },
+                    reason: "interrupted".to_owned(),
+                },
+            )
+            .await;
+            self.emit_metrics(&notify, started_at, false).await;
+            self.set_status(ThreadStatus::Interrupted, &notify).await;
+            store
+                .update_thread_status(&thread_id, ThreadStatus::Interrupted, Some("interrupted"))
+                .await
+                .ok();
+            return Ok(String::new());
+        }
+
         if let Some(err) = last_error {
             notify
-                .on_turn_event(&thread_id, &TurnEvent::TurnFailed { error: err.to_string() })
+                .on_turn_event(
+                    &thread_id,
+                    &TurnEvent::Response {
+                        turn_index: Some(starting_turn_index),
+                        event: AgentEventKind::ResponseFailed {
+                            response: AgentResponseRef {
+                                id: thread_id.clone(),
+                                status: ThreadStatus::Errored,
+                            },
+                            error: err.to_string(),
+                        },
+                    },
+                )
                 .await;
+            self.emit_metrics(&notify, started_at, false).await;
             self.set_status(ThreadStatus::Errored, &notify).await;
             store
                 .update_thread_status(&thread_id, ThreadStatus::Errored, Some(&err.to_string()))
@@ -215,6 +292,19 @@ impl AgentThread {
         }
 
         info!(thread_id, "thread completed");
+        self.emit_response_event(
+            &notify,
+            starting_turn_index,
+            AgentEventKind::ResponseCompleted {
+                response: AgentResponseRef {
+                    id: thread_id.clone(),
+                    status: ThreadStatus::Completed,
+                },
+                text: completion_text.clone().unwrap_or_default(),
+            },
+        )
+        .await;
+        self.emit_metrics(&notify, started_at, true).await;
         self.set_status(ThreadStatus::Completed, &notify).await;
         store
             .update_thread_status(&thread_id, ThreadStatus::Completed, completion_text.as_deref())
@@ -227,5 +317,127 @@ impl AgentThread {
     async fn set_status(&self, status: ThreadStatus, notify: &Arc<dyn AgentNotifyPort>) {
         let _ = self.status_tx.send(status);
         notify.on_status_change(&self.id, status).await;
+    }
+
+    async fn emit_response_event(
+        &self,
+        notify: &Arc<dyn AgentNotifyPort>,
+        turn_index: u32,
+        event: AgentEventKind,
+    ) {
+        notify
+            .on_turn_event(&self.id, &TurnEvent::Response { turn_index: Some(turn_index), event })
+            .await;
+    }
+
+    async fn maybe_compact(
+        &self,
+        notify: &Arc<dyn AgentNotifyPort>,
+        compact: &dyn CompactPort,
+        messages: &mut Vec<ConversationMessage>,
+        turn_index: u32,
+    ) {
+        let input_tokens = compact.estimate_tokens(messages);
+        let threshold_tokens = compact.threshold_tokens();
+        if input_tokens < threshold_tokens {
+            notify
+                .on_turn_event(
+                    &self.id,
+                    &TurnEvent::Response {
+                        turn_index: Some(turn_index),
+                        event: compact_skipped_event(
+                            input_tokens,
+                            threshold_tokens,
+                            "below threshold".to_owned(),
+                        ),
+                    },
+                )
+                .await;
+            return;
+        }
+
+        notify
+            .on_turn_event(
+                &self.id,
+                &TurnEvent::Response {
+                    turn_index: Some(turn_index),
+                    event: AgentEventKind::ResponseContextCompactStarted {
+                        input_tokens,
+                        threshold_tokens,
+                    },
+                },
+            )
+            .await;
+        match compact.compact(messages).await {
+            Ok(CompactOutcome::Replaced {
+                messages: compacted,
+                output_tokens,
+                replaced_messages,
+            }) => {
+                *messages = compacted;
+                notify
+                    .on_turn_event(
+                        &self.id,
+                        &TurnEvent::Response {
+                            turn_index: Some(turn_index),
+                            event: AgentEventKind::ResponseContextCompactCompleted {
+                                input_tokens,
+                                output_tokens,
+                                replaced_messages,
+                            },
+                        },
+                    )
+                    .await;
+            }
+            Ok(CompactOutcome::Skipped { reason }) => {
+                notify
+                    .on_turn_event(
+                        &self.id,
+                        &TurnEvent::Response {
+                            turn_index: Some(turn_index),
+                            event: compact_skipped_event(input_tokens, threshold_tokens, reason),
+                        },
+                    )
+                    .await;
+            }
+            Err(error) => {
+                notify
+                    .on_turn_event(
+                        &self.id,
+                        &TurnEvent::Response {
+                            turn_index: Some(turn_index),
+                            event: compact_skipped_event(
+                                input_tokens,
+                                threshold_tokens,
+                                error.to_string(),
+                            ),
+                        },
+                    )
+                    .await;
+            }
+        }
+    }
+
+    async fn emit_metrics(
+        &self,
+        notify: &Arc<dyn AgentNotifyPort>,
+        started_at: std::time::Instant,
+        success: bool,
+    ) {
+        notify
+            .on_turn_event(
+                &self.id,
+                &TurnEvent::Response {
+                    turn_index: None,
+                    event: AgentEventKind::ResponseMetrics {
+                        metrics: AgentMetrics {
+                            name: "agent_thread".to_owned(),
+                            duration_ms: started_at.elapsed().as_millis(),
+                            success: Some(success),
+                        },
+                    },
+                },
+            )
+            .await;
     }
 }

@@ -6,33 +6,43 @@ describe('assistant agent SSE parser', () => {
   it.each([
     [
       'agent_status',
-      '{"type":"agent_status","status":"running"}',
+      '{"thread_id":"thread-1","sequence_number":1,"type":"agent.status","status":"running"}',
       { type: 'agent_status', status: 'running' },
     ],
     [
       'tool_call_started',
-      '{"type":"tool_call_started","tool_name":"shell","call_id":"call-1","arguments":"{}"}',
+      '{"thread_id":"thread-1","sequence_number":2,"type":"response.function_call_arguments.done","name":"shell","call_id":"call-1","arguments":"{}"}',
       { type: 'tool_call_started', tool_name: 'shell', call_id: 'call-1', arguments: '{}' },
     ],
     [
       'tool_call_output',
-      '{"type":"tool_call_output","call_id":"call-1","output":"ok"}',
+      '{"thread_id":"thread-1","sequence_number":3,"type":"response.tool_call.output","call_id":"call-1","output":"ok","status":"completed"}',
       { type: 'tool_call_output', call_id: 'call-1', output: 'ok' },
     ],
     [
       'approval_required',
-      '{"type":"approval_required","call_id":"call-1","tool_name":"shell","command":"pwd"}',
+      '{"thread_id":"thread-1","sequence_number":4,"type":"response.tool_call.approval_required","call_id":"call-1","tool_name":"shell","command":"pwd"}',
       { type: 'approval_required', call_id: 'call-1', tool_name: 'shell', command: 'pwd' },
     ],
     [
+      'assistant_delta',
+      '{"thread_id":"thread-1","sequence_number":5,"type":"response.output_text.delta","delta":"hel"}',
+      { type: 'assistant_delta', text: 'hel' },
+    ],
+    [
       'turn_completed',
-      '{"type":"turn_completed","text":"done"}',
+      '{"thread_id":"thread-1","sequence_number":6,"type":"response.output_text.done","text":"done"}',
       { type: 'turn_completed', text: 'done' },
     ],
     [
       'turn_failed',
-      '{"type":"turn_failed","error":"failed"}',
+      '{"thread_id":"thread-1","sequence_number":7,"type":"response.failed","error":"failed"}',
       { type: 'turn_failed', error: 'failed' },
+    ],
+    [
+      'turn_cancelled',
+      '{"thread_id":"thread-1","sequence_number":8,"type":"response.cancelled","reason":"interrupted"}',
+      { type: 'turn_cancelled', reason: 'interrupted' },
     ],
   ])('parses %s', (_, raw, expected) => {
     expect(parseAssistantAgentStreamEvent(raw)).toEqual(expected)
@@ -40,6 +50,11 @@ describe('assistant agent SSE parser', () => {
 
   it('ignores malformed events', () => {
     expect(parseAssistantAgentStreamEvent('not json')).toBeNull()
-    expect(parseAssistantAgentStreamEvent('{"type":"tool_call_output"}')).toBeNull()
+    expect(parseAssistantAgentStreamEvent('{"type":"response.tool_call.output"}')).toBeNull()
+    expect(
+      parseAssistantAgentStreamEvent(
+        '{"thread_id":"thread-1","sequence_number":9,"type":"response.metrics","metrics":{"name":"turn","duration_ms":1}}'
+      )
+    ).toBeNull()
   })
 })

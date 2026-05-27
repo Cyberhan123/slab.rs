@@ -17,7 +17,10 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use dashmap::DashMap;
-use slab_agent::port::{AgentNotifyPort, ApprovalDecision, ApprovalPort, ThreadStatus, TurnEvent};
+use slab_agent::{
+    AgentEventKind, ToolRiskAssessment,
+    port::{AgentNotifyPort, ApprovalDecision, ApprovalPort, ThreadStatus, TurnEvent},
+};
 use tokio::sync::{broadcast, oneshot};
 use tracing::{debug, warn};
 
@@ -132,10 +135,10 @@ fn approval_key(thread_id: &str, call_id: &str) -> String {
 impl AgentNotifyPort for SseNotifyAdapter {
     async fn on_status_change(&self, thread_id: &str, status: ThreadStatus) {
         debug!(thread_id, ?status, "agent status change");
-        // Emit a dedicated AgentStatus event so SSE consumers can track thread
-        // lifecycle without receiving synthetic TurnCompleted / TurnFailed
-        // payloads that duplicate what the turn loop already emits.
-        self.broadcast(thread_id, TurnEvent::AgentStatus { status });
+        self.broadcast(
+            thread_id,
+            TurnEvent::Response { turn_index: None, event: AgentEventKind::AgentStatus { status } },
+        );
     }
 
     async fn on_turn_event(&self, thread_id: &str, event: &TurnEvent) {
@@ -151,6 +154,7 @@ impl ApprovalPort for SseNotifyAdapter {
         call_id: &str,
         tool_name: &str,
         command: &str,
+        risk: Option<ToolRiskAssessment>,
     ) -> ApprovalDecision {
         let (tx, rx) = oneshot::channel();
         let key = approval_key(thread_id, call_id);
@@ -159,10 +163,15 @@ impl ApprovalPort for SseNotifyAdapter {
         // Notify SSE subscribers that approval is needed.
         self.broadcast(
             thread_id,
-            TurnEvent::ApprovalRequired {
-                call_id: call_id.to_owned(),
-                tool_name: tool_name.to_owned(),
-                command: command.to_owned(),
+            TurnEvent::Response {
+                turn_index: None,
+                event: AgentEventKind::ResponseToolCallApprovalRequired {
+                    item_id: call_id.to_owned(),
+                    call_id: call_id.to_owned(),
+                    tool_name: tool_name.to_owned(),
+                    command: command.to_owned(),
+                    risk,
+                },
             },
         );
 
@@ -204,14 +213,28 @@ mod tests {
     #[test]
     fn subscribe_events_replays_events_emitted_before_subscription() {
         let adapter = SseNotifyAdapter::new();
-        adapter.broadcast("thread-1", TurnEvent::TurnCompleted { text: "done".into() });
+        adapter.broadcast(
+            "thread-1",
+            TurnEvent::Response {
+                turn_index: Some(0),
+                event: slab_agent::AgentEventKind::ResponseOutputTextDone {
+                    item_id: "item-1".into(),
+                    output_index: 0,
+                    content_index: 0,
+                    text: "done".into(),
+                },
+            },
+        );
 
         let subscription = adapter.subscribe_events("thread-1");
 
         assert_eq!(subscription.replay.len(), 1);
         assert!(matches!(
             &subscription.replay[0].event,
-            TurnEvent::TurnCompleted { text } if text == "done"
+            TurnEvent::Response {
+                event: slab_agent::AgentEventKind::ResponseOutputTextDone { text, .. },
+                ..
+            } if text == "done"
         ));
     }
 }

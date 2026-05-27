@@ -289,7 +289,16 @@ pub struct AgentSettingsConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct AgentToolsConfig {
     #[serde(default)]
+    pub mcp: AgentMcpConfig,
+    #[serde(default)]
     pub websearch: AgentWebSearchConfig,
+}
+
+/// Agent MCP tool integration settings.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct AgentMcpConfig {
+    #[serde(default)]
+    pub enabled: bool,
 }
 
 /// Supported `websearch` crate providers.

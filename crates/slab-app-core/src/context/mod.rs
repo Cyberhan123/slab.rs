@@ -134,12 +134,13 @@ fn build_agent_control(
 
     let mut tool_router = ToolRouter::new();
     let web_search_config = ctx.pmid.config().agent.tools.websearch;
+    let mcp_client = build_agent_mcp_client(ctx);
     slab_agent_tools::register_all_tools(
         &mut tool_router,
         shell_policy,
         sandbox_driver,
         workspace_root,
-        None,
+        mcp_client,
         false,
         web_search_config,
     );
@@ -148,6 +149,17 @@ fn build_agent_control(
     let approval_port: Arc<dyn slab_agent::ApprovalPort> = notify;
 
     AgentControl::new(llm, store_adapter, notify_port, approval_port, Arc::new(tool_router), 32, 4)
+}
+
+fn build_agent_mcp_client(ctx: &AppContext) -> Option<Arc<slab_mcp::McpClient>> {
+    if !ctx.pmid.config().agent.tools.mcp.enabled {
+        return None;
+    }
+
+    tracing::warn!(
+        "agent MCP tools are enabled, but no persisted MCP server launch config is wired yet"
+    );
+    Some(Arc::new(slab_mcp::McpClient::new()))
 }
 
 fn available_sandbox_driver(

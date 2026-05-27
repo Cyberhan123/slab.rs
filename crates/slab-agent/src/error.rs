@@ -19,6 +19,10 @@ pub enum AgentError {
     #[error("thread is busy: {0}")]
     ThreadBusy(String),
 
+    /// A caller attempted to resume a terminal thread that cannot continue.
+    #[error("thread cannot be resumed: {id} is {status}")]
+    ThreadNotResumable { id: String, status: slab_types::agent::AgentThreadStatus },
+
     /// Spawning a child would exceed the configured nesting-depth limit.
     #[error("depth limit exceeded: {current}/{max}")]
     DepthLimitExceeded { current: u32, max: u32 },
@@ -26,6 +30,10 @@ pub enum AgentError {
     /// The underlying LLM call returned an error.
     #[error("llm error: {0}")]
     Llm(String),
+
+    /// The current turn was interrupted by the caller.
+    #[error("turn interrupted")]
+    Interrupted,
 
     /// A persistence operation returned an error.
     #[error("store error: {0}")]

@@ -405,13 +405,23 @@ fn empty_sections() -> Vec<SettingsSectionView> {
             title: "Agent".to_owned(),
             description_md: "Agent tool configuration used by built-in deterministic tools."
                 .to_owned(),
-            subsections: vec![SettingsSubsectionView {
-                id: "websearch".to_owned(),
-                title: "Web Search".to_owned(),
-                description_md: "Configure the agent web search provider defaults and credentials."
-                    .to_owned(),
-                properties: Vec::new(),
-            }],
+            subsections: vec![
+                SettingsSubsectionView {
+                    id: "mcp".to_owned(),
+                    title: "MCP".to_owned(),
+                    description_md: "Control exposure of configured MCP servers as agent tools."
+                        .to_owned(),
+                    properties: Vec::new(),
+                },
+                SettingsSubsectionView {
+                    id: "websearch".to_owned(),
+                    title: "Web Search".to_owned(),
+                    description_md:
+                        "Configure the agent web search provider defaults and credentials."
+                            .to_owned(),
+                    properties: Vec::new(),
+                },
+            ],
         },
         SettingsSectionView {
             id: "server".to_owned(),
@@ -481,6 +491,7 @@ fn section_location(path: &str) -> (&'static str, &'static str) {
         _ if path.starts_with("database.") => ("database", "general"),
         _ if path.starts_with("logging.") => ("logging", "general"),
         _ if path.starts_with("tools.ffmpeg.") => ("tools", "ffmpeg"),
+        _ if path.starts_with("agent.tools.mcp.") => ("agent", "mcp"),
         _ if path.starts_with("agent.tools.websearch.") => ("agent", "websearch"),
         _ if path.starts_with("runtime.ggml.backends.llama.") => ("runtime", "llama"),
         _ if path.starts_with("runtime.ggml.backends.whisper.") => ("runtime", "whisper"),
@@ -547,6 +558,7 @@ fn enum_values(path: &str) -> Option<Vec<String>> {
             Some(vec!["managed_children".to_owned(), "external_endpoints".to_owned()])
         }
         "runtime.transport" => Some(vec!["http".to_owned(), "ipc".to_owned()]),
+        "agent.tools.mcp.enabled" => None,
         "agent.tools.websearch.default_provider" => Some(vec![
             "duckduckgo".to_owned(),
             "arxiv".to_owned(),
@@ -603,6 +615,7 @@ fn property_label(path: &str) -> String {
         "runtime.mode" => "Runtime Mode".to_owned(),
         "runtime.transport" => "Transport".to_owned(),
         "runtime.sessions.state_dir" => "Session State Directory".to_owned(),
+        "agent.tools.mcp.enabled" => "MCP Tools".to_owned(),
         "agent.tools.websearch.default_provider" => "Default Provider".to_owned(),
         "agent.tools.websearch.providers" => "Web Search Providers".to_owned(),
         _ if path.ends_with(".flash_attn") => "Flash Attention".to_owned(),
@@ -632,6 +645,9 @@ fn property_description(path: &str) -> String {
         "tools.ffmpeg.enabled" => "Enable FFmpeg integration for media tooling.".to_owned(),
         "tools.ffmpeg.auto_download" => "Download FFmpeg automatically when it is missing.".to_owned(),
         "tools.ffmpeg.install_dir" => "Optional install directory for the FFmpeg sidecar.".to_owned(),
+        "agent.tools.mcp.enabled" => {
+            "Expose configured MCP tools to the agent tool router. Disabled by default.".to_owned()
+        }
         "agent.tools.websearch.default_provider" => {
             "Provider used by the agent web_search tool when the tool call omits provider.".to_owned()
         }
@@ -907,11 +923,21 @@ mod tests {
         let document = service.document().await;
         let agent_section =
             document.sections.iter().find(|section| section.id == "agent").expect("agent section");
+        let mcp_subsection = agent_section
+            .subsections
+            .iter()
+            .find(|subsection| subsection.id == "mcp")
+            .expect("mcp subsection");
         let websearch_subsection = agent_section
             .subsections
             .iter()
             .find(|subsection| subsection.id == "websearch")
             .expect("websearch subsection");
+        let mcp_enabled = mcp_subsection
+            .properties
+            .iter()
+            .find(|property| property.pmid == "agent.tools.mcp.enabled")
+            .expect("mcp enabled property");
         let default_provider = websearch_subsection
             .properties
             .iter()
@@ -926,6 +952,8 @@ mod tests {
         let schema = providers.schema.json_schema.as_ref().expect("providers schema");
 
         assert_eq!(agent_section.title, "Agent");
+        assert_eq!(mcp_subsection.title, "MCP");
+        assert_eq!(mcp_enabled.schema.value_type, SettingValueType::Boolean);
         assert_eq!(websearch_subsection.title, "Web Search");
         assert!(provider_enum.contains(&"duckduckgo".to_owned()));
         assert!(provider_enum.contains(&"searxng".to_owned()));

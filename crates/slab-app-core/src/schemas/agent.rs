@@ -169,6 +169,8 @@ pub struct AgentStatusResponse {
 pub enum AgentStatusValue {
     Pending,
     Running,
+    Interrupting,
+    Interrupted,
     Completed,
     Errored,
     Shutdown,
@@ -179,6 +181,8 @@ impl From<AgentThreadStatus> for AgentStatusValue {
         match s {
             AgentThreadStatus::Pending => Self::Pending,
             AgentThreadStatus::Running => Self::Running,
+            AgentThreadStatus::Interrupting => Self::Interrupting,
+            AgentThreadStatus::Interrupted => Self::Interrupted,
             AgentThreadStatus::Completed => Self::Completed,
             AgentThreadStatus::Errored => Self::Errored,
             AgentThreadStatus::Shutdown => Self::Shutdown,

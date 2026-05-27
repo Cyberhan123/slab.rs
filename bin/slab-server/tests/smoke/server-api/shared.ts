@@ -38,6 +38,8 @@ export const executableSmokeOperations = [
   { method: "get", path: "/health" },
   { method: "post", path: "/v1/agents/spawn" },
   { method: "get", path: "/v1/agents/{id}/status" },
+  { method: "get", path: "/v1/agents/session/{session_id}/threads" },
+  { method: "get", path: "/v1/agents/{id}/messages" },
   { method: "post", path: "/v1/agents/{id}/input" },
   { method: "post", path: "/v1/agents/{id}/shutdown" },
   { method: "post", path: "/v1/agents/{id}/approve" },
