@@ -21,7 +21,6 @@ impl VoiceConsentDeletedResource {
         VoiceConsentDeletedResource { id, object, deleted }
     }
 }
-///
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
 pub(crate) enum VoiceConsentDeletedResourceObject {
@@ -64,7 +63,6 @@ impl VoiceConsentListResource {
         VoiceConsentListResource { object, data, has_more, first_id: None, last_id: None }
     }
 }
-///
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
 pub(crate) enum VoiceConsentListResourceObject {

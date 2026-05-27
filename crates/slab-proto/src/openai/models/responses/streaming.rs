@@ -117,7 +117,6 @@ impl DoneEvent {
         DoneEvent { event, data }
     }
 }
-///
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
 pub(crate) enum DoneEventEvent {
@@ -141,7 +140,6 @@ impl ErrorEvent {
         ErrorEvent { event, data: Box::new(data) }
     }
 }
-///
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
 pub(crate) enum ErrorEventEvent {

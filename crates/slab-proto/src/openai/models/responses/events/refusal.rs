@@ -42,19 +42,15 @@ impl ResponseRefusalDeltaEvent {
         }
     }
 }
-pub mod refusal_delta_type {
-    use serde::{Deserialize, Serialize};
-    /// The type of the event. Always `response.refusal.delta`.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.refusal.delta")]
-        #[default]
-        ResponseRefusalDelta,
-    }
-    
+
+/// The type of the event. Always `response.refusal.delta`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum RefusalDeltaType {
+    #[serde(rename = "response.refusal.delta")]
+    #[default]
+    ResponseRefusalDelta,
 }
-pub use refusal_delta_type::Type as RefusalDeltaType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseRefusalDoneEvent {
@@ -98,16 +94,12 @@ impl ResponseRefusalDoneEvent {
         }
     }
 }
-pub mod refusal_done_type {
-    use serde::{Deserialize, Serialize};
-    /// The type of the event. Always `response.refusal.done`.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.refusal.done")]
-        #[default]
-        ResponseRefusalDone,
-    }
-    
+
+/// The type of the event. Always `response.refusal.done`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum RefusalDoneType {
+    #[serde(rename = "response.refusal.done")]
+    #[default]
+    ResponseRefusalDone,
 }
-pub use refusal_done_type::Type as RefusalDoneType;

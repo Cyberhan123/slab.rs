@@ -310,14 +310,4 @@ impl Default for CustomToolPropertiesFormat {
         Self::TextFormat(Default::default())
     }
 }
-/// Unconstrained text format. Always `text`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
-pub(crate) enum CustomToolPropertiesFormatType {
-    #[serde(rename = "text")]
-    #[default]
-    Text,
-    #[serde(rename = "grammar")]
-    Grammar,
-}
 

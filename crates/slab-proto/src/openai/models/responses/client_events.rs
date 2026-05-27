@@ -139,84 +139,69 @@ impl ResponsesClientEvent {
         }
     }
 }
-pub mod client_event_type {
-    /// The type of the client event. Always `response.create`.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        Eq,
-        PartialEq,
-        Ord,
-        PartialOrd,
-        Hash,
-        serde::Serialize,
-        serde::Deserialize,
-    )]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.create")]
-        #[default]
-        ResponseCreate,
-    }
-
-    
+/// The type of the client event. Always `response.create`.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[derive(Default)]
+pub enum Type {
+    #[serde(rename = "response.create")]
+    #[default]
+    ResponseCreate,
 }
-pub use client_event_type::Type;
 
-pub mod client_prompt_cache_retention {
-    /// The retention policy for the prompt cache. Set to `24h` to enable extended prompt caching, which keeps cached prefixes active for longer, up to a maximum of 24 hours. [Learn more](/docs/guides/prompt-caching#prompt-cache-retention).
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        Eq,
-        PartialEq,
-        Ord,
-        PartialOrd,
-        Hash,
-        serde::Serialize,
-        serde::Deserialize,
-    )]
-    #[derive(Default)]
-    pub enum PromptCacheRetention {
-        #[serde(rename = "in_memory")]
-        #[default]
-        InMemory,
-        #[serde(rename = "24h")]
-        Variant24h,
-    }
-
-    
+/// The retention policy for the prompt cache. Set to `24h` to enable extended prompt caching, which keeps cached prefixes active for longer, up to a maximum of 24 hours. [Learn more](/docs/guides/prompt-caching#prompt-cache-retention).
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[derive(Default)]
+pub enum PromptCacheRetention {
+    #[serde(rename = "in_memory")]
+    #[default]
+    InMemory,
+    #[serde(rename = "24h")]
+    Variant24h,
 }
-pub use client_prompt_cache_retention::PromptCacheRetention;
 
-pub mod client_truncation {
-    /// The truncation strategy to use for the model response. - `auto`: If the input to this Response exceeds   the model's context window size, the model will truncate the   response to fit the context window by dropping items from the beginning of the conversation. - `disabled` (default): If the input size will exceed the context window   size for a model, the request will fail with a 400 error.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        Eq,
-        PartialEq,
-        Ord,
-        PartialOrd,
-        Hash,
-        serde::Serialize,
-        serde::Deserialize,
-    )]
-    #[derive(Default)]
-    pub enum Truncation {
-        #[serde(rename = "auto")]
-        #[default]
-        Auto,
-        #[serde(rename = "disabled")]
-        Disabled,
-    }
-
-    
+/// The truncation strategy to use for the model response. - `auto`: If the input to this Response exceeds   the model's context window size, the model will truncate the   response to fit the context window by dropping items from the beginning of the conversation. - `disabled` (default): If the input size will exceed the context window   size for a model, the request will fail with a 400 error.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[derive(Default)]
+pub enum Truncation {
+    #[serde(rename = "auto")]
+    #[default]
+    Auto,
+    #[serde(rename = "disabled")]
+    Disabled,
 }
-pub use client_truncation::Truncation;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponsesClientEventResponseCreate {
@@ -356,84 +341,69 @@ impl ResponsesClientEventResponseCreate {
         }
     }
 }
-pub mod response_create_event_type {
-    /// The type of the client event. Always `response.create`.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        Eq,
-        PartialEq,
-        Ord,
-        PartialOrd,
-        Hash,
-        serde::Serialize,
-        serde::Deserialize,
-    )]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.create")]
-        #[default]
-        ResponseCreate,
-    }
-
-    
+/// The type of the client event. Always `response.create`.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[derive(Default)]
+pub enum ResponseCreateEventType {
+    #[serde(rename = "response.create")]
+    #[default]
+    ResponseCreate,
 }
-pub use response_create_event_type::Type as ResponseCreateEventType;
 
-pub mod response_create_prompt_cache_retention {
-    /// The retention policy for the prompt cache. Set to `24h` to enable extended prompt caching, which keeps cached prefixes active for longer, up to a maximum of 24 hours. [Learn more](/docs/guides/prompt-caching#prompt-cache-retention).
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        Eq,
-        PartialEq,
-        Ord,
-        PartialOrd,
-        Hash,
-        serde::Serialize,
-        serde::Deserialize,
-    )]
-    #[derive(Default)]
-    pub enum PromptCacheRetention {
-        #[serde(rename = "in_memory")]
-        #[default]
-        InMemory,
-        #[serde(rename = "24h")]
-        Variant24h,
-    }
-
-    
+/// The retention policy for the prompt cache. Set to `24h` to enable extended prompt caching, which keeps cached prefixes active for longer, up to a maximum of 24 hours. [Learn more](/docs/guides/prompt-caching#prompt-cache-retention).
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[derive(Default)]
+pub enum ResponseCreatePromptCacheRetention {
+    #[serde(rename = "in_memory")]
+    #[default]
+    InMemory,
+    #[serde(rename = "24h")]
+    Variant24h,
 }
-pub use response_create_prompt_cache_retention::PromptCacheRetention as ResponseCreatePromptCacheRetention;
 
-pub mod response_create_truncation {
-    /// The truncation strategy to use for the model response. - `auto`: If the input to this Response exceeds   the model's context window size, the model will truncate the   response to fit the context window by dropping items from the beginning of the conversation. - `disabled` (default): If the input size will exceed the context window   size for a model, the request will fail with a 400 error.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        Eq,
-        PartialEq,
-        Ord,
-        PartialOrd,
-        Hash,
-        serde::Serialize,
-        serde::Deserialize,
-    )]
-    #[derive(Default)]
-    pub enum Truncation {
-        #[serde(rename = "auto")]
-        #[default]
-        Auto,
-        #[serde(rename = "disabled")]
-        Disabled,
-    }
-
-    
+/// The truncation strategy to use for the model response. - `auto`: If the input to this Response exceeds   the model's context window size, the model will truncate the   response to fit the context window by dropping items from the beginning of the conversation. - `disabled` (default): If the input size will exceed the context window   size for a model, the request will fail with a 400 error.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[derive(Default)]
+pub enum ResponseCreateTruncation {
+    #[serde(rename = "auto")]
+    #[default]
+    Auto,
+    #[serde(rename = "disabled")]
+    Disabled,
 }
-pub use response_create_truncation::Truncation as ResponseCreateTruncation;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponsesServerEvent {
@@ -561,27 +531,22 @@ impl ResponsesServerEvent {
         }
     }
 }
-pub mod server_event_type {
-    /// The event type identifier.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        Eq,
-        PartialEq,
-        Ord,
-        PartialOrd,
-        Hash,
-        serde::Serialize,
-        serde::Deserialize,
-    )]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.custom_tool_call_input.done")]
-        #[default]
-        ResponseCustomToolCallInputDone,
-    }
-
-    
+/// The event type identifier.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[derive(Default)]
+pub enum ServerEventType {
+    #[serde(rename = "response.custom_tool_call_input.done")]
+    #[default]
+    ResponseCustomToolCallInputDone,
 }
-pub use server_event_type::Type as ServerEventType;

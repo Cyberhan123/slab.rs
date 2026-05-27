@@ -40,14 +40,4 @@ pub enum PromptCacheRetention {
     Variant24h,
 }
 
-// Output types that you would like the model to generate. Most models are capable of generating text, which is the default:  `[\"text\"]`  The `gpt-4o-audio-preview` model can also be used to [generate audio](/docs/guides/audio). To request that this model generate both text and audio responses, you can use:  `[\"text\", \"audio\"]`
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
-pub(crate) enum Type {
-    #[serde(rename = "function")]
-    #[default]
-    Function,
-    #[serde(rename = "custom")]
-    Custom,
-}
 

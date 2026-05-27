@@ -14,20 +14,6 @@ impl Default for ArrayOfContentPartsInner {
         Self::MessageContentImageFileObject(Default::default())
     }
 }
-/// Always `image_file`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
-pub(crate) enum ArrayOfContentPartsInnerType {
-    #[serde(rename = "image_file")]
-    #[default]
-    ImageFile,
-    #[serde(rename = "image_url")]
-    ImageUrl,
-    #[serde(rename = "text")]
-    Text,
-}
-
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Content {
@@ -40,16 +26,6 @@ impl Default for Content {
         Self::InputContentTypes(Default::default())
     }
 }
-/// The type of the reasoning text. Always `reasoning_text`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
-pub(crate) enum ContentType {
-    #[serde(rename = "reasoning_text")]
-    #[default]
-    ReasoningText,
-}
-
-
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TextContent {
     #[serde(rename = "type")]

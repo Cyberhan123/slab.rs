@@ -1,18 +1,13 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-pub mod text_delta_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.output_text.delta")]
-        #[default]
-        ResponseOutputTextDelta,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum TextDeltaType {
+    #[serde(rename = "response.output_text.delta")]
+    #[default]
+    ResponseOutputTextDelta,
 }
-pub use text_delta_type::Type as TextDeltaType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseTextDeltaEvent {
@@ -62,18 +57,13 @@ impl ResponseTextDeltaEvent {
     }
 }
 
-pub mod text_done_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.output_text.done")]
-        #[default]
-        ResponseOutputTextDone,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum TextDoneType {
+    #[serde(rename = "response.output_text.done")]
+    #[default]
+    ResponseOutputTextDone,
 }
-pub use text_done_type::Type as TextDoneType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseTextDoneEvent {

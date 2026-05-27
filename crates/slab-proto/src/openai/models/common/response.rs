@@ -42,20 +42,6 @@ impl Default for TextResponseFormatConfiguration {
         Self::ResponseFormatText(Default::default())
     }
 }
-/// The type of response format being defined. Always `text`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
-pub(crate) enum TextResponseFormatConfigurationType {
-    #[serde(rename = "text")]
-    #[default]
-    Text,
-    #[serde(rename = "json_schema")]
-    JsonSchema,
-    #[serde(rename = "json_object")]
-    JsonObject,
-}
-
-
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TextResponseFormatJsonSchema {
     /// The type of response format being defined. Always `json_schema`.

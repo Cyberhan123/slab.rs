@@ -31,19 +31,15 @@ impl ResponseMcpCallArgumentsDeltaEvent {
         ResponseMcpCallArgumentsDeltaEvent { r#type, output_index, item_id, delta, sequence_number }
     }
 }
-pub mod mcp_call_arguments_delta_type {
-    use serde::{Deserialize, Serialize};
-    /// The type of the event. Always 'response.mcp_call_arguments.delta'.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.mcp_call_arguments.delta")]
-        #[default]
-        ResponseMcpCallArgumentsDelta,
-    }
-    
+
+/// The type of the event. Always 'response.mcp_call_arguments.delta'.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum McpCallArgumentsDeltaType {
+    #[serde(rename = "response.mcp_call_arguments.delta")]
+    #[default]
+    ResponseMcpCallArgumentsDelta,
 }
-pub use mcp_call_arguments_delta_type::Type as McpCallArgumentsDeltaType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseMcpCallArgumentsDoneEvent {
@@ -82,19 +78,15 @@ impl ResponseMcpCallArgumentsDoneEvent {
         }
     }
 }
-pub mod mcp_call_arguments_done_type {
-    use serde::{Deserialize, Serialize};
-    /// The type of the event. Always 'response.mcp_call_arguments.done'.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.mcp_call_arguments.done")]
-        #[default]
-        ResponseMcpCallArgumentsDone,
-    }
-    
+
+/// The type of the event. Always 'response.mcp_call_arguments.done'.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum McpCallArgumentsDoneType {
+    #[serde(rename = "response.mcp_call_arguments.done")]
+    #[default]
+    ResponseMcpCallArgumentsDone,
 }
-pub use mcp_call_arguments_done_type::Type as McpCallArgumentsDoneType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseMcpCallCompletedEvent {
@@ -123,19 +115,15 @@ impl ResponseMcpCallCompletedEvent {
         ResponseMcpCallCompletedEvent { r#type, item_id, output_index, sequence_number }
     }
 }
-pub mod mcp_call_completed_type {
-    use serde::{Deserialize, Serialize};
-    /// The type of the event. Always 'response.mcp_call.completed'.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.mcp_call.completed")]
-        #[default]
-        ResponseMcpCallCompleted,
-    }
-    
+
+/// The type of the event. Always 'response.mcp_call.completed'.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum McpCallCompletedType {
+    #[serde(rename = "response.mcp_call.completed")]
+    #[default]
+    ResponseMcpCallCompleted,
 }
-pub use mcp_call_completed_type::Type as McpCallCompletedType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseMcpCallFailedEvent {
@@ -164,19 +152,15 @@ impl ResponseMcpCallFailedEvent {
         ResponseMcpCallFailedEvent { r#type, item_id, output_index, sequence_number }
     }
 }
-pub mod mcp_call_failed_type {
-    use serde::{Deserialize, Serialize};
-    /// The type of the event. Always 'response.mcp_call.failed'.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.mcp_call.failed")]
-        #[default]
-        ResponseMcpCallFailed,
-    }
-    
+
+/// The type of the event. Always 'response.mcp_call.failed'.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum McpCallFailedType {
+    #[serde(rename = "response.mcp_call.failed")]
+    #[default]
+    ResponseMcpCallFailed,
 }
-pub use mcp_call_failed_type::Type as McpCallFailedType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseMcpCallInProgressEvent {
@@ -205,19 +189,15 @@ impl ResponseMcpCallInProgressEvent {
         ResponseMcpCallInProgressEvent { r#type, sequence_number, output_index, item_id }
     }
 }
-pub mod mcp_call_in_progress_type {
-    use serde::{Deserialize, Serialize};
-    /// The type of the event. Always 'response.mcp_call.in_progress'.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.mcp_call.in_progress")]
-        #[default]
-        ResponseMcpCallInProgress,
-    }
-    
+
+/// The type of the event. Always 'response.mcp_call.in_progress'.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum McpCallInProgressType {
+    #[serde(rename = "response.mcp_call.in_progress")]
+    #[default]
+    ResponseMcpCallInProgress,
 }
-pub use mcp_call_in_progress_type::Type as McpCallInProgressType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseMcpListToolsCompletedEvent {
@@ -246,19 +226,15 @@ impl ResponseMcpListToolsCompletedEvent {
         ResponseMcpListToolsCompletedEvent { r#type, item_id, output_index, sequence_number }
     }
 }
-pub mod mcp_list_tools_completed_type {
-    use serde::{Deserialize, Serialize};
-    /// The type of the event. Always 'response.mcp_list_tools.completed'.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.mcp_list_tools.completed")]
-        #[default]
-        ResponseMcpListToolsCompleted,
-    }
-    
+
+/// The type of the event. Always 'response.mcp_list_tools.completed'.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum McpListToolsCompletedType {
+    #[serde(rename = "response.mcp_list_tools.completed")]
+    #[default]
+    ResponseMcpListToolsCompleted,
 }
-pub use mcp_list_tools_completed_type::Type as McpListToolsCompletedType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseMcpListToolsFailedEvent {
@@ -287,19 +263,15 @@ impl ResponseMcpListToolsFailedEvent {
         ResponseMcpListToolsFailedEvent { r#type, item_id, output_index, sequence_number }
     }
 }
-pub mod mcp_list_tools_failed_type {
-    use serde::{Deserialize, Serialize};
-    /// The type of the event. Always 'response.mcp_list_tools.failed'.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.mcp_list_tools.failed")]
-        #[default]
-        ResponseMcpListToolsFailed,
-    }
-    
+
+/// The type of the event. Always 'response.mcp_list_tools.failed'.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum McpListToolsFailedType {
+    #[serde(rename = "response.mcp_list_tools.failed")]
+    #[default]
+    ResponseMcpListToolsFailed,
 }
-pub use mcp_list_tools_failed_type::Type as McpListToolsFailedType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseMcpListToolsInProgressEvent {
@@ -328,16 +300,12 @@ impl ResponseMcpListToolsInProgressEvent {
         ResponseMcpListToolsInProgressEvent { r#type, item_id, output_index, sequence_number }
     }
 }
-pub mod mcp_list_tools_in_progress_type {
-    use serde::{Deserialize, Serialize};
-    /// The type of the event. Always 'response.mcp_list_tools.in_progress'.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.mcp_list_tools.in_progress")]
-        #[default]
-        ResponseMcpListToolsInProgress,
-    }
-    
+
+/// The type of the event. Always 'response.mcp_list_tools.in_progress'.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum McpListToolsInProgressType {
+    #[serde(rename = "response.mcp_list_tools.in_progress")]
+    #[default]
+    ResponseMcpListToolsInProgress,
 }
-pub use mcp_list_tools_in_progress_type::Type as McpListToolsInProgressType;

@@ -1,17 +1,12 @@
 use serde::{Deserialize, Serialize};
 
-pub mod func_args_delta_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.function_call_arguments.delta")]
-        #[default]
-        ResponseFunctionCallArgumentsDelta,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum FuncArgsDeltaType {
+    #[serde(rename = "response.function_call_arguments.delta")]
+    #[default]
+    ResponseFunctionCallArgumentsDelta,
 }
-pub use func_args_delta_type::Type as FuncArgsDeltaType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseFunctionCallArgumentsDeltaEvent {
@@ -51,18 +46,13 @@ impl ResponseFunctionCallArgumentsDeltaEvent {
     }
 }
 
-pub mod func_args_done_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.function_call_arguments.done")]
-        #[default]
-        ResponseFunctionCallArgumentsDone,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum FuncArgsDoneType {
+    #[serde(rename = "response.function_call_arguments.done")]
+    #[default]
+    ResponseFunctionCallArgumentsDone,
 }
-pub use func_args_done_type::Type as FuncArgsDoneType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseFunctionCallArgumentsDoneEvent {

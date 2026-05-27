@@ -37,19 +37,16 @@ impl ResponseCustomToolCallInputDeltaEvent {
         }
     }
 }
-pub mod custom_tool_call_input_delta_type {
-    use serde::{Deserialize, Serialize};
-    /// The event type identifier.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.custom_tool_call_input.delta")]
-        #[default]
-        ResponseCustomToolCallInputDelta,
-    }
-    
+
+/// The event type identifier.
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub enum CustomToolCallInputDeltaType {
+    #[serde(rename = "response.custom_tool_call_input.delta")]
+    #[default]
+    ResponseCustomToolCallInputDelta,
 }
-pub use custom_tool_call_input_delta_type::Type as CustomToolCallInputDeltaType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseCustomToolCallInputDoneEvent {
@@ -88,16 +85,13 @@ impl ResponseCustomToolCallInputDoneEvent {
         }
     }
 }
-pub mod custom_tool_call_input_done_type {
-    use serde::{Deserialize, Serialize};
-    /// The event type identifier.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.custom_tool_call_input.done")]
-        #[default]
-        ResponseCustomToolCallInputDone,
-    }
-    
+
+/// The event type identifier.
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub enum CustomToolCallInputDoneType {
+    #[serde(rename = "response.custom_tool_call_input.done")]
+    #[default]
+    ResponseCustomToolCallInputDone,
 }
-pub use custom_tool_call_input_done_type::Type as CustomToolCallInputDoneType;

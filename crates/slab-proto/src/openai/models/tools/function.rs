@@ -334,7 +334,6 @@ impl FunctionToolParam {
         }
     }
 }
-///
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
 pub(crate) enum FunctionToolParamType {

@@ -1,18 +1,12 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-pub mod content_part_added_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.content_part.added")]
-        #[default]
-        ResponseContentPartAdded,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default)]
+pub enum ContentPartAddedType {
+    #[serde(rename = "response.content_part.added")]
+    #[default]
+    ResponseContentPartAdded,
 }
-pub use content_part_added_type::Type as ContentPartAddedType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseContentPartAddedEvent {
@@ -57,18 +51,12 @@ impl ResponseContentPartAddedEvent {
     }
 }
 
-pub mod content_part_done_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.content_part.done")]
-        #[default]
-        ResponseContentPartDone,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default)]
+pub enum ContentPartDoneType {
+    #[serde(rename = "response.content_part.done")]
+    #[default]
+    ResponseContentPartDone,
 }
-pub use content_part_done_type::Type as ContentPartDoneType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseContentPartDoneEvent {
@@ -113,18 +101,12 @@ impl ResponseContentPartDoneEvent {
     }
 }
 
-pub mod annotation_added_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.output_text.annotation.added")]
-        #[default]
-        ResponseOutputTextAnnotationAdded,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default)]
+pub enum AnnotationAddedType {
+    #[serde(rename = "response.output_text.annotation.added")]
+    #[default]
+    ResponseOutputTextAnnotationAdded,
 }
-pub use annotation_added_type::Type as AnnotationAddedType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseOutputTextAnnotationAddedEvent {

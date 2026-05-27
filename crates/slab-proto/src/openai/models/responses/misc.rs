@@ -147,20 +147,6 @@ impl Default for ResponsePromptVariablesValue {
         Self::String(Default::default())
     }
 }
-/// The type of the input item. Always `input_text`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
-pub(crate) enum ResponsePromptVariablesValueType {
-    #[serde(rename = "input_text")]
-    #[default]
-    InputText,
-    #[serde(rename = "input_image")]
-    InputImage,
-    #[serde(rename = "input_file")]
-    InputFile,
-}
-
-
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseTextParam {
     #[serde(rename = "format", skip_serializing_if = "Option::is_none")]

@@ -101,16 +101,6 @@ impl Default for CreateTranscription200Response {
         Self::CreateTranscriptionResponseJson(Default::default())
     }
 }
-/// The type of task that was run. Always `transcribe`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
-pub(crate) enum CreateTranscription200ResponseTask {
-    #[serde(rename = "transcribe")]
-    #[default]
-    Transcribe,
-}
-
-
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AudioTranscription {
     #[serde(rename = "model", skip_serializing_if = "Option::is_none")]
@@ -162,16 +152,6 @@ impl Default for TranscriptionChunkingStrategy {
         Self::String(Default::default())
     }
 }
-/// Must be set to `server_vad` to enable manual chunking using server side VAD.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
-pub(crate) enum TranscriptionChunkingStrategyType {
-    #[serde(rename = "server_vad")]
-    #[default]
-    ServerVad,
-}
-
-
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TranscriptionDiarizedSegment {
     /// The type of the segment. Always `transcript.text.segment`.

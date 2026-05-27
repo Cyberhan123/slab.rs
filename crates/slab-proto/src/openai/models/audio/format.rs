@@ -139,18 +139,13 @@ pub enum ResponseFormat {
 
 // The format to stream the audio in. Supported formats are `sse` and `audio`. `sse` is not supported for `tts-1` or `tts-1-hd`.
 
-pub mod text_format_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "text")]
-        #[default]
-        Text,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum TextFormatType {
+    #[serde(rename = "text")]
+    #[default]
+    Text,
 }
-pub use text_format_type::Type as TextFormatType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TextFormat {
@@ -177,18 +172,13 @@ pub enum StreamFormat {
 }
 
 
-pub mod custom_text_format_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "text")]
-        #[default]
-        Text,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum CustomTextFormatType {
+    #[serde(rename = "text")]
+    #[default]
+    Text,
 }
-pub use custom_text_format_type::Type as CustomTextFormatType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CustomTextFormatParam {
@@ -204,18 +194,13 @@ impl CustomTextFormatParam {
     }
 }
 
-pub mod custom_grammar_format_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "grammar")]
-        #[default]
-        Grammar,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum CustomGrammarFormatType {
+    #[serde(rename = "grammar")]
+    #[default]
+    Grammar,
 }
-pub use custom_grammar_format_type::Type as CustomGrammarFormatType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CustomGrammarFormatParam {
@@ -241,18 +226,13 @@ impl CustomGrammarFormatParam {
     }
 }
 
-pub mod grammar_format_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "grammar")]
-        #[default]
-        Grammar,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum GrammarFormatType {
+    #[serde(rename = "grammar")]
+    #[default]
+    Grammar,
 }
-pub use grammar_format_type::Type as GrammarFormatType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GrammarFormat {

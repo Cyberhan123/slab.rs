@@ -186,53 +186,6 @@ impl Default for ToolChoiceParam {
         Self::ToolChoiceOptions(Default::default())
     }
 }
-/// Allowed tool configuration type. Always `allowed_tools`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
-pub(crate) enum ToolChoiceParamType {
-    #[serde(rename = "allowed_tools")]
-    #[default]
-    AllowedTools,
-    #[serde(rename = "file_search")]
-    FileSearch,
-    #[serde(rename = "web_search_preview")]
-    WebSearchPreview,
-    #[serde(rename = "computer")]
-    Computer,
-    #[serde(rename = "computer_use_preview")]
-    ComputerUsePreview,
-    #[serde(rename = "computer_use")]
-    ComputerUse,
-    #[serde(rename = "web_search_preview_2025_03_11")]
-    WebSearchPreview20250311,
-    #[serde(rename = "image_generation")]
-    ImageGeneration,
-    #[serde(rename = "code_interpreter")]
-    CodeInterpreter,
-    #[serde(rename = "function")]
-    Function,
-    #[serde(rename = "mcp")]
-    Mcp,
-    #[serde(rename = "custom")]
-    Custom,
-    #[serde(rename = "apply_patch")]
-    ApplyPatch,
-    #[serde(rename = "shell")]
-    Shell,
-}
-
-/// Constrains the tools available to the model to a pre-defined set.  `auto` allows the model to pick from among the allowed tools and generate a message.  `required` requires the model to call one or more of the allowed tools.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
-pub(crate) enum ToolChoiceParamMode {
-    #[serde(rename = "auto")]
-    #[default]
-    Auto,
-    #[serde(rename = "required")]
-    Required,
-}
-
-
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolChoiceTypes {
     /// The type of hosted tool the model should to use. Learn more about [built-in tools](/docs/guides/tools).  Allowed values are: - `file_search` - `web_search_preview` - `computer` - `computer_use_preview` - `computer_use` - `code_interpreter` - `image_generation`

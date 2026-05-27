@@ -1,491 +1,461 @@
-pub mod edit_image_body_json_param {
-    use crate::models;
-    use serde::{Deserialize, Serialize};
+use crate::models;
+use serde::{Deserialize, Serialize};
 
-    use super::super::generation::Moderation;
-    use super::super::generation::OutputFormat;
-    use super::super::resource::Background;
-    use super::edit_image_input_fidelity::EditImageInputFidelity;
-    use super::edit_image_input_fidelity::Size;
-    #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-    pub struct EditImageBodyJsonParam {
-        /// Input image references to edit. For GPT image models, you can provide up to 16 images.
-        #[serde(rename = "images")]
-        pub images: Vec<models::ImageRefParam>,
-        /// A text description of the desired image edit.
-        #[serde(rename = "prompt")]
-        pub prompt: String,
-        #[serde(
-            rename = "model",
-            default,
-            with = "::serde_with::rust::double_option",
-            skip_serializing_if = "Option::is_none"
-        )]
-        pub model: Option<Option<Box<models::EditImageBodyJsonParamModel>>>,
-        #[serde(
-            rename = "mask",
-            default,
-            with = "::serde_with::rust::double_option",
-            skip_serializing_if = "Option::is_none"
-        )]
-        pub mask: Option<Option<Box<models::ImageRefParam>>>,
-        /// The number of edited images to generate.
-        #[serde(
-            rename = "n",
-            default,
-            with = "::serde_with::rust::double_option",
-            skip_serializing_if = "Option::is_none"
-        )]
-        pub n: Option<Option<i32>>,
-        /// Output quality for GPT image models.
-        #[serde(
-            rename = "quality",
-            default,
-            with = "::serde_with::rust::double_option",
-            skip_serializing_if = "Option::is_none"
-        )]
-        pub quality: Option<Option<Quality>>,
-        /// Controls fidelity to the original input image(s).
-        #[serde(
-            rename = "input_fidelity",
-            default,
-            with = "::serde_with::rust::double_option",
-            skip_serializing_if = "Option::is_none"
-        )]
-        pub input_fidelity: Option<Option<EditImageInputFidelity>>,
-        /// Requested output image size.
-        #[serde(
-            rename = "size",
-            default,
-            with = "::serde_with::rust::double_option",
-            skip_serializing_if = "Option::is_none"
-        )]
-        pub size: Option<Option<Size>>,
-        /// A unique identifier representing your end-user, which can help OpenAI monitor and detect abuse.
-        #[serde(rename = "user", skip_serializing_if = "Option::is_none")]
-        pub user: Option<String>,
-        /// Output image format. Supported for GPT image models.
-        #[serde(
-            rename = "output_format",
-            default,
-            with = "::serde_with::rust::double_option",
-            skip_serializing_if = "Option::is_none"
-        )]
-        pub output_format: Option<Option<OutputFormat>>,
-        /// Compression level for `jpeg` or `webp` output.
-        #[serde(
-            rename = "output_compression",
-            default,
-            with = "::serde_with::rust::double_option",
-            skip_serializing_if = "Option::is_none"
-        )]
-        pub output_compression: Option<Option<i32>>,
-        /// Moderation level for GPT image models.
-        #[serde(
-            rename = "moderation",
-            default,
-            with = "::serde_with::rust::double_option",
-            skip_serializing_if = "Option::is_none"
-        )]
-        pub moderation: Option<Option<Moderation>>,
-        /// Background behavior for generated image output.
-        #[serde(
-            rename = "background",
-            default,
-            with = "::serde_with::rust::double_option",
-            skip_serializing_if = "Option::is_none"
-        )]
-        pub background: Option<Option<Background>>,
-        /// Stream partial image results as events.
-        #[serde(
-            rename = "stream",
-            default,
-            with = "::serde_with::rust::double_option",
-            skip_serializing_if = "Option::is_none"
-        )]
-        pub stream: Option<Option<bool>>,
-        /// The number of partial images to generate. This parameter is used for streaming responses that return partial images. Value must be between 0 and 3. When set to 0, the response will be a single image sent in one streaming event.  Note that the final image may be sent before the full number of partial images are generated if the full image is generated more quickly.
-        #[serde(
-            rename = "partial_images",
-            default,
-            with = "::serde_with::rust::double_option",
-            skip_serializing_if = "Option::is_none"
-        )]
-        pub partial_images: Option<Option<i32>>,
-    }
+use super::params::Moderation;
 
-    impl EditImageBodyJsonParam {
-        /// JSON request body for image edits.  Use `images` (array of `ImageRefParam`) instead of multipart `image` uploads. You can reference images via external URLs, data URLs, or uploaded file IDs. JSON edits support GPT image models only; DALL-E edits require multipart (`dall-e-2` only).
-        pub fn new(images: Vec<models::ImageRefParam>, prompt: String) -> EditImageBodyJsonParam {
-            EditImageBodyJsonParam {
-                images,
-                prompt,
-                model: None,
-                mask: None,
-                n: None,
-                quality: None,
-                input_fidelity: None,
-                size: None,
-                user: None,
-                output_format: None,
-                output_compression: None,
-                moderation: None,
-                background: None,
-                stream: None,
-                partial_images: None,
-            }
-        }
-    }
+#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EditImageBodyJsonParam {
+    /// Input image references to edit. For GPT image models, you can provide up to 16 images.
+    #[serde(rename = "images")]
+    pub images: Vec<models::ImageRefParam>,
+    /// A text description of the desired image edit.
+    #[serde(rename = "prompt")]
+    pub prompt: String,
+    #[serde(
+        rename = "model",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub model: Option<Option<Box<models::EditImageBodyJsonParamModel>>>,
+    #[serde(
+        rename = "mask",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub mask: Option<Option<Box<models::ImageRefParam>>>,
+    /// The number of edited images to generate.
+    #[serde(
+        rename = "n",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub n: Option<Option<i32>>,
     /// Output quality for GPT image models.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub(crate) enum Quality {
-        #[serde(rename = "low")]
-        #[default]
-        Low,
-        #[serde(rename = "medium")]
-        Medium,
-        #[serde(rename = "high")]
-        High,
-        #[serde(rename = "auto")]
-        Auto,
-    }
-
-    
-    // Controls fidelity to the original input image(s).
-}
-
-pub mod edit_image_body_json_param_model {
-    
-    use serde::{Deserialize, Serialize};
-
-    #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-    pub struct EditImageBodyJsonParamModel {}
-
-    impl EditImageBodyJsonParamModel {
-        /// The model to use for image editing.
-        pub fn new() -> EditImageBodyJsonParamModel {
-            EditImageBodyJsonParamModel {}
-        }
-    }
-}
-
-pub mod edit_image_input_fidelity {
-    
-    use serde::{Deserialize, Serialize};
-
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum EditImageInputFidelity {
-        #[serde(rename = "high")]
-        #[default]
-        High,
-        #[serde(rename = "low")]
-        Low,
-    }
-
-    
+    #[serde(
+        rename = "quality",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub quality: Option<Option<Quality>>,
+    /// Controls fidelity to the original input image(s).
+    #[serde(
+        rename = "input_fidelity",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub input_fidelity: Option<Option<EditImageInputFidelity>>,
     /// Requested output image size.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub(crate) enum Size {
-        #[serde(rename = "auto")]
-        #[default]
-        Auto,
-        #[serde(rename = "1024x1024")]
-        Variant1024x1024,
-        #[serde(rename = "1536x1024")]
-        Variant1536x1024,
-        #[serde(rename = "1024x1536")]
-        Variant1024x1536,
-    }
-
-    
+    #[serde(
+        rename = "size",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub size: Option<Option<EditImageBodySize>>,
+    /// A unique identifier representing your end-user, which can help OpenAI monitor and detect abuse.
+    #[serde(rename = "user", skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
     /// Output image format. Supported for GPT image models.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub(crate) enum OutputFormat {
-        #[serde(rename = "png")]
-        #[default]
-        Png,
-        #[serde(rename = "jpeg")]
-        Jpeg,
-        #[serde(rename = "webp")]
-        Webp,
-    }
-
-    
-    // Moderation level for GPT image models.
+    #[serde(
+        rename = "output_format",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub output_format: Option<Option<EditImageBodyOutputFormat>>,
+    /// Compression level for `jpeg` or `webp` output.
+    #[serde(
+        rename = "output_compression",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub output_compression: Option<Option<i32>>,
+    /// Moderation level for GPT image models.
+    #[serde(
+        rename = "moderation",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub moderation: Option<Option<Moderation>>,
+    /// Background behavior for generated image output.
+    #[serde(
+        rename = "background",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub background: Option<Option<EditImageBodyBackground>>,
+    /// Stream partial image results as events.
+    #[serde(
+        rename = "stream",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub stream: Option<Option<bool>>,
+    /// The number of partial images to generate. This parameter is used for streaming responses that return partial images. Value must be between 0 and 3. When set to 0, the response will be a single image sent in one streaming event.  Note that the final image may be sent before the full number of partial images are generated if the full image is generated more quickly.
+    #[serde(
+        rename = "partial_images",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub partial_images: Option<Option<i32>>,
 }
 
-pub mod image_edit_completed_event {
-    use crate::models;
-    use serde::{Deserialize, Serialize};
-
-    #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-    pub struct ImageEditCompletedEvent {
-        /// The type of the event. Always `image_edit.completed`.
-        #[serde(rename = "type")]
-        pub r#type: Type,
-        /// Base64-encoded final edited image data, suitable for rendering as an image.
-        #[serde(rename = "b64_json")]
-        pub b64_json: String,
-        /// The Unix timestamp when the event was created.
-        #[serde(rename = "created_at")]
-        pub created_at: i32,
-        /// The size of the edited image.
-        #[serde(rename = "size")]
-        pub size: Size,
-        /// The quality setting for the edited image.
-        #[serde(rename = "quality")]
-        pub quality: Quality,
-        /// The background setting for the edited image.
-        #[serde(rename = "background")]
-        pub background: Background,
-        /// The output format for the edited image.
-        #[serde(rename = "output_format")]
-        pub output_format: OutputFormat,
-        #[serde(rename = "usage")]
-        pub usage: Box<models::ImagesUsage>,
-    }
-
-    impl ImageEditCompletedEvent {
-        /// Emitted when image editing has completed and the final image is available.
-        pub fn new(
-            r#type: Type,
-            b64_json: String,
-            created_at: i32,
-            size: Size,
-            quality: Quality,
-            background: Background,
-            output_format: OutputFormat,
-            usage: models::ImagesUsage,
-        ) -> ImageEditCompletedEvent {
-            ImageEditCompletedEvent {
-                r#type,
-                b64_json,
-                created_at,
-                size,
-                quality,
-                background,
-                output_format,
-                usage: Box::new(usage),
-            }
+impl EditImageBodyJsonParam {
+    /// JSON request body for image edits.  Use `images` (array of `ImageRefParam`) instead of multipart `image` uploads. You can reference images via external URLs, data URLs, or uploaded file IDs. JSON edits support GPT image models only; DALL-E edits require multipart (`dall-e-2` only).
+    pub fn new(images: Vec<models::ImageRefParam>, prompt: String) -> EditImageBodyJsonParam {
+        EditImageBodyJsonParam {
+            images,
+            prompt,
+            model: None,
+            mask: None,
+            n: None,
+            quality: None,
+            input_fidelity: None,
+            size: None,
+            user: None,
+            output_format: None,
+            output_compression: None,
+            moderation: None,
+            background: None,
+            stream: None,
+            partial_images: None,
         }
     }
+}
+/// Output quality for GPT image models.
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub(crate) enum Quality {
+    #[serde(rename = "low")]
+    #[default]
+    Low,
+    #[serde(rename = "medium")]
+    Medium,
+    #[serde(rename = "high")]
+    High,
+    #[serde(rename = "auto")]
+    Auto,
+}
+
+#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EditImageBodyJsonParamModel {}
+
+impl EditImageBodyJsonParamModel {
+    /// The model to use for image editing.
+    pub fn new() -> EditImageBodyJsonParamModel {
+        EditImageBodyJsonParamModel {}
+    }
+}
+
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub enum EditImageInputFidelity {
+    #[serde(rename = "high")]
+    #[default]
+    High,
+    #[serde(rename = "low")]
+    Low,
+}
+
+/// Requested output image size.
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub(crate) enum EditImageBodySize {
+    #[serde(rename = "auto")]
+    #[default]
+    Auto,
+    #[serde(rename = "1024x1024")]
+    Variant1024x1024,
+    #[serde(rename = "1536x1024")]
+    Variant1536x1024,
+    #[serde(rename = "1024x1536")]
+    Variant1024x1536,
+}
+
+/// Output image format for the edit body.
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub(crate) enum EditImageBodyOutputFormat {
+    #[serde(rename = "png")]
+    #[default]
+    Png,
+    #[serde(rename = "webp")]
+    Webp,
+    #[serde(rename = "jpeg")]
+    Jpeg,
+}
+
+/// Background behavior for the edit body.
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub(crate) enum EditImageBodyBackground {
+    #[serde(rename = "transparent")]
+    #[default]
+    Transparent,
+    #[serde(rename = "opaque")]
+    Opaque,
+    #[serde(rename = "auto")]
+    Auto,
+}
+
+#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ImageEditCompletedEvent {
     /// The type of the event. Always `image_edit.completed`.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub(crate) enum Type {
-        #[serde(rename = "image_edit.completed")]
-        #[default]
-        ImageEditCompleted,
-    }
-
-    
+    #[serde(rename = "type")]
+    pub r#type: ImageEditCompletedEventType,
+    /// Base64-encoded final edited image data, suitable for rendering as an image.
+    #[serde(rename = "b64_json")]
+    pub b64_json: String,
+    /// The Unix timestamp when the event was created.
+    #[serde(rename = "created_at")]
+    pub created_at: i32,
     /// The size of the edited image.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub(crate) enum Size {
-        #[serde(rename = "1024x1024")]
-        #[default]
-        Variant1024x1024,
-        #[serde(rename = "1024x1536")]
-        Variant1024x1536,
-        #[serde(rename = "1536x1024")]
-        Variant1536x1024,
-        #[serde(rename = "auto")]
-        Auto,
-    }
-
-    
+    #[serde(rename = "size")]
+    pub size: ImageEditCompletedEventSize,
     /// The quality setting for the edited image.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub(crate) enum Quality {
-        #[serde(rename = "low")]
-        #[default]
-        Low,
-        #[serde(rename = "medium")]
-        Medium,
-        #[serde(rename = "high")]
-        High,
-        #[serde(rename = "auto")]
-        Auto,
-    }
-
-    
+    #[serde(rename = "quality")]
+    pub quality: ImageEditCompletedEventQuality,
     /// The background setting for the edited image.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub(crate) enum Background {
-        #[serde(rename = "transparent")]
-        #[default]
-        Transparent,
-        #[serde(rename = "opaque")]
-        Opaque,
-        #[serde(rename = "auto")]
-        Auto,
-    }
-
-    
+    #[serde(rename = "background")]
+    pub background: ImageEditCompletedEventBackground,
     /// The output format for the edited image.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub(crate) enum OutputFormat {
-        #[serde(rename = "png")]
-        #[default]
-        Png,
-        #[serde(rename = "webp")]
-        Webp,
-        #[serde(rename = "jpeg")]
-        Jpeg,
-    }
-
-    
+    #[serde(rename = "output_format")]
+    pub output_format: ImageEditCompletedEventOutputFormat,
+    #[serde(rename = "usage")]
+    pub usage: Box<models::ImagesUsage>,
 }
 
-pub mod image_edit_partial_image_event {
-    
-    use serde::{Deserialize, Serialize};
-
-    #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-    pub struct ImageEditPartialImageEvent {
-        /// The type of the event. Always `image_edit.partial_image`.
-        #[serde(rename = "type")]
-        pub r#type: Type,
-        /// Base64-encoded partial image data, suitable for rendering as an image.
-        #[serde(rename = "b64_json")]
-        pub b64_json: String,
-        /// The Unix timestamp when the event was created.
-        #[serde(rename = "created_at")]
-        pub created_at: i32,
-        /// The size of the requested edited image.
-        #[serde(rename = "size")]
-        pub size: Size,
-        /// The quality setting for the requested edited image.
-        #[serde(rename = "quality")]
-        pub quality: Quality,
-        /// The background setting for the requested edited image.
-        #[serde(rename = "background")]
-        pub background: Background,
-        /// The output format for the requested edited image.
-        #[serde(rename = "output_format")]
-        pub output_format: OutputFormat,
-        /// 0-based index for the partial image (streaming).
-        #[serde(rename = "partial_image_index")]
-        pub partial_image_index: i32,
-    }
-
-    impl ImageEditPartialImageEvent {
-        /// Emitted when a partial image is available during image editing streaming.
-        pub fn new(
-            r#type: Type,
-            b64_json: String,
-            created_at: i32,
-            size: Size,
-            quality: Quality,
-            background: Background,
-            output_format: OutputFormat,
-            partial_image_index: i32,
-        ) -> ImageEditPartialImageEvent {
-            ImageEditPartialImageEvent {
-                r#type,
-                b64_json,
-                created_at,
-                size,
-                quality,
-                background,
-                output_format,
-                partial_image_index,
-            }
+impl ImageEditCompletedEvent {
+    /// Emitted when image editing has completed and the final image is available.
+    pub fn new(
+        r#type: ImageEditCompletedEventType,
+        b64_json: String,
+        created_at: i32,
+        size: ImageEditCompletedEventSize,
+        quality: ImageEditCompletedEventQuality,
+        background: ImageEditCompletedEventBackground,
+        output_format: ImageEditCompletedEventOutputFormat,
+        usage: models::ImagesUsage,
+    ) -> ImageEditCompletedEvent {
+        ImageEditCompletedEvent {
+            r#type,
+            b64_json,
+            created_at,
+            size,
+            quality,
+            background,
+            output_format,
+            usage: Box::new(usage),
         }
     }
+}
+/// The type of the event. Always `image_edit.completed`.
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub(crate) enum ImageEditCompletedEventType {
+    #[serde(rename = "image_edit.completed")]
+    #[default]
+    ImageEditCompleted,
+}
+
+/// The size of the edited image.
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub(crate) enum ImageEditCompletedEventSize {
+    #[serde(rename = "1024x1024")]
+    #[default]
+    Variant1024x1024,
+    #[serde(rename = "1024x1536")]
+    Variant1024x1536,
+    #[serde(rename = "1536x1024")]
+    Variant1536x1024,
+    #[serde(rename = "auto")]
+    Auto,
+}
+
+/// The quality setting for the edited image.
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub(crate) enum ImageEditCompletedEventQuality {
+    #[serde(rename = "low")]
+    #[default]
+    Low,
+    #[serde(rename = "medium")]
+    Medium,
+    #[serde(rename = "high")]
+    High,
+    #[serde(rename = "auto")]
+    Auto,
+}
+
+/// The background setting for the edited image.
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub(crate) enum ImageEditCompletedEventBackground {
+    #[serde(rename = "transparent")]
+    #[default]
+    Transparent,
+    #[serde(rename = "opaque")]
+    Opaque,
+    #[serde(rename = "auto")]
+    Auto,
+}
+
+/// The output format for the edited image.
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub(crate) enum ImageEditCompletedEventOutputFormat {
+    #[serde(rename = "png")]
+    #[default]
+    Png,
+    #[serde(rename = "webp")]
+    Webp,
+    #[serde(rename = "jpeg")]
+    Jpeg,
+}
+
+#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ImageEditPartialImageEvent {
     /// The type of the event. Always `image_edit.partial_image`.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub(crate) enum Type {
-        #[serde(rename = "image_edit.partial_image")]
-        #[default]
-        ImageEditPartialImage,
-    }
-
-    
+    #[serde(rename = "type")]
+    pub r#type: ImageEditPartialImageEventType,
+    /// Base64-encoded partial image data, suitable for rendering as an image.
+    #[serde(rename = "b64_json")]
+    pub b64_json: String,
+    /// The Unix timestamp when the event was created.
+    #[serde(rename = "created_at")]
+    pub created_at: i32,
     /// The size of the requested edited image.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub(crate) enum Size {
-        #[serde(rename = "1024x1024")]
-        #[default]
-        Variant1024x1024,
-        #[serde(rename = "1024x1536")]
-        Variant1024x1536,
-        #[serde(rename = "1536x1024")]
-        Variant1536x1024,
-        #[serde(rename = "auto")]
-        Auto,
-    }
-
-    
+    #[serde(rename = "size")]
+    pub size: ImageEditPartialImageEventSize,
     /// The quality setting for the requested edited image.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub(crate) enum Quality {
-        #[serde(rename = "low")]
-        #[default]
-        Low,
-        #[serde(rename = "medium")]
-        Medium,
-        #[serde(rename = "high")]
-        High,
-        #[serde(rename = "auto")]
-        Auto,
-    }
-
-    
+    #[serde(rename = "quality")]
+    pub quality: ImageEditPartialImageEventQuality,
     /// The background setting for the requested edited image.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub(crate) enum Background {
-        #[serde(rename = "transparent")]
-        #[default]
-        Transparent,
-        #[serde(rename = "opaque")]
-        Opaque,
-        #[serde(rename = "auto")]
-        Auto,
-    }
-
-    
+    #[serde(rename = "background")]
+    pub background: ImageEditPartialImageEventBackground,
     /// The output format for the requested edited image.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub(crate) enum OutputFormat {
-        #[serde(rename = "png")]
-        #[default]
-        Png,
-        #[serde(rename = "webp")]
-        Webp,
-        #[serde(rename = "jpeg")]
-        Jpeg,
+    #[serde(rename = "output_format")]
+    pub output_format: ImageEditPartialImageEventOutputFormat,
+    /// 0-based index for the partial image (streaming).
+    #[serde(rename = "partial_image_index")]
+    pub partial_image_index: i32,
+}
+
+impl ImageEditPartialImageEvent {
+    /// Emitted when a partial image is available during image editing streaming.
+    pub fn new(
+        r#type: ImageEditPartialImageEventType,
+        b64_json: String,
+        created_at: i32,
+        size: ImageEditPartialImageEventSize,
+        quality: ImageEditPartialImageEventQuality,
+        background: ImageEditPartialImageEventBackground,
+        output_format: ImageEditPartialImageEventOutputFormat,
+        partial_image_index: i32,
+    ) -> ImageEditPartialImageEvent {
+        ImageEditPartialImageEvent {
+            r#type,
+            b64_json,
+            created_at,
+            size,
+            quality,
+            background,
+            output_format,
+            partial_image_index,
+        }
     }
-
-    
+}
+/// The type of the event. Always `image_edit.partial_image`.
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub(crate) enum ImageEditPartialImageEventType {
+    #[serde(rename = "image_edit.partial_image")]
+    #[default]
+    ImageEditPartialImage,
 }
 
-pub mod image_edit_stream_event {
-    
-    use serde::{Deserialize, Serialize};
-
-    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-    #[serde(tag = "type")]
-    pub enum ImageEditStreamEvent {}
+/// The size of the requested edited image.
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub(crate) enum ImageEditPartialImageEventSize {
+    #[serde(rename = "1024x1024")]
+    #[default]
+    Variant1024x1024,
+    #[serde(rename = "1024x1536")]
+    Variant1024x1536,
+    #[serde(rename = "1536x1024")]
+    Variant1536x1024,
+    #[serde(rename = "auto")]
+    Auto,
 }
 
-pub use edit_image_body_json_param::EditImageBodyJsonParam;
-pub use edit_image_body_json_param_model::EditImageBodyJsonParamModel;
-pub use edit_image_input_fidelity::EditImageInputFidelity;
-pub(crate) use edit_image_input_fidelity::Size;
-pub use image_edit_completed_event::ImageEditCompletedEvent;
-pub use image_edit_partial_image_event::ImageEditPartialImageEvent;
-pub use image_edit_stream_event::ImageEditStreamEvent;
+/// The quality setting for the requested edited image.
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub(crate) enum ImageEditPartialImageEventQuality {
+    #[serde(rename = "low")]
+    #[default]
+    Low,
+    #[serde(rename = "medium")]
+    Medium,
+    #[serde(rename = "high")]
+    High,
+    #[serde(rename = "auto")]
+    Auto,
+}
+
+/// The background setting for the requested edited image.
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub(crate) enum ImageEditPartialImageEventBackground {
+    #[serde(rename = "transparent")]
+    #[default]
+    Transparent,
+    #[serde(rename = "opaque")]
+    Opaque,
+    #[serde(rename = "auto")]
+    Auto,
+}
+
+/// The output format for the requested edited image.
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub(crate) enum ImageEditPartialImageEventOutputFormat {
+    #[serde(rename = "png")]
+    #[default]
+    Png,
+    #[serde(rename = "webp")]
+    Webp,
+    #[serde(rename = "jpeg")]
+    Jpeg,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ImageEditStreamEvent {}

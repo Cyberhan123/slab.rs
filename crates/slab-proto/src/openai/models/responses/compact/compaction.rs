@@ -104,32 +104,27 @@ impl Default for ComparisonFilterValue {
     }
 }
 
-pub mod comparison_filter_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "eq")]
-        #[default]
-        Eq,
-        #[serde(rename = "ne")]
-        Ne,
-        #[serde(rename = "gt")]
-        Gt,
-        #[serde(rename = "gte")]
-        Gte,
-        #[serde(rename = "lt")]
-        Lt,
-        #[serde(rename = "lte")]
-        Lte,
-        #[serde(rename = "in")]
-        In,
-        #[serde(rename = "nin")]
-        Nin,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum ComparisonFilterType {
+    #[serde(rename = "eq")]
+    #[default]
+    Eq,
+    #[serde(rename = "ne")]
+    Ne,
+    #[serde(rename = "gt")]
+    Gt,
+    #[serde(rename = "gte")]
+    Gte,
+    #[serde(rename = "lt")]
+    Lt,
+    #[serde(rename = "lte")]
+    Lte,
+    #[serde(rename = "in")]
+    In,
+    #[serde(rename = "nin")]
+    Nin,
 }
-pub use comparison_filter_type::Type as ComparisonFilterType;
 
 /// ComparisonFilter : A filter used to compare a specified attribute key to a given value using a defined comparison operation.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]

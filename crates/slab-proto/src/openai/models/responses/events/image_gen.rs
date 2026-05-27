@@ -27,19 +27,15 @@ impl ResponseImageGenCallCompletedEvent {
         ResponseImageGenCallCompletedEvent { r#type, output_index, sequence_number, item_id }
     }
 }
-pub mod image_gen_call_completed_type {
-    use serde::{Deserialize, Serialize};
-    /// The type of the event. Always 'response.image_generation_call.completed'.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.image_generation_call.completed")]
-        #[default]
-        ResponseImageGenerationCallCompleted,
-    }
-    
+
+/// The type of the event. Always 'response.image_generation_call.completed'.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum ImageGenCallCompletedType {
+    #[serde(rename = "response.image_generation_call.completed")]
+    #[default]
+    ResponseImageGenerationCallCompleted,
 }
-pub use image_gen_call_completed_type::Type as ImageGenCallCompletedType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseImageGenCallGeneratingEvent {
@@ -68,19 +64,15 @@ impl ResponseImageGenCallGeneratingEvent {
         ResponseImageGenCallGeneratingEvent { r#type, output_index, item_id, sequence_number }
     }
 }
-pub mod image_gen_call_generating_type {
-    use serde::{Deserialize, Serialize};
-    /// The type of the event. Always 'response.image_generation_call.generating'.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.image_generation_call.generating")]
-        #[default]
-        ResponseImageGenerationCallGenerating,
-    }
-    
+
+/// The type of the event. Always 'response.image_generation_call.generating'.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum ImageGenCallGeneratingType {
+    #[serde(rename = "response.image_generation_call.generating")]
+    #[default]
+    ResponseImageGenerationCallGenerating,
 }
-pub use image_gen_call_generating_type::Type as ImageGenCallGeneratingType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseImageGenCallInProgressEvent {
@@ -109,19 +101,15 @@ impl ResponseImageGenCallInProgressEvent {
         ResponseImageGenCallInProgressEvent { r#type, output_index, item_id, sequence_number }
     }
 }
-pub mod image_gen_call_in_progress_type {
-    use serde::{Deserialize, Serialize};
-    /// The type of the event. Always 'response.image_generation_call.in_progress'.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.image_generation_call.in_progress")]
-        #[default]
-        ResponseImageGenerationCallInProgress,
-    }
-    
+
+/// The type of the event. Always 'response.image_generation_call.in_progress'.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum ImageGenCallInProgressType {
+    #[serde(rename = "response.image_generation_call.in_progress")]
+    #[default]
+    ResponseImageGenerationCallInProgress,
 }
-pub use image_gen_call_in_progress_type::Type as ImageGenCallInProgressType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseImageGenCallPartialImageEvent {
@@ -165,16 +153,12 @@ impl ResponseImageGenCallPartialImageEvent {
         }
     }
 }
-pub mod image_gen_call_partial_image_type {
-    use serde::{Deserialize, Serialize};
-    /// The type of the event. Always 'response.image_generation_call.partial_image'.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.image_generation_call.partial_image")]
-        #[default]
-        ResponseImageGenerationCallPartialImage,
-    }
-    
+
+/// The type of the event. Always 'response.image_generation_call.partial_image'.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum ImageGenCallPartialImageType {
+    #[serde(rename = "response.image_generation_call.partial_image")]
+    #[default]
+    ResponseImageGenerationCallPartialImage,
 }
-pub use image_gen_call_partial_image_type::Type as ImageGenCallPartialImageType;

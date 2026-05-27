@@ -21,13 +21,6 @@ impl OutputAudio {
         OutputAudio { r#type, data, transcript }
     }
 }
-/// The type of the output audio. Always `output_audio`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-pub(crate) enum Type {
-    #[serde(rename = "output_audio")]
-    OutputAudio,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[derive(Default)]
 pub enum NoiseReductionType {
@@ -84,7 +77,6 @@ impl std::fmt::Display for Rate {
         )
     }
 }
-
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]

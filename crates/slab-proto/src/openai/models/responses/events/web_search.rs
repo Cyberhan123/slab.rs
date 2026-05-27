@@ -1,17 +1,12 @@
 use serde::{Deserialize, Serialize};
 
-pub mod web_search_completed_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.web_search_call.completed")]
-        #[default]
-        ResponseWebSearchCallCompleted,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum WebSearchCompletedType {
+    #[serde(rename = "response.web_search_call.completed")]
+    #[default]
+    ResponseWebSearchCallCompleted,
 }
-pub use web_search_completed_type::Type as WebSearchCompletedType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseWebSearchCallCompletedEvent {
@@ -41,18 +36,13 @@ impl ResponseWebSearchCallCompletedEvent {
     }
 }
 
-pub mod web_search_in_progress_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.web_search_call.in_progress")]
-        #[default]
-        ResponseWebSearchCallInProgress,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum WebSearchInProgressType {
+    #[serde(rename = "response.web_search_call.in_progress")]
+    #[default]
+    ResponseWebSearchCallInProgress,
 }
-pub use web_search_in_progress_type::Type as WebSearchInProgressType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseWebSearchCallInProgressEvent {
@@ -82,18 +72,13 @@ impl ResponseWebSearchCallInProgressEvent {
     }
 }
 
-pub mod web_search_searching_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.web_search_call.searching")]
-        #[default]
-        ResponseWebSearchCallSearching,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum WebSearchSearchingType {
+    #[serde(rename = "response.web_search_call.searching")]
+    #[default]
+    ResponseWebSearchCallSearching,
 }
-pub use web_search_searching_type::Type as WebSearchSearchingType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseWebSearchCallSearchingEvent {

@@ -1,17 +1,12 @@
 use serde::{Deserialize, Serialize};
 
-pub mod audio_delta_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.audio.delta")]
-        #[default]
-        ResponseAudioDelta,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum AudioDeltaType {
+    #[serde(rename = "response.audio.delta")]
+    #[default]
+    ResponseAudioDelta,
 }
-pub use audio_delta_type::Type as AudioDeltaType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseAudioDeltaEvent {
@@ -37,18 +32,13 @@ impl ResponseAudioDeltaEvent {
     }
 }
 
-pub mod audio_done_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.audio.done")]
-        #[default]
-        ResponseAudioDone,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum AudioDoneType {
+    #[serde(rename = "response.audio.done")]
+    #[default]
+    ResponseAudioDone,
 }
-pub use audio_done_type::Type as AudioDoneType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseAudioDoneEvent {
@@ -67,18 +57,13 @@ impl ResponseAudioDoneEvent {
     }
 }
 
-pub mod audio_transcript_delta_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.audio.transcript.delta")]
-        #[default]
-        ResponseAudioTranscriptDelta,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum AudioTranscriptDeltaType {
+    #[serde(rename = "response.audio.transcript.delta")]
+    #[default]
+    ResponseAudioTranscriptDelta,
 }
-pub use audio_transcript_delta_type::Type as AudioTranscriptDeltaType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseAudioTranscriptDeltaEvent {
@@ -104,18 +89,13 @@ impl ResponseAudioTranscriptDeltaEvent {
     }
 }
 
-pub mod audio_transcript_done_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.audio.transcript.done")]
-        #[default]
-        ResponseAudioTranscriptDone,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum AudioTranscriptDoneType {
+    #[serde(rename = "response.audio.transcript.done")]
+    #[default]
+    ResponseAudioTranscriptDone,
 }
-pub use audio_transcript_done_type::Type as AudioTranscriptDoneType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseAudioTranscriptDoneEvent {

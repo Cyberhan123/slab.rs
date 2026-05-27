@@ -1,17 +1,14 @@
+use crate::models;
 use serde::{Deserialize, Serialize};
 
-pub mod code_delta_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.code_interpreter_call_code.delta")]
-        #[default]
-        ResponseCodeInterpreterCallCodeDelta,
-    }
-    
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub enum CodeDeltaType {
+    #[serde(rename = "response.code_interpreter_call_code.delta")]
+    #[default]
+    ResponseCodeInterpreterCallCodeDelta,
 }
-pub use code_delta_type::Type as CodeDeltaType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseCodeInterpreterCallCodeDeltaEvent {
@@ -51,18 +48,14 @@ impl ResponseCodeInterpreterCallCodeDeltaEvent {
     }
 }
 
-pub mod code_done_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.code_interpreter_call_code.done")]
-        #[default]
-        ResponseCodeInterpreterCallCodeDone,
-    }
-    
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub enum CodeDoneType {
+    #[serde(rename = "response.code_interpreter_call_code.done")]
+    #[default]
+    ResponseCodeInterpreterCallCodeDone,
 }
-pub use code_done_type::Type as CodeDoneType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseCodeInterpreterCallCodeDoneEvent {
@@ -102,18 +95,14 @@ impl ResponseCodeInterpreterCallCodeDoneEvent {
     }
 }
 
-pub mod code_completed_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.code_interpreter_call.completed")]
-        #[default]
-        ResponseCodeInterpreterCallCompleted,
-    }
-    
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub enum CodeCompletedType {
+    #[serde(rename = "response.code_interpreter_call.completed")]
+    #[default]
+    ResponseCodeInterpreterCallCompleted,
 }
-pub use code_completed_type::Type as CodeCompletedType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseCodeInterpreterCallCompletedEvent {
@@ -143,18 +132,14 @@ impl ResponseCodeInterpreterCallCompletedEvent {
     }
 }
 
-pub mod code_in_progress_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.code_interpreter_call.in_progress")]
-        #[default]
-        ResponseCodeInterpreterCallInProgress,
-    }
-    
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub enum CodeInProgressType {
+    #[serde(rename = "response.code_interpreter_call.in_progress")]
+    #[default]
+    ResponseCodeInterpreterCallInProgress,
 }
-pub use code_in_progress_type::Type as CodeInProgressType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseCodeInterpreterCallInProgressEvent {
@@ -189,18 +174,14 @@ impl ResponseCodeInterpreterCallInProgressEvent {
     }
 }
 
-pub mod code_interpreting_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.code_interpreter_call.interpreting")]
-        #[default]
-        ResponseCodeInterpreterCallInterpreting,
-    }
-    
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
+pub enum CodeInterpretingType {
+    #[serde(rename = "response.code_interpreter_call.interpreting")]
+    #[default]
+    ResponseCodeInterpreterCallInterpreting,
 }
-pub use code_interpreting_type::Type as CodeInterpretingType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseCodeInterpreterCallInterpretingEvent {

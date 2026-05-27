@@ -1,18 +1,13 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-pub mod output_item_added_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.output_item.added")]
-        #[default]
-        ResponseOutputItemAdded,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum OutputItemAddedType {
+    #[serde(rename = "response.output_item.added")]
+    #[default]
+    ResponseOutputItemAdded,
 }
-pub use output_item_added_type::Type as OutputItemAddedType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseOutputItemAddedEvent {
@@ -42,18 +37,13 @@ impl ResponseOutputItemAddedEvent {
     }
 }
 
-pub mod output_item_done_type {
-    use serde::{Deserialize, Serialize};
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-    #[derive(Default)]
-    pub enum Type {
-        #[serde(rename = "response.output_item.done")]
-        #[default]
-        ResponseOutputItemDone,
-    }
-    
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum OutputItemDoneType {
+    #[serde(rename = "response.output_item.done")]
+    #[default]
+    ResponseOutputItemDone,
 }
-pub use output_item_done_type::Type as OutputItemDoneType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseOutputItemDoneEvent {

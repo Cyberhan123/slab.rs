@@ -94,16 +94,6 @@ impl Default for OutputItem {
     }
 }
 
-/// The role of the output message. Always `assistant`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
-pub(crate) enum OutputItemRole {
-    #[serde(rename = "assistant")]
-    #[default]
-    Assistant,
-}
-
-
 use super::status::Status;
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OutputMessage {
@@ -225,12 +215,4 @@ impl Default for ItemResource {
     }
 }
 
-/// The role of the output message. Always `assistant`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[derive(Default)]
-pub(crate) enum ItemResourceRole {
-    #[serde(rename = "assistant")]
-    #[default]
-    Assistant,
-}
 

@@ -225,7 +225,6 @@ pub mod deleted_skill_resource {
             DeletedSkillResource { object, deleted, id }
         }
     }
-    ///
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
     #[derive(Default)]
     pub(crate) enum Object {
@@ -264,7 +263,6 @@ pub mod deleted_skill_version_resource {
             DeletedSkillVersionResource { object, deleted, id, version }
         }
     }
-    ///
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
     #[derive(Default)]
     pub(crate) enum Object {
