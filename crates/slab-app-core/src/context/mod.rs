@@ -114,7 +114,7 @@ fn build_agent_control(
     notify: Arc<crate::infra::agent_event_hub::AgentEventHub>,
 ) -> slab_agent::AgentControl {
     use slab_agent::{AgentControl, ToolRouter};
-    use slab_agent_tools::ShellPolicy;
+    use slab_agent_tools::{ShellPolicy, ShellRuleSet};
     use slab_sandboxing::{SandboxEnvironment, SandboxPolicy, create_platform_driver};
 
     let llm =
@@ -132,13 +132,26 @@ fn build_agent_control(
             }
         }
     });
-    let shell_policy =
+    let mut shell_policy =
         if sandbox_driver.is_some() { ShellPolicy::Allow } else { ShellPolicy::Block };
+    let shell_rules_dir = ctx.config.exec_rules_dir.clone();
+    let shell_rules = match ShellRuleSet::from_dir(&shell_rules_dir) {
+        Ok(rules) => rules,
+        Err(error) => {
+            tracing::warn!(
+                rules_dir = %shell_rules_dir.display(),
+                error = %error,
+                "failed to load shell exec rules; shell tool will stay blocked"
+            );
+            shell_policy = ShellPolicy::Block;
+            ShellRuleSet::default()
+        }
+    };
 
     let mut tool_router = ToolRouter::new();
     let web_search_config = ctx.pmid.config().agent.tools.websearch;
     let mcp_client = build_agent_mcp_client(ctx);
-    slab_agent_tools::register_all_tools(
+    slab_agent_tools::register_all_tools_with_shell_rules(
         &mut tool_router,
         shell_policy,
         sandbox_driver,
@@ -146,6 +159,7 @@ fn build_agent_control(
         mcp_client,
         false,
         web_search_config,
+        shell_rules,
     );
 
     let notify_port: Arc<dyn slab_agent::AgentNotifyPort> = notify.clone();

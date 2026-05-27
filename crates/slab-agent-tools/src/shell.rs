@@ -7,7 +7,7 @@ use serde_json::Value;
 use slab_agent::{AgentError, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput};
 use slab_sandboxing::SandboxDriver;
 pub use slab_shell_command::ShellPolicy;
-use slab_shell_command::{ShellCommand, ShellExecutor};
+use slab_shell_command::{ShellCommand, ShellExecutor, ShellRuleSet};
 
 pub struct ShellTool {
     executor: ShellExecutor,
@@ -20,6 +20,17 @@ impl ShellTool {
         sandbox_driver: Option<Arc<dyn SandboxDriver>>,
     ) -> Self {
         Self { executor: ShellExecutor::new(policy, workspace_root, sandbox_driver) }
+    }
+
+    pub fn new_with_rules(
+        policy: ShellPolicy,
+        workspace_root: Option<PathBuf>,
+        sandbox_driver: Option<Arc<dyn SandboxDriver>>,
+        rules: ShellRuleSet,
+    ) -> Self {
+        Self {
+            executor: ShellExecutor::new(policy, workspace_root, sandbox_driver).with_rules(rules),
+        }
     }
 }
 
@@ -64,10 +75,10 @@ impl ToolHandler for ShellTool {
     }
 
     fn approval_request(&self, arguments: &Value) -> Option<ToolApprovalRequest> {
-        if !self.executor.approval_required() {
+        let command = arguments.get("command").and_then(Value::as_str)?.to_string();
+        if !self.executor.approval_required_for_command(&command) {
             return None;
         }
-        let command = arguments.get("command").and_then(Value::as_str)?.to_string();
         Some(ToolApprovalRequest { command })
     }
 

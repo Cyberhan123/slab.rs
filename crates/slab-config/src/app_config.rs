@@ -95,6 +95,9 @@ pub struct Config {
     /// Root directory containing installed runtime plugins.
     pub plugins_dir: PathBuf,
 
+    /// Directory containing shell execution `.rule` files.
+    pub exec_rules_dir: PathBuf,
+
     /// Transport used when app-core talks to the JS plugin sidecar runtime.
     pub plugin_js_runtime_transport: PluginJsRuntimeTransport,
 }
@@ -143,6 +146,10 @@ impl Config {
             model_config_dir,
             plugins_dir: plugin_install_dir_from_settings(&settings_path)
                 .unwrap_or_else(|| default_plugin_install_dir_for_settings_path(&settings_path)),
+            exec_rules_dir: std::env::var("SLAB_EXEC_RULES_DIR")
+                .ok()
+                .map(PathBuf::from)
+                .unwrap_or_else(default_exec_rules_dir),
             plugin_js_runtime_transport: plugin_js_runtime_transport_from_settings(&settings_path)
                 .unwrap_or_default(),
         }
@@ -187,6 +194,10 @@ pub fn default_plugins_dir() -> PathBuf {
     default_plugin_install_dir_for_settings_path(&default_settings_path())
 }
 
+pub fn default_exec_rules_dir() -> PathBuf {
+    default_exec_rules_dir_for_settings_path(&default_settings_path())
+}
+
 fn plugin_install_dir_from_settings(settings_path: &Path) -> Option<PathBuf> {
     let document = settings_document_from_path(settings_path)?;
     document
@@ -218,6 +229,14 @@ pub fn default_plugin_install_dir_for_settings_path(settings_path: &Path) -> Pat
         .join("plugins")
 }
 
+pub fn default_exec_rules_dir_for_settings_path(settings_path: &Path) -> PathBuf {
+    settings_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("rules")
+}
+
 pub fn default_runtime_log_dir() -> PathBuf {
     default_app_dir().join("logs").join("runtime")
 }
@@ -244,7 +263,10 @@ pub fn default_output_dir_for_settings_path(settings_path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{Config, default_plugin_install_dir_for_settings_path};
+    use super::{
+        Config, default_exec_rules_dir_for_settings_path,
+        default_plugin_install_dir_for_settings_path,
+    };
     use slab_types::DESKTOP_API_BIND;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -293,12 +315,14 @@ mod tests {
         let _settings = EnvGuard::capture("SLAB_SETTINGS_PATH");
         let _model_config = EnvGuard::capture("SLAB_MODEL_CONFIG_DIR");
         let _plugins = EnvGuard::capture("SLAB_PLUGINS_DIR");
+        let _rules = EnvGuard::capture("SLAB_EXEC_RULES_DIR");
 
         unsafe {
             std::env::remove_var("SLAB_BIND");
             std::env::remove_var("SLAB_SETTINGS_PATH");
             std::env::remove_var("SLAB_MODEL_CONFIG_DIR");
             std::env::remove_var("SLAB_PLUGINS_DIR");
+            std::env::remove_var("SLAB_EXEC_RULES_DIR");
         }
 
         let config = Config::from_env();
@@ -311,12 +335,14 @@ mod tests {
         let _settings = EnvGuard::capture("SLAB_SETTINGS_PATH");
         let _model_config = EnvGuard::capture("SLAB_MODEL_CONFIG_DIR");
         let _plugins = EnvGuard::capture("SLAB_PLUGINS_DIR");
+        let _rules = EnvGuard::capture("SLAB_EXEC_RULES_DIR");
         let settings_path = temp_settings_path();
 
         unsafe {
             std::env::set_var("SLAB_SETTINGS_PATH", &settings_path);
             std::env::remove_var("SLAB_MODEL_CONFIG_DIR");
             std::env::remove_var("SLAB_PLUGINS_DIR");
+            std::env::remove_var("SLAB_EXEC_RULES_DIR");
         }
 
         let config = Config::from_env();
@@ -332,12 +358,14 @@ mod tests {
         let _lock = env_lock().lock().unwrap();
         let _settings = EnvGuard::capture("SLAB_SETTINGS_PATH");
         let _plugins = EnvGuard::capture("SLAB_PLUGINS_DIR");
+        let _rules = EnvGuard::capture("SLAB_EXEC_RULES_DIR");
         let settings_path = temp_settings_path();
         let ignored_plugins_dir = settings_path.parent().expect("parent").join("ignored-plugins");
 
         unsafe {
             std::env::set_var("SLAB_SETTINGS_PATH", &settings_path);
             std::env::set_var("SLAB_PLUGINS_DIR", &ignored_plugins_dir);
+            std::env::remove_var("SLAB_EXEC_RULES_DIR");
         }
 
         let config = Config::from_env();
@@ -353,6 +381,7 @@ mod tests {
         let _lock = env_lock().lock().unwrap();
         let _settings = EnvGuard::capture("SLAB_SETTINGS_PATH");
         let _plugins = EnvGuard::capture("SLAB_PLUGINS_DIR");
+        let _rules = EnvGuard::capture("SLAB_EXEC_RULES_DIR");
         let settings_path = temp_settings_path();
         let configured_plugins_dir =
             settings_path.parent().expect("parent").join("configured-plugins");
@@ -368,11 +397,35 @@ mod tests {
         unsafe {
             std::env::set_var("SLAB_SETTINGS_PATH", &settings_path);
             std::env::remove_var("SLAB_PLUGINS_DIR");
+            std::env::remove_var("SLAB_EXEC_RULES_DIR");
         }
 
         let config = Config::from_env();
 
         assert_eq!(config.plugins_dir, configured_plugins_dir);
         let _ = fs::remove_dir_all(settings_path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn exec_rules_dir_defaults_next_to_settings_path() {
+        let settings_path = PathBuf::from("C:/Slab/settings.json");
+
+        assert_eq!(
+            default_exec_rules_dir_for_settings_path(&settings_path),
+            PathBuf::from("C:/Slab/rules")
+        );
+    }
+
+    #[test]
+    fn from_env_uses_exec_rules_dir_override() {
+        let _lock = env_lock().lock().unwrap();
+        let _rules = EnvGuard::capture("SLAB_EXEC_RULES_DIR");
+        let rules_dir = PathBuf::from("D:/Slab/rules");
+
+        unsafe { std::env::set_var("SLAB_EXEC_RULES_DIR", &rules_dir) };
+
+        let config = Config::from_env();
+
+        assert_eq!(config.exec_rules_dir, rules_dir);
     }
 }

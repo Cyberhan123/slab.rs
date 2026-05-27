@@ -11,10 +11,10 @@ mod view;
 
 pub use app_config::{
     AppConfig, Config, default_app_dir, default_database_path, default_database_url,
-    default_model_config_dir, default_model_config_dir_for_settings_path,
-    default_output_dir_for_settings_path, default_plugin_install_dir_for_settings_path,
-    default_plugins_dir, default_runtime_ipc_dir, default_runtime_log_dir,
-    default_session_state_dir, default_settings_path,
+    default_exec_rules_dir, default_exec_rules_dir_for_settings_path, default_model_config_dir,
+    default_model_config_dir_for_settings_path, default_output_dir_for_settings_path,
+    default_plugin_install_dir_for_settings_path, default_plugins_dir, default_runtime_ipc_dir,
+    default_runtime_log_dir, default_session_state_dir, default_settings_path,
 };
 pub use error::ConfigError;
 pub use launch::{

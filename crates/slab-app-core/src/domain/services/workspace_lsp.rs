@@ -463,6 +463,7 @@ mod tests {
             settings_path,
             model_config_dir: root.join("models"),
             plugins_dir: root.join("plugins"),
+            exec_rules_dir: root.join("rules"),
             plugin_js_runtime_transport: PluginJsRuntimeTransport::Stdio,
         }
     }

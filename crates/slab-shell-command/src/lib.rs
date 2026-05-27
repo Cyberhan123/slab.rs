@@ -7,6 +7,12 @@ use slab_sandboxing::{ExecPolicy, SandboxDriver, SandboxError, SandboxPolicy, Sa
 use thiserror::Error;
 use tracing::{debug, warn};
 
+mod rules;
+
+pub use rules::{
+    RuleSource, ShellRule, ShellRuleAction, ShellRuleError, ShellRuleMatcher, ShellRuleSet,
+};
+
 const DEFAULT_OUTPUT_LIMIT_BYTES: usize = 100 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -143,6 +149,7 @@ pub enum ShellError {
 pub struct ShellExecutor {
     shell_policy: ShellPolicy,
     sandbox_policy: SandboxPolicy,
+    rules: ShellRuleSet,
     workspace_root: Option<PathBuf>,
     sandbox_driver: Option<Arc<dyn SandboxDriver>>,
     output_limit_bytes: usize,
@@ -157,6 +164,7 @@ impl ShellExecutor {
         Self {
             shell_policy,
             sandbox_policy: SandboxPolicy::WorkspaceWrite,
+            rules: ShellRuleSet::default(),
             workspace_root,
             sandbox_driver,
             output_limit_bytes: DEFAULT_OUTPUT_LIMIT_BYTES,
@@ -165,6 +173,11 @@ impl ShellExecutor {
 
     pub fn with_sandbox_policy(mut self, sandbox_policy: SandboxPolicy) -> Self {
         self.sandbox_policy = sandbox_policy;
+        self
+    }
+
+    pub fn with_rules(mut self, rules: ShellRuleSet) -> Self {
+        self.rules = rules;
         self
     }
 
@@ -180,12 +193,33 @@ impl ShellExecutor {
         )
     }
 
+    pub fn approval_required_for_command(&self, command: &str) -> bool {
+        matches!(self.policy_for_command(command), ExecPolicy::RequireApproval)
+    }
+
+    pub fn policy_for_command(&self, command: &str) -> ExecPolicy {
+        let base = ExecPolicyChecker::check(self.shell_policy, self.sandbox_policy);
+        if matches!(base, ExecPolicy::Deny) {
+            return ExecPolicy::Deny;
+        }
+
+        if let Some(rule) = self.rules.evaluate(command) {
+            return match rule.action {
+                ShellRuleAction::Allow => ExecPolicy::AutoApprove,
+                ShellRuleAction::RequireApproval => ExecPolicy::RequireApproval,
+                ShellRuleAction::Block => ExecPolicy::Deny,
+            };
+        }
+
+        base
+    }
+
     pub fn shell_policy(&self) -> ShellPolicy {
         self.shell_policy
     }
 
     pub async fn execute(&self, command: ShellCommand) -> Result<ShellOutput, ShellError> {
-        match ExecPolicyChecker::check(self.shell_policy, self.sandbox_policy) {
+        match self.policy_for_command(&command.command) {
             ExecPolicy::Deny => return Err(ShellError::BlockedByPolicy),
             ExecPolicy::AutoApprove | ExecPolicy::RequireApproval => {}
         }
@@ -349,6 +383,24 @@ mod tests {
             ExecPolicyChecker::check(ShellPolicy::Block, SandboxPolicy::DangerFullAccess),
             ExecPolicy::Deny
         );
+    }
+
+    #[test]
+    fn command_rules_override_approval_but_not_policy_denial() {
+        let rules = ShellRuleSet::from_rules(vec![
+            ShellRule::new(ShellRuleAction::Allow, ShellRuleMatcher::Prefix, "cargo check"),
+            ShellRule::new(ShellRuleAction::Block, ShellRuleMatcher::Contains, "Remove-Item"),
+        ]);
+        let executor = ShellExecutor::new(ShellPolicy::Allow, None, None).with_rules(rules.clone());
+
+        assert_eq!(
+            executor.policy_for_command("cargo check -p slab-agent"),
+            ExecPolicy::AutoApprove
+        );
+        assert_eq!(executor.policy_for_command("Remove-Item file.txt"), ExecPolicy::Deny);
+
+        let blocked = ShellExecutor::new(ShellPolicy::Block, None, None).with_rules(rules);
+        assert_eq!(blocked.policy_for_command("cargo check -p slab-agent"), ExecPolicy::Deny);
     }
 
     #[tokio::test]

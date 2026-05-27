@@ -28,6 +28,9 @@ pub use git::{GitCommitTool, GitDiffTool, GitStatusTool};
 pub use grep::GrepTool;
 pub use mcp::{McpCallTool, McpProxyTool};
 pub use shell::{ShellPolicy, ShellTool};
+pub use slab_shell_command::{
+    ShellRule, ShellRuleAction, ShellRuleError, ShellRuleMatcher, ShellRuleSet,
+};
 pub use web_search::WebSearchTool;
 
 /// Register only the minimal built-in tool (echo).
@@ -47,8 +50,36 @@ pub fn register_all_tools(
     git_tools: bool,
     web_search_config: AgentWebSearchConfig,
 ) {
+    register_all_tools_with_shell_rules(
+        router,
+        shell_policy,
+        sandbox_driver,
+        workspace_root,
+        mcp_client,
+        git_tools,
+        web_search_config,
+        ShellRuleSet::default(),
+    );
+}
+
+/// Register the full production tool suite with command-specific shell rules.
+pub fn register_all_tools_with_shell_rules(
+    router: &mut ToolRouter,
+    shell_policy: ShellPolicy,
+    sandbox_driver: Option<Arc<dyn SandboxDriver>>,
+    workspace_root: Option<PathBuf>,
+    mcp_client: Option<Arc<McpClient>>,
+    git_tools: bool,
+    web_search_config: AgentWebSearchConfig,
+    shell_rules: ShellRuleSet,
+) {
     router.register(Box::new(EchoTool));
-    router.register(Box::new(ShellTool::new(shell_policy, workspace_root.clone(), sandbox_driver)));
+    router.register(Box::new(ShellTool::new_with_rules(
+        shell_policy,
+        workspace_root.clone(),
+        sandbox_driver,
+        shell_rules,
+    )));
     router.register(Box::new(ReadFileTool::new(workspace_root.clone())));
     router.register(Box::new(WriteFileTool::new(workspace_root.clone())));
     router.register(Box::new(ListDirTool::new(workspace_root.clone())));
