@@ -1,0 +1,113 @@
+
+use crate::models;
+use serde::{Deserialize, Serialize};
+
+pub mod func_args_delta_type {
+    use serde::{Deserialize, Serialize};
+    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    pub enum Type {
+        #[serde(rename = "response.function_call_arguments.delta")]
+        ResponseFunctionCallArgumentsDelta,
+    }
+    impl Default for Type {
+        fn default() -> Self {
+            Self::ResponseFunctionCallArgumentsDelta
+        }
+    }
+}
+pub use func_args_delta_type::Type as FuncArgsDeltaType;
+
+#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ResponseFunctionCallArgumentsDeltaEvent {
+    /// The type of the event. Always `response.function_call_arguments.delta`.
+    #[serde(rename = "type")]
+    pub r#type: FuncArgsDeltaType,
+    /// The ID of the output item that the function-call arguments delta is added to.
+    #[serde(rename = "item_id")]
+    pub item_id: String,
+    /// The index of the output item that the function-call arguments delta is added to.
+    #[serde(rename = "output_index")]
+    pub output_index: i32,
+    /// The sequence number of this event.
+    #[serde(rename = "sequence_number")]
+    pub sequence_number: i32,
+    /// The function-call arguments delta that is added.
+    #[serde(rename = "delta")]
+    pub delta: String,
+}
+
+impl ResponseFunctionCallArgumentsDeltaEvent {
+    /// Emitted when there is a partial function-call arguments delta.
+    pub fn new(
+        r#type: FuncArgsDeltaType,
+        item_id: String,
+        output_index: i32,
+        sequence_number: i32,
+        delta: String,
+    ) -> ResponseFunctionCallArgumentsDeltaEvent {
+        ResponseFunctionCallArgumentsDeltaEvent {
+            r#type,
+            item_id,
+            output_index,
+            sequence_number,
+            delta,
+        }
+    }
+}
+
+pub mod func_args_done_type {
+    use serde::{Deserialize, Serialize};
+    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    pub enum Type {
+        #[serde(rename = "response.function_call_arguments.done")]
+        ResponseFunctionCallArgumentsDone,
+    }
+    impl Default for Type {
+        fn default() -> Self {
+            Self::ResponseFunctionCallArgumentsDone
+        }
+    }
+}
+pub use func_args_done_type::Type as FuncArgsDoneType;
+
+#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ResponseFunctionCallArgumentsDoneEvent {
+    #[serde(rename = "type")]
+    pub r#type: FuncArgsDoneType,
+    /// The ID of the item.
+    #[serde(rename = "item_id")]
+    pub item_id: String,
+    /// The name of the function that was called.
+    #[serde(rename = "name")]
+    pub name: String,
+    /// The index of the output item.
+    #[serde(rename = "output_index")]
+    pub output_index: i32,
+    /// The sequence number of this event.
+    #[serde(rename = "sequence_number")]
+    pub sequence_number: i32,
+    /// The function-call arguments.
+    #[serde(rename = "arguments")]
+    pub arguments: String,
+}
+
+impl ResponseFunctionCallArgumentsDoneEvent {
+    /// Emitted when function-call arguments are finalized.
+    pub fn new(
+        r#type: FuncArgsDoneType,
+        item_id: String,
+        name: String,
+        output_index: i32,
+        sequence_number: i32,
+        arguments: String,
+    ) -> ResponseFunctionCallArgumentsDoneEvent {
+        ResponseFunctionCallArgumentsDoneEvent {
+            r#type,
+            item_id,
+            name,
+            output_index,
+            sequence_number,
+            arguments,
+        }
+    }
+}

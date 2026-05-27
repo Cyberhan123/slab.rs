@@ -5,3 +5,8 @@ pub mod slab {
         }
     }
 }
+
+pub mod openai;
+
+// Re-export openai models at crate root for backward compatibility with generated code
+pub use openai::models;
