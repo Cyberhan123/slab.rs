@@ -1,10 +1,11 @@
-use crate::models;
 use serde::{Deserialize, Serialize};
 
 ///
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ChatSessionStatus {
     #[serde(rename = "active")]
+    #[default]
     Active,
     #[serde(rename = "expired")]
     Expired,
@@ -22,8 +23,3 @@ impl std::fmt::Display for ChatSessionStatus {
     }
 }
 
-impl Default for ChatSessionStatus {
-    fn default() -> ChatSessionStatus {
-        Self::Active
-    }
-}

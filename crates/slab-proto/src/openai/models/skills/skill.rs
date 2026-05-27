@@ -1,5 +1,5 @@
 pub mod skill_resource {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -50,16 +50,14 @@ pub mod skill_resource {
     }
     /// The object type, which is `skill`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Object {
         #[serde(rename = "skill")]
+        #[default]
         Skill,
     }
 
-    impl Default for Object {
-        fn default() -> Object {
-            Self::Skill
-        }
-    }
+    
 }
 
 pub mod skill_list_resource {
@@ -98,20 +96,18 @@ pub mod skill_list_resource {
     }
     /// The type of object returned, must be `list`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Object {
         #[serde(rename = "list")]
+        #[default]
         List,
     }
 
-    impl Default for Object {
-        fn default() -> Object {
-            Self::List
-        }
-    }
+    
 }
 
 pub mod skill_version_resource {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -154,16 +150,14 @@ pub mod skill_version_resource {
     }
     /// The object type, which is `skill.version`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Object {
         #[serde(rename = "skill.version")]
+        #[default]
         SkillVersion,
     }
 
-    impl Default for Object {
-        fn default() -> Object {
-            Self::SkillVersion
-        }
-    }
+    
 }
 
 pub mod skill_version_list_resource {
@@ -202,20 +196,18 @@ pub mod skill_version_list_resource {
     }
     /// The type of object returned, must be `list`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Object {
         #[serde(rename = "list")]
+        #[default]
         List,
     }
 
-    impl Default for Object {
-        fn default() -> Object {
-            Self::List
-        }
-    }
+    
 }
 
 pub mod deleted_skill_resource {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -235,20 +227,18 @@ pub mod deleted_skill_resource {
     }
     ///
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Object {
         #[serde(rename = "skill.deleted")]
+        #[default]
         SkillDeleted,
     }
 
-    impl Default for Object {
-        fn default() -> Object {
-            Self::SkillDeleted
-        }
-    }
+    
 }
 
 pub mod deleted_skill_version_resource {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -276,22 +266,19 @@ pub mod deleted_skill_version_resource {
     }
     ///
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Object {
         #[serde(rename = "skill.version.deleted")]
+        #[default]
         SkillVersionDeleted,
     }
 
-    impl Default for Object {
-        fn default() -> Object {
-            Self::SkillVersionDeleted
-        }
-    }
+    
 }
 
 pub use deleted_skill_resource::DeletedSkillResource;
 pub use deleted_skill_version_resource::DeletedSkillVersionResource;
 pub use skill_list_resource::SkillListResource;
-pub(crate) use skill_resource::Object;
 pub use skill_resource::SkillResource;
 pub use skill_version_list_resource::SkillVersionListResource;
 pub use skill_version_resource::SkillVersionResource;

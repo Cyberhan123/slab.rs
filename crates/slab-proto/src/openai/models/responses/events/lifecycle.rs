@@ -28,15 +28,13 @@ pub mod response_completed_type {
     use serde::{Deserialize, Serialize};
     /// The type of the event. Always `response.completed`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.completed")]
+        #[default]
         ResponseCompleted,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseCompleted
-        }
-    }
+    
 }
 pub use response_completed_type::Type as ResponseCompletedType;
 
@@ -67,15 +65,13 @@ pub mod response_created_type {
     use serde::{Deserialize, Serialize};
     /// The type of the event. Always `response.created`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.created")]
+        #[default]
         ResponseCreated,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseCreated
-        }
-    }
+    
 }
 pub use response_created_type::Type as ResponseCreatedType;
 
@@ -114,15 +110,13 @@ pub mod error_type {
     use serde::{Deserialize, Serialize};
     /// The type of the event. Always `error`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "error")]
+        #[default]
         Error,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::Error
-        }
-    }
+    
 }
 pub use error_type::Type as ErrorType;
 
@@ -153,15 +147,13 @@ pub mod response_failed_type {
     use serde::{Deserialize, Serialize};
     /// The type of the event. Always `response.failed`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.failed")]
+        #[default]
         ResponseFailed,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseFailed
-        }
-    }
+    
 }
 pub use response_failed_type::Type as ResponseFailedType;
 
@@ -192,15 +184,13 @@ pub mod response_in_progress_type {
     use serde::{Deserialize, Serialize};
     /// The type of the event. Always `response.in_progress`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.in_progress")]
+        #[default]
         ResponseInProgress,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseInProgress
-        }
-    }
+    
 }
 pub use response_in_progress_type::Type as ResponseInProgressType;
 
@@ -231,15 +221,13 @@ pub mod response_incomplete_type {
     use serde::{Deserialize, Serialize};
     /// The type of the event. Always `response.incomplete`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.incomplete")]
+        #[default]
         ResponseIncomplete,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseIncomplete
-        }
-    }
+    
 }
 pub use response_incomplete_type::Type as ResponseIncompleteType;
 
@@ -270,14 +258,12 @@ pub mod response_queued_type {
     use serde::{Deserialize, Serialize};
     /// The type of the event. Always 'response.queued'.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.queued")]
+        #[default]
         ResponseQueued,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseQueued
-        }
-    }
+    
 }
 pub use response_queued_type::Type as ResponseQueuedType;

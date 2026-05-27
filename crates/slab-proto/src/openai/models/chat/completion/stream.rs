@@ -79,8 +79,10 @@ impl ChatCompletionStreamResponseDelta {
 }
 /// The role of the author of this message.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Role {
     #[serde(rename = "developer")]
+    #[default]
     Developer,
     #[serde(rename = "system")]
     System,
@@ -92,8 +94,3 @@ pub enum Role {
     Tool,
 }
 
-impl Default for Role {
-    fn default() -> Role {
-        Self::Developer
-    }
-}

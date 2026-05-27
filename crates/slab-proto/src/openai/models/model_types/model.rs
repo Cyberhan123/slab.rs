@@ -27,16 +27,14 @@ pub mod model_object {
     use serde::{Deserialize, Serialize};
     /// The object type, which is always \"model\".
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Object {
         #[serde(rename = "model")]
+        #[default]
         Model,
     }
 
-    impl Default for Object {
-        fn default() -> Object {
-            Self::Model
-        }
-    }
+    
 }
 pub use model_object::Object as ModelObject;
 
@@ -92,12 +90,9 @@ impl ListModelsResponse {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Object {
     #[serde(rename = "list")]
+    #[default]
     List,
-}
-impl Default for Object {
-    fn default() -> Self {
-        Self::List
-    }
 }

@@ -1,18 +1,15 @@
-use crate::models;
 use serde::{Deserialize, Serialize};
 
 pub mod func_args_delta_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.function_call_arguments.delta")]
+        #[default]
         ResponseFunctionCallArgumentsDelta,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseFunctionCallArgumentsDelta
-        }
-    }
+    
 }
 pub use func_args_delta_type::Type as FuncArgsDeltaType;
 
@@ -57,15 +54,13 @@ impl ResponseFunctionCallArgumentsDeltaEvent {
 pub mod func_args_done_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.function_call_arguments.done")]
+        #[default]
         ResponseFunctionCallArgumentsDone,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseFunctionCallArgumentsDone
-        }
-    }
+    
 }
 pub use func_args_done_type::Type as FuncArgsDoneType;
 

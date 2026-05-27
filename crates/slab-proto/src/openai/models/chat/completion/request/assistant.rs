@@ -112,13 +112,10 @@ impl ChatCompletionRequestAssistantMessage {
 }
 /// The role of the messages author, in this case `assistant`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Role {
     #[serde(rename = "assistant")]
+    #[default]
     Assistant,
 }
 
-impl Default for Role {
-    fn default() -> Role {
-        Self::Assistant
-    }
-}

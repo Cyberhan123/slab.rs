@@ -40,8 +40,10 @@ impl Reasoning {
 // A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. One of `auto`, `concise`, or `detailed`.  `concise` is supported for `computer-use-preview` models and all reasoning models after `gpt-5`.
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ReasoningEffort {
     #[serde(rename = "none")]
+    #[default]
     None,
     #[serde(rename = "minimal")]
     Minimal,
@@ -68,14 +70,8 @@ impl std::fmt::Display for ReasoningEffort {
     }
 }
 
-impl Default for ReasoningEffort {
-    fn default() -> ReasoningEffort {
-        Self::None
-    }
-}
 
 use crate::openai::models::common::status::Status;
-use crate::openai::models::responses::streaming::Data;
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ReasoningItem {
     /// The type of the object. Always `reasoning`.
@@ -115,16 +111,13 @@ impl ReasoningItem {
 }
 /// The type of the object. Always `reasoning`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ReasoningItemType {
     #[serde(rename = "reasoning")]
+    #[default]
     Reasoning,
 }
 
-impl Default for ReasoningItemType {
-    fn default() -> ReasoningItemType {
-        Self::Reasoning
-    }
-}
 // The status of the item. One of `in_progress`, `completed`, or `incomplete`. Populated when items are returned via API.
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -145,13 +138,10 @@ impl ReasoningTextContent {
 }
 /// The type of the reasoning text. Always `reasoning_text`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ReasoningTextContentType {
     #[serde(rename = "reasoning_text")]
+    #[default]
     ReasoningText,
 }
 
-impl Default for ReasoningTextContentType {
-    fn default() -> ReasoningTextContentType {
-        Self::ReasoningText
-    }
-}

@@ -44,8 +44,10 @@ impl Default for TextResponseFormatConfiguration {
 }
 /// The type of response format being defined. Always `text`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum TextResponseFormatConfigurationType {
     #[serde(rename = "text")]
+    #[default]
     Text,
     #[serde(rename = "json_schema")]
     JsonSchema,
@@ -53,11 +55,6 @@ pub(crate) enum TextResponseFormatConfigurationType {
     JsonObject,
 }
 
-impl Default for TextResponseFormatConfigurationType {
-    fn default() -> TextResponseFormatConfigurationType {
-        Self::Text
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TextResponseFormatJsonSchema {
@@ -95,13 +92,10 @@ impl TextResponseFormatJsonSchema {
 }
 /// The type of response format being defined. Always `json_schema`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum TextResponseFormatJsonSchemaType {
     #[serde(rename = "json_schema")]
+    #[default]
     JsonSchema,
 }
 
-impl Default for TextResponseFormatJsonSchemaType {
-    fn default() -> TextResponseFormatJsonSchemaType {
-        Self::JsonSchema
-    }
-}

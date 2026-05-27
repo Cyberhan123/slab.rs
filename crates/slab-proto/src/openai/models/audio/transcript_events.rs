@@ -25,16 +25,13 @@ impl TranscriptTextDeltaEvent {
 }
 /// The type of the event. Always `transcript.text.delta`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum TranscriptTextDeltaEventType {
     #[serde(rename = "transcript.text.delta")]
+    #[default]
     TranscriptTextDelta,
 }
 
-impl Default for TranscriptTextDeltaEventType {
-    fn default() -> TranscriptTextDeltaEventType {
-        Self::TranscriptTextDelta
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TranscriptTextDeltaEventLogprobsInner {
@@ -78,16 +75,13 @@ impl TranscriptTextDoneEvent {
 }
 /// The type of the event. Always `transcript.text.done`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum TranscriptTextDoneEventType {
     #[serde(rename = "transcript.text.done")]
+    #[default]
     TranscriptTextDone,
 }
 
-impl Default for TranscriptTextDoneEventType {
-    fn default() -> TranscriptTextDoneEventType {
-        Self::TranscriptTextDone
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TranscriptTextSegmentEvent {
@@ -126,16 +120,13 @@ impl TranscriptTextSegmentEvent {
 }
 /// The type of the event. Always `transcript.text.segment`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum TranscriptTextSegmentEventType {
     #[serde(rename = "transcript.text.segment")]
+    #[default]
     TranscriptTextSegment,
 }
 
-impl Default for TranscriptTextSegmentEventType {
-    fn default() -> TranscriptTextSegmentEventType {
-        Self::TranscriptTextSegment
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TranscriptTextUsageDuration {
@@ -158,16 +149,13 @@ impl TranscriptTextUsageDuration {
 }
 /// The type of the usage object. Always `duration` for this variant.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum TranscriptTextUsageDurationType {
     #[serde(rename = "duration")]
+    #[default]
     Duration,
 }
 
-impl Default for TranscriptTextUsageDurationType {
-    fn default() -> TranscriptTextUsageDurationType {
-        Self::Duration
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TranscriptTextUsageTokens {
@@ -206,16 +194,13 @@ impl TranscriptTextUsageTokens {
 }
 /// The type of the usage object. Always `tokens` for this variant.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum TranscriptTextUsageTokensType {
     #[serde(rename = "tokens")]
+    #[default]
     Tokens,
 }
 
-impl Default for TranscriptTextUsageTokensType {
-    fn default() -> TranscriptTextUsageTokensType {
-        Self::Tokens
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TranscriptTextUsageTokensInputTokenDetails {

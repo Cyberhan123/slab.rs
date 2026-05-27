@@ -57,7 +57,7 @@ pub struct CompactResponseMethodPublicBody {
 impl CompactResponseMethodPublicBody {
     pub fn new(model: Option<models::ModelIdsCompaction>) -> CompactResponseMethodPublicBody {
         CompactResponseMethodPublicBody {
-            model: if let Some(x) = model { Some(Box::new(x)) } else { None },
+            model: model.map(Box::new),
             input: None,
             previous_response_id: None,
             instructions: None,

@@ -1,9 +1,10 @@
-use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ImageDetail {
     #[serde(rename = "low")]
+    #[default]
     Low,
     #[serde(rename = "high")]
     High,
@@ -24,8 +25,3 @@ impl std::fmt::Display for ImageDetail {
     }
 }
 
-impl Default for ImageDetail {
-    fn default() -> ImageDetail {
-        Self::Low
-    }
-}

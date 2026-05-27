@@ -74,22 +74,19 @@ impl VideoResource {
             size,
             seconds,
             remixed_from_video_id,
-            error: if let Some(x) = error { Some(Box::new(x)) } else { None },
+            error: error.map(Box::new),
         }
     }
 }
 /// The object type, which is always `video`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum VideoResourceObject {
     #[serde(rename = "video")]
+    #[default]
     Video,
 }
 
-impl Default for VideoResourceObject {
-    fn default() -> VideoResourceObject {
-        Self::Video
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DeletedVideoResource {
@@ -116,16 +113,13 @@ impl DeletedVideoResource {
 }
 /// The object type that signals the deletion response.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum DeletedVideoResourceObject {
     #[serde(rename = "video.deleted")]
+    #[default]
     VideoDeleted,
 }
 
-impl Default for DeletedVideoResourceObject {
-    fn default() -> DeletedVideoResourceObject {
-        Self::VideoDeleted
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VideoCharacterResource {
@@ -151,8 +145,10 @@ impl VideoCharacterResource {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum VideoContentVariant {
     #[serde(rename = "video")]
+    #[default]
     Video,
     #[serde(rename = "thumbnail")]
     Thumbnail,
@@ -170,11 +166,6 @@ impl std::fmt::Display for VideoContentVariant {
     }
 }
 
-impl Default for VideoContentVariant {
-    fn default() -> VideoContentVariant {
-        Self::Video
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VideoListResource {
@@ -208,13 +199,10 @@ impl VideoListResource {
 }
 /// The type of object returned, must be `list`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum VideoListResourceObject {
     #[serde(rename = "list")]
+    #[default]
     List,
 }
 
-impl Default for VideoListResourceObject {
-    fn default() -> VideoListResourceObject {
-        Self::List
-    }
-}

@@ -1,5 +1,5 @@
 pub mod image {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -31,7 +31,7 @@ pub mod images_response {
     use super::super::generation::OutputFormat;
     use super::super::generation::Quality;
     use super::background::Background;
-    use crate::openai::models::model_types::misc::Summary;
+    
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
     pub struct ImagesResponse {
         /// The Unix timestamp (in seconds) of when the image was created.
@@ -74,22 +74,20 @@ pub mod images_response {
 }
 
 pub mod background {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Background {
         #[serde(rename = "transparent")]
+        #[default]
         Transparent,
         #[serde(rename = "opaque")]
         Opaque,
     }
 
-    impl Default for Background {
-        fn default() -> Background {
-            Self::Transparent
-        }
-    }
+    
     // The output format of the image generation. Either `png`, `webp`, or `jpeg`.
 }
 

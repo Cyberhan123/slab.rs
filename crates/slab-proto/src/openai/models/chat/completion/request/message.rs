@@ -64,16 +64,13 @@ impl ChatCompletionRequestToolMessage {
 }
 /// The role of the messages author, in this case `tool`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ChatCompletionRequestToolMessageRole {
     #[serde(rename = "tool")]
+    #[default]
     Tool,
 }
 
-impl Default for ChatCompletionRequestToolMessageRole {
-    fn default() -> ChatCompletionRequestToolMessageRole {
-        Self::Tool
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -99,8 +96,10 @@ impl Default for ChatCompletionRequestUserMessageContentPart {
 }
 /// The type of the content part.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ChatCompletionRequestUserMessageContentPartType {
     #[serde(rename = "text")]
+    #[default]
     Text,
     #[serde(rename = "image_url")]
     ImageUrl,
@@ -110,11 +109,6 @@ pub enum ChatCompletionRequestUserMessageContentPartType {
     File,
 }
 
-impl Default for ChatCompletionRequestUserMessageContentPartType {
-    fn default() -> ChatCompletionRequestUserMessageContentPartType {
-        Self::Text
-    }
-}
 
 /// ChatCompletionRequestUserMessageContent : The contents of the user message.
 /// The contents of the user message.
@@ -157,29 +151,23 @@ impl ChatCompletionRequestUserMessage {
 }
 /// The role of the messages author, in this case `user`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ChatCompletionRequestUserMessageRole {
     #[serde(rename = "user")]
+    #[default]
     User,
 }
 
-impl Default for ChatCompletionRequestUserMessageRole {
-    fn default() -> ChatCompletionRequestUserMessageRole {
-        Self::User
-    }
-}
 
 /// The role of the messages author, in this case `system`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ChatCompletionRequestSystemMessageRole {
     #[serde(rename = "system")]
+    #[default]
     System,
 }
 
-impl Default for ChatCompletionRequestSystemMessageRole {
-    fn default() -> ChatCompletionRequestSystemMessageRole {
-        Self::System
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ChatCompletionRequestFunctionMessage {
@@ -205,16 +193,13 @@ impl ChatCompletionRequestFunctionMessage {
 }
 /// The role of the messages author, in this case `function`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ChatCompletionRequestFunctionMessageRole {
     #[serde(rename = "function")]
+    #[default]
     Function,
 }
 
-impl Default for ChatCompletionRequestFunctionMessageRole {
-    fn default() -> ChatCompletionRequestFunctionMessageRole {
-        Self::Function
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ChatCompletionRequestMessageContentPartAudioInputAudio {
@@ -236,18 +221,15 @@ impl ChatCompletionRequestMessageContentPartAudioInputAudio {
 }
 /// The format of the encoded audio data. Currently supports \"wav\" and \"mp3\".
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Format {
     #[serde(rename = "wav")]
+    #[default]
     Wav,
     #[serde(rename = "mp3")]
     Mp3,
 }
 
-impl Default for Format {
-    fn default() -> Format {
-        Self::Wav
-    }
-}
 
 /// ChatCompletionRequestMessageContentPartAudio : Learn about [audio inputs](/docs/guides/audio).
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -270,16 +252,13 @@ impl ChatCompletionRequestMessageContentPartAudio {
 }
 /// The type of the content part. Always `input_audio`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ChatCompletionRequestMessageContentPartAudioType {
     #[serde(rename = "input_audio")]
+    #[default]
     InputAudio,
 }
 
-impl Default for ChatCompletionRequestMessageContentPartAudioType {
-    fn default() -> ChatCompletionRequestMessageContentPartAudioType {
-        Self::InputAudio
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ChatCompletionRequestMessageContentPartFileFile {
@@ -325,16 +304,13 @@ impl ChatCompletionRequestMessageContentPartFile {
 }
 /// The type of the content part. Always `file`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ChatCompletionRequestMessageContentPartFileType {
     #[serde(rename = "file")]
+    #[default]
     File,
 }
 
-impl Default for ChatCompletionRequestMessageContentPartFileType {
-    fn default() -> ChatCompletionRequestMessageContentPartFileType {
-        Self::File
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ChatCompletionRequestMessageContentPartImageImageUrl {
@@ -353,8 +329,10 @@ impl ChatCompletionRequestMessageContentPartImageImageUrl {
 }
 /// Specifies the detail level of the image. Learn more in the [Vision guide](/docs/guides/vision#low-or-high-fidelity-image-understanding).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Detail {
     #[serde(rename = "auto")]
+    #[default]
     Auto,
     #[serde(rename = "low")]
     Low,
@@ -362,11 +340,6 @@ pub enum Detail {
     High,
 }
 
-impl Default for Detail {
-    fn default() -> Detail {
-        Self::Auto
-    }
-}
 
 /// ChatCompletionRequestMessageContentPartImage : Learn about [image inputs](/docs/guides/vision).
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -389,16 +362,13 @@ impl ChatCompletionRequestMessageContentPartImage {
 }
 /// The type of the content part.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ChatCompletionRequestMessageContentPartImageType {
     #[serde(rename = "image_url")]
+    #[default]
     ImageUrl,
 }
 
-impl Default for ChatCompletionRequestMessageContentPartImageType {
-    fn default() -> ChatCompletionRequestMessageContentPartImageType {
-        Self::ImageUrl
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ChatCompletionRequestMessageContentPartRefusal {
@@ -420,16 +390,13 @@ impl ChatCompletionRequestMessageContentPartRefusal {
 }
 /// The type of the content part.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ChatCompletionRequestMessageContentPartRefusalType {
     #[serde(rename = "refusal")]
+    #[default]
     Refusal,
 }
 
-impl Default for ChatCompletionRequestMessageContentPartRefusalType {
-    fn default() -> ChatCompletionRequestMessageContentPartRefusalType {
-        Self::Refusal
-    }
-}
 
 /// ChatCompletionRequestMessageContentPartText : Learn about [text inputs](/docs/guides/text-generation).
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -453,16 +420,13 @@ impl ChatCompletionRequestMessageContentPartText {
 }
 /// The type of the content part.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ChatCompletionRequestMessageContentPartTextType {
     #[serde(rename = "text")]
+    #[default]
     Text,
 }
 
-impl Default for ChatCompletionRequestMessageContentPartTextType {
-    fn default() -> ChatCompletionRequestMessageContentPartTextType {
-        Self::Text
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "role")]

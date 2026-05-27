@@ -55,16 +55,13 @@ impl CreateChatCompletionResponse {
 }
 /// The object type, which is always `chat.completion`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum Object {
     #[serde(rename = "chat.completion")]
+    #[default]
     ChatCompletion,
 }
 
-impl Default for Object {
-    fn default() -> Object {
-        Self::ChatCompletion
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CreateChatCompletionResponseChoicesInner {
@@ -91,14 +88,16 @@ impl CreateChatCompletionResponseChoicesInner {
             finish_reason,
             index,
             message: Box::new(message),
-            logprobs: if let Some(x) = logprobs { Some(Box::new(x)) } else { None },
+            logprobs: logprobs.map(Box::new),
         }
     }
 }
 /// The reason the model stopped generating tokens. This will be `stop` if the model hit a natural stop point or a provided stop sequence, `length` if the maximum number of tokens specified in the request was reached, `content_filter` if content was omitted due to a flag from our content filters, `tool_calls` if the model called a tool, or `function_call` (deprecated) if the model called a function.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum FinishReason {
     #[serde(rename = "stop")]
+    #[default]
     Stop,
     #[serde(rename = "length")]
     Length,
@@ -110,11 +109,6 @@ pub(crate) enum FinishReason {
     FunctionCall,
 }
 
-impl Default for FinishReason {
-    fn default() -> FinishReason {
-        Self::Stop
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CreateChatCompletionResponseChoicesInnerLogprobs {

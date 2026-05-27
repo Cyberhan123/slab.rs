@@ -1,9 +1,10 @@
-use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum DetailEnum {
     #[serde(rename = "low")]
+    #[default]
     Low,
     #[serde(rename = "high")]
     High,
@@ -24,8 +25,3 @@ impl std::fmt::Display for DetailEnum {
     }
 }
 
-impl Default for DetailEnum {
-    fn default() -> DetailEnum {
-        Self::Low
-    }
-}

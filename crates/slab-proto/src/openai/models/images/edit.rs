@@ -138,8 +138,10 @@ pub mod edit_image_body_json_param {
     }
     /// Output quality for GPT image models.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Quality {
         #[serde(rename = "low")]
+        #[default]
         Low,
         #[serde(rename = "medium")]
         Medium,
@@ -149,16 +151,12 @@ pub mod edit_image_body_json_param {
         Auto,
     }
 
-    impl Default for Quality {
-        fn default() -> Quality {
-            Self::Low
-        }
-    }
+    
     // Controls fidelity to the original input image(s).
 }
 
 pub mod edit_image_body_json_param_model {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -173,26 +171,26 @@ pub mod edit_image_body_json_param_model {
 }
 
 pub mod edit_image_input_fidelity {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum EditImageInputFidelity {
         #[serde(rename = "high")]
+        #[default]
         High,
         #[serde(rename = "low")]
         Low,
     }
 
-    impl Default for EditImageInputFidelity {
-        fn default() -> EditImageInputFidelity {
-            Self::High
-        }
-    }
+    
     /// Requested output image size.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Size {
         #[serde(rename = "auto")]
+        #[default]
         Auto,
         #[serde(rename = "1024x1024")]
         Variant1024x1024,
@@ -202,15 +200,13 @@ pub mod edit_image_input_fidelity {
         Variant1024x1536,
     }
 
-    impl Default for Size {
-        fn default() -> Size {
-            Self::Auto
-        }
-    }
+    
     /// Output image format. Supported for GPT image models.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum OutputFormat {
         #[serde(rename = "png")]
+        #[default]
         Png,
         #[serde(rename = "jpeg")]
         Jpeg,
@@ -218,11 +214,7 @@ pub mod edit_image_input_fidelity {
         Webp,
     }
 
-    impl Default for OutputFormat {
-        fn default() -> OutputFormat {
-            Self::Png
-        }
-    }
+    
     // Moderation level for GPT image models.
 }
 
@@ -283,20 +275,20 @@ pub mod image_edit_completed_event {
     }
     /// The type of the event. Always `image_edit.completed`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Type {
         #[serde(rename = "image_edit.completed")]
+        #[default]
         ImageEditCompleted,
     }
 
-    impl Default for Type {
-        fn default() -> Type {
-            Self::ImageEditCompleted
-        }
-    }
+    
     /// The size of the edited image.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Size {
         #[serde(rename = "1024x1024")]
+        #[default]
         Variant1024x1024,
         #[serde(rename = "1024x1536")]
         Variant1024x1536,
@@ -306,15 +298,13 @@ pub mod image_edit_completed_event {
         Auto,
     }
 
-    impl Default for Size {
-        fn default() -> Size {
-            Self::Variant1024x1024
-        }
-    }
+    
     /// The quality setting for the edited image.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Quality {
         #[serde(rename = "low")]
+        #[default]
         Low,
         #[serde(rename = "medium")]
         Medium,
@@ -324,15 +314,13 @@ pub mod image_edit_completed_event {
         Auto,
     }
 
-    impl Default for Quality {
-        fn default() -> Quality {
-            Self::Low
-        }
-    }
+    
     /// The background setting for the edited image.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Background {
         #[serde(rename = "transparent")]
+        #[default]
         Transparent,
         #[serde(rename = "opaque")]
         Opaque,
@@ -340,15 +328,13 @@ pub mod image_edit_completed_event {
         Auto,
     }
 
-    impl Default for Background {
-        fn default() -> Background {
-            Self::Transparent
-        }
-    }
+    
     /// The output format for the edited image.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum OutputFormat {
         #[serde(rename = "png")]
+        #[default]
         Png,
         #[serde(rename = "webp")]
         Webp,
@@ -356,15 +342,11 @@ pub mod image_edit_completed_event {
         Jpeg,
     }
 
-    impl Default for OutputFormat {
-        fn default() -> OutputFormat {
-            Self::Png
-        }
-    }
+    
 }
 
 pub mod image_edit_partial_image_event {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -421,20 +403,20 @@ pub mod image_edit_partial_image_event {
     }
     /// The type of the event. Always `image_edit.partial_image`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Type {
         #[serde(rename = "image_edit.partial_image")]
+        #[default]
         ImageEditPartialImage,
     }
 
-    impl Default for Type {
-        fn default() -> Type {
-            Self::ImageEditPartialImage
-        }
-    }
+    
     /// The size of the requested edited image.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Size {
         #[serde(rename = "1024x1024")]
+        #[default]
         Variant1024x1024,
         #[serde(rename = "1024x1536")]
         Variant1024x1536,
@@ -444,15 +426,13 @@ pub mod image_edit_partial_image_event {
         Auto,
     }
 
-    impl Default for Size {
-        fn default() -> Size {
-            Self::Variant1024x1024
-        }
-    }
+    
     /// The quality setting for the requested edited image.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Quality {
         #[serde(rename = "low")]
+        #[default]
         Low,
         #[serde(rename = "medium")]
         Medium,
@@ -462,15 +442,13 @@ pub mod image_edit_partial_image_event {
         Auto,
     }
 
-    impl Default for Quality {
-        fn default() -> Quality {
-            Self::Low
-        }
-    }
+    
     /// The background setting for the requested edited image.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Background {
         #[serde(rename = "transparent")]
+        #[default]
         Transparent,
         #[serde(rename = "opaque")]
         Opaque,
@@ -478,15 +456,13 @@ pub mod image_edit_partial_image_event {
         Auto,
     }
 
-    impl Default for Background {
-        fn default() -> Background {
-            Self::Transparent
-        }
-    }
+    
     /// The output format for the requested edited image.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum OutputFormat {
         #[serde(rename = "png")]
+        #[default]
         Png,
         #[serde(rename = "webp")]
         Webp,
@@ -494,15 +470,11 @@ pub mod image_edit_partial_image_event {
         Jpeg,
     }
 
-    impl Default for OutputFormat {
-        fn default() -> OutputFormat {
-            Self::Png
-        }
-    }
+    
 }
 
 pub mod image_edit_stream_event {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -511,13 +483,9 @@ pub mod image_edit_stream_event {
 }
 
 pub use edit_image_body_json_param::EditImageBodyJsonParam;
-pub(crate) use edit_image_body_json_param::Quality;
 pub use edit_image_body_json_param_model::EditImageBodyJsonParamModel;
 pub use edit_image_input_fidelity::EditImageInputFidelity;
-pub(crate) use edit_image_input_fidelity::OutputFormat;
 pub(crate) use edit_image_input_fidelity::Size;
-pub(crate) use image_edit_completed_event::Background;
 pub use image_edit_completed_event::ImageEditCompletedEvent;
-pub(crate) use image_edit_completed_event::Type;
 pub use image_edit_partial_image_event::ImageEditPartialImageEvent;
 pub use image_edit_stream_event::ImageEditStreamEvent;

@@ -34,16 +34,13 @@ impl McpApprovalRequest {
 }
 /// The type of the item. Always `mcp_approval_request`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum McpApprovalRequestType {
     #[serde(rename = "mcp_approval_request")]
+    #[default]
     McpApprovalRequest,
 }
 
-impl Default for McpApprovalRequestType {
-    fn default() -> McpApprovalRequestType {
-        Self::McpApprovalRequest
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct McpApprovalResponse {
@@ -86,16 +83,13 @@ impl McpApprovalResponse {
 }
 /// The type of the item. Always `mcp_approval_response`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum McpApprovalResponseType {
     #[serde(rename = "mcp_approval_response")]
+    #[default]
     McpApprovalResponse,
 }
 
-impl Default for McpApprovalResponseType {
-    fn default() -> McpApprovalResponseType {
-        Self::McpApprovalResponse
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct McpApprovalResponseResource {
@@ -134,16 +128,13 @@ impl McpApprovalResponseResource {
 }
 /// The type of the item. Always `mcp_approval_response`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum McpApprovalResponseResourceType {
     #[serde(rename = "mcp_approval_response")]
+    #[default]
     McpApprovalResponse,
 }
 
-impl Default for McpApprovalResponseResourceType {
-    fn default() -> McpApprovalResponseResourceType {
-        Self::McpApprovalResponse
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct McpListTools {
@@ -182,16 +173,13 @@ impl McpListTools {
 }
 /// The type of the item. Always `mcp_list_tools`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum McpListToolsType {
     #[serde(rename = "mcp_list_tools")]
+    #[default]
     McpListTools,
 }
 
-impl Default for McpListToolsType {
-    fn default() -> McpListToolsType {
-        Self::McpListTools
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct McpListToolsTool {
@@ -293,16 +281,13 @@ impl McpTool {
 }
 /// The type of the MCP tool. Always `mcp`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum McpToolType {
     #[serde(rename = "mcp")]
+    #[default]
     Mcp,
 }
 
-impl Default for McpToolType {
-    fn default() -> McpToolType {
-        Self::Mcp
-    }
-}
 // Identifier for service connectors, like those available in ChatGPT. One of `server_url` or `connector_id` must be provided. Learn more about service connectors [here](/docs/guides/tools-remote-mcp#connectors).  Currently supported `connector_id` values are:  - Dropbox: `connector_dropbox` - Gmail: `connector_gmail` - Google Calendar: `connector_googlecalendar` - Google Drive: `connector_googledrive` - Microsoft Teams: `connector_microsoftteams` - Outlook Calendar: `connector_outlookcalendar` - Outlook Email: `connector_outlookemail` - SharePoint: `connector_sharepoint`
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -403,20 +388,19 @@ impl McpToolCall {
 }
 /// The type of the item. Always `mcp_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum McpToolCallType {
     #[serde(rename = "mcp_call")]
+    #[default]
     McpCall,
 }
 
-impl Default for McpToolCallType {
-    fn default() -> McpToolCallType {
-        Self::McpCall
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum McpToolCallStatus {
     #[serde(rename = "in_progress")]
+    #[default]
     InProgress,
     #[serde(rename = "completed")]
     Completed,
@@ -440,11 +424,6 @@ impl std::fmt::Display for McpToolCallStatus {
     }
 }
 
-impl Default for McpToolCallStatus {
-    fn default() -> McpToolCallStatus {
-        Self::InProgress
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct McpToolFilter {

@@ -59,8 +59,10 @@ impl SubmitToolOutputsRunRequestToolOutputsInner {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum SubmitToolOutputsRunRequestToolOutputsInnerConnectorId {
     #[serde(rename = "connector_dropbox")]
+    #[default]
     ConnectorDropbox,
     #[serde(rename = "connector_gmail")]
     ConnectorGmail,
@@ -78,11 +80,6 @@ pub(crate) enum SubmitToolOutputsRunRequestToolOutputsInnerConnectorId {
     ConnectorSharepoint,
 }
 
-impl Default for SubmitToolOutputsRunRequestToolOutputsInnerConnectorId {
-    fn default() -> SubmitToolOutputsRunRequestToolOutputsInnerConnectorId {
-        Self::ConnectorDropbox
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NamespaceToolParam {
@@ -113,16 +110,13 @@ impl NamespaceToolParam {
 }
 /// The type of the tool. Always `namespace`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum Type {
     #[serde(rename = "namespace")]
+    #[default]
     Namespace,
 }
 
-impl Default for Type {
-    fn default() -> Type {
-        Self::Namespace
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]

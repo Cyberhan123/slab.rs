@@ -153,16 +153,14 @@ pub mod client_event_type {
         serde::Serialize,
         serde::Deserialize,
     )]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.create")]
+        #[default]
         ResponseCreate,
     }
 
-    impl Default for Type {
-        fn default() -> Type {
-            Self::ResponseCreate
-        }
-    }
+    
 }
 pub use client_event_type::Type;
 
@@ -180,18 +178,16 @@ pub mod client_prompt_cache_retention {
         serde::Serialize,
         serde::Deserialize,
     )]
+    #[derive(Default)]
     pub enum PromptCacheRetention {
         #[serde(rename = "in_memory")]
+        #[default]
         InMemory,
         #[serde(rename = "24h")]
         Variant24h,
     }
 
-    impl Default for PromptCacheRetention {
-        fn default() -> PromptCacheRetention {
-            Self::InMemory
-        }
-    }
+    
 }
 pub use client_prompt_cache_retention::PromptCacheRetention;
 
@@ -209,18 +205,16 @@ pub mod client_truncation {
         serde::Serialize,
         serde::Deserialize,
     )]
+    #[derive(Default)]
     pub enum Truncation {
         #[serde(rename = "auto")]
+        #[default]
         Auto,
         #[serde(rename = "disabled")]
         Disabled,
     }
 
-    impl Default for Truncation {
-        fn default() -> Truncation {
-            Self::Auto
-        }
-    }
+    
 }
 pub use client_truncation::Truncation;
 
@@ -376,16 +370,14 @@ pub mod response_create_event_type {
         serde::Serialize,
         serde::Deserialize,
     )]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.create")]
+        #[default]
         ResponseCreate,
     }
 
-    impl Default for Type {
-        fn default() -> Type {
-            Self::ResponseCreate
-        }
-    }
+    
 }
 pub use response_create_event_type::Type as ResponseCreateEventType;
 
@@ -403,18 +395,16 @@ pub mod response_create_prompt_cache_retention {
         serde::Serialize,
         serde::Deserialize,
     )]
+    #[derive(Default)]
     pub enum PromptCacheRetention {
         #[serde(rename = "in_memory")]
+        #[default]
         InMemory,
         #[serde(rename = "24h")]
         Variant24h,
     }
 
-    impl Default for PromptCacheRetention {
-        fn default() -> PromptCacheRetention {
-            Self::InMemory
-        }
-    }
+    
 }
 pub use response_create_prompt_cache_retention::PromptCacheRetention as ResponseCreatePromptCacheRetention;
 
@@ -432,18 +422,16 @@ pub mod response_create_truncation {
         serde::Serialize,
         serde::Deserialize,
     )]
+    #[derive(Default)]
     pub enum Truncation {
         #[serde(rename = "auto")]
+        #[default]
         Auto,
         #[serde(rename = "disabled")]
         Disabled,
     }
 
-    impl Default for Truncation {
-        fn default() -> Truncation {
-            Self::Auto
-        }
-    }
+    
 }
 pub use response_create_truncation::Truncation as ResponseCreateTruncation;
 
@@ -587,15 +575,13 @@ pub mod server_event_type {
         serde::Serialize,
         serde::Deserialize,
     )]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.custom_tool_call_input.done")]
+        #[default]
         ResponseCustomToolCallInputDone,
     }
 
-    impl Default for Type {
-        fn default() -> Type {
-            Self::ResponseCustomToolCallInputDone
-        }
-    }
+    
 }
 pub use server_event_type::Type as ServerEventType;

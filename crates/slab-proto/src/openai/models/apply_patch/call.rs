@@ -3,8 +3,10 @@ use serde::{Deserialize, Serialize};
 /// ApplyPatchCallOutputStatusParam : Outcome values reported for apply_patch tool call outputs.
 /// Outcome values reported for apply_patch tool call outputs.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ApplyPatchCallOutputStatusParam {
     #[serde(rename = "completed")]
+    #[default]
     Completed,
     #[serde(rename = "failed")]
     Failed,
@@ -19,15 +21,12 @@ impl std::fmt::Display for ApplyPatchCallOutputStatusParam {
     }
 }
 
-impl Default for ApplyPatchCallOutputStatusParam {
-    fn default() -> ApplyPatchCallOutputStatusParam {
-        Self::Completed
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ApplyPatchCallOutputStatus {
     #[serde(rename = "completed")]
+    #[default]
     Completed,
     #[serde(rename = "failed")]
     Failed,
@@ -42,17 +41,14 @@ impl std::fmt::Display for ApplyPatchCallOutputStatus {
     }
 }
 
-impl Default for ApplyPatchCallOutputStatus {
-    fn default() -> ApplyPatchCallOutputStatus {
-        Self::Completed
-    }
-}
 
 /// ApplyPatchCallStatusParam : ApplyPatchCallOutputStatus values reported for apply_patch tool calls.
 /// ApplyPatchCallOutputStatus values reported for apply_patch tool calls.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ApplyPatchCallStatusParam {
     #[serde(rename = "in_progress")]
+    #[default]
     InProgress,
     #[serde(rename = "completed")]
     Completed,
@@ -67,15 +63,12 @@ impl std::fmt::Display for ApplyPatchCallStatusParam {
     }
 }
 
-impl Default for ApplyPatchCallStatusParam {
-    fn default() -> ApplyPatchCallStatusParam {
-        Self::InProgress
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ApplyPatchCallStatus {
     #[serde(rename = "in_progress")]
+    #[default]
     InProgress,
     #[serde(rename = "completed")]
     Completed,
@@ -90,8 +83,3 @@ impl std::fmt::Display for ApplyPatchCallStatus {
     }
 }
 
-impl Default for ApplyPatchCallStatus {
-    fn default() -> ApplyPatchCallStatus {
-        Self::InProgress
-    }
-}

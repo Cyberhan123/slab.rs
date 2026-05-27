@@ -26,16 +26,13 @@ impl ApplyPatchCreateFileOperationParam {
 }
 /// The operation type. Always `create_file`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum CreateFileOperationParamType {
     #[serde(rename = "create_file")]
+    #[default]
     CreateFile,
 }
 
-impl Default for CreateFileOperationParamType {
-    fn default() -> CreateFileOperationParamType {
-        Self::CreateFile
-    }
-}
 
 /// ApplyPatchCreateFileOperation : Instruction describing how to create a file via the apply_patch tool.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -63,16 +60,13 @@ impl ApplyPatchCreateFileOperation {
 }
 /// Create a new file with the provided diff.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum CreateFileOperationType {
     #[serde(rename = "create_file")]
+    #[default]
     CreateFile,
 }
 
-impl Default for CreateFileOperationType {
-    fn default() -> CreateFileOperationType {
-        Self::CreateFile
-    }
-}
 
 /// ApplyPatchDeleteFileOperationParam : Instruction for deleting an existing file via the apply_patch tool.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -96,16 +90,13 @@ impl ApplyPatchDeleteFileOperationParam {
 }
 /// The operation type. Always `delete_file`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum DeleteFileOperationParamType {
     #[serde(rename = "delete_file")]
+    #[default]
     DeleteFile,
 }
 
-impl Default for DeleteFileOperationParamType {
-    fn default() -> DeleteFileOperationParamType {
-        Self::DeleteFile
-    }
-}
 
 /// ApplyPatchDeleteFileOperation : Instruction describing how to delete a file via the apply_patch tool.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -127,16 +118,13 @@ impl ApplyPatchDeleteFileOperation {
 
 /// Delete the specified file.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum DeleteFileOperationType {
     #[serde(rename = "delete_file")]
+    #[default]
     DeleteFile,
 }
 
-impl Default for DeleteFileOperationType {
-    fn default() -> DeleteFileOperationType {
-        Self::DeleteFile
-    }
-}
 
 /// ApplyPatchUpdateFileOperationParam : Instruction for updating an existing file via the apply_patch tool.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -164,16 +152,13 @@ impl ApplyPatchUpdateFileOperationParam {
 }
 /// The operation type. Always `update_file`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum UpdateFileOperationParamType {
     #[serde(rename = "update_file")]
+    #[default]
     UpdateFile,
 }
 
-impl Default for UpdateFileOperationParamType {
-    fn default() -> UpdateFileOperationParamType {
-        Self::UpdateFile
-    }
-}
 
 /// ApplyPatchUpdateFileOperation : Instruction describing how to update a file via the apply_patch tool.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -201,13 +186,10 @@ impl ApplyPatchUpdateFileOperation {
 }
 /// Update an existing file with the provided diff.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum UpdateFileOperationType {
     #[serde(rename = "update_file")]
+    #[default]
     UpdateFile,
 }
 
-impl Default for UpdateFileOperationType {
-    fn default() -> UpdateFileOperationType {
-        Self::UpdateFile
-    }
-}

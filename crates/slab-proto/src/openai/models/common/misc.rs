@@ -2,16 +2,13 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Anchor {
     #[serde(rename = "created_at")]
+    #[default]
     CreatedAt,
 }
 
-impl Default for Anchor {
-    fn default() -> Anchor {
-        Self::CreatedAt
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ClientToolCallItem {
@@ -129,8 +126,10 @@ impl ErrorResponse {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum IncludeEnum {
     #[serde(rename = "file_search_call.results")]
+    #[default]
     FileSearchCallResults,
     #[serde(rename = "web_search_call.results")]
     WebSearchCallResults,
@@ -165,11 +164,6 @@ impl std::fmt::Display for IncludeEnum {
     }
 }
 
-impl Default for IncludeEnum {
-    fn default() -> IncludeEnum {
-        Self::FileSearchCallResults
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InferenceOptions {
@@ -185,7 +179,7 @@ impl InferenceOptions {
     /// Model and tool overrides applied when generating the assistant response.
     pub fn new(tool_choice: Option<models::ToolChoice>, model: Option<String>) -> InferenceOptions {
         InferenceOptions {
-            tool_choice: if let Some(x) = tool_choice { Some(Box::new(x)) } else { None },
+            tool_choice: tool_choice.map(Box::new),
             model,
         }
     }
@@ -253,32 +247,28 @@ impl TopLogProb {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ClientToolCallItemObject {
     #[serde(rename = "chatkit.thread_item")]
+    #[default]
     ChatkitThreadItem,
 }
 
-impl Default for ClientToolCallItemObject {
-    fn default() -> ClientToolCallItemObject {
-        Self::ChatkitThreadItem
-    }
-}
 /// Type discriminator that is always `chatkit.client_tool_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ClientToolCallItemType {
     #[serde(rename = "chatkit.client_tool_call")]
+    #[default]
     ChatkitClientToolCall,
 }
 
-impl Default for ClientToolCallItemType {
-    fn default() -> ClientToolCallItemType {
-        Self::ChatkitClientToolCall
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum OrderEnum {
     #[serde(rename = "asc")]
+    #[default]
     Asc,
     #[serde(rename = "desc")]
     Desc,
@@ -293,11 +283,6 @@ impl std::fmt::Display for OrderEnum {
     }
 }
 
-impl Default for OrderEnum {
-    fn default() -> OrderEnum {
-        Self::Asc
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OtherChunkingStrategyResponseParam {
@@ -316,16 +301,13 @@ impl OtherChunkingStrategyResponseParam {
 }
 /// Always `other`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum OtherChunkingStrategyResponseParamType {
     #[serde(rename = "other")]
+    #[default]
     Other,
 }
 
-impl Default for OtherChunkingStrategyResponseParamType {
-    fn default() -> OtherChunkingStrategyResponseParamType {
-        Self::Other
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Project {
@@ -388,16 +370,13 @@ impl Project {
 }
 /// The object type, which is always `organization.project`
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ProjectObject {
     #[serde(rename = "organization.project")]
+    #[default]
     OrganizationProject,
 }
 
-impl Default for ProjectObject {
-    fn default() -> ProjectObject {
-        Self::OrganizationProject
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Prompt {
@@ -431,8 +410,10 @@ impl Prompt {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum PromptCacheRetentionEnum {
     #[serde(rename = "in_memory")]
+    #[default]
     InMemory,
     #[serde(rename = "24h")]
     Variant24h,
@@ -447,15 +428,12 @@ impl std::fmt::Display for PromptCacheRetentionEnum {
     }
 }
 
-impl Default for PromptCacheRetentionEnum {
-    fn default() -> PromptCacheRetentionEnum {
-        Self::InMemory
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ServiceTier {
     #[serde(rename = "auto")]
+    #[default]
     Auto,
     #[serde(rename = "default")]
     Default,
@@ -479,11 +457,6 @@ impl std::fmt::Display for ServiceTier {
     }
 }
 
-impl Default for ServiceTier {
-    fn default() -> ServiceTier {
-        Self::Auto
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SpecificApplyPatchParam {
@@ -500,16 +473,13 @@ impl SpecificApplyPatchParam {
 }
 /// The tool to call. Always `apply_patch`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum SpecificApplyPatchParamType {
     #[serde(rename = "apply_patch")]
+    #[default]
     ApplyPatch,
 }
 
-impl Default for SpecificApplyPatchParamType {
-    fn default() -> SpecificApplyPatchParamType {
-        Self::ApplyPatch
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SpecificFunctionShellParam {
@@ -526,16 +496,13 @@ impl SpecificFunctionShellParam {
 }
 /// The tool to call. Always `shell`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum SpecificFunctionShellParamType {
     #[serde(rename = "shell")]
+    #[default]
     Shell,
 }
 
-impl Default for SpecificFunctionShellParamType {
-    fn default() -> SpecificFunctionShellParamType {
-        Self::Shell
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -568,20 +535,19 @@ impl TypeParam {
 }
 /// Specifies the event type. For a type action, this property is always set to `type`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum TypeParamType {
     #[serde(rename = "type")]
+    #[default]
     TypeParamType,
 }
 
-impl Default for TypeParamType {
-    fn default() -> TypeParamType {
-        Self::TypeParamType
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Verbosity {
     #[serde(rename = "low")]
+    #[default]
     Low,
     #[serde(rename = "medium")]
     Medium,
@@ -599,11 +565,6 @@ impl std::fmt::Display for Verbosity {
     }
 }
 
-impl Default for Verbosity {
-    fn default() -> Verbosity {
-        Self::Low
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WidgetMessageItem {
@@ -642,25 +603,19 @@ impl WidgetMessageItem {
 }
 /// Type discriminator that is always `chatkit.thread_item`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum WidgetMessageItemObject {
     #[serde(rename = "chatkit.thread_item")]
+    #[default]
     ChatkitThreadItem,
 }
 
-impl Default for WidgetMessageItemObject {
-    fn default() -> WidgetMessageItemObject {
-        Self::ChatkitThreadItem
-    }
-}
 /// Type discriminator that is always `chatkit.widget`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum WidgetMessageItemType {
     #[serde(rename = "chatkit.widget")]
+    #[default]
     ChatkitWidget,
 }
 
-impl Default for WidgetMessageItemType {
-    fn default() -> WidgetMessageItemType {
-        Self::ChatkitWidget
-    }
-}

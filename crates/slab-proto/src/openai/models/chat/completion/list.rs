@@ -35,13 +35,10 @@ impl ChatCompletionList {
 }
 /// The type of this object. It is always set to \"list\".
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Object {
     #[serde(rename = "list")]
+    #[default]
     List,
 }
 
-impl Default for Object {
-    fn default() -> Object {
-        Self::List
-    }
-}

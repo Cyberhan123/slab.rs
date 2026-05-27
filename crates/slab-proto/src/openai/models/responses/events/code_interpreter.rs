@@ -3,15 +3,13 @@ use serde::{Deserialize, Serialize};
 pub mod code_delta_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.code_interpreter_call_code.delta")]
+        #[default]
         ResponseCodeInterpreterCallCodeDelta,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseCodeInterpreterCallCodeDelta
-        }
-    }
+    
 }
 pub use code_delta_type::Type as CodeDeltaType;
 
@@ -56,15 +54,13 @@ impl ResponseCodeInterpreterCallCodeDeltaEvent {
 pub mod code_done_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.code_interpreter_call_code.done")]
+        #[default]
         ResponseCodeInterpreterCallCodeDone,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseCodeInterpreterCallCodeDone
-        }
-    }
+    
 }
 pub use code_done_type::Type as CodeDoneType;
 
@@ -109,15 +105,13 @@ impl ResponseCodeInterpreterCallCodeDoneEvent {
 pub mod code_completed_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.code_interpreter_call.completed")]
+        #[default]
         ResponseCodeInterpreterCallCompleted,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseCodeInterpreterCallCompleted
-        }
-    }
+    
 }
 pub use code_completed_type::Type as CodeCompletedType;
 
@@ -152,15 +146,13 @@ impl ResponseCodeInterpreterCallCompletedEvent {
 pub mod code_in_progress_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.code_interpreter_call.in_progress")]
+        #[default]
         ResponseCodeInterpreterCallInProgress,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseCodeInterpreterCallInProgress
-        }
-    }
+    
 }
 pub use code_in_progress_type::Type as CodeInProgressType;
 
@@ -200,15 +192,13 @@ impl ResponseCodeInterpreterCallInProgressEvent {
 pub mod code_interpreting_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.code_interpreter_call.interpreting")]
+        #[default]
         ResponseCodeInterpreterCallInterpreting,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseCodeInterpreterCallInterpreting
-        }
-    }
+    
 }
 pub use code_interpreting_type::Type as CodeInterpretingType;
 

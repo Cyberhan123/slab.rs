@@ -103,7 +103,6 @@ impl Default for ResponseStreamEvent {
     }
 }
 
-use super::misc::Status;
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DoneEvent {
     #[serde(rename = "event")]
@@ -120,16 +119,13 @@ impl DoneEvent {
 }
 ///
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum DoneEventEvent {
     #[serde(rename = "done")]
+    #[default]
     Done,
 }
 
-impl Default for DoneEventEvent {
-    fn default() -> DoneEventEvent {
-        Self::Done
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ErrorEvent {
@@ -147,16 +143,13 @@ impl ErrorEvent {
 }
 ///
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ErrorEventEvent {
     #[serde(rename = "error")]
+    #[default]
     Error,
 }
 
-impl Default for ErrorEventEvent {
-    fn default() -> ErrorEventEvent {
-        Self::Error
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseStreamOptions {
@@ -173,13 +166,10 @@ impl ResponseStreamOptions {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Data {
     #[serde(rename = "[DONE]")]
+    #[default]
     LeftSquareBracketDoneRightSquareBracket,
 }
 
-impl Default for Data {
-    fn default() -> Data {
-        Self::LeftSquareBracketDoneRightSquareBracket
-    }
-}

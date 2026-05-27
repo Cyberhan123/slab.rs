@@ -1,4 +1,3 @@
-use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -30,16 +29,13 @@ impl ResponseFileSearchCallCompletedEvent {
 }
 /// The type of the event. Always `response.file_search_call.completed`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ResponseFileSearchCallCompletedEventType {
     #[serde(rename = "response.file_search_call.completed")]
+    #[default]
     ResponseFileSearchCallCompleted,
 }
 
-impl Default for ResponseFileSearchCallCompletedEventType {
-    fn default() -> ResponseFileSearchCallCompletedEventType {
-        Self::ResponseFileSearchCallCompleted
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseFileSearchCallInProgressEvent {
@@ -70,16 +66,13 @@ impl ResponseFileSearchCallInProgressEvent {
 }
 /// The type of the event. Always `response.file_search_call.in_progress`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ResponseFileSearchCallInProgressEventType {
     #[serde(rename = "response.file_search_call.in_progress")]
+    #[default]
     ResponseFileSearchCallInProgress,
 }
 
-impl Default for ResponseFileSearchCallInProgressEventType {
-    fn default() -> ResponseFileSearchCallInProgressEventType {
-        Self::ResponseFileSearchCallInProgress
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseFileSearchCallSearchingEvent {
@@ -110,13 +103,10 @@ impl ResponseFileSearchCallSearchingEvent {
 }
 /// The type of the event. Always `response.file_search_call.searching`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ResponseFileSearchCallSearchingEventType {
     #[serde(rename = "response.file_search_call.searching")]
+    #[default]
     ResponseFileSearchCallSearching,
 }
 
-impl Default for ResponseFileSearchCallSearchingEventType {
-    fn default() -> ResponseFileSearchCallSearchingEventType {
-        Self::ResponseFileSearchCallSearching
-    }
-}

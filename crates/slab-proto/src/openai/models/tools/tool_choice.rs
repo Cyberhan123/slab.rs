@@ -40,30 +40,24 @@ impl ToolChoiceAllowed {
 }
 /// Allowed tool configuration type. Always `allowed_tools`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ToolChoiceAllowedType {
     #[serde(rename = "allowed_tools")]
+    #[default]
     AllowedTools,
 }
 
-impl Default for ToolChoiceAllowedType {
-    fn default() -> ToolChoiceAllowedType {
-        Self::AllowedTools
-    }
-}
 /// Constrains the tools available to the model to a pre-defined set.  `auto` allows the model to pick from among the allowed tools and generate a message.  `required` requires the model to call one or more of the allowed tools.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ToolChoiceAllowedMode {
     #[serde(rename = "auto")]
+    #[default]
     Auto,
     #[serde(rename = "required")]
     Required,
 }
 
-impl Default for ToolChoiceAllowedMode {
-    fn default() -> ToolChoiceAllowedMode {
-        Self::Auto
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolChoiceCustom {
@@ -83,16 +77,13 @@ impl ToolChoiceCustom {
 }
 /// For custom tool calling, the type is always `custom`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ToolChoiceCustomType {
     #[serde(rename = "custom")]
+    #[default]
     Custom,
 }
 
-impl Default for ToolChoiceCustomType {
-    fn default() -> ToolChoiceCustomType {
-        Self::Custom
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolChoiceFunction {
@@ -112,16 +103,13 @@ impl ToolChoiceFunction {
 }
 /// For function calling, the type is always `function`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ToolChoiceFunctionType {
     #[serde(rename = "function")]
+    #[default]
     Function,
 }
 
-impl Default for ToolChoiceFunctionType {
-    fn default() -> ToolChoiceFunctionType {
-        Self::Function
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolChoiceMcp {
@@ -149,20 +137,19 @@ impl ToolChoiceMcp {
 }
 /// For MCP tools, the type is always `mcp`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ToolChoiceMcpType {
     #[serde(rename = "mcp")]
+    #[default]
     Mcp,
 }
 
-impl Default for ToolChoiceMcpType {
-    fn default() -> ToolChoiceMcpType {
-        Self::Mcp
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ToolChoiceOptions {
     #[serde(rename = "none")]
+    #[default]
     None,
     #[serde(rename = "auto")]
     Auto,
@@ -180,11 +167,6 @@ impl std::fmt::Display for ToolChoiceOptions {
     }
 }
 
-impl Default for ToolChoiceOptions {
-    fn default() -> ToolChoiceOptions {
-        Self::None
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -206,8 +188,10 @@ impl Default for ToolChoiceParam {
 }
 /// Allowed tool configuration type. Always `allowed_tools`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ToolChoiceParamType {
     #[serde(rename = "allowed_tools")]
+    #[default]
     AllowedTools,
     #[serde(rename = "file_search")]
     FileSearch,
@@ -237,25 +221,17 @@ pub(crate) enum ToolChoiceParamType {
     Shell,
 }
 
-impl Default for ToolChoiceParamType {
-    fn default() -> ToolChoiceParamType {
-        Self::AllowedTools
-    }
-}
 /// Constrains the tools available to the model to a pre-defined set.  `auto` allows the model to pick from among the allowed tools and generate a message.  `required` requires the model to call one or more of the allowed tools.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ToolChoiceParamMode {
     #[serde(rename = "auto")]
+    #[default]
     Auto,
     #[serde(rename = "required")]
     Required,
 }
 
-impl Default for ToolChoiceParamMode {
-    fn default() -> ToolChoiceParamMode {
-        Self::Auto
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolChoiceTypes {
@@ -272,8 +248,10 @@ impl ToolChoiceTypes {
 }
 /// The type of hosted tool the model should to use. Learn more about [built-in tools](/docs/guides/tools).  Allowed values are: - `file_search` - `web_search_preview` - `computer` - `computer_use_preview` - `computer_use` - `code_interpreter` - `image_generation`
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ToolChoiceTypesType {
     #[serde(rename = "file_search")]
+    #[default]
     FileSearch,
     #[serde(rename = "web_search_preview")]
     WebSearchPreview,
@@ -291,8 +269,3 @@ pub(crate) enum ToolChoiceTypesType {
     CodeInterpreter,
 }
 
-impl Default for ToolChoiceTypesType {
-    fn default() -> ToolChoiceTypesType {
-        Self::FileSearch
-    }
-}

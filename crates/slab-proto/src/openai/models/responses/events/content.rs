@@ -4,15 +4,13 @@ use serde::{Deserialize, Serialize};
 pub mod content_part_added_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.content_part.added")]
+        #[default]
         ResponseContentPartAdded,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseContentPartAdded
-        }
-    }
+    
 }
 pub use content_part_added_type::Type as ContentPartAddedType;
 
@@ -62,15 +60,13 @@ impl ResponseContentPartAddedEvent {
 pub mod content_part_done_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.content_part.done")]
+        #[default]
         ResponseContentPartDone,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseContentPartDone
-        }
-    }
+    
 }
 pub use content_part_done_type::Type as ContentPartDoneType;
 
@@ -120,15 +116,13 @@ impl ResponseContentPartDoneEvent {
 pub mod annotation_added_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.output_text.annotation.added")]
+        #[default]
         ResponseOutputTextAnnotationAdded,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseOutputTextAnnotationAdded
-        }
-    }
+    
 }
 pub use annotation_added_type::Type as AnnotationAddedType;
 

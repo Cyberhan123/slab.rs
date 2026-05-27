@@ -29,8 +29,10 @@ pub(crate) enum Type {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum NoiseReductionType {
     #[serde(rename = "near_field")]
+    #[default]
     NearField,
     #[serde(rename = "far_field")]
     FarField,
@@ -45,15 +47,12 @@ impl std::fmt::Display for NoiseReductionType {
     }
 }
 
-impl Default for NoiseReductionType {
-    fn default() -> NoiseReductionType {
-        Self::NearField
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Eagerness {
     #[serde(rename = "low")]
+    #[default]
     Low,
     #[serde(rename = "medium")]
     Medium,
@@ -63,17 +62,14 @@ pub enum Eagerness {
     Auto,
 }
 
-impl Default for Eagerness {
-    fn default() -> Eagerness {
-        Self::Low
-    }
-}
 
 #[repr(i64)]
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize_repr, Deserialize_repr,
 )]
+#[derive(Default)]
 pub enum Rate {
+    #[default]
     Variant24000 = 24000,
 }
 
@@ -89,11 +85,6 @@ impl std::fmt::Display for Rate {
     }
 }
 
-impl Default for Rate {
-    fn default() -> Rate {
-        Self::Variant24000
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]

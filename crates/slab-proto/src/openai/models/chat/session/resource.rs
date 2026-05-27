@@ -66,13 +66,10 @@ impl ChatSessionResource {
 }
 /// Type discriminator that is always `chatkit.session`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Object {
     #[serde(rename = "chatkit.session")]
+    #[default]
     ChatkitSession,
 }
 
-impl Default for Object {
-    fn default() -> Object {
-        Self::ChatkitSession
-    }
-}

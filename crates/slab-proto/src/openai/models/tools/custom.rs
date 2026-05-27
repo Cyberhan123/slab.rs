@@ -36,16 +36,13 @@ impl CustomToolCall {
 }
 /// The type of the custom tool call. Always `custom_tool_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum CustomToolCallType {
     #[serde(rename = "custom_tool_call")]
+    #[default]
     CustomToolCall,
 }
 
-impl Default for CustomToolCallType {
-    fn default() -> CustomToolCallType {
-        Self::CustomToolCall
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CustomToolCallOutput {
@@ -74,16 +71,13 @@ impl CustomToolCallOutput {
 }
 /// The type of the custom tool call output. Always `custom_tool_call_output`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum CustomToolCallOutputType {
     #[serde(rename = "custom_tool_call_output")]
+    #[default]
     CustomToolCallOutput,
 }
 
-impl Default for CustomToolCallOutputType {
-    fn default() -> CustomToolCallOutputType {
-        Self::CustomToolCallOutput
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -141,16 +135,13 @@ impl CustomToolCallOutputResource {
 }
 /// The type of the custom tool call output. Always `custom_tool_call_output`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum CustomToolCallOutputResourceType {
     #[serde(rename = "custom_tool_call_output")]
+    #[default]
     CustomToolCallOutput,
 }
 
-impl Default for CustomToolCallOutputResourceType {
-    fn default() -> CustomToolCallOutputResourceType {
-        Self::CustomToolCallOutput
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CustomToolCallResource {
@@ -203,16 +194,13 @@ impl CustomToolCallResource {
 }
 /// The type of the custom tool call. Always `custom_tool_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum CustomToolCallResourceType {
     #[serde(rename = "custom_tool_call")]
+    #[default]
     CustomToolCall,
 }
 
-impl Default for CustomToolCallResourceType {
-    fn default() -> CustomToolCallResourceType {
-        Self::CustomToolCall
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CustomToolChatCompletions {
@@ -234,16 +222,13 @@ impl CustomToolChatCompletions {
 }
 /// The type of the custom tool. Always `custom`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum CustomToolChatCompletionsType {
     #[serde(rename = "custom")]
+    #[default]
     Custom,
 }
 
-impl Default for CustomToolChatCompletionsType {
-    fn default() -> CustomToolChatCompletionsType {
-        Self::Custom
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CustomToolParam {
@@ -271,16 +256,13 @@ impl CustomToolParam {
 }
 /// The type of the custom tool. Always `custom`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum CustomToolParamType {
     #[serde(rename = "custom")]
+    #[default]
     Custom,
 }
 
-impl Default for CustomToolParamType {
-    fn default() -> CustomToolParamType {
-        Self::Custom
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -330,15 +312,12 @@ impl Default for CustomToolPropertiesFormat {
 }
 /// Unconstrained text format. Always `text`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum CustomToolPropertiesFormatType {
     #[serde(rename = "text")]
+    #[default]
     Text,
     #[serde(rename = "grammar")]
     Grammar,
 }
 
-impl Default for CustomToolPropertiesFormatType {
-    fn default() -> CustomToolPropertiesFormatType {
-        Self::Text
-    }
-}

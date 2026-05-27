@@ -1,4 +1,3 @@
-use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -24,16 +23,13 @@ impl VadConfig {
 }
 /// Must be set to `server_vad` to enable manual chunking using server side VAD.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum VadConfigType {
     #[serde(rename = "server_vad")]
+    #[default]
     ServerVad,
 }
 
-impl Default for VadConfigType {
-    fn default() -> VadConfigType {
-        Self::ServerVad
-    }
-}
 
 use super::misc::Eagerness;
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -60,16 +56,13 @@ impl SemanticVad {
 }
 /// Type of turn detection, `semantic_vad` to turn on Semantic VAD.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum SemanticVadType {
     #[serde(rename = "semantic_vad")]
+    #[default]
     SemanticVad,
 }
 
-impl Default for SemanticVadType {
-    fn default() -> SemanticVadType {
-        Self::SemanticVad
-    }
-}
 // Used only for `semantic_vad` mode. The eagerness of the model to respond. `low` will wait longer for the user to continue speaking, `high` will respond more quickly. `auto` is the default and is equivalent to `medium`. `low`, `medium`, and `high` have max timeouts of 8s, 4s, and 2s respectively.
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -118,13 +111,10 @@ impl ServerVad {
 }
 /// Type of turn detection, `server_vad` to turn on simple Server VAD.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ServerVadType {
     #[serde(rename = "server_vad")]
+    #[default]
     ServerVad,
 }
 
-impl Default for ServerVadType {
-    fn default() -> ServerVadType {
-        Self::ServerVad
-    }
-}

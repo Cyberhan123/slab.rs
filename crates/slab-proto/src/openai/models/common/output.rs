@@ -96,19 +96,15 @@ impl Default for OutputItem {
 
 /// The role of the output message. Always `assistant`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum OutputItemRole {
     #[serde(rename = "assistant")]
+    #[default]
     Assistant,
 }
 
-impl Default for OutputItemRole {
-    fn default() -> OutputItemRole {
-        Self::Assistant
-    }
-}
 
 use super::status::Status;
-use crate::openai::models::images::edit::EditImageInputFidelity;
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OutputMessage {
     /// The unique ID of the output message.
@@ -149,28 +145,22 @@ impl OutputMessage {
 }
 /// The type of the output message. Always `message`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum Type {
     #[serde(rename = "message")]
+    #[default]
     Message,
 }
 
-impl Default for Type {
-    fn default() -> Type {
-        Self::Message
-    }
-}
 /// The role of the output message. Always `assistant`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum OutputMessageRole {
     #[serde(rename = "assistant")]
+    #[default]
     Assistant,
 }
 
-impl Default for OutputMessageRole {
-    fn default() -> OutputMessageRole {
-        Self::Assistant
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -237,13 +227,10 @@ impl Default for ItemResource {
 
 /// The role of the output message. Always `assistant`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ItemResourceRole {
     #[serde(rename = "assistant")]
+    #[default]
     Assistant,
 }
 
-impl Default for ItemResourceRole {
-    fn default() -> ItemResourceRole {
-        Self::Assistant
-    }
-}

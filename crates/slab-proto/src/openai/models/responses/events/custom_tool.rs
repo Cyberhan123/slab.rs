@@ -1,4 +1,3 @@
-use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -42,15 +41,13 @@ pub mod custom_tool_call_input_delta_type {
     use serde::{Deserialize, Serialize};
     /// The event type identifier.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.custom_tool_call_input.delta")]
+        #[default]
         ResponseCustomToolCallInputDelta,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseCustomToolCallInputDelta
-        }
-    }
+    
 }
 pub use custom_tool_call_input_delta_type::Type as CustomToolCallInputDeltaType;
 
@@ -95,14 +92,12 @@ pub mod custom_tool_call_input_done_type {
     use serde::{Deserialize, Serialize};
     /// The event type identifier.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.custom_tool_call_input.done")]
+        #[default]
         ResponseCustomToolCallInputDone,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseCustomToolCallInputDone
-        }
-    }
+    
 }
 pub use custom_tool_call_input_done_type::Type as CustomToolCallInputDoneType;

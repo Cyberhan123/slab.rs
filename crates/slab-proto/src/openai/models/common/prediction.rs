@@ -18,16 +18,13 @@ impl PredictionContent {
 }
 /// The type of the predicted content you want to provide. This type is currently always `content`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum Type {
     #[serde(rename = "content")]
+    #[default]
     Content,
 }
 
-impl Default for Type {
-    fn default() -> Type {
-        Self::Content
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]

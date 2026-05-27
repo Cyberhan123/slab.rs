@@ -20,8 +20,10 @@ impl Default for ChatCompletionToolChoiceOption {
 }
 /// Allowed tool configuration type. Always `allowed_tools`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ChatCompletionToolChoiceOptionType {
     #[serde(rename = "allowed_tools")]
+    #[default]
     AllowedTools,
     #[serde(rename = "function")]
     Function,
@@ -29,11 +31,6 @@ pub enum ChatCompletionToolChoiceOptionType {
     Custom,
 }
 
-impl Default for ChatCompletionToolChoiceOptionType {
-    fn default() -> ChatCompletionToolChoiceOptionType {
-        Self::AllowedTools
-    }
-}
 
 /// ChatCompletionRequestToolMessageContent : The contents of the tool message.
 /// The contents of the tool message.
@@ -73,13 +70,10 @@ impl ChatCompletionTool {
 }
 /// The type of the tool. Currently, only `function` is supported.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ChatCompletionToolType {
     #[serde(rename = "function")]
+    #[default]
     Function,
 }
 
-impl Default for ChatCompletionToolType {
-    fn default() -> ChatCompletionToolType {
-        Self::Function
-    }
-}

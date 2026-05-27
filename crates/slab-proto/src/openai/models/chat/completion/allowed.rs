@@ -22,16 +22,13 @@ impl ChatCompletionAllowedToolsChoice {
 }
 /// Allowed tool configuration type. Always `allowed_tools`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Type {
     #[serde(rename = "allowed_tools")]
+    #[default]
     AllowedTools,
 }
 
-impl Default for Type {
-    fn default() -> Type {
-        Self::AllowedTools
-    }
-}
 
 /// ChatCompletionAllowedTools : Constrains the tools available to the model to a pre-defined set.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -55,15 +52,12 @@ impl ChatCompletionAllowedTools {
 }
 /// Constrains the tools available to the model to a pre-defined set.  `auto` allows the model to pick from among the allowed tools and generate a message.  `required` requires the model to call one or more of the allowed tools.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Mode {
     #[serde(rename = "auto")]
+    #[default]
     Auto,
     #[serde(rename = "required")]
     Required,
 }
 
-impl Default for Mode {
-    fn default() -> Mode {
-        Self::Auto
-    }
-}

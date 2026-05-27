@@ -4,15 +4,13 @@ use serde::{Deserialize, Serialize};
 pub mod text_delta_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.output_text.delta")]
+        #[default]
         ResponseOutputTextDelta,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseOutputTextDelta
-        }
-    }
+    
 }
 pub use text_delta_type::Type as TextDeltaType;
 
@@ -67,15 +65,13 @@ impl ResponseTextDeltaEvent {
 pub mod text_done_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.output_text.done")]
+        #[default]
         ResponseOutputTextDone,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseOutputTextDone
-        }
-    }
+    
 }
 pub use text_done_type::Type as TextDoneType;
 

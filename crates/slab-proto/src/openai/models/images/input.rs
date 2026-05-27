@@ -36,16 +36,14 @@ pub mod input_image_content {
     }
     /// The type of the input item. Always `input_image`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Type {
         #[serde(rename = "input_image")]
+        #[default]
         InputImage,
     }
 
-    impl Default for Type {
-        fn default() -> Type {
-            Self::InputImage
-        }
-    }
+    
 }
 
 pub mod input_image_content_param_auto_param {
@@ -91,20 +89,18 @@ pub mod input_image_content_param_auto_param {
     }
     /// The type of the input item. Always `input_image`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Type {
         #[serde(rename = "input_image")]
+        #[default]
         InputImage,
     }
 
-    impl Default for Type {
-        fn default() -> Type {
-            Self::InputImage
-        }
-    }
+    
 }
 
 pub mod image_ref_param {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -126,7 +122,7 @@ pub mod image_ref_param {
 }
 
 pub mod image_ref_param2 {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -148,5 +144,4 @@ pub mod image_ref_param2 {
 pub use image_ref_param::ImageRefParam;
 pub use image_ref_param2::ImageRefParam2;
 pub use input_image_content::InputImageContent;
-pub(crate) use input_image_content::Type;
 pub use input_image_content_param_auto_param::InputImageContentParamAutoParam;

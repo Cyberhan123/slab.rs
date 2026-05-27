@@ -34,8 +34,10 @@ impl Attachment {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum AttachmentType {
     #[serde(rename = "image")]
+    #[default]
     Image,
     #[serde(rename = "file")]
     File,
@@ -50,8 +52,3 @@ impl std::fmt::Display for AttachmentType {
     }
 }
 
-impl Default for AttachmentType {
-    fn default() -> AttachmentType {
-        Self::Image
-    }
-}

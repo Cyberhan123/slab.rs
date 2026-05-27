@@ -22,20 +22,17 @@ pub enum CreateEmbeddingRequestModel {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum CreateEmbeddingRequestModelEnum {
     #[serde(rename = "text-embedding-ada-002")]
     TextEmbeddingAda002,
     #[serde(rename = "text-embedding-3-small")]
+    #[default]
     TextEmbedding3Small,
     #[serde(rename = "text-embedding-3-large")]
     TextEmbedding3Large,
 }
 
-impl Default for CreateEmbeddingRequestModelEnum {
-    fn default() -> Self {
-        Self::TextEmbedding3Small
-    }
-}
 
 impl Default for CreateEmbeddingRequestModel {
     fn default() -> Self {
@@ -44,18 +41,15 @@ impl Default for CreateEmbeddingRequestModel {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum EmbeddingEncodingFormat {
     #[serde(rename = "float")]
+    #[default]
     Float,
     #[serde(rename = "base64")]
     Base64,
 }
 
-impl Default for EmbeddingEncodingFormat {
-    fn default() -> Self {
-        Self::Float
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CreateEmbeddingResponse {
@@ -70,16 +64,13 @@ pub struct CreateEmbeddingResponse {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum EmbeddingResponseObject {
     #[serde(rename = "list")]
+    #[default]
     List,
 }
 
-impl Default for EmbeddingResponseObject {
-    fn default() -> Self {
-        Self::List
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Embedding {
@@ -92,16 +83,13 @@ pub struct Embedding {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum EmbeddingObject {
     #[serde(rename = "embedding")]
+    #[default]
     Embedding,
 }
 
-impl Default for EmbeddingObject {
-    fn default() -> Self {
-        Self::Embedding
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CreateEmbeddingResponseUsage {

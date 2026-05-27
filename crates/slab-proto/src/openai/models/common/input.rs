@@ -36,16 +36,13 @@ impl InputTextContent {
 }
 /// The type of the input item. Always `input_text`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum InputTextContentType {
     #[serde(rename = "input_text")]
+    #[default]
     InputText,
 }
 
-impl Default for InputTextContentType {
-    fn default() -> InputTextContentType {
-        Self::InputText
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputTextContentParam {
@@ -65,16 +62,13 @@ impl InputTextContentParam {
 }
 /// The type of the input item. Always `input_text`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum InputTextContentParamType {
     #[serde(rename = "input_text")]
+    #[default]
     InputText,
 }
 
-impl Default for InputTextContentParamType {
-    fn default() -> InputTextContentParamType {
-        Self::InputText
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputFileContent {
@@ -118,16 +112,13 @@ impl InputFileContent {
 }
 /// The type of the input item. Always `input_file`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum InputFileContentType {
     #[serde(rename = "input_file")]
+    #[default]
     InputFile,
 }
 
-impl Default for InputFileContentType {
-    fn default() -> InputFileContentType {
-        Self::InputFile
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputFileContentParam {
@@ -186,20 +177,19 @@ impl InputFileContentParam {
 }
 /// The type of the input item. Always `input_file`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum InputFileContentParamType {
     #[serde(rename = "input_file")]
+    #[default]
     InputFile,
 }
 
-impl Default for InputFileContentParamType {
-    fn default() -> InputFileContentParamType {
-        Self::InputFile
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum InputFidelity {
     #[serde(rename = "high")]
+    #[default]
     High,
     #[serde(rename = "low")]
     Low,
@@ -214,11 +204,6 @@ impl std::fmt::Display for InputFidelity {
     }
 }
 
-impl Default for InputFidelity {
-    fn default() -> InputFidelity {
-        Self::High
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -262,8 +247,10 @@ impl InputMessage {
 }
 /// The role of the message input. One of `user`, `system`, or `developer`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum InputMessageRole {
     #[serde(rename = "user")]
+    #[default]
     User,
     #[serde(rename = "system")]
     System,
@@ -271,27 +258,21 @@ pub(crate) enum InputMessageRole {
     Developer,
 }
 
-impl Default for InputMessageRole {
-    fn default() -> InputMessageRole {
-        Self::User
-    }
-}
 /// The type of the message input. Always set to `message`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum InputMessageType {
     #[serde(rename = "message")]
+    #[default]
     Message,
 }
 
-impl Default for InputMessageType {
-    fn default() -> InputMessageType {
-        Self::Message
-    }
-}
 /// The status of item. One of `in_progress`, `completed`, or `incomplete`. Populated when items are returned via API.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum InputMessageStatus {
     #[serde(rename = "in_progress")]
+    #[default]
     InProgress,
     #[serde(rename = "completed")]
     Completed,
@@ -299,11 +280,6 @@ pub(crate) enum InputMessageStatus {
     Incomplete,
 }
 
-impl Default for InputMessageStatus {
-    fn default() -> InputMessageStatus {
-        Self::InProgress
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputMessageResource {
@@ -335,8 +311,10 @@ impl InputMessageResource {
 }
 /// The role of the message input. One of `user`, `system`, or `developer`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum InputMessageResourceRole {
     #[serde(rename = "user")]
+    #[default]
     User,
     #[serde(rename = "system")]
     System,
@@ -344,27 +322,21 @@ pub(crate) enum InputMessageResourceRole {
     Developer,
 }
 
-impl Default for InputMessageResourceRole {
-    fn default() -> InputMessageResourceRole {
-        Self::User
-    }
-}
 /// The type of the message input. Always set to `message`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum InputMessageResourceType {
     #[serde(rename = "message")]
+    #[default]
     Message,
 }
 
-impl Default for InputMessageResourceType {
-    fn default() -> InputMessageResourceType {
-        Self::Message
-    }
-}
 /// The status of item. One of `in_progress`, `completed`, or `incomplete`. Populated when items are returned via API.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum InputMessageResourceStatus {
     #[serde(rename = "in_progress")]
+    #[default]
     InProgress,
     #[serde(rename = "completed")]
     Completed,
@@ -372,11 +344,6 @@ pub(crate) enum InputMessageResourceStatus {
     Incomplete,
 }
 
-impl Default for InputMessageResourceStatus {
-    fn default() -> InputMessageResourceStatus {
-        Self::InProgress
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputMessagesItemReference {
@@ -398,16 +365,13 @@ impl InputMessagesItemReference {
 }
 /// The type of input messages. Always `item_reference`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum InputMessagesItemReferenceType {
     #[serde(rename = "item_reference")]
+    #[default]
     ItemReference,
 }
 
-impl Default for InputMessagesItemReferenceType {
-    fn default() -> InputMessagesItemReferenceType {
-        Self::ItemReference
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputMessagesTemplate {
@@ -429,16 +393,13 @@ impl InputMessagesTemplate {
 }
 /// The type of input messages. Always `template`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum InputMessagesTemplateType {
     #[serde(rename = "template")]
+    #[default]
     Template,
 }
 
-impl Default for InputMessagesTemplateType {
-    fn default() -> InputMessagesTemplateType {
-        Self::Template
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TemplateInputMessages {
@@ -460,16 +421,13 @@ impl TemplateInputMessages {
 }
 /// The type of input messages. Always `template`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum TemplateInputMessagesType {
     #[serde(rename = "template")]
+    #[default]
     Template,
 }
 
-impl Default for TemplateInputMessagesType {
-    fn default() -> TemplateInputMessagesType {
-        Self::Template
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ItemReferenceInputMessages {
@@ -491,16 +449,13 @@ impl ItemReferenceInputMessages {
 }
 /// The type of input messages. Always `item_reference`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ItemReferenceInputMessagesType {
     #[serde(rename = "item_reference")]
+    #[default]
     ItemReference,
 }
 
-impl Default for ItemReferenceInputMessagesType {
-    fn default() -> ItemReferenceInputMessagesType {
-        Self::ItemReference
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ItemReferenceParam {
@@ -525,16 +480,13 @@ impl ItemReferenceParam {
 }
 /// The type of item to reference. Always `item_reference`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ItemReferenceParamType {
     #[serde(rename = "item_reference")]
+    #[default]
     ItemReference,
 }
 
-impl Default for ItemReferenceParamType {
-    fn default() -> ItemReferenceParamType {
-        Self::ItemReference
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SimpleInputMessage {

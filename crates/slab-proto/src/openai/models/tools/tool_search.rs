@@ -39,16 +39,13 @@ impl ToolSearchCall {
 }
 /// The type of the item. Always `tool_search_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ToolSearchCallType {
     #[serde(rename = "tool_search_call")]
+    #[default]
     ToolSearchCall,
 }
 
-impl Default for ToolSearchCallType {
-    fn default() -> ToolSearchCallType {
-        Self::ToolSearchCall
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolSearchCallItemParam {
@@ -104,20 +101,19 @@ impl ToolSearchCallItemParam {
 }
 /// The item type. Always `tool_search_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ToolSearchCallItemParamType {
     #[serde(rename = "tool_search_call")]
+    #[default]
     ToolSearchCall,
 }
 
-impl Default for ToolSearchCallItemParamType {
-    fn default() -> ToolSearchCallItemParamType {
-        Self::ToolSearchCall
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ToolSearchExecutionType {
     #[serde(rename = "server")]
+    #[default]
     Server,
     #[serde(rename = "client")]
     Client,
@@ -132,11 +128,6 @@ impl std::fmt::Display for ToolSearchExecutionType {
     }
 }
 
-impl Default for ToolSearchExecutionType {
-    fn default() -> ToolSearchExecutionType {
-        Self::Server
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolSearchOutput {
@@ -177,16 +168,13 @@ impl ToolSearchOutput {
 }
 /// The type of the item. Always `tool_search_output`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ToolSearchOutputType {
     #[serde(rename = "tool_search_output")]
+    #[default]
     ToolSearchOutput,
 }
 
-impl Default for ToolSearchOutputType {
-    fn default() -> ToolSearchOutputType {
-        Self::ToolSearchOutput
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolSearchOutputItemParam {
@@ -242,16 +230,13 @@ impl ToolSearchOutputItemParam {
 }
 /// The item type. Always `tool_search_output`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ToolSearchOutputItemParamType {
     #[serde(rename = "tool_search_output")]
+    #[default]
     ToolSearchOutput,
 }
 
-impl Default for ToolSearchOutputItemParamType {
-    fn default() -> ToolSearchOutputItemParamType {
-        Self::ToolSearchOutput
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolSearchToolParam {
@@ -287,13 +272,10 @@ impl ToolSearchToolParam {
 }
 /// The type of the tool. Always `tool_search`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ToolSearchToolParamType {
     #[serde(rename = "tool_search")]
+    #[default]
     ToolSearch,
 }
 
-impl Default for ToolSearchToolParamType {
-    fn default() -> ToolSearchToolParamType {
-        Self::ToolSearch
-    }
-}

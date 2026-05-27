@@ -3,7 +3,7 @@ pub mod image_gen_tool {
     use serde::{Deserialize, Serialize};
 
     use super::super::params::Moderation;
-    use super::super::params::Status;
+    
     use super::super::resource::Background;
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
     pub struct ImageGenTool {
@@ -67,20 +67,20 @@ pub mod image_gen_tool {
     }
     /// The type of the image generation tool. Always `image_generation`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Type {
         #[serde(rename = "image_generation")]
+        #[default]
         ImageGeneration,
     }
 
-    impl Default for Type {
-        fn default() -> Type {
-            Self::ImageGeneration
-        }
-    }
+    
     /// The quality of the generated image. One of `low`, `medium`, `high`, or `auto`. Default: `auto`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Quality {
         #[serde(rename = "low")]
+        #[default]
         Low,
         #[serde(rename = "medium")]
         Medium,
@@ -90,15 +90,13 @@ pub mod image_gen_tool {
         Auto,
     }
 
-    impl Default for Quality {
-        fn default() -> Quality {
-            Self::Low
-        }
-    }
+    
     /// The output format of the generated image. One of `png`, `webp`, or `jpeg`. Default: `png`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum OutputFormat {
         #[serde(rename = "png")]
+        #[default]
         Png,
         #[serde(rename = "webp")]
         Webp,
@@ -106,20 +104,16 @@ pub mod image_gen_tool {
         Jpeg,
     }
 
-    impl Default for OutputFormat {
-        fn default() -> OutputFormat {
-            Self::Png
-        }
-    }
+    
     // Moderation level for the generated image. Default: `auto`.
 }
 
 pub mod image_gen_tool_call {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     use super::super::params::Status;
-    use super::super::resource::Background;
+    
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
     pub struct ImageGenToolCall {
         /// The type of the image generation call. Always `image_generation_call`.
@@ -149,21 +143,19 @@ pub mod image_gen_tool_call {
     }
     /// The type of the image generation call. Always `image_generation_call`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Type {
         #[serde(rename = "image_generation_call")]
+        #[default]
         ImageGenerationCall,
     }
 
-    impl Default for Type {
-        fn default() -> Type {
-            Self::ImageGenerationCall
-        }
-    }
+    
     // The status of the image generation call.
 }
 
 pub mod image_gen_tool_input_image_mask {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -185,7 +177,7 @@ pub mod image_gen_tool_input_image_mask {
 }
 
 pub mod image_gen_tool_model {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -199,7 +191,7 @@ pub mod image_gen_tool_model {
 }
 
 pub mod image_gen_tool_size {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -214,9 +206,6 @@ pub mod image_gen_tool_size {
 }
 
 pub use image_gen_tool::ImageGenTool;
-pub(crate) use image_gen_tool::OutputFormat;
-pub(crate) use image_gen_tool::Quality;
-pub(crate) use image_gen_tool::Type;
 pub use image_gen_tool_call::ImageGenToolCall;
 pub use image_gen_tool_input_image_mask::ImageGenToolInputImageMask;
 pub use image_gen_tool_model::ImageGenToolModel;

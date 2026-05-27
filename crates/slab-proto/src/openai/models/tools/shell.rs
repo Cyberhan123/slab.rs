@@ -94,23 +94,20 @@ impl FunctionShellCall {
             call_id,
             action: Box::new(action),
             status,
-            environment: if let Some(x) = environment { Some(Box::new(x)) } else { None },
+            environment: environment.map(Box::new),
             created_by: None,
         }
     }
 }
 /// The type of the item. Always `shell_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum FunctionShellCallType {
     #[serde(rename = "shell_call")]
+    #[default]
     ShellCall,
 }
 
-impl Default for FunctionShellCallType {
-    fn default() -> FunctionShellCallType {
-        Self::ShellCall
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionShellCallItemParam {
@@ -167,20 +164,19 @@ impl FunctionShellCallItemParam {
 }
 /// The type of the item. Always `shell_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum FunctionShellCallItemParamType {
     #[serde(rename = "shell_call")]
+    #[default]
     ShellCall,
 }
 
-impl Default for FunctionShellCallItemParamType {
-    fn default() -> FunctionShellCallItemParamType {
-        Self::ShellCall
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum FunctionShellCallItemStatus {
     #[serde(rename = "in_progress")]
+    #[default]
     InProgress,
     #[serde(rename = "completed")]
     Completed,
@@ -198,11 +194,6 @@ impl std::fmt::Display for FunctionShellCallItemStatus {
     }
 }
 
-impl Default for FunctionShellCallItemStatus {
-    fn default() -> FunctionShellCallItemStatus {
-        Self::InProgress
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionShellCallOutput {
@@ -252,16 +243,13 @@ impl FunctionShellCallOutput {
 }
 /// The type of the shell call output. Always `shell_call_output`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum FunctionShellCallOutputType {
     #[serde(rename = "shell_call_output")]
+    #[default]
     ShellCallOutput,
 }
 
-impl Default for FunctionShellCallOutputType {
-    fn default() -> FunctionShellCallOutputType {
-        Self::ShellCallOutput
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionShellCallOutputContent {
@@ -339,16 +327,13 @@ impl FunctionShellCallOutputExitOutcome {
 }
 /// The outcome type. Always `exit`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum FunctionShellCallOutputExitOutcomeType {
     #[serde(rename = "exit")]
+    #[default]
     Exit,
 }
 
-impl Default for FunctionShellCallOutputExitOutcomeType {
-    fn default() -> FunctionShellCallOutputExitOutcomeType {
-        Self::Exit
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionShellCallOutputExitOutcomeParam {
@@ -371,16 +356,13 @@ impl FunctionShellCallOutputExitOutcomeParam {
 }
 /// The outcome type. Always `exit`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum FunctionShellCallOutputExitOutcomeParamType {
     #[serde(rename = "exit")]
+    #[default]
     Exit,
 }
 
-impl Default for FunctionShellCallOutputExitOutcomeParamType {
-    fn default() -> FunctionShellCallOutputExitOutcomeParamType {
-        Self::Exit
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionShellCallOutputItemParam {
@@ -438,16 +420,13 @@ impl FunctionShellCallOutputItemParam {
 }
 /// The type of the item. Always `shell_call_output`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum FunctionShellCallOutputItemParamType {
     #[serde(rename = "shell_call_output")]
+    #[default]
     ShellCallOutput,
 }
 
-impl Default for FunctionShellCallOutputItemParamType {
-    fn default() -> FunctionShellCallOutputItemParamType {
-        Self::ShellCallOutput
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -467,8 +446,10 @@ impl Default for FunctionShellCallOutputOutcomeParam {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum FunctionShellCallOutputStatusEnum {
     #[serde(rename = "in_progress")]
+    #[default]
     InProgress,
     #[serde(rename = "completed")]
     Completed,
@@ -486,11 +467,6 @@ impl std::fmt::Display for FunctionShellCallOutputStatusEnum {
     }
 }
 
-impl Default for FunctionShellCallOutputStatusEnum {
-    fn default() -> FunctionShellCallOutputStatusEnum {
-        Self::InProgress
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionShellCallOutputTimeoutOutcome {
@@ -509,16 +485,13 @@ impl FunctionShellCallOutputTimeoutOutcome {
 }
 /// The outcome type. Always `timeout`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum FunctionShellCallOutputTimeoutOutcomeType {
     #[serde(rename = "timeout")]
+    #[default]
     Timeout,
 }
 
-impl Default for FunctionShellCallOutputTimeoutOutcomeType {
-    fn default() -> FunctionShellCallOutputTimeoutOutcomeType {
-        Self::Timeout
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionShellCallOutputTimeoutOutcomeParam {
@@ -537,20 +510,19 @@ impl FunctionShellCallOutputTimeoutOutcomeParam {
 }
 /// The outcome type. Always `timeout`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum FunctionShellCallOutputTimeoutOutcomeParamType {
     #[serde(rename = "timeout")]
+    #[default]
     Timeout,
 }
 
-impl Default for FunctionShellCallOutputTimeoutOutcomeParamType {
-    fn default() -> FunctionShellCallOutputTimeoutOutcomeParamType {
-        Self::Timeout
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum FunctionShellCallStatus {
     #[serde(rename = "in_progress")]
+    #[default]
     InProgress,
     #[serde(rename = "completed")]
     Completed,
@@ -568,11 +540,6 @@ impl std::fmt::Display for FunctionShellCallStatus {
     }
 }
 
-impl Default for FunctionShellCallStatus {
-    fn default() -> FunctionShellCallStatus {
-        Self::InProgress
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionShellToolParam {
@@ -596,16 +563,13 @@ impl FunctionShellToolParam {
 }
 /// The type of the shell tool. Always `shell`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum FunctionShellToolParamType {
     #[serde(rename = "shell")]
+    #[default]
     Shell,
 }
 
-impl Default for FunctionShellToolParamType {
-    fn default() -> FunctionShellToolParamType {
-        Self::Shell
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LocalEnvironmentParam {
@@ -624,16 +588,13 @@ impl LocalEnvironmentParam {
 }
 /// Use a local computer environment.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum LocalEnvironmentParamType {
     #[serde(rename = "local")]
+    #[default]
     Local,
 }
 
-impl Default for LocalEnvironmentParamType {
-    fn default() -> LocalEnvironmentParamType {
-        Self::Local
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LocalEnvironmentResource {
@@ -650,16 +611,13 @@ impl LocalEnvironmentResource {
 }
 /// The environment type. Always `local`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum LocalEnvironmentResourceType {
     #[serde(rename = "local")]
+    #[default]
     Local,
 }
 
-impl Default for LocalEnvironmentResourceType {
-    fn default() -> LocalEnvironmentResourceType {
-        Self::Local
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LocalShellExecAction {
@@ -717,16 +675,13 @@ impl LocalShellExecAction {
 }
 /// The type of the local shell action. Always `exec`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum LocalShellExecActionType {
     #[serde(rename = "exec")]
+    #[default]
     Exec,
 }
 
-impl Default for LocalShellExecActionType {
-    fn default() -> LocalShellExecActionType {
-        Self::Exec
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LocalShellToolCall {
@@ -760,20 +715,19 @@ impl LocalShellToolCall {
 }
 /// The type of the local shell call. Always `local_shell_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum LocalShellToolCallType {
     #[serde(rename = "local_shell_call")]
+    #[default]
     LocalShellCall,
 }
 
-impl Default for LocalShellToolCallType {
-    fn default() -> LocalShellToolCallType {
-        Self::LocalShellCall
-    }
-}
 /// The status of the local shell call.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum LocalShellToolCallStatus {
     #[serde(rename = "in_progress")]
+    #[default]
     InProgress,
     #[serde(rename = "completed")]
     Completed,
@@ -781,11 +735,6 @@ pub(crate) enum LocalShellToolCallStatus {
     Incomplete,
 }
 
-impl Default for LocalShellToolCallStatus {
-    fn default() -> LocalShellToolCallStatus {
-        Self::InProgress
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LocalShellToolCallOutput {
@@ -820,20 +769,19 @@ impl LocalShellToolCallOutput {
 }
 /// The type of the local shell tool call output. Always `local_shell_call_output`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum LocalShellToolCallOutputType {
     #[serde(rename = "local_shell_call_output")]
+    #[default]
     LocalShellCallOutput,
 }
 
-impl Default for LocalShellToolCallOutputType {
-    fn default() -> LocalShellToolCallOutputType {
-        Self::LocalShellCallOutput
-    }
-}
 /// The status of the item. One of `in_progress`, `completed`, or `incomplete`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum LocalShellToolCallOutputStatus {
     #[serde(rename = "in_progress")]
+    #[default]
     InProgress,
     #[serde(rename = "completed")]
     Completed,
@@ -841,11 +789,6 @@ pub(crate) enum LocalShellToolCallOutputStatus {
     Incomplete,
 }
 
-impl Default for LocalShellToolCallOutputStatus {
-    fn default() -> LocalShellToolCallOutputStatus {
-        Self::InProgress
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LocalShellToolParam {
@@ -862,16 +805,13 @@ impl LocalShellToolParam {
 }
 /// The type of the local shell tool. Always `local_shell`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum LocalShellToolParamType {
     #[serde(rename = "local_shell")]
+    #[default]
     LocalShell,
 }
 
-impl Default for LocalShellToolParamType {
-    fn default() -> LocalShellToolParamType {
-        Self::LocalShell
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]

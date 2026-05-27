@@ -1,18 +1,15 @@
-use crate::models;
 use serde::{Deserialize, Serialize};
 
 pub mod audio_delta_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.audio.delta")]
+        #[default]
         ResponseAudioDelta,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseAudioDelta
-        }
-    }
+    
 }
 pub use audio_delta_type::Type as AudioDeltaType;
 
@@ -43,15 +40,13 @@ impl ResponseAudioDeltaEvent {
 pub mod audio_done_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.audio.done")]
+        #[default]
         ResponseAudioDone,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseAudioDone
-        }
-    }
+    
 }
 pub use audio_done_type::Type as AudioDoneType;
 
@@ -75,15 +70,13 @@ impl ResponseAudioDoneEvent {
 pub mod audio_transcript_delta_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.audio.transcript.delta")]
+        #[default]
         ResponseAudioTranscriptDelta,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseAudioTranscriptDelta
-        }
-    }
+    
 }
 pub use audio_transcript_delta_type::Type as AudioTranscriptDeltaType;
 
@@ -114,15 +107,13 @@ impl ResponseAudioTranscriptDeltaEvent {
 pub mod audio_transcript_done_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.audio.transcript.done")]
+        #[default]
         ResponseAudioTranscriptDone,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseAudioTranscriptDone
-        }
-    }
+    
 }
 pub use audio_transcript_done_type::Type as AudioTranscriptDoneType;
 

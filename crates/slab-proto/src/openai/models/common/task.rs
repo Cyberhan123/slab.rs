@@ -38,28 +38,22 @@ impl TaskGroupItem {
 }
 /// Type discriminator that is always `chatkit.thread_item`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum TaskGroupItemObject {
     #[serde(rename = "chatkit.thread_item")]
+    #[default]
     ChatkitThreadItem,
 }
 
-impl Default for TaskGroupItemObject {
-    fn default() -> TaskGroupItemObject {
-        Self::ChatkitThreadItem
-    }
-}
 /// Type discriminator that is always `chatkit.task_group`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum TaskGroupItemType {
     #[serde(rename = "chatkit.task_group")]
+    #[default]
     ChatkitTaskGroup,
 }
 
-impl Default for TaskGroupItemType {
-    fn default() -> TaskGroupItemType {
-        Self::ChatkitTaskGroup
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TaskGroupTask {
@@ -130,32 +124,28 @@ impl TaskItem {
 }
 /// Type discriminator that is always `chatkit.thread_item`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum TaskItemObject {
     #[serde(rename = "chatkit.thread_item")]
+    #[default]
     ChatkitThreadItem,
 }
 
-impl Default for TaskItemObject {
-    fn default() -> TaskItemObject {
-        Self::ChatkitThreadItem
-    }
-}
 /// Type discriminator that is always `chatkit.task`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum TaskItemType {
     #[serde(rename = "chatkit.task")]
+    #[default]
     ChatkitTask,
 }
 
-impl Default for TaskItemType {
-    fn default() -> TaskItemType {
-        Self::ChatkitTask
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum TaskType {
     #[serde(rename = "custom")]
+    #[default]
     Custom,
     #[serde(rename = "thought")]
     Thought,
@@ -170,8 +160,3 @@ impl std::fmt::Display for TaskType {
     }
 }
 
-impl Default for TaskType {
-    fn default() -> TaskType {
-        Self::Custom
-    }
-}

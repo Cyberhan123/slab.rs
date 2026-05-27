@@ -52,8 +52,10 @@ pub enum CreateCompletionRequestModel {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum CreateCompletionRequestModelEnum {
     #[serde(rename = "gpt-3.5-turbo-instruct")]
+    #[default]
     Gpt35TurboInstruct,
     #[serde(rename = "davinci-002")]
     Davinci002,
@@ -61,11 +63,6 @@ pub enum CreateCompletionRequestModelEnum {
     Babbage002,
 }
 
-impl Default for CreateCompletionRequestModelEnum {
-    fn default() -> Self {
-        Self::Gpt35TurboInstruct
-    }
-}
 
 impl Default for CreateCompletionRequestModel {
     fn default() -> Self {
@@ -92,16 +89,13 @@ pub struct CreateCompletionResponse {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum CompletionResponseObject {
     #[serde(rename = "text_completion")]
+    #[default]
     TextCompletion,
 }
 
-impl Default for CompletionResponseObject {
-    fn default() -> Self {
-        Self::TextCompletion
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CreateCompletionResponseChoicesInner {
@@ -116,8 +110,10 @@ pub struct CreateCompletionResponseChoicesInner {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum CompletionFinishReason {
     #[serde(rename = "stop")]
+    #[default]
     Stop,
     #[serde(rename = "length")]
     Length,
@@ -125,8 +121,3 @@ pub enum CompletionFinishReason {
     ContentFilter,
 }
 
-impl Default for CompletionFinishReason {
-    fn default() -> Self {
-        Self::Stop
-    }
-}

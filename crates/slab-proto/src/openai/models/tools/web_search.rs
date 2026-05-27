@@ -42,16 +42,13 @@ impl WebSearchActionFind {
 }
 /// The action type.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum WebSearchActionFindType {
     #[serde(rename = "find_in_page")]
+    #[default]
     FindInPage,
 }
 
-impl Default for WebSearchActionFindType {
-    fn default() -> WebSearchActionFindType {
-        Self::FindInPage
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchActionOpenPage {
@@ -76,16 +73,13 @@ impl WebSearchActionOpenPage {
 }
 /// The action type.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum WebSearchActionOpenPageType {
     #[serde(rename = "open_page")]
+    #[default]
     OpenPage,
 }
 
-impl Default for WebSearchActionOpenPageType {
-    fn default() -> WebSearchActionOpenPageType {
-        Self::OpenPage
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchActionSearch {
@@ -111,16 +105,13 @@ impl WebSearchActionSearch {
 }
 /// The action type.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum WebSearchActionSearchType {
     #[serde(rename = "search")]
+    #[default]
     Search,
 }
 
-impl Default for WebSearchActionSearchType {
-    fn default() -> WebSearchActionSearchType {
-        Self::Search
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchApproximateLocation {
@@ -175,20 +166,19 @@ impl WebSearchApproximateLocation {
 }
 /// The type of location approximation. Always `approximate`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum WebSearchApproximateLocationType {
     #[serde(rename = "approximate")]
+    #[default]
     Approximate,
 }
 
-impl Default for WebSearchApproximateLocationType {
-    fn default() -> WebSearchApproximateLocationType {
-        Self::Approximate
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum WebSearchContextSize {
     #[serde(rename = "low")]
+    #[default]
     Low,
     #[serde(rename = "medium")]
     Medium,
@@ -206,11 +196,6 @@ impl std::fmt::Display for WebSearchContextSize {
     }
 }
 
-impl Default for WebSearchContextSize {
-    fn default() -> WebSearchContextSize {
-        Self::Low
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchLocation {
@@ -268,18 +253,15 @@ impl WebSearchPreviewTool {
 }
 /// The type of the web search tool. One of `web_search_preview` or `web_search_preview_2025_03_11`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum WebSearchPreviewToolType {
     #[serde(rename = "web_search_preview")]
+    #[default]
     WebSearchPreview,
     #[serde(rename = "web_search_preview_2025_03_11")]
     WebSearchPreview20250311,
 }
 
-impl Default for WebSearchPreviewToolType {
-    fn default() -> WebSearchPreviewToolType {
-        Self::WebSearchPreview
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchSource {
@@ -299,16 +281,13 @@ impl WebSearchSource {
 }
 /// The type of source. Always `url`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum WebSearchSourceType {
     #[serde(rename = "url")]
+    #[default]
     Url,
 }
 
-impl Default for WebSearchSourceType {
-    fn default() -> WebSearchSourceType {
-        Self::Url
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchTool {
@@ -342,18 +321,15 @@ impl WebSearchTool {
 }
 /// The type of the web search tool. One of `web_search` or `web_search_2025_08_26`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum WebSearchToolType {
     #[serde(rename = "web_search")]
+    #[default]
     WebSearch,
     #[serde(rename = "web_search_2025_08_26")]
     WebSearch20250826,
 }
 
-impl Default for WebSearchToolType {
-    fn default() -> WebSearchToolType {
-        Self::WebSearch
-    }
-}
 
 use super::misc::Status;
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -384,16 +360,13 @@ impl WebSearchToolCall {
 }
 /// The type of the web search tool call. Always `web_search_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum WebSearchToolCallType {
     #[serde(rename = "web_search_call")]
+    #[default]
     WebSearchCall,
 }
 
-impl Default for WebSearchToolCallType {
-    fn default() -> WebSearchToolCallType {
-        Self::WebSearchCall
-    }
-}
 // The status of the web search tool call.
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -433,8 +406,10 @@ impl WebSearchToolFilters {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum WebSearchToolSearchContextSize {
     #[serde(rename = "low")]
+    #[default]
     Low,
     #[serde(rename = "medium")]
     Medium,
@@ -442,11 +417,6 @@ pub enum WebSearchToolSearchContextSize {
     High,
 }
 
-impl Default for WebSearchToolSearchContextSize {
-    fn default() -> WebSearchToolSearchContextSize {
-        Self::Low
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchUserLocation {
@@ -468,13 +438,10 @@ impl WebSearchUserLocation {
 }
 /// The type of location approximation. Always `approximate`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum WebSearchUserLocationType {
     #[serde(rename = "approximate")]
+    #[default]
     Approximate,
 }
 
-impl Default for WebSearchUserLocationType {
-    fn default() -> WebSearchUserLocationType {
-        Self::Approximate
-    }
-}

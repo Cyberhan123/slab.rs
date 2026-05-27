@@ -1,10 +1,12 @@
 pub mod output_format {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum OutputFormat {
         #[serde(rename = "png")]
+        #[default]
         Png,
         #[serde(rename = "webp")]
         Webp,
@@ -12,21 +14,19 @@ pub mod output_format {
         Jpeg,
     }
 
-    impl Default for OutputFormat {
-        fn default() -> OutputFormat {
-            Self::Png
-        }
-    }
+    
     // The size of the image generated. Either `1024x1024`, `1024x1536`, or `1536x1024`.
 }
 
 pub mod quality {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Quality {
         #[serde(rename = "low")]
+        #[default]
         Low,
         #[serde(rename = "medium")]
         Medium,
@@ -34,20 +34,18 @@ pub mod quality {
         High,
     }
 
-    impl Default for Quality {
-        fn default() -> Quality {
-            Self::Low
-        }
-    }
+    
 }
 
 pub mod size {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Size {
         #[serde(rename = "1024x1024")]
+        #[default]
         Variant1024x1024,
         #[serde(rename = "1024x1536")]
         Variant1024x1536,
@@ -55,35 +53,31 @@ pub mod size {
         Variant1536x1024,
     }
 
-    impl Default for Size {
-        fn default() -> Size {
-            Self::Variant1024x1024
-        }
-    }
+    
     // The quality of the image generated. Either `low`, `medium`, or `high`.
 }
 
 pub mod moderation {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Moderation {
         #[serde(rename = "low")]
+        #[default]
         Low,
         #[serde(rename = "auto")]
         Auto,
     }
 
-    impl Default for Moderation {
-        fn default() -> Moderation {
-            Self::Low
-        }
-    }
+    
     /// Background behavior for generated image output.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Background {
         #[serde(rename = "transparent")]
+        #[default]
         Transparent,
         #[serde(rename = "opaque")]
         Opaque,
@@ -91,34 +85,30 @@ pub mod moderation {
         Auto,
     }
 
-    impl Default for Background {
-        fn default() -> Background {
-            Self::Transparent
-        }
-    }
+    
 }
 
 pub mod moderation_1 {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Moderation {
         #[serde(rename = "auto")]
+        #[default]
         Auto,
         #[serde(rename = "low")]
         Low,
     }
 
-    impl Default for Moderation {
-        fn default() -> Moderation {
-            Self::Auto
-        }
-    }
+    
     /// Background type for the generated image. One of `transparent`, `opaque`, or `auto`. Default: `auto`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Background {
         #[serde(rename = "transparent")]
+        #[default]
         Transparent,
         #[serde(rename = "opaque")]
         Opaque,
@@ -126,20 +116,18 @@ pub mod moderation_1 {
         Auto,
     }
 
-    impl Default for Background {
-        fn default() -> Background {
-            Self::Transparent
-        }
-    }
+    
 }
 
 pub mod status {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Status {
         #[serde(rename = "in_progress")]
+        #[default]
         InProgress,
         #[serde(rename = "completed")]
         Completed,
@@ -149,11 +137,7 @@ pub mod status {
         Failed,
     }
 
-    impl Default for Status {
-        fn default() -> Status {
-            Self::InProgress
-        }
-    }
+    
 }
 
 pub mod usage {
@@ -215,12 +199,14 @@ pub mod usage {
 }
 
 pub mod image_gen_action_enum {
-    use crate::models;
+    
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum ImageGenActionEnum {
         #[serde(rename = "generate")]
+        #[default]
         Generate,
         #[serde(rename = "edit")]
         Edit,
@@ -238,19 +224,11 @@ pub mod image_gen_action_enum {
         }
     }
 
-    impl Default for ImageGenActionEnum {
-        fn default() -> ImageGenActionEnum {
-            Self::Generate
-        }
-    }
+    
 }
 
 pub use image_gen_action_enum::ImageGenActionEnum;
-pub(crate) use moderation::Background;
 pub(crate) use moderation::Moderation;
-pub(crate) use output_format::OutputFormat;
-pub(crate) use quality::Quality;
-pub(crate) use size::Size;
 pub use status::Status;
 pub use usage::ImagesUsage;
 pub use usage::ImagesUsageInputTokensDetails;

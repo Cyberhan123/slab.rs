@@ -1,4 +1,3 @@
-use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -25,8 +24,10 @@ impl VideoReferenceInputParam {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum VideoSeconds {
     #[serde(rename = "4")]
+    #[default]
     Variant4,
     #[serde(rename = "8")]
     Variant8,
@@ -44,15 +45,12 @@ impl std::fmt::Display for VideoSeconds {
     }
 }
 
-impl Default for VideoSeconds {
-    fn default() -> VideoSeconds {
-        Self::Variant4
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum VideoSize {
     #[serde(rename = "720x1280")]
+    #[default]
     Variant720x1280,
     #[serde(rename = "1280x720")]
     Variant1280x720,
@@ -73,15 +71,12 @@ impl std::fmt::Display for VideoSize {
     }
 }
 
-impl Default for VideoSize {
-    fn default() -> VideoSize {
-        Self::Variant720x1280
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum VideoStatus {
     #[serde(rename = "queued")]
+    #[default]
     Queued,
     #[serde(rename = "in_progress")]
     InProgress,
@@ -102,8 +97,3 @@ impl std::fmt::Display for VideoStatus {
     }
 }
 
-impl Default for VideoStatus {
-    fn default() -> VideoStatus {
-        Self::Queued
-    }
-}

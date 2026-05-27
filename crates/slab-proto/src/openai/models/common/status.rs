@@ -1,4 +1,3 @@
-use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -16,16 +15,13 @@ impl ActiveStatus {
 }
 /// ActiveStatus discriminator that is always `active`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ActiveStatusType {
     #[serde(rename = "active")]
+    #[default]
     Active,
 }
 
-impl Default for ActiveStatusType {
-    fn default() -> ActiveStatusType {
-        Self::Active
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ClosedStatus {
@@ -45,16 +41,13 @@ impl ClosedStatus {
 }
 /// ClosedStatus discriminator that is always `closed`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ClosedStatusType {
     #[serde(rename = "closed")]
+    #[default]
     Closed,
 }
 
-impl Default for ClosedStatusType {
-    fn default() -> ClosedStatusType {
-        Self::Closed
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LockedStatus {
@@ -74,20 +67,19 @@ impl LockedStatus {
 }
 /// LockedStatus discriminator that is always `locked`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum LockedStatusType {
     #[serde(rename = "locked")]
+    #[default]
     Locked,
 }
 
-impl Default for LockedStatusType {
-    fn default() -> LockedStatusType {
-        Self::Locked
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum Status {
     #[serde(rename = "in_progress")]
+    #[default]
     InProgress,
     #[serde(rename = "completed")]
     Completed,
@@ -95,15 +87,12 @@ pub(crate) enum Status {
     Incomplete,
 }
 
-impl Default for Status {
-    fn default() -> Status {
-        Self::InProgress
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ClientToolCallStatus {
     #[serde(rename = "in_progress")]
+    #[default]
     InProgress,
     #[serde(rename = "completed")]
     Completed,
@@ -118,8 +107,3 @@ impl std::fmt::Display for ClientToolCallStatus {
     }
 }
 
-impl Default for ClientToolCallStatus {
-    fn default() -> ClientToolCallStatus {
-        Self::InProgress
-    }
-}

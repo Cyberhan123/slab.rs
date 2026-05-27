@@ -32,16 +32,13 @@ impl CreateTranscriptionRequestChunkingStrategy {
 }
 /// Must be set to `server_vad` to enable manual chunking using server side VAD.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum CreateTranscriptionRequestChunkingStrategyType {
     #[serde(rename = "server_vad")]
+    #[default]
     ServerVad,
 }
 
-impl Default for CreateTranscriptionRequestChunkingStrategyType {
-    fn default() -> CreateTranscriptionRequestChunkingStrategyType {
-        Self::ServerVad
-    }
-}
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CreateTranscriptionResponseDiarizedJson {
     /// The type of task that was run. Always `transcribe`.
@@ -73,16 +70,13 @@ impl CreateTranscriptionResponseDiarizedJson {
 }
 /// The type of task that was run. Always `transcribe`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum CreateTranscriptionResponseDiarizedJsonTask {
     #[serde(rename = "transcribe")]
+    #[default]
     Transcribe,
 }
 
-impl Default for CreateTranscriptionResponseDiarizedJsonTask {
-    fn default() -> CreateTranscriptionResponseDiarizedJsonTask {
-        Self::Transcribe
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CreateTranscriptionRequestModel {}
@@ -109,16 +103,13 @@ impl Default for CreateTranscription200Response {
 }
 /// The type of task that was run. Always `transcribe`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum CreateTranscription200ResponseTask {
     #[serde(rename = "transcribe")]
+    #[default]
     Transcribe,
 }
 
-impl Default for CreateTranscription200ResponseTask {
-    fn default() -> CreateTranscription200ResponseTask {
-        Self::Transcribe
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AudioTranscription {
@@ -142,8 +133,10 @@ impl AudioTranscription {
 }
 /// Controls how long the model waits before emitting transcription text. Higher values can improve transcription accuracy at the cost of latency. Only supported with `gpt-realtime-whisper` in GA Realtime sessions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Delay {
     #[serde(rename = "minimal")]
+    #[default]
     Minimal,
     #[serde(rename = "low")]
     Low,
@@ -155,11 +148,6 @@ pub enum Delay {
     Xhigh,
 }
 
-impl Default for Delay {
-    fn default() -> Delay {
-        Self::Minimal
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -176,16 +164,13 @@ impl Default for TranscriptionChunkingStrategy {
 }
 /// Must be set to `server_vad` to enable manual chunking using server side VAD.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum TranscriptionChunkingStrategyType {
     #[serde(rename = "server_vad")]
+    #[default]
     ServerVad,
 }
 
-impl Default for TranscriptionChunkingStrategyType {
-    fn default() -> TranscriptionChunkingStrategyType {
-        Self::ServerVad
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TranscriptionDiarizedSegment {
@@ -224,20 +209,19 @@ impl TranscriptionDiarizedSegment {
 }
 /// The type of the segment. Always `transcript.text.segment`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum TranscriptionDiarizedSegmentType {
     #[serde(rename = "transcript.text.segment")]
+    #[default]
     TranscriptTextSegment,
 }
 
-impl Default for TranscriptionDiarizedSegmentType {
-    fn default() -> TranscriptionDiarizedSegmentType {
-        Self::TranscriptTextSegment
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum TranscriptionInclude {
     #[serde(rename = "logprobs")]
+    #[default]
     Logprobs,
 }
 
@@ -249,11 +233,6 @@ impl std::fmt::Display for TranscriptionInclude {
     }
 }
 
-impl Default for TranscriptionInclude {
-    fn default() -> TranscriptionInclude {
-        Self::Logprobs
-    }
-}
 
 /// AudioTranscriptionModel : The model to use for transcription. Current options are `whisper-1`, `gpt-4o-mini-transcribe`, `gpt-4o-mini-transcribe-2025-12-15`, `gpt-4o-transcribe`, `gpt-4o-transcribe-diarize`, and `gpt-realtime-whisper`. Use `gpt-4o-transcribe-diarize` when you need diarization with speaker labels.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]

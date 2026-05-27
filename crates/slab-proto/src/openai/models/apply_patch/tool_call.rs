@@ -45,16 +45,13 @@ impl ApplyPatchToolCallItemParam {
 }
 /// The type of the item. Always `apply_patch_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ApplyPatchToolCallItemParamType {
     #[serde(rename = "apply_patch_call")]
+    #[default]
     ApplyPatchCall,
 }
 
-impl Default for ApplyPatchToolCallItemParamType {
-    fn default() -> ApplyPatchToolCallItemParamType {
-        Self::ApplyPatchCall
-    }
-}
 
 /// ApplyPatchToolCallOutputItemParam : The streamed output emitted by an apply patch tool call.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -98,16 +95,13 @@ impl ApplyPatchToolCallOutputItemParam {
 }
 /// The type of the item. Always `apply_patch_call_output`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ApplyPatchToolCallOutputItemParamType {
     #[serde(rename = "apply_patch_call_output")]
+    #[default]
     ApplyPatchCallOutput,
 }
 
-impl Default for ApplyPatchToolCallOutputItemParamType {
-    fn default() -> ApplyPatchToolCallOutputItemParamType {
-        Self::ApplyPatchCallOutput
-    }
-}
 
 /// ApplyPatchToolCallOutput : The output emitted by an apply patch tool call.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -150,16 +144,13 @@ impl ApplyPatchToolCallOutput {
 }
 /// The type of the item. Always `apply_patch_call_output`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ApplyPatchToolCallOutputType {
     #[serde(rename = "apply_patch_call_output")]
+    #[default]
     ApplyPatchCallOutput,
 }
 
-impl Default for ApplyPatchToolCallOutputType {
-    fn default() -> ApplyPatchToolCallOutputType {
-        Self::ApplyPatchCallOutput
-    }
-}
 
 /// ApplyPatchToolCall : A tool call that applies file diffs by creating, deleting, or updating files.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -205,16 +196,13 @@ impl ApplyPatchToolCall {
 
 /// The type of the item. Always `apply_patch_call`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ApplyPatchToolCallType {
     #[serde(rename = "apply_patch_call")]
+    #[default]
     ApplyPatchCall,
 }
 
-impl Default for ApplyPatchToolCallType {
-    fn default() -> ApplyPatchToolCallType {
-        Self::ApplyPatchCall
-    }
-}
 
 /// ApplyPatchToolParam : Allows the assistant to create, delete, or update files using unified diffs.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -232,13 +220,10 @@ impl ApplyPatchToolParam {
 }
 /// The type of the tool. Always `apply_patch`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ApplyPatchToolParamType {
     #[serde(rename = "apply_patch")]
+    #[default]
     ApplyPatch,
 }
 
-impl Default for ApplyPatchToolParamType {
-    fn default() -> ApplyPatchToolParamType {
-        Self::ApplyPatch
-    }
-}

@@ -23,16 +23,13 @@ impl VoiceConsentDeletedResource {
 }
 ///
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum VoiceConsentDeletedResourceObject {
     #[serde(rename = "audio.voice_consent")]
+    #[default]
     AudioVoiceConsent,
 }
 
-impl Default for VoiceConsentDeletedResourceObject {
-    fn default() -> VoiceConsentDeletedResourceObject {
-        Self::AudioVoiceConsent
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VoiceConsentListResource {
@@ -69,16 +66,13 @@ impl VoiceConsentListResource {
 }
 ///
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum VoiceConsentListResourceObject {
     #[serde(rename = "list")]
+    #[default]
     List,
 }
 
-impl Default for VoiceConsentListResourceObject {
-    fn default() -> VoiceConsentListResourceObject {
-        Self::List
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VoiceConsentResource {
@@ -113,16 +107,13 @@ impl VoiceConsentResource {
 }
 /// The object type, which is always `audio.voice_consent`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum VoiceConsentResourceObject {
     #[serde(rename = "audio.voice_consent")]
+    #[default]
     AudioVoiceConsent,
 }
 
-impl Default for VoiceConsentResourceObject {
-    fn default() -> VoiceConsentResourceObject {
-        Self::AudioVoiceConsent
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VoiceIdsOrCustomVoice {
@@ -190,16 +181,13 @@ impl VoiceResource {
 }
 /// The object type, which is always `audio.voice`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum VoiceResourceObject {
     #[serde(rename = "audio.voice")]
+    #[default]
     AudioVoice,
 }
 
-impl Default for VoiceResourceObject {
-    fn default() -> VoiceResourceObject {
-        Self::AudioVoice
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UpdateVoiceConsentRequest {

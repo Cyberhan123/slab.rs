@@ -1,17 +1,13 @@
-use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum RoleDiscriminator {
     #[serde(rename = "assistant")]
+    #[default]
     Assistant,
 }
 
-impl Default for RoleDiscriminator {
-    fn default() -> RoleDiscriminator {
-        Self::Assistant
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Role {
@@ -54,13 +50,10 @@ impl Role {
 }
 /// Always `role`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum Object {
     #[serde(rename = "role")]
+    #[default]
     Role,
 }
 
-impl Default for Object {
-    fn default() -> Object {
-        Self::Role
-    }
-}

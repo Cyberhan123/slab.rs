@@ -38,16 +38,13 @@ impl UrlAnnotation {
 }
 /// Type discriminator that is always `url` for this annotation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum UrlAnnotationType {
     #[serde(rename = "url")]
+    #[default]
     Url,
 }
 
-impl Default for UrlAnnotationType {
-    fn default() -> UrlAnnotationType {
-        Self::Url
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UrlAnnotationSource {
@@ -67,16 +64,13 @@ impl UrlAnnotationSource {
 }
 /// Type discriminator that is always `url`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum UrlAnnotationSourceType {
     #[serde(rename = "url")]
+    #[default]
     Url,
 }
 
-impl Default for UrlAnnotationSourceType {
-    fn default() -> UrlAnnotationSourceType {
-        Self::Url
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UrlCitationBody {
@@ -111,13 +105,10 @@ impl UrlCitationBody {
 }
 /// The type of the URL citation. Always `url_citation`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum UrlCitationBodyType {
     #[serde(rename = "url_citation")]
+    #[default]
     UrlCitation,
 }
 
-impl Default for UrlCitationBodyType {
-    fn default() -> UrlCitationBodyType {
-        Self::UrlCitation
-    }
-}

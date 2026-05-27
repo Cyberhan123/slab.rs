@@ -16,16 +16,13 @@ impl PcmaAudioFormat {
 }
 /// The audio format. Always `audio/pcma`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum PcmaAudioFormatType {
     #[serde(rename = "audio/pcma")]
+    #[default]
     AudioSlashPcma,
 }
 
-impl Default for PcmaAudioFormatType {
-    fn default() -> PcmaAudioFormatType {
-        Self::AudioSlashPcma
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PcmuAudioFormat {
@@ -42,16 +39,13 @@ impl PcmuAudioFormat {
 }
 /// The audio format. Always `audio/pcmu`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum PcmuAudioFormatType {
     #[serde(rename = "audio/pcmu")]
+    #[default]
     AudioSlashPcmu,
 }
 
-impl Default for PcmuAudioFormatType {
-    fn default() -> PcmuAudioFormatType {
-        Self::AudioSlashPcmu
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PcmAudioFormat {
@@ -72,36 +66,32 @@ impl PcmAudioFormat {
 
 /// The audio format. Always `audio/pcm`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum PcmAudioFormatType {
     #[serde(rename = "audio/pcm")]
+    #[default]
     AudioSlashPcm,
 }
 
-impl Default for PcmAudioFormatType {
-    fn default() -> PcmAudioFormatType {
-        Self::AudioSlashPcm
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Format {
     #[serde(rename = "mp3")]
+    #[default]
     Mp3,
     #[serde(rename = "wav")]
     Wav,
 }
 
-impl Default for Format {
-    fn default() -> Format {
-        Self::Mp3
-    }
-}
 
 /// AudioResponseFormat : The format of the output, in one of these options: `json`, `text`, `srt`, `verbose_json`, `vtt`, or `diarized_json`. For `gpt-4o-transcribe` and `gpt-4o-mini-transcribe`, the only supported format is `json`. For `gpt-4o-transcribe-diarize`, the supported formats are `json`, `text`, and `diarized_json`, with `diarized_json` required to receive speaker annotations.
 /// The format of the output, in one of these options: `json`, `text`, `srt`, `verbose_json`, `vtt`, or `diarized_json`. For `gpt-4o-transcribe` and `gpt-4o-mini-transcribe`, the only supported format is `json`. For `gpt-4o-transcribe-diarize`, the supported formats are `json`, `text`, and `diarized_json`, with `diarized_json` required to receive speaker annotations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum AudioResponseFormat {
     #[serde(rename = "json")]
+    #[default]
     Json,
     #[serde(rename = "text")]
     Text,
@@ -128,15 +118,12 @@ impl std::fmt::Display for AudioResponseFormat {
     }
 }
 
-impl Default for AudioResponseFormat {
-    fn default() -> AudioResponseFormat {
-        Self::Json
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ResponseFormat {
     #[serde(rename = "mp3")]
+    #[default]
     Mp3,
     #[serde(rename = "opus")]
     Opus,
@@ -150,25 +137,18 @@ pub enum ResponseFormat {
     Pcm,
 }
 
-impl Default for ResponseFormat {
-    fn default() -> ResponseFormat {
-        Self::Mp3
-    }
-}
 // The format to stream the audio in. Supported formats are `sse` and `audio`. `sse` is not supported for `tts-1` or `tts-1-hd`.
 
 pub mod text_format_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "text")]
+        #[default]
         Text,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::Text
-        }
-    }
+    
 }
 pub use text_format_type::Type as TextFormatType;
 
@@ -187,31 +167,26 @@ impl TextFormat {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum StreamFormat {
     #[serde(rename = "sse")]
+    #[default]
     Sse,
     #[serde(rename = "audio")]
     Audio,
 }
 
-impl Default for StreamFormat {
-    fn default() -> StreamFormat {
-        Self::Sse
-    }
-}
 
 pub mod custom_text_format_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "text")]
+        #[default]
         Text,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::Text
-        }
-    }
+    
 }
 pub use custom_text_format_type::Type as CustomTextFormatType;
 
@@ -232,15 +207,13 @@ impl CustomTextFormatParam {
 pub mod custom_grammar_format_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "grammar")]
+        #[default]
         Grammar,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::Grammar
-        }
-    }
+    
 }
 pub use custom_grammar_format_type::Type as CustomGrammarFormatType;
 
@@ -271,15 +244,13 @@ impl CustomGrammarFormatParam {
 pub mod grammar_format_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "grammar")]
+        #[default]
         Grammar,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::Grammar
-        }
-    }
+    
 }
 pub use grammar_format_type::Type as GrammarFormatType;
 
@@ -300,8 +271,10 @@ impl GrammarFormat {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum GrammarSyntax1 {
     #[serde(rename = "lark")]
+    #[default]
     Lark,
     #[serde(rename = "regex")]
     Regex,
@@ -316,8 +289,3 @@ impl std::fmt::Display for GrammarSyntax1 {
     }
 }
 
-impl Default for GrammarSyntax1 {
-    fn default() -> GrammarSyntax1 {
-        Self::Lark
-    }
-}

@@ -1,9 +1,10 @@
-use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Background {
     #[serde(rename = "transparent")]
+    #[default]
     Transparent,
     #[serde(rename = "opaque")]
     Opaque,
@@ -11,30 +12,24 @@ pub enum Background {
     Auto,
 }
 
-impl Default for Background {
-    fn default() -> Background {
-        Self::Transparent
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Moderation {
     #[serde(rename = "auto")]
+    #[default]
     Auto,
     #[serde(rename = "low")]
     Low,
 }
 
-impl Default for Moderation {
-    fn default() -> Moderation {
-        Self::Auto
-    }
-}
 // Background type for the generated image. One of `transparent`, `opaque`, or `auto`. Default: `auto`.
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum OutputFormat {
     #[serde(rename = "png")]
+    #[default]
     Png,
     #[serde(rename = "webp")]
     Webp,
@@ -42,16 +37,13 @@ pub enum OutputFormat {
     Jpeg,
 }
 
-impl Default for OutputFormat {
-    fn default() -> OutputFormat {
-        Self::Png
-    }
-}
 // Moderation level for the generated image. Default: `auto`.
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Quality {
     #[serde(rename = "low")]
+    #[default]
     Low,
     #[serde(rename = "medium")]
     Medium,
@@ -61,16 +53,13 @@ pub enum Quality {
     Auto,
 }
 
-impl Default for Quality {
-    fn default() -> Quality {
-        Self::Low
-    }
-}
 // The output format of the generated image. One of `png`, `webp`, or `jpeg`. Default: `png`.
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum Status {
     #[serde(rename = "in_progress")]
+    #[default]
     InProgress,
     #[serde(rename = "searching")]
     Searching,
@@ -80,8 +69,3 @@ pub(crate) enum Status {
     Failed,
 }
 
-impl Default for Status {
-    fn default() -> Status {
-        Self::InProgress
-    }
-}

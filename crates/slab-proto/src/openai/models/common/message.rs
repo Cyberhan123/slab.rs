@@ -28,8 +28,10 @@ impl EasyInputMessage {
 }
 /// The role of the message input. One of `user`, `assistant`, `system`, or `developer`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum Role {
     #[serde(rename = "user")]
+    #[default]
     User,
     #[serde(rename = "assistant")]
     Assistant,
@@ -39,23 +41,15 @@ pub(crate) enum Role {
     Developer,
 }
 
-impl Default for Role {
-    fn default() -> Role {
-        Self::User
-    }
-}
 /// The type of the message input. Always `message`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum Type {
     #[serde(rename = "message")]
+    #[default]
     Message,
 }
 
-impl Default for Type {
-    fn default() -> Type {
-        Self::Message
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -73,8 +67,10 @@ impl Default for EasyInputMessageContent {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum MessagePhase {
     #[serde(rename = "commentary")]
+    #[default]
     Commentary,
     #[serde(rename = "final_answer")]
     FinalAnswer,
@@ -89,15 +85,12 @@ impl std::fmt::Display for MessagePhase {
     }
 }
 
-impl Default for MessagePhase {
-    fn default() -> MessagePhase {
-        Self::Commentary
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum MessagePhase2 {
     #[serde(rename = "commentary")]
+    #[default]
     Commentary,
     #[serde(rename = "final_answer")]
     FinalAnswer,
@@ -112,8 +105,3 @@ impl std::fmt::Display for MessagePhase2 {
     }
 }
 
-impl Default for MessagePhase2 {
-    fn default() -> MessagePhase2 {
-        Self::Commentary
-    }
-}

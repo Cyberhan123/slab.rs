@@ -18,8 +18,10 @@ impl ResponseError {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ResponseErrorCode {
     #[serde(rename = "server_error")]
+    #[default]
     ServerError,
     #[serde(rename = "rate_limit_exceeded")]
     RateLimitExceeded,
@@ -82,11 +84,6 @@ impl std::fmt::Display for ResponseErrorCode {
     }
 }
 
-impl Default for ResponseErrorCode {
-    fn default() -> ResponseErrorCode {
-        Self::ServerError
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseOutputText {
@@ -113,16 +110,13 @@ impl ResponseOutputText {
 }
 /// Type discriminator that is always `output_text`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ResponseOutputTextType {
     #[serde(rename = "output_text")]
+    #[default]
     OutputText,
 }
 
-impl Default for ResponseOutputTextType {
-    fn default() -> ResponseOutputTextType {
-        Self::OutputText
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -155,8 +149,10 @@ impl Default for ResponsePromptVariablesValue {
 }
 /// The type of the input item. Always `input_text`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ResponsePromptVariablesValueType {
     #[serde(rename = "input_text")]
+    #[default]
     InputText,
     #[serde(rename = "input_image")]
     InputImage,
@@ -164,11 +160,6 @@ pub(crate) enum ResponsePromptVariablesValueType {
     InputFile,
 }
 
-impl Default for ResponsePromptVariablesValueType {
-    fn default() -> ResponsePromptVariablesValueType {
-        Self::InputText
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseTextParam {
@@ -191,22 +182,21 @@ impl ResponseTextParam {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Reason {
     #[serde(rename = "max_output_tokens")]
+    #[default]
     MaxOutputTokens,
     #[serde(rename = "content_filter")]
     ContentFilter,
 }
 
-impl Default for Reason {
-    fn default() -> Reason {
-        Self::MaxOutputTokens
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum Status {
     #[serde(rename = "completed")]
+    #[default]
     Completed,
     #[serde(rename = "failed")]
     Failed,
@@ -220,11 +210,6 @@ pub(crate) enum Status {
     Incomplete,
 }
 
-impl Default for Status {
-    fn default() -> Status {
-        Self::Completed
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseLogProb {

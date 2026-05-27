@@ -20,13 +20,10 @@ impl ChatCompletionDeleted {
 }
 /// The type of object being deleted.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Object {
     #[serde(rename = "chat.completion.deleted")]
+    #[default]
     ChatCompletionDeleted,
 }
 
-impl Default for Object {
-    fn default() -> Object {
-        Self::ChatCompletionDeleted
-    }
-}

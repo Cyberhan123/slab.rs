@@ -4,15 +4,13 @@ use serde::{Deserialize, Serialize};
 pub mod output_item_added_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.output_item.added")]
+        #[default]
         ResponseOutputItemAdded,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseOutputItemAdded
-        }
-    }
+    
 }
 pub use output_item_added_type::Type as OutputItemAddedType;
 
@@ -47,15 +45,13 @@ impl ResponseOutputItemAddedEvent {
 pub mod output_item_done_type {
     use serde::{Deserialize, Serialize};
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.output_item.done")]
+        #[default]
         ResponseOutputItemDone,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseOutputItemDone
-        }
-    }
+    
 }
 pub use output_item_done_type::Type as OutputItemDoneType;
 

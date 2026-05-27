@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum Status {
     #[serde(rename = "in_progress")]
+    #[default]
     InProgress,
     #[serde(rename = "completed")]
     Completed,
@@ -10,15 +12,12 @@ pub(crate) enum Status {
     Incomplete,
 }
 
-impl Default for Status {
-    fn default() -> Status {
-        Self::InProgress
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Summary {
     #[serde(rename = "auto")]
+    #[default]
     Auto,
     #[serde(rename = "concise")]
     Concise,
@@ -26,8 +25,3 @@ pub enum Summary {
     Detailed,
 }
 
-impl Default for Summary {
-    fn default() -> Summary {
-        Self::Auto
-    }
-}

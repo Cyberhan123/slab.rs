@@ -46,15 +46,13 @@ pub mod reasoning_summary_part_added_type {
     use serde::{Deserialize, Serialize};
     /// The type of the event. Always `response.reasoning_summary_part.added`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.reasoning_summary_part.added")]
+        #[default]
         ResponseReasoningSummaryPartAdded,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseReasoningSummaryPartAdded
-        }
-    }
+    
 }
 pub use reasoning_summary_part_added_type::Type as ReasoningSummaryPartAddedType;
 
@@ -123,15 +121,13 @@ pub mod reasoning_summary_part_done_type {
     use serde::{Deserialize, Serialize};
     /// The type of the event. Always `response.reasoning_summary_part.done`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.reasoning_summary_part.done")]
+        #[default]
         ResponseReasoningSummaryPartDone,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseReasoningSummaryPartDone
-        }
-    }
+    
 }
 pub use reasoning_summary_part_done_type::Type as ReasoningSummaryPartDoneType;
 
@@ -155,15 +151,13 @@ pub mod summary_text_type {
     use serde::{Deserialize, Serialize};
     /// The type of the summary part. Always `summary_text`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "summary_text")]
+        #[default]
         SummaryText,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::SummaryText
-        }
-    }
+    
 }
 pub use summary_text_type::Type as SummaryTextType;
 
@@ -213,15 +207,13 @@ pub mod reasoning_summary_text_delta_type {
     use serde::{Deserialize, Serialize};
     /// The type of the event. Always `response.reasoning_summary_text.delta`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.reasoning_summary_text.delta")]
+        #[default]
         ResponseReasoningSummaryTextDelta,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseReasoningSummaryTextDelta
-        }
-    }
+    
 }
 pub use reasoning_summary_text_delta_type::Type as ReasoningSummaryTextDeltaType;
 
@@ -271,15 +263,13 @@ pub mod reasoning_summary_text_done_type {
     use serde::{Deserialize, Serialize};
     /// The type of the event. Always `response.reasoning_summary_text.done`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.reasoning_summary_text.done")]
+        #[default]
         ResponseReasoningSummaryTextDone,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseReasoningSummaryTextDone
-        }
-    }
+    
 }
 pub use reasoning_summary_text_done_type::Type as ReasoningSummaryTextDoneType;
 
@@ -329,15 +319,13 @@ pub mod reasoning_text_delta_type {
     use serde::{Deserialize, Serialize};
     /// The type of the event. Always `response.reasoning_text.delta`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.reasoning_text.delta")]
+        #[default]
         ResponseReasoningTextDelta,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseReasoningTextDelta
-        }
-    }
+    
 }
 pub use reasoning_text_delta_type::Type as ReasoningTextDeltaType;
 
@@ -387,14 +375,12 @@ pub mod reasoning_text_done_type {
     use serde::{Deserialize, Serialize};
     /// The type of the event. Always `response.reasoning_text.done`.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.reasoning_text.done")]
+        #[default]
         ResponseReasoningTextDone,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseReasoningTextDone
-        }
-    }
+    
 }
 pub use reasoning_text_done_type::Type as ReasoningTextDoneType;

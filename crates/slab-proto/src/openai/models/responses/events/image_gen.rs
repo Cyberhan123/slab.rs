@@ -1,4 +1,3 @@
-use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -32,15 +31,13 @@ pub mod image_gen_call_completed_type {
     use serde::{Deserialize, Serialize};
     /// The type of the event. Always 'response.image_generation_call.completed'.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.image_generation_call.completed")]
+        #[default]
         ResponseImageGenerationCallCompleted,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseImageGenerationCallCompleted
-        }
-    }
+    
 }
 pub use image_gen_call_completed_type::Type as ImageGenCallCompletedType;
 
@@ -75,15 +72,13 @@ pub mod image_gen_call_generating_type {
     use serde::{Deserialize, Serialize};
     /// The type of the event. Always 'response.image_generation_call.generating'.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.image_generation_call.generating")]
+        #[default]
         ResponseImageGenerationCallGenerating,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseImageGenerationCallGenerating
-        }
-    }
+    
 }
 pub use image_gen_call_generating_type::Type as ImageGenCallGeneratingType;
 
@@ -118,15 +113,13 @@ pub mod image_gen_call_in_progress_type {
     use serde::{Deserialize, Serialize};
     /// The type of the event. Always 'response.image_generation_call.in_progress'.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.image_generation_call.in_progress")]
+        #[default]
         ResponseImageGenerationCallInProgress,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseImageGenerationCallInProgress
-        }
-    }
+    
 }
 pub use image_gen_call_in_progress_type::Type as ImageGenCallInProgressType;
 
@@ -176,14 +169,12 @@ pub mod image_gen_call_partial_image_type {
     use serde::{Deserialize, Serialize};
     /// The type of the event. Always 'response.image_generation_call.partial_image'.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub enum Type {
         #[serde(rename = "response.image_generation_call.partial_image")]
+        #[default]
         ResponseImageGenerationCallPartialImage,
     }
-    impl Default for Type {
-        fn default() -> Self {
-            Self::ResponseImageGenerationCallPartialImage
-        }
-    }
+    
 }
 pub use image_gen_call_partial_image_type::Type as ImageGenCallPartialImageType;

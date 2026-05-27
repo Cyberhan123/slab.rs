@@ -18,16 +18,13 @@ impl InputAudio {
 }
 /// The type of the input item. Always `input_audio`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum Type {
     #[serde(rename = "input_audio")]
+    #[default]
     InputAudio,
 }
 
-impl Default for Type {
-    fn default() -> Type {
-        Self::InputAudio
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputAudioInputAudio {
@@ -46,15 +43,12 @@ impl InputAudioInputAudio {
 }
 // The format of the audio data. Currently supported formats are `mp3` and `wav`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Format {
     #[serde(rename = "mp3")]
+    #[default]
     Mp3,
     #[serde(rename = "wav")]
     Wav,
 }
 
-impl Default for Format {
-    fn default() -> Format {
-        Self::Mp3
-    }
-}

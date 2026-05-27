@@ -33,13 +33,10 @@ impl CompactResource {
 }
 /// The object type. Always `response.compaction`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Object {
     #[serde(rename = "response.compaction")]
+    #[default]
     ResponseCompaction,
 }
 
-impl Default for Object {
-    fn default() -> Object {
-        Self::ResponseCompaction
-    }
-}

@@ -16,8 +16,10 @@ impl Default for ArrayOfContentPartsInner {
 }
 /// Always `image_file`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ArrayOfContentPartsInnerType {
     #[serde(rename = "image_file")]
+    #[default]
     ImageFile,
     #[serde(rename = "image_url")]
     ImageUrl,
@@ -25,11 +27,6 @@ pub(crate) enum ArrayOfContentPartsInnerType {
     Text,
 }
 
-impl Default for ArrayOfContentPartsInnerType {
-    fn default() -> ArrayOfContentPartsInnerType {
-        Self::ImageFile
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -45,16 +42,13 @@ impl Default for Content {
 }
 /// The type of the reasoning text. Always `reasoning_text`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ContentType {
     #[serde(rename = "reasoning_text")]
+    #[default]
     ReasoningText,
 }
 
-impl Default for ContentType {
-    fn default() -> ContentType {
-        Self::ReasoningText
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TextContent {
@@ -73,16 +67,13 @@ impl TextContent {
 
 /// The type of the text content. Always `text`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum TextContentType {
     #[serde(rename = "text")]
+    #[default]
     Text,
 }
 
-impl Default for TextContentType {
-    fn default() -> TextContentType {
-        Self::Text
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OutputTextContent {
@@ -112,16 +103,13 @@ impl OutputTextContent {
 }
 /// The type of the output text. Always `output_text`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum OutputTextContentType {
     #[serde(rename = "output_text")]
+    #[default]
     OutputText,
 }
 
-impl Default for OutputTextContentType {
-    fn default() -> OutputTextContentType {
-        Self::OutputText
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SummaryTextContent {
@@ -141,16 +129,13 @@ impl SummaryTextContent {
 }
 /// The type of the object. Always `summary_text`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum SummaryTextContentType {
     #[serde(rename = "summary_text")]
+    #[default]
     SummaryText,
 }
 
-impl Default for SummaryTextContentType {
-    fn default() -> SummaryTextContentType {
-        Self::SummaryText
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RefusalContent {
@@ -170,13 +155,10 @@ impl RefusalContent {
 }
 /// The type of the refusal. Always `refusal`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum RefusalContentType {
     #[serde(rename = "refusal")]
+    #[default]
     Refusal,
 }
 
-impl Default for RefusalContentType {
-    fn default() -> RefusalContentType {
-        Self::Refusal
-    }
-}

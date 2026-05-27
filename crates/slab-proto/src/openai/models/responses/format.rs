@@ -16,16 +16,13 @@ impl ResponseFormatJsonObject {
 }
 /// The type of response format being defined. Always `json_object`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ResponseFormatJsonObjectType {
     #[serde(rename = "json_object")]
+    #[default]
     JsonObject,
 }
 
-impl Default for ResponseFormatJsonObjectType {
-    fn default() -> ResponseFormatJsonObjectType {
-        Self::JsonObject
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseFormatJsonSchema {
@@ -47,16 +44,13 @@ impl ResponseFormatJsonSchema {
 }
 /// The type of response format being defined. Always `json_schema`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ResponseFormatJsonSchemaType {
     #[serde(rename = "json_schema")]
+    #[default]
     JsonSchema,
 }
 
-impl Default for ResponseFormatJsonSchemaType {
-    fn default() -> ResponseFormatJsonSchemaType {
-        Self::JsonSchema
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseFormatText {
@@ -73,16 +67,13 @@ impl ResponseFormatText {
 }
 /// The type of response format being defined. Always `text`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ResponseFormatTextType {
     #[serde(rename = "text")]
+    #[default]
     Text,
 }
 
-impl Default for ResponseFormatTextType {
-    fn default() -> ResponseFormatTextType {
-        Self::Text
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseFormatTextGrammar {
@@ -105,16 +96,13 @@ impl ResponseFormatTextGrammar {
 }
 /// The type of response format being defined. Always `grammar`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ResponseFormatTextGrammarType {
     #[serde(rename = "grammar")]
+    #[default]
     Grammar,
 }
 
-impl Default for ResponseFormatTextGrammarType {
-    fn default() -> ResponseFormatTextGrammarType {
-        Self::Grammar
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseFormatTextPython {
@@ -131,13 +119,10 @@ impl ResponseFormatTextPython {
 }
 /// The type of response format being defined. Always `python`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum ResponseFormatTextPythonType {
     #[serde(rename = "python")]
+    #[default]
     Python,
 }
 
-impl Default for ResponseFormatTextPythonType {
-    fn default() -> ResponseFormatTextPythonType {
-        Self::Python
-    }
-}

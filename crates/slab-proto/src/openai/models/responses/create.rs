@@ -182,32 +182,28 @@ pub mod create_response {
     }
     /// The retention policy for the prompt cache. Set to `24h` to enable extended prompt caching, which keeps cached prefixes active for longer, up to a maximum of 24 hours. [Learn more](/docs/guides/prompt-caching#prompt-cache-retention).
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum PromptCacheRetention {
         #[serde(rename = "in_memory")]
+        #[default]
         InMemory,
         #[serde(rename = "24h")]
         Variant24h,
     }
 
-    impl Default for PromptCacheRetention {
-        fn default() -> PromptCacheRetention {
-            Self::InMemory
-        }
-    }
+    
     /// The truncation strategy to use for the model response. - `auto`: If the input to this Response exceeds   the model's context window size, the model will truncate the   response to fit the context window by dropping items from the beginning of the conversation. - `disabled` (default): If the input size will exceed the context window   size for a model, the request will fail with a 400 error.
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum Truncation {
         #[serde(rename = "auto")]
+        #[default]
         Auto,
         #[serde(rename = "disabled")]
         Disabled,
     }
 
-    impl Default for Truncation {
-        fn default() -> Truncation {
-            Self::Auto
-        }
-    }
+    
 }
 
 pub mod create_model_response_properties {
@@ -271,21 +267,17 @@ pub mod create_model_response_properties {
     }
     /// The retention policy for the prompt cache. Set to `24h` to enable extended prompt caching, which keeps cached prefixes active for longer, up to a maximum of 24 hours. [Learn more](/docs/guides/prompt-caching#prompt-cache-retention).
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+    #[derive(Default)]
     pub(crate) enum PromptCacheRetention {
         #[serde(rename = "in_memory")]
+        #[default]
         InMemory,
         #[serde(rename = "24h")]
         Variant24h,
     }
 
-    impl Default for PromptCacheRetention {
-        fn default() -> PromptCacheRetention {
-            Self::InMemory
-        }
-    }
+    
 }
 
 pub use create_model_response_properties::CreateModelResponseProperties;
 pub use create_response::CreateResponse;
-pub(crate) use create_response::PromptCacheRetention;
-pub(crate) use create_response::Truncation;

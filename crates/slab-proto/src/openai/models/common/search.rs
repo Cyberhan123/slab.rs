@@ -2,8 +2,10 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum SearchContentType {
     #[serde(rename = "text")]
+    #[default]
     Text,
     #[serde(rename = "image")]
     Image,
@@ -18,15 +20,12 @@ impl std::fmt::Display for SearchContentType {
     }
 }
 
-impl Default for SearchContentType {
-    fn default() -> SearchContentType {
-        Self::Text
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum SearchContextSize {
     #[serde(rename = "low")]
+    #[default]
     Low,
     #[serde(rename = "medium")]
     Medium,
@@ -44,11 +43,6 @@ impl std::fmt::Display for SearchContextSize {
     }
 }
 
-impl Default for SearchContextSize {
-    fn default() -> SearchContextSize {
-        Self::Low
-    }
-}
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Filters {
@@ -77,8 +71,10 @@ impl Filters {
 }
 /// Specifies the comparison operator: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `nin`. - `eq`: equals - `ne`: not equal - `gt`: greater than - `gte`: greater than or equal - `lt`: less than - `lte`: less than or equal - `in`: in - `nin`: not in
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub(crate) enum Type {
     #[serde(rename = "eq")]
+    #[default]
     Eq,
     #[serde(rename = "ne")]
     Ne,
@@ -100,8 +96,3 @@ pub(crate) enum Type {
     Or,
 }
 
-impl Default for Type {
-    fn default() -> Type {
-        Self::Eq
-    }
-}
