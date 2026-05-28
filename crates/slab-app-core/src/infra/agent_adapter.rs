@@ -190,6 +190,7 @@ async fn llm_response_from_chat_stream(
 
         if let Some(reasoning_delta) = parsed.reasoning_delta {
             reasoning.push_str(&reasoning_delta);
+            observer.on_reasoning_delta(&reasoning_delta).await?;
         }
         if let Some(content_delta) = parsed.content_delta {
             content.push_str(&content_delta);
@@ -203,6 +204,7 @@ async fn llm_response_from_chat_stream(
     }
 
     let mut tool_calls = parse_text_tool_calls(&content);
+    observer.on_reasoning_done(&reasoning).await?;
     let content = if tool_calls.is_empty() {
         response_content_from_stream_parts(&content, &reasoning)
     } else {
@@ -526,6 +528,65 @@ mod tests {
                 .expect("parsed chunk");
 
         assert_eq!(finish.finish_reason.as_deref(), Some("stop"));
+    }
+
+    #[tokio::test]
+    async fn forwards_chat_stream_reasoning_events() {
+        use futures::StreamExt as _;
+
+        struct RecordingObserver {
+            text_delta: Vec<String>,
+            reasoning_delta: Vec<String>,
+            reasoning_done: Vec<String>,
+        }
+
+        #[async_trait]
+        impl LlmStreamObserver for RecordingObserver {
+            async fn on_text_delta(&mut self, delta: &str) -> Result<(), AgentError> {
+                self.text_delta.push(delta.to_owned());
+                Ok(())
+            }
+
+            async fn on_reasoning_delta(&mut self, delta: &str) -> Result<(), AgentError> {
+                self.reasoning_delta.push(delta.to_owned());
+                Ok(())
+            }
+
+            async fn on_reasoning_done(&mut self, text: &str) -> Result<(), AgentError> {
+                self.reasoning_done.push(text.to_owned());
+                Ok(())
+            }
+        }
+
+        let stream = futures::stream::iter([
+            ChatStreamChunk::Data(
+                r#"{"choices":[{"delta":{"reasoning_content":"plan "}}]}"#.to_owned(),
+            ),
+            ChatStreamChunk::Data(
+                r#"{"choices":[{"delta":{"reasoning_content":"done","content":"answer"}}]}"#
+                    .to_owned(),
+            ),
+            ChatStreamChunk::Data(
+                r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#.to_owned(),
+            ),
+        ])
+        .boxed();
+        let mut observer = RecordingObserver {
+            text_delta: Vec::new(),
+            reasoning_delta: Vec::new(),
+            reasoning_done: Vec::new(),
+        };
+
+        let response =
+            llm_response_from_chat_stream(stream, &mut observer).await.expect("stream response");
+
+        assert_eq!(observer.text_delta, ["answer"]);
+        assert_eq!(observer.reasoning_delta, ["plan ", "done"]);
+        assert_eq!(observer.reasoning_done, ["plan done"]);
+        assert_eq!(
+            response.content.as_deref(),
+            Some("<think status=\"done\">\n\nplan done\n\n</think>\n\nanswer")
+        );
     }
 
     #[test]

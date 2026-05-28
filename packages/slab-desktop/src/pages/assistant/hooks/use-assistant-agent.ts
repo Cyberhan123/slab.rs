@@ -22,6 +22,7 @@ import {
   parseAssistantAgentServerMessage,
   parseAssistantAgentStreamEvent,
 } from '../lib/assistant-agent-events'
+import { withAssistantMessageReasoningContent } from '../lib/assistant-message-utils'
 import {
   projectAgentThreadMessages,
   projectSessionMessages,
@@ -35,6 +36,7 @@ type PendingApproval = {
 
 type UseAssistantAgentOptions = {
   beforeRequest?: () => Promise<void> | void
+  deepThink?: boolean
   model: string
   runtimePresets?: AssistantRuntimePresets | null
   sessionId: string
@@ -53,7 +55,11 @@ function isBusyStatus(status: AgentStatus | null) {
   return status === 'pending' || status === 'running' || status === 'interrupting'
 }
 
-function toAgentConfig(model: string, runtimePresets?: AssistantRuntimePresets | null) {
+function toAgentConfig(
+  model: string,
+  runtimePresets?: AssistantRuntimePresets | null,
+  deepThink?: boolean
+) {
   return {
     allowed_tools: [] as string[],
     max_turns: 8,
@@ -73,6 +79,7 @@ function toAgentConfig(model: string, runtimePresets?: AssistantRuntimePresets |
     ...(typeof runtimePresets?.repetition_penalty === 'number'
       ? { repetition_penalty: runtimePresets.repetition_penalty }
       : {}),
+    ...(deepThink ? { reasoning_effort: 'medium' as const } : {}),
   }
 }
 
@@ -187,6 +194,7 @@ function serverMessageThreadId(message: AgentResponsesServerMessage): string | n
 
 export function useAssistantAgent({
   beforeRequest,
+  deepThink,
   model,
   runtimePresets,
   sessionId,
@@ -298,6 +306,67 @@ export function useAssistantAgent({
     })
   }, [])
 
+  const appendAssistantReasoningDelta = useCallback((text: string) => {
+    setMessages((current) => {
+      const updated = updateLastAssistantMessage(current, (message) => ({
+        ...message,
+        message: withAssistantMessageReasoningContent(
+          message.message,
+          `${message.message.reasoningContent ?? ''}${text}`
+        ),
+        status: 'updating',
+      }))
+
+      return updated ?? [
+        ...current,
+        {
+          id: nextId('assistant'),
+          message: withAssistantMessageReasoningContent(
+            {
+              role: 'assistant',
+              content: '',
+            },
+            text
+          ),
+          status: 'updating',
+        },
+      ]
+    })
+  }, [])
+
+  const completeAssistantReasoning = useCallback((text: string) => {
+    setMessages((current) => {
+      const updated = updateLastAssistantMessage(current, (message) => ({
+        ...message,
+        message: withAssistantMessageReasoningContent(message.message, text),
+        status: message.status === 'loading' ? 'updating' : message.status,
+      }))
+
+      if (updated) {
+        return updated
+      }
+
+      if (!text.trim()) {
+        return current
+      }
+
+      return [
+        ...current,
+        {
+          id: nextId('assistant'),
+          message: withAssistantMessageReasoningContent(
+            {
+              role: 'assistant',
+              content: '',
+            },
+            text
+          ),
+          status: 'updating',
+        },
+      ]
+    })
+  }, [])
+
   const completeAssistantTurn = useCallback((text: string) => {
     setMessages((current) => {
       const cleanedText = stripTrailingAssistantTurnArtifacts(text)
@@ -380,6 +449,12 @@ export function useAssistantAgent({
         case 'assistant_delta':
           appendAssistantDelta(event.text)
           break
+        case 'assistant_reasoning_delta':
+          appendAssistantReasoningDelta(event.text)
+          break
+        case 'assistant_reasoning_done':
+          completeAssistantReasoning(event.text)
+          break
         case 'turn_cancelled':
           setStatus('interrupted')
           setPendingApproval(null)
@@ -437,6 +512,8 @@ export function useAssistantAgent({
     [
       appendAssistantDelta,
       appendAssistantError,
+      appendAssistantReasoningDelta,
+      completeAssistantReasoning,
       completeAssistantTurn,
       locale.eventStreamLagged,
       replaceThought,
@@ -686,7 +763,7 @@ export function useAssistantAgent({
             userMessage.message,
           ])
           await sendAgentCommand({
-            config: toAgentConfig(model, runtimePresets),
+            config: toAgentConfig(model, runtimePresets, deepThink),
             messages: requestMessages,
             request_id: nextId('request'),
             session_id: resolvedSessionId,
@@ -715,6 +792,7 @@ export function useAssistantAgent({
       appendAssistantError,
       beforeRequest,
       canLoadSession,
+      deepThink,
       isRequesting,
       locale.requestFailed,
       messages,

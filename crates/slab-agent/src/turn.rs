@@ -543,4 +543,48 @@ impl LlmStreamObserver for TurnTextDeltaObserver<'_> {
             .await;
         Ok(())
     }
+
+    async fn on_reasoning_delta(&mut self, delta: &str) -> Result<(), AgentError> {
+        if delta.is_empty() {
+            return Ok(());
+        }
+
+        self.notify
+            .on_turn_event(
+                self.thread_id,
+                &TurnEvent::Response {
+                    turn_index: Some(self.turn_index),
+                    event: AgentEventKind::ResponseReasoningTextDelta {
+                        item_id: assistant_item_id(self.turn_index),
+                        output_index: 0,
+                        content_index: 0,
+                        delta: delta.to_owned(),
+                    },
+                },
+            )
+            .await;
+        Ok(())
+    }
+
+    async fn on_reasoning_done(&mut self, text: &str) -> Result<(), AgentError> {
+        if text.trim().is_empty() {
+            return Ok(());
+        }
+
+        self.notify
+            .on_turn_event(
+                self.thread_id,
+                &TurnEvent::Response {
+                    turn_index: Some(self.turn_index),
+                    event: AgentEventKind::ResponseReasoningTextDone {
+                        item_id: assistant_item_id(self.turn_index),
+                        output_index: 0,
+                        content_index: 0,
+                        text: text.to_owned(),
+                    },
+                },
+            )
+            .await;
+        Ok(())
+    }
 }

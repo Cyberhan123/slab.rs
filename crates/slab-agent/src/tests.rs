@@ -177,6 +177,8 @@ impl LlmPort for StreamingLlm {
         observer: &mut dyn LlmStreamObserver,
     ) -> Result<LlmResponse, AgentError> {
         observer.on_text_delta("hel").await?;
+        observer.on_reasoning_delta("thinking").await?;
+        observer.on_reasoning_done("thinking").await?;
         observer.on_text_delta("lo").await?;
         Ok(LlmResponse {
             content: Some("hello".into()),
@@ -695,8 +697,34 @@ async fn streaming_llm_deltas_arrive_before_text_done() {
             )
         })
         .expect("text done");
+    let reasoning_delta = events
+        .iter()
+        .position(|event| {
+            matches!(
+                event,
+                TurnEvent::Response {
+                    event: AgentEventKind::ResponseReasoningTextDelta { delta, .. },
+                    ..
+                } if delta == "thinking"
+            )
+        })
+        .expect("reasoning delta");
+    let reasoning_done = events
+        .iter()
+        .position(|event| {
+            matches!(
+                event,
+                TurnEvent::Response {
+                    event: AgentEventKind::ResponseReasoningTextDone { text, .. },
+                    ..
+                } if text == "thinking"
+            )
+        })
+        .expect("reasoning done");
 
     assert!(first_delta < done);
+    assert!(reasoning_delta < reasoning_done);
+    assert!(reasoning_done < done);
 }
 
 #[tokio::test]

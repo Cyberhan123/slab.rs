@@ -402,6 +402,7 @@ function Assistant() {
     submitApproval,
   } = useAssistantAgent({
     beforeRequest: ensureAssistantModelReady,
+    deepThink,
     model: selectedModelId || "slab-llama",
     runtimePresets: selectedModel?.runtimePresets ?? null,
     sessionId: curConversation,

@@ -38,6 +38,20 @@ pub enum AgentEventKind {
     },
     #[serde(rename = "response.output_text.done")]
     ResponseOutputTextDone { item_id: String, output_index: i32, content_index: i32, text: String },
+    #[serde(rename = "response.reasoning_text.delta")]
+    ResponseReasoningTextDelta {
+        item_id: String,
+        output_index: i32,
+        content_index: i32,
+        delta: String,
+    },
+    #[serde(rename = "response.reasoning_text.done")]
+    ResponseReasoningTextDone {
+        item_id: String,
+        output_index: i32,
+        content_index: i32,
+        text: String,
+    },
     #[serde(rename = "response.function_call_arguments.done")]
     ResponseFunctionCallArgumentsDone {
         item_id: String,

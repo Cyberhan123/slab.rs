@@ -33,23 +33,33 @@ describe('assistant agent SSE parser', () => {
       { type: 'assistant_delta', text: 'hel' },
     ],
     [
+      'assistant_reasoning_delta',
+      '{"thread_id":"thread-1","sequence_number":6,"type":"response.reasoning_text.delta","delta":"think"}',
+      { type: 'assistant_reasoning_delta', text: 'think' },
+    ],
+    [
+      'assistant_reasoning_done',
+      '{"thread_id":"thread-1","sequence_number":7,"type":"response.reasoning_text.done","text":"thinking done"}',
+      { type: 'assistant_reasoning_done', text: 'thinking done' },
+    ],
+    [
       'turn_completed',
-      '{"thread_id":"thread-1","sequence_number":6,"type":"response.output_text.done","text":"done"}',
+      '{"thread_id":"thread-1","sequence_number":8,"type":"response.output_text.done","text":"done"}',
       { type: 'turn_completed', text: 'done' },
     ],
     [
       'turn_finished',
-      '{"thread_id":"thread-1","sequence_number":7,"type":"response.completed","response":{"id":"thread-1","status":"completed"},"text":"done"}',
+      '{"thread_id":"thread-1","sequence_number":9,"type":"response.completed","response":{"id":"thread-1","status":"completed"},"text":"done"}',
       { type: 'turn_finished' },
     ],
     [
       'turn_failed',
-      '{"thread_id":"thread-1","sequence_number":8,"type":"response.failed","error":"failed"}',
+      '{"thread_id":"thread-1","sequence_number":10,"type":"response.failed","error":"failed"}',
       { type: 'turn_failed', error: 'failed' },
     ],
     [
       'turn_cancelled',
-      '{"thread_id":"thread-1","sequence_number":9,"type":"response.cancelled","reason":"interrupted"}',
+      '{"thread_id":"thread-1","sequence_number":11,"type":"response.cancelled","reason":"interrupted"}',
       { type: 'turn_cancelled', reason: 'interrupted' },
     ],
   ])('parses %s', (_, raw, expected) => {

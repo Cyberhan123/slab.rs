@@ -4,6 +4,8 @@ export type AssistantAgentStreamEvent =
   | { type: 'agent_status'; status: AgentStatus }
   | { type: 'approval_required'; call_id: string; tool_name: string; command: string }
   | { type: 'assistant_delta'; text: string }
+  | { type: 'assistant_reasoning_delta'; text: string }
+  | { type: 'assistant_reasoning_done'; text: string }
   | { type: 'lagged' }
   | { type: 'tool_call_output'; call_id: string; output: string }
   | { type: 'tool_call_started'; tool_name: string; call_id: string; arguments: string }
@@ -45,6 +47,14 @@ export function parseAssistantAgentStreamEvent(data: string): AssistantAgentStre
         : null
     case 'response.output_text.delta':
       return typeof value.delta === 'string' ? { type: 'assistant_delta', text: value.delta } : null
+    case 'response.reasoning_text.delta':
+      return typeof value.delta === 'string'
+        ? { type: 'assistant_reasoning_delta', text: value.delta }
+        : null
+    case 'response.reasoning_text.done':
+      return typeof value.text === 'string'
+        ? { type: 'assistant_reasoning_done', text: value.text }
+        : null
     case 'agent.stream.lagged':
       return { type: 'lagged' }
     case 'response.tool_call.output':

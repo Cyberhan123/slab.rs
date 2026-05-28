@@ -173,11 +173,21 @@ pub trait LlmPort: Send + Sync {
     }
 }
 
-/// Receives visible model deltas from an [`LlmPort`] streaming implementation.
+/// Receives model deltas from an [`LlmPort`] streaming implementation.
 #[async_trait]
 pub trait LlmStreamObserver: Send {
     /// Called with assistant text that is safe to show to the caller.
     async fn on_text_delta(&mut self, delta: &str) -> Result<(), AgentError>;
+
+    /// Called with assistant reasoning text as it becomes available.
+    async fn on_reasoning_delta(&mut self, _delta: &str) -> Result<(), AgentError> {
+        Ok(())
+    }
+
+    /// Called once with the final assistant reasoning text.
+    async fn on_reasoning_done(&mut self, _text: &str) -> Result<(), AgentError> {
+        Ok(())
+    }
 }
 
 /// Port for persisting agent state.
