@@ -6,6 +6,7 @@ desktop.ini
 .idea
 .vscode
 
+
 ## Build output
 /target
 /testdata/whisper
@@ -54,3 +55,5 @@ setup.rpt
 .slab/
 
 ide-demo/
+
+.playwright-mcp
