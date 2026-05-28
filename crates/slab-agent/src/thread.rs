@@ -300,7 +300,6 @@ impl AgentThread {
                     id: thread_id.clone(),
                     status: ThreadStatus::Completed,
                 },
-                text: completion_text.clone().unwrap_or_default(),
             },
         )
         .await;

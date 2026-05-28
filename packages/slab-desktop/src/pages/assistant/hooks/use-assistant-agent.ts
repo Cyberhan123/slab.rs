@@ -401,6 +401,7 @@ export function useAssistantAgent({
           })
           break
         case 'turn_completed':
+        case 'turn_finished':
           setStatus('completed')
           setPendingApproval(null)
           setThoughts((current) =>
@@ -408,7 +409,9 @@ export function useAssistantAgent({
               thought.status === 'loading' ? { ...thought, status: 'success' } : thought
             )
           )
-          completeAssistantTurn(event.text)
+          if (event.type === 'turn_completed') {
+            completeAssistantTurn(event.text)
+          }
           break
         case 'turn_failed':
           setStatus('errored')

@@ -3,16 +3,16 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use futures::stream::{self, StreamExt};
 use futures::SinkExt;
+use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use slab_agent::{AgentEventKind, AgentStreamEvent, TurnEvent};
 use slab_app_core::context::AppState;
@@ -24,8 +24,8 @@ use utoipa::OpenApi;
 
 use crate::api::v1::agent::schema::{
     AgentConfigInput, AgentResponsesAction, AgentResponsesClientMessage,
-    AgentResponsesServerMessage, AgentStatusValue, AgentThreadMessageResponse,
-    AgentThreadResponse, MessageInput,
+    AgentResponsesServerMessage, AgentStatusValue, AgentThreadMessageResponse, AgentThreadResponse,
+    MessageInput,
 };
 use crate::api::validation::{ValidatedJson, validate};
 use crate::error::ServerError;
@@ -82,7 +82,9 @@ async fn agent_responses_get(
     ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> Result<Response, ServerError> {
     if let Ok(ws) = ws {
-        return Ok(ws.on_upgrade(move |socket| agent_responses_socket(socket, service)).into_response());
+        return Ok(ws
+            .on_upgrade(move |socket| agent_responses_socket(socket, service))
+            .into_response());
     }
 
     if query.transport.as_deref() != Some("sse") {
@@ -467,12 +469,7 @@ fn server_error_message(
         }
     };
 
-    AgentResponsesServerMessage::Error {
-        request_id,
-        code: code.to_owned(),
-        message,
-        thread_id,
-    }
+    AgentResponsesServerMessage::Error { request_id, code: code.to_owned(), message, thread_id }
 }
 
 #[cfg(test)]
@@ -539,5 +536,29 @@ mod tests {
         assert_eq!(value["sequence_number"], 7);
         assert_eq!(value["type"], "response.output_text.done");
         assert_eq!(value["text"], "done");
+    }
+
+    #[test]
+    fn completed_event_does_not_duplicate_output_text() {
+        let data = turn_event_to_sse_data(
+            "thread-1",
+            8,
+            &slab_agent::TurnEvent::Response {
+                turn_index: Some(2),
+                event: slab_agent::AgentEventKind::ResponseCompleted {
+                    response: slab_agent::AgentResponseRef {
+                        id: "thread-1".to_owned(),
+                        status: slab_agent::ThreadStatus::Completed,
+                    },
+                },
+            },
+        );
+        let value: serde_json::Value = serde_json::from_str(&data).expect("json");
+
+        assert_eq!(value["thread_id"], "thread-1");
+        assert_eq!(value["turn_index"], 2);
+        assert_eq!(value["sequence_number"], 8);
+        assert_eq!(value["type"], "response.completed");
+        assert!(value.get("text").is_none());
     }
 }

@@ -24,7 +24,7 @@ pub enum AgentEventKind {
     #[serde(rename = "response.in_progress")]
     ResponseInProgress { response: AgentResponseRef },
     #[serde(rename = "response.completed")]
-    ResponseCompleted { response: AgentResponseRef, text: String },
+    ResponseCompleted { response: AgentResponseRef },
     #[serde(rename = "response.failed")]
     ResponseFailed { response: AgentResponseRef, error: String },
     #[serde(rename = "response.cancelled")]

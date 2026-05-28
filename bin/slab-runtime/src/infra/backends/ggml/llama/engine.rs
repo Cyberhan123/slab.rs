@@ -9,8 +9,8 @@ use slab_runtime_core::backend::{
 use slab_utils::loader::load_library_from_dir;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, RwLock};
-use tokio::sync::{Mutex, mpsc, watch};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+use tokio::sync::{mpsc, watch};
 use tracing::{info, warn};
 
 use super::contract::{
@@ -313,6 +313,14 @@ impl GGMLLlamaEngine {
         })
     }
 
+    fn lock_session_bindings(
+        &self,
+    ) -> Result<MutexGuard<'_, HashMap<String, SessionBinding>>, GGMLLlamaEngineError> {
+        self.session_bindings.lock().map_err(|_| GGMLLlamaEngineError::LockPoisoned {
+            operation: "lock llama session bindings",
+        })
+    }
+
     /// Load a model and start a multi-worker inference engine.
     ///
     /// Any previously loaded model/engine are replaced.
@@ -335,7 +343,7 @@ impl GGMLLlamaEngine {
             GGMLLlamaEngineError::LockPoisoned { operation: "lock loaded llama model state" }
         })?;
         *model_write_lock = None;
-        self.session_bindings.blocking_lock().clear();
+        self.lock_session_bindings()?.clear();
 
         let path =
             path_to_model.as_ref().to_str().ok_or(GGMLLlamaEngineError::InvalidModelPathUtf8)?;
@@ -492,7 +500,7 @@ impl GGMLLlamaEngine {
         let plan;
 
         {
-            let mut bindings = self.session_bindings.lock().await;
+            let mut bindings = self.lock_session_bindings()?;
             plan =
                 plan_session_reuse(&key, bindings.get(&key), &full_prompt, request.gbnf.as_deref())
                     .map_err(ggml::EngineError::from)?;
@@ -516,7 +524,7 @@ impl GGMLLlamaEngine {
                 match self.create_session_with_options(options.clone()).await {
                     Ok(sid) => (Some(sid), delta_prompt, cached_tokens),
                     Err(error) => {
-                        self.session_bindings.lock().await.remove(&key);
+                        self.lock_session_bindings()?.remove(&key);
                         return Err(error);
                     }
                 }
@@ -525,7 +533,7 @@ impl GGMLLlamaEngine {
                 match self.create_session_from_snapshot(snapshot, options).await {
                     Ok(sid) => (Some(sid), delta_prompt, cached_tokens),
                     Err(error) => {
-                        self.session_bindings.lock().await.remove(&key);
+                        self.lock_session_bindings()?.remove(&key);
                         return Err(error);
                     }
                 }
@@ -577,23 +585,28 @@ impl GGMLLlamaEngine {
         };
 
         if let Err(error) = self.end_session(sid).await {
-            self.session_bindings.lock().await.remove(&key);
+            self.lock_session_bindings()?.remove(&key);
             return Err(error);
         }
 
         let mut cached_prompt = String::with_capacity(full_prompt.len() + generated.len());
         cached_prompt.push_str(full_prompt);
         cached_prompt.push_str(generated);
-        self.session_bindings
-            .lock()
-            .await
+        self.lock_session_bindings()?
             .insert(key, SessionBinding::Ready { snapshot, cached_prompt, grammar: gbnf });
         Ok(())
     }
 
     async fn drop_managed_session(&self, key: Option<String>, sid: Option<SessionId>) {
         if let Some(key) = key {
-            self.session_bindings.lock().await.remove(&key);
+            match self.lock_session_bindings() {
+                Ok(mut bindings) => {
+                    bindings.remove(&key);
+                }
+                Err(error) => {
+                    warn!(%error, "failed to remove llama managed session binding");
+                }
+            }
         }
 
         if let Some(sid) = sid
@@ -1174,7 +1187,7 @@ impl GGMLLlamaEngine {
             GGMLLlamaEngineError::LockPoisoned { operation: "lock loaded llama model state" }
         })?;
         *model_write_lock = None;
-        self.session_bindings.blocking_lock().clear();
+        self.lock_session_bindings()?.clear();
         Ok(())
     }
 

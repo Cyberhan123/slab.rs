@@ -9,6 +9,7 @@ export type AssistantAgentStreamEvent =
   | { type: 'tool_call_started'; tool_name: string; call_id: string; arguments: string }
   | { type: 'turn_cancelled'; reason: string }
   | { type: 'turn_completed'; text: string }
+  | { type: 'turn_finished' }
   | { type: 'turn_failed'; error: string }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -66,8 +67,9 @@ export function parseAssistantAgentStreamEvent(data: string): AssistantAgentStre
         ? { type: 'turn_cancelled', reason: value.reason }
         : null
     case 'response.output_text.done':
-    case 'response.completed':
       return typeof value.text === 'string' ? { type: 'turn_completed', text: value.text } : null
+    case 'response.completed':
+      return { type: 'turn_finished' }
     case 'response.failed':
       return typeof value.error === 'string' ? { type: 'turn_failed', error: value.error } : null
     case 'response.context.compact_started':
