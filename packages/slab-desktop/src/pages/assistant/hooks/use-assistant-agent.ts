@@ -64,6 +64,15 @@ function toAgentConfig(model: string, runtimePresets?: AssistantRuntimePresets |
     ...(typeof runtimePresets?.temperature === 'number'
       ? { temperature: runtimePresets.temperature }
       : {}),
+    ...(typeof runtimePresets?.top_p === 'number' ? { top_p: runtimePresets.top_p } : {}),
+    ...(typeof runtimePresets?.top_k === 'number' ? { top_k: runtimePresets.top_k } : {}),
+    ...(typeof runtimePresets?.min_p === 'number' ? { min_p: runtimePresets.min_p } : {}),
+    ...(typeof runtimePresets?.presence_penalty === 'number'
+      ? { presence_penalty: runtimePresets.presence_penalty }
+      : {}),
+    ...(typeof runtimePresets?.repetition_penalty === 'number'
+      ? { repetition_penalty: runtimePresets.repetition_penalty }
+      : {}),
   }
 }
 

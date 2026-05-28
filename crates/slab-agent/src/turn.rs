@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use chrono::Utc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
@@ -19,7 +20,7 @@ use crate::{
     hook::{AgentHook, HookEvent, HookOutcome, dispatch_hooks},
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort,
-        ThreadMessageRecord, ToolCallRecord, TurnEvent,
+        LlmStreamObserver, ThreadMessageRecord, ToolCallRecord, TurnEvent,
     },
     risk::ToolRiskAnalyzer,
     tool::{ToolContext, ToolHandler, ToolRouter},
@@ -67,12 +68,18 @@ pub(crate) async fn execute_turn(
 
     debug!(thread_id = context.thread_id, turn_index = context.turn_index, "executing turn");
 
+    let mut stream_observer = TurnTextDeltaObserver {
+        thread_id: context.thread_id,
+        turn_index: context.turn_index,
+        notify: context.notify,
+    };
     let response = tokio::select! {
-        response = context.llm.chat_completion(
+        response = context.llm.chat_completion_streaming(
             &context.config.model,
             messages,
             &tool_specs,
             context.config,
+            &mut stream_observer,
         ) => response?,
         _ = context.cancellation.cancelled() => return Err(AgentError::Interrupted),
     };
@@ -505,4 +512,35 @@ async fn emit_turn_metrics(
 
 fn assistant_item_id(turn_index: u32) -> String {
     format!("assistant-{turn_index}")
+}
+
+struct TurnTextDeltaObserver<'a> {
+    thread_id: &'a str,
+    turn_index: u32,
+    notify: &'a dyn AgentNotifyPort,
+}
+
+#[async_trait]
+impl LlmStreamObserver for TurnTextDeltaObserver<'_> {
+    async fn on_text_delta(&mut self, delta: &str) -> Result<(), AgentError> {
+        if delta.is_empty() {
+            return Ok(());
+        }
+
+        self.notify
+            .on_turn_event(
+                self.thread_id,
+                &TurnEvent::Response {
+                    turn_index: Some(self.turn_index),
+                    event: AgentEventKind::ResponseOutputTextDelta {
+                        item_id: assistant_item_id(self.turn_index),
+                        output_index: 0,
+                        content_index: 0,
+                        delta: delta.to_owned(),
+                    },
+                },
+            )
+            .await;
+        Ok(())
+    }
 }

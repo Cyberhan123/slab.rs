@@ -148,6 +148,36 @@ pub trait LlmPort: Send + Sync {
         tools: &[ToolSpec],
         config: &AgentConfig,
     ) -> Result<LlmResponse, AgentError>;
+
+    /// Perform a chat completion while forwarding visible text deltas as they
+    /// become available.
+    ///
+    /// Implementations that cannot stream should keep the default behavior; it
+    /// emits one final delta after the blocking completion returns.
+    async fn chat_completion_streaming(
+        &self,
+        model: &str,
+        messages: &[ConversationMessage],
+        tools: &[ToolSpec],
+        config: &AgentConfig,
+        observer: &mut dyn LlmStreamObserver,
+    ) -> Result<LlmResponse, AgentError> {
+        let response = self.chat_completion(model, messages, tools, config).await?;
+        if response.tool_calls.is_empty()
+            && let Some(content) = response.content.clone()
+            && !content.is_empty()
+        {
+            observer.on_text_delta(&content).await?;
+        }
+        Ok(response)
+    }
+}
+
+/// Receives visible model deltas from an [`LlmPort`] streaming implementation.
+#[async_trait]
+pub trait LlmStreamObserver: Send {
+    /// Called with assistant text that is safe to show to the caller.
+    async fn on_text_delta(&mut self, delta: &str) -> Result<(), AgentError>;
 }
 
 /// Port for persisting agent state.

@@ -18,8 +18,8 @@ use crate::{
     event::AgentEventKind,
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
-        ParsedToolCall, ThreadMessageRecord, ThreadSnapshot, ThreadStatus, ToolCallRecord,
-        ToolSpec, TurnEvent,
+        LlmStreamObserver, ParsedToolCall, ThreadMessageRecord, ThreadSnapshot, ThreadStatus,
+        ToolCallRecord, ToolSpec, TurnEvent,
     },
 };
 use async_trait::async_trait;
@@ -149,6 +149,42 @@ impl LlmPort for MockLlm {
 }
 
 // ── Mock store ────────────────────────────────────────────────────────────────
+
+struct StreamingLlm;
+
+#[async_trait]
+impl LlmPort for StreamingLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+    ) -> Result<LlmResponse, AgentError> {
+        Ok(LlmResponse {
+            content: Some("hello".into()),
+            tool_calls: Vec::new(),
+            finish_reason: Some("stop".into()),
+        })
+    }
+
+    async fn chat_completion_streaming(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        observer: &mut dyn LlmStreamObserver,
+    ) -> Result<LlmResponse, AgentError> {
+        observer.on_text_delta("hel").await?;
+        observer.on_text_delta("lo").await?;
+        Ok(LlmResponse {
+            content: Some("hello".into()),
+            tool_calls: Vec::new(),
+            finish_reason: Some("stop".into()),
+        })
+    }
+}
 
 struct NoopStore;
 
@@ -599,6 +635,68 @@ async fn response_style_events_include_text_tool_and_metrics() {
     assert!(events.iter().any(|event| {
         matches!(event, TurnEvent::Response { event: AgentEventKind::ResponseMetrics { .. }, .. })
     }));
+}
+
+#[tokio::test]
+async fn streaming_llm_deltas_arrive_before_text_done() {
+    let llm = Arc::new(StreamingLlm);
+    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
+    let notify = Arc::new(RecordingNotify::default());
+    let router = Arc::new(ToolRouter::new());
+
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new(llm, store, notify.clone(), approval, router, 8, 4));
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: slab_types::ConversationMessageContent::Text("Say hello".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 1, ..AgentConfig::default() };
+
+    let thread_id =
+        control.spawn("session-streaming".into(), config, messages).await.expect("spawn");
+    let mut status_rx = control.subscribe(&thread_id).await.expect("subscribe");
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            status_rx.changed().await.expect("status channel closed");
+            if *status_rx.borrow() == ThreadStatus::Completed {
+                return;
+            }
+        }
+    })
+    .await
+    .expect("thread should complete");
+
+    let events = notify.events.lock().unwrap();
+    let first_delta = events
+        .iter()
+        .position(|event| {
+            matches!(
+                event,
+                TurnEvent::Response {
+                    event: AgentEventKind::ResponseOutputTextDelta { delta, .. },
+                    ..
+                } if delta == "hel"
+            )
+        })
+        .expect("first text delta");
+    let done = events
+        .iter()
+        .position(|event| {
+            matches!(
+                event,
+                TurnEvent::Response {
+                    event: AgentEventKind::ResponseOutputTextDone { text, .. },
+                    ..
+                } if text == "hello"
+            )
+        })
+        .expect("text done");
+
+    assert!(first_delta < done);
 }
 
 #[tokio::test]

@@ -6,6 +6,8 @@ from typing import Any, TypeVar, cast
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
+from ..models.chat_reasoning_effort import ChatReasoningEffort
+from ..models.chat_verbosity import ChatVerbosity
 from ..types import UNSET, Unset
 
 T = TypeVar("T", bound="AgentConfigInput")
@@ -19,17 +21,31 @@ class AgentConfigInput:
         allowed_tools (list[str] | None | Unset):
         max_tokens (int | None | Unset):
         max_turns (int | None | Unset):
+        min_p (float | None | Unset):
         model (None | str | Unset):
+        presence_penalty (float | None | Unset):
+        reasoning_effort (ChatReasoningEffort | None | Unset):
+        repetition_penalty (float | None | Unset):
         system_prompt (None | str | Unset):
         temperature (float | None | Unset):
+        top_k (int | None | Unset):
+        top_p (float | None | Unset):
+        verbosity (ChatVerbosity | None | Unset):
     """
 
     allowed_tools: list[str] | None | Unset = UNSET
     max_tokens: int | None | Unset = UNSET
     max_turns: int | None | Unset = UNSET
+    min_p: float | None | Unset = UNSET
     model: None | str | Unset = UNSET
+    presence_penalty: float | None | Unset = UNSET
+    reasoning_effort: ChatReasoningEffort | None | Unset = UNSET
+    repetition_penalty: float | None | Unset = UNSET
     system_prompt: None | str | Unset = UNSET
     temperature: float | None | Unset = UNSET
+    top_k: int | None | Unset = UNSET
+    top_p: float | None | Unset = UNSET
+    verbosity: ChatVerbosity | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -54,11 +70,37 @@ class AgentConfigInput:
         else:
             max_turns = self.max_turns
 
+        min_p: float | None | Unset
+        if isinstance(self.min_p, Unset):
+            min_p = UNSET
+        else:
+            min_p = self.min_p
+
         model: None | str | Unset
         if isinstance(self.model, Unset):
             model = UNSET
         else:
             model = self.model
+
+        presence_penalty: float | None | Unset
+        if isinstance(self.presence_penalty, Unset):
+            presence_penalty = UNSET
+        else:
+            presence_penalty = self.presence_penalty
+
+        reasoning_effort: None | str | Unset
+        if isinstance(self.reasoning_effort, Unset):
+            reasoning_effort = UNSET
+        elif isinstance(self.reasoning_effort, ChatReasoningEffort):
+            reasoning_effort = self.reasoning_effort.value
+        else:
+            reasoning_effort = self.reasoning_effort
+
+        repetition_penalty: float | None | Unset
+        if isinstance(self.repetition_penalty, Unset):
+            repetition_penalty = UNSET
+        else:
+            repetition_penalty = self.repetition_penalty
 
         system_prompt: None | str | Unset
         if isinstance(self.system_prompt, Unset):
@@ -72,6 +114,26 @@ class AgentConfigInput:
         else:
             temperature = self.temperature
 
+        top_k: int | None | Unset
+        if isinstance(self.top_k, Unset):
+            top_k = UNSET
+        else:
+            top_k = self.top_k
+
+        top_p: float | None | Unset
+        if isinstance(self.top_p, Unset):
+            top_p = UNSET
+        else:
+            top_p = self.top_p
+
+        verbosity: None | str | Unset
+        if isinstance(self.verbosity, Unset):
+            verbosity = UNSET
+        elif isinstance(self.verbosity, ChatVerbosity):
+            verbosity = self.verbosity.value
+        else:
+            verbosity = self.verbosity
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({})
@@ -81,12 +143,26 @@ class AgentConfigInput:
             field_dict["max_tokens"] = max_tokens
         if max_turns is not UNSET:
             field_dict["max_turns"] = max_turns
+        if min_p is not UNSET:
+            field_dict["min_p"] = min_p
         if model is not UNSET:
             field_dict["model"] = model
+        if presence_penalty is not UNSET:
+            field_dict["presence_penalty"] = presence_penalty
+        if reasoning_effort is not UNSET:
+            field_dict["reasoning_effort"] = reasoning_effort
+        if repetition_penalty is not UNSET:
+            field_dict["repetition_penalty"] = repetition_penalty
         if system_prompt is not UNSET:
             field_dict["system_prompt"] = system_prompt
         if temperature is not UNSET:
             field_dict["temperature"] = temperature
+        if top_k is not UNSET:
+            field_dict["top_k"] = top_k
+        if top_p is not UNSET:
+            field_dict["top_p"] = top_p
+        if verbosity is not UNSET:
+            field_dict["verbosity"] = verbosity
 
         return field_dict
 
@@ -129,6 +205,15 @@ class AgentConfigInput:
 
         max_turns = _parse_max_turns(d.pop("max_turns", UNSET))
 
+        def _parse_min_p(data: object) -> float | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(float | None | Unset, data)
+
+        min_p = _parse_min_p(d.pop("min_p", UNSET))
+
         def _parse_model(data: object) -> None | str | Unset:
             if data is None:
                 return data
@@ -137,6 +222,43 @@ class AgentConfigInput:
             return cast(None | str | Unset, data)
 
         model = _parse_model(d.pop("model", UNSET))
+
+        def _parse_presence_penalty(data: object) -> float | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(float | None | Unset, data)
+
+        presence_penalty = _parse_presence_penalty(d.pop("presence_penalty", UNSET))
+
+        def _parse_reasoning_effort(data: object) -> ChatReasoningEffort | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                reasoning_effort_type_1 = ChatReasoningEffort(data)
+
+                return reasoning_effort_type_1
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(ChatReasoningEffort | None | Unset, data)
+
+        reasoning_effort = _parse_reasoning_effort(d.pop("reasoning_effort", UNSET))
+
+        def _parse_repetition_penalty(data: object) -> float | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(float | None | Unset, data)
+
+        repetition_penalty = _parse_repetition_penalty(
+            d.pop("repetition_penalty", UNSET)
+        )
 
         def _parse_system_prompt(data: object) -> None | str | Unset:
             if data is None:
@@ -156,13 +278,55 @@ class AgentConfigInput:
 
         temperature = _parse_temperature(d.pop("temperature", UNSET))
 
+        def _parse_top_k(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        top_k = _parse_top_k(d.pop("top_k", UNSET))
+
+        def _parse_top_p(data: object) -> float | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(float | None | Unset, data)
+
+        top_p = _parse_top_p(d.pop("top_p", UNSET))
+
+        def _parse_verbosity(data: object) -> ChatVerbosity | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                verbosity_type_1 = ChatVerbosity(data)
+
+                return verbosity_type_1
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(ChatVerbosity | None | Unset, data)
+
+        verbosity = _parse_verbosity(d.pop("verbosity", UNSET))
+
         agent_config_input = cls(
             allowed_tools=allowed_tools,
             max_tokens=max_tokens,
             max_turns=max_turns,
+            min_p=min_p,
             model=model,
+            presence_penalty=presence_penalty,
+            reasoning_effort=reasoning_effort,
+            repetition_penalty=repetition_penalty,
             system_prompt=system_prompt,
             temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            verbosity=verbosity,
         )
 
         agent_config_input.additional_properties = d

@@ -886,10 +886,22 @@ export interface components {
             max_tokens?: number | null;
             /** Format: int32 */
             max_turns?: number | null;
+            /** Format: float */
+            min_p?: number | null;
             model?: string | null;
+            /** Format: float */
+            presence_penalty?: number | null;
+            reasoning_effort?: null | components["schemas"]["ChatReasoningEffort"];
+            /** Format: float */
+            repetition_penalty?: number | null;
             system_prompt?: string | null;
             /** Format: float */
             temperature?: number | null;
+            /** Format: int32 */
+            top_k?: number | null;
+            /** Format: float */
+            top_p?: number | null;
+            verbosity?: null | components["schemas"]["ChatVerbosity"];
         };
         /**
          * @description Client action acknowledged by `/v1/agents/responses`.

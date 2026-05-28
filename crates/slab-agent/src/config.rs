@@ -1,5 +1,7 @@
 //! Agent configuration.
 
+use slab_types::chat::{ChatReasoningEffort, ChatVerbosity};
+
 /// Runtime configuration for a single agent thread.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AgentConfig {
@@ -19,10 +21,24 @@ pub struct AgentConfig {
     /// `AgentControl` enforces a global maximum at spawn time; this field is
     /// preserved for serialisation fidelity and future per-session overrides.
     pub max_threads: u32,
-    /// Sampling temperature passed to the LLM.
-    pub temperature: f32,
     /// Maximum output tokens per LLM call.
-    pub max_tokens: u32,
+    pub max_tokens: Option<u32>,
+    /// Sampling temperature passed to the LLM.
+    pub temperature: Option<f32>,
+    /// Nucleus sampling threshold.
+    pub top_p: Option<f32>,
+    /// Top-k sampling limit for local llama backends.
+    pub top_k: Option<i32>,
+    /// Min-p sampling threshold for local llama backends.
+    pub min_p: Option<f32>,
+    /// Presence penalty for local llama backends.
+    pub presence_penalty: Option<f32>,
+    /// Repetition penalty for local llama backends.
+    pub repetition_penalty: Option<f32>,
+    /// Provider reasoning effort override.
+    pub reasoning_effort: Option<ChatReasoningEffort>,
+    /// Provider verbosity override.
+    pub verbosity: Option<ChatVerbosity>,
     /// Explicit allow-list of tool names available to this thread.
     /// An empty list means all registered tools are allowed.
     pub allowed_tools: Vec<String>,
@@ -36,8 +52,15 @@ impl Default for AgentConfig {
             max_turns: 10,
             max_depth: 3,
             max_threads: 8,
-            temperature: 0.7,
-            max_tokens: 2048,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            min_p: None,
+            presence_penalty: None,
+            repetition_penalty: None,
+            reasoning_effort: None,
+            verbosity: None,
             allowed_tools: vec![],
         }
     }

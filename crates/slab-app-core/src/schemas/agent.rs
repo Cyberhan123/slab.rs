@@ -7,14 +7,23 @@ use slab_types::agent::AgentThreadStatus;
 use utoipa::ToSchema;
 use validator::{Validate, ValidationError, ValidationErrors};
 
+use crate::schemas::chat::{ChatReasoningEffort, ChatVerbosity};
+
 /// Agent configuration provided by the caller.
 #[derive(Debug, Default, Deserialize, Serialize, ToSchema)]
 pub struct AgentConfigInput {
     pub model: Option<String>,
     pub system_prompt: Option<String>,
     pub max_turns: Option<u32>,
-    pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub top_k: Option<i32>,
+    pub min_p: Option<f32>,
+    pub presence_penalty: Option<f32>,
+    pub repetition_penalty: Option<f32>,
+    pub reasoning_effort: Option<ChatReasoningEffort>,
+    pub verbosity: Option<ChatVerbosity>,
     pub allowed_tools: Option<Vec<String>>,
 }
 
@@ -27,8 +36,15 @@ impl From<AgentConfigInput> for AgentConfig {
             max_turns: v.max_turns.unwrap_or(defaults.max_turns),
             max_depth: defaults.max_depth,
             max_threads: defaults.max_threads,
-            temperature: v.temperature.unwrap_or(defaults.temperature),
-            max_tokens: v.max_tokens.unwrap_or(defaults.max_tokens),
+            max_tokens: v.max_tokens,
+            temperature: v.temperature,
+            top_p: v.top_p,
+            top_k: v.top_k,
+            min_p: v.min_p,
+            presence_penalty: v.presence_penalty,
+            repetition_penalty: v.repetition_penalty,
+            reasoning_effort: v.reasoning_effort.map(Into::into),
+            verbosity: v.verbosity.map(Into::into),
             allowed_tools: v.allowed_tools.unwrap_or_default(),
         }
     }
