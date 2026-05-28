@@ -20,6 +20,20 @@ export function projectAgentThreadMessages(
 ): AssistantMessageRecord[] {
   return (messages ?? [])
     .filter((message) => message.role === 'assistant' || message.role === 'user')
+    .filter((message) => {
+      if (message.role !== 'assistant') {
+        return true
+      }
+
+      const content = message.content.trim()
+      if (!content) {
+        return false
+      }
+
+      return !content
+        .split('\n')
+        .every((line) => line.startsWith('tool_call') || line.startsWith('tool_call_id:'))
+    })
     .map((message) => ({
       id: message.id,
       message: {

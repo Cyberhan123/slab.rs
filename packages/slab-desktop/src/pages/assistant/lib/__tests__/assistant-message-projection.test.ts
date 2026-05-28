@@ -53,6 +53,22 @@ describe('assistant message projection', () => {
           thread_id: 'thread-1',
           turn_index: 1,
         },
+        {
+          content: 'tool_call id=call-1: web_search({"query":"Japan weather"})',
+          created_at: '2026-01-01T00:00:03Z',
+          id: 'msg-4',
+          role: 'assistant',
+          thread_id: 'thread-1',
+          turn_index: 2,
+        },
+        {
+          content: '',
+          created_at: '2026-01-01T00:00:04Z',
+          id: 'msg-5',
+          role: 'assistant',
+          thread_id: 'thread-1',
+          turn_index: 3,
+        },
       ])
     ).toEqual([
       {

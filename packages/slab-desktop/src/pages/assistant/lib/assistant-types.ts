@@ -21,6 +21,7 @@ export type AssistantThought = {
   title: string
   detail?: string
   status: AssistantThoughtStatus
+  summary?: string
   toolName?: string
   callId?: string
   pendingApproval?: {

@@ -48,18 +48,6 @@ const normalizeStoredMessageRole = (role: unknown, fallbackRole: string): Assist
   return fallbackRole.trim() || 'assistant'
 }
 
-const renderStoredToolCall = (value: unknown): string => {
-  if (!isRecord(value) || !isRecord(value.function) || typeof value.function.name !== 'string') {
-    return ''
-  }
-
-  const rawArguments = value.function.arguments
-  const argumentsText = typeof rawArguments === 'string' ? rawArguments : stringifyStoredValue(rawArguments ?? '')
-  const callId = typeof value.id === 'string' && value.id.trim() ? ` id=${value.id.trim()}` : ''
-
-  return `tool_call${callId}: ${value.function.name}(${argumentsText})`
-}
-
 const renderStoredContentPart = (value: unknown): string => {
   if (!isRecord(value) || typeof value.type !== 'string') {
     return typeof value === 'string' ? value : stringifyStoredValue(value ?? '')
@@ -140,19 +128,6 @@ export const toStoredSessionAssistantMessage = (
   const body = renderStoredMessageContent(message.content)
   if (body.trim()) {
     segments.push(body)
-  }
-
-  if (typeof message.tool_call_id === 'string' && message.tool_call_id.trim()) {
-    segments.push(`tool_call_id: ${message.tool_call_id.trim()}`)
-  }
-
-  if (Array.isArray(message.tool_calls)) {
-    const toolCalls = message.tool_calls
-      .map(renderStoredToolCall)
-      .filter((part) => part.trim().length > 0)
-    if (toolCalls.length > 0) {
-      segments.push(toolCalls.join('\n'))
-    }
   }
 
   return {

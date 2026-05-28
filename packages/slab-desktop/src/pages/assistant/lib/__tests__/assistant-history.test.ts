@@ -38,8 +38,6 @@ describe('assistant history', () => {
         'hello',
         '{"ok":true}',
         'tool_result[call-1]: {"value":42}',
-        'tool_call_id: call-1',
-        'tool_call id=call-2: lookup({"query":"slab"})',
       ].join('\n'),
     })
   })

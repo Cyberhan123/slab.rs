@@ -3,7 +3,7 @@ import XMarkdown from "@ant-design/x-markdown"
 import Latex from "@ant-design/x-markdown/plugins/latex"
 import "@ant-design/x-markdown/dist/plugins/latex.css"
 import { CodeHighlighter } from "@ant-design/x"
-import { isValidElement, type ReactNode } from "react"
+import { isValidElement, memo, type ReactNode } from "react"
 
 import { cn } from "@/lib/utils"
 
@@ -75,7 +75,17 @@ const markdownConfig = {
   extensions: Latex(),
 }
 
-export function AssistantMarkdown({
+const streamingIdle = {
+  enableAnimation: true,
+  hasNextChunk: false,
+}
+
+const streamingActive = {
+  enableAnimation: true,
+  hasNextChunk: true,
+}
+
+function AssistantMarkdownView({
   children,
   className,
   hasNextChunk = false,
@@ -84,14 +94,12 @@ export function AssistantMarkdown({
     <XMarkdown
       components={markdownComponents}
       config={markdownConfig}
+      content={children}
       paragraphTag="div"
       className={cn("assistant-markdown text-base leading-[1.625]", className)}
-      streaming={{
-        enableAnimation: true,
-        hasNextChunk,
-      }}
-    >
-      {children}
-    </XMarkdown>
+      streaming={hasNextChunk ? streamingActive : streamingIdle}
+    />
   )
 }
+
+export const AssistantMarkdown = memo(AssistantMarkdownView)

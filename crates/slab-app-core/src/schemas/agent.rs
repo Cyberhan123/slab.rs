@@ -277,7 +277,7 @@ impl From<ThreadSnapshot> for AgentThreadResponse {
 impl From<ThreadMessageRecord> for AgentThreadMessageResponse {
     fn from(record: ThreadMessageRecord) -> Self {
         let message = record.message;
-        let content = message.rendered_text();
+        let content = message.content.rendered_text();
         Self {
             id: record.id,
             thread_id: record.thread_id,
@@ -313,5 +313,61 @@ impl From<AgentThreadStatus> for AgentStatusValue {
             AgentThreadStatus::Errored => Self::Errored,
             AgentThreadStatus::Shutdown => Self::Shutdown,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use slab_agent::port::ThreadMessageRecord;
+    use slab_types::{
+        ConversationMessage, ConversationMessageContent, ConversationToolCall,
+        ConversationToolFunction,
+    };
+
+    use super::AgentThreadMessageResponse;
+
+    #[test]
+    fn agent_thread_message_response_hides_assistant_tool_calls() {
+        let response = AgentThreadMessageResponse::from(ThreadMessageRecord {
+            id: "message-1".into(),
+            thread_id: "thread-1".into(),
+            turn_index: 0,
+            message: ConversationMessage {
+                role: "assistant".into(),
+                content: ConversationMessageContent::Text(String::new()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![ConversationToolCall {
+                    id: Some("call-1".into()),
+                    r#type: "function".into(),
+                    function: ConversationToolFunction {
+                        name: "web_search".into(),
+                        arguments: r#"{"query":"Japan weather"}"#.into(),
+                    },
+                }],
+            },
+            created_at: "2026-01-01T00:00:00Z".into(),
+        });
+
+        assert_eq!(response.content, "");
+    }
+
+    #[test]
+    fn agent_thread_message_response_keeps_assistant_text() {
+        let response = AgentThreadMessageResponse::from(ThreadMessageRecord {
+            id: "message-1".into(),
+            thread_id: "thread-1".into(),
+            turn_index: 0,
+            message: ConversationMessage {
+                role: "assistant".into(),
+                content: ConversationMessageContent::Text("Tokyo is sunny.".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: Vec::new(),
+            },
+            created_at: "2026-01-01T00:00:00Z".into(),
+        });
+
+        assert_eq!(response.content, "Tokyo is sunny.");
     }
 }

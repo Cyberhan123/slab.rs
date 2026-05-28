@@ -7,25 +7,23 @@ afterEach(() => {
   cleanup();
 });
 
+class MockIntersectionObserver {
+  observe = vi.fn<() => void>();
+  unobserve = vi.fn<() => void>();
+  disconnect = vi.fn<() => void>();
+}
+
+class MockResizeObserver {
+  observe = vi.fn<() => void>();
+  unobserve = vi.fn<() => void>();
+  disconnect = vi.fn<() => void>();
+}
+
 // Mock IntersectionObserver
-global.IntersectionObserver = vi.fn<typeof IntersectionObserver>().mockImplementation(
-  () =>
-    ({
-      observe: vi.fn<() => void>(),
-      unobserve: vi.fn<() => void>(),
-      disconnect: vi.fn<() => void>(),
-    }) as unknown as IntersectionObserver,
-);
+global.IntersectionObserver = MockIntersectionObserver as unknown as typeof IntersectionObserver;
 
 // Mock ResizeObserver
-global.ResizeObserver = vi.fn<typeof ResizeObserver>().mockImplementation(
-  () =>
-    ({
-      observe: vi.fn<() => void>(),
-      unobserve: vi.fn<() => void>(),
-      disconnect: vi.fn<() => void>(),
-    }) as unknown as ResizeObserver,
-);
+global.ResizeObserver = MockResizeObserver as unknown as typeof ResizeObserver;
 
 // Mock matchMedia
 Object.defineProperty(window, 'matchMedia', {

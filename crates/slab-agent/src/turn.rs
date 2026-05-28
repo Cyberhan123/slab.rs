@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::Utc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use slab_types::{
@@ -187,6 +187,15 @@ pub(crate) async fn execute_turn(
         let parsed_args = match serde_json::from_str::<serde_json::Value>(&tc.arguments) {
             Ok(v) => v,
             Err(e) => {
+                info!(
+                    thread_id = context.thread_id,
+                    turn_index = context.turn_index,
+                    item_id = %tc.id,
+                    tool_name = %tc.name,
+                    arguments = %tc.arguments,
+                    error = %e,
+                    "agent tool call arguments parse failed"
+                );
                 warn!(
                     thread_id = context.thread_id,
                     tool = %tc.name,
@@ -279,6 +288,17 @@ pub(crate) async fn execute_turn(
             }
         };
         let risk = context.risk.analyze(&tc.name, &effective_args).await;
+        let effective_arguments =
+            serde_json::to_string(&effective_args).unwrap_or_else(|_| tc.arguments.clone());
+        info!(
+            thread_id = context.thread_id,
+            turn_index = context.turn_index,
+            item_id = %tc.id,
+            call_id = %call_id,
+            tool_name = %tc.name,
+            arguments = %effective_arguments,
+            "agent function call arguments done"
+        );
 
         // Emit ToolCallStarted AFTER hooks so SSE consumers see the final
         // effective arguments (hooks may have modified them).
@@ -293,8 +313,7 @@ pub(crate) async fn execute_turn(
                         call_id: call_id.clone(),
                         name: tc.name.clone(),
                         output_index: 0,
-                        arguments: serde_json::to_string(&effective_args)
-                            .unwrap_or_else(|_| tc.arguments.clone()),
+                        arguments: effective_arguments.clone(),
                         risk: Some(risk.clone()),
                     },
                 },
@@ -326,6 +345,15 @@ pub(crate) async fn execute_turn(
         }
 
         let (output, call_status) = if let Some(request) = approval_request {
+            info!(
+                thread_id = context.thread_id,
+                turn_index = context.turn_index,
+                item_id = %tc.id,
+                call_id = %call_id,
+                tool_name = %tc.name,
+                arguments = %effective_arguments,
+                "agent tool call approval required"
+            );
             let decision = tokio::select! {
                 decision = context.approval.request_approval(
                     context.thread_id,
@@ -338,6 +366,15 @@ pub(crate) async fn execute_turn(
             };
             match decision {
                 ApprovalDecision::Approved => {
+                    info!(
+                        thread_id = context.thread_id,
+                        turn_index = context.turn_index,
+                        item_id = %tc.id,
+                        call_id = %call_id,
+                        tool_name = %tc.name,
+                        status = "approved",
+                        "agent tool call approval resolved"
+                    );
                     context
                         .notify
                         .on_turn_event(
@@ -356,12 +393,30 @@ pub(crate) async fn execute_turn(
                     if context.cancellation.is_cancelled() {
                         return Err(AgentError::Interrupted);
                     }
+                    info!(
+                        thread_id = context.thread_id,
+                        turn_index = context.turn_index,
+                        item_id = %tc.id,
+                        call_id = %call_id,
+                        tool_name = %tc.name,
+                        arguments = %effective_arguments,
+                        "agent tool call execution started"
+                    );
                     tokio::select! {
                         result = execute_tool_call(&tc.name, handler, &ctx, &effective_args) => result,
                         _ = context.cancellation.cancelled() => return Err(AgentError::Interrupted),
                     }
                 }
                 ApprovalDecision::Rejected => {
+                    info!(
+                        thread_id = context.thread_id,
+                        turn_index = context.turn_index,
+                        item_id = %tc.id,
+                        call_id = %call_id,
+                        tool_name = %tc.name,
+                        status = "rejected",
+                        "agent tool call approval resolved"
+                    );
                     context
                         .notify
                         .on_turn_event(
@@ -384,6 +439,15 @@ pub(crate) async fn execute_turn(
             if context.cancellation.is_cancelled() {
                 return Err(AgentError::Interrupted);
             }
+            info!(
+                thread_id = context.thread_id,
+                turn_index = context.turn_index,
+                item_id = %tc.id,
+                call_id = %call_id,
+                tool_name = %tc.name,
+                arguments = %effective_arguments,
+                "agent tool call execution started"
+            );
             tokio::select! {
                 result = execute_tool_call(&tc.name, handler, &ctx, &effective_args) => result,
                 _ = context.cancellation.cancelled() => return Err(AgentError::Interrupted),
@@ -392,6 +456,16 @@ pub(crate) async fn execute_turn(
         if context.cancellation.is_cancelled() {
             return Err(AgentError::Interrupted);
         }
+        info!(
+            thread_id = context.thread_id,
+            turn_index = context.turn_index,
+            item_id = %tc.id,
+            call_id = %call_id,
+            tool_name = %tc.name,
+            status = ?call_status,
+            output_len = output.len(),
+            "agent tool call output"
+        );
 
         // Run PostToolUse hooks.
         let post_event = HookEvent::PostToolUse {
@@ -474,6 +548,7 @@ async fn execute_tool_call(
     arguments: &serde_json::Value,
 ) -> (String, ToolCallStatus) {
     let Some(handler) = handler else {
+        info!(tool_name = %tool_name, "agent tool call handler not found");
         warn!(tool = tool_name, "tool not found");
         return (format!("tool not found: {tool_name}"), ToolCallStatus::Failed);
     };

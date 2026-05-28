@@ -442,6 +442,7 @@ export function useAssistantAgent({
               toolName: event.tool_name,
             },
             status: 'loading',
+            summary: `tool_call id=${event.call_id}: ${event.tool_name}(${event.command})`,
             title: `${event.tool_name} approval`,
             toolName: event.tool_name,
           })
@@ -480,7 +481,8 @@ export function useAssistantAgent({
             callId: event.call_id,
             detail: event.arguments,
             status: 'loading',
-            title: `${event.tool_name} started`,
+            summary: `tool_call id=${event.call_id}: ${event.tool_name}(${event.arguments})`,
+            title: 'tool_call',
             toolName: event.tool_name,
           })
           break
