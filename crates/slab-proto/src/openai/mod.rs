@@ -2,9 +2,10 @@
 pub(crate) mod models;
 
 /// Re-export generated DTOs directly at crate::openai::* to avoid deep paths.
-/// these dtos write from crates\slab-proto\openai\openapi\openapi.yaml by hand.
-/// these are not meant is all right if need, please see openapi.yaml and change the dto to the right way, and add the test case in tests folder
-/// No client code or server code should be added here, only the dto and test case for it, if you want to add client or server code, please add it in the client or server module respectively
+/// These DTOs are maintained against `crates/slab-proto/openai/openapi/openapi.yaml`.
+/// When adjusting a DTO, align it with the OpenAPI spec and add or update a test
+/// under `src/openai/tests`.
+/// Keep this module DTO-only: do not add client or server logic here.
 pub use models::*;
 
 #[cfg(test)]

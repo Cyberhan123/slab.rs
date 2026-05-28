@@ -81,7 +81,6 @@ pub(crate) fn transcode_audio(source_path: &str, output_path: &str) -> anyhow::R
     output_stream.set_parameters(&encoder);
 
     let out_time_base = output_stream.time_base();
-    drop(output_stream);
 
     octx.set_metadata(ictx.metadata().to_owned());
     octx.write_header()
