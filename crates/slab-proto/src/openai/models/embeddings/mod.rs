@@ -1,4 +1,4 @@
 #[path = "embeddings.rs"]
-mod types;
+mod embeddings;
 
-pub use types::*;
+pub use embeddings::*;

@@ -24,7 +24,12 @@ fn chat_completions_item_post_update_request_and_response_deserialize() {
         assert_json_deserializes(CHAT_COMPLETION_UPDATE_REQUEST);
 
     assert_eq!(update_response.model, "string");
-    assert_eq!(update_request.metadata.unwrap()["foo"], "string");
+    assert_eq!(
+        update_request
+            .metadata
+            .expect("chat completion update fixture should include metadata")["foo"],
+        "string"
+    );
 }
 
 #[test]

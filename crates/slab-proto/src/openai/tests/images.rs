@@ -11,12 +11,24 @@ fn images_edits_post_response_deserializes() {
 fn images_generations_post_response_deserializes() {
     let image_generation: ImagesResponse = assert_json_deserializes(IMAGES_RESPONSE);
 
-    assert_eq!(image_generation.data.unwrap().len(), 1);
+    assert_eq!(
+        image_generation
+            .data
+            .expect("images generation fixture should include data")
+            .len(),
+        1
+    );
 }
 
 #[test]
 fn images_variations_post_response_deserializes() {
     let image_variation: ImagesResponse = assert_json_deserializes(IMAGES_RESPONSE);
 
-    assert_eq!(image_variation.usage.unwrap().total_tokens, 0);
+    assert_eq!(
+        image_variation
+            .usage
+            .expect("images variation fixture should include usage")
+            .total_tokens,
+        0
+    );
 }

@@ -46,19 +46,20 @@ fn responses_compact_post_response_deserializes() {
 
 #[test]
 fn responses_post_sse_lifecycle_events_deserialize() {
-    let response_value: serde_json::Value = serde_json::from_str(RESPONSE_RESOURCE).unwrap();
+    let response_value: serde_json::Value = serde_json::from_str(RESPONSE_RESOURCE)
+        .expect("response fixture should be valid JSON");
     let created_event: ResponseCreatedEvent = serde_json::from_value(json!({
         "type": "response.created",
         "response": response_value.clone(),
         "sequence_number": 1
     }))
-    .unwrap();
+    .expect("created response event fixture should deserialize");
     let completed_event: ResponseCompletedEvent = serde_json::from_value(json!({
         "type": "response.completed",
         "response": response_value,
         "sequence_number": 2
     }))
-    .unwrap();
+    .expect("completed response event fixture should deserialize");
 
     assert_eq!(created_event.sequence_number, 1);
     assert_eq!(completed_event.sequence_number, 2);
