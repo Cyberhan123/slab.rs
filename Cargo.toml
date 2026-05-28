@@ -142,7 +142,7 @@ image = { version = "0.25", default-features = false, features = [
     "png",
     "jpeg",
 ] }
-ffmpeg-sidecar = { version = "2", features = ["download_ffmpeg"] }
+ffmpeg-next = "8.1.0"
 ort = { version = "2.0.0-rc.12", features = ["load-dynamic"] }
 candle-core = "0.10.2"
 candle-nn = "0.10.2"

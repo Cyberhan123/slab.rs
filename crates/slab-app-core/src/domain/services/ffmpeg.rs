@@ -9,6 +9,13 @@ use tracing::{info, warn};
 use crate::context::worker_state::OperationContext;
 use crate::context::{SubmitOperation, WorkerState};
 use crate::domain::models::{AcceptedOperation, FfmpegConvertCommand, TaskProgress, TaskStatus};
+use crate::domain::services::ffmpeg_next_audio::{supports_output_format, transcode_audio};
+use crate::domain::services::ffmpeg_next_remux::{
+    remux_media, supports_output_format as supports_remux_output_format,
+};
+use crate::domain::services::ffmpeg_runtime::{
+    ensure_dynamic_runtime_ready, resolve_ffmpeg_binary,
+};
 use crate::error::AppCoreError;
 
 const FFMPEG_PROGRESS_LOG_LIMIT: usize = 240;
@@ -91,14 +98,87 @@ impl FfmpegService {
                                 .into_owned()
                         });
 
-                    // Use the ffmpeg-sidecar path resolver: prefers the sidecar
-                    // binary installed next to the executable, falls back to the
-                    // system `ffmpeg` on $PATH.
-                    let ffmpeg_bin = ffmpeg_sidecar::paths::ffmpeg_path();
+                    let ffmpeg_bin = resolve_ffmpeg_binary(None);
                     let mut progress = FfmpegProgressState::new(output_path.clone());
+
+                    if let Err(error) = ensure_dynamic_runtime_ready() {
+                        progress.push_log(error.clone());
+                        let payload = progress.to_payload();
+                        if let Err(db_error) = operation
+                            .update_status(TaskStatus::Failed, Some(&payload), Some(&error))
+                            .await
+                        {
+                            warn!(task_id = %operation_id, error = %db_error, "failed to persist ffmpeg runtime initialization error");
+                        }
+                        return;
+                    }
 
                     if let Err(error) = publish_ffmpeg_progress(&operation, &progress).await {
                         warn!(task_id = %operation_id, error = %error, "failed to publish initial ffmpeg progress");
+                    }
+
+                    if supports_output_format(&output_format) {
+                        let source_path_for_worker = source_path.clone();
+                        let output_path_for_worker = output_path.clone();
+                        let transcode_result = tokio::task::spawn_blocking(move || {
+                            transcode_audio(&source_path_for_worker, &output_path_for_worker)
+                        })
+                        .await;
+
+                        match transcode_result {
+                            Ok(Ok(())) => {
+                                progress.mark_complete();
+                                progress.push_log("ffmpeg-next audio transcoding completed".to_owned());
+                                let result_json = progress.to_success_payload();
+                                if let Err(error) = operation.mark_succeeded(&result_json).await {
+                                    warn!(task_id = %operation_id, error = %error, "failed to persist ffmpeg-next conversion success");
+                                }
+                                info!(task_id = %operation_id, output_path = %output_path, "ffmpeg-next audio conversion succeeded");
+                                return;
+                            }
+                            Ok(Err(error)) => {
+                                progress.push_log(format!(
+                                    "ffmpeg-next audio conversion failed, falling back to ffmpeg binary: {error}"
+                                ));
+                            }
+                            Err(error) => {
+                                progress.push_log(format!(
+                                    "ffmpeg-next audio conversion worker failed, falling back to ffmpeg binary: {error}"
+                                ));
+                            }
+                        }
+                    }
+
+                    if supports_remux_output_format(&output_format) {
+                        let source_path_for_worker = source_path.clone();
+                        let output_path_for_worker = output_path.clone();
+                        let remux_result = tokio::task::spawn_blocking(move || {
+                            remux_media(&source_path_for_worker, &output_path_for_worker)
+                        })
+                        .await;
+
+                        match remux_result {
+                            Ok(Ok(())) => {
+                                progress.mark_complete();
+                                progress.push_log("ffmpeg-next remux completed".to_owned());
+                                let result_json = progress.to_success_payload();
+                                if let Err(error) = operation.mark_succeeded(&result_json).await {
+                                    warn!(task_id = %operation_id, error = %error, "failed to persist ffmpeg-next remux success");
+                                }
+                                info!(task_id = %operation_id, output_path = %output_path, "ffmpeg-next remux succeeded");
+                                return;
+                            }
+                            Ok(Err(error)) => {
+                                progress.push_log(format!(
+                                    "ffmpeg-next remux failed, falling back to ffmpeg binary: {error}"
+                                ));
+                            }
+                            Err(error) => {
+                                progress.push_log(format!(
+                                    "ffmpeg-next remux worker failed, falling back to ffmpeg binary: {error}"
+                                ));
+                            }
+                        }
                     }
 
                     let mut command = tokio::process::Command::new(&ffmpeg_bin);

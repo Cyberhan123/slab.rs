@@ -1,6 +1,30 @@
 [tasks.dev]
 workspace = false
-dependencies = ["build-runtime-dev","build-js-runtime-dev","build-server-dev", "build-language-servers", "build-plugin-packs", "run-tauri"]
+dependencies = ["prepare-ffmpeg-sdk","build-runtime-dev","build-js-runtime-dev","build-server-dev", "build-language-servers", "run-tauri"]
+
+[tasks.prepare-ffmpeg-sdk]
+workspace = false
+script_runner = "@duckscript"
+script = '''
+windows = is_windows
+
+if ${windows}
+    cm_run_task prepare-ffmpeg-sdk-windows
+else
+    echo "Skipping FFmpeg SDK bootstrap on non-Windows host"
+end
+'''
+
+[tasks.prepare-ffmpeg-sdk-windows]
+workspace = false
+command = "powershell"
+args = [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+    "& { $root = '${CARGO_MAKE_WORKING_DIRECTORY}'; $sdkRoot = Join-Path $root '.slab/ffmpeg-sdk/windows-x64'; $sdkDir = Join-Path $sdkRoot 'ffmpeg-n7.1-latest-win64-gpl-shared-7.1'; if (-not (Test-Path (Join-Path $sdkDir 'bin/ffmpeg.exe'))) { New-Item -ItemType Directory -Force -Path $sdkRoot | Out-Null; $zip = Join-Path $sdkRoot 'ffmpeg-n7.1-shared.zip'; Invoke-WebRequest -Uri 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-win64-gpl-shared-7.1.zip' -OutFile $zip; Expand-Archive -LiteralPath $zip -DestinationPath $sdkRoot -Force } }",
+]
 
 [tasks.release]
 workspace = false
@@ -49,31 +73,37 @@ args = ["test", "--workspace"]
 workspace = false
 command = "cargo"
 args = ["build", "-p", "slab-server"]
+env = { FFMPEG_DIR = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1" }
 
 [tasks.build-runtime-dev]
 workspace = false
 command = "cargo"
 args = ["build", "-p", "slab-runtime"]
+env = { FFMPEG_DIR = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1" }
 
 [tasks.build-js-runtime-dev]
 workspace = false
 command = "cargo"
 args = ["build", "-p", "slab-js-runtime"]
+env = { FFMPEG_DIR = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1" }
 
 [tasks.build-server-release]
 workspace = false
 command = "cargo"
 args = ["build", "--release", "-p", "slab-server"]
+env = { FFMPEG_DIR = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1" }
 
 [tasks.build-runtime-release]
 workspace = false
 command = "cargo"
 args = ["build", "--release", "-p", "slab-runtime"]
+env = { FFMPEG_DIR = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1" }
 
 [tasks.build-js-runtime-release]
 workspace = false
 command = "cargo"
 args = ["build", "--release", "-p", "slab-js-runtime"]
+env = { FFMPEG_DIR = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1" }
 
 [tasks.run-tauri]
 workspace = false
@@ -105,6 +135,7 @@ args = [
     "src-tauri/tauri.windows.dev.conf.json",
 ]
 cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
+env = { SLAB_SKIP_VENDOR_RUNTIME_SYNC = "1", SLAB_SKIP_TAURI_SIDECAR_SYNC = "1", SLAB_SKIP_BUNDLED_PLUGIN_SYNC = "1", FFMPEG_DIR = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1", PATH = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1/bin;${PATH}" }
 
 [tasks.build-plugin-packs]
 workspace = false

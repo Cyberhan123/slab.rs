@@ -3,6 +3,7 @@ use bindgen::Builder as BindgenBuilder;
 use cargo_metadata::MetadataCommand;
 use slab_libfetch::{Api, Manifest};
 use std::collections::HashSet;
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -174,20 +175,24 @@ pub fn sync_tauri_vendor_runtime_artifacts(target: &str, tauri_manifest_dir: &Pa
     let mut expected_files = HashSet::new();
     let mut found_runtime_sources = false;
 
-    for artifact in ["ggml", "llama", "whisper", "diffusion"] {
+    for artifact in ["ggml", "llama", "whisper", "diffusion", "ffmpeg"] {
         let source_root = vendor_dir.join(artifact).join(source_subdir);
         if !source_root.exists() {
-            println!(
-                "cargo:warning=Vendored runtime artifact root missing for {} at {}",
-                artifact,
-                source_root.display()
-            );
+            if artifact != "ffmpeg" {
+                println!(
+                    "cargo:warning=Vendored runtime artifact root missing for {} at {}",
+                    artifact,
+                    source_root.display()
+                );
+            }
             continue;
         }
 
         found_runtime_sources = true;
         sync_runtime_tree(target, &source_root, &resources_dir, &mut expected_files)?;
     }
+
+    sync_tauri_ffmpeg_runtime_artifacts(target, &resources_dir, &mut expected_files)?;
 
     retain_existing_web_language_server_tree(&resources_dir, &mut expected_files)?;
 
@@ -200,6 +205,45 @@ pub fn sync_tauri_vendor_runtime_artifacts(target: &str, tauri_manifest_dir: &Pa
 
     prune_stale_runtime_files(&resources_dir, &expected_files)?;
     Ok(())
+}
+
+fn sync_tauri_ffmpeg_runtime_artifacts(
+    target: &str,
+    resources_dir: &Path,
+    expected_files: &mut HashSet<PathBuf>,
+) -> Result<()> {
+    let Ok(ffmpeg_dir) = env::var("FFMPEG_DIR") else {
+        return Ok(());
+    };
+
+    let ffmpeg_root = PathBuf::from(ffmpeg_dir);
+    if !ffmpeg_root.exists() {
+        println!(
+            "cargo:warning=FFMPEG_DIR points to missing directory {}",
+            ffmpeg_root.display()
+        );
+        return Ok(());
+    }
+
+    let source_subdir = runtime_source_subdir(target);
+    let ffmpeg_runtime_dir = if source_subdir == "bin" {
+        ffmpeg_root.join("bin")
+    } else {
+        ffmpeg_root.join("lib")
+    };
+
+    println!("cargo:rerun-if-env-changed=FFMPEG_DIR");
+    println!("cargo:rerun-if-changed={}", ffmpeg_runtime_dir.display());
+
+    if !ffmpeg_runtime_dir.exists() {
+        println!(
+            "cargo:warning=FFmpeg runtime directory missing at {}",
+            ffmpeg_runtime_dir.display()
+        );
+        return Ok(());
+    }
+
+    sync_runtime_tree(target, &ffmpeg_runtime_dir, &resources_dir, expected_files)
 }
 
 pub fn sync_tauri_bundled_plugins(tauri_manifest_dir: &Path) -> Result<()> {

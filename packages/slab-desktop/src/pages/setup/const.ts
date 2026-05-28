@@ -72,7 +72,7 @@ export function getProvisionStageHint(
         : 'Creating the setup task and connecting to the local host.';
     case 'running':
       return runtimePayloadInstalled
-        ? 'Checking FFmpeg, downloading it when needed, and confirming local workers are ready.'
+        ? 'Checking FFmpeg runtime availability and confirming local workers are ready.'
         : 'Downloading payloads, verifying CABs, checking FFmpeg, and restarting runtime workers.';
     default:
       return runtimePayloadInstalled

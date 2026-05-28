@@ -12,6 +12,9 @@ use crate::domain::models::{
     VideoGenerationRequestData, VideoGenerationResultData, VideoGenerationTaskView,
 };
 use crate::domain::ports::{RuntimeDiffusionVideoRequest, RuntimeRawImageInput};
+use crate::domain::services::ffmpeg_runtime::{
+    ensure_dynamic_runtime_ready, resolve_ffmpeg_binary,
+};
 use crate::domain::services::media_task::{
     cleanup_dir, parse_json_payload, read_managed_file, save_rgb_png, serialize_json_payload,
 };
@@ -249,7 +252,15 @@ impl VideoService {
 
                 let output_path = task_output_dir.join("output.mp4");
                 let frame_pattern = frame_dir.join("frame_%05d.png");
-                let ffmpeg_bin = ffmpeg_sidecar::paths::ffmpeg_path();
+                if let Err(error) = ensure_dynamic_runtime_ready() {
+                    cleanup_dir(&task_output_dir).await;
+                    if let Err(db_error) = operation.mark_failed(&error).await {
+                        warn!(task_id = %operation_id, error = %db_error, "failed to persist ffmpeg runtime initialization error for video task");
+                    }
+                    return;
+                }
+
+                let ffmpeg_bin = resolve_ffmpeg_binary(None);
                 let ffmpeg_result = tokio::process::Command::new(&ffmpeg_bin)
                     .arg("-y")
                     .arg("-framerate")

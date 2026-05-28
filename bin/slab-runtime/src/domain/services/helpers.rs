@@ -356,7 +356,7 @@ fn parse_whisper_segment_line(line: &str) -> Option<dto::WhisperSegment> {
 }
 
 fn decode_audio_path(path: &Path) -> Result<Arc<[f32]>, CoreError> {
-    let ffmpeg_bin = ffmpeg_sidecar::paths::ffmpeg_path();
+    let ffmpeg_bin = resolve_ffmpeg_binary();
     let output = std::process::Command::new(&ffmpeg_bin)
         .arg("-i")
         .arg(path)
@@ -382,6 +382,51 @@ fn decode_audio_path(path: &Path) -> Result<Arc<[f32]>, CoreError> {
 
     let samples: Vec<f32> = cast_slice::<u8, f32>(&output.stdout).to_vec();
     Ok(Arc::from(samples))
+}
+
+fn resolve_ffmpeg_binary() -> PathBuf {
+    if let Some(path) = std::env::var_os("SLAB_FFMPEG_BIN") {
+        let trimmed = path.to_string_lossy().trim().to_owned();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+
+    if let Some(path) = std::env::var_os("FFMPEG_DIR") {
+        let dir = PathBuf::from(path);
+        let candidates = if cfg!(target_os = "windows") {
+            [dir.join("ffmpeg.exe"), dir.join("bin").join("ffmpeg.exe")]
+        } else {
+            [dir.join("ffmpeg"), dir.join("bin").join("ffmpeg")]
+        };
+
+        if let Some(found) = candidates.into_iter().find(|candidate| candidate.exists()) {
+            return found;
+        }
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let mut resources = vec![exe_dir.join("resources").join("libs")];
+            if let Some(parent) = exe_dir.parent() {
+                resources.push(parent.join("Resources").join("libs"));
+            }
+
+            for base in resources {
+                let candidates = if cfg!(target_os = "windows") {
+                    [base.join("ffmpeg.exe"), base.join("bin").join("ffmpeg.exe")]
+                } else {
+                    [base.join("ffmpeg"), base.join("bin").join("ffmpeg")]
+                };
+
+                if let Some(found) = candidates.into_iter().find(|candidate| candidate.exists()) {
+                    return found;
+                }
+            }
+        }
+    }
+
+    PathBuf::from("ffmpeg")
 }
 
 #[cfg(test)]

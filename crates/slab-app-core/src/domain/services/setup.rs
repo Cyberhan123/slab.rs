@@ -20,6 +20,7 @@ use crate::domain::models::{
     AcceptedOperation, CompleteSetupCommand, ComponentStatus, EnvironmentStatus, TaskProgress,
     TaskStatus,
 };
+use crate::domain::services::ffmpeg_runtime::{probe_ffmpeg_runtime, resolve_ffmpeg_binary};
 use crate::error::AppCoreError;
 use crate::infra::db::repository::config::ConfigStore;
 use crate::infra::runtime::ManagedRuntimeHost;
@@ -89,18 +90,12 @@ impl SetupService {
     pub async fn environment_status(&self) -> Result<EnvironmentStatus, AppCoreError> {
         let initialized = self.load_setup_initialized().await?;
         let runtime_payload_installed = self.runtime_payload_installed();
-        let ffmpeg_installed =
-            tokio::task::spawn_blocking(ffmpeg_sidecar::command::ffmpeg_is_installed)
-                .await
-                .unwrap_or(false);
-
-        let ffmpeg_version = if ffmpeg_installed {
-            tokio::task::spawn_blocking(|| ffmpeg_sidecar::version::ffmpeg_version().ok())
-                .await
-                .unwrap_or(None)
-        } else {
-            None
-        };
+        let configured_dir = self.model_state.pmid().config().setup.ffmpeg.dir;
+        let ffmpeg_probe = tokio::task::spawn_blocking(move || {
+            probe_ffmpeg_runtime(configured_dir.as_deref())
+        })
+        .await
+        .unwrap_or_else(|_| probe_ffmpeg_runtime(None));
 
         let backends: Vec<ComponentStatus> = RuntimeBackendId::ALL
             .into_iter()
@@ -116,8 +111,8 @@ impl SetupService {
             runtime_payload_installed,
             ffmpeg: ComponentStatus {
                 name: "ffmpeg".to_owned(),
-                installed: ffmpeg_installed,
-                version: ffmpeg_version,
+                installed: ffmpeg_probe.installed,
+                version: ffmpeg_probe.version,
             },
             backends,
         })
@@ -417,33 +412,22 @@ impl SetupService {
     async fn ensure_ffmpeg_installed(&self) -> Result<PathBuf, AppCoreError> {
         let configured_dir = self.model_state.pmid().config().setup.ffmpeg.dir;
 
-        tokio::task::spawn_blocking(move || -> anyhow::Result<PathBuf> {
-            if ffmpeg_sidecar::command::ffmpeg_is_installed() {
-                return Ok(ffmpeg_sidecar::paths::ffmpeg_path());
+        tokio::task::spawn_blocking(move || {
+            let probe = probe_ffmpeg_runtime(configured_dir.as_deref());
+            if probe.installed {
+                return Ok(probe.binary);
             }
 
-            let download_url = ffmpeg_sidecar::download::ffmpeg_download_url()?;
-            let destination = match configured_dir.as_deref().filter(|dir| !dir.trim().is_empty()) {
-                Some(dir) => {
-                    let dir = PathBuf::from(dir);
-                    std::fs::create_dir_all(&dir)?;
-                    dir
-                }
-                None => ffmpeg_sidecar::paths::sidecar_dir()?,
-            };
-
-            let archive =
-                ffmpeg_sidecar::download::download_ffmpeg_package(download_url, &destination)?;
-            ffmpeg_sidecar::download::unpack_ffmpeg(&archive, &destination)?;
-            let _ = std::fs::remove_file(&archive);
-
-            Ok(ffmpeg_sidecar::paths::ffmpeg_path())
+            let binary = resolve_ffmpeg_binary(configured_dir.as_deref());
+            Err(AppCoreError::Internal(format!(
+                "ffmpeg runtime is unavailable; checked binary '{}' and dynamic libraries via ffmpeg-next",
+                binary.display()
+            )))
         })
         .await
         .map_err(|error| {
-            AppCoreError::Internal(format!("failed to join FFmpeg install task: {error}"))
+            AppCoreError::Internal(format!("failed to join FFmpeg runtime check task: {error}"))
         })?
-        .map_err(AppCoreError::from)
     }
 
     async fn restart_runtime_backends(&self) -> Result<Vec<RuntimeBackendId>, AppCoreError> {

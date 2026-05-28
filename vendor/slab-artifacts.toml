@@ -95,3 +95,21 @@ extension = "tar.gz"
 variants = []
 extension = "tar.gz"
 # checksums = "sha256:abcdef..."
+
+[artifacts.ffmpeg]
+repo = "BtbN/FFmpeg-Builds"
+version = "latest"
+lib_name = "ffmpeg"
+asset_pattern = "ffmpeg-master-latest-{os}-{arch}-gpl-shared.{extension}"
+
+[artifacts.ffmpeg.targets.windows.x86_64]
+variants = []
+extension = "zip"
+
+[artifacts.ffmpeg.targets.linux.x86_64]
+variants = []
+extension = "tar.xz"
+
+[artifacts.ffmpeg.targets.macos.arm64]
+variants = []
+extension = "zip"

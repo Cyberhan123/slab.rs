@@ -9,9 +9,10 @@ categories.workspace = true
 license.workspace = true
 
 [features]
-default = ["gpu-telemetry"]
+default = ["gpu-telemetry", "ffmpeg-next-runtime"]
 axum = ["dep:axum"]
 gpu-telemetry = ["dep:all-smi"]
+ffmpeg-next-runtime = ["dep:ffmpeg-next"]
 
 [build-dependencies]
 serde_json = { workspace = true }
@@ -85,7 +86,7 @@ sha2        = { workspace = true }
 zip         = { workspace = true }
 dirs-next   = { workspace = true }
 jsonschema  = { workspace = true }
-ffmpeg-sidecar = { workspace = true, features = ["download_ffmpeg"] }
+ffmpeg-next = { workspace = true, optional = true }
 all-smi = { workspace = true, optional = true }
 sysinfo = { workspace = true }
 windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
