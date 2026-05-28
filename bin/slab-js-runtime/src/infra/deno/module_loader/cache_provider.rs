@@ -7,13 +7,18 @@ use deno_core::{
 /// `deno_core::ModuleSource` does not implement Clone, so we need to implement it ourselves
 /// for our cache providers to work
 ///
-/// Todo: This is a temporary solution, we should submit a PR to `deno_core` to implement Clone for `ModuleSource`
+/// TODO: This is a temporary solution, we should submit a PR to `deno_core` to implement Clone for `ModuleSource`
 pub trait ClonableSource {
     /// Create a new copy of a `ModuleSource`
-    fn clone(&self, specifier: &ModuleSpecifier) -> ModuleSource;
+    fn clone_for_specifier(&self, specifier: &ModuleSpecifier) -> ModuleSource;
+
+    /// Backward-compatible alias.
+    fn clone(&self, specifier: &ModuleSpecifier) -> ModuleSource {
+        self.clone_for_specifier(specifier)
+    }
 }
 impl ClonableSource for ModuleSource {
-    fn clone(&self, specifier: &ModuleSpecifier) -> ModuleSource {
+    fn clone_for_specifier(&self, specifier: &ModuleSpecifier) -> ModuleSource {
         ModuleSource::new(
             self.module_type.clone(),
             match &self.code {

@@ -506,7 +506,7 @@ impl InnerRustyLoader {
         // Cache the source if a cache provider is available
         // Could speed up loads on some future runtime
         if let Some(p) = &mut inner.borrow_mut().cache_provider {
-            p.set(&module_specifier, source.clone(&module_specifier));
+            p.set(&module_specifier, source.clone_for_specifier(&module_specifier));
         }
 
         // Run import provider post-processing

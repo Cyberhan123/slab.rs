@@ -135,7 +135,7 @@ mod test {
         }
 
         fn get(&self, specifier: &ModuleSpecifier) -> Option<ModuleSource> {
-            self.0.get(specifier).map(|s| s.clone(specifier))
+            self.0.get(specifier).map(|s| s.clone_for_specifier(specifier))
         }
     }
 
@@ -151,7 +151,7 @@ mod test {
             None,
         );
 
-        cache_provider.set(&specifier, source.clone(&specifier));
+        cache_provider.set(&specifier, source.clone_for_specifier(&specifier));
         let cached_source = cache_provider.get(&specifier).expect("Expected to get cached source");
 
         let loader = RustyLoader::new(LoaderOptions {
