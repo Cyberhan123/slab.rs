@@ -498,6 +498,8 @@ pub struct ModelLoadCommand {
 pub struct ModelStatus {
     pub backend: String,
     pub status: String,
+    pub context_length: Option<u32>,
+    pub training_context_length: Option<u32>,
 }
 
 #[derive(Debug, Clone)]

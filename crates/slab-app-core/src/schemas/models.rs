@@ -241,6 +241,12 @@ pub struct ModelStatusResponse {
     pub backend: String,
     /// Human-readable status string.
     pub status: String,
+    /// Effective runtime context window length in tokens.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub context_length: Option<u32>,
+    /// Training context window length reported by the loaded model.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub training_context_length: Option<u32>,
 }
 
 /// Request body for `POST /v1/models/switch`.
@@ -573,7 +579,12 @@ pub struct UnifiedModelResponse {
 
 impl From<DomainModelStatus> for ModelStatusResponse {
     fn from(status: DomainModelStatus) -> Self {
-        Self { backend: status.backend, status: status.status }
+        Self {
+            backend: status.backend,
+            status: status.status,
+            context_length: status.context_length,
+            training_context_length: status.training_context_length,
+        }
     }
 }
 

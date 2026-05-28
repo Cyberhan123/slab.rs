@@ -189,7 +189,12 @@ pub fn decode_model_status_response(
         RpcCodecError::InvalidField { field: "backend", message: error.to_string() }
     })?;
 
-    Ok(RuntimeBackendStatus { backend, status: response.status.clone() })
+    Ok(RuntimeBackendStatus {
+        backend,
+        status: response.status.clone(),
+        context_length: response.context_length,
+        training_context_length: response.training_context_length,
+    })
 }
 
 fn decode_usage(usage: &pb::Usage) -> RuntimeTextGenerationUsage {

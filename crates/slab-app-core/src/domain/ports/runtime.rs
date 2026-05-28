@@ -192,6 +192,8 @@ pub struct RuntimeTranscriptionResult {
 pub struct RuntimeBackendStatus {
     pub backend: RuntimeBackendId,
     pub status: String,
+    pub context_length: Option<u32>,
+    pub training_context_length: Option<u32>,
 }
 
 /// Domain port for model runtime inference.

@@ -17,6 +17,14 @@ pub(crate) struct GgmlLlamaLoadConfig {
     pub gbnf: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct GgmlLlamaLoadMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_length: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub training_context_length: Option<u32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct GgmlWhisperLoadConfig {
     pub model_path: PathBuf,

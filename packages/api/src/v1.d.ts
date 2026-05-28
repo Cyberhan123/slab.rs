@@ -1819,8 +1819,18 @@ export interface components {
         ModelStatusResponse: {
             /** @description Backend identifier. */
             backend: string;
+            /**
+             * Format: int32
+             * @description Effective runtime context window length in tokens.
+             */
+            context_length?: number | null;
             /** @description Human-readable status string. */
             status: string;
+            /**
+             * Format: int32
+             * @description Training context window length reported by the loaded model.
+             */
+            training_context_length?: number | null;
         };
         OpenAiError: {
             code?: string | null;

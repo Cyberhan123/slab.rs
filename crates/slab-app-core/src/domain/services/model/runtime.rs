@@ -215,7 +215,12 @@ pub(super) async fn resolve_diffusion_context_params(
 pub(super) fn decode_model_status(
     response: RuntimeBackendStatus,
 ) -> Result<ModelStatus, AppCoreError> {
-    Ok(ModelStatus { backend: response.backend.to_string(), status: response.status })
+    Ok(ModelStatus {
+        backend: response.backend.to_string(),
+        status: response.status,
+        context_length: response.context_length,
+        training_context_length: response.training_context_length,
+    })
 }
 
 async fn load_model_with_state(

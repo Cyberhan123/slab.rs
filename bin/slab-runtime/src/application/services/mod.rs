@@ -55,7 +55,12 @@ impl From<CoreError> for RuntimeApplicationError {
 }
 
 pub(crate) fn model_status(backend: &str, status: &str) -> dto::ModelStatus {
-    dto::ModelStatus { backend: backend.to_owned(), status: status.to_owned() }
+    dto::ModelStatus {
+        backend: backend.to_owned(),
+        status: status.to_owned(),
+        context_length: None,
+        training_context_length: None,
+    }
 }
 
 pub(crate) async fn take_loaded<T>(slot: &LoadedService<T>) -> Option<T> {

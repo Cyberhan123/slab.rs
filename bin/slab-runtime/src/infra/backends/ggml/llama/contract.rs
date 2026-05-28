@@ -1,4 +1,5 @@
 pub(crate) use crate::domain::models::{
-    GgmlLlamaLoadConfig, TextGenerationMetadata, TextGenerationOptions, TextGenerationResponse,
-    TextGenerationStreamEvent, TextGenerationUsage, TextPromptTokensDetails, TextStopMetadata,
+    GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, TextGenerationMetadata, TextGenerationOptions,
+    TextGenerationResponse, TextGenerationStreamEvent, TextGenerationUsage,
+    TextPromptTokensDetails, TextStopMetadata,
 };

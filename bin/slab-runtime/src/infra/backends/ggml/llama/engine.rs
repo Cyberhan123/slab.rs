@@ -14,8 +14,8 @@ use tokio::sync::{mpsc, watch};
 use tracing::{info, warn};
 
 use super::contract::{
-    GgmlLlamaLoadConfig, TextGenerationMetadata, TextGenerationStreamEvent, TextGenerationUsage,
-    TextPromptTokensDetails, TextStopMetadata,
+    GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, TextGenerationMetadata, TextGenerationStreamEvent,
+    TextGenerationUsage, TextPromptTokensDetails, TextStopMetadata,
 };
 
 use super::{GGMLLlamaEngineError, SessionId, StreamChunk, StreamHandle};
@@ -330,7 +330,7 @@ impl GGMLLlamaEngine {
         model_params: LlamaModelParams,
         ctx_params: LlamaContextParams,
         num_workers: usize,
-    ) -> Result<(), ggml::EngineError> {
+    ) -> Result<GgmlLlamaLoadMetadata, ggml::EngineError> {
         if num_workers == 0 {
             return Err(GGMLLlamaEngineError::InvalidWorkerCount { num_workers }.into());
         }
@@ -352,19 +352,23 @@ impl GGMLLlamaEngine {
             Arc::new(self.instance.load_model_from_file(path, model_params).map_err(|source| {
                 GGMLLlamaEngineError::LoadModel { model_path: path.to_string(), source }
             })?);
+        let training_context_length =
+            u32::try_from(model.n_ctx_train()).ok().filter(|value| *value > 0);
 
         let engine = LlamaRuntime::start(num_workers, Arc::clone(&model), ctx_params)
             .map_err(GGMLLlamaEngineError::from)?;
+        let loaded_context_length = engine.context_length();
+        let context_length = (loaded_context_length > 0).then_some(loaded_context_length);
 
         *write_lock = Some(engine);
         *model_write_lock = Some(model);
-        Ok(())
+        Ok(GgmlLlamaLoadMetadata { context_length, training_context_length })
     }
 
     pub(crate) fn load_model_from_config(
         &self,
         config: &GgmlLlamaLoadConfig,
-    ) -> Result<(), ggml::EngineError> {
+    ) -> Result<GgmlLlamaLoadMetadata, ggml::EngineError> {
         let mut ctx_params = LlamaContextParams {
             kv_unified: true,
             flash_attn: config.flash_attn,

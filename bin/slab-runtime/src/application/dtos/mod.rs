@@ -44,6 +44,8 @@ pub(crate) use onnx::{
 pub(crate) struct ModelStatus {
     pub backend: String,
     pub status: String,
+    pub context_length: Option<u32>,
+    pub training_context_length: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -396,7 +398,12 @@ pub(crate) struct OnnxEmbeddingResponse {
 pub(crate) struct ProtoConversionError;
 
 pub(crate) fn encode_model_status_response(status: &ModelStatus) -> pb::ModelStatusResponse {
-    pb::ModelStatusResponse { backend: status.backend.clone(), status: status.status.clone() }
+    pb::ModelStatusResponse {
+        backend: status.backend.clone(),
+        status: status.status.clone(),
+        context_length: status.context_length,
+        training_context_length: status.training_context_length,
+    }
 }
 
 fn decode_optional_path(value: Option<&String>) -> Option<PathBuf> {
@@ -581,13 +588,17 @@ mod tests {
     }
 
     #[test]
-    fn model_status_encode_is_lossless_for_strings() {
+    fn model_status_encode_preserves_metadata_fields() {
         let encoded = encode_model_status_response(&ModelStatus {
             backend: "onnx.text".to_owned(),
             status: "loaded".to_owned(),
+            context_length: Some(4096),
+            training_context_length: None,
         });
 
         assert_eq!(encoded.backend, "onnx.text");
         assert_eq!(encoded.status, "loaded");
+        assert_eq!(encoded.context_length, Some(4096));
+        assert_eq!(encoded.training_context_length, None);
     }
 }

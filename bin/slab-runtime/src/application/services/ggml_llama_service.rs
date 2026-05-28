@@ -29,9 +29,14 @@ impl GgmlLlamaService {
         }
 
         let service = DomainGgmlLlamaService::new(self.execution.clone(), request)?;
-        service.load().await?;
+        let metadata = service.load().await?.unwrap_or_default();
         store_loaded(&self.loaded, service).await;
-        Ok(model_status("ggml.llama", "loaded"))
+        Ok(dto::ModelStatus {
+            backend: "ggml.llama".to_owned(),
+            status: "loaded".to_owned(),
+            context_length: metadata.context_length,
+            training_context_length: metadata.training_context_length,
+        })
     }
 
     pub(crate) async fn unload_model(&self) -> Result<dto::ModelStatus, RuntimeApplicationError> {

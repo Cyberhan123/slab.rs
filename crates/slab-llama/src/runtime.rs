@@ -1117,6 +1117,7 @@ impl InferenceWorkerState {
 #[derive(Clone, Debug)]
 pub struct LlamaRuntime {
     global_tx: mpsc::Sender<GlobalCommand>,
+    context_length: u32,
 }
 
 impl LlamaRuntime {
@@ -1130,6 +1131,7 @@ impl LlamaRuntime {
         }
 
         let mut worker_txs: Vec<mpsc::Sender<WorkerCommand>> = Vec::with_capacity(num_workers);
+        let mut context_length = None;
 
         for worker_id in 0..num_workers {
             let (cmd_tx, cmd_rx) = mpsc::channel::<WorkerCommand>(128);
@@ -1138,6 +1140,7 @@ impl LlamaRuntime {
             let ctx = model
                 .new_context(ctx_params.clone())
                 .map_err(|source| LlamaRuntimeError::CreateContext { source })?;
+            context_length.get_or_insert_with(|| ctx.n_ctx_seq());
 
             let worker_state =
                 InferenceWorkerState::new(worker_id, Arc::clone(&model), ctx, cmd_rx);
@@ -1159,7 +1162,11 @@ impl LlamaRuntime {
 
         tokio::spawn(master.run());
 
-        Ok(Self { global_tx })
+        Ok(Self { global_tx, context_length: context_length.unwrap_or(ctx_params.n_ctx) })
+    }
+
+    pub fn context_length(&self) -> u32 {
+        self.context_length
     }
 
     #[cfg_attr(not(test), allow(dead_code))]

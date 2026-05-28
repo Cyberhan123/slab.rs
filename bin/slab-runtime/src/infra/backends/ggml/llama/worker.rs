@@ -28,7 +28,9 @@ use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
-use super::contract::{GgmlLlamaLoadConfig, TextGenerationOptions, TextGenerationResponse};
+use super::contract::{
+    GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, TextGenerationOptions, TextGenerationResponse,
+};
 use super::engine::{GGMLLlamaEngine, LlamaDispatchOutput, LlamaDispatchRequest};
 use super::error::GGMLLlamaWorkerError;
 use slab_runtime_core::backend::{
@@ -97,7 +99,7 @@ impl LlamaWorker {
     async fn on_load_model(
         &mut self,
         config: Input<GgmlLlamaLoadConfig>,
-    ) -> Result<(), GGMLLlamaWorkerError> {
+    ) -> Result<Typed<GgmlLlamaLoadMetadata>, GGMLLlamaWorkerError> {
         self.handle_load_model(config.0).await
     }
 
@@ -157,7 +159,7 @@ impl LlamaWorker {
     async fn handle_load_model(
         &mut self,
         config: GgmlLlamaLoadConfig,
-    ) -> Result<(), GGMLLlamaWorkerError> {
+    ) -> Result<Typed<GgmlLlamaLoadMetadata>, GGMLLlamaWorkerError> {
         let engine = match self.engine.as_ref() {
             Some(e) => Arc::clone(e),
             None => {
@@ -173,7 +175,7 @@ impl LlamaWorker {
         // the async runtime without the Send constraint of spawn_blocking.
         let result = tokio::task::block_in_place(|| engine.load_model_from_config(&config));
 
-        result.map_err(|error| GGMLLlamaWorkerError::load(error.to_string()))
+        result.map(Typed).map_err(|error| GGMLLlamaWorkerError::load(error.to_string()))
     }
 
     // ── model.unload ──────────────────────────────────────────────────────────

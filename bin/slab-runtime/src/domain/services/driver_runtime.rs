@@ -50,6 +50,14 @@ impl DriverRuntime {
         self.ensure_loaded().await
     }
 
+    pub(crate) async fn load_with_result<T>(&self) -> Result<Option<T>, CoreError>
+    where
+        T: DeserializeOwned + Clone + Send + Sync + 'static,
+    {
+        let payload = self.ensure_loaded_with_reply().await?;
+        payload.map(|payload| decode_typed_output(payload, self.capability_id.as_ref())).transpose()
+    }
+
     pub(crate) async fn unload(&self) -> Result<(), CoreError> {
         let was_loaded = {
             let guard = self.loaded.lock().await;
@@ -217,24 +225,29 @@ impl DriverRuntime {
     }
 
     async fn ensure_loaded(&self) -> Result<(), CoreError> {
+        self.ensure_loaded_with_reply().await.map(|_| ())
+    }
+
+    async fn ensure_loaded_with_reply(&self) -> Result<Option<Payload>, CoreError> {
         {
             let guard = self.loaded.lock().await;
             if *guard {
-                return Ok(());
+                return Ok(None);
             }
         }
 
         let mut guard = self.loaded.lock().await;
         if *guard {
-            return Ok(());
+            return Ok(None);
         }
 
-        self.execution
+        let payload = self
+            .execution
             .orchestrator()
-            .load_model_backend(&self.deployment_id, self.load_payload.clone())
+            .load_model_backend_with_reply(&self.deployment_id, self.load_payload.clone())
             .await?;
         *guard = true;
-        Ok(())
+        Ok(payload)
     }
 }
 

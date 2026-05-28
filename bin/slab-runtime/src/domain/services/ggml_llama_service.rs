@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::application::dtos as dto;
-use crate::domain::models::{GgmlLlamaLoadConfig, TextGenerationOptions};
+use crate::domain::models::{GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, TextGenerationOptions};
 use crate::domain::runtime::CoreError;
 
 use super::ExecutionHub;
@@ -50,8 +50,8 @@ impl GgmlLlamaService {
         })
     }
 
-    pub(crate) async fn load(&self) -> Result<(), CoreError> {
-        self.runtime.load().await
+    pub(crate) async fn load(&self) -> Result<Option<GgmlLlamaLoadMetadata>, CoreError> {
+        self.runtime.load_with_result().await
     }
 
     pub(crate) async fn unload(&self) -> Result<(), CoreError> {

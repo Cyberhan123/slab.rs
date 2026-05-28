@@ -9,9 +9,9 @@ pub(crate) use backend_payload::{
 pub(crate) use contracts::{
     AudioTranscriptionDecodeOptions, AudioTranscriptionOptions, AudioTranscriptionResponse,
     AudioTranscriptionVadOptions, AudioTranscriptionVadParams, GeneratedImage,
-    GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig, ImageGenerationRequest,
-    ImageGenerationResponse, OnnxInferenceRequest, OnnxInferenceResponse, OnnxTensor,
-    TextGenerationMetadata, TextGenerationOptions, TextGenerationResponse,
+    GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, GgmlWhisperLoadConfig,
+    ImageGenerationRequest, ImageGenerationResponse, OnnxInferenceRequest, OnnxInferenceResponse,
+    OnnxTensor, TextGenerationMetadata, TextGenerationOptions, TextGenerationResponse,
     TextGenerationStreamEvent, TextGenerationUsage, TextPromptTokensDetails, TextStopMetadata,
 };
 pub(crate) use enabled_backends::EnabledBackends;

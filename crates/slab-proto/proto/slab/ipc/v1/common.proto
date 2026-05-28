@@ -63,4 +63,6 @@ message ModelUnloadRequest {}
 message ModelStatusResponse {
   string backend = 1;
   string status = 2;
+  optional uint32 context_length = 3;
+  optional uint32 training_context_length = 4;
 }

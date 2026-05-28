@@ -43,7 +43,7 @@ impl Orchestrator {
         event: ManagementEvent,
         op_name: &str,
         input: Payload,
-    ) -> Result<(), CoreError> {
+    ) -> Result<Option<Payload>, CoreError> {
         let _mgmt_lease = self.resource_manager.acquire_management_lease(backend_id).await?;
         let seq = self.resource_manager.next_seq(backend_id)?;
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
@@ -62,7 +62,8 @@ impl Orchestrator {
 
         let reply = reply_rx.await.map_err(|_| CoreError::BackendShutdown)?;
         match reply {
-            BackendReply::Ack | BackendReply::Value(_) => Ok(()),
+            BackendReply::Ack => Ok(None),
+            BackendReply::Value(payload) => Ok(Some(payload)),
             BackendReply::Error(message) => {
                 Err(CoreError::GpuStageFailed { stage_name: op_name.to_owned(), message })
             }
@@ -244,11 +245,11 @@ impl Orchestrator {
         self.storage.remove_task(task_id).await;
     }
 
-    pub async fn load_model_backend(
+    pub async fn load_model_backend_with_reply(
         &self,
         backend_id: &str,
         input: Payload,
-    ) -> Result<(), CoreError> {
+    ) -> Result<Option<Payload>, CoreError> {
         self.call_backend_management_inner(
             backend_id,
             ManagementEvent::LoadModel,
@@ -266,6 +267,7 @@ impl Orchestrator {
             Payload::default(),
         )
         .await
+        .map(|_| ())
     }
 
     pub async fn get_status(&self, task_id: TaskId) -> Result<TaskStatus, CoreError> {
