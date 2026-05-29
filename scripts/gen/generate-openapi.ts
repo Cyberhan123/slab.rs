@@ -23,10 +23,22 @@ const serverBinaryPath = path.join(
   "debug",
   process.platform === "win32" ? "slab-server.exe" : "slab-server",
 );
+const nativeRuntimeLibDir = path.join(
+  repoRoot,
+  "bin",
+  "slab-app",
+  "src-tauri",
+  "resources",
+  "libs",
+);
 
 async function main() {
   await runCommand("cargo", ["build", "-p", "slab-server"]);
-  const openapi = JSON.parse(await runCommandCapture(serverBinaryPath, ["--print-openapi"]));
+  const openapi = JSON.parse(
+    await runCommandCapture(serverBinaryPath, ["--print-openapi"], {
+      env: withNativeRuntimeLibraryPath(process.env),
+    }),
+  );
 
   const ast = await openapiTS(openapi, {
     transform(schemaObject) {
@@ -194,13 +206,28 @@ async function runCommand(command: string, args: string[]) {
   });
 }
 
-async function runCommandCapture(command: string, args: string[]) {
+function withNativeRuntimeLibraryPath(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (process.platform !== "win32") {
+    return env;
+  }
+
+  return {
+    ...env,
+    PATH: [nativeRuntimeLibDir, env.PATH].filter(Boolean).join(path.delimiter),
+  };
+}
+
+async function runCommandCapture(
+  command: string,
+  args: string[],
+  options: { env?: NodeJS.ProcessEnv } = {},
+) {
   return await new Promise<string>((resolve, reject) => {
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     const child = spawn(command, args, {
       cwd: repoRoot,
-      env: process.env,
+      env: options.env ?? process.env,
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,

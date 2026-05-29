@@ -986,6 +986,8 @@ export interface components {
             id: string;
             role: string;
             thread_id: string;
+            tool_call_id?: string | null;
+            tool_calls?: components["schemas"]["ChatToolCall"][];
             /** Format: int32 */
             turn_index: number;
         };

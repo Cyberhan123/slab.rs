@@ -229,6 +229,7 @@ function toThoughtChainItems(
     collapsible: true,
     content: renderThoughtContent(thought, approving, onApprove, labels),
     description: thought.summary ?? thought.toolName ?? thought.callId,
+    icon: false,
     key: thought.id,
     status: thought.status,
     title: thought.title,
@@ -247,6 +248,7 @@ function toThoughtChainItems(
           {thinking.content}
         </AssistantMarkdown>
       ),
+      icon: false,
       key: thinking.key,
       status: thinking.loading ? "loading" : "success",
       title: thinking.title,

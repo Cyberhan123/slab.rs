@@ -5,12 +5,11 @@ import {
   Network,
   Plus,
   Search,
-  SendHorizontal,
-  Square,
   WandSparkles,
   Wrench,
 } from "lucide-react"
-import { useMemo } from "react"
+import { type ReactNode, useCallback, useMemo } from "react"
+import { Sender, Suggestion, type SuggestionProps } from "@ant-design/x"
 
 import { Button } from "@slab/components/button"
 import {
@@ -19,7 +18,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@slab/components/dropdown-menu"
-import { Textarea } from "@slab/components/textarea"
 import { useTranslation } from "@slab/i18n"
 import { cn } from "@/lib/utils"
 
@@ -35,6 +33,22 @@ type AssistantComposerProps = {
   setDeepThink: (value: boolean) => void
   onGenerateImage: () => void
   statusLabel: string
+}
+
+function renderSenderSuffix(originNode: ReactNode) {
+  return (
+    <div className="flex items-end gap-2">
+      <Button
+        variant="quiet"
+        size="icon"
+        className="size-10 rounded-full text-muted-foreground hover:bg-[var(--shell-card)]/45 hover:text-foreground"
+        disabled
+      >
+        <Mic className="size-4" />
+      </Button>
+      {originNode}
+    </div>
+  )
 }
 
 export function AssistantComposer({
@@ -80,172 +94,144 @@ export function AssistantComposer({
     ],
     [t]
   )
+  const matchCommandItems = useCallback(
+    (query: string) =>
+      commandItems.filter((item) => {
+        const normalizedCommand = item.command.slice(1).toLowerCase()
+        const normalizedLabel = item.label.toLowerCase()
+
+        return normalizedCommand.startsWith(query) || normalizedLabel.startsWith(query)
+      }),
+    [commandItems]
+  )
   const commandQuery = value.match(/^\/([^\s/]*)$/)?.[1]?.toLowerCase() ?? null
-  const matchingCommandItems = useMemo(() => {
-    if (commandQuery === null) {
-      return []
-    }
+  const matchingCommandItems = useMemo(
+    () => (commandQuery === null ? [] : matchCommandItems(commandQuery)),
+    [commandQuery, matchCommandItems]
+  )
+  const commandSuggestions = useMemo<SuggestionProps<{ query: string }>["items"]>(
+    () => (info) =>
+      matchCommandItems(info?.query ?? "").map((item) => {
+        const Icon = item.icon
 
-    return commandItems.filter((item) => {
-      const normalizedCommand = item.command.slice(1).toLowerCase()
-      const normalizedLabel = item.label.toLowerCase()
-
-      return (
-        normalizedCommand.startsWith(commandQuery) ||
-        normalizedLabel.startsWith(commandQuery)
-      )
-    })
-  }, [commandItems, commandQuery])
-  const showCommandMenu = !disabled && commandQuery !== null && matchingCommandItems.length > 0
+        return {
+          icon: <Icon className="size-4" />,
+          label: (
+            <span className="min-w-0">
+              <span className="flex items-center gap-2 text-sm font-semibold">
+                <span className="font-mono text-[13px]">{item.command}</span>
+                <span>{item.label}</span>
+              </span>
+              <span className="block truncate text-[11px] opacity-70">{item.description}</span>
+            </span>
+          ),
+          value: item.command,
+        }
+      }),
+    [matchCommandItems]
+  )
   const webSearchActive = value.trimStart().startsWith("/web_search")
 
   const insertCommand = (command: string) => {
     onValueChange(`${command} `)
   }
 
-  const handleSubmit = () => {
-    if (!value.trim() || isRequesting || disabled) {
+  const handleSubmit = (nextValue: string) => {
+    const prompt = nextValue.trim()
+    if (!prompt || isRequesting || disabled) {
       return
     }
 
-    void onSubmit(value.trim())
+    void onSubmit(prompt)
   }
 
   return (
     <div className="relative space-y-3">
-      {showCommandMenu ? (
-        <div className="absolute bottom-[calc(100%+12px)] left-2 z-30 w-[min(24rem,calc(100vw-3rem))] overflow-hidden rounded-[18px] border border-border/70 bg-[var(--surface-1)] p-1.5 shadow-[0_22px_50px_-34px_color-mix(in_oklab,var(--foreground)_40%,transparent)]">
-          {matchingCommandItems.map((item) => {
-            const Icon = item.icon
-
-            return (
-              <button
-                key={item.command}
-                type="button"
-                className="flex w-full items-center gap-3 rounded-[12px] px-3 py-2.5 text-left transition hover:bg-[var(--surface-soft)]"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => insertCommand(item.command)}
-              >
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-[8px] bg-[var(--brand-teal)]/12 text-[var(--brand-teal)]">
-                  <Icon className="size-4" />
-                </span>
-                <span className="min-w-0">
-                  <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                    <span className="font-mono text-[13px]">{item.command}</span>
-                    <span>{item.label}</span>
-                  </span>
-                  <span className="block truncate text-[11px] text-muted-foreground">
-                    {item.description}
-                  </span>
-                </span>
-              </button>
-            )
-          })}
-        </div>
-      ) : null}
-      <div className="rounded-[24px] bg-[var(--surface-input)] p-[5px] shadow-[var(--shell-elevation)]">
-        <div className="flex items-end gap-2 px-4 py-2">
-          <div className="pb-1">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="quiet"
-                  size="icon"
-                  disabled={disabled}
-                  className="size-10 rounded-full border border-transparent bg-transparent text-muted-foreground hover:bg-[var(--shell-card)]/45 hover:text-foreground"
-                >
-                  <Plus className="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="rounded-2xl border-border/70">
-                {commandItems.map((item) => {
-                  const Icon = item.icon
-
-                  return (
-                    <DropdownMenuItem
-                      key={item.command}
-                      onClick={() => insertCommand(item.command)}
-                    >
-                      <Icon className="size-4" />
-                      <span className="font-mono text-xs">{item.command}</span>
-                      <span>{item.label}</span>
-                    </DropdownMenuItem>
-                  )
-                })}
-                <DropdownMenuItem onClick={onGenerateImage}>
-                  <ImagePlus className="size-4" />
-                  {t("pages.assistant.composer.generateImage")}
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled>
-                  <Mic className="size-4" />
-                  {t("pages.assistant.composer.voiceCapture")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-
-          <Textarea
+      <Suggestion<{ query: string }>
+        block
+        items={commandSuggestions}
+        onSelect={(command) => insertCommand(command)}
+      >
+        {({ onTrigger, onKeyDown, open }) => (
+          <Sender
             value={value}
-            variant="shell"
-            autoResize
+            loading={isRequesting}
             disabled={disabled}
-            onChange={(event) => onValueChange(event.target.value)}
-            placeholder={t("pages.assistant.composer.placeholder")}
-            className="min-h-[48px] max-h-48 resize-none border-0 bg-transparent px-3 py-3 text-base text-foreground shadow-none placeholder:text-muted-foreground/60 focus-visible:ring-0"
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault()
-                if (showCommandMenu && matchingCommandItems[0]) {
-                  insertCommand(matchingCommandItems[0].command)
-                  return
-                }
-
-                handleSubmit()
+            submitType="enter"
+            onCancel={onCancel}
+            onChange={(nextValue) => {
+              onValueChange(nextValue)
+              const nextQuery = nextValue.match(/^\/([^\s/]*)$/)?.[1]?.toLowerCase()
+              if (nextQuery === undefined || disabled || matchCommandItems(nextQuery).length === 0) {
+                onTrigger(false)
+                return
               }
+
+              onTrigger({ query: nextQuery })
             }}
-          />
-
-          <div className="flex items-end gap-2 pb-1">
-            <Button
-              variant="quiet"
-              size="icon"
-              className="size-10 rounded-full text-muted-foreground hover:bg-[var(--shell-card)]/45 hover:text-foreground"
-              disabled
-            >
-              <Mic className="size-4" />
-            </Button>
-
-            <Button
-              variant="cta"
-              size="icon"
-              className={cn(
-                "size-10 rounded-full shadow-[0_10px_15px_-3px_color-mix(in oklab,var(--brand-teal) 20%,transparent),0_4px_6px_-4px_color-mix(in oklab,var(--brand-teal) 20%,transparent)]",
-                isRequesting && "bg-foreground text-background shadow-none"
-              )}
-              onClick={() => {
-                if (disabled) {
-                  return
-                }
-
-                if (isRequesting) {
-                  onCancel()
-                  return
-                }
-
-                handleSubmit()
-              }}
-              disabled={disabled || (!isRequesting && !value.trim())}
-              aria-label={
-                isRequesting
-                  ? t("pages.assistant.composer.stopGeneratingResponse")
-                  : t("pages.assistant.composer.sendMessage")
+            onSubmit={(message) => handleSubmit(message)}
+            onKeyDown={(event) => {
+              if (open && event.key === "Enter" && !event.shiftKey && matchingCommandItems[0]) {
+                event.preventDefault()
+                insertCommand(matchingCommandItems[0].command)
+                onTrigger(false)
+                return false
               }
-            >
-              {isRequesting ? <Square className="size-4" /> : <SendHorizontal className="size-4" />}
-            </Button>
-          </div>
-        </div>
-      </div>
+
+              return onKeyDown(event)
+            }}
+            placeholder={t("pages.assistant.composer.placeholder")}
+            autoSize={{ minRows: 2, maxRows: 6 }}
+            className="rounded-[24px] border-0 bg-[var(--surface-input)] p-[5px] shadow-[var(--shell-elevation)]"
+            classNames={{
+              content: "flex items-end gap-2 px-4 py-2",
+              input:
+                "min-h-[48px] max-h-48 resize-none bg-transparent px-3 py-3 text-base text-foreground placeholder:text-muted-foreground/60",
+              prefix: "pb-1",
+              suffix: "pb-1",
+            }}
+            prefix={
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="quiet"
+                    size="icon"
+                    disabled={disabled}
+                    className="size-10 rounded-full border border-transparent bg-transparent text-muted-foreground hover:bg-[var(--shell-card)]/45 hover:text-foreground"
+                  >
+                    <Plus className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="rounded-2xl border-border/70">
+                  {commandItems.map((item) => {
+                    const Icon = item.icon
+
+                    return (
+                      <DropdownMenuItem
+                        key={item.command}
+                        onClick={() => insertCommand(item.command)}
+                      >
+                        <Icon className="size-4" />
+                        <span className="font-mono text-xs">{item.command}</span>
+                        <span>{item.label}</span>
+                      </DropdownMenuItem>
+                    )
+                  })}
+                  <DropdownMenuItem onClick={onGenerateImage}>
+                    <ImagePlus className="size-4" />
+                    {t("pages.assistant.composer.generateImage")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled>
+                    <Mic className="size-4" />
+                    {t("pages.assistant.composer.voiceCapture")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            }
+            suffix={renderSenderSuffix}
+          />
+        )}
+      </Suggestion>
 
       <div className="flex flex-wrap items-center justify-between gap-3 px-2">
         <div className="flex flex-wrap items-center gap-4">

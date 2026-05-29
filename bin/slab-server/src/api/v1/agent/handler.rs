@@ -27,6 +27,7 @@ use crate::api::v1::agent::schema::{
     AgentResponsesServerMessage, AgentStatusValue, AgentThreadMessageResponse, AgentThreadResponse,
     MessageInput,
 };
+use crate::api::v1::chat::schema::{ChatToolCall, ChatToolFunction};
 use crate::api::validation::{ValidatedJson, validate};
 use crate::error::ServerError;
 
@@ -42,6 +43,8 @@ use crate::error::ServerError;
         AgentConfigInput,
         MessageInput,
         AgentStatusValue,
+        ChatToolCall,
+        ChatToolFunction,
     ))
 )]
 pub struct AgentApi;

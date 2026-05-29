@@ -7,7 +7,7 @@ use slab_types::agent::AgentThreadStatus;
 use utoipa::ToSchema;
 use validator::{Validate, ValidationError, ValidationErrors};
 
-use crate::schemas::chat::{ChatReasoningEffort, ChatVerbosity};
+use crate::schemas::chat::{ChatReasoningEffort, ChatToolCall, ChatVerbosity};
 
 /// Agent configuration provided by the caller.
 #[derive(Debug, Default, Deserialize, Serialize, ToSchema)]
@@ -255,6 +255,10 @@ pub struct AgentThreadMessageResponse {
     pub turn_index: u32,
     pub role: String,
     pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ChatToolCall>,
     pub created_at: String,
 }
 
@@ -278,12 +282,16 @@ impl From<ThreadMessageRecord> for AgentThreadMessageResponse {
     fn from(record: ThreadMessageRecord) -> Self {
         let message = record.message;
         let content = message.content.rendered_text();
+        let tool_call_id = message.tool_call_id;
+        let tool_calls = message.tool_calls.into_iter().map(Into::into).collect();
         Self {
             id: record.id,
             thread_id: record.thread_id,
             turn_index: record.turn_index,
             role: message.role,
             content,
+            tool_call_id,
+            tool_calls,
             created_at: record.created_at,
         }
     }
@@ -327,7 +335,7 @@ mod tests {
     use super::AgentThreadMessageResponse;
 
     #[test]
-    fn agent_thread_message_response_hides_assistant_tool_calls() {
+    fn agent_thread_message_response_preserves_assistant_tool_calls() {
         let response = AgentThreadMessageResponse::from(ThreadMessageRecord {
             id: "message-1".into(),
             thread_id: "thread-1".into(),
@@ -350,6 +358,9 @@ mod tests {
         });
 
         assert_eq!(response.content, "");
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].id.as_deref(), Some("call-1"));
+        assert_eq!(response.tool_calls[0].function.name, "web_search");
     }
 
     #[test]
@@ -369,5 +380,6 @@ mod tests {
         });
 
         assert_eq!(response.content, "Tokyo is sunny.");
+        assert!(response.tool_calls.is_empty());
     }
 }

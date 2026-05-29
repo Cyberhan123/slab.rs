@@ -552,7 +552,9 @@ export function useAssistantAgent({
           setRestoreComplete(true)
           setActiveConversation(message.session_id)
           setThreadId(message.thread?.id ?? null)
-          setMessages(projectAgentThreadMessages(message.messages))
+          setMessages(
+            projectAgentThreadMessages(message.messages, message.thread?.status ?? undefined)
+          )
           setStatus(message.thread?.status ?? null)
           break
         case 'agent.error':
