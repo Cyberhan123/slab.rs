@@ -402,17 +402,28 @@ export function useAssistantAgent({
   }, [])
 
   const appendAssistantError = useCallback((content: string) => {
-    setMessages((current) => [
-      ...current,
-      {
-        id: nextId('assistant'),
+    setMessages((current) => {
+      const updated = updateLastAssistantMessage(current, (message) => ({
+        ...message,
         message: {
-          role: 'assistant',
+          ...message.message,
           content,
         },
         status: 'error',
-      },
-    ])
+      }))
+
+      return updated ?? [
+        ...current,
+        {
+          id: nextId('assistant'),
+          message: {
+            role: 'assistant',
+            content,
+          },
+          status: 'error',
+        },
+      ]
+    })
   }, [])
 
   const handleAgentEvent = useCallback(
@@ -752,7 +763,18 @@ export function useAssistantAgent({
         status: 'success',
       }
 
-      setMessages((current) => [...current, userMessage])
+      setMessages((current) => [
+        ...current,
+        userMessage,
+        {
+          id: nextId('assistant'),
+          message: {
+            role: 'assistant',
+            content: '',
+          },
+          status: 'loading',
+        },
+      ])
       setStatus('pending')
       setPendingApproval(null)
       setThoughts([])

@@ -91,11 +91,10 @@ impl SetupService {
         let initialized = self.load_setup_initialized().await?;
         let runtime_payload_installed = self.runtime_payload_installed();
         let configured_dir = self.model_state.pmid().config().setup.ffmpeg.dir;
-        let ffmpeg_probe = tokio::task::spawn_blocking(move || {
-            probe_ffmpeg_runtime(configured_dir.as_deref())
-        })
-        .await
-        .unwrap_or_else(|_| probe_ffmpeg_runtime(None));
+        let ffmpeg_probe =
+            tokio::task::spawn_blocking(move || probe_ffmpeg_runtime(configured_dir.as_deref()))
+                .await
+                .unwrap_or_else(|_| probe_ffmpeg_runtime(None));
 
         let backends: Vec<ComponentStatus> = RuntimeBackendId::ALL
             .into_iter()

@@ -4,6 +4,7 @@ import type {
   SessionMessageResponse,
 } from './assistant-types'
 import { toStoredSessionAssistantMessage } from './assistant-history'
+import { stripTrailingAssistantTurnArtifacts } from './assistant-message-utils'
 
 export function projectSessionMessages(
   messages: SessionMessageResponse[] | undefined
@@ -25,7 +26,7 @@ export function projectAgentThreadMessages(
         return true
       }
 
-      const content = message.content.trim()
+      const content = stripTrailingAssistantTurnArtifacts(message.content).trim()
       if (!content) {
         return false
       }
@@ -38,7 +39,10 @@ export function projectAgentThreadMessages(
       id: message.id,
       message: {
         role: message.role,
-        content: message.content,
+        content:
+          message.role === 'assistant'
+            ? stripTrailingAssistantTurnArtifacts(message.content)
+            : message.content,
       },
       status: 'success',
     }))

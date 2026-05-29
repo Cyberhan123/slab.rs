@@ -576,7 +576,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
+        put: operations["update_session"];
         post?: never;
         delete: operations["delete_session"];
         options?: never;
@@ -2443,6 +2443,10 @@ export interface components {
             spec?: null | components["schemas"]["ModelSpecRequest"];
             status?: string | null;
         };
+        /** @description Request body for `PUT /v1/sessions/{id}`. */
+        UpdateSessionRequest: {
+            name: string;
+        };
         UpdateSettingCommand: {
             op: components["schemas"]["UpdateSettingOperation"];
             value?: null | components["schemas"]["SettingValue"];
@@ -3992,6 +3996,53 @@ export interface operations {
             };
             /** @description Bad request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_session: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSessionRequest"];
+            };
+        };
+        responses: {
+            /** @description Session updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Session not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

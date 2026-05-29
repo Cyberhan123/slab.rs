@@ -31,7 +31,7 @@ import {
   DialogTitle,
 } from "@slab/components/dialog"
 import { ScrollArea } from "@slab/components/scroll-area"
-import api from "@slab/api"
+import api, { type components } from "@slab/api"
 import { toCatalogModelList, type CatalogModel } from "@slab/api/models"
 import { usePageHeader, usePageHeaderControl } from "@/hooks/use-global-header-meta"
 import { usePersistedHeaderSelect } from "@/hooks/use-persisted-header-select"
@@ -84,6 +84,8 @@ type ModelOption = {
   contextWindow?: number | null
   runtimePresets?: CatalogModel["runtime_presets"]
 }
+
+type ModelRuntimeStatus = components["schemas"]["ModelStatusResponse"]
 
 type AssistantBubbleContent = {
   approving: boolean
@@ -464,6 +466,7 @@ function Assistant() {
   const [isSessionSheetOpen, setIsSessionSheetOpen] = useState(false)
   const [pendingModelSwitchId, setPendingModelSwitchId] = useState<string | null>(null)
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null)
+  const [loadedModelStatus, setLoadedModelStatus] = useState<ModelRuntimeStatus | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const deepThink = useAssistantUiStore((state) => state.deepThink)
   const setDeepThink = useAssistantUiStore((state) => state.setDeepThink)
@@ -480,7 +483,7 @@ function Assistant() {
     isSessionMutating,
     isSessionsLoading: sessionsLoading,
     setCurrentSessionId: setCurConversation,
-    setSessionLabel,
+    updateSessionLabel,
   } = useAssistantSessions()
 
   const {
@@ -620,19 +623,21 @@ function Assistant() {
     const shouldSwitch = Boolean(loadedModelId && loadedModelId !== selectedModelId)
 
     if (shouldSwitch) {
-      await switchModelMutation.mutateAsync({
+      const status = await switchModelMutation.mutateAsync({
         body: {
           model_id: modelId,
         },
       })
+      setLoadedModelStatus(status)
       return
     }
 
-    await loadModelMutation.mutateAsync({
+    const status = await loadModelMutation.mutateAsync({
       body: {
         model_id: modelId,
       },
     })
+    setLoadedModelStatus(status)
   }
 
   const prepareSelectedModel = async () => {
@@ -651,6 +656,7 @@ function Assistant() {
 
     if (selectedOption.source === "cloud") {
       setLoadedModelId(selectedModelId)
+      setLoadedModelStatus(null)
       return
     }
 
@@ -739,6 +745,8 @@ function Assistant() {
   const currentConversationLabel =
     conversationList.find((item) => item.key === curConversation)?.label?.trim() ||
     t("pages.assistant.sessionSummary.currentSession")
+  const selectedRuntimeContextLength =
+    loadedModelId === selectedModelId ? loadedModelStatus?.context_length ?? null : null
   const selectedModelStatusLabel = useMemo(() => {
     if (isSessionBootstrapping || !curConversation) {
       return t("pages.assistant.status.preparingSession")
@@ -766,7 +774,13 @@ function Assistant() {
 
     const parts = [selectedModel.label]
 
-    if (selectedModel.contextWindow && selectedModel.contextWindow > 0) {
+    if (selectedRuntimeContextLength && selectedRuntimeContextLength > 0) {
+      parts.push(
+        t("pages.assistant.status.runtimeContextWindow", {
+          formatted: new Intl.NumberFormat(resolvedLanguage).format(selectedRuntimeContextLength),
+        })
+      )
+    } else if (selectedModel.contextWindow && selectedModel.contextWindow > 0) {
       parts.push(
         t("pages.assistant.status.contextWindow", {
           formatted: new Intl.NumberFormat(resolvedLanguage).format(selectedModel.contextWindow),
@@ -797,6 +811,7 @@ function Assistant() {
     isSessionBootstrapping,
     modelLoading,
     resolvedLanguage,
+    selectedRuntimeContextLength,
     selectedModel,
     t,
   ])
@@ -938,7 +953,7 @@ function Assistant() {
   }, [curConversation, safeMessages.length, sortedConversations, t])
 
   const setConversationLabelIfNeeded = useCallback(
-    (conversationKey: string, prompt: string) => {
+    async (conversationKey: string, prompt: string) => {
       const conversation = conversationList.find((item) => item.key === conversationKey)
       const label = conversation?.label ?? t("pages.assistant.runtime.newChat")
       const defaultLabels = new Set([
@@ -954,10 +969,10 @@ function Assistant() {
 
       const nextLabel = createConversationLabel(prompt, t("pages.assistant.runtime.newChat"))
       if (nextLabel) {
-        setSessionLabel(conversationKey, nextLabel)
+        await updateSessionLabel(conversationKey, nextLabel)
       }
     },
-    [conversationList, setSessionLabel, t]
+    [conversationList, t, updateSessionLabel]
   )
 
   const handleCreateConversation = useCallback(async () => {
@@ -989,6 +1004,22 @@ function Assistant() {
     [deleteConversationSession, isSessionBusy, t]
   )
 
+  const handleSelectConversation = useCallback(
+    (conversationKey: string) => {
+      if (conversationKey === curConversation) {
+        return
+      }
+
+      if (isSessionBusy || isSessionBootstrapping) {
+        toast.info(t("pages.assistant.toast.sessionSyncing"))
+        return
+      }
+
+      setCurConversation(conversationKey)
+    },
+    [curConversation, isSessionBootstrapping, isSessionBusy, setCurConversation, t]
+  )
+
   const handleGenerateImage = useCallback(() => {
     const prompt = draft.trim() || latestUserPrompt
     const search = prompt ? `?prompt=${encodeURIComponent(prompt)}` : ""
@@ -1011,8 +1042,8 @@ function Assistant() {
         return
       }
 
-      setConversationLabelIfNeeded(curConversation, value)
       setDraft("")
+      await setConversationLabelIfNeeded(curConversation, value)
       await handleSubmit(value)
     },
     [
@@ -1082,6 +1113,7 @@ function Assistant() {
               items={sessionSummaryItems}
               onManageSessions={() => setIsSessionSheetOpen(true)}
               onNewSession={handleCreateConversation}
+              onSelectSession={handleSelectConversation}
               disableNewSession={isSessionBusy || isSessionBootstrapping}
             />
           </div>
@@ -1103,6 +1135,7 @@ function Assistant() {
             items={sessionSummaryItems}
             onManageSessions={() => setIsSessionSheetOpen(true)}
             onNewSession={handleCreateConversation}
+            onSelectSession={handleSelectConversation}
             disableNewSession={isSessionBusy || isSessionBootstrapping}
           />
         </div>

@@ -143,6 +143,7 @@ function createAssistantSessionsViewModel(overrides = {}) {
     isSessionsLoading: false,
     setCurrentSessionId: createVoidMock(),
     setSessionLabel: createVoidMock(),
+    updateSessionLabel: vi.fn<() => Promise<boolean>>().mockResolvedValue(true),
     ...overrides,
   };
 }

@@ -50,11 +50,7 @@ pub(crate) fn probe_ffmpeg_runtime(configured_install_dir: Option<&str>) -> Ffmp
         _ => (false, None),
     };
 
-    FfmpegRuntimeProbe {
-        installed: dynamic_runtime_ready && command_ready,
-        version,
-        binary,
-    }
+    FfmpegRuntimeProbe { installed: dynamic_runtime_ready && command_ready, version, binary }
 }
 
 pub(crate) fn ensure_dynamic_runtime_ready() -> Result<(), String> {

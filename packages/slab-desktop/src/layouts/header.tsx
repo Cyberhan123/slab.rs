@@ -29,7 +29,7 @@ function HeaderSelect({ control }: { control: HeaderSelectControl }) {
   const disabled = control.disabled || !hasSelectableOptions
 
   return (
-    <Select value={control.value || undefined} onValueChange={control.onValueChange} disabled={disabled}>
+    <Select value={control.value} onValueChange={control.onValueChange} disabled={disabled}>
       <SelectTrigger
         size="sm"
         variant="pill"

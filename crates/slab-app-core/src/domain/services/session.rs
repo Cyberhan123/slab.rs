@@ -39,6 +39,25 @@ impl SessionService {
         Ok(sessions.into_iter().map(|session| SessionView::from(&session)).collect())
     }
 
+    pub async fn update_session_name(
+        &self,
+        id: &str,
+        name: String,
+    ) -> Result<SessionView, AppCoreError> {
+        let name = name.trim().to_owned();
+        if name.is_empty() {
+            return Err(AppCoreError::BadRequest("session name must not be empty".to_owned()));
+        }
+
+        let session = self
+            .state
+            .store()
+            .update_session_name(id, &name, Utc::now())
+            .await?
+            .ok_or_else(|| AppCoreError::NotFound(format!("session {id} not found")))?;
+        Ok(SessionView::from(&session))
+    }
+
     pub async fn delete_session(&self, id: &str) -> Result<DeleteSessionView, AppCoreError> {
         self.state.store().delete_session(id).await?;
         Ok(DeleteSessionView { deleted: true })

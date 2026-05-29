@@ -10,6 +10,18 @@ describe('assistant history', () => {
     })
   })
 
+  it('strips trailing assistant tool artifacts from plain stored content', () => {
+    expect(
+      toStoredSessionAssistantMessage(
+        ' assistant ',
+        'answer\ntool_call id=call-1: web_search({"query":"Tokyo weather"})'
+      )
+    ).toEqual({
+      role: 'assistant',
+      content: 'answer',
+    })
+  })
+
   it('renders stored message envelopes with content parts and tool calls', () => {
     const stored = {
       message: {

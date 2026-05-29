@@ -197,6 +197,7 @@ from .unified_model_response import UnifiedModelResponse
 from .unload_model_request import UnloadModelRequest
 from .update_model_config_selection_request import UpdateModelConfigSelectionRequest
 from .update_model_request import UpdateModelRequest
+from .update_session_request import UpdateSessionRequest
 from .update_setting_command import UpdateSettingCommand
 from .update_setting_operation import UpdateSettingOperation
 from .update_ui_state_request import UpdateUiStateRequest
@@ -379,6 +380,7 @@ __all__ = (
     "UnloadModelRequest",
     "UpdateModelConfigSelectionRequest",
     "UpdateModelRequest",
+    "UpdateSessionRequest",
     "UpdateSettingCommand",
     "UpdateSettingOperation",
     "UpdateUiStateRequest",

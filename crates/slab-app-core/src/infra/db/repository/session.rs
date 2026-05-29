@@ -11,6 +11,12 @@ pub trait SessionStore: Send + Sync + 'static {
         session: ChatSession,
     ) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
     fn list_sessions(&self) -> impl Future<Output = Result<Vec<ChatSession>, sqlx::Error>> + Send;
+    fn update_session_name(
+        &self,
+        id: &str,
+        name: &str,
+        updated_at: DateTime<Utc>,
+    ) -> impl Future<Output = Result<Option<ChatSession>, sqlx::Error>> + Send;
     fn delete_session(&self, id: &str) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
 }
 
@@ -49,6 +55,32 @@ impl SessionStore for AnyStore {
                 updated_at,
             })
             .collect())
+    }
+
+    async fn update_session_name(
+        &self,
+        id: &str,
+        name: &str,
+        updated_at: DateTime<Utc>,
+    ) -> Result<Option<ChatSession>, sqlx::Error> {
+        let updated_at_text = updated_at.to_rfc3339();
+        let row: Option<SessionRow> = sqlx::query_as(
+            "UPDATE chat_sessions SET name = ?2, updated_at = ?3 WHERE id = ?1 \
+             RETURNING id, name, state_path, created_at, updated_at",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(&updated_at_text)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|(id, name, state_path, created_at, updated_at)| ChatSession {
+            id,
+            name,
+            state_path,
+            created_at,
+            updated_at,
+        }))
     }
 
     async fn delete_session(&self, id: &str) -> Result<(), sqlx::Error> {

@@ -24,8 +24,22 @@ export function registerSessionsAndUiStateSmoke(
       expect(created.response.ok).toBe(true);
       expect(created.body.name).toBe("Vitest smoke session");
 
+      const renamed = await expectJson<Schema["SessionResponse"]>(
+        server,
+        `/v1/sessions/${created.body.id}`,
+        jsonInit({ name: "Renamed smoke session" } satisfies Schema["UpdateSessionRequest"], {
+          method: "PUT"
+        })
+      );
+      expect(renamed.response.ok).toBe(true);
+      expect(renamed.body.name).toBe("Renamed smoke session");
+
       const listed = await expectJson<Schema["SessionResponse"][]>(server, "/v1/sessions");
-      expect(listed.body.some((session) => session.id === created.body.id)).toBe(true);
+      expect(
+        listed.body.some(
+          (session) => session.id === created.body.id && session.name === "Renamed smoke session"
+        )
+      ).toBe(true);
 
       const messages = await expectJson<Schema["MessageResponse"][]>(
         server,

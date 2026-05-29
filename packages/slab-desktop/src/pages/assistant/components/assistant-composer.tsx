@@ -1,12 +1,16 @@
 import {
+  FileText,
   ImagePlus,
   Mic,
+  Network,
   Plus,
   Search,
   SendHorizontal,
   Square,
   WandSparkles,
+  Wrench,
 } from "lucide-react"
+import { useMemo } from "react"
 
 import { Button } from "@slab/components/button"
 import {
@@ -47,6 +51,57 @@ export function AssistantComposer({
   statusLabel,
 }: AssistantComposerProps) {
   const { t } = useTranslation()
+  const commandItems = useMemo(
+    () => [
+      {
+        command: "/plan",
+        description: t("pages.assistant.composer.commandPlanDescription"),
+        icon: FileText,
+        label: t("pages.assistant.composer.commandPlan"),
+      },
+      {
+        command: "/skill",
+        description: t("pages.assistant.composer.commandSkillDescription"),
+        icon: Wrench,
+        label: t("pages.assistant.composer.commandSkill"),
+      },
+      {
+        command: "/mcp",
+        description: t("pages.assistant.composer.commandMcpDescription"),
+        icon: Network,
+        label: t("pages.assistant.composer.commandMcp"),
+      },
+      {
+        command: "/web_search",
+        description: t("pages.assistant.composer.commandWebSearchDescription"),
+        icon: Search,
+        label: t("pages.assistant.composer.commandWebSearch"),
+      },
+    ],
+    [t]
+  )
+  const commandQuery = value.match(/^\/([^\s/]*)$/)?.[1]?.toLowerCase() ?? null
+  const matchingCommandItems = useMemo(() => {
+    if (commandQuery === null) {
+      return []
+    }
+
+    return commandItems.filter((item) => {
+      const normalizedCommand = item.command.slice(1).toLowerCase()
+      const normalizedLabel = item.label.toLowerCase()
+
+      return (
+        normalizedCommand.startsWith(commandQuery) ||
+        normalizedLabel.startsWith(commandQuery)
+      )
+    })
+  }, [commandItems, commandQuery])
+  const showCommandMenu = !disabled && commandQuery !== null && matchingCommandItems.length > 0
+  const webSearchActive = value.trimStart().startsWith("/web_search")
+
+  const insertCommand = (command: string) => {
+    onValueChange(`${command} `)
+  }
 
   const handleSubmit = () => {
     if (!value.trim() || isRequesting || disabled) {
@@ -57,7 +112,37 @@ export function AssistantComposer({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="relative space-y-3">
+      {showCommandMenu ? (
+        <div className="absolute bottom-[calc(100%+12px)] left-2 z-30 w-[min(24rem,calc(100vw-3rem))] overflow-hidden rounded-[18px] border border-border/70 bg-[var(--surface-1)] p-1.5 shadow-[0_22px_50px_-34px_color-mix(in_oklab,var(--foreground)_40%,transparent)]">
+          {matchingCommandItems.map((item) => {
+            const Icon = item.icon
+
+            return (
+              <button
+                key={item.command}
+                type="button"
+                className="flex w-full items-center gap-3 rounded-[12px] px-3 py-2.5 text-left transition hover:bg-[var(--surface-soft)]"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => insertCommand(item.command)}
+              >
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-[8px] bg-[var(--brand-teal)]/12 text-[var(--brand-teal)]">
+                  <Icon className="size-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <span className="font-mono text-[13px]">{item.command}</span>
+                    <span>{item.label}</span>
+                  </span>
+                  <span className="block truncate text-[11px] text-muted-foreground">
+                    {item.description}
+                  </span>
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
       <div className="rounded-[24px] bg-[var(--surface-input)] p-[5px] shadow-[var(--shell-elevation)]">
         <div className="flex items-end gap-2 px-4 py-2">
           <div className="pb-1">
@@ -73,13 +158,23 @@ export function AssistantComposer({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="rounded-2xl border-border/70">
+                {commandItems.map((item) => {
+                  const Icon = item.icon
+
+                  return (
+                    <DropdownMenuItem
+                      key={item.command}
+                      onClick={() => insertCommand(item.command)}
+                    >
+                      <Icon className="size-4" />
+                      <span className="font-mono text-xs">{item.command}</span>
+                      <span>{item.label}</span>
+                    </DropdownMenuItem>
+                  )
+                })}
                 <DropdownMenuItem onClick={onGenerateImage}>
                   <ImagePlus className="size-4" />
                   {t("pages.assistant.composer.generateImage")}
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled>
-                  <Search className="size-4" />
-                  {t("pages.assistant.composer.webSearch")}
                 </DropdownMenuItem>
                 <DropdownMenuItem disabled>
                   <Mic className="size-4" />
@@ -100,6 +195,11 @@ export function AssistantComposer({
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault()
+                if (showCommandMenu && matchingCommandItems[0]) {
+                  insertCommand(matchingCommandItems[0].command)
+                  return
+                }
+
                 handleSubmit()
               }
             }}
@@ -151,10 +251,18 @@ export function AssistantComposer({
         <div className="flex flex-wrap items-center gap-4">
           <button
             type="button"
-            disabled
-            className="inline-flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground transition disabled:cursor-not-allowed disabled:opacity-100"
+            disabled={disabled}
+            aria-pressed={webSearchActive}
+            onClick={() => insertCommand("/web_search")}
+            className={cn(
+              "inline-flex items-center gap-1.5 text-[11px] font-bold transition",
+              webSearchActive
+                ? "text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+              disabled && "cursor-not-allowed opacity-60"
+            )}
           >
-            <Search className="size-3" />
+            <Search className={cn("size-3", webSearchActive && "text-[var(--brand-teal)]")} />
             {t("pages.assistant.composer.webSearch")}
           </button>
 

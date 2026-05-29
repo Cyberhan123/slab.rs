@@ -15,6 +15,7 @@ type AssistantSessionSummaryCardProps = {
   items: AssistantSessionSummaryItem[]
   onManageSessions: () => void
   onNewSession: () => void
+  onSelectSession: (key: string) => void
   disableNewSession?: boolean
 }
 
@@ -22,6 +23,7 @@ export function AssistantSessionSummaryCard({
   items,
   onManageSessions,
   onNewSession,
+  onSelectSession,
   disableNewSession = false,
 }: AssistantSessionSummaryCardProps) {
   const { t } = useTranslation()
@@ -53,7 +55,7 @@ export function AssistantSessionSummaryCard({
             <button
               key={item.key}
               type="button"
-              onClick={onManageSessions}
+              onClick={() => onSelectSession(item.key)}
               className="flex w-full items-center gap-3 text-left"
             >
               <span

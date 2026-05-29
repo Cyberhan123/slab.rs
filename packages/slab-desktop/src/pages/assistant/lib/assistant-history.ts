@@ -2,6 +2,7 @@ import {
   isRecord,
   type AssistantUiMessage,
 } from './assistant-types'
+import { stripTrailingAssistantTurnArtifacts } from './assistant-message-utils'
 
 const isStoredSessionEnvelope = (
   value: unknown
@@ -118,9 +119,11 @@ export const toStoredSessionAssistantMessage = (
       : null
 
   if (!message) {
+    const role = normalizeStoredMessageRole(null, fallbackRole)
+
     return {
-      content,
-      role: normalizeStoredMessageRole(null, fallbackRole),
+      content: role === 'assistant' ? stripTrailingAssistantTurnArtifacts(content) : content,
+      role,
     }
   }
 
@@ -130,8 +133,11 @@ export const toStoredSessionAssistantMessage = (
     segments.push(body)
   }
 
+  const role = normalizeStoredMessageRole(message.role, fallbackRole)
+  const rendered = segments.join('\n')
+
   return {
-    content: segments.join('\n'),
-    role: normalizeStoredMessageRole(message.role, fallbackRole),
+    content: role === 'assistant' ? stripTrailingAssistantTurnArtifacts(rendered) : rendered,
+    role,
   }
 }

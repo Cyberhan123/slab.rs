@@ -18,12 +18,38 @@ export const getAssistantMessageTextContent = (
   return ''
 }
 
-export const stripTrailingAssistantTurnArtifacts = (value: string): string =>
-  value
+const assistantTurnArtifactLinePattern =
+  /^\s*(?:tool_call(?:\s+id=[^:]+)?:\s*[A-Za-z0-9_.-]+\(.*\)|tool_call_id:\s*.+)\s*$/i
+
+export const stripTrailingAssistantTurnArtifacts = (value: string): string => {
+  const cleaned = value
     .replace(/<\|endoftext\|>\s*<\|im_start\|>[\s\S]*$/g, '')
     .replace(/<\|endoftext\|>\s*$/g, '')
     .replace(/<\|im_end\|>\s*$/g, '')
     .replace(/<\|eot_id\|>\s*$/g, '')
+
+  const lines = cleaned.split(/\r?\n/)
+  let end = lines.length
+
+  while (end > 0 && !lines[end - 1]?.trim()) {
+    end -= 1
+  }
+
+  const artifactEnd = end
+  while (end > 0 && assistantTurnArtifactLinePattern.test(lines[end - 1] ?? '')) {
+    end -= 1
+  }
+
+  if (end === artifactEnd) {
+    return cleaned
+  }
+
+  while (end > 0 && !lines[end - 1]?.trim()) {
+    end -= 1
+  }
+
+  return lines.slice(0, end).join('\n').trimEnd()
+}
 
 const hasMeaningfulAssistantRequestContent = (
   message?: Pick<XModelMessage, 'content'> | null

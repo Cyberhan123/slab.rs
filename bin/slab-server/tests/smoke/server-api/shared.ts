@@ -79,6 +79,7 @@ export const executableSmokeOperations = [
   { method: "delete", path: "/v1/sessions/{id}" },
   { method: "get", path: "/v1/sessions" },
   { method: "post", path: "/v1/sessions" },
+  { method: "put", path: "/v1/sessions/{id}" },
   { method: "get", path: "/v1/sessions/{id}/messages" },
   { method: "get", path: "/v1/settings" },
   { method: "get", path: "/v1/settings/{pmid}" },

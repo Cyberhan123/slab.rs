@@ -34,7 +34,7 @@ function toConversationItem(
 
   return {
     key: session.id,
-    label: storedLabel ?? (backendLabel || defaults.newChat),
+    label: backendLabel || storedLabel || defaults.newChat,
     group: defaults.workspace,
   }
 }
@@ -58,6 +58,7 @@ export function useAssistantSessions() {
     "/v1/sessions"
   )
   const createSessionMutation = api.useMutation("post", "/v1/sessions")
+  const updateSessionMutation = api.useMutation("put", "/v1/sessions/{id}")
   const deleteSessionMutation = api.useMutation("delete", "/v1/sessions/{id}")
 
   const sessionRecords = useMemo(() => toSessionRecords(sessionData), [sessionData])
@@ -141,6 +142,38 @@ export function useAssistantSessions() {
     ]
   )
 
+  const updateSessionLabel = useCallback(
+    async (sessionId: string, label: string) => {
+      const trimmedSessionId = sessionId.trim()
+      const trimmedLabel = label.trim()
+
+      if (!trimmedSessionId || !trimmedLabel) {
+        return false
+      }
+
+      setSessionLabel(trimmedSessionId, trimmedLabel)
+
+      try {
+        await updateSessionMutation.mutateAsync({
+          params: {
+            path: { id: trimmedSessionId },
+          },
+          body: {
+            name: trimmedLabel,
+          },
+        })
+        await refetchSessions()
+        return true
+      } catch (error) {
+        toast.error(t("pages.assistant.toast.failedToUpdateSession"), {
+          description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError")),
+        })
+        return false
+      }
+    },
+    [refetchSessions, setSessionLabel, t, updateSessionMutation]
+  )
+
   useEffect(() => {
     if (isSessionsLoading) {
       return
@@ -191,6 +224,7 @@ export function useAssistantSessions() {
     isSessionsLoading,
     setCurrentSessionId,
     setSessionLabel,
+    updateSessionLabel,
     deleteSession,
   }
 }

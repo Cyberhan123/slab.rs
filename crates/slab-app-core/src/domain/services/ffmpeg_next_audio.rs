@@ -1,6 +1,6 @@
 use anyhow::{Context, anyhow};
-use ffmpeg_next as ffmpeg;
 use ffmpeg::{codec, format, frame, media};
+use ffmpeg_next as ffmpeg;
 
 pub(crate) fn supports_output_format(format_name: &str) -> bool {
     matches!(
@@ -38,10 +38,7 @@ pub(crate) fn transcode_audio(source_path: &str, output_path: &str) -> anyhow::R
         .audio()
         .context("selected output codec is not an audio encoder")?;
 
-    let global = octx
-        .format()
-        .flags()
-        .contains(ffmpeg::format::flag::Flags::GLOBAL_HEADER);
+    let global = octx.format().flags().contains(ffmpeg::format::flag::Flags::GLOBAL_HEADER);
 
     let mut output_stream = octx
         .add_stream(encoder_codec)
@@ -83,8 +80,7 @@ pub(crate) fn transcode_audio(source_path: &str, output_path: &str) -> anyhow::R
     let out_time_base = output_stream.time_base();
 
     octx.set_metadata(ictx.metadata().to_owned());
-    octx.write_header()
-        .map_err(|error| anyhow!("failed to write output header: {error}"))?;
+    octx.write_header().map_err(|error| anyhow!("failed to write output header: {error}"))?;
 
     let in_time_base = decoder.time_base();
 
@@ -101,18 +97,13 @@ pub(crate) fn transcode_audio(source_path: &str, output_path: &str) -> anyhow::R
         drain_decoded_frames(&mut decoder, &mut encoder, &mut octx, in_time_base, out_time_base)?;
     }
 
-    decoder
-        .send_eof()
-        .map_err(|error| anyhow!("failed to send decoder EOF: {error}"))?;
+    decoder.send_eof().map_err(|error| anyhow!("failed to send decoder EOF: {error}"))?;
     drain_decoded_frames(&mut decoder, &mut encoder, &mut octx, in_time_base, out_time_base)?;
 
-    encoder
-        .send_eof()
-        .map_err(|error| anyhow!("failed to send encoder EOF: {error}"))?;
+    encoder.send_eof().map_err(|error| anyhow!("failed to send encoder EOF: {error}"))?;
     drain_encoded_packets(&mut encoder, &mut octx, in_time_base, out_time_base)?;
 
-    octx.write_trailer()
-        .map_err(|error| anyhow!("failed to write output trailer: {error}"))?;
+    octx.write_trailer().map_err(|error| anyhow!("failed to write output trailer: {error}"))?;
 
     Ok(())
 }

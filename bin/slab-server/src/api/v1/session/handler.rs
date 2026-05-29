@@ -7,6 +7,7 @@ use utoipa::OpenApi;
 
 use crate::api::v1::session::schema::{
     CreateSessionRequest, DeleteSessionResponse, MessageResponse, SessionIdPath, SessionResponse,
+    UpdateSessionRequest,
 };
 use crate::api::validation::{ValidatedJson, validate};
 use crate::error::ServerError;
@@ -15,9 +16,10 @@ use slab_app_core::domain::services::SessionService;
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(create_session, list_sessions, delete_session, list_session_messages),
+    paths(create_session, list_sessions, update_session, delete_session, list_session_messages),
     components(schemas(
         CreateSessionRequest,
+        UpdateSessionRequest,
         SessionResponse,
         MessageResponse,
         DeleteSessionResponse,
@@ -29,7 +31,7 @@ pub struct SessionApi;
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/sessions", post(create_session).get(list_sessions))
-        .route("/sessions/{id}", delete(delete_session))
+        .route("/sessions/{id}", delete(delete_session).put(update_session))
         .route("/sessions/{id}/messages", get(list_session_messages))
 }
 
@@ -66,6 +68,28 @@ async fn list_sessions(
 ) -> Result<Json<Vec<SessionResponse>>, ServerError> {
     let sessions = service.list_sessions().await?.into_iter().map(Into::into).collect();
     Ok(Json(sessions))
+}
+
+#[utoipa::path(
+    put,
+    path = "/v1/sessions/{id}",
+    tag = "sessions",
+    params(SessionIdPath),
+    request_body = UpdateSessionRequest,
+    responses(
+        (status = 200, description = "Session updated", body = SessionResponse),
+        (status = 400, description = "Bad request"),
+        (status = 404, description = "Session not found"),
+        (status = 500, description = "Backend error"),
+    )
+)]
+async fn update_session(
+    State(service): State<SessionService>,
+    Path(params): Path<SessionIdPath>,
+    ValidatedJson(req): ValidatedJson<UpdateSessionRequest>,
+) -> Result<Json<SessionResponse>, ServerError> {
+    let params = validate(params)?;
+    Ok(Json(service.update_session_name(&params.id, req.name).await?.into()))
 }
 
 #[utoipa::path(
@@ -124,9 +148,11 @@ mod tests {
         let openapi =
             serde_json::to_value(SessionApi::openapi()).expect("serialize session openapi");
 
-        for (path, method) in
-            [("/v1/sessions/{id}", "delete"), ("/v1/sessions/{id}/messages", "get")]
-        {
+        for (path, method) in [
+            ("/v1/sessions/{id}", "delete"),
+            ("/v1/sessions/{id}", "put"),
+            ("/v1/sessions/{id}/messages", "get"),
+        ] {
             let parameters = operation_parameters(&openapi, path, method);
             assert!(parameters.iter().any(|parameter| {
                 parameter["name"] == Value::String("id".to_owned())

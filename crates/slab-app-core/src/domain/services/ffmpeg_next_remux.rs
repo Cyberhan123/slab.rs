@@ -23,7 +23,10 @@ pub(crate) fn remux_media(source_path: &str, output_path: &str) -> anyhow::Resul
 
     for (ist_index, ist) in ictx.streams().enumerate() {
         let medium = ist.parameters().medium();
-        if medium != media::Type::Audio && medium != media::Type::Video && medium != media::Type::Subtitle {
+        if medium != media::Type::Audio
+            && medium != media::Type::Video
+            && medium != media::Type::Subtitle
+        {
             stream_mapping[ist_index] = -1;
             continue;
         }
@@ -44,8 +47,7 @@ pub(crate) fn remux_media(source_path: &str, output_path: &str) -> anyhow::Resul
     }
 
     octx.set_metadata(ictx.metadata().to_owned());
-    octx.write_header()
-        .map_err(|error| anyhow!("failed to write output header: {error}"))?;
+    octx.write_header().map_err(|error| anyhow!("failed to write output header: {error}"))?;
 
     for (stream, mut packet) in ictx.packets() {
         let ist_index = stream.index();
@@ -65,8 +67,7 @@ pub(crate) fn remux_media(source_path: &str, output_path: &str) -> anyhow::Resul
             .map_err(|error| anyhow!("failed to write remuxed packet: {error}"))?;
     }
 
-    octx.write_trailer()
-        .map_err(|error| anyhow!("failed to write output trailer: {error}"))?;
+    octx.write_trailer().map_err(|error| anyhow!("failed to write output trailer: {error}"))?;
 
     Ok(())
 }

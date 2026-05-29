@@ -46,7 +46,7 @@ describe('assistant message projection', () => {
           turn_index: 0,
         },
         {
-          content: 'answer',
+          content: 'answer\ntool_call id=call-0: web_search({"query":"Japan weather"})',
           created_at: '2026-01-01T00:00:02Z',
           id: 'msg-3',
           role: 'assistant',

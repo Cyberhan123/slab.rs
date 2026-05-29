@@ -27,6 +27,16 @@ pub struct CreateSessionRequest {
     pub name: Option<String>,
 }
 
+/// Request body for `PUT /v1/sessions/{id}`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
+pub struct UpdateSessionRequest {
+    #[validate(custom(
+        function = "crate::schemas::validation::validate_non_blank",
+        message = "name must not be empty"
+    ))]
+    pub name: String,
+}
+
 /// Response for a single chat session.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SessionResponse {

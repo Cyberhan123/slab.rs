@@ -5,4 +5,5 @@
 
 pub use slab_app_core::schemas::session::{
     CreateSessionRequest, DeleteSessionResponse, MessageResponse, SessionIdPath, SessionResponse,
+    UpdateSessionRequest,
 };
