@@ -230,11 +230,6 @@ pub(super) async fn create_text_completion(
     cloud_chat_completion(&target, &messages, config, state.config().cloud_http_trace).await
 }
 
-#[cfg(test)]
-pub(super) fn cloud_option_id(provider_id: &str, model_id: &str) -> String {
-    format!("{}/{provider_id}/{model_id}", super::CLOUD_MODEL_ID_PREFIX)
-}
-
 fn looks_like_env_var_name(value: &str) -> bool {
     let mut chars = value.chars();
     match chars.next() {
@@ -360,69 +355,26 @@ async fn find_cloud_catalog_model(
     state: &ModelState,
     requested_model: &str,
 ) -> Result<Option<UnifiedModel>, AppCoreError> {
-    if let Some((provider_id, legacy_model_id)) = parse_legacy_cloud_option_id(requested_model) {
-        warn!(
-            requested_model,
-            provider_id, legacy_model_id, "legacy cloud model id shim hit; prefer catalog model.id"
-        );
-        let records = state.store().list_models().await?;
-        for record in records {
-            let model: UnifiedModel = match record.try_into() {
-                Ok(model) => model,
-                Err(error) => {
-                    warn!(error = %error, "failed to deserialize cloud model record; skipping");
-                    continue;
-                }
-            };
-            if model_matches_legacy_cloud_option(&model, provider_id, legacy_model_id) {
-                return Ok(Some(model));
+    let Some(record) = state.store().get_model(requested_model).await? else {
+        if let Some(suffix) = requested_model.strip_prefix("cloud/")
+            && let Some((provider_id, legacy_model_id)) = suffix.split_once('/')
+        {
+            let provider_id = provider_id.trim();
+            let legacy_model_id = legacy_model_id.trim();
+            if !provider_id.is_empty() && !legacy_model_id.is_empty() {
+                warn!(
+                    requested_model,
+                    provider_id,
+                    legacy_model_id,
+                    "legacy cloud model id requested; catalog model.id is required"
+                );
             }
         }
-        return Ok(None);
-    }
-
-    let Some(record) = state.store().get_model(requested_model).await? else {
         return Ok(None);
     };
     let model: UnifiedModel =
         record.try_into().map_err(|error: String| AppCoreError::Internal(error))?;
     if is_cloud_catalog_model(&model) { Ok(Some(model)) } else { Ok(None) }
-}
-
-fn parse_legacy_cloud_option_id(model_id: &str) -> Option<(&str, &str)> {
-    let suffix = model_id.strip_prefix("cloud/")?;
-    let (provider_id, legacy_model_id) = suffix.split_once('/')?;
-    let provider_id = provider_id.trim();
-    let legacy_model_id = legacy_model_id.trim();
-    if provider_id.is_empty() || legacy_model_id.is_empty() {
-        return None;
-    }
-    Some((provider_id, legacy_model_id))
-}
-
-fn model_matches_legacy_cloud_option(
-    model: &UnifiedModel,
-    provider_id: &str,
-    legacy_model_id: &str,
-) -> bool {
-    if !is_cloud_catalog_model(model) {
-        return false;
-    }
-
-    let Some(model_provider_id) = referenced_provider_id(model) else {
-        return false;
-    };
-    if model_provider_id != provider_id {
-        return false;
-    }
-
-    model.id == legacy_model_id
-        || model
-            .spec
-            .remote_model_id
-            .as_deref()
-            .map(str::trim)
-            .is_some_and(|remote_model_id| remote_model_id == legacy_model_id)
 }
 
 fn map_genai_error(action: &str, err: genai::Error) -> AppCoreError {
@@ -1161,7 +1113,7 @@ fn redact_secret_json(value: &Value) -> String {
 mod test {
     use super::{
         CloudChatRequestConfig, GenaiChatResponseFormat, ResolvedCloudModel,
-        build_cloud_http_request_body, build_openai_chat_completions_url, cloud_option_id,
+        build_cloud_http_request_body, build_openai_chat_completions_url,
         ensure_genai_endpoint_base, redact_header_value,
         structured_output_to_genai_response_format,
     };
@@ -1171,11 +1123,6 @@ mod test {
     };
     use serde_json::json;
     use slab_proto::openai::{FunctionTool, FunctionToolType};
-
-    #[test]
-    fn cloud_option_id_has_prefix() {
-        assert_eq!(cloud_option_id("openai", "gpt-4.1"), "cloud/openai/gpt-4.1");
-    }
 
     #[test]
     fn ensure_genai_endpoint_base_keeps_v1_path() {

@@ -62,7 +62,6 @@ pub use plugin_runtime::{
 };
 pub use runtime::{
     Capability, DiffusionLoadOptions, DriverDescriptor, DriverHints, DriverLoadStyle, ModelFamily,
-    ModelSource, ModelSourceKind, ModelSpec, RuntimeModelLoadCommand, RuntimeModelLoadSpec,
-    RuntimeModelStatus,
+    ModelSource, ModelSourceKind, ModelSpec, RuntimeModelLoadCommand, RuntimeModelStatus,
 };
 pub use sqlite::sqlite_url_for_path;

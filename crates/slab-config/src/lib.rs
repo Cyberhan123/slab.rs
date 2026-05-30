@@ -22,10 +22,7 @@ pub use launch::{
     ResolvedRuntimeChildSpec, ResolvedRuntimeEndpoints, resolve_launch_spec,
 };
 pub use pmid_service::PmidService;
-pub use provider::{
-    SettingsDocumentProvider, SettingsMigrationResult, migrate_legacy_settings_file_if_needed,
-    settings_document_to_json_value,
-};
+pub use provider::{SettingsDocumentProvider, settings_document_to_json_value};
 pub use settings::*;
 pub use view::{
     SettingPropertySchema, SettingPropertyView, SettingValidationErrorData, SettingValue,

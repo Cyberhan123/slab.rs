@@ -70,7 +70,7 @@ function createMockPlugin(overrides: Partial<PluginRecord> = {}): PluginRecord {
     allowHosts: [],
     contributions: {},
     permissions: {},
-    sourceKind: "market_pack",
+    sourceKind: "import_pack",
     sourceRef: "default",
     installRoot: "C:/Slab/plugins/plugin-example",
     installedVersion: "1.0.0",

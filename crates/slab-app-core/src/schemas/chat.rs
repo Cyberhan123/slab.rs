@@ -1139,7 +1139,7 @@ mod tests {
     fn make_request() -> ChatCompletionRequest {
         ChatCompletionRequest {
             id: None,
-            model: "cloud/provider/model".to_owned(),
+            model: "gpt-4.1-mini".to_owned(),
             messages: vec![ChatMessage {
                 role: "user".to_owned(),
                 content: Some(ChatMessageContent::Text("hello".to_owned())),
@@ -1170,7 +1170,7 @@ mod tests {
 
     fn make_completion_request() -> CompletionRequest {
         CompletionRequest {
-            model: "cloud/provider/model".to_owned(),
+            model: "gpt-4.1-mini".to_owned(),
             prompt: "hello".to_owned(),
             max_tokens: None,
             temperature: None,
@@ -1352,7 +1352,7 @@ mod tests {
     #[test]
     fn chat_completion_request_rejects_legacy_grammar_field() {
         let error = serde_json::from_value::<ChatCompletionRequest>(json!({
-            "model": "cloud/provider/model",
+            "model": "gpt-4.1-mini",
             "messages": [
                 {"role": "user", "content": "hello"}
             ],
@@ -1366,7 +1366,7 @@ mod tests {
     #[test]
     fn completion_request_rejects_legacy_grammar_field() {
         let error = serde_json::from_value::<CompletionRequest>(json!({
-            "model": "cloud/provider/model",
+            "model": "gpt-4.1-mini",
             "prompt": "hello",
             "grammar": "root ::= \"ok\""
         }))

@@ -131,8 +131,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn deserializes_legacy_manifest() {
-        let manifest = serde_json::from_value::<PluginManifest>(serde_json::json!({
+    fn rejects_manifest_without_runtime_ui() {
+        let error = serde_json::from_value::<PluginManifest>(serde_json::json!({
             "id": "legacy-plugin",
             "name": "Legacy Plugin",
             "version": "0.1.0",
@@ -140,11 +140,9 @@ mod tests {
             "integrity": { "filesSha256": { "ui/index.html": "0".repeat(64) } },
             "network": { "mode": "blocked", "allowHosts": [] }
         }))
-        .expect("legacy manifest should deserialize");
+        .expect_err("manifest without runtime.ui should be rejected");
 
-        assert_eq!(manifest.manifest_version, 0);
-        assert_eq!(manifest.runtime.ui.entry, "ui/index.html");
-        assert_eq!(manifest.permissions.network.mode, PluginNetworkMode::Blocked);
+        assert!(error.to_string().contains("missing runtime.ui entry"));
     }
 
     #[test]

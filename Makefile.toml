@@ -135,7 +135,7 @@ args = [
     "src-tauri/tauri.windows.dev.conf.json",
 ]
 cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
-env = { SLAB_SKIP_VENDOR_RUNTIME_SYNC = "1", SLAB_SKIP_TAURI_SIDECAR_SYNC = "1", SLAB_SKIP_BUNDLED_PLUGIN_SYNC = "1", FFMPEG_DIR = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1", PATH = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1/bin;${PATH}" }
+env = { SLAB_SKIP_VENDOR_RUNTIME_SYNC = "1", SLAB_SKIP_BUNDLED_PLUGIN_SYNC = "1", FFMPEG_DIR = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1", PATH = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1/bin;${PATH}" }
 
 [tasks.build-plugin-packs]
 workspace = false

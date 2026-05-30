@@ -195,10 +195,6 @@ impl ModelSpec {
     }
 }
 
-const fn default_num_workers() -> u32 {
-    1
-}
-
 const fn default_flash_attn_enabled() -> bool {
     true
 }
@@ -248,53 +244,11 @@ impl Default for DiffusionLoadOptions {
     }
 }
 
-/// Semantic model load specification shared between server/runtime and core/runtime.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct RuntimeModelLoadSpec {
-    pub model_path: PathBuf,
-    #[serde(default = "default_num_workers")]
-    pub num_workers: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context_length: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub chat_template: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gbnf: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diffusion: Option<DiffusionLoadOptions>,
-}
-
-impl Default for RuntimeModelLoadSpec {
-    fn default() -> Self {
-        Self {
-            model_path: PathBuf::default(),
-            num_workers: default_num_workers(),
-            context_length: None,
-            chat_template: None,
-            gbnf: None,
-            diffusion: None,
-        }
-    }
-}
-
 /// Runtime model load command when backend routing is part of the semantic contract.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct RuntimeModelLoadCommand {
     pub backend: RuntimeBackendId,
     pub spec: RuntimeBackendLoadSpec,
-}
-
-impl RuntimeModelLoadCommand {
-    pub fn from_legacy(
-        backend: RuntimeBackendId,
-        spec: RuntimeModelLoadSpec,
-    ) -> Result<Self, crate::error::SlabTypeError> {
-        Ok(Self { backend, spec: RuntimeBackendLoadSpec::from_legacy(backend, spec)? })
-    }
-
-    pub fn legacy_spec(&self) -> RuntimeModelLoadSpec {
-        self.spec.to_legacy_spec()
-    }
 }
 
 /// Runtime-reported model status on the server/runtime boundary.

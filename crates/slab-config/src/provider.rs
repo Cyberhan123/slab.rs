@@ -1,20 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::RwLock;
-use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::{
-    CloudProviderConfig, ProviderAuthConfig, ProviderDefaultsConfig, ProviderFamily,
-    ProviderRegistryEntry, SettingsDocument,
-};
+use crate::SettingsDocument;
 
 use crate::app_config::default_plugin_install_dir_for_settings_path;
 use crate::descriptor::{set_document_value, setting_value};
@@ -24,9 +18,6 @@ use crate::{ConfigError, SettingValue, UpdateSettingCommand, UpdateSettingOperat
 use std::os::unix::fs::PermissionsExt;
 #[cfg(windows)]
 use std::os::windows::ffi::OsStrExt;
-
-const LEGACY_SETTINGS_VERSION: u32 = 1;
-const MIGRATION_BACKUP_SUFFIX: &str = "legacy-v1";
 
 #[derive(Debug, Clone)]
 pub struct SettingsDocumentProvider {
@@ -38,29 +29,6 @@ pub struct SettingsDocumentProvider {
 struct SettingsRuntimeState {
     document: SettingsDocument,
     warnings: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SettingsMigrationResult {
-    pub migrated: bool,
-    pub backup_path: Option<PathBuf>,
-    pub warnings: Vec<String>,
-    pub setup_initialized: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct LegacySettingsValuesFile {
-    pub version: u32,
-    #[serde(default)]
-    pub values: BTreeMap<String, Value>,
-}
-
-#[derive(Debug, Clone, Default)]
-struct LegacyMigrationState {
-    document_json: Value,
-    consumed_keys: BTreeSet<String>,
-    warnings: Vec<String>,
-    setup_initialized: Option<bool>,
 }
 
 impl SettingsDocumentProvider {
@@ -127,65 +95,6 @@ impl SettingsDocumentProvider {
     }
 }
 
-pub fn migrate_legacy_settings_file_if_needed(
-    path: &Path,
-) -> Result<SettingsMigrationResult, ConfigError> {
-    ensure_settings_parent_dir(path)?;
-
-    if !path.exists() {
-        return Ok(SettingsMigrationResult::default());
-    }
-
-    let raw = fs::read_to_string(path).map_err(|error| {
-        ConfigError::Internal(format!("failed to read settings file '{}': {error}", path.display()))
-    })?;
-
-    let raw_json: Value = match serde_json::from_str(&raw) {
-        Ok(parsed) => parsed,
-        Err(_) => return Ok(SettingsMigrationResult::default()),
-    };
-
-    if !is_legacy_settings_file(&raw_json) {
-        return Ok(SettingsMigrationResult::default());
-    }
-
-    let parsed: LegacySettingsValuesFile = serde_json::from_value(raw_json).map_err(|error| {
-        ConfigError::BadRequest(format!(
-            "settings file '{}' looks like a legacy override document but could not be parsed: {error}",
-            path.display()
-        ))
-    })?;
-
-    if parsed.version != LEGACY_SETTINGS_VERSION {
-        return Err(ConfigError::BadRequest(format!(
-            "unsupported legacy settings version '{}'; expected '{}'",
-            parsed.version, LEGACY_SETTINGS_VERSION
-        )));
-    }
-
-    let (mut document, setup_initialized, warnings) =
-        migrate_legacy_settings_document(parsed.values)?;
-    apply_dynamic_defaults(path, &mut document);
-    let backup_path = create_settings_backup(path, MIGRATION_BACKUP_SUFFIX)?;
-    write_settings_document_file(path, &document)?;
-
-    info!(
-        settings_path = %path.display(),
-        backup_path = %backup_path.display(),
-        "migrated legacy settings file to the current document format"
-    );
-    for warning_message in &warnings {
-        warn!(settings_path = %path.display(), "{warning_message}");
-    }
-
-    Ok(SettingsMigrationResult {
-        migrated: true,
-        backup_path: Some(backup_path),
-        warnings,
-        setup_initialized,
-    })
-}
-
 fn load_runtime_state(path: &Path) -> Result<SettingsRuntimeState, ConfigError> {
     ensure_settings_parent_dir(path)?;
 
@@ -210,12 +119,20 @@ fn load_runtime_state(path: &Path) -> Result<SettingsRuntimeState, ConfigError> 
         }
     };
 
-    if is_legacy_settings_file(&raw_json) {
-        return Err(ConfigError::NotImplemented(
-            "legacy PMID override settings are no longer supported; run the settings migration before loading"
-                .to_owned(),
-        ));
-    }
+    let invalid_document_error = || {
+        ConfigError::BadRequest(format!(
+            "settings file '{}' is valid JSON but does not match the current settings document format",
+            path.display()
+        ))
+    };
+    let Some(schema_version) = raw_json
+        .get("schema_version")
+        .and_then(Value::as_u64)
+        .and_then(|version| u32::try_from(version).ok())
+    else {
+        return Err(invalid_document_error());
+    };
+    ensure_current_schema_version(schema_version)?;
 
     if let Ok(mut document) = serde_json::from_value::<SettingsDocument>(raw_json) {
         ensure_current_schema_version(document.schema_version)?;
@@ -225,10 +142,7 @@ fn load_runtime_state(path: &Path) -> Result<SettingsRuntimeState, ConfigError> 
         return Ok(SettingsRuntimeState { document, warnings: Vec::new() });
     }
 
-    Err(ConfigError::BadRequest(format!(
-        "settings file '{}' is valid JSON but does not match the current settings document format",
-        path.display()
-    )))
+    Err(invalid_document_error())
 }
 
 fn ensure_current_schema_version(schema_version: u32) -> Result<(), ConfigError> {
@@ -241,139 +155,6 @@ fn ensure_current_schema_version(schema_version: u32) -> Result<(), ConfigError>
         "unsupported settings schema_version '{}'; expected '{}'",
         schema_version, current
     )))
-}
-
-fn migrate_legacy_settings_document(
-    values: BTreeMap<String, Value>,
-) -> Result<(SettingsDocument, Option<bool>, Vec<String>), ConfigError> {
-    let mut state = LegacyMigrationState {
-        document_json: settings_document_to_json_value(&SettingsDocument::default()),
-        ..Default::default()
-    };
-
-    for &(legacy_path, current_path) in direct_legacy_mappings() {
-        if let Some(value) = values.get(legacy_path) {
-            set_value_at_path(&mut state.document_json, current_path, value.clone())?;
-            state.consumed_keys.insert(legacy_path.to_owned());
-        }
-    }
-
-    if let Some(value) = values.get("setup.initialized") {
-        match value.as_bool() {
-            Some(initialized) => {
-                state.setup_initialized = Some(initialized);
-                state.consumed_keys.insert("setup.initialized".to_owned());
-            }
-            None => state.warnings.push(
-                "Skipping legacy setting 'setup.initialized' because it is not a boolean."
-                    .to_owned(),
-            ),
-        }
-    }
-
-    if let Some(value) = values.get("chat.providers") {
-        match serde_json::from_value::<Vec<CloudProviderConfig>>(value.clone()) {
-            Ok(providers) => {
-                let registry = providers
-                    .into_iter()
-                    .map(|provider| ProviderRegistryEntry {
-                        id: provider.id.clone(),
-                        family: ProviderFamily::OpenaiCompatible,
-                        display_name: if provider.name.trim().is_empty() {
-                            provider.id
-                        } else {
-                            provider.name
-                        },
-                        api_base: provider.api_base,
-                        auth: ProviderAuthConfig {
-                            api_key: provider.api_key,
-                            api_key_env: provider.api_key_env,
-                        },
-                        defaults: ProviderDefaultsConfig::default(),
-                    })
-                    .collect::<Vec<_>>();
-                let registry_value = serde_json::to_value(&registry).map_err(|error| {
-                    ConfigError::Internal(format!(
-                        "failed to serialize migrated provider registry: {error}"
-                    ))
-                })?;
-                set_value_at_path(&mut state.document_json, "providers.registry", registry_value)?;
-                state.consumed_keys.insert("chat.providers".to_owned());
-            }
-            Err(error) => state.warnings.push(format!(
-                "Skipping legacy setting 'chat.providers' because it is invalid: {error}"
-            )),
-        }
-    }
-
-    for key in values.keys().filter(|key| !state.consumed_keys.contains(*key)) {
-        state.warnings.push(format!(
-            "Dropping legacy setting '{}' because it has no current settings document mapping.",
-            key
-        ));
-    }
-
-    let document: SettingsDocument =
-        serde_json::from_value(state.document_json).map_err(|error| {
-            ConfigError::BadRequest(format!(
-                "failed to convert legacy settings into the current document format: {error}"
-            ))
-        })?;
-
-    Ok((document, state.setup_initialized, state.warnings))
-}
-
-fn direct_legacy_mappings() -> &'static [(&'static str, &'static str)] {
-    &[
-        ("setup.ffmpeg.auto_download", "tools.ffmpeg.auto_download"),
-        ("setup.ffmpeg.dir", "tools.ffmpeg.install_dir"),
-        ("setup.backends.dir", "runtime.ggml.install_dir"),
-        ("runtime.model_cache_dir", "models.cache_dir"),
-        ("runtime.llama.num_workers", "runtime.ggml.backends.llama.capacity.concurrent_requests"),
-        ("runtime.llama.context_length", "runtime.ggml.backends.llama.context_length"),
-        ("runtime.llama.flash_attn", "runtime.ggml.backends.llama.flash_attn"),
-        (
-            "runtime.whisper.num_workers",
-            "runtime.ggml.backends.whisper.capacity.concurrent_requests",
-        ),
-        ("runtime.whisper.flash_attn", "runtime.ggml.backends.whisper.flash_attn"),
-        (
-            "runtime.diffusion.num_workers",
-            "runtime.ggml.backends.diffusion.capacity.concurrent_requests",
-        ),
-        ("runtime.model_auto_unload.enabled", "models.auto_unload.enabled"),
-        ("runtime.model_auto_unload.idle_minutes", "models.auto_unload.idle_minutes"),
-        (
-            "runtime.model_auto_unload.min_free_system_memory_bytes",
-            "models.auto_unload.min_free_system_memory_bytes",
-        ),
-        (
-            "runtime.model_auto_unload.min_free_gpu_memory_bytes",
-            "models.auto_unload.min_free_gpu_memory_bytes",
-        ),
-        (
-            "runtime.model_auto_unload.max_pressure_evictions_per_load",
-            "models.auto_unload.max_pressure_evictions_per_load",
-        ),
-        ("launch.transport", "runtime.transport"),
-        ("launch.queue_capacity", "runtime.capacity.queue"),
-        ("launch.backend_capacity", "runtime.capacity.concurrent_requests"),
-        ("launch.runtime_log_dir", "runtime.logging.path"),
-        ("launch.backends.llama.enabled", "runtime.ggml.backends.llama.enabled"),
-        ("launch.backends.whisper.enabled", "runtime.ggml.backends.whisper.enabled"),
-        ("launch.backends.diffusion.enabled", "runtime.ggml.backends.diffusion.enabled"),
-        ("launch.profiles.server.gateway_bind", "server.address"),
-        ("diffusion.performance.flash_attn", "runtime.ggml.backends.diffusion.flash_attn"),
-    ]
-}
-
-fn is_legacy_settings_file(raw_json: &Value) -> bool {
-    let Some(object) = raw_json.as_object() else {
-        return false;
-    };
-
-    matches!(object.get("version"), Some(Value::Number(_)))
-        && matches!(object.get("values"), Some(Value::Object(_)))
 }
 
 fn create_settings_backup(path: &Path, reason: &str) -> Result<PathBuf, ConfigError> {
@@ -886,48 +667,6 @@ pub fn settings_document_to_json_value(document: &SettingsDocument) -> Value {
     })
 }
 
-fn set_value_at_path(root: &mut Value, path: &str, next_value: Value) -> Result<(), ConfigError> {
-    let segments = settings_path_segments(path)?;
-    let (leaf, parents) = segments
-        .split_last()
-        .ok_or_else(|| ConfigError::BadRequest("settings pmid must not be empty".to_owned()))?;
-    let mut current = root;
-
-    for segment in parents {
-        current = current
-            .as_object_mut()
-            .and_then(|object| object.get_mut(*segment))
-            .ok_or_else(|| ConfigError::NotFound(format!("setting pmid '{}' not found", path)))?;
-    }
-
-    let object = current
-        .as_object_mut()
-        .ok_or_else(|| ConfigError::NotFound(format!("setting pmid '{}' not found", path)))?;
-    if !object.contains_key(*leaf) {
-        return Err(ConfigError::NotFound(format!("setting pmid '{}' not found", path)));
-    }
-
-    object.insert((*leaf).to_owned(), next_value);
-    Ok(())
-}
-
-fn settings_path_segments(path: &str) -> Result<Vec<&str>, ConfigError> {
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
-        return Err(ConfigError::BadRequest("settings pmid must not be empty".to_owned()));
-    }
-
-    let segments: Vec<&str> = trimmed.split('.').map(str::trim).collect();
-    if segments.iter().any(|segment| segment.is_empty()) {
-        return Err(ConfigError::BadRequest(format!(
-            "settings pmid '{}' contains an empty path segment",
-            path
-        )));
-    }
-
-    Ok(segments)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -935,19 +674,6 @@ mod tests {
     fn temp_settings_path() -> PathBuf {
         let base = std::env::temp_dir().join(format!("slab-settings-test-{}", Uuid::new_v4()));
         base.join("settings.json")
-    }
-
-    fn write_legacy_settings(path: &Path, values: BTreeMap<String, Value>) {
-        ensure_settings_parent_dir(path).expect("dir");
-        fs::write(
-            path,
-            serde_json::to_string_pretty(&LegacySettingsValuesFile {
-                version: LEGACY_SETTINGS_VERSION,
-                values,
-            })
-            .expect("serialize"),
-        )
-        .expect("write");
     }
 
     #[tokio::test]
@@ -966,76 +692,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn migrate_legacy_settings_rewrites_file_and_copies_setup_state() {
+    async fn provider_rejects_non_document_json() {
         let path = temp_settings_path();
-        write_legacy_settings(
+        ensure_settings_parent_dir(&path).expect("dir");
+        fs::write(
             &path,
-            BTreeMap::from([
-                ("setup.initialized".to_owned(), json!(true)),
-                ("setup.ffmpeg.dir".to_owned(), json!("C:/ffmpeg")),
-                ("runtime.model_cache_dir".to_owned(), json!("D:/models")),
-                ("launch.profiles.server.gateway_bind".to_owned(), json!("127.0.0.1:4000")),
-            ]),
-        );
-        let migration = migrate_legacy_settings_file_if_needed(&path).expect("migration");
-        let persisted: SettingsDocument =
-            serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
-
-        assert!(migration.migrated);
-        assert!(migration.backup_path.as_ref().is_some_and(|backup| backup.exists()));
-        assert_eq!(persisted.tools.ffmpeg.install_dir.as_deref(), Some("C:/ffmpeg"));
-        assert_eq!(persisted.models.cache_dir.as_deref(), Some("D:/models"));
-        assert_eq!(persisted.server.address, "127.0.0.1:4000");
-        assert_eq!(
-            persisted.plugin.install_dir.as_deref(),
-            default_settings_document_for_path(&path).plugin.install_dir.as_deref()
-        );
-        assert_eq!(migration.setup_initialized, Some(true));
-
-        let _ = fs::remove_dir_all(path.parent().expect("parent"));
-    }
-
-    #[tokio::test]
-    async fn migrate_legacy_chat_providers_to_registry() {
-        let path = temp_settings_path();
-        write_legacy_settings(
-            &path,
-            BTreeMap::from([(
-                "chat.providers".to_owned(),
-                json!([{
-                    "id": "openai-main",
-                    "name": "OpenAI",
-                    "api_base": "https://api.openai.com/v1",
-                    "api_key_env": "OPENAI_API_KEY"
-                }]),
-            )]),
-        );
-        migrate_legacy_settings_file_if_needed(&path).expect("migration");
-
-        let persisted: SettingsDocument =
-            serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
-        let provider = persisted.providers.registry.first().expect("provider");
-        assert_eq!(provider.id, "openai-main");
-        assert_eq!(provider.display_name, "OpenAI");
-        assert_eq!(provider.family, ProviderFamily::OpenaiCompatible);
-        assert_eq!(provider.auth.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
-
-        let _ = fs::remove_dir_all(path.parent().expect("parent"));
-    }
-
-    #[tokio::test]
-    async fn provider_rejects_legacy_file_without_bootstrap_migration() {
-        let path = temp_settings_path();
-        write_legacy_settings(
-            &path,
-            BTreeMap::from([("runtime.model_cache_dir".to_owned(), json!("D:/models"))]),
-        );
+            serde_json::to_string_pretty(&json!({
+                "version": 1,
+                "values": {
+                    "runtime.model_cache_dir": "D:/models"
+                }
+            }))
+            .expect("serialize"),
+        )
+        .expect("write");
 
         let error = SettingsDocumentProvider::load(path.clone())
             .await
-            .expect_err("legacy format should fail");
+            .expect_err("non-document JSON should fail");
 
-        assert!(matches!(error, ConfigError::NotImplemented(_)));
+        assert!(matches!(error, ConfigError::BadRequest(_)));
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }

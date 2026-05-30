@@ -229,22 +229,27 @@ fn encode_task_payload(raw: Option<&str>) -> Option<String> {
         data,
     })
     .ok()
-    .or_else(|| Some(raw.to_owned()))
 }
 
 fn decode_task_payload(raw: Option<String>) -> Option<String> {
     let raw = raw?;
     let Ok(envelope) = serde_json::from_str::<TaskPayloadEnvelope>(&raw) else {
-        return Some(raw);
+        tracing::warn!("stored task payload is not an envelope; ignoring result_data");
+        return None;
     };
 
-    if envelope.version != TASK_PAYLOAD_VERSION || envelope.kind.trim().is_empty() {
-        return Some(raw);
+    if envelope.version != TASK_PAYLOAD_VERSION || envelope.kind != TASK_PAYLOAD_KIND {
+        tracing::warn!(
+            kind = %envelope.kind,
+            version = envelope.version,
+            "stored task payload envelope is unsupported; ignoring result_data"
+        );
+        return None;
     }
 
     match envelope.data {
         Value::String(value) => Some(value),
-        value => serde_json::to_string(&value).ok().or(Some(raw)),
+        value => serde_json::to_string(&value).ok(),
     }
 }
 
@@ -278,9 +283,65 @@ mod tests {
     }
 
     #[test]
-    fn decode_task_payload_preserves_legacy_json() {
+    fn decode_task_payload_rejects_legacy_json() {
         let raw = String::from(r#"{"text":"legacy"}"#);
-        let decoded = decode_task_payload(Some(raw.clone())).expect("decoded payload");
-        assert_eq!(decoded, raw);
+        assert_eq!(decode_task_payload(Some(raw)), None);
+    }
+
+    #[test]
+    fn decode_task_payload_rejects_wrong_envelope_kind() {
+        let raw = String::from(r#"{"kind":"other","version":1,"data":{"text":"legacy"}}"#);
+        assert_eq!(decode_task_payload(Some(raw)), None);
+    }
+
+    #[tokio::test]
+    async fn task_payload_migration_wraps_legacy_results() {
+        let options =
+            sqlx::sqlite::SqliteConnectOptions::new().filename(":memory:").create_if_missing(true);
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .expect("connect in-memory db");
+        sqlx::query("CREATE TABLE tasks (id TEXT PRIMARY KEY, result_data TEXT)")
+            .execute(&pool)
+            .await
+            .expect("create tasks");
+        sqlx::query(
+            "INSERT INTO tasks (id, result_data) VALUES
+                ('legacy-json', '{\"text\":\"legacy\"}'),
+                ('legacy-text', 'plain text payload'),
+                ('current-envelope', '{\"kind\":\"task_result\",\"version\":1,\"data\":{\"text\":\"current\"}}')",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert tasks");
+
+        sqlx::query(include_str!(
+            "../../../../migrations/20260530010000_task_payload_envelopes.sql"
+        ))
+        .execute(&pool)
+        .await
+        .expect("run migration");
+
+        let legacy_json: String =
+            sqlx::query_scalar("SELECT result_data FROM tasks WHERE id = 'legacy-json'")
+                .fetch_one(&pool)
+                .await
+                .expect("legacy json");
+        let legacy_text: String =
+            sqlx::query_scalar("SELECT result_data FROM tasks WHERE id = 'legacy-text'")
+                .fetch_one(&pool)
+                .await
+                .expect("legacy text");
+        let current: String =
+            sqlx::query_scalar("SELECT result_data FROM tasks WHERE id = 'current-envelope'")
+                .fetch_one(&pool)
+                .await
+                .expect("current envelope");
+
+        assert_eq!(decode_task_payload(Some(legacy_json)).as_deref(), Some(r#"{"text":"legacy"}"#));
+        assert_eq!(decode_task_payload(Some(legacy_text)).as_deref(), Some("plain text payload"));
+        assert_eq!(decode_task_payload(Some(current)).as_deref(), Some(r#"{"text":"current"}"#));
     }
 }

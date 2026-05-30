@@ -7,7 +7,6 @@ use slab_app_core::context::AppState;
 use slab_app_core::domain::services::PmidService;
 use slab_app_core::infra::db::AnyStore;
 use slab_app_core::infra::rpc::gateway::GrpcGateway;
-use slab_app_core::infra::config_migration::migrate_legacy_settings_if_needed;
 use slab_app_core::launch::ResolvedLaunchSpec;
 use slab_app_core::runtime_supervisor::RuntimeSupervisorStatus;
 
@@ -32,7 +31,6 @@ pub async fn init_state<R: tauri::Runtime>(
     tokio::fs::create_dir_all(&cfg.session_state_dir).await?;
 
     let store = Arc::new(AnyStore::connect(&cfg.database_url).await?);
-    migrate_legacy_settings_if_needed(&cfg.settings_path, store.as_ref()).await?;
     let pmid = Arc::new(PmidService::load_from_path(cfg.settings_path.clone()).await?);
     let grpc = Arc::new(GrpcGateway::connect_from_config(&cfg).await?);
 

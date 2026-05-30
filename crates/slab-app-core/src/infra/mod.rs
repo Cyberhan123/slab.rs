@@ -1,7 +1,5 @@
 pub mod agent_adapter;
 pub mod agent_event_hub;
-#[path = "settings.rs"]
-pub mod config_migration;
 pub mod db;
 pub(crate) mod endpoint;
 pub mod model_packs;

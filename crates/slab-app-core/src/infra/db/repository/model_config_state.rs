@@ -98,7 +98,6 @@ mod tests {
             "CREATE TABLE IF NOT EXISTS models (
                 id TEXT PRIMARY KEY,
                 display_name TEXT NOT NULL,
-                provider TEXT NOT NULL,
                 kind TEXT NOT NULL,
                 backend_id TEXT,
                 capabilities TEXT NOT NULL,
@@ -137,7 +136,6 @@ mod tests {
             .upsert_model(UnifiedModelRecord {
                 id: "local-qwen".to_owned(),
                 display_name: "Local Qwen".to_owned(),
-                provider: "local.ggml.llama".to_owned(),
                 kind: UnifiedModelKind::Local.as_str().to_owned(),
                 backend_id: Some("ggml.llama".to_owned()),
                 capabilities: serde_json::to_string(&vec![

@@ -15,8 +15,6 @@ use slab_types::Capability;
 pub struct UnifiedModelRecord {
     pub id: String,
     pub display_name: String,
-    /// Legacy provider identifier retained only for storage migration.
-    pub provider: String,
     /// Canonical model kind (`"local"` or `"cloud"`).
     pub kind: String,
     /// Optional runtime backend identifier for local models.
@@ -35,23 +33,6 @@ pub struct UnifiedModelRecord {
     pub updated_at: DateTime<Utc>,
 }
 
-fn derive_kind_from_legacy_provider(provider: &str) -> UnifiedModelKind {
-    if provider.trim().starts_with("cloud.") || provider.trim() == "cloud" {
-        UnifiedModelKind::Cloud
-    } else {
-        UnifiedModelKind::Local
-    }
-}
-
-fn derive_backend_id_from_legacy_provider(provider: &str) -> Option<ManagedModelBackendId> {
-    provider
-        .trim()
-        .strip_prefix("local.")
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .and_then(|value| value.parse().ok())
-}
-
 fn normalize_optional_text(value: Option<String>) -> Option<String> {
     value.and_then(|value| {
         let trimmed = value.trim();
@@ -61,12 +42,9 @@ fn normalize_optional_text(value: Option<String>) -> Option<String> {
 
 fn parse_backend_id(
     raw_backend_id: Option<String>,
-    fallback_provider: &str,
     id: &str,
 ) -> Result<Option<ManagedModelBackendId>, String> {
-    match normalize_optional_text(raw_backend_id).or_else(|| {
-        derive_backend_id_from_legacy_provider(fallback_provider).map(|backend| backend.to_string())
-    }) {
+    match normalize_optional_text(raw_backend_id) {
         Some(value) => value.parse::<ManagedModelBackendId>().map(Some).map_err(|error| {
             format!("invalid backend_id '{}' for model '{}': {}", value, id, error)
         }),
@@ -85,7 +63,6 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
         let UnifiedModelRecord {
             id,
             display_name,
-            provider,
             kind: raw_kind,
             backend_id: raw_backend_id,
             capabilities: raw_capabilities,
@@ -98,16 +75,9 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
             updated_at,
         } = record;
 
-        let kind = raw_kind.parse::<UnifiedModelKind>().unwrap_or_else(|error| {
-            tracing::warn!(
-                id = %id,
-                raw_kind = %raw_kind,
-                raw_provider = %provider,
-                error = %error,
-                "failed to parse model kind; deriving from legacy provider"
-            );
-            derive_kind_from_legacy_provider(&provider)
-        });
+        let kind = raw_kind.parse::<UnifiedModelKind>().map_err(|error| {
+            format!("invalid kind '{}' for model '{}': {}", raw_kind, id, error)
+        })?;
         let status = raw_status.parse::<UnifiedModelStatus>().unwrap_or_else(|error| {
             tracing::warn!(
                 id = %id,
@@ -139,7 +109,7 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
                 Vec::new()
             });
         let backend_id = if kind == UnifiedModelKind::Local {
-            parse_backend_id(raw_backend_id, &provider, &id)?
+            parse_backend_id(raw_backend_id, &id)?
         } else {
             None
         };
@@ -192,7 +162,6 @@ mod tests {
         let model = UnifiedModel::try_from(UnifiedModelRecord {
             id: "cloud-model".to_owned(),
             display_name: "Cloud Model".to_owned(),
-            provider: "cloud.openai-main".to_owned(),
             kind: "cloud".to_owned(),
             backend_id: None,
             capabilities: serde_json::to_string(&vec![
@@ -227,7 +196,6 @@ mod tests {
         let error = UnifiedModel::try_from(UnifiedModelRecord {
             id: "cloud-model".to_owned(),
             display_name: "Cloud Model".to_owned(),
-            provider: "cloud.openai-main".to_owned(),
             kind: "cloud".to_owned(),
             backend_id: None,
             capabilities: "[]".to_owned(),
@@ -254,7 +222,6 @@ mod tests {
         let error = UnifiedModel::try_from(UnifiedModelRecord {
             id: "cloud-model".to_owned(),
             display_name: "Cloud Model".to_owned(),
-            provider: "cloud.openai-main".to_owned(),
             kind: "cloud".to_owned(),
             backend_id: None,
             capabilities: serde_json::to_string(&vec![

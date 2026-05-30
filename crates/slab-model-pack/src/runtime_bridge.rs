@@ -4,9 +4,10 @@ use std::str::FromStr;
 
 use serde_json::Value;
 use slab_types::{
-    Capability, DiffusionLoadOptions, DriverHints, GbnfAssetRef, JsonOptions, ModelSource,
-    ModelSpec, RuntimeBackendId, RuntimeBackendLoadSpec, RuntimeModelLoadCommand,
-    RuntimeModelLoadSpec, TemplateAssetRef,
+    CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig, Capability,
+    DiffusionLoadOptions, DriverHints, GbnfAssetRef, GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig,
+    GgmlWhisperLoadConfig, JsonOptions, ModelSource, ModelSpec, OnnxLoadConfig, RuntimeBackendId,
+    RuntimeBackendLoadSpec, RuntimeModelLoadCommand, TemplateAssetRef,
 };
 
 use crate::error::ModelPackError;
@@ -94,21 +95,14 @@ impl ModelPackRuntimeBridge {
         &self,
         preset_id: &str,
     ) -> Result<RuntimeModelLoadCommand, ModelPackError> {
-        let legacy = self.runtime_load_spec(preset_id)?;
-        let spec = RuntimeBackendLoadSpec::from_legacy(self.backend, legacy).map_err(|error| {
-            ModelPackError::InvalidRuntimeLoadCommand {
-                preset_id: preset_id.to_owned(),
-                message: error.to_string(),
-            }
-        })?;
-
+        let spec = self.runtime_load_spec(preset_id)?;
         Ok(RuntimeModelLoadCommand { backend: self.backend, spec })
     }
 
     pub fn runtime_load_spec(
         &self,
         preset_id: &str,
-    ) -> Result<RuntimeModelLoadSpec, ModelPackError> {
+    ) -> Result<RuntimeBackendLoadSpec, ModelPackError> {
         let model_path = match &self.model_spec.source {
             ModelSource::LocalPath { path } => path.clone(),
             ModelSource::LocalArtifacts { files } => files
@@ -133,13 +127,83 @@ impl ModelPackRuntimeBridge {
             }
         };
 
-        Ok(RuntimeModelLoadSpec {
-            model_path,
-            num_workers: self.load_defaults.num_workers.unwrap_or(1),
-            context_length: self.load_defaults.context_length,
-            chat_template: self.load_defaults.chat_template_source.clone(),
-            gbnf: self.load_defaults.gbnf_source.clone(),
-            diffusion: self.load_defaults.diffusion.clone(),
+        Ok(match self.backend {
+            RuntimeBackendId::GgmlLlama => RuntimeBackendLoadSpec::GgmlLlama(GgmlLlamaLoadConfig {
+                model_path,
+                num_workers: usize::try_from(self.load_defaults.num_workers.unwrap_or(1)).map_err(
+                    |error| ModelPackError::InvalidRuntimeLoadCommand {
+                        preset_id: preset_id.to_owned(),
+                        message: error.to_string(),
+                    },
+                )?,
+                context_length: self.load_defaults.context_length,
+                flash_attn: true,
+                chat_template: self.load_defaults.chat_template_source.clone(),
+                gbnf: self.load_defaults.gbnf_source.clone(),
+            }),
+            RuntimeBackendId::GgmlWhisper => {
+                RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig {
+                    model_path,
+                    flash_attn: true,
+                })
+            }
+            RuntimeBackendId::GgmlDiffusion => {
+                let diffusion = self.load_defaults.diffusion.clone().unwrap_or_default();
+                RuntimeBackendLoadSpec::GgmlDiffusion(Box::new(GgmlDiffusionLoadConfig {
+                    model_path,
+                    diffusion_model_path: diffusion.diffusion_model_path,
+                    vae_path: diffusion.vae_path,
+                    taesd_path: diffusion.taesd_path,
+                    clip_l_path: diffusion.clip_l_path,
+                    clip_g_path: diffusion.clip_g_path,
+                    t5xxl_path: diffusion.t5xxl_path,
+                    clip_vision_path: None,
+                    control_net_path: None,
+                    flash_attn: diffusion.flash_attn,
+                    vae_device: (!diffusion.vae_device.is_empty()).then_some(diffusion.vae_device),
+                    clip_device: (!diffusion.clip_device.is_empty())
+                        .then_some(diffusion.clip_device),
+                    offload_params_to_cpu: diffusion.offload_params_to_cpu,
+                    enable_mmap: false,
+                    n_threads: None,
+                }))
+            }
+            RuntimeBackendId::CandleLlama => {
+                RuntimeBackendLoadSpec::CandleLlama(CandleLlamaLoadConfig {
+                    model_path,
+                    tokenizer_path: None,
+                    seed: 0,
+                })
+            }
+            RuntimeBackendId::CandleWhisper => {
+                RuntimeBackendLoadSpec::CandleWhisper(CandleWhisperLoadConfig {
+                    model_path,
+                    tokenizer_path: None,
+                })
+            }
+            RuntimeBackendId::CandleDiffusion => {
+                let diffusion = self.load_defaults.diffusion.clone().unwrap_or_default();
+                RuntimeBackendLoadSpec::CandleDiffusion(CandleDiffusionLoadConfig {
+                    model_path,
+                    vae_path: diffusion.vae_path,
+                    sd_version: "v2-1".to_owned(),
+                })
+            }
+            RuntimeBackendId::Onnx => RuntimeBackendLoadSpec::Onnx(OnnxLoadConfig {
+                model_path,
+                execution_providers: vec!["CPU".to_owned()],
+                intra_op_num_threads: None,
+                inter_op_num_threads: None,
+            }),
+            backend => {
+                return Err(ModelPackError::InvalidRuntimeLoadCommand {
+                    preset_id: preset_id.to_owned(),
+                    message: format!(
+                        "runtime backend '{}' is not supported by model pack runtime bridge",
+                        backend.canonical_id()
+                    ),
+                });
+            }
         })
     }
 }
@@ -557,6 +621,9 @@ mod tests {
         let resolved = pack.resolve().expect("resolve pack");
         let bridge = resolved.compile_default_runtime_bridge().expect("compile bridge");
         let load_spec = bridge.runtime_load_spec("default").expect("load spec");
+        let slab_types::RuntimeBackendLoadSpec::GgmlLlama(load_spec) = load_spec else {
+            panic!("expected ggml llama load spec");
+        };
 
         assert_eq!(bridge.backend.canonical_id(), "ggml.llama");
         assert_eq!(

@@ -40,9 +40,7 @@ impl ModelService {
         runtime::resolve_local_backend_from_model(&model)?;
 
         let context = self.load_model_pack_context(id)?;
-        let selection = self
-            .resolve_model_pack_selection(id, &context.resolved, context.persisted.as_ref(), true)
-            .await?;
+        let selection = self.resolve_model_pack_selection(id, &context.resolved).await?;
         let command =
             pack::build_model_command_from_pack_context(&context, &selection.selected_preset)?;
         let selection_view = build_model_config_selection_view(

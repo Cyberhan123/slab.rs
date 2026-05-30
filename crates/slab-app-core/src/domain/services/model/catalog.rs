@@ -585,7 +585,6 @@ pub(super) fn model_to_record(model: &UnifiedModel) -> Result<UnifiedModelRecord
     Ok(UnifiedModelRecord {
         id: model.id.clone(),
         display_name: model.display_name.clone(),
-        provider: legacy_provider_value(model),
         kind: model.kind.as_str().to_owned(),
         backend_id: model.backend_id.map(|backend_id| backend_id.to_string()),
         capabilities: capabilities_json,
@@ -597,19 +596,4 @@ pub(super) fn model_to_record(model: &UnifiedModel) -> Result<UnifiedModelRecord
         created_at: model.created_at,
         updated_at: model.updated_at,
     })
-}
-
-fn legacy_provider_value(model: &UnifiedModel) -> String {
-    match model.kind {
-        UnifiedModelKind::Local => model
-            .backend_id
-            .map(|backend_id| format!("local.{backend_id}"))
-            .unwrap_or_else(|| "local".to_owned()),
-        UnifiedModelKind::Cloud => model
-            .spec
-            .provider_id
-            .as_deref()
-            .map(|provider_id| format!("cloud.{provider_id}"))
-            .unwrap_or_else(|| "cloud".to_owned()),
-    }
 }

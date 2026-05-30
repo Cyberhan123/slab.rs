@@ -30,7 +30,6 @@ use slab_types::{PluginRuntimeCallRequest, PluginRuntimeFileGrant};
 const SOURCE_KIND_DEV: &str = "dev";
 const SOURCE_KIND_IMPORT_PACK: &str = "import_pack";
 const SOURCE_KIND_PACKAGE_URL: &str = "package_url";
-const LEGACY_SOURCE_KIND_MARKET_PACK: &str = "market_pack";
 const RUNTIME_STATUS_RUNNING: &str = "running";
 const RUNTIME_STATUS_STOPPED: &str = "stopped";
 const RUNTIME_STATUS_ERROR: &str = "error";
@@ -1246,10 +1245,7 @@ fn is_valid_language_id(id: &str) -> bool {
 }
 
 fn is_pack_managed_source_kind(source_kind: &str) -> bool {
-    matches!(
-        source_kind,
-        SOURCE_KIND_IMPORT_PACK | SOURCE_KIND_PACKAGE_URL | LEGACY_SOURCE_KIND_MARKET_PACK
-    )
+    matches!(source_kind, SOURCE_KIND_IMPORT_PACK | SOURCE_KIND_PACKAGE_URL)
 }
 
 fn network_mode_label(mode: &PluginNetworkMode) -> &'static str {

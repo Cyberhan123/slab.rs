@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -149,135 +149,15 @@ impl RuntimeBackendLoadSpec {
         }
     }
 
-    pub fn from_legacy(
-        backend: crate::backend::RuntimeBackendId,
-        spec: crate::runtime::RuntimeModelLoadSpec,
-    ) -> Result<Self, crate::error::SlabTypeError> {
-        let crate::runtime::RuntimeModelLoadSpec {
-            model_path,
-            num_workers,
-            context_length,
-            chat_template,
-            gbnf,
-            diffusion,
-        } = spec;
-
-        Ok(match backend {
-            crate::backend::RuntimeBackendId::GgmlLlama => Self::GgmlLlama(GgmlLlamaLoadConfig {
-                model_path,
-                num_workers: usize::try_from(num_workers).map_err(|error| {
-                    crate::error::SlabTypeError::Validation {
-                        path: "num_workers".to_owned(),
-                        message: error.to_string(),
-                    }
-                })?,
-                context_length,
-                flash_attn: true,
-                chat_template,
-                gbnf,
-            }),
-            crate::backend::RuntimeBackendId::GgmlWhisper => {
-                Self::GgmlWhisper(GgmlWhisperLoadConfig { model_path, flash_attn: true })
-            }
-            crate::backend::RuntimeBackendId::GgmlDiffusion => {
-                let diffusion = diffusion.unwrap_or_default();
-                Self::GgmlDiffusion(Box::new(GgmlDiffusionLoadConfig {
-                    model_path,
-                    diffusion_model_path: diffusion.diffusion_model_path,
-                    vae_path: diffusion.vae_path,
-                    taesd_path: diffusion.taesd_path,
-                    clip_l_path: diffusion.clip_l_path,
-                    clip_g_path: diffusion.clip_g_path,
-                    t5xxl_path: diffusion.t5xxl_path,
-                    clip_vision_path: None,
-                    control_net_path: None,
-                    flash_attn: diffusion.flash_attn,
-                    vae_device: (!diffusion.vae_device.is_empty()).then_some(diffusion.vae_device),
-                    clip_device: (!diffusion.clip_device.is_empty())
-                        .then_some(diffusion.clip_device),
-                    offload_params_to_cpu: diffusion.offload_params_to_cpu,
-                    enable_mmap: false,
-                    n_threads: None,
-                }))
-            }
-            crate::backend::RuntimeBackendId::CandleLlama => {
-                Self::CandleLlama(CandleLlamaLoadConfig {
-                    model_path,
-                    tokenizer_path: None,
-                    seed: 0,
-                })
-            }
-            crate::backend::RuntimeBackendId::CandleWhisper => {
-                Self::CandleWhisper(CandleWhisperLoadConfig { model_path, tokenizer_path: None })
-            }
-            crate::backend::RuntimeBackendId::CandleDiffusion => {
-                let diffusion = diffusion.unwrap_or_default();
-                Self::CandleDiffusion(CandleDiffusionLoadConfig {
-                    model_path,
-                    vae_path: diffusion.vae_path,
-                    sd_version: default_candle_sd_version(),
-                })
-            }
-            crate::backend::RuntimeBackendId::Onnx => Self::Onnx(OnnxLoadConfig {
-                model_path,
-                execution_providers: default_execution_providers(),
-                intra_op_num_threads: None,
-                inter_op_num_threads: None,
-            }),
-        })
-    }
-
-    pub fn to_legacy_spec(&self) -> crate::runtime::RuntimeModelLoadSpec {
+    pub fn model_path(&self) -> &Path {
         match self {
-            Self::GgmlLlama(config) => crate::runtime::RuntimeModelLoadSpec {
-                model_path: config.model_path.clone(),
-                num_workers: u32::try_from(config.num_workers).unwrap_or(u32::MAX),
-                context_length: config.context_length,
-                chat_template: config.chat_template.clone(),
-                gbnf: config.gbnf.clone(),
-                diffusion: None,
-            },
-            Self::GgmlWhisper(config) => crate::runtime::RuntimeModelLoadSpec {
-                model_path: config.model_path.clone(),
-                ..Default::default()
-            },
-            Self::GgmlDiffusion(config) => crate::runtime::RuntimeModelLoadSpec {
-                model_path: config.model_path.clone(),
-                diffusion: Some(crate::runtime::DiffusionLoadOptions {
-                    diffusion_model_path: config.diffusion_model_path.clone(),
-                    vae_path: config.vae_path.clone(),
-                    taesd_path: config.taesd_path.clone(),
-                    lora_model_dir: None,
-                    clip_l_path: config.clip_l_path.clone(),
-                    clip_g_path: config.clip_g_path.clone(),
-                    t5xxl_path: config.t5xxl_path.clone(),
-                    flash_attn: config.flash_attn,
-                    vae_device: config.vae_device.clone().unwrap_or_default(),
-                    clip_device: config.clip_device.clone().unwrap_or_default(),
-                    offload_params_to_cpu: config.offload_params_to_cpu,
-                }),
-                ..Default::default()
-            },
-            Self::CandleLlama(config) => crate::runtime::RuntimeModelLoadSpec {
-                model_path: config.model_path.clone(),
-                ..Default::default()
-            },
-            Self::CandleWhisper(config) => crate::runtime::RuntimeModelLoadSpec {
-                model_path: config.model_path.clone(),
-                ..Default::default()
-            },
-            Self::CandleDiffusion(config) => crate::runtime::RuntimeModelLoadSpec {
-                model_path: config.model_path.clone(),
-                diffusion: Some(crate::runtime::DiffusionLoadOptions {
-                    vae_path: config.vae_path.clone(),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-            Self::Onnx(config) => crate::runtime::RuntimeModelLoadSpec {
-                model_path: config.model_path.clone(),
-                ..Default::default()
-            },
+            Self::GgmlLlama(config) => config.model_path.as_path(),
+            Self::GgmlWhisper(config) => config.model_path.as_path(),
+            Self::GgmlDiffusion(config) => config.model_path.as_path(),
+            Self::CandleLlama(config) => config.model_path.as_path(),
+            Self::CandleWhisper(config) => config.model_path.as_path(),
+            Self::CandleDiffusion(config) => config.model_path.as_path(),
+            Self::Onnx(config) => config.model_path.as_path(),
         }
     }
 }

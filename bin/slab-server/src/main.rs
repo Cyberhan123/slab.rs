@@ -22,7 +22,6 @@ use tracing_subscriber::util::SubscriberInitExt;
 use slab_app_core::config::{Config, default_model_config_dir_for_settings_path};
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::PmidService;
-use slab_app_core::infra::config_migration::migrate_legacy_settings_if_needed;
 use slab_app_core::infra::db::{AnyStore, TaskStore};
 use slab_app_core::infra::rpc::gateway::GrpcGateway;
 use slab_app_core::infra::runtime::{ManagedRuntimeHost, ManagedRuntimeHostStartOptions};
@@ -340,14 +339,6 @@ async fn run_supervisor(args: SupervisorArgs, mut gateway_cfg: Config) -> anyhow
     info!("slab-server supervisor starting");
     let store = Arc::new(AnyStore::connect(&gateway_cfg.database_url).await?);
     info!(database_url = %gateway_cfg.database_url, "database ready");
-    let migration =
-        migrate_legacy_settings_if_needed(&gateway_cfg.settings_path, store.as_ref()).await?;
-    if migration.migrated {
-        info!(
-            settings_path = %gateway_cfg.settings_path.display(),
-            "settings migration completed before runtime startup"
-        );
-    }
     let runtime_host = Arc::new(
         ManagedRuntimeHost::start_server(
             &gateway_cfg,

@@ -463,31 +463,16 @@ async fn build_selected_model_pack_load_target(
     })?;
     let persisted = model_packs::read_persisted_model_config_from_pack(pack_path)?;
     let state_record = state.store().get_model_config_state(model_id).await?;
-    let legacy_selection = persisted
-        .as_ref()
-        .and_then(|config| config.pack_selection.clone())
-        .map(pack::normalize_model_pack_selection);
     let explicit_selection = if let Some(record) = state_record.as_ref() {
         crate::domain::models::ModelPackSelection {
             preset_id: catalog::normalize_optional_text(record.selected_preset_id.clone()),
             variant_id: catalog::normalize_optional_text(record.selected_variant_id.clone()),
         }
     } else {
-        legacy_selection.clone().unwrap_or_default()
+        crate::domain::models::ModelPackSelection::default()
     };
     let (effective_selection, selected_preset, _) =
         pack::resolve_effective_model_pack_selection(&resolved, &explicit_selection)?;
-
-    if state_record.is_none()
-        && let Some(record) = pack::selection_state_record_for_storage(
-            model_id,
-            &resolved,
-            &legacy_selection.unwrap_or_default(),
-            &effective_selection,
-        )
-    {
-        let _ = state.store().upsert_model_config_state(record).await;
-    }
 
     let mut bridge = resolved.compile_runtime_bridge(&selected_preset).map_err(|error| {
         AppCoreError::BadRequest(format!(
@@ -518,7 +503,7 @@ async fn build_selected_model_pack_load_target(
 
     Ok(model_packs::ModelPackLoadTarget {
         backend_id: bridge.backend,
-        model_path: load_spec.model_path.to_string_lossy().into_owned(),
+        model_path: load_spec.model_path().to_string_lossy().into_owned(),
         load_defaults: bridge.load_defaults,
     })
 }

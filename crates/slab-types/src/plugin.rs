@@ -32,17 +32,17 @@ impl TryFrom<RawPluginManifest> for PluginManifest {
     type Error = String;
 
     fn try_from(raw: RawPluginManifest) -> Result<Self, Self::Error> {
-        let runtime = match (raw.runtime, raw.ui) {
-            (Some(runtime), _) => PluginRuntimeManifest {
-                ui: runtime.ui,
-                wasm: runtime.wasm.or(raw.wasm),
-                js: runtime.js.or(raw.js),
-                python: runtime.python.or(raw.python),
-            },
-            (None, Some(ui)) => {
-                PluginRuntimeManifest { ui, wasm: raw.wasm, js: raw.js, python: raw.python }
-            }
-            (None, None) => return Err("missing runtime.ui or legacy ui entry".to_string()),
+        let Some(runtime) = raw.runtime else {
+            return Err("missing runtime.ui entry".to_string());
+        };
+        let Some(ui) = runtime.ui else {
+            return Err("missing runtime.ui entry".to_string());
+        };
+        let runtime = PluginRuntimeManifest {
+            ui,
+            wasm: runtime.wasm.or(raw.wasm),
+            js: runtime.js.or(raw.js),
+            python: runtime.python.or(raw.python),
         };
 
         let mut permissions = raw.permissions.unwrap_or_default();
@@ -75,9 +75,7 @@ struct RawPluginManifest {
     #[serde(default)]
     compatibility: Option<PluginCompatibilityManifest>,
     #[serde(default)]
-    runtime: Option<PluginRuntimeManifest>,
-    #[serde(default)]
-    ui: Option<PluginUiManifest>,
+    runtime: Option<RawPluginRuntimeManifest>,
     #[serde(default)]
     wasm: Option<PluginWasmManifest>,
     #[serde(default)]
@@ -92,6 +90,19 @@ struct RawPluginManifest {
     permissions: Option<PluginPermissionsManifest>,
     #[serde(default)]
     network: Option<PluginNetworkManifest>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawPluginRuntimeManifest {
+    #[serde(default)]
+    ui: Option<PluginUiManifest>,
+    #[serde(default)]
+    wasm: Option<PluginWasmManifest>,
+    #[serde(default)]
+    js: Option<PluginJsManifest>,
+    #[serde(default)]
+    python: Option<PluginPythonManifest>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, ToSchema)]

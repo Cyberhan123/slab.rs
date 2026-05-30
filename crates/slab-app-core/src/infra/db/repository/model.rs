@@ -28,7 +28,6 @@ pub trait ModelStore: Send + Sync + 'static {
 type ModelRow = (
     String,         // id
     String,         // display_name
-    String,         // provider
     String,         // kind
     Option<String>, // backend_id
     String,         // capabilities
@@ -45,7 +44,6 @@ fn row_to_record(
     (
         id,
         display_name,
-        provider,
         kind,
         backend_id,
         capabilities,
@@ -61,7 +59,6 @@ fn row_to_record(
     UnifiedModelRecord {
         id,
         display_name,
-        provider,
         kind,
         backend_id,
         capabilities,
@@ -75,17 +72,93 @@ fn row_to_record(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn remove_provider_migration_keeps_canonical_model_columns() {
+        let options =
+            sqlx::sqlite::SqliteConnectOptions::new().filename(":memory:").create_if_missing(true);
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .expect("connect in-memory db");
+
+        sqlx::query(
+            "CREATE TABLE models (
+                id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                backend_id TEXT,
+                capabilities TEXT NOT NULL,
+                status TEXT NOT NULL,
+                spec TEXT NOT NULL,
+                runtime_presets TEXT,
+                config_schema_version INTEGER NOT NULL,
+                config_policy_version INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .expect("create models");
+        sqlx::query("CREATE INDEX idx_models_provider ON models(provider)")
+            .execute(&pool)
+            .await
+            .expect("create provider index");
+        sqlx::query(
+            "INSERT INTO models (
+                id, display_name, provider, kind, backend_id, capabilities, status, spec,
+                runtime_presets, config_schema_version, config_policy_version, created_at,
+                updated_at
+             ) VALUES (
+                'local-qwen', 'Local Qwen', 'local.ggml.llama', 'local', 'ggml.llama',
+                '[]', 'ready', '{}', NULL, 2, 3, '2026-05-30T00:00:00Z',
+                '2026-05-30T00:00:00Z'
+             )",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert model");
+
+        for statement in
+            include_str!("../../../../migrations/20260530000000_remove_models_provider.sql")
+                .split(';')
+                .map(str::trim)
+                .filter(|statement| !statement.is_empty())
+        {
+            sqlx::query(statement).execute(&pool).await.expect("run migration statement");
+        }
+
+        let columns: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info('models')")
+                .fetch_all(&pool)
+                .await
+                .expect("read table info");
+        let row: (String, Option<String>) =
+            sqlx::query_as("SELECT kind, backend_id FROM models WHERE id = 'local-qwen'")
+                .fetch_one(&pool)
+                .await
+                .expect("read migrated row");
+
+        assert!(!columns.iter().any(|column| column == "provider"));
+        assert_eq!(row.0, "local");
+        assert_eq!(row.1.as_deref(), Some("ggml.llama"));
+    }
+}
+
 impl ModelStore for AnyStore {
     async fn upsert_model(&self, record: UnifiedModelRecord) -> Result<(), sqlx::Error> {
         let created_at = record.created_at.to_rfc3339();
         let updated_at = record.updated_at.to_rfc3339();
         sqlx::query(
             "INSERT INTO models \
-             (id, display_name, provider, kind, backend_id, capabilities, status, spec, runtime_presets, config_schema_version, config_policy_version, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
+             (id, display_name, kind, backend_id, capabilities, status, spec, runtime_presets, config_schema_version, config_policy_version, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) \
              ON CONFLICT(id) DO UPDATE SET \
                   display_name = excluded.display_name, \
-                  provider = excluded.provider, \
                   kind = excluded.kind, \
                   backend_id = excluded.backend_id, \
                   capabilities = excluded.capabilities, \
@@ -99,7 +172,6 @@ impl ModelStore for AnyStore {
         )
         .bind(&record.id)
         .bind(&record.display_name)
-        .bind(&record.provider)
         .bind(&record.kind)
         .bind(&record.backend_id)
         .bind(&record.capabilities)
@@ -117,7 +189,7 @@ impl ModelStore for AnyStore {
 
     async fn get_model(&self, id: &str) -> Result<Option<UnifiedModelRecord>, sqlx::Error> {
         let row: Option<ModelRow> = sqlx::query_as(
-            "SELECT id, display_name, provider, kind, backend_id, capabilities, status, spec, runtime_presets, config_schema_version, config_policy_version, created_at, updated_at \
+            "SELECT id, display_name, kind, backend_id, capabilities, status, spec, runtime_presets, config_schema_version, config_policy_version, created_at, updated_at \
              FROM models WHERE id = ?1",
         )
         .bind(id)
@@ -129,7 +201,7 @@ impl ModelStore for AnyStore {
 
     async fn list_models(&self) -> Result<Vec<UnifiedModelRecord>, sqlx::Error> {
         let rows: Vec<ModelRow> = sqlx::query_as(
-            "SELECT id, display_name, provider, kind, backend_id, capabilities, status, spec, runtime_presets, config_schema_version, config_policy_version, created_at, updated_at \
+            "SELECT id, display_name, kind, backend_id, capabilities, status, spec, runtime_presets, config_schema_version, config_policy_version, created_at, updated_at \
              FROM models ORDER BY created_at DESC",
         )
         .fetch_all(&self.pool)

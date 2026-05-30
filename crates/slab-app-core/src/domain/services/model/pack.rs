@@ -28,7 +28,6 @@ pub(super) struct ResolvedModelPackSelectionView {
     pub(super) effective_selection: ModelPackSelection,
     pub(super) selected_preset: slab_model_pack::ResolvedPreset,
     pub(super) warnings: Vec<String>,
-    pub(super) legacy_selection_to_import: Option<ModelPackSelection>,
 }
 
 impl ModelService {
@@ -41,26 +40,20 @@ impl ModelService {
         let pack_existed = pack_path.exists();
         model_packs::write_model_pack(self.model_config_dir(), &summary.id, bytes)?;
 
-        let (command, legacy_selection) =
-            match self.build_selected_model_pack_command(&summary.id, false).await {
-                Ok(result) => result,
-                Err(error) => {
-                    if !pack_existed {
-                        let _ = model_packs::delete_model_pack_at_path(&pack_path);
-                    }
-                    return Err(error);
+        let command = match self.build_selected_model_pack_command(&summary.id).await {
+            Ok(result) => result,
+            Err(error) => {
+                if !pack_existed {
+                    let _ = model_packs::delete_model_pack_at_path(&pack_path);
                 }
-            };
+                return Err(error);
+            }
+        };
 
         let model = self.build_model_definition(command).await?;
 
         match self.store_model_definition(model).await {
-            Ok(model) => {
-                if let Some(record) = legacy_selection {
-                    self.model_state.store().upsert_model_config_state(record).await?;
-                }
-                Ok(model)
-            }
+            Ok(model) => Ok(model),
             Err(error) => {
                 if !pack_existed {
                     let _ = model_packs::delete_model_pack_at_path(&pack_path);
@@ -92,25 +85,21 @@ impl ModelService {
                 continue;
             };
 
-            let (command, legacy_selection) =
-                match self.build_selected_model_pack_command(&model_id, false).await {
-                    Ok(command) => command,
-                    Err(error) => {
-                        warn!(
-                            path = %path.display(),
-                            model_id = %model_id,
-                            error = %error,
-                            "skipping invalid model pack file"
-                        );
-                        continue;
-                    }
-                };
+            let command = match self.build_selected_model_pack_command(&model_id).await {
+                Ok(command) => command,
+                Err(error) => {
+                    warn!(
+                        path = %path.display(),
+                        model_id = %model_id,
+                        error = %error,
+                        "skipping invalid model pack file"
+                    );
+                    continue;
+                }
+            };
 
             match self.persist_model_definition_with_options(command, false).await {
                 Ok(model) => {
-                    if let Some(record) = legacy_selection {
-                        self.model_state.store().upsert_model_config_state(record).await?;
-                    }
                     imported += 1;
                     info!(model_id = %model.id, path = %path.display(), "initialized model from .slab pack");
                 }
@@ -158,93 +147,45 @@ impl ModelService {
     pub(super) async fn build_selected_model_pack_command(
         &self,
         id: &str,
-        persist_legacy_selection: bool,
-    ) -> Result<(CreateModelCommand, Option<ModelConfigStateRecord>), AppCoreError> {
+    ) -> Result<CreateModelCommand, AppCoreError> {
         let context = self.load_model_pack_context(id)?;
         if matches!(
             context.resolved.manifest.sources.first().map(|candidate| &candidate.source),
             Some(slab_model_pack::PackSource::Cloud { .. })
         ) {
             let command = model_packs::build_model_command_from_pack(&context.path)?;
-            return Ok((command, None));
+            return Ok(command);
         }
 
-        let selection = self
-            .resolve_model_pack_selection(
-                id,
-                &context.resolved,
-                context.persisted.as_ref(),
-                persist_legacy_selection,
-            )
-            .await?;
+        let selection = self.resolve_model_pack_selection(id, &context.resolved).await?;
         let command = build_model_command_from_pack_context(&context, &selection.selected_preset)?;
-        let state_record = selection.legacy_selection_to_import.map(|selection| {
-            model_config_state_record(id, selection.preset_id, selection.variant_id)
-        });
 
-        Ok((command, state_record))
+        Ok(command)
     }
 
     pub(super) async fn resolve_model_pack_selection(
         &self,
         model_id: &str,
         resolved: &slab_model_pack::ResolvedModelPack,
-        persisted: Option<&StoredModelConfig>,
-        persist_legacy_selection: bool,
     ) -> Result<ResolvedModelPackSelectionView, AppCoreError> {
         let state_record = self.model_state.store().get_model_config_state(model_id).await?;
-        let legacy_selection = persisted
-            .and_then(|config| config.pack_selection.clone())
-            .map(normalize_model_pack_selection);
-
         let explicit_selection = if let Some(record) = state_record.as_ref() {
             ModelPackSelection {
                 preset_id: catalog::normalize_optional_text(record.selected_preset_id.clone()),
                 variant_id: catalog::normalize_optional_text(record.selected_variant_id.clone()),
             }
         } else {
-            legacy_selection.clone().unwrap_or_default()
+            ModelPackSelection::default()
         };
 
         let (effective_selection, selected_preset, warnings) =
             resolve_effective_model_pack_selection(resolved, &explicit_selection)?;
-
-        let legacy_selection_to_import = if state_record.is_none() {
-            legacy_selection
-                .as_ref()
-                .filter(|selection| {
-                    effective_model_pack_selection(resolved, selection, &selected_preset)
-                        != default_model_pack_selection(resolved)
-                })
-                .cloned()
-        } else {
-            None
-        };
-
-        if persist_legacy_selection
-            && state_record.is_none()
-            && let Some(selection) = legacy_selection_to_import.as_ref()
-        {
-            self.model_state
-                .store()
-                .upsert_model_config_state(model_config_state_record(
-                    model_id,
-                    selection.preset_id.clone(),
-                    selection.variant_id.clone(),
-                ))
-                .await?;
-        }
 
         Ok(ResolvedModelPackSelectionView {
             explicit_selection,
             effective_selection,
             selected_preset,
             warnings,
-            legacy_selection_to_import: if persist_legacy_selection {
-                None
-            } else {
-                legacy_selection_to_import
-            },
         })
     }
 }

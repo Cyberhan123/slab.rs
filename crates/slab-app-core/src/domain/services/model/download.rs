@@ -664,14 +664,7 @@ impl ModelService {
         }
 
         let context = self.load_model_pack_context(&model.id)?;
-        let selection = self
-            .resolve_model_pack_selection(
-                &model.id,
-                &context.resolved,
-                context.persisted.as_ref(),
-                true,
-            )
-            .await?;
+        let selection = self.resolve_model_pack_selection(&model.id, &context.resolved).await?;
 
         let candidates = selection
             .selected_preset
