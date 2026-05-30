@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use slab_proto::openai::FunctionTool;
 pub use slab_types::chat::{
     ChatModelCapabilities, ChatModelSource, ChatReasoningEffort, ChatVerbosity,
     ConversationContentPart, ConversationMessage, ConversationMessageContent, ConversationToolCall,
@@ -39,6 +40,7 @@ pub struct TextGenerationResponse {
     pub tokens_used: Option<u32>,
     pub usage: Option<TextGenerationUsage>,
     pub metadata: JsonOptions,
+    pub tool_calls: Vec<ConversationToolCall>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -110,6 +112,7 @@ pub struct ChatCompletionCommand {
     pub id: Option<String>,
     pub model: String,
     pub messages: Vec<ConversationMessage>,
+    pub tools: Vec<FunctionTool>,
     pub continue_generation: bool,
     pub common: CommonChatParams,
     pub local: LocalChatParams,
@@ -281,7 +284,7 @@ pub fn assistant_message_from_text_response(
         )),
         name: None,
         tool_call_id: None,
-        tool_calls: Vec::new(),
+        tool_calls: response.tool_calls.clone(),
     }
 }
 
@@ -425,6 +428,7 @@ mod test {
             tokens_used: None,
             usage: None,
             metadata,
+            tool_calls: Vec::new(),
         };
 
         let message = super::assistant_message_from_text_response(&response);

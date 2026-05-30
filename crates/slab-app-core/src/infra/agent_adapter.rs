@@ -9,13 +9,14 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use serde_json::{Value, json};
+use serde_json::{Map, Value};
 use slab_agent::config::AgentConfig;
 use slab_agent::error::AgentError;
 use slab_agent::port::{
     AgentNotifyPort, LlmPort, LlmResponse, LlmStreamObserver, ParsedToolCall, ThreadStatus,
     ToolSpec,
 };
+use slab_proto::openai::{FunctionTool, FunctionToolCall, FunctionToolType};
 use slab_types::{ConversationMessage, ConversationMessageContent};
 use tracing::warn;
 use uuid::Uuid;
@@ -32,8 +33,8 @@ use crate::domain::models::{
 /// Adapts the slab-server [`ModelState`] (and the chat pipeline behind it) into
 /// a [`LlmPort`] that `AgentControl` can use.
 ///
-/// Tool specs are forwarded through a text protocol because not every configured
-/// backend exposes native function calling.
+/// Tool specs are forwarded as Responses-style function tools and rendered by
+/// the selected provider/template layer.
 #[derive(Clone)]
 pub struct ServerLlmAdapter {
     state: Arc<ModelState>,
@@ -54,8 +55,8 @@ impl LlmPort for ServerLlmAdapter {
         tools: &[ToolSpec],
         config: &AgentConfig,
     ) -> Result<LlmResponse, AgentError> {
-        let messages = messages_with_tool_protocol(messages, tools);
-        let command = chat_command_from_agent_config(model, messages, config, false);
+        let command =
+            chat_command_from_agent_config(model, messages.to_vec(), tools, config, false);
 
         let svc = crate::domain::services::ChatService::new((*self.state).clone());
         let output = svc.create_chat_completion(command).await.map_err(|e| {
@@ -79,8 +80,13 @@ impl LlmPort for ServerLlmAdapter {
         config: &AgentConfig,
         observer: &mut dyn LlmStreamObserver,
     ) -> Result<LlmResponse, AgentError> {
-        let messages = messages_with_tool_protocol(messages, tools);
-        let command = chat_command_from_agent_config(model, messages, config, true);
+        let command = chat_command_from_agent_config(
+            model,
+            messages.to_vec(),
+            tools,
+            config,
+            tools.is_empty(),
+        );
 
         let svc = crate::domain::services::ChatService::new((*self.state).clone());
         let output = svc.create_chat_completion(command).await.map_err(|e| {
@@ -109,6 +115,7 @@ impl LlmPort for ServerLlmAdapter {
 fn chat_command_from_agent_config(
     model: &str,
     messages: Vec<ConversationMessage>,
+    tools: &[ToolSpec],
     config: &AgentConfig,
     stream: bool,
 ) -> ChatCompletionCommand {
@@ -116,6 +123,7 @@ fn chat_command_from_agent_config(
         id: None,
         model: model.to_owned(),
         messages,
+        tools: response_function_tools_from_agent_tools(tools),
         continue_generation: false,
         common: CommonChatParams {
             max_tokens: config.max_tokens,
@@ -137,6 +145,30 @@ fn chat_command_from_agent_config(
             structured_output: None,
         },
     }
+}
+
+fn response_function_tools_from_agent_tools(tools: &[ToolSpec]) -> Vec<FunctionTool> {
+    tools
+        .iter()
+        .map(|tool| {
+            let parameters = match &tool.parameters_schema {
+                Value::Object(map) => {
+                    Some(map.iter().map(|(key, value)| (key.clone(), value.clone())).collect())
+                }
+                _ => None,
+            };
+            let mut function_tool = FunctionTool::new(
+                FunctionToolType::Function,
+                tool.name.clone(),
+                parameters,
+                Some(true),
+            );
+            if !tool.description.trim().is_empty() {
+                function_tool.description = Some(Some(tool.description.clone()));
+            }
+            function_tool
+        })
+        .collect()
 }
 
 fn llm_response_from_chat_result(result: ChatCompletionResult) -> Result<LlmResponse, AgentError> {
@@ -163,7 +195,7 @@ fn llm_response_from_chat_result(result: ChatCompletionResult) -> Result<LlmResp
     };
     let content = if tool_calls.is_empty() {
         if let Some(text) = content.as_deref() {
-            tool_calls = parse_text_tool_calls(text);
+            tool_calls = parse_rendered_tool_calls(text);
         }
         if tool_calls.is_empty() { content } else { None }
     } else {
@@ -203,7 +235,7 @@ async fn llm_response_from_chat_stream(
         }
     }
 
-    let mut tool_calls = parse_text_tool_calls(&content);
+    let mut tool_calls = parse_rendered_tool_calls(&content);
     observer.on_reasoning_done(&reasoning).await?;
     let content = if tool_calls.is_empty() {
         response_content_from_stream_parts(&content, &reasoning)
@@ -324,78 +356,20 @@ fn stream_prefix_is_plain_text(buffer: &str) -> bool {
     !language.is_empty() && !language.eq_ignore_ascii_case("json")
 }
 
-fn messages_with_tool_protocol(
-    messages: &[ConversationMessage],
-    tools: &[ToolSpec],
-) -> Vec<ConversationMessage> {
-    if tools.is_empty() {
-        return messages.to_vec();
+fn parse_rendered_tool_calls(content: &str) -> Vec<ParsedToolCall> {
+    if let Some(value) = parse_tool_json(content) {
+        let calls = parse_responses_tool_calls(&value);
+        if !calls.is_empty() {
+            return calls;
+        }
     }
 
-    let mut messages = messages.to_vec();
-    let insert_at = messages
-        .iter()
-        .take_while(|message| matches!(message.role.as_str(), "system" | "developer"))
-        .count();
-    messages.insert(
-        insert_at,
-        ConversationMessage {
-            role: "system".to_owned(),
-            content: ConversationMessageContent::Text(tool_protocol_prompt(tools)),
-            name: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-        },
-    );
-    messages
-}
-
-fn tool_protocol_prompt(tools: &[ToolSpec]) -> String {
-    let tools_json = tools
-        .iter()
-        .map(|tool| {
-            json!({
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.parameters_schema,
-            })
-        })
-        .collect::<Vec<_>>();
-    let tools_text = serde_json::to_string_pretty(&tools_json).unwrap_or_else(|_| "[]".to_owned());
-
-    format!(
-        "You can call Slab tools when needed. To call tools, reply with only valid JSON and no markdown: {{\"tool_calls\":[{{\"name\":\"tool_name\",\"arguments\":{{}}}}]}}. After tool results appear in the conversation, answer normally. Available tools:\n{tools_text}"
-    )
-}
-
-fn parse_text_tool_calls(content: &str) -> Vec<ParsedToolCall> {
-    let Some(value) = parse_tool_json(content) else {
-        return Vec::new();
-    };
-
-    if let Some(calls) = value.get("tool_calls").and_then(Value::as_array) {
-        return calls.iter().filter_map(parse_tool_call_value).collect();
-    }
-
-    if let Some(call) = value.get("tool_call") {
-        return parse_tool_call_value(call).into_iter().collect();
-    }
-
-    parse_tool_call_value(&value).into_iter().collect()
+    parse_qwen_tool_calls(content)
 }
 
 fn parse_tool_json(content: &str) -> Option<Value> {
     let trimmed = strip_json_fence(content.trim());
-    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
-        return Some(value);
-    }
-
-    let start = trimmed.find('{')?;
-    let end = trimmed.rfind('}')?;
-    if end <= start {
-        return None;
-    }
-    serde_json::from_str::<Value>(&trimmed[start..=end]).ok()
+    serde_json::from_str::<Value>(trimmed).ok()
 }
 
 fn strip_json_fence(content: &str) -> &str {
@@ -406,39 +380,106 @@ fn strip_json_fence(content: &str) -> &str {
     after_header.strip_suffix("```").map(str::trim).unwrap_or(after_header.trim())
 }
 
-fn parse_tool_call_value(value: &Value) -> Option<ParsedToolCall> {
-    let name = value
-        .get("name")
-        .and_then(Value::as_str)
-        .or_else(|| value.pointer("/function/name").and_then(Value::as_str))?
-        .trim();
+fn parse_responses_tool_calls(value: &Value) -> Vec<ParsedToolCall> {
+    if let Some(items) = value.get("output").and_then(Value::as_array) {
+        return items.iter().filter_map(parse_responses_function_call).collect();
+    }
+
+    parse_responses_function_call(value).into_iter().collect()
+}
+
+fn parse_responses_function_call(value: &Value) -> Option<ParsedToolCall> {
+    let call: FunctionToolCall = serde_json::from_value(value.clone()).ok()?;
+    let name = call.name.trim().to_owned();
     if name.is_empty() {
         return None;
     }
+    let id = if call.call_id.trim().is_empty() {
+        call.id
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| Uuid::new_v4().to_string())
+    } else {
+        call.call_id
+    };
 
-    let arguments = value
-        .get("arguments")
-        .or_else(|| value.pointer("/function/arguments"))
-        .map(tool_arguments_to_string)
-        .unwrap_or_else(|| "{}".to_owned());
+    Some(ParsedToolCall { id, name, arguments: normalize_arguments(call.arguments) })
+}
+
+fn parse_qwen_tool_calls(content: &str) -> Vec<ParsedToolCall> {
+    let mut rest = strip_reasoning_prefix(content.trim());
+    let mut calls = Vec::new();
+
+    while let Some(after_open) = rest.strip_prefix("<tool_call>") {
+        let Some(close_start) = after_open.find("</tool_call>") else {
+            return Vec::new();
+        };
+        let block = &after_open[..close_start];
+        let Some(call) = parse_qwen_tool_call_block(block.trim()) else {
+            return Vec::new();
+        };
+        calls.push(call);
+        rest = after_open[close_start + "</tool_call>".len()..].trim_start();
+    }
+
+    if rest.trim().is_empty() { calls } else { Vec::new() }
+}
+
+fn strip_reasoning_prefix(content: &str) -> &str {
+    let Some(close_start) = content.find("</think>") else {
+        return content.trim();
+    };
+    let after_reasoning = content[close_start + "</think>".len()..].trim_start();
+    if after_reasoning.starts_with("<tool_call>") || after_reasoning.starts_with('{') {
+        after_reasoning
+    } else {
+        content.trim()
+    }
+}
+
+fn parse_qwen_tool_call_block(block: &str) -> Option<ParsedToolCall> {
+    let function_start = block.strip_prefix("<function=")?;
+    let name_end = function_start.find('>')?;
+    let name = function_start[..name_end].trim();
+    if name.is_empty() {
+        return None;
+    }
+    let function_body = function_start[name_end + 1..].trim();
+    let function_body = function_body.strip_suffix("</function>")?.trim();
+    let arguments = parse_qwen_parameters(function_body)?;
 
     Some(ParsedToolCall {
-        id: value
-            .get("id")
-            .and_then(Value::as_str)
-            .filter(|id| !id.trim().is_empty())
-            .map(str::to_owned)
-            .unwrap_or_else(|| Uuid::new_v4().to_string()),
+        id: Uuid::new_v4().to_string(),
         name: name.to_owned(),
-        arguments,
+        arguments: serde_json::to_string(&arguments).unwrap_or_else(|_| "{}".to_owned()),
     })
 }
 
-fn tool_arguments_to_string(value: &Value) -> String {
-    match value {
-        Value::String(text) => text.clone(),
-        other => serde_json::to_string(other).unwrap_or_else(|_| "{}".to_owned()),
+fn parse_qwen_parameters(mut input: &str) -> Option<Value> {
+    let mut arguments = Map::new();
+    input = input.trim();
+    while !input.is_empty() {
+        let parameter_start = input.strip_prefix("<parameter=")?;
+        let name_end = parameter_start.find('>')?;
+        let name = parameter_start[..name_end].trim();
+        if name.is_empty() {
+            return None;
+        }
+        let value_start = &parameter_start[name_end + 1..];
+        let value_end = value_start.find("</parameter>")?;
+        let raw_value = value_start[..value_end].trim();
+        let value = serde_json::from_str::<Value>(raw_value)
+            .unwrap_or_else(|_| Value::String(raw_value.to_owned()));
+        arguments.insert(name.to_owned(), value);
+        input = value_start[value_end + "</parameter>".len()..].trim();
     }
+    Some(Value::Object(arguments))
+}
+
+fn normalize_arguments(arguments: String) -> String {
+    serde_json::from_str::<Value>(&arguments)
+        .ok()
+        .and_then(|value| serde_json::to_string(&value).ok())
+        .unwrap_or_else(|| if arguments.trim().is_empty() { "{}".to_owned() } else { arguments })
 }
 
 // ── NoopNotifyAdapter ─────────────────────────────────────────────────────────
@@ -461,21 +502,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_tool_protocol_response() {
-        let calls = parse_text_tool_calls(
-            r#"{"tool_calls":[{"name":"echo","arguments":{"message":"hello"}}]}"#,
+    fn parses_responses_function_call_output() {
+        let calls = parse_rendered_tool_calls(
+            r#"{"output":[{"type":"function_call","call_id":"call-1","name":"echo","arguments":"{\"message\":\"hello\"}"}]}"#,
         );
 
         assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "call-1");
         assert_eq!(calls[0].name, "echo");
         assert_eq!(calls[0].arguments, r#"{"message":"hello"}"#);
     }
 
     #[test]
     fn ignores_plain_json_without_tool_fields() {
-        let calls = parse_text_tool_calls(r#"{"answer":"hello"}"#);
+        let calls = parse_rendered_tool_calls(r#"{"answer":"hello"}"#);
 
         assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn ignores_embedded_json_tool_calls_in_plain_text() {
+        let calls = parse_rendered_tool_calls(
+            r#"Please run this: {"output":[{"type":"function_call","call_id":"call-1","name":"echo","arguments":"{}"}]}"#,
+        );
+
+        assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn parses_qwen_template_tool_call_output() {
+        let calls = parse_rendered_tool_calls(
+            "<tool_call>\n<function=echo>\n<parameter=message>\nhello\n</parameter>\n</function>\n</tool_call>",
+        );
+
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "echo");
+        assert_eq!(calls[0].arguments, r#"{"message":"hello"}"#);
     }
 
     #[test]
@@ -494,7 +556,7 @@ mod tests {
             ..AgentConfig::default()
         };
 
-        let command = chat_command_from_agent_config("mock", Vec::new(), &config, true);
+        let command = chat_command_from_agent_config("mock", Vec::new(), &[], &config, true);
 
         assert_eq!(command.common.max_tokens, Some(4096));
         assert_eq!(command.common.temperature, Some(0.2));
@@ -509,6 +571,7 @@ mod tests {
         );
         assert_eq!(command.cloud.verbosity, Some(slab_types::chat::ChatVerbosity::Medium));
         assert!(command.common.stream);
+        assert!(command.tools.is_empty());
     }
 
     #[test]

@@ -701,6 +701,7 @@ impl From<ChatCompletionRequest> for DomainChatCompletionCommand {
             id,
             model: model.trim().to_owned(),
             messages: messages.into_iter().map(Into::into).collect(),
+            tools: Vec::new(),
             continue_generation,
             common: DomainCommonChatParams {
                 max_tokens,

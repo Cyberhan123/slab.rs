@@ -3,8 +3,10 @@ use genai::adapter::AdapterKind;
 use genai::chat::{
     ChatMessage as GenaiChatMessage, ChatOptions as GenaiChatOptions,
     ChatRequest as GenaiChatRequest, ChatResponseFormat as GenaiChatResponseFormat,
-    ChatStreamEvent as GenaiChatStreamEvent, JsonSpec as GenaiJsonSpec,
-    ReasoningEffort as GenaiReasoningEffort, Verbosity as GenaiVerbosity,
+    ChatStreamEvent as GenaiChatStreamEvent, ContentPart as GenaiContentPart,
+    JsonSpec as GenaiJsonSpec, MessageContent as GenaiMessageContent,
+    ReasoningEffort as GenaiReasoningEffort, Tool as GenaiTool, ToolCall as GenaiToolCall,
+    ToolResponse as GenaiToolResponse, Verbosity as GenaiVerbosity,
 };
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{
@@ -20,8 +22,9 @@ use uuid::Uuid;
 use crate::context::ModelState;
 use crate::domain::models::{
     ChatReasoningEffort, ChatStreamChunk, ChatVerbosity,
-    ConversationMessage as DomainConversationMessage, JsonOptions, StructuredOutput,
-    TextGenerationResponse, UnifiedModel, UnifiedModelKind,
+    ConversationMessage as DomainConversationMessage, ConversationToolCall,
+    ConversationToolFunction, JsonOptions, StructuredOutput, TextGenerationResponse, UnifiedModel,
+    UnifiedModelKind,
 };
 use crate::error::AppCoreError;
 use crate::infra::db::ModelStore;
@@ -48,6 +51,7 @@ pub(super) struct CloudChatRequestConfig {
     pub(super) structured_output: Option<StructuredOutput>,
     pub(super) reasoning_effort: Option<ChatReasoningEffort>,
     pub(super) verbosity: Option<ChatVerbosity>,
+    pub(super) tools: Vec<slab_proto::openai::FunctionTool>,
     pub(super) stream: bool,
     pub(super) include_usage: bool,
 }
@@ -454,18 +458,88 @@ fn build_genai_client_for_target(target: &ResolvedCloudModel) -> Result<GenaiCli
     Ok(GenaiClient::builder().with_service_target_resolver(resolver).build())
 }
 
-fn build_genai_chat_request(messages: &[DomainConversationMessage]) -> GenaiChatRequest {
+fn build_genai_chat_request(
+    messages: &[DomainConversationMessage],
+    tools: &[slab_proto::openai::FunctionTool],
+) -> GenaiChatRequest {
     let mapped: Vec<GenaiChatMessage> =
         messages.iter().map(conversation_message_to_genai).collect();
-    GenaiChatRequest::new(mapped)
+    let request = GenaiChatRequest::new(mapped);
+    if tools.is_empty() {
+        request
+    } else {
+        request.with_tools(tools.iter().map(function_tool_to_genai))
+    }
 }
 
 fn conversation_message_to_genai(message: &DomainConversationMessage) -> GenaiChatMessage {
     let rendered = message.rendered_text();
     match message.role.as_str() {
         "system" | "developer" => GenaiChatMessage::system(rendered),
-        "assistant" => GenaiChatMessage::assistant(rendered),
+        "assistant" if message.tool_calls.is_empty() => GenaiChatMessage::assistant(rendered),
+        "assistant" => {
+            let mut parts = Vec::new();
+            if !message.content.rendered_text().trim().is_empty() {
+                parts.push(GenaiContentPart::Text(message.content.rendered_text()));
+            }
+            parts.extend(
+                message
+                    .tool_calls
+                    .iter()
+                    .map(conversation_tool_call_to_genai)
+                    .map(GenaiContentPart::ToolCall),
+            );
+            GenaiChatMessage::assistant(GenaiMessageContent::from_parts(parts))
+        }
+        "tool" => match message.tool_call_id.as_deref().filter(|value| !value.is_empty()) {
+            Some(tool_call_id) => {
+                GenaiChatMessage::from(GenaiToolResponse::new(tool_call_id, rendered))
+            }
+            None => GenaiChatMessage::tool(rendered),
+        },
         _ => GenaiChatMessage::user(rendered),
+    }
+}
+
+fn function_tool_to_genai(tool: &slab_proto::openai::FunctionTool) -> GenaiTool {
+    let mut genai_tool = GenaiTool::new(tool.name.clone());
+    if let Some(description) = tool.description.as_ref().and_then(|value| value.as_deref()) {
+        genai_tool = genai_tool.with_description(description);
+    }
+    if let Some(parameters) = tool.parameters.as_ref() {
+        genai_tool = genai_tool.with_schema(Value::Object(
+            parameters.iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
+        ));
+    }
+    if let Some(strict) = tool.strict {
+        genai_tool = genai_tool.with_strict(strict);
+    }
+    genai_tool
+}
+
+fn conversation_tool_call_to_genai(tool_call: &ConversationToolCall) -> GenaiToolCall {
+    GenaiToolCall {
+        call_id: tool_call
+            .id
+            .clone()
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| Uuid::new_v4().to_string()),
+        fn_name: tool_call.function.name.clone(),
+        fn_arguments: serde_json::from_str(&tool_call.function.arguments)
+            .unwrap_or_else(|_| json!({})),
+        thought_signatures: None,
+    }
+}
+
+fn genai_tool_call_to_conversation(tool_call: &GenaiToolCall) -> ConversationToolCall {
+    ConversationToolCall {
+        id: Some(tool_call.call_id.clone()).filter(|value| !value.is_empty()),
+        r#type: "function".to_owned(),
+        function: ConversationToolFunction {
+            name: tool_call.fn_name.clone(),
+            arguments: serde_json::to_string(&tool_call.fn_arguments)
+                .unwrap_or_else(|_| "{}".to_owned()),
+        },
     }
 }
 
@@ -500,6 +574,9 @@ fn build_genai_chat_options(
         structured_output_to_genai_response_format(config.structured_output.as_ref())
     {
         options = options.with_response_format(response_format);
+    }
+    if !config.tools.is_empty() {
+        options = options.with_capture_tool_calls(true);
     }
 
     if capture_raw_body { options.with_capture_raw_body(true) } else { options }
@@ -547,7 +624,7 @@ async fn cloud_chat_completion(
     }
 
     let client = build_genai_client_for_target(target)?;
-    let request = build_genai_chat_request(messages);
+    let request = build_genai_chat_request(messages, &config.tools);
     let options = build_genai_chat_options(&config, trace_http);
 
     let response =
@@ -562,12 +639,23 @@ async fn cloud_chat_completion(
         log_cloud_http_response_success(target, trace, response.captured_raw_body.as_ref());
     }
 
-    let text = response.first_text().map(str::to_owned).ok_or_else(|| {
-        AppCoreError::Internal("cloud response has empty assistant content".to_owned())
-    })?;
+    let tool_calls =
+        response.tool_calls().into_iter().map(genai_tool_call_to_conversation).collect::<Vec<_>>();
+    let text = response.first_text().map(str::to_owned).unwrap_or_default();
+    if text.is_empty() && tool_calls.is_empty() {
+        return Err(AppCoreError::Internal(
+            "cloud response has empty assistant content".to_owned(),
+        ));
+    }
     let usage = super::build_estimated_usage(&render_messages_for_usage(messages), &text, None);
     let finish_reason =
-        super::finish_reason_from_token_budget(usage.completion_tokens, config.max_tokens);
+        response.stop_reason.as_ref().map(ToString::to_string).unwrap_or_else(|| {
+            if tool_calls.is_empty() {
+                super::finish_reason_from_token_budget(usage.completion_tokens, config.max_tokens)
+            } else {
+                "tool_calls".to_owned()
+            }
+        });
     let mut metadata = JsonOptions::default();
     if let Some(reasoning) =
         extract_reasoning_content_from_raw_body(response.captured_raw_body.as_ref())
@@ -581,6 +669,7 @@ async fn cloud_chat_completion(
         tokens_used: Some(usage.completion_tokens),
         usage: Some(usage),
         metadata,
+        tool_calls,
     })
 }
 
@@ -608,7 +697,7 @@ async fn cloud_chat_stream(
     }
 
     let client = build_genai_client_for_target(target)?;
-    let request = build_genai_chat_request(messages);
+    let request = build_genai_chat_request(messages, &config.tools);
     let options = build_genai_chat_options(&config, false);
     let response = client
         .exec_chat_stream(&target.remote_model, request, Some(&options))
@@ -739,8 +828,37 @@ fn build_cloud_http_request_body(
     {
         payload["response_format"] = response_format;
     }
+    if !config.tools.is_empty() {
+        payload["tools"] = Value::Array(
+            config.tools.iter().map(function_tool_to_openai_chat_tool).collect::<Vec<_>>(),
+        );
+    }
 
     payload
+}
+
+fn function_tool_to_openai_chat_tool(tool: &slab_proto::openai::FunctionTool) -> Value {
+    let mut function = serde_json::Map::new();
+    function.insert("name".to_owned(), Value::String(tool.name.clone()));
+    if let Some(description) = tool.description.as_ref().and_then(|value| value.as_deref()) {
+        function.insert("description".to_owned(), Value::String(description.to_owned()));
+    }
+    if let Some(parameters) = tool.parameters.as_ref() {
+        function.insert(
+            "parameters".to_owned(),
+            Value::Object(
+                parameters.iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
+            ),
+        );
+    }
+    if let Some(strict) = tool.strict {
+        function.insert("strict".to_owned(), Value::Bool(strict));
+    }
+
+    json!({
+        "type": "function",
+        "function": function,
+    })
 }
 
 fn structured_output_to_genai_response_format(
@@ -1052,6 +1170,7 @@ mod test {
         StructuredOutput, StructuredOutputJsonSchema,
     };
     use serde_json::json;
+    use slab_proto::openai::{FunctionTool, FunctionToolType};
 
     #[test]
     fn cloud_option_id_has_prefix() {
@@ -1112,6 +1231,7 @@ mod test {
                 })),
                 reasoning_effort: None,
                 verbosity: None,
+                tools: Vec::new(),
                 stream: false,
                 include_usage: false,
             },
@@ -1124,6 +1244,30 @@ mod test {
             payload["response_format"]["json_schema"]["schema"]["additionalProperties"],
             false
         );
+    }
+
+    #[test]
+    fn cloud_http_request_body_includes_openai_function_tools() {
+        let payload = build_cloud_http_request_body(
+            &make_target(),
+            &[make_message("user", "hello")],
+            &CloudChatRequestConfig {
+                max_tokens: 64,
+                temperature: 0.7,
+                top_p: None,
+                structured_output: None,
+                reasoning_effort: None,
+                verbosity: None,
+                tools: vec![make_function_tool()],
+                stream: false,
+                include_usage: false,
+            },
+        );
+
+        assert_eq!(payload["tools"][0]["type"], "function");
+        assert_eq!(payload["tools"][0]["function"]["name"], "web_search");
+        assert_eq!(payload["tools"][0]["function"]["strict"], true);
+        assert_eq!(payload["tools"][0]["function"]["parameters"]["type"], "object");
     }
 
     fn make_target() -> ResolvedCloudModel {
@@ -1144,5 +1288,16 @@ mod test {
             tool_call_id: None,
             tool_calls: Vec::new(),
         }
+    }
+
+    fn make_function_tool() -> FunctionTool {
+        let mut tool = FunctionTool::new(
+            FunctionToolType::Function,
+            "web_search".to_owned(),
+            Some([("type".to_owned(), json!("object"))].into_iter().collect()),
+            Some(true),
+        );
+        tool.description = Some(Some("Search the web".to_owned()));
+        tool
     }
 }

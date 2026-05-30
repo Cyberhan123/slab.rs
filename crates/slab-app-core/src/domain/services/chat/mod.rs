@@ -395,7 +395,7 @@ fn text_response_has_visible_output(response: &TextGenerationResponse) -> bool {
         .and_then(Value::as_str)
         .is_some_and(|value| !value.trim().is_empty());
 
-    has_content || has_reasoning
+    has_content || has_reasoning || !response.tool_calls.is_empty()
 }
 
 fn with_stream_session_persistence(
@@ -713,6 +713,7 @@ async fn create_chat_completion_with_state(
                     structured_output: command.cloud.structured_output.clone(),
                     reasoning_effort: command.cloud.reasoning_effort,
                     verbosity: command.cloud.verbosity,
+                    tools: command.tools.clone(),
                     stream: true,
                     include_usage: command.common.stream_options.include_usage,
                 },
@@ -736,6 +737,7 @@ async fn create_chat_completion_with_state(
                     verbosity: command.cloud.verbosity,
                     gbnf: command.local.gbnf.clone(),
                     structured_output: command.local.structured_output.clone(),
+                    tools: command.tools.clone(),
                     stop: command.common.stop.clone(),
                     stream: true,
                     include_usage: command.common.stream_options.include_usage,
@@ -793,6 +795,7 @@ async fn create_chat_completion_with_state(
                     structured_output: command.cloud.structured_output.clone(),
                     reasoning_effort: command.cloud.reasoning_effort,
                     verbosity: command.cloud.verbosity,
+                    tools: command.tools.clone(),
                     stream: false,
                     include_usage: false,
                 },
@@ -816,6 +819,7 @@ async fn create_chat_completion_with_state(
                     verbosity: command.cloud.verbosity,
                     gbnf: command.local.gbnf.clone(),
                     structured_output: command.local.structured_output.clone(),
+                    tools: command.tools.clone(),
                     stop: command.common.stop.clone(),
                     stream: false,
                     include_usage: false,
@@ -919,6 +923,7 @@ async fn create_text_completion_with_state(
                     structured_output: command.cloud.structured_output.clone(),
                     reasoning_effort: None,
                     verbosity: None,
+                    tools: Vec::new(),
                     stream: false,
                     include_usage: false,
                 },
@@ -1058,6 +1063,7 @@ mod test {
                 tool_call_id: None,
                 tool_calls: Vec::new(),
             }],
+            tools: Vec::new(),
             continue_generation: false,
             common: crate::domain::models::CommonChatParams {
                 max_tokens: None,

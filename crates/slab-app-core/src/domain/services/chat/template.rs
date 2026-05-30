@@ -13,14 +13,16 @@ pub(super) fn build_prompt(
     messages: &[DomainConversationMessage],
     chat_template_source: Option<&str>,
     reasoning_effort: Option<ChatReasoningEffort>,
+    tools: &[slab_proto::openai::FunctionTool],
 ) -> Result<String, AppCoreError> {
     match chat_template_source.map(str::trim).filter(|value| !value.is_empty()) {
         Some(source) => render_minijinja_template(
             source,
             messages,
             reasoning_effort.map(|value| !matches!(value, ChatReasoningEffort::None)),
+            tools,
         ),
-        None => Ok(render_raw_chat(messages)),
+        None => Ok(render_raw_chat(messages, tools)),
     }
 }
 
@@ -74,6 +76,7 @@ fn render_minijinja_template(
     source: &str,
     messages: &[DomainConversationMessage],
     enable_thinking: Option<bool>,
+    tools: &[slab_proto::openai::FunctionTool],
 ) -> Result<String, AppCoreError> {
     let mut env = Environment::new();
     env.set_undefined_behavior(UndefinedBehavior::Strict);
@@ -109,6 +112,7 @@ fn render_minijinja_template(
         AppCoreError::BadRequest(format!("configured chat_template failed to load: {error}"))
     })?;
     let eos_token = infer_eos_token(source);
+    let template_tools = serde_json::to_value(tools).unwrap_or_else(|_| Value::Array(Vec::new()));
 
     let render_result = match enable_thinking {
         Some(enable_thinking) => template.render(context! {
@@ -119,7 +123,7 @@ fn render_minijinja_template(
             eos_token => eos_token,
             unk_token => "",
             pad_token => "",
-            tools => Vec::<Value>::new(),
+            tools => template_tools.clone(),
             documents => Vec::<Value>::new(),
             enable_thinking => enable_thinking,
         }),
@@ -131,7 +135,7 @@ fn render_minijinja_template(
             eos_token => eos_token,
             unk_token => "",
             pad_token => "",
-            tools => Vec::<Value>::new(),
+            tools => template_tools,
             documents => Vec::<Value>::new(),
         }),
     };
@@ -207,13 +211,32 @@ fn normalize_template_message(message: &DomainConversationMessage) -> Value {
         object.insert("tool_call_id".to_owned(), Value::String(tool_call_id.clone()));
     }
     if !message.tool_calls.is_empty() {
-        object.insert(
-            "tool_calls".to_owned(),
-            serde_json::to_value(&message.tool_calls).unwrap_or_else(|_| Value::Array(Vec::new())),
-        );
+        object.insert("tool_calls".to_owned(), normalize_template_tool_calls(&message.tool_calls));
     }
 
     Value::Object(object)
+}
+
+fn normalize_template_tool_calls(tool_calls: &[slab_types::chat::ConversationToolCall]) -> Value {
+    let mut value = serde_json::to_value(tool_calls).unwrap_or_else(|_| Value::Array(Vec::new()));
+    let Some(calls) = value.as_array_mut() else {
+        return Value::Array(Vec::new());
+    };
+
+    for call in calls {
+        let Some(arguments) = call.pointer_mut("/function/arguments") else {
+            continue;
+        };
+        let Some(text) = arguments.as_str() else {
+            continue;
+        };
+        *arguments = serde_json::from_str::<Value>(text)
+            .ok()
+            .filter(Value::is_object)
+            .unwrap_or_else(|| Value::Object(Map::new()));
+    }
+
+    value
 }
 
 fn normalize_assistant_content(raw: &str) -> Option<NormalizedAssistantContent> {
@@ -241,12 +264,20 @@ fn render_strftime_now(format: &str) -> Option<String> {
     Some(datetime.format(format).to_string())
 }
 
-fn render_raw_chat(messages: &[DomainConversationMessage]) -> String {
+fn render_raw_chat(
+    messages: &[DomainConversationMessage],
+    tools: &[slab_proto::openai::FunctionTool],
+) -> String {
     let (history, assistant_prefill) = split_assistant_prefill(messages);
-    let mut lines: Vec<String> = history
-        .iter()
-        .map(|message| format!("{}: {}", display_role(&message.role), message.rendered_text()))
-        .collect();
+    let mut lines: Vec<String> = Vec::new();
+    if !tools.is_empty() {
+        lines.push(format!("System: {}", raw_tool_prompt(tools)));
+    }
+    lines.extend(
+        history
+            .iter()
+            .map(|message| format!("{}: {}", display_role(&message.role), message.rendered_text())),
+    );
     let mut assistant = String::from("Assistant:");
     if let Some(prefill) = assistant_prefill.as_deref()
         && !prefill.is_empty()
@@ -256,6 +287,17 @@ fn render_raw_chat(messages: &[DomainConversationMessage]) -> String {
     }
     lines.push(assistant);
     lines.join("\n")
+}
+
+fn raw_tool_prompt(tools: &[slab_proto::openai::FunctionTool]) -> String {
+    let tools_json = serde_json::to_string_pretty(tools).unwrap_or_else(|_| "[]".to_owned());
+    format!(
+        "Tools are available as OpenAI Responses function tools.\n\
+Available tools:\n{tools_json}\n\
+When a tool is required, respond with one JSON object only and no markdown:\n\
+{{\"output\":[{{\"type\":\"function_call\",\"call_id\":\"call_<unique>\",\"name\":\"tool_name\",\"arguments\":\"{{\\\"arg\\\":\\\"value\\\"}}\"}}]}}\n\
+The `arguments` field must be a JSON string. If no tool is needed, answer normally."
+    )
 }
 
 fn split_assistant_prefill(
@@ -286,6 +328,8 @@ mod tests {
         ChatReasoningEffort, ConversationMessage as DomainConversationMessage,
         ConversationMessageContent,
     };
+    use serde_json::Value;
+    use slab_proto::openai::{FunctionTool, FunctionToolType};
 
     const QWEN35_TEMPLATE: &str =
         include_str!("../../../../../../models/llama/Qwen3.5-9B/configs/chat_template.jinja");
@@ -300,10 +344,21 @@ mod tests {
         }
     }
 
+    fn echo_tool() -> FunctionTool {
+        let mut tool = FunctionTool::new(
+            FunctionToolType::Function,
+            "echo".to_owned(),
+            Some([("type".to_owned(), Value::String("object".to_owned()))].into_iter().collect()),
+            Some(true),
+        );
+        tool.description = Some(Some("Echo a message".to_owned()));
+        tool
+    }
+
     #[test]
     fn raw_chat_fallback_transcribes_messages_without_heuristics() {
         let rendered =
-            build_prompt(&[message("system", "hi"), message("user", "hello")], None, None)
+            build_prompt(&[message("system", "hi"), message("user", "hello")], None, None, &[])
                 .expect("raw fallback prompt");
 
         assert_eq!(rendered, "System: hi\nUser: hello\nAssistant:");
@@ -316,6 +371,7 @@ mod tests {
             &[message("system", "hi"), message("user", "hello")],
             Some(template),
             None,
+            &[],
         )
         .expect("template prompt");
 
@@ -329,6 +385,7 @@ mod tests {
             &[message("user", "hello"), message("assistant", "partial")],
             Some(template),
             None,
+            &[],
         )
         .expect("template prompt");
 
@@ -345,6 +402,7 @@ mod tests {
             )],
             Some(template),
             None,
+            &[],
         )
         .expect("normalized template prompt");
 
@@ -357,6 +415,7 @@ mod tests {
             &[message("user", "hello")],
             Some("{% if enable_thinking is defined %}defined{% else %}undefined{% endif %}"),
             None,
+            &[],
         )
         .expect("template prompt");
 
@@ -371,6 +430,7 @@ mod tests {
                 "{% if add_generation_prompt %}{% if enable_thinking is defined and not enable_thinking %}<think></think>{% else %}<think>{% endif %}{% endif %}",
             ),
             Some(ChatReasoningEffort::None),
+            &[],
         )
         .expect("template prompt");
 
@@ -379,7 +439,7 @@ mod tests {
 
     #[test]
     fn qwen35_template_keeps_auto_reasoning_prompt_open() {
-        let rendered = build_prompt(&[message("user", "hello")], Some(QWEN35_TEMPLATE), None)
+        let rendered = build_prompt(&[message("user", "hello")], Some(QWEN35_TEMPLATE), None, &[])
             .expect("qwen3.5 prompt");
 
         assert!(rendered.ends_with("<|im_start|>assistant\n<think>\n"));
@@ -391,6 +451,7 @@ mod tests {
             &[message("user", "hello")],
             Some(QWEN35_TEMPLATE),
             Some(ChatReasoningEffort::Medium),
+            &[],
         )
         .expect("qwen3.5 prompt");
 
@@ -403,6 +464,7 @@ mod tests {
             &[message("user", "hello")],
             Some(QWEN35_TEMPLATE),
             Some(ChatReasoningEffort::None),
+            &[],
         )
         .expect("qwen3.5 prompt");
 
@@ -410,9 +472,22 @@ mod tests {
     }
 
     #[test]
+    fn qwen35_template_receives_function_tools() {
+        let tools = vec![echo_tool()];
+        let rendered =
+            build_prompt(&[message("user", "hello")], Some(QWEN35_TEMPLATE), None, &tools)
+                .expect("qwen3.5 prompt");
+
+        assert!(rendered.contains("<tools>"));
+        assert!(rendered.contains(r#""type":"function""#));
+        assert!(rendered.contains(r#""name":"echo""#));
+        assert!(rendered.contains("<tool_call>"));
+    }
+
+    #[test]
     fn minijinja_template_infers_chatml_eos_token() {
         let rendered =
-            build_prompt(&[message("user", "hello")], Some("{{ eos_token }}<|im_end|>"), None)
+            build_prompt(&[message("user", "hello")], Some("{{ eos_token }}<|im_end|>"), None, &[])
                 .expect("template prompt");
 
         assert_eq!(rendered, "<|im_end|><|im_end|>");

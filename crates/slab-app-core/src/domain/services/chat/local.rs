@@ -277,6 +277,7 @@ pub(super) struct LocalChatRequestConfig {
     pub(super) verbosity: Option<ChatVerbosity>,
     pub(super) gbnf: Option<String>,
     pub(super) structured_output: Option<StructuredOutput>,
+    pub(super) tools: Vec<slab_proto::openai::FunctionTool>,
     pub(super) stop: Vec<String>,
     pub(super) stream: bool,
     pub(super) include_usage: bool,
@@ -420,6 +421,7 @@ pub(super) async fn create_chat_completion(
         &request_messages,
         prompt_profile.chat_template_source.as_deref(),
         config.reasoning_effort,
+        &config.tools,
     )?;
     let effective_stop = merge_stop_sequences(
         &config.stop,
@@ -807,6 +809,7 @@ fn text_response_from_runtime(response: RuntimeTextGenerationResponse) -> TextGe
         tokens_used: response.tokens_used,
         usage: response.usage.map(text_usage_from_runtime),
         metadata: response.metadata,
+        tool_calls: Vec::new(),
     }
 }
 
