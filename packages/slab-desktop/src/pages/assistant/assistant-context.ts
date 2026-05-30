@@ -16,7 +16,6 @@ export {
   type AssistantRuntimePresets,
   type AssistantThought,
   type AssistantUiMessage,
-  type SessionMessageResponse,
 } from './lib/assistant-types'
 
 export {

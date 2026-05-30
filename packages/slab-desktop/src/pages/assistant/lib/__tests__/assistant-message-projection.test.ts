@@ -1,31 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { projectAgentThreadMessages, projectSessionMessages } from '../assistant-message-projection'
+import { projectAgentThreadMessages } from '../assistant-message-projection'
 
 describe('assistant message projection', () => {
-  it('projects legacy session messages', () => {
-    expect(
-      projectSessionMessages([
-        {
-          content: 'hello',
-          created_at: '2026-01-01T00:00:00Z',
-          id: 'msg-1',
-          role: 'user',
-          session_id: 'session-1',
-        },
-      ])
-    ).toEqual([
-      {
-        id: 'msg-1',
-        message: {
-          content: 'hello',
-          role: 'user',
-        },
-        status: 'success',
-      },
-    ])
-  })
-
   it('projects persisted agent thread messages and hides tool-only turns', () => {
     expect(
       projectAgentThreadMessages([

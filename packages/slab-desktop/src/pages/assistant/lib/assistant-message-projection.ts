@@ -3,20 +3,8 @@ import type {
   AgentThreadMessageResponse,
   AssistantMessageRecord,
   AssistantThought,
-  SessionMessageResponse,
 } from './assistant-types'
-import { toStoredSessionAssistantMessage } from './assistant-history'
 import { stripTrailingAssistantTurnArtifacts } from './assistant-message-utils'
-
-export function projectSessionMessages(
-  messages: SessionMessageResponse[] | undefined
-): AssistantMessageRecord[] {
-  return (messages ?? []).map((message) => ({
-    id: message.id,
-    message: toStoredSessionAssistantMessage(message.role, message.content),
-    status: 'success',
-  }))
-}
 
 function finalizePendingThoughts(
   thoughts: AssistantThought[],

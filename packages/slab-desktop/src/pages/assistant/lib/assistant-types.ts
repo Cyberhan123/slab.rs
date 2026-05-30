@@ -4,7 +4,6 @@ import type { components } from '@slab/api/v1'
 
 export type AssistantApiError = components['schemas']['OpenAiError']
 export type AssistantApiErrorResponse = components['schemas']['OpenAiErrorResponse']
-export type SessionMessageResponse = components['schemas']['MessageResponse']
 export type AgentStatus = components['schemas']['AgentStatusValue']
 export type AgentThreadResponse = components['schemas']['AgentThreadResponse']
 export type AgentThreadMessageResponse = components['schemas']['AgentThreadMessageResponse']

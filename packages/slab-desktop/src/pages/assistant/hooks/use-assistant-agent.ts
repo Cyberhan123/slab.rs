@@ -23,10 +23,7 @@ import {
   parseAssistantAgentStreamEvent,
 } from '../lib/assistant-agent-events'
 import { withAssistantMessageReasoningContent } from '../lib/assistant-message-utils'
-import {
-  projectAgentThreadMessages,
-  projectSessionMessages,
-} from '../lib/assistant-message-projection'
+import { projectAgentThreadMessages } from '../lib/assistant-message-projection'
 
 type PendingApproval = {
   callId: string
@@ -222,29 +219,10 @@ export function useAssistantAgent({
     async () => {}
   )
 
-  const {
-    data: sessionMessages,
-    isLoading: isSessionMessagesLoading,
-  } = api.useQuery(
-    'get',
-    '/v1/sessions/{id}/messages',
-    {
-      params: {
-        path: {
-          id: resolvedSessionId,
-        },
-      },
-    },
-    {
-      enabled: canLoadSession && restoreComplete && !threadId,
-      retry: false,
-    }
-  )
-
   const responsesMutation = api.useMutation('post', '/v1/agents/responses')
 
   const isRequesting = isBusyStatus(status) || responsesMutation.isPending
-  const isHistoryLoading = !restoreComplete || (!threadId && isSessionMessagesLoading)
+  const isHistoryLoading = !restoreComplete
 
   useEffect(() => {
     threadIdRef.current = threadId
@@ -733,15 +711,6 @@ export function useAssistantAgent({
       setEventsConnected(false)
     }
   }, [canLoadSession, resolvedSessionId])
-
-  useEffect(() => {
-    if (isRequesting || isHistoryLoading || threadId) {
-      return
-    }
-
-    setMessages(projectSessionMessages(sessionMessages))
-    setStatus(null)
-  }, [isHistoryLoading, isRequesting, sessionMessages, threadId])
 
   const handleSubmit = useCallback(
     async (value: string) => {
