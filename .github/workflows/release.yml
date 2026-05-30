@@ -91,6 +91,35 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
+      - name: Prepare FFmpeg SDK (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $root = "${{ github.workspace }}"
+          $sdkRoot = Join-Path $root ".slab/ffmpeg-sdk/windows-x64"
+          $sdkDir = Join-Path $sdkRoot "ffmpeg-n7.1-latest-win64-gpl-shared-7.1"
+          $ffmpegExe = Join-Path $sdkDir "bin/ffmpeg.exe"
+
+          if (-not (Test-Path $ffmpegExe)) {
+            New-Item -ItemType Directory -Force -Path $sdkRoot | Out-Null
+            $zipPath = Join-Path $sdkRoot "ffmpeg-n7.1-shared.zip"
+            Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-win64-gpl-shared-7.1.zip" -OutFile $zipPath
+            Expand-Archive -LiteralPath $zipPath -DestinationPath $sdkRoot -Force
+          }
+
+          "FFMPEG_DIR=$sdkDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "$sdkDir/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install FFmpeg (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew update
+          brew install pkg-config ffmpeg
+          FF_PREFIX="$(brew --prefix ffmpeg)"
+          echo "PKG_CONFIG_PATH=${FF_PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+          echo "PATH=${FF_PREFIX}/bin:${PATH}" >> "$GITHUB_ENV"
+
       - name: Build release via cargo-make
         run: cargo make release
         env:

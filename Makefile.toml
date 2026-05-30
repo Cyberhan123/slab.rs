@@ -71,39 +71,147 @@ args = ["test", "--workspace"]
 
 [tasks.build-server-dev]
 workspace = false
+script_runner = "@duckscript"
+script = '''
+windows = is_windows
+
+if ${windows}
+    cm_run_task build-server-dev-windows
+else
+    cm_run_task build-server-dev-default
+end
+'''
+
+[tasks.build-server-dev-default]
+workspace = false
 command = "cargo"
 args = ["build", "-p", "slab-server"]
-env = { FFMPEG_DIR = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1" }
+
+[tasks.build-server-dev-windows]
+workspace = false
+command = "cargo"
+args = ["build", "-p", "slab-server"]
+env = { PKG_CONFIG_PATH = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1/lib/pkgconfig", PATH = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1/bin;C:/Program Files/Git/bin;${PATH}" }
 
 [tasks.build-runtime-dev]
 workspace = false
+script_runner = "@duckscript"
+script = '''
+windows = is_windows
+
+if ${windows}
+    cm_run_task build-runtime-dev-windows
+else
+    cm_run_task build-runtime-dev-default
+end
+'''
+
+[tasks.build-runtime-dev-default]
+workspace = false
 command = "cargo"
 args = ["build", "-p", "slab-runtime"]
-env = { FFMPEG_DIR = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1" }
+
+[tasks.build-runtime-dev-windows]
+workspace = false
+command = "cargo"
+args = ["build", "-p", "slab-runtime"]
+env = { PKG_CONFIG_PATH = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1/lib/pkgconfig", PATH = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1/bin;C:/Program Files/Git/bin;${PATH}" }
 
 [tasks.build-js-runtime-dev]
 workspace = false
+script_runner = "@duckscript"
+script = '''
+windows = is_windows
+
+if ${windows}
+    cm_run_task build-js-runtime-dev-windows
+else
+    cm_run_task build-js-runtime-dev-default
+end
+'''
+
+[tasks.build-js-runtime-dev-default]
+workspace = false
 command = "cargo"
 args = ["build", "-p", "slab-js-runtime"]
-env = { FFMPEG_DIR = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1" }
+
+[tasks.build-js-runtime-dev-windows]
+workspace = false
+command = "cargo"
+args = ["build", "-p", "slab-js-runtime"]
+env = { PKG_CONFIG_PATH = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1/lib/pkgconfig", PATH = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1/bin;C:/Program Files/Git/bin;${PATH}" }
 
 [tasks.build-server-release]
 workspace = false
+script_runner = "@duckscript"
+script = '''
+windows = is_windows
+
+if ${windows}
+    cm_run_task build-server-release-windows
+else
+    cm_run_task build-server-release-default
+end
+'''
+
+[tasks.build-server-release-default]
+workspace = false
 command = "cargo"
 args = ["build", "--release", "-p", "slab-server"]
-env = { FFMPEG_DIR = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1" }
+
+[tasks.build-server-release-windows]
+workspace = false
+command = "cargo"
+args = ["build", "--release", "-p", "slab-server"]
+env = { PKG_CONFIG_PATH = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1/lib/pkgconfig", PATH = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1/bin;C:/Program Files/Git/bin;${PATH}" }
 
 [tasks.build-runtime-release]
 workspace = false
+script_runner = "@duckscript"
+script = '''
+windows = is_windows
+
+if ${windows}
+    cm_run_task build-runtime-release-windows
+else
+    cm_run_task build-runtime-release-default
+end
+'''
+
+[tasks.build-runtime-release-default]
+workspace = false
 command = "cargo"
 args = ["build", "--release", "-p", "slab-runtime"]
-env = { FFMPEG_DIR = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1" }
+
+[tasks.build-runtime-release-windows]
+workspace = false
+command = "cargo"
+args = ["build", "--release", "-p", "slab-runtime"]
+env = { PKG_CONFIG_PATH = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1/lib/pkgconfig", PATH = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1/bin;C:/Program Files/Git/bin;${PATH}" }
 
 [tasks.build-js-runtime-release]
 workspace = false
+script_runner = "@duckscript"
+script = '''
+windows = is_windows
+
+if ${windows}
+    cm_run_task build-js-runtime-release-windows
+else
+    cm_run_task build-js-runtime-release-default
+end
+'''
+
+[tasks.build-js-runtime-release-default]
+workspace = false
 command = "cargo"
 args = ["build", "--release", "-p", "slab-js-runtime"]
-env = { FFMPEG_DIR = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1" }
+
+[tasks.build-js-runtime-release-windows]
+workspace = false
+command = "cargo"
+args = ["build", "--release", "-p", "slab-js-runtime"]
+env = { PKG_CONFIG_PATH = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1/lib/pkgconfig", PATH = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1/bin;C:/Program Files/Git/bin;${PATH}" }
 
 [tasks.run-tauri]
 workspace = false
@@ -135,7 +243,7 @@ args = [
     "src-tauri/tauri.windows.dev.conf.json",
 ]
 cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
-env = { SLAB_SKIP_VENDOR_RUNTIME_SYNC = "1", SLAB_SKIP_BUNDLED_PLUGIN_SYNC = "1", FFMPEG_DIR = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1", PATH = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1/bin;${PATH}" }
+env = { SLAB_SKIP_VENDOR_RUNTIME_SYNC = "1", SLAB_SKIP_TAURI_SIDECAR_SYNC = "1", SLAB_SKIP_BUNDLED_PLUGIN_SYNC = "1", PKG_CONFIG_PATH = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1/lib/pkgconfig", PATH = "${CARGO_MAKE_WORKING_DIRECTORY}/.slab/ffmpeg-sdk/windows-x64/ffmpeg-n7.1-latest-win64-gpl-shared-7.1/bin;C:/Program Files/Git/bin;${PATH}" }
 
 [tasks.build-plugin-packs]
 workspace = false

@@ -1,9 +1,4 @@
-use std::process::Stdio;
-use std::sync::OnceLock;
-
-use regex::Regex;
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncReadExt;
 use tracing::{info, warn};
 
 use crate::context::worker_state::OperationContext;
@@ -13,12 +8,8 @@ use crate::domain::services::ffmpeg_next_audio::{supports_output_format, transco
 use crate::domain::services::ffmpeg_next_remux::{
     remux_media, supports_output_format as supports_remux_output_format,
 };
-use crate::domain::services::ffmpeg_runtime::{
-    ensure_dynamic_runtime_ready, resolve_ffmpeg_binary,
-};
+use crate::domain::services::ffmpeg_runtime::ensure_dynamic_runtime_ready;
 use crate::error::AppCoreError;
-
-const FFMPEG_PROGRESS_LOG_LIMIT: usize = 240;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct FfmpegConvertInputData {
@@ -88,17 +79,16 @@ impl FfmpegService {
                     let source_path = input.source_path;
                     let output_format = input.output_format;
                     let output_path = input.output_path.unwrap_or_else(|| {
-                            let base = std::path::Path::new(&source_path)
-                                .file_stem()
-                                .and_then(|stem| stem.to_str())
-                                .unwrap_or("output");
-                            std::env::temp_dir()
-                                .join(format!("{base}.{output_format}"))
-                                .to_string_lossy()
-                                .into_owned()
-                        });
+                        let base = std::path::Path::new(&source_path)
+                            .file_stem()
+                            .and_then(|stem| stem.to_str())
+                            .unwrap_or("output");
+                        std::env::temp_dir()
+                            .join(format!("{base}.{output_format}"))
+                            .to_string_lossy()
+                            .into_owned()
+                    });
 
-                    let ffmpeg_bin = resolve_ffmpeg_binary(None);
                     let mut progress = FfmpegProgressState::new(output_path.clone());
 
                     if let Err(error) = ensure_dynamic_runtime_ready() {
@@ -115,6 +105,25 @@ impl FfmpegService {
 
                     if let Err(error) = publish_ffmpeg_progress(&operation, &progress).await {
                         warn!(task_id = %operation_id, error = %error, "failed to publish initial ffmpeg progress");
+                    }
+
+                    let supported_format = supports_output_format(&output_format)
+                        || supports_remux_output_format(&output_format);
+                    if !supported_format {
+                        progress.push_log(format!(
+                            "unsupported output format '{output_format}' in static ffmpeg-next mode"
+                        ));
+                        let error = format!(
+                            "unsupported output format '{output_format}' for ffmpeg-next static mode"
+                        );
+                        let payload = progress.to_payload();
+                        if let Err(db_error) = operation
+                            .update_status(TaskStatus::Failed, Some(&payload), Some(&error))
+                            .await
+                        {
+                            warn!(task_id = %operation_id, error = %db_error, "failed to persist unsupported-format error");
+                        }
+                        return;
                     }
 
                     if supports_output_format(&output_format) {
@@ -137,16 +146,38 @@ impl FfmpegService {
                                 return;
                             }
                             Ok(Err(error)) => {
-                                progress.push_log(format!(
-                                    "ffmpeg-next audio conversion failed, falling back to ffmpeg binary: {error}"
-                                ));
+                                progress.push_log(format!("ffmpeg-next audio conversion failed: {error}"));
+                                let payload = progress.to_payload();
+                                let error_text = error.to_string();
+                                if let Err(db_error) = operation
+                                    .update_status(
+                                        TaskStatus::Failed,
+                                        Some(&payload),
+                                        Some(&error_text),
+                                    )
+                                    .await
+                                {
+                                    warn!(task_id = %operation_id, error = %db_error, "failed to persist ffmpeg-next conversion error");
+                                }
                             }
                             Err(error) => {
-                                progress.push_log(format!(
-                                    "ffmpeg-next audio conversion worker failed, falling back to ffmpeg binary: {error}"
-                                ));
+                                progress.push_log(format!("ffmpeg-next audio conversion worker failed: {error}"));
+                                let payload = progress.to_payload();
+                                let error_text = error.to_string();
+                                if let Err(db_error) = operation
+                                    .update_status(
+                                        TaskStatus::Failed,
+                                        Some(&payload),
+                                        Some(&error_text),
+                                    )
+                                    .await
+                                {
+                                    warn!(task_id = %operation_id, error = %db_error, "failed to persist ffmpeg-next worker error");
+                                }
                             }
                         }
+
+                        return;
                     }
 
                     if supports_remux_output_format(&output_format) {
@@ -169,118 +200,38 @@ impl FfmpegService {
                                 return;
                             }
                             Ok(Err(error)) => {
-                                progress.push_log(format!(
-                                    "ffmpeg-next remux failed, falling back to ffmpeg binary: {error}"
-                                ));
+                                progress.push_log(format!("ffmpeg-next remux failed: {error}"));
+                                let payload = progress.to_payload();
+                                let error_text = error.to_string();
+                                if let Err(db_error) = operation
+                                    .update_status(
+                                        TaskStatus::Failed,
+                                        Some(&payload),
+                                        Some(&error_text),
+                                    )
+                                    .await
+                                {
+                                    warn!(task_id = %operation_id, error = %db_error, "failed to persist ffmpeg-next remux error");
+                                }
                             }
                             Err(error) => {
-                                progress.push_log(format!(
-                                    "ffmpeg-next remux worker failed, falling back to ffmpeg binary: {error}"
-                                ));
-                            }
-                        }
-                    }
-
-                    let mut command = tokio::process::Command::new(&ffmpeg_bin);
-                    command
-                        .args(["-y", "-i", &source_path, "-f", &output_format, &output_path])
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::piped())
-                        .kill_on_drop(true);
-
-                    let spawn_result = command.spawn();
-
-                    let mut child = match spawn_result {
-                        Ok(child) => child,
-                        Err(error) => {
-                            progress.push_log(format!(
-                                "failed to spawn ffmpeg '{}': {error}",
-                                ffmpeg_bin.display()
-                            ));
-                            let payload = progress.to_payload();
-                            warn!(task_id = %operation_id, ffmpeg_bin = %ffmpeg_bin.display(), error = %error, "ffmpeg spawn failed");
-                            if let Err(db_error) = operation
-                                .update_status(TaskStatus::Failed, Some(&payload), Some(&error.to_string()))
-                                .await
-                            {
-                                warn!(task_id = %operation_id, error = %db_error, "failed to persist ffmpeg spawn error");
-                            }
-                            return;
-                        }
-                    };
-
-                    let stderr = child.stderr.take();
-                    if let Some(mut stderr) = stderr {
-                        let mut buffer = Vec::new();
-                        let mut chunk = [0_u8; 8192];
-                        loop {
-                            match stderr.read(&mut chunk).await {
-                                Ok(0) => break,
-                                Ok(bytes_read) => {
-                                    for byte in &chunk[..bytes_read] {
-                                        if *byte == b'\n' || *byte == b'\r' {
-                                            publish_ffmpeg_log_line(
-                                                &operation,
-                                                &mut progress,
-                                                &mut buffer,
-                                            )
-                                            .await;
-                                        } else {
-                                            buffer.push(*byte);
-                                        }
-                                    }
-                                }
-                                Err(error) => {
-                                    progress.push_log(format!("failed to read ffmpeg stderr: {error}"));
-                                    if let Err(db_error) =
-                                        publish_ffmpeg_progress(&operation, &progress).await
-                                    {
-                                        warn!(task_id = %operation_id, error = %db_error, "failed to publish ffmpeg stderr read error");
-                                    }
-                                    break;
+                                progress.push_log(format!("ffmpeg-next remux worker failed: {error}"));
+                                let payload = progress.to_payload();
+                                let error_text = error.to_string();
+                                if let Err(db_error) = operation
+                                    .update_status(
+                                        TaskStatus::Failed,
+                                        Some(&payload),
+                                        Some(&error_text),
+                                    )
+                                    .await
+                                {
+                                    warn!(task_id = %operation_id, error = %db_error, "failed to persist ffmpeg-next remux worker error");
                                 }
                             }
                         }
-                        publish_ffmpeg_log_line(&operation, &mut progress, &mut buffer).await;
-                    } else {
-                        progress.push_log("ffmpeg stderr pipe was not available".to_owned());
-                        if let Err(error) = publish_ffmpeg_progress(&operation, &progress).await {
-                            warn!(task_id = %operation_id, error = %error, "failed to publish ffmpeg stderr pipe warning");
-                        }
-                    }
 
-                    match child.wait().await {
-                        Ok(status) if status.success() => {
-                            progress.mark_complete();
-                            progress.push_log(format!("ffmpeg exited successfully with status {status}"));
-                            let result_json = progress.to_success_payload();
-                            if let Err(error) = operation.mark_succeeded(&result_json).await {
-                                warn!(task_id = %operation_id, error = %error, "failed to persist ffmpeg success");
-                            }
-                            info!(task_id = %operation_id, output_path = %output_path, "ffmpeg conversion succeeded");
-                        }
-                        Ok(status) => {
-                            let error = progress.failure_message(status.to_string());
-                            let payload = progress.to_payload();
-                            warn!(task_id = %operation_id, error = %error, "ffmpeg conversion failed");
-                            if let Err(db_error) = operation
-                                .update_status(TaskStatus::Failed, Some(&payload), Some(&error))
-                                .await
-                            {
-                                warn!(task_id = %operation_id, error = %db_error, "failed to persist ffmpeg error");
-                            }
-                        }
-                        Err(error) => {
-                            progress.push_log(format!("failed to wait for ffmpeg: {error}"));
-                            let payload = progress.to_payload();
-                            warn!(task_id = %operation_id, ffmpeg_bin = %ffmpeg_bin.display(), error = %error, "ffmpeg spawn failed");
-                            if let Err(db_error) = operation
-                                .update_status(TaskStatus::Failed, Some(&payload), Some(&error.to_string()))
-                                .await
-                            {
-                                warn!(task_id = %operation_id, error = %db_error, "failed to persist ffmpeg spawn error");
-                            }
-                        }
+                        return;
                     }
                 },
             )
@@ -294,7 +245,6 @@ impl FfmpegService {
 struct FfmpegProgressState {
     output_path: String,
     current_ms: u64,
-    duration_ms: Option<u64>,
     message: Option<String>,
     logs: Vec<String>,
 }
@@ -304,7 +254,6 @@ impl FfmpegProgressState {
         Self {
             output_path,
             current_ms: 0,
-            duration_ms: None,
             message: Some("Starting FFmpeg".to_owned()),
             logs: Vec::new(),
         }
@@ -316,31 +265,16 @@ impl FfmpegProgressState {
             return;
         }
 
-        if let Some(duration_ms) = parse_ffmpeg_duration_ms(&line) {
-            self.duration_ms = Some(duration_ms);
-        }
-        if let Some(current_ms) = parse_ffmpeg_time_ms(&line) {
-            self.current_ms = match self.duration_ms {
-                Some(total) => current_ms.min(total),
-                None => current_ms,
-            };
-        }
-
         self.message = Some(line.clone());
         self.logs.push(line);
-        if self.logs.len() > FFMPEG_PROGRESS_LOG_LIMIT {
-            let excess = self.logs.len() - FFMPEG_PROGRESS_LOG_LIMIT;
+        if self.logs.len() > 64 {
+            let excess = self.logs.len() - 64;
             self.logs.drain(0..excess);
         }
     }
 
     fn mark_complete(&mut self) {
-        if let Some(duration_ms) = self.duration_ms {
-            self.current_ms = duration_ms;
-        } else {
-            self.current_ms = self.current_ms.max(1);
-            self.duration_ms = Some(self.current_ms);
-        }
+        self.current_ms = 1;
         self.message = Some("FFmpeg conversion completed".to_owned());
     }
 
@@ -349,7 +283,7 @@ impl FfmpegProgressState {
             label: Some("FFmpeg audio extraction".to_owned()),
             message: self.message.clone(),
             current: self.current_ms,
-            total: self.duration_ms,
+            total: Some(1),
             unit: Some("ms".to_owned()),
             step: Some(1),
             step_count: Some(1),
@@ -369,38 +303,6 @@ impl FfmpegProgressState {
         })
         .unwrap_or_default()
     }
-
-    fn failure_message(&self, status: String) -> String {
-        let tail = self.logs.iter().rev().take(8).cloned().collect::<Vec<_>>();
-        if tail.is_empty() {
-            return format!("ffmpeg exited with status {status}");
-        }
-
-        let mut lines = tail;
-        lines.reverse();
-        format!("ffmpeg exited with status {status}: {}", lines.join("\n"))
-    }
-}
-
-async fn publish_ffmpeg_log_line(
-    operation: &OperationContext,
-    progress: &mut FfmpegProgressState,
-    buffer: &mut Vec<u8>,
-) {
-    if buffer.is_empty() {
-        return;
-    }
-
-    let line = String::from_utf8_lossy(buffer).trim().to_owned();
-    buffer.clear();
-    if line.is_empty() {
-        return;
-    }
-
-    progress.push_log(line);
-    if let Err(error) = publish_ffmpeg_progress(operation, progress).await {
-        warn!(task_id = %operation.id(), error = %error, "failed to publish ffmpeg progress");
-    }
 }
 
 async fn publish_ffmpeg_progress(
@@ -411,67 +313,8 @@ async fn publish_ffmpeg_progress(
     operation.update_status(TaskStatus::Running, Some(&payload), None).await
 }
 
-fn parse_ffmpeg_duration_ms(line: &str) -> Option<u64> {
-    let captures = ffmpeg_duration_regex().captures(line)?;
-    parse_ffmpeg_timestamp_captures(&captures)
-}
-
-fn parse_ffmpeg_time_ms(line: &str) -> Option<u64> {
-    let captures = ffmpeg_time_regex().captures(line)?;
-    parse_ffmpeg_timestamp_captures(&captures)
-}
-
-#[cfg(test)]
-fn parse_ffmpeg_timestamp_ms(value: &str) -> Option<u64> {
-    let captures = ffmpeg_timestamp_regex().captures(value.trim())?;
-    parse_ffmpeg_timestamp_captures(&captures)
-}
-
-fn parse_ffmpeg_timestamp_captures(captures: &regex::Captures<'_>) -> Option<u64> {
-    let hours = captures.get(1)?.as_str().parse::<u64>().ok()?;
-    let minutes = captures.get(2)?.as_str().parse::<u64>().ok()?;
-    let seconds = captures.get(3)?.as_str().parse::<f64>().ok()?;
-    if !seconds.is_finite() || seconds.is_sign_negative() {
-        return None;
-    }
-
-    Some(
-        hours
-            .saturating_mul(3_600_000)
-            .saturating_add(minutes.saturating_mul(60_000))
-            .saturating_add((seconds * 1_000.0).round().max(0.0) as u64),
-    )
-}
-
-fn ffmpeg_duration_regex() -> &'static Regex {
-    static REGEX: OnceLock<Regex> = OnceLock::new();
-    REGEX.get_or_init(|| {
-        Regex::new(r"Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)")
-            .expect("ffmpeg duration regex should be valid")
-    })
-}
-
-fn ffmpeg_time_regex() -> &'static Regex {
-    static REGEX: OnceLock<Regex> = OnceLock::new();
-    REGEX.get_or_init(|| {
-        Regex::new(r"(?:^|\s)time=(\d+):(\d{2}):(\d{2}(?:\.\d+)?)")
-            .expect("ffmpeg progress regex should be valid")
-    })
-}
-
-#[cfg(test)]
-fn ffmpeg_timestamp_regex() -> &'static Regex {
-    static REGEX: OnceLock<Regex> = OnceLock::new();
-    REGEX.get_or_init(|| {
-        Regex::new(r"^(\d+):(\d{2}):(\d{2}(?:\.\d+)?)$")
-            .expect("ffmpeg timestamp regex should be valid")
-    })
-}
-
 #[cfg(test)]
 mod test {
-    use super::{parse_ffmpeg_duration_ms, parse_ffmpeg_time_ms, parse_ffmpeg_timestamp_ms};
-
     #[test]
     fn output_path_defaults_to_temp_dir_when_missing() {
         let source_path = std::path::Path::new("/tmp/source.wav");
@@ -486,28 +329,5 @@ mod test {
             .into_owned();
 
         assert!(output_path.ends_with(".mp3"));
-    }
-
-    #[test]
-    fn parses_ffmpeg_timestamp() {
-        assert_eq!(parse_ffmpeg_timestamp_ms("01:02:03.45"), Some(3_723_450));
-    }
-
-    #[test]
-    fn parses_ffmpeg_duration_line() {
-        assert_eq!(
-            parse_ffmpeg_duration_ms("  Duration: 00:01:10.12, start: 0.000000, bitrate: 192 kb/s",),
-            Some(70_120),
-        );
-    }
-
-    #[test]
-    fn parses_ffmpeg_time_progress_line() {
-        assert_eq!(
-            parse_ffmpeg_time_ms(
-                "size=    256kB time=00:00:09.88 bitrate=212.4kbits/s speed=1.21x",
-            ),
-            Some(9_880),
-        );
     }
 }

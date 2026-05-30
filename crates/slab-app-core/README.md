@@ -21,6 +21,36 @@ Settings document ownership, PMID catalog behavior, settings file migration, hos
 
 SQLx migrations live in `migrations/`.
 
+## FFmpeg Runtime Notes
+
+`slab-app-core` now runs FFmpeg conversion through `ffmpeg-next` static/build mode only.
+The `/v1/ffmpeg/convert` path no longer falls back to invoking an external `ffmpeg` binary.
+
+Runtime binary resolution order is:
+
+1. `SLAB_FFMPEG_BIN`
+2. configured setup install directory
+3. `SLAB_FFMPEG_DIR`
+4. `FFMPEG_DIR`
+5. bundled `resources/libs`
+6. `PATH` (`ffmpeg`)
+
+Feature profiles:
+
+- `ffmpeg-next-runtime`: base integration hook (internal)
+- `ffmpeg-next-static`: static link mode via `ffmpeg-next/static` (default)
+- `ffmpeg-next-build`: static build-from-source mode via `ffmpeg-next/build`
+
+Example:
+
+```sh
+cargo build -p slab-app-core --no-default-features --features ffmpeg-next-static
+```
+
+```sh
+cargo build -p slab-app-core --no-default-features --features ffmpeg-next-build
+```
+
 ## Type
 
 Rust library crate.

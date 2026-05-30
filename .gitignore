@@ -57,3 +57,5 @@ setup.rpt
 ide-demo/
 
 .playwright-mcp
+
+vcpkg_installed/

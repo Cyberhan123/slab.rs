@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::process::Command;
 
 #[derive(Debug, Clone)]
 pub(crate) struct FfmpegRuntimeProbe {
@@ -38,19 +37,10 @@ pub(crate) fn resolve_ffmpeg_binary(configured_install_dir: Option<&str>) -> Pat
 pub(crate) fn probe_ffmpeg_runtime(configured_install_dir: Option<&str>) -> FfmpegRuntimeProbe {
     let binary = resolve_ffmpeg_binary(configured_install_dir);
 
-    // Probe the ffmpeg shared libraries first when ffmpeg-next integration is enabled.
-    let dynamic_runtime_ready = ffmpeg_dynamic_runtime_ready();
+    let installed = ffmpeg_dynamic_runtime_ready();
+    let version = installed.then_some("ffmpeg-next(static-runtime)".to_owned());
 
-    let command_output = Command::new(&binary).arg("-version").output();
-    let (command_ready, version) = match command_output {
-        Ok(output) if output.status.success() => {
-            let version = parse_version_line(&output.stdout);
-            (true, version)
-        }
-        _ => (false, None),
-    };
-
-    FfmpegRuntimeProbe { installed: dynamic_runtime_ready && command_ready, version, binary }
+    FfmpegRuntimeProbe { installed, version, binary }
 }
 
 pub(crate) fn ensure_dynamic_runtime_ready() -> Result<(), String> {
@@ -58,7 +48,7 @@ pub(crate) fn ensure_dynamic_runtime_ready() -> Result<(), String> {
         return Ok(());
     }
 
-    Err("ffmpeg-next failed to initialize dynamic libraries".to_owned())
+    Err("ffmpeg-next static runtime initialization failed".to_owned())
 }
 
 fn resolve_from_env_dir() -> Option<PathBuf> {
@@ -113,16 +103,6 @@ fn resolve_from_bundle_resources() -> Option<PathBuf> {
         .iter()
         .find(|candidate| candidate.exists())
         .and_then(|candidate| find_ffmpeg_binary(candidate.as_path()))
-}
-
-fn parse_version_line(stdout: &[u8]) -> Option<String> {
-    let text = String::from_utf8_lossy(stdout);
-    let first_line = text.lines().next()?.trim();
-    if first_line.is_empty() {
-        return None;
-    }
-
-    Some(first_line.to_owned())
 }
 
 #[cfg(feature = "ffmpeg-next-runtime")]

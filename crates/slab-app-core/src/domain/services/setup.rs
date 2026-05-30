@@ -20,7 +20,7 @@ use crate::domain::models::{
     AcceptedOperation, CompleteSetupCommand, ComponentStatus, EnvironmentStatus, TaskProgress,
     TaskStatus,
 };
-use crate::domain::services::ffmpeg_runtime::{probe_ffmpeg_runtime, resolve_ffmpeg_binary};
+use crate::domain::services::ffmpeg_runtime::probe_ffmpeg_runtime;
 use crate::error::AppCoreError;
 use crate::infra::db::repository::config::ConfigStore;
 use crate::infra::runtime::ManagedRuntimeHost;
@@ -417,11 +417,9 @@ impl SetupService {
                 return Ok(probe.binary);
             }
 
-            let binary = resolve_ffmpeg_binary(configured_dir.as_deref());
-            Err(AppCoreError::Internal(format!(
-                "ffmpeg runtime is unavailable; checked binary '{}' and dynamic libraries via ffmpeg-next",
-                binary.display()
-            )))
+            Err(AppCoreError::Internal(
+                "ffmpeg-next static runtime is unavailable".to_owned(),
+            ))
         })
         .await
         .map_err(|error| {
