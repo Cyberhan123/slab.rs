@@ -1,12 +1,11 @@
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::Utc;
 use serde_json::{Value, json};
+use slab_utils::fs::{AtomicWriteOptions, atomic_write_bytes_with_options};
 use tokio::sync::RwLock;
-use uuid::Uuid;
 
 use crate::SettingsDocument;
 
@@ -16,8 +15,6 @@ use crate::{ConfigError, SettingValue, UpdateSettingCommand, UpdateSettingOperat
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-#[cfg(windows)]
-use std::os::windows::ffi::OsStrExt;
 
 #[derive(Debug, Clone)]
 pub struct SettingsDocumentProvider {
@@ -233,121 +230,22 @@ fn write_settings_document_file(
 ) -> Result<(), ConfigError> {
     ensure_settings_parent_dir(path)?;
 
-    let parent = path.parent().ok_or_else(|| {
-        ConfigError::Internal(format!("settings path '{}' has no parent directory", path.display()))
-    })?;
-    let file_name = path.file_name().and_then(|name| name.to_str()).ok_or_else(|| {
-        ConfigError::Internal(format!("settings path '{}' has invalid file name", path.display()))
-    })?;
-
-    let temp_path = parent.join(format!(".{}.tmp-{}", file_name, Uuid::new_v4()));
     let mut payload = serde_json::to_vec_pretty(document).map_err(|error| {
         ConfigError::Internal(format!("failed to serialize settings file: {error}"))
     })?;
     payload.push(b'\n');
 
-    let write_result = (|| -> Result<(), ConfigError> {
-        let mut temp_file =
-            OpenOptions::new().create_new(true).write(true).open(&temp_path).map_err(|error| {
-                ConfigError::Internal(format!(
-                    "failed to create temp settings file '{}': {error}",
-                    temp_path.display()
-                ))
-            })?;
-
-        #[cfg(unix)]
-        {
-            let permissions = fs::Permissions::from_mode(0o600);
-            let _ = temp_file.set_permissions(permissions);
-        }
-
-        temp_file.write_all(&payload).map_err(|error| {
-            ConfigError::Internal(format!("failed to write settings file: {error}"))
-        })?;
-        temp_file.sync_all().map_err(|error| {
-            ConfigError::Internal(format!("failed to flush settings file: {error}"))
-        })?;
-
-        replace_file(&temp_path, path)?;
-        sync_parent_dir(parent)?;
-        Ok(())
-    })();
-
-    if write_result.is_err() {
-        let _ = fs::remove_file(&temp_path);
-    }
-
-    write_result
-}
-
-#[cfg(unix)]
-fn replace_file(from: &Path, to: &Path) -> Result<(), ConfigError> {
-    fs::rename(from, to).map_err(|error| {
+    atomic_write_bytes_with_options(
+        path,
+        &payload,
+        AtomicWriteOptions { unix_mode: Some(0o600), sync_parent_dir: true },
+    )
+    .map_err(|error| {
         ConfigError::Internal(format!(
-            "failed to replace settings file '{}' with '{}': {error}",
-            to.display(),
-            from.display()
+            "failed to write settings file '{}': {error}",
+            path.display()
         ))
     })
-}
-
-#[cfg(windows)]
-fn replace_file(from: &Path, to: &Path) -> Result<(), ConfigError> {
-    use windows_sys::Win32::Storage::FileSystem::{
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
-    };
-
-    let from_wide: Vec<u16> = from.as_os_str().encode_wide().chain(Some(0)).collect();
-    let to_wide: Vec<u16> = to.as_os_str().encode_wide().chain(Some(0)).collect();
-    let result = unsafe {
-        MoveFileExW(
-            from_wide.as_ptr(),
-            to_wide.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
-
-    if result == 0 {
-        Err(ConfigError::Internal(format!(
-            "failed to replace settings file '{}': {}",
-            to.display(),
-            std::io::Error::last_os_error()
-        )))
-    } else {
-        Ok(())
-    }
-}
-
-#[cfg(not(any(unix, windows)))]
-fn replace_file(from: &Path, to: &Path) -> Result<(), ConfigError> {
-    fs::rename(from, to).map_err(|error| {
-        ConfigError::Internal(format!(
-            "failed to replace settings file '{}' with '{}': {error}",
-            to.display(),
-            from.display()
-        ))
-    })
-}
-
-#[cfg(unix)]
-fn sync_parent_dir(parent: &Path) -> Result<(), ConfigError> {
-    let dir = fs::File::open(parent).map_err(|error| {
-        ConfigError::Internal(format!(
-            "failed to open settings directory '{}': {error}",
-            parent.display()
-        ))
-    })?;
-    dir.sync_all().map_err(|error| {
-        ConfigError::Internal(format!(
-            "failed to sync settings directory '{}': {error}",
-            parent.display()
-        ))
-    })
-}
-
-#[cfg(not(unix))]
-fn sync_parent_dir(_parent: &Path) -> Result<(), ConfigError> {
-    Ok(())
 }
 
 pub fn settings_document_to_json_value(document: &SettingsDocument) -> Value {
@@ -672,7 +570,8 @@ mod tests {
     use super::*;
 
     fn temp_settings_path() -> PathBuf {
-        let base = std::env::temp_dir().join(format!("slab-settings-test-{}", Uuid::new_v4()));
+        let base =
+            std::env::temp_dir().join(format!("slab-settings-test-{}", uuid::Uuid::new_v4()));
         base.join("settings.json")
     }
 

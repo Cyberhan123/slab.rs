@@ -1,5 +1,5 @@
 use crate::error::FetchError;
-use sha2::{Digest, Sha256};
+use slab_utils::hash::{sha256_hex_bytes, verify_sha256_hex_expected};
 
 /// Verify the SHA256 checksum of `data` against `expected`.
 ///
@@ -7,17 +7,9 @@ use sha2::{Digest, Sha256};
 /// Returns `Ok(())` on a match or `Err(FetchError::ChecksumMismatch)` on
 /// mismatch.
 pub fn verify_sha256(data: &[u8], expected: &str) -> Result<(), FetchError> {
-    let hex_expected = expected.trim().strip_prefix("sha256:").unwrap_or(expected.trim());
-
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    let digest = hex::encode(hasher.finalize());
-
-    if digest.eq_ignore_ascii_case(hex_expected) {
-        Ok(())
-    } else {
-        Err(FetchError::ChecksumMismatch { expected: hex_expected.to_string(), actual: digest })
-    }
+    let actual = sha256_hex_bytes(data);
+    verify_sha256_hex_expected(&actual, expected)
+        .map_err(|error| FetchError::ChecksumMismatch { expected: error.expected, actual })
 }
 
 #[cfg(test)]

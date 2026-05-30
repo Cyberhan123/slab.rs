@@ -14,13 +14,9 @@ clap = { workspace = true, features = ["derive"] }
 hex = { workspace = true }
 libloading = { workspace = true }
 portable-pty = { workspace = true }
+ring = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
-slab-ggml-sys = { workspace = true }
-slab-diffusion-sys = { workspace = true }
-slab-llama-sys = { workspace = true }
-slab-whisper-sys = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 uuid = { workspace = true }
 dirs = { workspace = true }
@@ -38,9 +34,9 @@ thiserror = { workspace = true }
 async_io = { workspace = true }
 tokio_util = { workspace = true, features = ["compat"] }
 uds_windows = { workspace = true }
+tempfile = { workspace = true }
 [dev-dependencies]
 pretty_assertions = { workspace = true }
-tempfile = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 filedescriptor = { workspace = true }
@@ -63,6 +59,7 @@ windows = { workspace = true, features = [
 ] }
 windows-sys = { workspace = true, features = [
     "Win32_Foundation",
+    "Win32_Storage_FileSystem",
     "Win32_System_Power",
     "Win32_System_SystemServices",
     "Win32_System_Threading",

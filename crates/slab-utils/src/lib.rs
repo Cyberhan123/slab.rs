@@ -1,6 +1,8 @@
 pub mod cab;
 pub mod cargo_bin;
+pub mod fs;
 pub mod fuzzy_match;
+pub mod hash;
 pub mod json;
 pub mod loader;
 pub mod path;

@@ -11,12 +11,11 @@ license.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 flate2 = { workspace = true }
-hex = { workspace = true }
 minijinja = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
+slab-utils = { workspace = true }
 tar = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }

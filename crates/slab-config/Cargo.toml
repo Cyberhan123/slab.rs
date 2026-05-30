@@ -19,6 +19,7 @@ dirs-next = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+slab-utils = { workspace = true }
 slab-types = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
@@ -26,7 +27,6 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 utoipa = { workspace = true, features = ["uuid", "chrono"] }
 uuid = { workspace = true }
-windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -44,8 +44,6 @@ slab-plugin = { workspace = true }
 tokio-tungstenite = { workspace = true }
 url = "2"
 extism = { workspace = true }
-sha2 = { workspace = true }
-hex = { workspace = true }
 mime_guess = { workspace = true }
 percent-encoding = { workspace = true }
 base64 = { workspace = true }

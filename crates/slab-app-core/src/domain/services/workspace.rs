@@ -3,9 +3,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use sha2::{Digest, Sha256};
 use slab_file::FileSystemError;
 use slab_git::{GitCommitOptions, GitError, GitRepository};
+use slab_utils::hash::{sha256_hex_bytes, verify_sha256_hex_expected};
 use slab_utils::pty::spawn_pipe_process_no_stdin;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
@@ -382,7 +382,7 @@ impl WorkspaceService {
                     ))
                 })?;
                 let current_hash = content_hash(&current_bytes);
-                if current_hash != expected_hash {
+                if verify_sha256_hex_expected(&current_hash, expected_hash).is_err() {
                     return Err(AppCoreError::BadRequest(
                         "file changed on disk; reload before saving".to_string(),
                     ));
@@ -683,9 +683,7 @@ fn should_hide_entry(name: &str, is_directory: bool, include_ignored: bool) -> b
 }
 
 fn content_hash(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hex::encode(hasher.finalize())
+    sha256_hex_bytes(bytes)
 }
 
 #[cfg(test)]

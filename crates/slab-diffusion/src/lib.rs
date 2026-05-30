@@ -81,10 +81,8 @@ impl Diffusion {
     /// Returns a [`libloading::Error`] when the library cannot be opened or a
     /// required symbol is missing.
     pub fn new<P: AsRef<Path>>(lib_dir: P) -> Result<Self, ::libloading::Error> {
-        let (diffusion_lib, ggml) = load_runtime_with_ggml_sidecar::<
-            _,
-            slab_diffusion_sys::DiffusionLib,
-        >(lib_dir, "stable-diffusion")?;
+        let (diffusion_lib, ggml) =
+            load_runtime_with_ggml_sidecar(lib_dir, "stable-diffusion", load_diffusion_lib)?;
 
         let diffusion = Self { lib: Arc::new(SharedDiffusionLib(diffusion_lib)), _ggml_lib: ggml };
         diffusion.install_logging_hook();
@@ -176,6 +174,25 @@ impl Diffusion {
 impl fmt::Debug for Diffusion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Diffusion").finish()
+    }
+}
+
+fn load_diffusion_lib(
+    _lib_dir: &Path,
+    path: &Path,
+) -> Result<slab_diffusion_sys::DiffusionLib, libloading::Error> {
+    #[cfg(windows)]
+    {
+        unsafe {
+            slab_diffusion_sys::DiffusionLib::from_library(slab_utils::loader::open_native_library(
+                path,
+            )?)
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        unsafe { slab_diffusion_sys::DiffusionLib::new(path) }
     }
 }
 

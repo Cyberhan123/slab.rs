@@ -7,7 +7,10 @@ pub use backend::GGMLBackendReg;
 pub use error::GGMLError;
 pub use logging::GgmlLogLevel;
 use slab_ggml_sys::GGmlLib;
-use slab_utils::loader::{RuntimeLibrary, load_runtime_library_from_dir};
+use slab_utils::loader::{
+    RuntimeLibrary, library_path, load_library_from_dir, load_runtime_library_from_dir,
+    open_native_library,
+};
 use std::ffi::CStr;
 use std::fmt;
 use std::ops::Deref;
@@ -50,7 +53,7 @@ impl GGML {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, GGMLError> {
         let path = path.as_ref();
         let lib_dir = path.parent().ok_or(GGMLError::NotParentDir)?;
-        let lib = unsafe { <GGmlLib as RuntimeLibrary>::load_from_dir(lib_dir, path)? };
+        let lib = load_ggml_lib(lib_dir, path)?;
         Ok(Self { lib: Arc::new(SharedGGmlLib(lib)) })
     }
 
@@ -153,21 +156,38 @@ impl fmt::Debug for GGML {
 
 impl RuntimeLibrary for GGML {
     unsafe fn load_from_dir(lib_dir: &Path, path: &Path) -> Result<Self, libloading::Error> {
-        let lib = unsafe { <GGmlLib as RuntimeLibrary>::load_from_dir(lib_dir, path)? };
+        let lib = load_ggml_lib(lib_dir, path)?;
         Ok(Self { lib: Arc::new(SharedGGmlLib(lib)) })
     }
 }
 
-pub fn load_runtime_with_ggml_sidecar<P, Main>(
+fn load_ggml_lib(lib_dir: &Path, path: &Path) -> Result<GGmlLib, libloading::Error> {
+    let ggml_base_path = library_path(lib_dir, "ggml-base");
+
+    #[cfg(windows)]
+    {
+        let ggml_base_lib = open_native_library(ggml_base_path.as_path())?;
+        let ggml_lib = open_native_library(path)?;
+        unsafe { GGmlLib::from_library(ggml_base_lib, ggml_lib) }
+    }
+
+    #[cfg(not(windows))]
+    {
+        unsafe { GGmlLib::new(ggml_base_path.as_path(), path) }
+    }
+}
+
+pub fn load_runtime_with_ggml_sidecar<P, Main, F>(
     lib_dir: P,
     main_name: &str,
+    load_main: F,
 ) -> Result<(Main, Option<Arc<GGML>>), libloading::Error>
 where
     P: AsRef<Path>,
-    Main: RuntimeLibrary,
+    F: FnOnce(&Path, &Path) -> Result<Main, libloading::Error>,
 {
     let lib_dir = lib_dir.as_ref();
-    let main = load_runtime_library_from_dir::<_, Main>(lib_dir, main_name)?;
+    let main = load_library_from_dir(lib_dir, main_name, load_main)?;
     let ggml = GGML::from_dir_and_load_backends(lib_dir).ok().map(Arc::new);
     Ok((main, ggml))
 }

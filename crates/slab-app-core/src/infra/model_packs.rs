@@ -1,12 +1,11 @@
 use std::collections::BTreeMap;
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use sha2::{Digest, Sha256};
 use slab_model_pack::{
     BackendConfigDocument, BackendConfigScope, ConfigEntryRef, ConfigRef, MANIFEST_FILE_NAME,
     ModelPack, ModelPackCatalogSummary, ModelPackError, ModelPackLoadDefaults, ModelPackManifest,
@@ -15,7 +14,8 @@ use slab_model_pack::{
     PresetEntryRef, VariantDocument,
 };
 use slab_types::{DiffusionLoadOptions, DriverHints, ModelFamily, RuntimeBackendId};
-use uuid::Uuid;
+use slab_utils::fs::atomic_write_bytes;
+use slab_utils::hash::{sha256_hex_bytes, verify_sha256_hex_expected};
 use zip::CompressionMethod;
 use zip::ZipArchive;
 use zip::ZipWriter;
@@ -329,67 +329,12 @@ fn write_bytes_file(path: &Path, payload: &[u8]) -> Result<(), AppCoreError> {
     })?;
     ensure_model_pack_dir(parent)?;
 
-    let file_name = path.file_name().and_then(|value| value.to_str()).ok_or_else(|| {
+    atomic_write_bytes(path, payload).map_err(|error| {
         AppCoreError::Internal(format!(
-            "model pack path '{}' has an invalid file name",
+            "failed to write model pack file '{}': {error}",
             path.display()
         ))
-    })?;
-    let temp_path = parent.join(format!(".{}.tmp-{}", file_name, Uuid::new_v4()));
-
-    let write_result = (|| -> Result<(), AppCoreError> {
-        let mut temp_file =
-            OpenOptions::new().create_new(true).write(true).open(&temp_path).map_err(|error| {
-                AppCoreError::Internal(format!(
-                    "failed to create temp model pack file '{}': {error}",
-                    temp_path.display()
-                ))
-            })?;
-
-        temp_file.write_all(payload).map_err(|error| {
-            AppCoreError::Internal(format!(
-                "failed to write temp model pack file '{}': {error}",
-                temp_path.display()
-            ))
-        })?;
-        temp_file.flush().map_err(|error| {
-            AppCoreError::Internal(format!(
-                "failed to flush temp model pack file '{}': {error}",
-                temp_path.display()
-            ))
-        })?;
-        temp_file.sync_all().map_err(|error| {
-            AppCoreError::Internal(format!(
-                "failed to sync temp model pack file '{}': {error}",
-                temp_path.display()
-            ))
-        })?;
-        drop(temp_file);
-
-        if path.exists() {
-            fs::remove_file(path).map_err(|error| {
-                AppCoreError::Internal(format!(
-                    "failed to replace existing model pack file '{}': {error}",
-                    path.display()
-                ))
-            })?;
-        }
-
-        fs::rename(&temp_path, path).map_err(|error| {
-            AppCoreError::Internal(format!(
-                "failed to finalize model pack file '{}': {error}",
-                path.display()
-            ))
-        })?;
-
-        Ok(())
-    })();
-
-    if write_result.is_err() {
-        let _ = fs::remove_file(&temp_path);
-    }
-
-    write_result
+    })
 }
 
 fn read_persisted_model_config_from_pack_bytes(
@@ -412,7 +357,8 @@ fn read_persisted_model_config_from_pack_bytes(
         return Ok(None);
     };
 
-    if manifest_sha256 != manifest_sha256_from_pack_bytes(bytes)? {
+    let actual_manifest_sha256 = manifest_sha256_from_pack_bytes(bytes)?;
+    if verify_sha256_hex_expected(&actual_manifest_sha256, manifest_sha256).is_err() {
         return Ok(None);
     }
 
@@ -487,7 +433,7 @@ fn build_generated_model_pack_bytes(config: &StoredModelConfig) -> Result<Vec<u8
     let mut entries = build_generated_pack_entries(config)?;
     let manifest_sha256 = entries
         .iter()
-        .find_map(|(path, payload)| (path == MANIFEST_FILE_NAME).then(|| hash_bytes_hex(payload)))
+        .find_map(|(path, payload)| (path == MANIFEST_FILE_NAME).then(|| sha256_hex_bytes(payload)))
         .ok_or_else(|| {
             AppCoreError::Internal("generated model pack is missing manifest.json".into())
         })?;
@@ -837,11 +783,7 @@ fn manifest_sha256_from_pack_bytes(bytes: &[u8]) -> Result<String, AppCoreError>
     let manifest_bytes = read_pack_entry_bytes(bytes, MANIFEST_FILE_NAME)?.ok_or_else(|| {
         AppCoreError::BadRequest("missing required manifest.json in .slab archive".into())
     })?;
-    Ok(hash_bytes_hex(&manifest_bytes))
-}
-
-fn hash_bytes_hex(bytes: &[u8]) -> String {
-    hex::encode(Sha256::digest(bytes))
+    Ok(sha256_hex_bytes(&manifest_bytes))
 }
 
 fn infer_runtime_backend_from_config(config: &StoredModelConfig) -> Option<RuntimeBackendId> {

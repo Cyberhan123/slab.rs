@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::RwLock;
 
 use percent_encoding::percent_decode_str;
-use sha2::{Digest, Sha256};
+use slab_utils::hash::{sha256_hex_file, verify_sha256_hex_expected};
 
 use crate::types::{
     LoadedPlugin, PluginInfo, PluginLanguageServerTransport, PluginManifest, PluginNetworkMode,
@@ -334,13 +333,13 @@ fn validate_integrity_files(
         }
 
         let computed_hash = compute_file_sha256(&file_path)?;
-        if !expected_hash.eq_ignore_ascii_case(&computed_hash) {
+        if verify_sha256_hex_expected(&computed_hash, expected_hash).is_err() {
             return Err(format!(
                 "integrity mismatch on `{normalized_path}`: expected {expected_hash}, got {computed_hash}"
             ));
         }
 
-        files_sha256.insert(normalized_path, expected_hash.to_ascii_lowercase());
+        files_sha256.insert(normalized_path, computed_hash);
     }
     Ok(files_sha256)
 }
@@ -480,22 +479,7 @@ fn validate_python_bundle_extension(entry: &str) -> Result<(), String> {
 }
 
 fn compute_file_sha256(path: &Path) -> Result<String, String> {
-    let mut file = fs::File::open(path)
-        .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0u8; 8192];
-
-    loop {
-        let bytes_read = file
-            .read(&mut buffer)
-            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-        if bytes_read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..bytes_read]);
-    }
-
-    Ok(hex::encode(hasher.finalize()))
+    sha256_hex_file(path).map_err(|error| format!("failed to hash {}: {error}", path.display()))
 }
 
 fn network_mode_label(mode: &PluginNetworkMode) -> &'static str {

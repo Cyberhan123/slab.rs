@@ -58,7 +58,7 @@ pub struct Whisper {
 impl Whisper {
     pub fn new<P: AsRef<Path>>(lib_dir: P) -> Result<Self, WhisperError> {
         let (whisper_lib, ggml_lib) =
-            load_runtime_with_ggml_sidecar::<_, slab_whisper_sys::WhisperLib>(lib_dir, "whisper")?;
+            load_runtime_with_ggml_sidecar(lib_dir, "whisper", load_whisper_lib)?;
 
         let whisper = Self { lib: Arc::new(whisper_lib), _ggml_lib: ggml_lib };
         whisper.install_logging_hooks();
@@ -91,6 +91,15 @@ impl Whisper {
 impl fmt::Debug for Whisper {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Whisper").finish()
+    }
+}
+
+fn load_whisper_lib(
+    _lib_dir: &Path,
+    path: &Path,
+) -> Result<slab_whisper_sys::WhisperLib, libloading::Error> {
+    unsafe {
+        slab_whisper_sys::WhisperLib::from_library(slab_utils::loader::open_native_library(path)?)
     }
 }
 

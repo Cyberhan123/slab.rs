@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
-use sha2::Digest;
 
-use slab_utils::cab::{bytes_to_hex, ensure_parent_dir, sha256_file};
+use slab_utils::cab::{ensure_parent_dir, sha256_file};
+use slab_utils::hash::{Sha256HexContext, verify_sha256_hex_expected};
 
 const BUNDLE_MAGIC: [u8; 16] = *b"SLAB-BUNDLE-V1\0\0";
 const FOOTER_LEN: u64 = 16 + (8 * 3);
@@ -76,7 +76,7 @@ impl EmbeddedBundle {
         ensure_parent_dir(output_path)?;
         copy_region_to_path(&self.executable_path, asset.offset, asset.len, output_path, on_chunk)?;
         let extracted_hash = sha256_file(output_path)?;
-        if extracted_hash != asset.sha256 {
+        if verify_sha256_hex_expected(&extracted_hash, &asset.sha256).is_err() {
             bail!("embedded asset '{}' failed hash verification after extraction", asset.name);
         }
         Ok(())
@@ -311,7 +311,7 @@ fn copy_file_with_hash(source_path: &Path, writer: &mut impl Write) -> Result<(S
     let file = File::open(source_path)
         .with_context(|| format!("failed to open {}", source_path.display()))?;
     let mut reader = BufReader::new(file);
-    let mut hasher = sha2::Sha256::new();
+    let mut hasher = Sha256HexContext::new();
     let mut len = 0_u64;
     let mut buffer = [0_u8; 1024 * 64];
 
@@ -325,11 +325,11 @@ fn copy_file_with_hash(source_path: &Path, writer: &mut impl Write) -> Result<(S
         writer.write_all(&buffer[..read]).with_context(|| {
             format!("failed to write bundled asset from {}", source_path.display())
         })?;
-        sha2::Digest::update(&mut hasher, &buffer[..read]);
+        hasher.update(&buffer[..read]);
         len += read as u64;
     }
 
-    Ok((bytes_to_hex(&sha2::Digest::finalize(hasher)), len))
+    Ok((hasher.finish(), len))
 }
 
 impl BundleFooter {

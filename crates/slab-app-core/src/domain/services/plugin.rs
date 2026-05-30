@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
 use reqwest::Url;
-use sha2::{Digest, Sha256};
+use slab_utils::hash::{sha256_hex_bytes, sha256_hex_file, verify_sha256_hex_expected};
 use uuid::Uuid;
 use zip::ZipArchive;
 
@@ -141,8 +141,8 @@ impl PluginService {
         let source = self.resolve_install_source(&command).await?;
         let package_bytes = load_package_bytes(&source.package_url).await?;
         if let Some(expected_hash) = source.package_sha256.as_deref() {
-            let actual = hash_bytes_hex(&package_bytes);
-            if actual != expected_hash {
+            let actual = sha256_hex_bytes(&package_bytes);
+            if verify_sha256_hex_expected(&actual, expected_hash).is_err() {
                 return Err(AppCoreError::BadRequest(format!(
                     "plugin package sha256 mismatch for '{}': expected {expected_hash}, got {actual}",
                     source.package_url
@@ -729,7 +729,7 @@ fn scan_plugin_dir(
             });
         }
     };
-    let manifest_hash = hash_bytes_hex(&manifest_bytes);
+    let manifest_hash = sha256_hex_bytes(&manifest_bytes);
     let manifest: PluginManifest = match serde_json::from_slice(&manifest_bytes) {
         Ok(manifest) => manifest,
         Err(error) => {
@@ -1162,9 +1162,9 @@ fn validate_declared_file(
         let expected_hash = files_sha256.get(&normalized_path).ok_or_else(|| {
             format!("{context} `{normalized_path}` is missing from integrity.filesSha256")
         })?;
-        let actual_hash = hash_file_hex(&file_path)
+        let actual_hash = sha256_hex_file(&file_path)
             .map_err(|error| format!("failed to hash `{normalized_path}`: {error}"))?;
-        if actual_hash != *expected_hash {
+        if verify_sha256_hex_expected(&actual_hash, expected_hash).is_err() {
             return Err(format!(
                 "integrity.filesSha256 mismatch for `{normalized_path}`: expected {expected_hash}, got {actual_hash}"
             ));
@@ -1253,15 +1253,6 @@ fn network_mode_label(mode: &PluginNetworkMode) -> &'static str {
         PluginNetworkMode::Blocked => "blocked",
         PluginNetworkMode::Allowlist => "allowlist",
     }
-}
-
-fn hash_bytes_hex(bytes: &[u8]) -> String {
-    hex::encode(Sha256::digest(bytes))
-}
-
-fn hash_file_hex(path: &Path) -> Result<String, std::io::Error> {
-    let bytes = fs::read(path)?;
-    Ok(hash_bytes_hex(&bytes))
 }
 
 async fn load_package_bytes(source: &str) -> Result<Vec<u8>, AppCoreError> {
@@ -1476,12 +1467,14 @@ fn ensure_path_within(path: &Path, root: &Path) -> Result<(), AppCoreError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        SOURCE_KIND_IMPORT_PACK, hash_bytes_hex, locate_plugin_root, normalize_relative_path,
-        scan_plugin_dir, scan_plugins,
-    };
     use serde_json::json;
+    use slab_utils::hash::sha256_hex_bytes as hash_bytes_hex;
     use std::fs;
+
+    use super::{
+        SOURCE_KIND_IMPORT_PACK, locate_plugin_root, normalize_relative_path, scan_plugin_dir,
+        scan_plugins,
+    };
 
     fn temp_dir(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("slab-plugin-service-{name}-{}", uuid::Uuid::new_v4()))

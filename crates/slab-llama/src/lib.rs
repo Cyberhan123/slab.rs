@@ -93,7 +93,7 @@ impl Llama {
     #[allow(clippy::arc_with_non_send_sync)]
     pub fn new<P: AsRef<Path>>(lib_dir: P) -> Result<Self, ::libloading::Error> {
         let (llama_lib, ggml_lib) =
-            load_runtime_with_ggml_sidecar::<_, slab_llama_sys::LlamaLib>(lib_dir, "llama")?;
+            load_runtime_with_ggml_sidecar(lib_dir, "llama", load_llama_lib)?;
 
         let llama = Self { lib: Arc::new(llama_lib), _ggml_lib: ggml_lib };
         llama.install_logging_hooks();
@@ -158,5 +158,22 @@ impl Llama {
 impl fmt::Debug for Llama {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Llama").finish()
+    }
+}
+
+fn load_llama_lib(
+    _lib_dir: &Path,
+    path: &Path,
+) -> Result<slab_llama_sys::LlamaLib, libloading::Error> {
+    #[cfg(windows)]
+    {
+        unsafe {
+            slab_llama_sys::LlamaLib::from_library(slab_utils::loader::open_native_library(path)?)
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        unsafe { slab_llama_sys::LlamaLib::new(path) }
     }
 }

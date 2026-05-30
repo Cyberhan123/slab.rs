@@ -3,12 +3,6 @@ use std::path::{Path, PathBuf};
 
 use libloading::Error as LibraryLoadError;
 
-#[cfg(windows)]
-type NativeLibrary = libloading::os::windows::Library;
-
-#[cfg(not(windows))]
-type NativeLibrary = libloading::Library;
-
 pub trait RuntimeLibrary: Sized {
     /// Load a generated dlopen wrapper type from the resolved shared-library path.
     ///
@@ -18,58 +12,6 @@ pub trait RuntimeLibrary: Sized {
     /// library for the requested wrapper type and that any lifetime or threading
     /// requirements imposed by the loaded symbols are upheld after loading.
     unsafe fn load_from_dir(lib_dir: &Path, path: &Path) -> Result<Self, LibraryLoadError>;
-}
-
-impl RuntimeLibrary for slab_ggml_sys::GGmlLib {
-    unsafe fn load_from_dir(lib_dir: &Path, path: &Path) -> Result<Self, LibraryLoadError> {
-        let ggml_base_path = library_path(lib_dir, "ggml-base");
-
-        #[cfg(windows)]
-        {
-            let ggml_base_lib = open_native_library(ggml_base_path.as_path())?;
-            let ggml_lib = open_native_library(path)?;
-            Ok(unsafe { Self::from_library(ggml_base_lib, ggml_lib)? })
-        }
-
-        #[cfg(not(windows))]
-        {
-            unsafe { Self::new(ggml_base_path.as_path(), path) }
-        }
-    }
-}
-
-impl RuntimeLibrary for slab_llama_sys::LlamaLib {
-    unsafe fn load_from_dir(_lib_dir: &Path, path: &Path) -> Result<Self, LibraryLoadError> {
-        #[cfg(windows)]
-        {
-            Ok(unsafe { Self::from_library(open_native_library(path)?)? })
-        }
-
-        #[cfg(not(windows))]
-        {
-            unsafe { Self::new(path) }
-        }
-    }
-}
-
-impl RuntimeLibrary for slab_whisper_sys::WhisperLib {
-    unsafe fn load_from_dir(_lib_dir: &Path, path: &Path) -> Result<Self, LibraryLoadError> {
-        unsafe { Self::from_library(open_native_library(path)?) }
-    }
-}
-
-impl RuntimeLibrary for slab_diffusion_sys::DiffusionLib {
-    unsafe fn load_from_dir(_lib_dir: &Path, path: &Path) -> Result<Self, LibraryLoadError> {
-        #[cfg(windows)]
-        {
-            Ok(unsafe { Self::from_library(open_native_library(path)?)? })
-        }
-
-        #[cfg(not(windows))]
-        {
-            unsafe { Self::new(path) }
-        }
-    }
 }
 
 /// Build the platform-specific shared library file name for a logical runtime name.
@@ -106,7 +48,9 @@ where
     load(lib_dir, &lib_path)
 }
 
-fn open_native_library(path: &Path) -> Result<NativeLibrary, LibraryLoadError> {
+/// Open a shared library using the runtime loader flags expected by generated
+/// FFI wrappers.
+pub fn open_native_library(path: &Path) -> Result<libloading::Library, LibraryLoadError> {
     #[cfg(windows)]
     {
         use libloading::os::windows::{
@@ -115,12 +59,13 @@ fn open_native_library(path: &Path) -> Result<NativeLibrary, LibraryLoadError> {
         };
 
         unsafe {
-            Library::load_with_flags(
+            Ok(Library::load_with_flags(
                 path,
                 LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR
                     | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS
                     | LOAD_LIBRARY_SEARCH_APPLICATION_DIR,
-            )
+            )?
+            .into())
         }
     }
 

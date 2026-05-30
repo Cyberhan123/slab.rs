@@ -11,6 +11,7 @@ license.workspace = true
 [dependencies]
 slab-llama-sys = { workspace = true }
 slab-ggml = { workspace = true }
+slab-utils = { workspace = true }
 libloading = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }

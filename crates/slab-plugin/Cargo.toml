@@ -16,6 +16,5 @@ base64 = { workspace = true }
 reqwest = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
-hex = { workspace = true }
-sha2 = { workspace = true }
+slab-utils = { workspace = true }
 percent-encoding = "2.3"

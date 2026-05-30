@@ -19,6 +19,7 @@ slab-diffusion-sys = { workspace = true }
 thiserror = { workspace = true }
 libc = { workspace = true }
 slab-ggml = { workspace = true }
+slab-utils = { workspace = true }
 serde = { workspace = true }
 tracing = { workspace = true }
 

@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use super::cabinet::create_cab;
 use super::fsops::{collect_files_recursive, normalize_relative_path, sha256_file, write_json};
@@ -168,7 +167,10 @@ impl PackagedPayloadManifest {
                     }
                     Entry::Occupied(entry) => {
                         let existing = entry.get();
-                        if existing.sha256 != file.sha256 || existing.size != file.size {
+                        if crate::hash::verify_sha256_hex_expected(&existing.sha256, &file.sha256)
+                            .is_err()
+                            || existing.size != file.size
+                        {
                             bail!(
                                 "conflicting payload file '{}' between selected packages",
                                 file.dest_relative_path
@@ -316,8 +318,7 @@ pub fn stage_runtime_payloads(
 
 fn payload_plan_fingerprint(manifest: &PackagedPayloadManifest) -> Result<String> {
     let bytes = serde_json::to_vec(manifest).context("failed to serialize payload manifest")?;
-    let digest = Sha256::digest(bytes);
-    Ok(super::fsops::bytes_to_hex(&digest))
+    Ok(crate::hash::sha256_hex_bytes(&bytes))
 }
 
 fn resolve_vendor_runtime_tree(root: &Path) -> Result<Vec<ResolvedPayloadFile>> {
@@ -357,7 +358,7 @@ fn dedupe_payload_files(files: Vec<ResolvedPayloadFile>) -> Result<Vec<ResolvedP
             }
             Entry::Occupied(entry) => {
                 let existing = entry.get();
-                if existing.sha256 != file.sha256
+                if crate::hash::verify_sha256_hex_expected(&existing.sha256, &file.sha256).is_err()
                     || existing.size != file.size
                     || existing.source_relative_path != file.source_relative_path
                 {

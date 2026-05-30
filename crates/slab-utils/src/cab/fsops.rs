@@ -5,7 +5,6 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::payload::{PAYLOAD_MANIFEST_FILE_NAME, SelectedPayloadManifest};
@@ -83,24 +82,11 @@ pub fn ensure_parent_dir(path: &Path) -> Result<()> {
 }
 
 pub fn sha256_file(path: &Path) -> Result<String> {
-    let file =
-        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
-    let mut reader = BufReader::new(file);
-    hash_reader(&mut reader)
+    crate::hash::sha256_hex_file(path).with_context(|| format!("failed to hash {}", path.display()))
 }
 
 pub fn hash_reader(reader: &mut impl Read) -> Result<String> {
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 64];
-    loop {
-        let read = reader.read(&mut buffer).context("failed to read stream while hashing")?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-
-    Ok(bytes_to_hex(&hasher.finalize()))
+    crate::hash::sha256_hex_reader(reader).context("failed to read stream while hashing")
 }
 
 pub fn bytes_to_hex(bytes: &[u8]) -> String {
@@ -154,7 +140,7 @@ pub fn apply_payload_manifest(
             ensure_parent_dir(&copied_path)?;
 
             let source_hash = sha256_file(&source_path)?;
-            if source_hash != file.sha256 {
+            if crate::hash::verify_sha256_hex_expected(&source_hash, &file.sha256).is_err() {
                 bail!(
                     "source payload hash mismatch for '{}': expected {}, got {}",
                     source_path.display(),
@@ -172,7 +158,7 @@ pub fn apply_payload_manifest(
             })?;
 
             let copied_hash = sha256_file(&copied_path)?;
-            if copied_hash != file.sha256 {
+            if crate::hash::verify_sha256_hex_expected(&copied_hash, &file.sha256).is_err() {
                 bail!(
                     "copied payload hash mismatch for '{}': expected {}, got {}",
                     copied_path.display(),
