@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
-use super::contract::{
+use crate::domain::models::{
     CandleLlamaLoadConfig, TextGenerationOptions, TextGenerationResponse, TextGenerationStreamEvent,
 };
 use super::engine::CandleLlamaEngine;

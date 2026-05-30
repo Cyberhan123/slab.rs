@@ -13,7 +13,7 @@
 //! ### `model.load` input payload
 //! Expects typed runtime-owned `GgmlWhisperLoadConfig` payloads.
 
-use super::contract::{
+use crate::domain::models::{
     AudioTranscriptionOptions, AudioTranscriptionResponse, GgmlWhisperLoadConfig,
 };
 use super::engine::GGMLWhisperEngine;

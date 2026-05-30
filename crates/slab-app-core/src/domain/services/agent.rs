@@ -44,7 +44,7 @@ impl AgentService {
         config: AgentConfig,
         messages: Vec<ConversationMessage>,
     ) -> Result<String, AppCoreError> {
-        self.control.spawn(session_id, config, messages).await.map_err(agent_err_to_server)
+        self.control.spawn(session_id, config, messages).await.map_err(AppCoreError::from)
     }
 
     /// Get the current status of an agent thread.
@@ -65,7 +65,7 @@ impl AgentService {
                 // Thread has already finished and was removed from the registry.
                 // Fall through to the DB lookup below.
             }
-            Err(e) => return Err(agent_err_to_server(e)),
+            Err(e) => return Err(AppCoreError::from(e)),
         }
 
         // Fallback: look up the persisted snapshot.
@@ -78,17 +78,17 @@ impl AgentService {
 
     /// Gracefully shut down a running agent thread.
     pub async fn shutdown(&self, thread_id: &str) -> Result<(), AppCoreError> {
-        self.control.shutdown(thread_id).await.map_err(agent_err_to_server)
+        self.control.shutdown(thread_id).await.map_err(AppCoreError::from)
     }
 
     /// Interrupt the currently running turn while keeping the thread resumable.
     pub async fn interrupt(&self, thread_id: &str) -> Result<(), AppCoreError> {
-        self.control.interrupt(thread_id).await.map_err(agent_err_to_server)
+        self.control.interrupt(thread_id).await.map_err(AppCoreError::from)
     }
 
     /// Append user input to an existing agent thread and run the next turn.
     pub async fn send_input(&self, thread_id: &str, content: String) -> Result<(), AppCoreError> {
-        self.control.send_input(thread_id, content).await.map_err(agent_err_to_server)
+        self.control.send_input(thread_id, content).await.map_err(AppCoreError::from)
     }
 
     /// List persisted root agent threads for a chat session, newest first.
@@ -158,26 +158,5 @@ impl AgentService {
     #[allow(dead_code)]
     pub async fn active_thread_count(&self) -> usize {
         self.control.active_thread_count().await
-    }
-}
-
-fn agent_err_to_server(e: AgentError) -> AppCoreError {
-    match e {
-        AgentError::ThreadNotFound(id) => {
-            AppCoreError::NotFound(format!("agent thread not found: {id}"))
-        }
-        AgentError::ThreadLimitExceeded { current, max } => AppCoreError::TooManyRequests(format!(
-            "thread limit exceeded: {current}/{max} concurrent threads active"
-        )),
-        AgentError::ThreadBusy(id) => {
-            AppCoreError::TooManyRequests(format!("agent thread is already running: {id}"))
-        }
-        AgentError::ThreadNotResumable { id, status } => {
-            AppCoreError::BadRequest(format!("agent thread cannot be resumed: {id} is {status}"))
-        }
-        AgentError::DepthLimitExceeded { current, max } => {
-            AppCoreError::BadRequest(format!("depth limit exceeded: {current}/{max}"))
-        }
-        other => AppCoreError::Internal(other.to_string()),
     }
 }

@@ -5,7 +5,7 @@ import { useTranslation } from '@slab/i18n';
 
 import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
-import api from '@slab/api';
+import api, { getErrorMessage } from '@slab/api';
 import type { components } from '@slab/api/v1';
 import {
   getImageGeneration,
@@ -231,7 +231,7 @@ export function useImageGeneration() {
       const items = await listImageGenerations();
       setHistory(items);
     } catch (error) {
-      setHistoryError(error instanceof Error ? error.message : String(error));
+      setHistoryError(getErrorMessage(error));
     } finally {
       setHistoryLoading(false);
     }
@@ -244,7 +244,7 @@ export function useImageGeneration() {
       setHistoryDialogOpen(true);
       mergeHistoryTask(detail);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = getErrorMessage(error);
       toast.error(t('pages.image.toast.historyDetailFailed', { message }));
     }
   }, [mergeHistoryTask, t]);
@@ -321,7 +321,7 @@ export function useImageGeneration() {
       setGenerationPhase('polling');
       pollAttempts.current = 0;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = getErrorMessage(error);
       toast.error(message);
     } finally {
       setIsSubmitting(false);
@@ -383,7 +383,7 @@ export function useImageGeneration() {
       return;
     }
 
-    const message = taskStatusError instanceof Error ? taskStatusError.message : String(taskStatusError);
+    const message = getErrorMessage(taskStatusError);
     toast.error(t('pages.image.toast.pollingError', { message }));
     clearGenerationTask();
   }, [clearGenerationTask, isPolling, taskId, taskStatusError, t]);
@@ -413,7 +413,7 @@ export function useImageGeneration() {
           return;
         }
 
-        const message = error instanceof Error ? error.message : String(error);
+        const message = getErrorMessage(error);
         toast.error(t('pages.image.toast.resultFetchFailed', { message }));
       } finally {
         if (!cancelled) {

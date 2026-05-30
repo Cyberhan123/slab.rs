@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import api from '@slab/api';
+import api, { getErrorMessage } from '@slab/api';
 import { queryClient } from '@/lib/query-client';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
@@ -17,10 +17,6 @@ import {
   type SetupStatus,
   type TaskRecord,
 } from '../const';
-
-function toErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
 
 export interface SetupViewModel {
   setupStatus: SetupStatus | null;
@@ -106,7 +102,7 @@ export function useSetup(): SetupViewModel {
       setProvisionTaskId(operation.operation_id);
     } catch (error) {
       setProvisionState('failed');
-      setProvisionError(toErrorMessage(error));
+      setProvisionError(getErrorMessage(error));
     }
   }, [provisionMutation]);
 
@@ -221,7 +217,7 @@ export function useSetup(): SetupViewModel {
   return {
     setupStatus: status,
     isChecking: isCheckingSetupStatus,
-    checkError: setupStatusError ? toErrorMessage(setupStatusError) : null,
+    checkError: setupStatusError ? getErrorMessage(setupStatusError) : null,
     provisionState,
     provisionError,
     stageLabel: getProvisionStageLabel(

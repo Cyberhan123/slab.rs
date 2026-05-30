@@ -93,5 +93,10 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Check API type drift
+        run: |
+          bun run gen:api
+          git diff --exit-code packages/api/src/v1.d.ts
+
       - name: Type-check & build
         run: bun run build:desktop

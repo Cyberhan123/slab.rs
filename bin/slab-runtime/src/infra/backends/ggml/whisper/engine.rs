@@ -1,4 +1,4 @@
-use super::contract::{AudioTranscriptionOptions, GgmlWhisperLoadConfig};
+use crate::domain::models::{AudioTranscriptionOptions, GgmlWhisperLoadConfig};
 use crate::infra::backends::ggml;
 use slab_subtitle::{
     SubtitleEntry,

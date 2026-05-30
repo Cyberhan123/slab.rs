@@ -14,7 +14,9 @@
 
 use std::time::Instant;
 
-use super::contract::{GgmlDiffusionLoadConfig, ImageGenerationRequest, ImageGenerationResponse};
+use crate::domain::models::{
+    GgmlDiffusionLoadConfig, ImageGenerationRequest, ImageGenerationResponse,
+};
 use super::engine::GGMLDiffusionEngine;
 use super::error::GGMLDiffusionWorkerError;
 use slab_runtime_core::Payload;

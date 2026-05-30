@@ -7,7 +7,7 @@ import useFile, { type SelectedFile } from '@/hooks/use-file';
 import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
 import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
 import useIsTauri from '@/hooks/use-tauri';
-import api from '@slab/api';
+import api, { getErrorMessage } from '@slab/api';
 import { modelSupportsCapability, toCatalogModelList, type CatalogModel } from '@slab/api/models';
 import {
   getAudioTranscription,
@@ -175,7 +175,7 @@ export function useAudio() {
       const items = await listAudioTranscriptions();
       setHistory(items);
     } catch (error) {
-      setHistoryError(error instanceof Error ? error.message : String(error));
+      setHistoryError(getErrorMessage(error));
     } finally {
       setHistoryLoading(false);
     }
@@ -188,7 +188,7 @@ export function useAudio() {
       setHistoryDialogOpen(true);
       mergeHistoryTask(detail);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = getErrorMessage(error);
       toast.error(t('pages.audio.toast.historyDetailFailed', { message }));
     }
   }, [mergeHistoryTask, t]);

@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
 import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
-import api from '@slab/api';
+import api, { getErrorMessage } from '@slab/api';
 import type { components } from '@slab/api/v1';
 import {
   getVideoGeneration,
@@ -185,7 +185,7 @@ export function useVideoGeneration() {
       const items = await listVideoGenerations();
       setHistory(items);
     } catch (error) {
-      setHistoryError(error instanceof Error ? error.message : String(error));
+      setHistoryError(getErrorMessage(error));
     } finally {
       setHistoryLoading(false);
     }
@@ -199,7 +199,7 @@ export function useVideoGeneration() {
       mergeHistoryTask(detail);
       setVideoPath(resolveMediaUrl(detail.video_url));
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = getErrorMessage(error);
       toast.error(t('pages.video.toast.historyDetailFailed', { message }));
     }
   }, [mergeHistoryTask, t]);
@@ -288,7 +288,7 @@ export function useVideoGeneration() {
       pollAttempts.current = 0;
       toast.info(t('pages.video.toast.started', { frames, fps }));
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = getErrorMessage(error);
       toast.error(message);
     } finally {
       setIsSubmitting(false);
@@ -346,7 +346,7 @@ export function useVideoGeneration() {
       return;
     }
 
-    const message = taskStatusError instanceof Error ? taskStatusError.message : String(taskStatusError);
+    const message = getErrorMessage(taskStatusError);
     toast.error(t('pages.video.toast.pollingError', { message }));
     clearGenerationTask();
   }, [clearGenerationTask, isPolling, taskId, taskStatusError, t]);
@@ -381,7 +381,7 @@ export function useVideoGeneration() {
           return;
         }
 
-        const message = error instanceof Error ? error.message : String(error);
+        const message = getErrorMessage(error);
         toast.error(t('pages.video.toast.resultFetchFailed', { message }));
       } finally {
         if (!cancelled) {

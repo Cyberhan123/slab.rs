@@ -1,4 +1,3 @@
-pub(crate) mod contract;
 pub(crate) mod engine;
 mod error;
 mod worker;

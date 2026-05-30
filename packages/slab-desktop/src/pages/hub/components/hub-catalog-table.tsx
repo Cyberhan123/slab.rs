@@ -365,6 +365,11 @@ function formatBytes(value: number) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   const exponent = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
   const size = value / 1024 ** exponent;
-  const fractionDigits = size >= 100 || exponent === 0 ? 0 : size >= 10 ? 1 : 2;
+  let fractionDigits = 2;
+  if (size >= 100 || exponent === 0) {
+    fractionDigits = 0;
+  } else if (size >= 10) {
+    fractionDigits = 1;
+  }
   return `${size.toFixed(fractionDigits)} ${units[exponent]}`;
 }

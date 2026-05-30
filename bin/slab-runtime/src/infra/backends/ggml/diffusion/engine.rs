@@ -1,4 +1,4 @@
-use super::contract::{
+use crate::domain::models::{
     GeneratedImage, GgmlDiffusionLoadConfig, ImageGenerationRequest, ImageGenerationResponse,
 };
 use crate::infra::backends::ggml;

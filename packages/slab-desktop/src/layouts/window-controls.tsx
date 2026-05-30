@@ -1,6 +1,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { Minus, Plus, Square, X } from "lucide-react"
 import { toast } from "sonner"
+import { getErrorMessage } from "@slab/api"
 
 import { Button } from "@slab/components/button"
 import useDesktopPlatform, { type DesktopPlatform } from "@/hooks/use-desktop-platform"
@@ -72,7 +73,7 @@ const WINDOW_CONTROLS_CONFIG_BY_PLATFORM: Record<DesktopPlatform, WindowControls
 }
 
 function getWindowControlErrorMessage(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error)
+  const message = getErrorMessage(error)
 
   if (message.includes("not allowed")) {
     return "Window controls need a Tauri restart after capability changes."

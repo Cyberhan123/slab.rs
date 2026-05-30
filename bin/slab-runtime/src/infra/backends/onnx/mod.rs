@@ -1,4 +1,3 @@
-mod contract;
 mod engine;
 mod error;
 mod worker;

@@ -142,7 +142,29 @@ export function SetupWorkbench({
   const ffmpegInstalled = setupStatus?.ffmpeg.installed ?? false;
   const readyBackends = setupStatus?.backends.filter((backend) => backend.installed).length ?? 0;
   const totalBackends = setupStatus?.backends.length ?? 0;
-  const Icon = isFailed ? TriangleAlert : isSucceeded ? CheckCircle2 : Loader2;
+  let Icon = Loader2;
+  if (isFailed) {
+    Icon = TriangleAlert;
+  } else if (isSucceeded) {
+    Icon = CheckCircle2;
+  }
+
+  let stageBadgeLabel = 'Running';
+  let stageBadgeTone: 'active' | 'success' | 'error' = 'active';
+  if (isFailed) {
+    stageBadgeLabel = 'Failed';
+    stageBadgeTone = 'error';
+  } else if (isSucceeded) {
+    stageBadgeLabel = 'Complete';
+    stageBadgeTone = 'success';
+  }
+
+  let progressHint = 'Keep this window open while the local setup task finishes provisioning the runtime.';
+  if (isSucceeded) {
+    progressHint = 'Setup has completed. Slab will enter the application automatically.';
+  } else if (runtimePayloadInstalled) {
+    progressHint = 'Keep this window open while Slab checks FFmpeg and confirms the packaged runtime is ready.';
+  }
 
   return (
     <SetupScaffold>
@@ -230,8 +252,8 @@ export function SetupWorkbench({
                 </div>
 
                 <SetupBadge
-                  label={isFailed ? 'Failed' : isSucceeded ? 'Complete' : 'Running'}
-                  tone={isFailed ? 'error' : isSucceeded ? 'success' : 'active'}
+                  label={stageBadgeLabel}
+                  tone={stageBadgeTone}
                 />
               </div>
 
@@ -255,13 +277,7 @@ export function SetupWorkbench({
                 {provisionError ? (
                   <p className="text-sm leading-6 text-destructive">{provisionError}</p>
                 ) : (
-                  <p className="text-sm leading-6 text-muted-foreground">
-                    {isSucceeded
-                      ? 'Setup has completed. Slab will enter the application automatically.'
-                      : runtimePayloadInstalled
-                        ? 'Keep this window open while Slab checks FFmpeg and confirms the packaged runtime is ready.'
-                        : 'Keep this window open while the local setup task finishes provisioning the runtime.'}
-                  </p>
+                  <p className="text-sm leading-6 text-muted-foreground">{progressHint}</p>
                 )}
               </div>
 

@@ -38,17 +38,36 @@ export function InstalledPluginCard({
 }) {
   const { t } = useTranslation();
   const running = isPluginRunning(plugin);
-  const primaryActionKey = running ? 'stop' : !plugin.enabled ? 'enable' : 'launch';
+  let primaryActionKey: 'stop' | 'enable' | 'launch' = 'launch';
+  if (running) {
+    primaryActionKey = 'stop';
+  } else if (!plugin.enabled) {
+    primaryActionKey = 'enable';
+  }
   const primaryLabel = t(`pages.plugins.actions.${primaryActionKey}`);
-  const PrimaryIcon = running ? Square : !plugin.enabled ? Power : PlugZap;
-  const status: PluginStatusKey = !plugin.valid
-    ? 'invalid'
-    : running
-      ? 'running'
-      : plugin.enabled
-        ? 'idle'
-        : 'disabled';
+  let PrimaryIcon = PlugZap;
+  if (running) {
+    PrimaryIcon = Square;
+  } else if (!plugin.enabled) {
+    PrimaryIcon = Power;
+  }
+
+  let status: PluginStatusKey = 'disabled';
+  if (!plugin.valid) {
+    status = 'invalid';
+  } else if (running) {
+    status = 'running';
+  } else if (plugin.enabled) {
+    status = 'idle';
+  }
   const summary = pluginSummaryMessage(plugin);
+
+  let primaryVariant: 'secondary' | 'pill' | 'cta' = 'cta';
+  if (running) {
+    primaryVariant = 'secondary';
+  } else if (!plugin.enabled) {
+    primaryVariant = 'pill';
+  }
 
   return (
     <article className="relative flex min-h-[194px] flex-col gap-4 rounded-[12px] border border-[color-mix(in_oklab,var(--border)_54%,transparent)] bg-[var(--shell-card)] p-[17px] shadow-[var(--shell-elevation)] transition hover:-translate-y-0.5 hover:border-[color-mix(in_oklab,var(--brand-teal)_28%,var(--border))] hover:shadow-[0_24px_50px_-40px_color-mix(in_oklab,var(--foreground)_38%,transparent)]">
@@ -80,7 +99,7 @@ export function InstalledPluginCard({
 
       <div className="mt-auto flex items-center gap-2 pt-2">
         <Button
-          variant={running ? 'secondary' : !plugin.enabled ? 'pill' : 'cta'}
+          variant={primaryVariant}
           size="sm"
           disabled={busy || (!plugin.valid && !plugin.enabled)}
           className={cn(

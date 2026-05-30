@@ -7,7 +7,9 @@
 
 use std::collections::HashMap;
 
-use super::contract::{OnnxInferenceRequest, OnnxInferenceResponse, OnnxLoadConfig, OnnxTensor};
+use crate::domain::models::{
+    OnnxInferenceRequest, OnnxInferenceResponse, OnnxLoadConfig, OnnxTensor,
+};
 use ort::{
     ep::ExecutionProviderDispatch,
     session::{Session, builder::GraphOptimizationLevel},

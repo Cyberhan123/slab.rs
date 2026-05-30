@@ -404,7 +404,12 @@ function toModelItem(
 ): ModelItem {
   const hasLocalPath = Boolean(model.local_path);
   const pending = !hasLocalPath && (model.pending || Boolean(tracking));
-  const status = hasLocalPath ? 'ready' : pending ? 'downloading' : model.status;
+  let status = model.status;
+  if (hasLocalPath) {
+    status = 'ready';
+  } else if (pending) {
+    status = 'downloading';
+  }
 
   return {
     id: model.id,

@@ -28,7 +28,7 @@ use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
-use super::contract::{
+use crate::domain::models::{
     GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, TextGenerationOptions, TextGenerationResponse,
 };
 use super::engine::{GGMLLlamaEngine, LlamaDispatchOutput, LlamaDispatchRequest};
@@ -306,7 +306,7 @@ pub fn spawn_backend_with_engine(
 
 #[cfg(test)]
 mod tests {
-    use super::super::contract::TextGenerationOptions;
+    use crate::domain::models::TextGenerationOptions;
     use super::{InferenceOptions, LlamaWorker};
     use slab_runtime_core::backend::ControlOpId;
 

@@ -16,7 +16,7 @@
 use image::GenericImageView;
 use tokio::sync::broadcast;
 
-use super::contract::{
+use crate::domain::models::{
     CandleDiffusionLoadConfig, GeneratedImage, ImageGenerationRequest, ImageGenerationResponse,
 };
 use super::engine::{CandleDiffusionEngine, GenImageParams};
@@ -286,7 +286,7 @@ pub fn spawn_backend(
 mod tests {
     use std::path::PathBuf;
 
-    use super::super::contract::CandleDiffusionLoadConfig;
+    use crate::domain::models::CandleDiffusionLoadConfig;
     use super::CandleDiffusionWorker;
     use slab_runtime_core::Payload;
     use slab_runtime_core::backend::{

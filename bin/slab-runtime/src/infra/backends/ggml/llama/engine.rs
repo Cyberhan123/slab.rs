@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use tokio::sync::{mpsc, watch};
 use tracing::{info, warn};
 
-use super::contract::{
+use crate::domain::models::{
     GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, TextGenerationMetadata, TextGenerationStreamEvent,
     TextGenerationUsage, TextPromptTokensDetails, TextStopMetadata,
 };

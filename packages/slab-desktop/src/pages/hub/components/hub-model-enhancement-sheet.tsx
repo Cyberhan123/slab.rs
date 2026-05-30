@@ -2,6 +2,7 @@ import { Loader2, LockKeyhole, Save, Settings2, TriangleAlert } from 'lucide-rea
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
+import { getErrorMessage } from '@slab/api';
 
 import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
 import { Badge } from '@slab/components/badge';
@@ -54,7 +55,7 @@ export function HubModelEnhancementSheet({
     enabled: open && Boolean(model),
   });
   const updateModelConfigSelectionMutation = useUpdateModelConfigSelectionMutation();
-  const loadError = error instanceof Error ? error.message : error ? String(error) : null;
+  const loadError = error ? getErrorMessage(error) : null;
   const isSaving = updateModelConfigSelectionMutation.isPending;
 
   useEffect(() => {

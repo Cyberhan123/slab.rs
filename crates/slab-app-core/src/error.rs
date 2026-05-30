@@ -5,6 +5,7 @@
 //! the HTTP server layer and from native Tauri IPC commands.
 
 use serde::Serialize;
+use slab_agent::error::AgentError;
 use thiserror::Error;
 
 /// Structured client-facing error details for known bad-request cases.
@@ -99,6 +100,29 @@ impl From<slab_config::ConfigError> for AppCoreError {
             slab_config::ConfigError::BadRequest(message) => Self::BadRequest(message),
             slab_config::ConfigError::NotImplemented(message) => Self::NotImplemented(message),
             slab_config::ConfigError::Internal(message) => Self::Internal(message),
+        }
+    }
+}
+
+impl From<AgentError> for AppCoreError {
+    fn from(error: AgentError) -> Self {
+        match error {
+            AgentError::ThreadNotFound(id) => {
+                Self::NotFound(format!("agent thread not found: {id}"))
+            }
+            AgentError::ThreadLimitExceeded { current, max } => Self::TooManyRequests(format!(
+                "thread limit exceeded: {current}/{max} concurrent threads active"
+            )),
+            AgentError::ThreadBusy(id) => {
+                Self::TooManyRequests(format!("agent thread is already running: {id}"))
+            }
+            AgentError::ThreadNotResumable { id, status } => {
+                Self::BadRequest(format!("agent thread cannot be resumed: {id} is {status}"))
+            }
+            AgentError::DepthLimitExceeded { current, max } => {
+                Self::BadRequest(format!("depth limit exceeded: {current}/{max}"))
+            }
+            other => Self::Internal(other.to_string()),
         }
     }
 }

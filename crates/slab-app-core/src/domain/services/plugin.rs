@@ -859,72 +859,12 @@ fn validate_contributions(
     manifest: &PluginManifest,
     source_kind: &str,
 ) -> Result<(), String> {
-    validate_duplicate_ids(
-        "contributes.routes",
-        manifest.contributes.routes.iter().map(|route| &route.id),
-    )?;
-    validate_duplicate_ids(
-        "contributes.sidebar",
-        manifest.contributes.sidebar.iter().map(|item| &item.id),
-    )?;
-    validate_duplicate_ids(
-        "contributes.commands",
-        manifest.contributes.commands.iter().map(|item| &item.id),
-    )?;
-    validate_duplicate_ids(
-        "contributes.settings",
-        manifest.contributes.settings.iter().map(|item| &item.id),
-    )?;
-    validate_duplicate_ids(
-        "contributes.agentCapabilities",
-        manifest.contributes.agent_capabilities.iter().map(|item| &item.id),
-    )?;
-    validate_duplicate_ids(
-        "contributes.languageServers",
-        manifest.contributes.language_servers.iter().map(|item| &item.id),
-    )?;
-
-    if !manifest.contributes.routes.is_empty() {
-        ensure_permission(
-            &manifest.permissions,
-            "route:create",
-            "contributes.routes requires permissions.ui to include route:create",
-        )?;
-    }
-    if !manifest.contributes.sidebar.is_empty() {
-        ensure_permission(
-            &manifest.permissions,
-            "sidebar:item:create",
-            "contributes.sidebar requires permissions.ui to include sidebar:item:create",
-        )?;
-    }
-    if !manifest.contributes.commands.is_empty() {
-        ensure_permission(
-            &manifest.permissions,
-            "command:create",
-            "contributes.commands requires permissions.ui to include command:create",
-        )?;
-    }
-    if !manifest.contributes.settings.is_empty() {
-        ensure_permission(
-            &manifest.permissions,
-            "settings:section:create",
-            "contributes.settings requires permissions.ui to include settings:section:create",
-        )?;
-    }
-    if !manifest.contributes.agent_capabilities.is_empty() {
-        ensure_agent_permission(
-            &manifest.permissions,
-            "capability:declare",
-            "contributes.agentCapabilities requires permissions.agent to include capability:declare",
-        )?;
-    }
-    if !manifest.contributes.language_servers.is_empty() {
-        ensure_lsp_permission(
-            &manifest.permissions,
-            "languageServer:declare",
-            "contributes.languageServers requires permissions.lsp to include languageServer:declare",
-        )?;
+    for rule in CONTRIBUTION_VALIDATION_RULES {
+        let ids = (rule.extract_ids)(manifest);
+        validate_duplicate_ids(rule.context, ids.iter())?;
+        if (rule.has_items)(manifest) {
+            (rule.ensure_permission)(&manifest.permissions)?;
+        }
     }
 
     let route_ids =
@@ -951,6 +891,154 @@ fn validate_contributions(
     }
 
     Ok(())
+}
+
+type ContributionIdExtractor = fn(&PluginManifest) -> Vec<String>;
+type ContributionPermissionChecker = fn(&PluginPermissionsManifest) -> Result<(), String>;
+type ContributionHasItems = fn(&PluginManifest) -> bool;
+
+struct ContributionValidationRule {
+    context: &'static str,
+    extract_ids: ContributionIdExtractor,
+    has_items: ContributionHasItems,
+    ensure_permission: ContributionPermissionChecker,
+}
+
+const CONTRIBUTION_VALIDATION_RULES: &[ContributionValidationRule] = &[
+    ContributionValidationRule {
+        context: "contributes.routes",
+        extract_ids: extract_route_ids,
+        has_items: has_routes,
+        ensure_permission: ensure_routes_permission,
+    },
+    ContributionValidationRule {
+        context: "contributes.sidebar",
+        extract_ids: extract_sidebar_ids,
+        has_items: has_sidebar,
+        ensure_permission: ensure_sidebar_permission,
+    },
+    ContributionValidationRule {
+        context: "contributes.commands",
+        extract_ids: extract_command_ids,
+        has_items: has_commands,
+        ensure_permission: ensure_commands_permission,
+    },
+    ContributionValidationRule {
+        context: "contributes.settings",
+        extract_ids: extract_setting_ids,
+        has_items: has_settings,
+        ensure_permission: ensure_settings_permission,
+    },
+    ContributionValidationRule {
+        context: "contributes.agentCapabilities",
+        extract_ids: extract_agent_capability_ids,
+        has_items: has_agent_capabilities,
+        ensure_permission: ensure_agent_capabilities_permission,
+    },
+    ContributionValidationRule {
+        context: "contributes.languageServers",
+        extract_ids: extract_language_server_ids,
+        has_items: has_language_servers,
+        ensure_permission: ensure_language_servers_permission,
+    },
+];
+
+fn extract_route_ids(manifest: &PluginManifest) -> Vec<String> {
+    manifest.contributes.routes.iter().map(|route| route.id.clone()).collect()
+}
+
+fn extract_sidebar_ids(manifest: &PluginManifest) -> Vec<String> {
+    manifest.contributes.sidebar.iter().map(|item| item.id.clone()).collect()
+}
+
+fn extract_command_ids(manifest: &PluginManifest) -> Vec<String> {
+    manifest.contributes.commands.iter().map(|item| item.id.clone()).collect()
+}
+
+fn extract_setting_ids(manifest: &PluginManifest) -> Vec<String> {
+    manifest.contributes.settings.iter().map(|item| item.id.clone()).collect()
+}
+
+fn extract_agent_capability_ids(manifest: &PluginManifest) -> Vec<String> {
+    manifest.contributes.agent_capabilities.iter().map(|item| item.id.clone()).collect()
+}
+
+fn extract_language_server_ids(manifest: &PluginManifest) -> Vec<String> {
+    manifest.contributes.language_servers.iter().map(|item| item.id.clone()).collect()
+}
+
+fn has_routes(manifest: &PluginManifest) -> bool {
+    !manifest.contributes.routes.is_empty()
+}
+
+fn has_sidebar(manifest: &PluginManifest) -> bool {
+    !manifest.contributes.sidebar.is_empty()
+}
+
+fn has_commands(manifest: &PluginManifest) -> bool {
+    !manifest.contributes.commands.is_empty()
+}
+
+fn has_settings(manifest: &PluginManifest) -> bool {
+    !manifest.contributes.settings.is_empty()
+}
+
+fn has_agent_capabilities(manifest: &PluginManifest) -> bool {
+    !manifest.contributes.agent_capabilities.is_empty()
+}
+
+fn has_language_servers(manifest: &PluginManifest) -> bool {
+    !manifest.contributes.language_servers.is_empty()
+}
+
+fn ensure_routes_permission(permissions: &PluginPermissionsManifest) -> Result<(), String> {
+    ensure_permission(
+        permissions,
+        "route:create",
+        "contributes.routes requires permissions.ui to include route:create",
+    )
+}
+
+fn ensure_sidebar_permission(permissions: &PluginPermissionsManifest) -> Result<(), String> {
+    ensure_permission(
+        permissions,
+        "sidebar:item:create",
+        "contributes.sidebar requires permissions.ui to include sidebar:item:create",
+    )
+}
+
+fn ensure_commands_permission(permissions: &PluginPermissionsManifest) -> Result<(), String> {
+    ensure_permission(
+        permissions,
+        "command:create",
+        "contributes.commands requires permissions.ui to include command:create",
+    )
+}
+
+fn ensure_settings_permission(permissions: &PluginPermissionsManifest) -> Result<(), String> {
+    ensure_permission(
+        permissions,
+        "settings:section:create",
+        "contributes.settings requires permissions.ui to include settings:section:create",
+    )
+}
+
+fn ensure_agent_capabilities_permission(
+    permissions: &PluginPermissionsManifest,
+) -> Result<(), String> {
+    ensure_agent_permission(
+        permissions,
+        "capability:declare",
+        "contributes.agentCapabilities requires permissions.agent to include capability:declare",
+    )
+}
+
+fn ensure_language_servers_permission(permissions: &PluginPermissionsManifest) -> Result<(), String> {
+    ensure_lsp_permission(
+        permissions,
+        "languageServer:declare",
+        "contributes.languageServers requires permissions.lsp to include languageServer:declare",
+    )
 }
 
 fn validate_route(

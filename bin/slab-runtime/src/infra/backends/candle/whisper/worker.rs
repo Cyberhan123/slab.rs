@@ -15,7 +15,7 @@
 
 use tokio::sync::broadcast;
 
-use super::contract::{
+use crate::domain::models::{
     AudioTranscriptionOptions, AudioTranscriptionResponse, CandleWhisperLoadConfig,
 };
 use super::engine::CandleWhisperEngine;
@@ -213,7 +213,7 @@ pub fn spawn_backend(
 mod tests {
     use std::path::PathBuf;
 
-    use super::super::contract::CandleWhisperLoadConfig;
+    use crate::domain::models::CandleWhisperLoadConfig;
     use super::CandleWhisperWorker;
     use slab_runtime_core::Payload;
     use slab_runtime_core::backend::{
