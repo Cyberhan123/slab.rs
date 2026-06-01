@@ -1,0 +1,28 @@
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    ".cargo/config.bazel.toml",
+    "Cargo.lock",
+    "Cargo.toml",
+    "package.json",
+])
+
+alias(
+    name = "slab-server",
+    actual = "//bin/slab-server:slab-server",
+)
+
+alias(
+    name = "slab-runtime",
+    actual = "//bin/slab-runtime:slab-runtime",
+)
+
+alias(
+    name = "slab-js-runtime",
+    actual = "//bin/slab-js-runtime:slab-js-runtime",
+)
+
+alias(
+    name = "slab-python-runtime",
+    actual = "//bin/slab-python-runtime:slab-python-runtime",
+)

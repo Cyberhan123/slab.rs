@@ -1,0 +1,24 @@
+load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
+
+package(default_visibility = ["//visibility:public"])
+
+rust_proc_macro(
+    name = "wivem",
+    srcs = [
+        "@crates__wasmtime-internal-versioned-export-macros-41.0.4//:src/lib.rs",
+    ],
+    crate_root = "@crates__wasmtime-internal-versioned-export-macros-41.0.4//:src/lib.rs",
+    deps = [
+        "@crates//:proc-macro2",
+        "@crates//:quote",
+        "@crates//:syn",
+    ],
+    edition = "2024",
+    rustc_env = {
+        "CARGO_PKG_VERSION": "41.0.4",
+    },
+    rustc_flags = [
+        "--cap-lints=allow",
+    ],
+    version = "41.0.4",
+)

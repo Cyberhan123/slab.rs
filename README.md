@@ -102,7 +102,7 @@ This section keeps only the most common and practical development entry points. 
 ### Install
 
 - Install the Rust stable toolchain.
-- Install `cargo-make`: `cargo install cargo-make`
+- Install Bazelisk.
 - Install Bun.
 - Install Python as well if you plan to run the server compatibility tests.
 
@@ -130,23 +130,30 @@ These commands cover the usual build, check, and test workflows.
 ```sh
 # Run the standard workspace checks
 bun run check
+bazel build //...
 
 # Run the full automated test suite
 bun run test
+bazel test //...
 
 # Build the desktop frontend only
 bun run build:desktop
 
 # Build the desktop app bundle
 bun run build:app
+bazel run //bin/slab-app:bundle_debug
 
 # Build the Windows full installer
 bun run build:windows-installer
+bazel run //bin/slab-app:bundle_release_windows
 
 # Regenerate generated assets
 bun run gen:api
+bazel run //tools/gen:api
 bun run gen:schemas
+bazel run //tools/gen:schemas
 bun run gen:plugin-packs
+bazel run //tools/plugins:plugin_packs
 bun run gen:model-packs
 
 # Server compatibility tests

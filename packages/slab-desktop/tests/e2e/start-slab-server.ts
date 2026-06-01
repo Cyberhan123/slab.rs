@@ -5,10 +5,6 @@ import { spawn, spawnSync } from "node:child_process";
 const scriptDir = path.dirname(import.meta.filename);
 const packageRoot = path.resolve(scriptDir, "..", "..");
 const repoRoot = path.resolve(packageRoot, "..", "..");
-const targetDir = path.join(repoRoot, "target", "debug");
-const isWindows = process.platform === "win32";
-const serverExe = path.join(targetDir, isWindows ? "slab-server.exe" : "slab-server");
-const runtimeExe = path.join(targetDir, isWindows ? "slab-runtime.exe" : "slab-runtime");
 
 const bind = process.env.SLAB_BIND ?? "127.0.0.1:3300";
 const settingsPath =
@@ -77,22 +73,43 @@ fs.writeFileSync(
   "utf8",
 );
 
-function runMakeTask(task: string) {
-  const result = spawnSync("cargo", ["make", task], {
+function runBazel(args: string[]) {
+  const result = spawnSync("bazel", args, {
     cwd: repoRoot,
     stdio: "inherit",
     env: process.env,
   });
 
   if (result.status !== 0) {
-    throw new Error(`cargo make ${task} failed with exit code ${result.status ?? "unknown"}`);
+    throw new Error(`bazel ${args.join(" ")} failed with exit code ${result.status ?? "unknown"}`);
   }
 }
 
-if (!fs.existsSync(serverExe) || !fs.existsSync(runtimeExe)) {
-  runMakeTask("build-runtime-dev");
-  runMakeTask("build-server-dev");
+function bazelOutputPath(label: string) {
+  const result = spawnSync("bazel", ["cquery", "--output=files", label], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: process.env,
+  });
+
+  if (result.status !== 0) {
+    throw new Error(`bazel cquery failed for ${label}: ${result.stderr}`);
+  }
+
+  const file = result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!file) {
+    throw new Error(`bazel cquery did not return an output file for ${label}`);
+  }
+  return path.isAbsolute(file) ? file : path.join(repoRoot, file);
 }
+
+runBazel(["build", "//bin/slab-server:slab-server", "//bin/slab-runtime:slab-runtime"]);
+
+const serverExe = bazelOutputPath("//bin/slab-server:slab-server");
+const runtimeExe = bazelOutputPath("//bin/slab-runtime:slab-runtime");
 
 if (!fs.existsSync(serverExe)) {
   throw new Error(`slab-server executable was not found at ${serverExe}`);

@@ -1,0 +1,21 @@
+load("//tools/bazel:rust.bzl", "slab_cargo_build_script", "slab_rust_binary", "slab_rust_library")
+
+package(default_visibility = ["//visibility:public"])
+
+slab_cargo_build_script()
+
+slab_rust_library(
+    name = "slab-python-runtime-lib",
+    crate_name = "slab_python_runtime",
+    deps = ["//crates/slab-types:slab-types"],
+    build_script = ":build_script",
+)
+
+slab_rust_binary(
+    name = "slab-python-runtime",
+    srcs = glob(["src/**/*.rs"], exclude = ["src/lib.rs"]),
+    deps = [
+        ":slab-python-runtime-lib",
+        "//crates/slab-types:slab-types",
+    ],
+)

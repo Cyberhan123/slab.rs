@@ -1,0 +1,23 @@
+load("//tools/bazel:rust.bzl", "slab_rust_binary", "slab_rust_library")
+
+package(default_visibility = ["//visibility:public"])
+
+slab_rust_library(
+    name = "slab-config",
+    deps = [
+        "//crates/slab-types:slab-types",
+        "//crates/slab-utils:slab-utils",
+    ],
+)
+
+slab_rust_binary(
+    name = "generate_settings_document_schema",
+    crate_name = "generate_settings_document_schema",
+    crate_root = "src/generate_settings_document_schema.rs",
+    srcs = glob(["src/**/*.rs"], exclude = ["src/lib.rs"]),
+    deps = [
+        ":slab-config",
+        "//crates/slab-types:slab-types",
+        "//crates/slab-utils:slab-utils",
+    ],
+)

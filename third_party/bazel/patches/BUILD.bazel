@@ -1,0 +1,3 @@
+exports_files([
+    "rules_rust_crate_universe_path_crates.patch",
+])

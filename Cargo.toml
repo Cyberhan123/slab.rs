@@ -315,6 +315,4 @@ sys_traits = "0.1.28"
 
 [patch.crates-io]
 all-smi-luwen-if = { path = "vendor/all-smi-luwen-if-0.7.9" }
-deno_io = { path = "vendor/deno_io-0.158.0" }
-pkcs8 = { path = "vendor/pkcs8-0.11.0-rc.10" }
-sha3 = { path = "vendor/sha3-0.11.0-rc.7" }
+

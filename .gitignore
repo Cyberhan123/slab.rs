@@ -9,6 +9,7 @@ desktop.ini
 
 ## Build output
 /target
+/bazel-*
 /testdata/whisper
 slab-libfetch/target/
 slab-*-sys/target/

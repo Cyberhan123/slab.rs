@@ -1,0 +1,20 @@
+common --enable_bzlmod
+common --announce_rc
+common --enable_platform_specific_config
+common:windows --repo_env=TMP=C:/tmp
+common:windows --repo_env=TEMP=C:/tmp
+
+startup --output_base=C:/tmp/b
+startup --windows_enable_symlinks
+
+build --incompatible_strict_action_env
+build --experimental_convenience_symlinks=ignore
+build --color=yes
+build --curses=yes
+
+build:release -c opt
+
+build:ffmpeg-static --//tools/bazel/settings:ffmpeg_mode=static
+build:ffmpeg-build --//tools/bazel/settings:ffmpeg_mode=build
+
+test --test_output=errors

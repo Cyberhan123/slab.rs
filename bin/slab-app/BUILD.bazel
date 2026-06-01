@@ -1,0 +1,72 @@
+load("@rules_python//python:defs.bzl", "py_binary")
+
+package(default_visibility = ["//visibility:public"])
+
+py_binary(
+    name = "dev",
+    srcs = ["//tools/bazel:workspace_command.py"],
+    args = [
+        "--cwd",
+        "bin/slab-app",
+        "bun",
+        "run",
+        "tauri",
+        "dev",
+    ],
+    data = [
+        "//bin/slab-js-runtime:slab-js-runtime",
+        "//bin/slab-python-runtime:slab-python-runtime",
+        "//bin/slab-runtime:slab-runtime",
+        "//bin/slab-server:slab-server",
+    ],
+)
+
+py_binary(
+    name = "bundle_debug",
+    srcs = ["//tools/bazel:workspace_command.py"],
+    args = [
+        "--cwd",
+        "bin/slab-app",
+        "bun",
+        "run",
+        "tauri",
+        "build",
+        "--no-bundle",
+        "--debug",
+    ],
+    data = [
+        "//bin/slab-js-runtime:slab-js-runtime",
+        "//bin/slab-python-runtime:slab-python-runtime",
+        "//bin/slab-runtime:slab-runtime",
+        "//bin/slab-server:slab-server",
+        "//tools/frontend:desktop_build",
+        "//tools/frontend:language_servers",
+        "//tools/plugins:plugin_packs",
+    ],
+)
+
+py_binary(
+    name = "bundle_release_windows",
+    srcs = ["//tools/bazel:workspace_command.py"],
+    args = [
+        "--cwd",
+        "bin/slab-app",
+        "bun",
+        "run",
+        "tauri",
+        "build",
+        "--bundles",
+        "nsis",
+        "--config",
+        "src-tauri/tauri.windows.release.conf.json",
+    ],
+    data = [
+        "//bin/slab-js-runtime:slab-js-runtime",
+        "//bin/slab-python-runtime:slab-python-runtime",
+        "//bin/slab-runtime:slab-runtime",
+        "//bin/slab-server:slab-server",
+        "//tools/frontend:desktop_build",
+        "//tools/frontend:language_servers",
+        "//tools/plugins:plugin_packs",
+    ],
+)

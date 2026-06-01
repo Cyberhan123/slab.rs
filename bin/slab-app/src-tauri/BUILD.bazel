@@ -1,0 +1,31 @@
+load("//tools/bazel:rust.bzl", "slab_cargo_build_script", "slab_rust_binary", "slab_rust_library")
+
+package(default_visibility = ["//visibility:public"])
+
+slab_cargo_build_script()
+
+slab_rust_library(
+    name = "slab-app-lib",
+    crate_name = "slab_lib",
+    deps = [
+        "//crates/slab-app-core:slab-app-core",
+        "//crates/slab-config:slab-config",
+        "//crates/slab-plugin:slab-plugin",
+        "//crates/slab-types:slab-types",
+        "//crates/slab-utils:slab-utils",
+    ],
+    build_script = ":build_script",
+)
+
+slab_rust_binary(
+    name = "slab-app",
+    srcs = glob(["src/**/*.rs"], exclude = ["src/lib.rs"]),
+    deps = [
+        ":slab-app-lib",
+        "//crates/slab-app-core:slab-app-core",
+        "//crates/slab-config:slab-config",
+        "//crates/slab-plugin:slab-plugin",
+        "//crates/slab-types:slab-types",
+        "//crates/slab-utils:slab-utils",
+    ],
+)

@@ -1,0 +1,19 @@
+load("//tools/bazel:rust.bzl", "slab_rust_binary", "slab_rust_library")
+
+package(default_visibility = ["//visibility:public"])
+
+slab_rust_library(
+    name = "slab-model-pack",
+    deps = ["//crates/slab-types:slab-types"],
+)
+
+slab_rust_binary(
+    name = "generate_manifest_schema",
+    crate_name = "generate_manifest_schema",
+    crate_root = "src/bin/generate_manifest_schema.rs",
+    srcs = glob(["src/**/*.rs"], exclude = ["src/lib.rs"]),
+    deps = [
+        ":slab-model-pack",
+        "//crates/slab-types:slab-types",
+    ],
+)

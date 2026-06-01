@@ -1,0 +1,12 @@
+load("@rules_python//python:defs.bzl", "py_binary")
+
+package(default_visibility = ["//visibility:public"])
+
+py_binary(
+    name = "plugin_packs",
+    srcs = ["//tools/bazel:workspace_command.py"],
+    args = [
+        "bun",
+        "./scripts/plugins/generate-plugin-packs.ts",
+    ],
+)

@@ -1,0 +1,11 @@
+load("//tools/bazel:rust.bzl", "slab_rust_library")
+
+package(default_visibility = ["//visibility:public"])
+
+slab_rust_library(
+    name = "slab-hub",
+    crate_features = [
+        "provider-hf-hub",
+        "provider-models-cat",
+    ],
+)

@@ -1,0 +1,38 @@
+load("//tools/bazel:rust.bzl", "slab_cargo_build_script", "slab_rust_library")
+
+package(default_visibility = ["//visibility:public"])
+
+slab_cargo_build_script(
+    deps = [
+        "//crates/slab-build-utils:slab-build-utils",
+        "//crates/slab-utils:slab-utils",
+    ],
+)
+
+slab_rust_library(
+    name = "slab-app-core",
+    crate_features = [
+        "gpu-telemetry",
+        "ffmpeg-next-static",
+    ],
+    deps = [
+        "//crates/slab-agent-tools:slab-agent-tools",
+        "//crates/slab-agent:slab-agent",
+        "//crates/slab-build-utils:slab-build-utils",
+        "//crates/slab-config:slab-config",
+        "//crates/slab-file:slab-file",
+        "//crates/slab-git:slab-git",
+        "//crates/slab-hub:slab-hub",
+        "//crates/slab-libfetch:slab-libfetch",
+        "//crates/slab-mcp:slab-mcp",
+        "//crates/slab-model-pack:slab-model-pack",
+        "//crates/slab-plugin:slab-plugin",
+        "//crates/slab-proto:slab-proto",
+        "//crates/slab-runtime-core:slab-runtime-core",
+        "//crates/slab-sandboxing:slab-sandboxing",
+        "//crates/slab-subtitle:slab-subtitle",
+        "//crates/slab-types:slab-types",
+        "//crates/slab-utils:slab-utils",
+    ],
+    build_script = ":build_script",
+)

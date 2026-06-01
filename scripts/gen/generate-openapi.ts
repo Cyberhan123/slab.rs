@@ -17,12 +17,6 @@ const pythonClientOutputPath = path.join(pythonSdkRoot, "src", "slab_api_client"
 const pythonClientConfigPath = path.join(pythonSdkRoot, "openapi-python-client.yaml");
 const OPENAPI_PYTHON_CLIENT_VERSION = "0.28.4";
 const PYTHON_STRING_MAP_SCHEMA = "SlabStringMap";
-const serverBinaryPath = path.join(
-  repoRoot,
-  "target",
-  "debug",
-  process.platform === "win32" ? "slab-server.exe" : "slab-server",
-);
 const nativeRuntimeLibDir = path.join(
   repoRoot,
   "bin",
@@ -33,7 +27,8 @@ const nativeRuntimeLibDir = path.join(
 );
 
 async function main() {
-  await runCommand("cargo", ["build", "-p", "slab-server"]);
+  await runCommand("bazel", ["build", "//bin/slab-server:slab-server"]);
+  const serverBinaryPath = await bazelOutputPath("//bin/slab-server:slab-server");
   const openapi = JSON.parse(
     await runCommandCapture(serverBinaryPath, ["--print-openapi"], {
       env: withNativeRuntimeLibraryPath(process.env),
@@ -61,6 +56,18 @@ async function main() {
   console.log(
     `Generated ${path.relative(repoRoot, pythonClientOutputPath).replace(/\\/g, "/")} from slab-server --print-openapi.`,
   );
+}
+
+async function bazelOutputPath(label: string) {
+  const output = await runCommandCapture("bazel", ["cquery", "--output=files", label]);
+  const file = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!file) {
+    throw new Error(`bazel cquery did not return an output file for ${label}.`);
+  }
+  return path.isAbsolute(file) ? file : path.join(repoRoot, file);
 }
 
 async function generatePythonClient(openapi: unknown) {

@@ -1,0 +1,43 @@
+load("@rules_python//python:defs.bzl", "py_binary")
+
+package(default_visibility = ["//visibility:public"])
+
+py_binary(
+    name = "frontend",
+    srcs = ["//tools/bazel:workspace_command.py"],
+    args = [
+        "bun",
+        "run",
+        "lint",
+        "--then",
+        "bun",
+        "run",
+        "--cwd",
+        "packages/api",
+        "build",
+        "--then",
+        "bun",
+        "run",
+        "--cwd",
+        "packages/slab-plugin-sdk",
+        "build",
+        "--then",
+        "bun",
+        "run",
+        "--cwd",
+        "packages/slab-plugin-cli",
+        "build",
+        "--then",
+        "bun",
+        "run",
+        "--cwd",
+        "packages/slab-plugin-ui",
+        "build",
+        "--then",
+        "bun",
+        "run",
+        "--cwd",
+        "packages/slab-desktop",
+        "build",
+    ],
+)

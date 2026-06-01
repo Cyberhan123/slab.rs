@@ -1,0 +1,17 @@
+load("//tools/bazel:rust.bzl", "slab_rust_binary")
+
+package(default_visibility = ["//visibility:public"])
+
+slab_rust_binary(
+    name = "slab-server",
+    srcs = glob(["src/**/*.rs"]),
+    deps = [
+        "//crates/slab-agent:slab-agent",
+        "//crates/slab-app-core:slab-app-core",
+        "//crates/slab-config:slab-config",
+        "//crates/slab-libfetch:slab-libfetch",
+        "//crates/slab-proto:slab-proto",
+        "//crates/slab-runtime-core:slab-runtime-core",
+        "//crates/slab-types:slab-types",
+    ],
+)

@@ -1,0 +1,12 @@
+load("//tools/bazel:rust.bzl", "slab_rust_library")
+
+package(default_visibility = ["//visibility:public"])
+
+slab_rust_library(
+    name = "slab-llama",
+    deps = [
+        "//crates/slab-ggml:slab-ggml",
+        "//crates/slab-llama-sys:slab-llama-sys",
+        "//crates/slab-utils:slab-utils",
+    ],
+)

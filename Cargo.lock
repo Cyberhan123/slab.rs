@@ -3421,6 +3421,8 @@ dependencies = [
 [[package]]
 name = "deno_io"
 version = "0.158.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eedc9aabeca92d87b93ed733876bdd57ce2b51e4492ff9b5c984e40063e2c6d3"
 dependencies = [
  "async-trait",
  "deno_core",
@@ -4878,7 +4880,7 @@ version = "0.5.0-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "24e146ca535b09cd2a2546e3eed9237e0b7f837b1c84c763fdfb20394fbcac20"
 dependencies = [
- "pkcs8 0.11.0-rc.10",
+ "pkcs8 0.11.0",
  "signature 3.0.0-rc.10",
 ]
 
@@ -4893,7 +4895,7 @@ dependencies = [
  "hash2curve",
  "rand_core 0.10.0",
  "serdect 0.4.3",
- "sha3 0.11.0-rc.7",
+ "sha3 0.11.0",
  "signature 3.0.0-rc.10",
  "subtle",
 ]
@@ -5036,7 +5038,7 @@ dependencies = [
  "crypto-bigint 0.7.0-rc.25",
  "crypto-common 0.2.1",
  "hybrid-array",
- "pkcs8 0.11.0-rc.10",
+ "pkcs8 0.11.0",
  "rand_core 0.10.0",
  "rustcrypto-ff",
  "rustcrypto-group",
@@ -9124,11 +9126,12 @@ dependencies = [
 
 [[package]]
 name = "keccak"
-version = "0.2.0-rc.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a412fe37705d515cba9dbf1448291a717e187e2351df908cfc0137cbec3d480"
+checksum = "9e24a010dd405bd7ed803e5253182815b41bf2e6a80cc3bfc066658e03a198aa"
 dependencies = [
- "cpufeatures 0.2.17",
+ "cfg-if",
+ "cpufeatures 0.3.0",
 ]
 
 [[package]]
@@ -11875,10 +11878,12 @@ dependencies = [
 
 [[package]]
 name = "pkcs8"
-version = "0.11.0-rc.10"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "451913da69c775a56034ea8d9003d27ee8948e12443eae7c038ba100a4f21cb7"
 dependencies = [
  "der 0.8.0",
- "spki 0.8.0-rc.4",
+ "spki 0.8.0",
 ]
 
 [[package]]
@@ -14470,10 +14475,12 @@ dependencies = [
 
 [[package]]
 name = "sha3"
-version = "0.11.0-rc.7"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be176f1a57ce4e3d31c1a166222d9768de5954f811601fb7ca06fc8203905ce1"
 dependencies = [
  "digest 0.11.2",
- "keccak 0.2.0-rc.1",
+ "keccak 0.2.0",
 ]
 
 [[package]]
@@ -14749,7 +14756,6 @@ dependencies = [
  "serde",
  "serde_json",
  "slab-app-core",
- "slab-build-utils",
  "slab-config",
  "slab-plugin",
  "slab-types",
@@ -15664,9 +15670,9 @@ dependencies = [
 
 [[package]]
 name = "spki"
-version = "0.8.0-rc.4"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8baeff88f34ed0691978ec34440140e1572b68c7dd4a495fd14a3dc1944daa80"
+checksum = "1d9efca8738c78ee9484207732f728b1ef517bbb1833d6fc0879ca898a522f6f"
 dependencies = [
  "base64ct",
  "der 0.8.0",

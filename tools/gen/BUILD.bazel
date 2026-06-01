@@ -1,0 +1,31 @@
+load("@rules_python//python:defs.bzl", "py_binary")
+
+package(default_visibility = ["//visibility:public"])
+
+py_binary(
+    name = "api",
+    srcs = ["//tools/bazel:workspace_command.py"],
+    args = [
+        "bun",
+        "./scripts/gen/generate-openapi.ts",
+    ],
+    data = ["//bin/slab-server:slab-server"],
+)
+
+py_binary(
+    name = "schemas",
+    srcs = ["//tools/bazel:workspace_command.py"],
+    args = [
+        "bazel",
+        "run",
+        "//crates/slab-model-pack:generate_manifest_schema",
+        "--then",
+        "bazel",
+        "run",
+        "//crates/slab-config:generate_settings_document_schema",
+    ],
+    data = [
+        "//crates/slab-config:generate_settings_document_schema",
+        "//crates/slab-model-pack:generate_manifest_schema",
+    ],
+)

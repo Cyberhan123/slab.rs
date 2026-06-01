@@ -1,0 +1,26 @@
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
+
+package(default_visibility = ["//visibility:public"])
+
+string_flag(
+    name = "ffmpeg_mode",
+    build_setting_default = "static",
+    values = [
+        "static",
+        "build",
+    ],
+)
+
+config_setting(
+    name = "ffmpeg_static",
+    flag_values = {
+        ":ffmpeg_mode": "static",
+    },
+)
+
+config_setting(
+    name = "ffmpeg_build",
+    flag_values = {
+        ":ffmpeg_mode": "build",
+    },
+)
