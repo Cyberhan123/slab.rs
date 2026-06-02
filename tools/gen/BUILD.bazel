@@ -18,13 +18,9 @@ py_binary(
     srcs = ["//tools/bazel:workspace_command.py"],
     main = "//tools/bazel:workspace_command.py",
     args = [
-        "bazelisk",
-        "run",
-        "//crates/slab-model-pack:generate_manifest_schema",
+        "--bazel-output=//crates/slab-model-pack:generate_manifest_schema",
         "--then",
-        "bazelisk",
-        "run",
-        "//crates/slab-config:generate_settings_document_schema",
+        "--bazel-output=//crates/slab-config:generate_settings_document_schema",
     ],
     data = [
         "//crates/slab-config:generate_settings_document_schema",

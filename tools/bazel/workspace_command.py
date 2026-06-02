@@ -14,6 +14,41 @@ def _split_commands(args: list[str]) -> list[list[str]]:
     return [command for command in commands if command]
 
 
+def _commands_need_bazel_ffmpeg_env(commands: list[list[str]]) -> bool:
+    return any(command[0] in {"bun", "cargo"} for command in commands if command)
+
+
+def _resolve_command_args(
+    command: list[str],
+    workspace: str,
+    env: dict[str, str],
+) -> list[str]:
+    resolved: list[str] = []
+    for arg in command:
+        if not arg.startswith("--bazel-output="):
+            resolved.append(arg)
+            continue
+
+        label = arg.removeprefix("--bazel-output=")
+        resolved.append(
+            _bazel_runfile_binary_path(label)
+            or _bazel_output_path(label, workspace, env)
+            or arg
+        )
+    return resolved
+
+
+def _bazel_runfile_binary_path(label: str) -> str | None:
+    runfiles_dir = os.environ.get("RUNFILES_DIR")
+    if not runfiles_dir or not label.startswith("//") or ":" not in label:
+        return None
+
+    package, target = label.removeprefix("//").split(":", 1)
+    executable_name = f"{target}.exe" if platform.system() == "Windows" else target
+    candidate = os.path.join(runfiles_dir, "_main", package, executable_name)
+    return candidate if os.path.isfile(candidate) else None
+
+
 def _bazel_capture(args: list[str], workspace: str, env: dict[str, str]) -> str | None:
     try:
         result = subprocess.run(
@@ -50,10 +85,27 @@ def _bazel_output_path(label: str, workspace: str, env: dict[str, str]) -> str |
 
 
 def _bazel_external_repo_path(repo_name: str, workspace: str, env: dict[str, str]) -> str | None:
+    for output_base in _known_output_base_candidates(env):
+        repo_path = _external_repo_path_from_output_base(output_base, repo_name)
+        if repo_path:
+            return repo_path
+
     output_base = _first_output_line(_bazel_capture(["info", "output_base"], workspace, env))
     if not output_base:
         return None
 
+    return _external_repo_path_from_output_base(output_base, repo_name)
+
+
+def _known_output_base_candidates(env: dict[str, str]) -> list[str]:
+    candidates = [
+        env.get("BAZEL_OUTPUT_BASE"),
+        "C:/tmp/b" if platform.system() == "Windows" else None,
+    ]
+    return [candidate for candidate in candidates if candidate]
+
+
+def _external_repo_path_from_output_base(output_base: str, repo_name: str) -> str | None:
     candidates = [
         os.path.join(output_base, "external", repo_name),
         os.path.join(output_base, "external", f"+http_archive+{repo_name}"),
@@ -116,13 +168,17 @@ def main() -> int:
         print("workspace_command.py requires a command", file=sys.stderr)
         return 2
 
-    env = _with_bazel_ffmpeg_env(workspace, os.environ.copy())
+    env = os.environ.copy()
+    if _commands_need_bazel_ffmpeg_env(commands):
+        env = _with_bazel_ffmpeg_env(workspace, env)
+
     for command in commands:
         cwd = workspace
         if "--cwd" in command:
             index = command.index("--cwd")
             cwd = os.path.join(workspace, command[index + 1])
             del command[index : index + 2]
+        command = _resolve_command_args(command, workspace, env)
         code = subprocess.run(command, cwd=cwd, env=env).returncode
         if code != 0:
             return code
