@@ -25,6 +25,7 @@ This section keeps planning artifacts, audits, worklogs, AI-maintenance notes, a
 
 ## Guides
 
+- [Bazel Usage Guide](/development/guides/bazel)
 - [Error Handling Guide](/development/guides/error-handling)
 - [Unified Config Guide](/development/guides/unified-config-guide)
 - [Workspace Dependencies](/development/guides/workspace-dependencies)

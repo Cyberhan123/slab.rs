@@ -991,17 +991,17 @@ pub enum AppCoreError {
 
 | 审计文件 | 关键贡献 |
 |----------|---------|
-| [00-executive-summary.md](../audits/00-executive-summary.md) | 总体评级、优先级排序 |
-| [01-architecture-analysis.md](../audits/01-architecture-analysis.md) | 分层验证 PASS、依赖分析、服务分组建议 |
-| [01-architecture-audit.md](../audits/01-architecture-audit.md) | Crate 复杂度、六边形架构验证 |
-| [02-rust-backend-audit.md](../audits/02-rust-backend-audit.md) | Chat 嵌套、Model 字段、Plugin 验证、错误处理 |
-| [02-frontend-audit.md](../audits/02-frontend-audit.md) | 嵌套三元、thinking parser、状态标签 |
-| [03-backend-audit.md](../audits/03-backend-audit.md) | Media 服务 ~80% 重复、Chat 复杂度 |
-| [03-frontend-typescript-audit.md](../audits/03-frontend-typescript-audit.md) | Hook 大小、prop drilling、错误处理不一致 |
-| [04-api-interface-audit.md](../audits/04-api-interface-audit.md) | 类型漂移、REST 一致性、验证框架 |
-| [04-api-protocol-audit.md](../audits/04-api-protocol-audit.md) | Schema 重复、OpenAI 协议深度 |
-| [05-consistency-audit.md](../audits/05-consistency-audit.md) | 测试目录、TS 配置、命名一致性 |
-| [06-runtime-audit.md](../audits/06-runtime-audit.md) | 后端 ~78% 重复、BackendHandler 宏、FFI 安全 |
+| [00-executive-summary.md](../audits/project-audits-2026-05-30/00-executive-summary.md) | 总体评级、优先级排序 |
+| [01-architecture-analysis.md](../audits/project-audits-2026-05-30/01-architecture-analysis.md) | 分层验证 PASS、依赖分析、服务分组建议 |
+| [01-architecture-audit.md](../audits/project-audits-2026-05-30/01-architecture-audit.md) | Crate 复杂度、六边形架构验证 |
+| [02-rust-backend-audit.md](../audits/project-audits-2026-05-30/02-rust-backend-audit.md) | Chat 嵌套、Model 字段、Plugin 验证、错误处理 |
+| [02-frontend-audit.md](../audits/project-audits-2026-05-30/02-frontend-audit.md) | 嵌套三元、thinking parser、状态标签 |
+| [03-backend-audit.md](../audits/project-audits-2026-05-30/03-backend-audit.md) | Media 服务 ~80% 重复、Chat 复杂度 |
+| [03-frontend-typescript-audit.md](../audits/project-audits-2026-05-30/03-frontend-typescript-audit.md) | Hook 大小、prop drilling、错误处理不一致 |
+| [04-api-interface-audit.md](../audits/project-audits-2026-05-30/04-api-interface-audit.md) | 类型漂移、REST 一致性、验证框架 |
+| [04-api-protocol-audit.md](../audits/project-audits-2026-05-30/04-api-protocol-audit.md) | Schema 重复、OpenAI 协议深度 |
+| [05-consistency-audit.md](../audits/project-audits-2026-05-30/05-consistency-audit.md) | 测试目录、TS 配置、命名一致性 |
+| [06-runtime-audit.md](../audits/project-audits-2026-05-30/06-runtime-audit.md) | 后端 ~78% 重复、BackendHandler 宏、FFI 安全 |
 
 ---
 

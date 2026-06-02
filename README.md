@@ -16,6 +16,7 @@ Slab is a local-first AI desktop workspace that brings chat, speech transcriptio
   - [Install](#install)
   - [Development](#development)
   - [Build](#build)
+  - [Bazel Usage Guide](#bazel-usage-guide)
 - [Slab Documentation](#slab-documentation)
 - [Contributors](#contributors)
 - [License](#license)
@@ -166,6 +167,12 @@ bun run gen:model-packs
 python -m pip install -r bin/slab-server/tests/requirements.txt
 pytest bin/slab-server/tests
 ```
+
+### Bazel Usage Guide
+
+For Bazel target layout, generated assets, Cargo wrapper behavior, vendor
+patches, and Windows runfiles notes, see
+[`docs/development/guides/bazel.md`](docs/development/guides/bazel.md).
 
 ## Slab Documentation
 
