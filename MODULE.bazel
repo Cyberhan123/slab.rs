@@ -55,6 +55,18 @@ crate.annotation(
     version = "0.158.0",
 )
 crate.annotation(
+    crate = "ed448",
+    patch_args = ["-p1"],
+    patches = ["//third_party/rust/patches:ed448-0.5.0-rc.3.patch"],
+    version = "0.5.0-rc.3",
+)
+crate.annotation(
+    crate = "ed448-goldilocks",
+    patch_args = ["-p1"],
+    patches = ["//third_party/rust/patches:ed448-goldilocks-0.14.0-pre.10.patch"],
+    version = "0.14.0-pre.10",
+)
+crate.annotation(
     build_script_data = ["@@+http_archive+ffmpeg_windows_x64//:sdk"],
     build_script_env = {
         "FFMPEG_DIR": "$${pwd}/external/+http_archive+ffmpeg_windows_x64",
@@ -65,16 +77,23 @@ crate.annotation(
     version = "8.1.0",
 )
 crate.annotation(
-    crate = "pkcs8",
+    crate = "khronos_api",
     patch_args = ["-p1"],
-    patches = ["//third_party/rust/patches:pkcs8-0.11.0-rc.10.patch"],
-    version = "0.11.0-rc.10",
+    patches = ["//third_party/rust/patches:khronos_api-3.1.0.patch"],
+    version = "3.1.0",
 )
 crate.annotation(
-    crate = "sha3",
+    build_script_env = {
+        "PYO3_NO_PYTHON": "1",
+    },
+    crate = "pyo3-build-config",
+    version = "0.28.3",
+)
+crate.annotation(
+    crate = "v8",
     patch_args = ["-p1"],
-    patches = ["//third_party/rust/patches:sha3-0.11.0-rc.7.patch"],
-    version = "0.11.0-rc.7",
+    patches = ["//third_party/rust/patches:v8-149.0.0.patch"],
+    version = "149.0.0",
 )
 crate.annotation(
     additive_build_file_content = "exports_files([\"src/lib.rs\"])",

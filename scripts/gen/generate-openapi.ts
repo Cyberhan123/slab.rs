@@ -27,8 +27,7 @@ const nativeRuntimeLibDir = path.join(
 );
 
 async function main() {
-  await runCommand("bazel", ["build", "//bin/slab-server:slab-server"]);
-  const serverBinaryPath = await bazelOutputPath("//bin/slab-server:slab-server");
+  const serverBinaryPath = await ensureServerBinary();
   const openapi = JSON.parse(
     await runCommandCapture(serverBinaryPath, ["--print-openapi"], {
       env: withNativeRuntimeLibraryPath(process.env),
@@ -58,16 +57,19 @@ async function main() {
   );
 }
 
-async function bazelOutputPath(label: string) {
-  const output = await runCommandCapture("bazel", ["cquery", "--output=files", label]);
-  const file = output
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find(Boolean);
-  if (!file) {
-    throw new Error(`bazel cquery did not return an output file for ${label}.`);
+async function ensureServerBinary() {
+  const serverBinaryPath = path.join(
+    repoRoot,
+    "target",
+    "debug",
+    process.platform === "win32" ? "slab-server.exe" : "slab-server",
+  );
+  try {
+    await runCommand("bazelisk", ["run", "//tools/cargo:build_sidecars"]);
+  } catch {
+    await runCommand("cargo", ["build", "-p", "slab-server"]);
   }
-  return path.isAbsolute(file) ? file : path.join(repoRoot, file);
+  return serverBinaryPath;
 }
 
 async function generatePythonClient(openapi: unknown) {

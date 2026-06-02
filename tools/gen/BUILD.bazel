@@ -5,22 +5,24 @@ package(default_visibility = ["//visibility:public"])
 py_binary(
     name = "api",
     srcs = ["//tools/bazel:workspace_command.py"],
+    main = "//tools/bazel:workspace_command.py",
     args = [
         "bun",
         "./scripts/gen/generate-openapi.ts",
     ],
-    data = ["//bin/slab-server:slab-server"],
+    data = ["//tools/cargo:build_sidecars"],
 )
 
 py_binary(
     name = "schemas",
     srcs = ["//tools/bazel:workspace_command.py"],
+    main = "//tools/bazel:workspace_command.py",
     args = [
-        "bazel",
+        "bazelisk",
         "run",
         "//crates/slab-model-pack:generate_manifest_schema",
         "--then",
-        "bazel",
+        "bazelisk",
         "run",
         "//crates/slab-config:generate_settings_document_schema",
     ],

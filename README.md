@@ -125,35 +125,41 @@ bun run dev:desktop
 
 ### Build
 
-These commands cover the usual build, check, and test workflows.
+These commands cover the usual build, check, and test workflows. Bazelisk is the
+repo entrypoint; Rust sidecar flows that are blocked in pure Bazel on Windows
+are run through Bazel-managed Cargo wrappers.
 
 ```sh
 # Run the standard workspace checks
 bun run check
-bazel build //...
+bun run check:rust
+bun run check:bazel
 
-# Run the full automated test suite
+# Run the standard automated test suite
 bun run test
-bazel test //...
+bun run test:bazel
+
+# Run browser and visual tests
+bun run test:browser
 
 # Build the desktop frontend only
 bun run build:desktop
 
 # Build the desktop app bundle
 bun run build:app
-bazel run //bin/slab-app:bundle_debug
+bazelisk run //bin/slab-app:bundle_debug
 
 # Build the Windows full installer
 bun run build:windows-installer
-bazel run //bin/slab-app:bundle_release_windows
+bazelisk run //bin/slab-app:bundle_release_windows
 
 # Regenerate generated assets
 bun run gen:api
-bazel run //tools/gen:api
+bazelisk run //tools/gen:api
 bun run gen:schemas
-bazel run //tools/gen:schemas
+bazelisk run //tools/gen:schemas
 bun run gen:plugin-packs
-bazel run //tools/plugins:plugin_packs
+bazelisk run //tools/plugins:plugin_packs
 bun run gen:model-packs
 
 # Server compatibility tests

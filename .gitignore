@@ -21,8 +21,6 @@ vendor/*
 !vendor/slab-artifacts.toml
 !vendor/all-smi-luwen-if-0.7.9/
 !vendor/all-smi-luwen-if-0.7.9/**
-!vendor/deno_io-0.158.0/
-!vendor/deno_io-0.158.0/**
 
 ## SQLite Databases
 *.db

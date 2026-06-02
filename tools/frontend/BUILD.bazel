@@ -5,6 +5,7 @@ package(default_visibility = ["//visibility:public"])
 py_binary(
     name = "desktop_build",
     srcs = ["//tools/bazel:workspace_command.py"],
+    main = "//tools/bazel:workspace_command.py",
     args = [
         "bun",
         "run",
@@ -17,6 +18,7 @@ py_binary(
 py_binary(
     name = "language_servers",
     srcs = ["//tools/bazel:workspace_command.py"],
+    main = "//tools/bazel:workspace_command.py",
     args = [
         "bun",
         "run",

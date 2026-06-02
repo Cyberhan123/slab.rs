@@ -5,6 +5,7 @@ package(default_visibility = ["//visibility:public"])
 py_binary(
     name = "frontend",
     srcs = ["//tools/bazel:workspace_command.py"],
+    main = "//tools/bazel:workspace_command.py",
     args = [
         "bun",
         "run",
@@ -39,5 +40,24 @@ py_binary(
         "--cwd",
         "packages/slab-desktop",
         "build",
+    ],
+)
+
+py_binary(
+    name = "workspace",
+    srcs = ["//tools/bazel:workspace_command.py"],
+    main = "//tools/bazel:workspace_command.py",
+    args = [
+        "bun",
+        "run",
+        "check:frontend",
+        "--then",
+        "bun",
+        "run",
+        "check:rust",
+        "--then",
+        "bun",
+        "run",
+        "check:bazel",
     ],
 )

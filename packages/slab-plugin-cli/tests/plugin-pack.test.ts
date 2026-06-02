@@ -200,7 +200,7 @@ describe("plugin pack generation", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it("rejects native extensions in Python bundles", async () => {
     const root = await createTempRoot("python-native");

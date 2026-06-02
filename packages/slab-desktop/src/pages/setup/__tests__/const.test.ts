@@ -65,7 +65,7 @@ describe('setup progress helpers', () => {
       'Downloading payloads, verifying CABs, checking FFmpeg, and restarting runtime workers.',
     );
     expect(getProvisionStageHint('running', null, true)).toBe(
-      'Checking FFmpeg, downloading it when needed, and confirming local workers are ready.',
+      'Checking FFmpeg runtime availability and confirming local workers are ready.',
     );
   });
 

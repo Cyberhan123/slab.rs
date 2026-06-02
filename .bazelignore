@@ -1,0 +1,6 @@
+node_modules
+target
+vendor/ed448-0.5.0-rc.3
+vendor/ed448-goldilocks-0.14.0-pre.10
+vendor/khronos_api-3.1.0
+vendor/v8-149.0.0

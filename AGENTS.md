@@ -102,15 +102,19 @@ Run these from the repo root unless a local README says otherwise. Pick the narr
 bun install
 bun run lint
 bun run lint:fix
+bun run check
+bun run check:bazel
 bun run test
+bun run test:bazel
+bun run test:browser
 bun run build:desktop
 bun run build:language-servers
 bun run dev:app
 bun run gen:api
 bun run gen:plugin-packs
 bun run gen:schemas
-cargo check --workspace
-cargo test --workspace
+bun run check:rust
+bun run test:rust
 ```
 
 For package-specific or crate-specific workflows, prefer the nearest subproject `README.md` and the local `package.json` / `Cargo.toml` scripts over copying those details into this file.

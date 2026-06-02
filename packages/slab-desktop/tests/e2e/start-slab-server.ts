@@ -73,43 +73,29 @@ fs.writeFileSync(
   "utf8",
 );
 
-function runBazel(args: string[]) {
-  const result = spawnSync("bazel", args, {
+function runBazelisk(args: string[]) {
+  const result = spawnSync("bazelisk", args, {
     cwd: repoRoot,
     stdio: "inherit",
     env: process.env,
   });
 
   if (result.status !== 0) {
-    throw new Error(`bazel ${args.join(" ")} failed with exit code ${result.status ?? "unknown"}`);
+    throw new Error(
+      `bazelisk ${args.join(" ")} failed with exit code ${result.status ?? "unknown"}`,
+    );
   }
 }
 
-function bazelOutputPath(label: string) {
-  const result = spawnSync("bazel", ["cquery", "--output=files", label], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    env: process.env,
-  });
-
-  if (result.status !== 0) {
-    throw new Error(`bazel cquery failed for ${label}: ${result.stderr}`);
-  }
-
-  const file = result.stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find(Boolean);
-  if (!file) {
-    throw new Error(`bazel cquery did not return an output file for ${label}`);
-  }
-  return path.isAbsolute(file) ? file : path.join(repoRoot, file);
+function cargoBinaryPath(binName: string) {
+  const extension = process.platform === "win32" ? ".exe" : "";
+  return path.join(repoRoot, "target", "debug", `${binName}${extension}`);
 }
 
-runBazel(["build", "//bin/slab-server:slab-server", "//bin/slab-runtime:slab-runtime"]);
+runBazelisk(["run", "//tools/cargo:build_sidecars"]);
 
-const serverExe = bazelOutputPath("//bin/slab-server:slab-server");
-const runtimeExe = bazelOutputPath("//bin/slab-runtime:slab-runtime");
+const serverExe = cargoBinaryPath("slab-server");
+const runtimeExe = cargoBinaryPath("slab-runtime");
 
 if (!fs.existsSync(serverExe)) {
   throw new Error(`slab-server executable was not found at ${serverExe}`);

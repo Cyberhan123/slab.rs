@@ -33,11 +33,11 @@ def slab_rust_library(
         compile_data = [],
         crate_features = [],
         proc_macro = False,
+        proc_macro_deps = [],
         build_script = None):
     rule = rust_proc_macro if proc_macro else rust_library
-    all_deps = deps + all_crate_deps(normal = True)
-    if build_script:
-        all_deps.append(build_script)
+    build_script_deps = [build_script] if build_script else []
+    all_deps = deps + build_script_deps + all_crate_deps(normal = True)
     kwargs = {
         "name": name,
         "aliases": aliases(),
@@ -47,7 +47,7 @@ def slab_rust_library(
         "crate_name": crate_name or _crate_name(name),
         "data": data,
         "deps": all_deps,
-        "proc_macro_deps": all_crate_deps(proc_macro = True),
+        "proc_macro_deps": proc_macro_deps + all_crate_deps(proc_macro = True),
         "srcs": srcs or native.glob(["src/**/*.rs"]),
     }
     rule(**kwargs)
@@ -61,10 +61,10 @@ def slab_rust_binary(
         data = [],
         compile_data = [],
         crate_features = [],
+        proc_macro_deps = [],
         build_script = None):
-    all_deps = deps + all_crate_deps(normal = True)
-    if build_script:
-        all_deps.append(build_script)
+    build_script_deps = [build_script] if build_script else []
+    all_deps = deps + build_script_deps + all_crate_deps(normal = True)
     kwargs = {
         "name": name,
         "aliases": aliases(),
@@ -75,7 +75,7 @@ def slab_rust_binary(
         "crate_root": crate_root,
         "data": data,
         "deps": all_deps,
-        "proc_macro_deps": all_crate_deps(proc_macro = True),
+        "proc_macro_deps": proc_macro_deps + all_crate_deps(proc_macro = True),
         "srcs": srcs or native.glob(["src/**/*.rs"]),
     }
     rust_binary(**kwargs)

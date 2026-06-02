@@ -125,7 +125,9 @@ bun run dev:desktop
 
 ### 构建
 
-下面这些命令适合做常规构建、检查和测试。
+下面这些命令适合做常规构建、检查和测试。仓库入口使用 Bazelisk；在
+Windows 上暂时无法纯 Bazel 构建的 Rust sidecar 通过 Bazel 管理的 Cargo
+wrapper 执行。
 
 ```sh
 # 运行标准工作区检查

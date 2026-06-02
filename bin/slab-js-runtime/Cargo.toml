@@ -81,6 +81,7 @@ extra_features = ["worker", "snapshot_builder"]
 # These extensions are not safe to use in a sandboxed environment without additional restrictions
 # (See [NodePermissions])
 node_experimental = [
+    "cache",
     "deno_bundle_runtime",
     "deno_runtime",
     "deno_node",
