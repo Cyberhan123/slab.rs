@@ -9,6 +9,11 @@ scripts are convenience wrappers around Bazel targets, while Bazel targets keep
 the build, check, generation, packaging, and development entrypoints in one
 place.
 
+Cargo remains the single source of truth for Rust dependencies, versions, and
+features. Bazel consumes that graph through Bzlmod and `crate_universe`, then
+provides a hermetic command surface for CI, cross-platform builds, and cached
+workspace automation.
+
 ## Responsibilities
 
 Bazel owns the top-level command surface:
@@ -35,11 +40,14 @@ bun run dev:app
 # Run the standard workspace checks.
 bun run check
 bun run check:rust
+bun run lint:rust
 bun run check:bazel
+bun run bazel:lock:check
 
 # Run the standard test suite.
 bun run test
 bun run test:bazel
+bun run test:rust:bazel
 
 # Build common deliverables.
 bun run build:desktop
@@ -53,9 +61,12 @@ The equivalent direct Bazel targets are:
 bazelisk run //bin/slab-app:dev
 bazelisk run //tools/check:workspace
 bazelisk run //tools/cargo:check_workspace
+bazelisk run //tools/cargo:clippy_workspace
 bazelisk query //...
 bazelisk run //tools/test:workspace
+bazelisk run //tools/cargo:test_workspace
 bazelisk test //...
+bazelisk mod deps --lockfile_mode=error
 bazelisk run //tools/frontend:desktop_build
 bazelisk run //bin/slab-app:bundle_debug
 bazelisk run //bin/slab-app:bundle_release_windows
@@ -85,6 +96,21 @@ bazelisk run //tools/plugins:plugin_packs
 
 When backend `/v1/*` API shapes change, regenerate
 `packages/api/src/v1.d.ts` with `bun run gen:api`.
+
+## Lockfile Discipline
+
+Keep `MODULE.bazel.lock` in sync whenever Cargo or Bazel module inputs change.
+
+```sh
+# Refresh the Bazel module lockfile.
+bun run bazel:lock:update
+
+# Verify the lockfile is current without rewriting it.
+bun run bazel:lock:check
+```
+
+This keeps Bazel module resolution deterministic in CI while preserving Cargo as
+the dependency source of truth.
 
 ## Rust Dependency Graph
 
@@ -116,6 +142,8 @@ Common targets:
 
 ```sh
 bazelisk run //tools/cargo:check_workspace
+bazelisk run //tools/cargo:clippy_workspace
+bazelisk run //tools/cargo:test_workspace
 bazelisk run //tools/cargo:check_sidecars
 bazelisk run //tools/cargo:build_sidecars
 ```
@@ -164,5 +192,6 @@ Use these rules when editing Bazel build files:
 - When changing API contracts, regenerate the frontend API package with
   `bun run gen:api`.
 
-Run `bun run check:bazel` after BUILD or MODULE changes, and run the narrowest
+Run `bun run check:bazel` after BUILD or MODULE changes, run
+`bun run bazel:lock:check` after dependency graph edits, and run the narrowest
 affected build/check target before broad workspace checks.
