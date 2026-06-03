@@ -51,6 +51,11 @@ jobs:
             pkg-config \
             python3-dev
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
       - name: bazel build
         run: |
           bazelisk build --config=ci \
@@ -66,10 +71,10 @@ jobs:
         run: bazelisk test --config=ci //...
 
       - name: bazel rust tests
-        run: bazelisk run //tools/cargo:test_workspace
+        run: bazelisk run --config=ci //tools/cargo:test_workspace
 
       - name: bazel rust clippy
-        run: bazelisk run //tools/cargo:clippy_workspace
+        run: bazelisk run --config=ci //tools/cargo:clippy_workspace
 
   frontend-check:
     name: Frontend – build check

@@ -11,10 +11,6 @@ py_binary(
         "run",
         "test:frontend",
         "--then",
-        "cargo",
-        "test",
-        "--workspace",
-        "--color",
-        "never",
+        "--bazel-output=//tools/cargo:test_workspace",
     ],
 )
