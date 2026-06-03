@@ -4,7 +4,10 @@ common --enable_platform_specific_config
 common:windows --repo_env=TMP=C:/tmp
 common:windows --repo_env=TEMP=C:/tmp
 
-# Windows-specific startup settings; create .bazelrc.windows locally on Windows.
+startup:windows --output_base=C:/tmp/b
+startup:windows --windows_enable_symlinks
+
+# Optional Windows-specific startup overrides.
 try-import %workspace%/.bazelrc.windows
 
 build --incompatible_strict_action_env

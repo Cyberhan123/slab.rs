@@ -24,6 +24,10 @@ vendor/*
 !vendor/slab-artifacts.toml
 !vendor/all-smi-luwen-if-0.7.9/
 !vendor/all-smi-luwen-if-0.7.9/**
+!vendor/ed448-0.5.0-rc.3/
+!vendor/ed448-0.5.0-rc.3/**
+!vendor/ed448-goldilocks-0.14.0-pre.10/
+!vendor/ed448-goldilocks-0.14.0-pre.10/**
 
 ## SQLite Databases
 *.db

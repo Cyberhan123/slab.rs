@@ -24,9 +24,9 @@ jobs:
 
       - name: Install Bazelisk
         run: |
-          curl -fsSL -o /usr/local/bin/bazelisk \
+          sudo curl -fsSL -o /usr/local/bin/bazelisk \
             https://github.com/bazelbuild/bazelisk/releases/download/v1.25.0/bazelisk-linux-amd64
-          chmod +x /usr/local/bin/bazelisk
+          sudo chmod +x /usr/local/bin/bazelisk
 
       - name: Cache Bazelisk downloads
         uses: actions/cache@v4
@@ -53,11 +53,14 @@ jobs:
 
       - name: bazel build
         run: |
-          bazelisk --output_base=/tmp/bazel-output build --config=ci \
+          bazelisk build --config=ci \
             //bin/slab-server:slab-server \
             //bin/slab-js-runtime:slab-js-runtime \
             //bin/slab-python-runtime:slab-python-runtime \
             //bin/slab-mcp-server:slab-mcp-server
+
+      - name: bazel test
+        run: bazelisk test --config=ci //...
 
   frontend-check:
     name: Frontend – build check
