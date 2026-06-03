@@ -127,18 +127,22 @@ bun run dev:desktop
 ### Build
 
 These commands cover the usual build, check, and test workflows. Bazelisk is the
-repo entrypoint; Rust sidecar flows that are blocked in pure Bazel on Windows
-are run through Bazel-managed Cargo wrappers.
+repo entrypoint; `Cargo.toml` and `Cargo.lock` remain the Rust dependency source
+of truth, while Bazel-managed Cargo wrappers cover Rust validation flows that are
+not yet modeled as first-class `rules_rust` test/lint targets on every platform.
 
 ```sh
 # Run the standard workspace checks
 bun run check
 bun run check:rust
+bun run lint:rust
 bun run check:bazel
+bun run bazel:lock:check
 
 # Run the standard automated test suite
 bun run test
 bun run test:bazel
+bun run test:rust:bazel
 
 # Run browser and visual tests
 bun run test:browser

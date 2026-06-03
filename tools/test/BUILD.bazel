@@ -11,8 +11,10 @@ py_binary(
         "run",
         "test:frontend",
         "--then",
-        "bun",
-        "run",
-        "test:rust",
+        "cargo",
+        "test",
+        "--workspace",
+        "--color",
+        "never",
     ],
 )
