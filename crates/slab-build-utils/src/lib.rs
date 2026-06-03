@@ -237,7 +237,7 @@ fn sync_tauri_ffmpeg_runtime_artifacts(
         return Ok(());
     }
 
-    sync_runtime_tree(target, &ffmpeg_runtime_dir, &resources_dir, expected_files)
+    sync_runtime_tree(target, &ffmpeg_runtime_dir, resources_dir, expected_files)
 }
 
 pub fn sync_tauri_bundled_plugins(tauri_manifest_dir: &Path) -> Result<()> {

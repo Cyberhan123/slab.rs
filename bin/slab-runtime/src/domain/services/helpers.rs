@@ -405,23 +405,23 @@ fn resolve_ffmpeg_binary() -> PathBuf {
         }
     }
 
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            let mut resources = vec![exe_dir.join("resources").join("libs")];
-            if let Some(parent) = exe_dir.parent() {
-                resources.push(parent.join("Resources").join("libs"));
-            }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(exe_dir) = exe.parent()
+    {
+        let mut resources = vec![exe_dir.join("resources").join("libs")];
+        if let Some(parent) = exe_dir.parent() {
+            resources.push(parent.join("Resources").join("libs"));
+        }
 
-            for base in resources {
-                let candidates = if cfg!(target_os = "windows") {
-                    [base.join("ffmpeg.exe"), base.join("bin").join("ffmpeg.exe")]
-                } else {
-                    [base.join("ffmpeg"), base.join("bin").join("ffmpeg")]
-                };
+        for base in resources {
+            let candidates = if cfg!(target_os = "windows") {
+                [base.join("ffmpeg.exe"), base.join("bin").join("ffmpeg.exe")]
+            } else {
+                [base.join("ffmpeg"), base.join("bin").join("ffmpeg")]
+            };
 
-                if let Some(found) = candidates.into_iter().find(|candidate| candidate.exists()) {
-                    return found;
-                }
+            if let Some(found) = candidates.into_iter().find(|candidate| candidate.exists()) {
+                return found;
             }
         }
     }

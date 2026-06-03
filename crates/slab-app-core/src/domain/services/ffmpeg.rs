@@ -197,7 +197,6 @@ impl FfmpegService {
                                     warn!(task_id = %operation_id, error = %error, "failed to persist ffmpeg-next remux success");
                                 }
                                 info!(task_id = %operation_id, output_path = %output_path, "ffmpeg-next remux succeeded");
-                                return;
                             }
                             Ok(Err(error)) => {
                                 progress.push_log(format!("ffmpeg-next remux failed: {error}"));
@@ -231,7 +230,6 @@ impl FfmpegService {
                             }
                         }
 
-                        return;
                     }
                 },
             )

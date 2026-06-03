@@ -63,6 +63,7 @@ pub fn register_all_tools(
 }
 
 /// Register the full production tool suite with command-specific shell rules.
+#[allow(clippy::too_many_arguments)]
 pub fn register_all_tools_with_shell_rules(
     router: &mut ToolRouter,
     shell_policy: ShellPolicy,

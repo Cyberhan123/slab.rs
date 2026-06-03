@@ -121,6 +121,7 @@ impl AgentControl {
     }
 
     /// Create a new controller with explicit compact and risk-analysis ports.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_ports(
         llm: Arc<dyn LlmPort>,
         store: Arc<dyn AgentStorePort>,

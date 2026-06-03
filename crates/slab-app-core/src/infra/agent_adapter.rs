@@ -239,11 +239,7 @@ async fn llm_response_from_chat_stream(
         observer.on_text_delta(delta).await?;
     }
     observer.on_reasoning_done(&completion.reasoning).await?;
-    let content = if completion.tool_calls.is_empty() {
-        response_content_from_stream_parts(&completion.content, &completion.reasoning)
-    } else {
-        response_content_from_stream_parts(&completion.content, &completion.reasoning)
-    };
+    let content = response_content_from_stream_parts(&completion.content, &completion.reasoning);
 
     Ok(LlmResponse {
         content,

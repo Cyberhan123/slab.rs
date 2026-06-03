@@ -265,9 +265,7 @@ fn strip_json_fence(content: &str) -> Option<&str> {
     let Some(rest) = content.strip_prefix("```") else {
         return Some(content);
     };
-    let Some(newline) = rest.find('\n') else {
-        return None;
-    };
+    let newline = rest.find('\n')?;
     let language = rest[..newline].trim();
     if !language.is_empty() && !language.eq_ignore_ascii_case("json") {
         return Some(content);
