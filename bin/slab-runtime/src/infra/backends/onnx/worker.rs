@@ -16,9 +16,9 @@
 //!
 use tracing::warn;
 
-use crate::domain::models::{OnnxInferenceRequest, OnnxInferenceResponse, OnnxLoadConfig};
 use super::engine::OnnxEngine;
 use super::error::OnnxWorkerError;
+use crate::domain::models::{OnnxInferenceRequest, OnnxInferenceResponse, OnnxLoadConfig};
 use slab_runtime_core::backend::{BroadcastSeq, ControlOpId, Input, PeerControlBus, Typed};
 use slab_runtime_macros::backend_handler;
 

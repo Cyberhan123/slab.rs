@@ -1033,7 +1033,9 @@ fn ensure_agent_capabilities_permission(
     )
 }
 
-fn ensure_language_servers_permission(permissions: &PluginPermissionsManifest) -> Result<(), String> {
+fn ensure_language_servers_permission(
+    permissions: &PluginPermissionsManifest,
+) -> Result<(), String> {
     ensure_lsp_permission(
         permissions,
         "languageServer:declare",

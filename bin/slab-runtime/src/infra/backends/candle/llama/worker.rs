@@ -20,11 +20,11 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
+use super::engine::CandleLlamaEngine;
+use super::error::{CandleLlamaWorkerError, SessionId};
 use crate::domain::models::{
     CandleLlamaLoadConfig, TextGenerationOptions, TextGenerationResponse, TextGenerationStreamEvent,
 };
-use super::engine::CandleLlamaEngine;
-use super::error::{CandleLlamaWorkerError, SessionId};
 use slab_runtime_core::backend::{
     ControlOpId, Input, Options, StreamChunk, StreamHandle, Typed, WorkerCommand,
 };

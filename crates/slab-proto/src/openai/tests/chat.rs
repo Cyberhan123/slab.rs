@@ -25,9 +25,7 @@ fn chat_completions_item_post_update_request_and_response_deserialize() {
 
     assert_eq!(update_response.model, "string");
     assert_eq!(
-        update_request
-            .metadata
-            .expect("chat completion update fixture should include metadata")["foo"],
+        update_request.metadata.expect("chat completion update fixture should include metadata")["foo"],
         "string"
     );
 }

@@ -16,11 +16,11 @@
 use image::GenericImageView;
 use tokio::sync::broadcast;
 
+use super::engine::{CandleDiffusionEngine, GenImageParams};
+use super::error::CandleDiffusionWorkerError;
 use crate::domain::models::{
     CandleDiffusionLoadConfig, GeneratedImage, ImageGenerationRequest, ImageGenerationResponse,
 };
-use super::engine::{CandleDiffusionEngine, GenImageParams};
-use super::error::CandleDiffusionWorkerError;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::spawn_workers;
 use slab_runtime_core::backend::{
@@ -286,8 +286,8 @@ pub fn spawn_backend(
 mod tests {
     use std::path::PathBuf;
 
-    use crate::domain::models::CandleDiffusionLoadConfig;
     use super::CandleDiffusionWorker;
+    use crate::domain::models::CandleDiffusionLoadConfig;
     use slab_runtime_core::Payload;
     use slab_runtime_core::backend::{
         ControlOpId, DeploymentSnapshot, PeerControlBus, WorkerCommand,

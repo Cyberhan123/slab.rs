@@ -15,11 +15,11 @@
 
 use tokio::sync::broadcast;
 
+use super::engine::CandleWhisperEngine;
+use super::error::CandleWhisperWorkerError;
 use crate::domain::models::{
     AudioTranscriptionOptions, AudioTranscriptionResponse, CandleWhisperLoadConfig,
 };
-use super::engine::CandleWhisperEngine;
-use super::error::CandleWhisperWorkerError;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::spawn_workers;
 use slab_runtime_core::backend::{
@@ -213,8 +213,8 @@ pub fn spawn_backend(
 mod tests {
     use std::path::PathBuf;
 
-    use crate::domain::models::CandleWhisperLoadConfig;
     use super::CandleWhisperWorker;
+    use crate::domain::models::CandleWhisperLoadConfig;
     use slab_runtime_core::Payload;
     use slab_runtime_core::backend::{
         ControlOpId, DeploymentSnapshot, PeerControlBus, WorkerCommand,

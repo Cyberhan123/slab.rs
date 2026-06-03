@@ -46,8 +46,8 @@ fn responses_compact_post_response_deserializes() {
 
 #[test]
 fn responses_post_sse_lifecycle_events_deserialize() {
-    let response_value: serde_json::Value = serde_json::from_str(RESPONSE_RESOURCE)
-        .expect("response fixture should be valid JSON");
+    let response_value: serde_json::Value =
+        serde_json::from_str(RESPONSE_RESOURCE).expect("response fixture should be valid JSON");
     let created_event: ResponseCreatedEvent = serde_json::from_value(json!({
         "type": "response.created",
         "response": response_value.clone(),

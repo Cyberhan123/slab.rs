@@ -13,11 +13,11 @@
 //! ### `model.load` input payload
 //! Expects typed runtime-owned `GgmlWhisperLoadConfig` payloads.
 
+use super::engine::GGMLWhisperEngine;
+use super::error::GGMLWhisperWorkerError;
 use crate::domain::models::{
     AudioTranscriptionOptions, AudioTranscriptionResponse, GgmlWhisperLoadConfig,
 };
-use super::engine::GGMLWhisperEngine;
-use super::error::GGMLWhisperWorkerError;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::{
     BroadcastSeq, ControlOpId, Input, Options, PeerControlBus, Typed,

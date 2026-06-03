@@ -417,9 +417,7 @@ impl SetupService {
                 return Ok(probe.binary);
             }
 
-            Err(AppCoreError::Internal(
-                "ffmpeg-next static runtime is unavailable".to_owned(),
-            ))
+            Err(AppCoreError::Internal("ffmpeg-next static runtime is unavailable".to_owned()))
         })
         .await
         .map_err(|error| {

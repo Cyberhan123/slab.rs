@@ -28,11 +28,11 @@ use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
+use super::engine::{GGMLLlamaEngine, LlamaDispatchOutput, LlamaDispatchRequest};
+use super::error::GGMLLlamaWorkerError;
 use crate::domain::models::{
     GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, TextGenerationOptions, TextGenerationResponse,
 };
-use super::engine::{GGMLLlamaEngine, LlamaDispatchOutput, LlamaDispatchRequest};
-use super::error::GGMLLlamaWorkerError;
 use slab_runtime_core::backend::{
     CancelRx, ControlOpId, Input, Options, StreamHandle, Typed, WorkerCommand,
 };
@@ -306,8 +306,8 @@ pub fn spawn_backend_with_engine(
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::models::TextGenerationOptions;
     use super::{InferenceOptions, LlamaWorker};
+    use crate::domain::models::TextGenerationOptions;
     use slab_runtime_core::backend::ControlOpId;
 
     // ── infer_add_assistant_prompt ────────────────────────────────────────────

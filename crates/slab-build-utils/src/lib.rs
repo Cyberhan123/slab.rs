@@ -218,19 +218,13 @@ fn sync_tauri_ffmpeg_runtime_artifacts(
 
     let ffmpeg_root = PathBuf::from(ffmpeg_dir);
     if !ffmpeg_root.exists() {
-        println!(
-            "cargo:warning=FFMPEG_DIR points to missing directory {}",
-            ffmpeg_root.display()
-        );
+        println!("cargo:warning=FFMPEG_DIR points to missing directory {}", ffmpeg_root.display());
         return Ok(());
     }
 
     let source_subdir = runtime_source_subdir(target);
-    let ffmpeg_runtime_dir = if source_subdir == "bin" {
-        ffmpeg_root.join("bin")
-    } else {
-        ffmpeg_root.join("lib")
-    };
+    let ffmpeg_runtime_dir =
+        if source_subdir == "bin" { ffmpeg_root.join("bin") } else { ffmpeg_root.join("lib") };
 
     println!("cargo:rerun-if-env-changed=FFMPEG_DIR");
     println!("cargo:rerun-if-changed={}", ffmpeg_runtime_dir.display());

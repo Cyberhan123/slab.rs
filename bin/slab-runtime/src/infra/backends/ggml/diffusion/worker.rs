@@ -14,11 +14,11 @@
 
 use std::time::Instant;
 
+use super::engine::GGMLDiffusionEngine;
+use super::error::GGMLDiffusionWorkerError;
 use crate::domain::models::{
     GgmlDiffusionLoadConfig, ImageGenerationRequest, ImageGenerationResponse,
 };
-use super::engine::GGMLDiffusionEngine;
-use super::error::GGMLDiffusionWorkerError;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::{BroadcastSeq, ControlOpId, Input, PeerControlBus, Typed};
 use slab_runtime_macros::backend_handler;
