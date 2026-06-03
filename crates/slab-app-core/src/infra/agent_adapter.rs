@@ -2,8 +2,6 @@
 //!
 //! - [`ServerLlmAdapter`]: implements [`LlmPort`] by delegating to the existing
 //!   [`ChatService`][crate::domain::services::ChatService].
-//! - [`NoopNotifyAdapter`]: implements [`AgentNotifyPort`] as a no-op placeholder
-//!   (fan-out to SSE/WebSocket is out of scope for P4-P6).
 
 use std::sync::Arc;
 
@@ -12,9 +10,9 @@ use futures::StreamExt;
 use serde_json::Value;
 use slab_agent::config::AgentConfig;
 use slab_agent::error::AgentError;
-use slab_agent::port::{
-    AgentNotifyPort, LlmPort, LlmResponse, LlmStreamObserver, ParsedToolCall, ThreadStatus,
-    ToolSpec,
+use slab_agent::{
+    AgentStreamAssembler, AgentStreamDelta, parse_rendered_tool_call_output,
+    port::{LlmPort, LlmResponse, LlmStreamObserver, ParsedToolCall, ToolSpec},
 };
 use slab_proto::openai::{FunctionTool, FunctionToolType};
 use slab_types::{ConversationMessage, ConversationMessageContent};
@@ -27,10 +25,6 @@ use crate::domain::models::{
     ChatStreamOptions, CloudChatParams, CommonChatParams, LocalChatParams,
     assistant_message_from_parts,
 };
-use crate::infra::agent_stream_parser::{
-    AgentStreamAssembler, AgentStreamDelta, parse_rendered_tool_call_output,
-};
-
 // ── ServerLlmAdapter ─────────────────────────────────────────────────────────
 
 /// Adapts the slab-server [`ModelState`] (and the chat pipeline behind it) into
@@ -258,21 +252,6 @@ fn response_content_from_stream_parts(content: &str, reasoning: &str) -> Option<
         assistant_message_from_parts(content, (!reasoning.trim().is_empty()).then_some(reasoning))
             .rendered_text(),
     )
-}
-
-// ── NoopNotifyAdapter ─────────────────────────────────────────────────────────
-
-/// A no-op [`AgentNotifyPort`] that discards all status-change notifications.
-///
-/// Replace with a real fan-out adapter (SSE, WebSocket) when the frontend
-/// needs real-time agent status streaming.
-pub struct NoopNotifyAdapter;
-
-#[async_trait]
-impl AgentNotifyPort for NoopNotifyAdapter {
-    async fn on_status_change(&self, thread_id: &str, status: ThreadStatus) {
-        tracing::debug!(thread_id, ?status, "agent status change (noop notify)");
-    }
 }
 
 #[cfg(test)]

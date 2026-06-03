@@ -33,6 +33,7 @@ pub mod risk;
 pub mod thread;
 pub mod tool;
 
+mod llm_output;
 mod turn;
 
 #[cfg(test)]
@@ -47,6 +48,10 @@ pub use event::{
     ToolRiskAssessment, ToolRiskLevel,
 };
 pub use hook::{AgentHook, HookEvent, HookOutcome};
+pub use llm_output::{
+    AgentStreamAssembler, AgentStreamCompletion, AgentStreamDelta, RenderedToolCallOutput,
+    parse_rendered_tool_call_output,
+};
 pub use port::{
     AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
     ThreadStatus, TurnEvent,

@@ -1,36 +1,45 @@
+//! LLM output normalization helpers for host [`LlmPort`](crate::port::LlmPort)
+//! adapters.
+
+use serde::Deserialize;
 use serde_json::{Map, Value};
-use slab_agent::error::AgentError;
-use slab_agent::port::ParsedToolCall;
-use slab_proto::openai::FunctionToolCall;
 use uuid::Uuid;
+
+use crate::error::AgentError;
+use crate::port::ParsedToolCall;
 
 const QWEN_TOOL_CALL_OPEN: &str = "<tool_call>";
 const QWEN_TOOL_CALL_CLOSE: &str = "</tool_call>";
 
+/// Assembles provider stream chunks into visible text, reasoning text, and
+/// structured tool calls.
 #[derive(Default)]
-pub(crate) struct AgentStreamAssembler {
+pub struct AgentStreamAssembler {
     content: String,
     reasoning: String,
     finish_reason: Option<String>,
     visibility: StreamVisibilityGate,
 }
 
-pub(crate) enum AgentStreamDelta {
+/// A visible delta emitted while assembling a provider stream.
+pub enum AgentStreamDelta {
     Text(String),
     Reasoning(String),
 }
 
-pub(crate) struct AgentStreamCompletion {
-    pub(crate) content: String,
-    pub(crate) content_already_streamed: bool,
-    pub(crate) reasoning: String,
-    pub(crate) unstreamed_text_delta: Option<String>,
-    pub(crate) tool_calls: Vec<ParsedToolCall>,
-    pub(crate) finish_reason: Option<String>,
+/// Final normalized output from an assembled provider stream.
+pub struct AgentStreamCompletion {
+    pub content: String,
+    pub content_already_streamed: bool,
+    pub reasoning: String,
+    pub unstreamed_text_delta: Option<String>,
+    pub tool_calls: Vec<ParsedToolCall>,
+    pub finish_reason: Option<String>,
 }
 
 impl AgentStreamAssembler {
-    pub(crate) fn ingest_data(&mut self, data: &str) -> Result<Vec<AgentStreamDelta>, AgentError> {
+    /// Ingests one provider stream data payload.
+    pub fn ingest_data(&mut self, data: &str) -> Result<Vec<AgentStreamDelta>, AgentError> {
         let Some(parsed) = parse_chat_stream_chunk(data)? else {
             return Ok(Vec::new());
         };
@@ -53,7 +62,8 @@ impl AgentStreamAssembler {
         Ok(deltas)
     }
 
-    pub(crate) fn finish(mut self) -> AgentStreamCompletion {
+    /// Finishes the stream and returns normalized content and tool calls.
+    pub fn finish(mut self) -> AgentStreamCompletion {
         let parsed = parse_rendered_tool_call_output(&self.content);
         let should_hide_unparsed_buffer = parsed.tool_calls.is_empty()
             && unparsed_stream_buffer_should_remain_hidden(&self.content);
@@ -83,13 +93,15 @@ impl AgentStreamAssembler {
     }
 }
 
+/// Tool calls parsed from a complete rendered model output.
 #[derive(Default)]
-pub(crate) struct RenderedToolCallOutput {
-    pub(crate) content: Option<String>,
-    pub(crate) tool_calls: Vec<ParsedToolCall>,
+pub struct RenderedToolCallOutput {
+    pub content: Option<String>,
+    pub tool_calls: Vec<ParsedToolCall>,
 }
 
-pub(crate) fn parse_rendered_tool_call_output(content: &str) -> RenderedToolCallOutput {
+/// Parses strict structured tool-call outputs from a complete model response.
+pub fn parse_rendered_tool_call_output(content: &str) -> RenderedToolCallOutput {
     if let Some(value) = parse_tool_json(content) {
         let tool_calls = parse_responses_tool_calls(&value);
         if !tool_calls.is_empty() {
@@ -101,15 +113,13 @@ pub(crate) fn parse_rendered_tool_call_output(content: &str) -> RenderedToolCall
 }
 
 #[derive(Default)]
-pub(crate) struct ParsedChatStreamChunk {
-    pub(crate) content_delta: Option<String>,
-    pub(crate) reasoning_delta: Option<String>,
-    pub(crate) finish_reason: Option<String>,
+struct ParsedChatStreamChunk {
+    content_delta: Option<String>,
+    reasoning_delta: Option<String>,
+    finish_reason: Option<String>,
 }
 
-pub(crate) fn parse_chat_stream_chunk(
-    data: &str,
-) -> Result<Option<ParsedChatStreamChunk>, AgentError> {
+fn parse_chat_stream_chunk(data: &str) -> Result<Option<ParsedChatStreamChunk>, AgentError> {
     let trimmed = data.trim();
     if trimmed.is_empty() || trimmed == "[DONE]" {
         return Ok(None);
@@ -283,8 +293,24 @@ fn parse_responses_tool_calls(value: &Value) -> Vec<ParsedToolCall> {
     parse_responses_function_call(value).into_iter().collect()
 }
 
+#[derive(Deserialize)]
+struct ResponsesFunctionToolCall {
+    #[serde(rename = "type")]
+    _call_type: ResponsesFunctionToolCallType,
+    call_id: String,
+    name: String,
+    arguments: String,
+    id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ResponsesFunctionToolCallType {
+    FunctionCall,
+}
+
 fn parse_responses_function_call(value: &Value) -> Option<ParsedToolCall> {
-    let call: FunctionToolCall = serde_json::from_value(value.clone()).ok()?;
+    let call: ResponsesFunctionToolCall = serde_json::from_value(value.clone()).ok()?;
     let name = call.name.trim().to_owned();
     if name.is_empty() {
         return None;
