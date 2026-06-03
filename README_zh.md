@@ -125,16 +125,23 @@ bun run dev:desktop
 
 ### 构建
 
-下面这些命令适合做常规构建、检查和测试。仓库入口使用 Bazelisk；在
-Windows 上暂时无法纯 Bazel 构建的 Rust sidecar 通过 Bazel 管理的 Cargo
-wrapper 执行。
+下面这些命令适合做常规构建、检查和测试。仓库入口使用 Bazelisk；
+`Cargo.toml` / `Cargo.lock` 仍然是 Rust 依赖与 feature 的单一事实来源，
+而 Bazel 负责统一入口、缓存、CI，以及当前尚未完全建模为 `rules_rust`
+lint/test 目标的 Rust 校验流程。
 
 ```sh
 # 运行标准工作区检查
 bun run check
+bun run check:rust
+bun run lint:rust
+bun run check:bazel
+bun run bazel:lock:check
 
 # 运行完整自动化测试
 bun run test
+bun run test:bazel
+bun run test:rust:bazel
 
 # 只构建桌面前端
 bun run build:desktop

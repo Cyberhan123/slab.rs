@@ -11,8 +11,6 @@ py_binary(
         "run",
         "test:frontend",
         "--then",
-        "bun",
-        "run",
-        "test:rust",
+        "--bazel-output=//tools/cargo:test_workspace",
     ],
 )
