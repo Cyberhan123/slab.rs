@@ -55,6 +55,12 @@ impl From<AgentConfigInput> for AgentConfig {
 pub struct MessageInput {
     pub role: String,
     pub content: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub tool_call_id: Option<String>,
+    #[serde(default)]
+    pub tool_calls: Vec<ChatToolCall>,
 }
 
 impl From<MessageInput> for slab_types::ConversationMessage {
@@ -62,9 +68,9 @@ impl From<MessageInput> for slab_types::ConversationMessage {
         slab_types::ConversationMessage {
             role: v.role,
             content: slab_types::ConversationMessageContent::Text(v.content),
-            name: None,
-            tool_call_id: None,
-            tool_calls: vec![],
+            name: v.name,
+            tool_call_id: v.tool_call_id,
+            tool_calls: v.tool_calls.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -332,7 +338,34 @@ mod tests {
         ConversationToolFunction,
     };
 
-    use super::AgentThreadMessageResponse;
+    use crate::schemas::chat::{ChatToolCall, ChatToolFunction};
+
+    use super::{AgentThreadMessageResponse, MessageInput};
+
+    #[test]
+    fn message_input_preserves_tool_role_metadata() {
+        let message = slab_types::ConversationMessage::from(MessageInput {
+            role: "tool".into(),
+            content: "search result".into(),
+            name: Some("web_search".into()),
+            tool_call_id: Some("call-1".into()),
+            tool_calls: vec![ChatToolCall {
+                id: Some("call-2".into()),
+                r#type: "function".into(),
+                function: ChatToolFunction {
+                    name: "echo".into(),
+                    arguments: r#"{"message":"hello"}"#.into(),
+                },
+            }],
+        });
+
+        assert_eq!(message.role, "tool");
+        assert_eq!(message.rendered_text(), "search result");
+        assert_eq!(message.name.as_deref(), Some("web_search"));
+        assert_eq!(message.tool_call_id.as_deref(), Some("call-1"));
+        assert_eq!(message.tool_calls.len(), 1);
+        assert_eq!(message.tool_calls[0].id.as_deref(), Some("call-2"));
+    }
 
     #[test]
     fn agent_thread_message_response_preserves_assistant_tool_calls() {

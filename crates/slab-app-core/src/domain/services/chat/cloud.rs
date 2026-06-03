@@ -104,7 +104,16 @@ pub(super) async fn create_chat_completion(
     let target = resolve_cloud_model(state, requested_model).await?;
     let trace_http = state.config().cloud_http_trace;
 
-    if config.stream {
+    if config.stream && !config.tools.is_empty() {
+        warn!(
+            provider_id = %target.provider_id,
+            provider_name = %target.provider_name,
+            remote_model = %target.remote_model,
+            "cloud tool streaming is falling back to non-streaming so native tool call chunks are preserved"
+        );
+    }
+
+    if config.stream && config.tools.is_empty() {
         let max_tokens = config.max_tokens;
         let include_usage = config.include_usage;
         let backend_stream = cloud_chat_stream(&target, messages, config, trace_http).await?;

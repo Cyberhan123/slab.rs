@@ -121,6 +121,7 @@ pub(crate) async fn execute_turn(
 
     // Emit assistant delta for any text alongside tool calls.
     if let Some(ref text) = response.content
+        && !response.content_already_streamed
         && !text.is_empty()
     {
         context

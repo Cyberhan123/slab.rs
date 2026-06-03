@@ -1,5 +1,6 @@
 pub mod agent_adapter;
 pub mod agent_event_hub;
+pub(crate) mod agent_stream_parser;
 pub mod db;
 pub(crate) mod endpoint;
 pub mod model_packs;

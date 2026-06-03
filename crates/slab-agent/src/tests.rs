@@ -130,6 +130,7 @@ impl LlmPort for MockLlm {
             // First turn: request an echo tool call.
             Ok(LlmResponse {
                 content: None,
+                content_already_streamed: false,
                 tool_calls: vec![ParsedToolCall {
                     id: "call-1".into(),
                     name: "echo".into(),
@@ -141,6 +142,7 @@ impl LlmPort for MockLlm {
             // Second turn: final text answer after receiving the tool result.
             Ok(LlmResponse {
                 content: Some("echo completed: hello from agent".into()),
+                content_already_streamed: false,
                 tool_calls: vec![],
                 finish_reason: Some("stop".into()),
             })
@@ -163,6 +165,7 @@ impl LlmPort for StreamingLlm {
     ) -> Result<LlmResponse, AgentError> {
         Ok(LlmResponse {
             content: Some("hello".into()),
+            content_already_streamed: false,
             tool_calls: Vec::new(),
             finish_reason: Some("stop".into()),
         })
@@ -182,9 +185,75 @@ impl LlmPort for StreamingLlm {
         observer.on_text_delta("lo").await?;
         Ok(LlmResponse {
             content: Some("hello".into()),
+            content_already_streamed: true,
             tool_calls: Vec::new(),
             finish_reason: Some("stop".into()),
         })
+    }
+}
+
+struct StreamingToolCallLlm {
+    call_count: Mutex<u32>,
+}
+
+impl StreamingToolCallLlm {
+    fn new() -> Self {
+        Self { call_count: Mutex::new(0) }
+    }
+}
+
+#[async_trait]
+impl LlmPort for StreamingToolCallLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+    ) -> Result<LlmResponse, AgentError> {
+        Ok(LlmResponse {
+            content: Some("done".into()),
+            content_already_streamed: false,
+            tool_calls: Vec::new(),
+            finish_reason: Some("stop".into()),
+        })
+    }
+
+    async fn chat_completion_streaming(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        observer: &mut dyn LlmStreamObserver,
+    ) -> Result<LlmResponse, AgentError> {
+        let next_call = {
+            let mut count = self.call_count.lock().unwrap();
+            *count += 1;
+            *count
+        };
+
+        if next_call == 1 {
+            observer.on_text_delta("checking ").await?;
+            Ok(LlmResponse {
+                content: Some("checking ".into()),
+                content_already_streamed: true,
+                tool_calls: vec![ParsedToolCall {
+                    id: "call-1".into(),
+                    name: "echo".into(),
+                    arguments: r#"{"message":"hello"}"#.into(),
+                }],
+                finish_reason: Some("tool_calls".into()),
+            })
+        } else {
+            observer.on_text_delta("done").await?;
+            Ok(LlmResponse {
+                content: Some("done".into()),
+                content_already_streamed: true,
+                tool_calls: Vec::new(),
+                finish_reason: Some("stop".into()),
+            })
+        }
     }
 }
 
@@ -728,6 +797,99 @@ async fn streaming_llm_deltas_arrive_before_text_done() {
 }
 
 #[tokio::test]
+async fn streaming_tool_call_emits_text_before_function_call_without_duplicate_delta() {
+    let llm = Arc::new(StreamingToolCallLlm::new());
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(RecordingNotify::default());
+
+    let mut router = ToolRouter::new();
+    router.register(Box::new(TestEchoTool));
+
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new(
+        llm,
+        store_port,
+        notify.clone(),
+        approval,
+        Arc::new(router),
+        8,
+        4,
+    ));
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: slab_types::ConversationMessageContent::Text("Please echo".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+
+    let thread_id =
+        control.spawn("session-streaming-tool".into(), config, messages).await.expect("spawn");
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+
+    let events = notify.events.lock().unwrap();
+    let text_delta_positions = events
+        .iter()
+        .enumerate()
+        .filter_map(|(index, event)| match event {
+            TurnEvent::Response {
+                event: AgentEventKind::ResponseOutputTextDelta { delta, .. },
+                ..
+            } if delta == "checking " => Some(index),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(text_delta_positions.len(), 1);
+
+    let function_call_position = events
+        .iter()
+        .position(|event| {
+            matches!(
+                event,
+                TurnEvent::Response {
+                    event: AgentEventKind::ResponseFunctionCallArgumentsDone {
+                        item_id,
+                        name,
+                        arguments,
+                        ..
+                    },
+                    ..
+                } if item_id == "call-1" && name == "echo" && arguments == r#"{"message":"hello"}"#
+            )
+        })
+        .expect("function call event");
+    assert!(text_delta_positions[0] < function_call_position);
+    drop(events);
+
+    let records = store.messages.lock().unwrap();
+    let debug_records = records
+        .iter()
+        .map(|record| {
+            format!(
+                "{}:{}:{}:{:?}:{}",
+                record.thread_id,
+                record.turn_index,
+                record.message.role,
+                record.message.tool_call_id,
+                record.message.rendered_text()
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        records.iter().any(|record| {
+            record.thread_id == thread_id
+                && record.message.role == "tool"
+                && record.message.tool_call_id.as_deref() == Some("call-1")
+                && record.message.rendered_text().contains("hello")
+        }),
+        "{debug_records:#?}"
+    );
+}
+
+#[tokio::test]
 async fn send_input_replays_persisted_thread_messages() {
     let llm = Arc::new(MockLlm::new());
     let store = Arc::new(PersistingStore::default());
@@ -984,6 +1146,7 @@ impl LlmPort for SlowLlm {
         tokio::time::sleep(std::time::Duration::from_secs(30)).await;
         Ok(LlmResponse {
             content: Some("too late".into()),
+            content_already_streamed: false,
             tool_calls: Vec::new(),
             finish_reason: Some("stop".into()),
         })

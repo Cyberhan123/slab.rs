@@ -23,6 +23,8 @@ pub type ThreadStatus = slab_types::agent::AgentThreadStatus;
 pub struct LlmResponse {
     /// Optional assistant text content.
     pub content: Option<String>,
+    /// True when `content` was already emitted via [`LlmStreamObserver::on_text_delta`].
+    pub content_already_streamed: bool,
     /// Tool calls requested by the model, if any.
     pub tool_calls: Vec<ParsedToolCall>,
     /// The finish reason reported by the provider (e.g. "stop", "tool_calls").
@@ -162,12 +164,13 @@ pub trait LlmPort: Send + Sync {
         config: &AgentConfig,
         observer: &mut dyn LlmStreamObserver,
     ) -> Result<LlmResponse, AgentError> {
-        let response = self.chat_completion(model, messages, tools, config).await?;
+        let mut response = self.chat_completion(model, messages, tools, config).await?;
         if response.tool_calls.is_empty()
-            && let Some(content) = response.content.clone()
+            && let Some(content) = response.content.as_deref()
             && !content.is_empty()
         {
-            observer.on_text_delta(&content).await?;
+            observer.on_text_delta(content).await?;
+            response.content_already_streamed = true;
         }
         Ok(response)
     }

@@ -1696,7 +1696,10 @@ export interface components {
         /** @description A single message in the initial conversation. */
         MessageInput: {
             content: string;
+            name?: string | null;
             role: string;
+            tool_call_id?: string | null;
+            tool_calls?: components["schemas"]["ChatToolCall"][];
         };
         /** @description Response for a single session message. */
         MessageResponse: {
