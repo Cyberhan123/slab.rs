@@ -16,6 +16,9 @@ slab-*-sys/target/
 __pycache__/
 *.py[cod]
 
+## Bazel – local Windows startup overrides
+.bazelrc.windows
+
 ## Vendor cache
 vendor/*
 !vendor/slab-artifacts.toml

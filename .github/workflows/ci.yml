@@ -10,8 +10,8 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  rust-check:
-    name: Rust – check & test (${{ matrix.os }})
+  bazel-check:
+    name: Bazel – build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -22,51 +22,42 @@ jobs:
         with:
           lfs: true
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      - name: Install Bazelisk
+        run: |
+          curl -fsSL -o /usr/local/bin/bazelisk \
+            https://github.com/bazelbuild/bazelisk/releases/download/v1.25.0/bazelisk-linux-amd64
+          chmod +x /usr/local/bin/bazelisk
 
-      - name: Cache Cargo registry & build artifacts
-        uses: Swatinem/rust-cache@v2
-
-      - name: Cache vendored native artifacts
+      - name: Cache Bazelisk downloads
         uses: actions/cache@v4
         with:
-          path: |
-            vendor/ggml
-            vendor/llama
-            vendor/whisper
-            vendor/diffusion
-          key: ${{ runner.os }}-vendor-${{ hashFiles('vendor/slab-artifacts.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-vendor-
+          path: ~/.cache/bazelisk
+          key: bazelisk-${{ hashFiles('.bazeliskrc') }}
 
-      # Linux system libraries required by some crates (e.g. OpenSSL, GTK for Tauri)
+      - name: Cache Bazel repository cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/bazel
+          key: ${{ runner.os }}-bazel-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bazel-
+
       - name: Install Linux system deps
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -y
           sudo apt-get install -y \
-            libgtk-3-dev \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
             libssl-dev \
             pkg-config \
             python3-dev
 
-      - name: cargo fmt --check
-        run: cargo fmt --all -- --check
-
-      - name: cargo clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: cargo build (workspace)
-        run: cargo build --workspace
-
-      - name: cargo test (workspace)
-        run: cargo test --workspace
+      - name: bazel build
+        run: |
+          bazelisk --output_base=/tmp/bazel-output build --config=ci \
+            //bin/slab-server:slab-server \
+            //bin/slab-js-runtime:slab-js-runtime \
+            //bin/slab-python-runtime:slab-python-runtime \
+            //bin/slab-mcp-server:slab-mcp-server
 
   frontend-check:
     name: Frontend – build check

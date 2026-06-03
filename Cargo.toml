@@ -315,5 +315,3 @@ sys_traits = "0.1.28"
 
 [patch.crates-io]
 all-smi-luwen-if = { path = "vendor/all-smi-luwen-if-0.7.9" }
-ed448 = { path = "vendor/ed448-0.5.0-rc.3" }
-ed448-goldilocks = { path = "vendor/ed448-goldilocks-0.14.0-pre.10" }

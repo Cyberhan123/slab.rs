@@ -4,13 +4,17 @@ common --enable_platform_specific_config
 common:windows --repo_env=TMP=C:/tmp
 common:windows --repo_env=TEMP=C:/tmp
 
-startup --output_base=C:/tmp/b
-startup --windows_enable_symlinks
+# Windows-specific startup settings; create .bazelrc.windows locally on Windows.
+try-import %workspace%/.bazelrc.windows
 
 build --incompatible_strict_action_env
 build --experimental_convenience_symlinks=ignore
 build --color=yes
 build --curses=yes
+
+# CI: disable interactive output for clean logs
+build:ci --curses=no
+build:ci --color=no
 
 build:release -c opt
 
