@@ -14,8 +14,18 @@ def _split_commands(args: list[str]) -> list[list[str]]:
     return [command for command in commands if command]
 
 
+def _command_program(command: list[str]) -> str | None:
+    index = 0
+    while index < len(command):
+        if command[index] == "--cwd":
+            index += 2
+            continue
+        return command[index]
+    return None
+
+
 def _commands_need_bazel_ffmpeg_env(commands: list[list[str]]) -> bool:
-    return any(command[0] in {"bun", "cargo"} for command in commands if command)
+    return any(_command_program(command) in {"bun", "cargo"} for command in commands)
 
 
 def _resolve_command_args(
