@@ -59,6 +59,11 @@ function run(
     shell: false,
   });
   if (result.error) {
+    if (result.error.code === "ENOENT") {
+      throw new Error(
+        `Command '${cmd}' not found. scripts/apply-patches.ts requires tools like 'tar' and 'git' to be installed and available in PATH.`
+      );
+    }
     throw new Error(`Failed to run ${cmd}: ${result.error.message}`);
   }
   return result.status === 0;
@@ -107,6 +112,11 @@ function applyPatch(vendorDir: string, patchAbsPath: string): void {
     { cwd: vendorDir, stdio: "pipe" }
   );
   if (reverseCheck.error) {
+    if (reverseCheck.error.code === "ENOENT") {
+      throw new Error(
+        "Command 'git' not found. scripts/apply-patches.ts requires tools like 'tar' and 'git' to be installed and available in PATH."
+      );
+    }
     throw new Error(`Failed to run git: ${reverseCheck.error.message}`);
   }
   if (reverseCheck.status === 0) {
