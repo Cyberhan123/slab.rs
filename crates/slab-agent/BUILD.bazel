@@ -1,8 +1,0 @@
-load("//tools/bazel:rust.bzl", "slab_rust_library")
-
-package(default_visibility = ["//visibility:public"])
-
-slab_rust_library(
-    name = "slab-agent",
-    deps = ["//crates/slab-types:slab-types"],
-)

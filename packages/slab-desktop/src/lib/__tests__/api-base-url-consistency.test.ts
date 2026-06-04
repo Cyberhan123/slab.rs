@@ -43,7 +43,7 @@ describe('desktop API base URL consistency', () => {
       };
     };
 
-    expect(workspacePackageJson.scripts?.['gen:api']).toBe('bazelisk run //tools/gen:api');
+    expect(workspacePackageJson.scripts?.['gen:api']).toMatch(/cargo.*build.*slab-server/);
     expect(desktopPackageJson.scripts?.api).toBeUndefined();
     expect(apiPackageJson.scripts?.api).toBeUndefined();
     expect(tauriConfig.app?.security?.csp?.['connect-src']).toContain(DEFAULT_API_BASE_URL);

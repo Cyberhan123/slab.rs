@@ -16,7 +16,7 @@ Slab is a local-first AI desktop workspace that brings chat, speech transcriptio
   - [Install](#install)
   - [Development](#development)
   - [Build](#build)
-  - [Bazel Usage Guide](#bazel-usage-guide)
+  - [Build Workflow Guide](#build-workflow-guide)
 - [Slab Documentation](#slab-documentation)
 - [Contributors](#contributors)
 - [License](#license)
@@ -103,7 +103,6 @@ This section keeps only the most common and practical development entry points. 
 ### Install
 
 - Install the Rust stable toolchain.
-- Install Bazelisk.
 - Install Bun.
 - Install Python as well if you plan to run the server compatibility tests.
 
@@ -126,23 +125,16 @@ bun run dev:desktop
 
 ### Build
 
-These commands cover the usual build, check, and test workflows. Bazelisk is the
-repo entrypoint; `Cargo.toml` and `Cargo.lock` remain the Rust dependency source
-of truth, while Bazel-managed Cargo wrappers cover Rust validation flows that are
-not yet modeled as first-class `rules_rust` test/lint targets on every platform.
+These commands cover the usual build, check, and test workflows using Bun and Cargo.
 
 ```sh
 # Run the standard workspace checks
 bun run check
 bun run check:rust
 bun run lint:rust
-bun run check:bazel
-bun run bazel:lock:check
 
 # Run the standard automated test suite
 bun run test
-bun run test:bazel
-bun run test:rust:bazel
 
 # Run browser and visual tests
 bun run test:browser
@@ -152,19 +144,14 @@ bun run build:desktop
 
 # Build the desktop app bundle
 bun run build:app
-bazelisk run //bin/slab-app:bundle_debug
 
 # Build the Windows full installer
 bun run build:windows-installer
-bazelisk run //bin/slab-app:bundle_release_windows
 
 # Regenerate generated assets
 bun run gen:api
-bazelisk run //tools/gen:api
 bun run gen:schemas
-bazelisk run //tools/gen:schemas
 bun run gen:plugin-packs
-bazelisk run //tools/plugins:plugin_packs
 bun run gen:model-packs
 
 # Server compatibility tests
@@ -172,10 +159,9 @@ python -m pip install -r bin/slab-server/tests/requirements.txt
 pytest bin/slab-server/tests
 ```
 
-### Bazel Usage Guide
+### Build Workflow Guide
 
-For Bazel target layout, generated assets, Cargo wrapper behavior, vendor
-patches, and Windows runfiles notes, see
+For build, generation, and vendor patch workflow details, see
 [`docs/development/guides/bazel.md`](docs/development/guides/bazel.md).
 
 ## Slab Documentation

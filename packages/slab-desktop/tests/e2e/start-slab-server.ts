@@ -73,16 +73,26 @@ fs.writeFileSync(
   "utf8",
 );
 
-function runBazelisk(args: string[]) {
-  const result = spawnSync("bazelisk", args, {
-    cwd: repoRoot,
-    stdio: "inherit",
-    env: process.env,
-  });
+function buildSidecars() {
+  const result = spawnSync(
+    "cargo",
+    [
+      "build",
+      "-p", "slab-server",
+      "-p", "slab-runtime",
+      "-p", "slab-js-runtime",
+      "-p", "slab-python-runtime",
+    ],
+    {
+      cwd: repoRoot,
+      stdio: "inherit",
+      env: process.env,
+    },
+  );
 
   if (result.status !== 0) {
     throw new Error(
-      `bazelisk ${args.join(" ")} failed with exit code ${result.status ?? "unknown"}`,
+      `cargo build sidecars failed with exit code ${result.status ?? "unknown"}`,
     );
   }
 }
@@ -92,7 +102,7 @@ function cargoBinaryPath(binName: string) {
   return path.join(repoRoot, "target", "debug", `${binName}${extension}`);
 }
 
-runBazelisk(["run", "//tools/cargo:build_sidecars"]);
+buildSidecars();
 
 const serverExe = cargoBinaryPath("slab-server");
 const runtimeExe = cargoBinaryPath("slab-runtime");
