@@ -17,96 +17,49 @@ env:
 
 jobs:
   release:
-    name: Bazel release (${{ matrix.platform }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: linux-x86_64
-            os: ubuntu-latest
-            bazel_config: linux-x86_64
-            bazel_target: //bin/slab-app:release_linux_x86_64
-          - platform: linux-aarch64
-            os: ubuntu-24.04-arm
-            bazel_config: linux-aarch64
-            bazel_target: //bin/slab-app:release_linux_aarch64
-          - platform: macos-x86_64
-            os: macos-13
-            bazel_config: macos-x86_64
-            bazel_target: //bin/slab-app:release_macos_x86_64
-          - platform: macos-aarch64
-            os: macos-latest
-            bazel_config: macos-aarch64
-            bazel_target: //bin/slab-app:release_macos_aarch64
-          - platform: windows-x86_64-gnullvm
-            os: windows-latest
-            bazel_config: windows-x86_64-gnullvm
-            bazel_target: //bin/slab-app:release_windows_x86_64_gnullvm
-          - platform: windows-aarch64-gnullvm
-            os: windows-11-arm
-            bazel_config: windows-aarch64-gnullvm
-            bazel_target: //bin/slab-app:release_windows_aarch64_gnullvm
+    name: Windows installer
+    runs-on: windows-latest
 
     steps:
       - uses: actions/checkout@v4
         with:
           lfs: true
 
-      - name: Setup Bazel
-        uses: bazel-contrib/setup-bazel@0.19.0
-        with:
-          bazelisk-cache: true
-          disk-cache: ${{ github.workflow }}
-          repository-cache: true
-          cache-save: ${{ github.event_name != 'pull_request' }}
-
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
 
-      - name: Install Linux system deps
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            libgtk-3-dev \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libssl-dev \
-            pkg-config \
-            python3-dev
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
       - name: Validate release tag matches project versions
         if: startsWith(github.ref, 'refs/tags/')
-        shell: bash
+        shell: pwsh
         run: |
-          TAG_RAW="${GITHUB_REF_NAME#v}"
-          TAG_BASE="${TAG_RAW%%-*}"
-          CARGO_VERSION="$(grep -E '^version[[:space:]]*=[[:space:]]*"' Cargo.toml | head -n1 | sed -E 's/version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/')"
-          TAURI_VERSION="$(grep -E '"version"[[:space:]]*:[[:space:]]*"' bin/slab-app/src-tauri/tauri.conf.json | head -n1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
-          ROOT_PKG_VERSION="$(grep -E '"version"[[:space:]]*:[[:space:]]*"' package.json | head -n1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+          $tagRaw = $env:GITHUB_REF_NAME -replace '^v', ''
+          $tagBase = ($tagRaw -split '-', 2)[0]
+          $cargoVersion = (Select-String -Path Cargo.toml -Pattern 'version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          $tauriVersion = (Get-Content -Raw bin/slab-app/src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          $rootPkgVersion = (Get-Content -Raw package.json | ConvertFrom-Json).version
 
-          if [ "$TAG_BASE" != "$CARGO_VERSION" ] || [ "$TAG_BASE" != "$TAURI_VERSION" ] || [ "$TAG_BASE" != "$ROOT_PKG_VERSION" ]; then
-            echo "Tag version:    $TAG_RAW"
-            echo "Tag base:       $TAG_BASE"
-            echo "Cargo version:  $CARGO_VERSION"
-            echo "Tauri version:  $TAURI_VERSION"
-            echo "Root pkg ver:   $ROOT_PKG_VERSION"
-            echo "Version mismatch between git tag and project files"
-            exit 1
-          fi
+          if ($tagBase -ne $cargoVersion -or $tagBase -ne $tauriVersion -or $tagBase -ne $rootPkgVersion) {
+            Write-Host "Tag version:    $tagRaw"
+            Write-Host "Tag base:       $tagBase"
+            Write-Host "Cargo version:  $cargoVersion"
+            Write-Host "Tauri version:  $tauriVersion"
+            Write-Host "Root pkg ver:   $rootPkgVersion"
+            throw "Version mismatch between git tag and project files"
+          }
 
-      - name: Bazel module lock check
-        run: bazelisk mod deps --lockfile_mode=error
-
-      - name: Build and stage release
-        run: bazelisk run --config=${{ matrix.bazel_config }} ${{ matrix.bazel_target }}
+      - name: Build Windows installer
+        run: bun run build:windows-installer
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -115,8 +68,10 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
-          name: slab-${{ matrix.platform }}
-          path: dist/${{ matrix.platform }}/
+          name: slab-windows-installer
+          path: |
+            target/release/bundle/nsis/**
+            bin/slab-app/src-tauri/target/release/bundle/nsis/**
           retention-days: 7
           if-no-files-found: error
 

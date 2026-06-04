@@ -142,7 +142,10 @@ bun run test:browser
 # Build the desktop frontend only
 bun run build:desktop
 
-# Build the desktop app bundle
+# Build and stage desktop sidecars
+bun run build:sidecars
+
+# Build the desktop app binary without an installer bundle
 bun run build:app
 
 # Build the Windows full installer
@@ -162,7 +165,7 @@ pytest bin/slab-server/tests
 ### Build Workflow Guide
 
 For build, generation, and vendor patch workflow details, see
-[`docs/development/guides/bazel.md`](docs/development/guides/bazel.md).
+[`docs/development/guides/build.md`](docs/development/guides/build.md).
 
 ## Slab Documentation
 

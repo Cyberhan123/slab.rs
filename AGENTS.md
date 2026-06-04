@@ -71,7 +71,7 @@ When fixing bugs, it's essential to start with first principles to find the root
 
 Keep this file focused on always-on constraints. For module-specific role, stack, testing, and layout details, prefer the nearest subproject `README.md` before restating that information here.
 
-- Build, generation, and packaging flow: `docs/development/guides/bazel.md`
+- Build, generation, and packaging flow: `docs/development/guides/build.md`
 - Desktop host and Tauri backend: `bin/slab-app/src-tauri/README.md`
 - HTTP gateway: `bin/slab-server/README.md`
 - Runtime worker: `bin/slab-runtime/README.md`
@@ -120,6 +120,7 @@ bun run test:browser
 
 bun run build:desktop
 bun run build:language-servers
+bun run build:sidecars
 bun run build:app
 bun run build:windows-installer
 

@@ -5,7 +5,8 @@ title: Build Workflow Guide
 # Build Workflow Guide
 
 Slab uses Bun and Cargo as the repository build entrypoints. Run commands from the
-repository root unless a subproject README says otherwise.
+repository root unless a subproject README says otherwise. Do not use Bazel or
+cargo-make wrappers for the top-level build flow.
 
 ## Daily Commands
 
@@ -30,11 +31,18 @@ bun run test:rust
 bun run test:browser
 
 # Builds
+bun run build:sidecars
 bun run build:desktop
 bun run build:language-servers
 bun run build:app
 bun run build:windows-installer
 ```
+
+`bun run build:sidecars` compiles `slab-server`, `slab-runtime`,
+`slab-js-runtime`, and `slab-python-runtime`, then stages them under
+`bin/slab-app/src-tauri/binaries/` for Tauri `externalBin` packaging.
+`bun run build:windows-installer` uses release sidecars before building the NSIS
+bundle.
 
 ## Generated Assets
 
