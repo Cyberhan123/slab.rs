@@ -58,6 +58,9 @@ function run(
     stdio: "inherit",
     shell: false,
   });
+  if (result.error) {
+    throw new Error(`Failed to run ${cmd}: ${result.error.message}`);
+  }
   return result.status === 0;
 }
 
@@ -103,6 +106,9 @@ function applyPatch(vendorDir: string, patchAbsPath: string): void {
     ["apply", "--no-index", "-p1", "--reverse", "--check", patchAbsPath],
     { cwd: vendorDir, stdio: "pipe" }
   );
+  if (reverseCheck.error) {
+    throw new Error(`Failed to run git: ${reverseCheck.error.message}`);
+  }
   if (reverseCheck.status === 0) {
     console.log("  Patch already applied – skipping.");
     return;
