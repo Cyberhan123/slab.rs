@@ -9,9 +9,12 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
+permissions:
+  contents: read
+
 jobs:
   cargo-check:
-    name: Cargo – check / clippy / test (${{ matrix.os }})
+    name: Cargo - check / clippy / test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
