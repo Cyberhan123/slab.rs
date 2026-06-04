@@ -13,32 +13,74 @@ permissions:
   contents: write
 
 env:
-  CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
   release:
-    name: cargo make release (${{ matrix.platform }})
+    name: Bazel release (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # TODO: we need to support liunux
-          # - platform: linux
-          #   os: ubuntu-latest
-          #   artifact_suffix: linux-x86_64
-          - platform: windows
-            os: windows-latest
-            artifact_suffix: windows-x86_64
-          - platform: macos
+          - platform: linux-x86_64
+            os: ubuntu-latest
+            bazel_config: linux-x86_64
+            bazel_target: //bin/slab-app:release_linux_x86_64
+          - platform: linux-aarch64
+            os: ubuntu-24.04-arm
+            bazel_config: linux-aarch64
+            bazel_target: //bin/slab-app:release_linux_aarch64
+          - platform: macos-x86_64
+            os: macos-13
+            bazel_config: macos-x86_64
+            bazel_target: //bin/slab-app:release_macos_x86_64
+          - platform: macos-aarch64
             os: macos-latest
-            artifact_suffix: macos-aarch64
+            bazel_config: macos-aarch64
+            bazel_target: //bin/slab-app:release_macos_aarch64
+          - platform: windows-x86_64-gnullvm
+            os: windows-latest
+            bazel_config: windows-x86_64-gnullvm
+            bazel_target: //bin/slab-app:release_windows_x86_64_gnullvm
+          - platform: windows-aarch64-gnullvm
+            os: windows-11-arm
+            bazel_config: windows-aarch64-gnullvm
+            bazel_target: //bin/slab-app:release_windows_aarch64_gnullvm
 
     steps:
       - uses: actions/checkout@v4
         with:
           lfs: true
+
+      - name: Setup Bazel
+        uses: bazel-contrib/setup-bazel@0.19.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
+          cache-save: ${{ github.event_name != 'pull_request' }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Install Linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            pkg-config \
+            python3-dev
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
 
       - name: Validate release tag matches project versions
         if: startsWith(github.ref, 'refs/tags/')
@@ -60,118 +102,21 @@ jobs:
             exit 1
           fi
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Bazel module lock check
+        run: bazelisk mod deps --lockfile_mode=error
 
-      - name: Install cargo-make
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-make
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: release-${{ matrix.platform }}
-
-      - name: Install Linux system deps
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            libgtk-3-dev \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libssl-dev \
-            pkg-config
-
-      - name: Install frontend dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Prepare FFmpeg SDK (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $root = "${{ github.workspace }}"
-          $sdkRoot = Join-Path $root ".slab/ffmpeg-sdk/windows-x64"
-          $sdkDir = Join-Path $sdkRoot "ffmpeg-n7.1-latest-win64-gpl-shared-7.1"
-          $ffmpegExe = Join-Path $sdkDir "bin/ffmpeg.exe"
-
-          if (-not (Test-Path $ffmpegExe)) {
-            New-Item -ItemType Directory -Force -Path $sdkRoot | Out-Null
-            $zipPath = Join-Path $sdkRoot "ffmpeg-n7.1-shared.zip"
-            Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-win64-gpl-shared-7.1.zip" -OutFile $zipPath
-            Expand-Archive -LiteralPath $zipPath -DestinationPath $sdkRoot -Force
-          }
-
-          "FFMPEG_DIR=$sdkDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "$sdkDir/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Install FFmpeg (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          brew update
-          brew install pkg-config ffmpeg
-          FF_PREFIX="$(brew --prefix ffmpeg)"
-          echo "PKG_CONFIG_PATH=${FF_PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
-          echo "PATH=${FF_PREFIX}/bin:${PATH}" >> "$GITHUB_ENV"
-
-      - name: Build release via cargo-make
-        run: cargo make release
+      - name: Build and stage release
+        run: bazelisk run --config=${{ matrix.bazel_config }} ${{ matrix.bazel_target }}
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-
-      - name: Collect publishable release assets
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          bundle_dir="target/release/bundle"
-          staging_dir="release-staging/${{ matrix.platform }}"
-
-          rm -rf "$staging_dir"
-          mkdir -p "$staging_dir"
-
-          case "${{ matrix.platform }}" in
-            macos)
-              find "$bundle_dir" -type f -name '*.dmg' -exec cp {} "$staging_dir/" \;
-              ;;
-            windows)
-              find "$bundle_dir" -type f \( \
-                -name 'Slab_*_x64-setup.exe' -o \
-                -name 'Slab_*_x64-offline-setup.exe' -o \
-                -name 'base.cab' -o \
-                -name 'cuda.cab' -o \
-                -name 'hip.cab' \
-              \) -exec cp {} "$staging_dir/" \;
-              ;;
-            *)
-              echo "Unsupported release platform: ${{ matrix.platform }}"
-              exit 1
-              ;;
-          esac
-
-          if ! find "$staging_dir" -maxdepth 1 -type f | grep -q .; then
-            echo "No publishable release assets found in $bundle_dir"
-            exit 1
-          fi
-
-          echo "Collected release assets:"
-          find "$staging_dir" -maxdepth 1 -type f | sort
 
       - name: Upload release bundle artifacts
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
-          name: slab-${{ matrix.artifact_suffix }}
-          path: |
-            release-staging/${{ matrix.platform }}/
+          name: slab-${{ matrix.platform }}
+          path: dist/${{ matrix.platform }}/
           retention-days: 7
           if-no-files-found: error
 

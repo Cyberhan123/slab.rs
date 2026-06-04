@@ -11,36 +11,24 @@ env:
 
 jobs:
   bazel-check:
-    name: Bazel – build (${{ matrix.os }})
+    name: Bazel build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
         with:
           lfs: true
 
-      - name: Install Bazelisk
-        run: |
-          sudo curl -fsSL -o /usr/local/bin/bazelisk \
-            https://github.com/bazelbuild/bazelisk/releases/download/v1.25.0/bazelisk-linux-amd64
-          sudo chmod +x /usr/local/bin/bazelisk
-
-      - name: Cache Bazelisk downloads
-        uses: actions/cache@v4
+      - name: Setup Bazel
+        uses: bazel-contrib/setup-bazel@0.19.0
         with:
-          path: ~/.cache/bazelisk
-          key: bazelisk-${{ hashFiles('.bazeliskrc') }}
-
-      - name: Cache Bazel repository cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/bazel
-          key: ${{ runner.os }}-bazel-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bazel-
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
+          cache-save: ${{ github.event_name != 'pull_request' }}
 
       - name: Install Linux system deps
         if: runner.os == 'Linux'
@@ -51,33 +39,23 @@ jobs:
             pkg-config \
             python3-dev
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-
-      - name: bazel build
-        run: |
-          bazelisk build --config=ci \
-            //bin/slab-server:slab-server \
-            //bin/slab-js-runtime:slab-js-runtime \
-            //bin/slab-python-runtime:slab-python-runtime \
-            //bin/slab-mcp-server:slab-mcp-server
-
       - name: bazel module lock check
         run: bazelisk mod deps --lockfile_mode=error
+
+      - name: bazel query
+        run: bazelisk query //...
+
+      - name: bazel build
+        run: bazelisk build --config=ci //...
 
       - name: bazel test
         run: bazelisk test --config=ci //...
 
-      - name: bazel rust tests
-        run: bazelisk run --config=ci //tools/cargo:test_workspace
-
       - name: bazel rust clippy
-        run: bazelisk run --config=ci //tools/cargo:clippy_workspace
+        run: bazelisk build --config=ci //tools/rust:clippy_workspace
 
   frontend-check:
-    name: Frontend – build check
+    name: Frontend build check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -9,7 +9,7 @@ categories.workspace = true
 license.workspace = true
 
 [features]
-default = ["gpu-telemetry", "ffmpeg-next-build"]
+default = ["gpu-telemetry", "ffmpeg-next-static"]
 axum = ["dep:axum"]
 gpu-telemetry = ["dep:all-smi"]
 ffmpeg-next-runtime = ["dep:ffmpeg-next"]

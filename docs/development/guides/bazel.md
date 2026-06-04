@@ -60,16 +60,16 @@ The equivalent direct Bazel targets are:
 ```sh
 bazelisk run //bin/slab-app:dev
 bazelisk run //tools/check:workspace
-bazelisk run //tools/cargo:check_workspace
-bazelisk run //tools/cargo:clippy_workspace
+bazelisk run //tools/rust:build_sidecars
+bazelisk build //tools/rust:clippy_workspace
 bazelisk query //...
 bazelisk run //tools/test:workspace
-bazelisk run //tools/cargo:test_workspace
+bazelisk test //...
 bazelisk test //...
 bazelisk mod deps --lockfile_mode=error
 bazelisk run //tools/frontend:desktop_build
 bazelisk run //bin/slab-app:bundle_debug
-bazelisk run //bin/slab-app:bundle_release_windows
+bazelisk run --config=windows-x86_64-gnullvm //bin/slab-app:release_windows_x86_64_gnullvm
 ```
 
 Prefer the `bun run ...` form for day-to-day use and the `bazelisk ...` form
@@ -133,24 +133,44 @@ When a crate patch is needed for both Cargo and Bazel, keep the source in
 sure `MODULE.bazel.lock` is refreshed by running a Bazel command that resolves
 the crate graph.
 
-## Cargo Wrapper Targets
+## Rust Bazel Targets
 
-The Cargo wrapper targets live in `tools/cargo/BUILD.bazel` and execute Cargo
-from the repository root through `tools/bazel/workspace_command.py`.
+Rust check, sidecar, and clippy targets live in `tools/rust/BUILD.bazel`.
+`tools/cargo/BUILD.bazel` is kept as a compatibility alias layer for older
+target names, but new commands should use `//tools/rust:*` directly.
 
 Common targets:
 
 ```sh
-bazelisk run //tools/cargo:check_workspace
-bazelisk run //tools/cargo:clippy_workspace
-bazelisk run //tools/cargo:test_workspace
-bazelisk run //tools/cargo:check_sidecars
-bazelisk run //tools/cargo:build_sidecars
+bazelisk run //tools/rust:build_sidecars
+bazelisk run //tools/rust:check_sidecars
+bazelisk run //tools/rust:check_workspace
+bazelisk build //tools/rust:clippy_workspace
 ```
 
-The wrapper is responsible for setting Bazel-discovered runtime paths such as
-the Windows FFmpeg SDK before invoking Cargo. Do not duplicate that path setup
-in ad hoc shell scripts.
+On Windows, sidecar builds currently run Cargo from the Bazel-managed
+`//tools/rust:build_sidecars` helper. The helper injects Bazel-discovered
+runtime dependency paths, builds the sidecar packages, and stages Tauri
+`externalBin` files under `bin/slab-app/src-tauri/binaries`. Keep
+Bazel-discovered runtime path setup in `tools/bazel/workspace_command.py` when a
+helper still needs to run a host command from the repository root.
+
+## Release Targets
+
+Release staging entrypoints live on `//bin/slab-app` and take their platform
+selection from Bazel configs in `.bazelrc`.
+
+```sh
+bazelisk run --config=linux-x86_64 //bin/slab-app:release_linux_x86_64
+bazelisk run --config=linux-aarch64 //bin/slab-app:release_linux_aarch64
+bazelisk run --config=macos-x86_64 //bin/slab-app:release_macos_x86_64
+bazelisk run --config=macos-aarch64 //bin/slab-app:release_macos_aarch64
+bazelisk run --config=windows-x86_64-gnullvm //bin/slab-app:release_windows_x86_64_gnullvm
+bazelisk run --config=windows-aarch64-gnullvm //bin/slab-app:release_windows_aarch64_gnullvm
+```
+
+The release targets stage artifacts under `dist/<platform>/` after Tauri
+finishes packaging.
 
 ## Runfiles and Helper Commands
 
