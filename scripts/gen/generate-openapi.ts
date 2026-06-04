@@ -64,11 +64,7 @@ async function ensureServerBinary() {
     "debug",
     process.platform === "win32" ? "slab-server.exe" : "slab-server",
   );
-  try {
-    await runCommand("bazelisk", ["run", "//tools/cargo:build_sidecars"]);
-  } catch {
-    await runCommand("cargo", ["build", "-p", "slab-server"]);
-  }
+  await runCommand("cargo", ["build", "-p", "slab-server"]);
   return serverBinaryPath;
 }
 

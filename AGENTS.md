@@ -38,10 +38,8 @@ When fixing bugs, it's essential to start with first principles to find the root
 
 ## Workflow
 - When docs and implementation disagree, verify the current behavior in code before changing docs or behavior.
-- The current top-level build flow is Bazel-first. Root `package.json` build, check, test, generation, package, and dev scripts should stay thin wrappers around `bazelisk` targets; use direct `bazelisk ...` commands when debugging a specific target.
-- Some Rust flows still intentionally execute Cargo through Bazel-managed wrapper targets, especially workspace-wide sidecar checks and builds on Windows. Keep Bazel-discovered runtime path setup in `tools/bazel/workspace_command.py` instead of duplicating it in ad hoc shell scripts.
-- For new Bazel helper targets, prefer target dependencies, `data`, runfiles, and `--bazel-output=...` resolution through `tools/bazel/workspace_command.py`; avoid nested `bazelisk run` inside Bazel-run helpers unless no direct runfiles path exists.
-- Do not reintroduce `cargo make` or parallel top-level build orchestration; add or update Bazel targets and expose them through root `package.json` scripts when a user-facing command is needed.
+- The current top-level build flow is Bun + Cargo. Root `package.json` build, check, test, generation, package, and dev scripts are the canonical entrypoints.
+- Do not reintroduce `cargo make`, Bazel wrappers, or parallel top-level build orchestration.
 - Keep repo guidance deterministic: commands should work from the repo root, and local references should come before remote-only advice.
 - `.agents/skills` contains optional task guidance. `plugins/` contains runtime plugin packages, `docs/public/manifests/` contains JSON schemas and model metadata, and `vendor/` contains vendored runtime artifacts.
 - Do not add repo-specific workflow that forces a skill-selection step for every task. Use skills when the active environment requires them or when the task directly matches them.
@@ -67,13 +65,13 @@ When fixing bugs, it's essential to start with first principles to find the root
 - `plugins/` is runtime plugin content, not AI skill content; `.agents/skills` is only for agent guidance.
 - SQLx migrations in `crates/slab-app-core/migrations/` are append-only.
 - Cargo excludes `packages/slab-desktop/src`, so Rust tooling does not validate the TypeScript frontend.
-- When backend API shapes change, regenerate `packages/api/src/v1.d.ts` with the Bazel-backed `bun run gen:api`.
+- When backend API shapes change, regenerate `packages/api/src/v1.d.ts` with `bun run gen:api`.
 
 ## Reference Pointers
 
 Keep this file focused on always-on constraints. For module-specific role, stack, testing, and layout details, prefer the nearest subproject `README.md` before restating that information here.
 
-- Bazel build, generation, dev, and packaging flow: `docs/development/guides/bazel.md`
+- Build, generation, and packaging flow: `docs/development/guides/bazel.md`
 - Desktop host and Tauri backend: `bin/slab-app/src-tauri/README.md`
 - HTTP gateway: `bin/slab-server/README.md`
 - Runtime worker: `bin/slab-runtime/README.md`
@@ -101,7 +99,7 @@ Keep this file focused on always-on constraints. For module-specific role, stack
 
 ## Common Root Commands
 
-Run these from the repo root unless a local README says otherwise. Prefer `bun run ...` for day-to-day use; these top-level scripts are the stable wrappers around Bazel targets. Pick the narrowest command that validates your change before reaching for broader workspace-wide checks:
+Run these from the repo root unless a local README says otherwise. Prefer `bun run ...` for day-to-day use. Pick the narrowest command that validates your change before reaching for broader workspace-wide checks:
 
 ```sh
 bun install
@@ -114,12 +112,10 @@ bun run dev:app
 bun run check
 bun run check:frontend
 bun run check:rust
-bun run check:bazel
 
 bun run test
 bun run test:frontend
 bun run test:rust
-bun run test:bazel
 bun run test:browser
 
 bun run build:desktop
@@ -130,20 +126,6 @@ bun run build:windows-installer
 bun run gen:api
 bun run gen:plugin-packs
 bun run gen:schemas
-```
-
-Use direct Bazel targets when debugging the build graph or a target-specific failure:
-
-```sh
-bazelisk run //bin/slab-app:dev
-bazelisk run //tools/check:workspace
-bazelisk run //tools/cargo:check_workspace
-bazelisk query //...
-bazelisk run //tools/test:workspace
-bazelisk test //...
-bazelisk run //tools/frontend:desktop_build
-bazelisk run //bin/slab-app:bundle_debug
-bazelisk run //bin/slab-app:bundle_release_windows
 ```
 
 For package-specific or crate-specific workflows, prefer the nearest subproject `README.md` and the local `package.json` / `Cargo.toml` scripts over copying those details into this file.

@@ -1,0 +1,320 @@
+[workspace]
+resolver = "2"
+members = [
+    "bin/slab-app/src-tauri",
+    "bin/slab-windows-full-installer",
+    "bin/slab-mcp-server",
+    "bin/slab-server",
+    "bin/slab-runtime",
+    "bin/slab-js-runtime",
+    "crates/slab-proto",
+    "crates/slab-agent",
+    "crates/slab-agent-tools",
+    "crates/slab-build-utils",
+    "crates/slab-model-pack",
+    "crates/slab-utils",
+    "crates/slab-diffusion",
+    "crates/slab-diffusion-sys",
+    "crates/slab-libfetch",
+    "crates/slab-llama",
+    "crates/slab-llama-sys",
+    "crates/slab-whisper",
+    "crates/slab-whisper-sys",
+    "crates/slab-runtime-macros",
+    "crates/slab-app-core",
+    "crates/slab-runtime-core",
+    "crates/slab-types",
+    "crates/slab-config",
+    "crates/slab-subtitle",
+    "crates/slab-ggml",
+    "crates/slab-ggml-sys",
+    "crates/slab-hub",
+    "crates/slab-sandboxing",
+    "crates/slab-file",
+    "crates/slab-git",
+    "crates/slab-shell-command",
+    "crates/slab-mcp-client",
+    "crates/slab-mcp",
+    "crates/slab-plugin",
+    "crates/slab-apply-patch",
+    "bin/slab-python-runtime",
+]
+
+exclude = ["packages"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+description = "slab ML"
+repository = "https://github.com/Cyberhan123/slab.rs"
+keywords = ["blas", "tensor", "machine-learning"]
+categories = ["science"]
+license = "AGPL-3.0-only"
+
+[workspace.lints.rust]
+
+[workspace.dependencies]
+# Internal crates
+slab-runtime-core = { path = "./crates/slab-runtime-core", package = "slab-runtime-core", version = "0.1.0" }
+slab-app-core = { path = "./crates/slab-app-core", package = "slab-app-core", version = "0.1.0" }
+slab-agent = { path = "./crates/slab-agent", package = "slab-agent", version = "0.1.0" }
+slab-agent-tools = { path = "./crates/slab-agent-tools", package = "slab-agent-tools", version = "0.1.0" }
+slab-proto = { path = "./crates/slab-proto", package = "slab-proto", version = "0.1.0" }
+slab-model-pack = { path = "./crates/slab-model-pack", package = "slab-model-pack", version = "0.1.0" }
+slab-types = { path = "./crates/slab-types", package = "slab-types", version = "0.1.0" }
+slab-config = { path = "./crates/slab-config", package = "slab-config", version = "0.1.0" }
+slab-hub = { path = "./crates/slab-hub", package = "slab-hub", version = "0.1.0" }
+slab-diffusion-sys = { path = "./crates/slab-diffusion-sys", package = "slab-diffusion-sys", version = "0.1.0" }
+slab-diffusion = { path = "./crates/slab-diffusion", package = "slab-diffusion", version = "0.1.0" }
+slab-llama = { path = "./crates/slab-llama", package = "slab-llama", version = "0.1.0" }
+slab-llama-sys = { path = "./crates/slab-llama-sys", package = "slab-llama-sys", version = "0.1.0" }
+slab-whisper = { path = "./crates/slab-whisper", package = "slab-whisper", version = "0.1.0" }
+slab-whisper-sys = { path = "./crates/slab-whisper-sys", package = "slab-whisper-sys", version = "0.1.0" }
+slab-libfetch = { path = "./crates/slab-libfetch", package = "slab-libfetch", version = "0.1.0" }
+slab-build-utils = { path = "./crates/slab-build-utils", package = "slab-build-utils", version = "0.1.0" }
+slab-utils = { path = "./crates/slab-utils", package = "slab-utils", version = "0.1.0" }
+slab-runtime-macros = { path = "./crates/slab-runtime-macros", package = "slab-runtime-macros", version = "0.1.0" }
+slab-subtitle = { path = "./crates/slab-subtitle", package = "slab-subtitle", version = "0.1.0" }
+slab-ggml-sys = { path = "./crates/slab-ggml-sys", package = "slab-ggml-sys", version = "0.1.0" }
+slab-ggml = { path = "./crates/slab-ggml", package = "slab-ggml", version = "0.1.0" }
+slab-sandboxing = { path = "./crates/slab-sandboxing", package = "slab-sandboxing", version = "0.1.0" }
+slab-file = { path = "./crates/slab-file", package = "slab-file", version = "0.1.0" }
+slab-git = { path = "./crates/slab-git", package = "slab-git", version = "0.1.0" }
+slab-shell-command = { path = "./crates/slab-shell-command", package = "slab-shell-command", version = "0.1.0" }
+slab-mcp-client = { path = "./crates/slab-mcp-client", package = "slab-mcp-client", version = "0.1.0" }
+slab-mcp = { path = "./crates/slab-mcp", package = "slab-mcp", version = "0.1.0" }
+slab-mcp-server = { path = "./bin/slab-mcp-server", package = "slab-mcp-server", version = "0.1.0" }
+slab-plugin = { path = "./crates/slab-plugin", package = "slab-plugin", version = "0.1.0" }
+slab-js-runtime = { path = "./bin/slab-js-runtime", package = "slab-js-runtime", version = "0.1.0" }
+slab-python-runtime = { path = "./bin/slab-python-runtime", package = "slab-python-runtime", version = "0.1.0" }
+slab-apply-patch = { path = "./crates/slab-apply-patch", package = "slab-apply-patch", version = "0.1.0" }
+
+notify = "8"
+ignore = "0.4"
+crossbeam-channel = "0.5"
+nucleo = "0.5"
+shlex = "2"
+which = { version = "8", default-features = false }
+dashmap = "6"
+combine = "4.6.7"
+anyhow = "1.0.102"
+bindgen = "0.72.1"
+flate2 = "1.1.9"
+libloading = "0.9.0"
+reqwest = { version = "0.13.3", features = [
+    "stream",
+    "native-tls",
+    "json",
+    "blocking",
+] }
+pyo3 = { version = "0.28", features = ["auto-initialize", "abi3-py39", "generate-import-lib"] }
+websearch = "0.1.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+regex = "1.12.3"
+regex-lite = "0.1.9"
+globset = "0.4"
+dunce = "1.0.5"
+minijinja = { version = "2", features = ["json"] }
+tar = "0.4.46"
+assert_cmd = "2.2.2"
+assert_matches = "1.5.0"
+pretty_assertions = "1.4.1"
+tempfile = "3.27.0"
+ring = "0.17.14"
+tokio = { version = "1.52.3", features = ["full"] }
+flume = { version = "0.12.0", default-features = false, features = ["async"] }
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+hf-hub = { version = "0.5.0", default-features = false }
+models-cat = { version = "0.1.0", default-features = false }
+huggingface-hub = { version = "0.0.0", default-features = false }
+thiserror = "2.0.18"
+derive_builder = "0.20"
+libc = "0.2"
+bytes = "1.11.1"
+futures = "0.3"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+genai = "0.6.0"
+gix = "0.83.0"
+base64 = "0.22"
+hex = "0.4"
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+] }
+ffmpeg-next = "8.1.0"
+ort = { version = "2.0.0-rc.12", features = ["load-dynamic"] }
+candle-core = "0.10.2"
+candle-nn = "0.10.2"
+candle-transformers = "0.10.2"
+tokenizers = "0.23.1"
+schemars = { version = "1.2", features = ["uuid1", "chrono04"] }
+toml = "1.1.2"
+once_cell = "1.21.4"
+similar = "3.1.1"
+
+proptest = "1.11"
+portable-pty = "0.9.0"
+filedescriptor = "0.8.3"
+lazy_static = "1"
+shared_library = "0.1.9"
+ts-rs = "12.0.1"
+walkdir = "2.5.0"
+rand = "0.10.1"
+tree-sitter = "0.26.9"
+tree-sitter-bash = "0.25.1"
+serde_with = "3.20.0"
+serde_repr = "0.1.20"
+# Logging / tracing
+log = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+tracing-test = "0.2"
+# Web / gRPC
+axum = { version = "0.8", features = ["macros"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = [
+    "cors",
+    "trace",
+    "request-id",
+    "set-header",
+    "util",
+] }
+tonic = { version = "0.14.6", features = ["transport"] }
+tonic-build = "0.14.6"
+tonic-prost = "0.14.6"
+tonic-prost-build = "0.14.6"
+prost = "0.14.3"
+http = "1"
+http-body-util = "0.1"
+hyper-util = { version = "0.1", features = ["tokio"] }
+sqlx = { version = "0.9", features = [
+    "sqlite",
+    "runtime-tokio",
+    "migrate",
+    "chrono",
+    "uuid",
+] }
+utoipa = "5"
+utoipa-axum = "0.2"
+utoipa-swagger-ui = "9"
+rustls = "0.23.40"
+# IPC / streaming
+parity-tokio-ipc = "0.9"
+winapi = { version = "0.3.9", features = ["winerror"] }
+tokio-stream = "0.1"
+tokio-tungstenite = "0.29.0"
+jsonrpc-core = "18"
+extism = "1.21.0"
+deno_core = "0.401.0"
+deno_ast = { version = "0.53.2", features = ["transpiling"] }
+deno_error = { version = "0.7.1", features = [
+    "serde_json",
+    "serde",
+    "url",
+    "tokio",
+] }
+# Utilities
+async-trait = "0.1"
+bytemuck = "1"
+async_io = { package = "async-io", version = "2.6.0" }
+tokio_util = { package = "tokio-util", version = "0.7.18" }
+uds_windows = "1.2.1"
+strum = { version = "0.28.0", features = ["derive"] }
+clap = { version = "4.6.1", features = ["derive"] }
+protoc-bin-vendored = "3"
+cargo_metadata = "0.23.1"
+sysinfo = "0.39.2"
+dirs = "6"
+dirs-next = "2.0.0"
+validator = "0.20"
+jsonschema = { version = "0.46.5", default-features = false }
+all-smi = "0.20"
+mime_guess = "2.0"
+percent-encoding = "2.3"
+itertools = "0.14.0"
+encoding_rs = "0.8.35"
+chardet = "0.2.4"
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = "2.0"
+trybuild = "1.0"
+tokio-util = "0.7.18"
+runfiles = "0.2.0"
+# GUI
+egui = "0.34.2"
+eframe = { version = "0.34.2", default-features = false, features = [
+    "default_fonts",
+    "glow",
+] }
+tauri = "2"
+tauri-build = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-mcp-bridge = "0.11"
+tauri-plugin-log = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-decorum = { git = "https://github.com/clearlysid/tauri-plugin-decorum.git", rev = "9f1f73636821c3cb8b940524214b940b7999ef6e" }
+
+# Platform-specific dependencies
+windows = "0.62.2"
+windows-sys = "0.61.2"
+landlock = "0.4"
+
+#deno dependencies
+
+deno_features = "0.45.0"
+deno_media_type = "0.4.0"
+deno_permissions = "0.107.0"
+deno_broadcast_channel = "0.216.0"
+deno_bundle_runtime = "0.35.0"
+deno_cache = "0.181.0"
+deno_console = "0.222.0"
+deno_cron = "0.128.0"
+deno_crypto = "0.262.0"
+deno_fetch = "0.272.0"
+deno_ffi = "0.235.0"
+deno_fs = "0.158.0"
+deno_http = "0.246.0"
+deno_kv = "0.156.0"
+deno_net = "0.240.0"
+deno_node = "0.186.0"
+deno_node_sqlite = "0.18.0"
+deno_os = "0.65.0"
+deno_tls = "0.235.0"
+deno_url = "0.222.0"
+
+deno_web = "0.279.0"
+deno_webidl = "0.248.0"
+deno_webstorage = "0.243.0"
+deno_websocket = "0.253.0"
+deno_webgpu = "0.215.0"
+
+deno_io = "0.158.0"
+deno_telemetry = "0.70.0"
+
+rustyline = "18.0.0"
+nix = "0.31.3"
+
+base64-simd = "0.8.0"
+deno_resolver = "0.79.0"
+node_resolver = "0.86.0"
+deno_runtime = "0.256.0"
+
+deno_terminal = "0.2.3"
+deno_semver = "0.10.0"
+deno_napi = "0.179.0"
+deno_npm = "0.60.0"
+deno_process = "0.63.0"
+deno_package_json = "0.50.0"
+checksum = "0.2.1"
+sys_traits = "0.1.28"
+
+[patch.crates-io]
+all-smi-luwen-if = { path = "vendor/all-smi-luwen-if-0.7.9" }
+deno_io = { path = "vendor/deno_io-0.158.0" }
+ed448 = { path = "vendor/ed448-0.5.0-rc.3" }
+ed448-goldilocks = { path = "vendor/ed448-goldilocks-0.14.0-pre.10" }
