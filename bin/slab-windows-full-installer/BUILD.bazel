@@ -1,9 +1,0 @@
-load("//tools/bazel:rust.bzl", "slab_rust_binary")
-
-package(default_visibility = ["//visibility:public"])
-
-slab_rust_binary(
-    name = "slab-windows-full-installer",
-    srcs = glob(["src/**/*.rs"]),
-    deps = ["//crates/slab-utils:slab-utils"],
-)

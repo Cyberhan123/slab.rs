@@ -1,0 +1,35 @@
+diff --git a/lib.rs b/lib.rs
+index 32b370a8..92d751b5 100644
+--- a/lib.rs
++++ b/lib.rs
+@@ -205,7 +205,7 @@ fn stdio_fd(fd: i32) -> StdFile {
+     _ => panic!("Invalid stdio fd {fd}"),
+   };
+   // SAFETY: GetStdHandle returns a valid handle for the given std device.
+-  unsafe { StdFile::from_raw_handle(GetStdHandle(std_handle)) }
++  unsafe { StdFile::from_raw_handle(GetStdHandle(std_handle) as std::os::windows::io::RawHandle) }
+ }
+ 
+ deno_core::extension!(deno_io,
+@@ -1433,7 +1433,7 @@ pub fn stat_extra(file: &std::fs::File, fsstat: &mut FsStat) -> FsResult<()> {
+ 
+   // SAFETY: winapi calls
+   unsafe {
+-    let file_handle = file.as_raw_handle();
++    let file_handle = file.as_raw_handle() as winapi::shared::ntdef::HANDLE;
+ 
+     fsstat.dev = get_dev(file_handle)?;
+ 
+diff --git a/winpipe.rs b/winpipe.rs
+index 8828fcc9..68a8d4e9 100644
+--- a/winpipe.rs
++++ b/winpipe.rs
+@@ -112,7 +112,7 @@ fn create_named_pipe_inner() -> io::Result<(RawHandle, RawHandle)> {
+     return Err(err);
+   }
+ 
+-  Ok((server_handle, client_handle))
++  Ok((server_handle as RawHandle, client_handle as RawHandle))
+ }
+ 
+ #[cfg(test)]

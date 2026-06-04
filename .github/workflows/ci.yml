@@ -10,8 +10,8 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  bazel-check:
-    name: Bazel – build (${{ matrix.os }})
+  cargo-check:
+    name: Cargo – check / clippy / test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -22,25 +22,18 @@ jobs:
         with:
           lfs: true
 
-      - name: Install Bazelisk
-        run: |
-          sudo curl -fsSL -o /usr/local/bin/bazelisk \
-            https://github.com/bazelbuild/bazelisk/releases/download/v1.25.0/bazelisk-linux-amd64
-          sudo chmod +x /usr/local/bin/bazelisk
-
-      - name: Cache Bazelisk downloads
-        uses: actions/cache@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          path: ~/.cache/bazelisk
-          key: bazelisk-${{ hashFiles('.bazeliskrc') }}
+          components: clippy
 
-      - name: Cache Bazel repository cache
-        uses: actions/cache@v4
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          path: ~/.cache/bazel
-          key: ${{ runner.os }}-bazel-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bazel-
+          bun-version-file: package.json
 
       - name: Install Linux system deps
         if: runner.os == 'Linux'
@@ -51,30 +44,17 @@ jobs:
             pkg-config \
             python3-dev
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+      - name: Apply patches (vendor setup)
+        run: bun run scripts/apply-patches.ts
 
-      - name: bazel build
-        run: |
-          bazelisk build --config=ci \
-            //bin/slab-server:slab-server \
-            //bin/slab-js-runtime:slab-js-runtime \
-            //bin/slab-python-runtime:slab-python-runtime \
-            //bin/slab-mcp-server:slab-mcp-server
+      - name: cargo check
+        run: cargo check --workspace
 
-      - name: bazel module lock check
-        run: bazelisk mod deps --lockfile_mode=error
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: bazel test
-        run: bazelisk test --config=ci //...
-
-      - name: bazel rust tests
-        run: bazelisk run --config=ci //tools/cargo:test_workspace
-
-      - name: bazel rust clippy
-        run: bazelisk run --config=ci //tools/cargo:clippy_workspace
+      - name: cargo test
+        run: cargo test --workspace
 
   frontend-check:
     name: Frontend – build check
