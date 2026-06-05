@@ -60,6 +60,31 @@ pub fn workspace_target_dir(profile: &str) -> Result<PathBuf> {
     Ok(workspace_root()?.join("target").join(profile))
 }
 
+pub fn sync_vendor_runtime_artifact_to_dir(
+    target: &str,
+    artifact: &ArtifactLayout,
+    dst_dir: &Path,
+) -> Result<()> {
+    let source_root = artifact.root_dir.join(runtime_source_subdir(target));
+    println!("cargo:rerun-if-changed={}", source_root.display());
+
+    if !source_root.exists() {
+        println!(
+            "cargo:warning=Vendored runtime artifact root missing for {} at {}",
+            artifact.name,
+            source_root.display()
+        );
+        return Ok(());
+    }
+
+    fs::create_dir_all(dst_dir).with_context(|| {
+        format!("failed to create runtime output directory {}", dst_dir.display())
+    })?;
+
+    let mut expected_files = HashSet::new();
+    sync_runtime_tree(target, &source_root, dst_dir, &mut expected_files)
+}
+
 pub fn configure_bindgen_builder<I, P>(
     header: &str,
     include_dirs: I,

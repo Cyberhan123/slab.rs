@@ -9,5 +9,8 @@
     "typescript": "catalog:language-servers",
     "typescript-language-server": "catalog:language-servers",
     "vscode-langservers-extracted": "catalog:language-servers"
+  },
+  "devDependencies": {
+    "vite": "catalog:"
   }
 }

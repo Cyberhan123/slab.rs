@@ -9,7 +9,7 @@
   },
   "type": "module",
   "scripts": {
-    "dev:app": "bun run build:sidecars && bun run --cwd bin/slab-app tauri dev",
+    "dev:app": "bun run build:language-servers && bun run build:sidecars && bun run --cwd bin/slab-app tauri dev",
     "check:frontend": "bun run lint && bun run --cwd packages/api build && bun run --cwd packages/slab-plugin-sdk build && bun run --cwd packages/slab-plugin-cli build && bun run --cwd packages/slab-plugin-ui build && bun run --cwd packages/slab-desktop build",
     "check:rust": "cargo check --workspace",
     "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings",

@@ -12,6 +12,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed={}", workspace_root.join("vendor").display());
     println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_OS");
 
+    if target_os == "windows" && env::var_os("CARGO_FEATURE_FFMPEG_NEXT_STATIC").is_some() {
+        println!("cargo:rustc-link-lib=strmiids");
+        println!("cargo:rustc-link-lib=mfuuid");
+    }
+
     let packaged_manifest = if target_os == "windows" {
         slab_utils::cab::build_runtime_payload_plan(&workspace_root, &version)?.packaged_manifest
     } else {

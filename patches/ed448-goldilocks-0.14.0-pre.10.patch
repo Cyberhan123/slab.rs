@@ -26,6 +26,7 @@ index 9f52147..79c0572 100644
              }
              let mut bytes = [0u8; PUBLIC_KEY_LENGTH];
              bytes.copy_from_slice(public_key);
+            Some(bytes)
 @@ -409,11 +409,11 @@ impl TryFrom<&KeypairBytes> for SigningKey {
          let signing_key =
              SigningKey::from(SecretKey::try_from(&value.secret_key[..]).expect("invalid length"));

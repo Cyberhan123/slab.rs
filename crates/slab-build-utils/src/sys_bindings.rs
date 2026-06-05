@@ -1,4 +1,7 @@
-use crate::{configure_bindgen_builder, ensure_vendor_layout, generate_or_copy_bindings};
+use crate::{
+    configure_bindgen_builder, ensure_vendor_layout, generate_or_copy_bindings,
+    sync_vendor_runtime_artifact_to_dir, workspace_root,
+};
 use anyhow::{Context, Result, anyhow};
 use std::env;
 use std::path::PathBuf;
@@ -31,5 +34,15 @@ pub fn generate_vendor_sys_bindings(
 
     let builder = configure_bindgen_builder("wrapper.h", &include_dirs, dynamic_library_name);
     generate_or_copy_bindings(builder, &out_dir, &fallback_source)
-        .with_context(|| format!("failed to prepare {primary_artifact} bindings"))
+        .with_context(|| format!("failed to prepare {primary_artifact} bindings"))?;
+
+    let target = env::var("TARGET").context("missing TARGET")?;
+    let runtime_output_dir = workspace_root()?
+        .join("bin")
+        .join("slab-app")
+        .join("src-tauri")
+        .join("resources")
+        .join("libs");
+    sync_vendor_runtime_artifact_to_dir(&target, &layout.primary, &runtime_output_dir)
+        .with_context(|| format!("failed to copy {primary_artifact} runtime libraries"))
 }
