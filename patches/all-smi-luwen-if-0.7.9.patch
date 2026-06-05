@@ -11,3 +11,14 @@ index cb49a262..d0fd030c 100644
  default-features = false
  
  [build-dependencies.prost-build]
+diff --git a/Cargo.toml.orig b/Cargo.toml.orig
+index 621777f1..1f90964c 100644
+--- a/Cargo.toml.orig
++++ b/Cargo.toml.orig
+@@ -24,5 +24,4 @@ bytemuck = {version = "1.22.0", features = ["derive"]}
+ 
+ [build-dependencies]
+ prost-build = "0.13.5"
+-home = { version = "=0.5.5", default-features = false }
+-
++home = { version = "0.5.12", default-features = false }

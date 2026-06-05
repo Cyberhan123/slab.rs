@@ -17,7 +17,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "fs";
-import { join, resolve } from "path";
+import { join, relative, resolve } from "path";
 import { spawnSync } from "child_process";
 import { tmpdir } from "os";
 
@@ -58,15 +58,38 @@ function run(
     stdio: "inherit",
     shell: false,
   });
+
   if (result.error) {
     if (result.error.code === "ENOENT") {
       throw new Error(
         `Command '${cmd}' not found. scripts/apply-patches.ts requires tools like 'tar' and 'git' to be installed and available in PATH.`
       );
     }
+
     throw new Error(`Failed to run ${cmd}: ${result.error.message}`);
   }
+
   return result.status === 0;
+}
+
+function checkGitApply(args: string[]): number {
+  const result = spawnSync("git", args, {
+    cwd: ROOT,
+    stdio: "pipe",
+    shell: false,
+  });
+
+  if (result.error) {
+    if (result.error.code === "ENOENT") {
+      throw new Error(
+        "Command 'git' not found. scripts/apply-patches.ts requires tools like 'tar' and 'git' to be installed and available in PATH."
+      );
+    }
+
+    throw new Error(`Failed to run git: ${result.error.message}`);
+  }
+
+  return result.status ?? 1;
 }
 
 async function downloadCrate(name: string, version: string): Promise<Buffer> {
@@ -84,6 +107,7 @@ function extractCrate(
 ): void {
   const tmp = join(tmpdir(), `${dirName}.crate`);
   writeFileSync(tmp, crateBuffer);
+
   try {
     mkdirSync(destParent, { recursive: true });
     // .crate files are gzip-compressed tar archives
@@ -101,28 +125,28 @@ function extractCrate(
 
 function applyPatch(vendorDir: string, patchAbsPath: string): void {
   console.log(`  Applying patch …`);
-  // Try `git apply --no-index` first (preferred, handles index checks cleanly)
-  if (run("git", ["apply", "--no-index", "-p1", patchAbsPath], { cwd: vendorDir })) {
+
+  const vendorRelPath = relative(ROOT, vendorDir).replace(/\\/g, "/");
+  const baseArgs = [
+    "apply",
+    "--ignore-whitespace",
+    "-p1",
+    `--directory=${vendorRelPath}`,
+  ];
+
+  // crates.io archives use LF; patch files can be CRLF on Windows checkouts.
+  if (checkGitApply([...baseArgs, "--check", patchAbsPath]) === 0) {
+    if (!run("git", [...baseArgs, patchAbsPath], { cwd: ROOT })) {
+      throw new Error(`Failed to apply patch ${patchAbsPath} to ${vendorDir}`);
+    }
     return;
   }
-  // If git apply fails (e.g. already applied), try with --reverse check
-  const reverseCheck = spawnSync(
-    "git",
-    ["apply", "--no-index", "-p1", "--reverse", "--check", patchAbsPath],
-    { cwd: vendorDir, stdio: "pipe" }
-  );
-  if (reverseCheck.error) {
-    if (reverseCheck.error.code === "ENOENT") {
-      throw new Error(
-        "Command 'git' not found. scripts/apply-patches.ts requires tools like 'tar' and 'git' to be installed and available in PATH."
-      );
-    }
-    throw new Error(`Failed to run git: ${reverseCheck.error.message}`);
-  }
-  if (reverseCheck.status === 0) {
+
+  if (checkGitApply([...baseArgs, "--reverse", "--check", patchAbsPath]) === 0) {
     console.log("  Patch already applied – skipping.");
     return;
   }
+
   throw new Error(`Failed to apply patch ${patchAbsPath} to ${vendorDir}`);
 }
 
@@ -133,8 +157,8 @@ async function main(): Promise<void> {
   }
 
   const patchFiles = readdirSync(PATCHES_DIR)
-    .filter((f) => f.endsWith(".patch"))
-    .sort();
+    .filter((file) => file.endsWith(".patch"))
+    .toSorted();
 
   if (patchFiles.length === 0) {
     console.log("No .patch files found in patches/ – nothing to do.");
@@ -165,6 +189,8 @@ async function main(): Promise<void> {
       console.log(`  Fetching crate ${name} v${version} from crates.io …`);
       let buf: Buffer;
       try {
+        // Keep downloads sequential so each crate's extraction and patch errors stay scoped.
+        // eslint-disable-next-line no-await-in-loop
         buf = await downloadCrate(name, version);
       } catch (err) {
         console.error(`[error] Download failed: ${err}`);
@@ -176,7 +202,9 @@ async function main(): Promise<void> {
       try {
         extractCrate(buf, VENDOR_DIR, dirName);
       } catch (err) {
-        if (existsSync(vendorDir)) rmSync(vendorDir, { recursive: true, force: true });
+        if (existsSync(vendorDir)) {
+          rmSync(vendorDir, { recursive: true, force: true });
+        }
         console.error(`[error] Extraction failed: ${err}`);
         errors++;
         continue;
