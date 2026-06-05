@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { useClipboard } from '@mantine/hooks';
 import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
 import { Button } from '@slab/components/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@slab/components/dialog';
@@ -32,6 +33,7 @@ export function TaskDetailDialog({
   onRestart,
 }: TaskDetailDialogProps) {
   const { t, i18n } = useTranslation();
+  const clipboard = useClipboard();
   const locale = i18n.resolvedLanguage ?? i18n.language;
   const taskDetail = selectedTask ?? task;
   const taskMeta = getTaskTypeMeta(taskDetail.task_type, t);
@@ -133,7 +135,7 @@ export function TaskDetailDialog({
                         variant="pill"
                         size="sm"
                         onClick={() => {
-                          navigator.clipboard.writeText(resultText);
+                          clipboard.copy(resultText);
                           toast.success(t('pages.task.dialog.copied'));
                         }}
                       >

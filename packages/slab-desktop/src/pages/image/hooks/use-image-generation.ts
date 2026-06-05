@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import { orderBy } from 'lodash-es';
 import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
@@ -220,7 +221,7 @@ export function useImageGeneration() {
   const mergeHistoryTask = useCallback((task: ImageGenerationTask) => {
     setHistory((previous) => {
       const next = [task, ...previous.filter((entry) => entry.task_id !== task.task_id)];
-      return next.toSorted((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
+      return orderBy(next, (entry) => Date.parse(entry.created_at), 'desc');
     });
   }, []);
 

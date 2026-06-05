@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { clamp, orderBy } from 'lodash-es';
 import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
@@ -174,7 +175,7 @@ export function useVideoGeneration() {
   const mergeHistoryTask = useCallback((task: VideoGenerationTask) => {
     setHistory((previous) => {
       const next = [task, ...previous.filter((entry) => entry.task_id !== task.task_id)];
-      return next.toSorted((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
+      return orderBy(next, (entry) => Date.parse(entry.created_at), 'desc');
     });
   }, []);
 
@@ -426,7 +427,7 @@ export function useVideoGeneration() {
 
   const widthValue = Number.parseInt(widthStr, 10) || DEFAULT_GENERATION_SIZE;
   const heightValue = Number.parseInt(heightStr, 10) || DEFAULT_GENERATION_SIZE;
-  const clipDurationSeconds = frames / Math.max(fps, 1);
+  const clipDurationSeconds = frames / clamp(fps, 1, Number.POSITIVE_INFINITY);
 
   const stageTitle = videoPath
     ? t('pages.video.stage.title.ready')

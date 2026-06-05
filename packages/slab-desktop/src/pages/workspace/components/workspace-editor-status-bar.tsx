@@ -1,6 +1,7 @@
 import { useTranslation } from "@slab/i18n"
 import { Popover, PopoverContent, PopoverTrigger } from "@slab/components/popover"
 import { AlertCircle, AlertTriangle, CircleCheck, Info } from "lucide-react"
+import { countBy } from "lodash-es"
 
 import { cn } from "@/lib/utils"
 import type { WorkspaceEditorCursor, WorkspaceEditorProblem } from "./workspace-code-editor"
@@ -21,8 +22,13 @@ export function WorkspaceEditorStatusBar({
   onRevealProblem,
 }: WorkspaceEditorStatusBarProps) {
   const { t } = useTranslation()
-  const errorCount = problems.filter((problem) => problem.severity >= 8).length
-  const warningCount = problems.filter((problem) => problem.severity === 4).length
+  const problemCounts = countBy(problems, (problem) => {
+    if (problem.severity >= 8) return "error"
+    if (problem.severity === 4) return "warning"
+    return "info"
+  })
+  const errorCount = problemCounts.error ?? 0
+  const warningCount = problemCounts.warning ?? 0
   const infoCount = problems.length - errorCount - warningCount
 
   return (

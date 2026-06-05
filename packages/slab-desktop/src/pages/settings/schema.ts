@@ -1,3 +1,5 @@
+import { clamp, compact } from 'lodash-es';
+
 import type { JsonObject, JsonValue, SettingResponse } from './types';
 
 type JsonSchemaType =
@@ -63,7 +65,7 @@ export function createDefaultJsonValue(schema: JsonSchemaNode): JsonValue {
 
   switch (schemaPrimaryType(schema)) {
     case 'array': {
-      const minItems = Math.max(0, schema.minItems ?? 0);
+      const minItems = clamp(schema.minItems ?? 0, 0, Number.POSITIVE_INFINITY);
       const itemSchema = schema.items;
 
       if (!itemSchema) {
@@ -175,9 +177,7 @@ function isJsonValue(value: unknown): value is JsonValue {
 }
 
 function humanizeIdentifier(value: string): string {
-  return value
-    .split(/[_-]+/g)
-    .filter(Boolean)
+  return compact(value.split(/[_-]+/g))
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
 }

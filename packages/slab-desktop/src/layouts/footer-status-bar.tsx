@@ -1,6 +1,8 @@
 import { useEffect, useMemo } from "react"
 import { Bell } from "lucide-react"
 import { useTranslation } from "@slab/i18n"
+import { useInterval } from "@mantine/hooks"
+import { sumBy } from "lodash-es"
 
 import { getErrorMessage } from "@slab/api"
 import type { components } from "@slab/api/v1"
@@ -49,15 +51,14 @@ export default function FooterStatusBar({ variant = "default" }: FooterStatusBar
     refetch,
   } = api.useQuery("get", "/v1/system/gpu")
 
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      void refetch()
-    }, POLL_INTERVAL_MS)
+  const { start: startGpuPoll, stop: stopGpuPoll } = useInterval(() => {
+    void refetch()
+  }, POLL_INTERVAL_MS)
 
-    return () => {
-      clearInterval(timer)
-    }
-  }, [refetch])
+  useEffect(() => {
+    startGpuPoll()
+    return stopGpuPoll
+  }, [startGpuPoll, stopGpuPoll])
 
   const snapshot = useMemo<GpuStatusResponse | null>(() => {
     if (data) {
@@ -90,8 +91,8 @@ export default function FooterStatusBar({ variant = "default" }: FooterStatusBar
     }
 
     const first = devices[0]
-    const totalUsed = devices.reduce((sum, item) => sum + item.used_memory_bytes, 0)
-    const totalMemory = devices.reduce((sum, item) => sum + item.total_memory_bytes, 0)
+    const totalUsed = sumBy(devices, "used_memory_bytes")
+    const totalMemory = sumBy(devices, "total_memory_bytes")
 
     return {
       available: Boolean(snapshot?.available),

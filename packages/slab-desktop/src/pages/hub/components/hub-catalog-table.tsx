@@ -1,4 +1,5 @@
 import { Bot, Boxes, Code2, HardDriveDownload, ImageIcon, Loader2, Mic, Settings2, Trash2 } from 'lucide-react';
+import { clamp } from 'lodash-es';
 import { useTranslation } from '@slab/i18n';
 
 import { Badge } from '@slab/components/badge';
@@ -327,7 +328,7 @@ function getDownloadProgressValue(progress: ModelItem['download_progress']) {
     return null;
   }
 
-  return Math.min(100, Math.max(0, (progress.current / progress.total) * 100));
+  return clamp((progress.current / progress.total) * 100, 0, 100);
 }
 
 function getDownloadProgressLabel(progress: ModelItem['download_progress']) {
@@ -363,7 +364,7 @@ function formatBytes(value: number) {
   }
 
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const exponent = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+  const exponent = clamp(Math.floor(Math.log(value) / Math.log(1024)), 0, units.length - 1);
   const size = value / 1024 ** exponent;
   let fractionDigits = 2;
   if (size >= 100 || exponent === 0) {

@@ -6,6 +6,7 @@ import {
   PlayCircle,
   Timer,
 } from 'lucide-react';
+import { clamp } from 'lodash-es';
 
 import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
 import {
@@ -96,7 +97,7 @@ export default function Task() {
                   // eslint-disable-next-line react/no-array-index-key
                   key={`${index}-${barHeight}`}
                   className="flex-1 rounded-t-[2px] bg-[var(--brand-teal)]/10"
-                  style={{ height: `${Math.max(barHeight * 48, 10)}px` }}
+                  style={{ height: `${clamp(barHeight * 48, 10, Number.POSITIVE_INFINITY)}px` }}
                 />
               ))}
             </div>
@@ -118,7 +119,7 @@ export default function Task() {
               <div className="h-1.5 overflow-hidden rounded-full bg-border/50">
                 <div
                   className="h-full rounded-full bg-[var(--brand-gold)] shadow-[0_0_12px_color-mix(in_oklab,var(--brand-gold)_30%,transparent)]"
-                  style={{ width: `${Math.max(activeShare, activeTaskCount > 0 ? 8 : 0)}%` }}
+                  style={{ width: `${clamp(activeShare, activeTaskCount > 0 ? 8 : 0, Number.POSITIVE_INFINITY)}%` }}
                 />
               </div>
               <div className="mt-3 flex items-center justify-between font-mono text-[10px] text-muted-foreground">
@@ -150,7 +151,7 @@ export default function Task() {
                 <div key={`${index}-${barHeight}`} className="flex h-full flex-1 items-end">
                   <div
                     className="w-full rounded-[2px] bg-foreground/10"
-                    style={{ height: `${Math.max(barHeight * 48, 9)}px` }}
+                    style={{ height: `${clamp(barHeight * 48, 9, Number.POSITIVE_INFINITY)}px` }}
                   />
                 </div>
               ))}
@@ -270,7 +271,7 @@ export default function Task() {
                 <PaginationButton
                   aria-label={t('pages.task.table.pagination.previousPage')}
                   disabled={currentPage === 1}
-                  onClick={() => setPage((value) => Math.max(1, value - 1))}
+                  onClick={() => setPage((value) => clamp(value - 1, 1, Number.POSITIVE_INFINITY))}
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </PaginationButton>
@@ -290,7 +291,7 @@ export default function Task() {
                 <PaginationButton
                   aria-label={t('pages.task.table.pagination.nextPage')}
                   disabled={currentPage === totalPages}
-                  onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+                  onClick={() => setPage((value) => clamp(value + 1, 1, totalPages))}
                 >
                   <ChevronRight className="h-4 w-4" />
                 </PaginationButton>

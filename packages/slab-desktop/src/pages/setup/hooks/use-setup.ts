@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useInterval } from '@mantine/hooks';
 import { useNavigate } from 'react-router-dom';
 
 import api, { getErrorMessage } from '@slab/api';
 import { queryClient } from '@/lib/query-client';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
-import { isSettledStatus } from '@/pages/task/utils';
 
 import {
   TASK_POLL_INTERVAL_MS,
@@ -35,7 +35,8 @@ export interface SetupViewModel {
 export function useSetup(): SetupViewModel {
   const navigate = useNavigate();
   const autoStartedRef = useRef(false);
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const setupMountedRef = useRef(true);
+  const provisionTaskIdRef = useRef<string | null>(null);
 
   usePageHeader(PAGE_HEADER_META.setup);
 
@@ -61,6 +62,14 @@ export function useSetup(): SetupViewModel {
   const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
 
   const status: SetupStatus | null = setupStatus ?? null;
+
+  useEffect(() => {
+    setupMountedRef.current = true;
+    return () => {
+      setupMountedRef.current = false;
+      provisionTaskIdRef.current = null;
+    };
+  }, []);
 
   const markSetupInitialized = useCallback(() => {
     queryClient.setQueriesData(
@@ -145,6 +154,10 @@ export function useSetup(): SetupViewModel {
   );
 
   useEffect(() => {
+    provisionTaskIdRef.current = provisionTaskId;
+  }, [provisionTaskId]);
+
+  useEffect(() => {
     if (autoStartedRef.current) {
       return;
     }
@@ -163,49 +176,42 @@ export function useSetup(): SetupViewModel {
     void startProvision();
   }, [setupStatusError, setupStatusFetching, setupStatusLoading, startProvision, status]);
 
-  useEffect(() => {
-    if (!provisionTaskId) {
+  const pollProvisionTask = useCallback(async () => {
+    const activeTaskId = provisionTaskId;
+    if (!activeTaskId) {
       return;
     }
 
-    let disposed = false;
+    try {
+      const task = await getTaskMutation.mutateAsync({
+        params: {
+          path: { id: activeTaskId },
+        },
+      });
 
-    const poll = async () => {
-      try {
-        const task = await getTaskMutation.mutateAsync({
-          params: {
-            path: { id: provisionTaskId },
-          },
-        });
-
-        if (disposed) {
-          return;
-        }
-
-        if (isSettledStatus(task.status) && pollIntervalRef.current) {
-          clearInterval(pollIntervalRef.current);
-          pollIntervalRef.current = null;
-        }
-
-        await handleProvisionTask(task);
-      } catch {
-        // Ignore transient polling failures while the local host is still alive.
+      if (!setupMountedRef.current || provisionTaskIdRef.current !== activeTaskId) {
+        return;
       }
-    };
 
-    void poll();
-    pollIntervalRef.current = setInterval(() => {
-      void poll();
-    }, TASK_POLL_INTERVAL_MS);
-
-    return () => {
-      disposed = true;
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
-    };
+      await handleProvisionTask(task);
+    } catch {
+      // Ignore transient polling failures while the local host is still alive.
+    }
   }, [getTaskMutation, handleProvisionTask, provisionTaskId]);
+  const { start: startProvisionPoll, stop: stopProvisionPoll } = useInterval(() => {
+    void pollProvisionTask();
+  }, TASK_POLL_INTERVAL_MS);
+
+  useEffect(() => {
+    if (!provisionTaskId) {
+      stopProvisionPoll();
+      return undefined;
+    }
+
+    void pollProvisionTask();
+    startProvisionPoll();
+    return stopProvisionPoll;
+  }, [pollProvisionTask, provisionTaskId, startProvisionPoll, stopProvisionPoll]);
 
   const handleRetry = useCallback(async () => {
     autoStartedRef.current = true;

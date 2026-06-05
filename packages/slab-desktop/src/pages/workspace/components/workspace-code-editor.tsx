@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { createEditor, createModelReference } from "@codingame/monaco-editor-wrapper"
 import * as Monaco from "monaco-editor"
+import { clamp } from "lodash-es"
 
 import { ensureWorkspaceLspServices } from "../lib/workspace-lsp"
 
@@ -40,10 +41,10 @@ function revealEditorTarget(
   target: WorkspaceEditorRevealTarget,
 ) {
   const maxLineNumber = model.getLineCount()
-  const lineNumber = Math.min(Math.max(target.lineNumber, 1), maxLineNumber)
+  const lineNumber = clamp(target.lineNumber, 1, maxLineNumber)
   const lineLength = model.getLineMaxColumn(lineNumber)
-  const startColumn = Math.min(Math.max(target.matchStart + 1, 1), lineLength)
-  const endColumn = Math.min(Math.max(target.matchEnd + 1, startColumn), lineLength)
+  const startColumn = clamp(target.matchStart + 1, 1, lineLength)
+  const endColumn = clamp(target.matchEnd + 1, startColumn, lineLength)
   editor.setSelection({
     startLineNumber: lineNumber,
     startColumn,

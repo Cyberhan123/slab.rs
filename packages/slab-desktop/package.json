@@ -123,7 +123,9 @@
     "vscode-uri": "catalog:",
     "vscode-ws-jsonrpc": "catalog:",
     "wtd-core": "catalog:",
-    "zustand": "catalog:"
+    "zustand": "catalog:",
+    "lodash-es": "catalog:",
+    "@mantine/hooks": "catalog:"
   },
   "devDependencies": {
     "@codingame/esbuild-import-meta-url-plugin": "catalog:",
@@ -140,7 +142,8 @@
     "postcss": "catalog:",
     "jsdom": "catalog:",
     "vite": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "@types/lodash-es": "catalog:"
   },
   "browserslist": {
     "production": [

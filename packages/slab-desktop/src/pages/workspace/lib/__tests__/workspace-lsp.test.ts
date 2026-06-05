@@ -7,7 +7,7 @@ import {
   workspaceLspModelPath,
   workspaceLspRelativePathFromUri,
 } from "../workspace-lsp-utils"
-import { languageForFile, lspLanguageForFile } from "../workspace-page-utils"
+import { languageForFile, lspLanguageForFile, sortDirectoryPaths } from "../workspace-page-utils"
 
 describe("workspace LSP helpers", () => {
   it("matches supported language providers", () => {
@@ -35,6 +35,15 @@ describe("workspace LSP helpers", () => {
     expect(lspLanguageForFile("src/main.rs")).toBe("rust")
     expect(lspLanguageForFile("cmd/server/main.go")).toBe("go")
     expect(lspLanguageForFile("scripts/tool.py")).toBe("python")
+  })
+
+  it("sorts directory paths by depth after removing duplicates and blanks", () => {
+    expect(sortDirectoryPaths(["src/components", "src", "", "src/components", "docs/api", "docs"])).toEqual([
+      "docs",
+      "src",
+      "docs/api",
+      "src/components",
+    ])
   })
 
   it("builds file uri model paths for Monaco", () => {

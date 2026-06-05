@@ -1,4 +1,5 @@
 import type { components } from '@slab/api/v1';
+import { clamp } from 'lodash-es';
 import {
   normalizeTaskProgress,
   type NormalizedTaskProgress,
@@ -146,12 +147,4 @@ export function getProvisionProgressSummary(
   }
 
   return 'Waiting to begin';
-}
-
-function clamp(value: number, min: number, max: number) {
-  if (!Number.isFinite(value)) {
-    return min;
-  }
-
-  return Math.min(max, Math.max(min, value));
 }

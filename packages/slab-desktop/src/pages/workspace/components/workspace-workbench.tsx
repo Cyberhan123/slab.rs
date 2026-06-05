@@ -1,10 +1,12 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type CSSProperties,
-  type PointerEvent as ReactPointerEvent,
 } from "react"
+import { useDrag, useWindowEvent } from "@mantine/hooks"
+import { clamp } from "lodash-es"
 import { useTranslation } from "@slab/i18n"
 import { Button } from "@slab/components/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@slab/components/tooltip"
@@ -84,40 +86,36 @@ export function WorkspaceWorkbench({
   const { t } = useTranslation()
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [explorerWidth, setExplorerWidth] = useState(380)
+  const explorerResizeStartWidthRef = useRef(explorerWidth)
+  const previousResizeCursorRef = useRef("")
+  const previousResizeUserSelectRef = useRef("")
   const terminalThemeMode = editorTheme === "vs-dark" ? "dark" : "light"
   const workspaceGridStyle = {
     "--workspace-explorer-width": `${explorerWidth}px`,
   } as CSSProperties
 
-  useEffect(() => {
+  useWindowEvent("keydown", (event) => {
     if (!isDesktopTauri) {
       return
     }
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.repeat || (!event.ctrlKey && !event.metaKey)) {
-        return
-      }
-
-      if (event.key.toLowerCase() !== "p") {
-        return
-      }
-
-      const target = event.target as HTMLElement | null
-      const isTextInput = target?.matches("input, textarea, select") || target?.isContentEditable
-      if (isTextInput && !target?.closest(".monaco-editor")) {
-        return
-      }
-
-      event.preventDefault()
-      setCommandPaletteOpen(true)
+    if (event.defaultPrevented || event.repeat || (!event.ctrlKey && !event.metaKey)) {
+      return
     }
 
-    window.addEventListener("keydown", handleKeyDown)
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown)
+    if (event.key.toLowerCase() !== "p") {
+      return
     }
-  }, [isDesktopTauri])
+
+    const target = event.target as HTMLElement | null
+    const isTextInput = target?.matches("input, textarea, select") || target?.isContentEditable
+    if (isTextInput && !target?.closest(".monaco-editor")) {
+      return
+    }
+
+    event.preventDefault()
+    setCommandPaletteOpen(true)
+  })
 
   useEffect(() => {
     if (!workspace) {
@@ -125,29 +123,27 @@ export function WorkspaceWorkbench({
     }
   }, [workspace])
 
-  const handleStartExplorerResize = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
-    event.preventDefault()
-    const startX = event.clientX
-    const startWidth = explorerWidth
-    const previousCursor = document.body.style.cursor
-    const previousUserSelect = document.body.style.userSelect
-    const handlePointerMove = (moveEvent: PointerEvent) => {
-      setExplorerWidth(Math.min(EXPLORER_MAX_WIDTH, Math.max(EXPLORER_MIN_WIDTH, startWidth + moveEvent.clientX - startX)))
-    }
-    const stopResize = () => {
-      window.removeEventListener("pointermove", handlePointerMove)
-      window.removeEventListener("pointerup", stopResize)
-      window.removeEventListener("pointercancel", stopResize)
-      document.body.style.cursor = previousCursor
-      document.body.style.userSelect = previousUserSelect
+  const explorerResize = useDrag<HTMLButtonElement>((state) => {
+    state.event.preventDefault()
+    if (state.first) {
+      explorerResizeStartWidthRef.current = explorerWidth
+      previousResizeCursorRef.current = document.body.style.cursor
+      previousResizeUserSelectRef.current = document.body.style.userSelect
+      document.body.style.cursor = "col-resize"
+      document.body.style.userSelect = "none"
     }
 
-    document.body.style.cursor = "col-resize"
-    document.body.style.userSelect = "none"
-    window.addEventListener("pointermove", handlePointerMove)
-    window.addEventListener("pointerup", stopResize)
-    window.addEventListener("pointercancel", stopResize)
-  }, [explorerWidth])
+    setExplorerWidth(
+      clamp(explorerResizeStartWidthRef.current + state.movement[0], EXPLORER_MIN_WIDTH, EXPLORER_MAX_WIDTH),
+    )
+
+    if (state.last) {
+      window.requestAnimationFrame(() => {
+        document.body.style.cursor = previousResizeCursorRef.current
+        document.body.style.userSelect = previousResizeUserSelectRef.current
+      })
+    }
+  })
 
   const runEditorAction = useCallback(
     async (actionId: string) => {
@@ -373,7 +369,7 @@ export function WorkspaceWorkbench({
             type="button"
             aria-label="Resize file explorer"
             className="absolute bottom-3 right-[-10px] top-3 z-10 hidden w-5 cursor-col-resize items-center justify-center rounded-full text-muted-foreground/70 transition hover:bg-muted/70 hover:text-foreground lg:flex"
-            onPointerDown={handleStartExplorerResize}
+            ref={explorerResize.ref}
           >
             <span className="h-12 w-1 rounded-full bg-current" />
           </button>

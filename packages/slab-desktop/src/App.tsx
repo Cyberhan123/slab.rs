@@ -1,6 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutationObserverTarget } from "@mantine/hooks";
+import { sortBy } from "lodash-es";
 
 import { ErrorBoundary } from "@/components/error-boundary";
 import {
@@ -23,6 +25,15 @@ import {
 import { RUNTIME_PLUGINS_QUERY_KEY } from "@/pages/plugins/hooks/use-runtime-plugins";
 import { isPluginRunning } from "@/pages/plugins/utils";
 import AppRoutes from "@/routes";
+
+const PLUGIN_THEME_OBSERVER_OPTIONS: MutationObserverInit = {
+  attributes: true,
+  attributeFilter: ["class", "style"],
+};
+
+function getDocumentElement() {
+  return document.documentElement;
+}
 
 /**
  * Checks whether the one-time setup wizard has been completed the first time
@@ -111,31 +122,24 @@ function AppLanguageSync() {
 }
 
 function PluginThemeSync() {
-  useEffect(() => {
-    let animationFrame = 0;
-
-    const publishTheme = () => {
-      window.cancelAnimationFrame(animationFrame);
-      animationFrame = window.requestAnimationFrame(() => {
-        void pluginSetThemeSnapshot(readPluginThemeSnapshot()).catch((error) => {
-          console.warn("failed to publish plugin theme snapshot", error);
-        });
+  const animationFrameRef = useRef(0);
+  const publishTheme = useCallback(() => {
+    window.cancelAnimationFrame(animationFrameRef.current);
+    animationFrameRef.current = window.requestAnimationFrame(() => {
+      void pluginSetThemeSnapshot(readPluginThemeSnapshot()).catch((error) => {
+        console.warn("failed to publish plugin theme snapshot", error);
       });
-    };
-
-    publishTheme();
-
-    const observer = new MutationObserver(publishTheme);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class", "style"],
     });
-
-    return () => {
-      window.cancelAnimationFrame(animationFrame);
-      observer.disconnect();
-    };
   }, []);
+
+  useMutationObserverTarget(publishTheme, PLUGIN_THEME_OBSERVER_OPTIONS, getDocumentElement);
+
+  useEffect(() => {
+    publishTheme();
+    return () => {
+      window.cancelAnimationFrame(animationFrameRef.current);
+    };
+  }, [publishTheme]);
 
   return null;
 }
@@ -186,15 +190,17 @@ function WorkspaceModeSync() {
   }, [workspace]);
 
   useEffect(() => {
-    const disabledPluginIds = Object.entries(workspaceConfig?.plugins ?? {})
-      .filter(([, preference]) => preference.enabled === false)
-      .map(([pluginId]) => pluginId)
-      .toSorted();
+    const disabledPluginIds = sortBy(
+      Object.entries(workspaceConfig?.plugins ?? {})
+        .filter(([, preference]) => preference.enabled === false)
+        .map(([pluginId]) => pluginId),
+    );
     const disabledPluginIdSet = new Set(disabledPluginIds);
-    const disabledRunningPluginIds = (pluginRows ?? [])
-      .filter((plugin) => disabledPluginIdSet.has(plugin.id) && isPluginRunning(plugin))
-      .map((plugin) => plugin.id)
-      .toSorted();
+    const disabledRunningPluginIds = sortBy(
+      (pluginRows ?? [])
+        .filter((plugin) => disabledPluginIdSet.has(plugin.id) && isPluginRunning(plugin))
+        .map((plugin) => plugin.id),
+    );
     const configSignature = workspace
       ? `${workspace.rootPath}:${disabledPluginIds.join(",")}:${disabledRunningPluginIds.join(",")}`
       : null;

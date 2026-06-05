@@ -1,5 +1,6 @@
 import type { WorkspaceFileEntry } from "@/lib/workspace-bridge"
 import type { WorkspaceFileTab } from "@/store/useWorkspaceUiStore"
+import { uniq } from "lodash-es"
 
 export type WorkspaceTreeNode = WorkspaceFileEntry & {
   children?: WorkspaceTreeNode[]
@@ -162,7 +163,7 @@ export function upsertFileTab(tabs: WorkspaceFileTab[], tab: WorkspaceFileTab) {
 }
 
 export function sortDirectoryPaths(paths: string[]) {
-  return [...new Set(paths)]
+  return uniq(paths)
     .filter((path) => path.trim().length > 0)
     .toSorted((left, right) => {
       const leftDepth = left.split("/").length

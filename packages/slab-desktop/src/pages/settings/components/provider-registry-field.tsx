@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { uniq } from 'lodash-es';
 import { Globe2, KeyRound, Plus, Shield, Trash2 } from 'lucide-react';
 
 import { Badge } from '@slab/components/badge';
@@ -452,7 +453,7 @@ function providerFamilyOptions(schema: JsonSchemaNode): string[] {
     ? familySchema.enum.filter((value): value is string => typeof value === 'string')
     : [];
 
-  return values.length > 0 ? Array.from(new Set(values)) : [DEFAULT_PROVIDER_FAMILY];
+  return values.length > 0 ? uniq(values) : [DEFAULT_PROVIDER_FAMILY];
 }
 
 function coerceProviderRegistryEntries(value: JsonValue): ProviderRegistryEntryDraft[] {

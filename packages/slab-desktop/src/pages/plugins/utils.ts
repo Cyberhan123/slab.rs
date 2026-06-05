@@ -7,6 +7,7 @@ import {
   TerminalSquare,
   type LucideIcon,
 } from 'lucide-react';
+import { compact } from 'lodash-es';
 
 import type { components } from '@slab/api/v1';
 
@@ -53,7 +54,7 @@ export function pluginSummaryMessage(plugin: PluginRecord): PluginSummaryMessage
 }
 
 export function pluginSearchText(plugin: PluginRecord) {
-  return [
+  return compact([
     plugin.name,
     plugin.id,
     plugin.version,
@@ -67,8 +68,7 @@ export function pluginSearchText(plugin: PluginRecord) {
     plugin.hasWasm ? 'wasm' : null,
     plugin.uiEntry ? 'ui' : null,
     ...plugin.allowHosts,
-  ]
-    .filter(Boolean)
+  ])
     .join(' ')
     .toLowerCase();
 }

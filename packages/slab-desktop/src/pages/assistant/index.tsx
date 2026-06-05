@@ -6,6 +6,7 @@ import {
   type BubbleListProps,
   type ThoughtChainItemType,
 } from "@ant-design/x"
+import { useClipboard } from "@mantine/hooks"
 import { BotMessageSquare, CheckCircle2, Copy, Loader2, UserRound, XCircle } from "lucide-react"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
@@ -350,6 +351,23 @@ function renderAssistantBubbleContent(content: AssistantBubbleContent) {
   return <AssistantBubbleContentView content={content} />
 }
 
+function AssistantCopyButton({ content }: { content: AssistantBubbleContent }) {
+  const clipboard = useClipboard()
+
+  return (
+    <Button
+      type="button"
+      variant="quiet"
+      size="sm"
+      className="h-7 rounded-full px-3 text-[11px] text-muted-foreground hover:text-foreground"
+      onClick={() => clipboard.copy(getAssistantMessageTextContent(content.item.message))}
+    >
+      <Copy className="size-3.5" />
+      {content.labels.copy}
+    </Button>
+  )
+}
+
 const ASSISTANT_BUBBLE_ROLES = {
   assistant: {
     avatar: (
@@ -358,18 +376,7 @@ const ASSISTANT_BUBBLE_ROLES = {
       </span>
     ),
     contentRender: renderAssistantBubbleContent,
-    footer: (content: AssistantBubbleContent) => (
-      <Button
-        type="button"
-        variant="quiet"
-        size="sm"
-        className="h-7 rounded-full px-3 text-[11px] text-muted-foreground hover:text-foreground"
-        onClick={() => void navigator.clipboard.writeText(getAssistantMessageTextContent(content.item.message))}
-      >
-        <Copy className="size-3.5" />
-        {content.labels.copy}
-      </Button>
-    ),
+    footer: (content: AssistantBubbleContent) => <AssistantCopyButton content={content} />,
     header: (content: AssistantBubbleContent) => content.labels.assistant,
     placement: "start",
     shape: "corner",
@@ -388,18 +395,7 @@ const ASSISTANT_BUBBLE_ROLES = {
       </span>
     ),
     contentRender: renderAssistantBubbleContent,
-    footer: (content: AssistantBubbleContent) => (
-      <Button
-        type="button"
-        variant="quiet"
-        size="sm"
-        className="h-7 rounded-full px-3 text-[11px] text-muted-foreground hover:text-foreground"
-        onClick={() => void navigator.clipboard.writeText(getAssistantMessageTextContent(content.item.message))}
-      >
-        <Copy className="size-3.5" />
-        {content.labels.copy}
-      </Button>
-    ),
+    footer: (content: AssistantBubbleContent) => <AssistantCopyButton content={content} />,
     header: (content: AssistantBubbleContent) => content.labels.user,
     placement: "end",
     shape: "corner",

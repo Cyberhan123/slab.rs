@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useInterval } from '@mantine/hooks';
+import { clamp, countBy } from 'lodash-es';
 import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
@@ -109,11 +111,13 @@ export function useHubModelCatalog() {
       }),
     [category, models, status],
   );
-  const downloadedCount = useMemo(
-    () => models.filter((model) => Boolean(model.local_path)).length,
-    [models],
-  );
-  const pendingCount = useMemo(() => models.filter((model) => model.pending).length, [models]);
+  const modelCounts = useMemo(() => countBy(models, (model) => {
+    if (model.pending) return 'pending';
+    if (model.local_path) return 'downloaded';
+    return 'other';
+  }), [models]);
+  const downloadedCount = modelCounts.downloaded ?? 0;
+  const pendingCount = modelCounts.pending ?? 0;
   const visibleModels = useMemo(
     () => filteredModels.slice(0, visibleCount),
     [filteredModels, visibleCount],
@@ -125,17 +129,20 @@ export function useHubModelCatalog() {
     setVisibleCount(DEFAULT_VISIBLE_COUNT);
   }, [category, status]);
 
+  const hasPendingModels = models.some((model) => model.pending);
+  const { start: startCatalogPoll, stop: stopCatalogPoll } = useInterval(() => {
+    void refetch();
+  }, 3000);
+
   useEffect(() => {
-    if (!models.some((model) => model.pending)) {
-      return;
+    if (hasPendingModels) {
+      startCatalogPoll();
+      return stopCatalogPoll;
     }
 
-    const intervalId = window.setInterval(() => {
-      void refetch();
-    }, 3000);
-
-    return () => window.clearInterval(intervalId);
-  }, [models, refetch]);
+    stopCatalogPoll();
+    return undefined;
+  }, [hasPendingModels, startCatalogPoll, stopCatalogPoll]);
 
   function resetCreateState() {
     setCreateFile(null);
@@ -152,13 +159,13 @@ export function useHubModelCatalog() {
     setCreateFile(file);
   }
 
-  function loadMore() {
+  const loadMore = useCallback(() => {
     setVisibleCount((current) =>
       current >= filteredModels.length
         ? current
-        : Math.min(current + DEFAULT_VISIBLE_COUNT, filteredModels.length),
+        : clamp(current + DEFAULT_VISIBLE_COUNT, 0, filteredModels.length),
     );
-  }
+  }, [filteredModels.length]);
 
   async function createModel() {
     if (!createFile || createModelPending) {

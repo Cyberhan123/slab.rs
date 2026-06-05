@@ -1,4 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
+import { useIntersection } from '@mantine/hooks';
+import { uniq } from 'lodash-es';
 import { useTranslation } from '@slab/i18n';
 import {
   Boxes,
@@ -37,45 +39,28 @@ import {
 export default function Hub() {
   const { t } = useTranslation();
   const hub = useHubModelCatalog();
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const { hasMore, isLoading, loadMore } = hub;
+  const [scrollRoot, setScrollRoot] = useState<HTMLDivElement | null>(null);
+  const { ref: loadMoreRef, entry: loadMoreEntry } = useIntersection<HTMLDivElement>({
+    root: scrollRoot,
+    rootMargin: '0px 0px 240px 0px',
+  });
   usePageHeader({
     icon: PAGE_HEADER_META.hub.icon,
     title: t('pages.hub.header.title'),
     subtitle: t('pages.hub.header.subtitle'),
   });
 
-  const backendCount = new Set(hub.models.flatMap((model) => model.backend_ids)).size;
+  const backendCount = uniq(hub.models.flatMap((model) => model.backend_ids)).length;
 
   useEffect(() => {
-    if (!hub.hasMore || hub.isLoading) {
-      return;
+    if (hasMore && !isLoading && loadMoreEntry?.isIntersecting) {
+      loadMore();
     }
-
-    const root = scrollRef.current;
-    const target = loadMoreRef.current;
-    if (!root || !target) {
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          hub.loadMore();
-        }
-      },
-      {
-        root,
-        rootMargin: '0px 0px 240px 0px',
-      },
-    );
-
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [hub.hasMore, hub.isLoading, hub.loadMore, hub]);
+  }, [hasMore, isLoading, loadMore, loadMoreEntry?.isIntersecting]);
 
   return (
-    <div ref={scrollRef} className="h-full w-full overflow-y-auto">
+    <div ref={setScrollRoot} className="h-full w-full overflow-y-auto">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-1 pb-10">
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1.9fr)_minmax(280px,0.92fr)]">
           <Card

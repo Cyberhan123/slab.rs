@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useResizeObserver, useWindowEvent } from '@mantine/hooks';
+import { clamp } from 'lodash-es';
 import { AlertCircle, Loader2 } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
@@ -19,15 +21,23 @@ function rectToBounds(rect: DOMRect): PluginViewBounds {
   return {
     x: rect.left,
     y: rect.top,
-    width: Math.max(1, rect.width),
-    height: Math.max(1, rect.height),
+    width: clamp(rect.width, 1, Number.POSITIVE_INFINITY),
+    height: clamp(rect.height, 1, Number.POSITIVE_INFINITY),
   };
 }
 
 export function PluginWebviewPage({ plugin }: PluginWebviewPageProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const [observeHostResize, hostRect] = useResizeObserver<HTMLDivElement>();
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  const setHostNode = useCallback(
+    (node: HTMLDivElement | null) => {
+      hostRef.current = node;
+      observeHostResize(node);
+    },
+    [observeHostResize],
+  );
 
   const syncBounds = useCallback(async () => {
     const host = hostRef.current;
@@ -35,6 +45,10 @@ export function PluginWebviewPage({ plugin }: PluginWebviewPageProps) {
     const bounds = rectToBounds(host.getBoundingClientRect());
     await pluginUpdateViewBounds({ pluginId: plugin.id, bounds });
   }, [plugin.id]);
+
+  useWindowEvent('resize', () => {
+    void syncBounds();
+  });
 
   useEffect(() => {
     const host = hostRef.current;
@@ -58,23 +72,21 @@ export function PluginWebviewPage({ plugin }: PluginWebviewPageProps) {
 
     void mount();
 
-    const observer = new ResizeObserver(() => {
-      void syncBounds();
-    });
-    observer.observe(host);
-    window.addEventListener('resize', syncBounds);
-
     return () => {
       cancelled = true;
-      observer.disconnect();
-      window.removeEventListener('resize', syncBounds);
       void pluginUnmountView({ pluginId: plugin.id });
     };
-  }, [plugin.id, syncBounds]);
+  }, [plugin.id]);
+
+  useEffect(() => {
+    if (mounted) {
+      void syncBounds();
+    }
+  }, [hostRect.height, hostRect.width, mounted, syncBounds]);
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-[24px] border border-border/70 bg-background">
-      <div ref={hostRef} className="absolute inset-0" />
+      <div ref={setHostNode} className="absolute inset-0" />
       {!mounted && !error ? (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-muted-foreground">
           <Loader2 className="mr-2 size-4 animate-spin" />

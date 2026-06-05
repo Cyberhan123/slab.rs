@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useInterval } from '@mantine/hooks';
+import { clamp, countBy, sortBy, sumBy } from 'lodash-es';
 import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
@@ -28,16 +30,16 @@ export function useTaskList() {
 
   const allTasks = useMemo<Task[]>(() => (Array.isArray(tasks) ? tasks : []), [tasks]);
 
-  const metrics = useMemo(
-    () => ({
+  const metrics = useMemo(() => {
+    const byStatus = countBy(allTasks, 'status');
+    return {
       total: allTasks.length,
-      running: allTasks.filter((task) => task.status === 'running').length,
-      queued: allTasks.filter((task) => task.status === 'pending').length,
-      failed: allTasks.filter((task) => task.status === 'failed').length,
-      succeeded: allTasks.filter((task) => task.status === 'succeeded').length,
-    }),
-    [allTasks],
-  );
+      running: byStatus.running ?? 0,
+      queued: byStatus.pending ?? 0,
+      failed: byStatus.failed ?? 0,
+      succeeded: byStatus.succeeded ?? 0,
+    };
+  }, [allTasks]);
 
   const settledTasks = useMemo(
     () => allTasks.filter((task) => isSettledStatus(task.status)),
@@ -55,17 +57,13 @@ export function useTaskList() {
   const averageTurnaroundMs = useMemo(() => {
     if (settledTasks.length === 0) return 0;
 
-    const totalDuration = settledTasks.reduce((sum, task) => {
-      return sum + getTaskDurationMs(task);
-    }, 0);
+    const totalDuration = sumBy(settledTasks, getTaskDurationMs);
 
     return totalDuration / settledTasks.length;
   }, [settledTasks]);
 
   const successSparkline = useMemo(() => {
-    const recentTasks = [...allTasks]
-      .toSorted((left, right) => Date.parse(left.updated_at) - Date.parse(right.updated_at))
-      .slice(-7);
+    const recentTasks = sortBy(allTasks, (task) => Date.parse(task.updated_at)).slice(-7);
 
     if (recentTasks.length === 0) {
       return [0.32, 0.48, 0.44, 0.66, 0.82, 0.72, 0.77];
@@ -75,8 +73,7 @@ export function useTaskList() {
   }, [allTasks]);
 
   const durationSparkline = useMemo(() => {
-    const samples = [...settledTasks]
-      .toSorted((left, right) => Date.parse(left.updated_at) - Date.parse(right.updated_at))
+    const samples = sortBy(settledTasks, (task) => Date.parse(task.updated_at))
       .slice(-5)
       .map((task) => getTaskDurationMs(task));
 
@@ -86,11 +83,11 @@ export function useTaskList() {
 
     const maxSample = Math.max(...samples, 1);
 
-    return samples.map((sample) => Math.max(sample / maxSample, 0.16));
+    return samples.map((sample) => clamp(sample / maxSample, 0.16, Number.POSITIVE_INFINITY));
   }, [settledTasks]);
 
   const totalPages = Math.max(1, Math.ceil(allTasks.length / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
+  const currentPage = clamp(page, 1, totalPages);
 
   const paginatedTasks = useMemo(() => {
     const startIndex = (currentPage - 1) * PAGE_SIZE;
@@ -103,7 +100,7 @@ export function useTaskList() {
     }
 
     const start = (currentPage - 1) * PAGE_SIZE + 1;
-    const end = Math.min(currentPage * PAGE_SIZE, allTasks.length);
+    const end = clamp(currentPage * PAGE_SIZE, 0, allTasks.length);
 
     return t('pages.task.table.pagination.summary', {
       start,
@@ -197,26 +194,35 @@ export function useTaskList() {
     }
   }, [page, totalPages]);
 
-  useEffect(() => {
-    const hasRunningTasks = allTasks.some((task) => task.status === 'running');
-    if (!hasRunningTasks) return;
-
-    const interval = setInterval(() => {
-      void refetchTasks();
-    }, TASK_LIST_POLL_INTERVAL_MS);
-
-    return () => clearInterval(interval);
-  }, [allTasks, refetchTasks]);
-
-  useEffect(() => {
-    if (!selectedTask || selectedTask.status !== 'running') return;
-
-    const interval = setInterval(() => {
+  const hasRunningTasks = allTasks.some((task) => task.status === 'running');
+  const { start: startTaskPoll, stop: stopTaskPoll } = useInterval(() => {
+    void refetchTasks();
+  }, TASK_LIST_POLL_INTERVAL_MS);
+  const { start: startSelectedTaskPoll, stop: stopSelectedTaskPoll } = useInterval(() => {
+    if (selectedTask) {
       void fetchTaskDetail(selectedTask.id);
-    }, TASK_LIST_POLL_INTERVAL_MS);
+    }
+  }, TASK_LIST_POLL_INTERVAL_MS);
 
-    return () => clearInterval(interval);
-  }, [selectedTask, fetchTaskDetail]);
+  useEffect(() => {
+    if (hasRunningTasks) {
+      startTaskPoll();
+      return stopTaskPoll;
+    }
+
+    stopTaskPoll();
+    return undefined;
+  }, [hasRunningTasks, startTaskPoll, stopTaskPoll]);
+
+  useEffect(() => {
+    if (selectedTask?.status === 'running') {
+      startSelectedTaskPoll();
+      return stopSelectedTaskPoll;
+    }
+
+    stopSelectedTaskPoll();
+    return undefined;
+  }, [selectedTask?.status, startSelectedTaskPoll, stopSelectedTaskPoll]);
 
   return {
     allTasks,

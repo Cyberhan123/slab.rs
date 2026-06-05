@@ -1,4 +1,5 @@
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
+import { countBy } from 'lodash-es';
 import { toast } from 'sonner';
 
 import {
@@ -45,11 +46,11 @@ export function useSettingsAutosave({
   }, []);
 
   const statusSummary = useMemo(() => {
-    const values = Object.values(fieldStatuses);
+    const byTone = countBy(Object.values(fieldStatuses), 'tone');
     return {
-      dirty: values.filter((value) => value.tone === 'dirty').length,
-      saving: values.filter((value) => value.tone === 'saving').length,
-      error: values.filter((value) => value.tone === 'error').length,
+      dirty: byTone.dirty ?? 0,
+      saving: byTone.saving ?? 0,
+      error: byTone.error ?? 0,
     };
   }, [fieldStatuses]);
 

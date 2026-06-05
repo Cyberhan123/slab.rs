@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit"
 import { Unicode11Addon } from "@xterm/addon-unicode11"
 import { WebLinksAddon } from "@xterm/addon-web-links"
 import { Terminal as XtermTerminal, type IDisposable, type ITheme } from "@xterm/xterm"
+import { useResizeObserver } from "@mantine/hooks"
 import { Plus, Terminal, Trash2, X } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
@@ -256,6 +257,28 @@ function TerminalSessionPane({
   const socketRef = useRef<WebSocket | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const initialThemeModeRef = useRef(themeMode)
+  const [observeHostResize, hostRect] = useResizeObserver<HTMLDivElement>()
+  const setHostNode = useCallback(
+    (node: HTMLDivElement | null) => {
+      hostRef.current = node
+      observeHostResize(node)
+    },
+    [observeHostResize],
+  )
+
+  const sendControl = useCallback((message: TerminalControlMessage) => {
+    const socket = socketRef.current
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(message))
+    }
+  }, [])
+
+  const sendResize = useCallback(() => {
+    const terminal = terminalRef.current
+    if (terminal) {
+      sendControl({ type: "resize", cols: terminal.cols, rows: terminal.rows })
+    }
+  }, [sendControl])
 
   useEffect(() => {
     const host = hostRef.current
@@ -286,29 +309,12 @@ function TerminalSessionPane({
     fitAddonRef.current = fitAddon
     onTerminalReady(sessionId, terminal)
 
-    const sendControl = (message: TerminalControlMessage) => {
-      const socket = socketRef.current
-      if (socket?.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify(message))
-      }
-    }
-
-    const sendResize = () => {
-      sendControl({ type: "resize", cols: terminal.cols, rows: terminal.rows })
-    }
-
     disposables.push(
       terminal.onData((data) => {
         sendControl({ type: "input", data })
       }),
     )
     disposables.push(terminal.onResize(({ cols, rows }) => sendControl({ type: "resize", cols, rows })))
-
-    const observer = new ResizeObserver(() => {
-      fitAddon.fit()
-      sendResize()
-    })
-    observer.observe(host)
 
     void workspaceTerminalSession()
       .then(({ url }) => {
@@ -349,7 +355,6 @@ function TerminalSessionPane({
 
     return () => {
       disposed = true
-      observer.disconnect()
       disposables.forEach((disposable) => disposable.dispose())
       socketRef.current?.close()
       socketRef.current = null
@@ -358,7 +363,14 @@ function TerminalSessionPane({
       fitAddonRef.current = null
       onTerminalReady(sessionId, null)
     }
-  }, [onTerminalReady, sessionId, t, workspaceRoot])
+  }, [onTerminalReady, sendControl, sendResize, sessionId, t, workspaceRoot])
+
+  useEffect(() => {
+    if (hostRect.width > 0 || hostRect.height > 0) {
+      fitAddonRef.current?.fit()
+      sendResize()
+    }
+  }, [hostRect.height, hostRect.width, sendResize])
 
   useEffect(() => {
     if (terminalRef.current) {
@@ -377,7 +389,7 @@ function TerminalSessionPane({
   return (
     <div
       role="tabpanel"
-      ref={hostRef}
+      ref={setHostNode}
       className={cn("absolute inset-0 min-h-0 px-2 py-2", !active && "pointer-events-none opacity-0")}
       aria-hidden={!active}
     />

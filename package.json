@@ -212,7 +212,10 @@
     "vscode-ws-jsonrpc": "^3.5.0",
     "wtd-core": "~4.0.1",
     "zod": "^4.3.6",
-    "zustand": "^5.0.12"
+    "zustand": "^5.0.12",
+    "@mantine/hooks": "^9.3.0",
+    "lodash-es": "^4.18.1",
+    "@types/lodash-es": "^4.17.12"
   },
   "catalogs": {
     "react-peer": {
@@ -245,7 +248,8 @@
     "typescript": "catalog:",
     "vitepress": "catalog:",
     "vitest": "catalog:",
-    "vitest-browser-react": "catalog:"
+    "vitest-browser-react": "catalog:",
+    "@types/lodash-es": "catalog:"
   },
   "license": "AGPL-3.0-only"
 }
