@@ -66,18 +66,18 @@ function CodeBlockComponent({ block, children, lang, ...props }: ComponentProps)
   )
 }
 
+function ThinkComponent() {
+  return null
+}
+
 const markdownComponents = {
   code: CodeBlockComponent,
   sup: SupComponent,
+  think: ThinkComponent,
 }
 
 const markdownConfig = {
   extensions: Latex(),
-}
-
-const streamingIdle = {
-  enableAnimation: true,
-  hasNextChunk: false,
 }
 
 const streamingActive = {
@@ -97,7 +97,7 @@ function AssistantMarkdownView({
       content={children}
       paragraphTag="div"
       className={cn("assistant-markdown text-base leading-[1.625]", className)}
-      streaming={hasNextChunk ? streamingActive : streamingIdle}
+      streaming={hasNextChunk ? streamingActive : undefined}
     />
   )
 }

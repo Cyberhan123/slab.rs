@@ -91,4 +91,48 @@ describe('AssistantMarkdown', () => {
 
     expect(screen.getByText('查询中')).toBeInTheDocument()
   })
+
+  it('renders completed responses with think tags and long plain text without recursive updates', () => {
+    const content =
+      '<think status="done">\n\nThe assistant planned the answer.\n\n</think>\n\n' +
+      'I can help with the following tasks:\n\n' +
+      '1. **File operations** - read and write files\n' +
+      '2. **Search** - search the codebase and the web\n\n' +
+      'Since 2011, researchers have described learning sciences as an emerging field that studies human learning in natural settings. This paragraph intentionally looks like unrelated retrieved text so the renderer handles model output as ordinary content.\n\n' +
+      'Reviews\n\n' +
+      '"This book provides a comprehensive overview of the most recent research."'
+
+    render(
+      <StrictMode>
+        <XProvider>
+          <Bubble.List
+            role={{
+              assistant: {
+                contentRender: (value: string) => (
+                  <AssistantMarkdown className="assistant-markdown--assistant">
+                    {value}
+                  </AssistantMarkdown>
+                ),
+                placement: 'start',
+                variant: 'filled',
+              },
+            }}
+            items={[
+              {
+                content,
+                key: 'assistant-message',
+                role: 'assistant',
+              },
+            ]}
+          />
+        </XProvider>
+      </StrictMode>
+    )
+
+    expect(screen.getByText('I can help with the following tasks:')).toBeInTheDocument()
+    expect(screen.queryByText('The assistant planned the answer.')).not.toBeInTheDocument()
+    expect(
+      screen.getByText(/This paragraph intentionally looks like unrelated retrieved text/)
+    ).toBeInTheDocument()
+  })
 })

@@ -44,6 +44,9 @@
     "zod": "catalog:",
     "zustand": "catalog:"
   },
+  "devDependencies": {
+    "@vitejs/plugin-react": "catalog:"
+  },
   "peerDependencies": {
     "react": "catalog:react-peer",
     "react-dom": "catalog:react-peer"
