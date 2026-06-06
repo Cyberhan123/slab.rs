@@ -194,6 +194,20 @@ impl AgentStorePort for SqlxStore {
         Ok(())
     }
 
+    async fn update_tool_call_status(
+        &self,
+        id: &str,
+        status: ToolCallStatus,
+    ) -> Result<(), slab_agent::AgentError> {
+        sqlx::query("UPDATE agent_tool_calls SET status = ?1 WHERE id = ?2")
+            .bind(status.to_string())
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
+        Ok(())
+    }
+
     async fn update_tool_call(
         &self,
         id: &str,

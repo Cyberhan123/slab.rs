@@ -34,6 +34,7 @@ pub mod thread;
 pub mod tool;
 
 mod llm_output;
+mod state;
 mod turn;
 
 #[cfg(test)]

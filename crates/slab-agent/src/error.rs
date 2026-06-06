@@ -35,6 +35,10 @@ pub enum AgentError {
     #[error("turn interrupted")]
     Interrupted,
 
+    /// A state machine rejected an invalid lifecycle transition.
+    #[error("invalid {entity} state transition: {from} -> {to}")]
+    InvalidStateTransition { entity: &'static str, from: String, to: String },
+
     /// A persistence operation returned an error.
     #[error("store error: {0}")]
     Store(String),

@@ -23,6 +23,7 @@ use crate::{
         TurnEvent,
     },
     risk::ToolRiskAnalyzer,
+    state::ThreadStateMachine,
     tool::ToolRouter,
     turn::{TurnExecutionContext, execute_turn, persist_thread_message},
 };
@@ -41,8 +42,8 @@ pub struct AgentThread {
     pub depth: u32,
     /// Runtime configuration for this thread.
     pub config: AgentConfig,
-    /// Shared sender so the controller can also signal status changes (e.g. Shutdown).
-    pub(crate) status_tx: Arc<watch::Sender<ThreadStatus>>,
+    /// Shared state machine so the controller can also request lifecycle transitions.
+    pub(crate) state: Arc<ThreadStateMachine>,
 }
 
 pub(crate) struct AgentThreadRuntime {
@@ -78,15 +79,14 @@ impl AgentThread {
         depth: u32,
         config: AgentConfig,
     ) -> (Self, watch::Receiver<ThreadStatus>) {
-        let (status_tx_inner, status_rx) = watch::channel(ThreadStatus::Pending);
-        let status_tx = Arc::new(status_tx_inner);
-        let thread = Self { id, session_id, parent_id, depth, config, status_tx };
+        let (state, status_rx) = ThreadStateMachine::new();
+        let thread = Self { id, session_id, parent_id, depth, config, state };
         (thread, status_rx)
     }
 
     /// Subscribe to status changes for this thread.
     pub fn subscribe(&self) -> watch::Receiver<ThreadStatus> {
-        self.status_tx.subscribe()
+        self.state.subscribe()
     }
 
     /// Run the agent loop to completion, consuming `self`.
@@ -152,7 +152,7 @@ impl AgentThread {
             session_id: self.session_id.clone(),
             parent_id: self.parent_id.clone(),
             depth: self.depth,
-            status: ThreadStatus::Pending,
+            status: self.state.status(),
             role_name: None,
             config_json,
             completion_text: None,
@@ -163,18 +163,22 @@ impl AgentThread {
             error!(thread_id, error = %e, "failed to persist thread snapshot");
         }
 
-        self.set_status(ThreadStatus::Running, &notify).await;
-        record_json(
-            trace.as_ref(),
-            &trace_context,
-            "slab-agent",
-            "thread_status",
-            serde_json::json!({ "status": ThreadStatus::Running }),
-        );
+        if !cancellation.is_cancelled() {
+            self.set_status(ThreadStatus::Running, &notify).await?;
+            record_json(
+                trace.as_ref(),
+                &trace_context,
+                "slab-agent",
+                "thread_status",
+                serde_json::json!({ "status": ThreadStatus::Running }),
+            );
 
-        // Persist the Running transition so the stored status matches the in-memory state.
-        if let Err(e) = store.update_thread_status(&thread_id, ThreadStatus::Running, None).await {
-            error!(thread_id, error = %e, "failed to persist running status");
+            // Persist the Running transition so the stored status matches the in-memory state.
+            if let Err(e) =
+                store.update_thread_status(&thread_id, ThreadStatus::Running, None).await
+            {
+                error!(thread_id, error = %e, "failed to persist running status");
+            }
         }
 
         // Dispatch SessionStart hook.
@@ -319,7 +323,7 @@ impl AgentThread {
             )
             .await;
             self.emit_metrics(&notify, started_at, false).await;
-            self.set_status(ThreadStatus::Interrupted, &notify).await;
+            self.set_status(ThreadStatus::Interrupted, &notify).await?;
             record_json(
                 trace.as_ref(),
                 &trace_context,
@@ -351,7 +355,7 @@ impl AgentThread {
                 )
                 .await;
             self.emit_metrics(&notify, started_at, false).await;
-            self.set_status(ThreadStatus::Errored, &notify).await;
+            self.set_status(ThreadStatus::Errored, &notify).await?;
             record_json(
                 trace.as_ref(),
                 &trace_context,
@@ -382,7 +386,7 @@ impl AgentThread {
         )
         .await;
         self.emit_metrics(&notify, started_at, true).await;
-        self.set_status(ThreadStatus::Completed, &notify).await;
+        self.set_status(ThreadStatus::Completed, &notify).await?;
         record_json(
             trace.as_ref(),
             &trace_context,
@@ -401,9 +405,14 @@ impl AgentThread {
         Ok(completion_text.unwrap_or_default())
     }
 
-    async fn set_status(&self, status: ThreadStatus, notify: &Arc<dyn AgentNotifyPort>) {
-        let _ = self.status_tx.send(status);
+    async fn set_status(
+        &self,
+        status: ThreadStatus,
+        notify: &Arc<dyn AgentNotifyPort>,
+    ) -> Result<(), AgentError> {
+        self.state.transition(status)?;
         notify.on_status_change(&self.id, status).await;
+        Ok(())
     }
 
     async fn emit_response_event(

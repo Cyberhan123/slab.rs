@@ -17,6 +17,7 @@ use crate::{
     hook::AgentHook,
     port::{AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, ThreadStatus},
     risk::{BasicToolRiskAnalyzer, ToolRiskAnalyzer},
+    state::ThreadStateMachine,
     thread::{AgentThread, AgentThreadRuntime},
     tool::ToolRouter,
 };
@@ -25,9 +26,7 @@ use crate::{
 
 struct ThreadEntry {
     status_rx: watch::Receiver<ThreadStatus>,
-    /// Shared sender — lets the controller push the `Shutdown` status even
-    /// after the spawned task has been aborted.
-    status_tx: Arc<watch::Sender<ThreadStatus>>,
+    state: Arc<ThreadStateMachine>,
     abort: tokio::task::AbortHandle,
     cancellation: CancellationToken,
 }
@@ -304,9 +303,7 @@ impl AgentControl {
 
         // Signal the terminal status before aborting so all watch subscribers
         // see `Shutdown` rather than the last intermediate status.
-        if let Err(err) = entry.status_tx.send(ThreadStatus::Shutdown) {
-            warn!(?err, thread_id, "failed to send Shutdown status before aborting thread");
-        }
+        entry.state.transition(ThreadStatus::Shutdown)?;
         entry.abort.abort();
 
         // Persist and fan-out the Shutdown transition.
@@ -324,13 +321,11 @@ impl AgentControl {
         let guard = self.threads.read().await;
         let entry =
             guard.get(thread_id).ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))?;
-        let status_tx = Arc::clone(&entry.status_tx);
+        let state = Arc::clone(&entry.state);
         let cancellation = entry.cancellation.clone();
         drop(guard);
 
-        if let Err(err) = status_tx.send(ThreadStatus::Interrupting) {
-            warn!(?err, thread_id, "failed to send Interrupting status");
-        }
+        state.transition(ThreadStatus::Interrupting)?;
         cancellation.cancel();
         self.notify.on_status_change(thread_id, ThreadStatus::Interrupting).await;
         self.notify
@@ -387,7 +382,7 @@ impl AgentControl {
         persist_messages_from: Option<usize>,
     ) -> Result<String, AgentError> {
         let thread_id = thread.id.clone();
-        let status_tx = Arc::clone(&thread.status_tx);
+        let state = Arc::clone(&thread.state);
 
         let llm = Arc::clone(&self.llm);
         let store = Arc::clone(&self.store);
@@ -442,7 +437,7 @@ impl AgentControl {
                 max: self.max_threads,
             });
         }
-        guard.insert(thread_id.clone(), ThreadEntry { status_rx, status_tx, abort, cancellation });
+        guard.insert(thread_id.clone(), ThreadEntry { status_rx, state, abort, cancellation });
         drop(guard);
 
         Ok(thread_id)

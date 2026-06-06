@@ -225,6 +225,13 @@ pub trait AgentStorePort: Send + Sync {
     /// Insert a new tool call audit record.
     async fn insert_tool_call(&self, record: &ToolCallRecord) -> Result<(), AgentError>;
 
+    /// Update only the status of an existing tool call audit record.
+    async fn update_tool_call_status(
+        &self,
+        id: &str,
+        status: ToolCallStatus,
+    ) -> Result<(), AgentError>;
+
     /// Update an existing tool call record with its output and final status.
     async fn update_tool_call(
         &self,

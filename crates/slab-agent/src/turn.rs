@@ -25,6 +25,7 @@ use crate::{
         TurnEvent,
     },
     risk::ToolRiskAnalyzer,
+    state::ToolCallStateMachine,
     tool::{ToolContext, ToolHandler, ToolRouter},
 };
 
@@ -297,6 +298,9 @@ pub(crate) async fn execute_turn(
                     "failed to parse tool call arguments as JSON"
                 );
                 let err_msg = format!("invalid tool call arguments: {e}");
+                let mut tool_state = ToolCallStateMachine::new(ToolCallStatus::Running);
+                insert_tool_call_record(&context, &call_id, tc, tool_state.status(), &now).await;
+                let call_status = tool_state.transition(ToolCallStatus::Failed)?;
                 context
                     .notify
                     .on_turn_event(
@@ -314,7 +318,7 @@ pub(crate) async fn execute_turn(
                     .await;
                 let message = ConversationMessage {
                     role: "tool".to_owned(),
-                    content: ConversationMessageContent::Text(err_msg),
+                    content: ConversationMessageContent::Text(err_msg.clone()),
                     name: None,
                     tool_call_id: Some(tc.id.clone()),
                     tool_calls: vec![],
@@ -337,6 +341,7 @@ pub(crate) async fn execute_turn(
                     }),
                 );
                 messages.push(message);
+                update_tool_call_record(&context, &call_id, Some(&err_msg), call_status).await;
                 continue;
             }
         };
@@ -379,6 +384,10 @@ pub(crate) async fn execute_turn(
                         reason,
                         "tool call blocked by hook"
                     );
+                    let mut tool_state = ToolCallStateMachine::new(ToolCallStatus::Running);
+                    insert_tool_call_record(&context, &call_id, tc, tool_state.status(), &now)
+                        .await;
+                    let call_status = tool_state.transition(ToolCallStatus::Failed)?;
                     context
                         .notify
                         .on_turn_event(
@@ -396,7 +405,7 @@ pub(crate) async fn execute_turn(
                         .await;
                     let message = ConversationMessage {
                         role: "tool".to_owned(),
-                        content: ConversationMessageContent::Text(reason),
+                        content: ConversationMessageContent::Text(reason.clone()),
                         name: None,
                         tool_call_id: Some(tc.id.clone()),
                         tool_calls: vec![],
@@ -419,6 +428,7 @@ pub(crate) async fn execute_turn(
                         }),
                     );
                     messages.push(message);
+                    update_tool_call_record(&context, &call_id, Some(&reason), call_status).await;
                     continue;
                 }
                 HookOutcome::ModifyArgs { arguments } => arguments,
@@ -466,39 +476,8 @@ pub(crate) async fn execute_turn(
         } else {
             ToolCallStatus::Running
         };
-
-        let record = ToolCallRecord {
-            id: call_id.clone(),
-            thread_id: context.thread_id.to_owned(),
-            tool_name: tc.name.clone(),
-            arguments: tc.arguments.clone(),
-            output: None,
-            status: initial_status,
-            created_at: now.clone(),
-            completed_at: None,
-        };
-
-        if let Err(e) = context.store.insert_tool_call(&record).await {
-            warn!(error = %e, call_id, "failed to persist tool call record");
-        }
-        record_json(
-            context.trace,
-            &context.trace_context,
-            "slab-agent",
-            "tool_call_record_persisted",
-            serde_json::json!({
-                "record": {
-                    "id": record.id,
-                    "thread_id": record.thread_id,
-                    "tool_name": record.tool_name,
-                    "arguments": record.arguments,
-                    "output": record.output,
-                    "status": record.status,
-                    "created_at": record.created_at,
-                    "completed_at": record.completed_at,
-                }
-            }),
-        );
+        let mut tool_state = ToolCallStateMachine::new(initial_status);
+        insert_tool_call_record(&context, &call_id, tc, tool_state.status(), &now).await;
 
         let (output, call_status) = if let Some(request) = approval_request {
             record_json(
@@ -574,6 +553,8 @@ pub(crate) async fn execute_turn(
                     if context.cancellation.is_cancelled() {
                         return Err(AgentError::Interrupted);
                     }
+                    let running_status = tool_state.transition(ToolCallStatus::Running)?;
+                    update_tool_call_status(&context, &call_id, running_status).await;
                     info!(
                         thread_id = context.thread_id,
                         turn_index = context.turn_index,
@@ -670,6 +651,7 @@ pub(crate) async fn execute_turn(
                 _ = context.cancellation.cancelled() => return Err(AgentError::Interrupted),
             }
         };
+        let call_status = tool_state.transition(call_status)?;
         if context.cancellation.is_cancelled() {
             return Err(AgentError::Interrupted);
         }
@@ -716,38 +698,13 @@ pub(crate) async fn execute_turn(
                         item_id: tc.id.clone(),
                         call_id: call_id.clone(),
                         output: output.clone(),
-                        status: match call_status {
-                            ToolCallStatus::Pending | ToolCallStatus::Running => {
-                                ToolExecutionStatus::Failed
-                            }
-                            ToolCallStatus::Completed => ToolExecutionStatus::Completed,
-                            ToolCallStatus::Failed => ToolExecutionStatus::Failed,
-                        },
+                        status: tool_execution_status(call_status),
                     },
                 },
             )
             .await;
 
-        let completed_at = Utc::now().to_rfc3339();
-        if let Err(e) = context
-            .store
-            .update_tool_call(&call_id, Some(&output), call_status, &completed_at)
-            .await
-        {
-            warn!(error = %e, call_id, "failed to update tool call record");
-        }
-        record_json(
-            context.trace,
-            &context.trace_context,
-            "slab-agent",
-            "tool_call_record_updated",
-            serde_json::json!({
-                "call_id": call_id,
-                "status": call_status,
-                "completed_at": completed_at,
-                "output": output,
-            }),
-        );
+        update_tool_call_record(&context, &call_id, Some(&output), call_status).await;
 
         let message = ConversationMessage {
             role: "tool".to_owned(),
@@ -797,6 +754,99 @@ pub(crate) async fn persist_thread_message(
     };
     if let Err(e) = store.insert_thread_message(&record).await {
         warn!(error = %e, thread_id, "failed to persist thread message");
+    }
+}
+
+async fn insert_tool_call_record(
+    context: &TurnExecutionContext<'_>,
+    call_id: &str,
+    tool_call: &ParsedToolCall,
+    status: ToolCallStatus,
+    created_at: &str,
+) {
+    let record = ToolCallRecord {
+        id: call_id.to_owned(),
+        thread_id: context.thread_id.to_owned(),
+        tool_name: tool_call.name.clone(),
+        arguments: tool_call.arguments.clone(),
+        output: None,
+        status,
+        created_at: created_at.to_owned(),
+        completed_at: None,
+    };
+
+    if let Err(e) = context.store.insert_tool_call(&record).await {
+        warn!(error = %e, call_id, "failed to persist tool call record");
+    }
+    record_json(
+        context.trace,
+        &context.trace_context,
+        "slab-agent",
+        "tool_call_record_persisted",
+        serde_json::json!({
+            "record": {
+                "id": &record.id,
+                "thread_id": &record.thread_id,
+                "tool_name": &record.tool_name,
+                "arguments": &record.arguments,
+                "output": &record.output,
+                "status": record.status,
+                "created_at": &record.created_at,
+                "completed_at": &record.completed_at,
+            }
+        }),
+    );
+}
+
+async fn update_tool_call_status(
+    context: &TurnExecutionContext<'_>,
+    call_id: &str,
+    status: ToolCallStatus,
+) {
+    if let Err(e) = context.store.update_tool_call_status(call_id, status).await {
+        warn!(error = %e, call_id, "failed to update tool call status");
+    }
+    record_json(
+        context.trace,
+        &context.trace_context,
+        "slab-agent",
+        "tool_call_record_status_updated",
+        serde_json::json!({
+            "call_id": call_id,
+            "status": status,
+        }),
+    );
+}
+
+async fn update_tool_call_record(
+    context: &TurnExecutionContext<'_>,
+    call_id: &str,
+    output: Option<&str>,
+    status: ToolCallStatus,
+) {
+    let completed_at = Utc::now().to_rfc3339();
+    if let Err(e) = context.store.update_tool_call(call_id, output, status, &completed_at).await {
+        warn!(error = %e, call_id, "failed to update tool call record");
+    }
+    record_json(
+        context.trace,
+        &context.trace_context,
+        "slab-agent",
+        "tool_call_record_updated",
+        serde_json::json!({
+            "call_id": call_id,
+            "status": status,
+            "completed_at": completed_at,
+            "output": output,
+        }),
+    );
+}
+
+fn tool_execution_status(status: ToolCallStatus) -> ToolExecutionStatus {
+    match status {
+        ToolCallStatus::Pending | ToolCallStatus::Running => ToolExecutionStatus::Failed,
+        ToolCallStatus::Completed => ToolExecutionStatus::Completed,
+        ToolCallStatus::Failed => ToolExecutionStatus::Failed,
     }
 }
 

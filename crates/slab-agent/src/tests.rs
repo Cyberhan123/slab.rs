@@ -12,8 +12,8 @@ use std::{
 };
 
 use crate::{
-    AgentControl, AgentControlLimits, AgentError, ToolApprovalRequest, ToolContext, ToolHandler,
-    ToolOutput, ToolRouter,
+    AgentControl, AgentControlLimits, AgentError, AgentHook, HookEvent, HookOutcome,
+    ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput, ToolRouter,
     config::AgentConfig,
     event::AgentEventKind,
     port::{
@@ -144,6 +144,51 @@ impl LlmPort for MockLlm {
             // Second turn: final text answer after receiving the tool result.
             Ok(LlmResponse {
                 content: Some("echo completed: hello from agent".into()),
+                content_already_streamed: false,
+                tool_calls: vec![],
+                finish_reason: Some("stop".into()),
+            })
+        }
+    }
+}
+
+struct InvalidToolArgsLlm {
+    call_count: Mutex<u32>,
+}
+
+impl InvalidToolArgsLlm {
+    fn new() -> Self {
+        Self { call_count: Mutex::new(0) }
+    }
+}
+
+#[async_trait]
+impl LlmPort for InvalidToolArgsLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        let mut count = self.call_count.lock().unwrap();
+        *count += 1;
+
+        if *count == 1 {
+            Ok(LlmResponse {
+                content: None,
+                content_already_streamed: false,
+                tool_calls: vec![ParsedToolCall {
+                    id: "call-invalid".into(),
+                    name: "echo".into(),
+                    arguments: "{not json".into(),
+                }],
+                finish_reason: Some("tool_calls".into()),
+            })
+        } else {
+            Ok(LlmResponse {
+                content: Some("handled invalid tool args".into()),
                 content_already_streamed: false,
                 tool_calls: vec![],
                 finish_reason: Some("stop".into()),
@@ -295,6 +340,14 @@ impl AgentStorePort for NoopStore {
         Ok(())
     }
 
+    async fn update_tool_call_status(
+        &self,
+        _id: &str,
+        _status: slab_types::agent::ToolCallStatus,
+    ) -> Result<(), AgentError> {
+        Ok(())
+    }
+
     async fn update_tool_call(
         &self,
         _id: &str,
@@ -351,6 +404,15 @@ impl AgentStorePort for RecordingStore {
 
     async fn insert_tool_call(&self, record: &ToolCallRecord) -> Result<(), AgentError> {
         self.inserted_statuses.lock().unwrap().push(record.status);
+        Ok(())
+    }
+
+    async fn update_tool_call_status(
+        &self,
+        _id: &str,
+        status: slab_types::agent::ToolCallStatus,
+    ) -> Result<(), AgentError> {
+        self.updated_statuses.lock().unwrap().push(status);
         Ok(())
     }
 
@@ -422,6 +484,14 @@ impl AgentStorePort for PersistingStore {
     }
 
     async fn insert_tool_call(&self, _record: &ToolCallRecord) -> Result<(), AgentError> {
+        Ok(())
+    }
+
+    async fn update_tool_call_status(
+        &self,
+        _id: &str,
+        _status: slab_types::agent::ToolCallStatus,
+    ) -> Result<(), AgentError> {
         Ok(())
     }
 
@@ -508,6 +578,38 @@ impl ApprovalPort for NoopNotify {
         _risk: Option<crate::ToolRiskAssessment>,
     ) -> ApprovalDecision {
         ApprovalDecision::Approved
+    }
+}
+
+struct RejectingApproval;
+
+#[async_trait]
+impl ApprovalPort for RejectingApproval {
+    async fn request_approval(
+        &self,
+        _thread_id: &str,
+        _call_id: &str,
+        _tool_name: &str,
+        _command: &str,
+        _risk: Option<crate::ToolRiskAssessment>,
+    ) -> ApprovalDecision {
+        ApprovalDecision::Rejected
+    }
+}
+
+struct BlockingHook;
+
+#[async_trait]
+impl AgentHook for BlockingHook {
+    async fn on_event(&self, event: &HookEvent) -> HookOutcome {
+        match event {
+            HookEvent::PreToolUse { .. } => {
+                HookOutcome::Block { reason: "blocked by test hook".into() }
+            }
+            HookEvent::PostToolUse { .. }
+            | HookEvent::SessionStart { .. }
+            | HookEvent::Stop { .. } => HookOutcome::Continue,
+        }
     }
 }
 
@@ -697,6 +799,27 @@ fn assert_trace_event(events: &[(AgentTraceContext, AgentTraceEvent)], event_nam
     );
 }
 
+async fn wait_for_control_terminal_status(control: &AgentControl, thread_id: &str) -> ThreadStatus {
+    let mut status_rx = control.subscribe(thread_id).await.expect("subscribe");
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            status_rx.changed().await.expect("status channel closed");
+            let status = *status_rx.borrow();
+            if matches!(
+                status,
+                ThreadStatus::Completed
+                    | ThreadStatus::Errored
+                    | ThreadStatus::Interrupted
+                    | ThreadStatus::Shutdown
+            ) {
+                break status;
+            }
+        }
+    })
+    .await
+    .expect("thread should finish")
+}
+
 #[tokio::test]
 async fn approval_required_tool_is_recorded_pending_then_completed() {
     let llm = Arc::new(MockLlm::new());
@@ -742,7 +865,130 @@ async fn approval_required_tool_is_recorded_pending_then_completed() {
     );
     assert_eq!(
         store.updated_statuses.lock().unwrap().as_slice(),
-        &[slab_types::agent::ToolCallStatus::Completed]
+        &[slab_types::agent::ToolCallStatus::Running, slab_types::agent::ToolCallStatus::Completed,]
+    );
+}
+
+#[tokio::test]
+async fn rejected_approval_tool_is_recorded_pending_then_failed() {
+    let llm = Arc::new(MockLlm::new());
+    let store = Arc::new(RecordingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+
+    let mut router = ToolRouter::new();
+    router.register(Box::new(ApprovalEchoTool));
+
+    let control = AgentControl::new(
+        llm,
+        store_port,
+        notify,
+        Arc::new(RejectingApproval),
+        Arc::new(router),
+        8,
+        4,
+    );
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: slab_types::ConversationMessageContent::Text("Please echo".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+
+    let thread_id =
+        control.spawn("session-approval-rejected".into(), config, messages).await.expect("spawn");
+    let final_status = wait_for_control_terminal_status(&control, &thread_id).await;
+
+    assert_eq!(final_status, ThreadStatus::Completed);
+    assert_eq!(
+        store.inserted_statuses.lock().unwrap().as_slice(),
+        &[slab_types::agent::ToolCallStatus::Pending]
+    );
+    assert_eq!(
+        store.updated_statuses.lock().unwrap().as_slice(),
+        &[slab_types::agent::ToolCallStatus::Failed]
+    );
+}
+
+#[tokio::test]
+async fn invalid_tool_arguments_are_recorded_failed() {
+    let llm = Arc::new(InvalidToolArgsLlm::new());
+    let store = Arc::new(RecordingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let approval = Arc::clone(&notify);
+    let control =
+        AgentControl::new(llm, store_port, notify, approval, Arc::new(ToolRouter::new()), 8, 4);
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: slab_types::ConversationMessageContent::Text("Please use a tool".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+
+    let thread_id =
+        control.spawn("session-invalid-tool-args".into(), config, messages).await.expect("spawn");
+    let final_status = wait_for_control_terminal_status(&control, &thread_id).await;
+
+    assert_eq!(final_status, ThreadStatus::Completed);
+    assert_eq!(
+        store.inserted_statuses.lock().unwrap().as_slice(),
+        &[slab_types::agent::ToolCallStatus::Running]
+    );
+    assert_eq!(
+        store.updated_statuses.lock().unwrap().as_slice(),
+        &[slab_types::agent::ToolCallStatus::Failed]
+    );
+}
+
+#[tokio::test]
+async fn hook_blocked_tool_call_is_recorded_failed() {
+    let llm = Arc::new(MockLlm::new());
+    let store = Arc::new(RecordingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+
+    let mut router = ToolRouter::new();
+    router.register(Box::new(TestEchoTool));
+
+    let approval = Arc::clone(&notify);
+    let control = AgentControl::new_with_hooks(
+        llm,
+        store_port,
+        notify,
+        approval,
+        Arc::new(router),
+        AgentControlLimits { max_threads: 8, max_depth: 4 },
+        vec![Arc::new(BlockingHook)],
+    );
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: slab_types::ConversationMessageContent::Text("Please echo".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+
+    let thread_id =
+        control.spawn("session-hook-blocked".into(), config, messages).await.expect("spawn");
+    let final_status = wait_for_control_terminal_status(&control, &thread_id).await;
+
+    assert_eq!(final_status, ThreadStatus::Completed);
+    assert_eq!(
+        store.inserted_statuses.lock().unwrap().as_slice(),
+        &[slab_types::agent::ToolCallStatus::Running]
+    );
+    assert_eq!(
+        store.updated_statuses.lock().unwrap().as_slice(),
+        &[slab_types::agent::ToolCallStatus::Failed]
     );
 }
 
