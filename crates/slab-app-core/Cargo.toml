@@ -85,7 +85,6 @@ strum       = { workspace = true }
 regex       = { workspace = true }
 image       = { workspace = true }
 zip         = { workspace = true }
-dirs-next   = { workspace = true }
 jsonschema  = { workspace = true }
 ffmpeg-next = { workspace = true, optional = true }
 all-smi = { workspace = true, optional = true }

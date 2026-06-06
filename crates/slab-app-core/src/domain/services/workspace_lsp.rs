@@ -47,9 +47,9 @@ impl WorkspaceLspService {
     }
 
     pub fn workspace_root(&self) -> Result<PathBuf, AppCoreError> {
-        workspace_root_from_settings_path(&self.config.settings_path).ok_or_else(|| {
+        workspace_root_from_config(&self.config).ok_or_else(|| {
             AppCoreError::BadRequest(format!(
-                "settings path {} is not inside a workspace `.slab` directory",
+                "settings path {} is not inside a workspace `.slab` directory and workspace_root is not set",
                 self.config.settings_path.display()
             ))
         })
@@ -192,6 +192,13 @@ pub fn workspace_root_from_settings_path(settings_path: &Path) -> Option<PathBuf
         return None;
     }
     slab_dir.parent().map(Path::to_path_buf)
+}
+
+pub fn workspace_root_from_config(config: &AppConfig) -> Option<PathBuf> {
+    config
+        .workspace_root
+        .clone()
+        .or_else(|| workspace_root_from_settings_path(&config.settings_path))
 }
 
 fn normalize_language_id(language_id: &str) -> String {
@@ -431,7 +438,8 @@ fn describe_searched_locations(locations: &[PathBuf]) -> String {
 mod tests {
     use super::{
         builtin_language_server_provider, language_server_command_candidates,
-        resolve_language_server_command, workspace_root_from_settings_path,
+        resolve_language_server_command, workspace_root_from_config,
+        workspace_root_from_settings_path,
     };
     use crate::config::Config;
     use slab_config::PluginJsRuntimeTransport;
@@ -461,6 +469,8 @@ mod tests {
             lib_dir: Some(root.join("resources").join("libs")),
             session_state_dir: root.join("sessions").to_string_lossy().into_owned(),
             settings_path,
+            settings_overlay_path: None,
+            workspace_root: None,
             model_config_dir: root.join("models"),
             plugins_dir: root.join("plugins"),
             exec_rules_dir: root.join("rules"),
@@ -499,6 +509,16 @@ mod tests {
             ))
             .is_none()
         );
+    }
+
+    #[test]
+    fn explicit_workspace_root_overrides_settings_path_in_config() {
+        let mut config = test_config(PathBuf::from(
+            "C:/Users/example/AppData/Roaming/cn.cyberhan.slab/settings.json",
+        ));
+        config.workspace_root = Some(PathBuf::from("D:/Workspace"));
+
+        assert_eq!(workspace_root_from_config(&config), Some(PathBuf::from("D:/Workspace")));
     }
 
     #[test]

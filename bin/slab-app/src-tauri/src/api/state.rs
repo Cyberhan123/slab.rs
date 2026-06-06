@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tauri::Manager as _;
 
-use slab_app_core::config::{Config, default_database_url};
+use slab_app_core::config::Config;
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::PmidService;
 use slab_app_core::infra::db::AnyStore;
@@ -18,10 +18,6 @@ pub async fn init_state<R: tauri::Runtime>(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut cfg = Config::from_env();
 
-    if cfg.database_url == "sqlite://slab.db?mode=rwc" {
-        cfg.database_url = default_database_url();
-    }
-
     launch_spec.apply_to_config(&mut cfg);
 
     if let Some(parent) = cfg.settings_path.parent() {
@@ -31,7 +27,10 @@ pub async fn init_state<R: tauri::Runtime>(
     tokio::fs::create_dir_all(&cfg.session_state_dir).await?;
 
     let store = Arc::new(AnyStore::connect(&cfg.database_url).await?);
-    let pmid = Arc::new(PmidService::load_from_path(cfg.settings_path.clone()).await?);
+    let pmid = Arc::new(
+        PmidService::load_from_paths(cfg.settings_path.clone(), cfg.settings_overlay_path.clone())
+            .await?,
+    );
     let grpc = Arc::new(GrpcGateway::connect_from_config(&cfg).await?);
 
     let state = Arc::new(AppState::new(

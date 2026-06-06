@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::Utc;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use slab_utils::fs::{AtomicWriteOptions, atomic_write_bytes_with_options};
 use tokio::sync::RwLock;
 
@@ -19,25 +19,52 @@ use std::os::unix::fs::PermissionsExt;
 #[derive(Debug, Clone)]
 pub struct SettingsDocumentProvider {
     path: PathBuf,
+    base_path: PathBuf,
+    default_document: SettingsDocument,
+    overlay_path: Option<PathBuf>,
     state: Arc<RwLock<SettingsRuntimeState>>,
 }
 
 #[derive(Debug, Clone, Default)]
 struct SettingsRuntimeState {
     document: SettingsDocument,
+    overlay: Option<Value>,
     warnings: Vec<String>,
+}
+
+#[derive(Debug)]
+struct LoadedSettingsRuntimeState {
+    state: SettingsRuntimeState,
+    default_document: SettingsDocument,
 }
 
 impl SettingsDocumentProvider {
     pub async fn load(path: PathBuf) -> Result<Self, ConfigError> {
-        let path_for_load = path.clone();
-        let state = tokio::task::spawn_blocking(move || load_runtime_state(&path_for_load))
-            .await
-            .map_err(|error| {
-                ConfigError::Internal(format!("settings loader task failed: {error}"))
-            })??;
+        Self::load_with_overlay(path, None).await
+    }
 
-        Ok(Self { path, state: Arc::new(RwLock::new(state)) })
+    pub async fn load_with_overlay(
+        path: PathBuf,
+        overlay_path: Option<PathBuf>,
+    ) -> Result<Self, ConfigError> {
+        let base_path_for_load = path.clone();
+        let overlay_path_for_load = overlay_path.clone();
+        let loaded = tokio::task::spawn_blocking(move || {
+            load_runtime_state(&base_path_for_load, overlay_path_for_load.as_deref())
+        })
+        .await
+        .map_err(|error| {
+            ConfigError::Internal(format!("settings loader task failed: {error}"))
+        })??;
+        let write_path = overlay_path.clone().unwrap_or_else(|| path.clone());
+
+        Ok(Self {
+            path: write_path,
+            base_path: path,
+            default_document: loaded.default_document,
+            overlay_path,
+            state: Arc::new(RwLock::new(loaded.state)),
+        })
     }
 
     pub async fn document(&self) -> SettingsDocument {
@@ -53,7 +80,7 @@ impl SettingsDocumentProvider {
     }
 
     pub fn default_document(&self) -> SettingsDocument {
-        default_settings_document_for_path(&self.path)
+        self.default_document.clone()
     }
 
     pub async fn value(&self, path: &str) -> Result<SettingValue, ConfigError> {
@@ -67,6 +94,10 @@ impl SettingsDocumentProvider {
         command: UpdateSettingCommand,
     ) -> Result<SettingValue, ConfigError> {
         let mut state = self.state.write().await;
+        if self.overlay_path.is_some() {
+            return self.update_overlay(&mut state, path, command);
+        }
+
         let mut next_settings = state.document.clone();
         let default_document = self.default_document();
 
@@ -82,7 +113,7 @@ impl SettingsDocumentProvider {
 
         set_document_value(&mut next_settings, path, requested_value)?;
 
-        apply_dynamic_defaults(&self.path, &mut next_settings);
+        apply_dynamic_defaults(&self.base_path, &mut next_settings);
         let next_value = setting_value(&next_settings, path)?;
 
         write_settings_document_file(&self.path, &next_settings)?;
@@ -90,15 +121,86 @@ impl SettingsDocumentProvider {
 
         Ok(next_value)
     }
+
+    fn update_overlay(
+        &self,
+        state: &mut SettingsRuntimeState,
+        path: &str,
+        command: UpdateSettingCommand,
+    ) -> Result<SettingValue, ConfigError> {
+        let mut overlay = state.overlay.clone().unwrap_or_else(empty_json_object);
+
+        match command.op {
+            UpdateSettingOperation::Set => {
+                let requested_value = command.value.ok_or_else(|| {
+                    ConfigError::BadRequest(format!(
+                        "setting '{}' update requires a value when op=set",
+                        path
+                    ))
+                })?;
+                let mut next_settings = state.document.clone();
+                set_document_value(&mut next_settings, path, requested_value.clone())?;
+                apply_dynamic_defaults(&self.base_path, &mut next_settings);
+                let next_value = setting_value(&next_settings, path)?;
+
+                set_json_path(&mut overlay, path, requested_value.into_json_value())?;
+                prune_empty_objects(&mut overlay);
+                write_json_value_file(&self.path, &overlay)?;
+                state.document = next_settings;
+                state.overlay = Some(overlay);
+
+                Ok(next_value)
+            }
+            UpdateSettingOperation::Unset => {
+                setting_value(&self.default_document, path)?;
+                remove_json_path(&mut overlay, path)?;
+                prune_empty_objects(&mut overlay);
+                let next_settings =
+                    merged_settings_document(&self.default_document, &overlay, &self.base_path)?;
+                let next_value = setting_value(&next_settings, path)?;
+
+                write_json_value_file(&self.path, &overlay)?;
+                state.document = next_settings;
+                state.overlay = Some(overlay);
+
+                Ok(next_value)
+            }
+        }
+    }
 }
 
-fn load_runtime_state(path: &Path) -> Result<SettingsRuntimeState, ConfigError> {
+fn load_runtime_state(
+    path: &Path,
+    overlay_path: Option<&Path>,
+) -> Result<LoadedSettingsRuntimeState, ConfigError> {
+    let base_state = load_base_runtime_state(path)?;
+    let Some(overlay_path) = overlay_path else {
+        return Ok(LoadedSettingsRuntimeState {
+            state: base_state,
+            default_document: default_settings_document_for_path(path),
+        });
+    };
+
+    let overlay = load_overlay_json(overlay_path)?;
+    let document = merged_settings_document(&base_state.document, &overlay, path)?;
+
+    Ok(LoadedSettingsRuntimeState {
+        default_document: base_state.document.clone(),
+        state: SettingsRuntimeState {
+            document,
+            overlay: Some(overlay),
+            warnings: base_state.warnings,
+        },
+    })
+}
+
+fn load_base_runtime_state(path: &Path) -> Result<SettingsRuntimeState, ConfigError> {
     ensure_settings_parent_dir(path)?;
 
     if !path.exists() {
         let document = default_settings_document_for_path(path);
         write_settings_document_file(path, &document)?;
-        return Ok(SettingsRuntimeState { document, warnings: Vec::new() });
+        return Ok(SettingsRuntimeState { document, overlay: None, warnings: Vec::new() });
     }
 
     let raw = fs::read_to_string(path).map_err(|error| {
@@ -111,6 +213,7 @@ fn load_runtime_state(path: &Path) -> Result<SettingsRuntimeState, ConfigError> 
             let warning = recover_corrupt_settings_file(path, &error.to_string())?;
             return Ok(SettingsRuntimeState {
                 document: default_settings_document_for_path(path),
+                overlay: None,
                 warnings: vec![warning],
             });
         }
@@ -136,10 +239,46 @@ fn load_runtime_state(path: &Path) -> Result<SettingsRuntimeState, ConfigError> 
         if apply_dynamic_defaults(path, &mut document) {
             write_settings_document_file(path, &document)?;
         }
-        return Ok(SettingsRuntimeState { document, warnings: Vec::new() });
+        return Ok(SettingsRuntimeState { document, overlay: None, warnings: Vec::new() });
     }
 
     Err(invalid_document_error())
+}
+
+fn load_overlay_json(path: &Path) -> Result<Value, ConfigError> {
+    if !path.exists() {
+        return Ok(empty_json_object());
+    }
+
+    let raw = fs::read_to_string(path).map_err(|error| {
+        ConfigError::Internal(format!(
+            "failed to read settings overlay file '{}': {error}",
+            path.display()
+        ))
+    })?;
+    let value: Value = serde_json::from_str(&raw).map_err(|error| {
+        ConfigError::BadRequest(format!(
+            "settings overlay file '{}' is not valid JSON: {error}",
+            path.display()
+        ))
+    })?;
+
+    if let Some(schema_version) = value
+        .get("schema_version")
+        .and_then(Value::as_u64)
+        .and_then(|version| u32::try_from(version).ok())
+    {
+        ensure_current_schema_version(schema_version)?;
+    }
+
+    if !value.is_object() {
+        return Err(ConfigError::BadRequest(format!(
+            "settings overlay file '{}' must contain a JSON object",
+            path.display()
+        )));
+    }
+
+    Ok(value)
 }
 
 fn ensure_current_schema_version(schema_version: u32) -> Result<(), ConfigError> {
@@ -248,322 +387,138 @@ fn write_settings_document_file(
     })
 }
 
-pub fn settings_document_to_json_value(document: &SettingsDocument) -> Value {
-    json!({
-        "$schema": document.schema,
-        "schema_version": document.schema_version,
-        "general": {
-            "language": document.general.language,
-        },
-        "database": {
-            "url": document.database.url,
-        },
-        "logging": {
-            "level": document.logging.level,
-            "json": document.logging.json,
-            "path": document.logging.path,
-        },
-        "tools": {
-            "ffmpeg": {
-                "enabled": document.tools.ffmpeg.enabled,
-                "auto_download": document.tools.ffmpeg.auto_download,
-                "install_dir": document.tools.ffmpeg.install_dir,
-                "source": {
-                    "version": document.tools.ffmpeg.source.version,
-                    "artifact": document.tools.ffmpeg.source.artifact,
-                }
-            }
-        },
-            "agent": {
-                "debug": document.agent.debug,
-                "tools": {
-                    "mcp": {
-                        "enabled": document.agent.tools.mcp.enabled,
-                    },
-                    "websearch": {
-                    "default_provider": document.agent.tools.websearch.default_provider,
-                    "providers": {
-                        "duckduckgo": {
-                            "base_url": document.agent.tools.websearch.providers.duckduckgo.base_url,
-                            "user_agent": document.agent.tools.websearch.providers.duckduckgo.user_agent,
-                            "use_lite": document.agent.tools.websearch.providers.duckduckgo.use_lite,
-                        },
-                        "arxiv": {},
-                        "google": {
-                            "auth": {
-                                "api_key": document.agent.tools.websearch.providers.google.auth.api_key,
-                                "api_key_env": document.agent.tools.websearch.providers.google.auth.api_key_env,
-                            },
-                            "cx": document.agent.tools.websearch.providers.google.cx,
-                            "base_url": document.agent.tools.websearch.providers.google.base_url,
-                        },
-                        "tavily": {
-                            "auth": {
-                                "api_key": document.agent.tools.websearch.providers.tavily.auth.api_key,
-                                "api_key_env": document.agent.tools.websearch.providers.tavily.auth.api_key_env,
-                            },
-                            "base_url": document.agent.tools.websearch.providers.tavily.base_url,
-                            "search_depth": document.agent.tools.websearch.providers.tavily.search_depth,
-                            "include_answer": document.agent.tools.websearch.providers.tavily.include_answer,
-                            "include_images": document.agent.tools.websearch.providers.tavily.include_images,
-                            "include_raw_content": document.agent.tools.websearch.providers.tavily.include_raw_content,
-                        },
-                        "exa": {
-                            "auth": {
-                                "api_key": document.agent.tools.websearch.providers.exa.auth.api_key,
-                                "api_key_env": document.agent.tools.websearch.providers.exa.auth.api_key_env,
-                            },
-                            "base_url": document.agent.tools.websearch.providers.exa.base_url,
-                            "model": document.agent.tools.websearch.providers.exa.model,
-                            "include_contents": document.agent.tools.websearch.providers.exa.include_contents,
-                        },
-                        "serpapi": {
-                            "auth": {
-                                "api_key": document.agent.tools.websearch.providers.serpapi.auth.api_key,
-                                "api_key_env": document.agent.tools.websearch.providers.serpapi.auth.api_key_env,
-                            },
-                            "engine": document.agent.tools.websearch.providers.serpapi.engine,
-                            "base_url": document.agent.tools.websearch.providers.serpapi.base_url,
-                        },
-                        "brave": {
-                            "auth": {
-                                "api_key": document.agent.tools.websearch.providers.brave.auth.api_key,
-                                "api_key_env": document.agent.tools.websearch.providers.brave.auth.api_key_env,
-                            },
-                        },
-                        "searxng": {
-                            "base_url": document.agent.tools.websearch.providers.searxng.base_url,
-                        },
-                    }
-                }
-            }
-        },
-        "runtime": {
-            "mode": document.runtime.mode,
-            "transport": document.runtime.transport,
-            "sessions": {
-                "state_dir": document.runtime.sessions.state_dir,
-            },
-            "logging": {
-                "level": document.runtime.logging.level,
-                "json": document.runtime.logging.json,
-                "path": document.runtime.logging.path,
-            },
-            "capacity": {
-                "queue": document.runtime.capacity.queue,
-                "concurrent_requests": document.runtime.capacity.concurrent_requests,
-            },
-            "endpoint": {
-                "http": {
-                    "address": document.runtime.endpoint.http.address,
-                },
-                "ipc": {
-                    "path": document.runtime.endpoint.ipc.path,
-                }
-            },
-            "ggml": {
-                "install_dir": document.runtime.ggml.install_dir,
-                "source": {
-                    "version": document.runtime.ggml.source.version,
-                    "artifact": document.runtime.ggml.source.artifact,
-                },
-                "logging": {
-                    "level": document.runtime.ggml.logging.level,
-                    "json": document.runtime.ggml.logging.json,
-                    "path": document.runtime.ggml.logging.path,
-                },
-                "capacity": {
-                    "queue": document.runtime.ggml.capacity.queue,
-                    "concurrent_requests": document.runtime.ggml.capacity.concurrent_requests,
-                },
-                "endpoint": {
-                    "http": {
-                        "address": document.runtime.ggml.endpoint.http.address,
-                    },
-                    "ipc": {
-                        "path": document.runtime.ggml.endpoint.ipc.path,
-                    }
-                },
-                "backends": {
-                    "llama": {
-                        "enabled": document.runtime.ggml.backends.llama.enabled,
-                        "context_length": document.runtime.ggml.backends.llama.context_length,
-                        "flash_attn": document.runtime.ggml.backends.llama.flash_attn,
-                        "source": {
-                            "version": document.runtime.ggml.backends.llama.source.version,
-                            "artifact": document.runtime.ggml.backends.llama.source.artifact,
-                        },
-                        "logging": {
-                            "level": document.runtime.ggml.backends.llama.logging.level,
-                            "json": document.runtime.ggml.backends.llama.logging.json,
-                            "path": document.runtime.ggml.backends.llama.logging.path,
-                        },
-                        "capacity": {
-                            "queue": document.runtime.ggml.backends.llama.capacity.queue,
-                            "concurrent_requests": document.runtime.ggml.backends.llama.capacity.concurrent_requests,
-                        },
-                        "endpoint": {
-                            "http": {
-                                "address": document.runtime.ggml.backends.llama.endpoint.http.address,
-                            },
-                            "ipc": {
-                                "path": document.runtime.ggml.backends.llama.endpoint.ipc.path,
-                            }
-                        }
-                    },
-                    "whisper": {
-                        "enabled": document.runtime.ggml.backends.whisper.enabled,
-                        "flash_attn": document.runtime.ggml.backends.whisper.flash_attn,
-                        "source": {
-                            "version": document.runtime.ggml.backends.whisper.source.version,
-                            "artifact": document.runtime.ggml.backends.whisper.source.artifact,
-                        },
-                        "logging": {
-                            "level": document.runtime.ggml.backends.whisper.logging.level,
-                            "json": document.runtime.ggml.backends.whisper.logging.json,
-                            "path": document.runtime.ggml.backends.whisper.logging.path,
-                        },
-                        "capacity": {
-                            "queue": document.runtime.ggml.backends.whisper.capacity.queue,
-                            "concurrent_requests": document.runtime.ggml.backends.whisper.capacity.concurrent_requests,
-                        },
-                        "endpoint": {
-                            "http": {
-                                "address": document.runtime.ggml.backends.whisper.endpoint.http.address,
-                            },
-                            "ipc": {
-                                "path": document.runtime.ggml.backends.whisper.endpoint.ipc.path,
-                            }
-                        }
-                    },
-                    "diffusion": {
-                        "enabled": document.runtime.ggml.backends.diffusion.enabled,
-                        "flash_attn": document.runtime.ggml.backends.diffusion.flash_attn,
-                        "source": {
-                            "version": document.runtime.ggml.backends.diffusion.source.version,
-                            "artifact": document.runtime.ggml.backends.diffusion.source.artifact,
-                        },
-                        "logging": {
-                            "level": document.runtime.ggml.backends.diffusion.logging.level,
-                            "json": document.runtime.ggml.backends.diffusion.logging.json,
-                            "path": document.runtime.ggml.backends.diffusion.logging.path,
-                        },
-                        "capacity": {
-                            "queue": document.runtime.ggml.backends.diffusion.capacity.queue,
-                            "concurrent_requests": document.runtime.ggml.backends.diffusion.capacity.concurrent_requests,
-                        },
-                        "endpoint": {
-                            "http": {
-                                "address": document.runtime.ggml.backends.diffusion.endpoint.http.address,
-                            },
-                            "ipc": {
-                                "path": document.runtime.ggml.backends.diffusion.endpoint.ipc.path,
-                            }
-                        }
-                    }
-                }
-            },
-            "candle": {
-                "enabled": document.runtime.candle.enabled,
-                "install_dir": document.runtime.candle.install_dir,
-                "source": {
-                    "version": document.runtime.candle.source.version,
-                    "artifact": document.runtime.candle.source.artifact,
-                },
-                "logging": {
-                    "level": document.runtime.candle.logging.level,
-                    "json": document.runtime.candle.logging.json,
-                    "path": document.runtime.candle.logging.path,
-                },
-                "capacity": {
-                    "queue": document.runtime.candle.capacity.queue,
-                    "concurrent_requests": document.runtime.candle.capacity.concurrent_requests,
-                },
-                "endpoint": {
-                    "http": {
-                        "address": document.runtime.candle.endpoint.http.address,
-                    },
-                    "ipc": {
-                        "path": document.runtime.candle.endpoint.ipc.path,
-                    }
-                }
-            },
-            "onnx": {
-                "enabled": document.runtime.onnx.enabled,
-                "install_dir": document.runtime.onnx.install_dir,
-                "source": {
-                    "version": document.runtime.onnx.source.version,
-                    "artifact": document.runtime.onnx.source.artifact,
-                },
-                "logging": {
-                    "level": document.runtime.onnx.logging.level,
-                    "json": document.runtime.onnx.logging.json,
-                    "path": document.runtime.onnx.logging.path,
-                },
-                "capacity": {
-                    "queue": document.runtime.onnx.capacity.queue,
-                    "concurrent_requests": document.runtime.onnx.capacity.concurrent_requests,
-                },
-                "endpoint": {
-                    "http": {
-                        "address": document.runtime.onnx.endpoint.http.address,
-                    },
-                    "ipc": {
-                        "path": document.runtime.onnx.endpoint.ipc.path,
-                    }
-                }
-            }
-        },
-        "providers": {
-            "registry": document.providers.registry.iter().map(|entry| json!({
-                "id": entry.id,
-                "family": entry.family,
-                "display_name": entry.display_name,
-                "api_base": entry.api_base,
-                "auth": {
-                    "api_key": entry.auth.api_key,
-                    "api_key_env": entry.auth.api_key_env,
-                },
-                "defaults": {
-                    "headers": entry.defaults.headers,
-                    "query": entry.defaults.query,
-                }
-            })).collect::<Vec<_>>(),
-        },
-        "models": {
-            "cache_dir": document.models.cache_dir,
-                "config_dir": document.models.config_dir,
-            "download_source": document.models.download_source,
-            "auto_unload": {
-                "enabled": document.models.auto_unload.enabled,
-                "idle_minutes": document.models.auto_unload.idle_minutes,
-                "min_free_system_memory_bytes": document.models.auto_unload.min_free_system_memory_bytes,
-                "min_free_gpu_memory_bytes": document.models.auto_unload.min_free_gpu_memory_bytes,
-                "max_pressure_evictions_per_load": document.models.auto_unload.max_pressure_evictions_per_load,
-            }
-            },
-            "plugin": {
-                "install_dir": document.plugin.install_dir,
-            },
-            "server": {
-            "address": document.server.address,
-            "logging": {
-                "level": document.server.logging.level,
-                "json": document.server.logging.json,
-                "path": document.server.logging.path,
-            },
-            "cors": {
-                "allowed_origins": document.server.cors.allowed_origins,
-            },
-            "admin": {
-                "token": document.server.admin.token,
-            },
-            "swagger": {
-                "enabled": document.server.swagger.enabled,
-            },
-            "cloud_http_trace": document.server.cloud_http_trace,
-        }
+fn write_json_value_file(path: &Path, value: &Value) -> Result<(), ConfigError> {
+    ensure_settings_parent_dir(path)?;
+
+    let mut payload = serde_json::to_vec_pretty(value).map_err(|error| {
+        ConfigError::Internal(format!("failed to serialize settings overlay file: {error}"))
+    })?;
+    payload.push(b'\n');
+
+    atomic_write_bytes_with_options(
+        path,
+        &payload,
+        AtomicWriteOptions { unix_mode: Some(0o600), sync_parent_dir: true },
+    )
+    .map_err(|error| {
+        ConfigError::Internal(format!(
+            "failed to write settings overlay file '{}': {error}",
+            path.display()
+        ))
     })
+}
+
+fn merged_settings_document(
+    base_document: &SettingsDocument,
+    overlay: &Value,
+    base_path: &Path,
+) -> Result<SettingsDocument, ConfigError> {
+    let mut merged = serde_json::to_value(base_document).map_err(|error| {
+        ConfigError::Internal(format!("failed to serialize base settings document: {error}"))
+    })?;
+    merge_json_values(&mut merged, overlay);
+    let mut document: SettingsDocument = serde_json::from_value(merged).map_err(|error| {
+        ConfigError::BadRequest(format!("settings overlay has invalid shape: {error}"))
+    })?;
+    ensure_current_schema_version(document.schema_version)?;
+    apply_dynamic_defaults(base_path, &mut document);
+    Ok(document)
+}
+
+fn merge_json_values(base: &mut Value, overlay: &Value) {
+    match (base, overlay) {
+        (Value::Object(base), Value::Object(overlay)) => {
+            for (key, value) in overlay {
+                match base.get_mut(key) {
+                    Some(existing) => merge_json_values(existing, value),
+                    None => {
+                        base.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+        }
+        (base, overlay) => {
+            *base = overlay.clone();
+        }
+    }
+}
+
+fn empty_json_object() -> Value {
+    Value::Object(Map::new())
+}
+
+fn set_json_path(root: &mut Value, path: &str, value: Value) -> Result<(), ConfigError> {
+    let segments = setting_path_segments(path)?;
+    let mut current = root;
+
+    for segment in &segments[..segments.len() - 1] {
+        if !current.is_object() {
+            *current = empty_json_object();
+        }
+        let object = current.as_object_mut().expect("object checked");
+        current = object.entry((*segment).to_owned()).or_insert_with(empty_json_object);
+    }
+
+    if !current.is_object() {
+        *current = empty_json_object();
+    }
+    current
+        .as_object_mut()
+        .expect("object checked")
+        .insert(segments[segments.len() - 1].to_owned(), value);
+    Ok(())
+}
+
+fn remove_json_path(root: &mut Value, path: &str) -> Result<(), ConfigError> {
+    let segments = setting_path_segments(path)?;
+    remove_json_path_segments(root, &segments);
+    Ok(())
+}
+
+fn setting_path_segments(path: &str) -> Result<Vec<&str>, ConfigError> {
+    let segments = path.split('.').filter(|segment| !segment.is_empty()).collect::<Vec<_>>();
+    if segments.is_empty() {
+        return Err(ConfigError::BadRequest("setting path cannot be empty".to_owned()));
+    }
+    Ok(segments)
+}
+
+fn remove_json_path_segments(value: &mut Value, segments: &[&str]) {
+    let Value::Object(object) = value else {
+        return;
+    };
+
+    if segments.len() == 1 {
+        object.remove(segments[0]);
+        return;
+    }
+
+    if let Some(child) = object.get_mut(segments[0]) {
+        remove_json_path_segments(child, &segments[1..]);
+        if child.as_object().is_some_and(Map::is_empty) {
+            object.remove(segments[0]);
+        }
+    }
+}
+
+fn prune_empty_objects(value: &mut Value) {
+    let Value::Object(object) = value else {
+        return;
+    };
+
+    let keys = object.keys().cloned().collect::<Vec<_>>();
+    for key in keys {
+        if let Some(child) = object.get_mut(&key) {
+            prune_empty_objects(child);
+            if child.as_object().is_some_and(Map::is_empty) {
+                object.remove(&key);
+            }
+        }
+    }
+}
+
+pub fn settings_document_to_json_value(document: &SettingsDocument) -> Value {
+    serde_json::to_value(document).unwrap_or_else(|_| json!({}))
 }
 
 #[cfg(test)]
@@ -574,6 +529,10 @@ mod tests {
         let base =
             std::env::temp_dir().join(format!("slab-settings-test-{}", uuid::Uuid::new_v4()));
         base.join("settings.json")
+    }
+
+    fn temp_overlay_path(settings_path: &Path) -> PathBuf {
+        settings_path.parent().expect("parent").join("workspace").join("settings.json")
     }
 
     #[tokio::test]
@@ -703,6 +662,115 @@ mod tests {
             provider.value("plugin.install_dir").await.expect("value"),
             json!(expected.plugin.install_dir.expect("plugin dir")).into()
         );
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn provider_loads_workspace_overlay_on_top_of_base_document() {
+        let path = temp_settings_path();
+        let overlay_path = temp_overlay_path(&path);
+        ensure_settings_parent_dir(&path).expect("base dir");
+        ensure_settings_parent_dir(&overlay_path).expect("overlay dir");
+        let mut base_document = SettingsDocument::default();
+        base_document.logging.level = "warn".to_owned();
+        fs::write(&path, serde_json::to_string_pretty(&base_document).expect("serialize"))
+            .expect("write base");
+        fs::write(
+            &overlay_path,
+            serde_json::to_string_pretty(&json!({
+                "logging": {
+                    "level": "debug"
+                }
+            }))
+            .expect("serialize"),
+        )
+        .expect("write overlay");
+
+        let provider =
+            SettingsDocumentProvider::load_with_overlay(path.clone(), Some(overlay_path.clone()))
+                .await
+                .expect("provider");
+        let document = provider.document().await;
+
+        assert_eq!(provider.path(), overlay_path.as_path());
+        assert_eq!(document.logging.level, "debug");
+        assert_eq!(provider.default_document().logging.level, "warn");
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn provider_overlay_update_writes_only_overlay_file() {
+        let path = temp_settings_path();
+        let overlay_path = temp_overlay_path(&path);
+        let provider =
+            SettingsDocumentProvider::load_with_overlay(path.clone(), Some(overlay_path.clone()))
+                .await
+                .expect("provider");
+
+        provider
+            .update(
+                "logging.level",
+                UpdateSettingCommand {
+                    op: UpdateSettingOperation::Set,
+                    value: Some(json!("debug").into()),
+                },
+            )
+            .await
+            .expect("set");
+
+        let base: SettingsDocument =
+            serde_json::from_str(&fs::read_to_string(&path).expect("base")).expect("base json");
+        let overlay: Value =
+            serde_json::from_str(&fs::read_to_string(&overlay_path).expect("overlay"))
+                .expect("overlay json");
+
+        assert_eq!(base.logging.level, "info");
+        assert_eq!(overlay, json!({ "logging": { "level": "debug" } }));
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn provider_overlay_unset_removes_override_and_restores_base() {
+        let path = temp_settings_path();
+        let overlay_path = temp_overlay_path(&path);
+        ensure_settings_parent_dir(&path).expect("base dir");
+        ensure_settings_parent_dir(&overlay_path).expect("overlay dir");
+        let mut base_document = SettingsDocument::default();
+        base_document.logging.level = "warn".to_owned();
+        fs::write(&path, serde_json::to_string_pretty(&base_document).expect("serialize"))
+            .expect("write base");
+        fs::write(
+            &overlay_path,
+            serde_json::to_string_pretty(&json!({
+                "logging": {
+                    "level": "debug"
+                }
+            }))
+            .expect("serialize"),
+        )
+        .expect("write overlay");
+        let provider =
+            SettingsDocumentProvider::load_with_overlay(path.clone(), Some(overlay_path.clone()))
+                .await
+                .expect("provider");
+
+        provider
+            .update(
+                "logging.level",
+                UpdateSettingCommand { op: UpdateSettingOperation::Unset, value: None },
+            )
+            .await
+            .expect("unset");
+
+        let overlay: Value =
+            serde_json::from_str(&fs::read_to_string(&overlay_path).expect("overlay"))
+                .expect("overlay json");
+
+        assert_eq!(provider.value("logging.level").await.expect("value"), json!("warn").into());
+        assert_eq!(overlay, json!({}));
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }

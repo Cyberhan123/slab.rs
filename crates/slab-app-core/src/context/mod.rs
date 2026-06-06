@@ -122,8 +122,7 @@ fn build_agent_control(
     let llm =
         Arc::new(crate::infra::agent_adapter::ServerLlmAdapter::new(Arc::clone(&ctx.model_state)));
     let store_adapter: Arc<dyn slab_agent::port::AgentStorePort> = store;
-    let workspace_root =
-        crate::domain::services::workspace_root_from_settings_path(&ctx.config.settings_path);
+    let workspace_root = crate::domain::services::workspace_root_from_config(&ctx.config);
     let sandbox_driver = workspace_root.clone().and_then(|root| {
         let env = SandboxEnvironment::new(Some(root), SandboxPolicy::WorkspaceWrite);
         match create_platform_driver(env) {
@@ -197,13 +196,7 @@ fn agent_trace_log_dir(ctx: &AppContext) -> PathBuf {
         .or_else(|| {
             ctx.config.log_file.as_ref().and_then(|path| path.parent()).map(Path::to_path_buf)
         })
-        .unwrap_or_else(|| {
-            ctx.config
-                .settings_path
-                .parent()
-                .map(|path| path.join("logs"))
-                .unwrap_or_else(|| PathBuf::from("logs"))
-        })
+        .unwrap_or_else(slab_utils::app_home::logs_dir)
 }
 
 fn normalize_non_empty_path(value: &str) -> Option<PathBuf> {

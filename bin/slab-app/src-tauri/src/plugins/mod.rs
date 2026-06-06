@@ -53,10 +53,6 @@ pub fn resolve_plugins_root_for_app<R: Runtime>(
     resolve_plugins_root(app)
 }
 
-pub fn resolve_plugins_root_for_settings_path(settings_path: &Path) -> PathBuf {
-    registry::resolve_plugins_root_for_settings_path(settings_path)
-}
-
 pub fn register_protocol<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     protocol::register_protocol(builder)
 }

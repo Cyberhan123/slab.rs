@@ -9,7 +9,6 @@ export type WorkspaceInfo = {
   name: string
   slabDir: string
   settingsPath: string
-  workspaceConfigPath: string
   databasePath: string
   modelConfigDir: string
   sessionStateDir: string

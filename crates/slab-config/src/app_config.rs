@@ -1,7 +1,7 @@
 //! Server configuration, loaded from environment variables at startup.
 
-use dirs_next::config_dir;
 use slab_types::{DESKTOP_API_BIND, sqlite_url_for_path};
+use slab_utils::app_home;
 use std::path::{Path, PathBuf};
 
 use crate::{PluginJsRuntimeTransport, SettingsDocument};
@@ -17,8 +17,8 @@ pub struct Config {
 
     /// SQLite (or other) database URL.
     ///
-    /// By default this resolves to an absolute SQLite file in the user's Slab
-    /// config directory (for example `%AppData%\Slab\slab.db` on Windows).
+    /// By default this resolves to an absolute SQLite file under the Slab app
+    /// home (for example `%AppData%\cn.cyberhan.slab\slab.db` on Windows).
     /// Override it with `SLAB_DATABASE_URL` to point elsewhere.
     ///
     /// Supports any sqlx-compatible connection string – swap the scheme to
@@ -85,6 +85,12 @@ pub struct Config {
     /// Absolute path of the user-managed settings values file.
     pub settings_path: PathBuf,
 
+    /// Optional workspace-local settings overlay file.
+    pub settings_overlay_path: Option<PathBuf>,
+
+    /// Optional workspace root used by workspace services and agent tools.
+    pub workspace_root: Option<PathBuf>,
+
     /// Directory containing persisted model config JSON files.
     ///
     /// Files in this directory are scanned during startup and upserted into the
@@ -143,6 +149,10 @@ impl Config {
             session_state_dir: std::env::var("SLAB_SESSION_STATE_DIR")
                 .unwrap_or_else(|_| default_session_state_dir().to_string_lossy().into_owned()),
             settings_path: settings_path.clone(),
+            settings_overlay_path: std::env::var("SLAB_SETTINGS_OVERLAY_PATH")
+                .ok()
+                .map(PathBuf::from),
+            workspace_root: std::env::var("SLAB_WORKSPACE_ROOT").ok().map(PathBuf::from),
             model_config_dir,
             plugins_dir: plugin_install_dir_from_settings(&settings_path)
                 .unwrap_or_else(|| default_plugin_install_dir_for_settings_path(&settings_path)),
@@ -167,11 +177,11 @@ fn parse_env<T: std::str::FromStr>(key: &str, default: T) -> T {
 }
 
 pub fn default_app_dir() -> PathBuf {
-    config_dir().unwrap_or_else(|| PathBuf::from(".")).join("Slab")
+    app_home::app_home_dir()
 }
 
 pub fn default_settings_path() -> PathBuf {
-    default_app_dir().join("settings.json")
+    app_home::settings_path()
 }
 
 pub fn default_model_config_dir() -> PathBuf {
@@ -179,7 +189,7 @@ pub fn default_model_config_dir() -> PathBuf {
 }
 
 pub fn default_database_path() -> PathBuf {
-    default_app_dir().join("slab.db")
+    app_home::database_path()
 }
 
 pub fn default_database_url() -> String {
@@ -187,7 +197,7 @@ pub fn default_database_url() -> String {
 }
 
 pub fn default_session_state_dir() -> PathBuf {
-    default_app_dir().join("sessions")
+    app_home::sessions_dir()
 }
 
 pub fn default_plugins_dir() -> PathBuf {
@@ -222,52 +232,43 @@ fn settings_document_from_path(settings_path: &Path) -> Option<SettingsDocument>
 }
 
 pub fn default_plugin_install_dir_for_settings_path(settings_path: &Path) -> PathBuf {
-    settings_path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("plugins")
+    let _ = settings_path;
+    app_home::plugins_dir()
 }
 
 pub fn default_exec_rules_dir_for_settings_path(settings_path: &Path) -> PathBuf {
-    settings_path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("rules")
+    let _ = settings_path;
+    app_home::rules_dir()
 }
 
 pub fn default_runtime_log_dir() -> PathBuf {
-    default_app_dir().join("logs").join("runtime")
+    app_home::runtime_log_dir()
 }
 
 pub fn default_runtime_ipc_dir() -> PathBuf {
-    default_app_dir().join("ipc")
+    app_home::runtime_ipc_dir()
 }
 
 pub fn default_model_config_dir_for_settings_path(settings_path: &Path) -> PathBuf {
-    settings_path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("models")
+    let _ = settings_path;
+    app_home::models_dir()
 }
 
 pub fn default_output_dir_for_settings_path(settings_path: &Path) -> PathBuf {
-    settings_path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("outputs")
+    let _ = settings_path;
+    app_home::outputs_dir()
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        Config, default_exec_rules_dir_for_settings_path,
-        default_plugin_install_dir_for_settings_path,
+        Config, default_database_path, default_exec_rules_dir,
+        default_exec_rules_dir_for_settings_path, default_model_config_dir,
+        default_plugin_install_dir_for_settings_path, default_plugins_dir, default_runtime_ipc_dir,
+        default_runtime_log_dir, default_session_state_dir, default_settings_path,
     };
     use slab_types::DESKTOP_API_BIND;
+    use slab_utils::app_home;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::{Mutex, OnceLock};
@@ -330,7 +331,30 @@ mod tests {
     }
 
     #[test]
-    fn from_env_defaults_plugins_dir_next_to_settings_path() {
+    fn default_paths_use_app_home() {
+        let app_home = app_home::app_home_dir();
+
+        for path in [
+            default_settings_path(),
+            default_database_path(),
+            default_model_config_dir(),
+            default_session_state_dir(),
+            default_plugins_dir(),
+            default_exec_rules_dir(),
+            default_runtime_log_dir(),
+            default_runtime_ipc_dir(),
+        ] {
+            assert!(
+                path.starts_with(&app_home),
+                "{} should stay under {}",
+                path.display(),
+                app_home.display()
+            );
+        }
+    }
+
+    #[test]
+    fn from_env_defaults_plugins_dir_to_app_home() {
         let _lock = env_lock().lock().unwrap();
         let _settings = EnvGuard::capture("SLAB_SETTINGS_PATH");
         let _model_config = EnvGuard::capture("SLAB_MODEL_CONFIG_DIR");
@@ -407,13 +431,10 @@ mod tests {
     }
 
     #[test]
-    fn exec_rules_dir_defaults_next_to_settings_path() {
+    fn exec_rules_dir_defaults_to_app_home() {
         let settings_path = PathBuf::from("C:/Slab/settings.json");
 
-        assert_eq!(
-            default_exec_rules_dir_for_settings_path(&settings_path),
-            PathBuf::from("C:/Slab/rules")
-        );
+        assert_eq!(default_exec_rules_dir_for_settings_path(&settings_path), app_home::rules_dir());
     }
 
     #[test]

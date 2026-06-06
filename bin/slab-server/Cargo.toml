@@ -80,6 +80,5 @@ bytemuck  = { workspace = true }
 strum = { workspace = true }
 clap = { workspace = true }
 image     = { workspace = true }
-dirs-next = { workspace = true }
 jsonschema = { workspace = true }
 windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }

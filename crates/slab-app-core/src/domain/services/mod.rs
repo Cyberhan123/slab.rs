@@ -42,7 +42,7 @@ pub use ui_state::UiStateService;
 pub use video::VideoService;
 pub use workspace::WorkspaceService;
 pub use workspace_lsp::WorkspaceLspService;
-pub(crate) use workspace_lsp::workspace_root_from_settings_path;
+pub(crate) use workspace_lsp::workspace_root_from_config;
 
 use std::sync::Arc;
 

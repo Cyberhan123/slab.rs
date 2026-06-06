@@ -1,3 +1,4 @@
+pub mod app_home;
 pub mod cab;
 pub mod cargo_bin;
 pub mod fs;

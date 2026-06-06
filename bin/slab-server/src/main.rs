@@ -34,6 +34,10 @@ struct SupervisorArgs {
     database_url: Option<String>,
     #[arg(long = "settings-path")]
     settings_path: Option<PathBuf>,
+    #[arg(long = "settings-overlay-path", hide = true)]
+    settings_overlay_path: Option<PathBuf>,
+    #[arg(long = "workspace-root", hide = true)]
+    workspace_root: Option<PathBuf>,
     #[arg(long = "model-config-dir")]
     model_config_dir: Option<PathBuf>,
     #[arg(long = "session-state-dir")]
@@ -90,6 +94,12 @@ impl SupervisorArgs {
                 cfg.model_config_dir = default_model_config_dir_for_settings_path(settings_path);
             }
         }
+        if let Some(settings_overlay_path) = &self.settings_overlay_path {
+            cfg.settings_overlay_path = Some(settings_overlay_path.clone());
+        }
+        if let Some(workspace_root) = &self.workspace_root {
+            cfg.workspace_root = Some(workspace_root.clone());
+        }
         if let Some(model_config_dir) = &self.model_config_dir {
             cfg.model_config_dir = model_config_dir.clone();
         }
@@ -125,6 +135,12 @@ impl SupervisorArgs {
         }
         if self.settings_path.is_none() {
             self.settings_path = Some(cfg.settings_path.clone());
+        }
+        if self.settings_overlay_path.is_none() {
+            self.settings_overlay_path = cfg.settings_overlay_path.clone();
+        }
+        if self.workspace_root.is_none() {
+            self.workspace_root = cfg.workspace_root.clone();
         }
         if self.model_config_dir.is_none() {
             self.model_config_dir = Some(cfg.model_config_dir.clone());
@@ -297,8 +313,19 @@ where
     }
 
     info!(database_url = %cfg.database_url, "database ready");
-    let pmid = Arc::new(PmidService::load_from_path(cfg.settings_path.clone()).await?);
-    info!(settings_path = %cfg.settings_path.display(), "settings service ready");
+    let pmid = Arc::new(
+        PmidService::load_from_paths(cfg.settings_path.clone(), cfg.settings_overlay_path.clone())
+            .await?,
+    );
+    if let Some(settings_overlay_path) = &cfg.settings_overlay_path {
+        info!(
+            settings_path = %cfg.settings_path.display(),
+            settings_overlay_path = %settings_overlay_path.display(),
+            "settings service ready"
+        );
+    } else {
+        info!(settings_path = %cfg.settings_path.display(), "settings service ready");
+    }
     info!(
         model_config_dir = %cfg.model_config_dir.display(),
         "model config directory ready"
@@ -532,6 +559,7 @@ async fn shutdown_signal(listen_stdin: bool) {
 mod tests {
     use super::*;
     use slab_app_core::config::{Config, default_model_config_dir_for_settings_path};
+    use slab_utils::app_home;
     use std::path::PathBuf;
 
     #[test]
@@ -565,9 +593,29 @@ mod tests {
 
         assert_eq!(cfg.database_url, "sqlite:///tmp/api.db?mode=rwc");
         assert_eq!(cfg.settings_path, PathBuf::from("D:/Slab/api-settings.json"));
-        assert_eq!(cfg.model_config_dir, PathBuf::from("D:/Slab/models"));
+        assert_eq!(cfg.model_config_dir, app_home::models_dir());
         assert_eq!(cfg.plugins_dir, PathBuf::from("C:/Slab/plugins"));
-        assert_eq!(args.model_config_dir, Some(PathBuf::from("D:/Slab/models")));
+        assert_eq!(args.model_config_dir, Some(app_home::models_dir()));
+    }
+
+    #[test]
+    fn bootstrap_args_apply_workspace_overlay_to_runtime_config() {
+        let mut args = SupervisorArgs {
+            settings_path: Some(app_home::settings_path()),
+            settings_overlay_path: Some(PathBuf::from("D:/Workspace/.slab/settings.json")),
+            workspace_root: Some(PathBuf::from("D:/Workspace")),
+            ..SupervisorArgs::default()
+        };
+        let mut cfg = Config::from_env();
+
+        args.apply_bootstrap_config(&mut cfg);
+
+        assert_eq!(cfg.settings_path, app_home::settings_path());
+        assert_eq!(
+            cfg.settings_overlay_path,
+            Some(PathBuf::from("D:/Workspace/.slab/settings.json"))
+        );
+        assert_eq!(cfg.workspace_root, Some(PathBuf::from("D:/Workspace")));
     }
 
     #[test]

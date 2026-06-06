@@ -4543,16 +4543,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dirs-next"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b98cf8ebf19c3d1b223e151f99a4f9f0690dca41414773390fc824184ac833e1"
-dependencies = [
- "cfg-if",
- "dirs-sys-next",
-]
-
-[[package]]
 name = "dirs-sys"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14762,7 +14752,6 @@ version = "0.1.0"
 dependencies = [
  "axum 0.8.9",
  "base64 0.22.1",
- "dirs-next",
  "extism",
  "futures",
  "log",
@@ -14805,7 +14794,6 @@ dependencies = [
  "bytes",
  "chrono",
  "dashmap 6.2.1",
- "dirs-next",
  "ffmpeg-next",
  "futures",
  "genai",
@@ -14890,7 +14878,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "dirs-next",
  "schemars 1.2.1",
  "serde",
  "serde_json",
@@ -15319,7 +15306,6 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
- "dirs-next",
  "futures",
  "genai",
  "hf-hub",

@@ -1,9 +1,8 @@
-use std::path::Path;
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use crate::config::Config;
+use crate::config::{Config, default_runtime_ipc_dir, default_runtime_log_dir};
 use crate::domain::services::PmidService;
 use crate::error::AppCoreError;
 use crate::launch::{LaunchHostPaths, LaunchProfile, ResolvedLaunchSpec};
@@ -39,20 +38,14 @@ impl ManagedRuntimeHost {
         gateway_cfg: &Config,
         options: ManagedRuntimeHostStartOptions,
     ) -> Result<Self, AppCoreError> {
-        let runtime_log_dir_fallback = gateway_cfg
-            .settings_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| std::env::temp_dir().join("Slab"))
-            .join("logs");
-        let runtime_ipc_dir_fallback = gateway_cfg
-            .settings_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| std::env::temp_dir().join("Slab"))
-            .join("ipc");
+        let runtime_log_dir_fallback = runtime_log_dir_fallback();
+        let runtime_ipc_dir_fallback = runtime_ipc_dir_fallback();
 
-        let pmid = PmidService::load_from_path(gateway_cfg.settings_path.clone()).await?;
+        let pmid = PmidService::load_from_paths(
+            gateway_cfg.settings_path.clone(),
+            gateway_cfg.settings_overlay_path.clone(),
+        )
+        .await?;
         let launch_spec = pmid
             .resolve_launch_spec(
                 LaunchProfile::Server,
@@ -166,6 +159,14 @@ impl ManagedRuntimeHost {
     }
 }
 
+fn runtime_log_dir_fallback() -> std::path::PathBuf {
+    default_runtime_log_dir()
+}
+
+fn runtime_ipc_dir_fallback() -> std::path::PathBuf {
+    default_runtime_ipc_dir()
+}
+
 enum SupervisorActivation {
     Existing(RuntimeSupervisorControlHandle),
     Started,
@@ -204,5 +205,16 @@ fn mark_managed_backends_unavailable(
     let detail = format!("managed runtime startup failed: {error}");
     for child_spec in &launch_spec.children {
         status.mark_unavailable(child_spec.backend, detail.clone());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{runtime_ipc_dir_fallback, runtime_log_dir_fallback};
+
+    #[test]
+    fn runtime_fallback_paths_use_global_app_home() {
+        assert_eq!(runtime_log_dir_fallback(), slab_config::default_runtime_log_dir());
+        assert_eq!(runtime_ipc_dir_fallback(), slab_config::default_runtime_ipc_dir());
     }
 }

@@ -601,7 +601,7 @@
       "description": "Runtime plugin installation settings.",
       "properties": {
         "install_dir": {
-          "description": "Directory containing installed runtime plugin packages. Defaults to the `plugins`\ndirectory next to `settings.json`.",
+          "description": "Directory containing installed runtime plugin packages. Defaults to the `plugins`\ndirectory under the Slab application home.",
           "type": [
             "string",
             "null"
@@ -1216,6 +1216,30 @@
         }
       },
       "type": "object"
+    },
+    "WorkspacePluginSettingsConfig": {
+      "description": "Workspace-local plugin settings keyed by plugin id.",
+      "properties": {
+        "enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "WorkspaceSettingsConfig": {
+      "description": "Workspace-local settings stored as an overlay on top of global settings.",
+      "properties": {
+        "plugins": {
+          "additionalProperties": {
+            "$ref": "#/$defs/WorkspacePluginSettingsConfig"
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
     }
   },
   "$id": "https://slab.reorgix.com/manifests/v1/settings-document.schema.json",
@@ -1419,6 +1443,9 @@
           "source": {}
         }
       }
+    },
+    "workspace": {
+      "$ref": "#/$defs/WorkspaceSettingsConfig"
     }
   },
   "title": "Slab Settings Document",

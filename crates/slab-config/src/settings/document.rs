@@ -96,6 +96,8 @@ pub struct SettingsDocument {
     pub models: ModelSettingsConfig,
     #[serde(default)]
     pub plugin: PluginSettingsConfig,
+    #[serde(default, skip_serializing_if = "WorkspaceSettingsConfig::is_empty")]
+    pub workspace: WorkspaceSettingsConfig,
     #[serde(default)]
     pub server: ServerSettingsConfig,
 }
@@ -114,6 +116,7 @@ impl Default for SettingsDocument {
             providers: ProvidersConfig::default(),
             models: ModelSettingsConfig::default(),
             plugin: PluginSettingsConfig::default(),
+            workspace: WorkspaceSettingsConfig::default(),
             server: ServerSettingsConfig::default(),
         }
     }
@@ -793,7 +796,7 @@ const fn default_max_pressure_evictions_per_load() -> u32 {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
 pub struct PluginSettingsConfig {
     /// Directory containing installed runtime plugin packages. Defaults to the `plugins`
-    /// directory next to `settings.json`.
+    /// directory under the Slab application home.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub install_dir: Option<String>,
     /// Transport mode used for JS sidecar communication.
@@ -808,6 +811,26 @@ pub enum PluginJsRuntimeTransport {
     #[default]
     Stdio,
     Uds,
+}
+
+/// Workspace-local settings stored as an overlay on top of global settings.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct WorkspaceSettingsConfig {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub plugins: BTreeMap<String, WorkspacePluginSettingsConfig>,
+}
+
+impl WorkspaceSettingsConfig {
+    pub fn is_empty(&self) -> bool {
+        self.plugins.is_empty()
+    }
+}
+
+/// Workspace-local plugin settings keyed by plugin id.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct WorkspacePluginSettingsConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
 }
 
 /// Server-only settings.
@@ -1143,6 +1166,7 @@ mod tests {
         assert_eq!(settings.runtime.transport, RuntimeTransportMode::Ipc);
         assert_eq!(settings.server.address, DESKTOP_API_BIND);
         assert!(settings.runtime.logging.level.is_none());
+        assert!(settings.workspace.plugins.is_empty());
     }
 
     #[test]

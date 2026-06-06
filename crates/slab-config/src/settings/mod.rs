@@ -23,8 +23,9 @@ pub use document::{
     WebSearchBraveProviderConfig, WebSearchDuckDuckGoProviderConfig, WebSearchExaProviderConfig,
     WebSearchGoogleProviderConfig, WebSearchProviderId, WebSearchProvidersConfig,
     WebSearchSearxngProviderConfig, WebSearchSerpApiProviderConfig, WebSearchTavilyProviderConfig,
-    provider_registry_json_schema, render_settings_document_json_schema,
-    settings_document_json_schema, string_list_json_schema, websearch_providers_json_schema,
+    WorkspacePluginSettingsConfig, WorkspaceSettingsConfig, provider_registry_json_schema,
+    render_settings_document_json_schema, settings_document_json_schema, string_list_json_schema,
+    websearch_providers_json_schema,
 };
 pub use launch::{
     DesktopLaunchProfileConfig, LaunchBackendConfig, LaunchBackendsConfig, LaunchConfig,

@@ -14,6 +14,8 @@ const SERVER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(8);
 pub struct ServerSidecarConfig {
     pub database_url: Option<String>,
     pub settings_path: Option<PathBuf>,
+    pub settings_overlay_path: Option<PathBuf>,
+    pub workspace_root: Option<PathBuf>,
     pub model_config_dir: Option<PathBuf>,
     pub session_state_dir: Option<PathBuf>,
     pub plugins_dir: Option<PathBuf>,
@@ -79,14 +81,12 @@ fn start_server_sidecar<R: tauri::Runtime>(
         .path()
         .resolve("resources/libs", BaseDirectory::Resource)
         .map_err(|error| format!("failed to resolve bundled runtime libraries: {error}"))?;
-    let log_dir = app_handle
-        .path()
-        .app_log_dir()
-        .map_err(|error| format!("failed to resolve app log directory: {error}"))?;
-    std::fs::create_dir_all(&log_dir).map_err(|error| {
-        format!("failed to create app log directory {}: {error}", log_dir.display())
-    })?;
-    let log_file = log_dir.join("slab-server.log");
+    let log_file = slab_utils::app_home::server_log_file();
+    if let Some(log_dir) = log_file.parent() {
+        std::fs::create_dir_all(log_dir).map_err(|error| {
+            format!("failed to create app log directory {}: {error}", log_dir.display())
+        })?;
+    }
     let mut args = vec![
         "--shutdown-on-stdin-close".to_owned(),
         "--log-file".to_owned(),
@@ -101,6 +101,14 @@ fn start_server_sidecar<R: tauri::Runtime>(
     if let Some(settings_path) = &config.settings_path {
         args.push("--settings-path".to_owned());
         args.push(settings_path.display().to_string());
+    }
+    if let Some(settings_overlay_path) = &config.settings_overlay_path {
+        args.push("--settings-overlay-path".to_owned());
+        args.push(settings_overlay_path.display().to_string());
+    }
+    if let Some(workspace_root) = &config.workspace_root {
+        args.push("--workspace-root".to_owned());
+        args.push(workspace_root.display().to_string());
     }
     if let Some(model_config_dir) = &config.model_config_dir {
         args.push("--model-config-dir".to_owned());

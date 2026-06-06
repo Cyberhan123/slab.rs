@@ -34,7 +34,15 @@ pub struct PmidService {
 
 impl PmidService {
     pub async fn load_from_path(path: PathBuf) -> Result<Self, ConfigError> {
-        let settings = Arc::new(SettingsDocumentProvider::load(path).await?);
+        Self::load_from_paths(path, None).await
+    }
+
+    pub async fn load_from_paths(
+        path: PathBuf,
+        overlay_path: Option<PathBuf>,
+    ) -> Result<Self, ConfigError> {
+        let settings =
+            Arc::new(SettingsDocumentProvider::load_with_overlay(path, overlay_path).await?);
         let config = load_config(&settings.document().await);
         Ok(Self { settings, config: Arc::new(RwLock::new(config)) })
     }
@@ -828,7 +836,7 @@ mod tests {
         let property = service.property("models.cache_dir").await.expect("property");
         let plugin_install_dir = service.property("plugin.install_dir").await.expect("plugin dir");
         let expected_plugin_dir =
-            path.parent().expect("parent").join("plugins").to_string_lossy().into_owned();
+            slab_utils::app_home::plugins_dir().to_string_lossy().into_owned();
 
         assert_eq!(config.runtime.model_cache_dir.as_deref(), Some("C:/models"));
         assert!(config.agent.debug);
@@ -838,6 +846,51 @@ mod tests {
         assert_eq!(plugin_install_dir.effective_value, json!(expected_plugin_dir).into());
         assert_eq!(plugin_install_dir.schema.default_value, plugin_install_dir.effective_value);
         assert!(!plugin_install_dir.is_overridden);
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn load_from_paths_applies_workspace_overlay() {
+        let path = temp_settings_path();
+        let overlay_path = path.parent().expect("parent").join("workspace").join("settings.json");
+        fs::create_dir_all(path.parent().expect("parent")).expect("base dir");
+        fs::create_dir_all(overlay_path.parent().expect("parent")).expect("overlay dir");
+        let mut document = SettingsDocument::default();
+        document.models.cache_dir = Some("C:/global-models".to_owned());
+        fs::write(&path, serde_json::to_string_pretty(&document).expect("serialize"))
+            .expect("write base");
+        fs::write(
+            &overlay_path,
+            serde_json::to_string_pretty(&json!({
+                "models": {
+                    "cache_dir": "D:/workspace-models"
+                }
+            }))
+            .expect("serialize"),
+        )
+        .expect("write overlay");
+
+        let service = PmidService::load_from_paths(path.clone(), Some(overlay_path.clone()))
+            .await
+            .expect("pmid service");
+        let document_view = service.document().await;
+
+        assert_eq!(
+            service.config().runtime.model_cache_dir.as_deref(),
+            Some("D:/workspace-models")
+        );
+        assert_eq!(document_view.settings_path, overlay_path.display().to_string());
+
+        service
+            .update_setting(
+                "models.cache_dir",
+                UpdateSettingCommand { op: crate::UpdateSettingOperation::Unset, value: None },
+            )
+            .await
+            .expect("unset");
+
+        assert_eq!(service.config().runtime.model_cache_dir.as_deref(), Some("C:/global-models"));
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }

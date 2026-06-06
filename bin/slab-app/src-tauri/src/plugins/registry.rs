@@ -1,13 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use dirs_next::config_dir;
 use slab_plugin::PluginRegistry;
 
 use super::types::PluginInfo;
 pub use slab_plugin::{LoadedPlugin, is_path_within_root, normalize_relative_path};
-
-pub const DEFAULT_PLUGINS_DIR: &str = "plugins";
 
 pub struct PluginRegistryState {
     registry: Arc<PluginRegistry>,
@@ -34,22 +31,7 @@ impl PluginRegistryState {
 
 pub fn resolve_plugins_root<R: tauri::Runtime>(_app: &tauri::App<R>) -> Result<PathBuf, String> {
     let settings_path = settings_path_for_plugins();
-    Ok(resolve_plugins_root_with(&settings_path, plugin_install_dir_from_settings(&settings_path)))
-}
-
-pub fn resolve_plugins_root_for_settings_path(settings_path: &Path) -> PathBuf {
-    resolve_plugins_root_with(settings_path, plugin_install_dir_from_settings(settings_path))
-}
-
-fn resolve_plugins_root_with(
-    settings_path: &Path,
-    settings_install_dir: Option<PathBuf>,
-) -> PathBuf {
-    if let Some(path) = settings_install_dir {
-        return path;
-    }
-
-    default_plugins_dir_for_settings_path(settings_path)
+    Ok(plugin_install_dir_from_settings(&settings_path).unwrap_or_else(default_plugins_dir))
 }
 
 fn settings_path_for_plugins() -> PathBuf {
@@ -60,18 +42,14 @@ fn settings_path_for_plugins() -> PathBuf {
 }
 
 fn default_settings_path() -> PathBuf {
-    config_dir().unwrap_or_else(|| PathBuf::from(".")).join("Slab").join("settings.json")
+    slab_utils::app_home::settings_path()
 }
 
-fn default_plugins_dir_for_settings_path(settings_path: &Path) -> PathBuf {
-    settings_path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(DEFAULT_PLUGINS_DIR)
+fn default_plugins_dir() -> PathBuf {
+    slab_utils::app_home::plugins_dir()
 }
 
-fn plugin_install_dir_from_settings(settings_path: &Path) -> Option<PathBuf> {
+fn plugin_install_dir_from_settings(settings_path: &std::path::Path) -> Option<PathBuf> {
     let raw = std::fs::read_to_string(settings_path).ok()?;
     let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
     value
