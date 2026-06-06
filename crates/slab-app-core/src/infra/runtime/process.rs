@@ -13,7 +13,9 @@ use crate::launch::ResolvedRuntimeChildSpec;
 
 use super::supervisor::{RuntimeChildExit, RuntimeChildHandle, RuntimeChildSpawner};
 
-const RUNTIME_CHILD_READY_TIMEOUT: Duration = Duration::from_secs(5);
+// Backend startup can spend several seconds in GPU runtime discovery and shared library init
+// before the gRPC socket is reachable.
+const RUNTIME_CHILD_READY_TIMEOUT: Duration = Duration::from_secs(15);
 const RUNTIME_CHILD_READY_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const RUNTIME_CHILD_READY_CONNECT_TIMEOUT: Duration = Duration::from_millis(250);
 const RUNTIME_CHILD_FAILED_START_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
