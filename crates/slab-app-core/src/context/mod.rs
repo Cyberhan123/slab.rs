@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub mod config;
@@ -115,6 +116,7 @@ fn build_agent_control(
 ) -> slab_agent::AgentControl {
     use slab_agent::{AgentControl, ToolRouter};
     use slab_agent_tools::{ShellPolicy, ShellRuleSet};
+    use slab_agent_tracing::{AgentTraceSink, FileAgentTraceSink, NoopAgentTraceSink};
     use slab_sandboxing::{SandboxEnvironment, SandboxPolicy, create_platform_driver};
 
     let llm =
@@ -164,8 +166,49 @@ fn build_agent_control(
 
     let notify_port: Arc<dyn slab_agent::AgentNotifyPort> = notify.clone();
     let approval_port: Arc<dyn slab_agent::ApprovalPort> = notify;
+    let (trace, trace_dir): (Arc<dyn AgentTraceSink>, Option<PathBuf>) =
+        if ctx.pmid.config().agent.debug {
+            let dir = agent_trace_log_dir(ctx);
+            (FileAgentTraceSink::shared(dir.clone()), Some(dir))
+        } else {
+            (Arc::new(NoopAgentTraceSink), None)
+        };
 
-    AgentControl::new(llm, store_adapter, notify_port, approval_port, Arc::new(tool_router), 32, 4)
+    AgentControl::new_with_hooks_and_tracing(
+        llm,
+        store_adapter,
+        notify_port,
+        approval_port,
+        Arc::new(tool_router),
+        slab_agent::AgentControlLimits { max_threads: 32, max_depth: 4 },
+        Vec::new(),
+        trace,
+        trace_dir,
+    )
+}
+
+fn agent_trace_log_dir(ctx: &AppContext) -> PathBuf {
+    let settings = ctx.pmid.config();
+    settings
+        .logging
+        .path
+        .as_deref()
+        .and_then(normalize_non_empty_path)
+        .or_else(|| {
+            ctx.config.log_file.as_ref().and_then(|path| path.parent()).map(Path::to_path_buf)
+        })
+        .unwrap_or_else(|| {
+            ctx.config
+                .settings_path
+                .parent()
+                .map(|path| path.join("logs"))
+                .unwrap_or_else(|| PathBuf::from("logs"))
+        })
+}
+
+fn normalize_non_empty_path(value: &str) -> Option<PathBuf> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
 }
 
 fn build_agent_mcp_client(ctx: &AppContext) -> Option<Arc<slab_mcp::McpClient>> {

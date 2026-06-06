@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use chrono::Utc;
 use futures::{StreamExt, stream};
 use serde_json::Value;
+use slab_agent_tracing::record_json_from_context;
 use uuid::Uuid;
 
 use crate::context::ModelState;
@@ -279,6 +280,7 @@ pub(super) struct LocalChatRequestConfig {
     pub(super) structured_output: Option<StructuredOutput>,
     pub(super) tools: Vec<slab_proto::openai::FunctionTool>,
     pub(super) stop: Vec<String>,
+    pub(super) agent_trace: Option<slab_agent_tracing::AgentTraceContext>,
     pub(super) stream: bool,
     pub(super) include_usage: bool,
 }
@@ -411,11 +413,30 @@ pub(super) async fn create_chat_completion(
     // template's own thinking protocol.
     let native_thinking =
         super::template::template_supports_thinking(prompt_profile.chat_template_source.as_deref());
+    let injected_guidance = if native_thinking {
+        None
+    } else {
+        local_reasoning_guidance(config.reasoning_effort, config.verbosity)
+    };
     let request_messages = if native_thinking {
         messages.to_vec()
     } else {
         apply_local_reasoning_controls(messages, config.reasoning_effort, config.verbosity)
     };
+    if let Some(trace_context) = config.agent_trace.as_ref() {
+        record_json_from_context(
+            trace_context,
+            "slab-app-core",
+            "local_reasoning_policy_injected",
+            serde_json::json!({
+                "native_thinking": native_thinking,
+                "injected": injected_guidance.is_some(),
+                "guidance": injected_guidance,
+                "reasoning_effort": config.reasoning_effort,
+                "verbosity": config.verbosity,
+            }),
+        );
+    }
 
     let prompt = super::template::build_prompt(
         &request_messages,
@@ -440,6 +461,24 @@ pub(super) async fn create_chat_completion(
         stop_count = effective_stop.len(),
         "local chat prompt rendered"
     );
+    if let Some(trace_context) = config.agent_trace.as_ref() {
+        record_json_from_context(
+            trace_context,
+            "slab-app-core",
+            "local_prompt_rendered",
+            serde_json::json!({
+                "model": model,
+                "messages": request_messages,
+                "prompt": prompt,
+                "native_thinking": native_thinking,
+                "chat_template_source": prompt_profile.chat_template_source,
+                "tools": config.tools,
+                "stop_sequences": effective_stop,
+                "trailing_stop_markers": trailing_stop_markers,
+                "gbnf": gbnf,
+            }),
+        );
+    }
     let request = RuntimeTextGenerationRequest {
         model: model.to_owned(),
         prompt: prompt.clone(),
@@ -455,7 +494,16 @@ pub(super) async fn create_chat_completion(
         stream: config.stream,
         gbnf,
         stop_sequences: effective_stop.clone(),
+        agent_trace: config.agent_trace.clone(),
     };
+    if let Some(trace_context) = config.agent_trace.as_ref() {
+        record_json_from_context(
+            trace_context,
+            "slab-app-core",
+            "runtime_request",
+            runtime_request_payload(&request),
+        );
+    }
 
     if config.stream {
         let usage_guard =
@@ -498,6 +546,7 @@ pub(super) async fn create_chat_completion(
         let token_stream_content_stop_state = Arc::clone(&content_stop_state);
         let effective_stop_for_tokens = effective_stop.clone();
         let trailing_stop_markers_for_tokens = trailing_stop_markers.clone();
+        let trace_context_for_tokens = config.agent_trace.clone();
         let token_stream = backend_stream
             .then(move |chunk| {
                 let completion_id = completion_id_for_tokens.clone();
@@ -508,9 +557,18 @@ pub(super) async fn create_chat_completion(
                 let content_stop_state = Arc::clone(&token_stream_content_stop_state);
                 let effective_stop = effective_stop_for_tokens.clone();
                 let trailing_stop_markers = trailing_stop_markers_for_tokens.clone();
+                let trace_context = trace_context_for_tokens.clone();
                 async move {
                     match chunk {
                         Ok(message) => {
+                            if let Some(trace_context) = trace_context.as_ref() {
+                                record_json_from_context(
+                                    trace_context,
+                                    "slab-app-core",
+                                    "runtime_stream_chunk",
+                                    runtime_chunk_payload(&message),
+                                );
+                            }
                             let decoded = text_chunk_from_runtime(message);
                             if decoded.done {
                                 let mut terminal = terminal_metadata
@@ -530,6 +588,18 @@ pub(super) async fn create_chat_completion(
                                     .finish(&effective_stop, &trailing_stop_markers);
                                 if emission.matched {
                                     terminal.finish_reason = Some("stop".to_owned());
+                                    if let Some(trace_context) = trace_context.as_ref() {
+                                        record_json_from_context(
+                                            trace_context,
+                                            "slab-app-core",
+                                            "local_stop_matched",
+                                            serde_json::json!({
+                                                "phase": "stream_finish_flush",
+                                                "stop_sequences": effective_stop,
+                                                "trailing_stop_markers": trailing_stop_markers,
+                                            }),
+                                        );
+                                    }
                                 }
                                 let mut chunks = Vec::new();
                                 if !emission.text.is_empty() {
@@ -581,6 +651,18 @@ pub(super) async fn create_chat_completion(
                                             .lock()
                                             .expect("local chat terminal metadata lock poisoned")
                                             .finish_reason = Some("stop".to_owned());
+                                        if let Some(trace_context) = trace_context.as_ref() {
+                                            record_json_from_context(
+                                                trace_context,
+                                                "slab-app-core",
+                                                "local_stop_matched",
+                                                serde_json::json!({
+                                                    "phase": "stream_reasoning_content",
+                                                    "stop_sequences": effective_stop,
+                                                    "trailing_stop_markers": trailing_stop_markers,
+                                                }),
+                                            );
+                                        }
                                     }
                                     if !emission.text.is_empty() {
                                         chunks.push(ChatStreamChunk::Data(super::build_chunk(
@@ -612,6 +694,18 @@ pub(super) async fn create_chat_completion(
                                         .lock()
                                         .expect("local chat terminal metadata lock poisoned")
                                         .finish_reason = Some("stop".to_owned());
+                                    if let Some(trace_context) = trace_context.as_ref() {
+                                        record_json_from_context(
+                                            trace_context,
+                                            "slab-app-core",
+                                            "local_stop_matched",
+                                            serde_json::json!({
+                                                "phase": "stream_content",
+                                                "stop_sequences": effective_stop,
+                                                "trailing_stop_markers": trailing_stop_markers,
+                                            }),
+                                        );
+                                    }
                                 }
                                 if !emission.text.is_empty() {
                                     vec![ChatStreamChunk::Data(super::build_chunk(
@@ -711,7 +805,16 @@ pub(super) async fn create_chat_completion(
             |error| AppCoreError::BackendNotReady(format!("llama backend not ready: {error}")),
         )?;
 
-    let mut response = text_response_from_runtime(state.runtime().chat(request).await?);
+    let runtime_response = state.runtime().chat(request).await?;
+    if let Some(trace_context) = config.agent_trace.as_ref() {
+        record_json_from_context(
+            trace_context,
+            "slab-app-core",
+            "runtime_response",
+            runtime_response_payload(&runtime_response),
+        );
+    }
+    let mut response = text_response_from_runtime(runtime_response);
 
     let usage = response.usage.clone().unwrap_or_else(|| {
         super::build_estimated_usage(&prompt, &response.text, response.tokens_used)
@@ -727,6 +830,18 @@ pub(super) async fn create_chat_completion(
     }
     let (trimmed_text, stop_matched) = super::apply_stop_sequences(&response.text, &effective_stop);
     if stop_matched {
+        if let Some(trace_context) = config.agent_trace.as_ref() {
+            record_json_from_context(
+                trace_context,
+                "slab-app-core",
+                "local_stop_matched",
+                serde_json::json!({
+                    "phase": "text_response",
+                    "stop_sequences": effective_stop,
+                    "trailing_stop_markers": trailing_stop_markers,
+                }),
+            );
+        }
         response.text = trimmed_text;
         response.finish_reason = Some("stop".to_owned());
     } else {
@@ -769,6 +884,7 @@ pub(super) async fn create_text_completion(
         stream: false,
         gbnf,
         stop_sequences: Vec::new(),
+        agent_trace: None,
     };
 
     let _usage_guard =
@@ -800,6 +916,57 @@ fn text_usage_from_runtime(usage: RuntimeTextGenerationUsage) -> TextGenerationU
         },
         estimated: usage.estimated,
     }
+}
+
+fn runtime_request_payload(request: &RuntimeTextGenerationRequest) -> serde_json::Value {
+    serde_json::json!({
+        "model": request.model,
+        "prompt": request.prompt,
+        "system_prompt": request.system_prompt,
+        "max_tokens": request.max_tokens,
+        "temperature": request.temperature,
+        "top_p": request.top_p,
+        "top_k": request.top_k,
+        "min_p": request.min_p,
+        "presence_penalty": request.presence_penalty,
+        "repetition_penalty": request.repetition_penalty,
+        "session_key": request.session_key,
+        "stream": request.stream,
+        "gbnf": request.gbnf,
+        "stop_sequences": request.stop_sequences,
+    })
+}
+
+fn runtime_response_payload(response: &RuntimeTextGenerationResponse) -> serde_json::Value {
+    serde_json::json!({
+        "text": response.text,
+        "finish_reason": response.finish_reason,
+        "tokens_used": response.tokens_used,
+        "usage": response.usage.as_ref().map(runtime_usage_payload),
+        "metadata": response.metadata,
+    })
+}
+
+fn runtime_chunk_payload(chunk: &RuntimeTextGenerationChunk) -> serde_json::Value {
+    serde_json::json!({
+        "delta": chunk.delta,
+        "done": chunk.done,
+        "finish_reason": chunk.finish_reason,
+        "usage": chunk.usage.as_ref().map(runtime_usage_payload),
+        "metadata": chunk.metadata,
+    })
+}
+
+fn runtime_usage_payload(usage: &RuntimeTextGenerationUsage) -> serde_json::Value {
+    serde_json::json!({
+        "prompt_tokens": usage.prompt_tokens,
+        "completion_tokens": usage.completion_tokens,
+        "total_tokens": usage.total_tokens,
+        "prompt_tokens_details": {
+            "cached_tokens": usage.prompt_tokens_details.cached_tokens,
+        },
+        "estimated": usage.estimated,
+    })
 }
 
 fn text_response_from_runtime(response: RuntimeTextGenerationResponse) -> TextGenerationResponse {

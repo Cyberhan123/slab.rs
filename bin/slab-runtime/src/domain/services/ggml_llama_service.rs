@@ -155,6 +155,7 @@ fn build_inference_params(
         ignore_eos: request.ignore_eos.unwrap_or(false),
         logit_bias,
         stop_sequences: request.stop_sequences.unwrap_or_default(),
+        agent_trace: request.agent_trace,
         stream: false,
     })
 }

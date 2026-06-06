@@ -275,6 +275,7 @@ pub fn settings_document_to_json_value(document: &SettingsDocument) -> Value {
             }
         },
             "agent": {
+                "debug": document.agent.debug,
                 "tools": {
                     "mcp": {
                         "enabled": document.agent.tools.mcp.enabled,

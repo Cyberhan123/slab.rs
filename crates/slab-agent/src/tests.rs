@@ -12,8 +12,8 @@ use std::{
 };
 
 use crate::{
-    AgentControl, AgentError, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput,
-    ToolRouter,
+    AgentControl, AgentControlLimits, AgentError, ToolApprovalRequest, ToolContext, ToolHandler,
+    ToolOutput, ToolRouter,
     config::AgentConfig,
     event::AgentEventKind,
     port::{
@@ -23,6 +23,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
+use slab_agent_tracing::{AgentTraceContext, AgentTraceEvent, AgentTraceSink};
 use slab_types::ConversationMessage;
 
 struct TestEchoTool;
@@ -122,6 +123,7 @@ impl LlmPort for MockLlm {
         _messages: &[ConversationMessage],
         _tools: &[ToolSpec],
         _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
     ) -> Result<LlmResponse, AgentError> {
         let mut count = self.call_count.lock().unwrap();
         *count += 1;
@@ -162,6 +164,7 @@ impl LlmPort for StreamingLlm {
         _messages: &[ConversationMessage],
         _tools: &[ToolSpec],
         _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
     ) -> Result<LlmResponse, AgentError> {
         Ok(LlmResponse {
             content: Some("hello".into()),
@@ -177,6 +180,7 @@ impl LlmPort for StreamingLlm {
         _messages: &[ConversationMessage],
         _tools: &[ToolSpec],
         _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
         observer: &mut dyn LlmStreamObserver,
     ) -> Result<LlmResponse, AgentError> {
         observer.on_text_delta("hel").await?;
@@ -210,6 +214,7 @@ impl LlmPort for StreamingToolCallLlm {
         _messages: &[ConversationMessage],
         _tools: &[ToolSpec],
         _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
     ) -> Result<LlmResponse, AgentError> {
         Ok(LlmResponse {
             content: Some("done".into()),
@@ -225,6 +230,7 @@ impl LlmPort for StreamingToolCallLlm {
         _messages: &[ConversationMessage],
         _tools: &[ToolSpec],
         _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
         observer: &mut dyn LlmStreamObserver,
     ) -> Result<LlmResponse, AgentError> {
         let next_call = {
@@ -505,6 +511,17 @@ impl ApprovalPort for NoopNotify {
     }
 }
 
+#[derive(Default)]
+struct RecordingTraceSink {
+    events: Mutex<Vec<(AgentTraceContext, AgentTraceEvent)>>,
+}
+
+impl AgentTraceSink for RecordingTraceSink {
+    fn record(&self, context: &AgentTraceContext, event: AgentTraceEvent) {
+        self.events.lock().unwrap().push((context.clone(), event));
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 async fn wait_for_persisted_status(
@@ -601,6 +618,83 @@ async fn smoke_echo_tool_agent_completes() {
 
     // By now the thread has been removed from the registry; verify the count.
     assert_eq!(control.active_thread_count().await, 0);
+}
+
+#[tokio::test]
+async fn trace_sink_records_prompt_llm_tool_and_turn_events() {
+    let llm = Arc::new(MockLlm::new());
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let mut router = ToolRouter::new();
+    router.register(Box::new(TestEchoTool));
+    let trace = Arc::new(RecordingTraceSink::default());
+    let trace_sink: Arc<dyn AgentTraceSink> = trace.clone();
+
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new_with_hooks_and_tracing(
+        llm,
+        store_port,
+        notify,
+        approval,
+        Arc::new(router),
+        AgentControlLimits { max_threads: 8, max_depth: 4 },
+        Vec::new(),
+        trace_sink,
+        None,
+    ));
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: slab_types::ConversationMessageContent::Text("Please echo".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig {
+        model: "mock".into(),
+        max_turns: 5,
+        system_prompt: Some("trace system prompt".into()),
+        ..AgentConfig::default()
+    };
+
+    let thread_id = control.spawn("trace-session".into(), config, messages).await.expect("spawn");
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+
+    let events = trace.events.lock().unwrap().clone();
+    assert!(
+        events.iter().all(|(context, _event)| context.session_id == "trace-session"),
+        "{events:#?}"
+    );
+    assert_trace_event(&events, "system_prompt_injected");
+    assert_trace_event(&events, "agent_llm_request");
+    assert_trace_event(&events, "llm_response_normalized");
+    assert_trace_event(&events, "tool_call_detected");
+    assert_trace_event(&events, "tool_call_arguments_parsed");
+    assert_trace_event(&events, "tool_call_output");
+    assert_trace_event(&events, "turn_completed");
+    assert_trace_event(&events, "thread_completed");
+    assert!(events.iter().any(|(context, _event)| context.turn_index == Some(0)));
+
+    let system_prompt = events
+        .iter()
+        .find(|(_context, event)| event.event == "system_prompt_injected")
+        .expect("system prompt event");
+    assert_eq!(system_prompt.1.payload["system_prompt"], "trace system prompt");
+
+    let tool_output = events
+        .iter()
+        .find(|(_context, event)| event.event == "tool_call_output")
+        .expect("tool output event");
+    assert_eq!(tool_output.1.payload["tool_name"], "echo");
+    assert_eq!(tool_output.1.payload["output"], "hello from agent");
+}
+
+fn assert_trace_event(events: &[(AgentTraceContext, AgentTraceEvent)], event_name: &str) {
+    assert!(
+        events.iter().any(|(_context, event)| event.event == event_name),
+        "missing trace event {event_name}; events: {events:#?}"
+    );
 }
 
 #[tokio::test]
@@ -1127,6 +1221,7 @@ impl LlmPort for FailingLlm {
         _messages: &[ConversationMessage],
         _tools: &[ToolSpec],
         _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
     ) -> Result<LlmResponse, AgentError> {
         Err(AgentError::Llm("simulated LLM failure".into()))
     }
@@ -1142,6 +1237,7 @@ impl LlmPort for SlowLlm {
         _messages: &[ConversationMessage],
         _tools: &[ToolSpec],
         _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
     ) -> Result<LlmResponse, AgentError> {
         tokio::time::sleep(std::time::Duration::from_secs(30)).await;
         Ok(LlmResponse {

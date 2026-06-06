@@ -6,6 +6,7 @@
 
 use async_trait::async_trait;
 
+use slab_agent_tracing::AgentTraceContext;
 use slab_types::ConversationMessage;
 use slab_types::agent::ToolCallStatus;
 
@@ -149,6 +150,7 @@ pub trait LlmPort: Send + Sync {
         messages: &[ConversationMessage],
         tools: &[ToolSpec],
         config: &AgentConfig,
+        trace_context: &AgentTraceContext,
     ) -> Result<LlmResponse, AgentError>;
 
     /// Perform a chat completion while forwarding visible text deltas as they
@@ -162,9 +164,11 @@ pub trait LlmPort: Send + Sync {
         messages: &[ConversationMessage],
         tools: &[ToolSpec],
         config: &AgentConfig,
+        trace_context: &AgentTraceContext,
         observer: &mut dyn LlmStreamObserver,
     ) -> Result<LlmResponse, AgentError> {
-        let mut response = self.chat_completion(model, messages, tools, config).await?;
+        let mut response =
+            self.chat_completion(model, messages, tools, config, trace_context).await?;
         if response.tool_calls.is_empty()
             && let Some(content) = response.content.as_deref()
             && !content.is_empty()

@@ -6,6 +6,7 @@ use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
+use slab_agent_tracing::{AgentTraceSink, NoopAgentTraceSink};
 use slab_types::{ConversationMessage, ConversationMessageContent};
 
 use crate::{
@@ -65,6 +66,8 @@ pub struct AgentControl {
     hooks: Arc<Vec<Arc<dyn AgentHook>>>,
     compact: Arc<dyn CompactPort>,
     risk: Arc<dyn ToolRiskAnalyzer>,
+    trace: Arc<dyn AgentTraceSink>,
+    trace_dir: Option<std::path::PathBuf>,
     max_threads: usize,
     max_depth: u32,
 }
@@ -105,6 +108,32 @@ impl AgentControl {
         limits: AgentControlLimits,
         hooks: Vec<Arc<dyn AgentHook>>,
     ) -> Self {
+        Self::new_with_hooks_and_tracing(
+            llm,
+            store,
+            notify,
+            approval,
+            tool_router,
+            limits,
+            hooks,
+            Arc::new(NoopAgentTraceSink),
+            None,
+        )
+    }
+
+    /// Create a new controller with hooks and an explicit trace sink.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_hooks_and_tracing(
+        llm: Arc<dyn LlmPort>,
+        store: Arc<dyn AgentStorePort>,
+        notify: Arc<dyn AgentNotifyPort>,
+        approval: Arc<dyn ApprovalPort>,
+        tool_router: Arc<ToolRouter>,
+        limits: AgentControlLimits,
+        hooks: Vec<Arc<dyn AgentHook>>,
+        trace: Arc<dyn AgentTraceSink>,
+        trace_dir: Option<std::path::PathBuf>,
+    ) -> Self {
         Self {
             threads: Arc::new(RwLock::new(HashMap::new())),
             llm,
@@ -115,6 +144,8 @@ impl AgentControl {
             hooks: Arc::new(hooks),
             compact: Arc::new(NoopCompactPort::default()),
             risk: Arc::new(BasicToolRiskAnalyzer),
+            trace,
+            trace_dir,
             max_threads: limits.max_threads,
             max_depth: limits.max_depth,
         }
@@ -142,6 +173,8 @@ impl AgentControl {
             hooks: Arc::new(Vec::new()),
             compact,
             risk,
+            trace: Arc::new(NoopAgentTraceSink),
+            trace_dir: None,
             max_threads: limits.max_threads,
             max_depth: limits.max_depth,
         }
@@ -364,6 +397,8 @@ impl AgentControl {
         let hooks = Arc::clone(&self.hooks);
         let compact = Arc::clone(&self.compact);
         let risk = Arc::clone(&self.risk);
+        let trace = Arc::clone(&self.trace);
+        let trace_dir = self.trace_dir.clone();
         let cancellation = CancellationToken::new();
         let threads_cleanup = Arc::clone(&self.threads);
         let id_cleanup = thread_id.clone();
@@ -376,6 +411,8 @@ impl AgentControl {
             hooks,
             compact,
             risk,
+            trace,
+            trace_dir,
             cancellation: cancellation.clone(),
         };
 

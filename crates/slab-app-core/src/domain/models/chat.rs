@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use slab_agent_tracing::AgentTraceContext;
 use slab_proto::openai::FunctionTool;
 pub use slab_types::chat::{
     ChatModelCapabilities, ChatModelSource, ChatReasoningEffort, ChatVerbosity,
@@ -113,6 +114,7 @@ pub struct ChatCompletionCommand {
     pub model: String,
     pub messages: Vec<ConversationMessage>,
     pub tools: Vec<FunctionTool>,
+    pub agent_trace: Option<AgentTraceContext>,
     pub continue_generation: bool,
     pub common: CommonChatParams,
     pub local: LocalChatParams,
@@ -128,13 +130,13 @@ pub struct TextCompletionCommand {
     pub cloud: CloudChatParams,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum StructuredOutput {
     JsonObject,
     JsonSchema(StructuredOutputJsonSchema),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StructuredOutputJsonSchema {
     pub name: String,
     pub description: Option<String>,

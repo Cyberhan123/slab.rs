@@ -1,4 +1,5 @@
 use crate::infra::backends::ggml;
+use slab_agent_tracing::record_json_from_context;
 use slab_llama::{
     Llama, LlamaContextParams, LlamaInferenceOutput, LlamaLogitBias, LlamaModel, LlamaModelParams,
     LlamaRuntime, LlamaSamplingOptions, LlamaSessionSnapshot, LlamaStopInfo,
@@ -35,6 +36,7 @@ pub(crate) struct LlamaDispatchRequest {
     pub ignore_eos: bool,
     pub logit_bias: Option<serde_json::Value>,
     pub stop_sequences: Vec<String>,
+    pub agent_trace: Option<slab_agent_tracing::AgentTraceContext>,
 }
 
 #[derive(Debug, Clone)]
@@ -161,6 +163,24 @@ fn stop_info_to_metadata(stop: &LlamaStopInfo) -> TextGenerationMetadata {
         }),
         ..Default::default()
     }
+}
+
+fn llama_request_payload(request: &LlamaDispatchRequest) -> serde_json::Value {
+    serde_json::json!({
+        "prompt": request.prompt,
+        "max_tokens": request.max_tokens,
+        "session_key": request.session_key,
+        "gbnf": request.gbnf,
+        "temperature": request.temperature,
+        "top_p": request.top_p,
+        "top_k": request.top_k,
+        "min_p": request.min_p,
+        "repetition_penalty": request.repetition_penalty,
+        "presence_penalty": request.presence_penalty,
+        "ignore_eos": request.ignore_eos,
+        "logit_bias": request.logit_bias,
+        "stop_sequences": request.stop_sequences,
+    })
 }
 
 fn resolve_logit_bias_value(value: &serde_json::Value) -> Option<f32> {
@@ -629,6 +649,15 @@ impl GGMLLlamaEngine {
         let gbnf = request.gbnf.clone();
         let commit_gbnf = request.gbnf.clone();
         let stop_sequences = request.stop_sequences.clone();
+        let agent_trace = request.agent_trace.clone();
+        if let Some(trace_context) = agent_trace.as_ref() {
+            record_json_from_context(
+                trace_context,
+                "slab-runtime",
+                "llama_request",
+                llama_request_payload(&request),
+            );
+        }
         let logit_bias = self.resolve_logit_bias(request.logit_bias.as_ref())?;
         let prepared = self.prepare_managed_session(&request, prompt, &logit_bias).await?;
 
@@ -647,6 +676,17 @@ impl GGMLLlamaEngine {
                 // Apply stop sequence trimming to the generated text before committing.
                 let (trimmed_text, stop_matched) =
                     apply_stop_sequences(&output.text, &stop_sequences);
+                if stop_matched && let Some(trace_context) = agent_trace.as_ref() {
+                    record_json_from_context(
+                        trace_context,
+                        "slab-runtime",
+                        "llama_stop_matched",
+                        serde_json::json!({
+                            "mode": "text",
+                            "stop_sequences": stop_sequences,
+                        }),
+                    );
+                }
                 let usage =
                     self.build_usage(&prepared.full_prompt, &trimmed_text, prepared.cached_tokens);
                 let finish_reason = if stop_matched {
@@ -671,11 +711,49 @@ impl GGMLLlamaEngine {
                     )
                     .await
                 {
+                    if let Some(trace_context) = agent_trace.as_ref() {
+                        record_json_from_context(
+                            trace_context,
+                            "slab-runtime",
+                            "llama_session_commit_failed",
+                            serde_json::json!({ "error": error.to_string() }),
+                        );
+                    }
                     warn!(error = %error, "failed to persist llama session snapshot after inference");
+                } else if let Some(trace_context) = agent_trace.as_ref() {
+                    record_json_from_context(
+                        trace_context,
+                        "slab-runtime",
+                        "llama_session_committed",
+                        serde_json::json!({ "mode": "text" }),
+                    );
+                }
+                if let Some(trace_context) = agent_trace.as_ref() {
+                    record_json_from_context(
+                        trace_context,
+                        "slab-runtime",
+                        "llama_response",
+                        serde_json::json!({
+                            "text": parsed.content,
+                            "raw_text": output.text,
+                            "trimmed_text": trimmed_text,
+                            "finish_reason": finish_reason,
+                            "usage": usage,
+                            "metadata": metadata,
+                        }),
+                    );
                 }
                 Ok(LlamaDispatchOutput { text: parsed.content, usage, finish_reason, metadata })
             }
             Err(error) => {
+                if let Some(trace_context) = agent_trace.as_ref() {
+                    record_json_from_context(
+                        trace_context,
+                        "slab-runtime",
+                        "llama_error",
+                        serde_json::json!({ "error": error.to_string() }),
+                    );
+                }
                 self.drop_managed_session(prepared.key, prepared.sid).await;
                 Err(error)
             }
@@ -692,6 +770,15 @@ impl GGMLLlamaEngine {
         let gbnf = request.gbnf.clone();
         let commit_gbnf = request.gbnf.clone();
         let stop_sequences = request.stop_sequences.clone();
+        let agent_trace = request.agent_trace.clone();
+        if let Some(trace_context) = agent_trace.as_ref() {
+            record_json_from_context(
+                trace_context,
+                "slab-runtime",
+                "llama_request",
+                llama_request_payload(&request),
+            );
+        }
         let logit_bias = self.resolve_logit_bias(request.logit_bias.as_ref())?;
         let prepared = self.prepare_managed_session(&request, prompt, &logit_bias).await?;
 
@@ -745,6 +832,17 @@ impl GGMLLlamaEngine {
                         if cancel_requested {
                             cancelled = true;
                             if let Err(error) = engine.cancel_generate(sid).await {
+                                if let Some(trace_context) = agent_trace.as_ref() {
+                                    record_json_from_context(
+                                        trace_context,
+                                        "slab-runtime",
+                                        "llama_cancel_failed",
+                                        serde_json::json!({
+                                            "session_id": sid,
+                                            "error": error.to_string(),
+                                        }),
+                                    );
+                                }
                                 warn!(session_id = sid, error = %error, "failed to cancel llama generation");
                             }
                         } else if cancel_changed.is_ok() {
@@ -759,6 +857,14 @@ impl GGMLLlamaEngine {
 
                         match chunk {
                             StreamChunk::Token(text) => {
+                                if let Some(trace_context) = agent_trace.as_ref() {
+                                    record_json_from_context(
+                                        trace_context,
+                                        "slab-runtime",
+                                        "llama_stream_token",
+                                        serde_json::json!({ "text": text }),
+                                    );
+                                }
                                 generated.push_str(&text);
 
                                 // Check for stop sequences in the accumulated output.
@@ -771,6 +877,18 @@ impl GGMLLlamaEngine {
                                     {
                                         // Found a stop sequence — forward text up to it, then cancel.
                                         stop_matched = true;
+                                        if let Some(trace_context) = agent_trace.as_ref() {
+                                            record_json_from_context(
+                                                trace_context,
+                                                "slab-runtime",
+                                                "llama_stop_matched",
+                                                serde_json::json!({
+                                                    "mode": "stream",
+                                                    "stop_index": stop_index,
+                                                    "stop_sequences": stop_sequences,
+                                                }),
+                                            );
+                                        }
                                         let safe_end = stop_index;
                                         if safe_end > forwarded_len {
                                             let forward_text = generated[forwarded_len..safe_end].to_owned();
@@ -789,6 +907,17 @@ impl GGMLLlamaEngine {
                                         generated.truncate(safe_end);
                                         // Cancel the backend generation.
                                         if let Err(error) = engine.cancel_generate(sid).await {
+                                            if let Some(trace_context) = agent_trace.as_ref() {
+                                                record_json_from_context(
+                                                    trace_context,
+                                                    "slab-runtime",
+                                                    "llama_cancel_failed",
+                                                    serde_json::json!({
+                                                        "session_id": sid,
+                                                        "error": error.to_string(),
+                                                    }),
+                                                );
+                                            }
                                             warn!(
                                                 session_id = sid,
                                                 error = %error,
@@ -855,9 +984,30 @@ impl GGMLLlamaEngine {
                             StreamChunk::Stop(stop) => {
                                 terminal_finish_reason = Some(stop.finish_reason.clone());
                                 terminal_metadata = stop_info_to_metadata(&stop);
+                                if let Some(trace_context) = agent_trace.as_ref() {
+                                    record_json_from_context(
+                                        trace_context,
+                                        "slab-runtime",
+                                        "llama_stream_stop",
+                                        serde_json::json!({
+                                            "finish_reason": stop.finish_reason,
+                                            "stop_token_id": stop.stop_token_id,
+                                            "stop_token_text": stop.stop_token_text,
+                                            "stop_token_kind": stop.stop_token_kind,
+                                        }),
+                                    );
+                                }
                             }
                             StreamChunk::Error(error) => {
                                 stream_error = true;
+                                if let Some(trace_context) = agent_trace.as_ref() {
+                                    record_json_from_context(
+                                        trace_context,
+                                        "slab-runtime",
+                                        "llama_stream_error",
+                                        serde_json::json!({ "error": error }),
+                                    );
+                                }
                                 if stream_tx.send(BaseStreamChunk::Error(error)).await.is_err() {
                                     forward_failed = true;
                                 }
@@ -892,6 +1042,18 @@ impl GGMLLlamaEngine {
                     .clone()
                     .or_else(|| stop_matched.then(|| "stop".to_owned()));
                 if let Some(finish_reason) = finish_reason {
+                    if let Some(trace_context) = agent_trace.as_ref() {
+                        record_json_from_context(
+                            trace_context,
+                            "slab-runtime",
+                            "llama_stream_finish",
+                            serde_json::json!({
+                                "finish_reason": finish_reason,
+                                "metadata": terminal_metadata,
+                                "generated": generated,
+                            }),
+                        );
+                    }
                     let event = TextGenerationStreamEvent {
                         delta: Some(String::new()),
                         done: Some(true),
@@ -913,7 +1075,16 @@ impl GGMLLlamaEngine {
                 && !stream_error
                 && !cancelled
                 && let Some(usage) = engine.build_usage(&full_prompt, &generated, cached_tokens)
-                && stream_tx
+            {
+                if let Some(trace_context) = agent_trace.as_ref() {
+                    record_json_from_context(
+                        trace_context,
+                        "slab-runtime",
+                        "llama_stream_usage",
+                        serde_json::json!({ "usage": usage }),
+                    );
+                }
+                if stream_tx
                     .send(BaseStreamChunk::Json(
                         serde_json::to_value(TextGenerationStreamEvent {
                             usage: Some(usage),
@@ -923,8 +1094,9 @@ impl GGMLLlamaEngine {
                     ))
                     .await
                     .is_err()
-            {
-                forward_failed = true;
+                {
+                    forward_failed = true;
+                }
             }
 
             if effectively_completed
@@ -945,9 +1117,37 @@ impl GGMLLlamaEngine {
                     .commit_managed_session(key, Some(sid), &full_prompt, &generated, gbnf)
                     .await
                 {
+                    if let Some(trace_context) = agent_trace.as_ref() {
+                        record_json_from_context(
+                            trace_context,
+                            "slab-runtime",
+                            "llama_session_commit_failed",
+                            serde_json::json!({ "error": error.to_string() }),
+                        );
+                    }
                     warn!(error = %error, "failed to persist llama session snapshot after stream");
+                } else if let Some(trace_context) = agent_trace.as_ref() {
+                    record_json_from_context(
+                        trace_context,
+                        "slab-runtime",
+                        "llama_session_committed",
+                        serde_json::json!({ "mode": "stream" }),
+                    );
                 }
             } else {
+                if let Some(trace_context) = agent_trace.as_ref() {
+                    record_json_from_context(
+                        trace_context,
+                        "slab-runtime",
+                        "llama_session_dropped",
+                        serde_json::json!({
+                            "completed": effectively_completed,
+                            "forward_failed": forward_failed,
+                            "stream_error": stream_error,
+                            "cancelled": cancelled,
+                        }),
+                    );
+                }
                 engine.drop_managed_session(key, Some(sid)).await;
             }
         });

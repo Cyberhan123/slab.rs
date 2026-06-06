@@ -175,6 +175,7 @@ pub(crate) struct GgmlLlamaChatRequest {
     pub stop_sequences: Option<Vec<String>>,
     pub ignore_eos: Option<bool>,
     pub logit_bias_json: Option<Vec<u8>>,
+    pub agent_trace: Option<slab_agent_tracing::AgentTraceContext>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -550,6 +551,7 @@ mod tests {
             stop_sequences: Some(pb::StringList { values: Vec::new() }),
             ignore_eos: Some(false),
             logit_bias_json: Some(Vec::new()),
+            agent_trace_json: None,
         })
         .expect("decode should succeed");
 

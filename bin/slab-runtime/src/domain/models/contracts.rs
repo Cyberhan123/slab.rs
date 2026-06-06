@@ -139,6 +139,8 @@ pub(crate) struct TextGenerationOptions {
     pub logit_bias: Option<serde_json::Value>,
     #[serde(default)]
     pub stop_sequences: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_trace: Option<slab_agent_tracing::AgentTraceContext>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

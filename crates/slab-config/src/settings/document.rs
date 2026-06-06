@@ -279,10 +279,18 @@ impl Default for FfmpegToolConfig {
 }
 
 /// Agent-specific settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct AgentSettingsConfig {
+    #[serde(default = "default_enabled")]
+    pub debug: bool,
     #[serde(default)]
     pub tools: AgentToolsConfig,
+}
+
+impl Default for AgentSettingsConfig {
+    fn default() -> Self {
+        Self { debug: true, tools: AgentToolsConfig::default() }
+    }
 }
 
 /// Agent tool settings.
@@ -1131,6 +1139,7 @@ mod tests {
             settings.agent.tools.websearch.default_provider,
             WebSearchProviderId::Duckduckgo
         );
+        assert!(settings.agent.debug);
         assert_eq!(settings.runtime.transport, RuntimeTransportMode::Ipc);
         assert_eq!(settings.server.address, DESKTOP_API_BIND);
         assert!(settings.runtime.logging.level.is_none());

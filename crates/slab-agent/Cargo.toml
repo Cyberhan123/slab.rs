@@ -10,6 +10,7 @@ license.workspace = true
 
 [dependencies]
 slab-types    = { workspace = true }
+slab-agent-tracing = { workspace = true }
 tokio         = { workspace = true }
 tokio-util    = { workspace = true }
 futures       = { workspace = true }

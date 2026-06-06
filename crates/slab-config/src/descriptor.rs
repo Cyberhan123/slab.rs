@@ -39,6 +39,7 @@ pub(crate) fn setting_descriptor(pmid: &str) -> Option<SettingDescriptor> {
         "tools.ffmpeg.source.artifact" => {
             descriptor!("tools.ffmpeg.source.artifact", tools.ffmpeg.source.artifact)
         }
+        "agent.debug" => descriptor!("agent.debug", agent.debug),
         "agent.tools.mcp.enabled" => {
             descriptor!("agent.tools.mcp.enabled", agent.tools.mcp.enabled)
         }

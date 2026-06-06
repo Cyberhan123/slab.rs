@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use serde_json::Value;
+use slab_agent_tracing::AgentTraceContext;
 use slab_types::{RuntimeBackendId, RuntimeBackendLoadSpec};
 
 use crate::domain::models::TimedTextSegment;
@@ -40,6 +41,7 @@ pub struct RuntimeTextGenerationRequest {
     pub stream: bool,
     pub gbnf: Option<String>,
     pub stop_sequences: Vec<String>,
+    pub agent_trace: Option<AgentTraceContext>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

@@ -54,6 +54,7 @@ struct InferenceOptions {
     ignore_eos: bool,
     logit_bias: Option<serde_json::Value>,
     stop_sequences: Vec<String>,
+    agent_trace: Option<slab_agent_tracing::AgentTraceContext>,
 }
 
 impl InferenceOptions {
@@ -75,6 +76,7 @@ impl InferenceOptions {
             ignore_eos: params.ignore_eos,
             logit_bias: params.logit_bias,
             stop_sequences: params.stop_sequences,
+            agent_trace: params.agent_trace,
         }
     }
 }
@@ -211,6 +213,7 @@ impl LlamaWorker {
             ignore_eos,
             logit_bias,
             stop_sequences,
+            agent_trace,
         } = options;
         let engine = self
             .engine
@@ -231,6 +234,7 @@ impl LlamaWorker {
             ignore_eos,
             logit_bias,
             stop_sequences,
+            agent_trace,
         };
         let LlamaDispatchOutput { text, usage, finish_reason, metadata } = engine
             .dispatch_inference(request)
@@ -260,6 +264,7 @@ impl LlamaWorker {
             ignore_eos,
             logit_bias,
             stop_sequences,
+            agent_trace,
         } = options;
         let engine = self
             .engine
@@ -280,6 +285,7 @@ impl LlamaWorker {
             ignore_eos,
             logit_bias,
             stop_sequences,
+            agent_trace,
         };
         engine.dispatch_inference_stream(request, cancel.0).await.map_err(
             |error: crate::infra::backends::ggml::EngineError| {

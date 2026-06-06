@@ -26,6 +26,10 @@
     "AgentSettingsConfig": {
       "description": "Agent-specific settings.",
       "properties": {
+        "debug": {
+          "default": true,
+          "type": "boolean"
+        },
         "tools": {
           "$ref": "#/$defs/AgentToolsConfig",
           "default": {
@@ -1229,6 +1233,7 @@
     "agent": {
       "$ref": "#/$defs/AgentSettingsConfig",
       "default": {
+        "debug": true,
         "tools": {
           "mcp": {
             "enabled": false

@@ -93,6 +93,7 @@ impl PmidService {
 
 fn load_config(settings: &SettingsDocument) -> PmidConfig {
     PmidConfig {
+        logging: settings.logging.clone(),
         setup: SetupConfig {
             initialized: false,
             ffmpeg: SetupFfmpegConfig {
@@ -407,6 +408,12 @@ fn empty_sections() -> Vec<SettingsSectionView> {
                 .to_owned(),
             subsections: vec![
                 SettingsSubsectionView {
+                    id: "general".to_owned(),
+                    title: "General".to_owned(),
+                    description_md: "Agent diagnostics and runtime behavior.".to_owned(),
+                    properties: Vec::new(),
+                },
+                SettingsSubsectionView {
                     id: "mcp".to_owned(),
                     title: "MCP".to_owned(),
                     description_md: "Control exposure of configured MCP servers as agent tools."
@@ -491,6 +498,7 @@ fn section_location(path: &str) -> (&'static str, &'static str) {
         _ if path.starts_with("database.") => ("database", "general"),
         _ if path.starts_with("logging.") => ("logging", "general"),
         _ if path.starts_with("tools.ffmpeg.") => ("tools", "ffmpeg"),
+        "agent.debug" => ("agent", "general"),
         _ if path.starts_with("agent.tools.mcp.") => ("agent", "mcp"),
         _ if path.starts_with("agent.tools.websearch.") => ("agent", "websearch"),
         _ if path.starts_with("runtime.ggml.backends.llama.") => ("runtime", "llama"),
@@ -520,6 +528,7 @@ fn value_type(path: &str, effective: &SettingValue, default: &SettingValue) -> S
         return SettingValueType::Object;
     }
     if path.ends_with(".enabled")
+        || path.ends_with(".debug")
         || path.ends_with(".json")
         || path.ends_with(".auto_download")
         || path.ends_with(".flash_attn")
@@ -615,6 +624,7 @@ fn property_label(path: &str) -> String {
         "runtime.mode" => "Runtime Mode".to_owned(),
         "runtime.transport" => "Transport".to_owned(),
         "runtime.sessions.state_dir" => "Session State Directory".to_owned(),
+        "agent.debug" => "Agent Debug Trace".to_owned(),
         "agent.tools.mcp.enabled" => "MCP Tools".to_owned(),
         "agent.tools.websearch.default_provider" => "Default Provider".to_owned(),
         "agent.tools.websearch.providers" => "Web Search Providers".to_owned(),
@@ -645,6 +655,9 @@ fn property_description(path: &str) -> String {
         "tools.ffmpeg.enabled" => "Enable FFmpeg integration for media tooling.".to_owned(),
         "tools.ffmpeg.auto_download" => "Download FFmpeg automatically when it is missing.".to_owned(),
         "tools.ffmpeg.install_dir" => "Optional install directory for the FFmpeg sidecar.".to_owned(),
+        "agent.debug" => {
+            "Write full-fidelity per-session agent trace files for prompt, tool, and runtime debugging.".to_owned()
+        }
         "agent.tools.mcp.enabled" => {
             "Expose configured MCP tools to the agent tool router. Disabled by default.".to_owned()
         }
@@ -818,6 +831,7 @@ mod tests {
             path.parent().expect("parent").join("plugins").to_string_lossy().into_owned();
 
         assert_eq!(config.runtime.model_cache_dir.as_deref(), Some("C:/models"));
+        assert!(config.agent.debug);
         assert_eq!(config.setup.ffmpeg.dir.as_deref(), Some("C:/ffmpeg"));
         assert_eq!(config.chat.providers.len(), 1);
         assert_eq!(property.effective_value, json!("C:/models").into());
@@ -923,6 +937,11 @@ mod tests {
         let document = service.document().await;
         let agent_section =
             document.sections.iter().find(|section| section.id == "agent").expect("agent section");
+        let general_subsection = agent_section
+            .subsections
+            .iter()
+            .find(|subsection| subsection.id == "general")
+            .expect("general subsection");
         let mcp_subsection = agent_section
             .subsections
             .iter()
@@ -948,10 +967,18 @@ mod tests {
             .iter()
             .find(|property| property.pmid == "agent.tools.websearch.providers")
             .expect("providers property");
+        let agent_debug = general_subsection
+            .properties
+            .iter()
+            .find(|property| property.pmid == "agent.debug")
+            .expect("agent debug property");
         let provider_enum = default_provider.schema.enum_values.as_ref().expect("provider enum");
         let schema = providers.schema.json_schema.as_ref().expect("providers schema");
 
         assert_eq!(agent_section.title, "Agent");
+        assert_eq!(general_subsection.title, "General");
+        assert_eq!(agent_debug.schema.value_type, SettingValueType::Boolean);
+        assert_eq!(agent_debug.effective_value, SettingValue::Boolean(true));
         assert_eq!(mcp_subsection.title, "MCP");
         assert_eq!(mcp_enabled.schema.value_type, SettingValueType::Boolean);
         assert_eq!(websearch_subsection.title, "Web Search");

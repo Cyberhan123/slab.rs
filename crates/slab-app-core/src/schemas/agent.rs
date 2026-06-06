@@ -360,7 +360,8 @@ mod tests {
         });
 
         assert_eq!(message.role, "tool");
-        assert_eq!(message.rendered_text(), "search result");
+        assert_eq!(message.content.rendered_text(), "search result");
+        assert!(message.rendered_text().contains("tool_call_id: call-1"));
         assert_eq!(message.name.as_deref(), Some("web_search"));
         assert_eq!(message.tool_call_id.as_deref(), Some("call-1"));
         assert_eq!(message.tool_calls.len(), 1);

@@ -14710,6 +14710,7 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
+ "slab-agent-tracing",
  "slab-types",
  "thiserror 2.0.18",
  "tokio",
@@ -14742,6 +14743,17 @@ dependencies = [
  "tracing",
  "websearch",
  "which 8.0.2",
+]
+
+[[package]]
+name = "slab-agent-tracing"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]
@@ -14808,6 +14820,7 @@ dependencies = [
  "serde_json",
  "slab-agent",
  "slab-agent-tools",
+ "slab-agent-tracing",
  "slab-build-utils",
  "slab-config",
  "slab-file",
@@ -15229,6 +15242,7 @@ dependencies = [
  "parity-tokio-ipc",
  "serde",
  "serde_json",
+ "slab-agent-tracing",
  "slab-diffusion",
  "slab-llama",
  "slab-proto",

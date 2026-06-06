@@ -14,6 +14,7 @@ use slab_agent::{
     AgentStreamAssembler, AgentStreamDelta, parse_rendered_tool_call_output,
     port::{LlmPort, LlmResponse, LlmStreamObserver, ParsedToolCall, ToolSpec},
 };
+use slab_agent_tracing::{AgentTraceContext, record_json_from_context};
 use slab_proto::openai::{FunctionTool, FunctionToolType};
 use slab_types::{ConversationMessage, ConversationMessageContent};
 use tracing::warn;
@@ -51,9 +52,17 @@ impl LlmPort for ServerLlmAdapter {
         messages: &[ConversationMessage],
         tools: &[ToolSpec],
         config: &AgentConfig,
+        trace_context: &AgentTraceContext,
     ) -> Result<LlmResponse, AgentError> {
-        let command =
-            chat_command_from_agent_config(model, messages.to_vec(), tools, config, false);
+        let command = chat_command_from_agent_config(
+            model,
+            messages.to_vec(),
+            tools,
+            config,
+            false,
+            trace_context,
+        );
+        record_chat_command(trace_context, "chat_command_created", &command);
 
         let svc = crate::domain::services::ChatService::new((*self.state).clone());
         let output = svc.create_chat_completion(command).await.map_err(|e| {
@@ -62,7 +71,11 @@ impl LlmPort for ServerLlmAdapter {
         })?;
 
         match output {
-            ChatCompletionOutput::Json(result) => llm_response_from_chat_result(result),
+            ChatCompletionOutput::Json(result) => {
+                let response = llm_response_from_chat_result(result)?;
+                record_llm_response(trace_context, "chat_response_normalized", &response);
+                Ok(response)
+            }
             ChatCompletionOutput::Stream(_) => Err(AgentError::Llm(
                 "ServerLlmAdapter received an unexpected streaming response".into(),
             )),
@@ -75,9 +88,18 @@ impl LlmPort for ServerLlmAdapter {
         messages: &[ConversationMessage],
         tools: &[ToolSpec],
         config: &AgentConfig,
+        trace_context: &AgentTraceContext,
         observer: &mut dyn LlmStreamObserver,
     ) -> Result<LlmResponse, AgentError> {
-        let command = chat_command_from_agent_config(model, messages.to_vec(), tools, config, true);
+        let command = chat_command_from_agent_config(
+            model,
+            messages.to_vec(),
+            tools,
+            config,
+            true,
+            trace_context,
+        );
+        record_chat_command(trace_context, "chat_command_created", &command);
 
         let svc = crate::domain::services::ChatService::new((*self.state).clone());
         let output = svc.create_chat_completion(command).await.map_err(|e| {
@@ -94,10 +116,14 @@ impl LlmPort for ServerLlmAdapter {
                 {
                     observer.on_text_delta(content).await?;
                 }
+                record_llm_response(trace_context, "chat_response_normalized", &response);
                 Ok(response)
             }
             ChatCompletionOutput::Stream(stream) => {
-                llm_response_from_chat_stream(stream, observer).await
+                let response =
+                    llm_response_from_chat_stream(stream, observer, trace_context).await?;
+                record_llm_response(trace_context, "chat_stream_normalized", &response);
+                Ok(response)
             }
         }
     }
@@ -109,12 +135,14 @@ fn chat_command_from_agent_config(
     tools: &[ToolSpec],
     config: &AgentConfig,
     stream: bool,
+    trace_context: &AgentTraceContext,
 ) -> ChatCompletionCommand {
     ChatCompletionCommand {
         id: None,
         model: model.to_owned(),
         messages,
         tools: response_function_tools_from_agent_tools(tools),
+        agent_trace: Some(trace_context.clone()),
         continue_generation: false,
         common: CommonChatParams {
             max_tokens: config.max_tokens,
@@ -213,11 +241,18 @@ fn llm_response_from_chat_result(result: ChatCompletionResult) -> Result<LlmResp
 async fn llm_response_from_chat_stream(
     mut stream: futures::stream::BoxStream<'static, ChatStreamChunk>,
     observer: &mut dyn LlmStreamObserver,
+    trace_context: &AgentTraceContext,
 ) -> Result<LlmResponse, AgentError> {
     let mut assembler = AgentStreamAssembler::default();
 
     while let Some(chunk) = stream.next().await {
         let ChatStreamChunk::Data(data) = chunk;
+        record_json_from_context(
+            trace_context,
+            "slab-app-core",
+            "chat_stream_chunk",
+            serde_json::json!({ "data": data }),
+        );
         for delta in assembler.ingest_data(&data)? {
             match delta {
                 AgentStreamDelta::Text(text) => observer.on_text_delta(&text).await?,
@@ -229,6 +264,18 @@ async fn llm_response_from_chat_stream(
     }
 
     let completion = assembler.finish();
+    record_json_from_context(
+        trace_context,
+        "slab-app-core",
+        "chat_stream_assembled",
+        serde_json::json!({
+            "content": completion.content,
+            "reasoning": completion.reasoning,
+            "content_already_streamed": completion.content_already_streamed,
+            "tool_calls": parsed_tool_calls_payload(&completion.tool_calls),
+            "finish_reason": completion.finish_reason,
+        }),
+    );
     if let Some(delta) = completion.unstreamed_text_delta.as_deref() {
         observer.on_text_delta(delta).await?;
     }
@@ -254,6 +301,80 @@ fn response_content_from_stream_parts(content: &str, reasoning: &str) -> Option<
     )
 }
 
+fn record_chat_command(
+    trace_context: &AgentTraceContext,
+    event: &'static str,
+    command: &ChatCompletionCommand,
+) {
+    record_json_from_context(
+        trace_context,
+        "slab-app-core",
+        event,
+        serde_json::json!({
+            "id": command.id,
+            "model": command.model,
+            "messages": command.messages,
+            "tools": command.tools,
+            "continue_generation": command.continue_generation,
+            "common": {
+                "max_tokens": command.common.max_tokens,
+                "temperature": command.common.temperature,
+                "top_p": command.common.top_p,
+                "top_k": command.common.top_k,
+                "min_p": command.common.min_p,
+                "presence_penalty": command.common.presence_penalty,
+                "repetition_penalty": command.common.repetition_penalty,
+                "n": command.common.n,
+                "stream": command.common.stream,
+                "stop": command.common.stop,
+                "stream_options": {
+                    "include_usage": command.common.stream_options.include_usage,
+                },
+            },
+            "local": {
+                "gbnf": command.local.gbnf,
+                "structured_output": command.local.structured_output,
+            },
+            "cloud": {
+                "reasoning_effort": command.cloud.reasoning_effort,
+                "verbosity": command.cloud.verbosity,
+                "structured_output": command.cloud.structured_output,
+            },
+        }),
+    );
+}
+
+fn record_llm_response(
+    trace_context: &AgentTraceContext,
+    event: &'static str,
+    response: &LlmResponse,
+) {
+    record_json_from_context(
+        trace_context,
+        "slab-app-core",
+        event,
+        serde_json::json!({
+            "content": response.content,
+            "content_already_streamed": response.content_already_streamed,
+            "finish_reason": response.finish_reason,
+            "tool_calls": parsed_tool_calls_payload(&response.tool_calls),
+        }),
+    );
+}
+
+fn parsed_tool_calls_payload(tool_calls: &[ParsedToolCall]) -> Vec<Value> {
+    tool_calls
+        .iter()
+        .map(|tool_call| {
+            serde_json::json!({
+                "id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,7 +395,9 @@ mod tests {
             ..AgentConfig::default()
         };
 
-        let command = chat_command_from_agent_config("mock", Vec::new(), &[], &config, true);
+        let trace_context = AgentTraceContext::new("session");
+        let command =
+            chat_command_from_agent_config("mock", Vec::new(), &[], &config, true, &trace_context);
 
         assert_eq!(command.common.max_tokens, Some(4096));
         assert_eq!(command.common.temperature, Some(0.2));
@@ -339,8 +462,10 @@ mod tests {
             reasoning_done: Vec::new(),
         };
 
-        let response =
-            llm_response_from_chat_stream(stream, &mut observer).await.expect("stream response");
+        let trace_context = AgentTraceContext::new("test-session");
+        let response = llm_response_from_chat_stream(stream, &mut observer, &trace_context)
+            .await
+            .expect("stream response");
 
         assert_eq!(observer.text_delta, ["answer"]);
         assert_eq!(observer.reasoning_delta, ["plan ", "done"]);

@@ -739,6 +739,7 @@ async fn create_chat_completion_with_state(
                     structured_output: command.local.structured_output.clone(),
                     tools: command.tools.clone(),
                     stop: command.common.stop.clone(),
+                    agent_trace: command.agent_trace.clone(),
                     stream: true,
                     include_usage: command.common.stream_options.include_usage,
                 },
@@ -821,6 +822,7 @@ async fn create_chat_completion_with_state(
                     structured_output: command.local.structured_output.clone(),
                     tools: command.tools.clone(),
                     stop: command.common.stop.clone(),
+                    agent_trace: command.agent_trace.clone(),
                     stream: false,
                     include_usage: false,
                 },
@@ -1064,6 +1066,7 @@ mod test {
                 tool_calls: Vec::new(),
             }],
             tools: Vec::new(),
+            agent_trace: None,
             continue_generation: false,
             common: crate::domain::models::CommonChatParams {
                 max_tokens: None,

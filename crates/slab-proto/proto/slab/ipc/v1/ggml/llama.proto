@@ -34,6 +34,7 @@ message GgmlLlamaChatRequest {
   StringList stop_sequences = 11;
   optional bool ignore_eos = 12;
   optional bytes logit_bias_json = 13;
+  optional string agent_trace_json = 14;
 }
 
 message GgmlLlamaChatResponse {

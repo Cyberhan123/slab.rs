@@ -7,6 +7,7 @@ use tokio::sync::watch;
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
+use slab_agent_tracing::{AgentTraceContext, AgentTraceSink, record_json};
 use slab_types::{ConversationMessage, ConversationMessageContent};
 
 use tokio_util::sync::CancellationToken;
@@ -53,6 +54,8 @@ pub(crate) struct AgentThreadRuntime {
     pub hooks: Arc<Vec<Arc<dyn AgentHook>>>,
     pub compact: Arc<dyn CompactPort>,
     pub risk: Arc<dyn ToolRiskAnalyzer>,
+    pub trace: Arc<dyn AgentTraceSink>,
+    pub trace_dir: Option<std::path::PathBuf>,
     pub cancellation: CancellationToken,
 }
 
@@ -109,11 +112,34 @@ impl AgentThread {
             hooks,
             compact,
             risk,
+            trace,
+            trace_dir,
             cancellation,
         } = runtime;
         let thread_id = self.id.clone();
+        let mut trace_context =
+            AgentTraceContext::new(self.session_id.clone()).with_thread(thread_id.clone());
+        if let Some(trace_dir) = trace_dir {
+            trace_context = trace_context.with_trace_dir(trace_dir);
+        }
         let now = Utc::now().to_rfc3339();
         let started_at = std::time::Instant::now();
+        record_json(
+            trace.as_ref(),
+            &trace_context,
+            "slab-agent",
+            "thread_started",
+            serde_json::json!({
+                "session_id": self.session_id,
+                "thread_id": thread_id,
+                "parent_id": self.parent_id,
+                "depth": self.depth,
+                "starting_turn_index": starting_turn_index,
+                "persist_messages_from": persist_messages_from,
+                "config": self.config,
+                "initial_messages": messages,
+            }),
+        );
 
         // Fail early if the config cannot be serialized — a swallowed error here
         // would silently persist an empty config_json and make debugging impossible.
@@ -138,6 +164,13 @@ impl AgentThread {
         }
 
         self.set_status(ThreadStatus::Running, &notify).await;
+        record_json(
+            trace.as_ref(),
+            &trace_context,
+            "slab-agent",
+            "thread_status",
+            serde_json::json!({ "status": ThreadStatus::Running }),
+        );
 
         // Persist the Running transition so the stored status matches the in-memory state.
         if let Err(e) = store.update_thread_status(&thread_id, ThreadStatus::Running, None).await {
@@ -163,12 +196,29 @@ impl AgentThread {
                     tool_calls: vec![],
                 },
             );
+            record_json(
+                trace.as_ref(),
+                &trace_context,
+                "slab-agent",
+                "system_prompt_injected",
+                serde_json::json!({ "system_prompt": system_prompt }),
+            );
         }
 
         if let Some(start) = persist_messages_from {
             for message in messages.iter().skip(start) {
                 persist_thread_message(store.as_ref(), &thread_id, starting_turn_index, message)
                     .await;
+                record_json(
+                    trace.as_ref(),
+                    &trace_context,
+                    "slab-agent",
+                    "thread_message_persisted",
+                    serde_json::json!({
+                        "turn_index": starting_turn_index,
+                        "message": message,
+                    }),
+                );
             }
         }
 
@@ -194,7 +244,16 @@ impl AgentThread {
                 },
             )
             .await;
-            self.maybe_compact(&notify, compact.as_ref(), &mut messages, turn_index).await;
+            let turn_trace_context = trace_context.clone().with_turn(turn_index);
+            self.maybe_compact(
+                &notify,
+                compact.as_ref(),
+                &mut messages,
+                turn_index,
+                trace.as_ref(),
+                &turn_trace_context,
+            )
+            .await;
             match execute_turn(
                 TurnExecutionContext {
                     thread_id: &thread_id,
@@ -208,6 +267,8 @@ impl AgentThread {
                     approval: approval.as_ref(),
                     hooks: &hooks,
                     risk: risk.as_ref(),
+                    trace: trace.as_ref(),
+                    trace_context: turn_trace_context,
                     cancellation: &cancellation,
                 },
                 &mut messages,
@@ -259,6 +320,13 @@ impl AgentThread {
             .await;
             self.emit_metrics(&notify, started_at, false).await;
             self.set_status(ThreadStatus::Interrupted, &notify).await;
+            record_json(
+                trace.as_ref(),
+                &trace_context,
+                "slab-agent",
+                "thread_cancelled",
+                serde_json::json!({ "status": ThreadStatus::Interrupted }),
+            );
             store
                 .update_thread_status(&thread_id, ThreadStatus::Interrupted, Some("interrupted"))
                 .await
@@ -284,6 +352,16 @@ impl AgentThread {
                 .await;
             self.emit_metrics(&notify, started_at, false).await;
             self.set_status(ThreadStatus::Errored, &notify).await;
+            record_json(
+                trace.as_ref(),
+                &trace_context,
+                "slab-agent",
+                "thread_failed",
+                serde_json::json!({
+                    "status": ThreadStatus::Errored,
+                    "error": err.to_string(),
+                }),
+            );
             store
                 .update_thread_status(&thread_id, ThreadStatus::Errored, Some(&err.to_string()))
                 .await
@@ -305,6 +383,16 @@ impl AgentThread {
         .await;
         self.emit_metrics(&notify, started_at, true).await;
         self.set_status(ThreadStatus::Completed, &notify).await;
+        record_json(
+            trace.as_ref(),
+            &trace_context,
+            "slab-agent",
+            "thread_completed",
+            serde_json::json!({
+                "status": ThreadStatus::Completed,
+                "completion_text": completion_text,
+            }),
+        );
         store
             .update_thread_status(&thread_id, ThreadStatus::Completed, completion_text.as_deref())
             .await
@@ -335,10 +423,23 @@ impl AgentThread {
         compact: &dyn CompactPort,
         messages: &mut Vec<ConversationMessage>,
         turn_index: u32,
+        trace: &dyn AgentTraceSink,
+        trace_context: &AgentTraceContext,
     ) {
         let input_tokens = compact.estimate_tokens(messages);
         let threshold_tokens = compact.threshold_tokens();
         if input_tokens < threshold_tokens {
+            record_json(
+                trace,
+                trace_context,
+                "slab-agent",
+                "context_compaction_skipped",
+                serde_json::json!({
+                    "input_tokens": input_tokens,
+                    "threshold_tokens": threshold_tokens,
+                    "reason": "below threshold",
+                }),
+            );
             notify
                 .on_turn_event(
                     &self.id,
@@ -367,6 +468,17 @@ impl AgentThread {
                 },
             )
             .await;
+        record_json(
+            trace,
+            trace_context,
+            "slab-agent",
+            "context_compaction_started",
+            serde_json::json!({
+                "input_tokens": input_tokens,
+                "threshold_tokens": threshold_tokens,
+                "message_count": messages.len(),
+            }),
+        );
         match compact.compact(messages).await {
             Ok(CompactOutcome::Replaced {
                 messages: compacted,
@@ -374,6 +486,18 @@ impl AgentThread {
                 replaced_messages,
             }) => {
                 *messages = compacted;
+                record_json(
+                    trace,
+                    trace_context,
+                    "slab-agent",
+                    "context_compaction_completed",
+                    serde_json::json!({
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "replaced_messages": replaced_messages,
+                        "messages": messages,
+                    }),
+                );
                 notify
                     .on_turn_event(
                         &self.id,
@@ -389,6 +513,17 @@ impl AgentThread {
                     .await;
             }
             Ok(CompactOutcome::Skipped { reason }) => {
+                record_json(
+                    trace,
+                    trace_context,
+                    "slab-agent",
+                    "context_compaction_skipped",
+                    serde_json::json!({
+                        "input_tokens": input_tokens,
+                        "threshold_tokens": threshold_tokens,
+                        "reason": reason,
+                    }),
+                );
                 notify
                     .on_turn_event(
                         &self.id,
@@ -400,6 +535,17 @@ impl AgentThread {
                     .await;
             }
             Err(error) => {
+                record_json(
+                    trace,
+                    trace_context,
+                    "slab-agent",
+                    "context_compaction_skipped",
+                    serde_json::json!({
+                        "input_tokens": input_tokens,
+                        "threshold_tokens": threshold_tokens,
+                        "reason": error.to_string(),
+                    }),
+                );
                 notify
                     .on_turn_event(
                         &self.id,

@@ -1,7 +1,10 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{document::AgentSettingsConfig, launch::LaunchConfig};
+use super::{
+    document::{AgentSettingsConfig, LoggingConfig},
+    launch::LaunchConfig,
+};
 
 const fn default_flash_attn_enabled() -> bool {
     true
@@ -44,6 +47,7 @@ pub struct CloudProviderConfig {
 /// Typed snapshot of all PMID-managed settings values.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct PmidConfig {
+    pub logging: LoggingConfig,
     pub setup: SetupConfig,
     pub agent: AgentSettingsConfig,
     pub runtime: RuntimeConfig,

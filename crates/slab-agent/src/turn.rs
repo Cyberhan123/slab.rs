@@ -8,6 +8,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+use slab_agent_tracing::{AgentTraceContext, AgentTraceSink, record_json};
 use slab_types::{
     ConversationMessage, ConversationMessageContent, ConversationToolCall,
     ConversationToolFunction, agent::ToolCallStatus,
@@ -20,7 +21,8 @@ use crate::{
     hook::{AgentHook, HookEvent, HookOutcome, dispatch_hooks},
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort,
-        LlmStreamObserver, ThreadMessageRecord, ToolCallRecord, TurnEvent,
+        LlmStreamObserver, ParsedToolCall, ThreadMessageRecord, ToolCallRecord, ToolSpec,
+        TurnEvent,
     },
     risk::ToolRiskAnalyzer,
     tool::{ToolContext, ToolHandler, ToolRouter},
@@ -42,6 +44,8 @@ pub(crate) struct TurnExecutionContext<'a> {
     pub approval: &'a dyn ApprovalPort,
     pub hooks: &'a [Arc<dyn AgentHook>],
     pub risk: &'a dyn ToolRiskAnalyzer,
+    pub trace: &'a dyn AgentTraceSink,
+    pub trace_context: AgentTraceContext,
     pub cancellation: &'a CancellationToken,
 }
 
@@ -67,6 +71,30 @@ pub(crate) async fn execute_turn(
     };
 
     debug!(thread_id = context.thread_id, turn_index = context.turn_index, "executing turn");
+    record_json(
+        context.trace,
+        &context.trace_context,
+        "slab-agent",
+        "turn_started",
+        serde_json::json!({
+            "thread_id": context.thread_id,
+            "turn_index": context.turn_index,
+            "depth": context.depth,
+            "message_count": messages.len(),
+        }),
+    );
+    record_json(
+        context.trace,
+        &context.trace_context,
+        "slab-agent",
+        "agent_llm_request",
+        serde_json::json!({
+            "model": context.config.model,
+            "messages": messages,
+            "tools": tool_specs_trace_payload(&tool_specs),
+            "config": context.config,
+        }),
+    );
 
     let mut stream_observer = TurnTextDeltaObserver {
         thread_id: context.thread_id,
@@ -79,6 +107,7 @@ pub(crate) async fn execute_turn(
             messages,
             &tool_specs,
             context.config,
+            &context.trace_context,
             &mut stream_observer,
         ) => response?,
         _ = context.cancellation.cancelled() => return Err(AgentError::Interrupted),
@@ -86,6 +115,18 @@ pub(crate) async fn execute_turn(
     if context.cancellation.is_cancelled() {
         return Err(AgentError::Interrupted);
     }
+    record_json(
+        context.trace,
+        &context.trace_context,
+        "slab-agent",
+        "llm_response_normalized",
+        serde_json::json!({
+            "content": response.content,
+            "content_already_streamed": response.content_already_streamed,
+            "finish_reason": response.finish_reason,
+            "tool_calls": parsed_tool_calls_trace_payload(&response.tool_calls),
+        }),
+    );
 
     if response.tool_calls.is_empty() {
         // Model produced a final answer — no more turns required.
@@ -114,8 +155,25 @@ pub(crate) async fn execute_turn(
         };
         persist_thread_message(context.store, context.thread_id, context.turn_index, &message)
             .await;
+        record_json(
+            context.trace,
+            &context.trace_context,
+            "slab-agent",
+            "assistant_message_persisted",
+            serde_json::json!({
+                "turn_index": context.turn_index,
+                "message": message,
+            }),
+        );
         messages.push(message);
         emit_turn_metrics(&context, turn_started_at, true).await;
+        record_json(
+            context.trace,
+            &context.trace_context,
+            "slab-agent",
+            "turn_completed",
+            serde_json::json!({ "more_turns": false }),
+        );
         return Ok(false);
     }
 
@@ -169,6 +227,16 @@ pub(crate) async fn execute_turn(
         &assistant_message,
     )
     .await;
+    record_json(
+        context.trace,
+        &context.trace_context,
+        "slab-agent",
+        "assistant_message_persisted",
+        serde_json::json!({
+            "turn_index": context.turn_index,
+            "message": assistant_message,
+        }),
+    );
     messages.push(assistant_message);
 
     let ctx = ToolContext {
@@ -183,11 +251,36 @@ pub(crate) async fn execute_turn(
             return Err(AgentError::Interrupted);
         }
         let call_id = Uuid::new_v4().to_string();
+        record_json(
+            context.trace,
+            &context.trace_context,
+            "slab-agent",
+            "tool_call_detected",
+            serde_json::json!({
+                "item_id": tc.id,
+                "call_id": call_id,
+                "tool_name": tc.name,
+                "arguments": tc.arguments,
+            }),
+        );
 
         // Parse arguments first so hooks receive a structured Value.
         let parsed_args = match serde_json::from_str::<serde_json::Value>(&tc.arguments) {
             Ok(v) => v,
             Err(e) => {
+                record_json(
+                    context.trace,
+                    &context.trace_context,
+                    "slab-agent",
+                    "tool_call_arguments_parse_failed",
+                    serde_json::json!({
+                        "item_id": tc.id,
+                        "call_id": call_id,
+                        "tool_name": tc.name,
+                        "arguments": tc.arguments,
+                        "error": e.to_string(),
+                    }),
+                );
                 info!(
                     thread_id = context.thread_id,
                     turn_index = context.turn_index,
@@ -233,10 +326,32 @@ pub(crate) async fn execute_turn(
                     &message,
                 )
                 .await;
+                record_json(
+                    context.trace,
+                    &context.trace_context,
+                    "slab-agent",
+                    "tool_message_persisted",
+                    serde_json::json!({
+                        "turn_index": context.turn_index,
+                        "message": message,
+                    }),
+                );
                 messages.push(message);
                 continue;
             }
         };
+        record_json(
+            context.trace,
+            &context.trace_context,
+            "slab-agent",
+            "tool_call_arguments_parsed",
+            serde_json::json!({
+                "item_id": tc.id,
+                "call_id": call_id,
+                "tool_name": tc.name,
+                "arguments": parsed_args,
+            }),
+        );
 
         // Run PreToolUse hooks — may block or modify args.
         let effective_args = {
@@ -246,6 +361,18 @@ pub(crate) async fn execute_turn(
             };
             match dispatch_hooks(context.hooks, &pre_event).await {
                 HookOutcome::Block { reason } => {
+                    record_json(
+                        context.trace,
+                        &context.trace_context,
+                        "slab-agent",
+                        "tool_call_blocked",
+                        serde_json::json!({
+                            "item_id": tc.id,
+                            "call_id": call_id,
+                            "tool_name": tc.name,
+                            "reason": reason,
+                        }),
+                    );
                     warn!(
                         thread_id = context.thread_id,
                         tool = %tc.name,
@@ -281,6 +408,16 @@ pub(crate) async fn execute_turn(
                         &message,
                     )
                     .await;
+                    record_json(
+                        context.trace,
+                        &context.trace_context,
+                        "slab-agent",
+                        "tool_message_persisted",
+                        serde_json::json!({
+                            "turn_index": context.turn_index,
+                            "message": message,
+                        }),
+                    );
                     messages.push(message);
                     continue;
                 }
@@ -344,8 +481,39 @@ pub(crate) async fn execute_turn(
         if let Err(e) = context.store.insert_tool_call(&record).await {
             warn!(error = %e, call_id, "failed to persist tool call record");
         }
+        record_json(
+            context.trace,
+            &context.trace_context,
+            "slab-agent",
+            "tool_call_record_persisted",
+            serde_json::json!({
+                "record": {
+                    "id": record.id,
+                    "thread_id": record.thread_id,
+                    "tool_name": record.tool_name,
+                    "arguments": record.arguments,
+                    "output": record.output,
+                    "status": record.status,
+                    "created_at": record.created_at,
+                    "completed_at": record.completed_at,
+                }
+            }),
+        );
 
         let (output, call_status) = if let Some(request) = approval_request {
+            record_json(
+                context.trace,
+                &context.trace_context,
+                "slab-agent",
+                "tool_call_approval_required",
+                serde_json::json!({
+                    "item_id": tc.id,
+                    "call_id": call_id,
+                    "tool_name": tc.name,
+                    "command": request.command,
+                    "risk": risk,
+                }),
+            );
             info!(
                 thread_id = context.thread_id,
                 turn_index = context.turn_index,
@@ -367,6 +535,18 @@ pub(crate) async fn execute_turn(
             };
             match decision {
                 ApprovalDecision::Approved => {
+                    record_json(
+                        context.trace,
+                        &context.trace_context,
+                        "slab-agent",
+                        "tool_call_approval_resolved",
+                        serde_json::json!({
+                            "item_id": tc.id,
+                            "call_id": call_id,
+                            "tool_name": tc.name,
+                            "approved": true,
+                        }),
+                    );
                     info!(
                         thread_id = context.thread_id,
                         turn_index = context.turn_index,
@@ -403,12 +583,36 @@ pub(crate) async fn execute_turn(
                         arguments = %effective_arguments,
                         "agent tool call execution started"
                     );
+                    record_json(
+                        context.trace,
+                        &context.trace_context,
+                        "slab-agent",
+                        "tool_call_started",
+                        serde_json::json!({
+                            "item_id": tc.id,
+                            "call_id": call_id,
+                            "tool_name": tc.name,
+                            "arguments": effective_args,
+                        }),
+                    );
                     tokio::select! {
                         result = execute_tool_call(&tc.name, handler, &ctx, &effective_args) => result,
                         _ = context.cancellation.cancelled() => return Err(AgentError::Interrupted),
                     }
                 }
                 ApprovalDecision::Rejected => {
+                    record_json(
+                        context.trace,
+                        &context.trace_context,
+                        "slab-agent",
+                        "tool_call_approval_resolved",
+                        serde_json::json!({
+                            "item_id": tc.id,
+                            "call_id": call_id,
+                            "tool_name": tc.name,
+                            "approved": false,
+                        }),
+                    );
                     info!(
                         thread_id = context.thread_id,
                         turn_index = context.turn_index,
@@ -449,6 +653,18 @@ pub(crate) async fn execute_turn(
                 arguments = %effective_arguments,
                 "agent tool call execution started"
             );
+            record_json(
+                context.trace,
+                &context.trace_context,
+                "slab-agent",
+                "tool_call_started",
+                serde_json::json!({
+                    "item_id": tc.id,
+                    "call_id": call_id,
+                    "tool_name": tc.name,
+                    "arguments": effective_args,
+                }),
+            );
             tokio::select! {
                 result = execute_tool_call(&tc.name, handler, &ctx, &effective_args) => result,
                 _ = context.cancellation.cancelled() => return Err(AgentError::Interrupted),
@@ -466,6 +682,19 @@ pub(crate) async fn execute_turn(
             status = ?call_status,
             output_len = output.len(),
             "agent tool call output"
+        );
+        record_json(
+            context.trace,
+            &context.trace_context,
+            "slab-agent",
+            "tool_call_output",
+            serde_json::json!({
+                "item_id": tc.id,
+                "call_id": call_id,
+                "tool_name": tc.name,
+                "status": call_status,
+                "output": output,
+            }),
         );
 
         // Run PostToolUse hooks.
@@ -507,6 +736,18 @@ pub(crate) async fn execute_turn(
         {
             warn!(error = %e, call_id, "failed to update tool call record");
         }
+        record_json(
+            context.trace,
+            &context.trace_context,
+            "slab-agent",
+            "tool_call_record_updated",
+            serde_json::json!({
+                "call_id": call_id,
+                "status": call_status,
+                "completed_at": completed_at,
+                "output": output,
+            }),
+        );
 
         let message = ConversationMessage {
             role: "tool".to_owned(),
@@ -517,10 +758,27 @@ pub(crate) async fn execute_turn(
         };
         persist_thread_message(context.store, context.thread_id, context.turn_index, &message)
             .await;
+        record_json(
+            context.trace,
+            &context.trace_context,
+            "slab-agent",
+            "tool_message_persisted",
+            serde_json::json!({
+                "turn_index": context.turn_index,
+                "message": message,
+            }),
+        );
         messages.push(message);
     }
 
     emit_turn_metrics(&context, turn_started_at, true).await;
+    record_json(
+        context.trace,
+        &context.trace_context,
+        "slab-agent",
+        "turn_completed",
+        serde_json::json!({ "more_turns": true }),
+    );
     Ok(true)
 }
 
@@ -588,6 +846,36 @@ async fn emit_turn_metrics(
 
 fn assistant_item_id(turn_index: u32) -> String {
     format!("assistant-{turn_index}")
+}
+
+fn tool_specs_trace_payload(tool_specs: &[ToolSpec]) -> serde_json::Value {
+    serde_json::Value::Array(
+        tool_specs
+            .iter()
+            .map(|tool| {
+                serde_json::json!({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters_schema": tool.parameters_schema,
+                })
+            })
+            .collect(),
+    )
+}
+
+fn parsed_tool_calls_trace_payload(tool_calls: &[ParsedToolCall]) -> serde_json::Value {
+    serde_json::Value::Array(
+        tool_calls
+            .iter()
+            .map(|tool_call| {
+                serde_json::json!({
+                    "id": tool_call.id,
+                    "name": tool_call.name,
+                    "arguments": tool_call.arguments,
+                })
+            })
+            .collect(),
+    )
 }
 
 struct TurnTextDeltaObserver<'a> {

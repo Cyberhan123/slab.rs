@@ -43,6 +43,10 @@ pub fn encode_chat_request(request: &RuntimeTextGenerationRequest) -> pb::GgmlLl
         stop_sequences: Some(pb::StringList { values: request.stop_sequences.clone() }),
         ignore_eos: None,
         logit_bias_json: None,
+        agent_trace_json: request
+            .agent_trace
+            .as_ref()
+            .and_then(|context| serde_json::to_string(context).ok()),
     }
 }
 

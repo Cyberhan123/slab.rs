@@ -36,6 +36,12 @@ pub(crate) fn decode_ggml_llama_chat_request(
         stop_sequences: decode_optional_string_list(request.stop_sequences.as_ref()),
         ignore_eos: request.ignore_eos,
         logit_bias_json: request.logit_bias_json.clone(),
+        agent_trace: request
+            .agent_trace_json
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(|_| ProtoConversionError)?,
     })
 }
 

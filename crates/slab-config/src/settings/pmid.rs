@@ -73,6 +73,7 @@ impl SettingsPmidCatalog {
             self.tools.ffmpeg.install_dir(),
             self.tools.ffmpeg.source.version(),
             self.tools.ffmpeg.source.artifact(),
+            self.agent.debug(),
             self.agent.tools.mcp.enabled(),
             self.agent.tools.websearch.default_provider(),
             self.agent.tools.websearch.providers(),
@@ -335,6 +336,10 @@ pub struct AgentPmids {
 impl AgentPmids {
     pub const fn new() -> Self {
         Self { tools: AgentToolsPmids::new() }
+    }
+
+    pub fn debug(self) -> SettingPmid {
+        SettingPmid::from_path("agent.debug")
     }
 }
 
