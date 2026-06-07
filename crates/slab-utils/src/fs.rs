@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tempfile::NamedTempFile;
 
@@ -40,6 +40,16 @@ pub fn atomic_write_bytes_with_options(
     }
 
     Ok(())
+}
+
+pub fn existing_ancestor(path: &Path) -> io::Result<PathBuf> {
+    let mut current = path;
+    while !current.exists() {
+        current = current.parent().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "path has no existing ancestor")
+        })?;
+    }
+    current.canonicalize()
 }
 
 #[cfg(unix)]
@@ -127,6 +137,16 @@ mod tests {
         let entries = fs::read_dir(dir.path()).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].path(), parent);
+    }
+
+    #[test]
+    fn existing_ancestor_returns_closest_existing_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("a").join("b").join("file.txt");
+
+        let ancestor = existing_ancestor(&missing).unwrap();
+
+        assert_eq!(ancestor, dir.path().canonicalize().unwrap());
     }
 
     #[cfg(unix)]

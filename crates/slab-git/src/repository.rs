@@ -9,7 +9,7 @@ use anyhow::Context;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use similar::{ChangeTag, TextDiff};
-use slab_utils::string::{decode_truncated_prefix, truncate_prefix_bytes};
+use slab_utils::string::{decode_truncated_output, truncate_output_prefix};
 use tracing::debug;
 use walkdir::WalkDir;
 
@@ -139,7 +139,7 @@ impl GitRepository {
             return Err(GitError::CommandFailed(output_message(&output)));
         }
 
-        let mut diff = decode_limited_output(&output.stdout, MAX_GIT_DIFF_BYTES);
+        let mut diff = decode_truncated_output(&output.stdout, MAX_GIT_DIFF_BYTES);
         if diff.trim().is_empty()
             && !staged
             && let Some(path) = relative_path.as_deref()
@@ -322,7 +322,7 @@ fn untracked_directory_diff(root: &Path, relative_path: &str) -> Result<String, 
         let content = std::fs::read_to_string(path).unwrap_or_else(|_| String::new());
         output.push_str(&render_added_file_diff(&relative, &content));
     }
-    Ok(limit_string(output, MAX_GIT_DIFF_BYTES))
+    Ok(truncate_output_prefix(output, MAX_GIT_DIFF_BYTES))
 }
 
 fn render_added_file_diff(relative_path: &str, content: &str) -> String {
@@ -339,7 +339,7 @@ fn render_added_file_diff(relative_path: &str, content: &str) -> String {
         }
         output.push_str(change.value());
     }
-    limit_string(output, MAX_GIT_DIFF_BYTES)
+    truncate_output_prefix(output, MAX_GIT_DIFF_BYTES)
 }
 
 fn output_message(output: &Output) -> String {
@@ -348,14 +348,6 @@ fn output_message(output: &Output) -> String {
         return stderr;
     }
     String::from_utf8_lossy(&output.stdout).trim().to_string()
-}
-
-fn decode_limited_output(bytes: &[u8], limit: usize) -> String {
-    decode_truncated_prefix(bytes, limit, "\n[output truncated]\n")
-}
-
-fn limit_string(output: String, limit: usize) -> String {
-    truncate_prefix_bytes(output, limit, "\n[output truncated]\n")
 }
 
 fn parse_git_status(

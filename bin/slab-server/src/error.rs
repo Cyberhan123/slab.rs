@@ -82,6 +82,23 @@ pub enum ServerError {
     Internal(String),
 }
 
+impl ServerError {
+    pub(crate) fn agent_code_message(self) -> (&'static str, String) {
+        match self {
+            ServerError::NotFound(message) => ("not_found", message),
+            ServerError::BadRequest(message) => ("bad_request", message),
+            ServerError::BadRequestData { message, .. } => ("bad_request", message),
+            ServerError::Conflict(message) => ("conflict", message),
+            ServerError::BackendNotReady(message) => ("backend_not_ready", message),
+            ServerError::NotImplemented(message) => ("not_implemented", message),
+            ServerError::TooManyRequests(message) => ("too_many_requests", message),
+            ServerError::Runtime(_) | ServerError::Database(_) | ServerError::Internal(_) => {
+                ("internal_error", "internal server error".to_owned())
+            }
+        }
+    }
+}
+
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
         let (status, code, data, message) = match &self {

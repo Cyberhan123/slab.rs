@@ -337,7 +337,7 @@ fn watch_target(path: &Path, recursive: bool) -> std::io::Result<WatchTarget> {
     let registered_path = if requested_path.exists() {
         requested_path.canonicalize()?
     } else {
-        existing_ancestor(&requested_path)?
+        slab_utils::fs::existing_ancestor(&requested_path)?
     };
     Ok(WatchTarget { requested_path, registered_path, recursive })
 }
@@ -356,16 +356,6 @@ fn absolute_path(path: &Path) -> std::io::Result<PathBuf> {
     let path =
         if path.is_absolute() { path.to_path_buf() } else { std::env::current_dir()?.join(path) };
     if path.exists() { path.canonicalize() } else { Ok(path) }
-}
-
-fn existing_ancestor(path: &Path) -> std::io::Result<PathBuf> {
-    let mut current = path;
-    while !current.exists() {
-        current = current.parent().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::NotFound, "watch path has no existing ancestor")
-        })?;
-    }
-    current.canonicalize()
 }
 
 #[cfg(test)]

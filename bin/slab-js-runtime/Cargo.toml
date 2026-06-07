@@ -97,6 +97,10 @@ node_experimental = [
     "sys_traits",
     "fs",
     "io",
+    "websocket",
+    "webstorage",
+    "ffi",
+    "http",
 ]
 
 # By default, an extension stub is included in the runtime if the `web` feature is disabled

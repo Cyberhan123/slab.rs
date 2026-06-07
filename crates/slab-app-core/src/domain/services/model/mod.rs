@@ -242,111 +242,13 @@ impl ModelService {
         resolved_inference_spec: &Value,
     ) -> Result<Vec<ModelConfigSectionView>, AppCoreError> {
         let source_origin = model_source_origin(selected_preset);
-        let summary_fields = vec![
-            build_model_config_field(
-                "model.id",
-                ModelConfigFieldScope::Summary,
-                "Model ID",
-                Some("Catalog identifier projected from the pack manifest.".into()),
-                ModelConfigValueType::String,
-                Value::String(model.id.clone()),
-                ModelConfigOrigin::PackManifest,
-            ),
-            build_model_config_field(
-                "model.display_name",
-                ModelConfigFieldScope::Summary,
-                "Display Name",
-                Some("Read-only label from the pack manifest.".into()),
-                ModelConfigValueType::String,
-                Value::String(command.display_name.clone()),
-                ModelConfigOrigin::PackManifest,
-            ),
-            build_model_config_field(
-                "model.backend",
-                ModelConfigFieldScope::Summary,
-                "Backend",
-                Some("Managed runtime backend selected for this pack.".into()),
-                ModelConfigValueType::String,
-                Value::String(bridge.backend.canonical_id().to_owned()),
-                ModelConfigOrigin::Derived,
-            ),
-            build_model_config_field(
-                "model.status",
-                ModelConfigFieldScope::Summary,
-                "Catalog Status",
-                Some("Current projected status in the models table.".into()),
-                ModelConfigValueType::String,
-                Value::String(model.status.as_str().to_owned()),
-                ModelConfigOrigin::Derived,
-            ),
-            build_model_config_field(
-                "model.capabilities",
-                ModelConfigFieldScope::Summary,
-                "Capabilities",
-                Some("Capabilities declared by the pack and projected into the catalog.".into()),
-                ModelConfigValueType::Json,
-                serde_json::to_value(&model.capabilities).map_err(|error| {
-                    AppCoreError::Internal(format!(
-                        "failed to serialize model capabilities for config document: {error}"
-                    ))
-                })?,
-                ModelConfigOrigin::PackManifest,
-            ),
-        ];
-
-        let mut source_fields = vec![build_model_config_field(
-            "source.kind",
-            ModelConfigFieldScope::Source,
-            "Source Kind",
-            Some("Where the selected preset resolves its artifacts from.".into()),
-            ModelConfigValueType::String,
-            Value::String(source_summary.source_kind.clone()),
-            source_origin,
-        )];
-        if let Some(repo_id) = source_summary.repo_id.as_ref() {
-            source_fields.push(build_model_config_field(
-                "source.repo_id",
-                ModelConfigFieldScope::Source,
-                "Repo ID",
-                Some("Resolved Hugging Face repository for the selected model source.".into()),
-                ModelConfigValueType::String,
-                Value::String(repo_id.clone()),
-                source_origin,
-            ));
-        }
-        if let Some(filename) = source_summary.filename.as_ref() {
-            source_fields.push(build_model_config_field(
-                "source.filename",
-                ModelConfigFieldScope::Source,
-                "Primary Artifact",
-                Some("Primary artifact path selected for this preset/variant.".into()),
-                ModelConfigValueType::Path,
-                Value::String(filename.clone()),
-                source_origin,
-            ));
-        }
-        if let Some(local_path) = source_summary.local_path.as_ref() {
-            source_fields.push(build_model_config_field(
-                "source.local_path",
-                ModelConfigFieldScope::Source,
-                "Local Path",
-                Some("Projected local path currently associated with the selected source.".into()),
-                ModelConfigValueType::Path,
-                Value::String(local_path.clone()),
-                source_origin,
-            ));
-        }
-        for artifact in &source_summary.artifacts {
-            source_fields.push(build_model_config_field(
-                format!("source.artifacts.{}", artifact.id),
-                ModelConfigFieldScope::Source,
-                artifact.label.clone(),
-                Some("Resolved artifact path for the selected source.".into()),
-                ModelConfigValueType::Path,
-                Value::String(artifact.value.clone()),
-                source_origin,
-            ));
-        }
+        let summary_fields = build_model_config_summary_fields(
+            model,
+            &command.display_name,
+            bridge.backend.canonical_id().to_owned(),
+            "Managed runtime backend selected for this pack.",
+        )?;
+        let source_fields = build_model_config_source_fields(source_summary, source_origin);
 
         let mut load_fields = vec![build_model_config_field(
             "load.num_workers",
@@ -456,53 +358,8 @@ impl ModelService {
             _ => {}
         }
 
-        let mut inference_fields = Vec::new();
-        if resolved.manifest.runtime_presets.as_ref().and_then(|value| value.temperature).is_some()
-            || value_is_present(resolved_inference_spec, "temperature")
-        {
-            inference_fields.push(build_model_config_field(
-                "inference.temperature",
-                ModelConfigFieldScope::Inference,
-                "Temperature",
-                Some("Resolved sampling temperature exposed by the pack.".into()),
-                ModelConfigValueType::Number,
-                json_property_or_null(resolved_inference_spec, "temperature"),
-                if resolved
-                    .manifest
-                    .runtime_presets
-                    .as_ref()
-                    .and_then(|value| value.temperature)
-                    .is_some()
-                {
-                    ModelConfigOrigin::PackManifest
-                } else {
-                    ModelConfigOrigin::SelectedBackendConfig
-                },
-            ));
-        }
-        if resolved.manifest.runtime_presets.as_ref().and_then(|value| value.top_p).is_some()
-            || value_is_present(resolved_inference_spec, "top_p")
-        {
-            inference_fields.push(build_model_config_field(
-                "inference.top_p",
-                ModelConfigFieldScope::Inference,
-                "Top P",
-                Some("Resolved nucleus sampling value exposed by the pack.".into()),
-                ModelConfigValueType::Number,
-                json_property_or_null(resolved_inference_spec, "top_p"),
-                if resolved
-                    .manifest
-                    .runtime_presets
-                    .as_ref()
-                    .and_then(|value| value.top_p)
-                    .is_some()
-                {
-                    ModelConfigOrigin::PackManifest
-                } else {
-                    ModelConfigOrigin::SelectedBackendConfig
-                },
-            ));
-        }
+        let inference_fields =
+            build_model_config_inference_fields(resolved, resolved_inference_spec);
 
         let advanced_fields = vec![
             build_model_config_field(
@@ -577,111 +434,13 @@ impl ModelService {
             .backend_id
             .map(|backend_id| backend_id.to_string())
             .unwrap_or_else(|| "unknown".to_owned());
-        let summary_fields = vec![
-            build_model_config_field(
-                "model.id",
-                ModelConfigFieldScope::Summary,
-                "Model ID",
-                Some("Catalog identifier projected from the pack manifest.".into()),
-                ModelConfigValueType::String,
-                Value::String(model.id.clone()),
-                ModelConfigOrigin::PackManifest,
-            ),
-            build_model_config_field(
-                "model.display_name",
-                ModelConfigFieldScope::Summary,
-                "Display Name",
-                Some("Read-only label from the pack manifest.".into()),
-                ModelConfigValueType::String,
-                Value::String(command.display_name.clone()),
-                ModelConfigOrigin::PackManifest,
-            ),
-            build_model_config_field(
-                "model.backend",
-                ModelConfigFieldScope::Summary,
-                "Backend",
-                Some("Managed backend used for catalog projection and downloads.".into()),
-                ModelConfigValueType::String,
-                Value::String(backend_label),
-                ModelConfigOrigin::Derived,
-            ),
-            build_model_config_field(
-                "model.status",
-                ModelConfigFieldScope::Summary,
-                "Catalog Status",
-                Some("Current projected status in the models table.".into()),
-                ModelConfigValueType::String,
-                Value::String(model.status.as_str().to_owned()),
-                ModelConfigOrigin::Derived,
-            ),
-            build_model_config_field(
-                "model.capabilities",
-                ModelConfigFieldScope::Summary,
-                "Capabilities",
-                Some("Capabilities declared by the pack and projected into the catalog.".into()),
-                ModelConfigValueType::Json,
-                serde_json::to_value(&model.capabilities).map_err(|error| {
-                    AppCoreError::Internal(format!(
-                        "failed to serialize model capabilities for config document: {error}"
-                    ))
-                })?,
-                ModelConfigOrigin::PackManifest,
-            ),
-        ];
-
-        let mut source_fields = vec![build_model_config_field(
-            "source.kind",
-            ModelConfigFieldScope::Source,
-            "Source Kind",
-            Some("Where the selected preset resolves its artifacts from.".into()),
-            ModelConfigValueType::String,
-            Value::String(source_summary.source_kind.clone()),
-            source_origin,
-        )];
-        if let Some(repo_id) = source_summary.repo_id.as_ref() {
-            source_fields.push(build_model_config_field(
-                "source.repo_id",
-                ModelConfigFieldScope::Source,
-                "Repo ID",
-                Some("Resolved Hugging Face repository for the selected model source.".into()),
-                ModelConfigValueType::String,
-                Value::String(repo_id.clone()),
-                source_origin,
-            ));
-        }
-        if let Some(filename) = source_summary.filename.as_ref() {
-            source_fields.push(build_model_config_field(
-                "source.filename",
-                ModelConfigFieldScope::Source,
-                "Primary Artifact",
-                Some("Primary artifact path selected for this preset/variant.".into()),
-                ModelConfigValueType::Path,
-                Value::String(filename.clone()),
-                source_origin,
-            ));
-        }
-        if let Some(local_path) = source_summary.local_path.as_ref() {
-            source_fields.push(build_model_config_field(
-                "source.local_path",
-                ModelConfigFieldScope::Source,
-                "Local Path",
-                Some("Projected local path currently associated with the selected source.".into()),
-                ModelConfigValueType::Path,
-                Value::String(local_path.clone()),
-                source_origin,
-            ));
-        }
-        for artifact in &source_summary.artifacts {
-            source_fields.push(build_model_config_field(
-                format!("source.artifacts.{}", artifact.id),
-                ModelConfigFieldScope::Source,
-                artifact.label.clone(),
-                Some("Resolved artifact path for the selected source.".into()),
-                ModelConfigValueType::Path,
-                Value::String(artifact.value.clone()),
-                source_origin,
-            ));
-        }
+        let summary_fields = build_model_config_summary_fields(
+            model,
+            &command.display_name,
+            backend_label,
+            "Managed backend used for catalog projection and downloads.",
+        )?;
+        let source_fields = build_model_config_source_fields(source_summary, source_origin);
 
         let load_fields = vec![build_model_config_field(
             "load.runtime_load_supported",
@@ -693,53 +452,8 @@ impl ModelService {
             ModelConfigOrigin::Derived,
         )];
 
-        let mut inference_fields = Vec::new();
-        if resolved.manifest.runtime_presets.as_ref().and_then(|value| value.temperature).is_some()
-            || value_is_present(resolved_inference_spec, "temperature")
-        {
-            inference_fields.push(build_model_config_field(
-                "inference.temperature",
-                ModelConfigFieldScope::Inference,
-                "Temperature",
-                Some("Resolved sampling temperature exposed by the pack.".into()),
-                ModelConfigValueType::Number,
-                json_property_or_null(resolved_inference_spec, "temperature"),
-                if resolved
-                    .manifest
-                    .runtime_presets
-                    .as_ref()
-                    .and_then(|value| value.temperature)
-                    .is_some()
-                {
-                    ModelConfigOrigin::PackManifest
-                } else {
-                    ModelConfigOrigin::SelectedBackendConfig
-                },
-            ));
-        }
-        if resolved.manifest.runtime_presets.as_ref().and_then(|value| value.top_p).is_some()
-            || value_is_present(resolved_inference_spec, "top_p")
-        {
-            inference_fields.push(build_model_config_field(
-                "inference.top_p",
-                ModelConfigFieldScope::Inference,
-                "Top P",
-                Some("Resolved nucleus sampling value exposed by the pack.".into()),
-                ModelConfigValueType::Number,
-                json_property_or_null(resolved_inference_spec, "top_p"),
-                if resolved
-                    .manifest
-                    .runtime_presets
-                    .as_ref()
-                    .and_then(|value| value.top_p)
-                    .is_some()
-                {
-                    ModelConfigOrigin::PackManifest
-                } else {
-                    ModelConfigOrigin::SelectedBackendConfig
-                },
-            ));
-        }
+        let inference_fields =
+            build_model_config_inference_fields(resolved, resolved_inference_spec);
 
         let advanced_fields = vec![
             build_model_config_field(
@@ -801,6 +515,165 @@ impl ModelService {
             },
         ])
     }
+}
+
+fn build_model_config_summary_fields(
+    model: &UnifiedModel,
+    display_name: &str,
+    backend_label: String,
+    backend_description: &str,
+) -> Result<Vec<ModelConfigFieldView>, AppCoreError> {
+    Ok(vec![
+        build_model_config_field(
+            "model.id",
+            ModelConfigFieldScope::Summary,
+            "Model ID",
+            Some("Catalog identifier projected from the pack manifest.".into()),
+            ModelConfigValueType::String,
+            Value::String(model.id.clone()),
+            ModelConfigOrigin::PackManifest,
+        ),
+        build_model_config_field(
+            "model.display_name",
+            ModelConfigFieldScope::Summary,
+            "Display Name",
+            Some("Read-only label from the pack manifest.".into()),
+            ModelConfigValueType::String,
+            Value::String(display_name.to_owned()),
+            ModelConfigOrigin::PackManifest,
+        ),
+        build_model_config_field(
+            "model.backend",
+            ModelConfigFieldScope::Summary,
+            "Backend",
+            Some(backend_description.to_owned()),
+            ModelConfigValueType::String,
+            Value::String(backend_label),
+            ModelConfigOrigin::Derived,
+        ),
+        build_model_config_field(
+            "model.status",
+            ModelConfigFieldScope::Summary,
+            "Catalog Status",
+            Some("Current projected status in the models table.".into()),
+            ModelConfigValueType::String,
+            Value::String(model.status.as_str().to_owned()),
+            ModelConfigOrigin::Derived,
+        ),
+        build_model_config_field(
+            "model.capabilities",
+            ModelConfigFieldScope::Summary,
+            "Capabilities",
+            Some("Capabilities declared by the pack and projected into the catalog.".into()),
+            ModelConfigValueType::Json,
+            serde_json::to_value(&model.capabilities).map_err(|error| {
+                AppCoreError::Internal(format!(
+                    "failed to serialize model capabilities for config document: {error}"
+                ))
+            })?,
+            ModelConfigOrigin::PackManifest,
+        ),
+    ])
+}
+
+fn build_model_config_source_fields(
+    source_summary: &ModelConfigSourceSummary,
+    source_origin: ModelConfigOrigin,
+) -> Vec<ModelConfigFieldView> {
+    let mut fields = vec![build_model_config_field(
+        "source.kind",
+        ModelConfigFieldScope::Source,
+        "Source Kind",
+        Some("Where the selected preset resolves its artifacts from.".into()),
+        ModelConfigValueType::String,
+        Value::String(source_summary.source_kind.clone()),
+        source_origin,
+    )];
+    if let Some(repo_id) = source_summary.repo_id.as_ref() {
+        fields.push(build_model_config_field(
+            "source.repo_id",
+            ModelConfigFieldScope::Source,
+            "Repo ID",
+            Some("Resolved Hugging Face repository for the selected model source.".into()),
+            ModelConfigValueType::String,
+            Value::String(repo_id.clone()),
+            source_origin,
+        ));
+    }
+    if let Some(filename) = source_summary.filename.as_ref() {
+        fields.push(build_model_config_field(
+            "source.filename",
+            ModelConfigFieldScope::Source,
+            "Primary Artifact",
+            Some("Primary artifact path selected for this preset/variant.".into()),
+            ModelConfigValueType::Path,
+            Value::String(filename.clone()),
+            source_origin,
+        ));
+    }
+    if let Some(local_path) = source_summary.local_path.as_ref() {
+        fields.push(build_model_config_field(
+            "source.local_path",
+            ModelConfigFieldScope::Source,
+            "Local Path",
+            Some("Projected local path currently associated with the selected source.".into()),
+            ModelConfigValueType::Path,
+            Value::String(local_path.clone()),
+            source_origin,
+        ));
+    }
+    for artifact in &source_summary.artifacts {
+        fields.push(build_model_config_field(
+            format!("source.artifacts.{}", artifact.id),
+            ModelConfigFieldScope::Source,
+            artifact.label.clone(),
+            Some("Resolved artifact path for the selected source.".into()),
+            ModelConfigValueType::Path,
+            Value::String(artifact.value.clone()),
+            source_origin,
+        ));
+    }
+    fields
+}
+
+fn build_model_config_inference_fields(
+    resolved: &slab_model_pack::ResolvedModelPack,
+    resolved_inference_spec: &Value,
+) -> Vec<ModelConfigFieldView> {
+    let runtime_presets = resolved.manifest.runtime_presets.as_ref();
+    let mut fields = Vec::new();
+    for (path, label, description, from_manifest) in [
+        (
+            "temperature",
+            "Temperature",
+            "Resolved sampling temperature exposed by the pack.",
+            runtime_presets.and_then(|value| value.temperature).is_some(),
+        ),
+        (
+            "top_p",
+            "Top P",
+            "Resolved nucleus sampling value exposed by the pack.",
+            runtime_presets.and_then(|value| value.top_p).is_some(),
+        ),
+    ] {
+        if !from_manifest && !value_is_present(resolved_inference_spec, path) {
+            continue;
+        }
+        fields.push(build_model_config_field(
+            format!("inference.{path}"),
+            ModelConfigFieldScope::Inference,
+            label,
+            Some(description.into()),
+            ModelConfigValueType::Number,
+            json_property_or_null(resolved_inference_spec, path),
+            if from_manifest {
+                ModelConfigOrigin::PackManifest
+            } else {
+                ModelConfigOrigin::SelectedBackendConfig
+            },
+        ));
+    }
+    fields
 }
 
 fn build_model_config_selection_view(

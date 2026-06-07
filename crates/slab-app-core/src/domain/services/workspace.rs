@@ -604,7 +604,16 @@ fn resolve_workspace_path_for_write(
     })?;
     let candidate = canonical_root.join(relative_path);
     if let Some(parent) = candidate.parent() {
-        let canonical_parent = existing_parent(parent)?;
+        let canonical_parent =
+            slab_utils::fs::existing_ancestor(parent).map_err(|error| match error.kind() {
+                std::io::ErrorKind::NotFound => {
+                    AppCoreError::BadRequest("workspace path has no existing parent".to_string())
+                }
+                _ => AppCoreError::Internal(format!(
+                    "failed to resolve workspace parent {}: {error}",
+                    parent.display()
+                )),
+            })?;
         if !canonical_parent.starts_with(&canonical_root) {
             return Err(AppCoreError::BadRequest(format!(
                 "workspace path `{relative_path}` escapes the workspace root"
@@ -653,21 +662,6 @@ fn resolve_workspace_path(root: &Path, relative_path: &str) -> Result<PathBuf, A
     }
 
     Ok(canonical_candidate)
-}
-
-fn existing_parent(path: &Path) -> Result<PathBuf, AppCoreError> {
-    let mut current = path;
-    while !current.exists() {
-        current = current.parent().ok_or_else(|| {
-            AppCoreError::BadRequest("workspace path has no existing parent".to_string())
-        })?;
-    }
-    current.canonicalize().map_err(|error| {
-        AppCoreError::Internal(format!(
-            "failed to resolve workspace parent {}: {error}",
-            current.display()
-        ))
-    })
 }
 
 fn should_hide_entry(name: &str, is_directory: bool, include_ignored: bool) -> bool {

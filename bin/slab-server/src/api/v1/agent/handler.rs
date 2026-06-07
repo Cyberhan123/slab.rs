@@ -460,19 +460,7 @@ fn server_error_message(
     request_id: Option<String>,
     thread_id: Option<String>,
 ) -> AgentResponsesServerMessage {
-    let (code, message) = match error {
-        ServerError::NotFound(message) => ("not_found", message),
-        ServerError::BadRequest(message) => ("bad_request", message),
-        ServerError::BadRequestData { message, .. } => ("bad_request", message),
-        ServerError::Conflict(message) => ("conflict", message),
-        ServerError::BackendNotReady(message) => ("backend_not_ready", message),
-        ServerError::NotImplemented(message) => ("not_implemented", message),
-        ServerError::TooManyRequests(message) => ("too_many_requests", message),
-        ServerError::Runtime(_) | ServerError::Database(_) | ServerError::Internal(_) => {
-            ("internal_error", "internal server error".to_owned())
-        }
-    };
-
+    let (code, message) = error.agent_code_message();
     AgentResponsesServerMessage::Error { request_id, code: code.to_owned(), message, thread_id }
 }
 

@@ -103,15 +103,6 @@ impl ExtensionTrait<()> for deno_web_worker {
     }
 }
 
-use deno_process::deno_process;
-
-use deno_runtime::deno_os::{ExitCode, deno_os};
-impl ExtensionTrait<()> for deno_os {
-    fn init((): ()) -> Extension {
-        deno_os::init(Some(ExitCode::default()))
-    }
-}
-
 use deno_runtime::ops::bootstrap::deno_bootstrap;
 impl ExtensionTrait<()> for deno_bootstrap {
     fn init((): ()) -> Extension {
@@ -135,8 +126,6 @@ pub fn extensions(
         deno_bundle_runtime::deno_bundle_runtime::build(None, is_snapshot),
         deno_fs_events::build((), is_snapshot),
         deno_bootstrap::build((), is_snapshot),
-        deno_os::build((), is_snapshot),
-        deno_process::build(options.node_resolver.clone(), is_snapshot),
         deno_web_worker::build((), is_snapshot),
         deno_worker_host::build((options, shared_array_buffer_store), is_snapshot),
         deno_permissions::build((), is_snapshot),

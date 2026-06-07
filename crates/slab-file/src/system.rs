@@ -168,7 +168,7 @@ pub fn resolve_path(workspace_root: Option<&Path>, path: &str) -> Result<PathBuf
     }
 
     if let Some(parent) = candidate.parent() {
-        let canonical_parent = existing_parent(parent)?;
+        let canonical_parent = slab_utils::fs::existing_ancestor(parent)?;
         if !canonical_parent.starts_with(&canonical_root) {
             return Err(FileSystemError::PathEscapesRoot(path.to_string()));
         }
@@ -272,16 +272,6 @@ pub fn apply_unified_patch(
     }
 
     Ok(PatchApplyResult { applied_files, result: "ok".to_string(), error_message: None })
-}
-
-fn existing_parent(path: &Path) -> Result<PathBuf, FileSystemError> {
-    let mut current = path;
-    while !current.exists() {
-        current = current
-            .parent()
-            .ok_or_else(|| FileSystemError::InvalidPath(path.display().to_string()))?;
-    }
-    Ok(current.canonicalize()?)
 }
 
 #[derive(Debug)]

@@ -2,6 +2,7 @@
 //! and suffix on UTF-8 boundaries.
 
 const APPROX_BYTES_PER_TOKEN: usize = 4;
+const OUTPUT_TRUNCATION_MARKER: &str = "\n[output truncated]\n";
 
 /// Truncate a string to `max_bytes` using a character-count marker.
 pub fn truncate_middle_chars(s: &str, max_bytes: usize) -> String {
@@ -43,6 +44,12 @@ pub fn decode_truncated_prefix(bytes: &[u8], limit: usize, marker: &str) -> Stri
     output
 }
 
+/// Decode command output bytes lossily, preserving at most `limit` leading
+/// bytes and appending the shared output truncation marker when needed.
+pub fn decode_truncated_output(bytes: &[u8], limit: usize) -> String {
+    decode_truncated_prefix(bytes, limit, OUTPUT_TRUNCATION_MARKER)
+}
+
 /// Preserve at most `limit` leading bytes from a UTF-8 string and append
 /// `marker` when truncation happens.
 pub fn truncate_prefix_bytes(mut output: String, limit: usize, marker: &str) -> String {
@@ -57,6 +64,12 @@ pub fn truncate_prefix_bytes(mut output: String, limit: usize, marker: &str) -> 
     output.truncate(end);
     output.push_str(marker);
     output
+}
+
+/// Preserve at most `limit` leading bytes from decoded command output and
+/// append the shared output truncation marker when needed.
+pub fn truncate_output_prefix(output: String, limit: usize) -> String {
+    truncate_prefix_bytes(output, limit, OUTPUT_TRUNCATION_MARKER)
 }
 
 fn truncate_with_byte_estimate(s: &str, max_bytes: usize, use_tokens: bool) -> String {
@@ -177,7 +190,10 @@ mod tests {
     use super::split_string;
     use super::truncate_middle_chars;
     use super::truncate_middle_with_token_budget;
-    use super::{decode_truncated_prefix, truncate_prefix_bytes};
+    use super::{
+        decode_truncated_output, decode_truncated_prefix, truncate_output_prefix,
+        truncate_prefix_bytes,
+    };
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -196,9 +212,19 @@ mod tests {
     }
 
     #[test]
+    fn decode_truncated_output_uses_shared_marker() {
+        assert_eq!(decode_truncated_output(b"abcdef", 4), "abcd\n[output truncated]\n");
+    }
+
+    #[test]
     fn truncate_prefix_bytes_uses_char_boundary() {
         assert_eq!(truncate_prefix_bytes("ab😀cd".to_string(), 4, "[cut]"), "ab[cut]");
         assert_eq!(truncate_prefix_bytes("abcd".to_string(), 4, "[cut]"), "abcd");
+    }
+
+    #[test]
+    fn truncate_output_prefix_uses_shared_marker() {
+        assert_eq!(truncate_output_prefix("abcdef".to_string(), 4), "abcd\n[output truncated]\n");
     }
 
     #[test]

@@ -4,7 +4,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use slab_sandboxing::{ExecPolicy, SandboxDriver, SandboxError, SandboxPolicy, SandboxedCommand};
-use slab_utils::string::decode_truncated_prefix;
+use slab_utils::string::decode_truncated_output;
 use thiserror::Error;
 use tracing::{debug, warn};
 
@@ -243,8 +243,8 @@ impl ShellExecutor {
                 .await?;
 
             return Ok(ShellOutput {
-                stdout: truncate_output(&output.stdout, self.output_limit_bytes),
-                stderr: truncate_output(&output.stderr, self.output_limit_bytes),
+                stdout: decode_truncated_output(&output.stdout, self.output_limit_bytes),
+                stderr: decode_truncated_output(&output.stderr, self.output_limit_bytes),
                 exit_code: output.exit_code,
                 timed_out: output.timed_out,
             });
@@ -252,8 +252,8 @@ impl ShellExecutor {
 
         let output = execute_direct(command, self.workspace_root.clone()).await?;
         Ok(ShellOutput {
-            stdout: truncate_output(&output.stdout, self.output_limit_bytes),
-            stderr: truncate_output(&output.stderr, self.output_limit_bytes),
+            stdout: decode_truncated_output(&output.stdout, self.output_limit_bytes),
+            stderr: decode_truncated_output(&output.stderr, self.output_limit_bytes),
             exit_code: output.status.code().unwrap_or(-1),
             timed_out: output.timed_out,
         })
@@ -331,10 +331,6 @@ fn shell_argv(command: &str) -> Vec<String> {
     {
         vec!["sh".to_string(), "-lc".to_string(), command.to_string()]
     }
-}
-
-fn truncate_output(bytes: &[u8], limit: usize) -> String {
-    decode_truncated_prefix(bytes, limit, "\n[output truncated]\n")
 }
 
 #[cfg(test)]
