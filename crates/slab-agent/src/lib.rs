@@ -36,6 +36,8 @@ pub mod tool;
 mod llm_output;
 mod state;
 mod turn;
+mod turn_tool_call;
+mod turn_tool_record;
 
 #[cfg(test)]
 mod tests;

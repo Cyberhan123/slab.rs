@@ -32,12 +32,17 @@
 
   function responseFromPayload(payload) {
     const headers = payload.headers || {};
+    const bodyBytes = Uint8Array.from(payload.bodyBytes || []);
+    const bodyText = () => new TextDecoder().decode(bodyBytes);
     return {
       status: payload.status,
       ok: payload.status >= 200 && payload.status < 300,
       headers,
-      text: async () => payload.body || "",
-      json: async () => JSON.parse(payload.body || "null"),
+      text: async () => bodyText(),
+      json: async () => JSON.parse(bodyText() || "null"),
+      arrayBuffer: async () =>
+        bodyBytes.buffer.slice(bodyBytes.byteOffset, bodyBytes.byteOffset + bodyBytes.byteLength),
+      bytes: async () => Uint8Array.from(bodyBytes),
     };
   }
 

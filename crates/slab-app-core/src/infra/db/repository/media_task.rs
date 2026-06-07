@@ -8,7 +8,6 @@ use crate::infra::db::entities::{
 };
 use chrono::{DateTime, Utc};
 use std::future::Future;
-use std::str::FromStr;
 
 #[derive(Debug, sqlx::FromRow)]
 struct ImageTaskViewRow {
@@ -160,7 +159,7 @@ impl MediaTaskStore for AnyStore {
         image_task: NewImageGenerationTaskRecord,
     ) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-        insert_task_in_tx(&mut tx, &task).await?;
+        super::insert_task_row(&mut tx, &task, task.result_data.as_deref()).await?;
         sqlx::query(
             "INSERT INTO image_generation_tasks \
              (task_id, backend_id, model_id, model_path, prompt, negative_prompt, mode, width, height, requested_count, reference_image_path, primary_image_path, artifact_paths, request_data, result_data, created_at, updated_at) \
@@ -192,7 +191,7 @@ impl MediaTaskStore for AnyStore {
         video_task: NewVideoGenerationTaskRecord,
     ) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-        insert_task_in_tx(&mut tx, &task).await?;
+        super::insert_task_row(&mut tx, &task, task.result_data.as_deref()).await?;
         sqlx::query(
             "INSERT INTO video_generation_tasks \
              (task_id, backend_id, model_id, model_path, prompt, negative_prompt, width, height, frames, fps, reference_image_path, video_path, request_data, result_data, created_at, updated_at) \
@@ -224,7 +223,7 @@ impl MediaTaskStore for AnyStore {
         audio_task: NewAudioTranscriptionTaskRecord,
     ) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-        insert_task_in_tx(&mut tx, &task).await?;
+        super::insert_task_row(&mut tx, &task, task.result_data.as_deref()).await?;
         sqlx::query(
             "INSERT INTO audio_transcription_tasks \
              (task_id, backend_id, model_id, source_path, language, prompt, detect_language, vad_json, decode_json, transcript_text, request_data, result_data, created_at, updated_at) \
@@ -382,29 +381,6 @@ const VIDEO_TASK_VIEW_QUERY_WITH_ID: &str = "SELECT v.task_id, v.backend_id, v.m
 const AUDIO_TASK_VIEW_QUERY: &str = "SELECT a.task_id, a.backend_id, a.model_id, a.source_path, a.language, a.prompt, a.detect_language, a.vad_json, a.decode_json, a.transcript_text, a.request_data, a.result_data, a.created_at, a.updated_at, t.status AS task_status, t.result_data AS task_result_data, t.error_msg, t.created_at AS task_created_at, t.updated_at AS task_updated_at FROM audio_transcription_tasks a JOIN tasks t ON t.id = a.task_id ORDER BY t.created_at DESC";
 const AUDIO_TASK_VIEW_QUERY_WITH_ID: &str = "SELECT a.task_id, a.backend_id, a.model_id, a.source_path, a.language, a.prompt, a.detect_language, a.vad_json, a.decode_json, a.transcript_text, a.request_data, a.result_data, a.created_at, a.updated_at, t.status AS task_status, t.result_data AS task_result_data, t.error_msg, t.created_at AS task_created_at, t.updated_at AS task_updated_at FROM audio_transcription_tasks a JOIN tasks t ON t.id = a.task_id WHERE a.task_id = ?1";
 
-async fn insert_task_in_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    task: &TaskRecord,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "INSERT INTO tasks (id, task_type, status, model_id, input_data, result_data, error_msg, core_task_id, created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-    )
-    .bind(&task.id)
-    .bind(&task.task_type)
-    .bind(task.status.as_str())
-    .bind(&task.model_id)
-    .bind(&task.input_data)
-    .bind(&task.result_data)
-    .bind(&task.error_msg)
-    .bind(task.core_task_id)
-    .bind(task.created_at.to_rfc3339())
-    .bind(task.updated_at.to_rfc3339())
-    .execute(&mut **tx)
-    .await?;
-    Ok(())
-}
-
 fn image_view_from_row(row: ImageTaskViewRow) -> ImageGenerationTaskViewRecord {
     ImageGenerationTaskViewRecord {
         task: ImageGenerationTaskRecord {
@@ -502,19 +478,12 @@ fn media_state_from_task(
     updated_at: DateTime<Utc>,
 ) -> MediaTaskState {
     MediaTaskState {
-        status: decode_task_status(&status),
+        status: TaskStatus::from_stored(&status, "media task repository"),
         progress: task_progress_from_payload(result_data.as_deref()),
         error_msg,
         task_created_at: created_at,
         task_updated_at: updated_at,
     }
-}
-
-fn decode_task_status(raw: &str) -> TaskStatus {
-    TaskStatus::from_str(raw).unwrap_or_else(|_| {
-        tracing::warn!(status = %raw, "unknown media task status stored in repository; defaulting to failed");
-        TaskStatus::Failed
-    })
 }
 
 fn decode_string_array(raw: Option<&str>) -> Vec<String> {

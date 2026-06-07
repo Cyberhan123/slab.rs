@@ -8,6 +8,7 @@ use std::{
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use uuid::Uuid;
 
 #[derive(Debug, Error)]
 pub enum FileSystemError {
@@ -42,15 +43,7 @@ pub struct PatchApplyResult {
     pub error_message: Option<String>,
 }
 
-/// Sandbox policy metadata attached to filesystem operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum FileSystemSandboxPolicy {
-    #[default]
-    ReadOnly,
-    WorkspaceWrite,
-    DangerFullAccess,
-}
+pub use slab_sandboxing::SandboxPolicy as FileSystemSandboxPolicy;
 
 /// Filesystem permission context supplied by host layers.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -218,11 +211,17 @@ pub async fn write_string(
             .file_name()
             .ok_or_else(|| FileSystemError::InvalidPath(path.display().to_string()))?
             .to_owned();
-        file_name.push(".tmp");
+        file_name.push(format!(".{}.tmp", Uuid::new_v4()));
         path.with_file_name(file_name)
     };
-    tokio::fs::write(&tmp_path, content).await?;
-    tokio::fs::rename(&tmp_path, &path).await?;
+    if let Err(error) = tokio::fs::write(&tmp_path, content).await {
+        let _ = tokio::fs::remove_file(&tmp_path).await;
+        return Err(FileSystemError::Io(error));
+    }
+    if let Err(error) = tokio::fs::rename(&tmp_path, &path).await {
+        let _ = tokio::fs::remove_file(&tmp_path).await;
+        return Err(FileSystemError::Io(error));
+    }
     Ok(())
 }
 
@@ -488,15 +487,38 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    #[test]
+    fn filesystem_sandbox_policy_uses_shared_sandbox_policy() {
+        assert_eq!(FileSystemSandboxContext::default().policy, FileSystemSandboxPolicy::ReadOnly);
+        assert_eq!(
+            FileSystemSandboxPolicy::WorkspaceWrite,
+            slab_sandboxing::SandboxPolicy::WorkspaceWrite
+        );
+    }
+
     #[tokio::test]
-    async fn write_string_uses_sibling_tmp_file_name() {
+    async fn write_string_uses_unique_sibling_tmp_file_name() {
         let root = temp_root("write");
-        fs::write(root.join("note.tmp"), "keep").expect("seed sibling tmp");
+        fs::write(root.join("note.md.tmp"), "keep").expect("seed sibling tmp");
 
         write_string(Some(&root), "note.md", "new content").await.expect("write should succeed");
 
         assert_eq!(fs::read_to_string(root.join("note.md")).unwrap(), "new content");
-        assert_eq!(fs::read_to_string(root.join("note.tmp")).unwrap(), "keep");
+        assert_eq!(fs::read_to_string(root.join("note.md.tmp")).unwrap(), "keep");
+        assert_tmp_files(&root, &["note.md.tmp"]);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn write_string_removes_tmp_file_after_failed_rename() {
+        let root = temp_root("write_fail");
+        fs::create_dir(root.join("note.md")).expect("seed target directory");
+
+        let error =
+            write_string(Some(&root), "note.md", "new content").await.expect_err("rename fails");
+
+        assert!(matches!(error, FileSystemError::Io(_)));
+        assert_tmp_files(&root, &[]);
         let _ = fs::remove_dir_all(root);
     }
 
@@ -547,5 +569,17 @@ mod tests {
             std::env::temp_dir().join(format!("slab_file_{name}_{}_{}", std::process::id(), nonce));
         fs::create_dir_all(&root).expect("create temp root");
         root
+    }
+
+    fn assert_tmp_files(root: &Path, expected: &[&str]) {
+        let mut tmp_files: Vec<String> = fs::read_dir(root)
+            .expect("read temp root")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".tmp"))
+            .collect();
+        tmp_files.sort();
+        let expected: Vec<String> = expected.iter().map(|name| (*name).to_owned()).collect();
+        assert_eq!(tmp_files, expected);
     }
 }

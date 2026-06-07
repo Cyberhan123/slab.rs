@@ -18,13 +18,6 @@ type ModelDownloadRow = (
     DateTime<Utc>,
 );
 
-fn decode_task_status(raw: &str) -> TaskStatus {
-    raw.parse::<TaskStatus>().unwrap_or_else(|_| {
-        tracing::warn!(status = %raw, "unknown model download status stored in repository; defaulting to failed");
-        TaskStatus::Failed
-    })
-}
-
 fn row_to_record(
     (
         task_id,
@@ -46,7 +39,7 @@ fn row_to_record(
         repo_id,
         filename,
         hub_provider,
-        status: decode_task_status(&status),
+        status: TaskStatus::from_stored(&status, "model download repository"),
         error_msg,
         created_at,
         updated_at,
@@ -83,25 +76,7 @@ impl ModelDownloadStore for AnyStore {
         download: ModelDownloadRecord,
     ) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-        let task_created_at = task.created_at.to_rfc3339();
-        let task_updated_at = task.updated_at.to_rfc3339();
-
-        sqlx::query(
-            "INSERT INTO tasks (id, task_type, status, model_id, input_data, result_data, error_msg, core_task_id, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        )
-        .bind(&task.id)
-        .bind(&task.task_type)
-        .bind(task.status.as_str())
-        .bind(&task.model_id)
-        .bind(&task.input_data)
-        .bind(Option::<String>::None)
-        .bind(&task.error_msg)
-        .bind(task.core_task_id)
-        .bind(&task_created_at)
-        .bind(&task_updated_at)
-        .execute(&mut *tx)
-        .await?;
+        super::insert_task_row(&mut tx, &task, None).await?;
 
         let download_created_at = download.created_at.to_rfc3339();
         let download_updated_at = download.updated_at.to_rfc3339();

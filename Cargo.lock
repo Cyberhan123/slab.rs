@@ -14930,10 +14930,12 @@ dependencies = [
  "nucleo",
  "pretty_assertions",
  "serde",
+ "slab-sandboxing",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

@@ -5,7 +5,6 @@ use crate::infra::db::entities::TaskRecord;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::future::Future;
-use std::str::FromStr;
 
 type TaskRow = (
     String,
@@ -55,24 +54,10 @@ pub trait TaskStore: Send + Sync + 'static {
 
 impl TaskStore for AnyStore {
     async fn insert_task(&self, record: TaskRecord) -> Result<(), sqlx::Error> {
-        let created_at = record.created_at.to_rfc3339();
-        let updated_at = record.updated_at.to_rfc3339();
-        sqlx::query(
-            "INSERT INTO tasks (id, task_type, status, model_id, input_data, result_data, error_msg, core_task_id, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        )
-        .bind(&record.id)
-        .bind(&record.task_type)
-        .bind(record.status.as_str())
-        .bind(&record.model_id)
-        .bind(&record.input_data)
-        .bind(encode_task_payload(record.result_data.as_deref()))
-        .bind(&record.error_msg)
-        .bind(record.core_task_id)
-        .bind(&created_at)
-        .bind(&updated_at)
-        .execute(&self.pool)
-        .await?;
+        let result_data = encode_task_payload(record.result_data.as_deref());
+        let mut tx = self.pool.begin().await?;
+        super::insert_task_row(&mut tx, &record, result_data.as_deref()).await?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -144,7 +129,7 @@ impl TaskStore for AnyStore {
                 TaskRecord {
                     id,
                     task_type,
-                    status: decode_task_status(&status),
+                    status: TaskStatus::from_stored(&status, "task repository"),
                     model_id,
                     input_data,
                     result_data: decode_task_payload(result_data),
@@ -192,7 +177,7 @@ impl TaskStore for AnyStore {
                     TaskRecord {
                         id,
                         task_type,
-                        status: decode_task_status(&status),
+                        status: TaskStatus::from_stored(&status, "task repository"),
                         model_id,
                         input_data,
                         result_data: decode_task_payload(result_data),
@@ -253,16 +238,13 @@ fn decode_task_payload(raw: Option<String>) -> Option<String> {
     }
 }
 
-fn decode_task_status(raw: &str) -> TaskStatus {
-    TaskStatus::from_str(raw).unwrap_or_else(|_| {
-        tracing::warn!(status = %raw, "unknown task status stored in repository; defaulting to failed");
-        TaskStatus::Failed
-    })
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{decode_task_payload, encode_task_payload};
+    use super::{TaskStore, decode_task_payload, encode_task_payload};
+    use crate::domain::models::TaskStatus;
+    use crate::infra::db::{AnyStore, TaskRecord};
+    use chrono::Utc;
+    use std::str::FromStr;
 
     #[test]
     fn envelope_round_trips_json_payload() {
@@ -292,6 +274,37 @@ mod tests {
     fn decode_task_payload_rejects_wrong_envelope_kind() {
         let raw = String::from(r#"{"kind":"other","version":1,"data":{"text":"legacy"}}"#);
         assert_eq!(decode_task_payload(Some(raw)), None);
+    }
+
+    #[tokio::test]
+    async fn insert_task_wraps_result_payload_envelope() {
+        let store = new_store().await;
+        let now = Utc::now();
+
+        store
+            .insert_task(TaskRecord {
+                id: "task-1".to_owned(),
+                task_type: "text".to_owned(),
+                status: TaskStatus::Succeeded,
+                model_id: None,
+                input_data: None,
+                result_data: Some(r#"{"text":"current"}"#.to_owned()),
+                error_msg: None,
+                core_task_id: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .expect("insert task");
+
+        let raw: String = sqlx::query_scalar("SELECT result_data FROM tasks WHERE id = 'task-1'")
+            .fetch_one(&store.pool)
+            .await
+            .expect("stored result data");
+        assert_eq!(decode_task_payload(Some(raw)).as_deref(), Some(r#"{"text":"current"}"#));
+
+        let record = store.get_task("task-1").await.expect("get task").expect("task exists");
+        assert_eq!(record.result_data.as_deref(), Some(r#"{"text":"current"}"#));
     }
 
     #[tokio::test]
@@ -343,5 +356,36 @@ mod tests {
         assert_eq!(decode_task_payload(Some(legacy_json)).as_deref(), Some(r#"{"text":"legacy"}"#));
         assert_eq!(decode_task_payload(Some(legacy_text)).as_deref(), Some("plain text payload"));
         assert_eq!(decode_task_payload(Some(current)).as_deref(), Some(r#"{"text":"current"}"#));
+    }
+
+    async fn new_store() -> AnyStore {
+        let options = sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")
+            .expect("sqlite options");
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .expect("connect in-memory db");
+        let store = AnyStore { pool };
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS tasks (
+                id TEXT PRIMARY KEY,
+                core_task_id INTEGER,
+                model_id TEXT,
+                task_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                input_data TEXT,
+                result_data TEXT,
+                error_msg TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )",
+        )
+        .execute(&store.pool)
+        .await
+        .expect("create tasks table");
+
+        store
     }
 }

@@ -39,6 +39,17 @@ impl TaskStatus {
     pub fn is_restartable(self) -> bool {
         matches!(self, Self::Failed | Self::Cancelled | Self::Interrupted)
     }
+
+    pub(crate) fn from_stored(raw: &str, context: &str) -> Self {
+        raw.parse().unwrap_or_else(|_| {
+            tracing::warn!(
+                status = %raw,
+                context,
+                "unknown task status stored in repository; defaulting to failed"
+            );
+            Self::Failed
+        })
+    }
 }
 
 impl std::fmt::Display for TaskStatus {
@@ -196,5 +207,10 @@ mod tests {
         };
 
         assert!(TaskView::from(&record).progress.is_none());
+    }
+
+    #[test]
+    fn stored_unknown_task_status_defaults_to_failed() {
+        assert_eq!(TaskStatus::from_stored("unknown", "test"), TaskStatus::Failed);
     }
 }

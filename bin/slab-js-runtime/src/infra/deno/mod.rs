@@ -542,7 +542,7 @@ struct FetchRequest {
 struct FetchResponse {
     status: u16,
     headers: HashMap<String, String>,
-    body: String,
+    body_bytes: Vec<u8>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -866,7 +866,7 @@ async fn op_slab_fetch(
         )));
     }
 
-    Ok(FetchResponse { status, headers, body: String::from_utf8_lossy(&bytes).to_string() })
+    Ok(FetchResponse { status, headers, body_bytes: bytes.to_vec() })
 }
 
 #[op2]
@@ -1257,6 +1257,42 @@ mod tests {
         let response = executor.execute(request).await.unwrap();
 
         assert_eq!(response.result, json!("ok"));
+    }
+
+    #[tokio::test]
+    async fn fetch_array_buffer_preserves_binary_body() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = [0u8; 1024];
+            let _ = socket.read(&mut buffer).await.unwrap();
+            let body = [0u8, 159, 146, 150, 255];
+            let headers = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
+            socket.write_all(headers.as_bytes()).await.unwrap();
+            socket.write_all(&body).await.unwrap();
+        });
+
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("plugin.ts"),
+            format!(
+                "export async function run() {{ const r = await fetch('http://{addr}'); return Array.from(new Uint8Array(await r.arrayBuffer())); }}"
+            ),
+        )
+        .unwrap();
+
+        let mut request = call_request(dir.path(), "plugin.ts", "run");
+        request.permissions.network = PluginNetworkManifest {
+            mode: slab_types::PluginNetworkMode::Allowlist,
+            allow_hosts: vec![addr.to_string()],
+        };
+        let executor = DenoPluginExecutor::new(Arc::new(TestHost));
+        let response = executor.execute(request).await.unwrap();
+
+        assert_eq!(response.result, json!([0, 159, 146, 150, 255]));
     }
 
     #[tokio::test]
