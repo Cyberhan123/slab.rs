@@ -31,6 +31,34 @@ pub fn truncate_middle_with_token_budget(s: &str, max_tokens: usize) -> (String,
     if truncated == s { (truncated, None) } else { (truncated, Some(total_tokens)) }
 }
 
+/// Decode bytes lossily and preserve at most `limit` leading bytes, appending
+/// `marker` when truncation happens.
+pub fn decode_truncated_prefix(bytes: &[u8], limit: usize, marker: &str) -> String {
+    if bytes.len() <= limit {
+        return String::from_utf8_lossy(bytes).into_owned();
+    }
+
+    let mut output = String::from_utf8_lossy(&bytes[..limit]).into_owned();
+    output.push_str(marker);
+    output
+}
+
+/// Preserve at most `limit` leading bytes from a UTF-8 string and append
+/// `marker` when truncation happens.
+pub fn truncate_prefix_bytes(mut output: String, limit: usize, marker: &str) -> String {
+    if output.len() <= limit {
+        return output;
+    }
+
+    let mut end = limit;
+    while end > 0 && !output.is_char_boundary(end) {
+        end -= 1;
+    }
+    output.truncate(end);
+    output.push_str(marker);
+    output
+}
+
 fn truncate_with_byte_estimate(s: &str, max_bytes: usize, use_tokens: bool) -> String {
     if s.is_empty() {
         return String::new();
@@ -149,6 +177,7 @@ mod tests {
     use super::split_string;
     use super::truncate_middle_chars;
     use super::truncate_middle_with_token_budget;
+    use super::{decode_truncated_prefix, truncate_prefix_bytes};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -158,6 +187,18 @@ mod tests {
             (1, "hello", "world")
         );
         assert_eq!(split_string("abc", /*beginning_bytes*/ 0, /*end_bytes*/ 0), (3, "", ""));
+    }
+
+    #[test]
+    fn decode_truncated_prefix_appends_marker() {
+        assert_eq!(decode_truncated_prefix(b"abcdef", 4, "\n[cut]\n"), "abcd\n[cut]\n");
+        assert_eq!(decode_truncated_prefix(b"abc", 4, "\n[cut]\n"), "abc");
+    }
+
+    #[test]
+    fn truncate_prefix_bytes_uses_char_boundary() {
+        assert_eq!(truncate_prefix_bytes("ab😀cd".to_string(), 4, "[cut]"), "ab[cut]");
+        assert_eq!(truncate_prefix_bytes("abcd".to_string(), 4, "[cut]"), "abcd");
     }
 
     #[test]

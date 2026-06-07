@@ -464,6 +464,7 @@ fn server_error_message(
         ServerError::NotFound(message) => ("not_found", message),
         ServerError::BadRequest(message) => ("bad_request", message),
         ServerError::BadRequestData { message, .. } => ("bad_request", message),
+        ServerError::Conflict(message) => ("conflict", message),
         ServerError::BackendNotReady(message) => ("backend_not_ready", message),
         ServerError::NotImplemented(message) => ("not_implemented", message),
         ServerError::TooManyRequests(message) => ("too_many_requests", message),

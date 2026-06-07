@@ -1,0 +1,13 @@
+[package]
+name = "slab-jsonrpc"
+version.workspace = true
+edition.workspace = true
+description = "Shared JSON-RPC 2.0 envelope helpers for Slab"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }

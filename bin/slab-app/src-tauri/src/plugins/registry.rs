@@ -4,6 +4,7 @@ use std::sync::Arc;
 use slab_plugin::PluginRegistry;
 
 use super::types::PluginInfo;
+use crate::paths::settings_path_from_env_or_default;
 pub use slab_plugin::{LoadedPlugin, is_path_within_root, normalize_relative_path};
 
 pub struct PluginRegistryState {
@@ -35,14 +36,7 @@ pub fn resolve_plugins_root<R: tauri::Runtime>(_app: &tauri::App<R>) -> Result<P
 }
 
 fn settings_path_for_plugins() -> PathBuf {
-    std::env::var("SLAB_SETTINGS_PATH")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(default_settings_path)
-}
-
-fn default_settings_path() -> PathBuf {
-    slab_utils::app_home::settings_path()
+    settings_path_from_env_or_default()
 }
 
 fn default_plugins_dir() -> PathBuf {

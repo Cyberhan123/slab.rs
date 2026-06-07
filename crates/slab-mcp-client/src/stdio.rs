@@ -4,6 +4,9 @@ use std::{
 };
 
 use serde_json::{Value, json};
+use slab_jsonrpc::{
+    notification_with_optional_params, parse_message, request_with_optional_params,
+};
 use thiserror::Error;
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
@@ -11,7 +14,7 @@ use tokio::{
     sync::Mutex,
 };
 
-use crate::protocol::{JsonRpcResponse, McpContent, McpTool, McpToolResult, notification, request};
+use crate::protocol::{McpContent, McpTool, McpToolResult};
 
 #[derive(Debug, Clone, Default)]
 pub struct StdioLaunchConfig {
@@ -164,7 +167,8 @@ where
 
     async fn request(&self, method: &str, params: Option<Value>) -> Result<Value, McpClientError> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let payload = serde_json::to_string(&request(id, method, params))?;
+        let payload =
+            serde_json::to_string(&request_with_optional_params(Value::from(id), method, params))?;
         {
             let mut writer = self.writer.lock().await;
             writer.write_all(payload.as_bytes()).await?;
@@ -182,7 +186,7 @@ where
                 "MCP connection closed before response".to_string(),
             ));
         }
-        let response: JsonRpcResponse = serde_json::from_str(&line)?;
+        let response = parse_message(&line)?;
         if let Some(error) = response.error {
             return Err(McpClientError::Protocol(error.message));
         }
@@ -192,7 +196,7 @@ where
     }
 
     async fn notify(&self, method: &str, params: Option<Value>) -> Result<(), McpClientError> {
-        let payload = serde_json::to_string(&notification(method, params))?;
+        let payload = serde_json::to_string(&notification_with_optional_params(method, params))?;
         let mut writer = self.writer.lock().await;
         writer.write_all(payload.as_bytes()).await?;
         writer.write_all(b"\n").await?;

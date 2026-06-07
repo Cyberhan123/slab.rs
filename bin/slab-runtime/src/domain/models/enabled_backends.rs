@@ -1,11 +1,11 @@
 use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct EnabledBackends {
+pub(crate) struct RuntimeEnabledBackends {
     service_ids: BTreeSet<String>,
 }
 
-impl EnabledBackends {
+impl RuntimeEnabledBackends {
     pub(crate) fn new<I, S>(service_ids: I) -> Self
     where
         I: IntoIterator<Item = S>,

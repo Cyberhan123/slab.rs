@@ -10,6 +10,7 @@ license.workspace = true
 
 [dependencies]
 slab-sandboxing = { workspace = true }
+slab-utils = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

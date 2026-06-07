@@ -6,6 +6,8 @@ use async_trait::async_trait;
 use serde_json::Value;
 use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
 
+use crate::args::string_arg;
+
 const MAX_LINES: usize = 1000;
 
 pub struct ReadFileTool {
@@ -170,13 +172,6 @@ impl ToolHandler for ListDirTool {
             metadata: None,
         })
     }
-}
-
-fn string_arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, AgentError> {
-    arguments
-        .get(name)
-        .and_then(Value::as_str)
-        .ok_or_else(|| AgentError::ToolExecution(format!("missing '{name}' argument")))
 }
 
 fn to_tool_error(error: slab_file::FileSystemError) -> AgentError {

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::domain::models::EnabledBackends;
+use crate::domain::models::RuntimeEnabledBackends;
 use crate::domain::runtime::Orchestrator;
 
 #[derive(Clone)]
@@ -11,11 +11,14 @@ pub struct ExecutionHub {
 #[derive(Debug)]
 pub(crate) struct ExecutionState {
     pub orchestrator: Orchestrator,
-    pub enabled_backends: EnabledBackends,
+    pub enabled_backends: RuntimeEnabledBackends,
 }
 
 impl ExecutionHub {
-    pub(crate) fn new(orchestrator: Orchestrator, enabled_backends: EnabledBackends) -> Self {
+    pub(crate) fn new(
+        orchestrator: Orchestrator,
+        enabled_backends: RuntimeEnabledBackends,
+    ) -> Self {
         Self { inner: Arc::new(ExecutionState { orchestrator, enabled_backends }) }
     }
 
@@ -23,7 +26,7 @@ impl ExecutionHub {
         self.inner.orchestrator.clone()
     }
 
-    pub(crate) fn enabled_backends(&self) -> &EnabledBackends {
+    pub(crate) fn enabled_backends(&self) -> &RuntimeEnabledBackends {
         &self.inner.enabled_backends
     }
 }

@@ -17,6 +17,12 @@ enum EventHandlerKind {
     Typed { extractors: Vec<TokenStream2> },
 }
 
+/// Expands an impl block of runtime backend handlers into dispatcher glue.
+///
+/// Methods annotated with the supported handler attributes are collected into
+/// match arms for the generated backend control plane. Use
+/// `#[backend_handler(peer_bus = <field>)]` when generated peer-routing code
+/// should read a peer bus field from the receiver.
 #[proc_macro_attribute]
 pub fn backend_handler(attr: TokenStream, item: TokenStream) -> TokenStream {
     let config = match syn::parse::<BackendHandlerConfig>(attr) {

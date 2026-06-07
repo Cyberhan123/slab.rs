@@ -9,6 +9,7 @@ use anyhow::Context;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use similar::{ChangeTag, TextDiff};
+use slab_utils::string::{decode_truncated_prefix, truncate_prefix_bytes};
 use tracing::debug;
 use walkdir::WalkDir;
 
@@ -350,21 +351,11 @@ fn output_message(output: &Output) -> String {
 }
 
 fn decode_limited_output(bytes: &[u8], limit: usize) -> String {
-    if bytes.len() <= limit {
-        return String::from_utf8_lossy(bytes).into_owned();
-    }
-    let mut output = String::from_utf8_lossy(&bytes[..limit]).into_owned();
-    output.push_str("\n[output truncated]\n");
-    output
+    decode_truncated_prefix(bytes, limit, "\n[output truncated]\n")
 }
 
-fn limit_string(mut output: String, limit: usize) -> String {
-    if output.len() <= limit {
-        return output;
-    }
-    output.truncate(limit);
-    output.push_str("\n[output truncated]\n");
-    output
+fn limit_string(output: String, limit: usize) -> String {
+    truncate_prefix_bytes(output, limit, "\n[output truncated]\n")
 }
 
 fn parse_git_status(

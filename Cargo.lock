@@ -14814,6 +14814,7 @@ dependencies = [
  "slab-file",
  "slab-git",
  "slab-hub",
+ "slab-jsonrpc",
  "slab-libfetch",
  "slab-mcp",
  "slab-model-pack",
@@ -14931,6 +14932,7 @@ dependencies = [
  "pretty_assertions",
  "serde",
  "slab-sandboxing",
+ "slab-utils",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -14974,6 +14976,7 @@ dependencies = [
  "serde",
  "similar",
  "slab-file",
+ "slab-utils",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -15056,6 +15059,7 @@ dependencies = [
  "rustyline 18.0.0",
  "serde",
  "serde_json",
+ "slab-jsonrpc",
  "slab-types",
  "slab-utils",
  "sys_traits",
@@ -15065,6 +15069,14 @@ dependencies = [
  "tokio-util",
  "uuid",
  "winapi",
+]
+
+[[package]]
+name = "slab-jsonrpc"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -15129,6 +15141,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "slab-jsonrpc",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -15140,9 +15153,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "serde_json",
+ "slab-utils",
  "tokio",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -15203,12 +15216,13 @@ dependencies = [
  "pyo3",
  "serde",
  "serde_json",
+ "slab-jsonrpc",
  "slab-types",
+ "slab-utils",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -15324,10 +15338,12 @@ dependencies = [
  "slab-agent",
  "slab-app-core",
  "slab-config",
+ "slab-jsonrpc",
  "slab-libfetch",
  "slab-proto",
  "slab-runtime-core",
  "slab-types",
+ "slab-utils",
  "sqlx",
  "strum 0.28.0",
  "thiserror 2.0.18",
@@ -15357,6 +15373,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slab-sandboxing",
+ "slab-utils",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -15418,6 +15435,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "tracing-subscriber",
  "ts-rs",
  "uds_windows",
  "uuid",

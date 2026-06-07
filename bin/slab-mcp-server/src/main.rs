@@ -2,11 +2,10 @@ use anyhow::Context;
 use serde_json::Value;
 use slab_mcp_server::{handle_message, parse_error_response};
 use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    init_tracing();
+    slab_utils::tracing::init_stderr_tracing("slab_mcp_server=info");
 
     let stdin = io::stdin();
     let mut stdout = io::stdout();
@@ -40,10 +39,4 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-fn init_tracing() {
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("slab_mcp_server=info"));
-    tracing_subscriber::fmt().with_env_filter(env_filter).with_writer(std::io::stderr).init();
 }

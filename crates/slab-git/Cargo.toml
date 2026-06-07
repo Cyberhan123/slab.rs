@@ -12,6 +12,7 @@ license.workspace = true
 anyhow = { workspace = true }
 chrono = { workspace = true }
 slab-file = { workspace = true }
+slab-utils = { workspace = true }
 gix = { workspace = true }
 once_cell = { workspace = true }
 regex = { workspace = true }

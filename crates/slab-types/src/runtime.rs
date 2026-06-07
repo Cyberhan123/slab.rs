@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::RuntimeBackendId;
 use crate::common::JsonOptions;
+use crate::defaults;
 use crate::load_config::RuntimeBackendLoadSpec;
 
 #[non_exhaustive]
@@ -195,10 +196,6 @@ impl ModelSpec {
     }
 }
 
-const fn default_flash_attn_enabled() -> bool {
-    true
-}
-
 /// Diffusion-specific model load options carried alongside the primary model path.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct DiffusionLoadOptions {
@@ -216,7 +213,7 @@ pub struct DiffusionLoadOptions {
     pub clip_g_path: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub t5xxl_path: Option<PathBuf>,
-    #[serde(default = "default_flash_attn_enabled")]
+    #[serde(default = "defaults::flash_attn_enabled")]
     pub flash_attn: bool,
     #[serde(default)]
     pub vae_device: String,
@@ -236,7 +233,7 @@ impl Default for DiffusionLoadOptions {
             clip_l_path: None,
             clip_g_path: None,
             t5xxl_path: None,
-            flash_attn: true,
+            flash_attn: defaults::flash_attn_enabled(),
             vae_device: String::new(),
             clip_device: String::new(),
             offload_params_to_cpu: false,

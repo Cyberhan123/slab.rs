@@ -4530,6 +4530,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Task restarted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskResponse"];
+                };
+            };
             /** @description Bad request */
             400: {
                 headers: {
@@ -4544,15 +4553,15 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Backend error */
-            500: {
+            /** @description Task restart conflicts with active work */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description Not implemented */
-            501: {
+            /** @description Backend error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

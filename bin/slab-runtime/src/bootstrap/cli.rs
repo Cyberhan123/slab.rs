@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use clap::{Parser, ValueEnum};
 
-use crate::infra::config::{EnabledBackends, RuntimeConfig, resolve_base_lib_path};
+use crate::infra::config::{CliEnabledBackends, RuntimeConfig, resolve_base_lib_path};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 enum EnabledBackendArg {
@@ -45,9 +45,9 @@ impl Cli {
 
     pub fn into_runtime_config(self) -> anyhow::Result<RuntimeConfig> {
         let enabled_backends = if self.enabled_backends.is_empty() {
-            EnabledBackends::all()
+            CliEnabledBackends::all()
         } else {
-            let mut enabled = EnabledBackends { llama: false, whisper: false, diffusion: false };
+            let mut enabled = CliEnabledBackends { llama: false, whisper: false, diffusion: false };
             for backend in self.enabled_backends {
                 match backend {
                     EnabledBackendArg::Llama => enabled.llama = true,

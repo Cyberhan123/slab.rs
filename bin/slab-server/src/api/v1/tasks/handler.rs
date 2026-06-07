@@ -3,10 +3,9 @@ use std::sync::Arc;
 use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Deserialize;
 use utoipa::OpenApi;
-use validator::Validate;
 
+use crate::api::v1::path::IdPath;
 use crate::api::v1::tasks::schema::{
     TaskProgressResponse, TaskResponse, TaskResultPayload, TaskStatus, TaskTypeQuery,
     TimedTextSegmentResponse,
@@ -75,7 +74,7 @@ async fn list_tasks(
 )]
 async fn get_task(
     State(service): State<TaskApplicationService>,
-    Path(params): Path<TaskIdPath>,
+    Path(params): Path<IdPath>,
 ) -> Result<Json<TaskResponse>, ServerError> {
     let params = validate(params)?;
     Ok(Json(service.get_task(&params.id).await?.into()))
@@ -97,7 +96,7 @@ async fn get_task(
 )]
 async fn get_task_result(
     State(service): State<TaskApplicationService>,
-    Path(params): Path<TaskIdPath>,
+    Path(params): Path<IdPath>,
 ) -> Result<Json<TaskResultPayload>, ServerError> {
     let params = validate(params)?;
     Ok(Json(service.get_task_result(&params.id).await?.into()))
@@ -119,7 +118,7 @@ async fn get_task_result(
 )]
 async fn cancel_task(
     State(service): State<TaskApplicationService>,
-    Path(params): Path<TaskIdPath>,
+    Path(params): Path<IdPath>,
 ) -> Result<Json<TaskResponse>, ServerError> {
     let params = validate(params)?;
     Ok(Json(service.cancel_task(&params.id).await?.into()))
@@ -133,27 +132,17 @@ async fn cancel_task(
         ("id" = String, Path, description = "ID of the task to restart")
     ),
     responses(
+        (status = 200, description = "Task restarted", body = TaskResponse),
         (status = 400, description = "Bad request"),
+        (status = 409, description = "Task restart conflicts with active work"),
         (status = 404, description = "Task not found"),
-        (status = 501, description = "Not implemented"),
         (status = 500, description = "Backend error"),
     )
 )]
 async fn restart_task(
     State(service): State<TaskApplicationService>,
-    Path(params): Path<TaskIdPath>,
+    Path(params): Path<IdPath>,
 ) -> Result<Json<TaskResponse>, ServerError> {
     let params = validate(params)?;
-    service.validate_restartable(&params.id).await?;
-
-    Err(ServerError::NotImplemented("task restart is not yet implemented".to_owned()))
-}
-
-#[derive(Debug, Deserialize, Validate)]
-struct TaskIdPath {
-    #[validate(custom(
-        function = "crate::api::validation::validate_non_blank",
-        message = "id must not be empty"
-    ))]
-    id: String,
+    Ok(Json(service.restart_task(&params.id).await?.into()))
 }

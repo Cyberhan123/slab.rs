@@ -1,11 +1,11 @@
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use hf_hub::{Cache, Repo, RepoType};
 
 use crate::client::HubClient;
 use crate::error::{HubError, map_hf_hub_error};
-use crate::progress::{DownloadProgress, DownloadProgressUpdate};
+use crate::progress::{DownloadProgress, SharedDownloadProgress};
 use crate::provider::HubProvider;
 
 impl HubClient {
@@ -75,8 +75,7 @@ impl HubClient {
 
 #[derive(Clone)]
 struct HfHubProgressAdapter {
-    observer: Arc<dyn DownloadProgress>,
-    state: Arc<Mutex<DownloadProgressUpdate>>,
+    progress: SharedDownloadProgress,
 }
 
 impl HfHubProgressAdapter {
@@ -86,41 +85,20 @@ impl HfHubProgressAdapter {
         filename: &str,
         observer: Arc<dyn DownloadProgress>,
     ) -> Self {
-        Self {
-            observer,
-            state: Arc::new(Mutex::new(DownloadProgressUpdate {
-                provider,
-                repo_id: repo_id.to_owned(),
-                filename: filename.to_owned(),
-                downloaded_bytes: 0,
-                total_bytes: None,
-            })),
-        }
+        Self { progress: SharedDownloadProgress::new(provider, repo_id, filename, observer) }
     }
 }
 
 impl hf_hub::api::tokio::Progress for HfHubProgressAdapter {
     async fn init(&mut self, size: usize, _filename: &str) {
-        let snapshot = {
-            let mut state = self.state.lock().expect("progress state");
-            state.total_bytes = Some(size as u64);
-            state.downloaded_bytes = 0;
-            state.clone()
-        };
-        self.observer.on_start(&snapshot);
+        self.progress.start(Some(size as u64));
     }
 
     async fn update(&mut self, size: usize) {
-        let snapshot = {
-            let mut state = self.state.lock().expect("progress state");
-            state.downloaded_bytes += size as u64;
-            state.clone()
-        };
-        self.observer.on_progress(&snapshot);
+        self.progress.increment(size as u64);
     }
 
     async fn finish(&mut self) {
-        let snapshot = self.state.lock().expect("progress state").clone();
-        self.observer.on_finish(&snapshot);
+        self.progress.finish();
     }
 }

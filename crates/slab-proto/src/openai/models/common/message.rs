@@ -90,22 +90,4 @@ impl std::fmt::Display for MessagePhase {
     }
 }
 
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum MessagePhase2 {
-    #[serde(rename = "commentary")]
-    #[default]
-    Commentary,
-    #[serde(rename = "final_answer")]
-    FinalAnswer,
-}
-
-impl std::fmt::Display for MessagePhase2 {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Self::Commentary => write!(f, "commentary"),
-            Self::FinalAnswer => write!(f, "final_answer"),
-        }
-    }
-}
+pub type MessagePhase2 = MessagePhase;

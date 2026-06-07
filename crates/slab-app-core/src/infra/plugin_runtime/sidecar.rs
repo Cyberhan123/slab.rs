@@ -7,8 +7,10 @@ use std::sync::{
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use dashmap::DashMap;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use slab_jsonrpc::{
+    application_error_response, id_key, parse_message, request as rpc_request, success_response,
+};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{Mutex, mpsc, oneshot};
 
@@ -135,44 +137,6 @@ type PendingMap = Arc<Mutex<HashMap<String, oneshot::Sender<Result<Value, String
 type ExitHandlerFuture = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
 type ExitHandler = dyn Fn(SupervisedProcessExit) -> ExitHandlerFuture + Send + Sync;
 
-#[derive(Debug, Deserialize)]
-struct JsonRpcIncoming {
-    #[serde(default)]
-    id: Option<Value>,
-    #[serde(default)]
-    method: Option<String>,
-    #[serde(default)]
-    params: Value,
-    #[serde(default)]
-    result: Option<Value>,
-    #[serde(default)]
-    error: Option<JsonRpcError>,
-}
-
-#[derive(Debug, Serialize)]
-struct JsonRpcRequest<'a> {
-    jsonrpc: &'static str,
-    id: Value,
-    method: &'a str,
-    params: Value,
-}
-
-#[derive(Debug, Serialize)]
-struct JsonRpcResponse {
-    jsonrpc: &'static str,
-    id: Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<JsonRpcError>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct JsonRpcError {
-    code: i64,
-    message: String,
-}
-
 impl PluginSidecarRuntimeClient {
     pub fn new(
         kind: PluginSidecarRuntimeKind,
@@ -221,15 +185,12 @@ impl PluginSidecarRuntimeClient {
         let params = serde_json::to_value(&request).map_err(|error| {
             AppCoreError::Internal(format!("failed to serialize plugin runtime call: {error}"))
         })?;
-        let payload = serde_json::to_string(&JsonRpcRequest {
-            jsonrpc: "2.0",
-            id,
-            method: "plugin.call",
-            params,
-        })
-        .map_err(|error| {
-            AppCoreError::Internal(format!("failed to serialize plugin runtime JSON-RPC: {error}"))
-        })?;
+        let payload =
+            serde_json::to_string(&rpc_request(id, "plugin.call", params)).map_err(|error| {
+                AppCoreError::Internal(format!(
+                    "failed to serialize plugin runtime JSON-RPC: {error}"
+                ))
+            })?;
 
         let (tx, rx) = oneshot::channel();
         child.pending.lock().await.insert(key.clone(), tx);
@@ -430,7 +391,7 @@ async fn read_runtime_line(
     outbound: RuntimeOutbound,
     inner: Arc<PluginSidecarRuntimeClientInner>,
 ) {
-    let incoming = match serde_json::from_str::<JsonRpcIncoming>(&line) {
+    let incoming = match parse_message(&line) {
         Ok(value) => value,
         Err(error) => {
             tracing::warn!(
@@ -521,13 +482,8 @@ async fn handle_runtime_host_request(
 
 fn send_child_response(outbound: &RuntimeOutbound, id: Value, result: Result<Value, String>) {
     let response = match result {
-        Ok(result) => JsonRpcResponse { jsonrpc: "2.0", id, result: Some(result), error: None },
-        Err(message) => JsonRpcResponse {
-            jsonrpc: "2.0",
-            id,
-            result: None,
-            error: Some(JsonRpcError { code: -32000, message }),
-        },
+        Ok(result) => success_response(id, result),
+        Err(message) => application_error_response(id, message),
     };
     if let Ok(line) = serde_json::to_string(&response) {
         let _ = outbound.send_line(line);
@@ -595,14 +551,6 @@ async fn prepare_runtime_socket_path(
     }
 
     Ok(socket_path)
-}
-
-fn id_key(id: &Value) -> String {
-    match id {
-        Value::String(value) => value.clone(),
-        Value::Number(value) => value.to_string(),
-        other => other.to_string(),
-    }
 }
 
 #[cfg(test)]

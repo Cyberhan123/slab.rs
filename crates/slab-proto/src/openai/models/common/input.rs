@@ -287,7 +287,7 @@ pub enum InputMessageStatus {
 pub struct InputMessageResource {
     /// The role of the message input. One of `user`, `system`, or `developer`.
     #[serde(rename = "role")]
-    pub role: InputMessageResourceRole,
+    pub role: InputMessageRole,
     /// A list of one or many input items to the model, containing different content  types.
     #[serde(rename = "content")]
     pub content: Vec<models::InputContent>,
@@ -296,58 +296,24 @@ pub struct InputMessageResource {
     pub id: String,
     /// The type of the message input. Always set to `message`.
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
-    pub r#type: Option<InputMessageResourceType>,
+    pub r#type: Option<InputMessageType>,
     /// The status of item. One of `in_progress`, `completed`, or `incomplete`. Populated when items are returned via API.
     #[serde(rename = "status", skip_serializing_if = "Option::is_none")]
-    pub status: Option<InputMessageResourceStatus>,
+    pub status: Option<InputMessageStatus>,
 }
 
 impl InputMessageResource {
     pub fn new(
-        role: InputMessageResourceRole,
+        role: InputMessageRole,
         content: Vec<models::InputContent>,
         id: String,
     ) -> InputMessageResource {
         InputMessageResource { role, content, id, r#type: None, status: None }
     }
 }
-/// The role of the message input. One of `user`, `system`, or `developer`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum InputMessageResourceRole {
-    #[serde(rename = "user")]
-    #[default]
-    User,
-    #[serde(rename = "system")]
-    System,
-    #[serde(rename = "developer")]
-    Developer,
-}
-
-/// The type of the message input. Always set to `message`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum InputMessageResourceType {
-    #[serde(rename = "message")]
-    #[default]
-    Message,
-}
-
-/// The status of item. One of `in_progress`, `completed`, or `incomplete`. Populated when items are returned via API.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum InputMessageResourceStatus {
-    #[serde(rename = "in_progress")]
-    #[default]
-    InProgress,
-    #[serde(rename = "completed")]
-    Completed,
-    #[serde(rename = "incomplete")]
-    Incomplete,
-}
+pub type InputMessageResourceRole = InputMessageRole;
+pub type InputMessageResourceType = InputMessageType;
+pub type InputMessageResourceStatus = InputMessageStatus;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputMessagesItemReference {
@@ -405,33 +371,8 @@ pub enum InputMessagesTemplateType {
     Template,
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct TemplateInputMessages {
-    /// The type of input messages. Always `template`.
-    #[serde(rename = "type")]
-    pub r#type: TemplateInputMessagesType,
-    /// A list of chat messages forming the prompt or context. May include variable references to the `item` namespace, ie {{item.name}}.
-    #[serde(rename = "template")]
-    pub template: Vec<models::TemplateInputMessagesTemplateInner>,
-}
-
-impl TemplateInputMessages {
-    pub fn new(
-        r#type: TemplateInputMessagesType,
-        template: Vec<models::TemplateInputMessagesTemplateInner>,
-    ) -> TemplateInputMessages {
-        TemplateInputMessages { r#type, template }
-    }
-}
-/// The type of input messages. Always `template`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum TemplateInputMessagesType {
-    #[serde(rename = "template")]
-    #[default]
-    Template,
-}
+pub type TemplateInputMessages = InputMessagesTemplate;
+pub type TemplateInputMessagesType = InputMessagesTemplateType;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ItemReferenceInputMessages {

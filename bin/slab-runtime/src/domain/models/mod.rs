@@ -14,5 +14,5 @@ pub(crate) use contracts::{
     OnnxTensor, TextGenerationMetadata, TextGenerationOptions, TextGenerationResponse,
     TextGenerationStreamEvent, TextGenerationUsage, TextPromptTokensDetails, TextStopMetadata,
 };
-pub(crate) use enabled_backends::EnabledBackends;
+pub(crate) use enabled_backends::RuntimeEnabledBackends;
 pub(crate) use task::{TaskCodec, TaskHandle};

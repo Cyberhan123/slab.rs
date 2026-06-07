@@ -4,6 +4,7 @@ mod pack;
 mod runtime;
 
 pub(crate) use catalog::list_chat_models_from_state;
+pub(crate) use download::MODEL_DOWNLOAD_TASK_TYPE;
 pub(crate) use runtime::resolve_local_chat_prompt_profile;
 
 use std::path::PathBuf;

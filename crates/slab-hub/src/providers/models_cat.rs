@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::client::HubClient;
 use crate::error::{HubError, map_models_cat_error};
-use crate::progress::{DownloadProgress, DownloadProgressUpdate};
+use crate::progress::{DownloadProgress, SharedDownloadProgress};
 use crate::provider::HubProvider;
 
 impl HubClient {
@@ -140,8 +140,7 @@ fn find_models_cat_downloaded_path(
 
 #[derive(Clone)]
 struct ModelsCatProgressAdapter {
-    observer: Arc<dyn DownloadProgress>,
-    state: Arc<Mutex<DownloadProgressUpdate>>,
+    progress: SharedDownloadProgress,
 }
 
 impl ModelsCatProgressAdapter {
@@ -151,16 +150,7 @@ impl ModelsCatProgressAdapter {
         filename: &str,
         observer: Arc<dyn DownloadProgress>,
     ) -> Self {
-        Self {
-            observer,
-            state: Arc::new(Mutex::new(DownloadProgressUpdate {
-                provider,
-                repo_id: repo_id.to_owned(),
-                filename: filename.to_owned(),
-                downloaded_bytes: 0,
-                total_bytes: None,
-            })),
-        }
+        Self { progress: SharedDownloadProgress::new(provider, repo_id, filename, observer) }
     }
 }
 
@@ -170,13 +160,7 @@ impl models_cat::asynchronous::Progress for ModelsCatProgressAdapter {
         &mut self,
         unit: &models_cat::asynchronous::ProgressUnit,
     ) -> Result<(), models_cat::OpsError> {
-        let snapshot = {
-            let mut state = self.state.lock().expect("progress state");
-            state.total_bytes = Some(unit.total_size());
-            state.downloaded_bytes = 0;
-            state.clone()
-        };
-        self.observer.on_start(&snapshot);
+        self.progress.start(Some(unit.total_size()));
         Ok(())
     }
 
@@ -184,13 +168,7 @@ impl models_cat::asynchronous::Progress for ModelsCatProgressAdapter {
         &mut self,
         unit: &models_cat::asynchronous::ProgressUnit,
     ) -> Result<(), models_cat::OpsError> {
-        let snapshot = {
-            let mut state = self.state.lock().expect("progress state");
-            state.total_bytes = Some(unit.total_size());
-            state.downloaded_bytes = unit.current();
-            state.clone()
-        };
-        self.observer.on_progress(&snapshot);
+        self.progress.progress(Some(unit.total_size()), unit.current());
         Ok(())
     }
 
@@ -198,13 +176,7 @@ impl models_cat::asynchronous::Progress for ModelsCatProgressAdapter {
         &mut self,
         unit: &models_cat::asynchronous::ProgressUnit,
     ) -> Result<(), models_cat::OpsError> {
-        let snapshot = {
-            let mut state = self.state.lock().expect("progress state");
-            state.total_bytes = Some(unit.total_size());
-            state.downloaded_bytes = unit.current();
-            state.clone()
-        };
-        self.observer.on_finish(&snapshot);
+        self.progress.finish_with(Some(unit.total_size()), unit.current());
         Ok(())
     }
 }

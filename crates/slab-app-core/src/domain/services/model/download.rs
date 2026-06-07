@@ -23,6 +23,7 @@ use super::{ModelService, catalog, pack, runtime};
 
 const MODEL_DOWNLOAD_PROGRESS_MIN_INTERVAL: Duration = Duration::from_millis(500);
 const MODEL_DOWNLOAD_PROGRESS_MIN_BYTES_DELTA: u64 = 512 * 1024;
+pub(crate) const MODEL_DOWNLOAD_TASK_TYPE: &str = "model_download";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ModelDownloadTaskInput {
@@ -235,9 +236,6 @@ impl ModelService {
             ))
         })?;
 
-        let store = Arc::clone(self.model_state.store());
-        let model_config_dir = self.model_config_dir().to_path_buf();
-        let auto_unload = Arc::clone(self.model_state.auto_unload());
         let operation_id = uuid::Uuid::new_v4().to_string();
         let now = Utc::now();
         let insert_result = self
@@ -246,7 +244,7 @@ impl ModelService {
             .insert_model_download_operation(
                 TaskRecord {
                     id: operation_id.clone(),
-                    task_type: "model_download".to_owned(),
+                    task_type: MODEL_DOWNLOAD_TASK_TYPE.to_owned(),
                     status: TaskStatus::Pending,
                     model_id: Some(model_id.clone()),
                     input_data: Some(input_data.clone()),
@@ -297,224 +295,7 @@ impl ModelService {
             Err(error) => return Err(error.into()),
         }
 
-        self.worker_state
-            .spawn_existing_operation(operation_id.clone(), move |operation| async move {
-                let operation_id = operation.id().to_owned();
-                if let Err(error) = operation.mark_running().await {
-                    warn!(task_id = %operation_id, error = %error, "failed to mark model download running");
-                    let _ = persist_model_download_status(
-                        &store,
-                        &operation_id,
-                        TaskStatus::Failed,
-                        Some(&error.to_string()),
-                    )
-                    .await;
-                    return;
-                }
-
-                if let Err(error) =
-                    persist_model_download_status(&store, &operation_id, TaskStatus::Running, None)
-                        .await
-                {
-                    warn!(task_id = %operation_id, error = %error, "failed to persist model download running status");
-                }
-
-                let input: ModelDownloadTaskInput = match serde_json::from_str(&input_data) {
-                    Ok(value) => value,
-                    Err(error) => {
-                        warn!(task_id = %operation_id, error = %error, "invalid stored input_data for model_download task");
-                        let message = format!("invalid stored input_data: {error}");
-                        mark_model_download_failed(&operation, &store, &operation_id, &message).await;
-                        return;
-                    }
-                };
-
-                let model_id = input.model_id.trim().to_owned();
-                let model_cache_dir = input
-                    .model_cache_dir
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(str::to_owned);
-                let download_candidates = input.candidates;
-
-                if model_id.is_empty() || download_candidates.is_empty() {
-                    warn!(task_id = %operation_id, "model_download task is missing model_id or candidates");
-                    mark_model_download_failed(
-                        &operation,
-                        &store,
-                        &operation_id,
-                        "missing model_id or candidates in stored input_data",
-                    )
-                    .await;
-                    return;
-                }
-
-                let mut attempt_errors = Vec::new();
-                let mut successful_download: Option<(
-                    String,
-                    BTreeMap<String, String>,
-                    SelectedModelDownloadSource,
-                )> = None;
-
-                for candidate in download_candidates {
-                    let repo_id = candidate.repo_id.trim().to_owned();
-                    let filename = candidate.filename.trim().to_owned();
-                    let hub_provider = candidate
-                        .hub_provider
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|value| !value.is_empty())
-                        .map(str::to_owned);
-                    let download_artifacts = if candidate.artifacts.is_empty() {
-                        let mut artifacts = BTreeMap::new();
-                        artifacts.insert("model".to_owned(), filename.clone());
-                        artifacts
-                    } else {
-                        candidate.artifacts
-                    };
-                    let primary_artifact_id = candidate
-                        .primary_artifact_id
-                        .or_else(|| catalog::primary_artifact_key(&download_artifacts));
-
-                    if repo_id.is_empty() || filename.is_empty() {
-                        attempt_errors.push(format!(
-                            "{}: candidate is missing repo_id or filename",
-                            candidate.source_key
-                        ));
-                        continue;
-                    }
-
-                    let attempt_result = async {
-                        let client =
-                            catalog::build_hub_client(model_cache_dir.as_deref(), hub_provider.as_deref())
-                                .map_err(|error| error.to_string())?;
-                        let mut materialized_artifacts = BTreeMap::new();
-                        let progress: Arc<dyn DownloadProgress> = Arc::new(
-                            ModelDownloadProgressReporter::new(
-                                operation_id.clone(),
-                                Arc::clone(&store),
-                                &download_artifacts,
-                            ),
-                        );
-
-                        for (artifact_id, artifact_file) in &download_artifacts {
-                            let path = client
-                                .download_file(&repo_id, artifact_file, Some(Arc::clone(&progress)))
-                                .await
-                                .map_err(|error| {
-                                    format!("hub download failed for {artifact_file}: {error}")
-                                })?;
-                            materialized_artifacts
-                                .insert(artifact_id.clone(), path.to_string_lossy().into_owned());
-                        }
-
-                        let local_path = primary_artifact_id
-                            .as_ref()
-                            .and_then(|artifact_id| materialized_artifacts.get(artifact_id))
-                            .cloned()
-                            .or_else(|| materialized_artifacts.values().next().cloned())
-                            .ok_or_else(|| "hub download produced no local artifacts".to_owned())?;
-
-                        Ok::<(String, BTreeMap<String, String>), String>((
-                            local_path,
-                            materialized_artifacts,
-                        ))
-                    }
-                    .await;
-
-                    match attempt_result {
-                        Ok((local_path, materialized_artifacts)) => {
-                            successful_download = Some((
-                                local_path,
-                                materialized_artifacts,
-                                SelectedModelDownloadSource {
-                                    source_key: candidate.source_key,
-                                    repo_id,
-                                    filename,
-                                    hub_provider,
-                                },
-                            ));
-                            break;
-                        }
-                        Err(error) => {
-                            attempt_errors.push(format!("{}: {error}", candidate.source_key));
-                        }
-                    }
-                }
-
-                let Some((local_path, materialized_artifacts, selected_source)) = successful_download
-                else {
-                    let error = if attempt_errors.is_empty() {
-                        "model download failed without a candidate attempt".to_owned()
-                    } else {
-                        attempt_errors.join(" | ")
-                    };
-                    warn!(task_id = %operation_id, error = %error, "model download failed");
-                    mark_model_download_failed(&operation, &store, &operation_id, &error).await;
-                    return;
-                };
-
-                if let Err(error) = store
-                    .update_model_local_path(&model_id, &local_path, "ready")
-                    .await
-                {
-                    warn!(task_id = %operation_id, error = %error, "failed to persist downloaded model path");
-                    let message = format!("downloaded file but failed to persist path: {error}");
-                    mark_model_download_failed(&operation, &store, &operation_id, &message).await;
-                    return;
-                }
-
-                let updated_record = match store.get_model(&model_id).await {
-                    Ok(Some(record)) => record,
-                    Ok(None) => {
-                        let message = format!(
-                            "downloaded file but model {model_id} no longer exists after update"
-                        );
-                        mark_model_download_failed(&operation, &store, &operation_id, &message)
-                            .await;
-                        return;
-                    }
-                    Err(error) => {
-                        let message =
-                            format!("downloaded file but failed to reload model {model_id}: {error}");
-                        mark_model_download_failed(&operation, &store, &operation_id, &message)
-                            .await;
-                        return;
-                    }
-                };
-
-                if let Err(error) = pack::sync_model_pack_record(
-                    &model_config_dir,
-                    updated_record,
-                    Some(materialized_artifacts),
-                    Some(selected_source),
-                ) {
-                    warn!(task_id = %operation_id, error = %error, "failed to sync downloaded model pack");
-                    let message = format!("downloaded file but failed to sync model pack: {error}");
-                    mark_model_download_failed(&operation, &store, &operation_id, &message).await;
-                    return;
-                }
-
-                auto_unload
-                    .invalidate_model_replay(&model_id, "model download updated catalog local_path")
-                    .await;
-
-                let result_json = serde_json::to_string(&ModelDownloadResultPayload {
-                    local_path: local_path.clone(),
-                })
-                .unwrap_or_default();
-                if let Err(db_error) = operation.mark_succeeded(&result_json).await {
-                    warn!(task_id = %operation_id, error = %db_error, "failed to persist model download success");
-                }
-                if let Err(error) =
-                    persist_model_download_status(&store, &operation_id, TaskStatus::Succeeded, None)
-                        .await
-                {
-                    warn!(task_id = %operation_id, error = %error, "failed to persist model download success status");
-                }
-                info!(task_id = %operation_id, local_path = %local_path, "model download succeeded");
-            });
+        self.spawn_model_download_operation(operation_id.clone(), input_data);
 
         info!(
             task_id = %operation_id,
@@ -525,6 +306,302 @@ impl ModelService {
 
         Ok(AcceptedOperation { operation_id })
     }
+}
+
+impl ModelService {
+    pub(crate) async fn restart_model_download_task(
+        &self,
+        task: TaskRecord,
+    ) -> Result<(), AppCoreError> {
+        match task.status {
+            TaskStatus::Pending | TaskStatus::Running => {
+                return Err(AppCoreError::Conflict(format!(
+                    "task {} is already active (status: {})",
+                    task.id, task.status
+                )));
+            }
+            TaskStatus::Succeeded => {
+                return Err(AppCoreError::BadRequest(format!(
+                    "task {} cannot be restarted (status: {})",
+                    task.id, task.status
+                )));
+            }
+            TaskStatus::Failed | TaskStatus::Cancelled | TaskStatus::Interrupted => {}
+        }
+
+        let input_data = task.input_data.clone().ok_or_else(|| {
+            AppCoreError::BadRequest(format!(
+                "model download task {} is missing input_data",
+                task.id
+            ))
+        })?;
+        serde_json::from_str::<ModelDownloadTaskInput>(&input_data).map_err(|error| {
+            AppCoreError::BadRequest(format!(
+                "model download task {} has invalid input_data: {error}",
+                task.id
+            ))
+        })?;
+
+        self.model_state.store().reconcile_model_downloads().await?;
+        let download =
+            self.model_state.store().get_model_download(&task.id).await?.ok_or_else(|| {
+                AppCoreError::BadRequest(format!(
+                    "model download task {} is missing model_downloads row",
+                    task.id
+                ))
+            })?;
+
+        if let Some(active) = self
+            .model_state
+            .store()
+            .get_active_model_download_for_source(&download.model_id, &download.source_key)
+            .await?
+            && active.task_id != task.id
+        {
+            return Err(AppCoreError::Conflict(format!(
+                "model download source is already active in task {}",
+                active.task_id
+            )));
+        }
+
+        match self.model_state.store().restart_model_download_task(&task.id).await {
+            Ok(()) => {}
+            Err(error) if is_model_download_conflict(&error) => {
+                return Err(AppCoreError::Conflict(format!(
+                    "model download source is already active for task {}",
+                    task.id
+                )));
+            }
+            Err(error) => return Err(error.into()),
+        }
+
+        self.spawn_model_download_operation(task.id.clone(), input_data);
+        info!(task_id = %task.id, "model download task restarted");
+        Ok(())
+    }
+
+    fn spawn_model_download_operation(&self, operation_id: String, input_data: String) {
+        let store = Arc::clone(self.model_state.store());
+        let model_config_dir = self.model_config_dir().to_path_buf();
+        let auto_unload = Arc::clone(self.model_state.auto_unload());
+
+        self.worker_state.spawn_existing_operation(operation_id, move |operation| async move {
+            run_model_download_operation(
+                operation,
+                store,
+                model_config_dir,
+                auto_unload,
+                input_data,
+            )
+            .await;
+        });
+    }
+}
+
+async fn run_model_download_operation(
+    operation: crate::context::worker_state::OperationContext,
+    store: Arc<crate::infra::db::AnyStore>,
+    model_config_dir: std::path::PathBuf,
+    auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
+    input_data: String,
+) {
+    let operation_id = operation.id().to_owned();
+    if let Err(error) = operation.mark_running().await {
+        warn!(task_id = %operation_id, error = %error, "failed to mark model download running");
+        let _ = persist_model_download_status(
+            &store,
+            &operation_id,
+            TaskStatus::Failed,
+            Some(&error.to_string()),
+        )
+        .await;
+        return;
+    }
+
+    if let Err(error) =
+        persist_model_download_status(&store, &operation_id, TaskStatus::Running, None).await
+    {
+        warn!(task_id = %operation_id, error = %error, "failed to persist model download running status");
+    }
+
+    let input: ModelDownloadTaskInput = match serde_json::from_str(&input_data) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(task_id = %operation_id, error = %error, "invalid stored input_data for model_download task");
+            let message = format!("invalid stored input_data: {error}");
+            mark_model_download_failed(&operation, &store, &operation_id, &message).await;
+            return;
+        }
+    };
+
+    let model_id = input.model_id.trim().to_owned();
+    let model_cache_dir = input
+        .model_cache_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    let download_candidates = input.candidates;
+
+    if model_id.is_empty() || download_candidates.is_empty() {
+        warn!(task_id = %operation_id, "model_download task is missing model_id or candidates");
+        mark_model_download_failed(
+            &operation,
+            &store,
+            &operation_id,
+            "missing model_id or candidates in stored input_data",
+        )
+        .await;
+        return;
+    }
+
+    let mut attempt_errors = Vec::new();
+    let mut successful_download: Option<(
+        String,
+        BTreeMap<String, String>,
+        SelectedModelDownloadSource,
+    )> = None;
+
+    for candidate in download_candidates {
+        let repo_id = candidate.repo_id.trim().to_owned();
+        let filename = candidate.filename.trim().to_owned();
+        let hub_provider = candidate
+            .hub_provider
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+        let download_artifacts = if candidate.artifacts.is_empty() {
+            let mut artifacts = BTreeMap::new();
+            artifacts.insert("model".to_owned(), filename.clone());
+            artifacts
+        } else {
+            candidate.artifacts
+        };
+        let primary_artifact_id = candidate
+            .primary_artifact_id
+            .or_else(|| catalog::primary_artifact_key(&download_artifacts));
+
+        if repo_id.is_empty() || filename.is_empty() {
+            attempt_errors.push(format!(
+                "{}: candidate is missing repo_id or filename",
+                candidate.source_key
+            ));
+            continue;
+        }
+
+        let attempt_result = async {
+            let client =
+                catalog::build_hub_client(model_cache_dir.as_deref(), hub_provider.as_deref())
+                    .map_err(|error| error.to_string())?;
+            let mut materialized_artifacts = BTreeMap::new();
+            let progress: Arc<dyn DownloadProgress> = Arc::new(ModelDownloadProgressReporter::new(
+                operation_id.clone(),
+                Arc::clone(&store),
+                &download_artifacts,
+            ));
+
+            for (artifact_id, artifact_file) in &download_artifacts {
+                let path = client
+                    .download_file(&repo_id, artifact_file, Some(Arc::clone(&progress)))
+                    .await
+                    .map_err(|error| format!("hub download failed for {artifact_file}: {error}"))?;
+                materialized_artifacts
+                    .insert(artifact_id.clone(), path.to_string_lossy().into_owned());
+            }
+
+            let local_path = primary_artifact_id
+                .as_ref()
+                .and_then(|artifact_id| materialized_artifacts.get(artifact_id))
+                .cloned()
+                .or_else(|| materialized_artifacts.values().next().cloned())
+                .ok_or_else(|| "hub download produced no local artifacts".to_owned())?;
+
+            Ok::<(String, BTreeMap<String, String>), String>((local_path, materialized_artifacts))
+        }
+        .await;
+
+        match attempt_result {
+            Ok((local_path, materialized_artifacts)) => {
+                successful_download = Some((
+                    local_path,
+                    materialized_artifacts,
+                    SelectedModelDownloadSource {
+                        source_key: candidate.source_key,
+                        repo_id,
+                        filename,
+                        hub_provider,
+                    },
+                ));
+                break;
+            }
+            Err(error) => {
+                attempt_errors.push(format!("{}: {error}", candidate.source_key));
+            }
+        }
+    }
+
+    let Some((local_path, materialized_artifacts, selected_source)) = successful_download else {
+        let error = if attempt_errors.is_empty() {
+            "model download failed without a candidate attempt".to_owned()
+        } else {
+            attempt_errors.join(" | ")
+        };
+        warn!(task_id = %operation_id, error = %error, "model download failed");
+        mark_model_download_failed(&operation, &store, &operation_id, &error).await;
+        return;
+    };
+
+    if let Err(error) = store.update_model_local_path(&model_id, &local_path, "ready").await {
+        warn!(task_id = %operation_id, error = %error, "failed to persist downloaded model path");
+        let message = format!("downloaded file but failed to persist path: {error}");
+        mark_model_download_failed(&operation, &store, &operation_id, &message).await;
+        return;
+    }
+
+    let updated_record = match store.get_model(&model_id).await {
+        Ok(Some(record)) => record,
+        Ok(None) => {
+            let message =
+                format!("downloaded file but model {model_id} no longer exists after update");
+            mark_model_download_failed(&operation, &store, &operation_id, &message).await;
+            return;
+        }
+        Err(error) => {
+            let message = format!("downloaded file but failed to reload model {model_id}: {error}");
+            mark_model_download_failed(&operation, &store, &operation_id, &message).await;
+            return;
+        }
+    };
+
+    if let Err(error) = pack::sync_model_pack_record(
+        &model_config_dir,
+        updated_record,
+        Some(materialized_artifacts),
+        Some(selected_source),
+    ) {
+        warn!(task_id = %operation_id, error = %error, "failed to sync downloaded model pack");
+        let message = format!("downloaded file but failed to sync model pack: {error}");
+        mark_model_download_failed(&operation, &store, &operation_id, &message).await;
+        return;
+    }
+
+    auto_unload
+        .invalidate_model_replay(&model_id, "model download updated catalog local_path")
+        .await;
+
+    let result_json =
+        serde_json::to_string(&ModelDownloadResultPayload { local_path: local_path.clone() })
+            .unwrap_or_default();
+    if let Err(db_error) = operation.mark_succeeded(&result_json).await {
+        warn!(task_id = %operation_id, error = %db_error, "failed to persist model download success");
+    }
+    if let Err(error) =
+        persist_model_download_status(&store, &operation_id, TaskStatus::Succeeded, None).await
+    {
+        warn!(task_id = %operation_id, error = %error, "failed to persist model download success status");
+    }
+    info!(task_id = %operation_id, local_path = %local_path, "model download succeeded");
 }
 
 fn should_publish_model_download_progress(

@@ -99,11 +99,7 @@ pub struct InputMessagesTemplateTemplateInner {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub r#type: Option<String>,
 }
-#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct TemplateInputMessagesTemplateInner {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub r#type: Option<String>,
-}
+pub type TemplateInputMessagesTemplateInner = InputMessagesTemplateTemplateInner;
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ChatkitWorkflow {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -146,6 +142,8 @@ pub struct MessageContentImageUrlObject {
 #[derive(
     Clone, Copy, Default, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize,
 )]
+/// Compact response service tier subset. Keep separate from `ServiceTier`
+/// because this generated shape only accepts `auto` and `default`.
 pub enum ServiceTierEnum {
     #[default]
     #[serde(rename = "auto")]

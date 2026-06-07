@@ -104,12 +104,11 @@ impl McpClient {
         for (server_name, server) in servers.iter() {
             let remote_tools =
                 server.list_tools().await.map_err(|source| transport_error(server_name, source))?;
-            tools.extend(remote_tools.into_iter().map(|tool| McpToolSpec {
-                server_name: server_name.clone(),
-                name: tool.name,
-                description: tool.description,
-                input_schema: tool.input_schema,
-            }));
+            tools.extend(
+                remote_tools
+                    .into_iter()
+                    .map(|tool| McpToolSpec { server_name: server_name.clone(), tool }),
+            );
         }
         if let Ok(mut cached_tools) = self.cached_tools.write() {
             *cached_tools = tools;
@@ -248,9 +247,9 @@ mod tests {
 
         assert_eq!(tools.len(), 2);
         assert_eq!(tools[0].server_name, "alpha");
-        assert_eq!(tools[0].name, "echo");
+        assert_eq!(tools[0].tool.name, "echo");
         assert_eq!(tools[1].server_name, "beta");
-        assert_eq!(tools[1].name, "search");
+        assert_eq!(tools[1].tool.name, "search");
         assert_eq!(client.cached_tools_blocking().len(), 2);
     }
 

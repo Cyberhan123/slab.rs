@@ -60,11 +60,19 @@ pub trait ModelDownloadStore: Send + Sync + 'static {
     fn list_model_downloads(
         &self,
     ) -> impl Future<Output = Result<Vec<ModelDownloadRecord>, sqlx::Error>> + Send;
+    fn get_model_download(
+        &self,
+        task_id: &str,
+    ) -> impl Future<Output = Result<Option<ModelDownloadRecord>, sqlx::Error>> + Send;
     fn update_model_download_status(
         &self,
         task_id: &str,
         status: TaskStatus,
         error_msg: Option<&str>,
+    ) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
+    fn restart_model_download_task(
+        &self,
+        task_id: &str,
     ) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
     fn reconcile_model_downloads(&self) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
 }
@@ -133,6 +141,22 @@ impl ModelDownloadStore for AnyStore {
         Ok(rows.into_iter().map(row_to_record).collect())
     }
 
+    async fn get_model_download(
+        &self,
+        task_id: &str,
+    ) -> Result<Option<ModelDownloadRecord>, sqlx::Error> {
+        let row: Option<ModelDownloadRow> = sqlx::query_as(
+            "SELECT task_id, model_id, source_key, repo_id, filename, hub_provider, status, error_msg, created_at, updated_at \
+             FROM model_downloads \
+             WHERE task_id = ?1",
+        )
+        .bind(task_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(row_to_record))
+    }
+
     async fn update_model_download_status(
         &self,
         task_id: &str,
@@ -151,6 +175,36 @@ impl ModelDownloadStore for AnyStore {
         .bind(task_id)
         .execute(&self.pool)
         .await?;
+        Ok(())
+    }
+
+    async fn restart_model_download_task(&self, task_id: &str) -> Result<(), sqlx::Error> {
+        let updated_at = Utc::now().to_rfc3339();
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query(
+            "UPDATE tasks \
+             SET status = ?1, result_data = NULL, error_msg = NULL, updated_at = ?2 \
+             WHERE id = ?3",
+        )
+        .bind(TaskStatus::Pending.as_str())
+        .bind(&updated_at)
+        .bind(task_id)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "UPDATE model_downloads \
+             SET status = ?1, error_msg = NULL, updated_at = ?2 \
+             WHERE task_id = ?3",
+        )
+        .bind(TaskStatus::Pending.as_str())
+        .bind(&updated_at)
+        .bind(task_id)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
         Ok(())
     }
 
@@ -363,5 +417,62 @@ mod tests {
         assert_eq!(downloads.len(), 1);
         assert_eq!(downloads[0].status, TaskStatus::Failed);
         assert_eq!(downloads[0].error_msg.as_deref(), Some("network lost"));
+    }
+
+    #[tokio::test]
+    async fn restart_model_download_task_resets_task_and_download_rows() {
+        let store = new_store().await;
+        let mut task = new_task_record("task-1");
+        task.status = TaskStatus::Failed;
+        task.result_data = Some(r#"{"progress":{"current":1}}"#.to_owned());
+        task.error_msg = Some("network lost".to_owned());
+        let mut download = new_download_record("task-1");
+        download.status = TaskStatus::Failed;
+        download.error_msg = Some("network lost".to_owned());
+
+        store.insert_model_download_operation(task, download).await.expect("insert download");
+
+        store.restart_model_download_task("task-1").await.expect("restart task");
+
+        let task = store.get_task("task-1").await.expect("get task").expect("task exists");
+        assert_eq!(task.status, TaskStatus::Pending);
+        assert!(task.result_data.is_none());
+        assert!(task.error_msg.is_none());
+
+        let download = store
+            .get_model_download("task-1")
+            .await
+            .expect("get download")
+            .expect("download exists");
+        assert_eq!(download.status, TaskStatus::Pending);
+        assert!(download.error_msg.is_none());
+    }
+
+    #[tokio::test]
+    async fn restart_model_download_task_keeps_active_source_unique() {
+        let store = new_store().await;
+        let mut failed_task = new_task_record("task-1");
+        failed_task.status = TaskStatus::Failed;
+        let mut failed_download = new_download_record("task-1");
+        failed_download.status = TaskStatus::Failed;
+        store
+            .insert_model_download_operation(failed_task, failed_download)
+            .await
+            .expect("insert failed download");
+        store
+            .insert_model_download_operation(
+                new_task_record("task-2"),
+                new_download_record("task-2"),
+            )
+            .await
+            .expect("insert active download");
+
+        let error = store
+            .restart_model_download_task("task-1")
+            .await
+            .expect_err("restart should conflict with active source");
+
+        let message = error.to_string();
+        assert!(message.contains("UNIQUE constraint failed"), "unexpected error: {message}");
     }
 }

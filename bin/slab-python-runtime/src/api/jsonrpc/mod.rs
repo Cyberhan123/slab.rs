@@ -5,62 +5,17 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
+use slab_jsonrpc::{
+    IncomingMessage, application_error_response, id_key, notification, parse_message, request,
+    success_response,
+};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{Mutex, mpsc, oneshot};
 
 use crate::PythonRuntime;
 use crate::domain::RuntimeHost;
-
-#[derive(Debug, Deserialize)]
-struct JsonRpcIncoming {
-    #[serde(default)]
-    jsonrpc: Option<String>,
-    #[serde(default)]
-    id: Option<Value>,
-    #[serde(default)]
-    method: Option<String>,
-    #[serde(default)]
-    params: Value,
-    #[serde(default)]
-    result: Option<Value>,
-    #[serde(default)]
-    error: Option<JsonRpcError>,
-}
-
-#[derive(Debug, Serialize)]
-struct JsonRpcRequest<'a> {
-    jsonrpc: &'static str,
-    id: Value,
-    method: &'a str,
-    #[serde(default)]
-    params: Value,
-}
-
-#[derive(Debug, Serialize)]
-struct JsonRpcNotification<'a> {
-    jsonrpc: &'static str,
-    method: &'a str,
-    #[serde(default)]
-    params: Value,
-}
-
-#[derive(Debug, Serialize)]
-struct JsonRpcResponse {
-    jsonrpc: &'static str,
-    id: Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<JsonRpcError>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct JsonRpcError {
-    code: i64,
-    message: String,
-}
 
 type PendingMap = Arc<Mutex<HashMap<String, oneshot::Sender<Result<Value, String>>>>>;
 
@@ -96,7 +51,7 @@ impl JsonRpcRuntimeHost {
         }
     }
 
-    async fn resolve_response(&self, response: JsonRpcIncoming) {
+    async fn resolve_response(&self, response: IncomingMessage) {
         let Some(id) = response.id.as_ref().map(id_key) else {
             return;
         };
@@ -113,19 +68,14 @@ impl JsonRpcRuntimeHost {
 
     fn send_response(&self, id: Value, result: Result<Value, String>) {
         let response = match result {
-            Ok(result) => JsonRpcResponse { jsonrpc: "2.0", id, result: Some(result), error: None },
-            Err(message) => JsonRpcResponse {
-                jsonrpc: "2.0",
-                id,
-                result: None,
-                error: Some(JsonRpcError { code: -32000, message }),
-            },
+            Ok(result) => success_response(id, result),
+            Err(message) => application_error_response(id, message),
         };
         self.send_serialized(&response);
     }
 
     fn send_notification(&self, method: &str, params: Value) {
-        self.send_serialized(&JsonRpcNotification { jsonrpc: "2.0", method, params });
+        self.send_serialized(&notification(method, params));
     }
 
     fn send_serialized<T: Serialize>(&self, value: &T) {
@@ -153,7 +103,7 @@ impl RuntimeHost for JsonRpcRuntimeHost {
         let key = id_key(&id);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(key.clone(), tx);
-        self.send_serialized(&JsonRpcRequest { jsonrpc: "2.0", id, method, params });
+        self.send_serialized(&request(id, method, params));
 
         match rx.await {
             Ok(result) => result,
@@ -187,7 +137,7 @@ pub async fn serve_stdio(
 
     while let Some(line) = line_rx.recv().await {
         let line = line.map_err(|error| anyhow::anyhow!(error))?;
-        let incoming = match serde_json::from_str::<JsonRpcIncoming>(&line) {
+        let incoming = match parse_message(&line) {
             Ok(incoming) => incoming,
             Err(error) => {
                 host.send_response(
@@ -205,7 +155,7 @@ pub async fn serve_stdio(
 
         let method = incoming.method.clone().unwrap_or_default();
         let id = incoming.id.clone();
-        if incoming.jsonrpc.as_deref() != Some("2.0") {
+        if !incoming.has_valid_version() {
             if let Some(id) = id {
                 host.send_response(id, Err("jsonrpc must be `2.0`".to_owned()));
             }
@@ -240,12 +190,4 @@ pub async fn serve_stdio(
     }
 
     Ok(())
-}
-
-fn id_key(id: &Value) -> String {
-    match id {
-        Value::String(value) => value.clone(),
-        Value::Number(value) => value.to_string(),
-        other => other.to_string(),
-    }
 }

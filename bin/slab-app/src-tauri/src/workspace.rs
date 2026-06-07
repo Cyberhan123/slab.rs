@@ -17,6 +17,7 @@ use slab_app_core::domain::services::WorkspaceService;
 use slab_config::SettingsDocument;
 use tauri::{AppHandle, Manager, Runtime, State};
 
+use crate::paths::{display_path_string, settings_path_from_env_or_default};
 use crate::setup::{ServerSidecarConfig, restart_server_sidecar};
 
 const SLAB_DIR_NAME: &str = ".slab";
@@ -357,19 +358,19 @@ fn prepare_workspace(root_path: PathBuf) -> Result<WorkspaceInfo, String> {
     let name = root.file_name().and_then(|name| name.to_str()).unwrap_or("Workspace").to_owned();
 
     Ok(WorkspaceInfo {
-        root_path: workspace_path_string(&root),
+        root_path: display_path_string(&root),
         name,
-        slab_dir: workspace_path_string(&slab_dir),
-        settings_path: workspace_path_string(&settings_path),
-        database_path: workspace_path_string(&slab_utils::app_home::database_path()),
-        model_config_dir: workspace_path_string(&slab_utils::app_home::models_dir()),
-        session_state_dir: workspace_path_string(&slab_utils::app_home::sessions_dir()),
+        slab_dir: display_path_string(&slab_dir),
+        settings_path: display_path_string(&settings_path),
+        database_path: display_path_string(&slab_utils::app_home::database_path()),
+        model_config_dir: display_path_string(&slab_utils::app_home::models_dir()),
+        session_state_dir: display_path_string(&slab_utils::app_home::sessions_dir()),
     })
 }
 
 fn sidecar_config_for_workspace(workspace: &WorkspaceInfo) -> ServerSidecarConfig {
     ServerSidecarConfig {
-        settings_path: Some(default_settings_path()),
+        settings_path: Some(settings_path_from_env_or_default()),
         settings_overlay_path: Some(PathBuf::from(&workspace.settings_path)),
         workspace_root: Some(PathBuf::from(&workspace.root_path)),
         ..ServerSidecarConfig::default()
@@ -378,7 +379,7 @@ fn sidecar_config_for_workspace(workspace: &WorkspaceInfo) -> ServerSidecarConfi
 
 fn global_sidecar_config() -> ServerSidecarConfig {
     ServerSidecarConfig {
-        settings_path: Some(default_settings_path()),
+        settings_path: Some(settings_path_from_env_or_default()),
         ..ServerSidecarConfig::default()
     }
 }
@@ -390,13 +391,6 @@ fn startup_workspace_root() -> Option<PathBuf> {
 fn folder_arg(value: OsString) -> Option<PathBuf> {
     let path = PathBuf::from(value);
     path.is_dir().then_some(path)
-}
-
-fn default_settings_path() -> PathBuf {
-    std::env::var("SLAB_SETTINGS_PATH")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(slab_utils::app_home::settings_path)
 }
 
 fn load_recent_workspaces(path: &Path) -> Result<Vec<RecentWorkspace>, String> {
@@ -605,23 +599,6 @@ pub(crate) fn should_hide_entry(name: &str, is_directory: bool, include_ignored:
         && IGNORED_DIR_NAMES.iter().any(|ignored| ignored.eq_ignore_ascii_case(name))
 }
 
-#[cfg(windows)]
-fn workspace_path_string(path: &Path) -> String {
-    let raw = path.to_string_lossy();
-    if let Some(path) = raw.strip_prefix(r"\\?\UNC\") {
-        return format!(r"\\{path}");
-    }
-    if let Some(path) = raw.strip_prefix(r"\\?\") {
-        return path.to_string();
-    }
-    raw.into_owned()
-}
-
-#[cfg(not(windows))]
-fn workspace_path_string(path: &Path) -> String {
-    path.to_string_lossy().into_owned()
-}
-
 fn validate_plugin_id(plugin_id: &str) -> Result<(), String> {
     let valid = (2..=64).contains(&plugin_id.len())
         && plugin_id.bytes().all(|byte| {
@@ -640,24 +617,10 @@ fn now_millis() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::validate_plugin_id;
-    use std::path::Path;
 
     #[test]
     fn validate_plugin_id_accepts_manifest_style_ids() {
         assert!(validate_plugin_id("video-subtitle_translator").is_ok());
         assert!(validate_plugin_id("Plugin").is_err());
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn workspace_path_string_strips_windows_extended_path_prefix() {
-        assert_eq!(
-            super::workspace_path_string(Path::new(r"\\?\C:\Users\example\repo")),
-            r"C:\Users\example\repo"
-        );
-        assert_eq!(
-            super::workspace_path_string(Path::new(r"\\?\UNC\server\share\repo")),
-            r"\\server\share\repo"
-        );
     }
 }

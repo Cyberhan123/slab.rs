@@ -90,7 +90,7 @@ impl SlabApiBridge {
         };
         let params = serde_json::to_value(request)
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
-        let response = self.host_request("slab.api.request", params)?;
+        let response = host_request(&self.host, &self.runtime_handle, "slab.api.request", params)?;
         json_value_to_py(py, response)
     }
 }
@@ -119,25 +119,18 @@ impl SlabUiBridge {
         };
         let params = serde_json::to_value(request)
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
-        let response = self.host_request("slab.ui.emit", params)?;
+        let response = host_request(&self.host, &self.runtime_handle, "slab.ui.emit", params)?;
         json_value_to_py(py, response)
     }
 }
 
-impl SlabApiBridge {
-    fn host_request(&self, method: &str, params: Value) -> PyResult<Value> {
-        self.runtime_handle
-            .block_on(self.host.request(method, params))
-            .map_err(PyRuntimeError::new_err)
-    }
-}
-
-impl SlabUiBridge {
-    fn host_request(&self, method: &str, params: Value) -> PyResult<Value> {
-        self.runtime_handle
-            .block_on(self.host.request(method, params))
-            .map_err(PyRuntimeError::new_err)
-    }
+fn host_request(
+    host: &Arc<dyn RuntimeHost>,
+    runtime_handle: &Handle,
+    method: &str,
+    params: Value,
+) -> PyResult<Value> {
+    runtime_handle.block_on(host.request(method, params)).map_err(PyRuntimeError::new_err)
 }
 
 fn json_value_to_py(py: Python<'_>, value: Value) -> PyResult<Py<PyAny>> {

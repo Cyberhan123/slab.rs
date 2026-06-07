@@ -138,24 +138,12 @@ pub trait ExecutorFileSystem: Send + Sync {
 }
 
 pub fn normalize_relative_path(raw: &str) -> Result<String, FileSystemError> {
-    let normalized = raw.replace('\\', "/");
-    let path = Path::new(&normalized);
-    if path.is_absolute() {
+    if Path::new(raw).is_absolute() {
         return Err(FileSystemError::AbsolutePath(raw.to_string()));
     }
 
-    let mut parts = Vec::new();
-    for part in normalized.split('/') {
-        if part.is_empty() || part == "." {
-            continue;
-        }
-        if part == ".." {
-            return Err(FileSystemError::InvalidPath(raw.to_string()));
-        }
-        parts.push(part);
-    }
-
-    Ok(parts.join("/"))
+    slab_utils::path::normalize_relative_path_allow_empty(raw)
+        .map_err(|_| FileSystemError::InvalidPath(raw.to_string()))
 }
 
 pub fn resolve_path(workspace_root: Option<&Path>, path: &str) -> Result<PathBuf, FileSystemError> {

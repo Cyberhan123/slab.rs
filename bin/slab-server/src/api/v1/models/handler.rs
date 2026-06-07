@@ -4,9 +4,7 @@ use axum::extract::{Multipart, Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Deserialize;
 use utoipa::{OpenApi, ToSchema};
-use validator::Validate;
 
 const MAX_MODEL_PACK_SIZE: usize = 10 * 1024 * 1024 * 1024; // 10GB
 
@@ -16,6 +14,7 @@ use crate::api::v1::models::schema::{
     ModelStatusResponse, SwitchModelRequest, UnifiedModelResponse, UnloadModelRequest,
     UpdateModelConfigSelectionRequest, UpdateModelRequest,
 };
+use crate::api::v1::path::IdPath;
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::api::validation::{ValidatedJson, ValidatedQuery, validate};
 use crate::error::ServerError;
@@ -170,7 +169,7 @@ async fn import_model_pack(
 )]
 async fn get_model(
     State(service): State<ModelService>,
-    Path(params): Path<ModelIdPath>,
+    Path(params): Path<IdPath>,
 ) -> Result<Json<UnifiedModelResponse>, ServerError> {
     let params = validate(params)?;
     Ok(Json(service.get_model(&params.id).await?.into()))
@@ -191,7 +190,7 @@ async fn get_model(
 )]
 async fn get_model_config_document(
     State(service): State<ModelService>,
-    Path(params): Path<ModelIdPath>,
+    Path(params): Path<IdPath>,
 ) -> Result<Json<ModelConfigDocumentResponse>, ServerError> {
     let params = validate(params)?;
     Ok(Json(service.get_model_config_document(&params.id).await?.into()))
@@ -214,7 +213,7 @@ async fn get_model_config_document(
 )]
 async fn update_model(
     State(service): State<ModelService>,
-    Path(params): Path<ModelIdPath>,
+    Path(params): Path<IdPath>,
     ValidatedJson(req): ValidatedJson<UpdateModelRequest>,
 ) -> Result<Json<UnifiedModelResponse>, ServerError> {
     let params = validate(params)?;
@@ -238,7 +237,7 @@ async fn update_model(
 )]
 async fn update_model_config_selection(
     State(service): State<ModelService>,
-    Path(params): Path<ModelIdPath>,
+    Path(params): Path<IdPath>,
     ValidatedJson(req): ValidatedJson<UpdateModelConfigSelectionRequest>,
 ) -> Result<Json<UnifiedModelResponse>, ServerError> {
     let params = validate(params)?;
@@ -260,7 +259,7 @@ async fn update_model_config_selection(
 )]
 async fn delete_model(
     State(service): State<ModelService>,
-    Path(params): Path<ModelIdPath>,
+    Path(params): Path<IdPath>,
 ) -> Result<Json<DeleteModelResponse>, ServerError> {
     let params = validate(params)?;
     let view = service.delete_model(&params.id).await?;
@@ -377,13 +376,4 @@ async fn download_model(
 ) -> Result<(StatusCode, Json<OperationAcceptedResponse>), ServerError> {
     let response = service.download_model(req.into()).await?;
     Ok((StatusCode::ACCEPTED, Json(response.into())))
-}
-
-#[derive(Debug, Deserialize, Validate)]
-struct ModelIdPath {
-    #[validate(custom(
-        function = "crate::api::validation::validate_non_blank",
-        message = "id must not be empty"
-    ))]
-    id: String,
 }

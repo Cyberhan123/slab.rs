@@ -27,6 +27,7 @@ ts-rs = { workspace = true, features = [
     "no-serde-warnings",
 ] }
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 regex-lite = { workspace = true }
 assert_cmd = { workspace = true }
 runfiles = { workspace = true }

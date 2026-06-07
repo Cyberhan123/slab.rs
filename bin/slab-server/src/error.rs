@@ -29,6 +29,7 @@ struct ErrorResponse {
 mod error_codes {
     pub const NOT_FOUND: u16 = 4004;
     pub const BAD_REQUEST: u16 = 4000;
+    pub const CONFLICT: u16 = 4009;
     pub const BACKEND_NOT_READY: u16 = 5003;
     pub const RUNTIME_ERROR: u16 = 5000;
     pub const DATABASE_ERROR: u16 = 5001;
@@ -59,6 +60,10 @@ pub enum ServerError {
     /// The caller sent an invalid or malformed request with structured details.
     #[error("bad request: {message}")]
     BadRequestData { message: String, data: AppCoreErrorData },
+
+    /// The request conflicts with the current resource state.
+    #[error("conflict: {0}")]
+    Conflict(String),
 
     /// Backend not initialized or ready.
     #[error("backend not ready: {0}")]
@@ -96,6 +101,9 @@ impl IntoResponse for ServerError {
                 Some(data.clone()),
                 message.clone(),
             ),
+            ServerError::Conflict(m) => {
+                (StatusCode::CONFLICT, error_codes::CONFLICT, None, m.clone())
+            }
             ServerError::BackendNotReady(m) => {
                 (StatusCode::SERVICE_UNAVAILABLE, error_codes::BACKEND_NOT_READY, None, m.clone())
             }
@@ -166,6 +174,7 @@ impl From<slab_app_core::error::AppCoreError> for ServerError {
             slab_app_core::error::AppCoreError::BadRequestData { message, data } => {
                 ServerError::BadRequestData { message, data }
             }
+            slab_app_core::error::AppCoreError::Conflict(m) => ServerError::Conflict(m),
             slab_app_core::error::AppCoreError::BackendNotReady(m) => {
                 ServerError::BackendNotReady(m)
             }

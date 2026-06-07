@@ -7,6 +7,7 @@ pub mod configuration_routes;
 pub mod ffmpeg;
 pub mod images;
 pub mod models;
+mod path;
 pub mod plugins;
 pub mod session;
 pub mod setup;

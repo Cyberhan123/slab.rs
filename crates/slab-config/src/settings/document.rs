@@ -4,6 +4,7 @@ use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use super::defaults;
 use super::launch::RuntimeTransportMode;
 use slab_types::DESKTOP_API_BIND;
 
@@ -47,10 +48,6 @@ const fn default_enabled() -> bool {
 
 const fn default_disabled() -> bool {
     false
-}
-
-const fn default_flash_attn_enabled() -> bool {
-    true
 }
 
 /// Frontend interface language preference stored in settings.json.
@@ -574,7 +571,7 @@ pub struct RuntimeLeafConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
     /// Whether Flash Attention is enabled for this backend when supported.
-    #[serde(default = "default_flash_attn_enabled")]
+    #[serde(default = "defaults::flash_attn_enabled")]
     pub flash_attn: bool,
     #[serde(default)]
     pub source: SourceConfig,
@@ -590,7 +587,7 @@ impl Default for RuntimeLeafConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            flash_attn: true,
+            flash_attn: defaults::flash_attn_enabled(),
             source: SourceConfig::default(),
             logging: LoggingOverrideConfig::default(),
             capacity: CapacityOverrideConfig::default(),
@@ -609,7 +606,7 @@ pub struct LlamaRuntimeLeafConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_length: Option<u32>,
     /// Whether Flash Attention is enabled for llama contexts.
-    #[serde(default = "default_flash_attn_enabled")]
+    #[serde(default = "defaults::flash_attn_enabled")]
     pub flash_attn: bool,
     #[serde(default)]
     pub source: SourceConfig,
@@ -626,7 +623,7 @@ impl Default for LlamaRuntimeLeafConfig {
         Self {
             enabled: true,
             context_length: Some(2048),
-            flash_attn: true,
+            flash_attn: defaults::flash_attn_enabled(),
             source: SourceConfig::default(),
             logging: LoggingOverrideConfig::default(),
             capacity: CapacityOverrideConfig::default(),
@@ -754,13 +751,13 @@ pub struct AutoUnloadConfig {
     #[serde(default = "default_idle_minutes")]
     pub idle_minutes: u32,
     /// Minimum free system memory required before model loads can proceed without eviction.
-    #[serde(default = "default_min_free_system_memory_bytes")]
+    #[serde(default = "defaults::auto_unload_min_free_system_memory_bytes")]
     pub min_free_system_memory_bytes: u64,
     /// Minimum free GPU memory required before model loads can proceed without eviction.
-    #[serde(default = "default_min_free_gpu_memory_bytes")]
+    #[serde(default = "defaults::auto_unload_min_free_gpu_memory_bytes")]
     pub min_free_gpu_memory_bytes: u64,
     /// Maximum number of idle-model evictions attempted for a single model load.
-    #[serde(default = "default_max_pressure_evictions_per_load")]
+    #[serde(default = "defaults::auto_unload_max_pressure_evictions_per_load")]
     pub max_pressure_evictions_per_load: u32,
 }
 
@@ -769,27 +766,16 @@ impl Default for AutoUnloadConfig {
         Self {
             enabled: false,
             idle_minutes: default_idle_minutes(),
-            min_free_system_memory_bytes: default_min_free_system_memory_bytes(),
-            min_free_gpu_memory_bytes: default_min_free_gpu_memory_bytes(),
-            max_pressure_evictions_per_load: default_max_pressure_evictions_per_load(),
+            min_free_system_memory_bytes: defaults::auto_unload_min_free_system_memory_bytes(),
+            min_free_gpu_memory_bytes: defaults::auto_unload_min_free_gpu_memory_bytes(),
+            max_pressure_evictions_per_load: defaults::auto_unload_max_pressure_evictions_per_load(
+            ),
         }
     }
 }
 
 const fn default_idle_minutes() -> u32 {
     10
-}
-
-const fn default_min_free_system_memory_bytes() -> u64 {
-    1_073_741_824
-}
-
-const fn default_min_free_gpu_memory_bytes() -> u64 {
-    536_870_912
-}
-
-const fn default_max_pressure_evictions_per_load() -> u32 {
-    3
 }
 
 /// Runtime plugin installation settings.

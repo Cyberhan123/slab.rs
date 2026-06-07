@@ -6,4 +6,4 @@ pub mod protocol;
 
 pub use client::McpClient;
 pub use config::{McpClientConfig, McpServerLauncher};
-pub use protocol::{McpContent, McpToolResult, McpToolSpec};
+pub use protocol::{McpContent, McpTool, McpToolResult, McpToolSpec};

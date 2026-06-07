@@ -4,6 +4,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use slab_sandboxing::{ExecPolicy, SandboxDriver, SandboxError, SandboxPolicy, SandboxedCommand};
+use slab_utils::string::decode_truncated_prefix;
 use thiserror::Error;
 use tracing::{debug, warn};
 
@@ -308,19 +309,10 @@ async fn execute_direct(
 }
 
 fn platform_command(command: &str) -> tokio::process::Command {
-    #[cfg(windows)]
-    {
-        let mut process = tokio::process::Command::new("powershell.exe");
-        process.args(["-NoLogo", "-NoProfile", "-Command", command]);
-        process
-    }
-
-    #[cfg(not(windows))]
-    {
-        let mut process = tokio::process::Command::new("sh");
-        process.args(["-lc", command]);
-        process
-    }
+    let argv = shell_argv(command);
+    let mut process = tokio::process::Command::new(&argv[0]);
+    process.args(&argv[1..]);
+    process
 }
 
 fn shell_argv(command: &str) -> Vec<String> {
@@ -342,13 +334,7 @@ fn shell_argv(command: &str) -> Vec<String> {
 }
 
 fn truncate_output(bytes: &[u8], limit: usize) -> String {
-    if bytes.len() <= limit {
-        return String::from_utf8_lossy(bytes).into_owned();
-    }
-
-    let mut output = String::from_utf8_lossy(&bytes[..limit]).into_owned();
-    output.push_str("\n[output truncated]\n");
-    output
+    decode_truncated_prefix(bytes, limit, "\n[output truncated]\n")
 }
 
 #[cfg(test)]

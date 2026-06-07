@@ -3,11 +3,7 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{GbnfAssetRef, TemplateAssetRef};
-
-const fn default_flash_attn_enabled() -> bool {
-    true
-}
+use crate::{GbnfAssetRef, TemplateAssetRef, defaults};
 
 /// Typed `model.load` payload for the `ggml.llama` backend.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -16,7 +12,7 @@ pub struct GgmlLlamaLoadConfig {
     pub num_workers: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_length: Option<u32>,
-    #[serde(default = "default_flash_attn_enabled")]
+    #[serde(default = "defaults::flash_attn_enabled")]
     pub flash_attn: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat_template: Option<String>,
@@ -38,7 +34,7 @@ pub struct GgmlLlamaLoadDefaultsConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct GgmlWhisperLoadConfig {
     pub model_path: PathBuf,
-    #[serde(default = "default_flash_attn_enabled")]
+    #[serde(default = "defaults::flash_attn_enabled")]
     pub flash_attn: bool,
 }
 
@@ -62,7 +58,7 @@ pub struct GgmlDiffusionLoadConfig {
     pub clip_vision_path: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control_net_path: Option<PathBuf>,
-    #[serde(default = "default_flash_attn_enabled")]
+    #[serde(default = "defaults::flash_attn_enabled")]
     pub flash_attn: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vae_device: Option<String>,

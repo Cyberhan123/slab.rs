@@ -17,6 +17,7 @@ notify = { workspace = true }
 nucleo = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 slab-sandboxing = { workspace = true }
+slab-utils = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

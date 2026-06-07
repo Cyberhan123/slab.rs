@@ -9,7 +9,7 @@ pub struct RuntimeConfig {
     pub backend_capacity: usize,
     pub base_lib_path: PathBuf,
     pub log_file: Option<PathBuf>,
-    pub enabled_backends: EnabledBackends,
+    pub enabled_backends: CliEnabledBackends,
     pub shutdown_on_stdin_close: bool,
     pub llama_lib_dir: Option<PathBuf>,
     pub whisper_lib_dir: Option<PathBuf>,
@@ -21,19 +21,19 @@ pub struct RuntimeConfig {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct EnabledBackends {
+pub struct CliEnabledBackends {
     pub llama: bool,
     pub whisper: bool,
     pub diffusion: bool,
 }
 
-impl EnabledBackends {
+impl CliEnabledBackends {
     pub fn all() -> Self {
         Self { llama: true, whisper: true, diffusion: true }
     }
 }
 
-impl std::fmt::Display for EnabledBackends {
+impl std::fmt::Display for CliEnabledBackends {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut first = true;
         for name in [

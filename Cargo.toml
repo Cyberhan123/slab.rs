@@ -34,6 +34,7 @@ members = [
     "crates/slab-file",
     "crates/slab-git",
     "crates/slab-shell-command",
+    "crates/slab-jsonrpc",
     "crates/slab-mcp-client",
     "crates/slab-mcp",
     "crates/slab-plugin",
@@ -83,6 +84,7 @@ slab-sandboxing = { path = "./crates/slab-sandboxing", package = "slab-sandboxin
 slab-file = { path = "./crates/slab-file", package = "slab-file", version = "0.1.0" }
 slab-git = { path = "./crates/slab-git", package = "slab-git", version = "0.1.0" }
 slab-shell-command = { path = "./crates/slab-shell-command", package = "slab-shell-command", version = "0.1.0" }
+slab-jsonrpc = { path = "./crates/slab-jsonrpc", package = "slab-jsonrpc", version = "0.1.0" }
 slab-mcp-client = { path = "./crates/slab-mcp-client", package = "slab-mcp-client", version = "0.1.0" }
 slab-mcp = { path = "./crates/slab-mcp", package = "slab-mcp", version = "0.1.0" }
 slab-mcp-server = { path = "./bin/slab-mcp-server", package = "slab-mcp-server", version = "0.1.0" }

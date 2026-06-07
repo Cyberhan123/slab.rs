@@ -112,6 +112,8 @@ pub struct CreateCompletionResponseChoicesInner {
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
 )]
+/// Legacy completions finish reason subset. Keep separate from chat
+/// `FinishReason` because completions do not accept tool/function-call reasons.
 pub enum CompletionFinishReason {
     #[serde(rename = "stop")]
     #[default]

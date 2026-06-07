@@ -17,6 +17,7 @@ pub mod asset_ref;
 pub mod backend;
 pub mod chat;
 pub mod common;
+mod defaults;
 pub mod desktop_api;
 pub mod error;
 pub mod load_config;

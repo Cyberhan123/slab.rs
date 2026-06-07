@@ -225,6 +225,7 @@ futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 slab-utils = { workspace = true }
+slab-jsonrpc = { workspace = true }
 slab-types = { workspace = true }
 thiserror = { workspace = true }
 

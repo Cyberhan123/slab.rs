@@ -15,6 +15,7 @@ use tauri::State as TauriState;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+use crate::paths::remove_windows_extended_path_prefix;
 use crate::workspace::{WorkspaceState, active_workspace};
 
 const DEFAULT_COLS: u16 = 100;
@@ -243,37 +244,6 @@ fn configure_prompt(env: &mut HashMap<String, String>) {
     );
 }
 
-#[cfg(windows)]
 fn terminal_cwd(path: &Path) -> PathBuf {
-    let raw = path.to_string_lossy();
-    if let Some(path) = raw.strip_prefix(r"\\?\UNC\") {
-        return PathBuf::from(format!(r"\\{path}"));
-    }
-    if let Some(path) = raw.strip_prefix(r"\\?\") {
-        return PathBuf::from(path);
-    }
-    path.to_path_buf()
-}
-
-#[cfg(not(windows))]
-fn terminal_cwd(path: &Path) -> PathBuf {
-    path.to_path_buf()
-}
-
-#[cfg(all(test, windows))]
-mod tests {
-    use super::terminal_cwd;
-    use std::path::Path;
-
-    #[test]
-    fn terminal_cwd_strips_windows_extended_path_prefix() {
-        assert_eq!(
-            terminal_cwd(Path::new(r"\\?\C:\Users\example\repo")),
-            Path::new(r"C:\Users\example\repo")
-        );
-        assert_eq!(
-            terminal_cwd(Path::new(r"\\?\UNC\server\share\repo")),
-            Path::new(r"\\server\share\repo")
-        );
-    }
+    remove_windows_extended_path_prefix(path)
 }

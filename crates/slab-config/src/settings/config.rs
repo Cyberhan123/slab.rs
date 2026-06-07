@@ -2,25 +2,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
+    defaults,
     document::{AgentSettingsConfig, LoggingConfig},
     launch::LaunchConfig,
 };
-
-const fn default_flash_attn_enabled() -> bool {
-    true
-}
-
-const fn default_model_auto_unload_min_free_system_memory_bytes() -> u64 {
-    1_073_741_824
-}
-
-const fn default_model_auto_unload_min_free_gpu_memory_bytes() -> u64 {
-    536_870_912
-}
-
-const fn default_model_auto_unload_max_pressure_evictions_per_load() -> u32 {
-    3
-}
 
 /// A configured cloud/remote AI provider.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -106,13 +91,13 @@ pub struct RuntimeLlamaConfig {
     /// Context window length in tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_length: Option<u32>,
-    #[serde(default = "default_flash_attn_enabled")]
+    #[serde(default = "defaults::flash_attn_enabled")]
     pub flash_attn: bool,
 }
 
 impl Default for RuntimeLlamaConfig {
     fn default() -> Self {
-        Self { num_workers: 0, context_length: None, flash_attn: true }
+        Self { num_workers: 0, context_length: None, flash_attn: defaults::flash_attn_enabled() }
     }
 }
 
@@ -121,13 +106,13 @@ impl Default for RuntimeLlamaConfig {
 pub struct RuntimeWhisperConfig {
     /// Number of parallel workers for this backend.
     pub num_workers: u32,
-    #[serde(default = "default_flash_attn_enabled")]
+    #[serde(default = "defaults::flash_attn_enabled")]
     pub flash_attn: bool,
 }
 
 impl Default for RuntimeWhisperConfig {
     fn default() -> Self {
-        Self { num_workers: 0, flash_attn: true }
+        Self { num_workers: 0, flash_attn: defaults::flash_attn_enabled() }
     }
 }
 
@@ -146,13 +131,13 @@ pub struct RuntimeModelAutoUnloadConfig {
     /// Minutes of inactivity before a model is unloaded.
     pub idle_minutes: u32,
     /// Minimum free system memory required before model loads can proceed without eviction.
-    #[serde(default = "default_model_auto_unload_min_free_system_memory_bytes")]
+    #[serde(default = "defaults::auto_unload_min_free_system_memory_bytes")]
     pub min_free_system_memory_bytes: u64,
     /// Minimum free GPU memory required before model loads can proceed without eviction.
-    #[serde(default = "default_model_auto_unload_min_free_gpu_memory_bytes")]
+    #[serde(default = "defaults::auto_unload_min_free_gpu_memory_bytes")]
     pub min_free_gpu_memory_bytes: u64,
     /// Maximum number of idle-model evictions attempted for a single model load.
-    #[serde(default = "default_model_auto_unload_max_pressure_evictions_per_load")]
+    #[serde(default = "defaults::auto_unload_max_pressure_evictions_per_load")]
     pub max_pressure_evictions_per_load: u32,
 }
 
@@ -161,10 +146,10 @@ impl Default for RuntimeModelAutoUnloadConfig {
         Self {
             enabled: false,
             idle_minutes: 0,
-            min_free_system_memory_bytes: default_model_auto_unload_min_free_system_memory_bytes(),
-            min_free_gpu_memory_bytes: default_model_auto_unload_min_free_gpu_memory_bytes(),
-            max_pressure_evictions_per_load:
-                default_model_auto_unload_max_pressure_evictions_per_load(),
+            min_free_system_memory_bytes: defaults::auto_unload_min_free_system_memory_bytes(),
+            min_free_gpu_memory_bytes: defaults::auto_unload_min_free_gpu_memory_bytes(),
+            max_pressure_evictions_per_load: defaults::auto_unload_max_pressure_evictions_per_load(
+            ),
         }
     }
 }
@@ -214,7 +199,7 @@ pub struct DiffusionPathsConfig {
 /// Diffusion performance tuning settings.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct DiffusionPerformanceConfig {
-    #[serde(default = "default_flash_attn_enabled")]
+    #[serde(default = "defaults::flash_attn_enabled")]
     pub flash_attn: bool,
     pub vae_device: String,
     pub clip_device: String,
@@ -224,7 +209,7 @@ pub struct DiffusionPerformanceConfig {
 impl Default for DiffusionPerformanceConfig {
     fn default() -> Self {
         Self {
-            flash_attn: true,
+            flash_attn: defaults::flash_attn_enabled(),
             vae_device: String::new(),
             clip_device: String::new(),
             offload_params_to_cpu: false,

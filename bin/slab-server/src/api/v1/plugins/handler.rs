@@ -6,7 +6,6 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::StreamExt;
-use serde::{Deserialize, Serialize};
 use utoipa::{OpenApi, ToSchema};
 
 const MAX_PLUGIN_PACK_SIZE: usize = 1024 * 1024 * 1024; // 1GB
@@ -18,6 +17,8 @@ use slab_app_core::domain::services::PluginService;
 use slab_app_core::schemas::plugin::{
     DeletePluginResponse, InstallPluginRequest, PluginPath, PluginResponse, StopPluginRequest,
 };
+
+use super::rpc;
 
 #[allow(dead_code)]
 #[derive(ToSchema)]
@@ -163,106 +164,9 @@ async fn plugin_rpc_socket(mut socket: WebSocket, service: PluginService) {
             continue;
         };
 
-        let response = handle_rpc_payload(&service, &payload).await;
+        let response = rpc::handle_payload(&service, &payload).await;
         let _ = socket.send(Message::Text(response.into())).await;
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct JsonRpcRequest {
-    jsonrpc: String,
-    id: serde_json::Value,
-    method: String,
-    #[serde(default)]
-    params: serde_json::Value,
-}
-
-#[derive(Debug, Serialize)]
-struct JsonRpcResponse {
-    jsonrpc: &'static str,
-    id: serde_json::Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<JsonRpcError>,
-}
-
-#[derive(Debug, Serialize)]
-struct JsonRpcError {
-    code: i64,
-    message: String,
-}
-
-async fn handle_rpc_payload(service: &PluginService, payload: &str) -> String {
-    let request: JsonRpcRequest = match serde_json::from_str(payload) {
-        Ok(request) => request,
-        Err(error) => {
-            return serialize_rpc_response(JsonRpcResponse {
-                jsonrpc: "2.0",
-                id: serde_json::Value::Null,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32700,
-                    message: format!("invalid json-rpc payload: {error}"),
-                }),
-            });
-        }
-    };
-
-    if request.jsonrpc != "2.0" {
-        return serialize_rpc_response(JsonRpcResponse {
-            jsonrpc: "2.0",
-            id: request.id,
-            result: None,
-            error: Some(JsonRpcError {
-                code: -32600,
-                message: "jsonrpc must be `2.0`".to_string(),
-            }),
-        });
-    }
-
-    let Some((plugin_id, function_name)) = parse_rpc_method(&request.method) else {
-        return serialize_rpc_response(JsonRpcResponse {
-            jsonrpc: "2.0",
-            id: request.id,
-            result: None,
-            error: Some(JsonRpcError {
-                code: -32601,
-                message: "method must use `plugin_id.function_name`".to_string(),
-            }),
-        });
-    };
-
-    match service.dispatch_rpc(plugin_id, function_name, request.params).await {
-        Ok(result) => serialize_rpc_response(JsonRpcResponse {
-            jsonrpc: "2.0",
-            id: request.id,
-            result: Some(result),
-            error: None,
-        }),
-        Err(error) => serialize_rpc_response(JsonRpcResponse {
-            jsonrpc: "2.0",
-            id: request.id,
-            result: None,
-            error: Some(JsonRpcError { code: -32000, message: error.to_string() }),
-        }),
-    }
-}
-
-fn serialize_rpc_response(response: JsonRpcResponse) -> String {
-    serde_json::to_string(&response).unwrap_or_else(|error| {
-        format!(
-            "{{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{{\"code\":-32603,\"message\":\"failed to serialize response: {error}\"}}}}"
-        )
-    })
-}
-
-fn parse_rpc_method(method: &str) -> Option<(&str, &str)> {
-    let (plugin_id, function_name) = method.split_once('.')?;
-    if plugin_id.trim().is_empty() || function_name.trim().is_empty() {
-        return None;
-    }
-    Some((plugin_id, function_name))
 }
 
 #[utoipa::path(
@@ -400,7 +304,7 @@ async fn delete_plugin(
 
 #[cfg(test)]
 mod tests {
-    use super::{PluginApi, parse_rpc_method};
+    use super::PluginApi;
     use utoipa::OpenApi;
 
     #[test]
@@ -409,13 +313,5 @@ mod tests {
         assert!(openapi["paths"]["/v1/plugins/install"]["post"].is_object());
         assert!(openapi["paths"]["/v1/plugins/import-pack"]["post"].is_object());
         assert!(openapi["paths"]["/v1/plugins/{id}/start"]["post"].is_object());
-    }
-
-    #[test]
-    fn parses_plugin_rpc_method_shape() {
-        assert_eq!(parse_rpc_method("plugin-a.run"), Some(("plugin-a", "run")));
-        assert_eq!(parse_rpc_method("plugin-a."), None);
-        assert_eq!(parse_rpc_method(".run"), None);
-        assert_eq!(parse_rpc_method("plugin-a"), None);
     }
 }

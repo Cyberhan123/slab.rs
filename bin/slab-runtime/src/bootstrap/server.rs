@@ -5,7 +5,7 @@ use anyhow::Context;
 use futures::StreamExt;
 use slab_proto::slab::ipc::v1 as pb;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tonic::transport::server::Connected;
+use tonic::transport::{server::Connected, server::Router};
 use tracing::info;
 
 use crate::api::handlers::GrpcServiceImpl;
@@ -89,25 +89,7 @@ pub(super) async fn serve_grpc(
             .with_context(|| format!("failed to bind IPC endpoint '{ipc_path}'"))?
             .map(|stream| stream.map(IpcIo::new));
 
-        tonic::transport::Server::builder()
-            .add_service(pb::ggml_llama_service_server::GgmlLlamaServiceServer::new(
-                grpc_service.clone(),
-            ))
-            .add_service(pb::ggml_whisper_service_server::GgmlWhisperServiceServer::new(
-                grpc_service.clone(),
-            ))
-            .add_service(pb::ggml_diffusion_service_server::GgmlDiffusionServiceServer::new(
-                grpc_service.clone(),
-            ))
-            .add_service(
-                pb::candle_transformers_service_server::CandleTransformersServiceServer::new(
-                    grpc_service.clone(),
-                ),
-            )
-            .add_service(pb::candle_diffusion_service_server::CandleDiffusionServiceServer::new(
-                grpc_service.clone(),
-            ))
-            .add_service(pb::onnx_service_server::OnnxServiceServer::new(grpc_service.clone()))
+        grpc_server(grpc_service.clone())
             .serve_with_incoming_shutdown(
                 incoming,
                 signals::shutdown_signal(shutdown_on_stdin_close),
@@ -121,6 +103,14 @@ pub(super) async fn serve_grpc(
         .parse()
         .with_context(|| format!("invalid TCP gRPC bind address '{grpc_bind}'"))?;
     info!(transport = "http", %addr, "slab-runtime gRPC listening");
+    grpc_server(grpc_service)
+        .serve_with_shutdown(addr, signals::shutdown_signal(shutdown_on_stdin_close))
+        .await?;
+    info!(transport = "http", %addr, "slab-runtime gRPC server stopped");
+    Ok(())
+}
+
+fn grpc_server(grpc_service: GrpcServiceImpl) -> Router {
     tonic::transport::Server::builder()
         .add_service(pb::ggml_llama_service_server::GgmlLlamaServiceServer::new(
             grpc_service.clone(),
@@ -138,8 +128,4 @@ pub(super) async fn serve_grpc(
             grpc_service.clone(),
         ))
         .add_service(pb::onnx_service_server::OnnxServiceServer::new(grpc_service))
-        .serve_with_shutdown(addr, signals::shutdown_signal(shutdown_on_stdin_close))
-        .await?;
-    info!(transport = "http", %addr, "slab-runtime gRPC server stopped");
-    Ok(())
 }

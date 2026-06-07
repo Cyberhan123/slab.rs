@@ -7,6 +7,8 @@ use serde_json::Value;
 use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
 use slab_mcp::{McpClient, McpToolSpec};
 
+use crate::args::string_arg;
+
 pub struct McpCallTool {
     client: Arc<McpClient>,
 }
@@ -72,7 +74,7 @@ pub struct McpProxyTool {
 
 impl McpProxyTool {
     pub fn new(client: Arc<McpClient>, spec: McpToolSpec) -> Self {
-        let name = proxy_tool_name(&spec.server_name, &spec.name);
+        let name = proxy_tool_name(&spec.server_name, &spec.tool.name);
         Self { client, spec, name }
     }
 }
@@ -84,14 +86,14 @@ impl ToolHandler for McpProxyTool {
     }
 
     fn description(&self) -> &str {
-        self.spec.description.as_deref().unwrap_or("Remote MCP tool proxy.")
+        self.spec.tool.description.as_deref().unwrap_or("Remote MCP tool proxy.")
     }
 
     fn parameters_schema(&self) -> Value {
-        if self.spec.input_schema.is_null() {
+        if self.spec.tool.input_schema.is_null() {
             return serde_json::json!({ "type": "object", "properties": {} });
         }
-        self.spec.input_schema.clone()
+        self.spec.tool.input_schema.clone()
     }
 
     async fn execute(
@@ -101,7 +103,7 @@ impl ToolHandler for McpProxyTool {
     ) -> Result<ToolOutput, AgentError> {
         let result = self
             .client
-            .call_tool(&self.spec.server_name, &self.spec.name, arguments.clone())
+            .call_tool(&self.spec.server_name, &self.spec.tool.name, arguments.clone())
             .await
             .map_err(|error| AgentError::ToolExecution(error.to_string()))?;
         Ok(ToolOutput {
@@ -110,13 +112,6 @@ impl ToolHandler for McpProxyTool {
             metadata: None,
         })
     }
-}
-
-fn string_arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, AgentError> {
-    arguments
-        .get(name)
-        .and_then(Value::as_str)
-        .ok_or_else(|| AgentError::ToolExecution(format!("missing '{name}' argument")))
 }
 
 fn proxy_tool_name(server_name: &str, tool_name: &str) -> String {

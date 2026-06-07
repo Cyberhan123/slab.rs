@@ -66,6 +66,10 @@ pub enum AppCoreError {
     #[error("bad request: {message}")]
     BadRequestData { message: String, data: AppCoreErrorData },
 
+    /// The request conflicts with the current resource state.
+    #[error("conflict: {0}")]
+    Conflict(String),
+
     /// Backend not initialized or ready.
     #[error("backend not ready: {0}")]
     BackendNotReady(String),

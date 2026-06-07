@@ -506,8 +506,16 @@ impl WorkspaceService {
         Ok(WorkspaceConsoleOutput {
             command: command.to_string(),
             exit_code: (exit_code >= 0).then_some(exit_code),
-            stdout: decode_limited_output(&stdout),
-            stderr: decode_limited_output(&stderr),
+            stdout: slab_utils::string::decode_truncated_prefix(
+                &stdout,
+                MAX_CONSOLE_OUTPUT_BYTES,
+                "\n[output truncated]\n",
+            ),
+            stderr: slab_utils::string::decode_truncated_prefix(
+                &stderr,
+                MAX_CONSOLE_OUTPUT_BYTES,
+                "\n[output truncated]\n",
+            ),
             timed_out: false,
         })
     }
@@ -561,10 +569,6 @@ fn shell_command(command: &str) -> (String, Vec<String>) {
     ("sh".to_owned(), vec!["-lc".to_owned(), command.to_owned()])
 }
 
-fn decode_limited_output(bytes: &[u8]) -> String {
-    decode_limited_output_with_limit(bytes, MAX_CONSOLE_OUTPUT_BYTES)
-}
-
 async fn collect_limited_output(mut rx: mpsc::Receiver<Vec<u8>>) -> Vec<u8> {
     let mut output = Vec::new();
     let limit = MAX_CONSOLE_OUTPUT_BYTES + 1;
@@ -574,16 +578,6 @@ async fn collect_limited_output(mut rx: mpsc::Receiver<Vec<u8>>) -> Vec<u8> {
             output.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
         }
     }
-    output
-}
-
-fn decode_limited_output_with_limit(bytes: &[u8], limit: usize) -> String {
-    if bytes.len() <= limit {
-        return String::from_utf8_lossy(bytes).into_owned();
-    }
-
-    let mut output = String::from_utf8_lossy(&bytes[..limit]).into_owned();
-    output.push_str("\n[output truncated]\n");
     output
 }
 

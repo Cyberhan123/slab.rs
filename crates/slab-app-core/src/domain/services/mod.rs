@@ -77,20 +77,21 @@ impl AppServices {
         agent: AgentService,
         runtime_host: Option<Arc<ManagedRuntimeHost>>,
     ) -> Self {
+        let model = ModelService::new(model_state.clone(), worker_state.clone());
         Self {
             audio: AudioService::new(worker_state.clone()),
             backend: BackendService::new(model_state.clone()),
             chat: ChatService::new(model_state.clone()),
             ffmpeg: FfmpegService::new(worker_state.clone()),
             image: ImageService::new(worker_state.clone()),
-            model: ModelService::new(model_state.clone(), worker_state.clone()),
+            model: model.clone(),
             plugin: PluginService::new(model_state.clone()),
             settings: SettingsService::new(model_state.clone()),
             session: SessionService::new(model_state.clone()),
             setup: SetupService::new(model_state.clone(), worker_state.clone(), runtime_host),
             subtitle: SubtitleService::new(),
             system: SystemService::new(),
-            task_application: TaskApplicationService::new(worker_state.clone()),
+            task_application: TaskApplicationService::new(worker_state.clone(), model),
             ui_state: UiStateService::new(model_state.clone()),
             video: VideoService::new(worker_state),
             agent,

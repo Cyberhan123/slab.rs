@@ -1,4 +1,4 @@
-use crate::domain::models::EnabledBackends;
+use crate::domain::models::RuntimeEnabledBackends;
 use crate::domain::runtime::CoreError;
 use crate::domain::services::ExecutionHub;
 
@@ -20,7 +20,7 @@ struct RuntimeServiceAvailability {
 }
 
 impl RuntimeServiceAvailability {
-    fn from_enabled_backends(backends: &EnabledBackends) -> Self {
+    fn from_enabled_backends(backends: &RuntimeEnabledBackends) -> Self {
         Self {
             ggml_llama: backends.contains("ggml.llama"),
             ggml_whisper: backends.contains("ggml.whisper"),

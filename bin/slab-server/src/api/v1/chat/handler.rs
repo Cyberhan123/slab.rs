@@ -164,6 +164,13 @@ fn openai_error_response(error: ServerError) -> Response {
             Some(data.code().to_owned()),
             Some(data.param().to_owned()),
         ),
+        ServerError::Conflict(message) => (
+            StatusCode::CONFLICT,
+            message,
+            "invalid_request_error".to_owned(),
+            Some("conflict".to_owned()),
+            None,
+        ),
         ServerError::BackendNotReady(message) => (
             StatusCode::SERVICE_UNAVAILABLE,
             message,

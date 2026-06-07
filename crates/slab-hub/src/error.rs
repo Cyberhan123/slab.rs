@@ -76,10 +76,6 @@ pub(crate) fn is_reqwest_network_error(error: &reqwest::Error) -> bool {
     error.is_connect() || error.is_timeout() || (error.is_request() && !error.is_status())
 }
 
-pub(crate) fn is_networkish_error_message(message: &str) -> bool {
-    is_network_message(message)
-}
-
 pub(crate) fn is_network_io_error(error: &std::io::Error) -> bool {
     matches!(
         error.kind(),
@@ -95,6 +91,17 @@ pub(crate) fn is_network_io_error(error: &std::io::Error) -> bool {
     )
 }
 
+fn provider_error_kind(
+    request_is_network: bool,
+    io_error: Option<&std::io::Error>,
+) -> HubErrorKind {
+    if request_is_network || io_error.is_some_and(is_network_io_error) {
+        HubErrorKind::NetworkUnavailable
+    } else {
+        HubErrorKind::OperationFailed
+    }
+}
+
 #[cfg(feature = "provider-hf-hub")]
 pub(crate) fn map_hf_hub_error(
     provider: HubProvider,
@@ -103,15 +110,13 @@ pub(crate) fn map_hf_hub_error(
 ) -> HubError {
     let context = context.into();
     let kind = match &error {
-        hf_hub::api::tokio::ApiError::RequestError(reqwest_error)
-            if is_networkish_error_message(&reqwest_error.to_string()) =>
-        {
-            HubErrorKind::NetworkUnavailable
+        hf_hub::api::tokio::ApiError::RequestError(reqwest_error) => {
+            provider_error_kind(is_network_message(&reqwest_error.to_string()), None)
         }
-        hf_hub::api::tokio::ApiError::IoError(io_error) if is_network_io_error(io_error) => {
-            HubErrorKind::NetworkUnavailable
+        hf_hub::api::tokio::ApiError::IoError(io_error) => {
+            provider_error_kind(false, Some(io_error))
         }
-        _ => HubErrorKind::OperationFailed,
+        _ => provider_error_kind(false, None),
     };
     HubError::new(kind, Some(provider), format!("{context}: {error}"))
 }
@@ -124,15 +129,11 @@ pub(crate) fn map_models_cat_error(
 ) -> HubError {
     let context = context.into();
     let kind = match &error {
-        models_cat::OpsError::RequestError(reqwest_error)
-            if is_networkish_error_message(&reqwest_error.to_string()) =>
-        {
-            HubErrorKind::NetworkUnavailable
+        models_cat::OpsError::RequestError(reqwest_error) => {
+            provider_error_kind(is_network_message(&reqwest_error.to_string()), None)
         }
-        models_cat::OpsError::IoError(io_error) if is_network_io_error(io_error) => {
-            HubErrorKind::NetworkUnavailable
-        }
-        _ => HubErrorKind::OperationFailed,
+        models_cat::OpsError::IoError(io_error) => provider_error_kind(false, Some(io_error)),
+        _ => provider_error_kind(false, None),
     };
     HubError::new(kind, Some(provider), format!("{context}: {error}"))
 }

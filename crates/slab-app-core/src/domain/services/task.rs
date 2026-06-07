@@ -1,5 +1,7 @@
 use tracing::info;
 
+use super::ModelService;
+use super::model::MODEL_DOWNLOAD_TASK_TYPE;
 use crate::context::WorkerState;
 use crate::domain::models::{TaskResult, TaskStatus, TaskView};
 use crate::error::AppCoreError;
@@ -8,11 +10,12 @@ use crate::infra::db::TaskStore;
 #[derive(Clone)]
 pub struct TaskApplicationService {
     state: WorkerState,
+    model_service: ModelService,
 }
 
 impl TaskApplicationService {
-    pub fn new(state: WorkerState) -> Self {
-        Self { state }
+    pub fn new(state: WorkerState, model_service: ModelService) -> Self {
+        Self { state, model_service }
     }
 
     pub async fn list_tasks(&self, task_type: Option<&str>) -> Result<Vec<TaskView>, AppCoreError> {
@@ -79,7 +82,7 @@ impl TaskApplicationService {
         Ok(TaskView::from(&updated))
     }
 
-    pub async fn validate_restartable(&self, id: &str) -> Result<(), AppCoreError> {
+    pub async fn restart_task(&self, id: &str) -> Result<TaskView, AppCoreError> {
         let record = self
             .state
             .store()
@@ -87,14 +90,19 @@ impl TaskApplicationService {
             .await?
             .ok_or_else(|| AppCoreError::NotFound(format!("task {id} not found")))?;
 
-        if !record.status.is_restartable() {
+        if record.task_type != MODEL_DOWNLOAD_TASK_TYPE {
             return Err(AppCoreError::BadRequest(format!(
-                "task {id} cannot be restarted (status: {})",
-                record.status
+                "task type `{}` does not support restart",
+                record.task_type
             )));
         }
 
-        Ok(())
+        self.model_service.restart_model_download_task(record).await?;
+        let updated =
+            self.state.store().get_task(id).await?.ok_or_else(|| {
+                AppCoreError::NotFound(format!("task {id} not found after restart"))
+            })?;
+        Ok(TaskView::from(&updated))
     }
 }
 
