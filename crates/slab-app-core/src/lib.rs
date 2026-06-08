@@ -7,3 +7,6 @@ pub mod launch;
 pub mod model_auto_unload;
 pub mod runtime_supervisor;
 pub mod schemas;
+
+#[cfg(test)]
+pub(crate) mod test_support;
