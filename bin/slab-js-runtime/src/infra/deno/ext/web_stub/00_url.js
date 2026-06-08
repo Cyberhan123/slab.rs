@@ -1,10 +1,8 @@
-// Minimal URL implementation for web_stub
-// Uses the native V8 URL implementation
+(function () {
+// Minimal URL implementation for web_stub.
+// Uses native globals when the embedder provides them.
 
-// V8 has built-in URL and URLSearchParams
-// We just need to export them properly
+const { URL, URLSearchParams } = globalThis;
 
-const URL = globalThis.URL;
-const URLSearchParams = globalThis.URLSearchParams;
-
-export { URL, URLSearchParams };
+return { URL, URLSearchParams };
+})();

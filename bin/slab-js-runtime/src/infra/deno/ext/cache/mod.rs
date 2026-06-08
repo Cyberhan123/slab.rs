@@ -8,7 +8,7 @@ use super::ExtensionTrait;
 
 extension!(
     init_cache,
-    deps = [rustyscript],
+    deps = [rustyscript, deno_cache],
     esm_entry_point = "ext:init_cache/init_cache.js",
     esm = [ dir "src/infra/deno/ext/cache", "init_cache.js" ],
 );

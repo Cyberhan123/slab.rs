@@ -73,15 +73,16 @@ impl ModelService {
         let mut imported = 0usize;
 
         for path in pack_paths {
-            let Some(model_id) = path
-                .file_stem()
-                .and_then(|value| value.to_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_owned)
-            else {
-                warn!(path = %path.display(), "skipping model pack without a valid file stem");
-                continue;
+            let model_id = match model_packs::read_model_pack_summary(&path) {
+                Ok(summary) => summary.id,
+                Err(error) => {
+                    warn!(
+                        path = %path.display(),
+                        error = %error,
+                        "skipping invalid model pack file"
+                    );
+                    continue;
+                }
             };
 
             let command = match self.build_selected_model_pack_command(&model_id).await {
@@ -879,6 +880,8 @@ mod tests {
         CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
         ModelSpec, StoredModelConfig, UnifiedModelKind, UnifiedModelStatus,
     };
+    use crate::error::AppCoreError;
+    use crate::test_support::{TEST_PROVIDER_ID, TestAppCore, cloud_model_pack_bytes};
     use slab_model_pack::{PackSource, PackSourceCandidate, PackSourceFile};
 
     #[test]
@@ -948,6 +951,47 @@ mod tests {
             slab_types::ModelSource::LocalPath {
                 path: PathBuf::from("C:/models/Qwen2.5-7B-Instruct-Q4_K_M.gguf")
             }
+        );
+    }
+
+    #[tokio::test]
+    async fn model_pack_import_model_pack_bytes_persists_cloud_model_and_pack() {
+        let app = TestAppCore::new().await;
+        let bytes = cloud_model_pack_bytes("pack-import-cloud");
+
+        let model = app.model.import_model_pack_bytes(&bytes).await.expect("import pack");
+
+        assert_eq!(model.id, "pack-import-cloud");
+        assert_eq!(model.kind, UnifiedModelKind::Cloud);
+        assert_eq!(model.status, UnifiedModelStatus::Ready);
+        assert_eq!(model.spec.provider_id.as_deref(), Some(TEST_PROVIDER_ID));
+        assert_eq!(model.spec.remote_model_id.as_deref(), Some("gpt-4.1-mini"));
+        assert!(app.model_pack_path(&model.id).is_file());
+
+        let fetched = app.model.get_model(&model.id).await.expect("fetch imported model");
+        assert_eq!(fetched.id, model.id);
+        assert_eq!(fetched.kind, UnifiedModelKind::Cloud);
+    }
+
+    #[tokio::test]
+    async fn model_pack_sync_model_packs_from_disk_imports_valid_and_skips_invalid() {
+        let app = TestAppCore::new().await;
+        std::fs::write(
+            app.model_pack_path("pack-sync-cloud"),
+            cloud_model_pack_bytes("pack-sync-cloud"),
+        )
+        .expect("write valid pack");
+        std::fs::write(app.model_config_dir.join("invalid.slab"), b"not a slab pack")
+            .expect("write invalid pack");
+
+        app.model.sync_model_packs_from_disk().await.expect("sync packs");
+
+        let synced = app.model.get_model("pack-sync-cloud").await.expect("synced model");
+        assert_eq!(synced.kind, UnifiedModelKind::Cloud);
+        let invalid = app.model.get_model("invalid").await.expect_err("invalid pack skipped");
+        assert!(
+            matches!(&invalid, AppCoreError::NotFound(message) if message.contains("model invalid not found")),
+            "unexpected error: {invalid}"
         );
     }
 }

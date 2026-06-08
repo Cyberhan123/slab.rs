@@ -63,15 +63,21 @@ impl ExtensionTrait<()> for init_runtime {
 impl ExtensionTrait<()> for deno_runtime::runtime {
     fn init((): ()) -> Extension {
         let mut e = deno_runtime::runtime::init();
+        e.esm_files.to_mut().clear();
+        e.esm_files.to_mut().push(deno_core::ExtensionFileSource::new(
+            "ext:runtime/98_global_scope_shared.js",
+            deno_core::ascii_str_include!("98_global_scope_shared.js"),
+        ));
         e.esm_entry_point = None;
-        e.esm_files.to_mut().retain(|f| f.specifier != "ext:runtime_main/js/99_main.js");
         e
     }
 }
 
 impl ExtensionTrait<Option<Arc<dyn BundleProvider>>> for deno_bundle_runtime::deno_bundle_runtime {
     fn init(bundle_provider: Option<Arc<dyn BundleProvider>>) -> Extension {
-        deno_bundle_runtime::deno_bundle_runtime::init(bundle_provider)
+        let mut e = deno_bundle_runtime::deno_bundle_runtime::init(bundle_provider);
+        e.esm_files.to_mut().clear();
+        e
     }
 }
 
@@ -123,14 +129,16 @@ pub fn extensions(
     is_snapshot: bool,
 ) -> Vec<Extension> {
     vec![
-        deno_bundle_runtime::deno_bundle_runtime::build(None, is_snapshot),
+        <deno_bundle_runtime::deno_bundle_runtime as ExtensionTrait<
+            Option<Arc<dyn BundleProvider>>,
+        >>::build(None, is_snapshot),
         deno_fs_events::build((), is_snapshot),
         deno_bootstrap::build((), is_snapshot),
         deno_web_worker::build((), is_snapshot),
         deno_worker_host::build((options, shared_array_buffer_store), is_snapshot),
         deno_permissions::build((), is_snapshot),
         //
-        deno_runtime::runtime::build((), is_snapshot),
+        <deno_runtime::runtime as ExtensionTrait<()>>::build((), is_snapshot),
         init_runtime::build((), is_snapshot),
     ]
 }

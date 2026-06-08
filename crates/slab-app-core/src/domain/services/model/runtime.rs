@@ -614,7 +614,11 @@ mod tests {
     use chrono::Utc;
 
     use super::*;
-    use crate::domain::models::{ManagedModelBackendId, ModelSpec, UnifiedModelStatus};
+    use crate::domain::models::{
+        ManagedModelBackendId, ModelLoadCommand, ModelSpec, UnifiedModelStatus,
+    };
+    use crate::error::AppCoreError;
+    use crate::test_support::{TestAppCore, ready_local_llama_command};
 
     fn local_llama_model(id: &str, local_path: &str) -> UnifiedModel {
         UnifiedModel {
@@ -658,5 +662,97 @@ mod tests {
             ),
             Some(PathBuf::from("C:/models/Qwen3.5-9B.slab"))
         );
+    }
+
+    #[tokio::test]
+    async fn model_runtime_loads_catalog_llama_by_model_id() {
+        let app = TestAppCore::new().await;
+        let model_path = app.write_model_file("runtime-ready.gguf");
+        let model = app
+            .model
+            .create_model(ready_local_llama_command("runtime-load", &model_path))
+            .await
+            .expect("create runtime model");
+        app.runtime.allow_backend(RuntimeBackendId::GgmlLlama);
+
+        let status = app
+            .model
+            .load_model(ModelLoadCommand {
+                model_id: Some(model.id.clone()),
+                backend_id: None,
+                model_path: None,
+                num_workers: Some(2),
+            })
+            .await
+            .expect("load catalog model");
+
+        assert_eq!(status.backend, RuntimeBackendId::GgmlLlama.to_string());
+        assert_eq!(status.status, "ready");
+        let loads = app.runtime.loads();
+        assert_eq!(loads.len(), 1);
+        match &loads[0] {
+            RuntimeBackendLoadSpec::GgmlLlama(config) => {
+                assert_eq!(config.model_path, model_path);
+                assert_eq!(config.num_workers, 2);
+                assert!(config.chat_template.is_none());
+                assert!(config.gbnf.is_none());
+            }
+            other => panic!("unexpected load spec: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn model_runtime_unavailable_backend_rejects_before_gateway_call() {
+        let app = TestAppCore::new().await;
+        let model_path = app.write_model_file("runtime-unavailable.gguf");
+        let model = app
+            .model
+            .create_model(ready_local_llama_command("runtime-unavailable", &model_path))
+            .await
+            .expect("create runtime model");
+
+        let error = app
+            .model
+            .load_model(ModelLoadCommand {
+                model_id: Some(model.id),
+                backend_id: None,
+                model_path: None,
+                num_workers: None,
+            })
+            .await
+            .expect_err("unavailable backend should reject");
+
+        assert!(
+            matches!(&error, AppCoreError::BackendNotReady(message) if message.contains("gRPC endpoint is not configured")),
+            "unexpected error: {error}"
+        );
+        assert!(app.runtime.loads().is_empty());
+    }
+
+    #[tokio::test]
+    async fn model_runtime_unloads_catalog_model_by_model_id() {
+        let app = TestAppCore::new().await;
+        let model_path = app.write_model_file("runtime-unload.gguf");
+        let model = app
+            .model
+            .create_model(ready_local_llama_command("runtime-unload", &model_path))
+            .await
+            .expect("create runtime model");
+        app.runtime.allow_backend(RuntimeBackendId::GgmlLlama);
+
+        let status = app
+            .model
+            .unload_model(ModelLoadCommand {
+                model_id: Some(model.id),
+                backend_id: None,
+                model_path: None,
+                num_workers: None,
+            })
+            .await
+            .expect("unload catalog model");
+
+        assert_eq!(status.backend, RuntimeBackendId::GgmlLlama.to_string());
+        assert_eq!(status.status, "unloaded");
+        assert_eq!(app.runtime.unloads(), vec![RuntimeBackendId::GgmlLlama]);
     }
 }

@@ -1,7 +1,10 @@
 use std::path::PathBuf;
+#[cfg(feature = "lsp_runtime")]
 use std::time::Duration;
 
-use anyhow::{Context, anyhow, bail};
+use anyhow::bail;
+#[cfg(feature = "lsp_runtime")]
+use anyhow::{Context, anyhow};
 
 #[cfg(feature = "lsp_runtime")]
 use crate::{Module, Runtime, RuntimeOptions, deno_core};

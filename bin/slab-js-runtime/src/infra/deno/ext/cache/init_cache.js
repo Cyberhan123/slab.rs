@@ -1,4 +1,5 @@
-import * as caches from "ext:deno_cache/01_cache.js";
+import { core } from "ext:core/mod.js";
+const caches = core.loadExtScript("ext:deno_cache/01_cache.js");
 
 import { applyToGlobal, nonEnumerable } from 'ext:rustyscript/rustyscript.js';
 applyToGlobal({

@@ -1,4 +1,5 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -32,6 +33,8 @@ use crate::infra::db::{AnyStore, ModelDownloadRecord, ModelDownloadStore, ModelS
 use crate::infra::rpc::gateway::GrpcGateway;
 use crate::model_auto_unload::ModelAutoUnloadManager;
 use crate::runtime_supervisor::RuntimeSupervisorStatus;
+use zip::write::SimpleFileOptions;
+use zip::{CompressionMethod, ZipWriter};
 
 pub(crate) const TEST_PROVIDER_ID: &str = "openai-main";
 pub(crate) const TEST_REPO_ID: &str = "slab/test-llama";
@@ -40,11 +43,19 @@ pub(crate) const TEST_HUB_PROVIDER: &str = "hf_hub";
 
 #[derive(Debug, Default)]
 pub(crate) struct RecordingRuntimeGateway {
+    available_backends: Mutex<HashSet<RuntimeBackendId>>,
     loads: Mutex<Vec<RuntimeBackendLoadSpec>>,
     unloads: Mutex<Vec<RuntimeBackendId>>,
 }
 
 impl RecordingRuntimeGateway {
+    pub(crate) fn allow_backend(&self, backend_id: RuntimeBackendId) {
+        self.available_backends
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .insert(backend_id);
+    }
+
     pub(crate) fn loads(&self) -> Vec<RuntimeBackendLoadSpec> {
         self.loads.lock().unwrap_or_else(|error| error.into_inner()).clone()
     }
@@ -60,8 +71,11 @@ impl RecordingRuntimeGateway {
 
 #[async_trait]
 impl RuntimeInferenceGateway for RecordingRuntimeGateway {
-    fn backend_available(&self, _backend_id: RuntimeBackendId) -> bool {
-        false
+    fn backend_available(&self, backend_id: RuntimeBackendId) -> bool {
+        self.available_backends
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .contains(&backend_id)
     }
 
     async fn chat(
@@ -244,6 +258,12 @@ impl TestAppCore {
         crate::infra::model_packs::model_pack_file_path(&self.model_config_dir, id)
     }
 
+    pub(crate) fn write_model_file(&self, filename: &str) -> PathBuf {
+        let path = self.model_cache_dir.join(filename);
+        std::fs::write(&path, b"test model").expect("write test model file");
+        path
+    }
+
     pub(crate) async fn seed_model_download(
         &self,
         task_id: &str,
@@ -366,6 +386,39 @@ pub(crate) fn cloud_chat_model_command(id: &str, provider_id: &str) -> CreateMod
         },
         runtime_presets: None,
     }
+}
+
+pub(crate) fn cloud_model_pack_bytes(id: &str) -> Vec<u8> {
+    build_pack_bytes(vec![(
+        "manifest.json",
+        serde_json::json!({
+            "version": 2,
+            "id": id,
+            "label": id,
+            "status": "ready",
+            "family": "llama",
+            "source": {
+                "kind": "cloud",
+                "provider_id": TEST_PROVIDER_ID,
+                "remote_model_id": "gpt-4.1-mini"
+            }
+        })
+        .to_string(),
+    )])
+}
+
+pub(crate) fn build_pack_bytes(entries: Vec<(&str, String)>) -> Vec<u8> {
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    let mut writer = ZipWriter::new(&mut cursor);
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+
+    for (path, content) in entries {
+        writer.start_file(path, options).expect("start pack entry");
+        writer.write_all(content.as_bytes()).expect("write pack entry");
+    }
+
+    writer.finish().expect("finish pack archive");
+    cursor.into_inner()
 }
 
 pub(crate) fn model_download_source_key(

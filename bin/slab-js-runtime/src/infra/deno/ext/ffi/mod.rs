@@ -4,7 +4,7 @@ use super::ExtensionTrait;
 
 extension!(
     init_ffi,
-    deps = [rustyscript],
+    deps = [rustyscript, deno_ffi],
     esm_entry_point = "ext:init_ffi/init_ffi.js",
     esm = [ dir "src/infra/deno/ext/ffi", "init_ffi.js" ],
 );

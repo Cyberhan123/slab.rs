@@ -12,7 +12,7 @@ impl ExtensionTrait<()> for deno_http_runtime {
 
 extension!(
     init_http,
-    deps = [rustyscript],
+    deps = [rustyscript, deno_http],
     esm_entry_point = "ext:init_http/init_http.js",
     esm = [ dir "src/infra/deno/ext/http", "init_http.js" ],
 );

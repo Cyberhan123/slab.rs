@@ -6,7 +6,7 @@ use super::ExtensionTrait;
 
 extension!(
     init_webstorage,
-    deps = [rustyscript],
+    deps = [rustyscript, deno_webstorage],
     esm_entry_point = "ext:init_webstorage/init_webstorage.js",
     esm = [ dir "src/infra/deno/ext/webstorage", "init_webstorage.js" ],
 );
