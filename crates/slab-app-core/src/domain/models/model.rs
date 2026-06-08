@@ -231,6 +231,8 @@ pub struct UnifiedModel {
     pub status: UnifiedModelStatus,
     pub spec: ModelSpec,
     pub runtime_presets: Option<RuntimePresets>,
+    pub materialized_artifacts: BTreeMap<String, String>,
+    pub selected_download_source: Option<SelectedModelDownloadSource>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -552,8 +554,8 @@ impl From<UnifiedModel> for StoredModelConfig {
             status: Some(model.status),
             spec: model.spec,
             runtime_presets: model.runtime_presets,
-            materialized_artifacts: BTreeMap::new(),
-            selected_download_source: None,
+            materialized_artifacts: model.materialized_artifacts,
+            selected_download_source: model.selected_download_source,
             pack_selection: None,
         }
     }
@@ -757,6 +759,8 @@ mod tests {
                 top_p: Some(0.95),
                 ..Default::default()
             }),
+            materialized_artifacts: BTreeMap::new(),
+            selected_download_source: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

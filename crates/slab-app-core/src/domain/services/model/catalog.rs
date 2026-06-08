@@ -77,7 +77,7 @@ impl ModelService {
         let current_model = self.get_model(id).await?;
         runtime::resolve_local_backend_from_model(&current_model)?;
 
-        let context = self.load_model_pack_context(id)?;
+        let context = self.load_model_pack_context(id).await?;
         let explicit_selection = pack::normalize_model_pack_selection(ModelPackSelection {
             preset_id: req.selected_preset_id,
             variant_id: req.selected_variant_id,
@@ -224,6 +224,8 @@ impl ModelService {
         let existing_record = self.model_state.store().get_model(&id).await?;
         let now = Utc::now();
         let created_at = existing_record.as_ref().map(|record| record.created_at).unwrap_or(now);
+        let (materialized_artifacts, selected_download_source) =
+            preserved_download_state(existing_record, &spec)?;
 
         Ok(UnifiedModel {
             id,
@@ -234,6 +236,8 @@ impl ModelService {
             status,
             spec,
             runtime_presets,
+            materialized_artifacts,
+            selected_download_source,
             created_at,
             updated_at: now,
         })
@@ -418,6 +422,30 @@ pub(super) fn primary_artifact_key<T>(files: &BTreeMap<String, T>) -> Option<Str
     files.keys().next().cloned()
 }
 
+fn preserved_download_state(
+    existing_record: Option<UnifiedModelRecord>,
+    next_spec: &ModelSpec,
+) -> Result<
+    (BTreeMap<String, String>, Option<crate::domain::models::SelectedModelDownloadSource>),
+    AppCoreError,
+> {
+    let Some(existing_record) = existing_record else {
+        return Ok((BTreeMap::new(), None));
+    };
+    let existing: UnifiedModel =
+        existing_record.try_into().map_err(|error: String| AppCoreError::Internal(error))?;
+    let mut existing_spec = existing.spec.clone();
+    if let Some(selected_download_source) = existing.selected_download_source.as_ref() {
+        pack::apply_selected_download_source_to_spec(&mut existing_spec, selected_download_source);
+    }
+
+    if pack::same_model_download_source(&existing_spec, next_spec) {
+        return Ok((existing.materialized_artifacts, existing.selected_download_source));
+    }
+
+    Ok((BTreeMap::new(), None))
+}
+
 pub(super) fn canonicalize_model_spec(
     kind: UnifiedModelKind,
     backend_id: Option<ManagedModelBackendId>,
@@ -581,6 +609,18 @@ pub(super) fn model_to_record(model: &UnifiedModel) -> Result<UnifiedModelRecord
         model.runtime_presets.as_ref().map(serde_json::to_string).transpose().map_err(|error| {
             AppCoreError::Internal(format!("failed to serialize runtime_presets: {error}"))
         })?;
+    let materialized_artifacts_json = serde_json::to_string(&model.materialized_artifacts)
+        .map_err(|error| {
+            AppCoreError::Internal(format!("failed to serialize materialized_artifacts: {error}"))
+        })?;
+    let selected_download_source_json = model
+        .selected_download_source
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| {
+            AppCoreError::Internal(format!("failed to serialize selected_download_source: {error}"))
+        })?;
 
     Ok(UnifiedModelRecord {
         id: model.id.clone(),
@@ -591,6 +631,8 @@ pub(super) fn model_to_record(model: &UnifiedModel) -> Result<UnifiedModelRecord
         status: model.status.as_str().to_owned(),
         spec: spec_json,
         runtime_presets: runtime_presets_json,
+        materialized_artifacts: materialized_artifacts_json,
+        selected_download_source: selected_download_source_json,
         config_schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION as i64,
         config_policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION as i64,
         created_at: model.created_at,

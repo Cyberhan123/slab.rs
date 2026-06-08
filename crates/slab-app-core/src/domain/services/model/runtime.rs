@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use slab_types::load_config::{
     GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig,
@@ -84,17 +84,16 @@ pub(crate) async fn resolve_local_chat_prompt_profile(
     let Some(model_path) = model.spec.local_path.as_deref() else {
         return Ok(LocalLlamaPromptProfile::default());
     };
-    if !model_packs::is_model_pack_path(model_path) {
-        return Ok(LocalLlamaPromptProfile::default());
+    if let Some(pack_target) =
+        build_catalog_model_pack_load_target(state, &model, model_path).await?
+    {
+        return Ok(LocalLlamaPromptProfile {
+            chat_template_source: pack_target.load_defaults.chat_template_source,
+            default_gbnf: pack_target.load_defaults.gbnf_source,
+        });
     }
 
-    let pack_target =
-        build_selected_model_pack_load_target(state, model_id, std::path::Path::new(model_path))
-            .await?;
-    Ok(LocalLlamaPromptProfile {
-        chat_template_source: pack_target.load_defaults.chat_template_source,
-        default_gbnf: pack_target.load_defaults.gbnf_source,
-    })
+    Ok(LocalLlamaPromptProfile::default())
 }
 
 pub(super) fn validate_and_normalize_model_workers(
@@ -379,13 +378,9 @@ async fn resolve_model_load_target(
         let model = resolve_local_catalog_model(state, model_id).await?;
         let backend_id = resolve_local_backend_from_model(&model)?;
         let model_path = resolve_local_model_path(&model)?;
-        if model_packs::is_model_pack_path(&model_path) {
-            let pack_target = build_selected_model_pack_load_target(
-                state,
-                &model.id,
-                std::path::Path::new(&model_path),
-            )
-            .await?;
+        if let Some(pack_target) =
+            build_catalog_model_pack_load_target(state, &model, &model_path).await?
+        {
             if pack_target.backend_id != backend_id {
                 return Err(AppCoreError::BadRequest(format!(
                     "model '{}' pack backend '{}' does not match catalog backend '{}'",
@@ -449,10 +444,37 @@ async fn resolve_model_load_target(
     Ok(ResolvedModelLoadTarget { backend_id, model_path, model_id: None, pack_load_defaults: None })
 }
 
+async fn build_catalog_model_pack_load_target(
+    state: &ModelState,
+    model: &UnifiedModel,
+    model_path: &str,
+) -> Result<Option<model_packs::ModelPackLoadTarget>, AppCoreError> {
+    let Some(pack_path) =
+        catalog_model_pack_path(state.config().model_config_dir.as_path(), model, model_path)
+    else {
+        return Ok(None);
+    };
+
+    build_selected_model_pack_load_target(state, &model.id, &pack_path).await.map(Some)
+}
+
+fn catalog_model_pack_path(
+    model_config_dir: &Path,
+    model: &UnifiedModel,
+    model_path: &str,
+) -> Option<PathBuf> {
+    if model_packs::is_model_pack_path(model_path) {
+        return Some(PathBuf::from(model_path));
+    }
+
+    let pack_path = model_packs::model_pack_file_path(model_config_dir, &model.id);
+    pack_path.exists().then_some(pack_path)
+}
+
 async fn build_selected_model_pack_load_target(
     state: &ModelState,
     model_id: &str,
-    pack_path: &std::path::Path,
+    pack_path: &Path,
 ) -> Result<model_packs::ModelPackLoadTarget, AppCoreError> {
     let pack = model_packs::open_model_pack(pack_path)?;
     let resolved = pack.resolve().map_err(|error| {
@@ -461,7 +483,9 @@ async fn build_selected_model_pack_load_target(
             pack_path.display()
         ))
     })?;
-    let persisted = model_packs::read_persisted_model_config_from_pack(pack_path)?;
+    let persisted = pack::read_model_download_state_from_db(state, model_id)
+        .await?
+        .or(model_packs::read_persisted_model_config_from_pack(pack_path)?);
     let state_record = state.store().get_model_config_state(model_id).await?;
     let explicit_selection = if let Some(record) = state_record.as_ref() {
         crate::domain::models::ModelPackSelection {
@@ -583,4 +607,56 @@ fn resolve_local_model_path(model: &UnifiedModel) -> Result<String, AppCoreError
                 model.id
             ))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+
+    use super::*;
+    use crate::domain::models::{ManagedModelBackendId, ModelSpec, UnifiedModelStatus};
+
+    fn local_llama_model(id: &str, local_path: &str) -> UnifiedModel {
+        UnifiedModel {
+            id: id.to_owned(),
+            display_name: id.to_owned(),
+            kind: UnifiedModelKind::Local,
+            backend_id: Some(ManagedModelBackendId::GgmlLlama),
+            capabilities: Vec::new(),
+            status: UnifiedModelStatus::Ready,
+            spec: ModelSpec { local_path: Some(local_path.to_owned()), ..ModelSpec::default() },
+            runtime_presets: None,
+            materialized_artifacts: std::collections::BTreeMap::new(),
+            selected_download_source: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn catalog_model_pack_path_uses_imported_pack_for_downloaded_model_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let model = local_llama_model("Qwen3.5-9B", "C:/models/Qwen3.5-9B-Q8_0.gguf");
+        let pack_path = model_packs::model_pack_file_path(dir.path(), &model.id);
+        std::fs::write(&pack_path, []).expect("pack marker");
+
+        assert_eq!(
+            catalog_model_pack_path(dir.path(), &model, model.spec.local_path.as_deref().unwrap()),
+            Some(pack_path)
+        );
+    }
+
+    #[test]
+    fn catalog_model_pack_path_keeps_explicit_pack_path() {
+        let model = local_llama_model("Qwen3.5-9B", "C:/models/Qwen3.5-9B.slab");
+
+        assert_eq!(
+            catalog_model_pack_path(
+                Path::new("C:/other-models"),
+                &model,
+                model.spec.local_path.as_deref().unwrap()
+            ),
+            Some(PathBuf::from("C:/models/Qwen3.5-9B.slab"))
+        );
+    }
 }

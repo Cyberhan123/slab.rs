@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
@@ -10,7 +9,7 @@ use crate::domain::models::{
     UnifiedModelStatus,
 };
 use crate::error::AppCoreError;
-use crate::infra::db::{ModelConfigStateRecord, ModelConfigStateStore, UnifiedModelRecord};
+use crate::infra::db::{ModelConfigStateRecord, ModelConfigStateStore, ModelStore};
 use crate::infra::model_packs;
 
 use super::{ModelService, catalog};
@@ -121,7 +120,7 @@ impl ModelService {
         self.model_state.config().model_config_dir.as_path()
     }
 
-    pub(super) fn load_model_pack_context(
+    pub(super) async fn load_model_pack_context(
         &self,
         id: &str,
     ) -> Result<ModelPackContext, AppCoreError> {
@@ -139,7 +138,9 @@ impl ModelService {
                 pack_path.display()
             ))
         })?;
-        let persisted = model_packs::read_persisted_model_config_from_pack(&pack_path)?;
+        let persisted = read_model_download_state_from_db(&self.model_state, id)
+            .await?
+            .or(model_packs::read_persisted_model_config_from_pack(&pack_path)?);
 
         Ok(ModelPackContext { path: pack_path, resolved, persisted })
     }
@@ -148,7 +149,7 @@ impl ModelService {
         &self,
         id: &str,
     ) -> Result<CreateModelCommand, AppCoreError> {
-        let context = self.load_model_pack_context(id)?;
+        let context = self.load_model_pack_context(id).await?;
         if matches!(
             context.resolved.manifest.sources.first().map(|candidate| &candidate.source),
             Some(slab_model_pack::PackSource::Cloud { .. })
@@ -263,40 +264,24 @@ pub(super) fn primary_materialized_artifact_path(config: &StoredModelConfig) -> 
         .and_then(|key| config.materialized_artifacts.get(&key).cloned())
 }
 
-pub(super) fn sync_model_pack_record(
-    config_dir: &Path,
-    record: UnifiedModelRecord,
-    materialized_artifacts: Option<BTreeMap<String, String>>,
-    selected_download_source: Option<SelectedModelDownloadSource>,
-) -> Result<(), AppCoreError> {
+pub(super) async fn read_model_download_state_from_db(
+    state: &crate::context::ModelState,
+    model_id: &str,
+) -> Result<Option<StoredModelConfig>, AppCoreError> {
+    let Some(record) = state.store().get_model(model_id).await? else {
+        return Ok(None);
+    };
     let model: UnifiedModel =
         record.try_into().map_err(|error: String| AppCoreError::Internal(error))?;
-    let mut config: StoredModelConfig = model.into();
-    let existing_path = model_packs::model_pack_file_path(config_dir, &config.id);
-    let existing = if existing_path.exists() {
-        model_packs::read_persisted_model_config_from_pack(&existing_path)?
-    } else {
-        None
-    };
+    let config: StoredModelConfig = model.into();
 
-    if let Some(materialized_artifacts) = materialized_artifacts {
-        config.materialized_artifacts = materialized_artifacts;
-        if config.spec.local_path.is_none() {
-            config.spec.local_path = primary_materialized_artifact_path(&config);
-        }
-    } else if let Some(existing) = existing.as_ref() {
-        config.materialized_artifacts = existing.materialized_artifacts.clone();
-    }
+    Ok(has_model_download_state(&config).then_some(config))
+}
 
-    if let Some(selected_download_source) = selected_download_source {
-        apply_selected_download_source_to_spec(&mut config.spec, &selected_download_source);
-        config.selected_download_source = Some(selected_download_source);
-    } else if let Some(existing) = existing {
-        config.selected_download_source = existing.selected_download_source;
-    }
-
-    model_packs::write_persisted_model_pack_from_config(config_dir, &config)?;
-    Ok(())
+fn has_model_download_state(config: &StoredModelConfig) -> bool {
+    config.spec.local_path.as_deref().is_some_and(|path| !path.trim().is_empty())
+        || !config.materialized_artifacts.is_empty()
+        || config.selected_download_source.is_some()
 }
 
 pub(super) fn default_model_pack_selection(
@@ -688,9 +673,13 @@ pub(super) fn materialized_model_source(
     let Some(persisted) = persisted else {
         return source.clone();
     };
+    let mut persisted_spec = persisted.spec.clone();
+    if let Some(selected_download_source) = persisted.selected_download_source.as_ref() {
+        apply_selected_download_source_to_spec(&mut persisted_spec, selected_download_source);
+    }
     let projected_spec =
         preview_from_pack_candidate_or_model_source(source_hint, source).into_model_spec();
-    if !same_model_download_source(&persisted.spec, &projected_spec) {
+    if !same_model_download_source(&persisted_spec, &projected_spec) {
         return source.clone();
     }
 

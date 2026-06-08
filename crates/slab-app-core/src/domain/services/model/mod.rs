@@ -40,7 +40,7 @@ impl ModelService {
         let model = self.get_model(id).await?;
         runtime::resolve_local_backend_from_model(&model)?;
 
-        let context = self.load_model_pack_context(id)?;
+        let context = self.load_model_pack_context(id).await?;
         let selection = self.resolve_model_pack_selection(id, &context.resolved).await?;
         let command =
             pack::build_model_command_from_pack_context(&context, &selection.selected_preset)?;
@@ -1300,6 +1300,8 @@ mod tests {
                 ..ModelSpec::default()
             },
             runtime_presets: None,
+            materialized_artifacts: BTreeMap::new(),
+            selected_download_source: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

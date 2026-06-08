@@ -16,12 +16,14 @@ pub trait ModelStore: Send + Sync + 'static {
         &self,
     ) -> impl Future<Output = Result<Vec<UnifiedModelRecord>, sqlx::Error>> + Send;
     fn delete_model(&self, id: &str) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
-    /// Update a local model's `spec.local_path` and set its status after a successful download.
-    fn update_model_local_path(
+    /// Update a local model's downloaded local path and materialized artifact state.
+    fn update_model_download_state(
         &self,
         id: &str,
         local_path: &str,
         status: &str,
+        materialized_artifacts: &str,
+        selected_download_source: Option<&str>,
     ) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
 }
 
@@ -34,6 +36,8 @@ type ModelRow = (
     String,         // status
     String,         // spec
     Option<String>, // runtime_presets
+    String,         // materialized_artifacts
+    Option<String>, // selected_download_source
     i64,            // config_schema_version
     i64,            // config_policy_version
     DateTime<Utc>,  // created_at
@@ -50,6 +54,8 @@ fn row_to_record(
         status,
         spec,
         runtime_presets,
+        materialized_artifacts,
+        selected_download_source,
         config_schema_version,
         config_policy_version,
         created_at,
@@ -65,6 +71,8 @@ fn row_to_record(
         status,
         spec,
         runtime_presets,
+        materialized_artifacts,
+        selected_download_source,
         config_schema_version,
         config_policy_version,
         created_at,
@@ -78,8 +86,8 @@ impl ModelStore for AnyStore {
         let updated_at = record.updated_at.to_rfc3339();
         sqlx::query(
             "INSERT INTO models \
-             (id, display_name, kind, backend_id, capabilities, status, spec, runtime_presets, config_schema_version, config_policy_version, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) \
+             (id, display_name, kind, backend_id, capabilities, status, spec, runtime_presets, materialized_artifacts, selected_download_source, config_schema_version, config_policy_version, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
              ON CONFLICT(id) DO UPDATE SET \
                   display_name = excluded.display_name, \
                   kind = excluded.kind, \
@@ -88,6 +96,8 @@ impl ModelStore for AnyStore {
                   status = excluded.status, \
                   spec = excluded.spec, \
                   runtime_presets = excluded.runtime_presets, \
+                  materialized_artifacts = excluded.materialized_artifacts, \
+                  selected_download_source = excluded.selected_download_source, \
                   config_schema_version = excluded.config_schema_version, \
                   config_policy_version = excluded.config_policy_version, \
                   created_at = excluded.created_at, \
@@ -101,6 +111,8 @@ impl ModelStore for AnyStore {
         .bind(&record.status)
         .bind(&record.spec)
         .bind(&record.runtime_presets)
+        .bind(&record.materialized_artifacts)
+        .bind(&record.selected_download_source)
         .bind(record.config_schema_version)
         .bind(record.config_policy_version)
         .bind(&created_at)
@@ -112,7 +124,7 @@ impl ModelStore for AnyStore {
 
     async fn get_model(&self, id: &str) -> Result<Option<UnifiedModelRecord>, sqlx::Error> {
         let row: Option<ModelRow> = sqlx::query_as(
-            "SELECT id, display_name, kind, backend_id, capabilities, status, spec, runtime_presets, config_schema_version, config_policy_version, created_at, updated_at \
+            "SELECT id, display_name, kind, backend_id, capabilities, status, spec, runtime_presets, materialized_artifacts, selected_download_source, config_schema_version, config_policy_version, created_at, updated_at \
              FROM models WHERE id = ?1",
         )
         .bind(id)
@@ -124,7 +136,7 @@ impl ModelStore for AnyStore {
 
     async fn list_models(&self) -> Result<Vec<UnifiedModelRecord>, sqlx::Error> {
         let rows: Vec<ModelRow> = sqlx::query_as(
-            "SELECT id, display_name, kind, backend_id, capabilities, status, spec, runtime_presets, config_schema_version, config_policy_version, created_at, updated_at \
+            "SELECT id, display_name, kind, backend_id, capabilities, status, spec, runtime_presets, materialized_artifacts, selected_download_source, config_schema_version, config_policy_version, created_at, updated_at \
              FROM models ORDER BY created_at DESC",
         )
         .fetch_all(&self.pool)
@@ -138,21 +150,29 @@ impl ModelStore for AnyStore {
         Ok(())
     }
 
-    async fn update_model_local_path(
+    async fn update_model_download_state(
         &self,
         id: &str,
         local_path: &str,
         status: &str,
+        materialized_artifacts: &str,
+        selected_download_source: Option<&str>,
     ) -> Result<(), sqlx::Error> {
         let updated_at = Utc::now().to_rfc3339();
         // Use SQLite's json_set to update the local_path field inside the spec JSON column.
         sqlx::query(
             "UPDATE models \
-             SET spec = json_set(spec, '$.local_path', ?1), status = ?2, updated_at = ?3 \
-             WHERE id = ?4",
+             SET spec = json_set(spec, '$.local_path', ?1), \
+                 status = ?2, \
+                 materialized_artifacts = ?3, \
+                 selected_download_source = ?4, \
+                 updated_at = ?5 \
+             WHERE id = ?6",
         )
         .bind(local_path)
         .bind(status)
+        .bind(materialized_artifacts)
+        .bind(selected_download_source)
         .bind(&updated_at)
         .bind(id)
         .execute(&self.pool)

@@ -382,18 +382,10 @@ impl ModelService {
 
     fn spawn_model_download_operation(&self, operation_id: String, input_data: String) {
         let store = Arc::clone(self.model_state.store());
-        let model_config_dir = self.model_config_dir().to_path_buf();
         let auto_unload = Arc::clone(self.model_state.auto_unload());
 
         self.worker_state.spawn_existing_operation(operation_id, move |operation| async move {
-            run_model_download_operation(
-                operation,
-                store,
-                model_config_dir,
-                auto_unload,
-                input_data,
-            )
-            .await;
+            run_model_download_operation(operation, store, auto_unload, input_data).await;
         });
     }
 }
@@ -401,7 +393,6 @@ impl ModelService {
 async fn run_model_download_operation(
     operation: crate::context::worker_state::OperationContext,
     store: Arc<crate::infra::db::AnyStore>,
-    model_config_dir: std::path::PathBuf,
     auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
     input_data: String,
 ) {
@@ -552,36 +543,35 @@ async fn run_model_download_operation(
         return;
     };
 
-    if let Err(error) = store.update_model_local_path(&model_id, &local_path, "ready").await {
-        warn!(task_id = %operation_id, error = %error, "failed to persist downloaded model path");
-        let message = format!("downloaded file but failed to persist path: {error}");
-        mark_model_download_failed(&operation, &store, &operation_id, &message).await;
-        return;
-    }
-
-    let updated_record = match store.get_model(&model_id).await {
-        Ok(Some(record)) => record,
-        Ok(None) => {
-            let message =
-                format!("downloaded file but model {model_id} no longer exists after update");
+    let materialized_artifacts_json = match serde_json::to_string(&materialized_artifacts) {
+        Ok(value) => value,
+        Err(error) => {
+            let message = format!("downloaded file but failed to serialize artifacts: {error}");
             mark_model_download_failed(&operation, &store, &operation_id, &message).await;
             return;
         }
+    };
+    let selected_source_json = match serde_json::to_string(&selected_source) {
+        Ok(value) => value,
         Err(error) => {
-            let message = format!("downloaded file but failed to reload model {model_id}: {error}");
+            let message = format!("downloaded file but failed to serialize source: {error}");
             mark_model_download_failed(&operation, &store, &operation_id, &message).await;
             return;
         }
     };
 
-    if let Err(error) = pack::sync_model_pack_record(
-        &model_config_dir,
-        updated_record,
-        Some(materialized_artifacts),
-        Some(selected_source),
-    ) {
-        warn!(task_id = %operation_id, error = %error, "failed to sync downloaded model pack");
-        let message = format!("downloaded file but failed to sync model pack: {error}");
+    if let Err(error) = store
+        .update_model_download_state(
+            &model_id,
+            &local_path,
+            "ready",
+            &materialized_artifacts_json,
+            Some(&selected_source_json),
+        )
+        .await
+    {
+        warn!(task_id = %operation_id, error = %error, "failed to persist downloaded model path");
+        let message = format!("downloaded file but failed to persist path: {error}");
         mark_model_download_failed(&operation, &store, &operation_id, &message).await;
         return;
     }
@@ -740,7 +730,7 @@ impl ModelService {
             return Ok(None);
         }
 
-        let context = self.load_model_pack_context(&model.id)?;
+        let context = self.load_model_pack_context(&model.id).await?;
         let selection = self.resolve_model_pack_selection(&model.id, &context.resolved).await?;
 
         let candidates = selection

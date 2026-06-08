@@ -3,8 +3,9 @@ use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
 
 use crate::domain::models::{
-    ManagedModelBackendId, ModelSpec, RuntimePresets, StoredModelConfig, UnifiedModel,
-    UnifiedModelKind, UnifiedModelStatus, validate_stored_model_config,
+    ManagedModelBackendId, ModelSpec, RuntimePresets, SelectedModelDownloadSource,
+    StoredModelConfig, UnifiedModel, UnifiedModelKind, UnifiedModelStatus,
+    validate_stored_model_config,
 };
 use slab_types::Capability;
 
@@ -27,6 +28,10 @@ pub struct UnifiedModelRecord {
     pub spec: String,
     /// JSON-serialized `RuntimePresets`, if any.
     pub runtime_presets: Option<String>,
+    /// JSON-serialized materialized artifact id to local path map.
+    pub materialized_artifacts: String,
+    /// JSON-serialized selected download source metadata, if any.
+    pub selected_download_source: Option<String>,
     pub config_schema_version: i64,
     pub config_policy_version: i64,
     pub created_at: DateTime<Utc>,
@@ -69,6 +74,8 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
             status: raw_status,
             spec: raw_spec,
             runtime_presets: raw_runtime_presets,
+            materialized_artifacts: raw_materialized_artifacts,
+            selected_download_source: raw_selected_download_source,
             config_schema_version,
             config_policy_version,
             created_at,
@@ -99,6 +106,27 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
 
         let runtime_presets: Option<RuntimePresets> =
             raw_runtime_presets.as_deref().and_then(|value| serde_json::from_str(value).ok());
+        let materialized_artifacts: BTreeMap<String, String> =
+            serde_json::from_str(&raw_materialized_artifacts).unwrap_or_else(|error| {
+                tracing::warn!(
+                    id = %id,
+                    error = %error,
+                    "failed to deserialize model materialized_artifacts JSON; using empty artifacts"
+                );
+                BTreeMap::new()
+            });
+        let selected_download_source: Option<SelectedModelDownloadSource> =
+            raw_selected_download_source.as_deref().and_then(|value| {
+                serde_json::from_str(value)
+                    .map_err(|error| {
+                        tracing::warn!(
+                            id = %id,
+                            error = %error,
+                            "failed to deserialize model selected_download_source JSON; ignoring source"
+                        );
+                    })
+                    .ok()
+            });
         let capabilities: Vec<Capability> =
             serde_json::from_str(&raw_capabilities).unwrap_or_else(|error| {
                 tracing::warn!(
@@ -125,8 +153,8 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
             status: Some(status),
             spec,
             runtime_presets,
-            materialized_artifacts: BTreeMap::new(),
-            selected_download_source: None,
+            materialized_artifacts,
+            selected_download_source,
             pack_selection: None,
         })?;
 
@@ -139,6 +167,8 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
             status: config.status.unwrap_or(default_status),
             spec: config.spec,
             runtime_presets: config.runtime_presets,
+            materialized_artifacts: config.materialized_artifacts,
+            selected_download_source: config.selected_download_source,
             created_at,
             updated_at,
         })
@@ -177,6 +207,8 @@ mod tests {
             })
             .to_string(),
             runtime_presets: None,
+            materialized_artifacts: "{}".to_owned(),
+            selected_download_source: None,
             config_schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION as i64,
             config_policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION as i64,
             created_at: now,
@@ -206,6 +238,8 @@ mod tests {
             })
             .to_string(),
             runtime_presets: None,
+            materialized_artifacts: "{}".to_owned(),
+            selected_download_source: None,
             config_schema_version: 1,
             config_policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION as i64,
             created_at: now,
@@ -236,6 +270,8 @@ mod tests {
             })
             .to_string(),
             runtime_presets: None,
+            materialized_artifacts: "{}".to_owned(),
+            selected_download_source: None,
             config_schema_version: (CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION + 1) as i64,
             config_policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION as i64,
             created_at: now,
