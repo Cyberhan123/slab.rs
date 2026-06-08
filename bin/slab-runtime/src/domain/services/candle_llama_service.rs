@@ -55,7 +55,7 @@ impl CandleLlamaService {
     pub(crate) async fn chat(
         &self,
         request: dto::CandleChatRequest,
-    ) -> Result<dto::LlamaChatResponse, CoreError> {
+    ) -> Result<dto::CandleChatResponse, CoreError> {
         let prompt = required_string("candle_llama.prompt", request.prompt)?;
         let payload = self
             .runtime
@@ -73,13 +73,13 @@ impl CandleLlamaService {
             .await?
             .result()
             .await?;
-        decode_text_response(payload, "candle_llama")
+        decode_text_response(payload, "candle_llama").map(Into::into)
     }
 
     pub(crate) async fn chat_stream(
         &self,
         request: dto::CandleChatRequest,
-    ) -> Result<BoxStream<'static, Result<dto::LlamaChatStreamChunk, CoreError>>, CoreError> {
+    ) -> Result<BoxStream<'static, Result<dto::CandleChatStreamChunk, CoreError>>, CoreError> {
         let prompt = required_string("candle_llama.prompt", request.prompt)?;
         let handle = self
             .runtime
@@ -103,13 +103,13 @@ impl CandleLlamaService {
             }
         };
 
-        let (tx, rx) = mpsc::channel::<Result<dto::LlamaChatStreamChunk, CoreError>>(32);
+        let (tx, rx) = mpsc::channel::<Result<dto::CandleChatStreamChunk, CoreError>>(32);
         tokio::spawn(async move {
             tokio::pin!(raw_stream);
             while let Some(chunk) = raw_stream.next().await {
                 let next = match chunk {
                     Ok(chunk) => match decode_text_stream_chunk(chunk, "candle_llama") {
-                        Ok(Some(chunk)) => Some(Ok(chunk)),
+                        Ok(Some(chunk)) => Some(Ok(chunk.into())),
                         Ok(None) => None,
                         Err(error) => Some(Err(error)),
                     },

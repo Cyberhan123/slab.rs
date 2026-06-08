@@ -53,9 +53,7 @@ pub struct TextGenerationChunk {
     pub metadata: JsonOptions,
 }
 
-pub enum ChatStreamChunk {
-    Data(String),
-}
+pub type ChatStreamChunk = String;
 
 pub enum ChatCompletionOutput {
     Json(ChatCompletionResult),

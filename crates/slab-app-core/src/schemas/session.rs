@@ -71,8 +71,8 @@ impl From<SessionView> for SessionResponse {
             id: session.id,
             name: session.name,
             state_path: session.state_path,
-            created_at: session.created_at,
-            updated_at: session.updated_at,
+            created_at: session.created_at.to_rfc3339(),
+            updated_at: session.updated_at.to_rfc3339(),
         }
     }
 }
@@ -84,7 +84,7 @@ impl From<SessionMessageView> for MessageResponse {
             session_id: message.session_id,
             role: message.role,
             content: message.content,
-            created_at: message.created_at,
+            created_at: message.created_at.to_rfc3339(),
         }
     }
 }
@@ -98,5 +98,39 @@ impl From<DeleteSessionView> for DeleteSessionResponse {
 impl From<CreateSessionRequest> for CreateSessionCommand {
     fn from(request: CreateSessionRequest) -> Self {
         Self { name: request.name }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{DateTime, Utc};
+
+    use super::*;
+
+    #[test]
+    fn session_schema_converts_datetime_views_to_rfc3339() {
+        let created_at =
+            DateTime::parse_from_rfc3339("2026-06-08T01:02:03Z").unwrap().with_timezone(&Utc);
+        let updated_at =
+            DateTime::parse_from_rfc3339("2026-06-08T04:05:06Z").unwrap().with_timezone(&Utc);
+
+        let response = SessionResponse::from(SessionView {
+            id: "session-1".to_owned(),
+            name: "Session".to_owned(),
+            state_path: Some("state.json".to_owned()),
+            created_at,
+            updated_at,
+        });
+        let message = MessageResponse::from(SessionMessageView {
+            id: "message-1".to_owned(),
+            session_id: "session-1".to_owned(),
+            role: "assistant".to_owned(),
+            content: "{}".to_owned(),
+            created_at,
+        });
+
+        assert_eq!(response.created_at, "2026-06-08T01:02:03+00:00");
+        assert_eq!(response.updated_at, "2026-06-08T04:05:06+00:00");
+        assert_eq!(message.created_at, "2026-06-08T01:02:03+00:00");
     }
 }

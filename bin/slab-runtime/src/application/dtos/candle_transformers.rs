@@ -1,10 +1,10 @@
 use slab_proto::slab::ipc::v1 as pb;
 
 use super::{
-    CandleChatRequest, CandleLlamaLoadRequest, CandleWhisperLoadRequest,
-    CandleWhisperTranscribeRequest, CandleWhisperTranscribeResponse, LlamaChatResponse,
-    LlamaChatStreamChunk, ProtoConversionError, decode_optional_path, encode_chat_metadata,
-    encode_usage, encode_whisper_transcription,
+    CandleChatRequest, CandleChatResponse, CandleChatStreamChunk, CandleLlamaLoadRequest,
+    CandleWhisperLoadRequest, CandleWhisperTranscribeRequest, CandleWhisperTranscribeResponse,
+    ProtoConversionError, decode_optional_path, encode_chat_metadata, encode_usage,
+    encode_whisper_transcription,
 };
 
 pub(crate) fn decode_candle_llama_load_request(
@@ -27,7 +27,7 @@ pub(crate) fn decode_candle_chat_request(
     })
 }
 
-pub(crate) fn encode_candle_chat_response(response: &LlamaChatResponse) -> pb::CandleChatResponse {
+pub(crate) fn encode_candle_chat_response(response: &CandleChatResponse) -> pb::CandleChatResponse {
     pb::CandleChatResponse {
         text: response.text.clone(),
         finish_reason: response.finish_reason.clone(),
@@ -39,7 +39,7 @@ pub(crate) fn encode_candle_chat_response(response: &LlamaChatResponse) -> pb::C
 }
 
 pub(crate) fn encode_candle_chat_stream_chunk(
-    chunk: &LlamaChatStreamChunk,
+    chunk: &CandleChatStreamChunk,
 ) -> pb::CandleChatStreamChunk {
     pb::CandleChatStreamChunk {
         delta: chunk.delta.clone(),

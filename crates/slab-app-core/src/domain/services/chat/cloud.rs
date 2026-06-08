@@ -134,11 +134,7 @@ pub(super) async fn create_chat_completion(
         let completion_tokens = Arc::new(AtomicU32::new(0));
 
         let role_chunk = stream::once(async move {
-            ChatStreamChunk::Data(super::build_role_chunk(
-                &completion_id_for_role,
-                created_ts,
-                &model_name_for_role,
-            ))
+            super::build_role_chunk(&completion_id_for_role, created_ts, &model_name_for_role)
         });
 
         let token_stream_error_flag = Arc::clone(&error_flag);
@@ -147,24 +143,22 @@ pub(super) async fn create_chat_completion(
             match chunk {
                 Ok(CloudDelta::Content(token)) => {
                     token_stream_completion_tokens.fetch_add(1, Ordering::SeqCst);
-                    ChatStreamChunk::Data(super::build_chunk(
+                    super::build_chunk(
                         &completion_id_for_tokens,
                         created_ts,
                         &model_name_for_tokens,
                         &token,
-                    ))
+                    )
                 }
-                Ok(CloudDelta::Reasoning(token)) => {
-                    ChatStreamChunk::Data(super::build_reasoning_chunk(
-                        &completion_id_for_tokens,
-                        created_ts,
-                        &model_name_for_tokens,
-                        &token,
-                    ))
-                }
+                Ok(CloudDelta::Reasoning(token)) => super::build_reasoning_chunk(
+                    &completion_id_for_tokens,
+                    created_ts,
+                    &model_name_for_tokens,
+                    &token,
+                ),
                 Err(error) => {
                     token_stream_error_flag.store(true, Ordering::SeqCst);
-                    ChatStreamChunk::Data(super::build_error_chunk(&error.to_string()))
+                    super::build_error_chunk(&error.to_string())
                 }
             }
         });
@@ -179,12 +173,12 @@ pub(super) async fn create_chat_completion(
                     finish_chunk_completion_tokens.load(Ordering::SeqCst),
                     max_tokens,
                 );
-                Some(ChatStreamChunk::Data(super::build_finish_chunk(
+                Some(super::build_finish_chunk(
                     &completion_id_for_finish,
                     created_ts,
                     &model_name_for_finish,
                     &finish_reason,
-                )))
+                ))
             }
         });
 
@@ -199,12 +193,12 @@ pub(super) async fn create_chat_completion(
                     "",
                     Some(usage_chunk_completion_tokens.load(Ordering::SeqCst)),
                 );
-                Some(ChatStreamChunk::Data(super::build_usage_chunk(
+                Some(super::build_usage_chunk(
                     &completion_id_for_usage,
                     created_ts,
                     &model_name_for_usage,
                     &usage,
-                )))
+                ))
             }
         });
 
@@ -212,7 +206,7 @@ pub(super) async fn create_chat_completion(
             .chain(token_stream)
             .chain(finish_chunk.filter_map(futures::future::ready))
             .chain(usage_chunk.filter_map(futures::future::ready))
-            .chain(stream::once(async { ChatStreamChunk::Data("[DONE]".into()) }));
+            .chain(stream::once(async { "[DONE]".to_owned() }));
 
         return Ok(GeneratedChatOutput::Stream(Box::pin(sse_stream)));
     }

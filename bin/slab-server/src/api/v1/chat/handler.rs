@@ -2,7 +2,7 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -79,9 +79,19 @@ pub fn router() -> Router<Arc<AppState>> {
 )]
 async fn list_chat_models(
     State(service): State<ModelService>,
-) -> Result<Json<Vec<ChatModelOption>>, ServerError> {
-    let items = service.list_chat_models().await?.into_iter().map(Into::into).collect();
-    Ok(Json(items))
+) -> Result<impl IntoResponse, ServerError> {
+    let items: Vec<ChatModelOption> =
+        service.list_chat_models().await?.into_iter().map(Into::into).collect();
+    Ok((
+        [
+            (HeaderName::from_static("deprecation"), HeaderValue::from_static("true")),
+            (
+                HeaderName::from_static("sunset"),
+                HeaderValue::from_static("Tue, 08 Jun 2027 00:00:00 GMT"),
+            ),
+        ],
+        Json(items),
+    ))
 }
 
 #[utoipa::path(
@@ -133,11 +143,8 @@ async fn completions(
 }
 
 fn sse_response(stream: futures::stream::BoxStream<'static, ChatStreamChunk>) -> Response {
-    let event_stream = stream.map(|chunk| -> Result<Event, Infallible> {
-        Ok(Event::default().data(match chunk {
-            ChatStreamChunk::Data(data) => data,
-        }))
-    });
+    let event_stream =
+        stream.map(|chunk| -> Result<Event, Infallible> { Ok(Event::default().data(chunk)) });
     Sse::new(event_stream).into_response()
 }
 

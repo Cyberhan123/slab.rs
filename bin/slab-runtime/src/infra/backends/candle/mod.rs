@@ -21,11 +21,14 @@ pub enum CandleEngineError {
 }
 
 macro_rules! impl_candle_from {
-    ($($ty:path),+ $(,)?) => {
+    ($($ty:path => $component:literal),+ $(,)?) => {
         $(
             impl From<$ty> for slab_runtime_core::CoreError {
                 fn from(error: $ty) -> Self {
-                    slab_runtime_core::CoreError::CandleEngine(error.to_string())
+                    slab_runtime_core::CoreError::CandleEngine {
+                        component: $component.to_owned(),
+                        message: error.to_string(),
+                    }
                 }
             }
         )+
@@ -33,10 +36,10 @@ macro_rules! impl_candle_from {
 }
 
 impl_candle_from!(
-    CandleEngineError,
-    llama::CandleLlamaEngineError,
-    whisper::CandleWhisperEngineError,
-    diffusion::CandleDiffusionEngineError,
+    CandleEngineError => "candle",
+    llama::CandleLlamaEngineError => "candle.llama",
+    whisper::CandleWhisperEngineError => "candle.whisper",
+    diffusion::CandleDiffusionEngineError => "candle.diffusion",
 );
 
 #[derive(Debug, Clone, Default)]

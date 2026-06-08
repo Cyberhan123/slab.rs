@@ -55,14 +55,14 @@ pub enum RuntimeError {
     #[error("engine I/O error: {0}")]
     EngineIo(String),
 
-    #[error("GGML engine error: {0}")]
-    GGMLEngine(String),
+    #[error("GGML engine error in {component}: {message}")]
+    GGMLEngine { component: String, message: String },
 
     #[error("ONNX engine error: {0}")]
     OnnxEngine(String),
 
-    #[error("Candle engine error: {0}")]
-    CandleEngine(String),
+    #[error("Candle engine error in {component}: {message}")]
+    CandleEngine { component: String, message: String },
 }
 
 impl From<slab_runtime_core::CoreError> for RuntimeError {
@@ -84,9 +84,13 @@ impl From<slab_runtime_core::CoreError> for RuntimeError {
                 Self::InternalPoisoned { lock_name }
             }
             slab_runtime_core::CoreError::EngineIo(message) => Self::EngineIo(message),
-            slab_runtime_core::CoreError::GGMLEngine(message) => Self::GGMLEngine(message),
+            slab_runtime_core::CoreError::GGMLEngine { component, message } => {
+                Self::GGMLEngine { component, message }
+            }
             slab_runtime_core::CoreError::OnnxEngine(message) => Self::OnnxEngine(message),
-            slab_runtime_core::CoreError::CandleEngine(message) => Self::CandleEngine(message),
+            slab_runtime_core::CoreError::CandleEngine { component, message } => {
+                Self::CandleEngine { component, message }
+            }
         }
     }
 }
@@ -94,5 +98,33 @@ impl From<slab_runtime_core::CoreError> for RuntimeError {
 impl From<std::io::Error> for RuntimeError {
     fn from(value: std::io::Error) -> Self {
         Self::EngineIo(value.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RuntimeError;
+
+    #[test]
+    fn core_engine_errors_preserve_component_and_message() {
+        let ggml = RuntimeError::from(slab_runtime_core::CoreError::GGMLEngine {
+            component: "ggml.llama".to_owned(),
+            message: "session not found".to_owned(),
+        });
+        let candle = RuntimeError::from(slab_runtime_core::CoreError::CandleEngine {
+            component: "candle.llama".to_owned(),
+            message: "tensor mismatch".to_owned(),
+        });
+
+        assert!(matches!(
+            ggml,
+            RuntimeError::GGMLEngine { component, message }
+                if component == "ggml.llama" && message == "session not found"
+        ));
+        assert!(matches!(
+            candle,
+            RuntimeError::CandleEngine { component, message }
+                if component == "candle.llama" && message == "tensor mismatch"
+        ));
     }
 }

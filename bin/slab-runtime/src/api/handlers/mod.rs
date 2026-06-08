@@ -70,9 +70,9 @@ pub(super) fn runtime_to_status(err: CoreError) -> Status {
         | CoreError::GpuStageFailed { .. }
         | CoreError::ResultDecodeFailed { .. }
         | CoreError::EngineIo(_)
-        | CoreError::GGMLEngine(_)
+        | CoreError::GGMLEngine { .. }
         | CoreError::OnnxEngine(_)
-        | CoreError::CandleEngine(_)
+        | CoreError::CandleEngine { .. }
         | CoreError::InternalPoisoned { .. } => Status::internal(msg),
     }
 }
@@ -101,9 +101,21 @@ mod tests {
         assert_eq!(engine_io.code(), Code::Internal);
         assert!(engine_io.message().contains("engine I/O error"));
 
-        let ggml = runtime_to_status(CoreError::GGMLEngine("session not found".into()));
+        let ggml = runtime_to_status(CoreError::GGMLEngine {
+            component: "ggml.llama".into(),
+            message: "session not found".into(),
+        });
         assert_eq!(ggml.code(), Code::Internal);
         assert!(ggml.message().contains("GGML engine error"));
+        assert!(ggml.message().contains("ggml.llama"));
+
+        let candle = runtime_to_status(CoreError::CandleEngine {
+            component: "candle.llama".into(),
+            message: "tensor mismatch".into(),
+        });
+        assert_eq!(candle.code(), Code::Internal);
+        assert!(candle.message().contains("Candle engine error"));
+        assert!(candle.message().contains("candle.llama"));
     }
 
     #[test]

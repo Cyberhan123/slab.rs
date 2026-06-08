@@ -9,10 +9,9 @@ use uuid::Uuid;
 
 use crate::context::ModelState;
 use crate::domain::models::{
-    ChatReasoningEffort, ChatStreamChunk, ChatVerbosity,
-    ConversationMessage as DomainConversationMessage, ConversationMessageContent, JsonOptions,
-    StructuredOutput, TextGenerationChunk, TextGenerationResponse, TextGenerationUsage,
-    TextPromptTokensDetails,
+    ChatReasoningEffort, ChatVerbosity, ConversationMessage as DomainConversationMessage,
+    ConversationMessageContent, JsonOptions, StructuredOutput, TextGenerationChunk,
+    TextGenerationResponse, TextGenerationUsage, TextPromptTokensDetails,
 };
 use crate::domain::ports::{
     RuntimeTextGenerationChunk, RuntimeTextGenerationRequest, RuntimeTextGenerationResponse,
@@ -532,11 +531,7 @@ pub(super) async fn create_chat_completion(
         let reasoning_disabled = reasoning_is_disabled(config.reasoning_effort);
 
         let role_chunk = stream::once(async move {
-            ChatStreamChunk::Data(super::build_role_chunk(
-                &completion_id_for_role,
-                created_ts,
-                &model_name_for_role,
-            ))
+            super::build_role_chunk(&completion_id_for_role, created_ts, &model_name_for_role)
         });
 
         let token_stream_error_flag = Arc::clone(&error_flag);
@@ -603,12 +598,12 @@ pub(super) async fn create_chat_completion(
                                 }
                                 let mut chunks = Vec::new();
                                 if !emission.text.is_empty() {
-                                    chunks.push(ChatStreamChunk::Data(super::build_chunk(
+                                    chunks.push(super::build_chunk(
                                         &completion_id,
                                         created_ts,
                                         &model_name,
                                         &emission.text,
-                                    )));
+                                    ));
                                 }
                                 chunks
                             } else if let Some(reasoning) =
@@ -628,13 +623,11 @@ pub(super) async fn create_chat_completion(
                                     reasoning_disabled,
                                 );
                                 if let Some(reasoning) = routed.reasoning.as_deref() {
-                                    chunks.push(ChatStreamChunk::Data(
-                                        super::build_reasoning_chunk(
-                                            &completion_id,
-                                            created_ts,
-                                            &model_name,
-                                            reasoning,
-                                        ),
+                                    chunks.push(super::build_reasoning_chunk(
+                                        &completion_id,
+                                        created_ts,
+                                        &model_name,
+                                        reasoning,
                                     ));
                                 }
                                 if !routed.content.is_empty() {
@@ -665,12 +658,12 @@ pub(super) async fn create_chat_completion(
                                         }
                                     }
                                     if !emission.text.is_empty() {
-                                        chunks.push(ChatStreamChunk::Data(super::build_chunk(
+                                        chunks.push(super::build_chunk(
                                             &completion_id,
                                             created_ts,
                                             &model_name,
                                             &emission.text,
-                                        )));
+                                        ));
                                     }
                                 }
                                 chunks
@@ -708,12 +701,12 @@ pub(super) async fn create_chat_completion(
                                     }
                                 }
                                 if !emission.text.is_empty() {
-                                    vec![ChatStreamChunk::Data(super::build_chunk(
+                                    vec![super::build_chunk(
                                         &completion_id,
                                         created_ts,
                                         &model_name,
                                         &emission.text,
-                                    ))]
+                                    )]
                                 } else {
                                     Vec::new()
                                 }
@@ -721,9 +714,7 @@ pub(super) async fn create_chat_completion(
                         }
                         Err(error) => {
                             error_flag.store(true, Ordering::SeqCst);
-                            vec![ChatStreamChunk::Data(super::build_error_chunk(
-                                &error.to_string(),
-                            ))]
+                            vec![super::build_error_chunk(&error.to_string())]
                         }
                     }
                 }
@@ -748,12 +739,12 @@ pub(super) async fn create_chat_completion(
                             config.max_tokens,
                         )
                     });
-                Some(ChatStreamChunk::Data(super::build_finish_chunk(
+                Some(super::build_finish_chunk(
                     &completion_id_for_finish,
                     created_ts,
                     &model_name_for_finish,
                     &finish_reason,
-                )))
+                ))
             }
         })
         .filter_map(futures::future::ready);
@@ -777,12 +768,12 @@ pub(super) async fn create_chat_completion(
                             Some(usage_chunk_completion_tokens.load(Ordering::SeqCst)),
                         )
                     });
-                Some(ChatStreamChunk::Data(super::build_usage_chunk(
+                Some(super::build_usage_chunk(
                     &completion_id_for_usage,
                     created_ts,
                     &model_name_for_usage,
                     &usage,
-                )))
+                ))
             }
         })
         .filter_map(futures::future::ready);
@@ -791,7 +782,7 @@ pub(super) async fn create_chat_completion(
             .chain(token_stream)
             .chain(finish_chunk)
             .chain(usage_chunk)
-            .chain(stream::once(async { ChatStreamChunk::Data("[DONE]".into()) }))
+            .chain(stream::once(async { "[DONE]".to_owned() }))
             .map(move |item| {
                 let _keep_alive = &usage_guard;
                 item

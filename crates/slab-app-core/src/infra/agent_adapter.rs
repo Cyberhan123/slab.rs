@@ -246,14 +246,13 @@ async fn llm_response_from_chat_stream(
     let mut assembler = AgentStreamAssembler::default();
 
     while let Some(chunk) = stream.next().await {
-        let ChatStreamChunk::Data(data) = chunk;
         record_json_from_context(
             trace_context,
             "slab-app-core",
             "chat_stream_chunk",
-            serde_json::json!({ "data": data }),
+            serde_json::json!({ "data": &chunk }),
         );
-        for delta in assembler.ingest_data(&data)? {
+        for delta in assembler.ingest_data(&chunk)? {
             match delta {
                 AgentStreamDelta::Text(text) => observer.on_text_delta(&text).await?,
                 AgentStreamDelta::Reasoning(reasoning) => {
@@ -444,16 +443,9 @@ mod tests {
         }
 
         let stream = futures::stream::iter([
-            ChatStreamChunk::Data(
-                r#"{"choices":[{"delta":{"reasoning_content":"plan "}}]}"#.to_owned(),
-            ),
-            ChatStreamChunk::Data(
-                r#"{"choices":[{"delta":{"reasoning_content":"done","content":"answer"}}]}"#
-                    .to_owned(),
-            ),
-            ChatStreamChunk::Data(
-                r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#.to_owned(),
-            ),
+            r#"{"choices":[{"delta":{"reasoning_content":"plan "}}]}"#.to_owned(),
+            r#"{"choices":[{"delta":{"reasoning_content":"done","content":"answer"}}]}"#.to_owned(),
+            r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#.to_owned(),
         ])
         .boxed();
         let mut observer = RecordingObserver {

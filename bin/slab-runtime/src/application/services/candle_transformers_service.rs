@@ -52,7 +52,7 @@ impl CandleTransformersService {
     pub(crate) async fn chat(
         &self,
         request: dto::CandleChatRequest,
-    ) -> Result<dto::LlamaChatResponse, RuntimeApplicationError> {
+    ) -> Result<dto::CandleChatResponse, RuntimeApplicationError> {
         clone_loaded(&self.llama).await?.chat(request).await.map_err(Into::into)
     }
 
@@ -60,7 +60,7 @@ impl CandleTransformersService {
         &self,
         request: dto::CandleChatRequest,
     ) -> Result<
-        BoxStream<'static, Result<dto::LlamaChatStreamChunk, CoreError>>,
+        BoxStream<'static, Result<dto::CandleChatStreamChunk, CoreError>>,
         RuntimeApplicationError,
     > {
         clone_loaded(&self.llama).await?.chat_stream(request).await.map_err(Into::into)

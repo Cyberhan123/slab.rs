@@ -151,6 +151,52 @@ pub(crate) struct LlamaChatStreamChunk {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct CandleChatResponse {
+    pub text: Option<String>,
+    pub finish_reason: Option<String>,
+    pub tokens_used: Option<u32>,
+    pub usage: Option<Usage>,
+    pub reasoning_content: Option<String>,
+    pub metadata: Option<ChatMetadata>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct CandleChatStreamChunk {
+    pub delta: Option<String>,
+    pub done: Option<bool>,
+    pub finish_reason: Option<String>,
+    pub usage: Option<Usage>,
+    pub reasoning_content: Option<String>,
+    pub metadata: Option<ChatMetadata>,
+}
+
+impl From<LlamaChatResponse> for CandleChatResponse {
+    fn from(response: LlamaChatResponse) -> Self {
+        Self {
+            text: response.text,
+            finish_reason: response.finish_reason,
+            tokens_used: response.tokens_used,
+            usage: response.usage,
+            reasoning_content: response.reasoning_content,
+            metadata: response.metadata,
+        }
+    }
+}
+
+impl From<LlamaChatStreamChunk> for CandleChatStreamChunk {
+    fn from(chunk: LlamaChatStreamChunk) -> Self {
+        Self {
+            delta: chunk.delta,
+            done: chunk.done,
+            finish_reason: chunk.finish_reason,
+            usage: chunk.usage,
+            reasoning_content: chunk.reasoning_content,
+            metadata: chunk.metadata,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct GgmlLlamaLoadRequest {
     pub model_path: Option<PathBuf>,
     pub num_workers: Option<u32>,

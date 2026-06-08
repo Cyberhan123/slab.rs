@@ -258,20 +258,19 @@ pub(super) async fn load_models_from_state(
     let records = state.store().list_models().await?;
     let download_status = download::load_model_download_status_index(state).await?;
     let requested_capability = query.capability;
-    let models = records
+    let models: Vec<UnifiedModel> = records
         .into_iter()
-        .filter_map(|record| {
+        .map(|record| {
             record
                 .try_into()
                 .map(|mut model: UnifiedModel| {
                     model.status = download::effective_model_status(&model, &download_status);
                     model
                 })
-                .map_err(|error: String| {
-                    tracing::warn!(error = %error, "failed to deserialize model record; skipping");
-                })
-                .ok()
+                .map_err(AppCoreError::Internal)
         })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
         .filter(|model: &UnifiedModel| {
             requested_capability.is_none_or(|capability| model.capabilities.contains(&capability))
         })
@@ -645,6 +644,7 @@ mod model_catalog_tests {
     use crate::domain::models::{
         ChatModelSource, ListModelsFilter, ModelSpec, UnifiedModelStatus, UpdateModelCommand,
     };
+    use crate::error::AppCoreError;
     use crate::infra::db::ModelStore;
     use crate::test_support::{
         TEST_FILENAME, TEST_HUB_PROVIDER, TEST_PROVIDER_ID, TEST_REPO_ID, TestAppCore,
@@ -674,6 +674,23 @@ mod model_catalog_tests {
         assert_eq!(listed[0].id, created.id);
         assert!(app.runtime.loads().is_empty());
         assert!(app.runtime.unloads().is_empty());
+    }
+
+    #[tokio::test]
+    async fn model_catalog_list_fails_on_corrupt_model_record() {
+        let app = TestAppCore::new().await;
+        let created =
+            app.model.create_model(downloadable_llama_command("catalog-corrupt")).await.unwrap();
+        let mut record = super::model_to_record(&created).expect("model record");
+        record.spec = "{".to_owned();
+        app.store.upsert_model(record).await.expect("replace model record");
+
+        let error =
+            app.model.list_models(ListModelsFilter::default()).await.expect_err("list should fail");
+
+        assert!(
+            matches!(error, AppCoreError::Internal(message) if message.contains("invalid spec JSON"))
+        );
     }
 
     #[tokio::test]

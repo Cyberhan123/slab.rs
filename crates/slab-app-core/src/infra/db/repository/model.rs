@@ -183,6 +183,20 @@ impl ModelStore for AnyStore {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
+    async fn migrated_pool() -> sqlx::Pool<sqlx::Sqlite> {
+        let options =
+            sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:").expect("sqlite url");
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .expect("connect in-memory db");
+        sqlx::migrate!("./migrations").run(&pool).await.expect("run migrations");
+        pool
+    }
+
     #[tokio::test]
     async fn remove_provider_migration_keeps_canonical_model_columns() {
         let options =
@@ -255,5 +269,136 @@ mod tests {
         assert!(!columns.iter().any(|column| column == "provider"));
         assert_eq!(row.0, "local");
         assert_eq!(row.1.as_deref(), Some("ggml.llama"));
+    }
+
+    #[tokio::test]
+    async fn storage_value_checks_reject_invalid_closed_values() {
+        let pool = migrated_pool().await;
+
+        sqlx::query(
+            "INSERT INTO models (
+                id, display_name, status, spec, runtime_presets, created_at, updated_at, kind,
+                backend_id, config_schema_version, config_policy_version, capabilities,
+                materialized_artifacts, selected_download_source
+             ) VALUES (
+                'model-ok', 'Model OK', 'ready', '{}', NULL, '2026-06-08T00:00:00Z',
+                '2026-06-08T00:00:00Z', 'local', 'ggml.llama', 2, 3, '[]', '{}', NULL
+             )",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert valid model");
+        sqlx::query(
+            "INSERT INTO tasks (
+                id, task_type, status, created_at, updated_at
+             ) VALUES (
+                'task-ok', 'custom.producer', 'pending', '2026-06-08T00:00:00Z',
+                '2026-06-08T00:00:00Z'
+             )",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert valid task with open task_type");
+        sqlx::query(
+            "INSERT INTO chat_sessions (id, name, created_at, updated_at)
+             VALUES ('session-ok', '', '2026-06-08T00:00:00Z', '2026-06-08T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert valid session");
+        sqlx::query(
+            "INSERT INTO chat_messages (id, session_id, role, content, created_at)
+             VALUES ('message-ok', 'session-ok', 'assistant', '{}', '2026-06-08T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert valid chat message");
+        sqlx::query(
+            "INSERT INTO model_downloads (
+                task_id, model_id, source_key, repo_id, filename, status, created_at, updated_at
+             ) VALUES (
+                'task-ok', 'model-ok', 'source-ok', 'repo', 'model.gguf', 'running',
+                '2026-06-08T00:00:00Z', '2026-06-08T00:00:00Z'
+             )",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert valid model download");
+
+        assert!(
+            sqlx::query(
+                "INSERT INTO models (
+                    id, display_name, status, spec, runtime_presets, created_at, updated_at, kind,
+                    backend_id, config_schema_version, config_policy_version, capabilities,
+                    materialized_artifacts, selected_download_source
+                 ) VALUES (
+                    'model-bad-kind', 'Bad Kind', 'ready', '{}', NULL, '2026-06-08T00:00:00Z',
+                    '2026-06-08T00:00:00Z', 'plugin', NULL, 2, 3, '[]', '{}', NULL
+                 )",
+            )
+            .execute(&pool)
+            .await
+            .is_err()
+        );
+        assert!(
+            sqlx::query(
+                "INSERT INTO models (
+                    id, display_name, status, spec, runtime_presets, created_at, updated_at, kind,
+                    backend_id, config_schema_version, config_policy_version, capabilities,
+                    materialized_artifacts, selected_download_source
+                 ) VALUES (
+                    'model-bad-status', 'Bad Status', 'archived', '{}', NULL,
+                    '2026-06-08T00:00:00Z', '2026-06-08T00:00:00Z', 'cloud', NULL, 2, 3, '[]',
+                    '{}', NULL
+                 )",
+            )
+            .execute(&pool)
+            .await
+            .is_err()
+        );
+        assert!(
+            sqlx::query(
+                "INSERT INTO tasks (id, task_type, status, created_at, updated_at)
+                 VALUES ('task-bad-status', 'custom.producer', 'paused', '2026-06-08T00:00:00Z',
+                         '2026-06-08T00:00:00Z')",
+            )
+            .execute(&pool)
+            .await
+            .is_err()
+        );
+        assert!(
+            sqlx::query(
+                "INSERT INTO chat_messages (id, session_id, role, content, created_at)
+                 VALUES ('message-bad-role', 'session-ok', 'moderator', '{}',
+                         '2026-06-08T00:00:00Z')",
+            )
+            .execute(&pool)
+            .await
+            .is_err()
+        );
+        assert!(
+            sqlx::query(
+                "INSERT INTO tasks (id, task_type, status, created_at, updated_at)
+                 VALUES ('task-download-bad-status', 'custom.producer', 'pending',
+                         '2026-06-08T00:00:00Z', '2026-06-08T00:00:00Z')",
+            )
+            .execute(&pool)
+            .await
+            .is_ok()
+        );
+        assert!(
+            sqlx::query(
+                "INSERT INTO model_downloads (
+                    task_id, model_id, source_key, repo_id, filename, status, created_at,
+                    updated_at
+                 ) VALUES (
+                    'task-download-bad-status', 'model-ok', 'source-bad', 'repo', 'model.gguf',
+                    'paused', '2026-06-08T00:00:00Z', '2026-06-08T00:00:00Z'
+                 )",
+            )
+            .execute(&pool)
+            .await
+            .is_err()
+        );
     }
 }

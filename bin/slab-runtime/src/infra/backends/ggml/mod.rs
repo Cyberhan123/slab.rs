@@ -35,11 +35,14 @@ pub enum GGMLEngineError {
 }
 
 macro_rules! impl_ggml_from {
-    ($($ty:path),+ $(,)?) => {
+    ($($ty:path => $component:literal),+ $(,)?) => {
         $(
             impl From<$ty> for slab_runtime_core::CoreError {
                 fn from(error: $ty) -> Self {
-                    slab_runtime_core::CoreError::GGMLEngine(error.to_string())
+                    slab_runtime_core::CoreError::GGMLEngine {
+                        component: $component.to_owned(),
+                        message: error.to_string(),
+                    }
                 }
             }
         )+
@@ -47,10 +50,10 @@ macro_rules! impl_ggml_from {
 }
 
 impl_ggml_from!(
-    GGMLEngineError,
-    whisper::GGMLWhisperEngineError,
-    llama::GGMLLlamaEngineError,
-    diffusion::GGMLDiffusionEngineError,
+    GGMLEngineError => "ggml",
+    whisper::GGMLWhisperEngineError => "ggml.whisper",
+    llama::GGMLLlamaEngineError => "ggml.llama",
+    diffusion::GGMLDiffusionEngineError => "ggml.diffusion",
 );
 
 #[derive(Debug, Clone, Default)]

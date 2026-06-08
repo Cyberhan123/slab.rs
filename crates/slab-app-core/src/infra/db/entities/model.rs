@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use serde::de::DeserializeOwned;
 
 use std::collections::BTreeMap;
 
@@ -61,6 +62,28 @@ fn parse_config_version(raw: i64, field: &str) -> Result<u32, String> {
     u32::try_from(raw).map_err(|_| format!("invalid model {field}: {raw}"))
 }
 
+fn parse_json_field<T>(raw: &str, id: &str, field: &str) -> Result<T, String>
+where
+    T: DeserializeOwned,
+{
+    serde_json::from_str(raw)
+        .map_err(|error| format!("invalid {field} JSON for model '{id}': {error}"))
+}
+
+fn parse_optional_json_field<T>(
+    raw: Option<String>,
+    id: &str,
+    field: &str,
+) -> Result<Option<T>, String>
+where
+    T: DeserializeOwned,
+{
+    match normalize_optional_text(raw) {
+        Some(value) => parse_json_field(&value, id, field).map(Some),
+        None => Ok(None),
+    }
+}
+
 impl TryFrom<UnifiedModelRecord> for UnifiedModel {
     type Error = String;
 
@@ -85,57 +108,23 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
         let kind = raw_kind.parse::<UnifiedModelKind>().map_err(|error| {
             format!("invalid kind '{}' for model '{}': {}", raw_kind, id, error)
         })?;
-        let status = raw_status.parse::<UnifiedModelStatus>().unwrap_or_else(|error| {
-            tracing::warn!(
-                id = %id,
-                raw_status = %raw_status,
-                error = %error,
-                "failed to parse model status; defaulting to Error"
-            );
-            UnifiedModelStatus::Error
-        });
+        let status = raw_status.parse::<UnifiedModelStatus>().map_err(|error| {
+            format!("invalid status '{}' for model '{}': {}", raw_status, id, error)
+        })?;
 
-        let spec: ModelSpec = serde_json::from_str(&raw_spec).unwrap_or_else(|error| {
-            tracing::warn!(
-                id = %id,
-                error = %error,
-                "failed to deserialize model spec JSON; using empty spec"
-            );
-            ModelSpec::default()
-        });
-
+        let spec: ModelSpec = parse_json_field(&raw_spec, &id, "spec")?;
         let runtime_presets: Option<RuntimePresets> =
-            raw_runtime_presets.as_deref().and_then(|value| serde_json::from_str(value).ok());
+            parse_optional_json_field(raw_runtime_presets, &id, "runtime_presets")?;
         let materialized_artifacts: BTreeMap<String, String> =
-            serde_json::from_str(&raw_materialized_artifacts).unwrap_or_else(|error| {
-                tracing::warn!(
-                    id = %id,
-                    error = %error,
-                    "failed to deserialize model materialized_artifacts JSON; using empty artifacts"
-                );
-                BTreeMap::new()
-            });
+            parse_json_field(&raw_materialized_artifacts, &id, "materialized_artifacts")?;
         let selected_download_source: Option<SelectedModelDownloadSource> =
-            raw_selected_download_source.as_deref().and_then(|value| {
-                serde_json::from_str(value)
-                    .map_err(|error| {
-                        tracing::warn!(
-                            id = %id,
-                            error = %error,
-                            "failed to deserialize model selected_download_source JSON; ignoring source"
-                        );
-                    })
-                    .ok()
-            });
+            parse_optional_json_field(
+                raw_selected_download_source,
+                &id,
+                "selected_download_source",
+            )?;
         let capabilities: Vec<Capability> =
-            serde_json::from_str(&raw_capabilities).unwrap_or_else(|error| {
-                tracing::warn!(
-                    id = %id,
-                    error = %error,
-                    "failed to deserialize model capabilities JSON; using empty capabilities"
-                );
-                Vec::new()
-            });
+            parse_json_field(&raw_capabilities, &id, "capabilities")?;
         let backend_id = if kind == UnifiedModelKind::Local {
             parse_backend_id(raw_backend_id, &id)?
         } else {
@@ -186,10 +175,9 @@ mod tests {
     use serde_json::json;
     use slab_types::Capability;
 
-    #[test]
-    fn converts_records_with_current_config_versions() {
+    fn current_cloud_record() -> UnifiedModelRecord {
         let now = Utc::now();
-        let model = UnifiedModel::try_from(UnifiedModelRecord {
+        UnifiedModelRecord {
             id: "cloud-model".to_owned(),
             display_name: "Cloud Model".to_owned(),
             kind: "cloud".to_owned(),
@@ -198,7 +186,7 @@ mod tests {
                 Capability::TextGeneration,
                 Capability::ChatGeneration,
             ])
-            .unwrap(),
+            .expect("serialize capabilities"),
             status: "ready".to_owned(),
             spec: json!({
                 "provider_id": "openai-main",
@@ -213,8 +201,13 @@ mod tests {
             config_policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION as i64,
             created_at: now,
             updated_at: now,
-        })
-        .expect("record should deserialize");
+        }
+    }
+
+    #[test]
+    fn converts_records_with_current_config_versions() {
+        let model =
+            UnifiedModel::try_from(current_cloud_record()).expect("record should deserialize");
 
         assert_eq!(model.kind, UnifiedModelKind::Cloud);
         assert_eq!(model.spec.provider_id.as_deref(), Some("openai-main"));
@@ -223,61 +216,62 @@ mod tests {
     }
 
     #[test]
+    fn rejects_records_with_invalid_required_json() {
+        let mut record = current_cloud_record();
+        record.spec = "{".to_owned();
+        let error = UnifiedModel::try_from(record).expect_err("invalid spec should fail");
+        assert!(error.contains("invalid spec JSON"));
+
+        let mut record = current_cloud_record();
+        record.capabilities = "{".to_owned();
+        let error = UnifiedModel::try_from(record).expect_err("invalid capabilities should fail");
+        assert!(error.contains("invalid capabilities JSON"));
+
+        let mut record = current_cloud_record();
+        record.materialized_artifacts = "{".to_owned();
+        let error =
+            UnifiedModel::try_from(record).expect_err("invalid materialized artifacts should fail");
+        assert!(error.contains("invalid materialized_artifacts JSON"));
+    }
+
+    #[test]
+    fn rejects_records_with_invalid_optional_json_when_present() {
+        let mut record = current_cloud_record();
+        record.runtime_presets = Some("{".to_owned());
+        let error =
+            UnifiedModel::try_from(record).expect_err("invalid runtime presets should fail");
+        assert!(error.contains("invalid runtime_presets JSON"));
+
+        let mut record = current_cloud_record();
+        record.selected_download_source = Some("{".to_owned());
+        let error = UnifiedModel::try_from(record)
+            .expect_err("invalid selected download source should fail");
+        assert!(error.contains("invalid selected_download_source JSON"));
+    }
+
+    #[test]
+    fn rejects_records_with_invalid_status() {
+        let mut record = current_cloud_record();
+        record.status = "unknown".to_owned();
+        let error = UnifiedModel::try_from(record).expect_err("invalid status should fail");
+        assert!(error.contains("invalid status"));
+    }
+
+    #[test]
     fn rejects_records_with_schema_version_one() {
-        let now = Utc::now();
-        let error = UnifiedModel::try_from(UnifiedModelRecord {
-            id: "cloud-model".to_owned(),
-            display_name: "Cloud Model".to_owned(),
-            kind: "cloud".to_owned(),
-            backend_id: None,
-            capabilities: "[]".to_owned(),
-            status: "ready".to_owned(),
-            spec: json!({
-                "provider_id": "openai-main",
-                "remote_model_id": "gpt-4.1-mini"
-            })
-            .to_string(),
-            runtime_presets: None,
-            materialized_artifacts: "{}".to_owned(),
-            selected_download_source: None,
-            config_schema_version: 1,
-            config_policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION as i64,
-            created_at: now,
-            updated_at: now,
-        })
-        .expect_err("schema version one record should fail");
+        let mut record = current_cloud_record();
+        record.config_schema_version = 1;
+        let error =
+            UnifiedModel::try_from(record).expect_err("schema version one record should fail");
 
         assert!(error.contains("unsupported stored model config schema_version"));
     }
 
     #[test]
     fn rejects_future_config_schema_versions() {
-        let now = Utc::now();
-        let error = UnifiedModel::try_from(UnifiedModelRecord {
-            id: "cloud-model".to_owned(),
-            display_name: "Cloud Model".to_owned(),
-            kind: "cloud".to_owned(),
-            backend_id: None,
-            capabilities: serde_json::to_string(&vec![
-                Capability::TextGeneration,
-                Capability::ChatGeneration,
-            ])
-            .unwrap(),
-            status: "ready".to_owned(),
-            spec: json!({
-                "provider_id": "openai-main",
-                "remote_model_id": "gpt-4.1-mini"
-            })
-            .to_string(),
-            runtime_presets: None,
-            materialized_artifacts: "{}".to_owned(),
-            selected_download_source: None,
-            config_schema_version: (CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION + 1) as i64,
-            config_policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION as i64,
-            created_at: now,
-            updated_at: now,
-        })
-        .expect_err("future schema version should fail");
+        let mut record = current_cloud_record();
+        record.config_schema_version = (CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION + 1) as i64;
+        let error = UnifiedModel::try_from(record).expect_err("future schema version should fail");
 
         assert!(error.contains("unsupported stored model config schema_version"));
     }

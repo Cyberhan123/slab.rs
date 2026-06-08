@@ -41,16 +41,16 @@ pub enum CoreError {
     EngineIo(String),
 
     /// An error raised by a GGML engine backend.
-    #[error("GGML engine error: {0}")]
-    GGMLEngine(String),
+    #[error("GGML engine error in {component}: {message}")]
+    GGMLEngine { component: String, message: String },
 
     /// An error raised by the ONNX Runtime engine backend.
     #[error("ONNX engine error: {0}")]
     OnnxEngine(String),
 
     /// An error raised by a Candle engine backend.
-    #[error("Candle engine error: {0}")]
-    CandleEngine(String),
+    #[error("Candle engine error in {component}: {message}")]
+    CandleEngine { component: String, message: String },
 }
 
 impl From<std::io::Error> for CoreError {

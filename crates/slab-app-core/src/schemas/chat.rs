@@ -1127,11 +1127,14 @@ mod tests {
     use super::{
         ChatCompletionRequest, ChatMessage, ChatMessageContent, ChatReasoningEffort,
         ChatResponseFormat, ChatResponseFormatType, ChatResponseJsonSchema, ChatStreamOptions,
-        ChatThinkingConfig, ChatThinkingType, ChatVerbosity, CompletionRequest, StopSequences,
+        ChatThinkingConfig, ChatThinkingType, ChatToolCall, ChatToolFunction, ChatVerbosity,
+        CompletionRequest, StopSequences,
     };
     use crate::domain::models::{
         ChatCompletionCommand as DomainChatCompletionCommand,
         ChatReasoningEffort as DomainChatReasoningEffort, ChatVerbosity as DomainChatVerbosity,
+        ConversationToolCall as DomainConversationToolCall,
+        ConversationToolFunction as DomainConversationToolFunction,
         StructuredOutput as DomainStructuredOutput,
         TextCompletionCommand as DomainTextCompletionCommand,
     };
@@ -1348,6 +1351,31 @@ mod tests {
 
         assert_eq!(command.local.structured_output, Some(DomainStructuredOutput::JsonObject));
         assert_eq!(command.cloud.structured_output, Some(DomainStructuredOutput::JsonObject));
+    }
+
+    #[test]
+    fn chat_tool_call_type_is_preserved_across_schema_domain_conversion() {
+        let schema_tool_call = ChatToolCall {
+            id: Some("call-1".to_owned()),
+            r#type: "custom_function".to_owned(),
+            function: ChatToolFunction {
+                name: "lookup".to_owned(),
+                arguments: r#"{"q":"slab"}"#.to_owned(),
+            },
+        };
+
+        let domain_tool_call = DomainConversationToolCall::from(schema_tool_call.clone());
+        let restored_schema_tool_call = ChatToolCall::from(DomainConversationToolCall {
+            id: domain_tool_call.id.clone(),
+            r#type: domain_tool_call.r#type.clone(),
+            function: DomainConversationToolFunction {
+                name: domain_tool_call.function.name.clone(),
+                arguments: domain_tool_call.function.arguments.clone(),
+            },
+        });
+
+        assert_eq!(domain_tool_call.r#type, "custom_function");
+        assert_eq!(restored_schema_tool_call.r#type, schema_tool_call.r#type);
     }
 
     #[test]

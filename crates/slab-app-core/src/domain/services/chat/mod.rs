@@ -406,9 +406,7 @@ fn with_stream_session_persistence(
     let assistant = Arc::new(Mutex::new(StreamedAssistantContent::default()));
     let capture_target = Arc::clone(&assistant);
     let streamed = stream.map(move |chunk| {
-        match &chunk {
-            ChatStreamChunk::Data(data) => capture_streamed_assistant_chunk(data, &capture_target),
-        }
+        capture_streamed_assistant_chunk(&chunk, &capture_target);
         chunk
     });
 
@@ -619,18 +617,10 @@ fn into_text_completion_stream(
 ) -> TextCompletionOutput {
     let mut chunks = Vec::new();
     if !text.is_empty() {
-        chunks.push(ChatStreamChunk::Data(build_text_completion_chunk(
-            &id, created, &model, 0, &text,
-        )));
+        chunks.push(build_text_completion_chunk(&id, created, &model, 0, &text));
     }
-    chunks.push(ChatStreamChunk::Data(build_text_completion_finish_chunk(
-        &id,
-        created,
-        &model,
-        0,
-        &finish_reason,
-    )));
-    chunks.push(ChatStreamChunk::Data("[DONE]".into()));
+    chunks.push(build_text_completion_finish_chunk(&id, created, &model, 0, &finish_reason));
+    chunks.push("[DONE]".into());
 
     TextCompletionOutput::Stream(Box::pin(stream::iter(chunks)))
 }

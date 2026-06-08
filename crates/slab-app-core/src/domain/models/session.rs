@@ -1,4 +1,5 @@
 use crate::infra::db::{ChatMessage, ChatSession};
+use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone)]
 pub struct CreateSessionCommand {
@@ -10,8 +11,8 @@ pub struct SessionView {
     pub id: String,
     pub name: String,
     pub state_path: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
@@ -20,7 +21,7 @@ pub struct SessionMessageView {
     pub session_id: String,
     pub role: String,
     pub content: String,
-    pub created_at: String,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
@@ -34,8 +35,8 @@ impl From<&ChatSession> for SessionView {
             id: session.id.clone(),
             name: session.name.clone(),
             state_path: session.state_path.clone(),
-            created_at: session.created_at.to_rfc3339(),
-            updated_at: session.updated_at.to_rfc3339(),
+            created_at: session.created_at,
+            updated_at: session.updated_at,
         }
     }
 }
@@ -47,7 +48,7 @@ impl From<&ChatMessage> for SessionMessageView {
             session_id: message.session_id.clone(),
             role: message.role.clone(),
             content: message.content.clone(),
-            created_at: message.created_at.to_rfc3339(),
+            created_at: message.created_at,
         }
     }
 }

@@ -43,6 +43,8 @@ export function registerModelsAndChatSmoke(
         expect(filtered.body.some((model) => model.id === created.body.id)).toBe(true);
 
         const chatModels = await expectJson<Schema["ChatModelOption"][]>(server, "/v1/chat/models");
+        expect(chatModels.response.headers.get("deprecation")).toBe("true");
+        expect(chatModels.response.headers.get("sunset")).toBe("Tue, 08 Jun 2027 00:00:00 GMT");
         const chatModel = chatModels.body.find((model) => model.id === created.body.id);
         expect(chatModel).toBeDefined();
         expect(chatModel?.source).toBe("local");
