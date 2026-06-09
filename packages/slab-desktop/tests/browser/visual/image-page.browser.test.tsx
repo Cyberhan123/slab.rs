@@ -87,6 +87,10 @@ function createImageViewModel(overrides = {}) {
     handleInitImageChange: createVoidMock(),
     handleSubmit: createAsyncVoidMock(),
     heightStr: '512',
+    history: [],
+    historyDialogOpen: false,
+    historyError: null,
+    historyLoading: false,
     images: [] as GeneratedImage[],
     initImageDataUri: null,
     initImageInputRef: { current: null },
@@ -103,13 +107,16 @@ function createImageViewModel(overrides = {}) {
     sampleMethod: 'euler_a',
     scheduler: 'normal',
     seed: -1,
+    selectedHistoryTask: null,
     selectedModelId: 'model-1',
+    openHistoryDetail: createAsyncVoidMock(),
     setAdvancedOpen: createVoidMock(),
     setCfgScale: createVoidMock(),
     setClipSkip: createVoidMock(),
     setEta: createVoidMock(),
     setGuidance: createVoidMock(),
     setHeightStr: createVoidMock(),
+    setHistoryDialogOpen: createVoidMock(),
     setInitImageDataUri: createVoidMock(),
     setMode: createVoidMock(),
     setNegativePrompt: createVoidMock(),
@@ -117,6 +124,7 @@ function createImageViewModel(overrides = {}) {
     setPrompt: createVoidMock(),
     setSampleMethod: createVoidMock(),
     setScheduler: createVoidMock(),
+    setSelectedHistoryTask: createVoidMock(),
     setSeed: createVoidMock(),
     setSteps: createVoidMock(),
     setStrength: createVoidMock(),
@@ -192,6 +200,7 @@ describe('ImagePage browser visual regression', () => {
   it('captures the image workbench with generated images', async () => {
     const mockImages: GeneratedImage[] = [
       {
+        id: 'visual-image-1',
         src: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
         prompt: 'A futuristic cityscape',
         width: 512,
@@ -199,6 +208,7 @@ describe('ImagePage browser visual regression', () => {
         mode: 'txt2img',
       },
       {
+        id: 'visual-image-2',
         src: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
         prompt: 'A futuristic cityscape',
         width: 512,
@@ -216,6 +226,7 @@ describe('ImagePage browser visual regression', () => {
 
     await renderDesktopScene(<ImagePage />, { route: '/image' });
 
+    await page.getByText('Generation Parameters').hover();
     await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot(
       'image-page-with-results.png',
       stableChromiumScreenshot,

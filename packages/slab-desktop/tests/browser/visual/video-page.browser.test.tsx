@@ -43,28 +43,36 @@ function createVideoViewModel(overrides = {}) {
     handleSubmit: createAsyncVoidMock(),
     heightStr: '512',
     heightValue: 512,
+    history: [],
+    historyDialogOpen: false,
+    historyError: null,
+    historyLoading: false,
     hasSelectedModel: true,
     immersivePreview: false,
     initImageDataUri: null,
     initImageInputRef: { current: null },
     isGenerating: false,
     negativePrompt: '',
+    openHistoryDetail: createAsyncVoidMock(),
     prompt: '',
     sampleMethod: 'euler_a',
     scheduler: 'normal',
     seed: -1,
+    selectedHistoryTask: null,
     setAdvancedOpen: createVoidMock(),
     setCfgScale: createVoidMock(),
     setFps: createVoidMock(),
     setFrames: createVoidMock(),
     setGuidance: createVoidMock(),
     setHeightStr: createVoidMock(),
+    setHistoryDialogOpen: createVoidMock(),
     setImmersivePreview: createVoidMock(),
     setInitImageDataUri: createVoidMock(),
     setNegativePrompt: createVoidMock(),
     setPrompt: createVoidMock(),
     setSampleMethod: createVoidMock(),
     setScheduler: createVoidMock(),
+    setSelectedHistoryTask: createVoidMock(),
     setSeed: createVoidMock(),
     setSteps: createVoidMock(),
     setStrength: createVoidMock(),
@@ -87,6 +95,8 @@ const stableChromiumScreenshot = {
     allowedMismatchedPixels: 100,
   },
 };
+const stableVideoDataUrl =
+  'data:video/webm;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAHpEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHWTbuMU6uEElTDZ1OsggEjTbuMU6uEHFO7a1OsggHT7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsCrXsYMPQkBNgIxMYXZmNjIuMy4xMDBXQYxMYXZmNjIuMy4xMDBEiYhAj0AAAAAAABZUrmvIrgEAAAAAAAA/14EBc8WI+BA4Ec5PAOWcgQAitZyDdW5kiIEAhoVWX1ZQOYOBASPjg4Q7msoA4JCwgRC6gRCagQJVsIRVuYEBElTDZ0B/c3OfY8CAZ8iZRaOHRU5DT0RFUkSHjExhdmY2Mi4zLjEwMHNz2mPAi2PFiPgQOBHOTwDlZ8ilRaOHRU5DT0RFUkSHmExhdmM2Mi4xMS4xMDAgbGlidnB4LXZwOWfIoUWjiERVUkFUSU9ORIeTMDA6MDA6MDEuMDAwMDAwMDAwAB9DtnWm54EAo6GBAACAgkmDQgAA8AD2ADgkHBhCAAAwYAAAEL///YsqAAAcU7trkbuPs4EAt4r3gQHxggGo8IED';
 
 describe('VideoPage browser visual regression', () => {
   beforeEach(() => {
@@ -147,7 +157,7 @@ describe('VideoPage browser visual regression', () => {
     mockUseVideoGeneration.mockReturnValue(
       createVideoViewModel({
         prompt: 'A bird flying through clouds',
-        videoPath: '/path/to/generated/video.mp4',
+        videoPath: stableVideoDataUrl,
         stageDescription: 'Video generation complete',
         stageStatus: 'Ready',
         stageTitle: 'Ready',

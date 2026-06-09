@@ -12,6 +12,9 @@ const apiSourceUrl = apiSourcePath.replace(/\\/g, "/");
 
 export default defineProject({
   plugins: [react(), tailwindcss()],
+  optimizeDeps: {
+    include: ["react-dom/client"],
+  },
   test: {
     name: "desktop-browser",
     include: ["tests/browser/**/*.browser.test.tsx"],

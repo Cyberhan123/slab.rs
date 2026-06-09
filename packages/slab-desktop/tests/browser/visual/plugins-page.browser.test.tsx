@@ -39,6 +39,7 @@ vi.mock("@slab/api", () => ({
     useQuery: mockUseQuery,
   },
   getErrorMessage: (error: unknown) => (error instanceof Error ? error.message : String(error)),
+  postFormData: vi.fn<() => Promise<Record<string, never>>>().mockResolvedValue({}),
 }));
 
 vi.mock("@/lib/plugin-host-bridge", () => ({

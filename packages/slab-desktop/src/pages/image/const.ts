@@ -47,6 +47,7 @@ export const SIDEBAR_TEXTAREA_CLASSNAME =
   'w-full rounded-xl border-border/70 bg-[var(--shell-card)] px-4 py-3 text-sm leading-5 text-foreground shadow-none resize-none focus-visible:border-[var(--brand-teal)]/60 focus-visible:ring-[3px] focus-visible:ring-[var(--brand-teal)]/12';
 
 export type GeneratedImage = {
+  id: string;
   src: string;
   prompt: string;
   width: number;

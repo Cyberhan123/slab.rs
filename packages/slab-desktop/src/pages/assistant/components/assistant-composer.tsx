@@ -8,8 +8,9 @@ import {
   WandSparkles,
   Wrench,
 } from "lucide-react"
-import { type ReactNode, useCallback, useMemo } from "react"
+import { useCallback, useMemo } from "react"
 import { Sender, Suggestion, type SuggestionProps } from "@ant-design/x"
+import type { ActionsComponents } from "@ant-design/x/es/sender"
 
 import { Button } from "@slab/components/button"
 import {
@@ -35,10 +36,17 @@ type AssistantComposerProps = {
   statusLabel: string
 }
 
-function renderSenderSuffix(originNode: ReactNode) {
+function renderSenderSuffix(
+  components: ActionsComponents,
+  labels: { cancel: string; send: string; voice: string },
+  isRequesting: boolean
+) {
+  const { LoadingButton, SendButton } = components
+
   return (
     <div className="flex items-end gap-2">
       <Button
+        aria-label={labels.voice}
         variant="quiet"
         size="icon"
         className="size-10 rounded-full text-muted-foreground hover:bg-[var(--shell-card)]/45 hover:text-foreground"
@@ -46,7 +54,11 @@ function renderSenderSuffix(originNode: ReactNode) {
       >
         <Mic className="size-4" />
       </Button>
-      {originNode}
+      {isRequesting ? (
+        <LoadingButton aria-label={labels.cancel} />
+      ) : (
+        <SendButton aria-label={labels.send} />
+      )}
     </div>
   )
 }
@@ -228,7 +240,17 @@ export function AssistantComposer({
                 </DropdownMenuContent>
               </DropdownMenu>
             }
-            suffix={renderSenderSuffix}
+            suffix={(_, { components }) =>
+              renderSenderSuffix(
+                components,
+                {
+                  cancel: t("pages.assistant.composer.cancel"),
+                  send: t("pages.assistant.composer.sendMessage"),
+                  voice: t("pages.assistant.composer.voiceCapture"),
+                },
+                isRequesting
+              )
+            }
           />
         )}
       </Suggestion>

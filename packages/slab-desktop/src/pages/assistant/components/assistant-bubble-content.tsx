@@ -104,7 +104,11 @@ function renderThoughtContent(
   if (thought.pendingApproval) {
     return (
       <div className="space-y-3">
-        <CodeHighlighter lang="shell" className="rounded-[14px] border border-border/60 text-xs">
+        <CodeHighlighter
+          lang="shell"
+          prismLightMode={false}
+          className="rounded-[14px] border border-border/60 text-xs"
+        >
           {thought.pendingApproval.command}
         </CodeHighlighter>
         <div className="flex justify-end gap-2">

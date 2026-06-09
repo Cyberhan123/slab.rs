@@ -207,9 +207,15 @@ export function useImageGeneration() {
     const generationMode = task.mode === 'img2img' ? 'img2img' : 'txt2img';
 
     return task.image_urls
-      .map((url) => resolveMediaUrl(url))
-      .filter((url): url is string => typeof url === 'string' && url.length > 0)
-      .map((src) => ({
+      .map((url, assetIndex) => ({
+        assetIndex,
+        src: resolveMediaUrl(url),
+      }))
+      .filter((image): image is { assetIndex: number; src: string } =>
+        typeof image.src === 'string' && image.src.length > 0,
+      )
+      .map(({ assetIndex, src }) => ({
+        id: `${task.task_id}:${assetIndex}`,
         src,
         prompt: task.prompt,
         width,
