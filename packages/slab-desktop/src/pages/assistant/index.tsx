@@ -1,39 +1,24 @@
 import {
   Bubble,
-  CodeHighlighter,
-  ThoughtChain,
   XProvider,
   type BubbleListProps,
-  type ThoughtChainItemType,
 } from "@ant-design/x"
-import { useClipboard } from "@mantine/hooks"
-import { BotMessageSquare, CheckCircle2, Copy, Loader2, UserRound, XCircle } from "lucide-react"
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 
 import "@ant-design/x-markdown/themes/dark.css"
 import "@ant-design/x-markdown/themes/light.css"
 
-import { Button } from "@slab/components/button"
 import {
   DEFAULT_ASSISTANT_LABELS,
   LEGACY_DEFAULT_CHAT_LABELS,
-  Trans,
   getResolvedAppLanguage,
   useTranslation,
 } from "@slab/i18n"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@slab/components/dialog"
 import { ScrollArea } from "@slab/components/scroll-area"
-import api, { type components } from "@slab/api"
-import { toCatalogModelList, type CatalogModel } from "@slab/api/models"
+import api from "@slab/api"
+import { toCatalogModelList } from "@slab/api/models"
 import { usePageHeader, usePageHeaderControl } from "@/hooks/use-global-header-meta"
 import { usePersistedHeaderSelect } from "@/hooks/use-persisted-header-select"
 import { PAGE_HEADER_META } from "@/layouts/header-meta"
@@ -50,12 +35,11 @@ import {
 import {
   getAssistantErrorDescription,
   getAssistantMessageTextContent,
-  stripTrailingAssistantTurnArtifacts,
   type AssistantMessageRecord,
-  type AssistantThought,
 } from "./assistant-context"
+import { ASSISTANT_BUBBLE_ROLES } from "./components/assistant-bubble-content"
 import { AssistantComposer } from "./components/assistant-composer"
-import { AssistantMarkdown } from "./components/assistant-markdown"
+import { AssistantModelSwitchDialog } from "./components/assistant-model-switch-dialog"
 import { AssistantSessionSheet } from "./components/assistant-session-sheet"
 import {
   AssistantSessionSummaryCard,
@@ -65,397 +49,14 @@ import { useAssistantLocale } from "./assistant-locale"
 import { useAssistantAgent } from "./hooks/use-assistant-agent"
 import { useAssistantSessions } from "./hooks/use-assistant-sessions"
 import { useMarkdownTheme } from "./hooks/use-markdown-theme"
-import { cn } from "@/lib/utils"
-
-type ModelOptionSource = "local" | "cloud"
-
-type AssistantModelCapabilities = {
-  raw_gbnf: boolean
-  structured_output: boolean
-  reasoning_controls: boolean
-}
-
-type ModelOption = {
-  id: string
-  label: string
-  downloaded: boolean
-  pending: boolean
-  source: ModelOptionSource
-  capabilities: AssistantModelCapabilities
-  contextWindow?: number | null
-  runtimePresets?: CatalogModel["runtime_presets"]
-}
-
-type ModelRuntimeStatus = components["schemas"]["ModelStatusResponse"]
-
-type AssistantBubbleContent = {
-  approving: boolean
-  item: AssistantMessageRecord
-  labels: {
-    approve: string
-    assistant: string
-    copy: string
-    reject: string
-    thinkingLoading: string
-    thinkingReady: string
-    user: string
-    waitingForResponse: string
-  }
-  markdownClassName?: string
-  onApprove?: (approved: boolean) => void
-}
-
-type ParsedThinkingContent = {
-  thinking: string | null
-  answer: string
-  thinkingLoading: boolean
-}
-
-function parseThinkingContent(rawContent: string): ParsedThinkingContent {
-  const openTagIndex = rawContent.indexOf("<think")
-  if (openTagIndex < 0) {
-    return { thinking: null, answer: rawContent, thinkingLoading: false }
-  }
-
-  const openTagEnd = rawContent.indexOf(">", openTagIndex)
-  if (openTagEnd < 0) {
-    return { thinking: null, answer: rawContent, thinkingLoading: false }
-  }
-
-  const openTag = rawContent.slice(openTagIndex, openTagEnd + 1)
-  const thinkingMarkedDone = /\bstatus\s*=\s*["']?done["']?/i.test(openTag)
-  const closeTag = "</think>"
-  const closeTagIndex = rawContent.indexOf(closeTag, openTagEnd + 1)
-
-  if (closeTagIndex < 0) {
-    const thinking = rawContent.slice(openTagEnd + 1).trimStart()
-
-    return {
-      answer: rawContent.slice(0, openTagIndex).trimEnd(),
-      thinking: thinking || null,
-      thinkingLoading: !thinkingMarkedDone,
-    }
-  }
-
-  const thinking = rawContent.slice(openTagEnd + 1, closeTagIndex).trim()
-  const before = rawContent.slice(0, openTagIndex)
-  const after = rawContent.slice(closeTagIndex + closeTag.length)
-
-  return {
-    answer: `${before}${after}`.trimStart(),
-    thinking: thinking || null,
-    thinkingLoading: false,
-  }
-}
-
-function guessCodeLanguage(value: string) {
-  const trimmed = value.trim()
-  if (trimmed.startsWith("diff --git") || trimmed.startsWith("--- ") || trimmed.startsWith("*** ")) {
-    return "diff"
-  }
-
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-    return "json"
-  }
-
-  return "text"
-}
-
-function renderThoughtContent(
-  thought: AssistantThought,
-  approving: boolean,
-  onApprove: ((approved: boolean) => void) | undefined,
-  labels: {
-    approve: string
-    reject: string
-  }
-) {
-  if (thought.pendingApproval) {
-    return (
-      <div className="space-y-3">
-        <CodeHighlighter lang="shell" className="rounded-[14px] border border-border/60 text-xs">
-          {thought.pendingApproval.command}
-        </CodeHighlighter>
-        <div className="flex justify-end gap-2">
-          <Button
-            variant="quiet"
-            size="sm"
-            onClick={() => onApprove?.(false)}
-            disabled={approving}
-          >
-            <XCircle className="size-4" />
-            {labels.reject}
-          </Button>
-          <Button
-            variant="pill"
-            size="sm"
-            onClick={() => onApprove?.(true)}
-            disabled={approving}
-          >
-            <CheckCircle2 className="size-4" />
-            {labels.approve}
-          </Button>
-        </div>
-      </div>
-    )
-  }
-
-  return thought.detail ? (
-    <CodeHighlighter
-      lang={guessCodeLanguage(thought.detail)}
-      className="rounded-[14px] border border-border/60 text-xs"
-    >
-      {thought.detail}
-    </CodeHighlighter>
-  ) : null
-}
-
-function toThoughtChainItems(
-  thoughts: AssistantThought[] | undefined,
-  approving: boolean,
-  onApprove: ((approved: boolean) => void) | undefined,
-  labels: {
-    approve: string
-    reject: string
-  },
-  thinking?: {
-    content: string
-    key: string
-    loading: boolean
-    title: string
-  }
-): ThoughtChainItemType[] {
-  const items = (thoughts ?? []).map((thought) => ({
-    blink: thought.status === "loading",
-    collapsible: true,
-    content: renderThoughtContent(thought, approving, onApprove, labels),
-    description: thought.summary ?? thought.toolName ?? thought.callId,
-    icon: false,
-    key: thought.id,
-    status: thought.status,
-    title: thought.title,
-  }))
-
-  if (!thinking?.content) {
-    return items
-  }
-
-  return [
-    {
-      blink: thinking.loading,
-      collapsible: true,
-      content: (
-        <AssistantMarkdown className="assistant-markdown--assistant" hasNextChunk={thinking.loading}>
-          {thinking.content}
-        </AssistantMarkdown>
-      ),
-      icon: false,
-      key: thinking.key,
-      status: thinking.loading ? "loading" : "success",
-      title: thinking.title,
-    },
-    ...items,
-  ]
-}
-
-const AssistantBubbleContentView = memo(function AssistantBubbleContentView({
-  content,
-}: {
-  content: AssistantBubbleContent
-}) {
-  const role = content.item.message.role
-  const isAssistant = role === "assistant"
-  const isBusy = content.item.status === "loading" || content.item.status === "updating"
-  const hasNextChunk = content.item.status === "updating"
-  const rawContent = stripTrailingAssistantTurnArtifacts(
-    getAssistantMessageTextContent(content.item.message)
-  )
-  const parsed = useMemo(() => parseThinkingContent(rawContent), [rawContent])
-  const liveThinking =
-    typeof content.item.message.reasoningContent === "string"
-      ? content.item.message.reasoningContent.trim()
-      : ""
-  const thinking = liveThinking || parsed.thinking
-  const answer = liveThinking
-    ? rawContent.includes("<think")
-      ? parsed.answer
-      : rawContent
-    : parsed.answer
-  const thinkingLoading = liveThinking ? isBusy : parsed.thinkingLoading
-  const thoughtItems = useMemo(
-    () =>
-      toThoughtChainItems(
-        content.item.message.thoughts,
-        content.approving,
-        content.onApprove,
-        {
-          approve: content.labels.approve,
-          reject: content.labels.reject,
-        },
-        thinking
-          ? {
-              content: thinking,
-              key: `${content.item.id}-thinking`,
-              loading: thinkingLoading && isBusy,
-              title: thinkingLoading && isBusy ? content.labels.thinkingLoading : content.labels.thinkingReady,
-            }
-          : undefined
-      ),
-    [
-      content.approving,
-      content.item.id,
-      content.item.message.thoughts,
-      content.labels.approve,
-      content.labels.reject,
-      content.labels.thinkingLoading,
-      content.labels.thinkingReady,
-      content.onApprove,
-      isBusy,
-      thinking,
-      thinkingLoading,
-    ]
-  )
-  const expandedThoughtKeys = useMemo(
-    () => thoughtItems.map((thought) => thought.key).filter((key): key is string => Boolean(key)),
-    [thoughtItems]
-  )
-
-  return (
-    <div className="space-y-4">
-      {isAssistant && thoughtItems.length > 0 ? (
-        <ThoughtChain
-          items={thoughtItems}
-          defaultExpandedKeys={expandedThoughtKeys}
-          className="rounded-[18px] border border-border/50 bg-background/30 px-4 py-3"
-        />
-      ) : null}
-
-      {answer ? (
-        <AssistantMarkdown
-          className={cn(
-            isAssistant ? "assistant-markdown--assistant" : "assistant-markdown--user",
-            content.markdownClassName
-          )}
-          hasNextChunk={hasNextChunk}
-        >
-          {answer}
-        </AssistantMarkdown>
-      ) : isBusy ? (
-        <p className="text-sm opacity-80">{content.labels.waitingForResponse}</p>
-      ) : null}
-    </div>
-  )
-})
-
-function renderAssistantBubbleContent(content: AssistantBubbleContent) {
-  return <AssistantBubbleContentView content={content} />
-}
-
-function AssistantCopyButton({ content }: { content: AssistantBubbleContent }) {
-  const clipboard = useClipboard()
-
-  return (
-    <Button
-      type="button"
-      variant="quiet"
-      size="sm"
-      className="h-7 rounded-full px-3 text-[11px] text-muted-foreground hover:text-foreground"
-      onClick={() => clipboard.copy(getAssistantMessageTextContent(content.item.message))}
-    >
-      <Copy className="size-3.5" />
-      {content.labels.copy}
-    </Button>
-  )
-}
-
-const ASSISTANT_BUBBLE_ROLES = {
-  assistant: {
-    avatar: (
-      <span className="flex size-6 shrink-0 items-center justify-center rounded-[8px] bg-[var(--brand-teal)] text-[var(--brand-teal-foreground)]">
-        <BotMessageSquare className="size-3.5" />
-      </span>
-    ),
-    contentRender: renderAssistantBubbleContent,
-    footer: (content: AssistantBubbleContent) => <AssistantCopyButton content={content} />,
-    header: (content: AssistantBubbleContent) => content.labels.assistant,
-    placement: "start",
-    shape: "corner",
-    styles: {
-      content: {
-        background: "var(--ai-bubble)",
-        color: "var(--ai-bubble-foreground)",
-      },
-    },
-    variant: "filled",
-  },
-  user: {
-    avatar: (
-      <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border/30 bg-[var(--shell-card)] text-foreground/70">
-        <UserRound className="size-3.5" />
-      </span>
-    ),
-    contentRender: renderAssistantBubbleContent,
-    footer: (content: AssistantBubbleContent) => <AssistantCopyButton content={content} />,
-    header: (content: AssistantBubbleContent) => content.labels.user,
-    placement: "end",
-    shape: "corner",
-    styles: {
-      content: {
-        background: "var(--user-bubble)",
-        color: "var(--user-bubble-foreground)",
-      },
-    },
-    variant: "filled",
-  },
-  system: {
-    shape: "round",
-    variant: "outlined",
-  },
-} satisfies BubbleListProps["role"]
-
-function createConversationLabel(value: string, fallback: string) {
-  const trimmed = value.trim()
-
-  if (!trimmed) {
-    return fallback
-  }
-
-  return trimmed.length > 42 ? `${trimmed.slice(0, 42)}...` : trimmed
-}
-
-function defaultCapabilitiesForSource(source: ModelOptionSource): AssistantModelCapabilities {
-  return source === "cloud"
-    ? {
-      raw_gbnf: false,
-      reasoning_controls: true,
-      structured_output: true,
-    }
-    : {
-      raw_gbnf: true,
-      reasoning_controls: false,
-      structured_output: true,
-    }
-}
-
-function resolveAssistantModelCapabilities(
-  model: Pick<CatalogModel, "chat_capabilities" | "kind">
-): AssistantModelCapabilities {
-  return model.chat_capabilities ?? defaultCapabilitiesForSource(model.kind)
-}
-
-function getGreeting(date: Date, t: (key: string) => string) {
-  const hour = date.getHours()
-
-  if (hour < 12) {
-    return t("pages.assistant.greeting.morning")
-  }
-
-  if (hour < 18) {
-    return t("pages.assistant.greeting.afternoon")
-  }
-
-  return t("pages.assistant.greeting.evening")
-}
+import {
+  createConversationLabel,
+  getGreeting,
+  getSelectedModelStatusLabel,
+  resolveAssistantModelCapabilities,
+  type ModelOption,
+  type ModelRuntimeStatus,
+} from "./lib/assistant-page-state"
 
 function Assistant() {
   const navigate = useNavigate()
@@ -745,74 +346,37 @@ function Assistant() {
     t("pages.assistant.sessionSummary.currentSession")
   const selectedRuntimeContextLength =
     loadedModelId === selectedModelId ? loadedModelStatus?.context_length ?? null : null
-  const selectedModelStatusLabel = useMemo(() => {
-    if (isSessionBootstrapping || !curConversation) {
-      return t("pages.assistant.status.preparingSession")
-    }
-
-    if (isHistoryLoading) {
-      return t("pages.assistant.status.loadingSessionHistory")
-    }
-
-    if (isCreatingSession) {
-      return t("pages.assistant.status.creatingSession")
-    }
-
-    if (isDeletingSession) {
-      return t("pages.assistant.status.deletingSession")
-    }
-
-    if (modelLoading) {
-      return t("pages.assistant.status.loadingModels")
-    }
-
-    if (!selectedModel) {
-      return t("pages.assistant.status.selectModel")
-    }
-
-    const parts = [selectedModel.label]
-
-    if (selectedRuntimeContextLength && selectedRuntimeContextLength > 0) {
-      parts.push(
-        t("pages.assistant.status.runtimeContextWindow", {
-          formatted: new Intl.NumberFormat(resolvedLanguage).format(selectedRuntimeContextLength),
-        })
-      )
-    } else if (selectedModel.contextWindow && selectedModel.contextWindow > 0) {
-      parts.push(
-        t("pages.assistant.status.contextWindow", {
-          formatted: new Intl.NumberFormat(resolvedLanguage).format(selectedModel.contextWindow),
-        })
-      )
-    } else if (selectedModel.pending) {
-      parts.push(t("pages.assistant.status.downloading"))
-    } else if (selectedModel.source === "local" && !selectedModel.downloaded) {
-      parts.push(t("pages.assistant.status.needsDownload"))
-    } else if (isPreparingModel) {
-      parts.push(t("pages.assistant.status.preparing"))
-    } else if (selectedModel.source === "cloud") {
-      parts.push(t("pages.assistant.status.cloudModel"))
-    }
-
-    if (eventsConnected) {
-      parts.push(t("pages.assistant.connection.connected"))
-    }
-
-    return parts.join(" / ")
-  }, [
-    curConversation,
-    eventsConnected,
-    isCreatingSession,
-    isDeletingSession,
-    isHistoryLoading,
-    isPreparingModel,
-    isSessionBootstrapping,
-    modelLoading,
-    resolvedLanguage,
-    selectedRuntimeContextLength,
-    selectedModel,
-    t,
-  ])
+  const selectedModelStatusLabel = useMemo(
+    () =>
+      getSelectedModelStatusLabel({
+        curConversation,
+        eventsConnected,
+        isCreatingSession,
+        isDeletingSession,
+        isHistoryLoading,
+        isPreparingModel,
+        isSessionBootstrapping,
+        modelLoading,
+        resolvedLanguage,
+        selectedModel,
+        selectedRuntimeContextLength,
+        t,
+      }),
+    [
+      curConversation,
+      eventsConnected,
+      isCreatingSession,
+      isDeletingSession,
+      isHistoryLoading,
+      isPreparingModel,
+      isSessionBootstrapping,
+      modelLoading,
+      resolvedLanguage,
+      selectedRuntimeContextLength,
+      selectedModel,
+      t,
+    ]
+  )
 
   const closePendingModelSwitch = useCallback(() => {
     if (isCreatingSession) {
@@ -1209,95 +773,21 @@ function Assistant() {
           onDelete={handleDeleteConversation}
         />
 
-        <Dialog
-          open={Boolean(pendingModelSwitchId)}
+        <AssistantModelSwitchDialog
+          conversationLabel={currentConversationLabel}
+          isCreatingSession={isCreatingSession}
+          messageCount={safeMessages.length}
+          onCreateSession={() => void handleCreateSessionOnModelSwitch()}
+          onKeepSession={handleKeepSessionOnModelSwitch}
           onOpenChange={(open) => {
             if (!open) {
               closePendingModelSwitch()
             }
           }}
-        >
-          <DialogContent className="max-w-xl" showCloseButton={!isCreatingSession}>
-            <DialogHeader className="space-y-3 text-left">
-              <DialogTitle>{t("pages.assistant.dialog.title")}</DialogTitle>
-              <DialogDescription>
-                {t("pages.assistant.dialog.description")}
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-2 text-sm leading-6 text-muted-foreground">
-              <p>
-                <Trans
-                  i18nKey="pages.assistant.dialog.switchingSummary"
-                  values={{
-                    from: selectedModel?.label ?? t("pages.assistant.modelPicker.placeholder"),
-                    to:
-                      pendingModelSwitch?.label ??
-                      pendingModelSwitchId ??
-                      t("pages.assistant.modelPicker.placeholder"),
-                  }}
-                  components={{ strong: <strong /> }}
-                />
-              </p>
-              <p>
-                <Trans
-                  i18nKey="pages.assistant.dialog.sessionSummary"
-                  count={safeMessages.length}
-                  values={{
-                    count: safeMessages.length,
-                    label: currentConversationLabel,
-                  }}
-                  components={{ strong: <strong /> }}
-                />
-              </p>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-border/70 bg-[var(--surface-1)] px-4 py-3">
-                <p className="text-sm font-medium text-foreground">
-                  {t("pages.assistant.dialog.keepTitle")}
-                </p>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  {t("pages.assistant.dialog.keepDescription")}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-border/70 bg-[var(--surface-1)] px-4 py-3">
-                <p className="text-sm font-medium text-foreground">
-                  {t("pages.assistant.dialog.createTitle")}
-                </p>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  {t("pages.assistant.dialog.createDescription")}
-                </p>
-              </div>
-            </div>
-
-            <DialogFooter className="gap-2">
-              <Button
-                variant="outline"
-                onClick={closePendingModelSwitch}
-                disabled={isCreatingSession}
-              >
-                {t("pages.assistant.dialog.cancel")}
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={handleKeepSessionOnModelSwitch}
-                disabled={isCreatingSession}
-              >
-                {t("pages.assistant.dialog.keepTitle")}
-              </Button>
-              <Button
-                onClick={() => void handleCreateSessionOnModelSwitch()}
-                disabled={isCreatingSession}
-              >
-                {isCreatingSession ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : null}
-                {t("pages.assistant.dialog.createTitle")}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+          pendingModelId={pendingModelSwitchId}
+          pendingModelLabel={pendingModelSwitch?.label}
+          selectedModelLabel={selectedModel?.label}
+        />
       </div>
     </XProvider>
   )

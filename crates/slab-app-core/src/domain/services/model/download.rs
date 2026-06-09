@@ -1,28 +1,28 @@
-use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+mod progress;
+mod status;
+
+use progress::ModelDownloadProgressReporter;
+pub(super) use status::{effective_model_status, load_model_download_status_index};
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use slab_config::ModelDownloadSourcePreference;
-use slab_hub::{DownloadProgress, DownloadProgressUpdate};
+use slab_hub::DownloadProgress;
 use tracing::{info, warn};
 
-use crate::context::ModelState;
 use crate::domain::models::{
-    AcceptedOperation, DownloadModelCommand, SelectedModelDownloadSource, TaskProgress, TaskStatus,
-    UnifiedModel, UnifiedModelKind, UnifiedModelStatus,
+    AcceptedOperation, DownloadModelCommand, SelectedModelDownloadSource, TaskStatus, UnifiedModel,
 };
 use crate::error::AppCoreError;
-use crate::infra::db::{
-    ModelDownloadRecord, ModelDownloadStore, ModelStore, TaskRecord, TaskStore,
-};
+use crate::infra::db::{ModelDownloadRecord, ModelDownloadStore, ModelStore, TaskRecord};
 use crate::infra::model_packs;
 
 use super::{ModelService, catalog, pack, runtime};
+use status::{ModelDownloadSourceKey, model_download_source_key_from_parts};
 
-const MODEL_DOWNLOAD_PROGRESS_MIN_INTERVAL: Duration = Duration::from_millis(500);
-const MODEL_DOWNLOAD_PROGRESS_MIN_BYTES_DELTA: u64 = 512 * 1024;
 pub(crate) const MODEL_DOWNLOAD_TASK_TYPE: &str = "model_download";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,11 +49,6 @@ struct ModelDownloadTaskCandidate {
 }
 
 #[derive(Serialize)]
-struct ModelDownloadProgressPayload {
-    progress: TaskProgress,
-}
-
-#[derive(Serialize)]
 struct ModelDownloadResultPayload {
     local_path: String,
 }
@@ -62,120 +57,6 @@ struct ModelDownloadResultPayload {
 struct ResolvedModelDownloadPlan {
     task_key: ModelDownloadSourceKey,
     candidates: Vec<ModelDownloadTaskCandidate>,
-}
-
-#[derive(Debug, Default)]
-struct ModelDownloadProgressState {
-    last_progress: Option<TaskProgress>,
-    last_published_at: Option<Instant>,
-}
-
-#[derive(Debug)]
-struct ModelDownloadProgressReporter {
-    task_id: String,
-    store: Arc<crate::infra::db::AnyStore>,
-    artifact_index_by_filename: HashMap<String, u32>,
-    artifact_count: u32,
-    state: Mutex<ModelDownloadProgressState>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct ModelDownloadSourceKey {
-    model_id: String,
-    source_key: String,
-    repo_id: String,
-    filename: String,
-    hub_provider: Option<String>,
-}
-
-#[derive(Default)]
-pub(super) struct ModelDownloadStatusIndex {
-    latest_by_source: HashMap<ModelDownloadSourceKey, ModelDownloadRecord>,
-    latest_by_model: HashMap<String, ModelDownloadRecord>,
-}
-
-impl ModelDownloadProgressReporter {
-    fn new(
-        task_id: impl Into<String>,
-        store: Arc<crate::infra::db::AnyStore>,
-        artifacts: &BTreeMap<String, String>,
-    ) -> Self {
-        let artifact_index_by_filename = artifacts
-            .values()
-            .enumerate()
-            .map(|(index, filename)| (filename.clone(), index as u32))
-            .collect();
-
-        Self {
-            task_id: task_id.into(),
-            store,
-            artifact_index_by_filename,
-            artifact_count: artifacts.len() as u32,
-            state: Mutex::new(ModelDownloadProgressState::default()),
-        }
-    }
-
-    fn to_task_progress(&self, update: &DownloadProgressUpdate) -> TaskProgress {
-        let step =
-            self.artifact_index_by_filename.get(&update.filename).copied().map(|index| index + 1);
-
-        TaskProgress {
-            label: Some(update.filename.clone()),
-            message: None,
-            current: update.downloaded_bytes,
-            total: update.total_bytes,
-            unit: Some("bytes".to_owned()),
-            step,
-            step_count: (self.artifact_count > 1).then_some(self.artifact_count),
-            logs: None,
-        }
-    }
-
-    fn publish(&self, update: &DownloadProgressUpdate, force: bool) {
-        let progress = self.to_task_progress(update);
-        let should_publish = {
-            let mut state = self.state.lock().expect("model download progress state");
-            if !should_publish_model_download_progress(&state, &progress, force) {
-                false
-            } else {
-                state.last_progress = Some(progress.clone());
-                state.last_published_at = Some(Instant::now());
-                true
-            }
-        };
-
-        if !should_publish {
-            return;
-        }
-
-        let payload =
-            serde_json::to_string(&ModelDownloadProgressPayload { progress }).unwrap_or_default();
-        let task_id = self.task_id.clone();
-        let store = Arc::clone(&self.store);
-
-        tokio::spawn(async move {
-            if let Err(error) = store
-                .update_task_status_if_active(&task_id, TaskStatus::Running, Some(&payload), None)
-                .await
-            {
-                warn!(task_id = %task_id, error = %error, "failed to persist model download progress");
-            }
-        });
-    }
-}
-
-impl DownloadProgress for ModelDownloadProgressReporter {
-    fn on_start(&self, update: &DownloadProgressUpdate) {
-        self.publish(update, true);
-    }
-
-    fn on_progress(&self, update: &DownloadProgressUpdate) {
-        self.publish(update, false);
-    }
-
-    fn on_finish(&self, update: &DownloadProgressUpdate) {
-        self.publish(update, true);
-    }
 }
 
 impl ModelService {
@@ -594,46 +475,6 @@ async fn run_model_download_operation(
     info!(task_id = %operation_id, local_path = %local_path, "model download succeeded");
 }
 
-fn should_publish_model_download_progress(
-    state: &ModelDownloadProgressState,
-    progress: &TaskProgress,
-    force: bool,
-) -> bool {
-    if force {
-        return true;
-    }
-
-    let Some(previous) = state.last_progress.as_ref() else {
-        return true;
-    };
-
-    if previous == progress {
-        return false;
-    }
-
-    if previous.label != progress.label
-        || previous.total != progress.total
-        || previous.step != progress.step
-        || previous.step_count != progress.step_count
-        || progress.current < previous.current
-    {
-        return true;
-    }
-
-    if progress.total.is_some() && Some(progress.current) == progress.total {
-        return true;
-    }
-
-    if progress.current.saturating_sub(previous.current) >= MODEL_DOWNLOAD_PROGRESS_MIN_BYTES_DELTA
-    {
-        return true;
-    }
-
-    state
-        .last_published_at
-        .is_none_or(|published_at| published_at.elapsed() >= MODEL_DOWNLOAD_PROGRESS_MIN_INTERVAL)
-}
-
 async fn persist_model_download_status(
     store: &Arc<crate::infra::db::AnyStore>,
     task_id: &str,
@@ -904,246 +745,9 @@ fn effective_hub_provider_for_pack_source(
     }
 }
 
-pub(super) async fn load_model_download_status_index(
-    state: &ModelState,
-) -> Result<ModelDownloadStatusIndex, AppCoreError> {
-    let mut index = ModelDownloadStatusIndex::default();
-
-    for download in state.store().list_model_downloads().await? {
-        let Some(key) = model_download_source_key_from_parts(
-            &download.model_id,
-            download.hub_provider.as_deref(),
-            &download.repo_id,
-            &download.filename,
-        ) else {
-            continue;
-        };
-
-        index.latest_by_source.entry(key).or_insert_with(|| download.clone());
-        index.latest_by_model.entry(download.model_id.clone()).or_insert(download);
-    }
-
-    Ok(index)
-}
-
-pub(super) fn effective_model_status(
-    model: &UnifiedModel,
-    download_status: &ModelDownloadStatusIndex,
-) -> UnifiedModelStatus {
-    if model.kind != UnifiedModelKind::Local {
-        return model.status.clone();
-    }
-
-    let base_status = normalized_local_model_status(model);
-
-    if let Some(download) = download_status.latest_by_model.get(&model.id)
-        && matches!(download.status, TaskStatus::Pending | TaskStatus::Running)
-    {
-        return UnifiedModelStatus::Downloading;
-    }
-
-    if base_status == UnifiedModelStatus::Ready {
-        return UnifiedModelStatus::Ready;
-    }
-
-    if let Some(source_key) = model_download_source_key(model)
-        && let Some(download) = download_status.latest_by_source.get(&source_key)
-    {
-        return match download.status {
-            TaskStatus::Pending | TaskStatus::Running => UnifiedModelStatus::Downloading,
-            TaskStatus::Failed | TaskStatus::Cancelled | TaskStatus::Interrupted => {
-                UnifiedModelStatus::Error
-            }
-            TaskStatus::Succeeded => base_status,
-        };
-    }
-
-    match download_status.latest_by_model.get(&model.id).map(|download| download.status) {
-        Some(TaskStatus::Failed | TaskStatus::Cancelled | TaskStatus::Interrupted) => {
-            UnifiedModelStatus::Error
-        }
-        _ => base_status,
-    }
-}
-
-fn normalized_local_model_status(model: &UnifiedModel) -> UnifiedModelStatus {
-    if model.spec.local_path.as_deref().map(str::trim).is_some_and(|value| !value.is_empty()) {
-        return UnifiedModelStatus::Ready;
-    }
-
-    match &model.status {
-        UnifiedModelStatus::Error => UnifiedModelStatus::Error,
-        _ => UnifiedModelStatus::NotDownloaded,
-    }
-}
-
-fn model_download_source_key(model: &UnifiedModel) -> Option<ModelDownloadSourceKey> {
-    model_download_source_key_from_parts(
-        &model.id,
-        model.spec.hub_provider.as_deref(),
-        model.spec.repo_id.as_deref().unwrap_or_default(),
-        model.spec.filename.as_deref().unwrap_or_default(),
-    )
-}
-
-fn model_download_source_key_from_parts(
-    model_id: &str,
-    hub_provider: Option<&str>,
-    repo_id: &str,
-    filename: &str,
-) -> Option<ModelDownloadSourceKey> {
-    let model_id = model_id.trim();
-    let repo_id = repo_id.trim();
-    let filename = filename.trim();
-    if model_id.is_empty() || repo_id.is_empty() || filename.is_empty() {
-        return None;
-    }
-
-    Some(ModelDownloadSourceKey {
-        model_id: model_id.to_owned(),
-        source_key: format!(
-            "{}::{}::{}",
-            source_key_hub_provider_segment(hub_provider),
-            repo_id,
-            filename
-        ),
-        repo_id: repo_id.to_owned(),
-        filename: filename.to_owned(),
-        hub_provider: normalized_source_key_hub_provider(hub_provider),
-    })
-}
-
-fn normalized_source_key_hub_provider(hub_provider: Option<&str>) -> Option<String> {
-    hub_provider.map(str::trim).filter(|value| !value.is_empty()).map(|value| {
-        match value.to_ascii_lowercase().replace('-', "_").as_str() {
-            "hf" | "hf_hub" | "huggingface" | "hugging_face" => "hf_hub".to_owned(),
-            "models_cat" | "modelscope" | "model_scope" => "models_cat".to_owned(),
-            other => other.to_owned(),
-        }
-    })
-}
-
-fn source_key_hub_provider_segment(hub_provider: Option<&str>) -> String {
-    match normalized_source_key_hub_provider(hub_provider).as_deref() {
-        Some("hf_hub") => "hugging_face".to_owned(),
-        Some("models_cat") => "model_scope".to_owned(),
-        Some(other) => other.to_owned(),
-        None => "auto".to_owned(),
-    }
-}
-
 fn is_model_download_conflict(error: &sqlx::Error) -> bool {
     matches!(error, sqlx::Error::Database(db_error) if db_error.message().contains("UNIQUE constraint failed"))
 }
 
 #[cfg(test)]
-mod model_download_tests {
-    use crate::domain::models::{
-        DownloadModelCommand, ListModelsFilter, ModelSpec, TaskStatus, UnifiedModelStatus,
-    };
-    use crate::error::AppCoreError;
-    use crate::infra::db::ModelDownloadStore;
-    use crate::test_support::{
-        TEST_FILENAME, TEST_HUB_PROVIDER, TEST_REPO_ID, TestAppCore, downloadable_llama_command,
-        local_llama_command,
-    };
-
-    #[tokio::test]
-    async fn model_download_reuses_existing_active_task_for_same_source() {
-        let app = TestAppCore::new().await;
-        let model =
-            app.model.create_model(downloadable_llama_command("download-reuse")).await.unwrap();
-        app.seed_model_download(
-            "existing-download-task",
-            &model.id,
-            TEST_REPO_ID,
-            TEST_FILENAME,
-            Some(TEST_HUB_PROVIDER),
-            TaskStatus::Running,
-        )
-        .await;
-
-        let accepted = app
-            .model
-            .download_model(DownloadModelCommand { model_id: model.id.clone() })
-            .await
-            .expect("download should reuse active task");
-
-        assert_eq!(accepted.operation_id, "existing-download-task");
-        let downloads = app.store.list_model_downloads().await.expect("list downloads");
-        assert_eq!(downloads.len(), 1);
-        assert_eq!(downloads[0].task_id, "existing-download-task");
-    }
-
-    #[tokio::test]
-    async fn model_download_requires_repo_id_and_filename() {
-        let app = TestAppCore::new().await;
-        let mut missing_repo = local_llama_command("download-missing-repo");
-        missing_repo.spec = ModelSpec {
-            hub_provider: Some(TEST_HUB_PROVIDER.to_owned()),
-            filename: Some(TEST_FILENAME.to_owned()),
-            ..ModelSpec::default()
-        };
-        let missing_repo_model =
-            app.model.persist_model_definition_with_options(missing_repo, false).await.unwrap();
-
-        let repo_error = app
-            .model
-            .download_model(DownloadModelCommand { model_id: missing_repo_model.id })
-            .await
-            .expect_err("missing repo_id should fail");
-        assert!(
-            matches!(&repo_error, AppCoreError::BadRequest(message) if message.contains("missing repo_id")),
-            "unexpected error: {repo_error}"
-        );
-
-        let mut missing_filename = downloadable_llama_command("download-missing-filename");
-        missing_filename.spec.filename = None;
-        let missing_filename_model =
-            app.model.persist_model_definition_with_options(missing_filename, false).await.unwrap();
-
-        let filename_error = app
-            .model
-            .download_model(DownloadModelCommand { model_id: missing_filename_model.id })
-            .await
-            .expect_err("missing filename should fail");
-        assert!(
-            matches!(&filename_error, AppCoreError::BadRequest(message) if message.contains("missing filename")),
-            "unexpected error: {filename_error}"
-        );
-    }
-
-    #[tokio::test]
-    async fn model_download_status_projects_into_list_models() {
-        let app = TestAppCore::new().await;
-        let pending =
-            app.model.create_model(downloadable_llama_command("download-pending")).await.unwrap();
-        let failed =
-            app.model.create_model(downloadable_llama_command("download-failed")).await.unwrap();
-        app.seed_model_download(
-            "pending-download-task",
-            &pending.id,
-            TEST_REPO_ID,
-            TEST_FILENAME,
-            Some(TEST_HUB_PROVIDER),
-            TaskStatus::Pending,
-        )
-        .await;
-        app.seed_model_download(
-            "failed-download-task",
-            &failed.id,
-            TEST_REPO_ID,
-            TEST_FILENAME,
-            Some(TEST_HUB_PROVIDER),
-            TaskStatus::Failed,
-        )
-        .await;
-
-        let models = app.model.list_models(ListModelsFilter::default()).await.expect("list models");
-        let pending_model = models.iter().find(|model| model.id == pending.id).unwrap();
-        let failed_model = models.iter().find(|model| model.id == failed.id).unwrap();
-
-        assert_eq!(pending_model.status, UnifiedModelStatus::Downloading);
-        assert_eq!(failed_model.status, UnifiedModelStatus::Error);
-    }
-}
+mod tests;

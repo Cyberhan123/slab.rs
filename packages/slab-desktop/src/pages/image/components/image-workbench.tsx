@@ -15,7 +15,7 @@ import { useTranslation } from '@slab/i18n';
 
 import { Badge } from '@slab/components/badge';
 import { Button } from '@slab/components/button';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@slab/components/dialog';
+import { Dialog, DialogContent } from '@slab/components/dialog';
 import { Input } from '@slab/components/input';
 import { Label } from '@slab/components/label';
 import { Slider } from '@slab/components/slider';
@@ -34,10 +34,7 @@ import {
   CollapsibleTrigger,
 } from '@slab/components/collapsible';
 import { SplitWorkbench } from '@slab/components/workspace';
-import {
-  resolveMediaUrl,
-  type ImageGenerationTask,
-} from '@/lib/media-task-api';
+import type { ImageGenerationTask } from '@/lib/media-task-api';
 import { cn } from '@/lib/utils';
 import {
   DIMENSION_PRESETS,
@@ -48,6 +45,7 @@ import {
   SIDEBAR_TEXTAREA_CLASSNAME,
   type GeneratedImage,
 } from '../const';
+import { ImageHistoryPanel } from './image-history-panel';
 import { SliderField } from './slider-field';
 
 type ImageWorkbenchProps = {
@@ -111,15 +109,6 @@ type ImageWorkbenchProps = {
   zoomedImage: string | null;
   openHistoryDetail: (taskId: string) => void | Promise<void>;
 };
-
-function formatHistoryTime(value: string) {
-  return new Date(value).toLocaleString(undefined, {
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
 
 export function ImageWorkbench({
   activeDimensionPreset,
@@ -189,9 +178,6 @@ export function ImageWorkbench({
   const schedulerOptions = SCHEDULERS.map((schedulerItem) =>
     Object.assign({}, schedulerItem, { label: t(`pages.image.options.schedulers.${schedulerItem.value}`) }),
   );
-  const selectedHistoryImages = selectedHistoryTask?.image_urls
-    .map((url) => resolveMediaUrl(url))
-    .filter((url): url is string => typeof url === 'string' && url.length > 0) ?? [];
 
   return (
     <div className="h-full w-full overflow-y-auto bg-[var(--shell-card)] lg:overflow-hidden">
@@ -737,61 +723,17 @@ export function ImageWorkbench({
                 </div>
                 )}
               </div>
-              <div className="border-t border-border/60 bg-[var(--surface-soft)] px-5 py-4 xl:px-8">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
-                      {t('pages.image.history.title')}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {historyLoading
-                        ? t('pages.image.history.loading')
-                        : historyError
-                          ? t('pages.image.history.error', { message: historyError })
-                          : t('pages.image.history.description')}
-                    </p>
-                  </div>
-                  <Badge variant="chip">{history.length}</Badge>
-                </div>
-
-                <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {history.slice(0, 3).map((task) => {
-                    const previewUrl = resolveMediaUrl(task.primary_image_url ?? task.image_urls[0]);
-                    return (
-                      <button
-                        key={task.task_id}
-                        type="button"
-                        className="group flex gap-3 rounded-[18px] border border-border/50 bg-[var(--shell-card)] p-3 text-left transition hover:border-[var(--brand-teal)]/50 hover:shadow-[0_18px_36px_-28px_color-mix(in_oklab,var(--foreground)_35%,transparent)]"
-                        onClick={() => void openHistoryDetail(task.task_id)}
-                      >
-                        <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-[14px] bg-[var(--surface-soft)] text-muted-foreground">
-                          {previewUrl ? (
-                            <img src={previewUrl} alt={task.prompt} className="h-full w-full object-cover" />
-                          ) : (
-                            <ImageIcon className="size-5" />
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="line-clamp-2 text-sm font-semibold leading-5 text-foreground">
-                            {task.prompt}
-                          </p>
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                            <span className="rounded-full bg-[var(--surface-soft)] px-2 py-0.5">
-                              {task.status}
-                            </span>
-                            <span>{formatHistoryTime(task.created_at)}</span>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                  {!historyLoading && history.length === 0 ? (
-                    <div className="rounded-[18px] border border-dashed border-border/60 bg-[var(--shell-card)] px-4 py-5 text-sm text-muted-foreground md:col-span-2 xl:col-span-3">
-                      {t('pages.image.history.empty')}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
+              <ImageHistoryPanel
+                handleDownload={handleDownload}
+                history={history}
+                historyDialogOpen={historyDialogOpen}
+                historyError={historyError}
+                historyLoading={historyLoading}
+                openHistoryDetail={openHistoryDetail}
+                selectedHistoryTask={selectedHistoryTask}
+                setHistoryDialogOpen={setHistoryDialogOpen}
+                setSelectedHistoryTask={setSelectedHistoryTask}
+              />
             </section>
           }
         />
@@ -816,80 +758,6 @@ export function ImageWorkbench({
         </DialogContent>
       </Dialog>
 
-      <Dialog
-        open={historyDialogOpen}
-        onOpenChange={(open) => {
-          setHistoryDialogOpen(open);
-          if (!open) {
-            setSelectedHistoryTask(null);
-          }
-        }}
-      >
-        <DialogContent className="max-w-5xl">
-          {selectedHistoryTask ? (
-            <>
-              <DialogHeader>
-                <DialogTitle>{t('pages.image.history.detailTitle')}</DialogTitle>
-                <DialogDescription>
-                  {selectedHistoryTask.status} | {formatHistoryTime(selectedHistoryTask.created_at)}
-                </DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
-                <div className="grid max-h-[70vh] gap-3 overflow-y-auto sm:grid-cols-2">
-                  {selectedHistoryImages.map((src, index) => (
-                    <figure key={src} className="overflow-hidden rounded-[22px] border border-border/60 bg-[var(--surface-soft)]">
-                      <img src={src} alt={selectedHistoryTask.prompt} className="w-full object-cover" />
-                      <figcaption className="flex justify-end border-t border-border/50 bg-[var(--shell-card)] px-3 py-2">
-                        <Button
-                          variant="pill"
-                          size="sm"
-                          onClick={() => handleDownload(src, index)}
-                        >
-                          <Download className="h-3.5 w-3.5" />
-                          {t('pages.image.workbench.gallery.downloadAria')}
-                        </Button>
-                      </figcaption>
-                    </figure>
-                  ))}
-                </div>
-                <div className="space-y-4 rounded-[22px] bg-[var(--surface-soft)] p-4">
-                  <div>
-                    <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
-                      {t('pages.image.workbench.prompt.label')}
-                    </p>
-                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground">
-                      {selectedHistoryTask.prompt}
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <p className="text-xs text-muted-foreground">{t('pages.image.history.fields.mode')}</p>
-                      <p className="font-semibold">{selectedHistoryTask.mode}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">{t('pages.image.history.fields.size')}</p>
-                      <p className="font-semibold">{selectedHistoryTask.width} x {selectedHistoryTask.height}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">{t('pages.image.history.fields.backend')}</p>
-                      <p className="truncate font-semibold">{selectedHistoryTask.backend_id}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">{t('pages.image.history.fields.model')}</p>
-                      <p className="truncate font-semibold">{selectedHistoryTask.model_id ?? selectedHistoryTask.model_path}</p>
-                    </div>
-                  </div>
-                  {selectedHistoryTask.error_msg ? (
-                    <p className="rounded-xl bg-destructive/10 p-3 text-xs leading-5 text-destructive">
-                      {selectedHistoryTask.error_msg}
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-            </>
-          ) : null}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

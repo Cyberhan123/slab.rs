@@ -9252,21 +9252,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jsonrpc-core"
-version = "18.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14f7f76aef2d054868398427f6c54943cf3d1caa9a7ec7d0c38d69df97a965eb"
-dependencies = [
- "futures",
- "futures-executor",
- "futures-util",
- "log",
- "serde",
- "serde_derive",
- "serde_json",
-]
-
-[[package]]
 name = "jsonschema"
 version = "0.46.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -15601,35 +15586,21 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum 0.8.9",
- "base64 0.22.1",
- "bytemuck",
  "bytes",
  "chrono",
  "clap",
  "futures",
- "genai",
- "hf-hub",
  "http 1.4.0",
  "http-body-util",
- "hyper-util",
- "image",
- "jsonrpc-core",
- "jsonschema",
- "parity-tokio-ipc",
- "reqwest 0.13.3",
  "serde",
  "serde_json",
  "slab-agent",
  "slab-app-core",
- "slab-config",
  "slab-jsonrpc",
- "slab-libfetch",
- "slab-proto",
  "slab-runtime-core",
  "slab-types",
  "slab-utils",
  "sqlx",
- "strum 0.28.0",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
@@ -15645,8 +15616,6 @@ dependencies = [
  "utoipa-swagger-ui",
  "uuid",
  "validator",
- "winapi",
- "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -1,26 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { orderBy } from 'lodash-es';
 import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
 import useFile, { type SelectedFile } from '@/hooks/use-file';
 import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
-import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
 import useIsTauri from '@/hooks/use-tauri';
-import api, { getErrorMessage } from '@slab/api';
-import { modelSupportsCapability, toCatalogModelList, type CatalogModel } from '@slab/api/models';
-import {
-  getAudioTranscription,
-  listAudioTranscriptions,
-  type AudioTranscriptionTask,
-} from '@/lib/media-task-api';
+import api from '@slab/api';
+import { modelSupportsCapability, toCatalogModelList } from '@slab/api/models';
+import { getAudioTranscription } from '@/lib/media-task-api';
 import { getErrorDescription } from '@/lib/error-description';
 import {
   useModelConfigDocumentQuery,
   type ModelConfigDocumentResponse,
 } from '@/lib/model-config';
-import { HEADER_SELECT_KEYS } from '@/layouts/header-controls';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import { useAudioUiStore } from '@/store/useAudioUiStore';
 import {
@@ -41,41 +34,11 @@ import {
   normalizeAudioTranscriptionControls,
   type AudioTranscriptionControls,
 } from '../lib/audio-transcription-controls';
+import { parseOptionalFloat, parseOptionalInt } from '../lib/audio-value-parsing';
+import { findBundledVadArtifact } from '../lib/audio-vad-models';
+import { useAudioHistory } from './use-audio-history';
+import { useAudioModelCatalog } from './use-audio-model-catalog';
 import useTranscribe, { type TranscribeOptions, type TranscribeVadSettings } from './use-transcribe';
-
-type BundledVadArtifact = {
-  id: string;
-  label: string;
-  value: string;
-};
-
-function findBundledVadArtifact(
-  document: ModelConfigDocumentResponse | undefined,
-): BundledVadArtifact | null {
-  const artifacts = document?.source_summary?.artifacts;
-  if (!Array.isArray(artifacts) || artifacts.length === 0) {
-    return null;
-  }
-
-  const exactMatch = artifacts.find((artifact) => {
-    const normalizedId = artifact.id.trim().toLowerCase();
-    return normalizedId === 'vad' || normalizedId === 'audio_vad';
-  });
-  if (exactMatch) {
-    return exactMatch;
-  }
-
-  const fuzzyMatch = artifacts.find((artifact) => {
-    const normalizedId = artifact.id.trim().toLowerCase();
-    return (
-      normalizedId.endsWith('/vad') ||
-      normalizedId.endsWith('_vad') ||
-      normalizedId.includes('vad')
-    );
-  });
-
-  return fuzzyMatch ?? null;
-}
 
 export function useAudio() {
   const { t } = useTranslation();
@@ -89,11 +52,17 @@ export function useAudio() {
   const [file, setFile] = useState<SelectedFile | null>(null);
   const [preparingStage, setPreparingStage] = useState<PreparingStage>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
-  const [history, setHistory] = useState<AudioTranscriptionTask[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyError, setHistoryError] = useState<string | null>(null);
-  const [selectedHistoryTask, setSelectedHistoryTask] = useState<AudioTranscriptionTask | null>(null);
-  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const {
+    history,
+    historyDialogOpen,
+    historyError,
+    historyLoading,
+    openHistoryDetail,
+    selectedHistoryTask,
+    setHistoryDialogOpen,
+    setSelectedHistoryTask,
+    showHistoryTask,
+  } = useAudioHistory();
 
   const { handleFile } = useFile();
   const transcribe = useTranscribe();
@@ -102,101 +71,20 @@ export function useAudio() {
   const setModelControlOverrides = useAudioUiStore((state) => state.setModelControlOverrides);
   const clearModelControlOverrides = useAudioUiStore((state) => state.clearModelControlOverrides);
   const {
-    data: transcriptionCatalogModels,
-    isLoading: transcriptionModelsLoading,
-    error: transcriptionModelsError,
-    refetch: refetchTranscriptionModels,
-  } = api.useQuery('get', '/v1/models', {
-    params: {
-      query: {
-        capability: 'audio_transcription',
-      },
-    },
-  });
-  const {
-    data: vadCatalogModels,
-    isLoading: vadModelsLoading,
-    error: vadModelsError,
-    refetch: refetchVadModels,
-  } = api.useQuery('get', '/v1/models', {
-    params: {
-      query: {
-        capability: 'audio_vad',
-      },
-    },
-  });
+    audioModels,
+    catalogModelsError,
+    catalogModelsLoading,
+    refetchTranscriptionModels,
+    refetchVadModels,
+    selectedModel,
+    selectedModelId,
+    setSelectedModelId,
+    whisperTranscribeModels,
+    whisperVadModels,
+  } = useAudioModelCatalog();
   const downloadModelMutation = api.useMutation('post', '/v1/models/download');
   const loadModelMutation = api.useMutation('post', '/v1/models/load');
   const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
-
-  const whisperTranscribeModels = useMemo(
-    () => toCatalogModelList(transcriptionCatalogModels).filter((model) => model.kind === 'local'),
-    [transcriptionCatalogModels],
-  );
-
-  const whisperVadModels = useMemo(
-    () => toCatalogModelList(vadCatalogModels).filter((model) => model.kind === 'local'),
-    [vadCatalogModels],
-  );
-
-  const audioModels = useMemo(() => {
-    const merged = new Map<string, CatalogModel>();
-    whisperTranscribeModels.forEach((model) => {
-      merged.set(model.id, model);
-    });
-    whisperVadModels.forEach((model) => {
-      merged.set(model.id, model);
-    });
-    return Array.from(merged.values());
-  }, [whisperTranscribeModels, whisperVadModels]);
-  const catalogModelsLoading = transcriptionModelsLoading || vadModelsLoading;
-  const catalogModelsError = transcriptionModelsError ?? vadModelsError;
-  const { value: selectedModelId, setValue: setSelectedModelId } = usePersistedHeaderSelect({
-    key: HEADER_SELECT_KEYS.audioModel,
-    options: whisperTranscribeModels,
-    isLoading: catalogModelsLoading,
-  });
-
-  const selectedModel = useMemo(
-    () => whisperTranscribeModels.find((model) => model.id === selectedModelId),
-    [whisperTranscribeModels, selectedModelId],
-  );
-
-  const mergeHistoryTask = useCallback((task: AudioTranscriptionTask) => {
-    setHistory((previous) => {
-      const next = [task, ...previous.filter((entry) => entry.task_id !== task.task_id)];
-      return orderBy(next, (entry) => Date.parse(entry.created_at), 'desc');
-    });
-  }, []);
-
-  const refreshHistory = useCallback(async () => {
-    try {
-      setHistoryLoading(true);
-      setHistoryError(null);
-      const items = await listAudioTranscriptions();
-      setHistory(items);
-    } catch (error) {
-      setHistoryError(getErrorMessage(error));
-    } finally {
-      setHistoryLoading(false);
-    }
-  }, []);
-
-  const openHistoryDetail = useCallback(async (taskIdToOpen: string) => {
-    try {
-      const detail = await getAudioTranscription(taskIdToOpen);
-      setSelectedHistoryTask(detail);
-      setHistoryDialogOpen(true);
-      mergeHistoryTask(detail);
-    } catch (error) {
-      const message = getErrorMessage(error);
-      toast.error(t('pages.audio.toast.historyDetailFailed', { message }));
-    }
-  }, [mergeHistoryTask, t]);
-
-  useEffect(() => {
-    void refreshHistory();
-  }, [refreshHistory]);
 
   const {
     data: selectedModelConfigDocument,
@@ -418,53 +306,6 @@ export function useAudio() {
     return models.find((model) => model.id === modelId);
   };
 
-  const parseOptionalInt = (raw: string, fieldLabel: string, min: number): number | undefined => {
-    const trimmed = raw.trim();
-    if (!trimmed) return undefined;
-
-    const parsed = Number(trimmed);
-    if (!Number.isInteger(parsed)) {
-      throw new Error(t('pages.audio.validation.integer', { label: fieldLabel }));
-    }
-    if (parsed < min) {
-      throw new Error(t('pages.audio.validation.min', { label: fieldLabel, value: min }));
-    }
-    return parsed;
-  };
-
-  const parseOptionalFloat = (
-    raw: string,
-    fieldLabel: string,
-    options: { min?: number; max?: number; exclusiveMin?: number } = {},
-  ): number | undefined => {
-    const trimmed = raw.trim();
-    if (!trimmed) return undefined;
-
-    const parsed = Number(trimmed);
-    if (!Number.isFinite(parsed)) {
-      throw new Error(t('pages.audio.validation.number', { label: fieldLabel }));
-    }
-    if (options.min !== undefined && parsed < options.min) {
-      throw new Error(
-        t('pages.audio.validation.min', { label: fieldLabel, value: options.min }),
-      );
-    }
-    if (options.max !== undefined && parsed > options.max) {
-      throw new Error(
-        t('pages.audio.validation.max', { label: fieldLabel, value: options.max }),
-      );
-    }
-    if (options.exclusiveMin !== undefined && parsed <= options.exclusiveMin) {
-      throw new Error(
-        t('pages.audio.validation.exclusiveMin', {
-          label: fieldLabel,
-          value: options.exclusiveMin,
-        }),
-      );
-    }
-    return parsed;
-  };
-
   const ensureDownloadedModelPath = async (
     modelId: string,
   ): Promise<{ modelPath: string; downloadedNow: boolean }> => {
@@ -582,21 +423,25 @@ export function useAudio() {
     const threshold = parseOptionalFloat(
       vadThreshold,
       t('pages.audio.validation.labels.vadThreshold'),
+      t,
       { min: 0, max: 1 },
     );
     const minSpeechDurationMs = parseOptionalInt(
       vadMinSpeechDurationMs,
       t('pages.audio.validation.labels.vadMinSpeechDurationMs'),
       0,
+      t,
     );
     const minSilenceDurationMs = parseOptionalInt(
       vadMinSilenceDurationMs,
       t('pages.audio.validation.labels.vadMinSilenceDurationMs'),
       0,
+      t,
     );
     const maxSpeechDurationS = parseOptionalFloat(
       vadMaxSpeechDurationS,
       t('pages.audio.validation.labels.vadMaxSpeechDurationS'),
+      t,
       {
         exclusiveMin: 0,
       },
@@ -605,10 +450,12 @@ export function useAudio() {
       vadSpeechPadMs,
       t('pages.audio.validation.labels.vadSpeechPadMs'),
       0,
+      t,
     );
     const samplesOverlap = parseOptionalFloat(
       vadSamplesOverlap,
       t('pages.audio.validation.labels.vadSamplesOverlap'),
+      t,
       { min: 0 },
     );
 
@@ -650,48 +497,58 @@ export function useAudio() {
       decodeOffsetMs,
       t('pages.audio.validation.labels.decodeOffsetMs'),
       0,
+      t,
     );
     const durationMs = parseOptionalInt(
       decodeDurationMs,
       t('pages.audio.validation.labels.decodeDurationMs'),
       0,
+      t,
     );
     const wordThold = parseOptionalFloat(
       decodeWordThold,
       t('pages.audio.validation.labels.decodeWordThreshold'),
+      t,
       { min: 0, max: 1 },
     );
     const maxLen = parseOptionalInt(
       decodeMaxLen,
       t('pages.audio.validation.labels.decodeMaxSegmentLength'),
       0,
+      t,
     );
     const maxTokens = parseOptionalInt(
       decodeMaxTokens,
       t('pages.audio.validation.labels.decodeMaxTokensPerSegment'),
       0,
+      t,
     );
     const temperature = parseOptionalFloat(
       decodeTemperature,
       t('pages.audio.validation.labels.decodeTemperature'),
+      t,
       { min: 0 },
     );
     const temperatureInc = parseOptionalFloat(
       decodeTemperatureInc,
       t('pages.audio.validation.labels.decodeTemperatureIncrement'),
+      t,
       { min: 0 },
     );
     const entropyThold = parseOptionalFloat(
       decodeEntropyThold,
       t('pages.audio.validation.labels.decodeEntropyThreshold'),
+      t,
     );
     const logprobThold = parseOptionalFloat(
       decodeLogprobThold,
       t('pages.audio.validation.labels.decodeLogprobThreshold'),
+      t,
     );
     const noSpeechThold = parseOptionalFloat(
       decodeNoSpeechThold,
       t('pages.audio.validation.labels.decodeNoSpeechThreshold'),
+      t,
     );
 
     if (offsetMs !== undefined) decode.offset_ms = offsetMs;
@@ -791,9 +648,7 @@ export function useAudio() {
 
       await waitForTaskToFinish(result.operation_id);
       const detail = await getAudioTranscription(result.operation_id);
-      mergeHistoryTask(detail);
-      setSelectedHistoryTask(detail);
-      setHistoryDialogOpen(true);
+      showHistoryTask(detail);
       toast.success(t('pages.audio.toast.transcriptionReady'));
     } catch (err: unknown) {
       toast.error(t('pages.audio.toast.failedToCreateTask'), {

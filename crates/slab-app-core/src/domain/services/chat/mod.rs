@@ -3,14 +3,13 @@
 mod cloud;
 mod gbnf;
 mod local;
+mod params;
+mod session;
+mod streaming;
 mod template;
 
 use chrono::Utc;
-use futures::StreamExt;
-use futures::stream::{self, BoxStream};
-use serde::Serialize;
-use serde_json::Value;
-use std::sync::{Arc, Mutex};
+use futures::stream::BoxStream;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -18,91 +17,29 @@ use crate::context::ModelState;
 use crate::domain::models::{
     ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatResultChoice,
     ChatStreamChunk, ConversationMessage as DomainConversationMessage, ConversationMessageContent,
-    StructuredOutput, TextCompletionCommand, TextCompletionOutput, TextCompletionResult,
-    TextGenerationResponse, TextGenerationUsage, TextResultChoice, assistant_message_from_parts,
-    assistant_message_from_text_response, serialize_session_message,
+    TextCompletionCommand, TextCompletionOutput, TextCompletionResult, TextGenerationResponse,
+    TextResultChoice, assistant_message_from_text_response,
 };
 use crate::error::AppCoreError;
-use crate::error::AppCoreErrorData;
-use crate::infra::db::{ChatMessage, ChatStore};
+#[cfg(test)]
+use params::validate_cloud_structured_output;
+use params::{
+    apply_stop_sequences, build_estimated_usage, finish_reason_from_token_budget, merge_usage,
+    text_response_has_visible_output, validate_chat_route_params, validate_text_route_params,
+};
+use session::{build_messages, persist_session_message};
+use streaming::{
+    build_chunk, build_error_chunk, build_finish_chunk, build_reasoning_chunk, build_role_chunk,
+    build_usage_chunk, into_text_completion_stream, with_stream_session_persistence,
+};
 
 const CLOUD_MODEL_ID_PREFIX: &str = "cloud";
 const DEFAULT_COMPLETION_MAX_TOKENS: u32 = 512;
-const REASONING_CONTENT_METADATA_KEY: &str = "reasoning_content";
 const SYSTEM_FINGERPRINT: &str = "b-slab";
 
 enum GeneratedChatOutput {
     Text(TextGenerationResponse),
     Stream(BoxStream<'static, ChatStreamChunk>),
-}
-
-#[derive(Default)]
-struct StreamedAssistantContent {
-    content: String,
-    reasoning: String,
-    usage: Option<TextGenerationUsage>,
-    saw_error: bool,
-}
-
-#[derive(Serialize)]
-struct ChatCompletionChunkPayload<'a> {
-    id: &'a str,
-    #[serde(rename = "object")]
-    object_type: &'static str,
-    created: i64,
-    model: &'a str,
-    system_fingerprint: &'static str,
-    choices: Vec<ChatCompletionChunkChoice<'a>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    usage: Option<&'a TextGenerationUsage>,
-}
-
-#[derive(Serialize)]
-struct ChatCompletionChunkChoice<'a> {
-    index: u32,
-    delta: ChatCompletionChunkDelta<'a>,
-    finish_reason: Option<&'a str>,
-}
-
-#[derive(Default, Serialize)]
-struct ChatCompletionChunkDelta<'a> {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    role: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    content: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reasoning_content: Option<&'a str>,
-}
-
-#[derive(Serialize)]
-struct TextCompletionChunkPayload<'a> {
-    id: &'a str,
-    #[serde(rename = "object")]
-    object_type: &'static str,
-    created: i64,
-    model: &'a str,
-    system_fingerprint: &'static str,
-    choices: Vec<TextCompletionChunkChoice<'a>>,
-}
-
-#[derive(Serialize)]
-struct TextCompletionChunkChoice<'a> {
-    index: u32,
-    text: &'a str,
-    finish_reason: Option<&'a str>,
-}
-
-#[derive(Serialize)]
-struct ChatStreamErrorPayload<'a> {
-    error: ChatStreamErrorBody<'a>,
-}
-
-#[derive(Serialize)]
-struct ChatStreamErrorBody<'a> {
-    message: &'a str,
-    #[serde(rename = "type")]
-    error_type: &'static str,
-    code: Option<&'static str>,
 }
 
 #[derive(Clone)]
@@ -130,321 +67,6 @@ impl ChatService {
     }
 }
 
-/// Build an OpenAI-compatible `chat.completion.chunk` SSE data payload.
-fn build_chunk(id: &str, created: i64, model: &str, token: &str) -> String {
-    serialize_chunk(&ChatCompletionChunkPayload {
-        id,
-        object_type: "chat.completion.chunk",
-        created,
-        model,
-        system_fingerprint: SYSTEM_FINGERPRINT,
-        choices: vec![ChatCompletionChunkChoice {
-            index: 0,
-            delta: ChatCompletionChunkDelta { content: Some(token), ..Default::default() },
-            finish_reason: None,
-        }],
-        usage: None,
-    })
-}
-
-/// Build an OpenAI-compatible initial SSE chunk that announces the assistant role.
-fn build_role_chunk(id: &str, created: i64, model: &str) -> String {
-    serialize_chunk(&ChatCompletionChunkPayload {
-        id,
-        object_type: "chat.completion.chunk",
-        created,
-        model,
-        system_fingerprint: SYSTEM_FINGERPRINT,
-        choices: vec![ChatCompletionChunkChoice {
-            index: 0,
-            delta: ChatCompletionChunkDelta { role: Some("assistant"), ..Default::default() },
-            finish_reason: None,
-        }],
-        usage: None,
-    })
-}
-
-/// Build an OpenAI-compatible reasoning SSE chunk payload.
-fn build_reasoning_chunk(id: &str, created: i64, model: &str, token: &str) -> String {
-    serialize_chunk(&ChatCompletionChunkPayload {
-        id,
-        object_type: "chat.completion.chunk",
-        created,
-        model,
-        system_fingerprint: SYSTEM_FINGERPRINT,
-        choices: vec![ChatCompletionChunkChoice {
-            index: 0,
-            delta: ChatCompletionChunkDelta {
-                reasoning_content: Some(token),
-                ..Default::default()
-            },
-            finish_reason: None,
-        }],
-        usage: None,
-    })
-}
-
-/// Build an OpenAI-compatible final SSE chunk with a finish reason.
-fn build_finish_chunk(id: &str, created: i64, model: &str, finish_reason: &str) -> String {
-    serialize_chunk(&ChatCompletionChunkPayload {
-        id,
-        object_type: "chat.completion.chunk",
-        created,
-        model,
-        system_fingerprint: SYSTEM_FINGERPRINT,
-        choices: vec![ChatCompletionChunkChoice {
-            index: 0,
-            delta: ChatCompletionChunkDelta::default(),
-            finish_reason: Some(finish_reason),
-        }],
-        usage: None,
-    })
-}
-
-fn build_usage_chunk(id: &str, created: i64, model: &str, usage: &TextGenerationUsage) -> String {
-    serialize_chunk(&ChatCompletionChunkPayload {
-        id,
-        object_type: "chat.completion.chunk",
-        created,
-        model,
-        system_fingerprint: SYSTEM_FINGERPRINT,
-        choices: Vec::new(),
-        usage: Some(usage),
-    })
-}
-
-fn build_text_completion_chunk(
-    id: &str,
-    created: i64,
-    model: &str,
-    index: u32,
-    text: &str,
-) -> String {
-    serialize_chunk(&TextCompletionChunkPayload {
-        id,
-        object_type: "text_completion",
-        created,
-        model,
-        system_fingerprint: SYSTEM_FINGERPRINT,
-        choices: vec![TextCompletionChunkChoice { index, text, finish_reason: None }],
-    })
-}
-
-fn build_text_completion_finish_chunk(
-    id: &str,
-    created: i64,
-    model: &str,
-    index: u32,
-    finish_reason: &str,
-) -> String {
-    serialize_chunk(&TextCompletionChunkPayload {
-        id,
-        object_type: "text_completion",
-        created,
-        model,
-        system_fingerprint: SYSTEM_FINGERPRINT,
-        choices: vec![TextCompletionChunkChoice {
-            index,
-            text: "",
-            finish_reason: Some(finish_reason),
-        }],
-    })
-}
-
-fn build_error_chunk(message: &str) -> String {
-    serialize_chunk(&ChatStreamErrorPayload {
-        error: ChatStreamErrorBody { message, error_type: "server_error", code: None },
-    })
-}
-
-fn serialize_chunk<T: Serialize>(payload: &T) -> String {
-    serde_json::to_string(payload)
-        .unwrap_or_else(|_| r#"{"error":{"message":"failed to serialize stream chunk","type":"server_error","code":null}}"#.to_owned())
-}
-
-pub(super) fn estimate_token_count(text: &str) -> u32 {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return 0;
-    }
-
-    let bytes = trimmed.len() as u32;
-    let whitespace_groups = trimmed.split_whitespace().count() as u32;
-    let byte_estimate = bytes.div_ceil(4);
-    byte_estimate.max(whitespace_groups).max(1)
-}
-
-pub(super) fn finish_reason_from_token_budget(completion_tokens: u32, max_tokens: u32) -> String {
-    if completion_tokens >= max_tokens && max_tokens > 0 {
-        "length".to_owned()
-    } else {
-        "stop".to_owned()
-    }
-}
-
-pub(super) fn build_estimated_usage(
-    prompt_text: &str,
-    completion_text: &str,
-    completion_tokens: Option<u32>,
-) -> TextGenerationUsage {
-    let prompt_tokens = estimate_token_count(prompt_text);
-    let completion_tokens =
-        completion_tokens.unwrap_or_else(|| estimate_token_count(completion_text));
-
-    TextGenerationUsage {
-        prompt_tokens,
-        completion_tokens,
-        total_tokens: prompt_tokens.saturating_add(completion_tokens),
-        prompt_tokens_details: Default::default(),
-        estimated: true,
-    }
-}
-
-async fn persist_session_message(
-    state: &ModelState,
-    session_id: &str,
-    message: &DomainConversationMessage,
-) {
-    state
-        .store()
-        .append_message(ChatMessage {
-            id: Uuid::new_v4().to_string(),
-            session_id: session_id.to_owned(),
-            role: message.role.clone(),
-            content: serialize_session_message(message),
-            created_at: Utc::now(),
-        })
-        .await
-        .unwrap_or_else(|error| {
-            tracing::warn!(
-                error = %error,
-                role = %message.role,
-                session_id,
-                "failed to persist session message"
-            )
-        });
-}
-
-fn extract_text_from_chunk_delta<'a>(value: &'a Value, field: &str) -> Option<&'a str> {
-    value
-        .get("choices")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|choice| {
-            choice.get("delta").and_then(|delta| delta.get(field)).and_then(Value::as_str)
-        })
-        .find(|value| !value.is_empty())
-}
-
-fn extract_usage_from_chunk(value: &Value) -> Option<TextGenerationUsage> {
-    serde_json::from_value(value.get("usage")?.clone()).ok()
-}
-
-fn capture_streamed_assistant_chunk(data: &str, assistant: &Arc<Mutex<StreamedAssistantContent>>) {
-    if data.trim().is_empty() || data.trim() == "[DONE]" {
-        return;
-    }
-
-    let Ok(payload) = serde_json::from_str::<Value>(data) else {
-        return;
-    };
-
-    let mut assistant = assistant.lock().expect("assistant stream accumulator poisoned");
-    if payload.get("error").is_some() {
-        assistant.saw_error = true;
-        return;
-    }
-    if let Some(usage) = extract_usage_from_chunk(&payload) {
-        assistant.usage = Some(usage);
-    }
-    if let Some(reasoning) = extract_text_from_chunk_delta(&payload, "reasoning_content") {
-        assistant.reasoning.push_str(reasoning);
-    }
-    if let Some(content) = extract_text_from_chunk_delta(&payload, "content") {
-        assistant.content.push_str(content);
-    }
-}
-
-fn build_streamed_assistant_message(
-    assistant: &StreamedAssistantContent,
-) -> Option<DomainConversationMessage> {
-    if assistant.saw_error {
-        return None;
-    }
-
-    let reasoning = assistant.reasoning.trim();
-    let content = assistant.content.trim();
-    if content.is_empty() && reasoning.is_empty() {
-        return None;
-    }
-
-    Some(assistant_message_from_parts(
-        assistant.content.as_str(),
-        (!reasoning.is_empty()).then_some(assistant.reasoning.as_str()),
-    ))
-}
-
-fn text_response_has_visible_output(response: &TextGenerationResponse) -> bool {
-    let has_content = !response.text.trim_end_matches('\0').trim().is_empty();
-    let has_reasoning = response
-        .metadata
-        .get(REASONING_CONTENT_METADATA_KEY)
-        .and_then(Value::as_str)
-        .is_some_and(|value| !value.trim().is_empty());
-
-    has_content || has_reasoning || !response.tool_calls.is_empty()
-}
-
-fn with_stream_session_persistence(
-    stream: BoxStream<'static, ChatStreamChunk>,
-    state: ModelState,
-    session_id: String,
-) -> BoxStream<'static, ChatStreamChunk> {
-    let assistant = Arc::new(Mutex::new(StreamedAssistantContent::default()));
-    let capture_target = Arc::clone(&assistant);
-    let streamed = stream.map(move |chunk| {
-        capture_streamed_assistant_chunk(&chunk, &capture_target);
-        chunk
-    });
-
-    let persist_target = Arc::clone(&assistant);
-    let persist = stream::once(async move {
-        let (message, saw_error, content_len, reasoning_len, usage) = {
-            let assistant = persist_target.lock().expect("assistant stream accumulator poisoned");
-            (
-                build_streamed_assistant_message(&assistant),
-                assistant.saw_error,
-                assistant.content.trim().len(),
-                assistant.reasoning.trim().len(),
-                assistant.usage.clone(),
-            )
-        };
-
-        if message.is_none() && !saw_error {
-            warn!(
-                session_id = %session_id,
-                content_len,
-                reasoning_len,
-                prompt_tokens = usage.as_ref().map(|value| value.prompt_tokens).unwrap_or(0),
-                completion_tokens = usage.as_ref().map(|value| value.completion_tokens).unwrap_or(0),
-                total_tokens = usage.as_ref().map(|value| value.total_tokens).unwrap_or(0),
-                usage_estimated = usage.as_ref().map(|value| value.estimated).unwrap_or(true),
-                "chat stream completed without visible assistant output"
-            );
-        }
-
-        if let Some(message) = message.as_ref() {
-            persist_session_message(&state, &session_id, message).await;
-        }
-
-        None::<ChatStreamChunk>
-    })
-    .filter_map(futures::future::ready);
-
-    Box::pin(streamed.chain(persist))
-}
-
 async fn resolve_requested_model(
     state: &ModelState,
     requested_model: &str,
@@ -463,164 +85,6 @@ async fn resolve_requested_model(
     preferred
         .map(|item| item.id.clone())
         .ok_or_else(|| AppCoreError::BadRequest("no chat-compatible models are configured".into()))
-}
-
-fn apply_stop_sequences(text: &str, stop: &[String]) -> (String, bool) {
-    let Some((index, _)) = stop
-        .iter()
-        .filter(|value| !value.is_empty())
-        .filter_map(|value| text.find(value).map(|index| (index, value)))
-        .min_by_key(|(index, _)| *index)
-    else {
-        return (text.to_owned(), false);
-    };
-
-    (text[..index].to_owned(), true)
-}
-
-fn merge_usage(total: &mut Option<TextGenerationUsage>, next: Option<TextGenerationUsage>) {
-    let Some(next) = next else {
-        return;
-    };
-
-    match total {
-        Some(total) => {
-            total.prompt_tokens = total.prompt_tokens.saturating_add(next.prompt_tokens);
-            total.completion_tokens =
-                total.completion_tokens.saturating_add(next.completion_tokens);
-            total.total_tokens = total.total_tokens.saturating_add(next.total_tokens);
-            total.prompt_tokens_details.cached_tokens = total
-                .prompt_tokens_details
-                .cached_tokens
-                .saturating_add(next.prompt_tokens_details.cached_tokens);
-            total.estimated |= next.estimated;
-        }
-        None => *total = Some(next),
-    }
-}
-
-fn validate_cloud_structured_output(
-    structured_output: Option<&StructuredOutput>,
-) -> Result<(), AppCoreError> {
-    let Some(StructuredOutput::JsonSchema(schema)) = structured_output else {
-        return Ok(());
-    };
-
-    if matches!(schema.strict, Some(false)) {
-        return Err(unsupported_chat_parameter(
-            "response_format.json_schema.strict",
-            "cloud structured outputs currently require strict=true",
-        ));
-    }
-
-    Ok(())
-}
-
-fn unsupported_chat_parameter(param: &str, message: impl Into<String>) -> AppCoreError {
-    AppCoreError::BadRequestData {
-        message: message.into(),
-        data: AppCoreErrorData::unsupported_chat_parameter(param),
-    }
-}
-
-fn validate_chat_route_params(
-    route_to_cloud: bool,
-    command: &ChatCompletionCommand,
-) -> Result<(), AppCoreError> {
-    if route_to_cloud {
-        if command.local.gbnf.is_some() {
-            return Err(unsupported_chat_parameter(
-                "gbnf",
-                "cloud chat completions do not support raw gbnf constraints",
-            ));
-        }
-        if command.common.top_k.is_some() {
-            return Err(unsupported_chat_parameter(
-                "top_k",
-                "cloud chat completions do not support local top_k sampling controls",
-            ));
-        }
-        if command.common.min_p.is_some() {
-            return Err(unsupported_chat_parameter(
-                "min_p",
-                "cloud chat completions do not support local min_p sampling controls",
-            ));
-        }
-        if command.common.presence_penalty.is_some() {
-            return Err(unsupported_chat_parameter(
-                "presence_penalty",
-                "cloud chat completions do not support local presence penalty controls",
-            ));
-        }
-        if command.common.repetition_penalty.is_some() {
-            return Err(unsupported_chat_parameter(
-                "repetition_penalty",
-                "cloud chat completions do not support local repetition penalty controls",
-            ));
-        }
-        validate_cloud_structured_output(command.cloud.structured_output.as_ref())?;
-        return Ok(());
-    }
-
-    Ok(())
-}
-
-fn validate_text_route_params(
-    route_to_cloud: bool,
-    command: &TextCompletionCommand,
-) -> Result<(), AppCoreError> {
-    if route_to_cloud {
-        if command.local.gbnf.is_some() {
-            return Err(unsupported_chat_parameter(
-                "gbnf",
-                "cloud text completions do not support raw gbnf constraints",
-            ));
-        }
-        if command.common.top_k.is_some() {
-            return Err(unsupported_chat_parameter(
-                "top_k",
-                "cloud text completions do not support local top_k sampling controls",
-            ));
-        }
-        if command.common.min_p.is_some() {
-            return Err(unsupported_chat_parameter(
-                "min_p",
-                "cloud text completions do not support local min_p sampling controls",
-            ));
-        }
-        if command.common.presence_penalty.is_some() {
-            return Err(unsupported_chat_parameter(
-                "presence_penalty",
-                "cloud text completions do not support local presence penalty controls",
-            ));
-        }
-        if command.common.repetition_penalty.is_some() {
-            return Err(unsupported_chat_parameter(
-                "repetition_penalty",
-                "cloud text completions do not support local repetition penalty controls",
-            ));
-        }
-        validate_cloud_structured_output(command.cloud.structured_output.as_ref())?;
-    }
-
-    Ok(())
-}
-
-fn into_text_completion_stream(
-    id: String,
-    created: i64,
-    model: String,
-    text: String,
-    finish_reason: String,
-) -> TextCompletionOutput {
-    let mut chunks = Vec::new();
-    if !text.is_empty() {
-        chunks.push(build_text_completion_chunk(&id, created, &model, 0, &text));
-    }
-    chunks.push(build_text_completion_finish_chunk(&id, created, &model, 0, &finish_reason));
-    chunks.push("[DONE]".into());
-
-    TextCompletionOutput::Stream(Box::pin(stream::iter(chunks)))
 }
 
 async fn create_chat_completion_with_state(
@@ -1011,37 +475,12 @@ async fn generate_local_chat_text(
     }
 }
 
-/// Merge history from DB and current request messages while avoiding duplicates.
-async fn build_messages(
-    state: &ModelState,
-    session_id: Option<&str>,
-    current_messages: &[DomainConversationMessage],
-) -> Result<Vec<DomainConversationMessage>, AppCoreError> {
-    let current: Vec<DomainConversationMessage> = current_messages
-        .iter()
-        .filter(|message| message.has_meaningful_content())
-        .cloned()
-        .collect();
-    let client_sent_history = current.len() > 1;
-
-    let mut merged = Vec::new();
-    if !client_sent_history && let Some(session_id) = session_id {
-        let history = state.store().list_messages(session_id).await?;
-        for message in history {
-            if message.content.trim().is_empty() {
-                continue;
-            }
-            merged.push(message.into());
-        }
-    }
-    merged.extend(current);
-    Ok(merged)
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::domain::models::{ChatReasoningEffort, ChatVerbosity, TextCompletionCommand};
+    use crate::domain::models::{
+        ChatReasoningEffort, ChatVerbosity, StructuredOutput, TextCompletionCommand,
+    };
 
     fn make_command(role: &str, content: &str) -> ChatCompletionCommand {
         ChatCompletionCommand {
@@ -1154,21 +593,6 @@ mod test {
     }
 
     #[test]
-    fn build_chunk_produces_openai_format() {
-        let json_str = build_chunk("chatcmpl-test", 1_700_000_000, "slab-llama", "Hello");
-        let value: serde_json::Value = serde_json::from_str(&json_str).expect("valid JSON");
-        assert_eq!(value["id"], "chatcmpl-test");
-        assert_eq!(value["object"], "chat.completion.chunk");
-        assert_eq!(value["created"], 1_700_000_000_i64);
-        assert_eq!(value["model"], "slab-llama");
-        assert_eq!(value["system_fingerprint"], SYSTEM_FINGERPRINT);
-        let choice = &value["choices"][0];
-        assert_eq!(choice["index"], 0);
-        assert_eq!(choice["delta"]["content"], "Hello");
-        assert!(choice["finish_reason"].is_null());
-    }
-
-    #[test]
     fn apply_stop_sequences_truncates_at_first_match() {
         let (trimmed, matched) = apply_stop_sequences("hello STOP world", &["STOP".into()]);
 
@@ -1209,53 +633,5 @@ mod test {
         let result = validate_chat_route_params(true, &command);
 
         assert!(matches!(result, Err(AppCoreError::BadRequestData { .. })));
-    }
-
-    #[test]
-    fn streamed_assistant_message_restores_reasoning_chunks_for_session_storage() {
-        let assistant = Arc::new(Mutex::new(StreamedAssistantContent::default()));
-
-        capture_streamed_assistant_chunk(
-            r#"{"choices":[{"delta":{"reasoning_content":"first thought"}}]}"#,
-            &assistant,
-        );
-        capture_streamed_assistant_chunk(
-            r#"{"choices":[{"delta":{"content":"final answer"}}]}"#,
-            &assistant,
-        );
-
-        let message = {
-            let assistant = assistant.lock().expect("assistant stream accumulator poisoned");
-            build_streamed_assistant_message(&assistant).expect("expected assistant message")
-        };
-
-        assert!(matches!(
-            message.content,
-            ConversationMessageContent::Text(ref text)
-                if text.contains("<think status=\"done\">")
-                    && text.contains("first thought")
-                    && text.ends_with("final answer")
-        ));
-    }
-
-    #[test]
-    fn streamed_assistant_message_skips_failed_streams() {
-        let assistant = Arc::new(Mutex::new(StreamedAssistantContent::default()));
-
-        capture_streamed_assistant_chunk(
-            r#"{"choices":[{"delta":{"content":"partial answer"}}]}"#,
-            &assistant,
-        );
-        capture_streamed_assistant_chunk(
-            r#"{"error":{"message":"stream failed","type":"server_error","code":null}}"#,
-            &assistant,
-        );
-
-        let message = {
-            let assistant = assistant.lock().expect("assistant stream accumulator poisoned");
-            build_streamed_assistant_message(&assistant)
-        };
-
-        assert!(message.is_none());
     }
 }
