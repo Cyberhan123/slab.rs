@@ -36,6 +36,7 @@ async_io = { workspace = true }
 tokio_util = { workspace = true, features = ["compat"] }
 uds_windows = { workspace = true }
 tempfile = { workspace = true }
+minijinja = { workspace = true }
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 

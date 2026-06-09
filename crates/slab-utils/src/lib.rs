@@ -14,3 +14,4 @@ pub mod string;
 pub mod time;
 pub mod tracing;
 pub mod uds;
+pub mod chat_template;

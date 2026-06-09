@@ -14874,6 +14874,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "slab-candle-diffusion"
+version = "0.1.0"
+dependencies = [
+ "candle-core",
+ "candle-nn",
+ "candle-transformers",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokenizers 0.23.1",
+ "tracing",
+]
+
+[[package]]
+name = "slab-candle-llm"
+version = "0.1.0"
+dependencies = [
+ "candle-core",
+ "candle-nn",
+ "candle-transformers",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokenizers 0.23.1",
+ "tracing",
+]
+
+[[package]]
+name = "slab-candle-whisper"
+version = "0.1.0"
+dependencies = [
+ "candle-core",
+ "candle-nn",
+ "candle-transformers",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokenizers 0.23.1",
+ "tracing",
+]
+
+[[package]]
 name = "slab-config"
 version = "0.1.0"
 dependencies = [
@@ -15421,6 +15463,7 @@ dependencies = [
  "libc",
  "libloading 0.9.0",
  "log",
+ "minijinja",
  "portable-pty",
  "pretty_assertions",
  "regex-lite",
