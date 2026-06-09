@@ -11,7 +11,7 @@ schema_version = "1"
 
 [artifacts.ggml]
 repo = "seasonjs/ggml.cpp-build"
-version = "v0.9.11"
+version = "v0.14.0"
 lib_name = "ggml"
 # Asset name pattern with template variables: {version}, {os}, {arch}, {variant}
 asset_pattern = "ggml-{version}-{os}-{arch}.{extension}"
@@ -33,7 +33,7 @@ extension = "tar.gz"
 
 [artifacts.llama]
 repo = "seasonjs/llama.cpp-build"
-version = "v8464"
+version = "v9555"
 lib_name = "llama"
 # Asset name pattern with template variables: {version}, {os}, {arch}, {variant}
 asset_pattern = "llama-sdk-{version}-{os}-{arch}.{extension}"
@@ -55,7 +55,7 @@ extension = "tar.gz"
 
 [artifacts.whisper]
 repo = "seasonjs/whisper.cpp-build"
-version = "v1.8.4"
+version = "v1.8.6"
 lib_name = "whisper"
 asset_pattern = "whisper-sdk-{os}-{arch}.{extension}"
 
@@ -95,21 +95,3 @@ extension = "tar.gz"
 variants = []
 extension = "tar.gz"
 # checksums = "sha256:abcdef..."
-
-[artifacts.ffmpeg]
-repo = "BtbN/FFmpeg-Builds"
-version = "latest"
-lib_name = "ffmpeg"
-asset_pattern = "ffmpeg-master-latest-{os}-{arch}-gpl-shared.{extension}"
-
-[artifacts.ffmpeg.targets.windows.x86_64]
-variants = []
-extension = "zip"
-
-[artifacts.ffmpeg.targets.linux.x86_64]
-variants = []
-extension = "tar.xz"
-
-[artifacts.ffmpeg.targets.macos.arm64]
-variants = []
-extension = "zip"
