@@ -2,8 +2,9 @@ use std::path::PathBuf;
 
 use candle_transformers::generation::Sampling;
 use serde::{Deserialize, Serialize};
+use slab_types::RuntimeDevicePreference;
 
-use crate::error::CandleLlmError;
+use super::error::CandleLlmError;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -161,6 +162,8 @@ pub struct CandleLlmLoadConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tokenizer_path: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<RuntimeDevicePreference>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_path: Option<PathBuf>,
     #[serde(default)]
     pub extra_weight_paths: Vec<PathBuf>,
@@ -200,6 +203,12 @@ pub struct TextGenerationResponse {
     pub finish_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<TextGenerationUsage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TextGenerationStreamChunk {
+    Token(String),
+    Done(TextGenerationResponse),
 }
 
 fn default_repeat_penalty() -> f32 {

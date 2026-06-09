@@ -404,6 +404,7 @@ pub(super) async fn create_chat_completion(
     config: LocalChatRequestConfig,
 ) -> Result<GeneratedChatOutput, AppCoreError> {
     let prompt_profile = model::resolve_local_chat_prompt_profile(state, model).await?;
+    let backend_id = prompt_profile.backend_id;
 
     // When the Jinja chat template natively references `enable_thinking` (e.g.
     // Qwen3, DeepSeek-R1), it already controls thinking behaviour via the
@@ -479,6 +480,7 @@ pub(super) async fn create_chat_completion(
         );
     }
     let request = RuntimeTextGenerationRequest {
+        backend_id: Some(backend_id),
         model: model.to_owned(),
         prompt: prompt.clone(),
         system_prompt: None,
@@ -506,9 +508,12 @@ pub(super) async fn create_chat_completion(
 
     if config.stream {
         let usage_guard =
-            state.auto_unload().acquire_for_inference(super::LLAMA_BACKEND_ID).await.map_err(
-                |error| AppCoreError::BackendNotReady(format!("llama backend not ready: {error}")),
-            )?;
+            state.auto_unload().acquire_for_inference(backend_id).await.map_err(|error| {
+                AppCoreError::BackendNotReady(format!(
+                    "{} backend not ready: {error}",
+                    backend_id.canonical_id()
+                ))
+            })?;
 
         let backend_stream = state.runtime().chat_stream(request.clone()).await?;
 
@@ -792,9 +797,12 @@ pub(super) async fn create_chat_completion(
     }
 
     let _usage_guard =
-        state.auto_unload().acquire_for_inference(super::LLAMA_BACKEND_ID).await.map_err(
-            |error| AppCoreError::BackendNotReady(format!("llama backend not ready: {error}")),
-        )?;
+        state.auto_unload().acquire_for_inference(backend_id).await.map_err(|error| {
+            AppCoreError::BackendNotReady(format!(
+                "{} backend not ready: {error}",
+                backend_id.canonical_id()
+            ))
+        })?;
 
     let runtime_response = state.runtime().chat(request).await?;
     if let Some(trace_context) = config.agent_trace.as_ref() {
@@ -853,6 +861,7 @@ pub(super) async fn create_text_completion(
     config: LocalTextRequestConfig,
 ) -> Result<TextGenerationResponse, AppCoreError> {
     let prompt_profile = model::resolve_local_chat_prompt_profile(state, model).await?;
+    let backend_id = prompt_profile.backend_id;
     let prompt =
         apply_local_reasoning_controls_to_prompt(prompt, config.reasoning_effort, config.verbosity);
     let gbnf = super::gbnf::resolve_effective_gbnf(
@@ -861,6 +870,7 @@ pub(super) async fn create_text_completion(
         prompt_profile.default_gbnf.as_deref(),
     )?;
     let request = RuntimeTextGenerationRequest {
+        backend_id: Some(backend_id),
         model: model.to_owned(),
         prompt: prompt.clone(),
         system_prompt: None,
@@ -879,9 +889,12 @@ pub(super) async fn create_text_completion(
     };
 
     let _usage_guard =
-        state.auto_unload().acquire_for_inference(super::LLAMA_BACKEND_ID).await.map_err(
-            |error| AppCoreError::BackendNotReady(format!("llama backend not ready: {error}")),
-        )?;
+        state.auto_unload().acquire_for_inference(backend_id).await.map_err(|error| {
+            AppCoreError::BackendNotReady(format!(
+                "{} backend not ready: {error}",
+                backend_id.canonical_id()
+            ))
+        })?;
 
     let mut response = text_response_from_runtime(state.runtime().chat(request).await?);
 
@@ -912,6 +925,7 @@ fn text_usage_from_runtime(usage: RuntimeTextGenerationUsage) -> TextGenerationU
 fn runtime_request_payload(request: &RuntimeTextGenerationRequest) -> serde_json::Value {
     serde_json::json!({
         "model": request.model,
+        "backend_id": request.backend_id.map(|backend| backend.canonical_id()),
         "prompt": request.prompt,
         "system_prompt": request.system_prompt,
         "max_tokens": request.max_tokens,

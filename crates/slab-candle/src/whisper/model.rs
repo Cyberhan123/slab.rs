@@ -2,8 +2,8 @@ use candle_core::{IndexOp, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::whisper::{self, Config};
 
-use crate::config::WhisperWeightSource;
-use crate::error::CandleWhisperError;
+use super::config::WhisperWeightSource;
+use super::error::CandleWhisperError;
 
 pub(crate) enum WhisperModel {
     Normal(whisper::model::Whisper),

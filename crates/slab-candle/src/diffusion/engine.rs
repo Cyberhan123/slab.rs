@@ -1,10 +1,11 @@
-use crate::config::{
+use super::config::{
     CandleDiffusionLoadConfig, DiffusionPipelineKind, GeneratedImage, ImageGenerationRequest,
 };
-use crate::error::CandleDiffusionError;
-use crate::flux::FluxPipeline;
+use super::error::CandleDiffusionError;
+use super::flux::FluxPipeline;
+use super::stable::StableDiffusionPipeline;
+use crate::device::resolve_device;
 use crate::runtime::CandleRuntimeEngine;
-use crate::stable::StableDiffusionPipeline;
 
 enum LoadedPipeline {
     StableDiffusion(Box<StableDiffusionPipeline>),
@@ -34,12 +35,15 @@ impl CandleRuntimeEngine for CandleDiffusionEngine {
     type LoadConfig = CandleDiffusionLoadConfig;
 
     fn load_model(&mut self, config: Self::LoadConfig) -> Result<(), Self::Error> {
+        let device = resolve_device(config.device).map_err(|error| {
+            CandleDiffusionError::load_model(config.model_path.display(), error)
+        })?;
         let pipeline = match config.pipeline {
-            DiffusionPipelineKind::StableDiffusion => {
-                LoadedPipeline::StableDiffusion(Box::new(StableDiffusionPipeline::load(config)?))
-            }
+            DiffusionPipelineKind::StableDiffusion => LoadedPipeline::StableDiffusion(Box::new(
+                StableDiffusionPipeline::load(config, device)?,
+            )),
             DiffusionPipelineKind::Flux => {
-                LoadedPipeline::Flux(Box::new(FluxPipeline::load(config)?))
+                LoadedPipeline::Flux(Box::new(FluxPipeline::load(config, device)?))
             }
             DiffusionPipelineKind::StableDiffusion3 => {
                 return Err(CandleDiffusionError::UnsupportedModel {
@@ -75,6 +79,7 @@ impl CandleRuntimeEngine for CandleDiffusionEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diffusion::{FluxModelKind, FluxWeightSource, StableDiffusionVersion};
 
     #[test]
     fn new_engine_is_unloaded() {
@@ -87,14 +92,15 @@ mod tests {
         let config = CandleDiffusionLoadConfig {
             model_path: "missing.safetensors".into(),
             vae_path: None,
+            device: None,
             text_encoder_path: None,
             text_encoder2_path: None,
             tokenizer_path: None,
             tokenizer2_path: None,
             pipeline: DiffusionPipelineKind::StableDiffusion3,
-            sd_version: crate::config::StableDiffusionVersion::default(),
-            flux_model: crate::config::FluxModelKind::default(),
-            flux_weight_source: crate::config::FluxWeightSource::default(),
+            sd_version: StableDiffusionVersion::default(),
+            flux_model: FluxModelKind::default(),
+            flux_weight_source: FluxWeightSource::default(),
             flux_t5_encoder_path: None,
             flux_t5_config_path: None,
             flux_t5_tokenizer_path: None,

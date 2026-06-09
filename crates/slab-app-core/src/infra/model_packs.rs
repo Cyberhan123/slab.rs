@@ -803,9 +803,13 @@ fn infer_model_family(
     };
 
     match backend_id {
-        ManagedModelBackendId::GgmlWhisper => ModelFamily::Whisper,
-        ManagedModelBackendId::GgmlDiffusion => ModelFamily::Diffusion,
-        ManagedModelBackendId::GgmlLlama => ModelFamily::Llama,
+        ManagedModelBackendId::GgmlWhisper | ManagedModelBackendId::CandleWhisper => {
+            ModelFamily::Whisper
+        }
+        ManagedModelBackendId::GgmlDiffusion | ManagedModelBackendId::CandleDiffusion => {
+            ModelFamily::Diffusion
+        }
+        ManagedModelBackendId::GgmlLlama | ManagedModelBackendId::CandleLlama => ModelFamily::Llama,
     }
 }
 

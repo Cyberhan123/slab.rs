@@ -1,4 +1,4 @@
-use crate::config::{LlmModelKind, PromptFormat};
+use super::config::{LlmModelKind, PromptFormat};
 
 pub(crate) fn apply_prompt_format(
     prompt: &str,

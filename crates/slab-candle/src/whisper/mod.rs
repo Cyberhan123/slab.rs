@@ -3,7 +3,6 @@ mod decoder;
 mod engine;
 mod error;
 mod model;
-mod runtime;
 
 pub use config::{
     CandleWhisperLoadConfig, TranscriptionRequest, TranscriptionResponse, TranscriptionSegment,
@@ -11,4 +10,3 @@ pub use config::{
 };
 pub use engine::CandleWhisperEngine;
 pub use error::CandleWhisperError;
-pub use runtime::CandleRuntimeEngine;

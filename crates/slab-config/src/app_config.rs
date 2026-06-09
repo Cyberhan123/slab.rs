@@ -76,6 +76,15 @@ pub struct Config {
     /// Optional diffusion backend gRPC endpoint used by HTTP gateway mode.
     pub diffusion_grpc_endpoint: Option<String>,
 
+    /// Optional Candle llama backend gRPC endpoint used by HTTP gateway mode.
+    pub candle_llama_grpc_endpoint: Option<String>,
+
+    /// Optional Candle whisper backend gRPC endpoint used by HTTP gateway mode.
+    pub candle_whisper_grpc_endpoint: Option<String>,
+
+    /// Optional Candle diffusion backend gRPC endpoint used by HTTP gateway mode.
+    pub candle_diffusion_grpc_endpoint: Option<String>,
+
     /// Directory containing the llama, whisper, and diffusion shared libraries.
     pub lib_dir: Option<std::path::PathBuf>,
 
@@ -145,6 +154,10 @@ impl Config {
             llama_grpc_endpoint: std::env::var("SLAB_LLAMA_GRPC_ENDPOINT").ok(),
             whisper_grpc_endpoint: std::env::var("SLAB_WHISPER_GRPC_ENDPOINT").ok(),
             diffusion_grpc_endpoint: std::env::var("SLAB_DIFFUSION_GRPC_ENDPOINT").ok(),
+            candle_llama_grpc_endpoint: std::env::var("SLAB_CANDLE_LLAMA_GRPC_ENDPOINT").ok(),
+            candle_whisper_grpc_endpoint: std::env::var("SLAB_CANDLE_WHISPER_GRPC_ENDPOINT").ok(),
+            candle_diffusion_grpc_endpoint: std::env::var("SLAB_CANDLE_DIFFUSION_GRPC_ENDPOINT")
+                .ok(),
             lib_dir: std::env::var("SLAB_LIB_DIR").ok().map(PathBuf::from),
             session_state_dir: std::env::var("SLAB_SESSION_STATE_DIR")
                 .unwrap_or_else(|_| default_session_state_dir().to_string_lossy().into_owned()),

@@ -92,6 +92,7 @@ pub(crate) struct TextGenerationMetadata {
 }
 
 impl TextGenerationMetadata {
+    #[cfg_attr(not(feature = "ggml"), allow(dead_code))]
     pub(crate) fn is_empty(&self) -> bool {
         self.reasoning_content.is_none() && self.stop.is_none() && self.extra.is_empty()
     }

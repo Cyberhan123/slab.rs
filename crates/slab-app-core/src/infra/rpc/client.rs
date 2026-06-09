@@ -206,6 +206,30 @@ pub async fn chat_stream(
     Ok(response.into_inner())
 }
 
+pub async fn candle_chat(
+    channel: Channel,
+    req: pb::CandleChatRequest,
+) -> anyhow::Result<pb::CandleChatResponse> {
+    let (mut client, request_id) = candle_transformers_client(channel);
+    debug!(request_id = %request_id, "sending gRPC candle llama chat request");
+    let response =
+        client.chat(req).await.inspect_err(|s| log_grpc_error("candle_chat", &request_id, s))?;
+    Ok(response.into_inner())
+}
+
+pub async fn candle_chat_stream(
+    channel: Channel,
+    req: pb::CandleChatRequest,
+) -> anyhow::Result<tonic::Streaming<pb::CandleChatStreamChunk>> {
+    let (mut client, request_id) = candle_transformers_client(channel);
+    debug!(request_id = %request_id, "sending gRPC candle llama chat_stream request");
+    let response = client
+        .chat_stream(req)
+        .await
+        .inspect_err(|s| log_grpc_error("candle_chat_stream", &request_id, s))?;
+    Ok(response.into_inner())
+}
+
 pub async fn transcribe(
     channel: Channel,
     req: pb::GgmlWhisperTranscribeRequest,
@@ -227,6 +251,23 @@ pub async fn transcribe(
     Ok(response.into_inner())
 }
 
+pub async fn candle_transcribe(
+    channel: Channel,
+    req: pb::CandleWhisperTranscribeRequest,
+) -> anyhow::Result<pb::CandleWhisperTranscribeResponse> {
+    let (mut client, request_id) = candle_transformers_client(channel);
+    debug!(
+        request_id = %request_id,
+        audio_path = %req.path.as_deref().unwrap_or_default(),
+        "sending gRPC candle whisper transcribe request"
+    );
+    let response = client.transcribe(req).await.map_err(|status| {
+        log_grpc_error("candle_transcribe", &request_id, &status);
+        grpc_status_to_anyhow("candle_transcribe", &request_id, status)
+    })?;
+    Ok(response.into_inner())
+}
+
 pub async fn generate_image(
     channel: Channel,
     req: pb::GgmlDiffusionGenerateImageRequest,
@@ -236,6 +277,19 @@ pub async fn generate_image(
     let response = client.generate_image(req).await.map_err(|status| {
         log_grpc_error("generate_image", &request_id, &status);
         grpc_status_to_anyhow("generate_image", &request_id, status)
+    })?;
+    Ok(response.into_inner())
+}
+
+pub async fn candle_generate_image(
+    channel: Channel,
+    req: pb::CandleDiffusionGenerateImageRequest,
+) -> anyhow::Result<pb::CandleDiffusionGenerateImageResponse> {
+    let (mut client, request_id) = candle_diffusion_client(channel);
+    debug!(request_id = %request_id, "sending gRPC candle diffusion generate_image request");
+    let response = client.generate_image(req).await.map_err(|status| {
+        log_grpc_error("candle_generate_image", &request_id, &status);
+        grpc_status_to_anyhow("candle_generate_image", &request_id, status)
     })?;
     Ok(response.into_inner())
 }

@@ -31,6 +31,7 @@ impl CandleLlamaService {
         let load_payload = CandleLlamaLoadConfig {
             model_path: model_path.clone(),
             tokenizer_path: request.tokenizer_path,
+            device: request.device,
             seed,
         };
 

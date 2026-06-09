@@ -13,6 +13,12 @@ enum EnabledBackendArg {
     Whisper,
     #[value(alias = "ggml.diffusion")]
     Diffusion,
+    #[value(name = "candle.llama", alias = "candle-llama")]
+    CandleLlama,
+    #[value(name = "candle.whisper", alias = "candle-whisper")]
+    CandleWhisper,
+    #[value(name = "candle.diffusion", alias = "candle-diffusion")]
+    CandleDiffusion,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -47,12 +53,22 @@ impl Cli {
         let enabled_backends = if self.enabled_backends.is_empty() {
             CliEnabledBackends::all()
         } else {
-            let mut enabled = CliEnabledBackends { llama: false, whisper: false, diffusion: false };
+            let mut enabled = CliEnabledBackends {
+                llama: false,
+                whisper: false,
+                diffusion: false,
+                candle_llama: false,
+                candle_whisper: false,
+                candle_diffusion: false,
+            };
             for backend in self.enabled_backends {
                 match backend {
                     EnabledBackendArg::Llama => enabled.llama = true,
                     EnabledBackendArg::Whisper => enabled.whisper = true,
                     EnabledBackendArg::Diffusion => enabled.diffusion = true,
+                    EnabledBackendArg::CandleLlama => enabled.candle_llama = true,
+                    EnabledBackendArg::CandleWhisper => enabled.candle_whisper = true,
+                    EnabledBackendArg::CandleDiffusion => enabled.candle_diffusion = true,
                 }
             }
             enabled
@@ -80,9 +96,9 @@ impl Cli {
             llama_lib_dir,
             whisper_lib_dir,
             diffusion_lib_dir,
-            enable_candle_llama: false,
-            enable_candle_whisper: false,
-            enable_candle_diffusion: false,
+            enable_candle_llama: enabled_backends.candle_llama,
+            enable_candle_whisper: enabled_backends.candle_whisper,
+            enable_candle_diffusion: enabled_backends.candle_diffusion,
             onnx_enabled: false,
         })
     }
@@ -101,6 +117,7 @@ mod tests {
         assert!(config.enabled_backends.llama);
         assert!(config.enabled_backends.whisper);
         assert!(config.enabled_backends.diffusion);
+        assert!(!config.enabled_backends.candle_llama);
     }
 
     #[test]
@@ -116,5 +133,24 @@ mod tests {
         assert!(config.enabled_backends.llama);
         assert!(config.enabled_backends.whisper);
         assert!(!config.enabled_backends.diffusion);
+    }
+
+    #[test]
+    fn runtime_config_accepts_candle_backend_ids() {
+        let cli = <Cli as Parser>::try_parse_from([
+            "slab-runtime",
+            "--enabled-backends",
+            "candle.llama,candle.whisper,candle.diffusion",
+        ])
+        .expect("parse cli");
+        let config = cli.into_runtime_config().expect("build runtime config");
+
+        assert!(!config.enabled_backends.llama);
+        assert!(config.enabled_backends.candle_llama);
+        assert!(config.enabled_backends.candle_whisper);
+        assert!(config.enabled_backends.candle_diffusion);
+        assert!(config.enable_candle_llama);
+        assert!(config.enable_candle_whisper);
+        assert!(config.enable_candle_diffusion);
     }
 }

@@ -16,12 +16,13 @@ use crate::domain::ports::{RuntimeDiffusionImageRequest, RuntimeRawImageInput};
 use crate::domain::services::media_task::{
     cleanup_dir, parse_json_payload, read_managed_file, save_rgb_png, serialize_json_payload,
 };
+use crate::domain::services::model;
 use crate::error::AppCoreError;
 use crate::infra::db::{
     ImageGenerationTaskViewRecord, MediaTaskStore, NewImageGenerationTaskRecord, TaskRecord,
 };
 
-const IMAGE_BACKEND_ID: &str = "ggml.diffusion";
+const DEFAULT_IMAGE_BACKEND_ID: RuntimeBackendId = RuntimeBackendId::GgmlDiffusion;
 
 #[derive(Clone)]
 pub struct ImageService {
@@ -41,6 +42,13 @@ impl ImageService {
             if req.mode == ImageGenerationMode::Img2Img { req.init_image.clone() } else { None };
         let effective_strength =
             if req.mode == ImageGenerationMode::Img2Img { req.strength } else { None };
+        let backend_id = model::resolve_worker_model_backend_or_default(
+            &self.state,
+            req.model_id.as_deref(),
+            DEFAULT_IMAGE_BACKEND_ID,
+        )
+        .await?;
+        ensure_image_backend(backend_id)?;
 
         debug!(
             model = %req.model,
@@ -52,10 +60,11 @@ impl ImageService {
             "image generation request"
         );
 
-        if !self.state.runtime().backend_available(RuntimeBackendId::GgmlDiffusion) {
-            return Err(AppCoreError::BackendNotReady(
-                "diffusion gRPC endpoint is not configured".into(),
-            ));
+        if !self.state.runtime().backend_available(backend_id) {
+            return Err(AppCoreError::BackendNotReady(format!(
+                "{} gRPC endpoint is not configured",
+                backend_id.canonical_id()
+            )));
         }
 
         let operation_id = Uuid::new_v4().to_string();
@@ -101,6 +110,7 @@ impl ImageService {
         let input_json = serialize_json_payload(&request_data)?;
 
         let runtime_request = RuntimeDiffusionImageRequest {
+            backend_id: Some(backend_id),
             model: req.model.clone(),
             prompt: req.prompt.clone(),
             negative_prompt: req.negative_prompt.clone(),
@@ -139,7 +149,7 @@ impl ImageService {
         };
         let image_task_record = NewImageGenerationTaskRecord {
             task_id: operation_id.clone(),
-            backend_id: IMAGE_BACKEND_ID.to_owned(),
+            backend_id: backend_id.canonical_id().to_owned(),
             model_id: req.model_id.clone(),
             model_path: req.model.clone(),
             prompt: req.prompt.clone(),
@@ -176,13 +186,10 @@ impl ImageService {
             .spawn_existing_operation(operation_id.clone(), move |operation| async move {
             let operation_id = operation.id().to_owned();
             let task_output_dir = image_task_dir(&output_root, &operation_id);
-            let _usage_guard = match model_auto_unload
-                .acquire_for_inference(RuntimeBackendId::GgmlDiffusion)
-                .await
-            {
+            let _usage_guard = match model_auto_unload.acquire_for_inference(backend_id).await {
                 Ok(guard) => guard,
                 Err(error) => {
-                    let message = format!("diffusion backend not ready: {error}");
+                    let message = format!("{} backend not ready: {error}", backend_id.canonical_id());
                     if let Err(db_error) = operation.mark_failed(&message).await {
                         warn!(task_id = %operation_id, error = %db_error, "failed to update auto-reload failure");
                     }
@@ -263,7 +270,7 @@ impl ImageService {
                     }
                 }
                 Err(error) => {
-                    let runtime_snapshot = runtime_status.snapshot(RuntimeBackendId::GgmlDiffusion);
+                    let runtime_snapshot = runtime_status.snapshot(backend_id);
                     let runtime_status = runtime_snapshot.compact_summary();
                     let message = format!("{error:#}\nruntime_status: {runtime_status}");
                     cleanup_dir(&task_output_dir).await;
@@ -331,6 +338,16 @@ impl ImageService {
 
     fn output_root(&self) -> PathBuf {
         default_output_dir_for_settings_path(&self.state.config().settings_path)
+    }
+}
+
+fn ensure_image_backend(backend_id: RuntimeBackendId) -> Result<(), AppCoreError> {
+    match backend_id {
+        RuntimeBackendId::GgmlDiffusion | RuntimeBackendId::CandleDiffusion => Ok(()),
+        other => Err(AppCoreError::BadRequest(format!(
+            "backend '{}' does not support image generation",
+            other.canonical_id()
+        ))),
     }
 }
 

@@ -172,6 +172,7 @@ impl ModelPackRuntimeBridge {
                 RuntimeBackendLoadSpec::CandleLlama(CandleLlamaLoadConfig {
                     model_path,
                     tokenizer_path: None,
+                    device: None,
                     seed: 0,
                 })
             }
@@ -179,6 +180,7 @@ impl ModelPackRuntimeBridge {
                 RuntimeBackendLoadSpec::CandleWhisper(CandleWhisperLoadConfig {
                     model_path,
                     tokenizer_path: None,
+                    device: None,
                 })
             }
             RuntimeBackendId::CandleDiffusion => {
@@ -186,6 +188,7 @@ impl ModelPackRuntimeBridge {
                 RuntimeBackendLoadSpec::CandleDiffusion(CandleDiffusionLoadConfig {
                     model_path,
                     vae_path: diffusion.vae_path,
+                    device: None,
                     sd_version: "v2-1".to_owned(),
                 })
             }
@@ -394,9 +397,12 @@ fn build_load_defaults(
         chat_template,
         gbnf_source: resolve_text_asset_ref(resolved, config_id, "gbnf", gbnf.as_ref())?,
         gbnf,
-        diffusion: (backend == RuntimeBackendId::GgmlDiffusion)
-            .then(|| build_diffusion_load_defaults(preset_id, source, &options))
-            .transpose()?,
+        diffusion: matches!(
+            backend,
+            RuntimeBackendId::GgmlDiffusion | RuntimeBackendId::CandleDiffusion
+        )
+        .then(|| build_diffusion_load_defaults(preset_id, source, &options))
+        .transpose()?,
     })
 }
 

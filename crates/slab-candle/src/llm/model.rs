@@ -10,8 +10,8 @@ use candle_transformers::models::{
     quantized_qwen3_moe, qwen2, qwen2_moe, qwen3, qwen3_moe,
 };
 
-use crate::config::{CandleLlmLoadConfig, LlmModelKind, LlmWeightSource};
-use crate::error::CandleLlmError;
+use super::config::{CandleLlmLoadConfig, LlmModelKind, LlmWeightSource};
+use super::error::CandleLlmError;
 
 pub(crate) enum LoadedLlmModel {
     QuantizedLlama(quantized_llama::ModelWeights),
@@ -480,6 +480,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llm::PromptFormat;
 
     #[test]
     fn explicit_config_path_is_used() {
@@ -503,11 +504,12 @@ mod tests {
             let config = CandleLlmLoadConfig {
                 model_path: PathBuf::from("missing.gguf"),
                 tokenizer_path: None,
+                device: None,
                 config_path: None,
                 extra_weight_paths: Vec::new(),
                 model_kind,
                 weight_source: LlmWeightSource::QuantizedGguf,
-                prompt_format: crate::config::PromptFormat::Raw,
+                prompt_format: PromptFormat::Raw,
                 seed: 0,
             };
             let error = match LoadedLlmModel::load(&config, &Device::Cpu, DType::F32) {

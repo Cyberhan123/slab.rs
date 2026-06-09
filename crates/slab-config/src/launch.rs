@@ -6,7 +6,8 @@ use slab_types::RuntimeBackendId;
 
 use crate::app_config::Config;
 use crate::{
-    ConfigError, LoggingOverrideConfig, RuntimeMode, RuntimeTransportMode, SettingsDocument,
+    CapacityOverrideConfig, ConfigError, LoggingOverrideConfig, RuntimeMode, RuntimeTransportMode,
+    SettingsDocument,
 };
 
 const RUNTIME_BACKEND_SLOTS: [(RuntimeBackendId, &str, u32); 3] = [
@@ -14,6 +15,12 @@ const RUNTIME_BACKEND_SLOTS: [(RuntimeBackendId, &str, u32); 3] = [
     (RuntimeBackendId::GgmlLlama, "llama", 1),
     (RuntimeBackendId::GgmlDiffusion, "diffusion", 2),
 ];
+const CANDLE_BACKENDS: [RuntimeBackendId; 3] = [
+    RuntimeBackendId::CandleLlama,
+    RuntimeBackendId::CandleWhisper,
+    RuntimeBackendId::CandleDiffusion,
+];
+const CANDLE_BACKEND_SLOT: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LaunchProfile {
@@ -41,6 +48,7 @@ pub struct LaunchHostPaths {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedRuntimeChildSpec {
     pub backend: RuntimeBackendId,
+    pub service_backends: Vec<RuntimeBackendId>,
     pub grpc_bind_address: String,
     pub transport: RuntimeTransportMode,
     pub queue_capacity: usize,
@@ -56,9 +64,18 @@ impl ResolvedRuntimeChildSpec {
     pub fn command_args(&self, log_level: Option<&str>, log_json: bool) -> Vec<String> {
         let effective_log_level = self.log_level.as_deref().or(log_level);
         let effective_log_json = self.log_json.unwrap_or(log_json);
+        let enabled_backends = if self.service_backends.is_empty() {
+            vec![self.backend]
+        } else {
+            self.service_backends.clone()
+        }
+        .into_iter()
+        .map(|backend| backend.canonical_id())
+        .collect::<Vec<_>>()
+        .join(",");
         let mut args = vec![
             "--enabled-backends".to_owned(),
-            self.backend.canonical_id().to_owned(),
+            enabled_backends,
             "--grpc-bind".to_owned(),
             self.grpc_bind_address.clone(),
             "--queue-capacity".to_owned(),
@@ -93,6 +110,9 @@ pub struct ResolvedRuntimeEndpoints {
     pub whisper: Option<String>,
     pub llama: Option<String>,
     pub diffusion: Option<String>,
+    pub candle_whisper: Option<String>,
+    pub candle_llama: Option<String>,
+    pub candle_diffusion: Option<String>,
 }
 
 impl ResolvedRuntimeEndpoints {
@@ -101,6 +121,10 @@ impl ResolvedRuntimeEndpoints {
             RuntimeBackendId::GgmlWhisper => self.whisper.as_deref(),
             RuntimeBackendId::GgmlLlama => self.llama.as_deref(),
             RuntimeBackendId::GgmlDiffusion => self.diffusion.as_deref(),
+            RuntimeBackendId::CandleWhisper => self.candle_whisper.as_deref(),
+            RuntimeBackendId::CandleLlama => self.candle_llama.as_deref(),
+            RuntimeBackendId::CandleDiffusion => self.candle_diffusion.as_deref(),
+            RuntimeBackendId::Onnx => None,
             _ => None,
         }
     }
@@ -110,6 +134,9 @@ impl ResolvedRuntimeEndpoints {
         config.whisper_grpc_endpoint = self.whisper.clone();
         config.llama_grpc_endpoint = self.llama.clone();
         config.diffusion_grpc_endpoint = self.diffusion.clone();
+        config.candle_whisper_grpc_endpoint = self.candle_whisper.clone();
+        config.candle_llama_grpc_endpoint = self.candle_llama.clone();
+        config.candle_diffusion_grpc_endpoint = self.candle_diffusion.clone();
     }
 }
 
@@ -248,11 +275,16 @@ fn resolve_managed_launch_spec(
             RuntimeBackendId::GgmlWhisper => endpoints.whisper = Some(endpoint.clone()),
             RuntimeBackendId::GgmlLlama => endpoints.llama = Some(endpoint.clone()),
             RuntimeBackendId::GgmlDiffusion => endpoints.diffusion = Some(endpoint.clone()),
+            RuntimeBackendId::CandleLlama
+            | RuntimeBackendId::CandleWhisper
+            | RuntimeBackendId::CandleDiffusion
+            | RuntimeBackendId::Onnx => {}
             _ => {}
         }
 
         children.push(ResolvedRuntimeChildSpec {
             backend,
+            service_backends: Vec::new(),
             grpc_bind_address: endpoint,
             transport,
             queue_capacity,
@@ -266,6 +298,49 @@ fn resolve_managed_launch_spec(
                 profile.as_str(),
                 alias
             )),
+            shutdown_on_stdin_close: host_paths.shutdown_on_stdin_close,
+        });
+    }
+
+    if settings.runtime.candle.enabled {
+        let endpoint = resolve_managed_candle_endpoint(
+            settings,
+            profile,
+            transport,
+            host_paths,
+            CANDLE_BACKEND_SLOT,
+            pid,
+        )?;
+        endpoints.candle_llama = Some(endpoint.clone());
+        endpoints.candle_whisper = Some(endpoint.clone());
+        endpoints.candle_diffusion = Some(endpoint.clone());
+
+        let (queue_capacity, backend_capacity) =
+            resolve_family_capacity(settings, &settings.runtime.candle.capacity, "candle")?;
+        let (log_level, log_json, log_dir) =
+            resolve_family_logging(settings, &settings.runtime.candle.logging, &runtime_log_dir);
+
+        if log_dir != runtime_log_dir {
+            extra_dirs.insert(log_dir.clone());
+        }
+        if transport == RuntimeTransportMode::Ipc
+            && let Some(dir) = directory_from_ipc_endpoint(&endpoint)
+            && runtime_ipc_dir.as_ref() != Some(&dir)
+        {
+            extra_dirs.insert(dir);
+        }
+
+        children.push(ResolvedRuntimeChildSpec {
+            backend: RuntimeBackendId::CandleLlama,
+            service_backends: CANDLE_BACKENDS.to_vec(),
+            grpc_bind_address: endpoint,
+            transport,
+            queue_capacity,
+            backend_capacity,
+            lib_dir: None,
+            log_level,
+            log_json: Some(log_json),
+            log_file: log_dir.join(format!("slab-runtime-{}-{}-candle.log", pid, profile.as_str())),
             shutdown_on_stdin_close: host_paths.shutdown_on_stdin_close,
         });
     }
@@ -312,8 +387,19 @@ fn resolve_external_launch_spec(
             RuntimeBackendId::GgmlWhisper => endpoints.whisper = Some(endpoint),
             RuntimeBackendId::GgmlLlama => endpoints.llama = Some(endpoint),
             RuntimeBackendId::GgmlDiffusion => endpoints.diffusion = Some(endpoint),
+            RuntimeBackendId::CandleLlama
+            | RuntimeBackendId::CandleWhisper
+            | RuntimeBackendId::CandleDiffusion
+            | RuntimeBackendId::Onnx => {}
             _ => {}
         }
+    }
+
+    if settings.runtime.candle.enabled {
+        let endpoint = resolve_external_candle_endpoint(settings, transport)?;
+        endpoints.candle_llama = Some(endpoint.clone());
+        endpoints.candle_whisper = Some(endpoint.clone());
+        endpoints.candle_diffusion = Some(endpoint);
     }
 
     let gateway = match profile {
@@ -400,6 +486,40 @@ fn resolve_external_backend_endpoint(
     normalize_runtime_endpoint(explicit, transport)
 }
 
+fn resolve_managed_candle_endpoint(
+    settings: &SettingsDocument,
+    profile: LaunchProfile,
+    transport: RuntimeTransportMode,
+    host_paths: &LaunchHostPaths,
+    slot: u32,
+    pid: u32,
+) -> Result<String, ConfigError> {
+    if let Some(explicit) = shared_candle_endpoint(settings, transport) {
+        return normalize_runtime_endpoint(explicit, transport);
+    }
+    if let Some(explicit) = shared_runtime_endpoint(settings, transport) {
+        return normalize_runtime_endpoint(explicit, transport);
+    }
+
+    default_generated_backend_endpoint(profile, transport, host_paths, "candle", slot, pid)
+}
+
+fn resolve_external_candle_endpoint(
+    settings: &SettingsDocument,
+    transport: RuntimeTransportMode,
+) -> Result<String, ConfigError> {
+    let explicit = shared_candle_endpoint(settings, transport)
+        .or_else(|| shared_runtime_endpoint(settings, transport))
+        .ok_or_else(|| {
+            ConfigError::BadRequest(
+                "runtime.mode=external_endpoints requires runtime.candle.endpoint when runtime.candle.enabled=true"
+                    .to_owned(),
+            )
+        })?;
+
+    normalize_runtime_endpoint(explicit, transport)
+}
+
 fn resolve_backend_capacity(
     settings: &SettingsDocument,
     backend: RuntimeBackendId,
@@ -438,6 +558,29 @@ fn resolve_backend_capacity(
     Ok((queue_capacity, backend_capacity))
 }
 
+fn resolve_family_capacity(
+    settings: &SettingsDocument,
+    family: &CapacityOverrideConfig,
+    family_name: &str,
+) -> Result<(usize, usize), ConfigError> {
+    let root = &settings.runtime.capacity;
+    let queue = family.queue.unwrap_or(root.queue);
+    let concurrent = family.concurrent_requests.unwrap_or(root.concurrent_requests);
+
+    let queue_capacity = usize::try_from(queue).map_err(|_| {
+        ConfigError::Internal(format!(
+            "resolved queue capacity for '{family_name}' does not fit into usize"
+        ))
+    })?;
+    let backend_capacity = usize::try_from(concurrent).map_err(|_| {
+        ConfigError::Internal(format!(
+            "resolved concurrent request capacity for '{family_name}' does not fit into usize"
+        ))
+    })?;
+
+    Ok((queue_capacity, backend_capacity))
+}
+
 fn resolve_backend_logging(
     settings: &SettingsDocument,
     backend: RuntimeBackendId,
@@ -466,6 +609,33 @@ fn resolve_backend_logging(
         .as_deref()
         .and_then(normalize_text)
         .or_else(|| family.path.as_deref().and_then(normalize_text))
+        .or_else(|| runtime.path.as_deref().and_then(normalize_text))
+        .or_else(|| global.path.as_deref().and_then(normalize_text))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| fallback_dir.to_path_buf());
+
+    (level, json, dir)
+}
+
+fn resolve_family_logging(
+    settings: &SettingsDocument,
+    family: &LoggingOverrideConfig,
+    fallback_dir: &std::path::Path,
+) -> (Option<String>, bool, PathBuf) {
+    let global = &settings.logging;
+    let runtime = &settings.runtime.logging;
+
+    let level = family
+        .level
+        .as_deref()
+        .and_then(normalize_text)
+        .or_else(|| runtime.level.as_deref().and_then(normalize_text))
+        .or_else(|| normalize_text(global.level.as_str()));
+    let json = family.json.or(runtime.json).unwrap_or(global.json);
+    let dir = family
+        .path
+        .as_deref()
+        .and_then(normalize_text)
         .or_else(|| runtime.path.as_deref().and_then(normalize_text))
         .or_else(|| global.path.as_deref().and_then(normalize_text))
         .map(PathBuf::from)
@@ -524,6 +694,16 @@ fn shared_ggml_endpoint(
     match transport {
         RuntimeTransportMode::Http => settings.runtime.ggml.endpoint.http.address.as_deref(),
         RuntimeTransportMode::Ipc => settings.runtime.ggml.endpoint.ipc.path.as_deref(),
+    }
+}
+
+fn shared_candle_endpoint(
+    settings: &SettingsDocument,
+    transport: RuntimeTransportMode,
+) -> Option<&str> {
+    match transport {
+        RuntimeTransportMode::Http => settings.runtime.candle.endpoint.http.address.as_deref(),
+        RuntimeTransportMode::Ipc => settings.runtime.candle.endpoint.ipc.path.as_deref(),
     }
 }
 
@@ -649,6 +829,7 @@ mod tests {
     fn child_command_args_are_generated_from_resolved_spec() {
         let spec = ResolvedRuntimeChildSpec {
             backend: RuntimeBackendId::GgmlLlama,
+            service_backends: Vec::new(),
             grpc_bind_address: "127.0.0.1:50052".to_owned(),
             transport: RuntimeTransportMode::Http,
             queue_capacity: 64,
@@ -666,6 +847,33 @@ mod tests {
         assert!(args.windows(2).any(|pair| pair == ["--grpc-bind", "127.0.0.1:50052"]));
         assert!(args.contains(&"--shutdown-on-stdin-close".to_owned()));
         assert!(args.contains(&"--log-json".to_owned()));
+    }
+
+    #[test]
+    fn child_command_args_include_multiple_service_backends() {
+        let spec = ResolvedRuntimeChildSpec {
+            backend: RuntimeBackendId::CandleLlama,
+            service_backends: vec![
+                RuntimeBackendId::CandleLlama,
+                RuntimeBackendId::CandleWhisper,
+                RuntimeBackendId::CandleDiffusion,
+            ],
+            grpc_bind_address: "127.0.0.1:50054".to_owned(),
+            transport: RuntimeTransportMode::Http,
+            queue_capacity: 64,
+            backend_capacity: 4,
+            lib_dir: None,
+            log_level: None,
+            log_json: None,
+            log_file: PathBuf::from("C:/runtime/logs/slab-runtime-candle.log"),
+            shutdown_on_stdin_close: true,
+        };
+
+        let args = spec.command_args(None, false);
+
+        assert!(args.windows(2).any(|pair| {
+            pair == ["--enabled-backends", "candle.llama,candle.whisper,candle.diffusion"]
+        }));
     }
 
     #[test]
@@ -728,6 +936,34 @@ mod tests {
             spec.gateway.as_ref().map(|gateway| gateway.bind_address.as_str()),
             Some("127.0.0.1:3000")
         );
+    }
+
+    #[test]
+    fn managed_planner_starts_single_candle_child_for_all_candle_services() {
+        let mut settings = SettingsDocument::default();
+        settings.runtime.ggml.backends.llama.enabled = false;
+        settings.runtime.ggml.backends.whisper.enabled = false;
+        settings.runtime.ggml.backends.diffusion.enabled = false;
+        settings.runtime.candle.enabled = true;
+        settings.runtime.transport = RuntimeTransportMode::Http;
+        settings.runtime.candle.endpoint.http.address = Some("127.0.0.1:4200".to_owned());
+
+        let spec = resolve_launch_spec(&settings, LaunchProfile::Server, &host_paths()).unwrap();
+
+        assert_eq!(spec.children.len(), 1);
+        assert_eq!(spec.children[0].backend, RuntimeBackendId::CandleLlama);
+        assert_eq!(
+            spec.children[0].service_backends,
+            vec![
+                RuntimeBackendId::CandleLlama,
+                RuntimeBackendId::CandleWhisper,
+                RuntimeBackendId::CandleDiffusion
+            ]
+        );
+        assert_eq!(spec.children[0].grpc_bind_address, "127.0.0.1:4200");
+        assert_eq!(spec.endpoints.candle_llama.as_deref(), Some("127.0.0.1:4200"));
+        assert_eq!(spec.endpoints.candle_whisper.as_deref(), Some("127.0.0.1:4200"));
+        assert_eq!(spec.endpoints.candle_diffusion.as_deref(), Some("127.0.0.1:4200"));
     }
 
     #[test]

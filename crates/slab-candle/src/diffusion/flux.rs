@@ -5,11 +5,11 @@ use candle_nn::VarBuilder;
 use candle_transformers::models::{clip, flux, t5};
 use tokenizers::Tokenizer;
 
-use crate::config::{
+use super::config::{
     CandleDiffusionLoadConfig, FluxModelKind, FluxWeightSource, GeneratedImage,
     ImageGenerationRequest,
 };
-use crate::error::CandleDiffusionError;
+use super::error::CandleDiffusionError;
 
 enum FluxTransformer {
     Normal(flux::model::Flux),
@@ -24,11 +24,14 @@ pub(crate) struct FluxPipeline {
     t5_tokenizer: Tokenizer,
     clip: clip::text_model::ClipTextTransformer,
     clip_tokenizer: Tokenizer,
+    device: Device,
 }
 
 impl FluxPipeline {
-    pub(crate) fn load(config: CandleDiffusionLoadConfig) -> Result<Self, CandleDiffusionError> {
-        let device = Device::Cpu;
+    pub(crate) fn load(
+        config: CandleDiffusionLoadConfig,
+        device: Device,
+    ) -> Result<Self, CandleDiffusionError> {
         let dtype = DType::F32;
         let root = model_root(&config.model_path);
         let transformer_path = flux_transformer_path(&config, &root);
@@ -149,6 +152,7 @@ impl FluxPipeline {
             t5_tokenizer,
             clip,
             clip_tokenizer,
+            device,
         })
     }
 
@@ -179,7 +183,7 @@ impl FluxPipeline {
             });
         }
 
-        let device = Device::Cpu;
+        let device = self.device.clone();
         device
             .set_seed(request.seed)
             .map_err(|error| CandleDiffusionError::inference(format!("seed RNG: {error}")))?;
@@ -366,18 +370,20 @@ fn tensor_to_image(image: Tensor) -> Result<GeneratedImage, CandleDiffusionError
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diffusion::{DiffusionPipelineKind, StableDiffusionVersion};
 
     #[test]
     fn flux_directory_layout_selects_schnell_weights() {
         let config = CandleDiffusionLoadConfig {
             model_path: PathBuf::from("flux"),
             vae_path: None,
+            device: None,
             text_encoder_path: None,
             text_encoder2_path: None,
             tokenizer_path: None,
             tokenizer2_path: None,
-            pipeline: crate::config::DiffusionPipelineKind::Flux,
-            sd_version: crate::config::StableDiffusionVersion::default(),
+            pipeline: DiffusionPipelineKind::Flux,
+            sd_version: StableDiffusionVersion::default(),
             flux_model: FluxModelKind::Schnell,
             flux_weight_source: FluxWeightSource::Safetensors,
             flux_t5_encoder_path: None,

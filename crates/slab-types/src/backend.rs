@@ -98,7 +98,15 @@ impl RuntimeBackendId {
     }
 
     pub const fn is_runtime_worker_backend(self) -> bool {
-        matches!(self, Self::GgmlLlama | Self::GgmlWhisper | Self::GgmlDiffusion)
+        matches!(
+            self,
+            Self::GgmlLlama
+                | Self::GgmlWhisper
+                | Self::GgmlDiffusion
+                | Self::CandleLlama
+                | Self::CandleWhisper
+                | Self::CandleDiffusion
+        )
     }
 }
 

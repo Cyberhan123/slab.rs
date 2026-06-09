@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use slab_types::RuntimeDevicePreference;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -33,6 +34,8 @@ pub struct CandleWhisperLoadConfig {
     pub model_path: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tokenizer_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<RuntimeDevicePreference>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_path: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -1,5 +1,3 @@
-pub(crate) use super::engine::CandleWhisperEngineError;
-
 use thiserror::Error;
 
 #[allow(dead_code)]

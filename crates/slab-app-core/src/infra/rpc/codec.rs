@@ -94,12 +94,14 @@ pub fn encode_model_load_request(spec: &RuntimeBackendLoadSpec) -> ModelLoadRpcR
                 model_path: Some(path_to_string(&config.model_path)),
                 tokenizer_path: opt_path_to_string(config.tokenizer_path.as_deref()),
                 seed: Some(config.seed),
+                device: config.device.map(String::from),
             })
         }
         RuntimeBackendLoadSpec::CandleWhisper(config) => {
             ModelLoadRpcRequest::CandleWhisper(pb::CandleWhisperLoadRequest {
                 model_path: Some(path_to_string(&config.model_path)),
                 tokenizer_path: opt_path_to_string(config.tokenizer_path.as_deref()),
+                device: config.device.map(String::from),
             })
         }
         RuntimeBackendLoadSpec::CandleDiffusion(config) => {
@@ -107,6 +109,7 @@ pub fn encode_model_load_request(spec: &RuntimeBackendLoadSpec) -> ModelLoadRpcR
                 model_path: Some(path_to_string(&config.model_path)),
                 vae_path: opt_path_to_string(config.vae_path.as_deref()),
                 sd_version: non_empty_string(Some(&config.sd_version)),
+                device: config.device.map(String::from),
             })
         }
         RuntimeBackendLoadSpec::Onnx(config) => {
@@ -136,4 +139,59 @@ fn opt_path_to_string(path: Option<&Path>) -> Option<String> {
 
 fn usize_to_u32(value: usize) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use slab_types::{
+        CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig,
+        RuntimeBackendLoadSpec, RuntimeDevicePreference,
+    };
+
+    use super::{ModelLoadRpcRequest, encode_model_load_request};
+
+    #[test]
+    fn encodes_candle_load_device_preferences() {
+        let llama = encode_model_load_request(&RuntimeBackendLoadSpec::CandleLlama(
+            CandleLlamaLoadConfig {
+                model_path: PathBuf::from("llama.gguf"),
+                tokenizer_path: None,
+                device: Some(RuntimeDevicePreference::Cuda { ordinal: 0 }),
+                seed: 42,
+            },
+        ));
+        let whisper = encode_model_load_request(&RuntimeBackendLoadSpec::CandleWhisper(
+            CandleWhisperLoadConfig {
+                model_path: PathBuf::from("whisper.bin"),
+                tokenizer_path: None,
+                device: Some(RuntimeDevicePreference::Metal { ordinal: 1 }),
+            },
+        ));
+        let diffusion = encode_model_load_request(&RuntimeBackendLoadSpec::CandleDiffusion(
+            CandleDiffusionLoadConfig {
+                model_path: PathBuf::from("sd"),
+                vae_path: None,
+                device: Some(RuntimeDevicePreference::Cpu),
+                sd_version: "sdxl".to_owned(),
+            },
+        ));
+
+        assert!(matches!(
+            llama,
+            ModelLoadRpcRequest::CandleLlama(request)
+                if request.device.as_deref() == Some("cuda:0")
+        ));
+        assert!(matches!(
+            whisper,
+            ModelLoadRpcRequest::CandleWhisper(request)
+                if request.device.as_deref() == Some("metal:1")
+        ));
+        assert!(matches!(
+            diffusion,
+            ModelLoadRpcRequest::CandleDiffusion(request)
+                if request.device.as_deref() == Some("cpu")
+        ));
+    }
 }

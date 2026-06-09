@@ -19,6 +19,7 @@ pub mod chat;
 pub mod common;
 mod defaults;
 pub mod desktop_api;
+pub mod device;
 pub mod error;
 pub mod load_config;
 pub mod plugin;
@@ -40,6 +41,7 @@ pub use desktop_api::{
     DESKTOP_DEV_ALLOWED_ORIGINS, desktop_api_bind, desktop_api_host, desktop_api_origin,
     desktop_api_port, desktop_dev_allowed_origins,
 };
+pub use device::RuntimeDevicePreference;
 pub use error::{SlabTypeError, ValidationError};
 pub use load_config::{
     CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig,

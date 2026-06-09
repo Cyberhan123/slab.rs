@@ -3,8 +3,8 @@ use slab_proto::slab::ipc::v1 as pb;
 use super::{
     CandleChatRequest, CandleChatResponse, CandleChatStreamChunk, CandleLlamaLoadRequest,
     CandleWhisperLoadRequest, CandleWhisperTranscribeRequest, CandleWhisperTranscribeResponse,
-    ProtoConversionError, decode_optional_path, encode_chat_metadata, encode_usage,
-    encode_whisper_transcription,
+    ProtoConversionError, decode_optional_device, decode_optional_path, encode_chat_metadata,
+    encode_usage, encode_whisper_transcription,
 };
 
 pub(crate) fn decode_candle_llama_load_request(
@@ -13,6 +13,7 @@ pub(crate) fn decode_candle_llama_load_request(
     Ok(CandleLlamaLoadRequest {
         model_path: decode_optional_path(request.model_path.as_ref()),
         tokenizer_path: decode_optional_path(request.tokenizer_path.as_ref()),
+        device: decode_optional_device(request.device.as_ref())?,
         seed: request.seed,
     })
 }
@@ -57,6 +58,7 @@ pub(crate) fn decode_candle_whisper_load_request(
     Ok(CandleWhisperLoadRequest {
         model_path: decode_optional_path(request.model_path.as_ref()),
         tokenizer_path: decode_optional_path(request.tokenizer_path.as_ref()),
+        device: decode_optional_device(request.device.as_ref())?,
     })
 }
 

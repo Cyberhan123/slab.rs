@@ -4,25 +4,27 @@ use candle_core::{DType, Device, IndexOp, Tensor};
 use candle_transformers::generation::LogitsProcessor;
 use tokenizers::Tokenizer;
 
-use crate::config::{
+use super::config::{
     CandleLlmLoadConfig, SamplingConfig, TextGenerationRequest, TextGenerationResponse,
-    TextGenerationUsage,
+    TextGenerationStreamChunk, TextGenerationUsage,
 };
-use crate::error::CandleLlmError;
-use crate::model::LoadedLlmModel;
-use crate::prompt::{apply_prompt_format, eos_candidates};
+use super::error::CandleLlmError;
+use super::model::LoadedLlmModel;
+use super::prompt::{apply_prompt_format, eos_candidates};
+use super::token_stream::TokenOutputStream;
+use crate::device::resolve_device;
 use crate::runtime::CandleRuntimeEngine;
-use crate::token_stream::TokenOutputStream;
 
 pub struct CandleLlmEngine {
     model: Option<LoadedLlmModel>,
     tokenizer: Option<Tokenizer>,
     config: Option<CandleLlmLoadConfig>,
+    device: Option<Device>,
 }
 
 impl CandleLlmEngine {
     pub fn new() -> Self {
-        Self { model: None, tokenizer: None, config: None }
+        Self { model: None, tokenizer: None, config: None, device: None }
     }
 
     fn resolve_tokenizer_path(
@@ -64,57 +66,36 @@ impl CandleLlmEngine {
         }
         request.sampling.validate()
     }
-}
 
-impl Default for CandleLlmEngine {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl CandleRuntimeEngine for CandleLlmEngine {
-    type Error = CandleLlmError;
-    type InferenceRequest = TextGenerationRequest;
-    type InferenceResponse = TextGenerationResponse;
-    type LoadConfig = CandleLlmLoadConfig;
-
-    fn load_model(&mut self, config: Self::LoadConfig) -> Result<(), Self::Error> {
-        let tokenizer_path =
-            Self::resolve_tokenizer_path(&config.model_path, config.tokenizer_path.clone())?;
-        let device = Device::Cpu;
-        let model = LoadedLlmModel::load(&config, &device, DType::F32)?;
-        let tokenizer = Tokenizer::from_file(&tokenizer_path).map_err(|error| {
-            CandleLlmError::LoadTokenizer {
-                tokenizer_path: tokenizer_path.display().to_string(),
-                message: error.to_string(),
-            }
-        })?;
-
-        self.model = Some(model);
-        self.tokenizer = Some(tokenizer);
-        self.config = Some(config);
-        Ok(())
-    }
-
-    fn unload_model(&mut self) {
-        self.model = None;
-        self.tokenizer = None;
-        self.config = None;
-    }
-
-    fn is_model_loaded(&self) -> bool {
-        self.model.is_some() && self.tokenizer.is_some() && self.config.is_some()
-    }
-
-    fn infer(
+    pub fn infer_stream<F>(
         &mut self,
-        request: Self::InferenceRequest,
-    ) -> Result<Self::InferenceResponse, Self::Error> {
+        request: TextGenerationRequest,
+        mut on_chunk: F,
+    ) -> Result<TextGenerationResponse, CandleLlmError>
+    where
+        F: FnMut(TextGenerationStreamChunk) -> bool,
+    {
+        let response = self.infer_with_stream(request, |token| {
+            on_chunk(TextGenerationStreamChunk::Token(token))
+        })?;
+        let _ = on_chunk(TextGenerationStreamChunk::Done(response.clone()));
+        Ok(response)
+    }
+
+    fn infer_with_stream<F>(
+        &mut self,
+        request: TextGenerationRequest,
+        mut on_token: F,
+    ) -> Result<TextGenerationResponse, CandleLlmError>
+    where
+        F: FnMut(String) -> bool,
+    {
         Self::validate_request(&request)?;
 
         let config = self.config.clone().ok_or(CandleLlmError::ModelNotLoaded)?;
         let tokenizer = self.tokenizer.as_ref().ok_or(CandleLlmError::ModelNotLoaded)?;
         let model = self.model.as_mut().ok_or(CandleLlmError::ModelNotLoaded)?;
+        let device = self.device.as_ref().ok_or(CandleLlmError::ModelNotLoaded)?;
         model.reset_cache();
 
         let prompt =
@@ -133,7 +114,6 @@ impl CandleRuntimeEngine for CandleLlmEngine {
         let eos_tokens = Self::eos_tokens(&output_stream, &config);
         let mut logits_processor =
             LogitsProcessor::from_sampling(config.seed, request.sampling.sampling());
-        let device = Device::Cpu;
         let mut text = String::new();
         let mut finish_reason = "length".to_owned();
         let mut generated = 0usize;
@@ -141,7 +121,7 @@ impl CandleRuntimeEngine for CandleLlmEngine {
         for index in 0..request.max_tokens {
             let context_size = if index == 0 { all_tokens.len() } else { 1 };
             let start_pos = all_tokens.len().saturating_sub(context_size);
-            let input = Tensor::new(&all_tokens[start_pos..], &device)
+            let input = Tensor::new(&all_tokens[start_pos..], device)
                 .and_then(|tensor| tensor.unsqueeze(0))
                 .map_err(|error| CandleLlmError::inference(format!("input tensor: {error}")))?;
             let logits = model
@@ -162,6 +142,10 @@ impl CandleRuntimeEngine for CandleLlmEngine {
             generated += 1;
             if let Some(piece) = output_stream.next_token(next_token)? {
                 text.push_str(&piece);
+                if !on_token(piece) {
+                    finish_reason = "stop".to_owned();
+                    break;
+                }
                 if request.stop_sequences.iter().any(|stop| text.ends_with(stop)) {
                     finish_reason = "stop".to_owned();
                     break;
@@ -171,6 +155,7 @@ impl CandleRuntimeEngine for CandleLlmEngine {
 
         if let Some(rest) = output_stream.decode_rest()? {
             text.push_str(&rest);
+            let _ = on_token(rest);
         }
 
         Ok(TextGenerationResponse {
@@ -182,6 +167,60 @@ impl CandleRuntimeEngine for CandleLlmEngine {
                 total_tokens: (prompt_tokens.len() + generated) as u32,
             }),
         })
+    }
+}
+
+impl Default for CandleLlmEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CandleRuntimeEngine for CandleLlmEngine {
+    type Error = CandleLlmError;
+    type InferenceRequest = TextGenerationRequest;
+    type InferenceResponse = TextGenerationResponse;
+    type LoadConfig = CandleLlmLoadConfig;
+
+    fn load_model(&mut self, config: Self::LoadConfig) -> Result<(), Self::Error> {
+        let tokenizer_path =
+            Self::resolve_tokenizer_path(&config.model_path, config.tokenizer_path.clone())?;
+        let device = resolve_device(config.device)
+            .map_err(|error| CandleLlmError::load_model(config.model_path.display(), error))?;
+        let model = LoadedLlmModel::load(&config, &device, DType::F32)?;
+        let tokenizer = Tokenizer::from_file(&tokenizer_path).map_err(|error| {
+            CandleLlmError::LoadTokenizer {
+                tokenizer_path: tokenizer_path.display().to_string(),
+                message: error.to_string(),
+            }
+        })?;
+
+        self.model = Some(model);
+        self.tokenizer = Some(tokenizer);
+        self.config = Some(config);
+        self.device = Some(device);
+        Ok(())
+    }
+
+    fn unload_model(&mut self) {
+        self.model = None;
+        self.tokenizer = None;
+        self.config = None;
+        self.device = None;
+    }
+
+    fn is_model_loaded(&self) -> bool {
+        self.model.is_some()
+            && self.tokenizer.is_some()
+            && self.config.is_some()
+            && self.device.is_some()
+    }
+
+    fn infer(
+        &mut self,
+        request: Self::InferenceRequest,
+    ) -> Result<Self::InferenceResponse, Self::Error> {
+        self.infer_with_stream(request, |_| true)
     }
 }
 

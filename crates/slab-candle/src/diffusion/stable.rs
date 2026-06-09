@@ -4,10 +4,10 @@ use candle_core::{D, DType, Device, IndexOp, Tensor};
 use candle_transformers::models::stable_diffusion;
 use tokenizers::Tokenizer;
 
-use crate::config::{
+use super::config::{
     CandleDiffusionLoadConfig, GeneratedImage, ImageGenerationRequest, StableDiffusionVersion,
 };
-use crate::error::CandleDiffusionError;
+use super::error::CandleDiffusionError;
 
 pub(crate) struct StableDiffusionPipeline {
     version: StableDiffusionVersion,
@@ -18,11 +18,14 @@ pub(crate) struct StableDiffusionPipeline {
     clip2: Option<stable_diffusion::clip::ClipTextTransformer>,
     tokenizer: Tokenizer,
     tokenizer2: Option<Tokenizer>,
+    device: Device,
 }
 
 impl StableDiffusionPipeline {
-    pub(crate) fn load(config: CandleDiffusionLoadConfig) -> Result<Self, CandleDiffusionError> {
-        let device = Device::Cpu;
+    pub(crate) fn load(
+        config: CandleDiffusionLoadConfig,
+        device: Device,
+    ) -> Result<Self, CandleDiffusionError> {
         let dtype = DType::F32;
         let root = model_root(&config.model_path);
         let sd_config = sd_config(config.sd_version, None, None)?;
@@ -93,6 +96,7 @@ impl StableDiffusionPipeline {
             clip2,
             tokenizer,
             tokenizer2,
+            device,
         })
     }
 
@@ -110,13 +114,13 @@ impl StableDiffusionPipeline {
             });
         }
 
-        let device = Device::Cpu;
+        let device = &self.device;
         let use_guidance = request.cfg_scale > 1.0;
         let text_embeddings = self.text_embeddings(
             request.prompt.trim(),
             &request.negative_prompt,
             use_guidance,
-            &device,
+            device,
         )?;
         let mut scheduler = self
             .sd_config
@@ -131,7 +135,7 @@ impl StableDiffusionPipeline {
             .init_image
             .as_ref()
             .map(|image| {
-                generated_image_to_tensor(image, request.width, request.height, &device, DType::F32)
+                generated_image_to_tensor(image, request.width, request.height, device, DType::F32)
             })
             .transpose()?;
         let init_latent_dist =
@@ -149,7 +153,7 @@ impl StableDiffusionPipeline {
             request,
             init_image.as_ref(),
             use_guidance,
-            &device,
+            device,
             DType::F32,
         )?;
         let mut latents = match init_latent_dist {
@@ -173,7 +177,7 @@ impl StableDiffusionPipeline {
             }
             None => {
                 let latents =
-                    Tensor::randn(0.0f32, 1.0f32, (1usize, 4, latent_h, latent_w), &device)
+                    Tensor::randn(0.0f32, 1.0f32, (1usize, 4, latent_h, latent_w), device)
                         .map_err(|error| {
                             CandleDiffusionError::inference(format!("noise tensor: {error}"))
                         })?;

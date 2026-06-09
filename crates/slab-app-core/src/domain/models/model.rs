@@ -71,16 +71,29 @@ pub enum ManagedModelBackendId {
     GgmlLlama,
     GgmlWhisper,
     GgmlDiffusion,
+    CandleLlama,
+    CandleWhisper,
+    CandleDiffusion,
 }
 
 impl ManagedModelBackendId {
-    pub const ALL: [Self; 3] = [Self::GgmlLlama, Self::GgmlWhisper, Self::GgmlDiffusion];
+    pub const ALL: [Self; 6] = [
+        Self::GgmlLlama,
+        Self::GgmlWhisper,
+        Self::GgmlDiffusion,
+        Self::CandleLlama,
+        Self::CandleWhisper,
+        Self::CandleDiffusion,
+    ];
 
     pub const fn as_runtime_backend_id(self) -> RuntimeBackendId {
         match self {
             Self::GgmlLlama => RuntimeBackendId::GgmlLlama,
             Self::GgmlWhisper => RuntimeBackendId::GgmlWhisper,
             Self::GgmlDiffusion => RuntimeBackendId::GgmlDiffusion,
+            Self::CandleLlama => RuntimeBackendId::CandleLlama,
+            Self::CandleWhisper => RuntimeBackendId::CandleWhisper,
+            Self::CandleDiffusion => RuntimeBackendId::CandleDiffusion,
         }
     }
 
@@ -128,6 +141,9 @@ impl TryFrom<RuntimeBackendId> for ManagedModelBackendId {
             RuntimeBackendId::GgmlLlama => Ok(Self::GgmlLlama),
             RuntimeBackendId::GgmlWhisper => Ok(Self::GgmlWhisper),
             RuntimeBackendId::GgmlDiffusion => Ok(Self::GgmlDiffusion),
+            RuntimeBackendId::CandleLlama => Ok(Self::CandleLlama),
+            RuntimeBackendId::CandleWhisper => Ok(Self::CandleWhisper),
+            RuntimeBackendId::CandleDiffusion => Ok(Self::CandleDiffusion),
             other => Err(format!("unsupported managed model backend id: {}", other.canonical_id())),
         }
     }
@@ -576,11 +592,17 @@ pub fn default_model_capabilities(
         {
             vec![Capability::AudioVad]
         }
-        (UnifiedModelKind::Local, Some(ManagedModelBackendId::GgmlWhisper)) => {
+        (
+            UnifiedModelKind::Local,
+            Some(ManagedModelBackendId::GgmlWhisper | ManagedModelBackendId::CandleWhisper),
+        ) => {
             vec![Capability::AudioTranscription]
         }
         (UnifiedModelKind::Local, Some(ManagedModelBackendId::GgmlDiffusion)) => {
             vec![Capability::ImageGeneration, Capability::VideoGeneration]
+        }
+        (UnifiedModelKind::Local, Some(ManagedModelBackendId::CandleDiffusion)) => {
+            vec![Capability::ImageGeneration]
         }
         _ => vec![Capability::TextGeneration, Capability::ChatGeneration],
     }
@@ -873,5 +895,21 @@ mod tests {
             &ModelSpec::default(),
         );
         assert_eq!(video_caps, vec![Capability::ImageGeneration, Capability::VideoGeneration]);
+
+        let candle_audio_caps = default_model_capabilities(
+            UnifiedModelKind::Local,
+            Some(ManagedModelBackendId::CandleWhisper),
+            "Whisper",
+            &ModelSpec::default(),
+        );
+        assert_eq!(candle_audio_caps, vec![Capability::AudioTranscription]);
+
+        let candle_image_caps = default_model_capabilities(
+            UnifiedModelKind::Local,
+            Some(ManagedModelBackendId::CandleDiffusion),
+            "Diffusion",
+            &ModelSpec::default(),
+        );
+        assert_eq!(candle_image_caps, vec![Capability::ImageGeneration]);
     }
 }

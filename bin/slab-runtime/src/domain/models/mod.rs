@@ -12,7 +12,9 @@ pub(crate) use contracts::{
     GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, GgmlWhisperLoadConfig,
     ImageGenerationRequest, ImageGenerationResponse, OnnxInferenceRequest, OnnxInferenceResponse,
     OnnxTensor, TextGenerationMetadata, TextGenerationOptions, TextGenerationResponse,
-    TextGenerationStreamEvent, TextGenerationUsage, TextPromptTokensDetails, TextStopMetadata,
+    TextGenerationStreamEvent, TextGenerationUsage,
 };
+#[cfg(feature = "ggml")]
+pub(crate) use contracts::{TextPromptTokensDetails, TextStopMetadata};
 pub(crate) use enabled_backends::RuntimeEnabledBackends;
 pub(crate) use task::{TaskCodec, TaskHandle};

@@ -4,10 +4,11 @@ use candle_core::{Device, Tensor};
 use candle_transformers::models::whisper::{self, Config, audio};
 use tokenizers::Tokenizer;
 
-use crate::config::{CandleWhisperLoadConfig, TranscriptionRequest, TranscriptionResponse};
-use crate::decoder::WhisperDecoder;
-use crate::error::CandleWhisperError;
-use crate::model::WhisperModel;
+use super::config::{CandleWhisperLoadConfig, TranscriptionRequest, TranscriptionResponse};
+use super::decoder::WhisperDecoder;
+use super::error::CandleWhisperError;
+use super::model::WhisperModel;
+use crate::device::resolve_device;
 use crate::runtime::CandleRuntimeEngine;
 
 pub struct CandleWhisperEngine {
@@ -15,11 +16,12 @@ pub struct CandleWhisperEngine {
     tokenizer: Option<Tokenizer>,
     config: Option<Config>,
     mel_filters: Option<Vec<f32>>,
+    device: Option<Device>,
 }
 
 impl CandleWhisperEngine {
     pub fn new() -> Self {
-        Self { model: None, tokenizer: None, config: None, mel_filters: None }
+        Self { model: None, tokenizer: None, config: None, mel_filters: None, device: None }
     }
 
     fn model_dir(model_path: &Path) -> &Path {
@@ -102,7 +104,8 @@ impl CandleRuntimeEngine for CandleWhisperEngine {
     type LoadConfig = CandleWhisperLoadConfig;
 
     fn load_model(&mut self, config: Self::LoadConfig) -> Result<(), Self::Error> {
-        let device = Device::Cpu;
+        let device = resolve_device(config.device)
+            .map_err(|error| CandleWhisperError::load_model(config.model_path.display(), error))?;
         let config_path = Self::config_path(&config.model_path, config.config_path);
         let model_config = Self::load_config(&config_path)?;
         let tokenizer_path = Self::tokenizer_path(&config.model_path, config.tokenizer_path);
@@ -125,6 +128,7 @@ impl CandleRuntimeEngine for CandleWhisperEngine {
         self.tokenizer = Some(tokenizer);
         self.config = Some(model_config);
         self.mel_filters = Some(mel_filters);
+        self.device = Some(device);
         Ok(())
     }
 
@@ -133,10 +137,14 @@ impl CandleRuntimeEngine for CandleWhisperEngine {
         self.tokenizer = None;
         self.config = None;
         self.mel_filters = None;
+        self.device = None;
     }
 
     fn is_model_loaded(&self) -> bool {
-        self.model.is_some() && self.tokenizer.is_some() && self.config.is_some()
+        self.model.is_some()
+            && self.tokenizer.is_some()
+            && self.config.is_some()
+            && self.device.is_some()
     }
 
     fn infer(
@@ -152,11 +160,11 @@ impl CandleRuntimeEngine for CandleWhisperEngine {
         let mel_filters = self.mel_filters.clone().ok_or(CandleWhisperError::ModelNotLoaded)?;
         let tokenizer = self.tokenizer.as_ref().ok_or(CandleWhisperError::ModelNotLoaded)?.clone();
         let model = self.model.as_mut().ok_or(CandleWhisperError::ModelNotLoaded)?;
+        let device = self.device.as_ref().ok_or(CandleWhisperError::ModelNotLoaded)?;
         let mel_data = audio::pcm_to_mel(&config, &request.samples, &mel_filters);
         let n_mels = config.num_mel_bins;
         let n_frames = mel_data.len() / n_mels;
-        let device = Device::Cpu;
-        let mel = Tensor::from_vec(mel_data, (1usize, n_mels, n_frames), &device)
+        let mel = Tensor::from_vec(mel_data, (1usize, n_mels, n_frames), device)
             .map_err(|error| CandleWhisperError::inference(format!("mel tensor: {error}")))?;
         let decoder = WhisperDecoder::new(tokenizer, model, request.timestamps)?;
         let (text, detected_language, segments) = decoder.decode(model, &mel, &request)?;

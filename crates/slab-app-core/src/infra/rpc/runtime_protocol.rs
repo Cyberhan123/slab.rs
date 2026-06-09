@@ -22,12 +22,7 @@ const TOKEN_TEXT_METADATA_KEY: &str = "token_text";
 const TOKEN_KIND_METADATA_KEY: &str = "token_kind";
 
 pub fn encode_chat_request(request: &RuntimeTextGenerationRequest) -> pb::GgmlLlamaChatRequest {
-    let prompt = match request.system_prompt.as_deref() {
-        Some(system_prompt) if !system_prompt.is_empty() => {
-            format!("{system_prompt}\n\n{}", request.prompt)
-        }
-        _ => request.prompt.clone(),
-    };
+    let prompt = merged_prompt(request);
 
     pb::GgmlLlamaChatRequest {
         prompt: Some(prompt),
@@ -50,7 +45,30 @@ pub fn encode_chat_request(request: &RuntimeTextGenerationRequest) -> pb::GgmlLl
     }
 }
 
+pub fn encode_candle_chat_request(request: &RuntimeTextGenerationRequest) -> pb::CandleChatRequest {
+    pb::CandleChatRequest {
+        prompt: Some(merged_prompt(request)),
+        max_tokens: request.max_tokens,
+        session_key: request.session_key.clone(),
+    }
+}
+
 pub fn decode_chat_response(response: &pb::GgmlLlamaChatResponse) -> RuntimeTextGenerationResponse {
+    let metadata =
+        decode_chat_metadata(response.metadata.as_ref(), response.reasoning_content.as_deref());
+
+    RuntimeTextGenerationResponse {
+        text: response.text.clone().unwrap_or_default(),
+        finish_reason: response.finish_reason.clone(),
+        tokens_used: response.tokens_used,
+        usage: response.usage.as_ref().map(decode_usage),
+        metadata,
+    }
+}
+
+pub fn decode_candle_chat_response(
+    response: &pb::CandleChatResponse,
+) -> RuntimeTextGenerationResponse {
     let metadata =
         decode_chat_metadata(response.metadata.as_ref(), response.reasoning_content.as_deref());
 
@@ -65,6 +83,21 @@ pub fn decode_chat_response(response: &pb::GgmlLlamaChatResponse) -> RuntimeText
 
 pub fn decode_chat_stream_chunk(
     chunk: &pb::GgmlLlamaChatStreamChunk,
+) -> RuntimeTextGenerationChunk {
+    let metadata =
+        decode_chat_metadata(chunk.metadata.as_ref(), chunk.reasoning_content.as_deref());
+
+    RuntimeTextGenerationChunk {
+        delta: chunk.delta.clone().unwrap_or_default(),
+        done: chunk.done.unwrap_or_default(),
+        finish_reason: chunk.finish_reason.clone(),
+        usage: chunk.usage.as_ref().map(decode_usage),
+        metadata,
+    }
+}
+
+pub fn decode_candle_chat_stream_chunk(
+    chunk: &pb::CandleChatStreamChunk,
 ) -> RuntimeTextGenerationChunk {
     let metadata =
         decode_chat_metadata(chunk.metadata.as_ref(), chunk.reasoning_content.as_deref());
@@ -100,6 +133,21 @@ pub fn encode_diffusion_image_request(
     }
 }
 
+pub fn encode_candle_diffusion_image_request(
+    request: &RuntimeDiffusionImageRequest,
+) -> pb::CandleDiffusionGenerateImageRequest {
+    pb::CandleDiffusionGenerateImageRequest {
+        prompt: Some(request.prompt.clone()),
+        negative_prompt: non_empty_string(request.negative_prompt.as_deref()),
+        width: Some(request.width),
+        height: Some(request.height),
+        batch_count: request.count,
+        sample_steps: request.steps,
+        guidance_scale: request.guidance.or(request.cfg_scale),
+        seed: request.seed,
+    }
+}
+
 pub fn encode_diffusion_video_request(
     request: &RuntimeDiffusionVideoRequest,
 ) -> pb::GgmlDiffusionGenerateVideoRequest {
@@ -123,6 +171,25 @@ pub fn encode_diffusion_video_request(
 
 pub fn decode_diffusion_image_response(
     response: &pb::GgmlDiffusionGenerateImageResponse,
+) -> Result<RuntimeDiffusionImageResult, RpcCodecError> {
+    let images = response
+        .images
+        .iter()
+        .map(|image| {
+            Ok(RuntimeGeneratedImage {
+                bytes: raw_image_to_png_bytes(image)?,
+                width: required_u32(image.width, "images[].width")?,
+                height: required_u32(image.height, "images[].height")?,
+                channels: required_u8(image.channels, "images[].channels")?,
+            })
+        })
+        .collect::<Result<Vec<_>, RpcCodecError>>()?;
+
+    Ok(RuntimeDiffusionImageResult { images, metadata: RuntimeJsonOptions::default() })
+}
+
+pub fn decode_candle_diffusion_image_response(
+    response: &pb::CandleDiffusionGenerateImageResponse,
 ) -> Result<RuntimeDiffusionImageResult, RpcCodecError> {
     let images = response
         .images
@@ -186,6 +253,33 @@ pub fn decode_whisper_transcription_response(
     }
 }
 
+pub fn decode_candle_whisper_transcription_response(
+    response: &pb::CandleWhisperTranscribeResponse,
+) -> RuntimeTranscriptionResult {
+    RuntimeTranscriptionResult {
+        text: response
+            .transcription
+            .as_ref()
+            .and_then(|transcription| transcription.raw_text.clone())
+            .unwrap_or_default(),
+        segments: response
+            .transcription
+            .as_ref()
+            .map(|transcription| {
+                transcription
+                    .segments
+                    .iter()
+                    .map(|segment| TimedTextSegment {
+                        start_ms: segment.start_ms,
+                        end_ms: segment.end_ms,
+                        text: segment.text.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+    }
+}
+
 pub fn decode_model_status_response(
     response: &pb::ModelStatusResponse,
 ) -> Result<RuntimeBackendStatus, RpcCodecError> {
@@ -210,6 +304,15 @@ fn decode_usage(usage: &pb::Usage) -> RuntimeTextGenerationUsage {
             cached_tokens: usage.prompt_cached_tokens.unwrap_or_default(),
         },
         estimated: usage.estimated.unwrap_or_default(),
+    }
+}
+
+fn merged_prompt(request: &RuntimeTextGenerationRequest) -> String {
+    match request.system_prompt.as_deref() {
+        Some(system_prompt) if !system_prompt.is_empty() => {
+            format!("{system_prompt}\n\n{}", request.prompt)
+        }
+        _ => request.prompt.clone(),
     }
 }
 

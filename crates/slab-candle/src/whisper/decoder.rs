@@ -4,9 +4,9 @@ use candle_transformers::generation::{LogitsProcessor, Sampling};
 use candle_transformers::models::whisper;
 use tokenizers::Tokenizer;
 
-use crate::config::{TranscriptionRequest, TranscriptionSegment, WhisperTask};
-use crate::error::CandleWhisperError;
-use crate::model::WhisperModel;
+use super::config::{TranscriptionRequest, TranscriptionSegment, WhisperTask};
+use super::error::CandleWhisperError;
+use super::model::WhisperModel;
 
 const LANGUAGE_CODES: [&str; 99] = [
     "en", "zh", "de", "es", "ru", "ko", "fr", "ja", "pt", "tr", "pl", "ca", "nl", "ar", "sv", "it",

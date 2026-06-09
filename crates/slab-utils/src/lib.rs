@@ -1,6 +1,7 @@
 pub mod app_home;
 pub mod cab;
 pub mod cargo_bin;
+pub mod chat_template;
 pub mod fs;
 pub mod fuzzy_match;
 pub mod hash;
@@ -14,4 +15,3 @@ pub mod string;
 pub mod time;
 pub mod tracing;
 pub mod uds;
-pub mod chat_template;

@@ -10,7 +10,6 @@ use futures::StreamExt;
 use futures::stream::{self, BoxStream};
 use serde::Serialize;
 use serde_json::Value;
-use slab_types::RuntimeBackendId;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -27,7 +26,6 @@ use crate::error::AppCoreError;
 use crate::error::AppCoreErrorData;
 use crate::infra::db::{ChatMessage, ChatStore};
 
-const LLAMA_BACKEND_ID: RuntimeBackendId = RuntimeBackendId::GgmlLlama;
 const CLOUD_MODEL_ID_PREFIX: &str = "cloud";
 const DEFAULT_COMPLETION_MAX_TOKENS: u32 = 512;
 const REASONING_CONTENT_METADATA_KEY: &str = "reasoning_content";

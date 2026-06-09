@@ -17,12 +17,13 @@ use crate::domain::ports::{
 use crate::domain::services::media_task::{
     parse_json_payload, parse_json_payload_optional, serialize_json_payload,
 };
+use crate::domain::services::model;
 use crate::error::AppCoreError;
 use crate::infra::db::{
     AudioTranscriptionTaskViewRecord, MediaTaskStore, NewAudioTranscriptionTaskRecord, TaskRecord,
 };
 
-const AUDIO_BACKEND_ID: &str = "ggml.whisper";
+const DEFAULT_AUDIO_BACKEND_ID: RuntimeBackendId = RuntimeBackendId::GgmlWhisper;
 
 #[derive(Clone)]
 pub struct AudioService {
@@ -40,6 +41,13 @@ impl AudioService {
     ) -> Result<AcceptedOperation, AppCoreError> {
         let vad = build_vad_request(req.vad.as_ref())?;
         let decode = build_decode_request(req.decode.as_ref())?;
+        let backend_id = model::resolve_worker_model_backend_or_default(
+            &self.state,
+            req.model_id.as_deref(),
+            DEFAULT_AUDIO_BACKEND_ID,
+        )
+        .await?;
+        ensure_audio_backend(backend_id)?;
         let vad_enabled = vad.is_some();
         let decode_configured = decode.is_some();
         debug!(
@@ -49,13 +57,15 @@ impl AudioService {
             "transcription request"
         );
 
-        if !self.state.runtime().backend_available(RuntimeBackendId::GgmlWhisper) {
-            return Err(AppCoreError::BackendNotReady(
-                "whisper gRPC endpoint is not configured".into(),
-            ));
+        if !self.state.runtime().backend_available(backend_id) {
+            return Err(AppCoreError::BackendNotReady(format!(
+                "{} gRPC endpoint is not configured",
+                backend_id.canonical_id()
+            )));
         }
 
         let runtime_request = RuntimeTranscriptionRequest {
+            backend_id: Some(backend_id),
             path: req.path.clone(),
             language: req.language.clone(),
             prompt: req.prompt.clone(),
@@ -94,7 +104,7 @@ impl AudioService {
                 },
                 NewAudioTranscriptionTaskRecord {
                     task_id: operation_id.clone(),
-                    backend_id: AUDIO_BACKEND_ID.to_owned(),
+                    backend_id: backend_id.canonical_id().to_owned(),
                     model_id: req.model_id.clone(),
                     source_path: req.path.clone(),
                     language: req.language.clone(),
@@ -116,13 +126,10 @@ impl AudioService {
             .clone()
             .spawn_existing_operation(operation_id.clone(), move |operation| async move {
                 let operation_id = operation.id().to_owned();
-                let _usage_guard = match model_auto_unload
-                    .acquire_for_inference(RuntimeBackendId::GgmlWhisper)
-                    .await
-                {
+                let _usage_guard = match model_auto_unload.acquire_for_inference(backend_id).await {
                     Ok(guard) => guard,
                     Err(error) => {
-                        let msg = format!("whisper backend not ready: {error}");
+                        let msg = format!("{} backend not ready: {error}", backend_id.canonical_id());
                         if let Err(db_e) = operation.mark_failed(&msg).await {
                             warn!(task_id = %operation_id, error = %db_e, "failed to update auto-reload failure");
                         }
@@ -202,6 +209,16 @@ impl AudioService {
                 AppCoreError::NotFound(format!("audio transcription task {task_id} not found"))
             })?;
         Ok(map_audio_view(row))
+    }
+}
+
+fn ensure_audio_backend(backend_id: RuntimeBackendId) -> Result<(), AppCoreError> {
+    match backend_id {
+        RuntimeBackendId::GgmlWhisper | RuntimeBackendId::CandleWhisper => Ok(()),
+        other => Err(AppCoreError::BadRequest(format!(
+            "backend '{}' does not support audio transcription",
+            other.canonical_id()
+        ))),
     }
 }
 

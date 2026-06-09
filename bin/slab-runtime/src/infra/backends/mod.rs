@@ -15,9 +15,13 @@ pub(crate) mod onnx;
 #[cfg_attr(not(any(feature = "ggml", feature = "candle", feature = "onnx")), allow(dead_code))]
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RuntimeDriversConfig {
+    #[cfg_attr(not(feature = "ggml"), allow(dead_code))]
     pub llama_lib_dir: Option<PathBuf>,
+    #[cfg_attr(not(feature = "ggml"), allow(dead_code))]
     pub whisper_lib_dir: Option<PathBuf>,
+    #[cfg_attr(not(feature = "ggml"), allow(dead_code))]
     pub diffusion_lib_dir: Option<PathBuf>,
+    #[cfg_attr(not(feature = "onnx"), allow(dead_code))]
     pub onnx_enabled: bool,
     pub enable_candle_llama: bool,
     pub enable_candle_whisper: bool,

@@ -118,10 +118,10 @@ pub struct RuntimeSupervisorStatus {
 
 impl RuntimeSupervisorStatus {
     pub fn from_launch_spec(spec: &ResolvedLaunchSpec) -> Self {
-        let managed: HashSet<_> = spec.children.iter().map(|child| child.backend).collect();
+        let managed: HashSet<_> = spec.children.iter().flat_map(child_service_backends).collect();
         let mut states = HashMap::new();
 
-        for backend in RuntimeBackendId::ALL {
+        for backend in runtime_status_backends(spec) {
             let status = if managed.contains(&backend) {
                 RuntimeBackendRuntimeStatus::Restarting
             } else if spec.endpoints.backend_endpoint(backend).is_some() {
@@ -171,6 +171,12 @@ impl RuntimeSupervisorStatus {
         entry.last_error = None;
     }
 
+    fn mark_ready_all(&self, backends: &[RuntimeBackendId], restart_attempts: usize) {
+        for backend in backends {
+            self.mark_ready(*backend, restart_attempts);
+        }
+    }
+
     fn mark_disabled(&self, backend: RuntimeBackendId) {
         let mut guard = self.inner.lock().unwrap_or_else(|error| error.into_inner());
         let entry = guard.entry(backend).or_insert_with(|| {
@@ -178,6 +184,12 @@ impl RuntimeSupervisorStatus {
         });
         entry.status = RuntimeBackendRuntimeStatus::Disabled;
         entry.last_error = None;
+    }
+
+    fn mark_disabled_all(&self, backends: &[RuntimeBackendId]) {
+        for backend in backends {
+            self.mark_disabled(*backend);
+        }
     }
 
     fn mark_restarting(&self, backend: RuntimeBackendId, restart_attempts: usize) {
@@ -188,6 +200,12 @@ impl RuntimeSupervisorStatus {
         entry.status = RuntimeBackendRuntimeStatus::Restarting;
         entry.restart_attempts = restart_attempts;
         entry.last_error = None;
+    }
+
+    fn mark_restarting_all(&self, backends: &[RuntimeBackendId], restart_attempts: usize) {
+        for backend in backends {
+            self.mark_restarting(*backend, restart_attempts);
+        }
     }
 
     fn mark_failure(
@@ -209,6 +227,58 @@ impl RuntimeSupervisorStatus {
         entry.last_error = Some(error);
         entry.last_unexpected_exit = Some(unexpected_exit);
     }
+
+    fn mark_failure_all(
+        &self,
+        backends: &[RuntimeBackendId],
+        status: RuntimeBackendRuntimeStatus,
+        consecutive_failures: usize,
+        restart_attempts: usize,
+        error: String,
+        unexpected_exit: UnexpectedRuntimeExit,
+    ) {
+        for backend in backends {
+            let mut exit = unexpected_exit.clone();
+            exit.backend = *backend;
+            self.mark_failure(
+                *backend,
+                status,
+                consecutive_failures,
+                restart_attempts,
+                error.clone(),
+                exit,
+            );
+        }
+    }
+}
+
+fn child_service_backends(child: &ResolvedRuntimeChildSpec) -> Vec<RuntimeBackendId> {
+    if child.service_backends.is_empty() {
+        vec![child.backend]
+    } else {
+        child.service_backends.clone()
+    }
+}
+
+fn runtime_status_backends(spec: &ResolvedLaunchSpec) -> Vec<RuntimeBackendId> {
+    let mut backends = RuntimeBackendId::ALL.to_vec();
+    for child in &spec.children {
+        for backend in child_service_backends(child) {
+            if !backends.contains(&backend) {
+                backends.push(backend);
+            }
+        }
+    }
+    for backend in [
+        RuntimeBackendId::CandleLlama,
+        RuntimeBackendId::CandleWhisper,
+        RuntimeBackendId::CandleDiffusion,
+    ] {
+        if spec.endpoints.backend_endpoint(backend).is_some() && !backends.contains(&backend) {
+            backends.push(backend);
+        }
+    }
+    backends
 }
 
 #[derive(Debug, Clone)]
@@ -291,10 +361,9 @@ pub struct RuntimeSupervisorControlHandle {
 
 impl RuntimeSupervisorControlHandle {
     pub fn managed_backends(&self) -> Vec<RuntimeBackendId> {
-        RuntimeBackendId::ALL
-            .into_iter()
-            .filter(|backend| self.senders.contains_key(backend))
-            .collect()
+        let mut backends = self.senders.keys().copied().collect::<Vec<_>>();
+        backends.sort_by_key(|backend| backend.canonical_id());
+        backends
     }
 
     pub fn restart_backend(&self, backend: RuntimeBackendId) -> Result<(), AppCoreError> {
@@ -363,7 +432,8 @@ impl ManagedRuntimeSupervisor {
         for child_spec in &launch_spec.children {
             match spawner.spawn_child(child_spec).await {
                 Ok(handle) => {
-                    status.mark_ready(child_spec.backend, 0);
+                    let service_backends = child_service_backends(child_spec);
+                    status.mark_ready_all(&service_backends, 0);
                     info!(
                         backend = child_spec.backend.canonical_id(),
                         bind_address = %child_spec.grpc_bind_address,
@@ -395,7 +465,9 @@ impl ManagedRuntimeSupervisor {
         let mut command_senders = HashMap::new();
         for (child_spec, handle) in started_children {
             let (command_tx, command_rx) = mpsc::unbounded_channel();
-            command_senders.insert(child_spec.backend, command_tx);
+            for backend in child_service_backends(&child_spec) {
+                command_senders.insert(backend, command_tx.clone());
+            }
             tasks.push(tokio::spawn(supervise_backend(
                 child_spec,
                 handle,
@@ -455,7 +527,7 @@ impl ManagedRuntimeSupervisor {
         }
 
         for child_spec in &self.launch_spec.children {
-            self.status.mark_disabled(child_spec.backend);
+            self.status.mark_disabled_all(&child_service_backends(child_spec));
         }
     }
 }
@@ -479,6 +551,7 @@ async fn supervise_backend(
     options: RuntimeSupervisorOptions,
 ) {
     let backend = child_spec.backend;
+    let service_backends = child_service_backends(&child_spec);
     let bind_address = child_spec.grpc_bind_address.clone();
     let mut consecutive_failures = 0usize;
     let mut restart_attempts = 0usize;
@@ -495,7 +568,7 @@ async fn supervise_backend(
             command = command_rx.recv() => {
                 match command {
                     Some(RuntimeSupervisorCommand::ControlledRestart) => {
-                        status.mark_restarting(backend, restart_attempts);
+                        status.mark_restarting_all(&service_backends, restart_attempts);
                         info!(
                             backend = backend.canonical_id(),
                             bind_address = %bind_address,
@@ -548,8 +621,8 @@ async fn supervise_backend(
                 let transition_status = options.status_for_failures(consecutive_failures);
                 let exit_detail = exit.description();
 
-                status.mark_failure(
-                    backend,
+                status.mark_failure_all(
+                    &service_backends,
                     transition_status,
                     consecutive_failures,
                     restart_attempts,
@@ -605,6 +678,7 @@ async fn restart_child_with_retries(
     initial_delay: Duration,
 ) -> Option<Box<dyn RuntimeChildHandle>> {
     let backend = child_spec.backend;
+    let service_backends = child_service_backends(child_spec);
     let mut retry_delay = initial_delay;
 
     loop {
@@ -624,7 +698,7 @@ async fn restart_child_with_retries(
         match spawner.spawn_child(child_spec).await {
             Ok(new_handle) => {
                 *restart_attempts = (*restart_attempts).saturating_add(1);
-                status.mark_ready(backend, *restart_attempts);
+                status.mark_ready_all(&service_backends, *restart_attempts);
                 info!(
                     backend = backend.canonical_id(),
                     bind_address = %bind_address,
@@ -640,8 +714,8 @@ async fn restart_child_with_retries(
                 retry_delay = options.restart_delay(*consecutive_failures);
                 let transition_status = options.status_for_failures(*consecutive_failures);
                 let error_text = error.to_string();
-                status.mark_failure(
-                    backend,
+                status.mark_failure_all(
+                    &service_backends,
                     transition_status,
                     *consecutive_failures,
                     *restart_attempts,
@@ -945,6 +1019,7 @@ mod tests {
     fn child_spec(backend: RuntimeBackendId, bind_address: &str) -> ResolvedRuntimeChildSpec {
         ResolvedRuntimeChildSpec {
             backend,
+            service_backends: Vec::new(),
             grpc_bind_address: bind_address.to_owned(),
             transport: slab_config::RuntimeTransportMode::Http,
             queue_capacity: 64,
@@ -953,6 +1028,26 @@ mod tests {
             log_level: None,
             log_json: Some(false),
             log_file: format!("C:/runtime/logs/{}.log", backend.canonical_id()).into(),
+            shutdown_on_stdin_close: true,
+        }
+    }
+
+    fn candle_child_spec(bind_address: &str) -> ResolvedRuntimeChildSpec {
+        ResolvedRuntimeChildSpec {
+            backend: RuntimeBackendId::CandleLlama,
+            service_backends: vec![
+                RuntimeBackendId::CandleLlama,
+                RuntimeBackendId::CandleWhisper,
+                RuntimeBackendId::CandleDiffusion,
+            ],
+            grpc_bind_address: bind_address.to_owned(),
+            transport: slab_config::RuntimeTransportMode::Http,
+            queue_capacity: 64,
+            backend_capacity: 4,
+            lib_dir: None,
+            log_level: None,
+            log_json: Some(false),
+            log_file: "C:/runtime/logs/candle.log".into(),
             shutdown_on_stdin_close: true,
         }
     }
@@ -1003,6 +1098,51 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(llama.graceful_shutdowns.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn candle_child_marks_all_service_backends_ready_and_restarts_together() {
+        let spawner = FakeSpawner::default();
+        let first = FakeChildControl::new();
+        let second = FakeChildControl::new();
+        spawner.push_success(RuntimeBackendId::CandleLlama, Arc::clone(&first));
+        spawner.push_success(RuntimeBackendId::CandleLlama, Arc::clone(&second));
+
+        let supervisor = ManagedRuntimeSupervisor::start(
+            launch_spec(vec![candle_child_spec("127.0.0.1:50054")]),
+            Arc::new(spawner.clone()),
+            test_options(),
+        )
+        .await
+        .unwrap();
+
+        for backend in [
+            RuntimeBackendId::CandleLlama,
+            RuntimeBackendId::CandleWhisper,
+            RuntimeBackendId::CandleDiffusion,
+        ] {
+            assert_eq!(
+                supervisor.status_registry().status(backend),
+                RuntimeBackendRuntimeStatus::Ready
+            );
+        }
+
+        supervisor.control_handle().restart_backend(RuntimeBackendId::CandleDiffusion).unwrap();
+        yield_until(|| first.graceful_shutdowns.load(Ordering::SeqCst) == 1).await;
+        yield_until(|| spawner.spawn_count() == 2).await;
+
+        for backend in [
+            RuntimeBackendId::CandleLlama,
+            RuntimeBackendId::CandleWhisper,
+            RuntimeBackendId::CandleDiffusion,
+        ] {
+            assert_eq!(
+                supervisor.status_registry().status(backend),
+                RuntimeBackendRuntimeStatus::Ready
+            );
+        }
+
+        supervisor.shutdown().await;
     }
 
     #[tokio::test(start_paused = true)]

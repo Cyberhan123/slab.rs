@@ -32,7 +32,7 @@
 //! # }
 //! ```
 
-use minijinja::{context, Environment};
+use minijinja::{Environment, context};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -45,10 +45,7 @@ pub struct Message {
 
 impl Message {
     pub fn new(role: impl Into<String>, content: impl Into<String>) -> Self {
-        Self {
-            role: role.into(),
-            content: content.into(),
-        }
+        Self { role: role.into(), content: content.into() }
     }
 
     pub fn system(content: impl Into<String>) -> Self {
@@ -79,17 +76,11 @@ pub struct ChatTemplateOptions {
 
 impl ChatTemplateOptions {
     pub fn for_generation() -> Self {
-        Self {
-            add_generation_prompt: true,
-            ..Default::default()
-        }
+        Self { add_generation_prompt: true, ..Default::default() }
     }
 
     pub fn for_training() -> Self {
-        Self {
-            add_generation_prompt: false,
-            ..Default::default()
-        }
+        Self { add_generation_prompt: false, ..Default::default() }
     }
 
     pub fn with_thinking(mut self) -> Self {
@@ -167,20 +158,13 @@ impl ChatTemplate {
         let mut env = Environment::new();
         // Add the raise_exception function that HF templates use
         env.add_function("raise_exception", |msg: String| -> Result<String, _> {
-            Err(minijinja::Error::new(
-                minijinja::ErrorKind::InvalidOperation,
-                msg,
-            ))
+            Err(minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, msg))
         });
 
         env.add_template_owned("chat".to_string(), template.into())
             .map_err(|e| ChatTemplateError::TemplateError(e.to_string()))?;
 
-        Ok(Self {
-            env,
-            bos_token: bos_token.into(),
-            eos_token: eos_token.into(),
-        })
+        Ok(Self { env, bos_token: bos_token.into(), eos_token: eos_token.into() })
     }
 
     /// Load chat template from a tokenizer_config.json file
@@ -210,14 +194,8 @@ impl ChatTemplate {
             None => return Err(ChatTemplateError::NoTemplate),
         };
 
-        let bos = config
-            .bos_token
-            .map(|t| t.as_str().to_string())
-            .unwrap_or_default();
-        let eos = config
-            .eos_token
-            .map(|t| t.as_str().to_string())
-            .unwrap_or_default();
+        let bos = config.bos_token.map(|t| t.as_str().to_string()).unwrap_or_default();
+        let eos = config.eos_token.map(|t| t.as_str().to_string()).unwrap_or_default();
 
         Self::new(template, bos, eos)
     }
@@ -378,11 +356,7 @@ impl Conversation {
 
     /// Create without a system prompt
     pub fn without_system(template: ChatTemplate) -> Self {
-        Self {
-            messages: Vec::new(),
-            template,
-            options: ChatTemplateOptions::for_generation(),
-        }
+        Self { messages: Vec::new(), template, options: ChatTemplateOptions::for_generation() }
     }
 
     /// Set options (e.g., enable thinking mode)
@@ -427,8 +401,7 @@ impl Conversation {
 
     /// Format entire conversation for display (no generation prompt)
     pub fn format_history(&self) -> Result<String, ChatTemplateError> {
-        self.template
-            .apply(&self.messages, &ChatTemplateOptions::for_training())
+        self.template.apply(&self.messages, &ChatTemplateOptions::for_training())
     }
 }
 
@@ -493,10 +466,7 @@ mod tests {
         let messages = vec![Message::user("Think about this")];
 
         let result = template
-            .apply(
-                &messages,
-                &ChatTemplateOptions::for_generation().with_thinking(),
-            )
+            .apply(&messages, &ChatTemplateOptions::for_generation().with_thinking())
             .unwrap();
 
         assert!(result.contains("<think>"));

@@ -1,12 +1,15 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use slab_types::RuntimeDevicePreference;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct CandleLlamaLoadConfig {
     pub model_path: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tokenizer_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<RuntimeDevicePreference>,
     #[serde(default)]
     pub seed: u64,
 }
@@ -16,6 +19,8 @@ pub(crate) struct CandleWhisperLoadConfig {
     pub model_path: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tokenizer_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<RuntimeDevicePreference>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -23,6 +28,8 @@ pub(crate) struct CandleDiffusionLoadConfig {
     pub model_path: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vae_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<RuntimeDevicePreference>,
     #[serde(default = "default_candle_sd_version")]
     pub sd_version: String,
 }

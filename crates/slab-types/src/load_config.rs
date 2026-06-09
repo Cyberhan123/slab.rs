@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{GbnfAssetRef, TemplateAssetRef, defaults};
+use crate::{GbnfAssetRef, RuntimeDevicePreference, TemplateAssetRef, defaults};
 
 /// Typed `model.load` payload for the `ggml.llama` backend.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -78,6 +78,8 @@ pub struct CandleLlamaLoadConfig {
     pub model_path: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tokenizer_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<RuntimeDevicePreference>,
     #[serde(default)]
     pub seed: u64,
 }
@@ -88,6 +90,8 @@ pub struct CandleWhisperLoadConfig {
     pub model_path: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tokenizer_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<RuntimeDevicePreference>,
 }
 
 /// Typed `model.load` payload for the `candle.diffusion` backend.
@@ -96,6 +100,8 @@ pub struct CandleDiffusionLoadConfig {
     pub model_path: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vae_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<RuntimeDevicePreference>,
     #[serde(default = "default_candle_sd_version")]
     pub sd_version: String,
 }

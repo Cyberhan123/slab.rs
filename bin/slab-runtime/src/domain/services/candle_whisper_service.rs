@@ -24,6 +24,7 @@ impl CandleWhisperService {
         let load_payload = CandleWhisperLoadConfig {
             model_path: model_path.clone(),
             tokenizer_path: request.tokenizer_path,
+            device: request.device,
         };
 
         Ok(Self {

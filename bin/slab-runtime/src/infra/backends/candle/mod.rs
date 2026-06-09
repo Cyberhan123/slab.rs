@@ -2,22 +2,23 @@ pub mod diffusion;
 pub mod llama;
 pub mod whisper;
 
+use slab_candle::diffusion::CandleDiffusionError;
+use slab_candle::llm::CandleLlmError;
+use slab_candle::whisper::CandleWhisperError;
 use slab_runtime_core::CoreError;
 use slab_runtime_core::backend::ResourceManager;
 use thiserror::Error;
 
-pub use slab_runtime_core::CoreError as EngineError;
-
 #[derive(Debug, Error)]
 pub enum CandleEngineError {
     #[error("candle/llama/error {0}")]
-    Llama(#[from] llama::CandleLlamaEngineError),
+    Llama(#[from] CandleLlmError),
 
     #[error("candle/whisper/error {0}")]
-    Whisper(#[from] whisper::CandleWhisperEngineError),
+    Whisper(#[from] CandleWhisperError),
 
     #[error("candle/diffusion/error {0}")]
-    Diffusion(#[from] diffusion::CandleDiffusionEngineError),
+    Diffusion(#[from] CandleDiffusionError),
 }
 
 macro_rules! impl_candle_from {
@@ -37,9 +38,6 @@ macro_rules! impl_candle_from {
 
 impl_candle_from!(
     CandleEngineError => "candle",
-    llama::CandleLlamaEngineError => "candle.llama",
-    whisper::CandleWhisperEngineError => "candle.whisper",
-    diffusion::CandleDiffusionEngineError => "candle.diffusion",
 );
 
 #[derive(Debug, Clone, Default)]

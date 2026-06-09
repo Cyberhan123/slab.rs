@@ -27,6 +27,7 @@ pub struct RuntimeTextGenerationUsage {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RuntimeTextGenerationRequest {
+    pub backend_id: Option<RuntimeBackendId>,
     pub model: String,
     pub prompt: String,
     pub system_prompt: Option<String>,
@@ -88,6 +89,7 @@ pub struct RuntimeGeneratedFrame {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RuntimeDiffusionImageRequest {
+    pub backend_id: Option<RuntimeBackendId>,
     pub model: String,
     pub prompt: String,
     pub negative_prompt: Option<String>,
@@ -176,6 +178,7 @@ pub struct RuntimeTranscriptionDecodeOptions {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RuntimeTranscriptionRequest {
+    pub backend_id: Option<RuntimeBackendId>,
     pub path: String,
     pub language: Option<String>,
     pub prompt: Option<String>,

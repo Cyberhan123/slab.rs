@@ -2,7 +2,8 @@ use slab_proto::slab::ipc::v1 as pb;
 
 use super::{
     CandleDiffusionGenerateImageRequest, CandleDiffusionGenerateImageResponse,
-    CandleDiffusionLoadRequest, ProtoConversionError, decode_optional_path, encode_raw_image,
+    CandleDiffusionLoadRequest, ProtoConversionError, decode_optional_device, decode_optional_path,
+    encode_raw_image,
 };
 
 pub(crate) fn decode_candle_diffusion_load_request(
@@ -12,6 +13,7 @@ pub(crate) fn decode_candle_diffusion_load_request(
         model_path: decode_optional_path(request.model_path.as_ref()),
         vae_path: decode_optional_path(request.vae_path.as_ref()),
         sd_version: request.sd_version.clone(),
+        device: decode_optional_device(request.device.as_ref())?,
     })
 }
 

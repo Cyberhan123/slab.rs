@@ -25,11 +25,21 @@ pub struct CliEnabledBackends {
     pub llama: bool,
     pub whisper: bool,
     pub diffusion: bool,
+    pub candle_llama: bool,
+    pub candle_whisper: bool,
+    pub candle_diffusion: bool,
 }
 
 impl CliEnabledBackends {
     pub fn all() -> Self {
-        Self { llama: true, whisper: true, diffusion: true }
+        Self {
+            llama: true,
+            whisper: true,
+            diffusion: true,
+            candle_llama: false,
+            candle_whisper: false,
+            candle_diffusion: false,
+        }
     }
 }
 
@@ -40,6 +50,9 @@ impl std::fmt::Display for CliEnabledBackends {
             self.llama.then_some("llama"),
             self.whisper.then_some("whisper"),
             self.diffusion.then_some("diffusion"),
+            self.candle_llama.then_some("candle.llama"),
+            self.candle_whisper.then_some("candle.whisper"),
+            self.candle_diffusion.then_some("candle.diffusion"),
         ]
         .into_iter()
         .flatten()

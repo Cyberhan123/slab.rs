@@ -1,6 +1,6 @@
 use tokenizers::Tokenizer;
 
-use crate::error::CandleLlmError;
+use super::error::CandleLlmError;
 
 pub(crate) struct TokenOutputStream {
     tokenizer: Tokenizer,

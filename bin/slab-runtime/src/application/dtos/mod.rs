@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use slab_types::RuntimeDevicePreference;
 use thiserror::Error;
 
 use slab_proto::slab::ipc::v1 as pb;
@@ -352,6 +353,7 @@ pub(crate) struct GgmlDiffusionGenerateVideoResponse {
 pub(crate) struct CandleLlamaLoadRequest {
     pub model_path: Option<PathBuf>,
     pub tokenizer_path: Option<PathBuf>,
+    pub device: Option<RuntimeDevicePreference>,
     pub seed: Option<u64>,
 }
 
@@ -366,6 +368,7 @@ pub(crate) struct CandleChatRequest {
 pub(crate) struct CandleWhisperLoadRequest {
     pub model_path: Option<PathBuf>,
     pub tokenizer_path: Option<PathBuf>,
+    pub device: Option<RuntimeDevicePreference>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -383,6 +386,7 @@ pub(crate) struct CandleDiffusionLoadRequest {
     pub model_path: Option<PathBuf>,
     pub vae_path: Option<PathBuf>,
     pub sd_version: Option<String>,
+    pub device: Option<RuntimeDevicePreference>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -455,6 +459,12 @@ pub(crate) fn encode_model_status_response(status: &ModelStatus) -> pb::ModelSta
 
 fn decode_optional_path(value: Option<&String>) -> Option<PathBuf> {
     value.map(PathBuf::from)
+}
+
+fn decode_optional_device(
+    value: Option<&String>,
+) -> Result<Option<RuntimeDevicePreference>, ProtoConversionError> {
+    value.map(|value| value.parse()).transpose().map_err(|_| ProtoConversionError)
 }
 
 fn decode_optional_string_list(value: Option<&pb::StringList>) -> Option<Vec<String>> {

@@ -52,11 +52,25 @@ impl RuntimeInferenceGateway for GrpcRuntimeInferenceGateway {
         &self,
         request: RuntimeTextGenerationRequest,
     ) -> Result<RuntimeTextGenerationResponse, AppCoreError> {
-        let channel = self.channel(RuntimeBackendId::GgmlLlama)?;
-        let grpc_request = runtime_protocol::encode_chat_request(&request);
-        let response =
-            client::chat(channel, grpc_request).await.map_err(map_runtime_error("chat"))?;
-        Ok(runtime_protocol::decode_chat_response(&response))
+        let backend_id = request.backend_id.unwrap_or(RuntimeBackendId::GgmlLlama);
+        match backend_id {
+            RuntimeBackendId::GgmlLlama => {
+                let channel = self.channel(backend_id)?;
+                let grpc_request = runtime_protocol::encode_chat_request(&request);
+                let response =
+                    client::chat(channel, grpc_request).await.map_err(map_runtime_error("chat"))?;
+                Ok(runtime_protocol::decode_chat_response(&response))
+            }
+            RuntimeBackendId::CandleLlama => {
+                let channel = self.channel(backend_id)?;
+                let grpc_request = runtime_protocol::encode_candle_chat_request(&request);
+                let response = client::candle_chat(channel, grpc_request)
+                    .await
+                    .map_err(map_runtime_error("candle chat"))?;
+                Ok(runtime_protocol::decode_candle_chat_response(&response))
+            }
+            other => Err(unsupported_inference_backend("chat", other)),
+        }
     }
 
     async fn chat_stream(
@@ -64,43 +78,103 @@ impl RuntimeInferenceGateway for GrpcRuntimeInferenceGateway {
         request: RuntimeTextGenerationRequest,
     ) -> Result<BoxStream<'static, Result<RuntimeTextGenerationChunk, AppCoreError>>, AppCoreError>
     {
-        let channel = self.channel(RuntimeBackendId::GgmlLlama)?;
-        let grpc_request = runtime_protocol::encode_chat_request(&request);
-        let stream = client::chat_stream(channel, grpc_request)
-            .await
-            .map_err(map_runtime_error("chat stream"))?;
-        Ok(stream
-            .map(|chunk| {
-                chunk
-                    .map(|chunk| runtime_protocol::decode_chat_stream_chunk(&chunk))
-                    .map_err(map_runtime_status("chat stream"))
-            })
-            .boxed())
+        let backend_id = request.backend_id.unwrap_or(RuntimeBackendId::GgmlLlama);
+        match backend_id {
+            RuntimeBackendId::GgmlLlama => {
+                let channel = self.channel(backend_id)?;
+                let grpc_request = runtime_protocol::encode_chat_request(&request);
+                let stream = client::chat_stream(channel, grpc_request)
+                    .await
+                    .map_err(map_runtime_error("chat stream"))?;
+                Ok(stream
+                    .map(|chunk| {
+                        chunk
+                            .map(|chunk| runtime_protocol::decode_chat_stream_chunk(&chunk))
+                            .map_err(map_runtime_status("chat stream"))
+                    })
+                    .boxed())
+            }
+            RuntimeBackendId::CandleLlama => {
+                let channel = self.channel(backend_id)?;
+                let grpc_request = runtime_protocol::encode_candle_chat_request(&request);
+                let stream = client::candle_chat_stream(channel, grpc_request)
+                    .await
+                    .map_err(map_runtime_error("candle chat stream"))?;
+                Ok(stream
+                    .map(|chunk| {
+                        chunk
+                            .map(|chunk| runtime_protocol::decode_candle_chat_stream_chunk(&chunk))
+                            .map_err(map_runtime_status("candle chat stream"))
+                    })
+                    .boxed())
+            }
+            other => Err(unsupported_inference_backend("chat stream", other)),
+        }
     }
 
     async fn transcribe(
         &self,
         request: RuntimeTranscriptionRequest,
     ) -> Result<RuntimeTranscriptionResult, AppCoreError> {
-        let channel = self.channel(RuntimeBackendId::GgmlWhisper)?;
-        let response = client::transcribe(channel, pb_whisper_request_from_runtime(request))
-            .await
-            .map_err(map_runtime_error("transcribe"))?;
-        Ok(runtime_protocol::decode_whisper_transcription_response(&response))
+        let backend_id = request.backend_id.unwrap_or(RuntimeBackendId::GgmlWhisper);
+        match backend_id {
+            RuntimeBackendId::GgmlWhisper => {
+                let channel = self.channel(backend_id)?;
+                let response =
+                    client::transcribe(channel, pb_whisper_request_from_runtime(request))
+                        .await
+                        .map_err(map_runtime_error("transcribe"))?;
+                Ok(runtime_protocol::decode_whisper_transcription_response(&response))
+            }
+            RuntimeBackendId::CandleWhisper => {
+                let channel = self.channel(backend_id)?;
+                let response = client::candle_transcribe(
+                    channel,
+                    pb_candle_whisper_request_from_runtime(request),
+                )
+                .await
+                .map_err(map_runtime_error("candle transcribe"))?;
+                Ok(runtime_protocol::decode_candle_whisper_transcription_response(&response))
+            }
+            other => Err(unsupported_inference_backend("transcribe", other)),
+        }
     }
 
     async fn generate_image(
         &self,
         request: RuntimeDiffusionImageRequest,
     ) -> Result<RuntimeDiffusionImageResult, AppCoreError> {
-        let channel = self.channel(RuntimeBackendId::GgmlDiffusion)?;
-        let grpc_request = runtime_protocol::encode_diffusion_image_request(&request);
-        let response = client::generate_image(channel, grpc_request)
-            .await
-            .map_err(map_runtime_error("generate image"))?;
-        runtime_protocol::decode_diffusion_image_response(&response).map_err(|error| {
-            AppCoreError::Internal(format!("invalid diffusion image response payload: {error}"))
-        })
+        let backend_id = request.backend_id.unwrap_or(RuntimeBackendId::GgmlDiffusion);
+        match backend_id {
+            RuntimeBackendId::GgmlDiffusion => {
+                let channel = self.channel(backend_id)?;
+                let grpc_request = runtime_protocol::encode_diffusion_image_request(&request);
+                let response = client::generate_image(channel, grpc_request)
+                    .await
+                    .map_err(map_runtime_error("generate image"))?;
+                runtime_protocol::decode_diffusion_image_response(&response).map_err(|error| {
+                    AppCoreError::Internal(format!(
+                        "invalid diffusion image response payload: {error}"
+                    ))
+                })
+            }
+            RuntimeBackendId::CandleDiffusion => {
+                let channel = self.channel(backend_id)?;
+                let grpc_request =
+                    runtime_protocol::encode_candle_diffusion_image_request(&request);
+                let response = client::candle_generate_image(channel, grpc_request)
+                    .await
+                    .map_err(map_runtime_error("candle generate image"))?;
+                runtime_protocol::decode_candle_diffusion_image_response(&response).map_err(
+                    |error| {
+                        AppCoreError::Internal(format!(
+                            "invalid candle diffusion image response payload: {error}"
+                        ))
+                    },
+                )
+            }
+            other => Err(unsupported_inference_backend("generate image", other)),
+        }
     }
 
     async fn generate_video(
@@ -192,6 +266,13 @@ fn map_runtime_status(action: &'static str) -> impl Fn(tonic::Status) -> AppCore
     }
 }
 
+fn unsupported_inference_backend(action: &str, backend_id: RuntimeBackendId) -> AppCoreError {
+    AppCoreError::BadRequest(format!(
+        "backend '{}' does not support runtime {action}",
+        backend_id.canonical_id()
+    ))
+}
+
 pub(crate) fn runtime_status_from_pb(
     response: pb::ModelStatusResponse,
 ) -> Result<RuntimeBackendStatus, AppCoreError> {
@@ -211,6 +292,12 @@ fn pb_whisper_request_from_runtime(
         vad: request.vad.map(pb_whisper_vad_options_from_runtime),
         decode: request.decode.map(pb_whisper_decode_options_from_runtime),
     }
+}
+
+fn pb_candle_whisper_request_from_runtime(
+    request: RuntimeTranscriptionRequest,
+) -> pb::CandleWhisperTranscribeRequest {
+    pb::CandleWhisperTranscribeRequest { path: Some(request.path) }
 }
 
 fn pb_whisper_vad_options_from_runtime(

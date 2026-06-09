@@ -12,9 +12,7 @@ members = [
     "crates/slab-agent-tracing",
     "crates/slab-agent-tools",
     "crates/slab-build-utils",
-    "crates/slab-candle-llm",
-    "crates/slab-candle-whisper",
-    "crates/slab-candle-diffusion",
+    "crates/slab-candle",
     "crates/slab-model-pack",
     "crates/slab-utils",
     "crates/slab-diffusion",
@@ -66,6 +64,7 @@ slab-agent = { path = "./crates/slab-agent", package = "slab-agent", version = "
 slab-agent-tracing = { path = "./crates/slab-agent-tracing", package = "slab-agent-tracing", version = "0.1.0" }
 slab-agent-tools = { path = "./crates/slab-agent-tools", package = "slab-agent-tools", version = "0.1.0" }
 slab-proto = { path = "./crates/slab-proto", package = "slab-proto", version = "0.1.0" }
+slab-candle = { path = "./crates/slab-candle", package = "slab-candle", version = "0.1.0" }
 slab-model-pack = { path = "./crates/slab-model-pack", package = "slab-model-pack", version = "0.1.0" }
 slab-types = { path = "./crates/slab-types", package = "slab-types", version = "0.1.0" }
 slab-config = { path = "./crates/slab-config", package = "slab-config", version = "0.1.0" }

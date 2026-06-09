@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use slab_types::RuntimeDevicePreference;
 
-use crate::error::CandleDiffusionError;
+use super::error::CandleDiffusionError;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -89,6 +90,8 @@ pub struct CandleDiffusionLoadConfig {
     pub model_path: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vae_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<RuntimeDevicePreference>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_encoder_path: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -349,6 +352,7 @@ mod tests {
         let config = CandleDiffusionLoadConfig {
             model_path: PathBuf::from("flux.safetensors"),
             vae_path: None,
+            device: None,
             text_encoder_path: None,
             text_encoder2_path: None,
             tokenizer_path: None,

@@ -317,6 +317,7 @@ mod tests {
     fn test_child_spec(bind_address: String) -> ResolvedRuntimeChildSpec {
         ResolvedRuntimeChildSpec {
             backend: RuntimeBackendId::GgmlLlama,
+            service_backends: Vec::new(),
             grpc_bind_address: bind_address,
             transport: RuntimeTransportMode::Http,
             queue_capacity: 64,

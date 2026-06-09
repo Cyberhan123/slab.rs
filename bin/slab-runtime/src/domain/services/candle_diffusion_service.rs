@@ -28,6 +28,7 @@ impl CandleDiffusionService {
         let load_payload = CandleDiffusionLoadConfig {
             model_path: model_path.clone(),
             vae_path: request.vae_path,
+            device: request.device,
             sd_version,
         };
 

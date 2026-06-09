@@ -1,13 +1,14 @@
 use std::path::{Path, PathBuf};
 
 use slab_types::load_config::{
+    CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig,
     GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig,
 };
 use slab_types::runtime::DiffusionLoadOptions;
 use slab_types::{RuntimeBackendId, RuntimeBackendLoadSpec};
 use tracing::info;
 
-use crate::context::ModelState;
+use crate::context::{ModelState, WorkerState};
 use crate::domain::models::{ModelLoadCommand, ModelStatus, UnifiedModel, UnifiedModelKind};
 use crate::domain::ports::RuntimeBackendStatus;
 use crate::error::AppCoreError;
@@ -19,8 +20,9 @@ use super::{ModelService, catalog, pack};
 
 const DEFAULT_MODEL_NUM_WORKERS: u32 = 1;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct LocalLlamaPromptProfile {
+    pub(crate) backend_id: RuntimeBackendId,
     pub(crate) chat_template_source: Option<String>,
     pub(crate) default_gbnf: Option<String>,
 }
@@ -74,26 +76,50 @@ pub(crate) async fn resolve_local_chat_prompt_profile(
 ) -> Result<LocalLlamaPromptProfile, AppCoreError> {
     let model = resolve_local_catalog_model(state, model_id).await?;
     let backend_id = resolve_local_backend_from_model(&model)?;
-    if backend_id != RuntimeBackendId::GgmlLlama {
+    if !matches!(backend_id, RuntimeBackendId::GgmlLlama | RuntimeBackendId::CandleLlama) {
         return Err(AppCoreError::BadRequest(format!(
-            "model '{model_id}' uses backend '{}' and does not support local llama chat prompt rendering",
+            "model '{model_id}' uses backend '{}' and does not support local chat prompt rendering",
             backend_id.canonical_id()
         )));
     }
 
     let Some(model_path) = model.spec.local_path.as_deref() else {
-        return Ok(LocalLlamaPromptProfile::default());
+        return Ok(LocalLlamaPromptProfile {
+            backend_id,
+            chat_template_source: None,
+            default_gbnf: None,
+        });
     };
     if let Some(pack_target) =
         build_catalog_model_pack_load_target(state, &model, model_path).await?
     {
         return Ok(LocalLlamaPromptProfile {
+            backend_id,
             chat_template_source: pack_target.load_defaults.chat_template_source,
             default_gbnf: pack_target.load_defaults.gbnf_source,
         });
     }
 
-    Ok(LocalLlamaPromptProfile::default())
+    Ok(LocalLlamaPromptProfile { backend_id, chat_template_source: None, default_gbnf: None })
+}
+
+pub(crate) async fn resolve_worker_model_backend_or_default(
+    state: &WorkerState,
+    model_id: Option<&str>,
+    default_backend: RuntimeBackendId,
+) -> Result<RuntimeBackendId, AppCoreError> {
+    let Some(model_id) = model_id.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(default_backend);
+    };
+    let record = state
+        .store()
+        .get_model(model_id)
+        .await?
+        .ok_or_else(|| AppCoreError::NotFound(format!("model {model_id} not found")))?;
+    let model: UnifiedModel =
+        record.try_into().map_err(|error: String| AppCoreError::Internal(error))?;
+
+    resolve_local_backend_from_model(&model)
 }
 
 pub(super) fn validate_and_normalize_model_workers(
@@ -188,7 +214,7 @@ pub(super) async fn resolve_diffusion_context_params(
     state: &ModelState,
     backend_id: RuntimeBackendId,
 ) -> Result<Option<DiffusionLoadOptions>, AppCoreError> {
-    if backend_id != RuntimeBackendId::GgmlDiffusion {
+    if !matches!(backend_id, RuntimeBackendId::GgmlDiffusion | RuntimeBackendId::CandleDiffusion) {
         return Ok(None);
     }
 
@@ -360,6 +386,30 @@ fn build_backend_load_spec(
                 enable_mmap: false,
                 n_threads: None,
             })))
+        }
+        RuntimeBackendId::CandleLlama => {
+            Ok(RuntimeBackendLoadSpec::CandleLlama(CandleLlamaLoadConfig {
+                model_path,
+                tokenizer_path: None,
+                device: None,
+                seed: 0,
+            }))
+        }
+        RuntimeBackendId::CandleWhisper => {
+            Ok(RuntimeBackendLoadSpec::CandleWhisper(CandleWhisperLoadConfig {
+                model_path,
+                tokenizer_path: None,
+                device: None,
+            }))
+        }
+        RuntimeBackendId::CandleDiffusion => {
+            let diffusion = diffusion.unwrap_or_default();
+            Ok(RuntimeBackendLoadSpec::CandleDiffusion(CandleDiffusionLoadConfig {
+                model_path,
+                vae_path: diffusion.vae_path,
+                device: None,
+                sd_version: "v2-1".to_owned(),
+            }))
         }
         other => Err(AppCoreError::Internal(format!(
             "unsupported backend for managed model load spec assembly: {}",
@@ -696,6 +746,40 @@ mod tests {
                 assert_eq!(config.num_workers, 2);
                 assert!(config.chat_template.is_none());
                 assert!(config.gbnf.is_none());
+            }
+            other => panic!("unexpected load spec: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn model_runtime_loads_catalog_candle_llama_by_model_id() {
+        let app = TestAppCore::new().await;
+        let model_path = app.write_model_file("runtime-ready-candle.gguf");
+        let mut command = ready_local_llama_command("runtime-load-candle", &model_path);
+        command.backend_id = Some(ManagedModelBackendId::CandleLlama);
+        let model = app.model.create_model(command).await.expect("create candle runtime model");
+        app.runtime.allow_backend(RuntimeBackendId::CandleLlama);
+
+        let status = app
+            .model
+            .load_model(ModelLoadCommand {
+                model_id: Some(model.id.clone()),
+                backend_id: None,
+                model_path: None,
+                num_workers: None,
+            })
+            .await
+            .expect("load candle catalog model");
+
+        assert_eq!(status.backend, RuntimeBackendId::CandleLlama.to_string());
+        assert_eq!(status.status, "ready");
+        let loads = app.runtime.loads();
+        assert_eq!(loads.len(), 1);
+        match &loads[0] {
+            RuntimeBackendLoadSpec::CandleLlama(config) => {
+                assert_eq!(config.model_path, model_path);
+                assert!(config.tokenizer_path.is_none());
+                assert!(config.device.is_none());
             }
             other => panic!("unexpected load spec: {other:?}"),
         }
