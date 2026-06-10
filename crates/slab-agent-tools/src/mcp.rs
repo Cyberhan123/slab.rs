@@ -121,3 +121,52 @@ fn proxy_tool_name(server_name: &str, tool_name: &str) -> String {
 fn sanitize_name(value: &str) -> String {
     value.chars().map(|ch| if ch.is_ascii_alphanumeric() || ch == '_' { ch } else { '_' }).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use serde_json::json;
+    use slab_mcp::{McpClient, McpTool, McpToolSpec};
+
+    use super::*;
+
+    #[test]
+    fn mcp_proxy_tool_names_are_stable_and_identifier_safe() {
+        let spec = McpToolSpec {
+            server_name: "team server".into(),
+            tool: McpTool {
+                name: "search.web/v1".into(),
+                description: Some("Search the web".into()),
+                input_schema: json!({"type": "object", "properties": {"query": {"type": "string"}}}),
+            },
+        };
+        let tool = McpProxyTool::new(Arc::new(McpClient::new()), spec);
+
+        assert_eq!(tool.name(), "mcp__team_server__search_web_v1");
+        assert_eq!(tool.description(), "Search the web");
+        assert_eq!(tool.parameters_schema()["properties"]["query"]["type"], "string");
+    }
+
+    #[test]
+    fn mcp_proxy_tool_uses_empty_object_schema_for_null_input_schema() {
+        let spec = McpToolSpec {
+            server_name: "server".into(),
+            tool: McpTool { name: "tool".into(), description: None, input_schema: Value::Null },
+        };
+        let tool = McpProxyTool::new(Arc::new(McpClient::new()), spec);
+
+        assert_eq!(tool.description(), "Remote MCP tool proxy.");
+        assert_eq!(tool.parameters_schema(), json!({"type": "object", "properties": {}}));
+    }
+
+    #[test]
+    fn mcp_call_tool_schema_requires_server_and_tool_names() {
+        let tool = McpCallTool::new(Arc::new(McpClient::new()));
+        let schema = tool.parameters_schema();
+
+        assert_eq!(tool.name(), "mcp_call");
+        assert_eq!(schema["required"], json!(["server_name", "tool_name"]));
+        assert_eq!(schema["properties"]["arguments"]["default"], json!({}));
+    }
+}

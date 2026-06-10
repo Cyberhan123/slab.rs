@@ -183,15 +183,15 @@ impl WebSearchRequest {
             provider,
             query,
             id_list: optional_string(arguments, "id_list"),
-            max_results: optional_u32(arguments, "max_results")?,
+            max_results: optional_positive_u32(arguments, "max_results")?,
             language: optional_string(arguments, "language"),
             region: optional_string(arguments, "region"),
             safe_search: optional_safe_search(arguments)?,
-            page: optional_u32(arguments, "page")?,
+            page: optional_positive_u32(arguments, "page")?,
             start: optional_u32(arguments, "start")?,
             sort_by: optional_sort_by(arguments)?,
             sort_order: optional_sort_order(arguments)?,
-            timeout_ms: optional_u64(arguments, "timeout_ms")?,
+            timeout_ms: optional_positive_u64(arguments, "timeout_ms")?,
         })
     }
 }
@@ -409,6 +409,15 @@ fn optional_u32(arguments: &Value, name: &str) -> Result<Option<u32>, AgentError
         .transpose()
 }
 
+fn optional_positive_u32(arguments: &Value, name: &str) -> Result<Option<u32>, AgentError> {
+    optional_positive_u64(arguments, name)?
+        .map(|value| {
+            u32::try_from(value)
+                .map_err(|_| AgentError::ToolExecution(format!("'{name}' is too large")))
+        })
+        .transpose()
+}
+
 fn optional_u64(arguments: &Value, name: &str) -> Result<Option<u64>, AgentError> {
     arguments
         .get(name)
@@ -416,6 +425,18 @@ fn optional_u64(arguments: &Value, name: &str) -> Result<Option<u64>, AgentError
             value
                 .as_u64()
                 .ok_or_else(|| AgentError::ToolExecution(format!("'{name}' must be an integer")))
+        })
+        .transpose()
+}
+
+fn optional_positive_u64(arguments: &Value, name: &str) -> Result<Option<u64>, AgentError> {
+    optional_u64(arguments, name)?
+        .map(|value| {
+            if value == 0 {
+                Err(AgentError::ToolExecution(format!("'{name}' must be at least 1")))
+            } else {
+                Ok(value)
+            }
         })
         .transpose()
 }
@@ -494,6 +515,10 @@ mod tests {
 
         assert!(providers.contains(&Value::String("duckduckgo".to_owned())));
         assert!(providers.contains(&Value::String("searxng".to_owned())));
+        assert_eq!(schema["properties"]["max_results"]["minimum"], 1);
+        assert_eq!(schema["properties"]["page"]["minimum"], 1);
+        assert_eq!(schema["properties"]["timeout_ms"]["minimum"], 1);
+        assert_eq!(schema["required"], serde_json::json!(["query"]));
     }
 
     #[tokio::test]
@@ -510,6 +535,30 @@ mod tests {
             .expect_err("missing credentials should fail");
 
         assert!(error.to_string().contains("missing api key"));
+    }
+
+    #[tokio::test]
+    async fn provider_settings_are_validated_before_network() {
+        let mut google = AgentWebSearchConfig {
+            default_provider: WebSearchProviderId::Google,
+            ..AgentWebSearchConfig::default()
+        };
+        google.providers.google.auth.api_key = Some("key".to_owned());
+        let error = WebSearchTool::new(google)
+            .execute(&ctx(), &serde_json::json!({"query": "rust"}))
+            .await
+            .expect_err("missing cx should fail");
+        assert!(error.to_string().contains("agent.tools.websearch.providers.google.cx"));
+
+        let searxng = AgentWebSearchConfig {
+            default_provider: WebSearchProviderId::Searxng,
+            ..AgentWebSearchConfig::default()
+        };
+        let error = WebSearchTool::new(searxng)
+            .execute(&ctx(), &serde_json::json!({"query": "rust"}))
+            .await
+            .expect_err("missing base url should fail");
+        assert!(error.to_string().contains("agent.tools.websearch.providers.searxng.base_url"));
     }
 
     #[tokio::test]
@@ -539,5 +588,122 @@ mod tests {
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert_eq!(value["results"][0]["raw"]["hidden"], true);
+    }
+
+    #[tokio::test]
+    async fn parsed_request_options_are_forwarded_to_runner() {
+        let runner = Arc::new(FakeRunner { requests: Mutex::new(Vec::new()) });
+        let tool = WebSearchTool::with_runner(AgentWebSearchConfig::default(), runner.clone());
+
+        tool.execute(
+            &ctx(),
+            &serde_json::json!({
+                "query": "rust",
+                "provider": "arxiv",
+                "id_list": "2401.00001,2401.00002",
+                "max_results": 5,
+                "language": "en",
+                "region": "us",
+                "safe_search": "strict",
+                "page": 2,
+                "start": 10,
+                "sort_by": "last_updated_date",
+                "sort_order": "ascending",
+                "timeout_ms": 1500
+            }),
+        )
+        .await
+        .expect("search output");
+
+        let requests = runner.requests.lock().expect("requests");
+        let request = requests.first().expect("captured request");
+        assert_eq!(request.provider, WebSearchProviderId::Arxiv);
+        assert_eq!(request.query, "rust");
+        assert_eq!(request.id_list.as_deref(), Some("2401.00001,2401.00002"));
+        assert_eq!(request.max_results, Some(5));
+        assert_eq!(request.language.as_deref(), Some("en"));
+        assert_eq!(request.region.as_deref(), Some("us"));
+        assert_eq!(
+            request.safe_search.as_ref().map(ToString::to_string).as_deref(),
+            Some("strict")
+        );
+        assert_eq!(request.page, Some(2));
+        assert_eq!(request.start, Some(10));
+        assert_eq!(
+            request.sort_by.as_ref().map(ToString::to_string).as_deref(),
+            Some("lastUpdatedDate")
+        );
+        assert_eq!(
+            request.sort_order.as_ref().map(ToString::to_string).as_deref(),
+            Some("ascending")
+        );
+        assert_eq!(request.timeout_ms, Some(1500));
+    }
+
+    #[tokio::test]
+    async fn invalid_arguments_fail_before_runner_is_called() {
+        let cases = [
+            (serde_json::json!({}), "missing 'query' argument"),
+            (
+                serde_json::json!({"query": "rust", "provider": "missing"}),
+                "unsupported web search provider",
+            ),
+            (
+                serde_json::json!({"query": "rust", "max_results": 0}),
+                "'max_results' must be at least 1",
+            ),
+            (serde_json::json!({"query": "rust", "page": 0}), "'page' must be at least 1"),
+            (
+                serde_json::json!({"query": "rust", "timeout_ms": 0}),
+                "'timeout_ms' must be at least 1",
+            ),
+            (serde_json::json!({"query": "rust", "start": false}), "'start' must be an integer"),
+            (
+                serde_json::json!({"query": "rust", "safe_search": "maximum"}),
+                "unsupported safe_search",
+            ),
+            (serde_json::json!({"query": "rust", "sort_by": "newest"}), "unsupported sort_by"),
+            (
+                serde_json::json!({"query": "rust", "sort_order": "sideways"}),
+                "unsupported sort_order",
+            ),
+        ];
+
+        for (arguments, expected) in cases {
+            let runner = Arc::new(FakeRunner { requests: Mutex::new(Vec::new()) });
+            let tool = WebSearchTool::with_runner(AgentWebSearchConfig::default(), runner.clone());
+            let error = tool.execute(&ctx(), &arguments).await.expect_err("invalid arguments");
+
+            assert!(error.to_string().contains(expected), "{error}");
+            assert!(runner.requests.lock().expect("requests").is_empty());
+        }
+    }
+
+    #[test]
+    fn api_key_resolution_trims_literals_env_values_and_inline_fallbacks() {
+        let literal =
+            ProviderAuthConfig { api_key: Some(" literal ".to_owned()), api_key_env: None };
+        assert_eq!(resolve_api_key("exa", &literal).expect("literal key"), "literal");
+
+        unsafe {
+            std::env::set_var("SLAB_WEB_SEARCH_TEST_KEY", " env-value ");
+        }
+        let env = ProviderAuthConfig {
+            api_key: None,
+            api_key_env: Some("SLAB_WEB_SEARCH_TEST_KEY".to_owned()),
+        };
+        assert_eq!(resolve_api_key("exa", &env).expect("env key"), "env-value");
+        unsafe {
+            std::env::remove_var("SLAB_WEB_SEARCH_TEST_KEY");
+        }
+
+        let inline = ProviderAuthConfig {
+            api_key: None,
+            api_key_env: Some("inline-secret-with-dashes".to_owned()),
+        };
+        assert_eq!(
+            resolve_api_key("exa", &inline).expect("inline fallback"),
+            "inline-secret-with-dashes"
+        );
     }
 }

@@ -82,16 +82,21 @@ export function extractTaskId(payload: unknown): string | null {
     return null;
   }
 
-  const taskId =
-    (payload as { operation_id?: unknown }).operation_id ??
-    (payload as { task_id?: unknown }).task_id;
+  for (const taskId of [
+    (payload as { operation_id?: unknown }).operation_id,
+    (payload as { task_id?: unknown }).task_id,
+  ]) {
+    if (typeof taskId !== 'string') {
+      continue;
+    }
 
-  if (typeof taskId !== 'string') {
-    return null;
+    const trimmed = taskId.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
   }
 
-  const trimmed = taskId.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  return null;
 }
 
 export const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));

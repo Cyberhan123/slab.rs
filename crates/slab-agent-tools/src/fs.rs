@@ -177,3 +177,88 @@ impl ToolHandler for ListDirTool {
 fn to_tool_error(error: slab_file::FileSystemError) -> AgentError {
     AgentError::ToolExecution(error.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use serde_json::{Value, json};
+    use slab_agent::ToolHandler;
+
+    use super::*;
+
+    fn ctx() -> ToolContext {
+        ToolContext { thread_id: "thread".into(), turn_index: 0, depth: 0 }
+    }
+
+    #[tokio::test]
+    async fn read_file_tool_respects_line_ranges_and_reports_truncation() {
+        let root = temp_root("read_range");
+        fs::write(root.join("notes.txt"), "one\ntwo\nthree\n").expect("seed file");
+        let tool = ReadFileTool::new(Some(root.clone()));
+
+        let output = tool
+            .execute(&ctx(), &json!({"path": "notes.txt", "start_line": 2, "end_line": 3}))
+            .await
+            .expect("read file");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+        assert_eq!(value["content"], "two\nthree");
+        assert_eq!(value["total_lines"], 3);
+        assert_eq!(value["returned_lines"], 2);
+        assert_eq!(value["truncated"], false);
+
+        let output = tool
+            .execute(&ctx(), &json!({"path": "notes.txt", "start_line": 2_000}))
+            .await
+            .expect("out of range read");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+        assert_eq!(value["content"], "");
+        assert_eq!(value["returned_lines"], 0);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn write_and_list_tools_stay_inside_workspace() {
+        let root = temp_root("write_list");
+        let write = WriteFileTool::new(Some(root.clone()));
+        let list = ListDirTool::new(Some(root.clone()));
+
+        let output = write
+            .execute(&ctx(), &json!({"path": "dir/note.txt", "content": "hello"}))
+            .await
+            .expect("write file");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+        assert_eq!(value["written"], "dir/note.txt");
+        assert_eq!(value["bytes"], 5);
+        assert_eq!(fs::read_to_string(root.join("dir").join("note.txt")).unwrap(), "hello");
+
+        let output = list.execute(&ctx(), &json!({"path": "dir"})).await.expect("list dir");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+        assert_eq!(value["entries"].as_array().expect("entries").len(), 1);
+        assert_eq!(value["entries"][0]["name"], "note.txt");
+
+        let error = write
+            .execute(&ctx(), &json!({"path": "../outside.txt", "content": "nope"}))
+            .await
+            .expect_err("escape rejected");
+        assert!(error.to_string().contains("workspace path `../outside.txt` is invalid"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn temp_root(name: &str) -> PathBuf {
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "slab_agent_tools_fs_{name}_{}_{}",
+            std::process::id(),
+            nonce
+        ));
+        fs::create_dir_all(&root).expect("create temp root");
+        root
+    }
+}

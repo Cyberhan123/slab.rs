@@ -149,7 +149,8 @@ mod tests {
 
     use super::{
         APPLICATION_ERROR, IncomingMessage, RpcError, application_error_response, id_key,
-        parse_message, request_with_optional_params, serialize_response, success_response,
+        notification, notification_with_optional_params, parse_message, request,
+        request_with_optional_params, serialize_response, success_response,
     };
 
     #[test]
@@ -172,6 +173,33 @@ mod tests {
     }
 
     #[test]
+    fn serializes_requests_and_notifications_with_params_when_present() {
+        let request = request(Value::from(3), "plugin.call", json!({"name": "search"}));
+        let request_value = serde_json::to_value(request).expect("request json");
+        assert_eq!(request_value["jsonrpc"], "2.0");
+        assert_eq!(request_value["id"], 3);
+        assert_eq!(request_value["method"], "plugin.call");
+        assert_eq!(request_value["params"], json!({"name": "search"}));
+
+        let notification = notification("plugin.ready", json!({"ok": true}));
+        let notification_value = serde_json::to_value(notification).expect("notification json");
+        assert_eq!(notification_value["jsonrpc"], "2.0");
+        assert!(notification_value.get("id").is_none());
+        assert_eq!(notification_value["params"], json!({"ok": true}));
+    }
+
+    #[test]
+    fn serializes_optional_notifications_without_absent_params() {
+        let notification = notification_with_optional_params("plugin.ready", None);
+        let value = serde_json::to_value(notification).expect("notification json");
+
+        assert_eq!(value["jsonrpc"], "2.0");
+        assert_eq!(value["method"], "plugin.ready");
+        assert!(value.get("id").is_none());
+        assert!(value.get("params").is_none());
+    }
+
+    #[test]
     fn serializes_success_and_error_responses() {
         let success = serialize_response(&success_response(Value::from(7), json!({"ok": true})));
         assert_eq!(success, r#"{"jsonrpc":"2.0","id":7,"result":{"ok":true}}"#);
@@ -188,9 +216,33 @@ mod tests {
     }
 
     #[test]
+    fn preserves_error_data_and_response_envelopes_when_parsing() {
+        let error = RpcError {
+            code: -32600,
+            message: "bad request".to_string(),
+            data: Some(json!({"path": "params.name"})),
+        };
+        let value = serde_json::to_value(error).expect("error json");
+        assert_eq!(value["data"], json!({"path": "params.name"}));
+
+        let message = parse_message(
+            r#"{"jsonrpc":"2.0","id":"call-1","error":{"code":-32000,"message":"failed","data":{"retry":false}}}"#,
+        )
+        .expect("response message");
+
+        assert!(message.has_valid_version());
+        assert_eq!(message.id, Some(Value::from("call-1")));
+        assert!(message.method.is_none());
+        let error = message.error.expect("response error");
+        assert_eq!(error.code, APPLICATION_ERROR);
+        assert_eq!(error.data, Some(json!({"retry": false})));
+    }
+
+    #[test]
     fn normalizes_id_keys() {
         assert_eq!(id_key(&Value::from("abc")), "abc");
         assert_eq!(id_key(&Value::from(42)), "42");
+        assert_eq!(id_key(&Value::Null), "null");
         assert_eq!(id_key(&Value::Bool(true)), "true");
     }
 

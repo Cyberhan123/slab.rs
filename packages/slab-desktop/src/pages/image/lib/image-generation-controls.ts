@@ -45,6 +45,7 @@ const DEFAULT_IMAGE_GENERATION_CONTROLS: ImageGenerationControls = {
 const ALLOWED_IMAGE_COUNTS = new Set([1, 2, 4]);
 const SAMPLE_METHOD_VALUES = new Set(SAMPLE_METHODS.map((item) => item.value));
 const SCHEDULER_VALUES = new Set(SCHEDULERS.map((item) => item.value));
+const DIMENSION_PATTERN = /^\d+$/;
 
 export function createDefaultImageGenerationControls(): ImageGenerationControls {
   return { ...DEFAULT_IMAGE_GENERATION_CONTROLS };
@@ -166,6 +167,10 @@ function normalizeDimensionString(
 
   const trimmed = value.trim();
   if (!trimmed) {
+    return fallback;
+  }
+
+  if (!DIMENSION_PATTERN.test(trimmed)) {
     return fallback;
   }
 

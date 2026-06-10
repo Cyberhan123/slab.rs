@@ -118,3 +118,48 @@ impl ToolHandler for FsWatchTool {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+    use slab_agent::{ToolContext, ToolHandler};
+
+    use super::*;
+
+    fn ctx() -> ToolContext {
+        ToolContext { thread_id: "thread".into(), turn_index: 0, depth: 0 }
+    }
+
+    #[test]
+    fn fs_watch_schema_requires_path() {
+        let schema = FsWatchTool::noop().parameters_schema();
+
+        assert_eq!(schema["properties"]["path"]["type"], "string");
+        assert_eq!(schema["properties"]["recursive"]["default"], true);
+        assert_eq!(schema["properties"]["timeout_ms"]["default"], 2000);
+        assert_eq!(schema["required"], json!(["path"]));
+    }
+
+    #[tokio::test]
+    async fn fs_watch_requires_path_argument() {
+        let tool = FsWatchTool::noop();
+
+        let error = tool.execute(&ctx(), &json!({})).await.expect_err("missing path");
+
+        assert_eq!(error.to_string(), "tool execution error: missing 'path' argument");
+    }
+
+    #[tokio::test]
+    async fn noop_fs_watch_times_out_with_empty_change_list() {
+        let tool = FsWatchTool::noop();
+
+        let output = tool
+            .execute(&ctx(), &json!({"path": ".", "recursive": false, "timeout_ms": 1}))
+            .await
+            .expect("watch output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+
+        assert_eq!(value["changed_paths"], json!([]));
+        assert_eq!(value["timed_out"], true);
+    }
+}

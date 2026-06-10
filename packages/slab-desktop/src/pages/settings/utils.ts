@@ -158,6 +158,21 @@ export function buildRequestBody(
     };
   }
 
+  if (propertyType === 'number') {
+    const trimmed = rawValue.trim();
+    if (!trimmed) {
+      return { op: 'unset' };
+    }
+    const value = parseSettingNumberValue(trimmed, 'number');
+    if (value === null) {
+      throw new Error('Value must be a number.');
+    }
+    return {
+      op: 'set',
+      value,
+    };
+  }
+
   if (propertyType === 'array' || propertyType === 'object') {
     if (propertyType === 'array' && Array.isArray(draftValue)) {
       return {

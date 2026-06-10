@@ -484,6 +484,41 @@ mod tests {
     }
 
     #[test]
+    fn parses_branch_status_and_conflict_edge_cases() {
+        let status = parse_git_status(
+            "## No commits yet on main\nUU conflicted.txt\nC  copied.md -> copy.md\n D deleted.rs\n",
+            Some("C:/repo".to_string()),
+            Some("fallback".to_string()),
+        );
+
+        assert_eq!(status.branch.as_deref(), Some("main"));
+        assert_eq!(status.summary.conflicted, 1);
+        assert_eq!(status.summary.copied, 1);
+        assert_eq!(status.summary.deleted, 1);
+        assert_eq!(
+            status
+                .entries
+                .iter()
+                .find(|entry| entry.path == "copy.md")
+                .map(|entry| { (entry.original_path.as_deref(), entry.status, entry.staged) }),
+            Some((Some("copied.md"), GitFileStatus::Copied, true))
+        );
+        assert_eq!(parse_branch_line("## HEAD (no branch)").as_deref(), Some("detached HEAD"));
+        assert_eq!(
+            parse_branch_line("## feature...origin/feature [behind 2]").as_deref(),
+            Some("feature")
+        );
+    }
+
+    #[test]
+    fn rejects_git_internal_and_escaping_paths() {
+        assert!(matches!(validate_relative_path(".git/config"), Err(GitError::InvalidPath(_))));
+        assert!(matches!(validate_relative_path("src/.git/config"), Err(GitError::InvalidPath(_))));
+        assert!(matches!(validate_relative_path("../outside"), Err(GitError::InvalidPath(_))));
+        assert_eq!(validate_relative_path("src//main.rs").expect("normalized"), "src/main.rs");
+    }
+
+    #[test]
     fn commit_policy_auto_stages_only_when_index_is_empty() {
         let unstaged_status = GitStatus {
             entries: vec![GitStatusEntry {

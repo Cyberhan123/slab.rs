@@ -67,6 +67,10 @@ export const toAssistantRequestMessage = (
       ? stripTrailingAssistantTurnArtifacts(getAssistantMessageTextContent(message))
       : getAssistantMessageTextContent(message)
 
+  if (!text.trim()) {
+    return null
+  }
+
   return {
     role: message.role,
     content: text,

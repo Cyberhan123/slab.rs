@@ -7,7 +7,15 @@ import {
   workspaceLspModelPath,
   workspaceLspRelativePathFromUri,
 } from "../workspace-lsp-utils"
-import { languageForFile, lspLanguageForFile, sortDirectoryPaths } from "../workspace-page-utils"
+import {
+  directoryAncestors,
+  entryToTreeNode,
+  insertChildren,
+  languageForFile,
+  lspLanguageForFile,
+  sortDirectoryPaths,
+  upsertFileTab,
+} from "../workspace-page-utils"
 
 describe("workspace LSP helpers", () => {
   it("matches supported language providers", () => {
@@ -37,6 +45,57 @@ describe("workspace LSP helpers", () => {
     expect(lspLanguageForFile("scripts/tool.py")).toBe("python")
   })
 
+  it.each([
+    ["Dockerfile", "dockerfile"],
+    ["dockerfile", "dockerfile"],
+    ["Makefile", "makefile"],
+    ["GNUmakefile", "makefile"],
+    [".env.local", "dotenv"],
+    ["src/app.ts", "typescript"],
+    ["src/app.mjs", "javascript"],
+    ["src/app.cjs", "javascript"],
+    ["src/App.java", "java"],
+    ["include/slab.h", "c"],
+    ["native/slab.cc", "cpp"],
+    ["native/slab.cpp", "cpp"],
+    ["native/slab.cxx", "cpp"],
+    ["native/slab.hpp", "cpp"],
+    ["settings.jsonc", "json"],
+    ["docs/readme.mdx", "markdown"],
+    ["styles/app.css", "css"],
+    ["styles/app.scss", "scss"],
+    ["styles/app.less", "less"],
+    ["index.html", "html"],
+    ["Cargo.toml", "toml"],
+    ["scripts/install.sh", "shell"],
+    ["scripts/install.bash", "shell"],
+    ["scripts/install.zsh", "shell"],
+    ["scripts/install.ps1", "powershell"],
+    ["migrations/init.sql", "sql"],
+    ["assets/icon.svg", "xml"],
+    ["workflow.yaml", "yaml"],
+    ["schema.graphql", "graphql"],
+    ["schema.gql", "graphql"],
+    ["Component.vue", "vue"],
+    ["Component.svelte", "svelte"],
+    ["tool.rb", "ruby"],
+    ["index.php", "php"],
+    ["script.lua", "lua"],
+    ["analysis.r", "r"],
+    ["App.swift", "swift"],
+    ["Main.kt", "kotlin"],
+    ["build.gradle.kts", "kotlin"],
+    ["Program.cs", "csharp"],
+    ["runtime.env", "dotenv"],
+    ["settings.ini", "ini"],
+    ["settings.cfg", "ini"],
+    ["server.conf", "ini"],
+    ["types.proto", "proto"],
+    ["README", "plaintext"],
+  ])("detects %s as %s", (fileName, language) => {
+    expect(languageForFile(fileName)).toBe(language)
+  })
+
   it("sorts directory paths by depth after removing duplicates and blanks", () => {
     expect(sortDirectoryPaths(["src/components", "src", "", "src/components", "docs/api", "docs"])).toEqual([
       "docs",
@@ -44,6 +103,51 @@ describe("workspace LSP helpers", () => {
       "docs/api",
       "src/components",
     ])
+  })
+
+  it("maps workspace entries into expandable tree nodes", () => {
+    expect(entryToTreeNode({ kind: "directory", name: "src", relativePath: "src" })).toEqual({
+      children: [],
+      kind: "directory",
+      loaded: false,
+      name: "src",
+      relativePath: "src",
+    })
+    expect(entryToTreeNode({ kind: "file", name: "main.rs", relativePath: "src/main.rs" })).toEqual({
+      children: undefined,
+      kind: "file",
+      loaded: true,
+      name: "main.rs",
+      relativePath: "src/main.rs",
+    })
+  })
+
+  it("inserts children at nested tree paths without mutating siblings", () => {
+    const nodes = [
+      entryToTreeNode({ kind: "directory", name: "src", relativePath: "src" }),
+      entryToTreeNode({ kind: "file", name: "README.md", relativePath: "README.md" }),
+    ]
+    const next = insertChildren(nodes, "src", [
+      entryToTreeNode({ kind: "file", name: "main.rs", relativePath: "src/main.rs" }),
+    ])
+
+    expect(next[0]?.loaded).toBe(true)
+    expect(next[0]?.children).toHaveLength(1)
+    expect(next[1]).toBe(nodes[1])
+    expect(nodes[0]?.children).toEqual([])
+  })
+
+  it("upserts file tabs and derives directory ancestors", () => {
+    const tabs = [{ name: "a.ts", relativePath: "src/a.ts", language: "typescript" }]
+    expect(upsertFileTab(tabs, { name: "b.ts", relativePath: "src/b.ts", language: "typescript" })).toHaveLength(
+      2,
+    )
+    expect(
+      upsertFileTab(tabs, { name: "a.tsx", relativePath: "src/a.ts", language: "typescript" }),
+    ).toEqual([{ name: "a.tsx", relativePath: "src/a.ts", language: "typescript" }])
+    expect(directoryAncestors("src/pages/index.tsx")).toEqual(["src", "src/pages"])
+    expect(directoryAncestors("src/pages", true)).toEqual(["src", "src/pages"])
+    expect(directoryAncestors("")).toEqual([])
   })
 
   it("builds file uri model paths for Monaco", () => {

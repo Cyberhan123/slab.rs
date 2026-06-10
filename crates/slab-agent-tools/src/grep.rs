@@ -93,27 +93,8 @@ impl ToolHandler for GrepTool {
             arguments.get("case_insensitive").and_then(Value::as_bool).unwrap_or(false);
 
         let search_root = if let Some(ref root) = self.workspace_root {
-            // Reject absolute paths to prevent escaping the workspace.
-            if PathBuf::from(path_str).is_absolute() {
-                return Err(AgentError::ToolExecution(format!(
-                    "absolute path '{path_str}' is not allowed when a workspace root is configured; \
-                     use a path relative to the workspace root"
-                )));
-            }
-            let resolved = root.join(path_str);
-            // Verify the resolved path stays within the workspace root.
-            // For non-existent paths we fall back to a lexical prefix check.
-            let canonical_root = root.canonicalize().map_err(|e| {
-                AgentError::ToolExecution(format!("failed to canonicalize workspace root: {e}"))
-            })?;
-            if let Ok(canonical_resolved) = resolved.canonicalize()
-                && !canonical_resolved.starts_with(&canonical_root)
-            {
-                return Err(AgentError::ToolExecution(format!(
-                    "path '{path_str}' escapes the workspace root"
-                )));
-            }
-            resolved
+            slab_file::resolve_path(Some(root), path_str)
+                .map_err(|error| AgentError::ToolExecution(error.to_string()))?
         } else {
             PathBuf::from(path_str)
         };
@@ -194,4 +175,191 @@ fn grep_blocking(
     }
 
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use serde_json::{Value, json};
+    use slab_agent::{ToolContext, ToolHandler};
+
+    use super::*;
+
+    fn ctx() -> ToolContext {
+        ToolContext { thread_id: "thread".into(), turn_index: 0, depth: 0 }
+    }
+
+    #[tokio::test]
+    async fn grep_tool_filters_by_glob_and_case() {
+        let root = temp_root("filters");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::write(root.join("src").join("lib.rs"), "Alpha\nbeta\n").expect("write rust file");
+        fs::write(root.join("notes.txt"), "alpha\n").expect("write text file");
+        let tool = GrepTool::new(Some(root.clone()));
+
+        let output = tool
+            .execute(
+                &ctx(),
+                &json!({
+                    "path": ".",
+                    "pattern": "alpha",
+                    "glob": "*.rs",
+                    "case_insensitive": true
+                }),
+            )
+            .await
+            .expect("grep output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+
+        assert_eq!(value["total"], 1);
+        assert_eq!(value["truncated"], false);
+        assert_eq!(value["matches"][0]["line"], 1);
+        assert_eq!(value["matches"][0]["text"], "Alpha");
+        assert!(value["matches"][0]["file"].as_str().expect("file").ends_with("lib.rs"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn grep_tool_requires_pattern_argument() {
+        let root = temp_root("missing_pattern");
+        let tool = GrepTool::new(Some(root.clone()));
+
+        let error = tool.execute(&ctx(), &json!({"path": "."})).await.expect_err("missing pattern");
+
+        assert_eq!(error.to_string(), "tool execution error: missing 'pattern' argument");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn grep_tool_rejects_workspace_escape_before_scanning() {
+        let root = temp_root("escape");
+        let tool = GrepTool::new(Some(root.clone()));
+
+        let parent_escape = tool
+            .execute(&ctx(), &json!({"path": "../outside/missing.txt", "pattern": "needle"}))
+            .await
+            .expect_err("parent escape rejected");
+        assert!(parent_escape.to_string().contains("workspace path"));
+
+        let absolute_escape = tool
+            .execute(
+                &ctx(),
+                &json!({"path": root.join("file.txt").display().to_string(), "pattern": "needle"}),
+            )
+            .await
+            .expect_err("absolute path rejected");
+        assert!(absolute_escape.to_string().contains("absolute path"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn grep_tool_reports_invalid_regex() {
+        let root = temp_root("invalid_regex");
+        let tool = GrepTool::new(Some(root.clone()));
+
+        let error =
+            tool.execute(&ctx(), &json!({"path": ".", "pattern": "["})).await.expect_err("regex");
+
+        assert!(error.to_string().contains("invalid regex"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn grep_tool_reports_invalid_glob() {
+        let root = temp_root("invalid_glob");
+        let tool = GrepTool::new(Some(root.clone()));
+
+        let error = tool
+            .execute(&ctx(), &json!({"path": ".", "pattern": "needle", "glob": "["}))
+            .await
+            .expect_err("invalid glob");
+
+        assert!(error.to_string().contains("invalid glob"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn grep_tool_without_workspace_allows_absolute_file_path() {
+        let root = temp_root("absolute_without_workspace");
+        let file = root.join("notes.txt");
+        fs::write(&file, "needle\n").expect("write file");
+        let tool = GrepTool::new(None);
+
+        let output = tool
+            .execute(&ctx(), &json!({"path": file.display().to_string(), "pattern": "needle"}))
+            .await
+            .expect("grep output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+
+        assert_eq!(value["total"], 1);
+        assert_eq!(value["matches"][0]["file"], file.display().to_string());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn grep_tool_includes_hidden_files_and_skips_binary_content() {
+        let root = temp_root("hidden_binary");
+        fs::write(root.join(".env"), "TOKEN=needle\n").expect("write hidden file");
+        fs::write(root.join("binary.bin"), [0xff, 0xfe, b'n', b'e', b'e', b'd', b'l', b'e'])
+            .expect("write binary file");
+        let tool = GrepTool::new(Some(root.clone()));
+
+        let output = tool
+            .execute(&ctx(), &json!({"path": ".", "pattern": "needle"}))
+            .await
+            .expect("grep output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+
+        assert_eq!(value["total"], 1);
+        assert!(value["matches"][0]["file"].as_str().expect("file").ends_with(".env"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn grep_tool_schema_matches_required_arguments() {
+        let schema = GrepTool::new(None).parameters_schema();
+
+        assert_eq!(schema["properties"]["pattern"]["type"], "string");
+        assert_eq!(schema["properties"]["path"]["default"], ".");
+        assert_eq!(schema["properties"]["case_insensitive"]["default"], false);
+        assert_eq!(schema["required"], json!(["pattern"]));
+    }
+
+    #[tokio::test]
+    async fn grep_tool_caps_results_and_marks_truncation() {
+        let root = temp_root("truncated");
+        let content = std::iter::repeat_n("hit", MAX_RESULTS + 5).collect::<Vec<_>>().join("\n");
+        fs::write(root.join("many.txt"), format!("{content}\n")).expect("write matches");
+        let tool = GrepTool::new(Some(root.clone()));
+
+        let output = tool
+            .execute(&ctx(), &json!({"path": "many.txt", "pattern": "hit"}))
+            .await
+            .expect("grep output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+
+        assert_eq!(value["matches"].as_array().expect("matches").len(), MAX_RESULTS);
+        assert_eq!(value["total"], MAX_RESULTS);
+        assert_eq!(value["truncated"], true);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn temp_root(name: &str) -> PathBuf {
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "slab_agent_tools_grep_{name}_{}_{}",
+            std::process::id(),
+            nonce
+        ));
+        fs::create_dir_all(&root).expect("create temp root");
+        root
+    }
 }

@@ -369,7 +369,7 @@ fn parse_patch(patch: &str) -> Result<Vec<FilePatch>, FileSystemError> {
 }
 
 fn parse_patch_path(raw: &str) -> Option<String> {
-    let path = raw.split_whitespace().next().unwrap_or(raw);
+    let path = raw.trim().split_once('\t').map_or(raw.trim(), |(path, _)| path);
     if path == "/dev/null" {
         return None;
     }
@@ -520,6 +520,16 @@ mod tests {
     }
 
     #[test]
+    fn parses_patch_paths_with_spaces_and_tab_metadata() {
+        assert_eq!(parse_patch_path("a/dir/file name.txt"), Some("dir/file name.txt".to_string()));
+        assert_eq!(
+            parse_patch_path("b/dir/file name.txt\t2026-01-01 00:00:00"),
+            Some("dir/file name.txt".to_string())
+        );
+        assert_eq!(parse_patch_path("/dev/null"), None);
+    }
+
+    #[test]
     fn apply_unified_patch_updates_file_and_reports_mismatch() {
         let root = temp_root("patch");
         fs::write(root.join("a.txt"), "one\ntwo\n").expect("seed file");
@@ -538,6 +548,30 @@ mod tests {
 
         let mismatch = apply_unified_patch(&root, patch).expect_err("patch should not reapply");
         assert!(matches!(mismatch, FileSystemError::PatchMismatch { .. }));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn apply_unified_patch_handles_paths_with_spaces() {
+        let root = temp_root("patch_spaces");
+        fs::create_dir_all(root.join("dir")).expect("create dir");
+        fs::write(root.join("dir").join("file name.txt"), "one\ntwo\n").expect("seed file");
+        let patch = "\
+--- a/dir/file name.txt
++++ b/dir/file name.txt
+@@ -1,2 +1,2 @@
+ one
+-two
++three
+";
+
+        let result = apply_unified_patch(&root, patch).expect("patch applies");
+
+        assert_eq!(result.applied_files, vec!["dir/file name.txt"]);
+        assert_eq!(
+            fs::read_to_string(root.join("dir").join("file name.txt")).unwrap(),
+            "one\nthree\n"
+        );
         let _ = fs::remove_dir_all(root);
     }
 

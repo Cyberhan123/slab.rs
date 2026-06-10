@@ -190,7 +190,7 @@ impl From<serde_json::Value> for Payload {
 mod tests {
     use serde::{Deserialize, Serialize};
 
-    use super::Payload;
+    use super::{Payload, StreamChunk};
 
     #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
     struct TestTypedPayload {
@@ -244,6 +244,67 @@ mod tests {
             debug.contains("TestTypedPayload"),
             "debug output should include the concrete type name"
         );
+    }
+
+    #[test]
+    fn payload_conversions_and_accessors_preserve_expected_variants() {
+        let bytes = Payload::from(vec![1, 2, 3]);
+        assert!(matches!(bytes, Payload::Bytes(_)));
+
+        let floats = Payload::from(vec![1.0_f32, 2.5]);
+        assert_eq!(floats.to_f32_arc().expect("f32 payload").as_ref(), &[1.0, 2.5]);
+
+        let borrowed_text = Payload::from("hello");
+        assert_eq!(borrowed_text.to_str().expect("text payload"), "hello");
+        assert_eq!(borrowed_text.to_str_arc().expect("text arc").as_ref(), "hello");
+
+        let owned_text = Payload::from("owned".to_owned());
+        assert_eq!(owned_text.to_str().expect("owned text payload"), "owned");
+
+        let json = Payload::from(serde_json::json!({"value": "json"}));
+        assert_eq!(json.to_serde_value(), serde_json::json!({"value": "json"}));
+        assert_eq!(Payload::default().to_serde_value(), serde_json::Value::Null);
+
+        let text_error = floats.to_str().expect_err("f32 is not text");
+        assert!(text_error.contains("expected Text variant"));
+    }
+
+    #[test]
+    fn payload_json_helpers_report_deserialize_and_variant_errors() {
+        let invalid_json = Payload::json(serde_json::json!({"value": 123}));
+        let error = invalid_json.to_json::<TestTypedPayload>().expect_err("json shape mismatch");
+        assert!(error.contains("JSON Deserialize error"));
+
+        let wrong_variant = Payload::from("not json");
+        let error = wrong_variant.to_json::<TestTypedPayload>().expect_err("text is not json");
+        assert!(error.contains("expected Json variant"));
+
+        let typed_error = Payload::from(vec![1_u8, 2])
+            .to_typed::<TestTypedPayload>()
+            .expect_err("bytes are not typed");
+        assert!(typed_error.contains("expected Typed or Json variant"));
+    }
+
+    #[test]
+    fn typed_payload_downcast_arc_shares_original_value() {
+        let payload = Payload::typed(TestTypedPayload { value: "arc".to_owned() });
+        let Payload::Typed(typed) = payload else {
+            panic!("expected typed payload");
+        };
+
+        let value = typed.downcast_arc::<TestTypedPayload>().expect("typed arc");
+
+        assert_eq!(value.value, "arc");
+        assert!(typed.downcast_ref::<TestTypedPayload>().is_some());
+        assert!(typed.downcast_arc::<usize>().is_none());
+    }
+
+    #[test]
+    fn stream_chunk_debug_variants_are_stable() {
+        assert!(format!("{:?}", StreamChunk::Token("tok".to_owned())).contains("Token"));
+        assert!(format!("{:?}", StreamChunk::Done).contains("Done"));
+        assert!(format!("{:?}", StreamChunk::Error("bad".to_owned())).contains("Error"));
+        assert!(format!("{:?}", StreamChunk::Json(serde_json::json!({"a": 1}))).contains("Json"));
     }
 }
 

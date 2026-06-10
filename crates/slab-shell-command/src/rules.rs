@@ -215,7 +215,9 @@ fn prefix_matches(command: &str, pattern: &str) -> bool {
 }
 
 fn contains_shell_control(value: &str) -> bool {
-    ["&&", "||", ";", "|", "\n", "\r"].iter().any(|pattern| value.contains(pattern))
+    ["&&", "||", ";", "|", ">", "<", "$(", "`", "\n", "\r"]
+        .iter()
+        .any(|pattern| value.contains(pattern))
 }
 
 #[cfg(test)]
@@ -288,6 +290,8 @@ mod tests {
         assert!(rules.evaluate("cargo checkout").is_none());
         assert!(rules.evaluate("cargo check && Remove-Item file.txt").is_none());
         assert!(rules.evaluate("cargo check; Remove-Item file.txt").is_none());
+        assert!(rules.evaluate("cargo check > output.txt").is_none());
+        assert!(rules.evaluate("cargo check $(Get-Content extra-args.txt)").is_none());
     }
 
     #[test]

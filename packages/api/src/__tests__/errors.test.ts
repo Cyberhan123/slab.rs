@@ -1,5 +1,14 @@
-import { describe, it, expect } from 'vitest';
-import { ApiError, ErrorCodes, getErrorMessage, getErrorCode, isApiError } from '../errors';
+import { describe, expect, it } from 'vitest';
+import {
+  ApiError,
+  ErrorCodes,
+  NetworkError,
+  TimeoutError,
+  errorMiddleware,
+  getErrorCode,
+  getErrorMessage,
+  isApiError,
+} from '../errors';
 
 describe('ApiError', () => {
   describe('constructor', () => {
@@ -97,6 +106,79 @@ describe('ApiError', () => {
       const error = new ApiError(9999, 'Unknown error');
       expect(error.getUserMessage()).toBe('Unknown error');
     });
+
+    it.each([
+      [4000, 'Invalid request. Please check your input and try again.'],
+      [5000, 'An error occurred while processing your request.'],
+      [5001, 'A database error occurred. Please try again later.'],
+      [5002, 'An internal server error occurred. Please try again later.'],
+      [5003, 'Backend service is not ready. Please ensure all backends are properly configured.'],
+      [9999, 'An unexpected error occurred. Please try again.'],
+    ])('should return fallback message for code %s', (code, message) => {
+      expect(new ApiError(code, 'error: backend detail').getUserMessage()).toBe(message);
+    });
+  });
+});
+
+describe('specialized API errors', () => {
+  it('creates network and timeout errors with API error semantics', () => {
+    expect(new NetworkError()).toMatchObject({
+      code: 5002,
+      message: 'Network request failed',
+      name: 'NetworkError',
+    });
+    expect(new TimeoutError('slow request')).toMatchObject({
+      code: 5002,
+      message: 'slow request',
+      name: 'TimeoutError',
+    });
+  });
+});
+
+describe('errorMiddleware', () => {
+  it('lets successful responses pass through', async () => {
+    await expect(
+      errorMiddleware.onResponse?.({ response: new Response('ok') } as never),
+    ).resolves.toBeUndefined();
+  });
+
+  it('throws ApiError with backend code, data, and HTTP status', async () => {
+    await expect(
+      errorMiddleware.onResponse?.({
+        response: new Response(
+          JSON.stringify({ code: 4000, message: 'Invalid input', data: { path: 'name' } }),
+          {
+            status: 400,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
+      } as never),
+    ).rejects.toMatchObject({
+      code: 4000,
+      data: { path: 'name' },
+      message: 'Invalid input',
+      status: 400,
+    });
+  });
+
+  it('throws a generic error for malformed JSON error bodies', async () => {
+    await expect(
+      errorMiddleware.onResponse?.({
+        response: new Response('not json', {
+          status: 502,
+          statusText: 'Bad Gateway',
+        }),
+      } as never),
+    ).rejects.toThrow('502 Bad Gateway');
+  });
+
+  it('wraps fetch errors and non-error throwables', async () => {
+    await expect(errorMiddleware.onError?.({ error: new Error('offline') } as never)).resolves.toEqual(
+      new ApiError(5002, 'offline'),
+    );
+    await expect(errorMiddleware.onError?.({ error: 'offline' } as never)).resolves.toEqual(
+      new Error('offline'),
+    );
   });
 });
 

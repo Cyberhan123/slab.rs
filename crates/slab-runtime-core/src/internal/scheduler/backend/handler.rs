@@ -373,3 +373,229 @@ pub fn extract_peer_control_broadcast_seq(
 ) -> Result<BroadcastSeq, BackendHandlerError> {
     Ok(BroadcastSeq(cmd.seq_id()))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use serde::{Deserialize, Serialize, Serializer};
+    use tokio::sync::{oneshot, watch};
+
+    use crate::base::types::{Payload, StreamChunk};
+
+    use super::super::protocol::{
+        BackendOp, BackendReply, BackendRequest, BackendRequestKind, PeerWorkerCommand,
+        RuntimeControlSignal, SyncMessage,
+    };
+    use super::*;
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    struct Sample {
+        value: String,
+    }
+
+    struct BrokenSerialize;
+
+    impl Serialize for BrokenSerialize {
+        fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            Err(serde::ser::Error::custom("broken serialize"))
+        }
+    }
+
+    fn request(input: Payload, options: Payload, broadcast_seq: Option<u64>) -> BackendRequest {
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+        let (reply_tx, _reply_rx) = oneshot::channel();
+        BackendRequest::new(
+            BackendRequestKind::Inference,
+            BackendOp::new("inference", options),
+            input,
+            cancel_rx,
+            broadcast_seq,
+            reply_tx,
+        )
+    }
+
+    #[test]
+    fn into_backend_reply_maps_common_success_values() {
+        assert!(matches!(().into_backend_reply().expect("unit"), BackendReply::Ack));
+        assert!(matches!(
+            Payload::from("payload").into_backend_reply().expect("payload"),
+            BackendReply::Value(Payload::Text(_))
+        ));
+        assert!(matches!(
+            "text".to_owned().into_backend_reply().expect("string"),
+            BackendReply::Value(Payload::Text(_))
+        ));
+        assert!(matches!(
+            Arc::<str>::from("arc text").into_backend_reply().expect("arc str"),
+            BackendReply::Value(Payload::Text(_))
+        ));
+        assert!(matches!(
+            vec![1_u8, 2].into_backend_reply().expect("bytes"),
+            BackendReply::Value(Payload::Bytes(_))
+        ));
+        assert!(matches!(
+            Arc::<[u8]>::from([1_u8, 2]).into_backend_reply().expect("arc bytes"),
+            BackendReply::Value(Payload::Bytes(_))
+        ));
+        assert!(matches!(
+            vec![1.0_f32].into_backend_reply().expect("floats"),
+            BackendReply::Value(Payload::F32(_))
+        ));
+        assert!(matches!(
+            Arc::<[f32]>::from([1.0_f32]).into_backend_reply().expect("arc floats"),
+            BackendReply::Value(Payload::F32(_))
+        ));
+        assert!(matches!(
+            serde_json::json!({"ok": true}).into_backend_reply().expect("json"),
+            BackendReply::Value(Payload::Json(_))
+        ));
+        assert!(matches!(
+            Json(Sample { value: "json".to_owned() }).into_backend_reply().expect("json wrapper"),
+            BackendReply::Value(Payload::Json(_))
+        ));
+        assert!(matches!(
+            Typed(Sample { value: "typed".to_owned() })
+                .into_backend_reply()
+                .expect("typed wrapper"),
+            BackendReply::Value(Payload::Typed(_))
+        ));
+
+        let (_tx, rx) = tokio::sync::mpsc::channel::<StreamChunk>(1);
+        assert!(matches!(rx.into_backend_reply().expect("stream"), BackendReply::Stream(_)));
+    }
+
+    #[test]
+    fn backend_reply_from_event_result_preserves_handler_and_adapter_errors() {
+        assert!(matches!(
+            backend_reply_from_event_result::<_, &str>(Ok("ok".to_owned())),
+            BackendReply::Value(Payload::Text(_))
+        ));
+        assert!(matches!(
+            backend_reply_from_event_result::<String, _>(Err("handler failed")),
+            BackendReply::Error(message) if message == "handler failed"
+        ));
+        assert!(matches!(
+            backend_reply_from_event_result::<_, &str>(Ok(Json(BrokenSerialize))),
+            BackendReply::Error(message) if message.contains("failed to serialize backend json response")
+        ));
+    }
+
+    #[test]
+    fn event_extractors_decode_text_payload_options_cancel_and_sequence() {
+        let req = request(
+            Payload::json(serde_json::json!({"value": "input"})),
+            Payload::typed(Sample { value: "options".to_owned() }),
+            Some(17),
+        );
+
+        assert!(matches!(extract_event_payload(&req).expect("payload"), Payload::Json(_)));
+        assert_eq!(
+            extract_event_input::<Sample>(&req).expect("input").0,
+            Sample { value: "input".to_owned() }
+        );
+        assert_eq!(
+            extract_event_options::<Sample>(&req).expect("options").0,
+            Sample { value: "options".to_owned() }
+        );
+        assert_eq!(extract_event_broadcast_seq(&req).expect("seq").0, 17);
+        assert!(!*extract_event_cancel_rx(&req).expect("cancel").0.borrow());
+
+        let text_req = request(Payload::from("hello"), Payload::default(), None);
+        assert_eq!(extract_event_text(&text_req).expect("text"), "hello");
+        assert_eq!(extract_event_broadcast_seq(&text_req).expect("default seq").0, 0);
+    }
+
+    #[test]
+    fn event_extractors_report_type_errors_with_context() {
+        let req = request(Payload::from(vec![1_u8]), Payload::from("bad options"), None);
+
+        let text_error = extract_event_text(&req).expect_err("bytes are not text");
+        assert!(text_error.to_string().contains("invalid event text input"));
+
+        let input_error = extract_event_input::<Sample>(&req).expect_err("bytes are not typed");
+        assert!(input_error.to_string().contains("invalid event input"));
+
+        let options_error =
+            extract_event_options::<Sample>(&req).expect_err("text options are not typed");
+        assert!(options_error.to_string().contains("invalid event options"));
+    }
+
+    #[test]
+    fn runtime_control_extractors_handle_load_and_unload_boundaries() {
+        let load = RuntimeControlSignal::GlobalLoad {
+            op_id: 31,
+            payload: Payload::json(serde_json::json!({"value": "runtime"})),
+        };
+        let unload = RuntimeControlSignal::GlobalUnload { op_id: 32 };
+
+        assert_eq!(extract_runtime_control_op_id(&load).expect("load id").0, 31);
+        assert_eq!(extract_runtime_control_op_id(&unload).expect("unload id").0, 32);
+        assert!(matches!(
+            extract_runtime_control_payload(&load).expect("payload"),
+            Payload::Json(_)
+        ));
+        assert_eq!(
+            extract_runtime_control_input::<Sample>(&load).expect("typed load").0,
+            Sample { value: "runtime".to_owned() }
+        );
+
+        let unload_error =
+            extract_runtime_control_payload(&unload).expect_err("unload has no payload");
+        assert!(unload_error.to_string().contains("payload unavailable"));
+    }
+
+    #[test]
+    fn peer_control_extractors_handle_deployments_and_generation_only_commands() {
+        let load = PeerWorkerCommand::LoadModel {
+            sync: SyncMessage::Deployment(super::super::protocol::DeploymentSnapshot::with_model(
+                41,
+                Payload::typed(Sample { value: "peer".to_owned() }),
+            )),
+            sender_id: 2,
+        };
+        let unload = PeerWorkerCommand::Unload {
+            sync: SyncMessage::Generation { generation: 42 },
+            sender_id: 3,
+        };
+
+        assert!(matches!(extract_peer_control_payload(&load).expect("payload"), Payload::Typed(_)));
+        assert_eq!(
+            extract_peer_control_input::<Sample>(&load).expect("typed peer").0,
+            Sample { value: "peer".to_owned() }
+        );
+        assert_eq!(extract_peer_control_broadcast_seq(&load).expect("seq").0, 41);
+        assert_eq!(extract_peer_control_broadcast_seq(&unload).expect("unload seq").0, 42);
+
+        let error = extract_peer_control_payload(&unload).expect_err("generation has no payload");
+        assert!(error.to_string().contains("payload unavailable"));
+    }
+
+    #[test]
+    fn logging_helpers_accept_all_control_shapes() {
+        let load = RuntimeControlSignal::GlobalLoad { op_id: 1, payload: Payload::default() };
+        let unload = RuntimeControlSignal::GlobalUnload { op_id: 2 };
+        let peer = PeerWorkerCommand::Unload {
+            sync: SyncMessage::Generation { generation: 3 },
+            sender_id: 4,
+        };
+
+        log_runtime_control_extractor_failure("test", "load", &load, "bad load");
+        log_runtime_control_handler_failure("test", "unload", &unload, "bad unload");
+        log_peer_control_extractor_failure("test", "peer", &peer, "bad peer");
+        log_peer_control_handler_failure("test", "peer", &peer, "bad peer");
+        log_lagged_control_handler_failure("test", "lagged", "lagged");
+    }
+
+    #[test]
+    fn backend_handler_error_round_trips_to_string() {
+        let error = BackendHandlerError::from("message");
+        let value: String = error.clone().into();
+
+        assert_eq!(value, "message");
+        assert_eq!(error.to_string(), "message");
+    }
+}

@@ -149,7 +149,8 @@ export const errorMiddleware: Middleware = {
         throw new ApiError(
           errorData.code,
           errorData.message,
-          errorData.data
+          errorData.data,
+          response.status
         );
       }
 
