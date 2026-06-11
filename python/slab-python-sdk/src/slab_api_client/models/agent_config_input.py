@@ -48,6 +48,7 @@ class AgentConfigInput:
         tool_concurrency (int | None | Unset):
         top_k (int | None | Unset):
         top_p (float | None | Unset):
+        transient (bool | None | Unset):
         verbosity (ChatVerbosity | None | Unset):
     """
 
@@ -76,6 +77,7 @@ class AgentConfigInput:
     tool_concurrency: int | None | Unset = UNSET
     top_k: int | None | Unset = UNSET
     top_p: float | None | Unset = UNSET
+    transient: bool | None | Unset = UNSET
     verbosity: ChatVerbosity | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -204,6 +206,12 @@ class AgentConfigInput:
         else:
             top_p = self.top_p
 
+        transient: bool | None | Unset
+        if isinstance(self.transient, Unset):
+            transient = UNSET
+        else:
+            transient = self.transient
+
         verbosity: None | str | Unset
         if isinstance(self.verbosity, Unset):
             verbosity = UNSET
@@ -247,6 +255,8 @@ class AgentConfigInput:
             field_dict["top_k"] = top_k
         if top_p is not UNSET:
             field_dict["top_p"] = top_p
+        if transient is not UNSET:
+            field_dict["transient"] = transient
         if verbosity is not UNSET:
             field_dict["verbosity"] = verbosity
 
@@ -521,6 +531,15 @@ class AgentConfigInput:
 
         top_p = _parse_top_p(d.pop("top_p", UNSET))
 
+        def _parse_transient(data: object) -> bool | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(bool | None | Unset, data)
+
+        transient = _parse_transient(d.pop("transient", UNSET))
+
         def _parse_verbosity(data: object) -> ChatVerbosity | None | Unset:
             if data is None:
                 return data
@@ -555,6 +574,7 @@ class AgentConfigInput:
             tool_concurrency=tool_concurrency,
             top_k=top_k,
             top_p=top_p,
+            transient=transient,
             verbosity=verbosity,
         )
 

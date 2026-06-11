@@ -2,7 +2,9 @@
 
 use async_trait::async_trait;
 use slab_agent::port::ThreadStatus;
-use slab_agent::port::{AgentStorePort, ThreadMessageRecord, ThreadSnapshot, ToolCallRecord};
+use slab_agent::port::{
+    AgentStorePort, ThreadMessageRecord, ThreadSnapshot, ToolCallRecord, TurnStateRecord,
+};
 use slab_types::agent::ToolCallStatus;
 use slab_types::{ConversationMessage, ConversationMessageContent};
 
@@ -267,5 +269,38 @@ impl AgentStorePort for SqlxStore {
         .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
 
         Ok(rows.into_iter().map(AgentThreadMessageRow::into_record).collect())
+    }
+
+    async fn upsert_turn_state(
+        &self,
+        record: &TurnStateRecord,
+    ) -> Result<(), slab_agent::AgentError> {
+        sqlx::query(
+            "INSERT INTO agent_turn_states \
+             (thread_id, turn_index, status, input_messages_json, tool_specs_json, \
+              llm_response_json, error, started_at, completed_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
+             ON CONFLICT(thread_id, turn_index) DO UPDATE SET \
+               status=excluded.status, \
+               input_messages_json=COALESCE(excluded.input_messages_json, agent_turn_states.input_messages_json), \
+               tool_specs_json=COALESCE(excluded.tool_specs_json, agent_turn_states.tool_specs_json), \
+               llm_response_json=COALESCE(excluded.llm_response_json, agent_turn_states.llm_response_json), \
+               error=excluded.error, \
+               started_at=agent_turn_states.started_at, \
+               completed_at=COALESCE(excluded.completed_at, agent_turn_states.completed_at)",
+        )
+        .bind(&record.thread_id)
+        .bind(record.turn_index as i64)
+        .bind(&record.status)
+        .bind(&record.input_messages_json)
+        .bind(&record.tool_specs_json)
+        .bind(&record.llm_response_json)
+        .bind(&record.error)
+        .bind(&record.started_at)
+        .bind(&record.completed_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
+        Ok(())
     }
 }

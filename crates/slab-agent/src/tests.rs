@@ -832,12 +832,14 @@ struct BlockingHook;
 impl AgentHook for BlockingHook {
     async fn on_event(&self, event: &HookEvent) -> HookOutcome {
         match event {
-            HookEvent::PreToolUse { .. } => {
+            HookEvent::OnToolStart { .. } => {
                 HookOutcome::Block { reason: "blocked by test hook".into() }
             }
-            HookEvent::PostToolUse { .. }
-            | HookEvent::SessionStart { .. }
-            | HookEvent::Stop { .. } => HookOutcome::Continue,
+            HookEvent::OnAgentStart { .. }
+            | HookEvent::OnLlmStart { .. }
+            | HookEvent::OnLlmEnd { .. }
+            | HookEvent::OnToolEnd { .. }
+            | HookEvent::OnAgentEnd { .. } => HookOutcome::Continue,
         }
     }
 }

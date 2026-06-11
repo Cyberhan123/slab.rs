@@ -1,0 +1,30 @@
+[package]
+name = "slab-agent-memories"
+version.workspace = true
+edition.workspace = true
+description = "Agent memory pipeline helpers for slab.rs"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[dependencies]
+slab-agent = { workspace = true }
+slab-types = { workspace = true }
+slab-utils = { workspace = true }
+
+async-trait = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+minijinja = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+walkdir = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

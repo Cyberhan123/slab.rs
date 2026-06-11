@@ -76,6 +76,9 @@ pub struct AgentConfig {
     /// Optional structured-output request forwarded to the chat backend.
     #[serde(default)]
     pub structured_output: Option<StructuredOutput>,
+    /// True for short-lived sessions that should skip root-start background work.
+    #[serde(default)]
+    pub transient: bool,
 }
 
 impl Default for AgentConfig {
@@ -100,6 +103,7 @@ impl Default for AgentConfig {
             tool_concurrency: DEFAULT_TOOL_CONCURRENCY,
             invalid_tool_call_retries: DEFAULT_INVALID_TOOL_CALL_RETRIES,
             structured_output: None,
+            transient: false,
         }
     }
 }

@@ -18,6 +18,7 @@ pub mod git;
 pub mod grep;
 pub mod mcp;
 pub mod shell;
+pub mod subagent;
 pub mod web_search;
 
 pub use apply_patch::ApplyPatchTool;
@@ -30,6 +31,7 @@ pub use shell::{ShellPolicy, ShellTool};
 pub use slab_shell_command::{
     ShellRule, ShellRuleAction, ShellRuleError, ShellRuleMatcher, ShellRuleSet,
 };
+pub use subagent::DelegateSubagentTool;
 pub use web_search::WebSearchTool;
 
 /// Register the full production tool suite.

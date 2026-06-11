@@ -17,10 +17,10 @@ use crate::{
     config::{AgentConfig, AgentToolChoice},
     error::AgentError,
     event::{AgentEventKind, AgentMetrics},
-    hook::AgentHook,
+    hook::{AgentHook, HookEvent, dispatch_hooks},
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, LlmStreamObserver, ParsedToolCall,
-        ThreadMessageRecord, ToolSpec, TurnEvent,
+        ThreadMessageRecord, ToolSpec, TurnEvent, TurnStateRecord,
     },
     risk::ToolRiskAnalyzer,
     tool::ToolRouter,
@@ -65,6 +65,28 @@ pub(crate) async fn execute_turn(
     }
 
     let tool_specs = allowed_tool_specs(&context)?;
+    let llm_start_effects = dispatch_hooks(
+        context.hooks,
+        &HookEvent::OnLlmStart {
+            thread_id: context.thread_id.to_owned(),
+            turn_index: context.turn_index,
+            messages: messages.clone(),
+            tools: tool_specs.clone(),
+        },
+    )
+    .await;
+    insert_injected_messages(messages, llm_start_effects.injected_messages);
+    append_observations(messages, llm_start_effects.observations);
+    persist_turn_state(
+        &context,
+        "running",
+        Some(messages.as_slice()),
+        Some(&tool_specs),
+        None,
+        None,
+        None,
+    )
+    .await;
 
     debug!(thread_id = context.thread_id, turn_index = context.turn_index, "executing turn");
     record_json(
@@ -106,7 +128,7 @@ pub(crate) async fn execute_turn(
         turn_index: context.turn_index,
         notify: context.notify,
     };
-    let response = tokio::select! {
+    let response_result = tokio::select! {
         response = context.llm.chat_completion_streaming(
             &context.config.model,
             messages,
@@ -114,8 +136,24 @@ pub(crate) async fn execute_turn(
             context.config,
             &context.trace_context,
             &mut stream_observer,
-        ) => response?,
+        ) => response,
         _ = context.cancellation.cancelled() => return Err(AgentError::Interrupted),
+    };
+    let response = match response_result {
+        Ok(response) => response,
+        Err(error) => {
+            persist_turn_state(
+                &context,
+                "failed",
+                Some(messages.as_slice()),
+                Some(&tool_specs),
+                None,
+                Some(&error.to_string()),
+                Some(Utc::now().to_rfc3339()),
+            )
+            .await;
+            return Err(error);
+        }
     };
     if context.cancellation.is_cancelled() {
         return Err(AgentError::Interrupted);
@@ -133,11 +171,54 @@ pub(crate) async fn execute_turn(
             "tool_calls": parsed_tool_calls_trace_payload(&response.tool_calls),
         }),
     );
+    persist_turn_state(
+        &context,
+        "llm_completed",
+        Some(messages.as_slice()),
+        Some(&tool_specs),
+        Some(&response),
+        None,
+        None,
+    )
+    .await;
+    let llm_end_effects = dispatch_hooks(
+        context.hooks,
+        &HookEvent::OnLlmEnd {
+            thread_id: context.thread_id.to_owned(),
+            turn_index: context.turn_index,
+            response: response.clone(),
+        },
+    )
+    .await;
+    insert_injected_messages(messages, llm_end_effects.injected_messages);
+    append_observations(messages, llm_end_effects.observations);
 
     if response.tool_calls.is_empty() {
-        reject_missing_required_tool_call(&context)?;
+        if let Err(error) = reject_missing_required_tool_call(&context) {
+            persist_turn_state(
+                &context,
+                "failed",
+                Some(messages.as_slice()),
+                Some(&tool_specs),
+                Some(&response),
+                Some(&error.to_string()),
+                Some(Utc::now().to_rfc3339()),
+            )
+            .await;
+            return Err(error);
+        }
         persist_final_answer(&context, messages, response.content.unwrap_or_default()).await;
         emit_turn_metrics(&context, turn_started_at, true).await;
+        persist_turn_state(
+            &context,
+            "completed",
+            Some(messages.as_slice()),
+            Some(&tool_specs),
+            None,
+            None,
+            Some(Utc::now().to_rfc3339()),
+        )
+        .await;
         record_json(
             context.trace,
             &context.trace_context,
@@ -169,6 +250,16 @@ pub(crate) async fn execute_turn(
     }
 
     emit_turn_metrics(&context, turn_started_at, true).await;
+    persist_turn_state(
+        &context,
+        "tool_calls_completed",
+        Some(messages.as_slice()),
+        Some(&tool_specs),
+        None,
+        None,
+        Some(Utc::now().to_rfc3339()),
+    )
+    .await;
     record_json(
         context.trace,
         &context.trace_context,
@@ -406,6 +497,64 @@ pub(crate) async fn persist_thread_message(
     };
     if let Err(error) = store.insert_thread_message(&record).await {
         warn!(error = %error, thread_id, "failed to persist thread message");
+    }
+}
+
+async fn persist_turn_state(
+    context: &TurnExecutionContext<'_>,
+    status: &str,
+    messages: Option<&[ConversationMessage]>,
+    tool_specs: Option<&[ToolSpec]>,
+    response: Option<&crate::port::LlmResponse>,
+    error: Option<&str>,
+    completed_at: Option<String>,
+) {
+    let input_messages_json = messages.and_then(|messages| serde_json::to_string(messages).ok());
+    let tool_specs_json = tool_specs.and_then(|tool_specs| serde_json::to_string(tool_specs).ok());
+    let llm_response_json = response.and_then(|response| serde_json::to_string(response).ok());
+    let record = TurnStateRecord {
+        thread_id: context.thread_id.to_owned(),
+        turn_index: context.turn_index,
+        status: status.to_owned(),
+        input_messages_json,
+        tool_specs_json,
+        llm_response_json,
+        error: error.map(str::to_owned),
+        started_at: Utc::now().to_rfc3339(),
+        completed_at,
+    };
+    if let Err(error) = context.store.upsert_turn_state(&record).await {
+        warn!(error = %error, thread_id = context.thread_id, "failed to persist turn state");
+    }
+}
+
+fn insert_injected_messages(
+    messages: &mut Vec<ConversationMessage>,
+    injected: Vec<ConversationMessage>,
+) {
+    if injected.is_empty() {
+        return;
+    }
+    let insert_at = messages
+        .iter()
+        .position(|message| message.role != "system" && message.role != "developer")
+        .unwrap_or(messages.len());
+    for (offset, message) in injected.into_iter().enumerate() {
+        messages.insert(insert_at + offset, message);
+    }
+}
+
+fn append_observations(messages: &mut Vec<ConversationMessage>, observations: Vec<String>) {
+    for observation in observations.into_iter().filter(|value| !value.trim().is_empty()) {
+        messages.push(ConversationMessage {
+            role: "developer".to_owned(),
+            content: ConversationMessageContent::Text(format!(
+                "Local hook observation:\n{observation}"
+            )),
+            name: Some("slab_hook".to_owned()),
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+        });
     }
 }
 

@@ -23,12 +23,108 @@
       },
       "type": "object"
     },
+    "AgentMemoriesConfig": {
+      "description": "Agent memory pipeline settings.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "extension_retention_days": {
+          "default": 30,
+          "format": "int64",
+          "type": "integer"
+        },
+        "max_unused_days": {
+          "default": 180,
+          "format": "int64",
+          "type": "integer"
+        },
+        "memory_root": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phase1_concurrency": {
+          "default": 2,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "phase1_idle_seconds": {
+          "default": 300,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "phase1_lease_seconds": {
+          "default": 900,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "phase1_max_age_days": {
+          "default": 30,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "phase1_retry_seconds": {
+          "default": 3600,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "phase1_scan_limit": {
+          "default": 8,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "phase2_lease_seconds": {
+          "default": 1800,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "phase2_limit": {
+          "default": 64,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "AgentSettingsConfig": {
       "description": "Agent-specific settings.",
       "properties": {
         "debug": {
           "default": true,
           "type": "boolean"
+        },
+        "memories": {
+          "$ref": "#/$defs/AgentMemoriesConfig",
+          "default": {
+            "enabled": false,
+            "extension_retention_days": 30,
+            "max_unused_days": 180,
+            "phase1_concurrency": 2,
+            "phase1_idle_seconds": 300,
+            "phase1_lease_seconds": 900,
+            "phase1_max_age_days": 30,
+            "phase1_retry_seconds": 3600,
+            "phase1_scan_limit": 8,
+            "phase2_lease_seconds": 1800,
+            "phase2_limit": 64
+          }
         },
         "tools": {
           "$ref": "#/$defs/AgentToolsConfig",
@@ -1271,6 +1367,19 @@
       "$ref": "#/$defs/AgentSettingsConfig",
       "default": {
         "debug": true,
+        "memories": {
+          "enabled": false,
+          "extension_retention_days": 30,
+          "max_unused_days": 180,
+          "phase1_concurrency": 2,
+          "phase1_idle_seconds": 300,
+          "phase1_lease_seconds": 900,
+          "phase1_max_age_days": 30,
+          "phase1_retry_seconds": 3600,
+          "phase1_scan_limit": 8,
+          "phase2_lease_seconds": 1800,
+          "phase2_limit": 64
+        },
         "tools": {
           "mcp": {
             "enabled": false

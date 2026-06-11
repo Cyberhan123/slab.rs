@@ -12,11 +12,19 @@ const MAX_LINES: usize = 1000;
 
 pub struct ReadFileTool {
     pub workspace_root: Option<PathBuf>,
+    pub extra_roots: Vec<PathBuf>,
 }
 
 impl ReadFileTool {
     pub fn new(workspace_root: Option<PathBuf>) -> Self {
-        Self { workspace_root }
+        Self { workspace_root, extra_roots: Vec::new() }
+    }
+
+    pub fn new_with_extra_roots(
+        workspace_root: Option<PathBuf>,
+        extra_roots: Vec<PathBuf>,
+    ) -> Self {
+        Self { workspace_root, extra_roots }
     }
 }
 
@@ -50,9 +58,10 @@ impl ToolHandler for ReadFileTool {
         let path = string_arg(arguments, "path")?;
         let start_line = arguments.get("start_line").and_then(Value::as_u64).unwrap_or(1) as usize;
         let end_line = arguments.get("end_line").and_then(Value::as_u64).map(|v| v as usize);
-        let raw = slab_file::read_to_string(self.workspace_root.as_deref(), path)
+        let path = resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, path)?;
+        let raw = tokio::fs::read_to_string(path)
             .await
-            .map_err(to_tool_error)?;
+            .map_err(|error| AgentError::ToolExecution(error.to_string()))?;
 
         let start_idx = start_line.saturating_sub(1);
         let lines: Vec<&str> = raw.lines().collect();
@@ -76,11 +85,19 @@ impl ToolHandler for ReadFileTool {
 
 pub struct WriteFileTool {
     pub workspace_root: Option<PathBuf>,
+    pub extra_roots: Vec<PathBuf>,
 }
 
 impl WriteFileTool {
     pub fn new(workspace_root: Option<PathBuf>) -> Self {
-        Self { workspace_root }
+        Self { workspace_root, extra_roots: Vec::new() }
+    }
+
+    pub fn new_with_extra_roots(
+        workspace_root: Option<PathBuf>,
+        extra_roots: Vec<PathBuf>,
+    ) -> Self {
+        Self { workspace_root, extra_roots }
     }
 }
 
@@ -110,15 +127,22 @@ impl ToolHandler for WriteFileTool {
         _ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let path = string_arg(arguments, "path")?;
+        let requested_path = string_arg(arguments, "path")?;
         let content = string_arg(arguments, "content")?;
-        slab_file::write_string(self.workspace_root.as_deref(), path, content)
+        let path =
+            resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, requested_path)?;
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|error| AgentError::ToolExecution(error.to_string()))?;
+        }
+        tokio::fs::write(&path, content)
             .await
-            .map_err(to_tool_error)?;
+            .map_err(|error| AgentError::ToolExecution(error.to_string()))?;
 
         Ok(ToolOutput {
             content: serde_json::json!({
-                "written": path,
+                "written": requested_path,
                 "bytes": content.len()
             })
             .to_string(),
@@ -129,11 +153,19 @@ impl ToolHandler for WriteFileTool {
 
 pub struct ListDirTool {
     pub workspace_root: Option<PathBuf>,
+    pub extra_roots: Vec<PathBuf>,
 }
 
 impl ListDirTool {
     pub fn new(workspace_root: Option<PathBuf>) -> Self {
-        Self { workspace_root }
+        Self { workspace_root, extra_roots: Vec::new() }
+    }
+
+    pub fn new_with_extra_roots(
+        workspace_root: Option<PathBuf>,
+        extra_roots: Vec<PathBuf>,
+    ) -> Self {
+        Self { workspace_root, extra_roots }
     }
 }
 
@@ -163,9 +195,9 @@ impl ToolHandler for ListDirTool {
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
         let path = string_arg(arguments, "path")?;
-        let entries = slab_file::list_dir(self.workspace_root.as_deref(), path)
-            .await
-            .map_err(to_tool_error)?;
+        let path = resolve_agent_path(self.workspace_root.as_deref(), &self.extra_roots, path)?;
+        let entries =
+            slab_file::list_dir(None, &path.to_string_lossy()).await.map_err(to_tool_error)?;
 
         Ok(ToolOutput {
             content: serde_json::json!({ "entries": entries }).to_string(),
@@ -176,6 +208,33 @@ impl ToolHandler for ListDirTool {
 
 fn to_tool_error(error: slab_file::FileSystemError) -> AgentError {
     AgentError::ToolExecution(error.to_string())
+}
+
+pub(crate) fn resolve_agent_path(
+    workspace_root: Option<&std::path::Path>,
+    extra_roots: &[PathBuf],
+    path: &str,
+) -> Result<PathBuf, AgentError> {
+    let path_buf = PathBuf::from(path);
+    if path_buf.is_absolute() {
+        if path_is_under_extra_root(&path_buf, extra_roots) {
+            return Ok(path_buf);
+        }
+        return slab_file::resolve_path(workspace_root, path).map_err(to_tool_error);
+    }
+    slab_file::resolve_path(workspace_root, path).map_err(to_tool_error)
+}
+
+fn path_is_under_extra_root(path: &std::path::Path, extra_roots: &[PathBuf]) -> bool {
+    let Ok(candidate_parent) = slab_utils::fs::existing_ancestor(path.parent().unwrap_or(path))
+    else {
+        return false;
+    };
+    extra_roots.iter().any(|root| {
+        root.canonicalize()
+            .map(|canonical_root| candidate_parent.starts_with(canonical_root))
+            .unwrap_or(false)
+    })
 }
 
 #[cfg(test)]

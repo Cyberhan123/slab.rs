@@ -13,7 +13,7 @@ use slab_types::{ConversationMessage, agent::ToolCallStatus};
 use crate::{
     error::AgentError,
     event::{AgentEventKind, ToolRiskAssessment},
-    hook::{HookEvent, HookOutcome, dispatch_hooks},
+    hook::{HookEvent, HookToolAction, dispatch_hooks},
     port::{ApprovalDecision, ParsedToolCall, TurnEvent},
     state::ToolCallStateMachine,
     tool::{ToolApprovalRequest, ToolContext, ToolHandler},
@@ -236,10 +236,15 @@ async fn handle_tool_call(
         }),
     );
 
-    let pre_event =
-        HookEvent::PreToolUse { tool_name: tool_call.name.clone(), arguments: parsed_args.clone() };
-    let effective_args = match dispatch_hooks(context.hooks, &pre_event).await {
-        HookOutcome::Block { reason } => {
+    let pre_event = HookEvent::OnToolStart {
+        thread_id: context.thread_id.to_owned(),
+        turn_index: context.turn_index,
+        call_id: call_id.clone(),
+        tool_name: tool_call.name.clone(),
+        arguments: parsed_args.clone(),
+    };
+    let effective_args = match dispatch_hooks(context.hooks, &pre_event).await.tool_action {
+        HookToolAction::Block { reason } => {
             record_json(
                 context.trace,
                 &context.trace_context,
@@ -264,8 +269,8 @@ async fn handle_tool_call(
             .await?;
             return Ok(ToolCallRunResult { message, status: ToolCallStatus::Failed });
         }
-        HookOutcome::ModifyArgs { arguments } => arguments,
-        HookOutcome::Continue => parsed_args,
+        HookToolAction::ModifyArgs { arguments } => arguments,
+        HookToolAction::Continue => parsed_args,
     };
 
     let risk = context.risk.analyze(&tool_call.name, &effective_args).await;
@@ -307,7 +312,7 @@ async fn handle_tool_call(
     let mut tool_state = ToolCallStateMachine::new(initial_status);
     insert_tool_call_record(context, &call_id, tool_call, tool_state.status(), created_at).await;
 
-    let (output, call_status) = run_tool_with_optional_approval(ToolRunContext {
+    let (mut output, call_status) = run_tool_with_optional_approval(ToolRunContext {
         context,
         call_id: &call_id,
         tool_call,
@@ -349,12 +354,17 @@ async fn handle_tool_call(
         }),
     );
 
-    let post_event = HookEvent::PostToolUse {
+    let post_event = HookEvent::OnToolEnd {
+        thread_id: context.thread_id.to_owned(),
+        turn_index: context.turn_index,
+        call_id: call_id.clone(),
         tool_name: tool_call.name.clone(),
         arguments: effective_args,
         output: output.clone(),
+        status: call_status,
     };
-    dispatch_hooks(context.hooks, &post_event).await;
+    let post_effects = dispatch_hooks(context.hooks, &post_event).await;
+    append_hook_observations(&mut output, post_effects.observations);
 
     context
         .notify
@@ -556,5 +566,24 @@ async fn execute_tool_call(
             warn!(tool = handler.name(), error = %error, "tool execution failed");
             (error.to_string(), ToolCallStatus::Failed)
         }
+    }
+}
+
+fn append_hook_observations(output: &mut String, observations: Vec<String>) {
+    let observations = observations
+        .into_iter()
+        .filter(|observation| !observation.trim().is_empty())
+        .collect::<Vec<_>>();
+    if observations.is_empty() {
+        return;
+    }
+    if !output.ends_with('\n') {
+        output.push('\n');
+    }
+    output.push_str("\nHook observations:\n");
+    for observation in observations {
+        output.push_str("- ");
+        output.push_str(observation.trim());
+        output.push('\n');
     }
 }

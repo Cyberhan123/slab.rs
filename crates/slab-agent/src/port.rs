@@ -20,7 +20,7 @@ pub type ThreadStatus = slab_types::agent::AgentThreadStatus;
 // ── Supporting data types ────────────────────────────────────────────────────
 
 /// The response returned by the LLM for a single chat completion call.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LlmResponse {
     /// Optional assistant text content.
     pub content: Option<String>,
@@ -33,7 +33,7 @@ pub struct LlmResponse {
 }
 
 /// A single tool call parsed from the LLM response.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ParsedToolCall {
     /// Provider-assigned call identifier.
     pub id: String,
@@ -44,7 +44,7 @@ pub struct ParsedToolCall {
 }
 
 /// Tool description passed to the LLM so it knows what tools are available.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ToolSpec {
     /// Canonical tool name.
     pub name: String,
@@ -98,6 +98,20 @@ pub struct ThreadMessageRecord {
     pub message: ConversationMessage,
     /// RFC 3339 creation timestamp.
     pub created_at: String,
+}
+
+/// Persisted state snapshot for a single agent turn.
+#[derive(Debug, Clone)]
+pub struct TurnStateRecord {
+    pub thread_id: String,
+    pub turn_index: u32,
+    pub status: String,
+    pub input_messages_json: Option<String>,
+    pub tool_specs_json: Option<String>,
+    pub llm_response_json: Option<String>,
+    pub error: Option<String>,
+    pub started_at: String,
+    pub completed_at: Option<String>,
 }
 
 /// A streaming event emitted during a single LLM turn.
@@ -249,6 +263,13 @@ pub trait AgentStorePort: Send + Sync {
         &self,
         thread_id: &str,
     ) -> Result<Vec<ThreadMessageRecord>, AgentError>;
+
+    /// Insert or update detailed state for a single agent turn.
+    ///
+    /// Hosts that do not need turn-level state can keep this default no-op.
+    async fn upsert_turn_state(&self, _record: &TurnStateRecord) -> Result<(), AgentError> {
+        Ok(())
+    }
 }
 
 /// Port for status-change and turn-event notifications.

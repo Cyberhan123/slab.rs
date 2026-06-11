@@ -181,9 +181,6 @@ impl AgentThread {
             }
         }
 
-        // Dispatch SessionStart hook.
-        dispatch_hooks(&hooks, &HookEvent::SessionStart { thread_id: thread_id.clone() }).await;
-
         // Inject system prompt as the first message, if not already present.
         if starting_turn_index == 0
             && let Some(ref system_prompt) = self.config.system_prompt
@@ -208,6 +205,19 @@ impl AgentThread {
                 serde_json::json!({ "system_prompt": system_prompt }),
             );
         }
+
+        let start_effects = dispatch_hooks(
+            &hooks,
+            &HookEvent::OnAgentStart {
+                thread_id: thread_id.clone(),
+                session_id: self.session_id.clone(),
+                parent_id: self.parent_id.clone(),
+                depth: self.depth,
+                config: self.config.clone(),
+            },
+        )
+        .await;
+        insert_injected_messages(&mut messages, start_effects.injected_messages);
 
         if let Some(start) = persist_messages_from {
             for message in messages.iter().skip(start) {
@@ -322,9 +332,6 @@ impl AgentThread {
             }
         }
 
-        // Dispatch Stop hook regardless of outcome.
-        dispatch_hooks(&hooks, &HookEvent::Stop { thread_id: thread_id.clone() }).await;
-
         if interrupted {
             self.emit_response_event(
                 &notify,
@@ -351,6 +358,15 @@ impl AgentThread {
                 .update_thread_status(&thread_id, ThreadStatus::Interrupted, Some("interrupted"))
                 .await
                 .ok();
+            dispatch_hooks(
+                &hooks,
+                &HookEvent::OnAgentEnd {
+                    thread_id: thread_id.clone(),
+                    status: ThreadStatus::Interrupted,
+                    error: None,
+                },
+            )
+            .await;
             return Ok(String::new());
         }
 
@@ -386,6 +402,15 @@ impl AgentThread {
                 .update_thread_status(&thread_id, ThreadStatus::Errored, Some(&err.to_string()))
                 .await
                 .ok();
+            dispatch_hooks(
+                &hooks,
+                &HookEvent::OnAgentEnd {
+                    thread_id: thread_id.clone(),
+                    status: ThreadStatus::Errored,
+                    error: Some(err.to_string()),
+                },
+            )
+            .await;
             return Err(err);
         }
 
@@ -417,6 +442,15 @@ impl AgentThread {
             .update_thread_status(&thread_id, ThreadStatus::Completed, completion_text.as_deref())
             .await
             .ok();
+        dispatch_hooks(
+            &hooks,
+            &HookEvent::OnAgentEnd {
+                thread_id: thread_id.clone(),
+                status: ThreadStatus::Completed,
+                error: None,
+            },
+        )
+        .await;
 
         Ok(completion_text.unwrap_or_default())
     }
@@ -620,5 +654,19 @@ impl AgentThread {
                 },
             )
             .await;
+    }
+}
+
+fn insert_injected_messages(
+    messages: &mut Vec<ConversationMessage>,
+    injected: Vec<ConversationMessage>,
+) {
+    if injected.is_empty() {
+        return;
+    }
+    let insert_at =
+        messages.iter().position(|message| message.role != "system").unwrap_or(messages.len());
+    for (offset, message) in injected.into_iter().enumerate() {
+        messages.insert(insert_at + offset, message);
     }
 }

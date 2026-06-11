@@ -285,12 +285,109 @@ pub struct AgentSettingsConfig {
     pub debug: bool,
     #[serde(default)]
     pub tools: AgentToolsConfig,
+    #[serde(default)]
+    pub memories: AgentMemoriesConfig,
 }
 
 impl Default for AgentSettingsConfig {
     fn default() -> Self {
-        Self { debug: true, tools: AgentToolsConfig::default() }
+        Self {
+            debug: true,
+            tools: AgentToolsConfig::default(),
+            memories: AgentMemoriesConfig::default(),
+        }
     }
+}
+
+/// Agent memory pipeline settings.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct AgentMemoriesConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_root: Option<String>,
+    #[serde(default = "default_memory_phase1_scan_limit")]
+    pub phase1_scan_limit: u32,
+    #[serde(default = "default_memory_phase1_concurrency")]
+    pub phase1_concurrency: u32,
+    #[serde(default = "default_memory_phase1_idle_seconds")]
+    pub phase1_idle_seconds: u64,
+    #[serde(default = "default_memory_phase1_lease_seconds")]
+    pub phase1_lease_seconds: u64,
+    #[serde(default = "default_memory_phase1_retry_seconds")]
+    pub phase1_retry_seconds: u64,
+    #[serde(default = "default_memory_phase1_max_age_days")]
+    pub phase1_max_age_days: u32,
+    #[serde(default = "default_memory_phase2_limit")]
+    pub phase2_limit: u32,
+    #[serde(default = "default_memory_phase2_lease_seconds")]
+    pub phase2_lease_seconds: u64,
+    #[serde(default = "default_memory_max_unused_days")]
+    pub max_unused_days: i64,
+    #[serde(default = "default_memory_extension_retention_days")]
+    pub extension_retention_days: i64,
+}
+
+impl Default for AgentMemoriesConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model: None,
+            memory_root: None,
+            phase1_scan_limit: default_memory_phase1_scan_limit(),
+            phase1_concurrency: default_memory_phase1_concurrency(),
+            phase1_idle_seconds: default_memory_phase1_idle_seconds(),
+            phase1_lease_seconds: default_memory_phase1_lease_seconds(),
+            phase1_retry_seconds: default_memory_phase1_retry_seconds(),
+            phase1_max_age_days: default_memory_phase1_max_age_days(),
+            phase2_limit: default_memory_phase2_limit(),
+            phase2_lease_seconds: default_memory_phase2_lease_seconds(),
+            max_unused_days: default_memory_max_unused_days(),
+            extension_retention_days: default_memory_extension_retention_days(),
+        }
+    }
+}
+
+const fn default_memory_phase1_scan_limit() -> u32 {
+    8
+}
+
+const fn default_memory_phase1_concurrency() -> u32 {
+    2
+}
+
+const fn default_memory_phase1_idle_seconds() -> u64 {
+    300
+}
+
+const fn default_memory_phase1_lease_seconds() -> u64 {
+    900
+}
+
+const fn default_memory_phase1_retry_seconds() -> u64 {
+    3600
+}
+
+const fn default_memory_phase1_max_age_days() -> u32 {
+    30
+}
+
+const fn default_memory_phase2_limit() -> u32 {
+    64
+}
+
+const fn default_memory_phase2_lease_seconds() -> u64 {
+    1800
+}
+
+const fn default_memory_max_unused_days() -> i64 {
+    180
+}
+
+const fn default_memory_extension_retention_days() -> i64 {
+    30
 }
 
 /// Agent tool settings.
@@ -1161,6 +1258,8 @@ mod tests {
             WebSearchProviderId::Duckduckgo
         );
         assert!(settings.agent.debug);
+        assert!(!settings.agent.memories.enabled);
+        assert_eq!(settings.agent.memories.phase1_concurrency, 2);
         assert_eq!(settings.runtime.transport, RuntimeTransportMode::Ipc);
         assert_eq!(settings.server.address, DESKTOP_API_BIND);
         assert!(settings.runtime.logging.level.is_none());

@@ -28,11 +28,19 @@ const MAX_RESULTS: usize = 200;
 /// Returns up to 200 matches as `[{file, line, text}]`.
 pub struct GrepTool {
     workspace_root: Option<PathBuf>,
+    extra_roots: Vec<PathBuf>,
 }
 
 impl GrepTool {
     pub fn new(workspace_root: Option<PathBuf>) -> Self {
-        Self { workspace_root }
+        Self { workspace_root, extra_roots: Vec::new() }
+    }
+
+    pub fn new_with_extra_roots(
+        workspace_root: Option<PathBuf>,
+        extra_roots: Vec<PathBuf>,
+    ) -> Self {
+        Self { workspace_root, extra_roots }
     }
 }
 
@@ -92,12 +100,11 @@ impl ToolHandler for GrepTool {
         let case_insensitive =
             arguments.get("case_insensitive").and_then(Value::as_bool).unwrap_or(false);
 
-        let search_root = if let Some(ref root) = self.workspace_root {
-            slab_file::resolve_path(Some(root), path_str)
-                .map_err(|error| AgentError::ToolExecution(error.to_string()))?
-        } else {
-            PathBuf::from(path_str)
-        };
+        let search_root = crate::fs::resolve_agent_path(
+            self.workspace_root.as_deref(),
+            &self.extra_roots,
+            path_str,
+        )?;
 
         // Build the regex.
         let re = regex::RegexBuilder::new(&pattern)

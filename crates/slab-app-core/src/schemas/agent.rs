@@ -35,6 +35,7 @@ pub struct AgentConfigInput {
     pub tool_concurrency: Option<u8>,
     pub invalid_tool_call_retries: Option<u8>,
     pub structured_output: Option<AgentStructuredOutputInput>,
+    pub transient: Option<bool>,
 }
 
 impl From<AgentConfigInput> for AgentConfig {
@@ -66,6 +67,7 @@ impl From<AgentConfigInput> for AgentConfig {
                 .unwrap_or(defaults.invalid_tool_call_retries)
                 .clamp(0, MAX_INVALID_TOOL_CALL_RETRIES),
             structured_output: v.structured_output.map(Into::into),
+            transient: v.transient.unwrap_or(defaults.transient),
         }
     }
 }
@@ -513,6 +515,7 @@ mod tests {
         assert_eq!(config.tool_concurrency, 1);
         assert_eq!(config.invalid_tool_call_retries, 1);
         assert_eq!(config.structured_output, None);
+        assert!(!config.transient);
     }
 
     #[test]

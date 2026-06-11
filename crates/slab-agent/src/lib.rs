@@ -51,14 +51,14 @@ pub use event::{
     AgentEventKind, AgentMetrics, AgentResponseRef, AgentStreamEvent, ToolExecutionStatus,
     ToolRiskAssessment, ToolRiskLevel,
 };
-pub use hook::{AgentHook, HookEvent, HookOutcome};
+pub use hook::{AgentHook, HookEffects, HookEvent, HookOutcome, HookToolAction};
 pub use llm_output::{
     AgentStreamAssembler, AgentStreamCompletion, AgentStreamDelta, RenderedToolCallOutput,
     parse_rendered_tool_call_output,
 };
 pub use port::{
     AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
-    ThreadStatus, TurnEvent,
+    ThreadStatus, TurnEvent, TurnStateRecord,
 };
 pub use risk::{BasicToolRiskAnalyzer, ToolRiskAnalyzer};
 pub use tool::{ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput, ToolRouter};

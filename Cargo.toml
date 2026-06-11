@@ -9,6 +9,7 @@ members = [
     "bin/slab-js-runtime",
     "crates/slab-proto",
     "crates/slab-agent",
+    "crates/slab-agent-memories",
     "crates/slab-agent-tracing",
     "crates/slab-agent-tools",
     "crates/slab-build-utils",
@@ -61,6 +62,7 @@ license = "AGPL-3.0-only"
 slab-runtime-core = { path = "./crates/slab-runtime-core", package = "slab-runtime-core", version = "0.1.0" }
 slab-app-core = { path = "./crates/slab-app-core", package = "slab-app-core", version = "0.1.0" }
 slab-agent = { path = "./crates/slab-agent", package = "slab-agent", version = "0.1.0" }
+slab-agent-memories = { path = "./crates/slab-agent-memories", package = "slab-agent-memories", version = "0.1.0" }
 slab-agent-tracing = { path = "./crates/slab-agent-tracing", package = "slab-agent-tracing", version = "0.1.0" }
 slab-agent-tools = { path = "./crates/slab-agent-tools", package = "slab-agent-tools", version = "0.1.0" }
 slab-proto = { path = "./crates/slab-proto", package = "slab-proto", version = "0.1.0" }

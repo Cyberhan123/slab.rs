@@ -85,11 +85,8 @@ impl AppState {
         let store_for_agent: Arc<dyn slab_agent::port::AgentStorePort> =
             Arc::clone(&store) as Arc<dyn slab_agent::port::AgentStorePort>;
         let agent_event_hub = Arc::new(crate::infra::agent_event_hub::AgentEventHub::new());
-        let agent_control = Arc::new(build_agent_control(
-            &context,
-            Arc::clone(&store),
-            Arc::clone(&agent_event_hub),
-        ));
+        let agent_control =
+            build_agent_control(&context, Arc::clone(&store), Arc::clone(&agent_event_hub));
         let agent_service = crate::domain::services::AgentService::new(
             agent_control,
             store_for_agent,
@@ -113,7 +110,7 @@ fn build_agent_control(
     ctx: &AppContext,
     store: Arc<crate::infra::db::AnyStore>,
     notify: Arc<crate::infra::agent_event_hub::AgentEventHub>,
-) -> slab_agent::AgentControl {
+) -> Arc<slab_agent::AgentControl> {
     use slab_agent::{AgentControl, ToolRouter};
     use slab_agent_tools::{ShellPolicy, ShellRuleSet};
     use slab_agent_tracing::{AgentTraceSink, FileAgentTraceSink, NoopAgentTraceSink};
@@ -121,6 +118,7 @@ fn build_agent_control(
 
     let llm =
         Arc::new(crate::infra::agent_adapter::ServerLlmAdapter::new(Arc::clone(&ctx.model_state)));
+    let memory_store = Arc::clone(&store);
     let store_adapter: Arc<dyn slab_agent::port::AgentStorePort> = store;
     let workspace_root = crate::domain::services::workspace_root_from_config(&ctx.config);
     let sandbox_driver = workspace_root.clone().and_then(|root| {
@@ -156,13 +154,14 @@ fn build_agent_control(
         &mut tool_router,
         shell_policy,
         sandbox_driver,
-        workspace_root,
+        workspace_root.clone(),
         mcp_client,
         false,
         web_search_config,
         shell_rules,
     );
 
+    let tool_router = Arc::new(tool_router);
     let notify_port: Arc<dyn slab_agent::AgentNotifyPort> = notify.clone();
     let approval_port: Arc<dyn slab_agent::ApprovalPort> = notify;
     let (trace, trace_dir): (Arc<dyn AgentTraceSink>, Option<PathBuf>) =
@@ -173,17 +172,60 @@ fn build_agent_control(
             (Arc::new(NoopAgentTraceSink), None)
         };
 
-    AgentControl::new_with_hooks_and_tracing(
+    let memory_config = ctx.pmid.config().agent.memories.clone();
+    let memory_root = memory_config
+        .memory_root
+        .as_deref()
+        .and_then(normalize_non_empty_path)
+        .unwrap_or_else(|| slab_utils::app_home::app_home_dir().join("memories"));
+    if memory_config.enabled {
+        let extra_roots = vec![memory_root.clone()];
+        tool_router.register(Box::new(slab_agent_tools::ReadFileTool::new_with_extra_roots(
+            workspace_root.clone(),
+            extra_roots.clone(),
+        )));
+        tool_router.register(Box::new(slab_agent_tools::WriteFileTool::new_with_extra_roots(
+            workspace_root.clone(),
+            extra_roots.clone(),
+        )));
+        tool_router.register(Box::new(slab_agent_tools::ListDirTool::new_with_extra_roots(
+            workspace_root.clone(),
+            extra_roots.clone(),
+        )));
+        tool_router.register(Box::new(slab_agent_tools::GrepTool::new_with_extra_roots(
+            workspace_root.clone(),
+            extra_roots,
+        )));
+    }
+    let memory_pipeline = crate::infra::agent_memory::AgentMemoryPipeline::new(
+        memory_store,
+        Arc::clone(&ctx.model_state),
+        memory_config.clone(),
+        memory_root.clone(),
+    );
+    let hooks: Vec<Arc<dyn slab_agent::AgentHook>> = vec![
+        Arc::new(slab_agent_memories::hooks::MemoryInstructionHook::new(
+            memory_config.enabled,
+            memory_root,
+        )),
+        Arc::new(crate::infra::agent_memory::AgentMemoryStartupHook::new(memory_pipeline.clone())),
+    ];
+
+    let control = Arc::new(AgentControl::new_with_hooks_and_tracing(
         llm,
         store_adapter,
         notify_port,
         approval_port,
-        Arc::new(tool_router),
+        Arc::clone(&tool_router),
         slab_agent::AgentControlLimits { max_threads: 32, max_depth: 4 },
-        Vec::new(),
+        hooks,
         trace,
         trace_dir,
-    )
+    ));
+    tool_router
+        .register(Box::new(slab_agent_tools::DelegateSubagentTool::new(Arc::clone(&control))));
+    memory_pipeline.set_control(Arc::clone(&control));
+    control
 }
 
 fn agent_trace_log_dir(ctx: &AppContext) -> PathBuf {

@@ -25,6 +25,7 @@ slab-utils = { workspace = true }
 # Internal workspace deps
 slab-runtime-core = { workspace = true }
 slab-agent        = { workspace = true }
+slab-agent-memories = { workspace = true }
 slab-agent-tracing = { workspace = true }
 slab-agent-tools  = { workspace = true }
 slab-mcp          = { workspace = true }

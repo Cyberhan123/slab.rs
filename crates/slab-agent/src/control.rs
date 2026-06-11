@@ -227,6 +227,65 @@ impl AgentControl {
         .await
     }
 
+    /// Spawn a child agent using an existing thread as its parent.
+    pub async fn spawn_child_for_parent(
+        &self,
+        parent_thread_id: &str,
+        config: AgentConfig,
+        messages: Vec<ConversationMessage>,
+    ) -> Result<String, AgentError> {
+        let parent = self
+            .store
+            .get_thread(parent_thread_id)
+            .await?
+            .ok_or_else(|| AgentError::ThreadNotFound(parent_thread_id.to_owned()))?;
+        let parent_config =
+            serde_json::from_str::<AgentConfig>(&parent.config_json).map_err(|error| {
+                AgentError::Internal(format!("failed to deserialize parent agent config: {error}"))
+            })?;
+        let depth = parent.depth + 1;
+        if depth > parent_config.max_depth {
+            return Err(AgentError::DepthLimitExceeded {
+                current: depth,
+                max: parent_config.max_depth,
+            });
+        }
+        self.spawn_child(parent.session_id, parent.id, depth, config, messages).await
+    }
+
+    /// Return a persisted thread snapshot.
+    pub async fn thread_snapshot(
+        &self,
+        thread_id: &str,
+    ) -> Result<Option<crate::port::ThreadSnapshot>, AgentError> {
+        self.store.get_thread(thread_id).await
+    }
+
+    /// Wait for a thread to reach a terminal status and return its latest snapshot.
+    pub async fn wait_for_terminal_snapshot(
+        &self,
+        thread_id: &str,
+    ) -> Result<crate::port::ThreadSnapshot, AgentError> {
+        match self.subscribe(thread_id).await {
+            Ok(mut rx) => loop {
+                let status = *rx.borrow();
+                if is_terminal_status(status) {
+                    break;
+                }
+                if rx.changed().await.is_err() {
+                    break;
+                }
+            },
+            Err(AgentError::ThreadNotFound(_)) => {}
+            Err(error) => return Err(error),
+        }
+
+        self.store
+            .get_thread(thread_id)
+            .await?
+            .ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))
+    }
+
     /// Append user input to a persisted thread and run another agent turn.
     pub async fn send_input(&self, thread_id: &str, content: String) -> Result<(), AgentError> {
         if self.threads.read().await.contains_key(thread_id) {
@@ -442,4 +501,14 @@ impl AgentControl {
 
         Ok(thread_id)
     }
+}
+
+fn is_terminal_status(status: ThreadStatus) -> bool {
+    matches!(
+        status,
+        ThreadStatus::Completed
+            | ThreadStatus::Errored
+            | ThreadStatus::Interrupted
+            | ThreadStatus::Shutdown
+    )
 }

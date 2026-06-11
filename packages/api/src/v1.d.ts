@@ -907,6 +907,7 @@ export interface components {
             top_k?: number | null;
             /** Format: float */
             top_p?: number | null;
+            transient?: boolean | null;
             verbosity?: null | components["schemas"]["ChatVerbosity"];
         };
         /**
