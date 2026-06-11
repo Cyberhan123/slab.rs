@@ -384,3 +384,77 @@ fn humanize_artifact_label(id: &str) -> String {
         other => other.replace('_', " "),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    use slab_types::ModelSource;
+
+    use super::{
+        build_model_config_source_fields, build_model_config_source_summary,
+        humanize_artifact_label,
+    };
+    use crate::domain::models::ModelConfigOrigin;
+
+    #[test]
+    fn hugging_face_source_summary_prefers_named_model_artifact() {
+        let source = ModelSource::HuggingFace {
+            repo_id: "Qwen/Qwen3".to_owned(),
+            revision: Some("main".to_owned()),
+            files: BTreeMap::from([
+                ("tokenizer".to_owned(), PathBuf::from("tokenizer.json")),
+                ("model".to_owned(), PathBuf::from("qwen.gguf")),
+                ("clip_l".to_owned(), PathBuf::from("clip-l.safetensors")),
+            ]),
+        };
+
+        let summary = build_model_config_source_summary(&source);
+
+        assert_eq!(summary.source_kind, "hugging_face");
+        assert_eq!(summary.repo_id.as_deref(), Some("Qwen/Qwen3"));
+        assert_eq!(summary.filename.as_deref(), Some("qwen.gguf"));
+        assert_eq!(summary.local_path, None);
+        assert!(
+            summary
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.id == "clip_l" && artifact.label == "CLIP L")
+        );
+    }
+
+    #[test]
+    fn local_artifacts_without_model_use_first_artifact_as_primary_path() {
+        let source = ModelSource::LocalArtifacts {
+            files: BTreeMap::from([
+                ("vae".to_owned(), PathBuf::from("vae.safetensors")),
+                ("clip_l".to_owned(), PathBuf::from("clip-l.safetensors")),
+            ]),
+        };
+
+        let summary = build_model_config_source_summary(&source);
+
+        assert_eq!(summary.source_kind, "local_artifacts");
+        assert_eq!(summary.filename, None);
+        assert_eq!(summary.local_path.as_deref(), Some("clip-l.safetensors"));
+        assert_eq!(summary.artifacts.len(), 2);
+    }
+
+    #[test]
+    fn source_fields_only_emit_optional_values_that_exist() {
+        let source = ModelSource::LocalPath { path: PathBuf::from("/models/qwen.gguf") };
+        let summary = build_model_config_source_summary(&source);
+
+        let fields = build_model_config_source_fields(&summary, ModelConfigOrigin::SelectedVariant);
+        let paths = fields.iter().map(|field| field.path.as_str()).collect::<Vec<_>>();
+
+        assert_eq!(paths, vec!["source.kind", "source.local_path", "source.artifacts.model"]);
+        assert!(fields.iter().all(|field| field.origin == ModelConfigOrigin::SelectedVariant));
+    }
+
+    #[test]
+    fn unknown_artifact_labels_are_humanized_without_title_casing() {
+        assert_eq!(humanize_artifact_label("audio_encoder"), "audio encoder");
+    }
+}

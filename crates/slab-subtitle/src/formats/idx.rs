@@ -230,3 +230,75 @@ impl IdxFile {
             .map_err(|e| IdxLineParseError { line_num, msg: parse_error_to_string(e) }.into())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::SubtitleFileInterface;
+    use crate::timetypes::{TimePoint, TimeSpan};
+
+    use super::IdxFile;
+    use super::errors::ErrorKind;
+
+    const IDX_WITH_TIMESTAMPS: &str = concat!(
+        "# VobSub index file\n",
+        "size: 1920x1080\n",
+        "timestamp: 00:00:01:250, filepos: 000000000\n",
+        "   timestamp: 00:00:03:000, filepos: 000000100\n",
+    );
+
+    #[test]
+    fn parses_timestamps_into_adjacent_timespans() {
+        let file = IdxFile::parse(IDX_WITH_TIMESTAMPS).expect("parse idx");
+
+        let entries = file.get_subtitle_entries().expect("idx entries");
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            entries[0].timespan,
+            TimeSpan::new(
+                TimePoint::from_components(0, 0, 1, 250),
+                TimePoint::from_components(0, 0, 3, 0)
+            )
+        );
+        assert_eq!(
+            entries[1].timespan,
+            TimeSpan::new(
+                TimePoint::from_components(0, 0, 3, 0),
+                TimePoint::from_components(0, 1, 3, 0)
+            )
+        );
+        assert!(entries.iter().all(|entry| entry.line.is_none()));
+    }
+
+    #[test]
+    fn updates_timestamps_while_preserving_idx_metadata() {
+        let mut file = IdxFile::parse(IDX_WITH_TIMESTAMPS).expect("parse idx");
+        let entries = vec![
+            TimeSpan::new(
+                TimePoint::from_components(0, 0, 10, 5),
+                TimePoint::from_components(0, 0, 12, 0),
+            )
+            .into(),
+            TimeSpan::new(
+                TimePoint::from_components(0, 0, 12, 500),
+                TimePoint::from_components(0, 0, 13, 0),
+            )
+            .into(),
+        ];
+
+        file.update_subtitle_entries(&entries).expect("update idx entries");
+
+        let data = String::from_utf8(file.to_data().expect("serialize idx")).expect("utf8 idx");
+        assert!(data.contains("# VobSub index file\nsize: 1920x1080\n"));
+        assert!(data.contains("timestamp: 00:00:10:005, filepos: 000000000"));
+        assert!(data.contains("   timestamp: 00:00:12:500, filepos: 000000100"));
+    }
+
+    #[test]
+    fn rejects_malformed_timestamp_line() {
+        let error = IdxFile::parse_inner("timestamp: 00:00:not-a-time, filepos: 0\n")
+            .expect_err("malformed timestamp should fail");
+
+        assert!(matches!(error.kind(), ErrorKind::IdxLineParseError { line_num: 0, .. }));
+    }
+}

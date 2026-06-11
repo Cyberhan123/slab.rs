@@ -155,3 +155,114 @@ fn should_publish_model_download_progress(
         .last_published_at
         .is_none_or(|published_at| published_at.elapsed() >= MODEL_DOWNLOAD_PROGRESS_MIN_INTERVAL)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        MODEL_DOWNLOAD_PROGRESS_MIN_BYTES_DELTA, MODEL_DOWNLOAD_PROGRESS_MIN_INTERVAL,
+        ModelDownloadProgressState, should_publish_model_download_progress,
+    };
+    use crate::domain::models::TaskProgress;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn progress_publish_rules_allow_initial_forced_and_terminal_updates() {
+        let initial = task_progress("model.gguf", 0, Some(100), Some(1), Some(2));
+
+        assert!(should_publish_model_download_progress(
+            &ModelDownloadProgressState::default(),
+            &initial,
+            false
+        ));
+
+        let state = state_with(initial.clone(), Duration::ZERO);
+        assert!(should_publish_model_download_progress(&state, &initial, true));
+
+        let finished = task_progress("model.gguf", 100, Some(100), Some(1), Some(2));
+        assert!(should_publish_model_download_progress(&state, &finished, false));
+    }
+
+    #[test]
+    fn progress_publish_rules_throttle_duplicate_and_small_byte_updates() {
+        let previous = task_progress("model.gguf", 1_000, Some(10_000), Some(1), Some(2));
+        let state = state_with(previous.clone(), Duration::ZERO);
+
+        assert!(!should_publish_model_download_progress(&state, &previous, false));
+
+        let small_delta = task_progress(
+            "model.gguf",
+            previous.current + MODEL_DOWNLOAD_PROGRESS_MIN_BYTES_DELTA - 1,
+            Some(10_000),
+            Some(1),
+            Some(2),
+        );
+        assert!(!should_publish_model_download_progress(&state, &small_delta, false));
+
+        let large_delta = task_progress(
+            "model.gguf",
+            previous.current + MODEL_DOWNLOAD_PROGRESS_MIN_BYTES_DELTA,
+            Some(10_000),
+            Some(1),
+            Some(2),
+        );
+        assert!(should_publish_model_download_progress(&state, &large_delta, false));
+    }
+
+    #[test]
+    fn progress_publish_rules_publish_shape_changes_and_stale_updates() {
+        let previous = task_progress("model.gguf", 1_000, Some(10_000), Some(1), Some(2));
+        let fresh_state = state_with(previous, Duration::ZERO);
+
+        assert!(should_publish_model_download_progress(
+            &fresh_state,
+            &task_progress("tokenizer.json", 1, Some(10_000), Some(2), Some(2)),
+            false
+        ));
+        assert!(should_publish_model_download_progress(
+            &fresh_state,
+            &task_progress("model.gguf", 999, Some(10_000), Some(1), Some(2)),
+            false
+        ));
+        assert!(should_publish_model_download_progress(
+            &fresh_state,
+            &task_progress("model.gguf", 1_001, Some(12_000), Some(1), Some(2)),
+            false
+        ));
+
+        let stale_state = state_with(
+            task_progress("model.gguf", 1_000, Some(10_000), Some(1), Some(2)),
+            MODEL_DOWNLOAD_PROGRESS_MIN_INTERVAL + Duration::from_millis(1),
+        );
+        assert!(should_publish_model_download_progress(
+            &stale_state,
+            &task_progress("model.gguf", 1_001, Some(10_000), Some(1), Some(2)),
+            false
+        ));
+    }
+
+    fn state_with(progress: TaskProgress, age: Duration) -> ModelDownloadProgressState {
+        ModelDownloadProgressState {
+            last_progress: Some(progress),
+            last_published_at: Some(Instant::now() - age),
+        }
+    }
+
+    fn task_progress(
+        filename: &str,
+        current: u64,
+        total: Option<u64>,
+        step: Option<u32>,
+        step_count: Option<u32>,
+    ) -> TaskProgress {
+        TaskProgress {
+            label: Some(filename.to_owned()),
+            message: None,
+            current,
+            total,
+            unit: Some("bytes".to_owned()),
+            step,
+            step_count,
+            logs: None,
+        }
+    }
+}

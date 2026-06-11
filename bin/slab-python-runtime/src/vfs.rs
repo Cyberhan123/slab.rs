@@ -128,6 +128,8 @@ _slab_finder = next(
     (finder for finder in sys.meta_path if getattr(finder, '_slab_embedded_finder', False)),
     None,
 )
+for _slab_module_name in list(_slab_embedded_modules.keys()):
+    sys.modules.pop(_slab_module_name, None)
 if _slab_finder is None:
     _slab_finder = _EmbeddedFinder(_slab_embedded_modules)
     _slab_finder._slab_embedded_finder = True

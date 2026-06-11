@@ -474,3 +474,88 @@ impl SubtitleFileInterface for SsaFile {
         Ok(result.into_bytes())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::SubtitleFileInterface;
+    use crate::timetypes::{TimePoint, TimeSpan};
+
+    use super::SsaFile;
+    use super::errors::ErrorKind;
+
+    const SSA_WITH_COMMA_TEXT: &str = concat!(
+        "[Script Info]\r\n",
+        "Title: Sample\r\n",
+        "\r\n",
+        "[Events]\r\n",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\r\n",
+        "Dialogue: 0,0:00:01.20,0:00:03.40,Default,,0,0,0,,Hello, world\r\n",
+    );
+
+    #[test]
+    fn parses_dialogue_text_with_commas_as_single_text_field() {
+        let file = SsaFile::parse(SSA_WITH_COMMA_TEXT).expect("parse SSA");
+
+        let entries = file.get_subtitle_entries().expect("entries");
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].timespan,
+            TimeSpan::new(
+                TimePoint::from_components(0, 0, 1, 200),
+                TimePoint::from_components(0, 0, 3, 400)
+            )
+        );
+        assert_eq!(entries[0].line.as_deref(), Some("Hello, world"));
+    }
+
+    #[test]
+    fn updates_dialogue_text_without_reformatting_other_fields() {
+        let mut file = SsaFile::parse(SSA_WITH_COMMA_TEXT).expect("parse SSA");
+        let mut entries = file.get_subtitle_entries().expect("entries");
+        entries[0].timespan = TimeSpan::new(
+            TimePoint::from_components(0, 0, 2, 500),
+            TimePoint::from_components(0, 0, 5, 0),
+        );
+        entries[0].line = Some("Updated, with comma".to_owned());
+
+        file.update_subtitle_entries(&entries).expect("update entries");
+
+        let data = String::from_utf8(file.to_data().expect("serialized SSA")).expect("utf8 SSA");
+        assert!(
+            data.contains("Dialogue: 0,0:00:02.50,0:00:05.00,Default,,0,0,0,,Updated, with comma")
+        );
+        assert!(data.contains("[Script Info]\r\nTitle: Sample\r\n"));
+    }
+
+    #[test]
+    fn rejects_event_format_when_text_is_not_last_field() {
+        let error = SsaFile::parse_inner(
+            concat!(
+                "[Events]\n",
+                "Format: Layer, Start, Text, End\n",
+                "Dialogue: 0,0:00:01.20,hello,0:00:03.40\n",
+            )
+            .to_owned(),
+        )
+        .expect_err("Text before End should be rejected");
+
+        assert_eq!(error.kind(), &ErrorKind::SsaTextFieldNotLast { line_num: 1 });
+    }
+
+    #[test]
+    fn rejects_dialogue_with_invalid_timepoint() {
+        let error =
+            SsaFile::parse_inner(
+                concat!(
+                    "[Events]\n",
+                    "Format: Start, End, Text\n",
+                    "Dialogue: bad,0:00:03.40,hello\n",
+                )
+                .to_owned(),
+            )
+            .expect_err("bad timepoint should be rejected");
+
+        assert!(matches!(error.kind(), ErrorKind::SsaWrongTimepointFormat { line_num: 2, .. }));
+    }
+}

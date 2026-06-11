@@ -7,7 +7,7 @@ use slab_types::RuntimeBackendId;
 use std::str::FromStr;
 use validator::ValidationError;
 
-use crate::domain::models::ManagedModelBackendId;
+use crate::domain::models::{ManagedModelBackendId, UnifiedModelStatus};
 
 const ALLOWED_FFMPEG_OUTPUT_FORMATS: &[&str] = &[
     "mp3", "mp4", "wav", "flac", "ogg", "opus", "webm", "avi", "mkv", "mov", "aac", "m4a", "m4v",
@@ -65,6 +65,13 @@ pub fn validate_managed_model_backend_id(value: &str) -> Result<(), ValidationEr
     ManagedModelBackendId::from_str(value)
         .map(|_| ())
         .map_err(|_| ValidationError::new("backend_id"))
+}
+
+pub fn validate_unified_model_status(value: &str) -> Result<(), ValidationError> {
+    validate_non_blank(value)?;
+    UnifiedModelStatus::from_str(value)
+        .map(|_| ())
+        .map_err(|_| ValidationError::new("model_status"))
 }
 
 pub fn validate_optional_managed_model_backend_id(

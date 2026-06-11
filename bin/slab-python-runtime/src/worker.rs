@@ -1,7 +1,7 @@
 //! Python plugin worker: runs a single plugin call inside CPython via PyO3.
 
 use std::ffi::CString;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Result, bail};
@@ -15,6 +15,7 @@ use crate::host_bridge;
 use crate::{PythonRuntimeConfig, ResolvedPythonEntry, interpreter, security};
 
 const PYTHON_EXECUTION_TIMEOUT: Duration = Duration::from_secs(30);
+static PYTHON_INTERPRETER_LOCK: Mutex<()> = Mutex::new(());
 
 /// A handle to a Python plugin worker.
 pub struct PythonWorkerHandle {
@@ -24,6 +25,7 @@ pub struct PythonWorkerHandle {
 
 impl PythonWorkerHandle {
     pub fn new(entry: ResolvedPythonEntry, config: PythonRuntimeConfig) -> Result<Self> {
+        let _guard = PYTHON_INTERPRETER_LOCK.lock().expect("python interpreter lock");
         interpreter::init(config.embedded_stdlib.clone())?;
         debug!("created Python worker for {}", entry.cache_key());
 
@@ -73,6 +75,7 @@ fn execute_python_call(
             (entry_source.clone(), path.display().to_string())
         }
     };
+    let _guard = PYTHON_INTERPRETER_LOCK.lock().expect("python interpreter lock");
     interpreter::init(embedded_modules)?;
     let params_json = serde_json::to_string(&request.params)?;
     let timeout_secs = PYTHON_EXECUTION_TIMEOUT.as_secs();

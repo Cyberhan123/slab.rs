@@ -488,3 +488,157 @@ fn network_mode_label(mode: &PluginNetworkMode) -> &'static str {
         PluginNetworkMode::Allowlist => "allowlist",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::{PluginRegistry, is_path_within_root, normalize_relative_path};
+
+    static NEXT_TEST_DIR: AtomicU64 = AtomicU64::new(0);
+
+    struct TestDir {
+        path: PathBuf,
+    }
+
+    impl TestDir {
+        fn new(label: &str) -> Self {
+            let sequence = NEXT_TEST_DIR.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir()
+                .join(format!("slab-plugin-registry-{label}-{}-{sequence}", std::process::id()));
+            if path.exists() {
+                fs::remove_dir_all(&path).expect("remove stale test directory");
+            }
+            fs::create_dir_all(&path).expect("create test directory");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn normalize_relative_path_rejects_encoded_traversal_and_absolute_paths() {
+        assert_eq!(
+            normalize_relative_path(" /ui/%69ndex.html ").expect("normalize path"),
+            "ui/index.html"
+        );
+        assert_eq!(
+            normalize_relative_path("./ui/./index.html").expect("normalize current dirs"),
+            "ui/index.html"
+        );
+
+        for raw in ["../plugin.json", "ui/%2e%2e/plugin.json", "/../plugin.json"] {
+            assert!(
+                normalize_relative_path(raw).is_err(),
+                "{raw} should not be accepted as a plugin-relative path"
+            );
+        }
+    }
+
+    #[test]
+    fn path_within_root_requires_existing_canonical_child() {
+        let root = TestDir::new("root-check");
+        let child = root.path().join("ui").join("index.html");
+        fs::create_dir_all(child.parent().expect("child parent")).expect("create child parent");
+        fs::write(&child, "<html></html>").expect("write child file");
+
+        assert!(is_path_within_root(root.path(), &child));
+        assert!(!is_path_within_root(root.path(), &root.path().join("missing.html")));
+        assert!(!is_path_within_root(root.path(), &std::env::temp_dir()));
+    }
+
+    #[test]
+    fn registry_loads_development_plugin_without_packaged_integrity() {
+        let root = TestDir::new("dev-plugin");
+        let plugin_dir = root.path().join("sample-plugin");
+        fs::create_dir_all(plugin_dir.join("ui")).expect("create ui directory");
+        fs::create_dir_all(plugin_dir.join("dist")).expect("create js directory");
+        fs::write(plugin_dir.join("ui").join("index.html"), "<html></html>")
+            .expect("write ui entry");
+        fs::write(plugin_dir.join("dist").join("plugin.mjs"), "export function ping() {}")
+            .expect("write js entry");
+        fs::write(
+            plugin_dir.join("plugin.json"),
+            r#"{
+                "manifestVersion": 1,
+                "id": "sample-plugin",
+                "name": "Sample Plugin",
+                "version": "0.1.0",
+                "runtime": {
+                    "ui": { "entry": "ui/index.html" },
+                    "js": { "entry": "dist/plugin.mjs" }
+                },
+                "permissions": {
+                    "network": {
+                        "mode": "allowlist",
+                        "allowHosts": ["api.example.test"]
+                    }
+                }
+            }"#,
+        )
+        .expect("write manifest");
+
+        let registry = PluginRegistry::new(root.path().to_path_buf()).expect("create registry");
+        let plugin = registry.get_plugin("sample-plugin").expect("load plugin");
+
+        assert_eq!(plugin.ui_entry, "ui/index.html");
+        assert!(plugin.js_entry_path.as_ref().is_some_and(|path| path.is_file()));
+        assert!(plugin.files_sha256.contains_key("ui/index.html"));
+        assert!(plugin.files_sha256.contains_key("dist/plugin.mjs"));
+
+        let listed = registry.list().expect("list plugins");
+        assert_eq!(listed.len(), 1);
+        assert!(listed[0].valid);
+        assert_eq!(listed[0].network_mode, "allowlist");
+        assert_eq!(listed[0].allow_hosts, vec!["api.example.test".to_owned()]);
+    }
+
+    #[test]
+    fn registry_reports_invalid_plugin_entry_without_loading_it() {
+        let root = TestDir::new("invalid-plugin");
+        let plugin_dir = root.path().join("sample-plugin");
+        fs::create_dir_all(plugin_dir.join("ui")).expect("create ui directory");
+        fs::create_dir_all(plugin_dir.join("dist")).expect("create js directory");
+        fs::write(plugin_dir.join("ui").join("index.html"), "<html></html>")
+            .expect("write ui entry");
+        fs::write(plugin_dir.join("dist").join("plugin.txt"), "not javascript")
+            .expect("write bad js entry");
+        fs::write(
+            plugin_dir.join("plugin.json"),
+            r#"{
+                "manifestVersion": 1,
+                "id": "sample-plugin",
+                "name": "Sample Plugin",
+                "version": "0.1.0",
+                "runtime": {
+                    "ui": { "entry": "ui/index.html" },
+                    "js": { "entry": "dist/plugin.txt" }
+                }
+            }"#,
+        )
+        .expect("write manifest");
+
+        let registry = PluginRegistry::new(root.path().to_path_buf()).expect("create registry");
+        assert!(registry.get_plugin("sample-plugin").is_err());
+
+        let listed = registry.list().expect("list plugins");
+        assert_eq!(listed.len(), 1);
+        assert!(!listed[0].valid);
+        assert!(
+            listed[0]
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("runtime.js.entry must use"))
+        );
+    }
+}

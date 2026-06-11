@@ -148,6 +148,10 @@ pub struct CreateModelRequest {
     pub backend_id: Option<String>,
     /// Initial status. If omitted, defaults to `"ready"` for cloud models and
     /// `"not_downloaded"` for local models.
+    #[validate(custom(
+        function = "crate::schemas::validation::validate_unified_model_status",
+        message = "status must be one of ready, not_downloaded, downloading, error"
+    ))]
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -176,6 +180,10 @@ pub struct UpdateModelRequest {
     pub backend_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub capabilities: Option<Vec<ModelCapability>>,
+    #[validate(custom(
+        function = "crate::schemas::validation::validate_unified_model_status",
+        message = "status must be one of ready, not_downloaded, downloading, error"
+    ))]
     pub status: Option<String>,
     pub spec: Option<ModelSpecRequest>,
     pub runtime_presets: Option<RuntimePresetsRequest>,
@@ -926,7 +934,7 @@ impl From<CreateModelRequest> for DomainCreateModelCommand {
             capabilities: req
                 .capabilities
                 .map(|capabilities| capabilities.into_iter().map(Into::into).collect()),
-            status: req.status.and_then(|status| status.parse().ok()),
+            status: req.status.map(|status| status.parse().expect("status was validated")),
             spec: req.spec.map(Into::into).unwrap_or_default(),
             runtime_presets: req.runtime_presets.map(Into::into),
         }
@@ -944,7 +952,7 @@ impl From<UpdateModelRequest> for DomainUpdateModelCommand {
             capabilities: req
                 .capabilities
                 .map(|capabilities| capabilities.into_iter().map(Into::into).collect()),
-            status: req.status.and_then(|status| status.parse().ok()),
+            status: req.status.map(|status| status.parse().expect("status was validated")),
             spec: req.spec.map(Into::into),
             runtime_presets: req.runtime_presets.map(Into::into),
         }
@@ -1102,8 +1110,16 @@ fn validation_error(code: &'static str, message: &'static str) -> ValidationErro
 
 #[cfg(test)]
 mod tests {
-    use super::CreateModelRequest;
+    use super::{
+        CreateModelRequest, LoadModelRequest, ModelKind, SwitchModelRequest, UnloadModelRequest,
+        UpdateModelRequest,
+    };
+    use crate::domain::models::{
+        CreateModelCommand as DomainCreateModelCommand, UnifiedModelStatus,
+        UpdateModelCommand as DomainUpdateModelCommand,
+    };
     use serde_json::json;
+    use validator::Validate;
 
     #[test]
     fn create_model_request_rejects_legacy_spec_chat_template() {
@@ -1120,5 +1136,147 @@ mod tests {
         .expect_err("legacy spec.chat_template must fail");
 
         assert!(error.to_string().contains("chat_template"));
+    }
+
+    #[test]
+    fn create_model_request_rejects_unknown_status_instead_of_dropping_it() {
+        let request = serde_json::from_value::<CreateModelRequest>(json!({
+            "display_name": "Qwen",
+            "kind": "local",
+            "backend_id": "ggml.llama",
+            "status": "half_ready"
+        }))
+        .expect("request shape should deserialize");
+
+        let error = request.validate().expect_err("unknown status should fail validation");
+
+        assert!(error.to_string().contains("status"));
+    }
+
+    #[test]
+    fn update_model_request_rejects_unknown_status_instead_of_dropping_it() {
+        let request = serde_json::from_value::<UpdateModelRequest>(json!({
+            "display_name": "Qwen",
+            "status": "half_ready"
+        }))
+        .expect("request shape should deserialize");
+
+        let error = request.validate().expect_err("unknown status should fail validation");
+
+        assert!(error.to_string().contains("status"));
+    }
+
+    #[test]
+    fn validated_status_is_preserved_when_converted_to_domain_command() {
+        let create_request = CreateModelRequest {
+            display_name: "Qwen".to_owned(),
+            kind: ModelKind::Local,
+            backend_id: Some("ggml.llama".to_owned()),
+            status: Some("downloading".to_owned()),
+            capabilities: None,
+            spec: None,
+            runtime_presets: None,
+        };
+        create_request.validate().expect("valid create status");
+        let create_command: DomainCreateModelCommand = create_request.into();
+        assert_eq!(create_command.status, Some(UnifiedModelStatus::Downloading));
+
+        let update_request = UpdateModelRequest {
+            display_name: Some("Qwen".to_owned()),
+            kind: None,
+            backend_id: None,
+            capabilities: None,
+            status: Some("error".to_owned()),
+            spec: None,
+            runtime_presets: None,
+        };
+        update_request.validate().expect("valid update status");
+        let update_command: DomainUpdateModelCommand = update_request.into();
+        assert_eq!(update_command.status, Some(UnifiedModelStatus::Error));
+    }
+
+    #[test]
+    fn load_model_request_accepts_catalog_model_id_without_legacy_path() {
+        let request = LoadModelRequest {
+            model_id: Some("model-1".to_owned()),
+            backend_id: None,
+            model_path: None,
+            num_workers: Some(1),
+        };
+
+        request.validate().expect("model_id is sufficient for load");
+    }
+
+    #[test]
+    fn load_model_request_requires_absolute_legacy_path_without_model_id() {
+        let missing_path = LoadModelRequest {
+            model_id: None,
+            backend_id: Some("ggml.llama".to_owned()),
+            model_path: None,
+            num_workers: Some(1),
+        };
+        assert!(missing_path.validate().is_err());
+
+        let relative_path = LoadModelRequest {
+            model_id: None,
+            backend_id: Some("ggml.llama".to_owned()),
+            model_path: Some("models/qwen.gguf".to_owned()),
+            num_workers: Some(1),
+        };
+        assert!(relative_path.validate().is_err());
+
+        let absolute_path = LoadModelRequest {
+            model_id: None,
+            backend_id: Some("ggml.llama".to_owned()),
+            model_path: Some(absolute_model_path()),
+            num_workers: Some(1),
+        };
+        absolute_path.validate().expect("legacy backend load with absolute path");
+    }
+
+    #[test]
+    fn switch_model_request_rejects_path_traversal_in_legacy_path() {
+        let request = SwitchModelRequest {
+            model_id: None,
+            backend_id: Some("ggml.llama".to_owned()),
+            model_path: Some(traversal_model_path()),
+            num_workers: Some(1),
+        };
+
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn unload_model_request_accepts_backend_without_model_path() {
+        let request =
+            UnloadModelRequest { model_id: None, backend_id: Some("ggml.llama".to_owned()) };
+
+        request.validate().expect("backend_id is sufficient for unload");
+    }
+
+    #[test]
+    fn unload_model_request_rejects_blank_identity() {
+        let request = UnloadModelRequest {
+            model_id: Some("   ".to_owned()),
+            backend_id: Some("   ".to_owned()),
+        };
+
+        assert!(request.validate().is_err());
+    }
+
+    fn absolute_model_path() -> String {
+        if cfg!(windows) {
+            r"C:\models\qwen.gguf".to_owned()
+        } else {
+            "/models/qwen.gguf".to_owned()
+        }
+    }
+
+    fn traversal_model_path() -> String {
+        if cfg!(windows) {
+            r"C:\models\..\qwen.gguf".to_owned()
+        } else {
+            "/models/../qwen.gguf".to_owned()
+        }
     }
 }
