@@ -20,7 +20,7 @@ use crate::{
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
         LlmStreamObserver, ParsedToolCall, ThreadMessageRecord, ThreadSnapshot, ThreadStatus,
-        ToolCallRecord, ToolSpec, TurnEvent,
+        ToolCallRecord, ToolSpec, TurnEvent, TurnStateRecord,
     },
 };
 use async_trait::async_trait;
@@ -537,6 +537,47 @@ impl LlmPort for StreamingToolCallLlm {
     }
 }
 
+struct CapturingMessagesLlm {
+    calls: Arc<Mutex<Vec<Vec<ConversationMessage>>>>,
+    first_call_uses_tool: bool,
+}
+
+#[async_trait]
+impl LlmPort for CapturingMessagesLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        let call_index = {
+            let mut calls = self.calls.lock().unwrap();
+            calls.push(messages.to_vec());
+            calls.len()
+        };
+        if self.first_call_uses_tool && call_index == 1 {
+            return Ok(LlmResponse {
+                content: None,
+                content_already_streamed: false,
+                tool_calls: vec![ParsedToolCall {
+                    id: "call-1".into(),
+                    name: "echo".into(),
+                    arguments: r#"{"message":"ok"}"#.into(),
+                }],
+                finish_reason: Some("tool_calls".into()),
+            });
+        }
+        Ok(LlmResponse {
+            content: Some("done".into()),
+            content_already_streamed: false,
+            tool_calls: Vec::new(),
+            finish_reason: Some("stop".into()),
+        })
+    }
+}
+
 struct NoopStore;
 
 #[async_trait]
@@ -672,6 +713,7 @@ impl AgentStorePort for RecordingStore {
 struct PersistingStore {
     snapshots: Mutex<HashMap<String, ThreadSnapshot>>,
     messages: Mutex<Vec<ThreadMessageRecord>>,
+    turn_states: Mutex<Vec<TurnStateRecord>>,
 }
 
 #[async_trait]
@@ -751,6 +793,11 @@ impl AgentStorePort for PersistingStore {
             .filter(|record| record.thread_id == thread_id)
             .cloned()
             .collect())
+    }
+
+    async fn upsert_turn_state(&self, record: &TurnStateRecord) -> Result<(), AgentError> {
+        self.turn_states.lock().unwrap().push(record.clone());
+        Ok(())
     }
 }
 
@@ -834,6 +881,54 @@ impl AgentHook for BlockingHook {
         match event {
             HookEvent::OnToolStart { .. } => {
                 HookOutcome::Block { reason: "blocked by test hook".into() }
+            }
+            HookEvent::OnAgentStart { .. }
+            | HookEvent::OnLlmStart { .. }
+            | HookEvent::OnLlmEnd { .. }
+            | HookEvent::OnToolEnd { .. }
+            | HookEvent::OnAgentEnd { .. } => HookOutcome::Continue,
+        }
+    }
+}
+
+struct LifecycleInjectionHook;
+
+#[async_trait]
+impl AgentHook for LifecycleInjectionHook {
+    async fn on_event(&self, event: &HookEvent) -> HookOutcome {
+        match event {
+            HookEvent::OnAgentStart { .. } => {
+                HookOutcome::AppendObservation { observation: "agent started".into() }
+            }
+            HookEvent::OnLlmStart { .. } => HookOutcome::inject_message(ConversationMessage {
+                role: "developer".into(),
+                content: ConversationMessageContent::Text("llm start".into()),
+                name: Some("test_hook".into()),
+                tool_call_id: None,
+                tool_calls: Vec::new(),
+            }),
+            HookEvent::OnLlmEnd { .. } => HookOutcome::inject_message(ConversationMessage {
+                role: "developer".into(),
+                content: ConversationMessageContent::Text("llm end".into()),
+                name: Some("test_hook".into()),
+                tool_call_id: None,
+                tool_calls: Vec::new(),
+            }),
+            HookEvent::OnToolStart { .. }
+            | HookEvent::OnToolEnd { .. }
+            | HookEvent::OnAgentEnd { .. } => HookOutcome::Continue,
+        }
+    }
+}
+
+struct ToolObservationHook;
+
+#[async_trait]
+impl AgentHook for ToolObservationHook {
+    async fn on_event(&self, event: &HookEvent) -> HookOutcome {
+        match event {
+            HookEvent::OnToolStart { .. } => {
+                HookOutcome::AppendObservation { observation: "tool args checked".into() }
             }
             HookEvent::OnAgentStart { .. }
             | HookEvent::OnLlmStart { .. }
@@ -1028,6 +1123,153 @@ fn assert_trace_event(events: &[(AgentTraceContext, AgentTraceEvent)], event_nam
         events.iter().any(|(_context, event)| event.event == event_name),
         "missing trace event {event_name}; events: {events:#?}"
     );
+}
+
+#[tokio::test]
+async fn lifecycle_hooks_inject_start_observations_and_llm_messages_in_order() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let llm = Arc::new(CapturingMessagesLlm { calls: calls.clone(), first_call_uses_tool: true });
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(TestEchoTool));
+
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new_with_hooks(
+        llm,
+        store_port,
+        notify,
+        approval,
+        Arc::new(router),
+        AgentControlLimits { max_threads: 8, max_depth: 4 },
+        vec![Arc::new(LifecycleInjectionHook)],
+    ));
+    let thread_id = control
+        .spawn(
+            "session-hooks".into(),
+            AgentConfig { model: "mock".into(), max_turns: 3, ..AgentConfig::default() },
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("use tool".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: Vec::new(),
+            }],
+        )
+        .await
+        .expect("spawn");
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 2);
+    let first = message_texts(&calls[0]);
+    let start_observation = first
+        .iter()
+        .position(|text| text.contains("Local hook observation:\nagent started"))
+        .expect("start observation");
+    let llm_start = first.iter().position(|text| text == "llm start").expect("llm start");
+    let user = first.iter().position(|text| text == "use tool").expect("user");
+    assert!(start_observation < llm_start);
+    assert!(llm_start < user);
+
+    let second = message_texts(&calls[1]);
+    let llm_end = second.iter().position(|text| text == "llm end").expect("llm end");
+    let user = second.iter().position(|text| text == "use tool").expect("user");
+    assert!(llm_end < user);
+}
+
+#[tokio::test]
+async fn tool_start_observations_are_appended_to_tool_output() {
+    let llm = Arc::new(MockLlm::new());
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(TestEchoTool));
+
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new_with_hooks(
+        llm,
+        store_port,
+        notify,
+        approval,
+        Arc::new(router),
+        AgentControlLimits { max_threads: 8, max_depth: 4 },
+        vec![Arc::new(ToolObservationHook)],
+    ));
+    let thread_id = control
+        .spawn(
+            "session-tool-hook".into(),
+            AgentConfig { model: "mock".into(), max_turns: 3, ..AgentConfig::default() },
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("use tool".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: Vec::new(),
+            }],
+        )
+        .await
+        .expect("spawn");
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+
+    let messages = store.messages.lock().unwrap();
+    let tool_output = messages
+        .iter()
+        .find(|record| record.thread_id == thread_id && record.message.role == "tool")
+        .expect("tool message")
+        .message
+        .rendered_text();
+    assert!(tool_output.contains("hello from agent"));
+    assert!(tool_output.contains("Hook observations:"));
+    assert!(tool_output.contains("tool args checked"));
+}
+
+#[tokio::test]
+async fn turn_state_records_running_llm_tool_and_completed_statuses() {
+    let llm = Arc::new(MockLlm::new());
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(TestEchoTool));
+
+    let approval = Arc::clone(&notify);
+    let control =
+        Arc::new(AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4));
+    let thread_id = control
+        .spawn(
+            "session-turn-state".into(),
+            AgentConfig { model: "mock".into(), max_turns: 3, ..AgentConfig::default() },
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("use tool".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: Vec::new(),
+            }],
+        )
+        .await
+        .expect("spawn");
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+
+    let statuses = store
+        .turn_states
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|record| record.thread_id == thread_id)
+        .map(|record| record.status.clone())
+        .collect::<Vec<_>>();
+    assert!(statuses.contains(&"running".to_owned()));
+    assert!(statuses.contains(&"llm_completed".to_owned()));
+    assert!(statuses.contains(&"tool_calls_completed".to_owned()));
+    assert!(statuses.contains(&"completed".to_owned()));
+}
+
+fn message_texts(messages: &[ConversationMessage]) -> Vec<String> {
+    messages.iter().map(ConversationMessage::rendered_text).collect()
 }
 
 async fn wait_for_control_terminal_status(control: &AgentControl, thread_id: &str) -> ThreadStatus {

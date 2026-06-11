@@ -218,6 +218,10 @@ impl AgentThread {
         )
         .await;
         insert_injected_messages(&mut messages, start_effects.injected_messages);
+        insert_injected_messages(
+            &mut messages,
+            hook_observation_messages(start_effects.observations),
+        );
 
         if let Some(start) = persist_messages_from {
             for message in messages.iter().skip(start) {
@@ -669,4 +673,20 @@ fn insert_injected_messages(
     for (offset, message) in injected.into_iter().enumerate() {
         messages.insert(insert_at + offset, message);
     }
+}
+
+fn hook_observation_messages(observations: Vec<String>) -> Vec<ConversationMessage> {
+    observations
+        .into_iter()
+        .filter(|observation| !observation.trim().is_empty())
+        .map(|observation| ConversationMessage {
+            role: "developer".to_owned(),
+            content: ConversationMessageContent::Text(format!(
+                "Local hook observation:\n{observation}"
+            )),
+            name: Some("slab_hook".to_owned()),
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+        })
+        .collect()
 }

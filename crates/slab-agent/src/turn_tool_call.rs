@@ -243,8 +243,12 @@ async fn handle_tool_call(
         tool_name: tool_call.name.clone(),
         arguments: parsed_args.clone(),
     };
-    let effective_args = match dispatch_hooks(context.hooks, &pre_event).await.tool_action {
+    let pre_effects = dispatch_hooks(context.hooks, &pre_event).await;
+    let pre_observations = pre_effects.observations;
+    let effective_args = match pre_effects.tool_action {
         HookToolAction::Block { reason } => {
+            let mut output = reason.clone();
+            append_hook_observations(&mut output, pre_observations);
             record_json(
                 context.trace,
                 &context.trace_context,
@@ -260,11 +264,11 @@ async fn handle_tool_call(
             warn!(
                 thread_id = context.thread_id,
                 tool = %tool_call.name,
-                reason,
+                reason = %output,
                 "tool call blocked by hook"
             );
             let message = record_failed_tool_call_without_persisting_message(
-                context, &call_id, tool_call, reason, created_at,
+                context, &call_id, tool_call, output, created_at,
             )
             .await?;
             return Ok(ToolCallRunResult { message, status: ToolCallStatus::Failed });
@@ -353,6 +357,7 @@ async fn handle_tool_call(
             "output": output,
         }),
     );
+    append_hook_observations(&mut output, pre_observations);
 
     let post_event = HookEvent::OnToolEnd {
         thread_id: context.thread_id.to_owned(),

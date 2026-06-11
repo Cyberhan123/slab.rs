@@ -304,3 +304,80 @@ impl AgentStorePort for SqlxStore {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn turn_state_upsert_preserves_existing_payload_fields() {
+        let store = SqlxStore::connect("sqlite::memory:").await.expect("store");
+        let now = "2026-01-01T00:00:00Z".to_owned();
+        sqlx::query(
+            "INSERT INTO chat_sessions (id, name, created_at, updated_at) \
+             VALUES ('session-1', '', ?1, ?1)",
+        )
+        .bind(&now)
+        .execute(&store.pool)
+        .await
+        .expect("session");
+        store
+            .upsert_thread(&ThreadSnapshot {
+                id: "thread-1".to_owned(),
+                session_id: "session-1".to_owned(),
+                parent_id: None,
+                depth: 0,
+                status: ThreadStatus::Running,
+                role_name: None,
+                config_json: "{}".to_owned(),
+                completion_text: None,
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            })
+            .await
+            .expect("thread");
+
+        store
+            .upsert_turn_state(&TurnStateRecord {
+                thread_id: "thread-1".to_owned(),
+                turn_index: 0,
+                status: "running".to_owned(),
+                input_messages_json: Some("[{\"role\":\"user\"}]".to_owned()),
+                tool_specs_json: Some("[]".to_owned()),
+                llm_response_json: None,
+                error: None,
+                started_at: now.clone(),
+                completed_at: None,
+            })
+            .await
+            .expect("running state");
+        store
+            .upsert_turn_state(&TurnStateRecord {
+                thread_id: "thread-1".to_owned(),
+                turn_index: 0,
+                status: "completed".to_owned(),
+                input_messages_json: None,
+                tool_specs_json: None,
+                llm_response_json: None,
+                error: None,
+                started_at: "ignored".to_owned(),
+                completed_at: Some(now.clone()),
+            })
+            .await
+            .expect("completed state");
+
+        let row: (String, Option<String>, Option<String>, String, Option<String>) = sqlx::query_as(
+            "SELECT status, input_messages_json, tool_specs_json, started_at, completed_at \
+                 FROM agent_turn_states WHERE thread_id='thread-1' AND turn_index=0",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .expect("state");
+
+        assert_eq!(row.0, "completed");
+        assert_eq!(row.1.as_deref(), Some("[{\"role\":\"user\"}]"));
+        assert_eq!(row.2.as_deref(), Some("[]"));
+        assert_eq!(row.3, now);
+        assert_eq!(row.4.as_deref(), Some("2026-01-01T00:00:00Z"));
+    }
+}

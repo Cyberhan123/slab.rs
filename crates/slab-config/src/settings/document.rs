@@ -286,6 +286,8 @@ pub struct AgentSettingsConfig {
     #[serde(default)]
     pub tools: AgentToolsConfig,
     #[serde(default)]
+    pub hooks: AgentHooksConfig,
+    #[serde(default)]
     pub memories: AgentMemoriesConfig,
 }
 
@@ -294,9 +296,44 @@ impl Default for AgentSettingsConfig {
         Self {
             debug: true,
             tools: AgentToolsConfig::default(),
+            hooks: AgentHooksConfig::default(),
             memories: AgentMemoriesConfig::default(),
         }
     }
+}
+
+/// Agent lifecycle hook settings.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct AgentHooksConfig {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scripts: Vec<AgentHookScriptConfig>,
+}
+
+/// Explicit local script registered for agent lifecycle hook execution.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct AgentHookScriptConfig {
+    pub name: String,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    pub language: AgentHookScriptLanguage,
+    pub root_dir: String,
+    pub entry: String,
+    #[serde(default = "default_hook_export_name")]
+    pub export_name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentHookScriptLanguage {
+    #[serde(rename = "javascript")]
+    JavaScript,
+    Python,
+}
+
+fn default_hook_export_name() -> String {
+    "run".to_owned()
 }
 
 /// Agent memory pipeline settings.
@@ -1258,6 +1295,7 @@ mod tests {
             WebSearchProviderId::Duckduckgo
         );
         assert!(settings.agent.debug);
+        assert!(settings.agent.hooks.scripts.is_empty());
         assert!(!settings.agent.memories.enabled);
         assert_eq!(settings.agent.memories.phase1_concurrency, 2);
         assert_eq!(settings.runtime.transport, RuntimeTransportMode::Ipc);
@@ -1299,6 +1337,29 @@ mod tests {
         let expected = fs::read_to_string(&schema_path).expect("read checked-in schema");
 
         assert_eq!(render_settings_document_json_schema(), expected);
+    }
+
+    #[test]
+    fn agent_hook_scripts_parse_with_default_export() {
+        let settings = serde_json::from_value::<SettingsDocument>(json!({
+            "agent": {
+                "hooks": {
+                    "scripts": [{
+                        "name": "local-memory",
+                        "language": "javascript",
+                        "root_dir": "C:/hooks",
+                        "entry": "hook.mjs",
+                        "events": ["on_llm_start"]
+                    }]
+                }
+            }
+        }))
+        .expect("settings");
+
+        let script = &settings.agent.hooks.scripts[0];
+        assert!(script.enabled);
+        assert_eq!(script.export_name, "run");
+        assert_eq!(script.language, AgentHookScriptLanguage::JavaScript);
     }
 
     #[test]

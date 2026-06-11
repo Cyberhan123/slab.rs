@@ -10,7 +10,7 @@ use slab_agent_memories::{
     phase1::{Phase1MemoryOutput, Phase1ModelOutput, Phase1RolloutInput, RolloutCandidate},
     phase2,
     phase2::{Phase2Input, Phase2SelectionConfig},
-    read::parse_memory_citations,
+    read::{MemoryCitationSourceKind, parse_memory_citations},
     templates,
 };
 use slab_config::AgentMemoriesConfig;
@@ -25,6 +25,8 @@ use crate::domain::models::{
 };
 use crate::domain::services::ChatService;
 use crate::infra::db::AnyStore;
+
+const MEMORY_PHASE2_SESSION_PREFIX: &str = "memory-phase2-";
 
 #[derive(Clone)]
 pub struct AgentMemoryPipeline {
@@ -173,12 +175,14 @@ impl AgentMemoryPipeline {
         let diff = memory_git::write_workspace_diff(&self.memory_root)
             .map_err(|error| error.to_string())?;
         if diff.diff.trim().is_empty() {
+            memory_git::remove_workspace_diff_file(&self.memory_root)
+                .map_err(|error| error.to_string())?;
             self.mark_phase2_selection(&selection.inputs, selection.new_watermark).await?;
             self.complete_phase2(&run_id, "succeeded", selection.new_watermark, None).await?;
             return Ok(());
         }
 
-        let result = self.run_consolidation_agent(model, &diff.diff_path).await;
+        let result = self.run_consolidation_agent(model, &diff.diff_path, &owner).await;
         match result {
             Ok(()) => {
                 let _ = std::fs::remove_file(&diff.diff_path);
@@ -201,6 +205,7 @@ impl AgentMemoryPipeline {
         &self,
         model: &str,
         diff_path: &std::path::Path,
+        owner: &str,
     ) -> Result<(), String> {
         let Some(control) = self.control.get().cloned() else {
             return Err("agent control is not available for memory phase2".to_owned());
@@ -212,21 +217,7 @@ impl AgentMemoryPipeline {
             "",
         )
         .map_err(|error| error.to_string())?;
-        let config = AgentConfig {
-            model: model.to_owned(),
-            system_prompt: Some(prompt),
-            max_turns: 12,
-            max_depth: 0,
-            max_threads: 1,
-            allowed_tools: vec![
-                "read_file".to_owned(),
-                "write_file".to_owned(),
-                "list_dir".to_owned(),
-                "grep".to_owned(),
-            ],
-            transient: true,
-            ..AgentConfig::default()
-        };
+        let config = phase2_consolidation_agent_config(model, prompt);
         let thread_id = control
             .spawn(
                 format!("memory-phase2-{}", Uuid::new_v4()),
@@ -244,10 +235,40 @@ impl AgentMemoryPipeline {
             )
             .await
             .map_err(|error| error.to_string())?;
+        let mut status_rx =
+            control.subscribe(&thread_id).await.map_err(|error| error.to_string())?;
+        let heartbeat_seconds = (self.config.phase2_lease_seconds / 3).clamp(1, 60);
+        let mut heartbeat =
+            tokio::time::interval(std::time::Duration::from_secs(heartbeat_seconds));
+        loop {
+            let status = *status_rx.borrow();
+            if matches!(
+                status,
+                slab_agent::ThreadStatus::Completed
+                    | slab_agent::ThreadStatus::Errored
+                    | slab_agent::ThreadStatus::Interrupted
+                    | slab_agent::ThreadStatus::Shutdown
+            ) {
+                break;
+            }
+            tokio::select! {
+                changed = status_rx.changed() => {
+                    if changed.is_err() {
+                        break;
+                    }
+                }
+                _ = heartbeat.tick() => {
+                    if !self.refresh_phase2_lease(owner, Utc::now()).await? {
+                        return Err("memory phase2 lease was lost during consolidation".to_owned());
+                    }
+                }
+            }
+        }
         let snapshot = control
-            .wait_for_terminal_snapshot(&thread_id)
+            .thread_snapshot(&thread_id)
             .await
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("memory consolidation thread {thread_id} disappeared"))?;
         if snapshot.status == slab_agent::ThreadStatus::Completed {
             Ok(())
         } else {
@@ -331,6 +352,9 @@ impl AgentMemoryPipeline {
         let mut claimed = Vec::new();
         let lease_until = now + Duration::seconds(self.config.phase1_lease_seconds as i64);
         for row in rows {
+            if row.session_id.starts_with(MEMORY_PHASE2_SESSION_PREFIX) {
+                continue;
+            }
             let Ok(config) = serde_json::from_str::<AgentConfig>(&row.config_json) else {
                 continue;
             };
@@ -397,6 +421,7 @@ impl AgentMemoryPipeline {
                 phase1::RolloutResponseItem { role: row.role, content, created_at: row.created_at }
             })
             .collect();
+        let items = phase1::filter_memory_relevant_items(items);
         Ok(Phase1RolloutInput { candidate, items })
     }
 
@@ -500,6 +525,21 @@ impl AgentMemoryPipeline {
         Ok(Some(watermark.as_deref().map(parse_rfc3339)))
     }
 
+    async fn refresh_phase2_lease(&self, owner: &str, now: DateTime<Utc>) -> Result<bool, String> {
+        let lease_until = now + Duration::seconds(self.config.phase2_lease_seconds as i64);
+        let updated = sqlx::query(
+            "UPDATE agent_memory_phase2_lock \
+             SET lease_until=?1, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+             WHERE id=1 AND status='running' AND lease_owner=?2",
+        )
+        .bind(lease_until.to_rfc3339())
+        .bind(owner)
+        .execute(&self.store.pool)
+        .await
+        .map_err(|error| error.to_string())?;
+        Ok(updated.rows_affected() == 1)
+    }
+
     async fn load_phase2_inputs(&self) -> Result<Vec<Phase2Input>, String> {
         let rows: Vec<Phase2InputRow> = sqlx::query_as(
             "SELECT thread_id, session_id, raw_memory, rollout_summary, rollout_slug, \
@@ -583,29 +623,58 @@ impl AgentMemoryPipeline {
         let Some(content) = response.content.as_deref() else {
             return Ok(());
         };
-        let citations = parse_memory_citations(content);
-        if citations.is_empty() {
-            return Ok(());
-        }
-        let now = Utc::now().to_rfc3339();
-        let mut tx = self.store.pool.begin().await.map_err(|error| error.to_string())?;
-        for citation in citations {
+        record_memory_usage_in_pool(&self.store.pool, thread_id, content).await
+    }
+}
+
+async fn record_memory_usage_in_pool(
+    pool: &sqlx::SqlitePool,
+    thread_id: &str,
+    content: &str,
+) -> Result<(), String> {
+    let citations = parse_memory_citations(content);
+    if citations.is_empty() {
+        return Ok(());
+    }
+    let now = Utc::now().to_rfc3339();
+    let mut tx = pool.begin().await.map_err(|error| error.to_string())?;
+    for citation in citations {
+        let source_kind = citation.source_kind.as_str();
+        sqlx::query(
+            "INSERT INTO agent_memory_usage_events \
+             (id, thread_id, source, source_kind, note, used_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(thread_id)
+        .bind(&citation.source)
+        .bind(source_kind)
+        .bind(&citation.note)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| error.to_string())?;
+        if citation.source_kind == MemoryCitationSourceKind::RolloutSummary
+            && let Some(filename) = rollout_summary_filename_from_citation(&citation.source)
+        {
             sqlx::query(
-                "INSERT INTO agent_memory_usage_events (id, thread_id, source, note, used_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                "UPDATE agent_memory_phase1_outputs \
+                 SET last_usage=?1, usage_count=usage_count + 1, \
+                     updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+                 WHERE selected_for_phase2=1 \
+                   AND ((rollout_slug IS NOT NULL AND rollout_slug || '.md' = ?2) \
+                        OR ((rollout_slug IS NULL OR rollout_slug = '') \
+                            AND thread_id || '.md' = ?2))",
             )
-            .bind(Uuid::new_v4().to_string())
-            .bind(thread_id)
-            .bind(citation.source)
-            .bind(citation.note)
             .bind(&now)
+            .bind(filename)
             .execute(&mut *tx)
             .await
             .map_err(|error| error.to_string())?;
         }
-        tx.commit().await.map_err(|error| error.to_string())?;
-        Ok(())
     }
+    tx.commit().await.map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 pub struct AgentMemoryStartupHook {
@@ -706,4 +775,146 @@ fn parse_rfc3339(value: &str) -> DateTime<Utc> {
             Utc::now()
         },
     )
+}
+
+fn rollout_summary_filename_from_citation(source: &str) -> Option<String> {
+    let path = source.split_once(':').map_or(source, |(path, _)| path).replace('\\', "/");
+    let filename = path.strip_prefix("rollout_summaries/")?;
+    if filename.ends_with(".md") && !filename.contains('/') {
+        return Some(filename.to_owned());
+    }
+    None
+}
+
+fn phase2_consolidation_agent_config(model: &str, prompt: String) -> AgentConfig {
+    AgentConfig {
+        model: model.to_owned(),
+        system_prompt: Some(prompt),
+        max_turns: 12,
+        max_depth: 0,
+        max_threads: 1,
+        allowed_tools: vec![
+            "read_file".to_owned(),
+            "write_file".to_owned(),
+            "list_dir".to_owned(),
+            "grep".to_owned(),
+        ],
+        transient: true,
+        ..AgentConfig::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use slab_agent::AgentConfig;
+
+    use super::*;
+    use crate::infra::db::AnyStore;
+
+    #[tokio::test]
+    async fn records_usage_source_kind_and_updates_matching_selected_rollout() {
+        let store = AnyStore::connect("sqlite::memory:").await.expect("store");
+        insert_thread(&store, "thread-a").await;
+        insert_thread(&store, "thread-b").await;
+        sqlx::query(
+            "INSERT INTO agent_memory_phase1_outputs \
+             (thread_id, session_id, status, raw_memory, rollout_summary, rollout_slug, \
+              selected_for_phase2, usage_count) \
+             VALUES \
+             ('thread-a', 'session-1', 'succeeded', 'raw', 'summary', 'slug-a', 1, 0), \
+             ('thread-b', 'session-1', 'succeeded', 'raw', 'summary', NULL, 1, 0)",
+        )
+        .execute(&store.pool)
+        .await
+        .expect("phase1 rows");
+
+        record_memory_usage_in_pool(
+            &store.pool,
+            "reader-thread",
+            "<oai-mem-citation>\n<citation_entries>\nrollout_summaries/slug-a.md:1-2|note=[used]\nraw_memories.md:3-4|note=[read]\n</citation_entries>\n<rollout_ids>\n</rollout_ids>\n</oai-mem-citation>",
+        )
+        .await
+        .expect("record usage");
+
+        let events: Vec<(String,)> =
+            sqlx::query_as("SELECT source_kind FROM agent_memory_usage_events ORDER BY source")
+                .fetch_all(&store.pool)
+                .await
+                .expect("events");
+        assert_eq!(events, vec![("raw_memory".to_owned(),), ("rollout_summary".to_owned(),)]);
+
+        let usage_a: (i64, Option<String>) = sqlx::query_as(
+            "SELECT usage_count, last_usage FROM agent_memory_phase1_outputs WHERE thread_id='thread-a'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .expect("usage a");
+        let usage_b: (i64, Option<String>) = sqlx::query_as(
+            "SELECT usage_count, last_usage FROM agent_memory_phase1_outputs WHERE thread_id='thread-b'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .expect("usage b");
+        assert_eq!(usage_a.0, 1);
+        assert!(usage_a.1.is_some());
+        assert_eq!(usage_b, (0, None));
+    }
+
+    #[test]
+    fn extracts_rollout_summary_filename_from_citation() {
+        assert_eq!(
+            rollout_summary_filename_from_citation("rollout_summaries/slug.md:1-2"),
+            Some("slug.md".to_owned())
+        );
+        assert_eq!(
+            rollout_summary_filename_from_citation("rollout_summaries/nested/slug.md:1-2"),
+            None
+        );
+        assert_eq!(rollout_summary_filename_from_citation("raw_memories.md:1-2"), None);
+    }
+
+    #[test]
+    fn phase2_consolidation_agent_config_is_transient_and_local_only() {
+        let config = phase2_consolidation_agent_config("model", "prompt".to_owned());
+
+        assert!(config.transient);
+        assert_eq!(config.max_depth, 0);
+        assert_eq!(config.max_threads, 1);
+        assert_eq!(
+            config.allowed_tools,
+            vec![
+                "read_file".to_owned(),
+                "write_file".to_owned(),
+                "list_dir".to_owned(),
+                "grep".to_owned()
+            ]
+        );
+        assert!(!config.allowed_tools.contains(&"delegate_subagent".to_owned()));
+        assert!(!config.allowed_tools.contains(&"web_search".to_owned()));
+        assert!(!config.allowed_tools.contains(&"shell".to_owned()));
+    }
+
+    async fn insert_thread(store: &AnyStore, thread_id: &str) {
+        let now = Utc::now().to_rfc3339();
+        let config_json = serde_json::to_string(&AgentConfig::default()).expect("config");
+        sqlx::query(
+            "INSERT OR IGNORE INTO chat_sessions (id, name, created_at, updated_at) \
+             VALUES ('session-1', '', ?1, ?1)",
+        )
+        .bind(&now)
+        .execute(&store.pool)
+        .await
+        .expect("session");
+        sqlx::query(
+            "INSERT INTO agent_threads \
+             (id, session_id, parent_id, depth, status, config_json, created_at, updated_at) \
+             VALUES (?1, 'session-1', NULL, 0, 'completed', ?2, ?3, ?3)",
+        )
+        .bind(thread_id)
+        .bind(config_json)
+        .bind(now)
+        .execute(&store.pool)
+        .await
+        .expect("thread");
+    }
 }

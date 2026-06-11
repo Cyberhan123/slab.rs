@@ -20,7 +20,29 @@ pub struct MemoryReadArtifacts {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemoryCitation {
     pub source: String,
+    pub source_kind: MemoryCitationSourceKind,
     pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryCitationSourceKind {
+    MemorySummary,
+    MemoryRegistry,
+    RawMemory,
+    RolloutSummary,
+    Unknown,
+}
+
+impl MemoryCitationSourceKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::MemorySummary => "memory_summary",
+            Self::MemoryRegistry => "memory_registry",
+            Self::RawMemory => "raw_memory",
+            Self::RolloutSummary => "rollout_summary",
+            Self::Unknown => "unknown",
+        }
+    }
 }
 
 pub fn load_read_artifacts(memory_root: &Path) -> Result<MemoryReadArtifacts> {
@@ -85,7 +107,28 @@ fn parse_citation_line(line: &str) -> Option<MemoryCitation> {
         Some((source, rest)) => (source.trim(), rest.strip_suffix(']').map(str::to_owned)),
         None => (line.trim(), None),
     };
-    (!source.is_empty()).then(|| MemoryCitation { source: source.to_owned(), note })
+    (!source.is_empty()).then(|| MemoryCitation {
+        source: source.to_owned(),
+        source_kind: classify_citation_source(source),
+        note,
+    })
+}
+
+pub fn classify_citation_source(source: &str) -> MemoryCitationSourceKind {
+    let path = source.split_once(':').map_or(source, |(path, _)| path).replace('\\', "/");
+    if path == "memory_summary.md" {
+        return MemoryCitationSourceKind::MemorySummary;
+    }
+    if path == "MEMORY.md" {
+        return MemoryCitationSourceKind::MemoryRegistry;
+    }
+    if path == "raw_memories.md" {
+        return MemoryCitationSourceKind::RawMemory;
+    }
+    if path.starts_with("rollout_summaries/") && path.ends_with(".md") {
+        return MemoryCitationSourceKind::RolloutSummary;
+    }
+    MemoryCitationSourceKind::Unknown
 }
 
 fn read_optional(path: &Path) -> Result<Option<String>> {
@@ -111,9 +154,27 @@ mod tests {
             citations,
             vec![MemoryCitation {
                 source: "MEMORY.md:1-2".to_owned(),
+                source_kind: MemoryCitationSourceKind::MemoryRegistry,
                 note: Some("used".to_owned())
             }]
         );
+    }
+
+    #[test]
+    fn classifies_memory_citation_sources() {
+        assert_eq!(
+            classify_citation_source("memory_summary.md:1-2"),
+            MemoryCitationSourceKind::MemorySummary
+        );
+        assert_eq!(
+            classify_citation_source("raw_memories.md:1-2"),
+            MemoryCitationSourceKind::RawMemory
+        );
+        assert_eq!(
+            classify_citation_source("rollout_summaries/thread.md:1-2"),
+            MemoryCitationSourceKind::RolloutSummary
+        );
+        assert_eq!(classify_citation_source("other.md"), MemoryCitationSourceKind::Unknown);
     }
 
     #[test]

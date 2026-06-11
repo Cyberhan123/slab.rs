@@ -30,11 +30,7 @@ pub fn write_workspace_diff(memory_root: &Path) -> Result<MemoryGitDiff> {
 }
 
 pub fn reset_memory_git_baseline(memory_root: &Path) -> Result<()> {
-    let diff_path = memory_root.join(PHASE2_WORKSPACE_DIFF_FILE);
-    if diff_path.exists() {
-        std::fs::remove_file(&diff_path)
-            .map_err(|error| crate::error::fs_error(&diff_path, error))?;
-    }
+    remove_workspace_diff_file(memory_root)?;
     ensure_memory_git_baseline(memory_root)?;
     run_git(memory_root, &["add", "-A"])?;
     let status = git_output(memory_root, &["status", "--porcelain"])?;
@@ -43,6 +39,15 @@ pub fn reset_memory_git_baseline(memory_root: &Path) -> Result<()> {
     }
     run_git(memory_root, &["commit", "-m", "slab memory baseline"])?;
     Ok(())
+}
+
+pub fn remove_workspace_diff_file(memory_root: &Path) -> Result<()> {
+    let diff_path = memory_root.join(PHASE2_WORKSPACE_DIFF_FILE);
+    match std::fs::remove_file(&diff_path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(crate::error::fs_error(&diff_path, error)),
+    }
 }
 
 fn git_output(root: &Path, args: &[&str]) -> Result<String> {
@@ -85,5 +90,17 @@ mod tests {
         reset_memory_git_baseline(root.path()).expect("reset");
         let clean = git_output(root.path(), &["status", "--porcelain"]).expect("status");
         assert!(clean.trim().is_empty());
+    }
+
+    #[test]
+    fn removes_workspace_diff_file_if_present() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let diff_path = root.path().join(PHASE2_WORKSPACE_DIFF_FILE);
+        std::fs::write(&diff_path, "diff").expect("diff");
+
+        remove_workspace_diff_file(root.path()).expect("remove");
+        remove_workspace_diff_file(root.path()).expect("remove missing");
+
+        assert!(!diff_path.exists());
     }
 }

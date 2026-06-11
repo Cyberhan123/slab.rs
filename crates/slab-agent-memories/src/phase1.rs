@@ -116,6 +116,16 @@ impl Phase1ModelOutput {
     }
 }
 
+pub fn filter_memory_relevant_items(items: Vec<RolloutResponseItem>) -> Vec<RolloutResponseItem> {
+    items
+        .into_iter()
+        .filter(|item| {
+            matches!(item.role.as_str(), "user" | "assistant" | "tool")
+                && !item.content.trim().is_empty()
+        })
+        .collect()
+}
+
 pub fn sanitize_slug(value: &str) -> String {
     let mut output = String::with_capacity(value.len().min(80));
     let mut last_dash = false;
@@ -161,5 +171,40 @@ mod tests {
     #[test]
     fn sanitizes_rollout_slug() {
         assert_eq!(sanitize_slug("My Slug! 2026"), "my-slug-2026");
+    }
+
+    #[test]
+    fn filters_memory_relevant_items() {
+        let items = filter_memory_relevant_items(vec![
+            RolloutResponseItem {
+                role: "system".into(),
+                content: "ignore".into(),
+                created_at: "1".into(),
+            },
+            RolloutResponseItem {
+                role: "developer".into(),
+                content: "ignore".into(),
+                created_at: "2".into(),
+            },
+            RolloutResponseItem {
+                role: "user".into(),
+                content: " ".into(),
+                created_at: "3".into(),
+            },
+            RolloutResponseItem {
+                role: "assistant".into(),
+                content: "keep".into(),
+                created_at: "4".into(),
+            },
+            RolloutResponseItem {
+                role: "tool".into(),
+                content: "keep".into(),
+                created_at: "5".into(),
+            },
+        ]);
+
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].role, "assistant");
+        assert_eq!(items[1].role, "tool");
     }
 }

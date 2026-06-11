@@ -31,4 +31,5 @@ regex         = { workspace = true }
 websearch     = { workspace = true }
 
 [dev-dependencies]
+slab-agent-tracing = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }

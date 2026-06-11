@@ -13,6 +13,63 @@
       },
       "type": "object"
     },
+    "AgentHookScriptConfig": {
+      "description": "Explicit local script registered for agent lifecycle hook execution.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "entry": {
+          "type": "string"
+        },
+        "events": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "export_name": {
+          "default": "run",
+          "type": "string"
+        },
+        "language": {
+          "$ref": "#/$defs/AgentHookScriptLanguage"
+        },
+        "name": {
+          "type": "string"
+        },
+        "root_dir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "language",
+        "root_dir",
+        "entry"
+      ],
+      "type": "object"
+    },
+    "AgentHookScriptLanguage": {
+      "enum": [
+        "javascript",
+        "python"
+      ],
+      "type": "string"
+    },
+    "AgentHooksConfig": {
+      "description": "Agent lifecycle hook settings.",
+      "properties": {
+        "scripts": {
+          "items": {
+            "$ref": "#/$defs/AgentHookScriptConfig"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "AgentMcpConfig": {
       "description": "Agent MCP tool integration settings.",
       "properties": {
@@ -109,6 +166,10 @@
         "debug": {
           "default": true,
           "type": "boolean"
+        },
+        "hooks": {
+          "$ref": "#/$defs/AgentHooksConfig",
+          "default": {}
         },
         "memories": {
           "$ref": "#/$defs/AgentMemoriesConfig",
@@ -1367,6 +1428,7 @@
       "$ref": "#/$defs/AgentSettingsConfig",
       "default": {
         "debug": true,
+        "hooks": {},
         "memories": {
           "enabled": false,
           "extension_retention_days": 30,

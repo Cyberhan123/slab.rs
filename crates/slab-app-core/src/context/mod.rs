@@ -203,13 +203,19 @@ fn build_agent_control(
         memory_config.clone(),
         memory_root.clone(),
     );
-    let hooks: Vec<Arc<dyn slab_agent::AgentHook>> = vec![
+    let mut hooks: Vec<Arc<dyn slab_agent::AgentHook>> = vec![
         Arc::new(slab_agent_memories::hooks::MemoryInstructionHook::new(
             memory_config.enabled,
             memory_root,
         )),
         Arc::new(crate::infra::agent_memory::AgentMemoryStartupHook::new(memory_pipeline.clone())),
     ];
+    if let Some(script_hook) = crate::infra::agent_hooks::registered_script_hook(
+        &ctx.pmid.config().agent.hooks,
+        &ctx.config,
+    ) {
+        hooks.push(script_hook);
+    }
 
     let control = Arc::new(AgentControl::new_with_hooks_and_tracing(
         llm,

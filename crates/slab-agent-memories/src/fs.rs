@@ -192,6 +192,36 @@ mod tests {
         assert!(!summaries.join("stale.md").exists());
     }
 
+    #[test]
+    fn sync_writes_empty_placeholder_when_selection_is_empty() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let summaries = root.path().join("rollout_summaries");
+        std::fs::create_dir_all(&summaries).expect("summaries");
+        std::fs::write(summaries.join("stale.md"), "old").expect("stale");
+        let now = Utc.with_ymd_and_hms(2026, 6, 11, 0, 0, 0).unwrap();
+
+        sync_phase2_workspace(root.path(), &[], 30, now).expect("sync");
+
+        let raw = std::fs::read_to_string(root.path().join(RAW_MEMORIES_FILE)).expect("raw");
+        assert!(raw.contains("No selected Phase 1 memories."));
+        assert!(!summaries.join("stale.md").exists());
+    }
+
+    #[test]
+    fn sync_prunes_expired_extension_resources() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let resources = root.path().join("extensions").join("ad_hoc").join("resources");
+        std::fs::create_dir_all(&resources).expect("resources");
+        let expired = resources.join("old.txt");
+        std::fs::write(&expired, "old").expect("resource");
+        let future = Utc.with_ymd_and_hms(2100, 1, 1, 0, 0, 0).unwrap();
+
+        let result = sync_phase2_workspace(root.path(), &[], 0, future).expect("sync");
+
+        assert_eq!(result.pruned_extension_resources, vec![expired.clone()]);
+        assert!(!expired.exists());
+    }
+
     fn input(thread_id: &str, now: DateTime<Utc>) -> Phase2Input {
         Phase2Input {
             thread_id: thread_id.to_owned(),

@@ -97,4 +97,56 @@ mod tests {
         assert_eq!(selection.inputs[0].thread_id, "fresh");
         assert_eq!(selection.new_watermark, Some(fresh));
     }
+
+    #[test]
+    fn selection_orders_by_usage_count_then_usage_time_and_watermark_max() {
+        let now = Utc.with_ymd_and_hms(2026, 6, 11, 0, 0, 0).unwrap();
+        let claimed = now - Duration::hours(1);
+        let newest_source = now + Duration::hours(1);
+
+        let selection = select_phase2_inputs(
+            vec![
+                Phase2Input {
+                    thread_id: "often".into(),
+                    session_id: "s".into(),
+                    raw_memory: "often".into(),
+                    rollout_summary: "often".into(),
+                    rollout_slug: None,
+                    generated_at: now,
+                    source_updated_at: now,
+                    last_usage: Some(now - Duration::minutes(5)),
+                    usage_count: 5,
+                },
+                Phase2Input {
+                    thread_id: "older".into(),
+                    session_id: "s".into(),
+                    raw_memory: "older".into(),
+                    rollout_summary: "older".into(),
+                    rollout_slug: None,
+                    generated_at: now,
+                    source_updated_at: newest_source,
+                    last_usage: Some(now - Duration::minutes(10)),
+                    usage_count: 1,
+                },
+                Phase2Input {
+                    thread_id: "newer".into(),
+                    session_id: "s".into(),
+                    raw_memory: "newer".into(),
+                    rollout_summary: "newer".into(),
+                    rollout_slug: None,
+                    generated_at: now,
+                    source_updated_at: now,
+                    last_usage: Some(now - Duration::minutes(1)),
+                    usage_count: 1,
+                },
+            ],
+            Phase2SelectionConfig { limit: 3, max_unused_days: 30 },
+            now,
+            Some(claimed),
+        );
+
+        let ids = selection.inputs.iter().map(|input| input.thread_id.as_str()).collect::<Vec<_>>();
+        assert_eq!(ids, vec!["older", "newer", "often"]);
+        assert_eq!(selection.new_watermark, Some(newest_source));
+    }
 }
