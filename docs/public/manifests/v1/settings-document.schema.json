@@ -597,6 +597,14 @@
       ],
       "type": "string"
     },
+    "PluginPythonRuntimeTransport": {
+      "description": "Runtime transport used for Python plugin sidecar communication.",
+      "enum": [
+        "stdio",
+        "uds"
+      ],
+      "type": "string"
+    },
     "PluginSettingsConfig": {
       "description": "Runtime plugin installation settings.",
       "properties": {
@@ -611,6 +619,11 @@
           "$ref": "#/$defs/PluginJsRuntimeTransport",
           "default": "stdio",
           "description": "Transport mode used for JS sidecar communication."
+        },
+        "python_runtime_transport": {
+          "$ref": "#/$defs/PluginPythonRuntimeTransport",
+          "default": "stdio",
+          "description": "Transport mode used for Python sidecar communication."
         }
       },
       "type": "object"
@@ -1323,7 +1336,8 @@
     "plugin": {
       "$ref": "#/$defs/PluginSettingsConfig",
       "default": {
-        "js_runtime_transport": "stdio"
+        "js_runtime_transport": "stdio",
+        "python_runtime_transport": "stdio"
       }
     },
     "providers": {

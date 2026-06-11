@@ -15,7 +15,7 @@ use crate::infra::endpoint::ensure_http_base_url;
 use crate::infra::plugin_runtime::{
     PluginEventBus, PluginSidecarRuntimeClient, PluginSidecarRuntimeKind, PluginSidecarTransport,
 };
-use slab_config::PluginJsRuntimeTransport;
+use slab_config::{PluginJsRuntimeTransport, PluginPythonRuntimeTransport};
 use slab_plugin::{PluginCallRequest, PluginRegistry, PluginRuntime};
 use slab_types::{PluginRuntimeCallRequest, PluginRuntimeFileGrant};
 
@@ -63,6 +63,10 @@ impl PluginService {
             PluginJsRuntimeTransport::Stdio => PluginSidecarTransport::Stdio,
             PluginJsRuntimeTransport::Uds => PluginSidecarTransport::Uds,
         };
+        let python_transport = match state.config().plugin_python_runtime_transport {
+            PluginPythonRuntimeTransport::Stdio => PluginSidecarTransport::Stdio,
+            PluginPythonRuntimeTransport::Uds => PluginSidecarTransport::Uds,
+        };
         let js_runtime = PluginSidecarRuntimeClient::for_current_server(
             PluginSidecarRuntimeKind::JavaScript,
             js_transport,
@@ -71,7 +75,7 @@ impl PluginService {
         );
         let python_runtime = PluginSidecarRuntimeClient::for_current_server(
             PluginSidecarRuntimeKind::Python,
-            PluginSidecarTransport::Stdio,
+            python_transport,
             api_base_url,
             event_bus.clone(),
         );

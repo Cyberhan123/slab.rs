@@ -1,6 +1,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use base64::Engine as _;
 use serde_json::{Value, json};
@@ -9,6 +10,8 @@ use slab_types::{
     PluginApiResponse, PluginPermissionsManifest, PluginRuntimeApiHostRequest,
     PluginRuntimeCallRequest, PluginRuntimeUiEmitRequest,
 };
+use slab_utils::uds::UnixListener;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as AsyncBufReader};
 
 #[derive(Default)]
 struct RecordingHost {
@@ -266,6 +269,12 @@ async fn rejects_python_bundle_with_native_extensions() {
     assert!(error.contains("unsupported native extensions"));
 }
 
+#[tokio::test]
+async fn supports_uds_json_rpc_transport() {
+    let temp = tempfile::tempdir().unwrap();
+    assert_uds_json_rpc(temp.path()).await;
+}
+
 fn request(root: &std::path::Path, export_name: &str, params: Value) -> PluginRuntimeCallRequest {
     PluginRuntimeCallRequest {
         call_id: format!("call-{export_name}"),
@@ -279,6 +288,67 @@ fn request(root: &std::path::Path, export_name: &str, params: Value) -> PluginRu
         file_grants: Vec::new(),
         blocked_fetch_origins: Vec::new(),
     }
+}
+
+async fn assert_uds_json_rpc(root: &std::path::Path) {
+    std::fs::write(
+        root.join("uds_plugin.py"),
+        r#"
+def run(params):
+    return {"value": params["value"] + 1}
+"#,
+    )
+    .unwrap();
+
+    let socket_path = root.join("runtime.sock");
+    let mut listener = UnixListener::bind(&socket_path).await.unwrap();
+    let runtime_exe = std::env::var("CARGO_BIN_EXE_slab-python-runtime").unwrap();
+    let mut child = Command::new(runtime_exe)
+        .arg("--socket")
+        .arg(&socket_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let stream =
+        tokio::time::timeout(Duration::from_secs(5), listener.accept()).await.unwrap().unwrap();
+    let (reader, mut writer) = tokio::io::split(stream);
+    let mut lines = AsyncBufReader::new(reader).lines();
+
+    let ready = tokio::time::timeout(Duration::from_secs(5), lines.next_line())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let ready: Value = serde_json::from_str(ready.trim()).unwrap();
+    assert_eq!(ready["method"], "runtime.ready");
+    assert_eq!(ready["params"]["runtime"], "slab-python-runtime");
+
+    let mut call = request(root, "run", json!({ "value": 2 }));
+    call.call_id = "uds-call".to_owned();
+    call.entry = "uds_plugin.py".to_owned();
+    let line = json!({
+        "jsonrpc": "2.0",
+        "id": "1",
+        "method": "plugin.call",
+        "params": call
+    });
+    writer.write_all(format!("{line}\n").as_bytes()).await.unwrap();
+    writer.flush().await.unwrap();
+
+    let response = tokio::time::timeout(Duration::from_secs(5), lines.next_line())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let response: Value = serde_json::from_str(response.trim()).unwrap();
+    assert_eq!(response["id"], "1");
+    assert_eq!(response["result"]["result"], json!({ "value": 3 }));
+
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn assert_stdio_json_rpc(root: &std::path::Path) {

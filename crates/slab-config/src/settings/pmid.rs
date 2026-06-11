@@ -164,6 +164,7 @@ impl SettingsPmidCatalog {
             self.models.auto_unload.max_pressure_evictions_per_load(),
             self.plugin.install_dir(),
             self.plugin.js_runtime_transport(),
+            self.plugin.python_runtime_transport(),
             self.server.address(),
             self.server.logging.level(),
             self.server.logging.json(),
@@ -713,6 +714,10 @@ impl PluginPmids {
 
     pub fn js_runtime_transport(self) -> SettingPmid {
         SettingPmid::from_path("plugin.js_runtime_transport")
+    }
+
+    pub fn python_runtime_transport(self) -> SettingPmid {
+        SettingPmid::from_path("plugin.python_runtime_transport")
     }
 }
 

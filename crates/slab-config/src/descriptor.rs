@@ -330,6 +330,9 @@ pub(crate) fn setting_descriptor(pmid: &str) -> Option<SettingDescriptor> {
         "plugin.js_runtime_transport" => {
             descriptor!("plugin.js_runtime_transport", plugin.js_runtime_transport)
         }
+        "plugin.python_runtime_transport" => {
+            descriptor!("plugin.python_runtime_transport", plugin.python_runtime_transport)
+        }
         "server.address" => descriptor!("server.address", server.address),
         "server.logging.level" => descriptor!("server.logging.level", server.logging.level),
         "server.logging.json" => descriptor!("server.logging.json", server.logging.json),

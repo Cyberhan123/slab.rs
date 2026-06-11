@@ -4,7 +4,7 @@ use slab_types::{DESKTOP_API_BIND, sqlite_url_for_path};
 use slab_utils::app_home;
 use std::path::{Path, PathBuf};
 
-use crate::{PluginJsRuntimeTransport, SettingsDocument};
+use crate::{PluginJsRuntimeTransport, PluginPythonRuntimeTransport, SettingsDocument};
 
 /// Runtime configuration for slab-server.
 ///
@@ -115,6 +115,9 @@ pub struct Config {
 
     /// Transport used when app-core talks to the JS plugin sidecar runtime.
     pub plugin_js_runtime_transport: PluginJsRuntimeTransport,
+
+    /// Transport used when app-core talks to the Python plugin sidecar runtime.
+    pub plugin_python_runtime_transport: PluginPythonRuntimeTransport,
 }
 
 pub type AppConfig = Config;
@@ -175,6 +178,10 @@ impl Config {
                 .unwrap_or_else(default_exec_rules_dir),
             plugin_js_runtime_transport: plugin_js_runtime_transport_from_settings(&settings_path)
                 .unwrap_or_default(),
+            plugin_python_runtime_transport: plugin_python_runtime_transport_from_settings(
+                &settings_path,
+            )
+            .unwrap_or_default(),
         }
     }
 }
@@ -237,6 +244,13 @@ fn plugin_js_runtime_transport_from_settings(
 ) -> Option<PluginJsRuntimeTransport> {
     let document = settings_document_from_path(settings_path)?;
     Some(document.plugin.js_runtime_transport)
+}
+
+fn plugin_python_runtime_transport_from_settings(
+    settings_path: &Path,
+) -> Option<PluginPythonRuntimeTransport> {
+    let document = settings_document_from_path(settings_path)?;
+    Some(document.plugin.python_runtime_transport)
 }
 
 fn settings_document_from_path(settings_path: &Path) -> Option<SettingsDocument> {

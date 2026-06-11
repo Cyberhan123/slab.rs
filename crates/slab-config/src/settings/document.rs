@@ -788,12 +788,24 @@ pub struct PluginSettingsConfig {
     /// Transport mode used for JS sidecar communication.
     #[serde(default)]
     pub js_runtime_transport: PluginJsRuntimeTransport,
+    /// Transport mode used for Python sidecar communication.
+    #[serde(default)]
+    pub python_runtime_transport: PluginPythonRuntimeTransport,
 }
 
 /// Runtime transport used for JS plugin sidecar communication.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PluginJsRuntimeTransport {
+    #[default]
+    Stdio,
+    Uds,
+}
+
+/// Runtime transport used for Python plugin sidecar communication.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginPythonRuntimeTransport {
     #[default]
     Stdio,
     Uds,

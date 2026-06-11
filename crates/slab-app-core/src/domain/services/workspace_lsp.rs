@@ -442,7 +442,7 @@ mod tests {
         workspace_root_from_settings_path,
     };
     use crate::config::Config;
-    use slab_config::PluginJsRuntimeTransport;
+    use slab_config::{PluginJsRuntimeTransport, PluginPythonRuntimeTransport};
     use slab_types::plugin::PluginLanguageServerTransport;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -478,6 +478,7 @@ mod tests {
             plugins_dir: root.join("plugins"),
             exec_rules_dir: root.join("rules"),
             plugin_js_runtime_transport: PluginJsRuntimeTransport::Stdio,
+            plugin_python_runtime_transport: PluginPythonRuntimeTransport::Stdio,
         }
     }
 

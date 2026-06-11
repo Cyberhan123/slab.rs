@@ -520,11 +520,12 @@ fn runtime_transport_mode(
     transport: PluginSidecarTransport,
 ) -> RuntimeTransportMode {
     match kind {
-        PluginSidecarRuntimeKind::JavaScript => match transport {
-            PluginSidecarTransport::Stdio => RuntimeTransportMode::Stdio,
-            PluginSidecarTransport::Uds => RuntimeTransportMode::Uds,
-        },
-        PluginSidecarRuntimeKind::Python => RuntimeTransportMode::Stdio,
+        PluginSidecarRuntimeKind::JavaScript | PluginSidecarRuntimeKind::Python => {
+            match transport {
+                PluginSidecarTransport::Stdio => RuntimeTransportMode::Stdio,
+                PluginSidecarTransport::Uds => RuntimeTransportMode::Uds,
+            }
+        }
     }
 }
 
@@ -582,7 +583,7 @@ mod tests {
         ));
         assert!(matches!(
             runtime_transport_mode(PluginSidecarRuntimeKind::Python, PluginSidecarTransport::Uds),
-            super::RuntimeTransportMode::Stdio
+            super::RuntimeTransportMode::Uds
         ));
     }
 

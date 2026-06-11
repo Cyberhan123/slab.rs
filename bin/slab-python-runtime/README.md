@@ -4,9 +4,9 @@ Sandboxed Python plugin backend for Slab, powered by CPython through PyO3.
 
 ## Role
 
-This binary is a supervised stdio sidecar used by `crates/slab-app-core` when a
+This binary is a supervised sidecar used by `crates/slab-app-core` when a
 plugin declares `runtime.python.entry` in `plugin.json`. It speaks
-line-delimited JSON-RPC 2.0:
+line-delimited JSON-RPC 2.0 over stdio or `--socket <path>`:
 
 - `runtime.ready` is sent on startup.
 - `plugin.call` receives `PluginRuntimeCallRequest`.

@@ -8,9 +8,9 @@ use chrono::Utc;
 use futures::StreamExt;
 use futures::stream::{self, BoxStream};
 use slab_config::{
-    LaunchProfile, PluginJsRuntimeTransport, ProviderDefaultsConfig, ProviderFamily,
-    ProviderRegistryEntry, ResolvedLaunchSpec, ResolvedRuntimeEndpoints, RuntimeTransportMode,
-    SettingsDocument,
+    LaunchProfile, PluginJsRuntimeTransport, PluginPythonRuntimeTransport, ProviderDefaultsConfig,
+    ProviderFamily, ProviderRegistryEntry, ResolvedLaunchSpec, ResolvedRuntimeEndpoints,
+    RuntimeTransportMode, SettingsDocument,
 };
 use slab_types::{Capability, RuntimeBackendId, RuntimeBackendLoadSpec, sqlite_url_for_path};
 use tempfile::TempDir;
@@ -213,6 +213,7 @@ impl TestAppCore {
             plugins_dir,
             exec_rules_dir,
             plugin_js_runtime_transport: PluginJsRuntimeTransport::default(),
+            plugin_python_runtime_transport: PluginPythonRuntimeTransport::default(),
         });
 
         let grpc = Arc::new(GrpcGateway::default());

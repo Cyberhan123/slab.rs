@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::BufRead;
+use std::path::Path;
 use std::sync::{
     Arc,
     atomic::{AtomicU64, Ordering},
@@ -11,11 +11,12 @@ use slab_jsonrpc::{
     IncomingMessage, application_error_response, id_key, notification, parse_message, request,
     success_response,
 };
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{Mutex, mpsc, oneshot};
 
 use crate::PythonRuntime;
 use crate::domain::RuntimeHost;
+use slab_utils::uds::UnixStream;
 
 type PendingMap = Arc<Mutex<HashMap<String, oneshot::Sender<Result<Value, String>>>>>;
 
@@ -27,28 +28,16 @@ pub struct JsonRpcRuntimeHost {
 }
 
 impl JsonRpcRuntimeHost {
-    pub fn new() -> Self {
-        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
-        tokio::spawn(async move {
-            let mut stdout = tokio::io::stdout();
-            while let Some(line) = rx.recv().await {
-                if stdout.write_all(line.as_bytes()).await.is_err() {
-                    break;
-                }
-                if stdout.write_all(b"\n").await.is_err() {
-                    break;
-                }
-                if stdout.flush().await.is_err() {
-                    break;
-                }
-            }
-        });
-
-        Self {
-            outbound: tx,
-            pending: Arc::new(Mutex::new(HashMap::new())),
-            next_id: Arc::new(AtomicU64::new(1)),
-        }
+    pub fn new() -> (Self, mpsc::UnboundedReceiver<String>) {
+        let (tx, rx) = mpsc::unbounded_channel::<String>();
+        (
+            Self {
+                outbound: tx,
+                pending: Arc::new(Mutex::new(HashMap::new())),
+                next_id: Arc::new(AtomicU64::new(1)),
+            },
+            rx,
+        )
     }
 
     async fn resolve_response(&self, response: IncomingMessage) {
@@ -90,12 +79,6 @@ impl JsonRpcRuntimeHost {
     }
 }
 
-impl Default for JsonRpcRuntimeHost {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[async_trait::async_trait]
 impl RuntimeHost for JsonRpcRuntimeHost {
     async fn request(&self, method: &str, params: Value) -> Result<Value, String> {
@@ -115,7 +98,10 @@ impl RuntimeHost for JsonRpcRuntimeHost {
 pub async fn serve_stdio(
     host: Arc<JsonRpcRuntimeHost>,
     runtime: Arc<PythonRuntime>,
+    outbound: mpsc::UnboundedReceiver<String>,
 ) -> anyhow::Result<()> {
+    tokio::spawn(drain_outbound(outbound, tokio::io::stdout()));
+
     host.send_notification(
         "runtime.ready",
         serde_json::json!({
@@ -124,19 +110,47 @@ pub async fn serve_stdio(
         }),
     );
 
-    let (line_tx, mut line_rx) = mpsc::unbounded_channel::<Result<String, String>>();
-    std::thread::spawn(move || {
-        let stdin = std::io::stdin();
-        for line in stdin.lock().lines() {
-            let result = line.map_err(|error| error.to_string());
-            if line_tx.send(result).is_err() {
-                break;
-            }
-        }
-    });
+    let stdin = tokio::io::stdin();
+    let lines = BufReader::new(stdin);
+    serve_reader(host, runtime, lines).await
+}
 
-    while let Some(line) = line_rx.recv().await {
-        let line = line.map_err(|error| anyhow::anyhow!(error))?;
+pub async fn serve_uds(
+    host: Arc<JsonRpcRuntimeHost>,
+    runtime: Arc<PythonRuntime>,
+    outbound: mpsc::UnboundedReceiver<String>,
+    socket_path: &Path,
+) -> anyhow::Result<()> {
+    let stream = UnixStream::connect(socket_path).await.map_err(|error| {
+        anyhow::anyhow!(
+            "failed to connect runtime JSON-RPC socket {}: {error}",
+            socket_path.display()
+        )
+    })?;
+    let (socket_reader, socket_writer) = tokio::io::split(stream);
+    tokio::spawn(drain_outbound(outbound, socket_writer));
+
+    host.send_notification(
+        "runtime.ready",
+        serde_json::json!({
+            "runtime": "slab-python-runtime",
+            "engine": "cpython-pyo3"
+        }),
+    );
+    let lines = BufReader::new(socket_reader);
+    serve_reader(host, runtime, lines).await
+}
+
+async fn serve_reader<R>(
+    host: Arc<JsonRpcRuntimeHost>,
+    runtime: Arc<PythonRuntime>,
+    reader: R,
+) -> anyhow::Result<()>
+where
+    R: AsyncBufRead + Unpin,
+{
+    let mut lines = reader.lines();
+    while let Some(line) = lines.next_line().await? {
         let incoming = match parse_message(&line) {
             Ok(incoming) => incoming,
             Err(error) => {
@@ -190,4 +204,21 @@ pub async fn serve_stdio(
     }
 
     Ok(())
+}
+
+async fn drain_outbound<W>(mut outbound: mpsc::UnboundedReceiver<String>, mut writer: W)
+where
+    W: AsyncWrite + Unpin,
+{
+    while let Some(line) = outbound.recv().await {
+        if writer.write_all(line.as_bytes()).await.is_err() {
+            break;
+        }
+        if writer.write_all(b"\n").await.is_err() {
+            break;
+        }
+        if writer.flush().await.is_err() {
+            break;
+        }
+    }
 }

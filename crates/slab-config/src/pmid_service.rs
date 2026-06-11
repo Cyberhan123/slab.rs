@@ -575,6 +575,9 @@ fn enum_values(path: &str) -> Option<Vec<String>> {
             Some(vec!["managed_children".to_owned(), "external_endpoints".to_owned()])
         }
         "runtime.transport" => Some(vec!["http".to_owned(), "ipc".to_owned()]),
+        "plugin.js_runtime_transport" | "plugin.python_runtime_transport" => {
+            Some(vec!["stdio".to_owned(), "uds".to_owned()])
+        }
         "agent.tools.mcp.enabled" => None,
         "agent.tools.websearch.default_provider" => Some(vec![
             "duckduckgo".to_owned(),
@@ -643,6 +646,7 @@ fn property_label(path: &str) -> String {
         "models.download_source" => "Model Source".to_owned(),
         "plugin.install_dir" => "Plugin Install Directory".to_owned(),
         "plugin.js_runtime_transport" => "JS Runtime Transport".to_owned(),
+        "plugin.python_runtime_transport" => "Python Runtime Transport".to_owned(),
         "server.address" => "Bind Address".to_owned(),
         "server.admin.token" => "Admin Token".to_owned(),
         "server.cors.allowed_origins" => "Allowed Origins".to_owned(),
@@ -687,6 +691,9 @@ fn property_description(path: &str) -> String {
         },
         "plugin.js_runtime_transport" => {
             "Transport used by slab-app-core when communicating with the JavaScript plugin sidecar runtime.".to_owned()
+        }
+        "plugin.python_runtime_transport" => {
+            "Transport used by slab-app-core when communicating with the Python plugin sidecar runtime.".to_owned()
         }
         "models.auto_unload.enabled" => "Unload idle models automatically to reclaim memory.".to_owned(),
         "models.auto_unload.idle_minutes" => "Idle timeout in minutes before auto-unload triggers.".to_owned(),
