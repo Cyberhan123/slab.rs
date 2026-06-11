@@ -6,22 +6,18 @@ use slab_types::RuntimeDevicePreference;
 
 use super::error::CandleLlmError;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum LlmWeightSource {
+    #[default]
     QuantizedGguf,
     Safetensors,
 }
 
-impl Default for LlmWeightSource {
-    fn default() -> Self {
-        Self::QuantizedGguf
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum LlmModelKind {
+    #[default]
     Llama,
     Qwen2,
     Qwen2Moe,
@@ -36,12 +32,6 @@ pub enum LlmModelKind {
     Mamba,
     Mamba2,
     Phi,
-}
-
-impl Default for LlmModelKind {
-    fn default() -> Self {
-        Self::Llama
-    }
 }
 
 impl std::fmt::Display for LlmModelKind {
@@ -65,9 +55,10 @@ impl std::fmt::Display for LlmModelKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PromptFormat {
+    #[default]
     Raw,
     LlamaChat,
     MistralInstruct,
@@ -77,12 +68,6 @@ pub enum PromptFormat {
     QwenChat,
     GemmaInstruct,
     PhiChat,
-}
-
-impl Default for PromptFormat {
-    fn default() -> Self {
-        Self::Raw
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

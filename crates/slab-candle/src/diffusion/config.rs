@@ -5,18 +5,13 @@ use slab_types::RuntimeDevicePreference;
 
 use super::error::CandleDiffusionError;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DiffusionPipelineKind {
+    #[default]
     StableDiffusion,
     Flux,
     StableDiffusion3,
-}
-
-impl Default for DiffusionPipelineKind {
-    fn default() -> Self {
-        Self::StableDiffusion
-    }
 }
 
 impl std::fmt::Display for DiffusionPipelineKind {
@@ -29,47 +24,32 @@ impl std::fmt::Display for DiffusionPipelineKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum StableDiffusionVersion {
     V1_5,
     V1_5Inpaint,
+    #[default]
     V2_1,
     Sdxl,
     SdxlInpaint,
     SdxlTurbo,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FluxModelKind {
     Dev,
+    #[default]
     Schnell,
 }
 
-impl Default for FluxModelKind {
-    fn default() -> Self {
-        Self::Schnell
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FluxWeightSource {
+    #[default]
     Safetensors,
     QuantizedGguf,
-}
-
-impl Default for FluxWeightSource {
-    fn default() -> Self {
-        Self::Safetensors
-    }
-}
-
-impl Default for StableDiffusionVersion {
-    fn default() -> Self {
-        Self::V2_1
-    }
 }
 
 impl StableDiffusionVersion {

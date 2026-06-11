@@ -28,6 +28,7 @@ function ButtonGroup({
 }: React.ComponentProps<"div"> & VariantProps<typeof buttonGroupVariants>) {
   return (
     <div
+      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- ButtonGroup keeps a div wrapper while exposing grouped-control semantics.
       role="group"
       data-slot="button-group"
       data-orientation={orientation}

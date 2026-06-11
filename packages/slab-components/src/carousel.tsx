@@ -162,6 +162,7 @@ function CarouselItem({ className, ...props }: React.ComponentProps<"div">) {
 
   return (
     <div
+      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- Carousel slides use the WAI carousel group pattern with aria-roledescription.
       role="group"
       aria-roledescription="slide"
       data-slot="carousel-item"

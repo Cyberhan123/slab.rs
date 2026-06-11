@@ -815,11 +815,11 @@
       return handle;
     }
     const iframe = container.ownerDocument.createElement("iframe");
+    iframe.setAttribute("sandbox", "allow-scripts allow-forms");
     iframe.src = entry;
     iframe.style.width = "100%";
     iframe.style.height = "100%";
     iframe.style.border = "0";
-    iframe.setAttribute("sandbox", "allow-scripts allow-forms");
     container.appendChild(iframe);
     return { kind: "browser", pluginId, iframe };
   }

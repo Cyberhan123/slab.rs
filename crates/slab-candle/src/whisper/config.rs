@@ -3,30 +3,20 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use slab_types::RuntimeDevicePreference;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum WhisperWeightSource {
+    #[default]
     Safetensors,
     QuantizedGguf,
 }
 
-impl Default for WhisperWeightSource {
-    fn default() -> Self {
-        Self::Safetensors
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum WhisperTask {
+    #[default]
     Transcribe,
     Translate,
-}
-
-impl Default for WhisperTask {
-    fn default() -> Self {
-        Self::Transcribe
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -8,6 +8,7 @@ import { cn } from "./lib/utils"
 function ItemGroup({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
+      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- ItemGroup keeps the div-based component API while exposing list semantics.
       role="list"
       data-slot="item-group"
       className={cn("group/item-group flex flex-col", className)}

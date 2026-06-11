@@ -336,18 +336,20 @@ export function mountPluginUI(
     return handle;
   }
 
+  // eslint-disable-next-line react/iframe-missing-sandbox -- sandbox is set before the iframe is mounted.
   const iframe = container.ownerDocument.createElement("iframe");
+  iframe.setAttribute("sandbox", "allow-scripts allow-forms");
   iframe.src = entry;
   iframe.style.width = "100%";
   iframe.style.height = "100%";
   iframe.style.border = "0";
-  iframe.setAttribute("sandbox", "allow-scripts allow-forms");
   container.appendChild(iframe);
   return { kind: "browser", pluginId, iframe };
 }
 
 export function unmountPluginUI(handle: PluginUIHandle): void {
   if (handle.kind === "tauri") {
+    // eslint-disable-next-line no-underscore-dangle -- Preserve the existing exported PluginUIHandle field name.
     const targetWindow = handle._targetWindow as TauriPluginWindow;
     const tauriCore = targetWindow["__TAURI__"]?.core;
     const hasTrustedTauriContext = Boolean(

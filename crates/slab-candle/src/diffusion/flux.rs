@@ -12,8 +12,8 @@ use super::config::{
 use super::error::CandleDiffusionError;
 
 enum FluxTransformer {
-    Normal(flux::model::Flux),
-    Quantized(flux::quantized_model::Flux),
+    Normal(Box<flux::model::Flux>),
+    Quantized(Box<flux::quantized_model::Flux>),
 }
 
 pub(crate) struct FluxPipeline {
@@ -82,9 +82,12 @@ impl FluxPipeline {
                         CandleDiffusionError::load_model(transformer_path.display(), error)
                     })?
                 };
-                flux::model::Flux::new(&model_cfg, vb).map(FluxTransformer::Normal).map_err(
-                    |error| CandleDiffusionError::load_model(transformer_path.display(), error),
-                )?
+                flux::model::Flux::new(&model_cfg, vb)
+                    .map(Box::new)
+                    .map(FluxTransformer::Normal)
+                    .map_err(|error| {
+                        CandleDiffusionError::load_model(transformer_path.display(), error)
+                    })?
             }
             FluxWeightSource::QuantizedGguf => {
                 let vb = candle_transformers::quantized_var_builder::VarBuilder::from_gguf(
@@ -95,6 +98,7 @@ impl FluxPipeline {
                     CandleDiffusionError::load_model(transformer_path.display(), error)
                 })?;
                 flux::quantized_model::Flux::new(&model_cfg, vb)
+                    .map(Box::new)
                     .map(FluxTransformer::Quantized)
                     .map_err(|error| {
                         CandleDiffusionError::load_model(transformer_path.display(), error)
@@ -209,7 +213,7 @@ impl FluxPipeline {
         };
         let denoised = match &self.transformer {
             FluxTransformer::Normal(model) => flux::sampling::denoise(
-                model,
+                model.as_ref(),
                 &state.img,
                 &state.img_ids,
                 &state.txt,
@@ -219,7 +223,7 @@ impl FluxPipeline {
                 request.cfg_scale,
             ),
             FluxTransformer::Quantized(model) => flux::sampling::denoise(
-                model,
+                model.as_ref(),
                 &state.img,
                 &state.img_ids,
                 &state.txt,

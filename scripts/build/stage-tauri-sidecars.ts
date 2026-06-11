@@ -22,15 +22,17 @@ async function main() {
 
   await mkdir(tauriBinariesDir, { recursive: true });
 
-  for (const sidecar of sidecars) {
-    const sourcePath = path.join(profileDir, `${sidecar}${extension}`);
-    const destPath = path.join(tauriBinariesDir, `${sidecar}-${target}${extension}`);
-    await copyFile(sourcePath, destPath);
-    if (!target.includes("windows")) {
-      await chmod(destPath, 0o755);
-    }
-    console.log(`Staged ${path.relative(repoRoot, destPath).replace(/\\/g, "/")}`);
-  }
+  await Promise.all(
+    sidecars.map(async (sidecar) => {
+      const sourcePath = path.join(profileDir, `${sidecar}${extension}`);
+      const destPath = path.join(tauriBinariesDir, `${sidecar}-${target}${extension}`);
+      await copyFile(sourcePath, destPath);
+      if (!target.includes("windows")) {
+        await chmod(destPath, 0o755);
+      }
+      console.log(`Staged ${path.relative(repoRoot, destPath).replace(/\\/g, "/")}`);
+    }),
+  );
 }
 
 function parseProfile(argv: string[]) {

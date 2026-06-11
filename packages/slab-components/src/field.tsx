@@ -85,6 +85,7 @@ function Field({
 }: React.ComponentProps<"div"> & VariantProps<typeof fieldVariants>) {
   return (
     <div
+      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- Field is a div-based layout wrapper that intentionally exposes group semantics.
       role="group"
       data-slot="field"
       data-orientation={orientation}

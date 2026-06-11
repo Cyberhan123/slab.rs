@@ -388,13 +388,13 @@ impl Conversation {
 
     /// Clear conversation history (keeps system prompt if present)
     pub fn clear(&mut self) {
-        if let Some(first) = self.messages.first() {
-            if first.role == "system" {
-                let system = self.messages.remove(0);
-                self.messages.clear();
-                self.messages.push(system);
-                return;
-            }
+        if let Some(first) = self.messages.first()
+            && first.role == "system"
+        {
+            let system = self.messages.remove(0);
+            self.messages.clear();
+            self.messages.push(system);
+            return;
         }
         self.messages.clear();
     }

@@ -6,19 +6,18 @@ use serde::{Deserialize, Serialize};
 use crate::error::SlabTypeError;
 
 /// Runtime device preference passed across model load boundaries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(try_from = "String", into = "String")]
 pub enum RuntimeDevicePreference {
+    #[default]
     Auto,
     Cpu,
-    Cuda { ordinal: usize },
-    Metal { ordinal: usize },
-}
-
-impl Default for RuntimeDevicePreference {
-    fn default() -> Self {
-        Self::Auto
-    }
+    Cuda {
+        ordinal: usize,
+    },
+    Metal {
+        ordinal: usize,
+    },
 }
 
 impl std::fmt::Display for RuntimeDevicePreference {

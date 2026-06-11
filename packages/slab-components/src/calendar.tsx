@@ -15,6 +15,54 @@ import {
 import { Button, buttonVariants } from "./button"
 import { cn } from "./lib/utils"
 
+type CalendarRootProps = React.ComponentProps<"div"> & {
+  rootRef?: React.Ref<HTMLDivElement>
+}
+
+function CalendarRoot({ className, rootRef, ...props }: CalendarRootProps) {
+  return (
+    <div
+      data-slot="calendar"
+      ref={rootRef}
+      className={cn(className)}
+      {...props}
+    />
+  )
+}
+
+type CalendarChevronProps = React.ComponentProps<typeof ChevronDownIcon> & {
+  orientation?: "down" | "left" | "right" | "up"
+}
+
+function CalendarChevron({
+  className,
+  orientation,
+  ...props
+}: CalendarChevronProps) {
+  if (orientation === "left") {
+    return <ChevronLeftIcon className={cn("size-4", className)} {...props} />
+  }
+
+  if (orientation === "right") {
+    return <ChevronRightIcon className={cn("size-4", className)} {...props} />
+  }
+
+  return <ChevronDownIcon className={cn("size-4", className)} {...props} />
+}
+
+function CalendarWeekNumber({
+  children,
+  ...props
+}: React.ComponentProps<"td">) {
+  return (
+    <td {...props}>
+      <div className="flex size-(--cell-size) items-center justify-center text-center">
+        {children}
+      </div>
+    </td>
+  )
+}
+
 function Calendar({
   className,
   classNames,
@@ -132,49 +180,10 @@ function Calendar({
         ...classNames,
       }}
       components={{
-        // eslint-disable-next-line react/no-shadow -- shadcn/ui DayPicker component override pattern
-        Root: ({ className, rootRef, ...props }) => {
-          return (
-            <div
-              data-slot="calendar"
-              ref={rootRef}
-              className={cn(className)}
-              {...props}
-            />
-          )
-        },
-        // eslint-disable-next-line react/no-shadow -- shadcn/ui DayPicker component override pattern
-        Chevron: ({ className, orientation, ...props }) => {
-          if (orientation === "left") {
-            return (
-              <ChevronLeftIcon className={cn("size-4", className)} {...props} />
-            )
-          }
-
-          if (orientation === "right") {
-            return (
-              <ChevronRightIcon
-                className={cn("size-4", className)}
-                {...props}
-              />
-            )
-          }
-
-          return (
-            <ChevronDownIcon className={cn("size-4", className)} {...props} />
-          )
-        },
+        Root: CalendarRoot,
+        Chevron: CalendarChevron,
         DayButton: CalendarDayButton,
-        // eslint-disable-next-line react/no-shadow -- shadcn/ui DayPicker component override pattern
-        WeekNumber: ({ children, ...props }) => {
-          return (
-            <td {...props}>
-              <div className="flex size-(--cell-size) items-center justify-center text-center">
-                {children}
-              </div>
-            </td>
-          )
-        },
+        WeekNumber: CalendarWeekNumber,
         ...components,
       }}
       {...props}
