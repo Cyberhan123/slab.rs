@@ -883,6 +883,8 @@ export interface components {
         AgentConfigInput: {
             allowed_tools?: string[] | null;
             /** Format: int32 */
+            invalid_tool_call_retries?: number | null;
+            /** Format: int32 */
             max_tokens?: number | null;
             /** Format: int32 */
             max_turns?: number | null;
@@ -894,9 +896,13 @@ export interface components {
             reasoning_effort?: null | components["schemas"]["ChatReasoningEffort"];
             /** Format: float */
             repetition_penalty?: number | null;
+            structured_output?: null | components["schemas"]["AgentStructuredOutputInput"];
             system_prompt?: string | null;
             /** Format: float */
             temperature?: number | null;
+            tool_choice?: null | components["schemas"]["AgentToolChoiceInput"];
+            /** Format: int32 */
+            tool_concurrency?: number | null;
             /** Format: int32 */
             top_k?: number | null;
             /** Format: float */
@@ -979,6 +985,17 @@ export interface components {
          * @enum {string}
          */
         AgentStatusValue: "pending" | "running" | "interrupting" | "interrupted" | "completed" | "errored" | "shutdown";
+        AgentStructuredOutputInput: {
+            /** @enum {string} */
+            type: "json_object";
+        } | {
+            description?: string | null;
+            name?: string | null;
+            schema: unknown;
+            strict?: boolean | null;
+            /** @enum {string} */
+            type: "json_schema";
+        };
         /** @description Persisted agent thread message. */
         AgentThreadMessageResponse: {
             content: string;
@@ -1003,6 +1020,20 @@ export interface components {
             session_id: string;
             status: components["schemas"]["AgentStatusValue"];
             updated_at: string;
+        };
+        AgentToolChoiceInput: {
+            /** @enum {string} */
+            type: "auto";
+        } | {
+            /** @enum {string} */
+            type: "none";
+        } | {
+            /** @enum {string} */
+            type: "required";
+        } | {
+            name: string;
+            /** @enum {string} */
+            type: "tool";
         };
         AudioTranscriptionRequest: {
             decode?: null | components["schemas"]["TranscribeDecodeRequest"];

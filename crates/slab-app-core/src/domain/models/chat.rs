@@ -5,7 +5,7 @@ use slab_proto::openai::FunctionTool;
 pub use slab_types::chat::{
     ChatModelCapabilities, ChatModelSource, ChatReasoningEffort, ChatVerbosity,
     ConversationContentPart, ConversationMessage, ConversationMessageContent, ConversationToolCall,
-    ConversationToolFunction,
+    ConversationToolFunction, StructuredOutput, StructuredOutputJsonSchema,
 };
 
 use futures::stream::BoxStream;
@@ -126,36 +126,6 @@ pub struct TextCompletionCommand {
     pub common: CommonChatParams,
     pub local: LocalChatParams,
     pub cloud: CloudChatParams,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum StructuredOutput {
-    JsonObject,
-    JsonSchema(StructuredOutputJsonSchema),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct StructuredOutputJsonSchema {
-    pub name: String,
-    pub description: Option<String>,
-    pub strict: Option<bool>,
-    pub schema: Value,
-}
-
-impl StructuredOutputJsonSchema {
-    pub fn new(
-        name: Option<String>,
-        description: Option<String>,
-        strict: Option<bool>,
-        schema: Value,
-    ) -> Self {
-        Self {
-            name: sanitize_structured_output_name(name.as_deref()),
-            description: normalize_optional_text(description),
-            strict,
-            schema,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -309,37 +279,6 @@ fn format_assistant_content(reasoning: Option<&str>, content: &str) -> String {
     }
 
     format!("<think status=\"done\">\n\n{reasoning}\n\n</think>\n\n{trimmed_content}")
-}
-
-fn normalize_optional_text(value: Option<String>) -> Option<String> {
-    value.and_then(|value| {
-        let trimmed = value.trim();
-        if trimmed.is_empty() { None } else { Some(trimmed.to_owned()) }
-    })
-}
-
-const DEFAULT_STRUCTURED_OUTPUT_NAME: &str = "slab_structured_output";
-
-fn sanitize_structured_output_name(value: Option<&str>) -> String {
-    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
-        return DEFAULT_STRUCTURED_OUTPUT_NAME.to_owned();
-    };
-
-    let mut sanitized = String::with_capacity(value.len());
-    for ch in value.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-            sanitized.push(ch);
-        } else if !sanitized.ends_with('_') {
-            sanitized.push('_');
-        }
-    }
-
-    let sanitized = sanitized.trim_matches('_');
-    if sanitized.is_empty() {
-        DEFAULT_STRUCTURED_OUTPUT_NAME.to_owned()
-    } else {
-        sanitized.to_owned()
-    }
 }
 
 #[cfg(test)]

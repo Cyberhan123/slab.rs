@@ -1,6 +1,9 @@
 //! Tool handler trait and router registry.
 
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
 use async_trait::async_trait;
 
@@ -65,30 +68,42 @@ pub trait ToolHandler: Send + Sync {
 // ── ToolRouter ───────────────────────────────────────────────────────────────
 
 /// Registry of available tools for a given agent thread.
+#[derive(Clone)]
 pub struct ToolRouter {
-    handlers: HashMap<String, Box<dyn ToolHandler>>,
+    handlers: Arc<RwLock<HashMap<String, Arc<dyn ToolHandler>>>>,
 }
 
 impl ToolRouter {
     /// Create an empty router.
     pub fn new() -> Self {
-        Self { handlers: HashMap::new() }
+        Self { handlers: Arc::new(RwLock::new(HashMap::new())) }
     }
 
     /// Register a tool handler.  A handler with the same name replaces any
     /// previously registered handler.
-    pub fn register(&mut self, handler: Box<dyn ToolHandler>) {
-        self.handlers.insert(handler.name().to_owned(), handler);
+    pub fn register(&self, handler: Box<dyn ToolHandler>) {
+        let handler: Arc<dyn ToolHandler> = handler.into();
+        self.handlers
+            .write()
+            .expect("tool registry lock poisoned")
+            .insert(handler.name().to_owned(), handler);
+    }
+
+    /// Remove a registered tool handler by name.
+    pub fn unregister(&self, name: &str) -> Option<Arc<dyn ToolHandler>> {
+        self.handlers.write().expect("tool registry lock poisoned").remove(name)
     }
 
     /// Look up a handler by tool name.
-    pub fn get(&self, name: &str) -> Option<&dyn ToolHandler> {
-        self.handlers.get(name).map(|h| h.as_ref())
+    pub fn get(&self, name: &str) -> Option<Arc<dyn ToolHandler>> {
+        self.handlers.read().expect("tool registry lock poisoned").get(name).cloned()
     }
 
     /// Return [`ToolSpec`] descriptors for all registered tools.
     pub fn tool_specs(&self) -> Vec<ToolSpec> {
         self.handlers
+            .read()
+            .expect("tool registry lock poisoned")
             .values()
             .map(|h| ToolSpec {
                 name: h.name().to_owned(),

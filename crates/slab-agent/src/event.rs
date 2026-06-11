@@ -85,6 +85,17 @@ pub enum AgentEventKind {
         tool_name: String,
         approved: bool,
     },
+    #[serde(rename = "response.tool_call.validation_failed")]
+    ResponseToolCallValidationFailed {
+        item_id: String,
+        call_id: String,
+        tool_name: String,
+        reason: String,
+    },
+    #[serde(rename = "response.tool_call.concurrency_started")]
+    ResponseToolCallConcurrencyStarted { total: usize, concurrency: usize },
+    #[serde(rename = "response.tool_call.concurrency_completed")]
+    ResponseToolCallConcurrencyCompleted { total: usize, completed: usize, failed: usize },
     #[serde(rename = "response.context.compact_started")]
     ResponseContextCompactStarted { input_tokens: usize, threshold_tokens: usize },
     #[serde(rename = "response.context.compact_completed")]

@@ -27,7 +27,6 @@ export function toAgentConfig(
   deepThink?: boolean
 ) {
   return {
-    allowed_tools: [] as string[],
     max_turns: 8,
     model,
     ...(typeof runtimePresets?.max_tokens === 'number'

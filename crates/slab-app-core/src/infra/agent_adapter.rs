@@ -157,11 +157,11 @@ fn chat_command_from_agent_config(
             stop: vec![],
             stream_options: ChatStreamOptions::default(),
         },
-        local: LocalChatParams { gbnf: None, structured_output: None },
+        local: LocalChatParams { gbnf: None, structured_output: config.structured_output.clone() },
         cloud: CloudChatParams {
             reasoning_effort: config.reasoning_effort,
             verbosity: config.verbosity,
-            structured_output: None,
+            structured_output: config.structured_output.clone(),
         },
     }
 }
@@ -391,6 +391,7 @@ mod tests {
             repetition_penalty: Some(1.05),
             reasoning_effort: Some(slab_types::chat::ChatReasoningEffort::Low),
             verbosity: Some(slab_types::chat::ChatVerbosity::Medium),
+            structured_output: Some(slab_types::chat::StructuredOutput::JsonObject),
             ..AgentConfig::default()
         };
 
@@ -410,6 +411,14 @@ mod tests {
             Some(slab_types::chat::ChatReasoningEffort::Low)
         );
         assert_eq!(command.cloud.verbosity, Some(slab_types::chat::ChatVerbosity::Medium));
+        assert_eq!(
+            command.local.structured_output,
+            Some(slab_types::chat::StructuredOutput::JsonObject)
+        );
+        assert_eq!(
+            command.cloud.structured_output,
+            Some(slab_types::chat::StructuredOutput::JsonObject)
+        );
         assert!(command.common.stream);
         assert!(command.tools.is_empty());
     }

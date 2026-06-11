@@ -39,8 +39,24 @@ from .agent_responses_server_message_type_2_type import (
     AgentResponsesServerMessageType2Type,
 )
 from .agent_status_value import AgentStatusValue
+from .agent_structured_output_input_type_0 import AgentStructuredOutputInputType0
+from .agent_structured_output_input_type_0_type import (
+    AgentStructuredOutputInputType0Type,
+)
+from .agent_structured_output_input_type_1 import AgentStructuredOutputInputType1
+from .agent_structured_output_input_type_1_type import (
+    AgentStructuredOutputInputType1Type,
+)
 from .agent_thread_message_response import AgentThreadMessageResponse
 from .agent_thread_response import AgentThreadResponse
+from .agent_tool_choice_input_type_0 import AgentToolChoiceInputType0
+from .agent_tool_choice_input_type_0_type import AgentToolChoiceInputType0Type
+from .agent_tool_choice_input_type_1 import AgentToolChoiceInputType1
+from .agent_tool_choice_input_type_1_type import AgentToolChoiceInputType1Type
+from .agent_tool_choice_input_type_2 import AgentToolChoiceInputType2
+from .agent_tool_choice_input_type_2_type import AgentToolChoiceInputType2Type
+from .agent_tool_choice_input_type_3 import AgentToolChoiceInputType3
+from .agent_tool_choice_input_type_3_type import AgentToolChoiceInputType3Type
 from .audio_transcription_request import AudioTranscriptionRequest
 from .audio_transcription_request_data import AudioTranscriptionRequestData
 from .audio_transcription_result_data import AudioTranscriptionResultData
@@ -228,8 +244,20 @@ __all__ = (
     "AgentResponsesServerMessageType2",
     "AgentResponsesServerMessageType2Type",
     "AgentStatusValue",
+    "AgentStructuredOutputInputType0",
+    "AgentStructuredOutputInputType0Type",
+    "AgentStructuredOutputInputType1",
+    "AgentStructuredOutputInputType1Type",
     "AgentThreadMessageResponse",
     "AgentThreadResponse",
+    "AgentToolChoiceInputType0",
+    "AgentToolChoiceInputType0Type",
+    "AgentToolChoiceInputType1",
+    "AgentToolChoiceInputType1Type",
+    "AgentToolChoiceInputType2",
+    "AgentToolChoiceInputType2Type",
+    "AgentToolChoiceInputType3",
+    "AgentToolChoiceInputType3Type",
     "AudioTranscriptionRequest",
     "AudioTranscriptionRequestData",
     "AudioTranscriptionResultData",

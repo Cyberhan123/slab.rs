@@ -1,12 +1,18 @@
 //! Request and response schemas for the `/v1/agents/responses` route.
 
 use serde::{Deserialize, Serialize};
-use slab_agent::config::AgentConfig;
+use slab_agent::config::{
+    AgentConfig, AgentToolChoice, MAX_INVALID_TOOL_CALL_RETRIES, MAX_TOOL_CONCURRENCY,
+};
 use slab_agent::port::{ThreadMessageRecord, ThreadSnapshot};
 use slab_types::agent::AgentThreadStatus;
 use utoipa::ToSchema;
 use validator::{Validate, ValidationError, ValidationErrors};
 
+use crate::domain::models::{
+    StructuredOutput as DomainStructuredOutput,
+    StructuredOutputJsonSchema as DomainStructuredOutputJsonSchema,
+};
 use crate::schemas::chat::{ChatReasoningEffort, ChatToolCall, ChatVerbosity};
 
 /// Agent configuration provided by the caller.
@@ -25,6 +31,10 @@ pub struct AgentConfigInput {
     pub reasoning_effort: Option<ChatReasoningEffort>,
     pub verbosity: Option<ChatVerbosity>,
     pub allowed_tools: Option<Vec<String>>,
+    pub tool_choice: Option<AgentToolChoiceInput>,
+    pub tool_concurrency: Option<u8>,
+    pub invalid_tool_call_retries: Option<u8>,
+    pub structured_output: Option<AgentStructuredOutputInput>,
 }
 
 impl From<AgentConfigInput> for AgentConfig {
@@ -46,6 +56,67 @@ impl From<AgentConfigInput> for AgentConfig {
             reasoning_effort: v.reasoning_effort.map(Into::into),
             verbosity: v.verbosity.map(Into::into),
             allowed_tools: v.allowed_tools.unwrap_or_default(),
+            tool_choice: v.tool_choice.map(Into::into).unwrap_or_default(),
+            tool_concurrency: v
+                .tool_concurrency
+                .unwrap_or(defaults.tool_concurrency)
+                .clamp(1, MAX_TOOL_CONCURRENCY),
+            invalid_tool_call_retries: v
+                .invalid_tool_call_retries
+                .unwrap_or(defaults.invalid_tool_call_retries)
+                .clamp(0, MAX_INVALID_TOOL_CALL_RETRIES),
+            structured_output: v.structured_output.map(Into::into),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AgentToolChoiceInput {
+    Auto,
+    None,
+    Required,
+    Tool { name: String },
+}
+
+impl From<AgentToolChoiceInput> for AgentToolChoice {
+    fn from(value: AgentToolChoiceInput) -> Self {
+        match value {
+            AgentToolChoiceInput::Auto => Self::Auto,
+            AgentToolChoiceInput::None => Self::None,
+            AgentToolChoiceInput::Required => Self::Required,
+            AgentToolChoiceInput::Tool { name } => Self::Tool { name },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AgentStructuredOutputInput {
+    JsonObject,
+    JsonSchema {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        strict: Option<bool>,
+        schema: serde_json::Value,
+    },
+}
+
+impl From<AgentStructuredOutputInput> for DomainStructuredOutput {
+    fn from(value: AgentStructuredOutputInput) -> Self {
+        match value {
+            AgentStructuredOutputInput::JsonObject => Self::JsonObject,
+            AgentStructuredOutputInput::JsonSchema { name, description, strict, schema } => {
+                Self::JsonSchema(DomainStructuredOutputJsonSchema::new(
+                    name,
+                    description,
+                    strict,
+                    schema,
+                ))
+            }
         }
     }
 }
@@ -155,8 +226,9 @@ impl Validate for AgentResponsesClientMessage {
             Self::SessionRestore { session_id, .. } => {
                 add_non_blank(&mut errors, "session_id", session_id);
             }
-            Self::ResponseCreate { session_id, messages, .. } => {
+            Self::ResponseCreate { session_id, config, messages, .. } => {
                 add_non_blank(&mut errors, "session_id", session_id);
+                validate_agent_config(&mut errors, config);
                 for message in messages {
                     add_non_blank(&mut errors, "role", &message.role);
                 }
@@ -185,6 +257,36 @@ fn add_non_blank(errors: &mut ValidationErrors, field: &'static str, value: &str
 
     let mut error = ValidationError::new("required");
     error.message = Some(format!("{field} must not be blank").into());
+    errors.add(field, error);
+}
+
+fn validate_agent_config(errors: &mut ValidationErrors, config: &AgentConfigInput) {
+    if let Some(0) = config.tool_concurrency {
+        add_field_error(errors, "tool_concurrency", "tool_concurrency must be at least 1");
+    }
+    if config.tool_concurrency.is_some_and(|value| value > MAX_TOOL_CONCURRENCY) {
+        add_field_error(errors, "tool_concurrency", "tool_concurrency must be at most 4");
+    }
+    if config.invalid_tool_call_retries.is_some_and(|value| value > MAX_INVALID_TOOL_CALL_RETRIES) {
+        add_field_error(
+            errors,
+            "invalid_tool_call_retries",
+            "invalid_tool_call_retries must be at most 3",
+        );
+    }
+    if let Some(AgentToolChoiceInput::Tool { name }) = &config.tool_choice {
+        add_non_blank(errors, "tool_choice.name", name);
+    }
+    if let Some(allowed_tools) = &config.allowed_tools {
+        for tool_name in allowed_tools {
+            add_non_blank(errors, "allowed_tools", tool_name);
+        }
+    }
+}
+
+fn add_field_error(errors: &mut ValidationErrors, field: &'static str, message: &'static str) {
+    let mut error = ValidationError::new("range");
+    error.message = Some(message.into());
     errors.add(field, error);
 }
 
@@ -332,15 +434,86 @@ impl From<AgentThreadStatus> for AgentStatusValue {
 
 #[cfg(test)]
 mod tests {
-    use slab_agent::port::ThreadMessageRecord;
+    use slab_agent::{
+        config::{AgentConfig, AgentToolChoice},
+        port::ThreadMessageRecord,
+    };
     use slab_types::{
         ConversationMessage, ConversationMessageContent, ConversationToolCall,
-        ConversationToolFunction,
+        ConversationToolFunction, StructuredOutput,
     };
+    use validator::Validate;
 
     use crate::schemas::chat::{ChatToolCall, ChatToolFunction};
 
-    use super::{AgentThreadMessageResponse, MessageInput};
+    use super::{
+        AgentConfigInput, AgentResponsesClientMessage, AgentStructuredOutputInput,
+        AgentThreadMessageResponse, AgentToolChoiceInput, MessageInput,
+    };
+
+    #[test]
+    fn agent_config_input_maps_new_defaults_and_structured_output() {
+        let config = AgentConfig::from(AgentConfigInput {
+            model: Some("mock".into()),
+            tool_choice: Some(AgentToolChoiceInput::Tool { name: "echo".into() }),
+            tool_concurrency: Some(4),
+            invalid_tool_call_retries: Some(3),
+            structured_output: Some(AgentStructuredOutputInput::JsonObject),
+            ..AgentConfigInput::default()
+        });
+
+        assert_eq!(config.model, "mock");
+        assert_eq!(config.tool_choice, AgentToolChoice::Tool { name: "echo".into() });
+        assert_eq!(config.tool_concurrency, 4);
+        assert_eq!(config.invalid_tool_call_retries, 3);
+        assert_eq!(config.structured_output, Some(StructuredOutput::JsonObject));
+    }
+
+    #[test]
+    fn agent_config_input_rejects_out_of_range_tool_controls() {
+        let message = AgentResponsesClientMessage::ResponseCreate {
+            request_id: None,
+            session_id: "session-1".into(),
+            config: AgentConfigInput {
+                tool_concurrency: Some(5),
+                invalid_tool_call_retries: Some(4),
+                tool_choice: Some(AgentToolChoiceInput::Tool { name: " ".into() }),
+                ..AgentConfigInput::default()
+            },
+            messages: Vec::new(),
+        };
+
+        let errors = message.validate().expect_err("invalid config");
+        assert!(errors.field_errors().contains_key("tool_concurrency"));
+        assert!(errors.field_errors().contains_key("invalid_tool_call_retries"));
+        assert!(errors.field_errors().contains_key("tool_choice.name"));
+    }
+
+    #[test]
+    fn old_agent_config_json_deserializes_with_new_defaults() {
+        let config = serde_json::from_value::<AgentConfig>(serde_json::json!({
+            "model": "mock",
+            "system_prompt": null,
+            "max_turns": 10,
+            "max_depth": 3,
+            "max_threads": 8,
+            "max_tokens": null,
+            "temperature": null,
+            "top_p": null,
+            "top_k": null,
+            "min_p": null,
+            "presence_penalty": null,
+            "repetition_penalty": null,
+            "reasoning_effort": null,
+            "verbosity": null
+        }))
+        .expect("old config json");
+
+        assert_eq!(config.tool_choice, AgentToolChoice::Auto);
+        assert_eq!(config.tool_concurrency, 1);
+        assert_eq!(config.invalid_tool_call_retries, 1);
+        assert_eq!(config.structured_output, None);
+    }
 
     #[test]
     fn message_input_preserves_tool_role_metadata() {

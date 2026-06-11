@@ -1,6 +1,9 @@
 //! Tool-call execution for a single agent turn.
 
+use std::sync::Arc;
+
 use chrono::Utc;
+use futures::future::join_all;
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -16,10 +19,16 @@ use crate::{
     tool::{ToolApprovalRequest, ToolContext, ToolHandler},
     turn::TurnExecutionContext,
     turn_tool_record::{
-        insert_tool_call_record, persist_tool_message, record_failed_tool_call,
-        tool_execution_status, update_tool_call_record, update_tool_call_status,
+        insert_tool_call_record, persist_tool_message_record,
+        record_failed_tool_call_without_persisting_message, tool_execution_status,
+        update_tool_call_record, update_tool_call_status,
     },
 };
+
+struct ToolCallRunResult {
+    message: ConversationMessage,
+    status: ToolCallStatus,
+}
 
 pub(crate) async fn handle_tool_calls(
     context: &TurnExecutionContext<'_>,
@@ -32,21 +41,131 @@ pub(crate) async fn handle_tool_calls(
         depth: context.depth,
     };
     let now = Utc::now().to_rfc3339();
-
-    for tool_call in tool_calls {
-        handle_tool_call(context, &tool_context, tool_call, &now, messages).await?;
+    let total = tool_calls.len();
+    if total == 0 {
+        return Ok(());
     }
 
+    let concurrency = context.config.effective_tool_concurrency().min(total);
+    emit_tool_concurrency_started(context, total, concurrency).await;
+
+    let mut results = Vec::with_capacity(total);
+    for (chunk_index, chunk) in tool_calls.chunks(concurrency).enumerate() {
+        let base_index = chunk_index * concurrency;
+        let batch = chunk.iter().enumerate().map(|(offset, tool_call)| {
+            let created_at = now.clone();
+            let tool_context = tool_context.clone();
+            async move {
+                handle_tool_call(
+                    context,
+                    &tool_context,
+                    base_index + offset,
+                    tool_call,
+                    &created_at,
+                )
+                .await
+            }
+        });
+        results.extend(join_all(batch).await);
+    }
+
+    let mut completed = 0usize;
+    let mut failed = 0usize;
+    let mut first_error = None;
+    for result in results {
+        match result {
+            Ok(result) => {
+                match result.status {
+                    ToolCallStatus::Completed => completed += 1,
+                    ToolCallStatus::Pending | ToolCallStatus::Running | ToolCallStatus::Failed => {
+                        failed += 1;
+                    }
+                }
+                persist_tool_message_record(context, result.message, messages).await;
+            }
+            Err(error) => {
+                failed += 1;
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
+    }
+
+    emit_tool_concurrency_completed(context, total, completed, failed).await;
+    if let Some(error) = first_error {
+        return Err(error);
+    }
     Ok(())
+}
+
+async fn emit_tool_concurrency_started(
+    context: &TurnExecutionContext<'_>,
+    total: usize,
+    concurrency: usize,
+) {
+    record_json(
+        context.trace,
+        &context.trace_context,
+        "slab-agent",
+        "tool_concurrency_started",
+        serde_json::json!({
+            "total": total,
+            "concurrency": concurrency,
+        }),
+    );
+    context
+        .notify
+        .on_turn_event(
+            context.thread_id,
+            &TurnEvent::Response {
+                turn_index: Some(context.turn_index),
+                event: AgentEventKind::ResponseToolCallConcurrencyStarted { total, concurrency },
+            },
+        )
+        .await;
+}
+
+async fn emit_tool_concurrency_completed(
+    context: &TurnExecutionContext<'_>,
+    total: usize,
+    completed: usize,
+    failed: usize,
+) {
+    record_json(
+        context.trace,
+        &context.trace_context,
+        "slab-agent",
+        "tool_concurrency_completed",
+        serde_json::json!({
+            "total": total,
+            "completed": completed,
+            "failed": failed,
+        }),
+    );
+    context
+        .notify
+        .on_turn_event(
+            context.thread_id,
+            &TurnEvent::Response {
+                turn_index: Some(context.turn_index),
+                event: AgentEventKind::ResponseToolCallConcurrencyCompleted {
+                    total,
+                    completed,
+                    failed,
+                },
+            },
+        )
+        .await;
 }
 
 async fn handle_tool_call(
     context: &TurnExecutionContext<'_>,
     tool_context: &ToolContext,
+    _index: usize,
     tool_call: &ParsedToolCall,
     created_at: &str,
-    messages: &mut Vec<ConversationMessage>,
-) -> Result<(), AgentError> {
+) -> Result<ToolCallRunResult, AgentError> {
     if context.cancellation.is_cancelled() {
         return Err(AgentError::Interrupted);
     }
@@ -97,9 +216,11 @@ async fn handle_tool_call(
                 "failed to parse tool call arguments as JSON"
             );
             let output = format!("invalid tool call arguments: {error}");
-            record_failed_tool_call(context, &call_id, tool_call, output, created_at, messages)
-                .await?;
-            return Ok(());
+            let message = record_failed_tool_call_without_persisting_message(
+                context, &call_id, tool_call, output, created_at,
+            )
+            .await?;
+            return Ok(ToolCallRunResult { message, status: ToolCallStatus::Failed });
         }
     };
     record_json(
@@ -137,9 +258,11 @@ async fn handle_tool_call(
                 reason,
                 "tool call blocked by hook"
             );
-            record_failed_tool_call(context, &call_id, tool_call, reason, created_at, messages)
-                .await?;
-            return Ok(());
+            let message = record_failed_tool_call_without_persisting_message(
+                context, &call_id, tool_call, reason, created_at,
+            )
+            .await?;
+            return Ok(ToolCallRunResult { message, status: ToolCallStatus::Failed });
         }
         HookOutcome::ModifyArgs { arguments } => arguments,
         HookOutcome::Continue => parsed_args,
@@ -177,7 +300,8 @@ async fn handle_tool_call(
         .await;
 
     let handler = context.tools.get(&tool_call.name);
-    let approval_request = handler.and_then(|handler| handler.approval_request(&effective_args));
+    let approval_request =
+        handler.as_ref().and_then(|handler| handler.approval_request(&effective_args));
     let initial_status =
         if approval_request.is_some() { ToolCallStatus::Pending } else { ToolCallStatus::Running };
     let mut tool_state = ToolCallStateMachine::new(initial_status);
@@ -249,9 +373,9 @@ async fn handle_tool_call(
         .await;
 
     update_tool_call_record(context, &call_id, Some(&output), call_status).await;
-    persist_tool_message(context, tool_call, output, messages).await;
+    let message = crate::turn_tool_record::tool_message(tool_call, output);
 
-    Ok(())
+    Ok(ToolCallRunResult { message, status: call_status })
 }
 
 struct ToolRunContext<'a, 'ctx> {
@@ -262,7 +386,7 @@ struct ToolRunContext<'a, 'ctx> {
     effective_args: &'a serde_json::Value,
     effective_arguments: &'a str,
     risk: &'a ToolRiskAssessment,
-    handler: Option<&'a dyn ToolHandler>,
+    handler: Option<Arc<dyn ToolHandler>>,
     approval_request: Option<ToolApprovalRequest>,
     tool_state: &'a mut ToolCallStateMachine,
 }
@@ -319,7 +443,7 @@ async fn run_tool_with_optional_approval(
             Ok(tokio::select! {
                 result = execute_tool_call(
                     &run.tool_call.name,
-                    run.handler,
+                    run.handler.clone(),
                     run.tool_context,
                     run.effective_args,
                 ) => result,
@@ -343,7 +467,7 @@ async fn run_tool_without_approval(
     Ok(tokio::select! {
         result = execute_tool_call(
             &run.tool_call.name,
-            run.handler,
+            run.handler.clone(),
             run.tool_context,
             run.effective_args,
         ) => result,
@@ -416,7 +540,7 @@ async fn emit_tool_execution_started(run: &ToolRunContext<'_, '_>) {
 
 async fn execute_tool_call(
     tool_name: &str,
-    handler: Option<&dyn ToolHandler>,
+    handler: Option<Arc<dyn ToolHandler>>,
     ctx: &ToolContext,
     arguments: &serde_json::Value,
 ) -> (String, ToolCallStatus) {

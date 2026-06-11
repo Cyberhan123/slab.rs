@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -9,6 +9,19 @@ from attrs import field as _attrs_field
 from ..models.chat_reasoning_effort import ChatReasoningEffort
 from ..models.chat_verbosity import ChatVerbosity
 from ..types import UNSET, Unset
+
+if TYPE_CHECKING:
+    from ..models.agent_structured_output_input_type_0 import (
+        AgentStructuredOutputInputType0,
+    )
+    from ..models.agent_structured_output_input_type_1 import (
+        AgentStructuredOutputInputType1,
+    )
+    from ..models.agent_tool_choice_input_type_0 import AgentToolChoiceInputType0
+    from ..models.agent_tool_choice_input_type_1 import AgentToolChoiceInputType1
+    from ..models.agent_tool_choice_input_type_2 import AgentToolChoiceInputType2
+    from ..models.agent_tool_choice_input_type_3 import AgentToolChoiceInputType3
+
 
 T = TypeVar("T", bound="AgentConfigInput")
 
@@ -19,6 +32,7 @@ class AgentConfigInput:
 
     Attributes:
         allowed_tools (list[str] | None | Unset):
+        invalid_tool_call_retries (int | None | Unset):
         max_tokens (int | None | Unset):
         max_turns (int | None | Unset):
         min_p (float | None | Unset):
@@ -26,14 +40,19 @@ class AgentConfigInput:
         presence_penalty (float | None | Unset):
         reasoning_effort (ChatReasoningEffort | None | Unset):
         repetition_penalty (float | None | Unset):
+        structured_output (AgentStructuredOutputInputType0 | AgentStructuredOutputInputType1 | None | Unset):
         system_prompt (None | str | Unset):
         temperature (float | None | Unset):
+        tool_choice (AgentToolChoiceInputType0 | AgentToolChoiceInputType1 | AgentToolChoiceInputType2 |
+            AgentToolChoiceInputType3 | None | Unset):
+        tool_concurrency (int | None | Unset):
         top_k (int | None | Unset):
         top_p (float | None | Unset):
         verbosity (ChatVerbosity | None | Unset):
     """
 
     allowed_tools: list[str] | None | Unset = UNSET
+    invalid_tool_call_retries: int | None | Unset = UNSET
     max_tokens: int | None | Unset = UNSET
     max_turns: int | None | Unset = UNSET
     min_p: float | None | Unset = UNSET
@@ -41,14 +60,37 @@ class AgentConfigInput:
     presence_penalty: float | None | Unset = UNSET
     reasoning_effort: ChatReasoningEffort | None | Unset = UNSET
     repetition_penalty: float | None | Unset = UNSET
+    structured_output: (
+        AgentStructuredOutputInputType0 | AgentStructuredOutputInputType1 | None | Unset
+    ) = UNSET
     system_prompt: None | str | Unset = UNSET
     temperature: float | None | Unset = UNSET
+    tool_choice: (
+        AgentToolChoiceInputType0
+        | AgentToolChoiceInputType1
+        | AgentToolChoiceInputType2
+        | AgentToolChoiceInputType3
+        | None
+        | Unset
+    ) = UNSET
+    tool_concurrency: int | None | Unset = UNSET
     top_k: int | None | Unset = UNSET
     top_p: float | None | Unset = UNSET
     verbosity: ChatVerbosity | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.agent_structured_output_input_type_0 import (
+            AgentStructuredOutputInputType0,
+        )
+        from ..models.agent_structured_output_input_type_1 import (
+            AgentStructuredOutputInputType1,
+        )
+        from ..models.agent_tool_choice_input_type_0 import AgentToolChoiceInputType0
+        from ..models.agent_tool_choice_input_type_1 import AgentToolChoiceInputType1
+        from ..models.agent_tool_choice_input_type_2 import AgentToolChoiceInputType2
+        from ..models.agent_tool_choice_input_type_3 import AgentToolChoiceInputType3
+
         allowed_tools: list[str] | None | Unset
         if isinstance(self.allowed_tools, Unset):
             allowed_tools = UNSET
@@ -57,6 +99,12 @@ class AgentConfigInput:
 
         else:
             allowed_tools = self.allowed_tools
+
+        invalid_tool_call_retries: int | None | Unset
+        if isinstance(self.invalid_tool_call_retries, Unset):
+            invalid_tool_call_retries = UNSET
+        else:
+            invalid_tool_call_retries = self.invalid_tool_call_retries
 
         max_tokens: int | None | Unset
         if isinstance(self.max_tokens, Unset):
@@ -102,6 +150,16 @@ class AgentConfigInput:
         else:
             repetition_penalty = self.repetition_penalty
 
+        structured_output: dict[str, Any] | None | Unset
+        if isinstance(self.structured_output, Unset):
+            structured_output = UNSET
+        elif isinstance(self.structured_output, AgentStructuredOutputInputType0):
+            structured_output = self.structured_output.to_dict()
+        elif isinstance(self.structured_output, AgentStructuredOutputInputType1):
+            structured_output = self.structured_output.to_dict()
+        else:
+            structured_output = self.structured_output
+
         system_prompt: None | str | Unset
         if isinstance(self.system_prompt, Unset):
             system_prompt = UNSET
@@ -113,6 +171,26 @@ class AgentConfigInput:
             temperature = UNSET
         else:
             temperature = self.temperature
+
+        tool_choice: dict[str, Any] | None | Unset
+        if isinstance(self.tool_choice, Unset):
+            tool_choice = UNSET
+        elif isinstance(self.tool_choice, AgentToolChoiceInputType0):
+            tool_choice = self.tool_choice.to_dict()
+        elif isinstance(self.tool_choice, AgentToolChoiceInputType1):
+            tool_choice = self.tool_choice.to_dict()
+        elif isinstance(self.tool_choice, AgentToolChoiceInputType2):
+            tool_choice = self.tool_choice.to_dict()
+        elif isinstance(self.tool_choice, AgentToolChoiceInputType3):
+            tool_choice = self.tool_choice.to_dict()
+        else:
+            tool_choice = self.tool_choice
+
+        tool_concurrency: int | None | Unset
+        if isinstance(self.tool_concurrency, Unset):
+            tool_concurrency = UNSET
+        else:
+            tool_concurrency = self.tool_concurrency
 
         top_k: int | None | Unset
         if isinstance(self.top_k, Unset):
@@ -139,6 +217,8 @@ class AgentConfigInput:
         field_dict.update({})
         if allowed_tools is not UNSET:
             field_dict["allowed_tools"] = allowed_tools
+        if invalid_tool_call_retries is not UNSET:
+            field_dict["invalid_tool_call_retries"] = invalid_tool_call_retries
         if max_tokens is not UNSET:
             field_dict["max_tokens"] = max_tokens
         if max_turns is not UNSET:
@@ -153,10 +233,16 @@ class AgentConfigInput:
             field_dict["reasoning_effort"] = reasoning_effort
         if repetition_penalty is not UNSET:
             field_dict["repetition_penalty"] = repetition_penalty
+        if structured_output is not UNSET:
+            field_dict["structured_output"] = structured_output
         if system_prompt is not UNSET:
             field_dict["system_prompt"] = system_prompt
         if temperature is not UNSET:
             field_dict["temperature"] = temperature
+        if tool_choice is not UNSET:
+            field_dict["tool_choice"] = tool_choice
+        if tool_concurrency is not UNSET:
+            field_dict["tool_concurrency"] = tool_concurrency
         if top_k is not UNSET:
             field_dict["top_k"] = top_k
         if top_p is not UNSET:
@@ -168,6 +254,17 @@ class AgentConfigInput:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.agent_structured_output_input_type_0 import (
+            AgentStructuredOutputInputType0,
+        )
+        from ..models.agent_structured_output_input_type_1 import (
+            AgentStructuredOutputInputType1,
+        )
+        from ..models.agent_tool_choice_input_type_0 import AgentToolChoiceInputType0
+        from ..models.agent_tool_choice_input_type_1 import AgentToolChoiceInputType1
+        from ..models.agent_tool_choice_input_type_2 import AgentToolChoiceInputType2
+        from ..models.agent_tool_choice_input_type_3 import AgentToolChoiceInputType3
+
         d = dict(src_dict)
 
         def _parse_allowed_tools(data: object) -> list[str] | None | Unset:
@@ -186,6 +283,17 @@ class AgentConfigInput:
             return cast(list[str] | None | Unset, data)
 
         allowed_tools = _parse_allowed_tools(d.pop("allowed_tools", UNSET))
+
+        def _parse_invalid_tool_call_retries(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        invalid_tool_call_retries = _parse_invalid_tool_call_retries(
+            d.pop("invalid_tool_call_retries", UNSET)
+        )
 
         def _parse_max_tokens(data: object) -> int | None | Unset:
             if data is None:
@@ -260,6 +368,48 @@ class AgentConfigInput:
             d.pop("repetition_penalty", UNSET)
         )
 
+        def _parse_structured_output(
+            data: object,
+        ) -> (
+            AgentStructuredOutputInputType0
+            | AgentStructuredOutputInputType1
+            | None
+            | Unset
+        ):
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                componentsschemas_agent_structured_output_input_type_0 = (
+                    AgentStructuredOutputInputType0.from_dict(data)
+                )
+
+                return componentsschemas_agent_structured_output_input_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                componentsschemas_agent_structured_output_input_type_1 = (
+                    AgentStructuredOutputInputType1.from_dict(data)
+                )
+
+                return componentsschemas_agent_structured_output_input_type_1
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(
+                AgentStructuredOutputInputType0
+                | AgentStructuredOutputInputType1
+                | None
+                | Unset,
+                data,
+            )
+
+        structured_output = _parse_structured_output(d.pop("structured_output", UNSET))
+
         def _parse_system_prompt(data: object) -> None | str | Unset:
             if data is None:
                 return data
@@ -277,6 +427,81 @@ class AgentConfigInput:
             return cast(float | None | Unset, data)
 
         temperature = _parse_temperature(d.pop("temperature", UNSET))
+
+        def _parse_tool_choice(
+            data: object,
+        ) -> (
+            AgentToolChoiceInputType0
+            | AgentToolChoiceInputType1
+            | AgentToolChoiceInputType2
+            | AgentToolChoiceInputType3
+            | None
+            | Unset
+        ):
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                componentsschemas_agent_tool_choice_input_type_0 = (
+                    AgentToolChoiceInputType0.from_dict(data)
+                )
+
+                return componentsschemas_agent_tool_choice_input_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                componentsschemas_agent_tool_choice_input_type_1 = (
+                    AgentToolChoiceInputType1.from_dict(data)
+                )
+
+                return componentsschemas_agent_tool_choice_input_type_1
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                componentsschemas_agent_tool_choice_input_type_2 = (
+                    AgentToolChoiceInputType2.from_dict(data)
+                )
+
+                return componentsschemas_agent_tool_choice_input_type_2
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                componentsschemas_agent_tool_choice_input_type_3 = (
+                    AgentToolChoiceInputType3.from_dict(data)
+                )
+
+                return componentsschemas_agent_tool_choice_input_type_3
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(
+                AgentToolChoiceInputType0
+                | AgentToolChoiceInputType1
+                | AgentToolChoiceInputType2
+                | AgentToolChoiceInputType3
+                | None
+                | Unset,
+                data,
+            )
+
+        tool_choice = _parse_tool_choice(d.pop("tool_choice", UNSET))
+
+        def _parse_tool_concurrency(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        tool_concurrency = _parse_tool_concurrency(d.pop("tool_concurrency", UNSET))
 
         def _parse_top_k(data: object) -> int | None | Unset:
             if data is None:
@@ -315,6 +540,7 @@ class AgentConfigInput:
 
         agent_config_input = cls(
             allowed_tools=allowed_tools,
+            invalid_tool_call_retries=invalid_tool_call_retries,
             max_tokens=max_tokens,
             max_turns=max_turns,
             min_p=min_p,
@@ -322,8 +548,11 @@ class AgentConfigInput:
             presence_penalty=presence_penalty,
             reasoning_effort=reasoning_effort,
             repetition_penalty=repetition_penalty,
+            structured_output=structured_output,
             system_prompt=system_prompt,
             temperature=temperature,
+            tool_choice=tool_choice,
+            tool_concurrency=tool_concurrency,
             top_k=top_k,
             top_p=top_p,
             verbosity=verbosity,

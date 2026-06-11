@@ -35,6 +35,7 @@ pub mod tool;
 
 mod llm_output;
 mod state;
+mod tool_validation;
 mod turn;
 mod turn_tool_call;
 mod turn_tool_record;
@@ -42,8 +43,8 @@ mod turn_tool_record;
 #[cfg(test)]
 mod tests;
 
-pub use compact::{CompactOutcome, CompactPort, NoopCompactPort};
-pub use config::AgentConfig;
+pub use compact::{CompactOutcome, CompactPort, NoopCompactPort, SlidingWindowCompactPort};
+pub use config::{AgentConfig, AgentToolChoice};
 pub use control::{AgentControl, AgentControlLimits};
 pub use error::AgentError;
 pub use event::{

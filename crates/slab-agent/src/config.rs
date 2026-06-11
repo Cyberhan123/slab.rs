@@ -1,6 +1,27 @@
 //! Agent configuration.
 
-use slab_types::chat::{ChatReasoningEffort, ChatVerbosity};
+use slab_types::chat::{ChatReasoningEffort, ChatVerbosity, StructuredOutput};
+
+pub const DEFAULT_TOOL_CONCURRENCY: u8 = 1;
+pub const MAX_TOOL_CONCURRENCY: u8 = 4;
+pub const DEFAULT_INVALID_TOOL_CALL_RETRIES: u8 = 1;
+pub const MAX_INVALID_TOOL_CALL_RETRIES: u8 = 3;
+
+/// Tool-call mode requested for an agent thread.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AgentToolChoice {
+    Auto,
+    None,
+    Required,
+    Tool { name: String },
+}
+
+impl Default for AgentToolChoice {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
 
 /// Runtime configuration for a single agent thread.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -41,7 +62,20 @@ pub struct AgentConfig {
     pub verbosity: Option<ChatVerbosity>,
     /// Explicit allow-list of tool names available to this thread.
     /// An empty list means all registered tools are allowed.
+    #[serde(default)]
     pub allowed_tools: Vec<String>,
+    /// Tool-call mode requested for this thread.
+    #[serde(default)]
+    pub tool_choice: AgentToolChoice,
+    /// Maximum number of tool calls from one assistant turn to execute concurrently.
+    #[serde(default = "default_tool_concurrency")]
+    pub tool_concurrency: u8,
+    /// Number of invalid tool-call feedback turns allowed before the thread errors.
+    #[serde(default = "default_invalid_tool_call_retries")]
+    pub invalid_tool_call_retries: u8,
+    /// Optional structured-output request forwarded to the chat backend.
+    #[serde(default)]
+    pub structured_output: Option<StructuredOutput>,
 }
 
 impl Default for AgentConfig {
@@ -62,6 +96,28 @@ impl Default for AgentConfig {
             reasoning_effort: None,
             verbosity: None,
             allowed_tools: vec![],
+            tool_choice: AgentToolChoice::Auto,
+            tool_concurrency: DEFAULT_TOOL_CONCURRENCY,
+            invalid_tool_call_retries: DEFAULT_INVALID_TOOL_CALL_RETRIES,
+            structured_output: None,
         }
     }
+}
+
+impl AgentConfig {
+    pub fn effective_tool_concurrency(&self) -> usize {
+        self.tool_concurrency.clamp(1, MAX_TOOL_CONCURRENCY) as usize
+    }
+
+    pub fn effective_invalid_tool_call_retries(&self) -> u8 {
+        self.invalid_tool_call_retries.clamp(0, MAX_INVALID_TOOL_CALL_RETRIES)
+    }
+}
+
+fn default_tool_concurrency() -> u8 {
+    DEFAULT_TOOL_CONCURRENCY
+}
+
+fn default_invalid_tool_call_retries() -> u8 {
+    DEFAULT_INVALID_TOOL_CALL_RETRIES
 }

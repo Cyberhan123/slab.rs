@@ -10,7 +10,7 @@ use slab_agent_tracing::{AgentTraceSink, NoopAgentTraceSink};
 use slab_types::{ConversationMessage, ConversationMessageContent};
 
 use crate::{
-    compact::{CompactPort, NoopCompactPort},
+    compact::{CompactPort, SlidingWindowCompactPort},
     config::AgentConfig,
     error::AgentError,
     event::{AgentEventKind, AgentResponseRef},
@@ -141,7 +141,7 @@ impl AgentControl {
             approval,
             tool_router,
             hooks: Arc::new(hooks),
-            compact: Arc::new(NoopCompactPort::default()),
+            compact: Arc::new(SlidingWindowCompactPort::default()),
             risk: Arc::new(BasicToolRiskAnalyzer),
             trace,
             trace_dir,

@@ -33,7 +33,7 @@ pub use backend::RuntimeBackendId;
 pub use chat::{
     ChatModelSource, ChatReasoningEffort, ChatVerbosity, ConversationContentPart,
     ConversationMessage, ConversationMessageContent, ConversationToolCall,
-    ConversationToolFunction,
+    ConversationToolFunction, StructuredOutput, StructuredOutputJsonSchema,
 };
 pub use common::{Id, JsonOptions, Timestamp};
 pub use desktop_api::{

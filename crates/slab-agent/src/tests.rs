@@ -14,7 +14,8 @@ use std::{
 use crate::{
     AgentControl, AgentControlLimits, AgentError, AgentHook, HookEvent, HookOutcome,
     ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput, ToolRouter,
-    config::AgentConfig,
+    compact::{CompactPort, SlidingWindowCompactPort},
+    config::{AgentConfig, AgentToolChoice},
     event::AgentEventKind,
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
@@ -24,7 +25,9 @@ use crate::{
 };
 use async_trait::async_trait;
 use slab_agent_tracing::{AgentTraceContext, AgentTraceEvent, AgentTraceSink};
-use slab_types::ConversationMessage;
+use slab_types::{
+    ConversationMessage, ConversationMessageContent, ConversationToolCall, ConversationToolFunction,
+};
 
 struct TestEchoTool;
 
@@ -104,6 +107,71 @@ impl ToolHandler for ApprovalEchoTool {
 }
 
 // ── Mock LLM ─────────────────────────────────────────────────────────────────
+
+struct SecretTool {
+    executions: Arc<Mutex<u32>>,
+}
+
+#[async_trait]
+impl ToolHandler for SecretTool {
+    fn name(&self) -> &str {
+        "secret"
+    }
+
+    fn description(&self) -> &str {
+        "A tool that must not run unless explicitly allowed."
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({ "type": "object" })
+    }
+
+    async fn execute(
+        &self,
+        _ctx: &ToolContext,
+        _arguments: &serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        *self.executions.lock().unwrap() += 1;
+        Ok(ToolOutput { content: "secret executed".to_owned(), metadata: None })
+    }
+}
+
+struct DelayEchoTool;
+
+#[async_trait]
+impl ToolHandler for DelayEchoTool {
+    fn name(&self) -> &str {
+        "echo"
+    }
+
+    fn description(&self) -> &str {
+        "Echo after an optional delay."
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "message": { "type": "string" },
+                "delay_ms": { "type": "integer" }
+            },
+            "required": ["message"]
+        })
+    }
+
+    async fn execute(
+        &self,
+        _ctx: &ToolContext,
+        arguments: &serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        let delay_ms = arguments.get("delay_ms").and_then(serde_json::Value::as_u64).unwrap_or(0);
+        if delay_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+        }
+        let message = arguments.get("message").and_then(serde_json::Value::as_str).unwrap_or("");
+        Ok(ToolOutput { content: message.to_owned(), metadata: None })
+    }
+}
 
 struct MockLlm {
     call_count: Mutex<u32>,
@@ -198,6 +266,167 @@ impl LlmPort for InvalidToolArgsLlm {
 }
 
 // ── Mock store ────────────────────────────────────────────────────────────────
+
+struct SecretToolCallLlm {
+    call_count: Mutex<u32>,
+}
+
+impl SecretToolCallLlm {
+    fn new() -> Self {
+        Self { call_count: Mutex::new(0) }
+    }
+}
+
+#[async_trait]
+impl LlmPort for SecretToolCallLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        let mut count = self.call_count.lock().unwrap();
+        *count += 1;
+        if *count == 1 {
+            Ok(LlmResponse {
+                content: None,
+                content_already_streamed: false,
+                tool_calls: vec![ParsedToolCall {
+                    id: "call-secret".into(),
+                    name: "secret".into(),
+                    arguments: "{}".into(),
+                }],
+                finish_reason: Some("tool_calls".into()),
+            })
+        } else {
+            Ok(LlmResponse {
+                content: Some("secret was blocked".into()),
+                content_already_streamed: false,
+                tool_calls: Vec::new(),
+                finish_reason: Some("stop".into()),
+            })
+        }
+    }
+}
+
+struct RepeatingInvalidToolLlm;
+
+#[async_trait]
+impl LlmPort for RepeatingInvalidToolLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        Ok(LlmResponse {
+            content: None,
+            content_already_streamed: false,
+            tool_calls: vec![ParsedToolCall {
+                id: "call-missing".into(),
+                name: "missing".into(),
+                arguments: "{}".into(),
+            }],
+            finish_reason: Some("tool_calls".into()),
+        })
+    }
+}
+
+struct CapturingToolsLlm {
+    calls: Arc<Mutex<Vec<Vec<String>>>>,
+}
+
+#[async_trait]
+impl LlmPort for CapturingToolsLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        let call_index = {
+            let mut calls = self.calls.lock().unwrap();
+            calls.push(tools.iter().map(|tool| tool.name.clone()).collect());
+            calls.len()
+        };
+        if call_index == 1 {
+            Ok(LlmResponse {
+                content: None,
+                content_already_streamed: false,
+                tool_calls: vec![ParsedToolCall {
+                    id: "call-echo".into(),
+                    name: "echo".into(),
+                    arguments: r#"{"message":"done"}"#.into(),
+                }],
+                finish_reason: Some("tool_calls".into()),
+            })
+        } else {
+            Ok(LlmResponse {
+                content: Some("done".into()),
+                content_already_streamed: false,
+                tool_calls: Vec::new(),
+                finish_reason: Some("stop".into()),
+            })
+        }
+    }
+}
+
+struct TwoToolCallsLlm {
+    call_count: Mutex<u32>,
+}
+
+impl TwoToolCallsLlm {
+    fn new() -> Self {
+        Self { call_count: Mutex::new(0) }
+    }
+}
+
+#[async_trait]
+impl LlmPort for TwoToolCallsLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        let mut count = self.call_count.lock().unwrap();
+        *count += 1;
+        if *count == 1 {
+            Ok(LlmResponse {
+                content: None,
+                content_already_streamed: false,
+                tool_calls: vec![
+                    ParsedToolCall {
+                        id: "call-slow".into(),
+                        name: "echo".into(),
+                        arguments: r#"{"message":"slow","delay_ms":50}"#.into(),
+                    },
+                    ParsedToolCall {
+                        id: "call-fast".into(),
+                        name: "echo".into(),
+                        arguments: r#"{"message":"fast","delay_ms":0}"#.into(),
+                    },
+                ],
+                finish_reason: Some("tool_calls".into()),
+            })
+        } else {
+            Ok(LlmResponse {
+                content: Some("done".into()),
+                content_already_streamed: false,
+                tool_calls: Vec::new(),
+                finish_reason: Some("stop".into()),
+            })
+        }
+    }
+}
 
 struct StreamingLlm;
 
@@ -668,7 +897,7 @@ async fn smoke_echo_tool_agent_completes() {
     let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
     let notify = Arc::new(NoopNotify);
 
-    let mut router = ToolRouter::new();
+    let router = ToolRouter::new();
     router.register(Box::new(TestEchoTool));
 
     let approval = Arc::clone(&notify);
@@ -728,7 +957,7 @@ async fn trace_sink_records_prompt_llm_tool_and_turn_events() {
     let store = Arc::new(PersistingStore::default());
     let store_port: Arc<dyn AgentStorePort> = store.clone();
     let notify = Arc::new(NoopNotify);
-    let mut router = ToolRouter::new();
+    let router = ToolRouter::new();
     router.register(Box::new(TestEchoTool));
     let trace = Arc::new(RecordingTraceSink::default());
     let trace_sink: Arc<dyn AgentTraceSink> = trace.clone();
@@ -821,13 +1050,243 @@ async fn wait_for_control_terminal_status(control: &AgentControl, thread_id: &st
 }
 
 #[tokio::test]
+async fn tool_choice_specific_filters_tools_sent_to_llm() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let llm = Arc::new(CapturingToolsLlm { calls: calls.clone() });
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(TestEchoTool));
+    router.register(Box::new(SecretTool { executions: Arc::new(Mutex::new(0)) }));
+
+    let approval = Arc::clone(&notify);
+    let control =
+        Arc::new(AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4));
+    let config = AgentConfig {
+        model: "mock".into(),
+        max_turns: 1,
+        tool_choice: AgentToolChoice::Tool { name: "echo".into() },
+        ..AgentConfig::default()
+    };
+    let thread_id = control
+        .spawn(
+            "session-tool-choice".into(),
+            config,
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("finish".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+    let calls = calls.lock().unwrap().clone();
+    assert!(!calls.is_empty());
+    assert!(calls.iter().all(|tools| tools == &vec!["echo".to_owned()]), "{calls:#?}");
+}
+
+#[tokio::test]
+async fn disallowed_registered_tool_is_not_executed_and_feedback_is_persisted() {
+    let executions = Arc::new(Mutex::new(0));
+    let llm = Arc::new(SecretToolCallLlm::new());
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(RecordingNotify::default());
+    let router = ToolRouter::new();
+    router.register(Box::new(TestEchoTool));
+    router.register(Box::new(SecretTool { executions: executions.clone() }));
+
+    let approval = notify.clone();
+    let control =
+        Arc::new(AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4));
+    let config = AgentConfig {
+        model: "mock".into(),
+        max_turns: 5,
+        allowed_tools: vec!["echo".into()],
+        ..AgentConfig::default()
+    };
+    let thread_id = control
+        .spawn(
+            "session-disallowed-tool".into(),
+            config,
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("try secret".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+    assert_eq!(*executions.lock().unwrap(), 0);
+    wait_for_persisted_message(&store, &thread_id, "invalid tool call: tool not allowed: secret")
+        .await;
+}
+
+#[tokio::test]
+async fn invalid_tool_call_retry_budget_errors_thread() {
+    let llm = Arc::new(RepeatingInvalidToolLlm);
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(TestEchoTool));
+
+    let approval = Arc::clone(&notify);
+    let control =
+        Arc::new(AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4));
+    let config = AgentConfig {
+        model: "mock".into(),
+        max_turns: 5,
+        invalid_tool_call_retries: 0,
+        ..AgentConfig::default()
+    };
+    let thread_id = control
+        .spawn(
+            "session-invalid-budget".into(),
+            config,
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("call missing".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Errored).await;
+    let snapshot = store.snapshots.lock().unwrap().get(&thread_id).cloned().expect("snapshot");
+    assert!(
+        snapshot
+            .completion_text
+            .as_deref()
+            .is_some_and(|text| text.contains("invalid tool call retry budget exceeded")),
+        "{snapshot:#?}"
+    );
+}
+
+#[tokio::test]
+async fn concurrent_tool_calls_preserve_persisted_message_order() {
+    let llm = Arc::new(TwoToolCallsLlm::new());
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(DelayEchoTool));
+
+    let approval = Arc::clone(&notify);
+    let control =
+        Arc::new(AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4));
+    let config = AgentConfig {
+        model: "mock".into(),
+        max_turns: 5,
+        tool_concurrency: 2,
+        ..AgentConfig::default()
+    };
+    let thread_id = control
+        .spawn(
+            "session-tool-concurrency".into(),
+            config,
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("call twice".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+    let tool_outputs = store
+        .messages
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|record| record.thread_id == thread_id && record.message.role == "tool")
+        .map(|record| match &record.message.content {
+            ConversationMessageContent::Text(text) => text.clone(),
+            ConversationMessageContent::Parts(_) => record.message.rendered_text(),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(tool_outputs, vec!["slow".to_owned(), "fast".to_owned()]);
+}
+
+#[tokio::test]
+async fn sliding_window_compaction_drops_leading_orphan_tool_result() {
+    let compact = SlidingWindowCompactPort::new(10, 8);
+    let messages = vec![
+        ConversationMessage {
+            role: "system".into(),
+            content: ConversationMessageContent::Text("system".into()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: vec![],
+        },
+        ConversationMessage {
+            role: "assistant".into(),
+            content: ConversationMessageContent::Text("x".repeat(200)),
+            name: None,
+            tool_call_id: None,
+            tool_calls: vec![ConversationToolCall {
+                id: Some("call-old".into()),
+                r#type: "function".into(),
+                function: ConversationToolFunction { name: "echo".into(), arguments: "{}".into() },
+            }],
+        },
+        ConversationMessage {
+            role: "tool".into(),
+            content: ConversationMessageContent::Text("old tool result".into()),
+            name: None,
+            tool_call_id: Some("call-old".into()),
+            tool_calls: vec![],
+        },
+        ConversationMessage {
+            role: "user".into(),
+            content: ConversationMessageContent::Text("next".into()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: vec![],
+        },
+    ];
+
+    let outcome = compact.compact(&messages).await.expect("compact");
+    let crate::CompactOutcome::Replaced { messages, .. } = outcome else {
+        panic!("expected replaced outcome");
+    };
+    assert_eq!(messages.first().map(|message| message.role.as_str()), Some("system"));
+    assert!(messages.iter().skip(1).next().is_some_and(|message| message.role != "tool"));
+    assert!(messages.iter().any(|message| message.rendered_text() == "next"));
+}
+
+#[test]
+fn tool_router_supports_runtime_unregister() {
+    let router = ToolRouter::new();
+    router.register(Box::new(TestEchoTool));
+    assert!(router.get("echo").is_some());
+    assert!(router.unregister("echo").is_some());
+    assert!(router.get("echo").is_none());
+}
+
+#[tokio::test]
 async fn approval_required_tool_is_recorded_pending_then_completed() {
     let llm = Arc::new(MockLlm::new());
     let store = Arc::new(RecordingStore::default());
     let store_port: Arc<dyn AgentStorePort> = store.clone();
     let notify = Arc::new(NoopNotify);
 
-    let mut router = ToolRouter::new();
+    let router = ToolRouter::new();
     router.register(Box::new(ApprovalEchoTool));
 
     let approval = Arc::clone(&notify);
@@ -876,7 +1335,7 @@ async fn rejected_approval_tool_is_recorded_pending_then_failed() {
     let store_port: Arc<dyn AgentStorePort> = store.clone();
     let notify = Arc::new(NoopNotify);
 
-    let mut router = ToolRouter::new();
+    let router = ToolRouter::new();
     router.register(Box::new(ApprovalEchoTool));
 
     let control = AgentControl::new(
@@ -954,7 +1413,7 @@ async fn hook_blocked_tool_call_is_recorded_failed() {
     let store_port: Arc<dyn AgentStorePort> = store.clone();
     let notify = Arc::new(NoopNotify);
 
-    let mut router = ToolRouter::new();
+    let router = ToolRouter::new();
     router.register(Box::new(TestEchoTool));
 
     let approval = Arc::clone(&notify);
@@ -998,7 +1457,7 @@ async fn response_style_events_include_text_tool_and_metrics() {
     let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
     let notify = Arc::new(RecordingNotify::default());
 
-    let mut router = ToolRouter::new();
+    let router = ToolRouter::new();
     router.register(Box::new(ApprovalEchoTool));
 
     let approval = Arc::clone(&notify);
@@ -1143,7 +1602,7 @@ async fn streaming_tool_call_emits_text_before_function_call_without_duplicate_d
     let store_port: Arc<dyn AgentStorePort> = store.clone();
     let notify = Arc::new(RecordingNotify::default());
 
-    let mut router = ToolRouter::new();
+    let router = ToolRouter::new();
     router.register(Box::new(TestEchoTool));
 
     let approval = Arc::clone(&notify);
@@ -1236,7 +1695,7 @@ async fn send_input_replays_persisted_thread_messages() {
     let store_port: Arc<dyn AgentStorePort> = store.clone();
     let notify = Arc::new(NoopNotify);
 
-    let mut router = ToolRouter::new();
+    let router = ToolRouter::new();
     router.register(Box::new(TestEchoTool));
 
     let approval = Arc::clone(&notify);
@@ -1301,7 +1760,7 @@ async fn echo_tool_missing_message_returns_empty() {
 async fn tool_router_registers_and_retrieves_tools() {
     use crate::tool::ToolRouter;
 
-    let mut router = ToolRouter::new();
+    let router = ToolRouter::new();
     router.register(Box::new(TestEchoTool));
 
     let tool = router.get("echo");
@@ -1349,7 +1808,7 @@ async fn tool_router_overwrites_existing_tool() {
         }
     }
 
-    let mut router = ToolRouter::new();
+    let router = ToolRouter::new();
     router.register(Box::new(CustomTool));
 
     let ctx = ToolContext { thread_id: "t1".into(), turn_index: 0, depth: 0 };
@@ -1369,7 +1828,7 @@ async fn tool_router_overwrites_existing_tool() {
 async fn tool_router_generates_tool_specs() {
     use crate::tool::ToolRouter;
 
-    let mut router = ToolRouter::new();
+    let router = ToolRouter::new();
     router.register(Box::new(TestEchoTool));
 
     let specs = router.tool_specs();

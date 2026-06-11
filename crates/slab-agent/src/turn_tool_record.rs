@@ -22,6 +22,21 @@ pub(crate) async fn record_failed_tool_call(
     created_at: &str,
     messages: &mut Vec<ConversationMessage>,
 ) -> Result<(), AgentError> {
+    let message = record_failed_tool_call_without_persisting_message(
+        context, call_id, tool_call, output, created_at,
+    )
+    .await?;
+    persist_tool_message_record(context, message, messages).await;
+    Ok(())
+}
+
+pub(crate) async fn record_failed_tool_call_without_persisting_message(
+    context: &TurnExecutionContext<'_>,
+    call_id: &str,
+    tool_call: &ParsedToolCall,
+    output: String,
+    created_at: &str,
+) -> Result<ConversationMessage, AgentError> {
     let mut tool_state = ToolCallStateMachine::new(ToolCallStatus::Running);
     insert_tool_call_record(context, call_id, tool_call, tool_state.status(), created_at).await;
     let call_status = tool_state.transition(ToolCallStatus::Failed)?;
@@ -40,24 +55,25 @@ pub(crate) async fn record_failed_tool_call(
             },
         )
         .await;
-    persist_tool_message(context, tool_call, output.clone(), messages).await;
     update_tool_call_record(context, call_id, Some(&output), call_status).await;
-    Ok(())
+    Ok(tool_message(tool_call, output))
 }
 
-pub(crate) async fn persist_tool_message(
-    context: &TurnExecutionContext<'_>,
-    tool_call: &ParsedToolCall,
-    output: String,
-    messages: &mut Vec<ConversationMessage>,
-) {
-    let message = ConversationMessage {
+pub(crate) fn tool_message(tool_call: &ParsedToolCall, output: String) -> ConversationMessage {
+    ConversationMessage {
         role: "tool".to_owned(),
         content: ConversationMessageContent::Text(output),
         name: None,
         tool_call_id: Some(tool_call.id.clone()),
         tool_calls: vec![],
-    };
+    }
+}
+
+pub(crate) async fn persist_tool_message_record(
+    context: &TurnExecutionContext<'_>,
+    message: ConversationMessage,
+    messages: &mut Vec<ConversationMessage>,
+) {
     persist_thread_message(context.store, context.thread_id, context.turn_index, &message).await;
     record_json(
         context.trace,

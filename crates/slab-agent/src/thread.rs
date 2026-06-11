@@ -25,7 +25,7 @@ use crate::{
     risk::ToolRiskAnalyzer,
     state::ThreadStateMachine,
     tool::ToolRouter,
-    turn::{TurnExecutionContext, execute_turn, persist_thread_message},
+    turn::{TurnExecutionContext, TurnOutcome, execute_turn, persist_thread_message},
 };
 
 /// A single agent conversation thread.
@@ -228,6 +228,7 @@ impl AgentThread {
 
         let mut completion_text: Option<String> = None;
         let mut last_error: Option<AgentError> = None;
+        let mut invalid_tool_call_retries = 0u8;
         let mut interrupted = false;
 
         'turns: for turn_offset in 0..self.config.max_turns {
@@ -279,8 +280,8 @@ impl AgentThread {
             )
             .await
             {
-                Ok(more_turns) => {
-                    if !more_turns {
+                Ok(outcome) => match outcome {
+                    TurnOutcome::Final => {
                         // Extract the final assistant text.
                         completion_text = messages.iter().rev().find_map(|m| {
                             if m.role == "assistant"
@@ -293,7 +294,22 @@ impl AgentThread {
                         });
                         break 'turns;
                     }
-                }
+                    TurnOutcome::ToolCalls { invalid_tool_calls } => {
+                        if invalid_tool_calls == 0 {
+                            invalid_tool_call_retries = 0;
+                        } else {
+                            invalid_tool_call_retries = invalid_tool_call_retries.saturating_add(1);
+                            if invalid_tool_call_retries
+                                > self.config.effective_invalid_tool_call_retries()
+                            {
+                                last_error = Some(AgentError::Internal(format!(
+                                    "invalid tool call retry budget exceeded after {invalid_tool_call_retries} invalid responses"
+                                )));
+                                break 'turns;
+                            }
+                        }
+                    }
+                },
                 Err(e) => {
                     if matches!(e, AgentError::Interrupted) {
                         interrupted = true;
@@ -437,6 +453,17 @@ impl AgentThread {
     ) {
         let input_tokens = compact.estimate_tokens(messages);
         let threshold_tokens = compact.threshold_tokens();
+        record_json(
+            trace,
+            trace_context,
+            "slab-agent",
+            "context_compaction_policy",
+            serde_json::json!({
+                "policy": compact.policy_name(),
+                "input_tokens": input_tokens,
+                "threshold_tokens": threshold_tokens,
+            }),
+        );
         if input_tokens < threshold_tokens {
             record_json(
                 trace,

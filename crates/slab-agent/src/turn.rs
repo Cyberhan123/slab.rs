@@ -14,7 +14,7 @@ use slab_types::{
 };
 
 use crate::{
-    config::AgentConfig,
+    config::{AgentConfig, AgentToolChoice},
     error::AgentError,
     event::{AgentEventKind, AgentMetrics},
     hook::AgentHook,
@@ -24,7 +24,9 @@ use crate::{
     },
     risk::ToolRiskAnalyzer,
     tool::ToolRouter,
+    tool_validation::{InvalidToolCall, validate_tool_calls},
     turn_tool_call::handle_tool_calls,
+    turn_tool_record::record_failed_tool_call,
 };
 
 /// Execute a single LLM turn.
@@ -48,16 +50,21 @@ pub(crate) struct TurnExecutionContext<'a> {
     pub cancellation: &'a CancellationToken,
 }
 
+pub(crate) enum TurnOutcome {
+    Final,
+    ToolCalls { invalid_tool_calls: usize },
+}
+
 pub(crate) async fn execute_turn(
     context: TurnExecutionContext<'_>,
     messages: &mut Vec<ConversationMessage>,
-) -> Result<bool, AgentError> {
+) -> Result<TurnOutcome, AgentError> {
     let turn_started_at = std::time::Instant::now();
     if context.cancellation.is_cancelled() {
         return Err(AgentError::Interrupted);
     }
 
-    let tool_specs = allowed_tool_specs(&context);
+    let tool_specs = allowed_tool_specs(&context)?;
 
     debug!(thread_id = context.thread_id, turn_index = context.turn_index, "executing turn");
     record_json(
@@ -84,6 +91,15 @@ pub(crate) async fn execute_turn(
             "config": context.config,
         }),
     );
+    if let Some(structured_output) = context.config.structured_output.as_ref() {
+        record_json(
+            context.trace,
+            &context.trace_context,
+            "slab-agent",
+            "structured_output_requested",
+            serde_json::json!({ "structured_output": structured_output }),
+        );
+    }
 
     let mut stream_observer = TurnTextDeltaObserver {
         thread_id: context.thread_id,
@@ -119,6 +135,7 @@ pub(crate) async fn execute_turn(
     );
 
     if response.tool_calls.is_empty() {
+        reject_missing_required_tool_call(&context)?;
         persist_final_answer(&context, messages, response.content.unwrap_or_default()).await;
         emit_turn_metrics(&context, turn_started_at, true).await;
         record_json(
@@ -128,9 +145,15 @@ pub(crate) async fn execute_turn(
             "turn_completed",
             serde_json::json!({ "more_turns": false }),
         );
-        return Ok(false);
+        return Ok(TurnOutcome::Final);
     }
 
+    let validation = validate_tool_calls(
+        &context.config.tool_choice,
+        &context.config.allowed_tools,
+        &tool_specs,
+        &response.tool_calls,
+    );
     emit_unstreamed_tool_text(
         &context,
         response.content.as_deref(),
@@ -138,7 +161,12 @@ pub(crate) async fn execute_turn(
     )
     .await;
     persist_assistant_tool_request(&context, messages, &response).await;
-    handle_tool_calls(&context, &response.tool_calls, messages).await?;
+    if !validation.invalid.is_empty() {
+        record_invalid_tool_calls(&context, &validation.invalid, messages).await?;
+    }
+    if !validation.valid.is_empty() {
+        handle_tool_calls(&context, &validation.valid, messages).await?;
+    }
 
     emit_turn_metrics(&context, turn_started_at, true).await;
     record_json(
@@ -148,20 +176,103 @@ pub(crate) async fn execute_turn(
         "turn_completed",
         serde_json::json!({ "more_turns": true }),
     );
-    Ok(true)
+    Ok(TurnOutcome::ToolCalls { invalid_tool_calls: validation.invalid.len() })
 }
 
-fn allowed_tool_specs(context: &TurnExecutionContext<'_>) -> Vec<ToolSpec> {
-    if context.config.allowed_tools.is_empty() {
-        return context.tools.tool_specs();
+fn allowed_tool_specs(context: &TurnExecutionContext<'_>) -> Result<Vec<ToolSpec>, AgentError> {
+    let mut specs = context.tools.tool_specs();
+    if !context.config.allowed_tools.is_empty() {
+        specs.retain(|tool| context.config.allowed_tools.contains(&tool.name));
     }
 
-    context
-        .tools
-        .tool_specs()
-        .into_iter()
-        .filter(|tool| context.config.allowed_tools.contains(&tool.name))
-        .collect()
+    match &context.config.tool_choice {
+        AgentToolChoice::Auto => Ok(specs),
+        AgentToolChoice::None => Ok(Vec::new()),
+        AgentToolChoice::Required => {
+            if specs.is_empty() {
+                Err(AgentError::Internal(
+                    "tool_choice required but no tools are available".to_owned(),
+                ))
+            } else {
+                Ok(specs)
+            }
+        }
+        AgentToolChoice::Tool { name } => {
+            let name = name.trim();
+            if name.is_empty() {
+                return Err(AgentError::Internal(
+                    "tool_choice tool name must not be blank".to_owned(),
+                ));
+            }
+            let Some(spec) = specs.into_iter().find(|tool| tool.name == name) else {
+                return Err(AgentError::Internal(format!(
+                    "tool_choice tool is not available or allowed: {name}"
+                )));
+            };
+            Ok(vec![spec])
+        }
+    }
+}
+
+fn reject_missing_required_tool_call(context: &TurnExecutionContext<'_>) -> Result<(), AgentError> {
+    match &context.config.tool_choice {
+        AgentToolChoice::Required => Err(AgentError::Internal(
+            "tool_choice required but the model returned no tool calls".to_owned(),
+        )),
+        AgentToolChoice::Tool { name } => Err(AgentError::Internal(format!(
+            "tool_choice requires tool '{name}' but the model returned no tool calls"
+        ))),
+        AgentToolChoice::Auto | AgentToolChoice::None => Ok(()),
+    }
+}
+
+async fn record_invalid_tool_calls(
+    context: &TurnExecutionContext<'_>,
+    invalid: &[InvalidToolCall],
+    messages: &mut Vec<ConversationMessage>,
+) -> Result<(), AgentError> {
+    let created_at = Utc::now().to_rfc3339();
+    for invalid_call in invalid {
+        let call_id = Uuid::new_v4().to_string();
+        record_json(
+            context.trace,
+            &context.trace_context,
+            "slab-agent",
+            "invalid_tool_call",
+            serde_json::json!({
+                "item_id": invalid_call.tool_call.id,
+                "call_id": call_id,
+                "tool_name": invalid_call.tool_call.name,
+                "arguments": invalid_call.tool_call.arguments,
+                "reason": invalid_call.reason,
+            }),
+        );
+        context
+            .notify
+            .on_turn_event(
+                context.thread_id,
+                &TurnEvent::Response {
+                    turn_index: Some(context.turn_index),
+                    event: AgentEventKind::ResponseToolCallValidationFailed {
+                        item_id: invalid_call.tool_call.id.clone(),
+                        call_id: call_id.clone(),
+                        tool_name: invalid_call.tool_call.name.clone(),
+                        reason: invalid_call.reason.clone(),
+                    },
+                },
+            )
+            .await;
+        record_failed_tool_call(
+            context,
+            &call_id,
+            &invalid_call.tool_call,
+            format!("invalid tool call: {}", invalid_call.reason),
+            &created_at,
+            messages,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 async fn persist_final_answer(

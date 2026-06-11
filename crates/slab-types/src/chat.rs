@@ -262,6 +262,40 @@ impl ChatVerbosity {
     }
 }
 
+/// Structured-output controls shared by chat and agent execution paths.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub enum StructuredOutput {
+    JsonObject,
+    JsonSchema(StructuredOutputJsonSchema),
+}
+
+/// JSON-schema structured-output request.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct StructuredOutputJsonSchema {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strict: Option<bool>,
+    pub schema: serde_json::Value,
+}
+
+impl StructuredOutputJsonSchema {
+    pub fn new(
+        name: Option<String>,
+        description: Option<String>,
+        strict: Option<bool>,
+        schema: serde_json::Value,
+    ) -> Self {
+        Self {
+            name: sanitize_structured_output_name(name.as_deref()),
+            description: normalize_optional_text(description),
+            strict,
+            schema,
+        }
+    }
+}
+
 /// Identifies whether a chat model option is backed by a local (on-device) or cloud-hosted model.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -277,6 +311,37 @@ impl ChatModelSource {
             Self::Local => "local",
             Self::Cloud => "cloud",
         }
+    }
+}
+
+fn normalize_optional_text(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() { None } else { Some(trimmed.to_owned()) }
+    })
+}
+
+const DEFAULT_STRUCTURED_OUTPUT_NAME: &str = "slab_structured_output";
+
+fn sanitize_structured_output_name(value: Option<&str>) -> String {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return DEFAULT_STRUCTURED_OUTPUT_NAME.to_owned();
+    };
+
+    let mut sanitized = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+            sanitized.push(ch);
+        } else if !sanitized.ends_with('_') {
+            sanitized.push('_');
+        }
+    }
+
+    let sanitized = sanitized.trim_matches('_');
+    if sanitized.is_empty() {
+        DEFAULT_STRUCTURED_OUTPUT_NAME.to_owned()
+    } else {
+        sanitized.to_owned()
     }
 }
 
