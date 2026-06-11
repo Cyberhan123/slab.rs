@@ -96,6 +96,19 @@ function guessCodeLanguage(value: string) {
   return "text"
 }
 
+function formatJsonCode(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed || (trimmed[0] !== "{" && trimmed[0] !== "[")) {
+    return value
+  }
+
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2)
+  } catch {
+    return value
+  }
+}
+
 function renderThoughtContent(
   thought: AssistantThought,
   approving: boolean,
@@ -141,16 +154,23 @@ function renderThoughtContent(
     )
   }
 
-  return thought.detail ? (
+  if (!thought.detail) {
+    return null
+  }
+
+  const language = guessCodeLanguage(thought.detail)
+  const detail = language === "json" ? formatJsonCode(thought.detail) : thought.detail
+
+  return (
     <div className="min-w-0 max-w-full overflow-x-auto">
       <CodeHighlighter
-        lang={guessCodeLanguage(thought.detail)}
+        lang={language}
         className="max-w-full rounded-[14px] border border-border/60 text-xs"
       >
-        {thought.detail}
+        {detail}
       </CodeHighlighter>
     </div>
-  ) : null
+  )
 }
 
 function toThoughtChainItems(

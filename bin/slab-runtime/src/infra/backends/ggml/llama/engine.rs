@@ -67,6 +67,7 @@ struct ThinkingStreamState {
     raw: String,
     emitted_content_len: usize,
     emitted_reasoning_len: usize,
+    prefilled_thinking: bool,
 }
 
 fn trailing_partial_marker_len(raw: &str, marker: &str) -> usize {
@@ -78,7 +79,45 @@ fn normalize_thinking_content_prefix(prefix: &str) -> &str {
     if prefix.trim().is_empty() { "" } else { prefix }
 }
 
+#[cfg(test)]
 fn parse_thinking_output(raw: &str, complete: bool) -> ParsedThinkingOutput {
+    parse_thinking_output_with_prefill(raw, complete, false)
+}
+
+fn parse_generated_thinking_output(
+    prompt: &str,
+    raw: &str,
+    complete: bool,
+) -> ParsedThinkingOutput {
+    parse_thinking_output_with_prefill(raw, complete, prompt_has_prefilled_thinking(prompt))
+}
+
+fn prompt_has_prefilled_thinking(prompt: &str) -> bool {
+    let Some(open_start) = prompt.rfind(THINK_OPEN_MARKER) else {
+        return false;
+    };
+    if let Some(close_start) = prompt.rfind(THINK_CLOSE_TAG)
+        && close_start > open_start
+    {
+        return false;
+    }
+
+    let after_open_marker = &prompt[open_start..];
+    let Some(open_end_rel) = after_open_marker.find('>') else {
+        return false;
+    };
+    after_open_marker[open_end_rel + 1..].trim().is_empty()
+}
+
+fn parse_thinking_output_with_prefill(
+    raw: &str,
+    complete: bool,
+    prefilled_thinking: bool,
+) -> ParsedThinkingOutput {
+    if prefilled_thinking {
+        return parse_prefilled_thinking_output(raw, complete);
+    }
+
     let Some(open_start) = raw.find(THINK_OPEN_MARKER) else {
         if complete {
             return ParsedThinkingOutput { content: raw.to_owned(), reasoning: String::new() };
@@ -130,7 +169,31 @@ fn parse_thinking_output(raw: &str, complete: bool) -> ParsedThinkingOutput {
     }
 }
 
+fn parse_prefilled_thinking_output(raw: &str, complete: bool) -> ParsedThinkingOutput {
+    if let Some(close_start) = raw.find(THINK_CLOSE_TAG) {
+        let close_end = close_start + THINK_CLOSE_TAG.len();
+        return ParsedThinkingOutput {
+            content: raw[close_end..].to_owned(),
+            reasoning: raw[..close_start].to_owned(),
+        };
+    }
+
+    let stable_reasoning_end = if complete {
+        raw.len()
+    } else {
+        raw.len().saturating_sub(trailing_partial_marker_len(raw, THINK_CLOSE_TAG))
+    };
+    ParsedThinkingOutput {
+        content: String::new(),
+        reasoning: raw[..stable_reasoning_end].to_owned(),
+    }
+}
+
 impl ThinkingStreamState {
+    fn for_prompt(prompt: &str) -> Self {
+        Self { prefilled_thinking: prompt_has_prefilled_thinking(prompt), ..Default::default() }
+    }
+
     fn ingest(&mut self, delta: &str) -> ThinkingDelta {
         if delta.is_empty() {
             return ThinkingDelta::default();
@@ -144,7 +207,8 @@ impl ThinkingStreamState {
     }
 
     fn emit(&mut self, complete: bool) -> ThinkingDelta {
-        let parsed = parse_thinking_output(&self.raw, complete);
+        let parsed =
+            parse_thinking_output_with_prefill(&self.raw, complete, self.prefilled_thinking);
         let content = parsed.content.get(self.emitted_content_len..).unwrap_or_default().to_owned();
         let reasoning =
             parsed.reasoning.get(self.emitted_reasoning_len..).unwrap_or_default().to_owned();
@@ -694,7 +758,8 @@ impl GGMLLlamaEngine {
                 } else {
                     output.stop.as_ref().map(|stop| stop.finish_reason.clone())
                 };
-                let parsed = parse_thinking_output(&trimmed_text, true);
+                let parsed =
+                    parse_generated_thinking_output(&prepared.full_prompt, &trimmed_text, true);
                 let mut metadata =
                     output.stop.as_ref().map(stop_info_to_metadata).unwrap_or_default();
                 let reasoning = parsed.reasoning.trim();
@@ -813,7 +878,7 @@ impl GGMLLlamaEngine {
             let mut stop_matched = false;
             let mut terminal_finish_reason: Option<String> = None;
             let mut terminal_metadata = TextGenerationMetadata::default();
-            let mut thinking_state = ThinkingStreamState::default();
+            let mut thinking_state = ThinkingStreamState::for_prompt(&full_prompt);
             // Tracks how many bytes of `generated` have been forwarded downstream.
             // When a stop sequence is partially accumulated we hold back the
             // uncertain tail so that we never forward text that may need to be
@@ -1429,7 +1494,7 @@ fn reasoning_event_payload(reasoning: String) -> serde_json::Value {
 mod tests {
     use super::{
         ParsedThinkingOutput, SessionBinding, SessionReusePlan, ThinkingDelta, ThinkingStreamState,
-        parse_thinking_output, plan_session_reuse,
+        parse_generated_thinking_output, parse_thinking_output, plan_session_reuse,
     };
     use slab_llama::LlamaSessionSnapshot;
     use std::sync::Arc;
@@ -1543,6 +1608,31 @@ mod tests {
     }
 
     #[test]
+    fn parse_generated_thinking_output_handles_prompt_prefilled_think() {
+        let prompt = "<|im_start|>assistant\n<think>\n";
+        let parsed = parse_generated_thinking_output(prompt, "chain</think>\n\nfinal answer", true);
+
+        assert_eq!(
+            parsed,
+            ParsedThinkingOutput {
+                content: "\n\nfinal answer".to_owned(),
+                reasoning: "chain".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_generated_thinking_output_ignores_closed_prompt_think() {
+        let prompt = "<|im_start|>assistant\n<think>\n\n</think>\n\n";
+        let parsed = parse_generated_thinking_output(prompt, "final answer", true);
+
+        assert_eq!(
+            parsed,
+            ParsedThinkingOutput { content: "final answer".to_owned(), reasoning: String::new() }
+        );
+    }
+
+    #[test]
     fn thinking_stream_state_routes_reasoning_and_content() {
         let mut state = ThinkingStreamState::default();
 
@@ -1557,6 +1647,33 @@ mod tests {
             ThinkingDelta { reasoning: String::new(), content: "\n\nanswer".to_owned() }
         );
         assert_eq!(state.finish(), ThinkingDelta::default());
+    }
+
+    #[test]
+    fn thinking_stream_state_routes_prompt_prefilled_reasoning_and_content() {
+        let prompt = "<|im_start|>assistant\n<think>\n";
+        let mut state = ThinkingStreamState::for_prompt(prompt);
+
+        assert_eq!(
+            state.ingest("chain</th"),
+            ThinkingDelta { reasoning: "chain".to_owned(), content: String::new() }
+        );
+        assert_eq!(
+            state.ingest("ink>\n\nfinal answer"),
+            ThinkingDelta { reasoning: String::new(), content: "\n\nfinal answer".to_owned() }
+        );
+        assert_eq!(state.finish(), ThinkingDelta::default());
+    }
+
+    #[test]
+    fn thinking_stream_state_treats_closed_prompt_think_as_content() {
+        let prompt = "<|im_start|>assistant\n<think>\n\n</think>\n\n";
+        let mut state = ThinkingStreamState::for_prompt(prompt);
+
+        assert_eq!(
+            state.ingest("final answer"),
+            ThinkingDelta { reasoning: String::new(), content: "final answer".to_owned() }
+        );
     }
 }
 

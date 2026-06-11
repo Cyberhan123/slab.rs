@@ -212,4 +212,48 @@ describe('AssistantMarkdown', () => {
     expect(screen.getByText('streaming-thinking')).toBeInTheDocument()
     expect(screen.queryByText('<think>streaming-thinking')).not.toBeInTheDocument()
   })
+
+  it('formats one-line JSON thought details into multiline content', () => {
+    const toolJson =
+      '{"entries":[{"name":"ipc","is_dir":true,"size_bytes":0},{"name":"slab-server.log","is_dir":false,"size_bytes":919059921}]}'
+
+    const { container } = render(
+      <StrictMode>
+        <XProvider>
+          <Bubble.List
+            role={ASSISTANT_BUBBLE_ROLES}
+            items={[
+              {
+                content: {
+                  ...createAssistantBubbleContent('Tool result received.'),
+                  item: {
+                    id: 'assistant-message',
+                    message: {
+                      content: 'Tool result received.',
+                      role: 'assistant',
+                      thoughts: [
+                        {
+                          detail: toolJson,
+                          id: 'tool-call',
+                          status: 'success',
+                          title: 'tool_call',
+                        },
+                      ],
+                    },
+                    status: 'success',
+                  },
+                },
+                key: 'assistant-message',
+                role: 'assistant',
+              },
+            ]}
+          />
+        </XProvider>
+      </StrictMode>
+    )
+
+    expect(container.textContent).toContain('"entries": [')
+    expect(container.textContent).toContain('"name": "slab-server.log"')
+    expect(container.textContent).not.toContain('{"entries":[{"name":"ipc"')
+  })
 })

@@ -300,6 +300,9 @@ describe('assistant core flow e2e', () => {
     await renderDesktopScene(<AssistantPage />, { route: '/' });
 
     await expect.element(page.getByText('slab-server.log')).toBeVisible();
+    const sceneText = document.querySelector('[data-testid="desktop-browser-scene"]')?.textContent ?? '';
+    expect(sceneText).toContain('"entries": [');
+    expect(sceneText).not.toContain('{"entries":[{"name":"ipc"');
 
     await vi.waitFor(() => {
       const scene = document.querySelector('[data-testid="desktop-browser-scene"]') as HTMLElement | null;
