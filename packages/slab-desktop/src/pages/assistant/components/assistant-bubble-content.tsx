@@ -50,7 +50,11 @@ function parseThinkingContent(rawContent: string): ParsedThinkingContent {
 
   const openTagEnd = rawContent.indexOf(">", openTagIndex)
   if (openTagEnd < 0) {
-    return { thinking: null, answer: rawContent, thinkingLoading: false }
+    return {
+      thinking: null,
+      answer: rawContent.slice(0, openTagIndex).trimEnd(),
+      thinkingLoading: true,
+    }
   }
 
   const openTag = rawContent.slice(openTagIndex, openTagEnd + 1)
@@ -103,15 +107,17 @@ function renderThoughtContent(
 ) {
   if (thought.pendingApproval) {
     return (
-      <div className="space-y-3">
-        <CodeHighlighter
-          lang="shell"
-          prismLightMode={false}
-          className="rounded-[14px] border border-border/60 text-xs"
-        >
-          {thought.pendingApproval.command}
-        </CodeHighlighter>
-        <div className="flex justify-end gap-2">
+      <div className="min-w-0 max-w-full space-y-3 overflow-hidden">
+        <div className="min-w-0 max-w-full overflow-x-auto">
+          <CodeHighlighter
+            lang="shell"
+            prismLightMode={false}
+            className="max-w-full rounded-[14px] border border-border/60 text-xs"
+          >
+            {thought.pendingApproval.command}
+          </CodeHighlighter>
+        </div>
+        <div className="flex flex-wrap justify-end gap-2">
           <Button
             variant="quiet"
             size="sm"
@@ -136,12 +142,14 @@ function renderThoughtContent(
   }
 
   return thought.detail ? (
-    <CodeHighlighter
-      lang={guessCodeLanguage(thought.detail)}
-      className="rounded-[14px] border border-border/60 text-xs"
-    >
-      {thought.detail}
-    </CodeHighlighter>
+    <div className="min-w-0 max-w-full overflow-x-auto">
+      <CodeHighlighter
+        lang={guessCodeLanguage(thought.detail)}
+        className="max-w-full rounded-[14px] border border-border/60 text-xs"
+      >
+        {thought.detail}
+      </CodeHighlighter>
+    </div>
   ) : null
 }
 
@@ -180,7 +188,10 @@ function toThoughtChainItems(
       blink: thinking.loading,
       collapsible: true,
       content: (
-        <AssistantMarkdown className="assistant-markdown--assistant" hasNextChunk={thinking.loading}>
+        <AssistantMarkdown
+          className="assistant-markdown--assistant"
+          hasNextChunk={thinking.loading}
+        >
           {thinking.content}
         </AssistantMarkdown>
       ),
@@ -259,12 +270,12 @@ const AssistantBubbleContentView = memo(function AssistantBubbleContentView({
   )
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 max-w-full space-y-4 overflow-hidden">
       {isAssistant && thoughtItems.length > 0 ? (
         <ThoughtChain
           items={thoughtItems}
           defaultExpandedKeys={expandedThoughtKeys}
-          className="rounded-[18px] border border-border/50 bg-background/30 px-4 py-3"
+          className="min-w-0 max-w-full overflow-hidden rounded-[18px] border border-border/50 bg-background/30 px-4 py-3"
         />
       ) : null}
 
@@ -322,6 +333,9 @@ export const ASSISTANT_BUBBLE_ROLES = {
       content: {
         background: "var(--ai-bubble)",
         color: "var(--ai-bubble-foreground)",
+        maxWidth: "min(100%, 42rem)",
+        minWidth: 0,
+        overflow: "hidden",
       },
     },
     variant: "filled",
@@ -341,12 +355,22 @@ export const ASSISTANT_BUBBLE_ROLES = {
       content: {
         background: "var(--user-bubble)",
         color: "var(--user-bubble-foreground)",
+        maxWidth: "min(100%, 42rem)",
+        minWidth: 0,
+        overflow: "hidden",
       },
     },
     variant: "filled",
   },
   system: {
     shape: "round",
+    styles: {
+      content: {
+        maxWidth: "100%",
+        minWidth: 0,
+        overflow: "hidden",
+      },
+    },
     variant: "outlined",
   },
 } satisfies BubbleListProps["role"]

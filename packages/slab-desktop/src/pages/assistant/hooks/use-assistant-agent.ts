@@ -579,12 +579,6 @@ export function useAssistantAgent({
         return
       }
 
-      try {
-        await beforeRequest?.()
-      } catch {
-        return
-      }
-
       const userMessage: AssistantMessageRecord = {
         id: nextId('user'),
         message: {
@@ -594,9 +588,23 @@ export function useAssistantAgent({
         status: 'success',
       }
 
+      setMessages((current) => [...current, userMessage])
+      setStatus('pending')
+      setPendingApproval(null)
+      setThoughts([])
+      setActiveConversation(resolvedSessionId)
+
+      try {
+        await beforeRequest?.()
+      } catch (error) {
+        const message = getErrorMessage(error)
+        setStatus('errored')
+        appendAssistantError(message || locale.requestFailed)
+        return
+      }
+
       setMessages((current) => [
         ...current,
-        userMessage,
         {
           id: nextId('assistant'),
           message: {
@@ -606,10 +614,6 @@ export function useAssistantAgent({
           status: 'loading',
         },
       ])
-      setStatus('pending')
-      setPendingApproval(null)
-      setThoughts([])
-      setActiveConversation(resolvedSessionId)
 
       try {
         if (!threadId) {

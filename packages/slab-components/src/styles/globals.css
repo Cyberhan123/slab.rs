@@ -688,6 +688,13 @@
     color: inherit;
     font-size: 0.95rem;
     line-height: 1.72;
+    max-width: 100%;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .assistant-markdown * {
+    max-width: 100%;
   }
 
   .assistant-markdown > * + * {
@@ -703,7 +710,9 @@
   }
 
   .assistant-markdown pre {
+    max-width: 100%;
     overflow-x: auto;
+    overflow-y: hidden;
     border-radius: 1rem;
     background: color-mix(in oklab, var(--foreground) 5%, var(--surface-2));
     padding: 0.875rem 1rem;
@@ -714,6 +723,8 @@
     background: color-mix(in oklab, var(--foreground) 6%, var(--surface-2));
     padding: 0.15rem 0.45rem;
     font-size: 0.85em;
+    overflow-wrap: anywhere;
+    white-space: normal;
   }
 
   .assistant-markdown blockquote {

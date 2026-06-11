@@ -47,7 +47,7 @@ function CodeBlockComponent({ block, children, lang, ...props }: ComponentProps)
   const code = childrenToText(children)
   if (!block) {
     return (
-      <code {...props} className={props.className}>
+      <code {...props} className={cn("break-words whitespace-normal", props.className)}>
         {children}
       </code>
     )
@@ -58,7 +58,7 @@ function CodeBlockComponent({ block, children, lang, ...props }: ComponentProps)
   return (
     <CodeHighlighter
       lang={language}
-      className="my-3 overflow-hidden rounded-[14px] border border-border/60 text-xs"
+      className="my-3 max-w-full overflow-x-auto rounded-[14px] border border-border/60 text-xs"
       header={language}
     >
       {code}
@@ -96,7 +96,10 @@ function AssistantMarkdownView({
       config={markdownConfig}
       content={children}
       paragraphTag="div"
-      className={cn("assistant-markdown text-base leading-[1.625]", className)}
+      className={cn(
+        "assistant-markdown min-w-0 max-w-full overflow-hidden break-words text-base leading-[1.625]",
+        className
+      )}
       streaming={hasNextChunk ? streamingActive : undefined}
     />
   )

@@ -605,8 +605,9 @@ function Assistant() {
       }
 
       setDraft("")
-      await setConversationLabelIfNeeded(curConversation, value)
-      await handleSubmit(value)
+      const submitPromise = handleSubmit(value)
+      void setConversationLabelIfNeeded(curConversation, value)
+      await submitPromise
     },
     [
       curConversation,
@@ -645,7 +646,7 @@ function Assistant() {
 
       if (isPreparingModel || modelLoading) {
         items.push({
-          content: selectedModelStatusLabel,
+          content: t("pages.assistant.message.loadingModel"),
           key: "assistant-model-loading",
           role: "system",
           status: "loading",
@@ -660,7 +661,6 @@ function Assistant() {
       markdownThemeClassName,
       modelLoading,
       safeMessages,
-      selectedModelStatusLabel,
       submitApproval,
       t,
     ]

@@ -87,6 +87,7 @@ export const assistant = {
     assistant: '助手',
     user: '用户',
     waitingForResponse: '等待回复...',
+    loadingModel: '正在加载模型...',
     copy: '复制',
     continue: '继续',
     retry: '重试',

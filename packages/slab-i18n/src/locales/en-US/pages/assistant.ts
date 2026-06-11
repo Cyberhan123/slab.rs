@@ -88,6 +88,7 @@ export const assistant = {
     assistant: 'Assistant',
     user: 'User',
     waitingForResponse: 'Waiting for response...',
+    loadingModel: 'Loading model...',
     copy: 'Copy',
     continue: 'Continue',
     retry: 'Retry',

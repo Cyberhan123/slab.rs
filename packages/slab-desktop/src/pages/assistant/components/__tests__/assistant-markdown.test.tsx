@@ -3,7 +3,38 @@ import { render, screen } from '@testing-library/react'
 import { StrictMode, useEffect, useState } from 'react'
 import { describe, expect, it } from 'vitest'
 
+import type { AssistantBubbleContent } from '../assistant-bubble-content'
+import { ASSISTANT_BUBBLE_ROLES } from '../assistant-bubble-content'
 import { AssistantMarkdown } from '../assistant-markdown'
+
+const bubbleLabels = {
+  approve: 'Approve',
+  assistant: 'Assistant',
+  copy: 'Copy',
+  reject: 'Reject',
+  thinkingLoading: 'Thinking...',
+  thinkingReady: 'Reasoning trace',
+  user: 'User',
+  waitingForResponse: 'Waiting for response...',
+}
+
+function createAssistantBubbleContent(
+  content: string,
+  status: AssistantBubbleContent['item']['status'] = 'success'
+): AssistantBubbleContent {
+  return {
+    approving: false,
+    item: {
+      id: 'assistant-message',
+      message: {
+        content,
+        role: 'assistant',
+      },
+      status,
+    },
+    labels: bubbleLabels,
+  }
+}
 
 function StreamingThought() {
   const [content, setContent] = useState('查询中')
@@ -134,5 +165,51 @@ describe('AssistantMarkdown', () => {
     expect(
       screen.getByText(/This paragraph intentionally looks like unrelated retrieved text/)
     ).toBeInTheDocument()
+  })
+
+  it('routes think tags to ThoughtChain instead of duplicating them in the answer body', () => {
+    render(
+      <StrictMode>
+        <XProvider>
+          <Bubble.List
+            role={ASSISTANT_BUBBLE_ROLES}
+            items={[
+              {
+                content: createAssistantBubbleContent(
+                  '<think>chain-only-thinking</think>\n\nVisible answer body'
+                ),
+                key: 'assistant-message',
+                role: 'assistant',
+              },
+            ]}
+          />
+        </XProvider>
+      </StrictMode>
+    )
+
+    expect(screen.getByText('Visible answer body')).toBeInTheDocument()
+    expect(screen.getAllByText('chain-only-thinking')).toHaveLength(1)
+  })
+
+  it('keeps streamed incomplete think content out of the answer body', () => {
+    render(
+      <StrictMode>
+        <XProvider>
+          <Bubble.List
+            role={ASSISTANT_BUBBLE_ROLES}
+            items={[
+              {
+                content: createAssistantBubbleContent('<think>streaming-thinking', 'updating'),
+                key: 'assistant-message',
+                role: 'assistant',
+              },
+            ]}
+          />
+        </XProvider>
+      </StrictMode>
+    )
+
+    expect(screen.getByText('streaming-thinking')).toBeInTheDocument()
+    expect(screen.queryByText('<think>streaming-thinking')).not.toBeInTheDocument()
   })
 })

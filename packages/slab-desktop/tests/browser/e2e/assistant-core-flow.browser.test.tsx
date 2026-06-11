@@ -1,30 +1,33 @@
 import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useState } from 'react';
 
 import AssistantPage from '@/pages/assistant';
+import type { AssistantMessageRecord } from '@/pages/assistant/assistant-context';
 import { renderDesktopScene } from '../test-utils';
 
 const {
+  mockCatalogState,
   mockHandleSubmit,
+  mockMutationState,
   mockSetDeepThink,
+  mockUseAssistantAgent,
   mockUpdateSessionLabel,
 } = vi.hoisted(() => ({
-  mockHandleSubmit: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+  mockCatalogState: {
+    isLoading: false,
+  },
+  mockHandleSubmit: vi.fn<(value: string) => void>(),
+  mockMutationState: {
+    isPending: false,
+  },
   mockSetDeepThink: vi.fn<() => void>(),
-  mockUpdateSessionLabel: vi.fn<() => Promise<boolean>>().mockResolvedValue(true),
+  mockUseAssistantAgent: vi.fn<() => unknown>(),
+  mockUpdateSessionLabel: vi.fn<(sessionId: string, label: string) => Promise<boolean>>().mockResolvedValue(true),
 }));
 
 vi.mock('@/pages/assistant/hooks/use-assistant-agent', () => ({
-  useAssistantAgent: vi.fn<() => unknown>(() => ({
-    abort: vi.fn<() => void>(),
-    activeConversation: 'session-1',
-    eventsConnected: true,
-    handleSubmit: mockHandleSubmit,
-    isHistoryLoading: false,
-    isRequesting: false,
-    messages: [],
-    submitApproval: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
-  })),
+  useAssistantAgent: mockUseAssistantAgent,
 }));
 
 vi.mock('@/pages/assistant/hooks/use-assistant-sessions', () => ({
@@ -78,7 +81,7 @@ vi.mock('@/store/useAssistantUiStore', () => ({
 vi.mock('@slab/api', () => ({
   default: {
     useMutation: vi.fn<() => unknown>(() => ({
-      isPending: false,
+      isPending: mockMutationState.isPending,
       mutateAsync: vi.fn<() => Promise<Record<string, never>>>().mockResolvedValue({}),
     })),
     useQuery: vi.fn<() => unknown>(() => ({
@@ -103,7 +106,7 @@ vi.mock('@slab/api', () => ({
           status: 'ready',
         },
       ],
-      isLoading: false,
+      isLoading: mockCatalogState.isLoading,
       refetch: vi.fn<() => Promise<{ data: unknown[] }>>().mockResolvedValue({ data: [] }),
     })),
   },
@@ -113,25 +116,101 @@ vi.mock('@slab/api/models', () => ({
   toCatalogModelList: vi.fn<(data: unknown) => unknown[]>((data) => (Array.isArray(data) ? data : [])),
 }));
 
+function createMockMessage(overrides: Partial<AssistantMessageRecord>): AssistantMessageRecord {
+  return {
+    id: 'msg-1',
+    message: {
+      content: '',
+      role: 'user',
+    },
+    status: 'success',
+    ...overrides,
+  };
+}
+
+type MockAssistantAgentOptions = {
+  echoOnSubmit?: boolean;
+  isRequesting?: boolean;
+  messages?: AssistantMessageRecord[];
+};
+
+function useMockAssistantAgent({
+  echoOnSubmit = false,
+  isRequesting = false,
+  messages = [],
+}: MockAssistantAgentOptions = {}) {
+  const [visibleMessages, setVisibleMessages] = useState(messages);
+
+  return {
+    abort: vi.fn<() => void>(),
+    activeConversation: 'session-1',
+    eventsConnected: true,
+    handleSubmit: async (value: string) => {
+      mockHandleSubmit(value);
+      if (echoOnSubmit) {
+        setVisibleMessages((current) => [
+          ...current,
+          createMockMessage({
+            id: 'echo-user-message',
+            message: {
+              content: value,
+              role: 'user',
+            },
+          }),
+        ]);
+      }
+    },
+    isHistoryLoading: false,
+    isRequesting,
+    messages: visibleMessages,
+    submitApproval: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+  };
+}
+
+function installAssistantAgentMock(options: MockAssistantAgentOptions = {}) {
+  mockUseAssistantAgent.mockImplementation(function useAssistantAgentMock() {
+    return useMockAssistantAgent(options);
+  });
+}
+
 describe('assistant core flow e2e', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCatalogState.isLoading = false;
+    mockMutationState.isPending = false;
+    installAssistantAgentMock();
   });
 
-  it('submits a prompt and persists the first useful session label', async () => {
+  it('renders the submitted user message path before slow session label work completes', async () => {
+    let labelDone = false;
+    let resolveLabel!: (value: boolean) => void;
+
+    mockUpdateSessionLabel.mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveLabel = (value) => {
+            labelDone = true;
+            resolve(value);
+          };
+        }),
+    );
+    installAssistantAgentMock({ echoOnSubmit: true });
+
     await renderDesktopScene(<AssistantPage />, { route: '/' });
 
     const composer = page.getByPlaceholder('Type a message or drop files...');
     await composer.fill('Investigate failing desktop tests');
     await page.getByRole('button', { name: 'Send message' }).click();
 
-    await vi.waitFor(() => {
-      expect(mockUpdateSessionLabel).toHaveBeenCalledWith(
-        'session-1',
-        'Investigate failing desktop tests',
-      );
-      expect(mockHandleSubmit).toHaveBeenCalledWith('Investigate failing desktop tests');
-    });
+    await expect.element(page.getByText('Investigate failing desktop tests')).toBeVisible();
+    expect(labelDone).toBe(false);
+    expect(mockHandleSubmit).toHaveBeenCalledWith('Investigate failing desktop tests');
+    expect(mockUpdateSessionLabel).toHaveBeenCalledWith(
+      'session-1',
+      'Investigate failing desktop tests',
+    );
+
+    resolveLabel(true);
   });
 
   it('inserts the web search slash command from the helper control', async () => {
@@ -141,5 +220,93 @@ describe('assistant core flow e2e', () => {
     await page.getByRole('button', { name: 'Web search' }).click();
 
     await expect.element(composer).toHaveValue('/web_search ');
+  });
+
+  it('shows the model loading system bubble after the user message', async () => {
+    mockMutationState.isPending = true;
+    installAssistantAgentMock({
+      messages: [
+        createMockMessage({
+          id: 'user-before-model-load',
+          message: {
+            content: 'Use the local model for this answer',
+            role: 'user',
+          },
+        }),
+      ],
+    });
+
+    await renderDesktopScene(<AssistantPage />, { route: '/' });
+
+    await expect.element(page.getByText('Use the local model for this answer')).toBeVisible();
+    await expect.element(page.getByText('Loading model...')).toBeVisible();
+
+    const sceneText = document.querySelector('[data-testid="desktop-browser-scene"]')?.textContent ?? '';
+    expect(sceneText.indexOf('Use the local model for this answer')).toBeLessThan(
+      sceneText.indexOf('Loading model...'),
+    );
+  });
+
+  it('renders thinking content in the thought chain without duplicating it in the answer body', async () => {
+    installAssistantAgentMock({
+      messages: [
+        createMockMessage({
+          id: 'assistant-with-thinking',
+          message: {
+            content: '<think>plan-only-thinking</think>\n\nFinal answer body',
+            role: 'assistant',
+          },
+          status: 'success',
+        }),
+      ],
+    });
+
+    await renderDesktopScene(<AssistantPage />, { route: '/' });
+
+    await expect.element(page.getByText('Final answer body')).toBeVisible();
+    await expect.element(page.getByText('plan-only-thinking')).toBeVisible();
+
+    const sceneText = document.querySelector('[data-testid="desktop-browser-scene"]')?.textContent ?? '';
+    expect(sceneText.match(/plan-only-thinking/g)).toHaveLength(1);
+  });
+
+  it('keeps long tool JSON inside the assistant scene width', async () => {
+    const toolJson =
+      '{"entries":[{"name":"ipc","is_dir":true,"size_bytes":0,"modified":1775143656},{"name":"runtime","is_dir":true,"size_bytes":0,"modified":1775833862},{"name":"slab-agent-session-1fe184a9-3485-4f1b-b914-bd934d763f60-2026-6-6.log","is_dir":false,"size_bytes":1369404,"modified":1780744212},{"name":"slab-app.log","is_dir":false,"size_bytes":23786,"modified":1780745608},{"name":"slab-server.log","is_dir":false,"size_bytes":919059921,"modified":1780745609}]}';
+
+    installAssistantAgentMock({
+      messages: [
+        createMockMessage({
+          id: 'tool-json-message',
+          message: {
+            content: 'Tool result received.',
+            role: 'assistant',
+            thoughts: [
+              {
+                callId: 'call-1',
+                detail: toolJson,
+                id: 'call-1',
+                status: 'success',
+                title: 'tool_call',
+                toolName: 'list_files',
+              },
+            ],
+          },
+          status: 'success',
+        }),
+      ],
+    });
+
+    await renderDesktopScene(<AssistantPage />, { route: '/' });
+
+    await expect.element(page.getByText('slab-server.log')).toBeVisible();
+
+    await vi.waitFor(() => {
+      const scene = document.querySelector('[data-testid="desktop-browser-scene"]') as HTMLElement | null;
+      if (!scene) {
+        throw new Error('Desktop browser scene is missing');
+      }
+      expect(scene.scrollWidth).toBeLessThanOrEqual(scene.clientWidth + 1);
+    });
   });
 });
