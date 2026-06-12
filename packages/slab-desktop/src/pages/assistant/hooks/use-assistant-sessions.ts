@@ -91,7 +91,7 @@ export function useAssistantSessions() {
       } catch (error) {
         if (!options?.quiet) {
           toast.error(t("pages.assistant.toast.failedToCreateSession"), {
-            description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError")),
+            description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError"), t),
           })
         }
 
@@ -111,7 +111,7 @@ export function useAssistantSessions() {
         })
       } catch (error) {
         toast.error(t("pages.assistant.toast.failedToDeleteSession"), {
-          description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError")),
+          description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError"), t),
         })
         return false
       }
@@ -166,7 +166,7 @@ export function useAssistantSessions() {
         return true
       } catch (error) {
         toast.error(t("pages.assistant.toast.failedToUpdateSession"), {
-          description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError")),
+          description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError"), t),
         })
         return false
       }

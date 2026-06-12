@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use slab_types::I18nPayload;
 use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
@@ -72,6 +73,8 @@ pub struct TaskResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub progress: Option<TaskProgressResponse>,
     pub error_msg: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub i18n: Option<I18nPayload>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -82,6 +85,8 @@ pub struct TaskProgressResponse {
     pub label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub i18n: Option<I18nPayload>,
     pub current: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total: Option<u64>,
@@ -141,6 +146,7 @@ impl From<TaskView> for TaskResponse {
             status: view.status.into(),
             progress: view.progress.map(Into::into),
             error_msg: view.error_msg,
+            i18n: view.i18n,
             created_at: view.created_at,
             updated_at: view.updated_at,
         }
@@ -152,6 +158,7 @@ impl From<TaskProgress> for TaskProgressResponse {
         Self {
             label: progress.label,
             message: progress.message,
+            i18n: progress.i18n,
             current: progress.current,
             total: progress.total,
             unit: progress.unit,

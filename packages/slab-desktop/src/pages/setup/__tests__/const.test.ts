@@ -29,6 +29,7 @@ describe('setup progress helpers', () => {
       } as TaskProgress),
     ).toEqual({
       label: '  Downloading runtime payloads  ',
+      message: null,
       current: 25,
       total: 50,
       step: 2,

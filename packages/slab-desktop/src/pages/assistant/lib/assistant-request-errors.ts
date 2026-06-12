@@ -1,4 +1,5 @@
 import type { SSEFields, XModelResponse } from '@ant-design/x-sdk'
+import { translateServerField, type ServerI18nPayload } from '@slab/i18n'
 
 import { getErrorDescription } from '@/lib/error-description'
 
@@ -12,12 +13,15 @@ import {
   type AssistantUiMessage,
 } from './assistant-types'
 
+type Translate = (key: string, options?: Record<string, unknown>) => string
+
 export class AssistantTransportError extends Error {
   readonly transport_status: number
   readonly code?: AssistantApiError['code']
   readonly param?: AssistantApiError['param']
   readonly request_id?: string | null
   readonly error_type?: AssistantRequestErrorType
+  readonly i18n?: ServerI18nPayload
 
   constructor(options: {
     message: string
@@ -26,6 +30,7 @@ export class AssistantTransportError extends Error {
     param?: AssistantApiError['param']
     request_id?: string | null
     error_type?: AssistantRequestErrorType
+    i18n?: ServerI18nPayload
   }) {
     super(options.message)
     this.name = 'AssistantTransportError'
@@ -34,6 +39,7 @@ export class AssistantTransportError extends Error {
     this.param = options.param
     this.request_id = options.request_id
     this.error_type = options.error_type
+    this.i18n = options.i18n
   }
 }
 
@@ -72,16 +78,29 @@ export const isAssistantRequestErrorInfo = (value: unknown): value is AssistantR
 export const isAssistantTransportError = (value: unknown): value is AssistantTransportError =>
   value instanceof AssistantTransportError
 
-export const getAssistantRequestErrorMessage = (value: unknown): string | undefined => {
+export const getAssistantRequestErrorMessage = (
+  value: unknown,
+  t?: Translate
+): string | undefined => {
   if (isAssistantTransportError(value)) {
-    return value.message
+    return t ? translateServerField(value.i18n, 'message', value.message, t) : value.message
   }
 
-  return isAssistantRequestErrorInfo(value) ? value.error.message : undefined
+  if (!isAssistantRequestErrorInfo(value)) {
+    return undefined
+  }
+
+  return t
+    ? translateServerField(value.error.i18n as ServerI18nPayload, 'message', value.error.message, t)
+    : value.error.message
 }
 
-export const getAssistantErrorDescription = (value: unknown, fallback: string): string => {
-  const requestErrorMessage = getAssistantRequestErrorMessage(value)
+export const getAssistantErrorDescription = (
+  value: unknown,
+  fallback: string,
+  t?: Translate
+): string => {
+  const requestErrorMessage = getAssistantRequestErrorMessage(value, t)
   if (requestErrorMessage?.trim()) {
     return requestErrorMessage
   }
@@ -142,6 +161,7 @@ const buildAssistantTransportError = async (response: Response): Promise<Assista
         param: payload.error.param ?? undefined,
         request_id,
         error_type: payload.error.type,
+        i18n: payload.error.i18n as ServerI18nPayload,
       })
     }
   }

@@ -5,7 +5,7 @@ import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
 import { Badge } from '@slab/components/badge';
 import { Button } from '@slab/components/button';
 import { StageEmptyState, StatusPill } from '@slab/components/workspace';
-import { useTranslation } from '@slab/i18n';
+import { translateServerField, useTranslation } from '@slab/i18n';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import api, { getErrorMessage } from '@slab/api';
@@ -47,6 +47,12 @@ export default function SettingsPage() {
     () => sections.find((section) => section.id === activeSectionId) ?? sections[0] ?? null,
     [activeSectionId, sections],
   );
+  const activeSectionTitle = activeSection
+    ? translateServerField(activeSection.i18n, 'title', activeSection.title, t)
+    : '';
+  const activeSectionDescription = activeSection
+    ? translateServerField(activeSection.i18n, 'description_md', activeSection.description_md, t)
+    : '';
 
   useEffect(() => {
     if (sections.length === 0) {
@@ -160,7 +166,7 @@ export default function SettingsPage() {
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-center gap-3">
                       <h1 className="text-3xl font-bold tracking-[-0.045em] text-foreground">
-                        {activeSection.title}
+                        {activeSectionTitle}
                       </h1>
                       <Badge
                         variant="chip"
@@ -171,9 +177,9 @@ export default function SettingsPage() {
                         })}
                       </Badge>
                     </div>
-                    {activeSection.description_md ? (
+                    {activeSectionDescription ? (
                       <p className="max-w-3xl text-base leading-8 text-muted-foreground">
-                        {activeSection.description_md}
+                        {activeSectionDescription}
                       </p>
                     ) : null}
                     <p className="max-w-3xl truncate font-mono text-[11px] text-muted-foreground/80">
@@ -206,53 +212,67 @@ export default function SettingsPage() {
               </header>
 
               <div className="space-y-6 pb-8">
-                {activeSection.subsections.map((subsection) => (
-                  <section
-                    key={subsection.id}
-                    id={subsectionAnchorId(activeSection.id, subsection.id)}
-                    className="scroll-mt-8 rounded-[20px] border border-border/40 bg-[var(--surface-soft)]/70 p-6 md:p-8"
-                  >
-                    {shouldCollapseSubsectionHeading(activeSection, subsection) ? (
-                      subsection.description_md ? (
-                        <p className="text-sm leading-7 text-muted-foreground">
-                          {subsection.description_md}
-                        </p>
-                      ) : null
-                    ) : (
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-3">
-                          <h2 className="text-[18px] font-bold tracking-[-0.03em] text-foreground">
-                            {subsection.title}
-                          </h2>
-                        </div>
-                        {subsection.description_md ? (
+                {activeSection.subsections.map((subsection) => {
+                  const subsectionTitle = translateServerField(
+                    subsection.i18n,
+                    'title',
+                    subsection.title,
+                    t,
+                  );
+                  const subsectionDescription = translateServerField(
+                    subsection.i18n,
+                    'description_md',
+                    subsection.description_md,
+                    t,
+                  );
+                  return (
+                    <section
+                      key={subsection.id}
+                      id={subsectionAnchorId(activeSection.id, subsection.id)}
+                      className="scroll-mt-8 rounded-[20px] border border-border/40 bg-[var(--surface-soft)]/70 p-6 md:p-8"
+                    >
+                      {shouldCollapseSubsectionHeading(activeSection, subsection) ? (
+                        subsectionDescription ? (
                           <p className="text-sm leading-7 text-muted-foreground">
-                            {subsection.description_md}
+                            {subsectionDescription}
                           </p>
-                        ) : null}
-                      </div>
-                    )}
-
-                    <div className="mt-6 grid gap-4 xl:grid-cols-2">
-                      {subsection.properties.map((property) => (
-                        <div
-                          key={property.pmid}
-                          className={shouldPropertySpanFullWidth(property) ? 'xl:col-span-2' : ''}
-                        >
-                          <SettingFieldCard
-                            property={property}
-                            draftValue={drafts[property.pmid]}
-                            errorState={fieldErrors[property.pmid]}
-                            fieldStatus={fieldStatuses[property.pmid]}
-                            isResetting={resettingPmid === property.pmid}
-                            onChange={setDraftValue}
-                            onReset={resetSetting}
-                          />
+                        ) : null
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center gap-3">
+                            <h2 className="text-[18px] font-bold tracking-[-0.03em] text-foreground">
+                              {subsectionTitle}
+                            </h2>
+                          </div>
+                          {subsectionDescription ? (
+                            <p className="text-sm leading-7 text-muted-foreground">
+                              {subsectionDescription}
+                            </p>
+                          ) : null}
                         </div>
-                      ))}
-                    </div>
-                  </section>
-                ))}
+                      )}
+
+                      <div className="mt-6 grid gap-4 xl:grid-cols-2">
+                        {subsection.properties.map((property) => (
+                          <div
+                            key={property.pmid}
+                            className={shouldPropertySpanFullWidth(property) ? 'xl:col-span-2' : ''}
+                          >
+                            <SettingFieldCard
+                              property={property}
+                              draftValue={drafts[property.pmid]}
+                              errorState={fieldErrors[property.pmid]}
+                              fieldStatus={fieldStatuses[property.pmid]}
+                              isResetting={resettingPmid === property.pmid}
+                              onChange={setDraftValue}
+                              onReset={resetSetting}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  );
+                })}
               </div>
             </>
           )}

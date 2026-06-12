@@ -4,6 +4,9 @@ import { initReactI18next } from 'react-i18next';
 import { enUS } from './locales/en-US';
 import { zhCN } from './locales/zh-CN';
 
+export { translateServerField } from './locales/server';
+export type { ServerI18nKey, ServerI18nMessageRef, ServerI18nPayload } from './locales/server';
+
 export const SUPPORTED_LANGUAGES = ['en-US', 'zh-CN'] as const;
 export const APP_LANGUAGE_PREFERENCES = ['auto', ...SUPPORTED_LANGUAGES] as const;
 export const APP_LANGUAGE_STORAGE_KEY = 'slab.ui.language';

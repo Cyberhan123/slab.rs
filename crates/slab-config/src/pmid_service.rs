@@ -12,6 +12,7 @@ use crate::{
     websearch_providers_json_schema,
 };
 use serde_json::{Value, json};
+use slab_types::{I18nMessageRef, I18nPayload, ServerI18nKey};
 use tracing::warn;
 
 use crate::descriptor::setting_value;
@@ -219,6 +220,7 @@ async fn build_document_view(
             build_property_view_from_documents(pmid.as_str(), &current, &default_document)?;
         push_property(&mut sections, property)?;
     }
+    attach_settings_i18n(&mut sections);
 
     Ok(SettingsDocumentView {
         schema_version: current.schema_version,
@@ -250,6 +252,7 @@ fn build_property_view_from_documents(
         pmid: pmid.to_owned(),
         label: property_label(pmid),
         description_md: property_description(pmid),
+        i18n: property_i18n(pmid),
         editable: true,
         schema: SettingPropertySchema {
             value_type: value_type(pmid, &effective_value, &default_value),
@@ -277,12 +280,14 @@ fn empty_sections() -> Vec<SettingsSectionView> {
             title: "General".to_owned(),
             description_md: "Desktop application preferences shared across the frontend shell."
                 .to_owned(),
+            i18n: None,
             subsections: vec![SettingsSubsectionView {
                 id: "general".to_owned(),
                 title: "General".to_owned(),
                 description_md:
                     "Choose how the desktop app should present shared interface preferences."
                         .to_owned(),
+                i18n: None,
                 properties: Vec::new(),
             }],
         },
@@ -291,12 +296,14 @@ fn empty_sections() -> Vec<SettingsSectionView> {
             title: "Database".to_owned(),
             description_md: "Persistent application data storage and connection settings."
                 .to_owned(),
+            i18n: None,
             subsections: vec![SettingsSubsectionView {
                 id: "general".to_owned(),
                 title: "General".to_owned(),
                 description_md:
                     "Configure the primary database connection used by the desktop app and server."
                         .to_owned(),
+                i18n: None,
                 properties: Vec::new(),
             }],
         },
@@ -306,12 +313,14 @@ fn empty_sections() -> Vec<SettingsSectionView> {
             description_md:
                 "Global logging defaults inherited by runtime workers and server processes."
                     .to_owned(),
+            i18n: None,
             subsections: vec![SettingsSubsectionView {
                 id: "general".to_owned(),
                 title: "General".to_owned(),
                 description_md:
                     "Choose the default log level, output format, and optional log directory."
                         .to_owned(),
+                i18n: None,
                 properties: Vec::new(),
             }],
         },
@@ -320,12 +329,14 @@ fn empty_sections() -> Vec<SettingsSectionView> {
             title: "Telemetry".to_owned(),
             description_md: "OpenTelemetry export, local telemetry files, and GenAI content capture."
                 .to_owned(),
+            i18n: None,
             subsections: vec![SettingsSubsectionView {
                 id: "general".to_owned(),
                 title: "General".to_owned(),
                 description_md:
                     "Configure telemetry enablement, local export, and optional remote OTLP targets."
                         .to_owned(),
+                i18n: None,
                 properties: Vec::new(),
             }],
         },
@@ -333,10 +344,12 @@ fn empty_sections() -> Vec<SettingsSectionView> {
             id: "tools".to_owned(),
             title: "Tools".to_owned(),
             description_md: "External helper binaries managed by the application.".to_owned(),
+            i18n: None,
             subsections: vec![SettingsSubsectionView {
                 id: "ffmpeg".to_owned(),
                 title: "FFmpeg".to_owned(),
                 description_md: "Configure FFmpeg installation and download behavior.".to_owned(),
+                i18n: None,
                 properties: Vec::new(),
             }],
         },
@@ -346,6 +359,7 @@ fn empty_sections() -> Vec<SettingsSectionView> {
             description_md:
                 "Shared inference runtime topology, transport, and backend-specific overrides."
                     .to_owned(),
+            i18n: None,
             subsections: vec![
                 SettingsSubsectionView {
                     id: "general".to_owned(),
@@ -353,6 +367,7 @@ fn empty_sections() -> Vec<SettingsSectionView> {
                     description_md:
                         "Configure shared transport, session state, and fallback capacity limits."
                             .to_owned(),
+                    i18n: None,
                     properties: Vec::new(),
                 },
                 SettingsSubsectionView {
@@ -360,24 +375,28 @@ fn empty_sections() -> Vec<SettingsSectionView> {
                     title: "GGML".to_owned(),
                     description_md: "Family-level defaults shared by GGML worker processes."
                         .to_owned(),
+                    i18n: None,
                     properties: Vec::new(),
                 },
                 SettingsSubsectionView {
                     id: "llama".to_owned(),
                     title: "Llama".to_owned(),
                     description_md: "Overrides specific to the GGML llama worker.".to_owned(),
+                    i18n: None,
                     properties: Vec::new(),
                 },
                 SettingsSubsectionView {
                     id: "whisper".to_owned(),
                     title: "Whisper".to_owned(),
                     description_md: "Overrides specific to the GGML whisper worker.".to_owned(),
+                    i18n: None,
                     properties: Vec::new(),
                 },
                 SettingsSubsectionView {
                     id: "diffusion".to_owned(),
                     title: "Diffusion".to_owned(),
                     description_md: "Overrides specific to the GGML diffusion worker.".to_owned(),
+                    i18n: None,
                     properties: Vec::new(),
                 },
                 SettingsSubsectionView {
@@ -385,12 +404,14 @@ fn empty_sections() -> Vec<SettingsSectionView> {
                     title: "Candle".to_owned(),
                     description_md: "Shared configuration for the Candle runtime family."
                         .to_owned(),
+                    i18n: None,
                     properties: Vec::new(),
                 },
                 SettingsSubsectionView {
                     id: "onnx".to_owned(),
                     title: "ONNX".to_owned(),
                     description_md: "Shared configuration for the ONNX runtime family.".to_owned(),
+                    i18n: None,
                     properties: Vec::new(),
                 },
             ],
@@ -399,11 +420,13 @@ fn empty_sections() -> Vec<SettingsSectionView> {
             id: "providers".to_owned(),
             title: "Providers".to_owned(),
             description_md: "Cloud and remote model provider definitions.".to_owned(),
+            i18n: None,
             subsections: vec![SettingsSubsectionView {
                 id: "registry".to_owned(),
                 title: "Registry".to_owned(),
                 description_md: "Manage provider endpoints, credentials, and request defaults."
                     .to_owned(),
+                i18n: None,
                 properties: Vec::new(),
             }],
         },
@@ -411,12 +434,14 @@ fn empty_sections() -> Vec<SettingsSectionView> {
             id: "models".to_owned(),
             title: "Models".to_owned(),
             description_md: "Model cache locations and automatic unload behavior.".to_owned(),
+            i18n: None,
             subsections: vec![
                 SettingsSubsectionView {
                     id: "general".to_owned(),
                     title: "General".to_owned(),
                     description_md: "Configure model cache and config directory locations."
                         .to_owned(),
+                    i18n: None,
                     properties: Vec::new(),
                 },
                 SettingsSubsectionView {
@@ -424,6 +449,7 @@ fn empty_sections() -> Vec<SettingsSectionView> {
                     title: "Auto Unload".to_owned(),
                     description_md: "Unload idle models automatically to reclaim memory."
                         .to_owned(),
+                    i18n: None,
                     properties: Vec::new(),
                 },
             ],
@@ -432,11 +458,13 @@ fn empty_sections() -> Vec<SettingsSectionView> {
             id: "plugin".to_owned(),
             title: "Plugins".to_owned(),
             description_md: "Runtime plugin installation and registration settings.".to_owned(),
+            i18n: None,
             subsections: vec![SettingsSubsectionView {
                 id: "general".to_owned(),
                 title: "General".to_owned(),
                 description_md: "Choose where installed plugin packages are loaded from."
                     .to_owned(),
+                i18n: None,
                 properties: Vec::new(),
             }],
         },
@@ -445,11 +473,13 @@ fn empty_sections() -> Vec<SettingsSectionView> {
             title: "Agent".to_owned(),
             description_md: "Agent tool configuration used by built-in deterministic tools."
                 .to_owned(),
+            i18n: None,
             subsections: vec![
                 SettingsSubsectionView {
                     id: "general".to_owned(),
                     title: "General".to_owned(),
                     description_md: "Agent diagnostics and runtime behavior.".to_owned(),
+                    i18n: None,
                     properties: Vec::new(),
                 },
                 SettingsSubsectionView {
@@ -457,6 +487,7 @@ fn empty_sections() -> Vec<SettingsSectionView> {
                     title: "MCP".to_owned(),
                     description_md: "Control exposure of configured MCP servers as agent tools."
                         .to_owned(),
+                    i18n: None,
                     properties: Vec::new(),
                 },
                 SettingsSubsectionView {
@@ -465,6 +496,7 @@ fn empty_sections() -> Vec<SettingsSectionView> {
                     description_md:
                         "Configure the agent web search provider defaults and credentials."
                             .to_owned(),
+                    i18n: None,
                     properties: Vec::new(),
                 },
                 SettingsSubsectionView {
@@ -473,6 +505,7 @@ fn empty_sections() -> Vec<SettingsSectionView> {
                     description_md:
                         "Control external plugin and script hooks for agent lifecycle events."
                             .to_owned(),
+                    i18n: None,
                     properties: Vec::new(),
                 },
                 SettingsSubsectionView {
@@ -480,6 +513,7 @@ fn empty_sections() -> Vec<SettingsSectionView> {
                     title: "Memories".to_owned(),
                     description_md: "Configure the built-in agent memory pipeline and workspace."
                         .to_owned(),
+                    i18n: None,
                     properties: Vec::new(),
                 },
             ],
@@ -489,6 +523,7 @@ fn empty_sections() -> Vec<SettingsSectionView> {
             title: "Server".to_owned(),
             description_md: "HTTP gateway configuration, access control, and API tooling."
                 .to_owned(),
+            i18n: None,
             subsections: vec![
                 SettingsSubsectionView {
                     id: "general".to_owned(),
@@ -496,12 +531,14 @@ fn empty_sections() -> Vec<SettingsSectionView> {
                     description_md:
                         "Configure the gateway bind address and server-side logging behavior."
                             .to_owned(),
+                    i18n: None,
                     properties: Vec::new(),
                 },
                 SettingsSubsectionView {
                     id: "cors".to_owned(),
                     title: "CORS".to_owned(),
                     description_md: "Allowed browser origins for the HTTP API.".to_owned(),
+                    i18n: None,
                     properties: Vec::new(),
                 },
                 SettingsSubsectionView {
@@ -509,6 +546,7 @@ fn empty_sections() -> Vec<SettingsSectionView> {
                     title: "Admin".to_owned(),
                     description_md: "Protect management routes with an optional bearer token."
                         .to_owned(),
+                    i18n: None,
                     properties: Vec::new(),
                 },
                 SettingsSubsectionView {
@@ -516,11 +554,206 @@ fn empty_sections() -> Vec<SettingsSectionView> {
                     title: "Swagger".to_owned(),
                     description_md: "Enable or disable the OpenAPI and Swagger UI endpoints."
                         .to_owned(),
+                    i18n: None,
                     properties: Vec::new(),
                 },
             ],
         },
     ]
+}
+
+fn attach_settings_i18n(sections: &mut [SettingsSectionView]) {
+    for section in sections {
+        section.i18n = section_i18n(&section.id);
+        for subsection in &mut section.subsections {
+            subsection.i18n = subsection_i18n(&section.id, &subsection.id);
+        }
+    }
+}
+
+fn section_i18n(section_id: &str) -> Option<I18nPayload> {
+    match section_id {
+        "general" => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSectionGeneralTitle),
+            Some(ServerI18nKey::SettingsSectionGeneralDescription),
+        )),
+        "database" => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSectionDatabaseTitle),
+            Some(ServerI18nKey::SettingsSectionDatabaseDescription),
+        )),
+        "logging" => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSectionLoggingTitle),
+            Some(ServerI18nKey::SettingsSectionLoggingDescription),
+        )),
+        "telemetry" => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSectionTelemetryTitle),
+            Some(ServerI18nKey::SettingsSectionTelemetryDescription),
+        )),
+        "tools" => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSectionToolsTitle),
+            Some(ServerI18nKey::SettingsSectionToolsDescription),
+        )),
+        "runtime" => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSectionRuntimeTitle),
+            Some(ServerI18nKey::SettingsSectionRuntimeDescription),
+        )),
+        "providers" => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSectionProvidersTitle),
+            Some(ServerI18nKey::SettingsSectionProvidersDescription),
+        )),
+        "models" => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSectionModelsTitle),
+            Some(ServerI18nKey::SettingsSectionModelsDescription),
+        )),
+        "plugin" => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSectionPluginTitle),
+            Some(ServerI18nKey::SettingsSectionPluginDescription),
+        )),
+        "agent" => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSectionAgentTitle),
+            Some(ServerI18nKey::SettingsSectionAgentDescription),
+        )),
+        "server" => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSectionServerTitle),
+            Some(ServerI18nKey::SettingsSectionServerDescription),
+        )),
+        _ => None,
+    }
+}
+
+fn subsection_i18n(section_id: &str, subsection_id: &str) -> Option<I18nPayload> {
+    match (section_id, subsection_id) {
+        ("general", "general") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionGeneralGeneralTitle),
+            Some(ServerI18nKey::SettingsSubsectionGeneralGeneralDescription),
+        )),
+        ("database", "general") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionGeneralGeneralTitle),
+            Some(ServerI18nKey::SettingsSubsectionDatabaseGeneralDescription),
+        )),
+        ("logging", "general") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionGeneralGeneralTitle),
+            Some(ServerI18nKey::SettingsSubsectionLoggingGeneralDescription),
+        )),
+        ("telemetry", "general") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionGeneralGeneralTitle),
+            Some(ServerI18nKey::SettingsSubsectionTelemetryGeneralDescription),
+        )),
+        ("tools", "ffmpeg") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionToolsFfmpegTitle),
+            Some(ServerI18nKey::SettingsSubsectionToolsFfmpegDescription),
+        )),
+        ("runtime", "general") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionGeneralGeneralTitle),
+            Some(ServerI18nKey::SettingsSubsectionRuntimeGeneralDescription),
+        )),
+        ("runtime", "ggml") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionRuntimeGgmlTitle),
+            Some(ServerI18nKey::SettingsSubsectionRuntimeGgmlDescription),
+        )),
+        ("runtime", "llama") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionRuntimeLlamaTitle),
+            Some(ServerI18nKey::SettingsSubsectionRuntimeLlamaDescription),
+        )),
+        ("runtime", "whisper") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionRuntimeWhisperTitle),
+            Some(ServerI18nKey::SettingsSubsectionRuntimeWhisperDescription),
+        )),
+        ("runtime", "diffusion") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionRuntimeDiffusionTitle),
+            Some(ServerI18nKey::SettingsSubsectionRuntimeDiffusionDescription),
+        )),
+        ("runtime", "candle") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionRuntimeCandleTitle),
+            Some(ServerI18nKey::SettingsSubsectionRuntimeCandleDescription),
+        )),
+        ("runtime", "onnx") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionRuntimeOnnxTitle),
+            Some(ServerI18nKey::SettingsSubsectionRuntimeOnnxDescription),
+        )),
+        ("providers", "registry") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionProvidersRegistryTitle),
+            Some(ServerI18nKey::SettingsSubsectionProvidersRegistryDescription),
+        )),
+        ("models", "general") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionGeneralGeneralTitle),
+            Some(ServerI18nKey::SettingsSubsectionModelsGeneralDescription),
+        )),
+        ("models", "auto_unload") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionModelsAutoUnloadTitle),
+            Some(ServerI18nKey::SettingsSubsectionModelsAutoUnloadDescription),
+        )),
+        ("plugin", "general") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionGeneralGeneralTitle),
+            Some(ServerI18nKey::SettingsSubsectionPluginGeneralDescription),
+        )),
+        ("agent", "general") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionGeneralGeneralTitle),
+            Some(ServerI18nKey::SettingsSubsectionAgentGeneralDescription),
+        )),
+        ("agent", "mcp") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionAgentMcpTitle),
+            Some(ServerI18nKey::SettingsSubsectionAgentMcpDescription),
+        )),
+        ("agent", "websearch") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionAgentWebsearchTitle),
+            Some(ServerI18nKey::SettingsSubsectionAgentWebsearchDescription),
+        )),
+        ("agent", "hooks") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionAgentHooksTitle),
+            Some(ServerI18nKey::SettingsSubsectionAgentHooksDescription),
+        )),
+        ("agent", "memories") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionAgentMemoriesTitle),
+            Some(ServerI18nKey::SettingsSubsectionAgentMemoriesDescription),
+        )),
+        ("server", "general") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionGeneralGeneralTitle),
+            Some(ServerI18nKey::SettingsSubsectionServerGeneralDescription),
+        )),
+        ("server", "cors") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionServerCorsTitle),
+            Some(ServerI18nKey::SettingsSubsectionServerCorsDescription),
+        )),
+        ("server", "admin") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionServerAdminTitle),
+            Some(ServerI18nKey::SettingsSubsectionServerAdminDescription),
+        )),
+        ("server", "swagger") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionServerSwaggerTitle),
+            Some(ServerI18nKey::SettingsSubsectionServerSwaggerDescription),
+        )),
+        _ => None,
+    }
+}
+
+fn property_i18n(path: &str) -> Option<I18nPayload> {
+    let label = property_label_key(path);
+    let description = property_description_key(path);
+    (label.is_some() || description.is_some()).then(|| {
+        let mut payload = I18nPayload::new();
+        if let Some(key) = label {
+            payload.insert("label", I18nMessageRef::new(key));
+        }
+        if let Some(key) = description {
+            payload.insert("description_md", I18nMessageRef::new(key));
+        }
+        payload
+    })
+}
+
+fn metadata_i18n(
+    title_or_label: Option<ServerI18nKey>,
+    description: Option<ServerI18nKey>,
+) -> I18nPayload {
+    let mut payload = I18nPayload::new();
+    if let Some(key) = title_or_label {
+        payload.insert("title", I18nMessageRef::new(key));
+    }
+    if let Some(key) = description {
+        payload.insert("description_md", I18nMessageRef::new(key));
+    }
+    payload
 }
 
 fn push_property(
@@ -894,6 +1127,242 @@ fn property_description(path: &str) -> String {
         _ if path.ends_with(".artifact") => "Optional artifact or asset selector override.".to_owned(),
         _ if path.ends_with(".context_length") => "Override the llama context window length in tokens.".to_owned(),
         _ => String::new(),
+    }
+}
+
+fn property_label_key(path: &str) -> Option<ServerI18nKey> {
+    match path {
+        "general.language" => Some(ServerI18nKey::SettingsPropertyLabelInterfaceLanguage),
+        "database.url" => Some(ServerI18nKey::SettingsPropertyLabelDatabaseUrl),
+        "logging.level" => Some(ServerI18nKey::SettingsPropertyLabelLogLevel),
+        "logging.json" => Some(ServerI18nKey::SettingsPropertyLabelJsonLogs),
+        "logging.path" => Some(ServerI18nKey::SettingsPropertyLabelLogDirectory),
+        "telemetry.enabled" => Some(ServerI18nKey::SettingsPropertyLabelTelemetry),
+        "telemetry.environment" => Some(ServerI18nKey::SettingsPropertyLabelEnvironment),
+        "telemetry.service_name" => Some(ServerI18nKey::SettingsPropertyLabelServiceName),
+        "telemetry.service_version" => Some(ServerI18nKey::SettingsPropertyLabelServiceVersion),
+        "telemetry.metrics_exporter" => Some(ServerI18nKey::SettingsPropertyLabelMetricsExporter),
+        "telemetry.capture_content" => {
+            Some(ServerI18nKey::SettingsPropertyLabelCaptureGenaiContent)
+        }
+        "telemetry.span_attributes" => Some(ServerI18nKey::SettingsPropertyLabelSpanAttributes),
+        "telemetry.tracestate" => Some(ServerI18nKey::SettingsPropertyLabelTraceState),
+        "runtime.mode" => Some(ServerI18nKey::SettingsPropertyLabelRuntimeMode),
+        "runtime.transport" => Some(ServerI18nKey::SettingsPropertyLabelTransport),
+        "runtime.sessions.state_dir" => {
+            Some(ServerI18nKey::SettingsPropertyLabelSessionStateDirectory)
+        }
+        "agent.debug" => Some(ServerI18nKey::SettingsPropertyLabelAgentDebugTrace),
+        "agent.hooks.enabled" => Some(ServerI18nKey::SettingsPropertyLabelExternalHooks),
+        "agent.hooks.scripts" => Some(ServerI18nKey::SettingsPropertyLabelLegacyHookScripts),
+        "agent.memories.enabled" => Some(ServerI18nKey::SettingsPropertyLabelAgentMemories),
+        "agent.memories.memory_root" => Some(ServerI18nKey::SettingsPropertyLabelMemoryRoot),
+        "agent.memories.phase1_scan_limit" => {
+            Some(ServerI18nKey::SettingsPropertyLabelPhase1ScanLimit)
+        }
+        "agent.memories.phase1_concurrency" => {
+            Some(ServerI18nKey::SettingsPropertyLabelPhase1Concurrency)
+        }
+        "agent.memories.phase1_idle_seconds" => {
+            Some(ServerI18nKey::SettingsPropertyLabelPhase1IdleSeconds)
+        }
+        "agent.memories.phase1_lease_seconds" => {
+            Some(ServerI18nKey::SettingsPropertyLabelPhase1LeaseSeconds)
+        }
+        "agent.memories.phase1_retry_seconds" => {
+            Some(ServerI18nKey::SettingsPropertyLabelPhase1RetrySeconds)
+        }
+        "agent.memories.phase1_max_age_days" => {
+            Some(ServerI18nKey::SettingsPropertyLabelPhase1MaxAgeDays)
+        }
+        "agent.memories.phase2_limit" => Some(ServerI18nKey::SettingsPropertyLabelPhase2Limit),
+        "agent.memories.phase2_lease_seconds" => {
+            Some(ServerI18nKey::SettingsPropertyLabelPhase2LeaseSeconds)
+        }
+        "agent.memories.max_unused_days" => Some(ServerI18nKey::SettingsPropertyLabelMaxUnusedDays),
+        "agent.memories.extension_retention_days" => {
+            Some(ServerI18nKey::SettingsPropertyLabelExtensionRetentionDays)
+        }
+        "agent.tools.mcp.enabled" => Some(ServerI18nKey::SettingsPropertyLabelMcpTools),
+        "agent.tools.websearch.default_provider" => {
+            Some(ServerI18nKey::SettingsPropertyLabelDefaultProvider)
+        }
+        "agent.tools.websearch.providers" => {
+            Some(ServerI18nKey::SettingsPropertyLabelWebSearchProviders)
+        }
+        _ if path.ends_with(".flash_attn") => {
+            Some(ServerI18nKey::SettingsPropertyLabelFlashAttention)
+        }
+        "providers.registry" => Some(ServerI18nKey::SettingsPropertyLabelProviderRegistry),
+        "models.cache_dir" => Some(ServerI18nKey::SettingsPropertyLabelModelCacheDirectory),
+        "models.config_dir" => Some(ServerI18nKey::SettingsPropertyLabelModelConfigDirectory),
+        "models.download_source" => Some(ServerI18nKey::SettingsPropertyLabelModelSource),
+        "plugin.install_dir" => Some(ServerI18nKey::SettingsPropertyLabelPluginInstallDirectory),
+        "plugin.js_runtime_transport" => {
+            Some(ServerI18nKey::SettingsPropertyLabelJsRuntimeTransport)
+        }
+        "plugin.python_runtime_transport" => {
+            Some(ServerI18nKey::SettingsPropertyLabelPythonRuntimeTransport)
+        }
+        "server.address" => Some(ServerI18nKey::SettingsPropertyLabelBindAddress),
+        "server.admin.token" => Some(ServerI18nKey::SettingsPropertyLabelAdminToken),
+        "server.cors.allowed_origins" => Some(ServerI18nKey::SettingsPropertyLabelAllowedOrigins),
+        "server.cloud_http_trace" => Some(ServerI18nKey::SettingsPropertyLabelCloudHttpTrace),
+        _ => None,
+    }
+}
+
+fn property_description_key(path: &str) -> Option<ServerI18nKey> {
+    match path {
+        "general.language" => Some(ServerI18nKey::SettingsPropertyDescriptionInterfaceLanguage),
+        "database.url" => Some(ServerI18nKey::SettingsPropertyDescriptionDatabaseUrl),
+        "logging.level" => Some(ServerI18nKey::SettingsPropertyDescriptionLogLevel),
+        "logging.json" => Some(ServerI18nKey::SettingsPropertyDescriptionJsonLogs),
+        "logging.path" => Some(ServerI18nKey::SettingsPropertyDescriptionLogDirectory),
+        "telemetry.enabled" => Some(ServerI18nKey::SettingsPropertyDescriptionTelemetry),
+        "telemetry.environment" => Some(ServerI18nKey::SettingsPropertyDescriptionEnvironment),
+        "telemetry.service_name" => Some(ServerI18nKey::SettingsPropertyDescriptionServiceName),
+        "telemetry.service_version" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionServiceVersion)
+        }
+        "telemetry.metrics_exporter" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionMetricsExporter)
+        }
+        "telemetry.capture_content" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionCaptureGenaiContent)
+        }
+        "telemetry.span_attributes" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionSpanAttributes)
+        }
+        "telemetry.tracestate" => Some(ServerI18nKey::SettingsPropertyDescriptionTraceState),
+        "tools.ffmpeg.enabled" => Some(ServerI18nKey::SettingsPropertyDescriptionFfmpegEnabled),
+        "tools.ffmpeg.auto_download" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionFfmpegAutoDownload)
+        }
+        "tools.ffmpeg.install_dir" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionFfmpegInstallDir)
+        }
+        "agent.debug" => Some(ServerI18nKey::SettingsPropertyDescriptionAgentDebugTrace),
+        "agent.hooks.enabled" => Some(ServerI18nKey::SettingsPropertyDescriptionExternalHooks),
+        "agent.hooks.scripts" => Some(ServerI18nKey::SettingsPropertyDescriptionLegacyHookScripts),
+        "agent.memories.enabled" => Some(ServerI18nKey::SettingsPropertyDescriptionAgentMemories),
+        "agent.memories.model" => Some(ServerI18nKey::SettingsPropertyDescriptionAgentMemoryModel),
+        "agent.memories.memory_root" => Some(ServerI18nKey::SettingsPropertyDescriptionMemoryRoot),
+        "agent.memories.phase1_scan_limit" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionPhase1ScanLimit)
+        }
+        "agent.memories.phase1_concurrency" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionPhase1Concurrency)
+        }
+        "agent.memories.phase1_idle_seconds" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionPhase1IdleSeconds)
+        }
+        "agent.memories.phase1_lease_seconds" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionPhase1LeaseSeconds)
+        }
+        "agent.memories.phase1_retry_seconds" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionPhase1RetrySeconds)
+        }
+        "agent.memories.phase1_max_age_days" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionPhase1MaxAgeDays)
+        }
+        "agent.memories.phase2_limit" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionPhase2Limit)
+        }
+        "agent.memories.phase2_lease_seconds" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionPhase2LeaseSeconds)
+        }
+        "agent.memories.max_unused_days" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionMaxUnusedDays)
+        }
+        "agent.memories.extension_retention_days" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionExtensionRetentionDays)
+        }
+        "agent.tools.mcp.enabled" => Some(ServerI18nKey::SettingsPropertyDescriptionMcpTools),
+        "agent.tools.websearch.default_provider" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionDefaultProvider)
+        }
+        "agent.tools.websearch.providers" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionWebSearchProviders)
+        }
+        "runtime.mode" => Some(ServerI18nKey::SettingsPropertyDescriptionRuntimeMode),
+        "runtime.transport" => Some(ServerI18nKey::SettingsPropertyDescriptionRuntimeTransport),
+        "runtime.sessions.state_dir" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionSessionStateDirectory)
+        }
+        "providers.registry" => Some(ServerI18nKey::SettingsPropertyDescriptionProviderRegistry),
+        "models.cache_dir" => Some(ServerI18nKey::SettingsPropertyDescriptionModelCacheDirectory),
+        "models.config_dir" => Some(ServerI18nKey::SettingsPropertyDescriptionModelConfigDirectory),
+        "models.download_source" => Some(ServerI18nKey::SettingsPropertyDescriptionModelSource),
+        "plugin.install_dir" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionPluginInstallDirectory)
+        }
+        "plugin.js_runtime_transport" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionJsRuntimeTransport)
+        }
+        "plugin.python_runtime_transport" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionPythonRuntimeTransport)
+        }
+        "models.auto_unload.enabled" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionAutoUnloadEnabled)
+        }
+        "models.auto_unload.idle_minutes" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionAutoUnloadIdleMinutes)
+        }
+        "models.auto_unload.min_free_system_memory_bytes" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionAutoUnloadMinFreeSystemMemoryBytes)
+        }
+        "models.auto_unload.min_free_gpu_memory_bytes" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionAutoUnloadMinFreeGpuMemoryBytes)
+        }
+        "models.auto_unload.max_pressure_evictions_per_load" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionAutoUnloadMaxPressureEvictionsPerLoad)
+        }
+        "server.address" => Some(ServerI18nKey::SettingsPropertyDescriptionServerAddress),
+        "server.admin.token" => Some(ServerI18nKey::SettingsPropertyDescriptionAdminToken),
+        "server.cors.allowed_origins" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionAllowedOrigins)
+        }
+        "server.swagger.enabled" => Some(ServerI18nKey::SettingsPropertyDescriptionSwaggerEnabled),
+        "server.cloud_http_trace" => Some(ServerI18nKey::SettingsPropertyDescriptionCloudHttpTrace),
+        _ if path.ends_with(".enabled") => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionGenericEnabled)
+        }
+        _ if path.ends_with(".flash_attn") => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionGenericFlashAttention)
+        }
+        _ if path.ends_with(".install_dir") => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionGenericInstallDirectory)
+        }
+        _ if path.ends_with(".level") => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionGenericLogLevel)
+        }
+        _ if path.ends_with(".json") => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionGenericJsonLogs)
+        }
+        _ if path.ends_with(".path") => Some(ServerI18nKey::SettingsPropertyDescriptionGenericPath),
+        _ if path.ends_with(".queue") => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionGenericQueue)
+        }
+        _ if path.ends_with(".concurrent_requests") => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionGenericConcurrentRequests)
+        }
+        _ if path.ends_with(".address") => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionGenericAddress)
+        }
+        _ if path.ends_with(".ipc.path") => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionGenericIpcPath)
+        }
+        _ if path.ends_with(".version") => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionGenericVersion)
+        }
+        _ if path.ends_with(".artifact") => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionGenericArtifact)
+        }
+        _ if path.ends_with(".context_length") => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionGenericContextLength)
+        }
+        _ => None,
     }
 }
 

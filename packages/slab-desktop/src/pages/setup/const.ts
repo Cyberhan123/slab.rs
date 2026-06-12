@@ -16,6 +16,7 @@ export type OperationAccepted = components['schemas']['OperationAcceptedResponse
 export type TaskRecord = components['schemas']['TaskResponse'];
 export type TaskProgress = components['schemas']['TaskProgressResponse'];
 export { normalizeTaskProgress, type NormalizedTaskProgress };
+type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 export type ProvisionState =
   | 'idle'
@@ -28,8 +29,9 @@ export function getProvisionStageLabel(
   state: ProvisionState,
   task: TaskRecord | null,
   runtimePayloadInstalled = false,
+  t?: Translate,
 ) {
-  const progress = normalizeTaskProgress(task?.progress);
+  const progress = normalizeTaskProgress(task?.progress, t);
   if (progress?.label?.trim()) {
     return progress.label.trim();
   }
@@ -52,8 +54,12 @@ export function getProvisionStageHint(
   state: ProvisionState,
   task: TaskRecord | null,
   runtimePayloadInstalled = false,
+  t?: Translate,
 ) {
-  const progress = normalizeTaskProgress(task?.progress);
+  const progress = normalizeTaskProgress(task?.progress, t);
+  if (progress?.message?.trim()) {
+    return progress.message.trim();
+  }
   if (progress?.step && progress.stepCount) {
     return `Step ${progress.step} of ${progress.stepCount}`;
   }

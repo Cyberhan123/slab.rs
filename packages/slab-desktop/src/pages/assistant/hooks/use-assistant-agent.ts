@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { translateServerField, useTranslation } from '@slab/i18n'
 
 import api, { getErrorMessage } from '@slab/api'
 
@@ -56,6 +57,7 @@ export function useAssistantAgent({
   runtimePresets,
   sessionId,
 }: UseAssistantAgentOptions) {
+  const { t } = useTranslation()
   const locale = useAssistantLocale()
   const resolvedSessionId = sessionId || DEFAULT_CONVERSATION_KEY
   const canLoadSession = !isEphemeralConversationKey(resolvedSessionId)
@@ -395,17 +397,19 @@ export function useAssistantAgent({
           )
           setStatus(message.thread?.status ?? null)
           break
-        case 'agent.error':
+        case 'agent.error': {
+          const errorMessage = translateServerField(message.i18n, 'message', message.message, t)
           setRestoreComplete(true)
           setStatus('errored')
-          appendAssistantError(message.message)
+          appendAssistantError(errorMessage)
           toast.error(locale.requestFailed, {
-            description: message.message,
+            description: errorMessage,
           })
           break
+        }
       }
     },
-    [appendAssistantError, locale.approvalNotDelivered, locale.requestFailed]
+    [appendAssistantError, locale.approvalNotDelivered, locale.requestFailed, t]
   )
 
   const handleTransportPayload = useCallback(

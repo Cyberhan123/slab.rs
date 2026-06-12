@@ -60,6 +60,7 @@ impl ModelDownloadProgressReporter {
         TaskProgress {
             label: Some(update.filename.clone()),
             message: None,
+            i18n: None,
             current: update.downloaded_bytes,
             total: update.total_bytes,
             unit: Some("bytes".to_owned()),
@@ -257,6 +258,7 @@ mod tests {
         TaskProgress {
             label: Some(filename.to_owned()),
             message: None,
+            i18n: None,
             current,
             total,
             unit: Some("bytes".to_owned()),

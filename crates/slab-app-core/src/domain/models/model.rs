@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use slab_types::{Capability, RuntimeBackendId};
+use slab_types::{Capability, I18nPayload, RuntimeBackendId};
 use strum::{Display, EnumString};
 
 // ---------------------------------------------------------------------------
@@ -466,6 +466,7 @@ pub struct ModelConfigFieldView {
     pub scope: ModelConfigFieldScope,
     pub label: String,
     pub description_md: Option<String>,
+    pub i18n: Option<I18nPayload>,
     pub value_type: ModelConfigValueType,
     pub effective_value: Value,
     pub origin: ModelConfigOrigin,
@@ -479,6 +480,7 @@ pub struct ModelConfigSectionView {
     pub id: String,
     pub label: String,
     pub description_md: Option<String>,
+    pub i18n: Option<I18nPayload>,
     pub fields: Vec<ModelConfigFieldView>,
 }
 

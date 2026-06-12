@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Spinner } from '@slab/components/spinner';
 import { SoftPanel } from '@slab/components/workspace';
 import { toast } from 'sonner';
-import { useTranslation } from '@slab/i18n';
+import { translateServerField, useTranslation } from '@slab/i18n';
 import type { Task, TaskResult } from '../const';
 import { formatDateTime, getTaskDeepLink, getTaskTypeMeta, isMediaTaskType } from '../utils';
 import { renderStatusPill } from './task-status-pill';
@@ -40,6 +40,12 @@ export function TaskDetailDialog({
   const mediaTask = isMediaTaskType(taskDetail.task_type);
   const deepLink = getTaskDeepLink(taskDetail.task_type, taskDetail.id);
   const resultText = taskResult?.text;
+  const failureReason = translateServerField(
+    selectedTask?.i18n,
+    'error_msg',
+    selectedTask?.error_msg,
+    t,
+  );
 
   return (
     <Dialog>
@@ -98,11 +104,11 @@ export function TaskDetailDialog({
                 </div>
               </SoftPanel>
 
-              {selectedTask.status === 'failed' && selectedTask.error_msg ? (
+              {selectedTask.status === 'failed' && failureReason ? (
                 <Alert variant="destructive">
                   <AlertTitle>{t('pages.task.dialog.failureReason')}</AlertTitle>
                   <AlertDescription className="whitespace-pre-wrap break-words">
-                    {selectedTask.error_msg}
+                    {failureReason}
                   </AlertDescription>
                 </Alert>
               ) : null}

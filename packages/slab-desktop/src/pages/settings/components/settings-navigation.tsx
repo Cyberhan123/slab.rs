@@ -11,6 +11,7 @@ import {
   Wrench,
   type LucideIcon,
 } from 'lucide-react';
+import { translateServerField, useTranslation } from '@slab/i18n';
 
 import { Badge } from '@slab/components/badge';
 import { cn } from '@/lib/utils';
@@ -43,6 +44,7 @@ export function SettingsNavigation({
   sections,
   onSelectSection,
 }: SettingsNavigationProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex h-full flex-col px-4 py-5 lg:px-5 lg:py-6">
       <nav className="flex flex-col gap-1.5 overflow-y-auto pr-1">
@@ -78,7 +80,7 @@ export function SettingsNavigation({
                     isActiveSection ? 'font-semibold text-[var(--brand-teal)]' : 'font-medium',
                   )}
                 >
-                  {section.title}
+                  {translateServerField(section.i18n, 'title', section.title, t)}
                 </span>
               </span>
 

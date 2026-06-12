@@ -3,6 +3,7 @@ import { useInterval } from '@mantine/hooks';
 import { useNavigate } from 'react-router-dom';
 
 import api, { getErrorMessage } from '@slab/api';
+import { translateServerField, useTranslation } from '@slab/i18n';
 import { queryClient } from '@/lib/query-client';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
@@ -33,6 +34,7 @@ export interface SetupViewModel {
 }
 
 export function useSetup(): SetupViewModel {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const autoStartedRef = useRef(false);
   const setupMountedRef = useRef(true);
@@ -148,9 +150,12 @@ export function useSetup(): SetupViewModel {
 
       setProvisionState('failed');
       setProvisionTaskId(null);
-      setProvisionError(task.error_msg ?? 'Setup failed before provisioning could finish.');
+      setProvisionError(
+        translateServerField(task.i18n, 'error_msg', task.error_msg, t) ||
+          'Setup failed before provisioning could finish.',
+      );
     },
-    [markSetupInitialized, navigate, refetchSetupStatus],
+    [markSetupInitialized, navigate, refetchSetupStatus, t],
   );
 
   useEffect(() => {
@@ -230,11 +235,13 @@ export function useSetup(): SetupViewModel {
       provisionState,
       provisionTask,
       status?.runtime_payload_installed ?? false,
+      t,
     ),
     stageHint: getProvisionStageHint(
       provisionState,
       provisionTask,
       status?.runtime_payload_installed ?? false,
+      t,
     ),
     progressPercent: getProvisionProgressValue(provisionState, provisionTask),
     progressSummary: getProvisionProgressSummary(

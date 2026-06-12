@@ -113,6 +113,9 @@ from .download_model_request import DownloadModelRequest
 from .gpu_device_status import GpuDeviceStatus
 from .gpu_status_response import GpuStatusResponse
 from .health_response import HealthResponse
+from .i18n_message_ref import I18NMessageRef
+from .i18n_message_ref_params import I18NMessageRefParams
+from .i18n_payload import I18NPayload
 from .image_generation_request import ImageGenerationRequest
 from .image_generation_request_data import ImageGenerationRequestData
 from .image_generation_result_data import ImageGenerationResultData
@@ -184,6 +187,7 @@ from .render_subtitle_request import RenderSubtitleRequest
 from .render_subtitle_response import RenderSubtitleResponse
 from .runtime_presets_request import RuntimePresetsRequest
 from .runtime_presets_response import RuntimePresetsResponse
+from .server_i18n_key import ServerI18NKey
 from .session_id_path import SessionIdPath
 from .session_response import SessionResponse
 from .setting_property_schema import SettingPropertySchema
@@ -318,6 +322,9 @@ __all__ = (
     "GpuDeviceStatus",
     "GpuStatusResponse",
     "HealthResponse",
+    "I18NMessageRef",
+    "I18NMessageRefParams",
+    "I18NPayload",
     "ImageGenerationRequest",
     "ImageGenerationRequestData",
     "ImageGenerationResultData",
@@ -383,6 +390,7 @@ __all__ = (
     "RenderSubtitleResponse",
     "RuntimePresetsRequest",
     "RuntimePresetsResponse",
+    "ServerI18NKey",
     "SessionIdPath",
     "SessionResponse",
     "SettingPropertySchema",

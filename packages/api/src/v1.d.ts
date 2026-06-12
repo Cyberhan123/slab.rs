@@ -975,6 +975,7 @@ export interface components {
             type: "agent.session.restored";
         } | {
             code: string;
+            i18n?: null | components["schemas"]["I18nPayload"];
             message: string;
             request_id?: string | null;
             thread_id?: string | null;
@@ -1551,6 +1552,15 @@ export interface components {
             status: string;
             version: string;
         };
+        I18nMessageRef: {
+            key: components["schemas"]["ServerI18nKey"];
+            params?: {
+                [key: string]: unknown;
+            };
+        };
+        I18nPayload: {
+            [key: string]: components["schemas"]["I18nMessageRef"];
+        };
         /** @description Request body for `POST /v1/images/generations`. */
         ImageGenerationRequest: {
             /**
@@ -1756,6 +1766,7 @@ export interface components {
             description_md?: string | null;
             editable: boolean;
             effective_value: unknown;
+            i18n?: null | components["schemas"]["I18nPayload"];
             json_schema?: unknown;
             label: string;
             locked: boolean;
@@ -1778,6 +1789,7 @@ export interface components {
         ModelConfigSectionResponse: {
             description_md?: string | null;
             fields: components["schemas"]["ModelConfigFieldResponse"][];
+            i18n?: null | components["schemas"]["I18nPayload"];
             id: string;
             label: string;
         };
@@ -1871,6 +1883,7 @@ export interface components {
         };
         OpenAiError: {
             code?: string | null;
+            i18n?: null | components["schemas"]["I18nPayload"];
             message: string;
             param?: string | null;
             type: string;
@@ -2136,6 +2149,8 @@ export interface components {
             /** Format: float */
             top_p?: number | null;
         };
+        /** @enum {string} */
+        ServerI18nKey: "server.errors.notFound" | "server.errors.badRequest" | "server.errors.conflict" | "server.errors.backendNotReady" | "server.errors.runtimeBusy" | "server.errors.runtimeUnavailable" | "server.errors.runtimeUnsupportedOperation" | "server.errors.runtimeDriverNotRegistered" | "server.errors.runtimeError" | "server.errors.databaseError" | "server.errors.internalError" | "server.errors.notImplemented" | "server.errors.tooManyRequests" | "server.errors.requestValidationFailed" | "server.agent.errors.invalidMessage" | "server.tasks.setup.selectingRuntimePayload" | "server.tasks.setup.usingInstalledRuntimePayload" | "server.tasks.setup.expandingRuntimePayload" | "server.tasks.setup.installingRuntimeLibraries" | "server.tasks.setup.checkingFfmpeg" | "server.tasks.setup.restartingRuntimeWorkers" | "server.tasks.setup.usingCachedPayload" | "server.tasks.setup.downloadingPayload" | "server.tasks.setup.downloadedPayload" | "server.tasks.setup.failedBeforeFinish" | "server.tasks.ffmpeg.audioExtraction" | "server.tasks.ffmpeg.starting" | "server.tasks.ffmpeg.completed" | "server.tasks.ffmpeg.unsupportedOutputFormat" | "server.tasks.ffmpeg.conversionFailed" | "server.tasks.ffmpeg.workerFailed" | "server.tasks.ffmpeg.remuxCompleted" | "server.tasks.ffmpeg.remuxFailed" | "server.tasks.ffmpeg.runtimeInitFailed" | "server.settings.sections.general.title" | "server.settings.sections.general.description" | "server.settings.sections.database.title" | "server.settings.sections.database.description" | "server.settings.sections.logging.title" | "server.settings.sections.logging.description" | "server.settings.sections.telemetry.title" | "server.settings.sections.telemetry.description" | "server.settings.sections.tools.title" | "server.settings.sections.tools.description" | "server.settings.sections.runtime.title" | "server.settings.sections.runtime.description" | "server.settings.sections.providers.title" | "server.settings.sections.providers.description" | "server.settings.sections.models.title" | "server.settings.sections.models.description" | "server.settings.sections.plugin.title" | "server.settings.sections.plugin.description" | "server.settings.sections.agent.title" | "server.settings.sections.agent.description" | "server.settings.sections.server.title" | "server.settings.sections.server.description" | "server.settings.subsections.general.general.title" | "server.settings.subsections.general.general.description" | "server.settings.subsections.database.general.description" | "server.settings.subsections.logging.general.description" | "server.settings.subsections.telemetry.general.description" | "server.settings.subsections.tools.ffmpeg.title" | "server.settings.subsections.tools.ffmpeg.description" | "server.settings.subsections.runtime.general.description" | "server.settings.subsections.runtime.ggml.title" | "server.settings.subsections.runtime.ggml.description" | "server.settings.subsections.runtime.llama.title" | "server.settings.subsections.runtime.llama.description" | "server.settings.subsections.runtime.whisper.title" | "server.settings.subsections.runtime.whisper.description" | "server.settings.subsections.runtime.diffusion.title" | "server.settings.subsections.runtime.diffusion.description" | "server.settings.subsections.runtime.candle.title" | "server.settings.subsections.runtime.candle.description" | "server.settings.subsections.runtime.onnx.title" | "server.settings.subsections.runtime.onnx.description" | "server.settings.subsections.providers.registry.title" | "server.settings.subsections.providers.registry.description" | "server.settings.subsections.models.general.description" | "server.settings.subsections.models.autoUnload.title" | "server.settings.subsections.models.autoUnload.description" | "server.settings.subsections.plugin.general.description" | "server.settings.subsections.agent.general.description" | "server.settings.subsections.agent.mcp.title" | "server.settings.subsections.agent.mcp.description" | "server.settings.subsections.agent.websearch.title" | "server.settings.subsections.agent.websearch.description" | "server.settings.subsections.agent.hooks.title" | "server.settings.subsections.agent.hooks.description" | "server.settings.subsections.agent.memories.title" | "server.settings.subsections.agent.memories.description" | "server.settings.subsections.server.general.description" | "server.settings.subsections.server.cors.title" | "server.settings.subsections.server.cors.description" | "server.settings.subsections.server.admin.title" | "server.settings.subsections.server.admin.description" | "server.settings.subsections.server.swagger.title" | "server.settings.subsections.server.swagger.description" | "server.settings.properties.label.interfaceLanguage" | "server.settings.properties.label.databaseUrl" | "server.settings.properties.label.logLevel" | "server.settings.properties.label.jsonLogs" | "server.settings.properties.label.logDirectory" | "server.settings.properties.label.telemetry" | "server.settings.properties.label.environment" | "server.settings.properties.label.serviceName" | "server.settings.properties.label.serviceVersion" | "server.settings.properties.label.metricsExporter" | "server.settings.properties.label.captureGenaiContent" | "server.settings.properties.label.spanAttributes" | "server.settings.properties.label.traceState" | "server.settings.properties.label.runtimeMode" | "server.settings.properties.label.transport" | "server.settings.properties.label.sessionStateDirectory" | "server.settings.properties.label.agentDebugTrace" | "server.settings.properties.label.externalHooks" | "server.settings.properties.label.legacyHookScripts" | "server.settings.properties.label.agentMemories" | "server.settings.properties.label.memoryRoot" | "server.settings.properties.label.phase1ScanLimit" | "server.settings.properties.label.phase1Concurrency" | "server.settings.properties.label.phase1IdleSeconds" | "server.settings.properties.label.phase1LeaseSeconds" | "server.settings.properties.label.phase1RetrySeconds" | "server.settings.properties.label.phase1MaxAgeDays" | "server.settings.properties.label.phase2Limit" | "server.settings.properties.label.phase2LeaseSeconds" | "server.settings.properties.label.maxUnusedDays" | "server.settings.properties.label.extensionRetentionDays" | "server.settings.properties.label.mcpTools" | "server.settings.properties.label.defaultProvider" | "server.settings.properties.label.webSearchProviders" | "server.settings.properties.label.flashAttention" | "server.settings.properties.label.providerRegistry" | "server.settings.properties.label.modelCacheDirectory" | "server.settings.properties.label.modelConfigDirectory" | "server.settings.properties.label.modelSource" | "server.settings.properties.label.pluginInstallDirectory" | "server.settings.properties.label.jsRuntimeTransport" | "server.settings.properties.label.pythonRuntimeTransport" | "server.settings.properties.label.bindAddress" | "server.settings.properties.label.adminToken" | "server.settings.properties.label.allowedOrigins" | "server.settings.properties.label.cloudHttpTrace" | "server.settings.properties.description.interfaceLanguage" | "server.settings.properties.description.databaseUrl" | "server.settings.properties.description.logLevel" | "server.settings.properties.description.jsonLogs" | "server.settings.properties.description.logDirectory" | "server.settings.properties.description.telemetry" | "server.settings.properties.description.environment" | "server.settings.properties.description.serviceName" | "server.settings.properties.description.serviceVersion" | "server.settings.properties.description.metricsExporter" | "server.settings.properties.description.captureGenaiContent" | "server.settings.properties.description.spanAttributes" | "server.settings.properties.description.traceState" | "server.settings.properties.description.ffmpegEnabled" | "server.settings.properties.description.ffmpegAutoDownload" | "server.settings.properties.description.ffmpegInstallDir" | "server.settings.properties.description.agentDebugTrace" | "server.settings.properties.description.externalHooks" | "server.settings.properties.description.legacyHookScripts" | "server.settings.properties.description.agentMemories" | "server.settings.properties.description.agentMemoryModel" | "server.settings.properties.description.memoryRoot" | "server.settings.properties.description.phase1ScanLimit" | "server.settings.properties.description.phase1Concurrency" | "server.settings.properties.description.phase1IdleSeconds" | "server.settings.properties.description.phase1LeaseSeconds" | "server.settings.properties.description.phase1RetrySeconds" | "server.settings.properties.description.phase1MaxAgeDays" | "server.settings.properties.description.phase2Limit" | "server.settings.properties.description.phase2LeaseSeconds" | "server.settings.properties.description.maxUnusedDays" | "server.settings.properties.description.extensionRetentionDays" | "server.settings.properties.description.mcpTools" | "server.settings.properties.description.defaultProvider" | "server.settings.properties.description.webSearchProviders" | "server.settings.properties.description.runtimeMode" | "server.settings.properties.description.runtimeTransport" | "server.settings.properties.description.sessionStateDirectory" | "server.settings.properties.description.providerRegistry" | "server.settings.properties.description.modelCacheDirectory" | "server.settings.properties.description.modelConfigDirectory" | "server.settings.properties.description.modelSource" | "server.settings.properties.description.pluginInstallDirectory" | "server.settings.properties.description.jsRuntimeTransport" | "server.settings.properties.description.pythonRuntimeTransport" | "server.settings.properties.description.autoUnloadEnabled" | "server.settings.properties.description.autoUnloadIdleMinutes" | "server.settings.properties.description.autoUnloadMinFreeSystemMemoryBytes" | "server.settings.properties.description.autoUnloadMinFreeGpuMemoryBytes" | "server.settings.properties.description.autoUnloadMaxPressureEvictionsPerLoad" | "server.settings.properties.description.serverAddress" | "server.settings.properties.description.adminToken" | "server.settings.properties.description.allowedOrigins" | "server.settings.properties.description.swaggerEnabled" | "server.settings.properties.description.cloudHttpTrace" | "server.settings.properties.description.genericEnabled" | "server.settings.properties.description.genericFlashAttention" | "server.settings.properties.description.genericInstallDirectory" | "server.settings.properties.description.genericLogLevel" | "server.settings.properties.description.genericJsonLogs" | "server.settings.properties.description.genericPath" | "server.settings.properties.description.genericQueue" | "server.settings.properties.description.genericConcurrentRequests" | "server.settings.properties.description.genericAddress" | "server.settings.properties.description.genericIpcPath" | "server.settings.properties.description.genericVersion" | "server.settings.properties.description.genericArtifact" | "server.settings.properties.description.genericContextLength" | "server.modelConfig.sections.summary.label" | "server.modelConfig.sections.summary.description" | "server.modelConfig.sections.source.label" | "server.modelConfig.sections.source.description" | "server.modelConfig.sections.load.label" | "server.modelConfig.sections.load.description" | "server.modelConfig.sections.load.nonRuntimeDescription" | "server.modelConfig.sections.inference.label" | "server.modelConfig.sections.inference.description" | "server.modelConfig.sections.advanced.label" | "server.modelConfig.sections.advanced.description" | "server.modelConfig.sections.advanced.nonRuntimeDescription" | "server.modelConfig.fields.modelId.label" | "server.modelConfig.fields.modelId.description" | "server.modelConfig.fields.displayName.label" | "server.modelConfig.fields.displayName.description" | "server.modelConfig.fields.backend.label" | "server.modelConfig.fields.backend.runtimeDescription" | "server.modelConfig.fields.backend.productDescription" | "server.modelConfig.fields.catalogStatus.label" | "server.modelConfig.fields.catalogStatus.description" | "server.modelConfig.fields.capabilities.label" | "server.modelConfig.fields.capabilities.description" | "server.modelConfig.fields.sourceKind.label" | "server.modelConfig.fields.sourceKind.description" | "server.modelConfig.fields.repoId.label" | "server.modelConfig.fields.repoId.description" | "server.modelConfig.fields.primaryArtifact.label" | "server.modelConfig.fields.primaryArtifact.description" | "server.modelConfig.fields.localPath.label" | "server.modelConfig.fields.localPath.description" | "server.modelConfig.fields.artifactPath.description" | "server.modelConfig.fields.temperature.label" | "server.modelConfig.fields.temperature.description" | "server.modelConfig.fields.topP.label" | "server.modelConfig.fields.topP.description" | "server.modelConfig.fields.workers.label" | "server.modelConfig.fields.workers.description" | "server.modelConfig.fields.contextLength.label" | "server.modelConfig.fields.contextLength.description" | "server.modelConfig.fields.chatTemplate.label" | "server.modelConfig.fields.chatTemplate.description" | "server.modelConfig.fields.gbnf.label" | "server.modelConfig.fields.gbnf.description" | "server.modelConfig.fields.diffusionAsset.label" | "server.modelConfig.fields.diffusionAsset.description" | "server.modelConfig.fields.flashAttention.label" | "server.modelConfig.fields.diffusionPerformance.description" | "server.modelConfig.fields.offloadParamsToCpu.label" | "server.modelConfig.fields.diffusionDevice.description" | "server.modelConfig.fields.vaeDevice.label" | "server.modelConfig.fields.clipDevice.label" | "server.modelConfig.fields.runtimeLoadSupported.label" | "server.modelConfig.fields.runtimeLoadSupported.description" | "server.modelConfig.fields.nonRuntimeProjection.label" | "server.modelConfig.fields.nonRuntimeProjection.description" | "server.modelConfig.fields.resolvedLoadJson.label" | "server.modelConfig.fields.resolvedLoadJson.description" | "server.modelConfig.fields.resolvedInferenceJson.label" | "server.modelConfig.fields.resolvedInferenceJson.description" | "server.modelConfig.fields.resolvedInferenceJson.nonRuntimeDescription";
         SessionIdPath: {
             id: string;
         };
@@ -2166,6 +2181,7 @@ export interface components {
             description_md?: string;
             editable: boolean;
             effective_value: components["schemas"]["SettingValue"];
+            i18n?: null | components["schemas"]["I18nPayload"];
             is_overridden: boolean;
             label: string;
             override_value?: null | components["schemas"]["SettingValue"];
@@ -2191,12 +2207,14 @@ export interface components {
         };
         SettingsSectionView: {
             description_md?: string;
+            i18n?: null | components["schemas"]["I18nPayload"];
             id: string;
             subsections: components["schemas"]["SettingsSubsectionView"][];
             title: string;
         };
         SettingsSubsectionView: {
             description_md?: string;
+            i18n?: null | components["schemas"]["I18nPayload"];
             id: string;
             properties: components["schemas"]["SettingPropertyView"][];
             title: string;
@@ -2241,6 +2259,7 @@ export interface components {
         TaskProgressResponse: {
             /** Format: int64 */
             current: number;
+            i18n?: null | components["schemas"]["I18nPayload"];
             label?: string | null;
             logs?: string[] | null;
             message?: string | null;
@@ -2255,6 +2274,7 @@ export interface components {
         TaskResponse: {
             created_at: string;
             error_msg?: string | null;
+            i18n?: null | components["schemas"]["I18nPayload"];
             id: string;
             progress?: null | components["schemas"]["TaskProgressResponse"];
             status: components["schemas"]["TaskStatus"];

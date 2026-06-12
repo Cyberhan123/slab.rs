@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use slab_types::I18nPayload;
 use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
@@ -508,6 +509,8 @@ pub struct OpenAiError {
     pub param: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub i18n: Option<I18nPayload>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

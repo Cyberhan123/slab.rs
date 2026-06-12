@@ -29,7 +29,8 @@ use crate::api::v1::agent::schema::{
 };
 use crate::api::v1::chat::schema::{ChatToolCall, ChatToolFunction};
 use crate::api::validation::{ValidatedJson, validate};
-use crate::error::ServerError;
+use crate::error::{ServerError, message_i18n_with_detail};
+use slab_types::ServerI18nKey;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -161,7 +162,11 @@ async fn run_agent_responses_socket(
                             &AgentResponsesServerMessage::Error {
                                 request_id: None,
                                 code: "bad_request".to_owned(),
-                                message: error,
+                                message: error.clone(),
+                                i18n: Some(message_i18n_with_detail(
+                                    ServerI18nKey::AgentInvalidMessage,
+                                    &error,
+                                )),
                                 thread_id: active_thread_id.clone(),
                             },
                         )
@@ -438,7 +443,7 @@ fn parse_last_event_id(headers: &HeaderMap) -> Option<u64> {
 
 fn serialize_json<T: Serialize>(value: &T) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| {
-        r#"{"type":"agent.error","code":"serialization_failed","message":"failed to serialize agent message"}"#.to_owned()
+        r#"{"type":"agent.error","code":"serialization_failed","message":"failed to serialize agent message","i18n":{"message":{"key":"server.errors.internalError"}}}"#.to_owned()
     })
 }
 
@@ -460,13 +465,23 @@ fn server_error_message(
     request_id: Option<String>,
     thread_id: Option<String>,
 ) -> AgentResponsesServerMessage {
-    let (code, message) = error.agent_code_message();
-    AgentResponsesServerMessage::Error { request_id, code: code.to_owned(), message, thread_id }
+    let (code, message, i18n) = error.agent_code_message();
+    AgentResponsesServerMessage::Error {
+        request_id,
+        code: code.to_owned(),
+        message,
+        i18n: Some(i18n),
+        thread_id,
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentApi, parse_client_message, should_replay_event, turn_event_to_sse_data};
+    use super::{
+        AgentApi, parse_client_message, server_error_message, should_replay_event,
+        turn_event_to_sse_data,
+    };
+    use crate::error::ServerError;
     use utoipa::OpenApi;
 
     #[test]
@@ -504,6 +519,21 @@ mod tests {
         assert!(paths.contains_key("/v1/agents/responses"));
         assert!(!paths.contains_key("/v1/agents/spawn"));
         assert!(!paths.contains_key("/v1/agents/{id}/events"));
+    }
+
+    #[test]
+    fn server_error_message_includes_message_i18n() {
+        let message = server_error_message(
+            ServerError::BadRequest("invalid agent request".to_owned()),
+            Some("req-1".to_owned()),
+            Some("thread-1".to_owned()),
+        );
+        let payload = serde_json::to_value(message).expect("serialize message");
+
+        assert_eq!(payload["type"], "agent.error");
+        assert_eq!(payload["message"], "invalid agent request");
+        assert_eq!(payload["i18n"]["message"]["key"], "server.errors.badRequest");
+        assert_eq!(payload["i18n"]["message"]["params"]["detail"], "invalid agent request");
     }
 
     #[test]

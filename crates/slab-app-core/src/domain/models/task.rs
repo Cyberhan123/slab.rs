@@ -2,6 +2,8 @@ use crate::infra::db::TaskRecord;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use slab_types::{I18nPayload, ServerI18nKey};
+use std::collections::BTreeMap;
 use std::str::FromStr;
 
 #[derive(Debug, Clone)]
@@ -87,6 +89,8 @@ pub struct TaskProgress {
     pub label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub i18n: Option<I18nPayload>,
     pub current: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total: Option<u64>,
@@ -107,6 +111,7 @@ pub struct TaskView {
     pub status: TaskStatus,
     pub progress: Option<TaskProgress>,
     pub error_msg: Option<String>,
+    pub i18n: Option<I18nPayload>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -130,12 +135,14 @@ pub struct TaskResult {
 
 impl From<&TaskRecord> for TaskView {
     fn from(record: &TaskRecord) -> Self {
+        let error_msg = record.error_msg.clone();
         Self {
             id: record.id.clone(),
             task_type: record.task_type.clone(),
             status: record.status,
             progress: task_progress_from_payload(record.result_data.as_deref()),
-            error_msg: record.error_msg.clone(),
+            error_msg: error_msg.clone(),
+            i18n: task_error_i18n(&record.task_type, error_msg.as_deref()),
             created_at: record.created_at.to_rfc3339(),
             updated_at: record.updated_at.to_rfc3339(),
         }
@@ -147,6 +154,20 @@ pub(crate) fn task_progress_from_payload(raw: Option<&str>) -> Option<TaskProgre
     let payload: Value = serde_json::from_str(raw).ok()?;
     let progress = payload.get("progress")?;
     serde_json::from_value(progress.clone()).ok()
+}
+
+fn task_error_i18n(task_type: &str, error_msg: Option<&str>) -> Option<I18nPayload> {
+    let error_msg = error_msg?;
+    let key = match task_type {
+        "setup_provision" => ServerI18nKey::TaskSetupFailedBeforeFinish,
+        "ffmpeg" => ServerI18nKey::TaskFfmpegConversionFailed,
+        _ => return None,
+    };
+    Some(I18nPayload::with_field_params(
+        "error_msg",
+        key,
+        BTreeMap::from([("detail".to_owned(), Value::String(error_msg.to_owned()))]),
+    ))
 }
 
 #[cfg(test)]
@@ -180,6 +201,7 @@ mod tests {
             Some(TaskProgress {
                 label: Some("model.gguf".to_owned()),
                 message: None,
+                i18n: None,
                 current: 512,
                 total: Some(1024),
                 unit: Some("bytes".to_owned()),
@@ -207,6 +229,65 @@ mod tests {
         };
 
         assert!(TaskView::from(&record).progress.is_none());
+    }
+
+    #[test]
+    fn task_view_reads_progress_i18n_payload() {
+        let now = Utc::now();
+        let record = TaskRecord {
+            id: "task-1".to_owned(),
+            task_type: "setup_provision".to_owned(),
+            status: TaskStatus::Running,
+            model_id: None,
+            input_data: None,
+            result_data: Some(
+                r#"{"progress":{"label":"Downloading payload","message":"Step detail","i18n":{"label":{"key":"server.tasks.setup.downloadingPayload","params":{"file_name":"runtime.cab"}},"message":{"key":"server.tasks.setup.checkingFfmpeg"}},"current":1,"total":2}}"#
+                    .to_owned(),
+            ),
+            error_msg: None,
+            core_task_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        let progress = TaskView::from(&record).progress.expect("progress payload");
+
+        assert_eq!(progress.label.as_deref(), Some("Downloading payload"));
+        assert_eq!(progress.message.as_deref(), Some("Step detail"));
+        let i18n = progress.i18n.expect("progress i18n");
+        assert_eq!(
+            i18n.0.get("label").map(|message| message.key),
+            Some(ServerI18nKey::TaskSetupDownloadingPayload)
+        );
+        assert_eq!(
+            i18n.0.get("message").map(|message| message.key),
+            Some(ServerI18nKey::TaskSetupCheckingFfmpeg)
+        );
+    }
+
+    #[test]
+    fn task_view_adds_i18n_for_known_task_errors() {
+        let now = Utc::now();
+        let record = TaskRecord {
+            id: "task-1".to_owned(),
+            task_type: "setup_provision".to_owned(),
+            status: TaskStatus::Failed,
+            model_id: None,
+            input_data: None,
+            result_data: None,
+            error_msg: Some("download failed".to_owned()),
+            core_task_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        let view = TaskView::from(&record);
+        assert_eq!(view.error_msg.as_deref(), Some("download failed"));
+        let i18n = view.i18n.expect("task error i18n");
+        assert_eq!(
+            i18n.0.get("error_msg").map(|message| message.key),
+            Some(ServerI18nKey::TaskSetupFailedBeforeFinish)
+        );
     }
 
     #[test]

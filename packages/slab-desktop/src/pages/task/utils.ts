@@ -1,9 +1,11 @@
 import { Download, Film, Image, ListChecks, Mic } from 'lucide-react';
+import { translateServerField, type ServerI18nPayload } from '@slab/i18n';
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 export interface NormalizedTaskProgress {
   label: string | null;
+  message: string | null;
   current: number;
   total: number | null;
   step: number | null;
@@ -101,7 +103,10 @@ export function extractTaskId(payload: unknown): string | null {
 
 export const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
-export function normalizeTaskProgress(progress: unknown): NormalizedTaskProgress | null {
+export function normalizeTaskProgress(
+  progress: unknown,
+  t?: Translate,
+): NormalizedTaskProgress | null {
   if (
     typeof progress !== 'object' ||
     progress === null ||
@@ -112,8 +117,13 @@ export function normalizeTaskProgress(progress: unknown): NormalizedTaskProgress
   }
 
   const value = progress as Record<string, unknown>;
+  const i18n = value.i18n as ServerI18nPayload;
+  const label = typeof value.label === 'string' ? value.label : null;
+  const message = typeof value.message === 'string' ? value.message : null;
+
   return {
-    label: typeof value.label === 'string' ? value.label : null,
+    label: t ? translateServerField(i18n, 'label', label, t) || null : label,
+    message: t ? translateServerField(i18n, 'message', message, t) || null : message,
     current: value.current as number,
     total: finiteNumberOrNull(value.total),
     step: finiteNumberOrNull(value.step),

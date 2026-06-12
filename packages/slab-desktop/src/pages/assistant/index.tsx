@@ -299,7 +299,7 @@ function Assistant() {
       await prepareSelectedModel()
     } catch (error) {
       toast.error(t("pages.assistant.toast.failedToPrepareModel"), {
-        description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError")),
+        description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError"), t),
       })
       throw error
     }

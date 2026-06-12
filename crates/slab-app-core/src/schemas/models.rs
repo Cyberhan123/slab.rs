@@ -1,7 +1,7 @@
 //! Request / response types for the model-management API (`/v1/models/...`).
 
 use serde::{Deserialize, Serialize};
-use slab_types::Capability as DomainCapability;
+use slab_types::{Capability as DomainCapability, I18nPayload};
 use utoipa::{IntoParams, ToSchema};
 use validator::{Validate, ValidationError};
 
@@ -530,6 +530,8 @@ pub struct ModelConfigFieldResponse {
     pub label: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description_md: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub i18n: Option<I18nPayload>,
     pub value_type: ModelConfigValueTypeResponse,
     pub effective_value: serde_json::Value,
     pub origin: ModelConfigOriginResponse,
@@ -545,6 +547,8 @@ pub struct ModelConfigSectionResponse {
     pub label: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description_md: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub i18n: Option<I18nPayload>,
     pub fields: Vec<ModelConfigFieldResponse>,
 }
 
@@ -780,6 +784,7 @@ impl From<DomainModelConfigFieldView> for ModelConfigFieldResponse {
             scope: value.scope.into(),
             label: value.label,
             description_md: value.description_md,
+            i18n: value.i18n,
             value_type: value.value_type.into(),
             effective_value: value.effective_value,
             origin: value.origin.into(),
@@ -796,6 +801,7 @@ impl From<DomainModelConfigSectionView> for ModelConfigSectionResponse {
             id: value.id,
             label: value.label,
             description_md: value.description_md,
+            i18n: value.i18n,
             fields: value.fields.into_iter().map(Into::into).collect(),
         }
     }

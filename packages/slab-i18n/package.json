@@ -12,6 +12,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@slab/api": "workspace:*",
     "i18next": "catalog:",
     "react-i18next": "catalog:"
   },

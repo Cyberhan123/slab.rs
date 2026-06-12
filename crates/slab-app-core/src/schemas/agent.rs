@@ -5,7 +5,7 @@ use slab_agent::config::{
     AgentConfig, AgentToolChoice, MAX_INVALID_TOOL_CALL_RETRIES, MAX_TOOL_CONCURRENCY,
 };
 use slab_agent::port::{ThreadMessageRecord, ThreadSnapshot};
-use slab_types::agent::AgentThreadStatus;
+use slab_types::{I18nPayload, agent::AgentThreadStatus};
 use utoipa::ToSchema;
 use validator::{Validate, ValidationError, ValidationErrors};
 
@@ -338,6 +338,8 @@ pub enum AgentResponsesServerMessage {
         request_id: Option<String>,
         code: String,
         message: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        i18n: Option<I18nPayload>,
         #[serde(skip_serializing_if = "Option::is_none")]
         thread_id: Option<String>,
     },

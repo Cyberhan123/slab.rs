@@ -17,6 +17,13 @@ import {
 } from '../utils';
 
 const translate = (key: string) => key;
+const serverTranslate = (key: string, options?: Record<string, unknown>) => {
+  if (key === 'server.tasks.setup.downloadingPayload') {
+    return `translated ${options?.file_name}`;
+  }
+
+  return typeof options?.defaultValue === 'string' ? options.defaultValue : key;
+};
 
 describe('task utils', () => {
   it('extracts operation ids from accepted task responses', () => {
@@ -55,6 +62,7 @@ describe('task utils', () => {
       }),
     ).toEqual({
       label: 'Downloading',
+      message: null,
       current: 25,
       total: 50,
       step: 2,
@@ -62,6 +70,31 @@ describe('task utils', () => {
       unit: 'bytes',
     });
     expect(normalizeTaskProgress({ current: Number.NaN })).toBeNull();
+  });
+
+  it('translates task progress fields and falls back to legacy strings', () => {
+    expect(
+      normalizeTaskProgress(
+        {
+          label: 'Downloading payload',
+          message: 'Legacy message',
+          i18n: {
+            label: {
+              key: 'server.tasks.setup.downloadingPayload',
+              params: { file_name: 'runtime.cab' },
+            },
+            message: {
+              key: 'server.tasks.setup.checkingFfmpeg',
+            },
+          },
+          current: 1,
+        },
+        serverTranslate,
+      ),
+    ).toMatchObject({
+      label: 'translated runtime.cab',
+      message: 'Legacy message',
+    });
   });
 
   it('formats task values defensively', () => {

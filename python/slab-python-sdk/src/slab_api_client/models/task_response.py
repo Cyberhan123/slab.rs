@@ -10,6 +10,7 @@ from ..models.task_status import TaskStatus
 from ..types import UNSET, Unset
 
 if TYPE_CHECKING:
+    from ..models.i18n_payload import I18NPayload
     from ..models.task_progress_response import TaskProgressResponse
 
 
@@ -26,6 +27,7 @@ class TaskResponse:
         task_type (str):
         updated_at (str):
         error_msg (None | str | Unset):
+        i18n (I18NPayload | None | Unset):
         progress (None | TaskProgressResponse | Unset):
     """
 
@@ -35,10 +37,12 @@ class TaskResponse:
     task_type: str
     updated_at: str
     error_msg: None | str | Unset = UNSET
+    i18n: I18NPayload | None | Unset = UNSET
     progress: None | TaskProgressResponse | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.i18n_payload import I18NPayload
         from ..models.task_progress_response import TaskProgressResponse
 
         created_at = self.created_at
@@ -56,6 +60,14 @@ class TaskResponse:
             error_msg = UNSET
         else:
             error_msg = self.error_msg
+
+        i18n: dict[str, Any] | None | Unset
+        if isinstance(self.i18n, Unset):
+            i18n = UNSET
+        elif isinstance(self.i18n, I18NPayload):
+            i18n = self.i18n.to_dict()
+        else:
+            i18n = self.i18n
 
         progress: dict[str, Any] | None | Unset
         if isinstance(self.progress, Unset):
@@ -78,6 +90,8 @@ class TaskResponse:
         )
         if error_msg is not UNSET:
             field_dict["error_msg"] = error_msg
+        if i18n is not UNSET:
+            field_dict["i18n"] = i18n
         if progress is not UNSET:
             field_dict["progress"] = progress
 
@@ -85,6 +99,7 @@ class TaskResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.i18n_payload import I18NPayload
         from ..models.task_progress_response import TaskProgressResponse
 
         d = dict(src_dict)
@@ -106,6 +121,23 @@ class TaskResponse:
             return cast(None | str | Unset, data)
 
         error_msg = _parse_error_msg(d.pop("error_msg", UNSET))
+
+        def _parse_i18n(data: object) -> I18NPayload | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                i18n_type_1 = I18NPayload.from_dict(data)
+
+                return i18n_type_1
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(I18NPayload | None | Unset, data)
+
+        i18n = _parse_i18n(d.pop("i18n", UNSET))
 
         def _parse_progress(data: object) -> None | TaskProgressResponse | Unset:
             if data is None:
@@ -131,6 +163,7 @@ class TaskResponse:
             task_type=task_type,
             updated_at=updated_at,
             error_msg=error_msg,
+            i18n=i18n,
             progress=progress,
         )
 

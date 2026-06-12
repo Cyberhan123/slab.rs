@@ -14,6 +14,7 @@ export interface ApiErrorResponse {
   code: number;
   data: unknown;
   message: string;
+  i18n?: Record<string, { key: string; params?: Record<string, unknown> }>;
   status?: number;
 }
 
@@ -24,13 +25,21 @@ export class ApiError extends Error {
   code: number;
   status?: number;
   data: unknown;
+  i18n?: ApiErrorResponse["i18n"];
 
-  constructor(code: number, message: string, data?: unknown, status?: number) {
+  constructor(
+    code: number,
+    message: string,
+    data?: unknown,
+    status?: number,
+    i18n?: ApiErrorResponse["i18n"],
+  ) {
     super(message);
     this.name = "ApiError";
     this.code = code;
     this.status = status;
     this.data = data;
+    this.i18n = i18n;
   }
 
   static fromResponse(response: Response, errorData?: unknown): ApiError {
@@ -43,7 +52,7 @@ export class ApiError extends Error {
       typeof (errorData as { message?: unknown }).message === "string"
     ) {
       const payload = errorData as ApiErrorResponse;
-      return new ApiError(payload.code, payload.message, payload.data, response.status);
+      return new ApiError(payload.code, payload.message, payload.data, response.status, payload.i18n);
     }
 
     return new ApiError(
@@ -150,7 +159,8 @@ export const errorMiddleware: Middleware = {
           errorData.code,
           errorData.message,
           errorData.data,
-          response.status
+          response.status,
+          errorData.i18n,
         );
       }
 

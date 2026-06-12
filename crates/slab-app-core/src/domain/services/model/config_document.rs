@@ -1,12 +1,13 @@
 use std::path::PathBuf;
 
 use serde_json::{Map, Value};
-use slab_types::ModelSource;
+use slab_types::{I18nMessageRef, I18nPayload, ModelSource, ServerI18nKey};
 
 use crate::domain::models::{
     ModelConfigFieldScope, ModelConfigFieldView, ModelConfigOrigin, ModelConfigPresetOption,
-    ModelConfigSelectionView, ModelConfigSourceArtifact, ModelConfigSourceSummary,
-    ModelConfigValueType, ModelConfigVariantOption, ModelPackSelection, UnifiedModel,
+    ModelConfigSectionView, ModelConfigSelectionView, ModelConfigSourceArtifact,
+    ModelConfigSourceSummary, ModelConfigValueType, ModelConfigVariantOption, ModelPackSelection,
+    UnifiedModel,
 };
 use crate::error::AppCoreError;
 
@@ -288,11 +289,15 @@ pub(super) fn build_model_config_field(
     effective_value: Value,
     origin: ModelConfigOrigin,
 ) -> ModelConfigFieldView {
+    let path = path.into();
+    let label = label.into();
+    let i18n = model_config_field_i18n(&path, description_md.as_deref());
     ModelConfigFieldView {
-        path: path.into(),
+        path,
         scope,
-        label: label.into(),
+        label,
         description_md,
+        i18n,
         value_type,
         effective_value,
         origin,
@@ -300,6 +305,191 @@ pub(super) fn build_model_config_field(
         locked: true,
         json_schema: None,
     }
+}
+
+pub(super) fn build_model_config_section(
+    id: impl Into<String>,
+    label: impl Into<String>,
+    description_md: Option<String>,
+    fields: Vec<ModelConfigFieldView>,
+) -> ModelConfigSectionView {
+    let id = id.into();
+    let label = label.into();
+    let i18n = model_config_section_i18n(&id, description_md.as_deref());
+    ModelConfigSectionView { id, label, description_md, i18n, fields }
+}
+
+fn model_config_section_i18n(id: &str, description_md: Option<&str>) -> Option<I18nPayload> {
+    let (label, description) = match id {
+        "summary" => (
+            Some(ServerI18nKey::ModelConfigSectionSummaryLabel),
+            Some(ServerI18nKey::ModelConfigSectionSummaryDescription),
+        ),
+        "source" => (
+            Some(ServerI18nKey::ModelConfigSectionSourceLabel),
+            Some(ServerI18nKey::ModelConfigSectionSourceDescription),
+        ),
+        "load" if description_md.is_some_and(|value| value.contains("does not expose")) => (
+            Some(ServerI18nKey::ModelConfigSectionLoadLabel),
+            Some(ServerI18nKey::ModelConfigSectionLoadNonRuntimeDescription),
+        ),
+        "load" => (
+            Some(ServerI18nKey::ModelConfigSectionLoadLabel),
+            Some(ServerI18nKey::ModelConfigSectionLoadDescription),
+        ),
+        "inference" => (
+            Some(ServerI18nKey::ModelConfigSectionInferenceLabel),
+            Some(ServerI18nKey::ModelConfigSectionInferenceDescription),
+        ),
+        "advanced" if description_md.is_some_and(|value| value.contains("non-runtime")) => (
+            Some(ServerI18nKey::ModelConfigSectionAdvancedLabel),
+            Some(ServerI18nKey::ModelConfigSectionAdvancedNonRuntimeDescription),
+        ),
+        "advanced" => (
+            Some(ServerI18nKey::ModelConfigSectionAdvancedLabel),
+            Some(ServerI18nKey::ModelConfigSectionAdvancedDescription),
+        ),
+        _ => return None,
+    };
+    Some(metadata_i18n(label, description))
+}
+
+fn model_config_field_i18n(path: &str, description_md: Option<&str>) -> Option<I18nPayload> {
+    let (label, description) = match path {
+        "model.id" => (
+            Some(ServerI18nKey::ModelConfigFieldModelIdLabel),
+            Some(ServerI18nKey::ModelConfigFieldModelIdDescription),
+        ),
+        "model.display_name" => (
+            Some(ServerI18nKey::ModelConfigFieldDisplayNameLabel),
+            Some(ServerI18nKey::ModelConfigFieldDisplayNameDescription),
+        ),
+        "model.backend"
+            if description_md.is_some_and(|value| value.contains("runtime backend")) =>
+        {
+            (
+                Some(ServerI18nKey::ModelConfigFieldBackendLabel),
+                Some(ServerI18nKey::ModelConfigFieldBackendRuntimeDescription),
+            )
+        }
+        "model.backend" => (
+            Some(ServerI18nKey::ModelConfigFieldBackendLabel),
+            Some(ServerI18nKey::ModelConfigFieldBackendProductDescription),
+        ),
+        "model.status" => (
+            Some(ServerI18nKey::ModelConfigFieldCatalogStatusLabel),
+            Some(ServerI18nKey::ModelConfigFieldCatalogStatusDescription),
+        ),
+        "model.capabilities" => (
+            Some(ServerI18nKey::ModelConfigFieldCapabilitiesLabel),
+            Some(ServerI18nKey::ModelConfigFieldCapabilitiesDescription),
+        ),
+        "source.kind" => (
+            Some(ServerI18nKey::ModelConfigFieldSourceKindLabel),
+            Some(ServerI18nKey::ModelConfigFieldSourceKindDescription),
+        ),
+        "source.repo_id" => (
+            Some(ServerI18nKey::ModelConfigFieldRepoIdLabel),
+            Some(ServerI18nKey::ModelConfigFieldRepoIdDescription),
+        ),
+        "source.filename" => (
+            Some(ServerI18nKey::ModelConfigFieldPrimaryArtifactLabel),
+            Some(ServerI18nKey::ModelConfigFieldPrimaryArtifactDescription),
+        ),
+        "source.local_path" => (
+            Some(ServerI18nKey::ModelConfigFieldLocalPathLabel),
+            Some(ServerI18nKey::ModelConfigFieldLocalPathDescription),
+        ),
+        _ if path.starts_with("source.artifacts.") => {
+            (None, Some(ServerI18nKey::ModelConfigFieldArtifactPathDescription))
+        }
+        "inference.temperature" => (
+            Some(ServerI18nKey::ModelConfigFieldTemperatureLabel),
+            Some(ServerI18nKey::ModelConfigFieldTemperatureDescription),
+        ),
+        "inference.top_p" => (
+            Some(ServerI18nKey::ModelConfigFieldTopPLabel),
+            Some(ServerI18nKey::ModelConfigFieldTopPDescription),
+        ),
+        "load.num_workers" => (
+            Some(ServerI18nKey::ModelConfigFieldWorkersLabel),
+            Some(ServerI18nKey::ModelConfigFieldWorkersDescription),
+        ),
+        "load.context_length" => (
+            Some(ServerI18nKey::ModelConfigFieldContextLengthLabel),
+            Some(ServerI18nKey::ModelConfigFieldContextLengthDescription),
+        ),
+        "load.chat_template" => (
+            Some(ServerI18nKey::ModelConfigFieldChatTemplateLabel),
+            Some(ServerI18nKey::ModelConfigFieldChatTemplateDescription),
+        ),
+        "load.gbnf" => (
+            Some(ServerI18nKey::ModelConfigFieldGbnfLabel),
+            Some(ServerI18nKey::ModelConfigFieldGbnfDescription),
+        ),
+        "load.diffusion_model_path"
+        | "load.vae_path"
+        | "load.taesd_path"
+        | "load.clip_l_path"
+        | "load.clip_g_path"
+        | "load.t5xxl_path" => (
+            Some(ServerI18nKey::ModelConfigFieldDiffusionAssetLabel),
+            Some(ServerI18nKey::ModelConfigFieldDiffusionAssetDescription),
+        ),
+        "load.flash_attn" => (
+            Some(ServerI18nKey::ModelConfigFieldFlashAttentionLabel),
+            Some(ServerI18nKey::ModelConfigFieldDiffusionPerformanceDescription),
+        ),
+        "load.offload_params_to_cpu" => (
+            Some(ServerI18nKey::ModelConfigFieldOffloadParamsToCpuLabel),
+            Some(ServerI18nKey::ModelConfigFieldDiffusionPerformanceDescription),
+        ),
+        "load.vae_device" => (
+            Some(ServerI18nKey::ModelConfigFieldVaeDeviceLabel),
+            Some(ServerI18nKey::ModelConfigFieldDiffusionDeviceDescription),
+        ),
+        "load.clip_device" => (
+            Some(ServerI18nKey::ModelConfigFieldClipDeviceLabel),
+            Some(ServerI18nKey::ModelConfigFieldDiffusionDeviceDescription),
+        ),
+        "load.runtime_load_supported" => (
+            Some(ServerI18nKey::ModelConfigFieldRuntimeLoadSupportedLabel),
+            Some(ServerI18nKey::ModelConfigFieldRuntimeLoadSupportedDescription),
+        ),
+        "advanced.non_runtime_projection" => (
+            Some(ServerI18nKey::ModelConfigFieldNonRuntimeProjectionLabel),
+            Some(ServerI18nKey::ModelConfigFieldNonRuntimeProjectionDescription),
+        ),
+        "advanced.resolved_load_spec" => (
+            Some(ServerI18nKey::ModelConfigFieldResolvedLoadJsonLabel),
+            Some(ServerI18nKey::ModelConfigFieldResolvedLoadJsonDescription),
+        ),
+        "advanced.resolved_inference_spec"
+            if description_md.is_some_and(|value| value.contains("selected pack preset")) =>
+        {
+            (
+                Some(ServerI18nKey::ModelConfigFieldResolvedInferenceJsonLabel),
+                Some(ServerI18nKey::ModelConfigFieldResolvedInferenceJsonNonRuntimeDescription),
+            )
+        }
+        "advanced.resolved_inference_spec" => (
+            Some(ServerI18nKey::ModelConfigFieldResolvedInferenceJsonLabel),
+            Some(ServerI18nKey::ModelConfigFieldResolvedInferenceJsonDescription),
+        ),
+        _ => return None,
+    };
+    Some(metadata_i18n(label, description))
+}
+
+fn metadata_i18n(label: Option<ServerI18nKey>, description: Option<ServerI18nKey>) -> I18nPayload {
+    let mut payload = I18nPayload::new();
+    if let Some(key) = label {
+        payload.insert("label", I18nMessageRef::new(key));
+    }
+    if let Some(key) = description {
+        payload.insert("description_md", I18nMessageRef::new(key));
+    }
+    payload
 }
 
 pub(super) fn model_source_origin(
@@ -390,13 +580,13 @@ mod tests {
     use std::collections::BTreeMap;
     use std::path::PathBuf;
 
-    use slab_types::ModelSource;
+    use slab_types::{ModelSource, ServerI18nKey};
 
     use super::{
         build_model_config_source_fields, build_model_config_source_summary,
         humanize_artifact_label,
     };
-    use crate::domain::models::ModelConfigOrigin;
+    use crate::domain::models::{ModelConfigFieldScope, ModelConfigOrigin, ModelConfigValueType};
 
     #[test]
     fn hugging_face_source_summary_prefers_named_model_artifact() {
@@ -451,6 +641,49 @@ mod tests {
 
         assert_eq!(paths, vec!["source.kind", "source.local_path", "source.artifacts.model"]);
         assert!(fields.iter().all(|field| field.origin == ModelConfigOrigin::SelectedVariant));
+    }
+
+    #[test]
+    fn model_config_fields_include_metadata_i18n_when_known() {
+        let field = super::build_model_config_field(
+            "model.id",
+            ModelConfigFieldScope::Summary,
+            "Model ID",
+            Some("Catalog identifier projected from the pack manifest.".into()),
+            ModelConfigValueType::String,
+            serde_json::Value::String("model-1".into()),
+            ModelConfigOrigin::PackManifest,
+        );
+
+        let i18n = field.i18n.expect("field i18n");
+        assert_eq!(
+            i18n.0.get("label").map(|message| message.key),
+            Some(ServerI18nKey::ModelConfigFieldModelIdLabel)
+        );
+        assert_eq!(
+            i18n.0.get("description_md").map(|message| message.key),
+            Some(ServerI18nKey::ModelConfigFieldModelIdDescription)
+        );
+    }
+
+    #[test]
+    fn model_config_sections_include_metadata_i18n_when_known() {
+        let section = super::build_model_config_section(
+            "load",
+            "Load",
+            Some("Effective runtime load parameters.".into()),
+            Vec::new(),
+        );
+
+        let i18n = section.i18n.expect("section i18n");
+        assert_eq!(
+            i18n.0.get("label").map(|message| message.key),
+            Some(ServerI18nKey::ModelConfigSectionLoadLabel)
+        );
+        assert_eq!(
+            i18n.0.get("description_md").map(|message| message.key),
+            Some(ServerI18nKey::ModelConfigSectionLoadDescription)
+        );
     }
 
     #[test]

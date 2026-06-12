@@ -22,7 +22,7 @@ use crate::error::AppCoreError;
 use crate::infra::model_packs;
 
 use config_document::{
-    build_model_config_field, build_model_config_inference_fields,
+    build_model_config_field, build_model_config_inference_fields, build_model_config_section,
     build_model_config_selection_view, build_model_config_source_fields,
     build_model_config_source_summary, build_model_config_summary_fields, diffusion_load_origin,
     ensure_json_object, insert_optional_path, json_property_or_null, model_source_origin,
@@ -389,40 +389,38 @@ impl ModelService {
         ];
 
         Ok(vec![
-            ModelConfigSectionView {
-                id: "summary".into(),
-                label: "Summary".into(),
-                description_md: Some("Pack-backed catalog summary for the selected model.".into()),
-                fields: summary_fields,
-            },
-            ModelConfigSectionView {
-                id: "source".into(),
-                label: "Source / Artifacts".into(),
-                description_md: Some(
-                    "Resolved source and artifacts for the active selection.".into(),
-                ),
-                fields: source_fields,
-            },
-            ModelConfigSectionView {
-                id: "load".into(),
-                label: "Load".into(),
-                description_md: Some("Effective runtime load parameters.".into()),
-                fields: load_fields,
-            },
-            ModelConfigSectionView {
-                id: "inference".into(),
-                label: "Inference".into(),
-                description_md: Some("Resolved inference defaults from the pack.".into()),
-                fields: inference_fields,
-            },
-            ModelConfigSectionView {
-                id: "advanced".into(),
-                label: "Advanced".into(),
-                description_md: Some(
+            build_model_config_section(
+                "summary",
+                "Summary",
+                Some("Pack-backed catalog summary for the selected model.".into()),
+                summary_fields,
+            ),
+            build_model_config_section(
+                "source",
+                "Source / Artifacts",
+                Some("Resolved source and artifacts for the active selection.".into()),
+                source_fields,
+            ),
+            build_model_config_section(
+                "load",
+                "Load",
+                Some("Effective runtime load parameters.".into()),
+                load_fields,
+            ),
+            build_model_config_section(
+                "inference",
+                "Inference",
+                Some("Resolved inference defaults from the pack.".into()),
+                inference_fields,
+            ),
+            build_model_config_section(
+                "advanced",
+                "Advanced",
+                Some(
                     "Fallback JSON for fields not yet promoted into the canonical catalog.".into(),
                 ),
-                fields: advanced_fields,
-            },
+                advanced_fields,
+            ),
         ])
     }
 
@@ -486,39 +484,39 @@ impl ModelService {
         ];
 
         Ok(vec![
-            ModelConfigSectionView {
-                id: "summary".into(),
-                label: "Summary".into(),
-                description_md: Some("Pack-backed catalog summary for the selected model.".into()),
-                fields: summary_fields,
-            },
-            ModelConfigSectionView {
-                id: "source".into(),
-                label: "Source / Artifacts".into(),
-                description_md: Some("Resolved source and artifacts for the active selection.".into()),
-                fields: source_fields,
-            },
-            ModelConfigSectionView {
-                id: "load".into(),
-                label: "Load".into(),
-                description_md: Some(
+            build_model_config_section(
+                "summary",
+                "Summary",
+                Some("Pack-backed catalog summary for the selected model.".into()),
+                summary_fields,
+            ),
+            build_model_config_section(
+                "source",
+                "Source / Artifacts",
+                Some("Resolved source and artifacts for the active selection.".into()),
+                source_fields,
+            ),
+            build_model_config_section(
+                "load",
+                "Load",
+                Some(
                     "This pack does not expose a runtime-execution capability, so runtime load settings are unavailable."
                         .into(),
                 ),
-                fields: load_fields,
-            },
-            ModelConfigSectionView {
-                id: "inference".into(),
-                label: "Inference".into(),
-                description_md: Some("Resolved inference defaults from the pack.".into()),
-                fields: inference_fields,
-            },
-            ModelConfigSectionView {
-                id: "advanced".into(),
-                label: "Advanced".into(),
-                description_md: Some("Additional metadata for the selected non-runtime pack.".into()),
-                fields: advanced_fields,
-            },
+                load_fields,
+            ),
+            build_model_config_section(
+                "inference",
+                "Inference",
+                Some("Resolved inference defaults from the pack.".into()),
+                inference_fields,
+            ),
+            build_model_config_section(
+                "advanced",
+                "Advanced",
+                Some("Additional metadata for the selected non-runtime pack.".into()),
+                advanced_fields,
+            ),
         ])
     }
 }

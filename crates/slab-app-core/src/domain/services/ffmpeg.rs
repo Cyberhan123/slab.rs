@@ -1,4 +1,8 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use slab_types::{I18nMessageRef, I18nPayload, ServerI18nKey};
 use tracing::{info, warn};
 
 use crate::context::worker_state::OperationContext;
@@ -92,7 +96,11 @@ impl FfmpegService {
                     let mut progress = FfmpegProgressState::new(output_path.clone());
 
                     if let Err(error) = ensure_dynamic_runtime_ready() {
-                        progress.push_log(error.clone());
+                        progress.push_log_with_i18n(
+                            error.clone(),
+                            ServerI18nKey::TaskFfmpegRuntimeInitFailed,
+                            detail_params(&error),
+                        );
                         let payload = progress.to_payload();
                         if let Err(db_error) = operation
                             .update_status(TaskStatus::Failed, Some(&payload), Some(&error))
@@ -116,6 +124,13 @@ impl FfmpegService {
                         let error = format!(
                             "unsupported output format '{output_format}' for ffmpeg-next static mode"
                         );
+                        progress.set_message_i18n(
+                            ServerI18nKey::TaskFfmpegUnsupportedOutputFormat,
+                            BTreeMap::from([(
+                                "format".to_owned(),
+                                Value::String(output_format.clone()),
+                            )]),
+                        );
                         let payload = progress.to_payload();
                         if let Err(db_error) = operation
                             .update_status(TaskStatus::Failed, Some(&payload), Some(&error))
@@ -137,7 +152,11 @@ impl FfmpegService {
                         match transcode_result {
                             Ok(Ok(())) => {
                                 progress.mark_complete();
-                                progress.push_log("ffmpeg-next audio transcoding completed".to_owned());
+                                progress.push_log_with_i18n(
+                                    "ffmpeg-next audio transcoding completed".to_owned(),
+                                    ServerI18nKey::TaskFfmpegCompleted,
+                                    BTreeMap::new(),
+                                );
                                 let result_json = progress.to_success_payload();
                                 if let Err(error) = operation.mark_succeeded(&result_json).await {
                                     warn!(task_id = %operation_id, error = %error, "failed to persist ffmpeg-next conversion success");
@@ -146,9 +165,13 @@ impl FfmpegService {
                                 return;
                             }
                             Ok(Err(error)) => {
-                                progress.push_log(format!("ffmpeg-next audio conversion failed: {error}"));
-                                let payload = progress.to_payload();
                                 let error_text = error.to_string();
+                                progress.push_log_with_i18n(
+                                    format!("ffmpeg-next audio conversion failed: {error_text}"),
+                                    ServerI18nKey::TaskFfmpegConversionFailed,
+                                    detail_params(&error_text),
+                                );
+                                let payload = progress.to_payload();
                                 if let Err(db_error) = operation
                                     .update_status(
                                         TaskStatus::Failed,
@@ -161,9 +184,13 @@ impl FfmpegService {
                                 }
                             }
                             Err(error) => {
-                                progress.push_log(format!("ffmpeg-next audio conversion worker failed: {error}"));
-                                let payload = progress.to_payload();
                                 let error_text = error.to_string();
+                                progress.push_log_with_i18n(
+                                    format!("ffmpeg-next audio conversion worker failed: {error_text}"),
+                                    ServerI18nKey::TaskFfmpegWorkerFailed,
+                                    detail_params(&error_text),
+                                );
+                                let payload = progress.to_payload();
                                 if let Err(db_error) = operation
                                     .update_status(
                                         TaskStatus::Failed,
@@ -191,7 +218,11 @@ impl FfmpegService {
                         match remux_result {
                             Ok(Ok(())) => {
                                 progress.mark_complete();
-                                progress.push_log("ffmpeg-next remux completed".to_owned());
+                                progress.push_log_with_i18n(
+                                    "ffmpeg-next remux completed".to_owned(),
+                                    ServerI18nKey::TaskFfmpegRemuxCompleted,
+                                    BTreeMap::new(),
+                                );
                                 let result_json = progress.to_success_payload();
                                 if let Err(error) = operation.mark_succeeded(&result_json).await {
                                     warn!(task_id = %operation_id, error = %error, "failed to persist ffmpeg-next remux success");
@@ -199,9 +230,13 @@ impl FfmpegService {
                                 info!(task_id = %operation_id, output_path = %output_path, "ffmpeg-next remux succeeded");
                             }
                             Ok(Err(error)) => {
-                                progress.push_log(format!("ffmpeg-next remux failed: {error}"));
-                                let payload = progress.to_payload();
                                 let error_text = error.to_string();
+                                progress.push_log_with_i18n(
+                                    format!("ffmpeg-next remux failed: {error_text}"),
+                                    ServerI18nKey::TaskFfmpegRemuxFailed,
+                                    detail_params(&error_text),
+                                );
+                                let payload = progress.to_payload();
                                 if let Err(db_error) = operation
                                     .update_status(
                                         TaskStatus::Failed,
@@ -214,9 +249,13 @@ impl FfmpegService {
                                 }
                             }
                             Err(error) => {
-                                progress.push_log(format!("ffmpeg-next remux worker failed: {error}"));
-                                let payload = progress.to_payload();
                                 let error_text = error.to_string();
+                                progress.push_log_with_i18n(
+                                    format!("ffmpeg-next remux worker failed: {error_text}"),
+                                    ServerI18nKey::TaskFfmpegWorkerFailed,
+                                    detail_params(&error_text),
+                                );
+                                let payload = progress.to_payload();
                                 if let Err(db_error) = operation
                                     .update_status(
                                         TaskStatus::Failed,
@@ -244,6 +283,7 @@ struct FfmpegProgressState {
     output_path: String,
     current_ms: u64,
     message: Option<String>,
+    message_i18n: Option<I18nMessageRef>,
     logs: Vec<String>,
 }
 
@@ -253,6 +293,7 @@ impl FfmpegProgressState {
             output_path,
             current_ms: 0,
             message: Some("Starting FFmpeg".to_owned()),
+            message_i18n: Some(I18nMessageRef::new(ServerI18nKey::TaskFfmpegStarting)),
             logs: Vec::new(),
         }
     }
@@ -264,6 +305,7 @@ impl FfmpegProgressState {
         }
 
         self.message = Some(line.clone());
+        self.message_i18n = None;
         self.logs.push(line);
         if self.logs.len() > 64 {
             let excess = self.logs.len() - 64;
@@ -271,15 +313,35 @@ impl FfmpegProgressState {
         }
     }
 
+    fn push_log_with_i18n(
+        &mut self,
+        line: String,
+        key: ServerI18nKey,
+        params: BTreeMap<String, Value>,
+    ) {
+        self.push_log(line);
+        self.set_message_i18n(key, params);
+    }
+
+    fn set_message_i18n(&mut self, key: ServerI18nKey, params: BTreeMap<String, Value>) {
+        self.message_i18n = Some(I18nMessageRef::with_params(key, params));
+    }
+
     fn mark_complete(&mut self) {
         self.current_ms = 1;
         self.message = Some("FFmpeg conversion completed".to_owned());
+        self.message_i18n = Some(I18nMessageRef::new(ServerI18nKey::TaskFfmpegCompleted));
     }
 
     fn to_progress(&self) -> TaskProgress {
+        let mut i18n = I18nPayload::with_field("label", ServerI18nKey::TaskFfmpegAudioExtraction);
+        if let Some(message_i18n) = self.message_i18n.clone() {
+            i18n.insert("message", message_i18n);
+        }
         TaskProgress {
             label: Some("FFmpeg audio extraction".to_owned()),
             message: self.message.clone(),
+            i18n: Some(i18n),
             current: self.current_ms,
             total: Some(1),
             unit: Some("ms".to_owned()),
@@ -301,6 +363,10 @@ impl FfmpegProgressState {
         })
         .unwrap_or_default()
     }
+}
+
+fn detail_params(detail: &str) -> BTreeMap<String, Value> {
+    BTreeMap::from([("detail".to_owned(), Value::String(detail.to_owned()))])
 }
 
 async fn publish_ffmpeg_progress(

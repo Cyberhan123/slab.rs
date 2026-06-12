@@ -12,6 +12,14 @@ import {
   isAssistantTransportError,
 } from '../assistant-request-errors'
 
+const translate = (key: string, options?: Record<string, unknown>) => {
+  if (key === 'server.errors.badRequest') {
+    return `translated ${options?.detail}`
+  }
+
+  return typeof options?.defaultValue === 'string' ? options.defaultValue : key
+}
+
 describe('assistant request errors', () => {
   it('uses typed assistant transport messages', () => {
     const error = new AssistantTransportError({
@@ -32,6 +40,37 @@ describe('assistant request errors', () => {
       errorStatus: 500,
       errorType: 'server_error',
     })
+  })
+
+  it('translates assistant transport i18n payloads with legacy fallback', () => {
+    const error = new AssistantTransportError({
+      message: 'model is required',
+      transport_status: 400,
+      error_type: 'invalid_request_error',
+      i18n: {
+        message: {
+          key: 'server.errors.badRequest',
+          params: { detail: 'model is required' },
+        },
+      },
+    })
+
+    expect(getAssistantErrorDescription(error, 'fallback', translate)).toBe(
+      'translated model is required',
+    )
+
+    const fallbackError = new AssistantTransportError({
+      message: 'legacy message',
+      transport_status: 400,
+      error_type: 'invalid_request_error',
+      i18n: {
+        message: {
+          key: 'server.errors.conflict',
+        },
+      },
+    })
+
+    expect(getAssistantErrorDescription(fallbackError, 'fallback', translate)).toBe('legacy message')
   })
 
   it('uses generic error messages before fallback text', () => {

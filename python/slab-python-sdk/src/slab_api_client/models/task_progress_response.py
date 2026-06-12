@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
+
+if TYPE_CHECKING:
+    from ..models.i18n_payload import I18NPayload
+
 
 T = TypeVar("T", bound="TaskProgressResponse")
 
@@ -16,6 +20,7 @@ class TaskProgressResponse:
     """
     Attributes:
         current (int):
+        i18n (I18NPayload | None | Unset):
         label (None | str | Unset):
         logs (list[str] | None | Unset):
         message (None | str | Unset):
@@ -26,6 +31,7 @@ class TaskProgressResponse:
     """
 
     current: int
+    i18n: I18NPayload | None | Unset = UNSET
     label: None | str | Unset = UNSET
     logs: list[str] | None | Unset = UNSET
     message: None | str | Unset = UNSET
@@ -36,7 +42,17 @@ class TaskProgressResponse:
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.i18n_payload import I18NPayload
+
         current = self.current
+
+        i18n: dict[str, Any] | None | Unset
+        if isinstance(self.i18n, Unset):
+            i18n = UNSET
+        elif isinstance(self.i18n, I18NPayload):
+            i18n = self.i18n.to_dict()
+        else:
+            i18n = self.i18n
 
         label: None | str | Unset
         if isinstance(self.label, Unset):
@@ -90,6 +106,8 @@ class TaskProgressResponse:
                 "current": current,
             }
         )
+        if i18n is not UNSET:
+            field_dict["i18n"] = i18n
         if label is not UNSET:
             field_dict["label"] = label
         if logs is not UNSET:
@@ -109,8 +127,27 @@ class TaskProgressResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.i18n_payload import I18NPayload
+
         d = dict(src_dict)
         current = d.pop("current")
+
+        def _parse_i18n(data: object) -> I18NPayload | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                i18n_type_1 = I18NPayload.from_dict(data)
+
+                return i18n_type_1
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(I18NPayload | None | Unset, data)
+
+        i18n = _parse_i18n(d.pop("i18n", UNSET))
 
         def _parse_label(data: object) -> None | str | Unset:
             if data is None:
@@ -185,6 +222,7 @@ class TaskProgressResponse:
 
         task_progress_response = cls(
             current=current,
+            i18n=i18n,
             label=label,
             logs=logs,
             message=message,

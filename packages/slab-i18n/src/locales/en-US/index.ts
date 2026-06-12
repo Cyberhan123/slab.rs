@@ -1,9 +1,11 @@
 import { layouts } from './layouts';
 import { pages } from './pages';
+import { enUSServer as server } from '../server';
 
 export const enUS = {
   layouts,
   pages,
+  server,
 } as const;
 
 type LocaleMessages<T> = {

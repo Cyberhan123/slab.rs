@@ -7,6 +7,7 @@
 //! - [`common`] universal building blocks: [`common::Id`], [`common::JsonOptions`],
 //!   [`common::Timestamp`].
 //! - [`error`] crate-level error type.
+//! - [`i18n`] server-to-frontend internationalization references.
 //! - [`plugin`] shared plugin manifest and contribution contracts.
 //! - [`plugin_runtime`] shared JS plugin runtime JSON-RPC contracts.
 //! - [`runtime`] shared runtime model and load specifications.
@@ -21,6 +22,7 @@ mod defaults;
 pub mod desktop_api;
 pub mod device;
 pub mod error;
+pub mod i18n;
 pub mod load_config;
 pub mod plugin;
 pub mod plugin_runtime;
@@ -43,6 +45,7 @@ pub use desktop_api::{
 };
 pub use device::RuntimeDevicePreference;
 pub use error::{SlabTypeError, ValidationError};
+pub use i18n::{I18nMessageRef, I18nPayload, ServerI18nKey};
 pub use load_config::{
     CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig,
     GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlLlamaLoadDefaultsConfig,

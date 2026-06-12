@@ -18,7 +18,7 @@ import {
 import { Switch } from '@slab/components/switch';
 import { Textarea } from '@slab/components/textarea';
 import { StatusPill } from '@slab/components/workspace';
-import { useTranslation } from '@slab/i18n';
+import { translateServerField, useTranslation } from '@slab/i18n';
 import { cn } from '@/lib/utils';
 
 import { parseStructuredJsonSchema } from '../schema';
@@ -65,13 +65,13 @@ export function SettingFieldCard({
       ? t('pages.settings.language.title')
       : isModelSourceField
         ? t('pages.settings.modelSource.title')
-      : property.label;
+      : translateServerField(property.i18n, 'label', property.label, t);
   const displayDescription =
     isLanguageField
       ? t('pages.settings.language.description')
       : isModelSourceField
         ? t('pages.settings.modelSource.description')
-      : property.description_md;
+      : translateServerField(property.i18n, 'description_md', property.description_md, t);
 
   const textValue =
     typeof draftValue === 'string'

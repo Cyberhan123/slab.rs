@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useInterval } from '@mantine/hooks';
 import { clamp, countBy } from 'lodash-es';
 import { toast } from 'sonner';
-import { useTranslation } from '@slab/i18n';
+import { translateServerField, useTranslation } from '@slab/i18n';
 
 import api, { getErrorMessage, postFormData } from '@slab/api';
 import type { components } from '@slab/api/v1';
@@ -204,7 +204,7 @@ export function useHubModelCatalog() {
       const task = await getModelDownloadTask(taskId);
       setModelDownloadTracking(modelId, {
         taskId,
-        progress: normalizeTaskProgress(task.progress),
+        progress: normalizeTaskProgress(task.progress, t),
       });
 
       if (task.status === 'succeeded') {
@@ -213,7 +213,7 @@ export function useHubModelCatalog() {
 
       if (isFailedTaskStatus(task.status)) {
         throw new Error(
-          task.error_msg ??
+          translateServerField(task.i18n, 'error_msg', task.error_msg, t) ||
             t('pages.hub.error.taskEndedWithStatus', {
               taskId,
               status: task.status,

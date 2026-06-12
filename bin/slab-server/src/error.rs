@@ -8,11 +8,15 @@
 //! detail but only a generic message is returned to the caller so that
 //! file paths, SQL, or other implementation details never leak to clients.
 
+use std::collections::BTreeMap;
+
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
+use serde_json::Value;
 use slab_app_core::error::AppCoreErrorData;
+use slab_types::{I18nPayload, ServerI18nKey};
 use thiserror::Error;
 use tracing::error;
 use validator::{ValidationErrors, ValidationErrorsKind};
@@ -23,6 +27,8 @@ struct ErrorResponse {
     code: u16,
     data: Option<AppCoreErrorData>,
     message: String,
+    #[serde(skip_serializing_if = "I18nPayload::is_empty")]
+    i18n: I18nPayload,
 }
 
 /// Error codes for different error types
@@ -61,6 +67,10 @@ pub enum ServerError {
     #[error("bad request: {message}")]
     BadRequestData { message: String, data: AppCoreErrorData },
 
+    /// The caller sent a syntactically valid request that failed schema validation.
+    #[error("request validation failed: {0}")]
+    RequestValidationFailed(String),
+
     /// The request conflicts with the current resource state.
     #[error("conflict: {0}")]
     Conflict(String),
@@ -83,55 +93,119 @@ pub enum ServerError {
 }
 
 impl ServerError {
-    pub(crate) fn agent_code_message(self) -> (&'static str, String) {
+    pub(crate) fn agent_code_message(self) -> (&'static str, String, I18nPayload) {
         match self {
-            ServerError::NotFound(message) => ("not_found", message),
-            ServerError::BadRequest(message) => ("bad_request", message),
-            ServerError::BadRequestData { message, .. } => ("bad_request", message),
-            ServerError::Conflict(message) => ("conflict", message),
-            ServerError::BackendNotReady(message) => ("backend_not_ready", message),
-            ServerError::NotImplemented(message) => ("not_implemented", message),
-            ServerError::TooManyRequests(message) => ("too_many_requests", message),
-            ServerError::Runtime(_) | ServerError::Database(_) | ServerError::Internal(_) => {
-                ("internal_error", "internal server error".to_owned())
-            }
+            ServerError::NotFound(message) => (
+                "not_found",
+                message.clone(),
+                message_i18n_with_detail(ServerI18nKey::ErrorNotFound, &message),
+            ),
+            ServerError::BadRequest(message) => (
+                "bad_request",
+                message.clone(),
+                message_i18n_with_detail(ServerI18nKey::ErrorBadRequest, &message),
+            ),
+            ServerError::BadRequestData { message, .. } => (
+                "bad_request",
+                message.clone(),
+                message_i18n_with_detail(ServerI18nKey::ErrorBadRequest, &message),
+            ),
+            ServerError::RequestValidationFailed(message) => (
+                "bad_request",
+                message.clone(),
+                message_i18n_with_detail(ServerI18nKey::ErrorRequestValidationFailed, &message),
+            ),
+            ServerError::Conflict(message) => (
+                "conflict",
+                message.clone(),
+                message_i18n_with_detail(ServerI18nKey::ErrorConflict, &message),
+            ),
+            ServerError::BackendNotReady(message) => (
+                "backend_not_ready",
+                message.clone(),
+                message_i18n_with_detail(ServerI18nKey::ErrorBackendNotReady, &message),
+            ),
+            ServerError::NotImplemented(message) => (
+                "not_implemented",
+                message.clone(),
+                message_i18n_with_detail(ServerI18nKey::ErrorNotImplemented, &message),
+            ),
+            ServerError::TooManyRequests(message) => (
+                "too_many_requests",
+                message.clone(),
+                message_i18n_with_detail(ServerI18nKey::ErrorTooManyRequests, &message),
+            ),
+            ServerError::Runtime(_) | ServerError::Database(_) | ServerError::Internal(_) => (
+                "internal_error",
+                "internal server error".to_owned(),
+                message_i18n(ServerI18nKey::ErrorInternalError),
+            ),
         }
     }
 }
 
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
-        let (status, code, data, message) = match &self {
+        let (status, code, data, message, i18n) = match &self {
             // Client-facing errors: expose the message directly.
             ServerError::NotFound(m) => (
                 StatusCode::NOT_FOUND,
                 error_codes::NOT_FOUND,
                 None as Option<AppCoreErrorData>,
                 m.clone(),
+                message_i18n_with_detail(ServerI18nKey::ErrorNotFound, m),
             ),
-            ServerError::BadRequest(m) => {
-                (StatusCode::BAD_REQUEST, error_codes::BAD_REQUEST, None, m.clone())
-            }
+            ServerError::BadRequest(m) => (
+                StatusCode::BAD_REQUEST,
+                error_codes::BAD_REQUEST,
+                None,
+                m.clone(),
+                message_i18n_with_detail(ServerI18nKey::ErrorBadRequest, m),
+            ),
             ServerError::BadRequestData { message, data } => (
                 StatusCode::BAD_REQUEST,
                 error_codes::BAD_REQUEST,
                 Some(data.clone()),
                 message.clone(),
+                message_i18n_with_detail(ServerI18nKey::ErrorBadRequest, message),
             ),
-            ServerError::Conflict(m) => {
-                (StatusCode::CONFLICT, error_codes::CONFLICT, None, m.clone())
-            }
-            ServerError::BackendNotReady(m) => {
-                (StatusCode::SERVICE_UNAVAILABLE, error_codes::BACKEND_NOT_READY, None, m.clone())
-            }
+            ServerError::RequestValidationFailed(m) => (
+                StatusCode::BAD_REQUEST,
+                error_codes::BAD_REQUEST,
+                None,
+                m.clone(),
+                message_i18n_with_detail(ServerI18nKey::ErrorRequestValidationFailed, m),
+            ),
+            ServerError::Conflict(m) => (
+                StatusCode::CONFLICT,
+                error_codes::CONFLICT,
+                None,
+                m.clone(),
+                message_i18n_with_detail(ServerI18nKey::ErrorConflict, m),
+            ),
+            ServerError::BackendNotReady(m) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                error_codes::BACKEND_NOT_READY,
+                None,
+                m.clone(),
+                message_i18n_with_detail(ServerI18nKey::ErrorBackendNotReady, m),
+            ),
 
-            ServerError::NotImplemented(m) => {
-                (StatusCode::NOT_IMPLEMENTED, error_codes::NOT_IMPLEMENTED, None, m.clone())
-            }
+            ServerError::NotImplemented(m) => (
+                StatusCode::NOT_IMPLEMENTED,
+                error_codes::NOT_IMPLEMENTED,
+                None,
+                m.clone(),
+                message_i18n_with_detail(ServerI18nKey::ErrorNotImplemented, m),
+            ),
 
-            ServerError::TooManyRequests(m) => {
-                (StatusCode::TOO_MANY_REQUESTS, error_codes::TOO_MANY_REQUESTS, None, m.clone())
-            }
+            ServerError::TooManyRequests(m) => (
+                StatusCode::TOO_MANY_REQUESTS,
+                error_codes::TOO_MANY_REQUESTS,
+                None,
+                m.clone(),
+                message_i18n_with_detail(ServerI18nKey::ErrorTooManyRequests, m),
+            ),
 
             // Internal errors: log the full detail, return a helpful message
             // for common errors while keeping sensitive details private.
@@ -153,7 +227,27 @@ impl IntoResponse for ServerError {
                     }
                     _ => "inference backend error".to_owned(),
                 };
-                (StatusCode::INTERNAL_SERVER_ERROR, error_codes::RUNTIME_ERROR, None, message)
+                let key = match e {
+                    slab_runtime_core::CoreError::QueueFull { .. }
+                    | slab_runtime_core::CoreError::Busy { .. } => ServerI18nKey::ErrorRuntimeBusy,
+                    slab_runtime_core::CoreError::BackendShutdown => {
+                        ServerI18nKey::ErrorRuntimeUnavailable
+                    }
+                    slab_runtime_core::CoreError::UnsupportedOperation { .. } => {
+                        ServerI18nKey::ErrorRuntimeUnsupportedOperation
+                    }
+                    slab_runtime_core::CoreError::DriverNotRegistered { .. } => {
+                        ServerI18nKey::ErrorRuntimeDriverNotRegistered
+                    }
+                    _ => ServerI18nKey::ErrorRuntimeError,
+                };
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    error_codes::RUNTIME_ERROR,
+                    None,
+                    message,
+                    message_i18n(key),
+                )
             }
             ServerError::Database(e) => {
                 error!(error = %e, "database error");
@@ -162,6 +256,7 @@ impl IntoResponse for ServerError {
                     error_codes::DATABASE_ERROR,
                     None,
                     "internal server error".to_owned(),
+                    message_i18n(ServerI18nKey::ErrorDatabaseError),
                 )
             }
             ServerError::Internal(m) => {
@@ -171,11 +266,12 @@ impl IntoResponse for ServerError {
                     error_codes::INTERNAL_ERROR,
                     None,
                     "internal server error".to_owned(),
+                    message_i18n(ServerI18nKey::ErrorInternalError),
                 )
             }
         };
 
-        let error_response = ErrorResponse { code, data, message };
+        let error_response = ErrorResponse { code, data, message, i18n };
 
         (status, Json(error_response)).into_response()
     }
@@ -219,7 +315,7 @@ impl From<anyhow::Error> for ServerError {
 
 impl From<ValidationErrors> for ServerError {
     fn from(errors: ValidationErrors) -> Self {
-        ServerError::BadRequest(format_validation_errors(&errors))
+        ServerError::RequestValidationFailed(format_validation_errors(&errors))
     }
 }
 
@@ -228,6 +324,18 @@ fn format_validation_errors(errors: &ValidationErrors) -> String {
     collect_validation_messages("", errors, &mut messages);
 
     if messages.is_empty() { "request validation failed".to_owned() } else { messages.join("; ") }
+}
+
+pub(crate) fn message_i18n(key: ServerI18nKey) -> I18nPayload {
+    I18nPayload::with_field("message", key)
+}
+
+pub(crate) fn message_i18n_with_detail(key: ServerI18nKey, detail: &str) -> I18nPayload {
+    I18nPayload::with_field_params(
+        "message",
+        key,
+        BTreeMap::from([("detail".to_owned(), Value::String(detail.to_owned()))]),
+    )
 }
 
 fn collect_validation_messages(
@@ -263,5 +371,42 @@ fn collect_validation_messages(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::body::to_bytes;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use serde_json::Value;
+
+    use super::ServerError;
+
+    #[tokio::test]
+    async fn error_response_includes_message_i18n_payload() {
+        let response = ServerError::BadRequest("model is required".to_owned()).into_response();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.expect("read body");
+        let payload: Value = serde_json::from_slice(&body).expect("json body");
+
+        assert_eq!(payload["message"], "model is required");
+        assert_eq!(payload["i18n"]["message"]["key"], "server.errors.badRequest");
+        assert_eq!(payload["i18n"]["message"]["params"]["detail"], "model is required");
+    }
+
+    #[tokio::test]
+    async fn validation_error_response_uses_validation_i18n_key() {
+        let response =
+            ServerError::RequestValidationFailed("model: required".to_owned()).into_response();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.expect("read body");
+        let payload: Value = serde_json::from_slice(&body).expect("json body");
+
+        assert_eq!(payload["message"], "model: required");
+        assert_eq!(payload["i18n"]["message"]["key"], "server.errors.requestValidationFailed");
+        assert_eq!(payload["i18n"]["message"]["params"]["detail"], "model: required");
     }
 }

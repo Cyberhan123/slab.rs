@@ -1,7 +1,7 @@
 import { Loader2, LockKeyhole, Save, Settings2, TriangleAlert } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
-import { useTranslation } from '@slab/i18n';
+import { translateServerField, useTranslation } from '@slab/i18n';
 import { getErrorMessage } from '@slab/api';
 
 import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
@@ -209,29 +209,38 @@ export function HubModelEnhancementSheet({
                 </FieldBlock>
               </section>
 
-              {data.sections.map((section) => (
-                <section
-                  key={section.id}
-                  className="space-y-4 rounded-[28px] border border-border/60 bg-[var(--shell-card)]/55 p-5"
-                >
-                  <div className="space-y-1">
-                    <h3 className="text-base font-semibold tracking-[-0.02em] text-foreground">
-                      {section.label}
-                    </h3>
-                    {section.description_md ? (
-                      <p className="text-xs leading-5 text-muted-foreground">
-                        {section.description_md}
-                      </p>
-                    ) : null}
-                  </div>
+              {data.sections.map((section) => {
+                const sectionLabel = translateServerField(section.i18n, 'label', section.label, t);
+                const sectionDescription = translateServerField(
+                  section.i18n,
+                  'description_md',
+                  section.description_md,
+                  t,
+                );
+                return (
+                  <section
+                    key={section.id}
+                    className="space-y-4 rounded-[28px] border border-border/60 bg-[var(--shell-card)]/55 p-5"
+                  >
+                    <div className="space-y-1">
+                      <h3 className="text-base font-semibold tracking-[-0.02em] text-foreground">
+                        {sectionLabel}
+                      </h3>
+                      {sectionDescription ? (
+                        <p className="text-xs leading-5 text-muted-foreground">
+                          {sectionDescription}
+                        </p>
+                      ) : null}
+                    </div>
 
-                  <div className="space-y-3">
-                    {section.fields.map((field) => (
-                      <ReadonlyFieldCard key={field.path} field={field} />
-                    ))}
-                  </div>
-                </section>
-              ))}
+                    <div className="space-y-3">
+                      {section.fields.map((field) => (
+                        <ReadonlyFieldCard key={field.path} field={field} />
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
             </div>
           ) : null}
         </div>
@@ -282,13 +291,20 @@ function FieldBlock({
 
 function ReadonlyFieldCard({ field }: { field: ModelConfigFieldResponse }) {
   const { t } = useTranslation();
+  const fieldLabel = translateServerField(field.i18n, 'label', field.label, t);
+  const fieldDescription = translateServerField(
+    field.i18n,
+    'description_md',
+    field.description_md,
+    t,
+  );
   return (
     <div className="rounded-[20px] border border-border/60 bg-background/70 p-4 shadow-[0_1px_2px_color-mix(in_oklab,var(--foreground)_8%,transparent)]">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <h4 className="text-sm font-semibold tracking-[-0.02em] text-foreground">
-              {field.label}
+              {fieldLabel}
             </h4>
               <Badge variant="secondary" className="rounded-full">
                 {formatOrigin(field.origin, t)}
@@ -300,8 +316,8 @@ function ReadonlyFieldCard({ field }: { field: ModelConfigFieldResponse }) {
                 </Badge>
               ) : null}
           </div>
-          {field.description_md ? (
-            <p className="text-xs leading-5 text-muted-foreground">{field.description_md}</p>
+          {fieldDescription ? (
+            <p className="text-xs leading-5 text-muted-foreground">{fieldDescription}</p>
           ) : null}
           <p className="text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
             {field.path}

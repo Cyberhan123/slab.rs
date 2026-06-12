@@ -9,6 +9,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 if TYPE_CHECKING:
+    from ..models.i18n_payload import I18NPayload
     from ..models.setting_property_schema import SettingPropertySchema
 
 
@@ -27,6 +28,7 @@ class SettingPropertyView:
         schema (SettingPropertySchema):
         search_terms (list[str]):
         description_md (str | Unset):
+        i18n (I18NPayload | None | Unset):
         override_value (Any | None | Unset):
     """
 
@@ -38,10 +40,13 @@ class SettingPropertyView:
     schema: SettingPropertySchema
     search_terms: list[str]
     description_md: str | Unset = UNSET
+    i18n: I18NPayload | None | Unset = UNSET
     override_value: Any | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.i18n_payload import I18NPayload
+
         editable = self.editable
 
         effective_value = self.effective_value
@@ -57,6 +62,14 @@ class SettingPropertyView:
         search_terms = self.search_terms
 
         description_md = self.description_md
+
+        i18n: dict[str, Any] | None | Unset
+        if isinstance(self.i18n, Unset):
+            i18n = UNSET
+        elif isinstance(self.i18n, I18NPayload):
+            i18n = self.i18n.to_dict()
+        else:
+            i18n = self.i18n
 
         override_value: Any | None | Unset
         if isinstance(self.override_value, Unset):
@@ -79,6 +92,8 @@ class SettingPropertyView:
         )
         if description_md is not UNSET:
             field_dict["description_md"] = description_md
+        if i18n is not UNSET:
+            field_dict["i18n"] = i18n
         if override_value is not UNSET:
             field_dict["override_value"] = override_value
 
@@ -86,6 +101,7 @@ class SettingPropertyView:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.i18n_payload import I18NPayload
         from ..models.setting_property_schema import SettingPropertySchema
 
         d = dict(src_dict)
@@ -105,6 +121,23 @@ class SettingPropertyView:
 
         description_md = d.pop("description_md", UNSET)
 
+        def _parse_i18n(data: object) -> I18NPayload | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                i18n_type_1 = I18NPayload.from_dict(data)
+
+                return i18n_type_1
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(I18NPayload | None | Unset, data)
+
+        i18n = _parse_i18n(d.pop("i18n", UNSET))
+
         def _parse_override_value(data: object) -> Any | None | Unset:
             if data is None:
                 return data
@@ -123,6 +156,7 @@ class SettingPropertyView:
             schema=schema,
             search_terms=search_terms,
             description_md=description_md,
+            i18n=i18n,
             override_value=override_value,
         )
 

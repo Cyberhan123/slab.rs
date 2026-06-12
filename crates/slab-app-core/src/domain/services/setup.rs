@@ -1,10 +1,12 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 
 use futures::StreamExt;
 use serde::Serialize;
-use slab_types::RuntimeBackendId;
+use serde_json::Value;
+use slab_types::{I18nPayload, RuntimeBackendId, ServerI18nKey};
 use slab_utils::cab::{
     PackagedPayloadManifest, RuntimeVariant, SelectedPayloadFile, SelectedPayloadManifest,
     apply_payload_manifest, detect_best_variant, expand_cab_with_progress, remove_dir_if_exists,
@@ -183,6 +185,7 @@ impl SetupService {
             operation,
             ProvisionStep::SelectPayload,
             "Selecting runtime payload",
+            ServerI18nKey::TaskSetupSelectingRuntimePayload,
         )
         .await?;
 
@@ -195,6 +198,7 @@ impl SetupService {
                     Some(100),
                     ProvisionStep::InstallPayload.index(),
                     PROVISION_STEP_COUNT,
+                    Some(label_i18n(ServerI18nKey::TaskSetupUsingInstalledRuntimePayload)),
                 )
                 .await?;
             } else {
@@ -238,6 +242,7 @@ impl SetupService {
                         Some(100),
                         ProvisionStep::ExpandPayload.index(),
                         PROVISION_STEP_COUNT,
+                        Some(label_i18n(ServerI18nKey::TaskSetupExpandingRuntimePayload)),
                     )
                     .await?;
                     self.expand_selected_cabs(
@@ -254,6 +259,7 @@ impl SetupService {
                         Some(100),
                         ProvisionStep::InstallPayload.index(),
                         PROVISION_STEP_COUNT,
+                        Some(label_i18n(ServerI18nKey::TaskSetupInstallingRuntimeLibraries)),
                     )
                     .await?;
                     self.apply_selected_payload(&expand_root, &target_dir, &selected_manifest).await
@@ -271,6 +277,7 @@ impl SetupService {
                 Some(100),
                 ProvisionStep::EnsureFfmpeg.index(),
                 PROVISION_STEP_COUNT,
+                Some(label_i18n(ServerI18nKey::TaskSetupCheckingFfmpeg)),
             )
             .await?;
             let ffmpeg_path = self.ensure_ffmpeg_installed().await?;
@@ -282,6 +289,7 @@ impl SetupService {
                 Some(100),
                 ProvisionStep::RestartRuntime.index(),
                 PROVISION_STEP_COUNT,
+                Some(label_i18n(ServerI18nKey::TaskSetupRestartingRuntimeWorkers)),
             )
             .await?;
             let restarted_backends = self.restart_runtime_backends().await?;
@@ -348,6 +356,10 @@ impl SetupService {
                     Some(download_progress_total),
                     ProvisionStep::DownloadPayload.index(),
                     PROVISION_STEP_COUNT,
+                    Some(label_i18n_with_file(
+                        ServerI18nKey::TaskSetupUsingCachedPayload,
+                        cab_name,
+                    )),
                 )
                 .await?;
                 continue;
@@ -612,11 +624,13 @@ async fn publish_progress(
     total: Option<u64>,
     step: u32,
     step_count: u32,
+    i18n: Option<I18nPayload>,
 ) -> Result<(), AppCoreError> {
     let payload = serde_json::to_string(&SetupProgressPayload {
         progress: TaskProgress {
             label: Some(label.into()),
             message: None,
+            i18n,
             current,
             total,
             unit: None,
@@ -636,8 +650,18 @@ async fn publish_stage_progress(
     operation: &OperationContext,
     step: ProvisionStep,
     label: impl Into<String>,
+    key: ServerI18nKey,
 ) -> Result<(), AppCoreError> {
-    publish_progress(operation, label, 0, Some(100), step.index(), PROVISION_STEP_COUNT).await
+    publish_progress(
+        operation,
+        label,
+        0,
+        Some(100),
+        step.index(),
+        PROVISION_STEP_COUNT,
+        Some(label_i18n(key)),
+    )
+    .await
 }
 
 async fn download_cab_with_progress(
@@ -687,6 +711,7 @@ async fn download_cab_with_progress(
         Some(progress_total),
         ProvisionStep::DownloadPayload.index(),
         PROVISION_STEP_COUNT,
+        Some(label_i18n_with_file(ServerI18nKey::TaskSetupDownloadingPayload, &file_name)),
     )
     .await?;
 
@@ -718,6 +743,7 @@ async fn download_cab_with_progress(
                 Some(progress_total),
                 ProvisionStep::DownloadPayload.index(),
                 PROVISION_STEP_COUNT,
+                Some(label_i18n_with_file(ServerI18nKey::TaskSetupDownloadingPayload, &file_name)),
             )
             .await?;
             last_reported = downloaded;
@@ -747,10 +773,23 @@ async fn download_cab_with_progress(
         Some(progress_total),
         ProvisionStep::DownloadPayload.index(),
         PROVISION_STEP_COUNT,
+        Some(label_i18n_with_file(ServerI18nKey::TaskSetupDownloadedPayload, &file_name)),
     )
     .await?;
 
     Ok(())
+}
+
+fn label_i18n(key: ServerI18nKey) -> I18nPayload {
+    I18nPayload::with_field("label", key)
+}
+
+fn label_i18n_with_file(key: ServerI18nKey, file_name: &str) -> I18nPayload {
+    I18nPayload::with_field_params(
+        "label",
+        key,
+        BTreeMap::from([("fileName".to_owned(), Value::String(file_name.to_owned()))]),
+    )
 }
 
 fn github_release_asset_url(version: &str, asset_name: &str) -> String {

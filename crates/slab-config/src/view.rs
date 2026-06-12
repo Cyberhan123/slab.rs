@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
+use slab_types::I18nPayload;
 use utoipa::{PartialSchema, ToSchema};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -119,6 +120,8 @@ pub struct SettingPropertyView {
     pub label: String,
     #[serde(default)]
     pub description_md: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub i18n: Option<I18nPayload>,
     pub editable: bool,
     pub schema: SettingPropertySchema,
     pub effective_value: SettingValue,
@@ -134,6 +137,8 @@ pub struct SettingsSubsectionView {
     pub title: String,
     #[serde(default)]
     pub description_md: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub i18n: Option<I18nPayload>,
     pub properties: Vec<SettingPropertyView>,
 }
 
@@ -143,6 +148,8 @@ pub struct SettingsSectionView {
     pub title: String,
     #[serde(default)]
     pub description_md: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub i18n: Option<I18nPayload>,
     pub subsections: Vec<SettingsSubsectionView>,
 }
 
