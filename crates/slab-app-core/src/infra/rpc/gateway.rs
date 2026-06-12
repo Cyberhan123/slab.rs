@@ -15,6 +15,7 @@ use crate::infra::endpoint::{TransportEndpoint, parse_transport_endpoint};
 const STRICT_CONNECT_ATTEMPTS: usize = 30;
 const BEST_EFFORT_CONNECT_ATTEMPTS: usize = 3;
 const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GrpcGatewayConnectPolicy {
@@ -175,7 +176,8 @@ async fn connect_channel(endpoint: &str, attempts: usize) -> anyhow::Result<Chan
 
 async fn connect_http_channel(url: &str) -> anyhow::Result<Channel> {
     let transport = Endpoint::from_shared(url.to_owned())
-        .with_context(|| format!("invalid gRPC URL: {url}"))?;
+        .with_context(|| format!("invalid gRPC URL: {url}"))?
+        .connect_timeout(CONNECT_TIMEOUT);
     let channel = transport
         .connect()
         .await
@@ -188,6 +190,7 @@ async fn connect_ipc_channel(path: &str) -> anyhow::Result<Channel> {
     let path_for_connector = path_display.clone();
 
     let channel = Endpoint::from_static("http://[::]:50051")
+        .connect_timeout(CONNECT_TIMEOUT)
         .connect_with_connector(service_fn(move |_| {
             let path = path_for_connector.clone();
             async move {

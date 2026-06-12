@@ -384,6 +384,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn concurrent_active_model_download_inserts_keep_single_source_owner() {
+        let store = new_store().await;
+        let first_store = store.clone();
+        let second_store = store.clone();
+
+        let (first, second) = tokio::join!(
+            async move {
+                first_store
+                    .insert_model_download_operation(
+                        new_task_record("task-1"),
+                        new_download_record("task-1"),
+                    )
+                    .await
+            },
+            async move {
+                second_store
+                    .insert_model_download_operation(
+                        new_task_record("task-2"),
+                        new_download_record("task-2"),
+                    )
+                    .await
+            }
+        );
+
+        let successes =
+            [first.is_ok(), second.is_ok()].into_iter().filter(|success| *success).count();
+        assert_eq!(successes, 1);
+
+        let active = store
+            .get_active_model_download_for_source("model-a", "hugging_face::repo/model::model.gguf")
+            .await
+            .expect("lookup active download")
+            .expect("active download exists");
+        assert!(matches!(active.task_id.as_str(), "task-1" | "task-2"));
+        let downloads = store.list_model_downloads().await.expect("list downloads");
+        assert_eq!(downloads.len(), 1);
+    }
+
+    #[tokio::test]
     async fn reconcile_model_downloads_follows_task_terminal_state() {
         let store = new_store().await;
 

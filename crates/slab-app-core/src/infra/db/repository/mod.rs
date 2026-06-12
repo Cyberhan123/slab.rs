@@ -22,6 +22,7 @@ pub use ui_state::UiStateStore;
 
 use crate::infra::db::entities::TaskRecord;
 use std::str::FromStr;
+use std::time::Duration;
 
 #[derive(Clone, Debug)]
 pub struct SqlxStore {
@@ -30,7 +31,10 @@ pub struct SqlxStore {
 
 impl SqlxStore {
     pub async fn connect(url: &str) -> Result<Self, sqlx::Error> {
-        let options = sqlx::sqlite::SqliteConnectOptions::from_str(url)?;
+        let options = sqlx::sqlite::SqliteConnectOptions::from_str(url)?
+            .foreign_keys(true)
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+            .busy_timeout(Duration::from_millis(5_000));
         let pool = sqlx::SqlitePool::connect_with(options).await?;
         sqlx::migrate!("./migrations").run(&pool).await?;
         Ok(Self { pool })
@@ -63,4 +67,33 @@ async fn insert_task_row(
     .execute(&mut **tx)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn connect_configures_sqlite_concurrency_pragmas() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let database_url = slab_types::sqlite_url_for_path(&temp_dir.path().join("slab.db"));
+        let store = SqlxStore::connect(&database_url).await.expect("connect store");
+
+        let journal_mode: String = sqlx::query_scalar("PRAGMA journal_mode")
+            .fetch_one(&store.pool)
+            .await
+            .expect("journal mode");
+        let busy_timeout: i64 = sqlx::query_scalar("PRAGMA busy_timeout")
+            .fetch_one(&store.pool)
+            .await
+            .expect("busy timeout");
+        let foreign_keys: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
+            .fetch_one(&store.pool)
+            .await
+            .expect("foreign keys");
+
+        assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
+        assert_eq!(busy_timeout, 5_000);
+        assert_eq!(foreign_keys, 1);
+    }
 }

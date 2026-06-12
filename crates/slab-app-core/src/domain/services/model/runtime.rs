@@ -47,6 +47,7 @@ impl ModelService {
         let backend_id = resolve_unload_backend(&self.model_state, &command).await?;
         info!(backend = %backend_id, model_id = ?command.model_id, "unloading model");
 
+        self.model_state.auto_unload().ensure_idle_for_manual_unload(backend_id).await?;
         let response = self.model_state.runtime().unload_model(backend_id).await?;
         self.model_state.auto_unload().notify_model_unloaded(backend_id).await;
 

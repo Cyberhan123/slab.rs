@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 pub mod config;
 pub mod model_state;
@@ -10,6 +11,8 @@ use crate::domain::ports::RuntimeInferenceGateway;
 pub use config::AppConfig;
 pub use model_state::ModelState;
 pub use worker_state::{OperationManager, SubmitOperation, WorkerState};
+
+const SETTINGS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
 pub struct AppContext {
@@ -27,6 +30,7 @@ impl AppContext {
         runtime_status: Arc<crate::runtime_supervisor::RuntimeSupervisorStatus>,
         store: Arc<crate::infra::db::AnyStore>,
     ) -> Self {
+        pmid.spawn_periodic_refresh(SETTINGS_REFRESH_INTERVAL);
         let task_manager = Arc::new(OperationManager::new());
         let runtime_gateway: Arc<dyn RuntimeInferenceGateway> =
             Arc::new(crate::infra::rpc::GrpcRuntimeInferenceGateway::new(Arc::clone(&grpc)));

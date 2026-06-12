@@ -32,6 +32,17 @@ impl TryFrom<RawPluginManifest> for PluginManifest {
     type Error = String;
 
     fn try_from(raw: RawPluginManifest) -> Result<Self, Self::Error> {
+        let manifest_version = match raw.manifest_version {
+            Some(1) => 1,
+            Some(version) => {
+                return Err(format!("unsupported manifestVersion {version}; expected 1"));
+            }
+            None => {
+                return Err(
+                    "missing manifestVersion; explicit manifestVersion: 1 is required".to_string()
+                );
+            }
+        };
         let Some(runtime) = raw.runtime else {
             return Err("missing runtime.ui entry".to_string());
         };
@@ -40,18 +51,13 @@ impl TryFrom<RawPluginManifest> for PluginManifest {
         };
         let runtime = PluginRuntimeManifest {
             ui,
-            wasm: runtime.wasm.or(raw.wasm),
-            js: runtime.js.or(raw.js),
-            python: runtime.python.or(raw.python),
+            wasm: runtime.wasm,
+            js: runtime.js,
+            python: runtime.python,
         };
 
-        let mut permissions = raw.permissions.unwrap_or_default();
-        if let Some(network) = raw.network {
-            permissions.network = network;
-        }
-
         Ok(Self {
-            manifest_version: raw.manifest_version.unwrap_or(0),
+            manifest_version,
             id: raw.id,
             name: raw.name,
             version: raw.version,
@@ -59,7 +65,7 @@ impl TryFrom<RawPluginManifest> for PluginManifest {
             runtime,
             integrity: raw.integrity.unwrap_or_default(),
             contributes: raw.contributes.unwrap_or_default(),
-            permissions,
+            permissions: raw.permissions.unwrap_or_default(),
         })
     }
 }
@@ -77,19 +83,11 @@ struct RawPluginManifest {
     #[serde(default)]
     runtime: Option<RawPluginRuntimeManifest>,
     #[serde(default)]
-    wasm: Option<PluginWasmManifest>,
-    #[serde(default)]
-    js: Option<PluginJsManifest>,
-    #[serde(default)]
-    python: Option<PluginPythonManifest>,
-    #[serde(default)]
     integrity: Option<PluginIntegrityManifest>,
     #[serde(default)]
     contributes: Option<PluginContributesManifest>,
     #[serde(default)]
     permissions: Option<PluginPermissionsManifest>,
-    #[serde(default)]
-    network: Option<PluginNetworkManifest>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -446,6 +444,48 @@ mod tests {
         .expect("manifest should deserialize without integrity");
 
         assert!(manifest.integrity.files_sha256.is_empty());
+    }
+
+    #[test]
+    fn manifest_requires_explicit_v1_version() {
+        let error = serde_json::from_value::<PluginManifest>(json!({
+            "id": "dev-plugin",
+            "name": "Dev Plugin",
+            "version": "0.1.0",
+            "runtime": { "ui": { "entry": "ui/index.html" } }
+        }))
+        .expect_err("manifest without version should fail");
+
+        assert!(error.to_string().contains("missing manifestVersion"));
+    }
+
+    #[test]
+    fn manifest_rejects_non_v1_version() {
+        let error = serde_json::from_value::<PluginManifest>(json!({
+            "manifestVersion": 0,
+            "id": "dev-plugin",
+            "name": "Dev Plugin",
+            "version": "0.1.0",
+            "runtime": { "ui": { "entry": "ui/index.html" } }
+        }))
+        .expect_err("manifestVersion 0 should fail");
+
+        assert!(error.to_string().contains("unsupported manifestVersion 0"));
+    }
+
+    #[test]
+    fn legacy_top_level_runtime_is_not_merged_into_v1_manifest() {
+        let manifest = serde_json::from_value::<PluginManifest>(json!({
+            "manifestVersion": 1,
+            "id": "legacy-runtime-plugin",
+            "name": "Legacy Runtime Plugin",
+            "version": "0.1.0",
+            "runtime": { "ui": { "entry": "ui/index.html" } },
+            "js": { "entry": "dist/plugin.js" }
+        }))
+        .expect("unknown top-level legacy runtime is ignored");
+
+        assert!(manifest.runtime.js.is_none());
     }
 
     #[test]

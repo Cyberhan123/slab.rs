@@ -147,6 +147,7 @@ pub(crate) struct TestAppCore {
     _pmid: Arc<PmidService>,
     pub(crate) store: Arc<AnyStore>,
     pub(crate) runtime: Arc<RecordingRuntimeGateway>,
+    pub(crate) auto_unload: Arc<ModelAutoUnloadManager>,
     pub(crate) model: ModelService,
     pub(crate) model_config_dir: PathBuf,
     pub(crate) model_cache_dir: PathBuf,
@@ -241,7 +242,7 @@ impl TestAppCore {
             grpc,
             runtime_port,
             runtime_status,
-            auto_unload,
+            Arc::clone(&auto_unload),
             Arc::new(OperationManager::new()),
         );
         let model = ModelService::new(model_state, worker_state);
@@ -252,6 +253,7 @@ impl TestAppCore {
             _pmid: pmid,
             store,
             runtime,
+            auto_unload,
             model,
             model_config_dir,
             model_cache_dir,

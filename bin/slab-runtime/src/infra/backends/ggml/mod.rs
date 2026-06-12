@@ -52,9 +52,21 @@ macro_rules! impl_ggml_from {
 impl_ggml_from!(
     GGMLEngineError => "ggml",
     whisper::GGMLWhisperEngineError => "ggml.whisper",
-    llama::GGMLLlamaEngineError => "ggml.llama",
     diffusion::GGMLDiffusionEngineError => "ggml.diffusion",
 );
+
+impl From<llama::GGMLLlamaEngineError> for slab_runtime_core::CoreError {
+    fn from(error: llama::GGMLLlamaEngineError) -> Self {
+        match error {
+            llama::GGMLLlamaEngineError::SessionKeyBusy { key } => {
+                Self::Busy { backend_id: format!("ggml.llama session key '{key}'") }
+            }
+            other => {
+                Self::GGMLEngine { component: "ggml.llama".to_owned(), message: other.to_string() }
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct GgmlBackendConfig {
@@ -124,6 +136,21 @@ pub fn register(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn llama_session_busy_maps_to_core_busy() {
+        let error = llama::GGMLLlamaEngineError::SessionKeyBusy { key: "chat-1".to_owned() };
+        let core_error = CoreError::from(error);
+
+        assert!(
+            matches!(core_error, CoreError::Busy { backend_id } if backend_id.contains("session key 'chat-1'"))
+        );
+    }
 }
 
 fn load_llama_engine(path: &Path) -> Result<Arc<GGMLLlamaEngine>, CoreError> {

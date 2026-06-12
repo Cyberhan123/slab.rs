@@ -88,6 +88,7 @@ impl SetupService {
     }
 
     pub async fn environment_status(&self) -> Result<EnvironmentStatus, AppCoreError> {
+        self.model_state.auto_unload().sync_runtime_restart_states().await;
         let initialized = self.load_setup_initialized().await?;
         let runtime_payload_installed = self.runtime_payload_installed();
         let configured_dir = self.model_state.pmid().config().setup.ffmpeg.dir;

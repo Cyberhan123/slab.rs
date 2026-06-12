@@ -154,14 +154,12 @@ assets from host-controlled extension points and agent-facing capabilities:
   },
   "runtime": {
     "ui": { "entry": "ui/index.html" },
-    "wasm": { "entry": "wasm/plugin.wasm" },
-    "python": { "entry": "python/plugin.py", "bundle": "python/backend.slabpy" }
+    "js": { "entry": "dist/plugin.js" }
   },
   "integrity": {
     "filesSha256": {
       "ui/index.html": "<sha256>",
-      "wasm/plugin.wasm": "<sha256>",
-      "python/backend.slabpy": "<sha256>",
+      "dist/plugin.js": "<sha256>",
       "schemas/input.schema.json": "<sha256>"
     }
   },
@@ -230,6 +228,12 @@ assets from host-controlled extension points and agent-facing capabilities:
 }
 ```
 
+Plugin IDs must use lowercase letters, numbers, `-`, or `_` with length 2..64.
+IDs prefixed with `slab`, `slab-`, `slab_`, `system`, `system-`, or `system_`
+are reserved for Slab-managed packages. A plugin may declare at most one
+callable backend runtime: choose one of `runtime.js`, `runtime.python`, or
+`runtime.wasm`. Frontend-only plugins declare only `runtime.ui`.
+
 The first supported extension points are routes, sidebar entries, commands,
 settings sections, agent capabilities, agent lifecycle hooks, and workspace
 language servers. Header, footer, chat toolbar, and other shell slots are
@@ -241,26 +245,6 @@ runtime artifacts; it does not rewrite the development manifest.
 
 ## Legacy manifests
 
-Legacy manifests without `manifestVersion` are still accepted and normalized to
-the v1 runtime/permissions shape:
-
-```json
-{
-  "id": "example-plugin",
-  "name": "Example Plugin",
-  "version": "0.1.0",
-  "ui": { "entry": "ui/index.html" },
-  "wasm": { "entry": "wasm/plugin.wasm" },
-  "python": { "entry": "python/plugin.py" },
-  "integrity": {
-    "filesSha256": {
-      "ui/index.html": "<sha256>",
-      "wasm/plugin.wasm": "<sha256>"
-    }
-  },
-  "network": {
-    "mode": "blocked",
-    "allowHosts": []
-  }
-}
-```
+Legacy manifests without explicit `"manifestVersion": 1` are invalid. Move
+runtime declarations under `runtime.*`, move network access under
+`permissions.network`, and keep only one callable backend runtime per plugin.

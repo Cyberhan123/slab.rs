@@ -218,6 +218,14 @@ fn map_runtime_error(action: &'static str) -> impl Fn(anyhow::Error) -> AppCoreE
         if let Some(detail) = client::transient_runtime_detail(&error) {
             return AppCoreError::BackendNotReady(detail);
         }
+        if let Some(detail) = session_busy_detail(&error) {
+            return AppCoreError::Conflict(detail);
+        }
+        if is_memory_pressure_error(&error) {
+            return AppCoreError::RuntimeMemoryPressure(format!(
+                "runtime reported memory pressure during {action}: {error:#}"
+            ));
+        }
         AppCoreError::Internal(format!("grpc {action} failed: {error:#}"))
     }
 }
@@ -232,6 +240,25 @@ fn map_model_load_error(error: anyhow::Error) -> AppCoreError {
         ));
     }
     AppCoreError::Internal(format!("grpc load model failed: {error:#}"))
+}
+
+fn session_busy_detail(error: &anyhow::Error) -> Option<String> {
+    let status = error.chain().find_map(|cause| cause.downcast_ref::<tonic::Status>())?;
+    if status.code() != tonic::Code::ResourceExhausted {
+        return None;
+    }
+
+    let message = status.message().trim();
+    let lower = message.to_ascii_lowercase();
+    let session_busy = lower.contains("session key")
+        && (lower.contains("busy") || lower.contains("already active"));
+    session_busy.then(|| {
+        if message.is_empty() {
+            "runtime session key is busy".to_owned()
+        } else {
+            message.to_owned()
+        }
+    })
 }
 
 fn is_memory_pressure_error(error: &anyhow::Error) -> bool {
@@ -343,5 +370,38 @@ fn pb_whisper_decode_options_from_runtime(
         logprob_thold: value.logprob_thold,
         no_speech_thold: value.no_speech_thold,
         tdrz_enable: value.tdrz_enable,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn map_runtime_error_reports_inference_memory_pressure() {
+        let status = tonic::Status::new(
+            tonic::Code::ResourceExhausted,
+            "CUDA out of memory while allocating KV cache",
+        );
+        let error = map_runtime_error("chat")(anyhow::Error::new(status));
+
+        assert!(
+            matches!(&error, AppCoreError::RuntimeMemoryPressure(message) if message.contains("chat")),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn map_runtime_error_reports_session_busy_as_conflict() {
+        let status = tonic::Status::new(
+            tonic::Code::ResourceExhausted,
+            "backend busy: ggml.llama session key 'chat-1'",
+        );
+        let error = map_runtime_error("chat")(anyhow::Error::new(status));
+
+        assert!(
+            matches!(&error, AppCoreError::Conflict(message) if message.contains("session key")),
+            "unexpected error: {error}"
+        );
     }
 }

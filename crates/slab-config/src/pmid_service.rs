@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use crate::{
     ChatConfig, CloudProviderConfig, DesktopLaunchProfileConfig, DiffusionConfig,
@@ -11,6 +12,7 @@ use crate::{
     websearch_providers_json_schema,
 };
 use serde_json::{Value, json};
+use tracing::warn;
 
 use crate::descriptor::setting_value;
 use crate::{
@@ -49,6 +51,20 @@ impl PmidService {
 
     pub fn config(&self) -> PmidConfig {
         self.config.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
+    }
+
+    pub fn spawn_periodic_refresh(self: &Arc<Self>, interval: Duration) {
+        let service = Arc::clone(self);
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                ticker.tick().await;
+                if let Err(error) = service.refresh().await {
+                    warn!(%error, "failed to refresh settings from disk");
+                }
+            }
+        });
     }
 
     pub async fn resolve_launch_spec(
@@ -1096,6 +1112,23 @@ mod tests {
 
         assert_eq!(service.config().runtime.model_cache_dir.as_deref(), Some("D:/models"));
         assert_eq!(persisted.models.cache_dir.as_deref(), Some("D:/models"));
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn refresh_picks_up_external_settings_file_change() {
+        let path = temp_settings_path();
+        let service = PmidService::load_from_path(path.clone()).await.expect("pmid service");
+        let mut document: SettingsDocument =
+            serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
+        document.logging.level = "debug".to_owned();
+        fs::write(&path, serde_json::to_string_pretty(&document).expect("serialize"))
+            .expect("external write");
+
+        service.refresh().await.expect("refresh");
+
+        assert_eq!(service.config().logging.level, "debug");
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }

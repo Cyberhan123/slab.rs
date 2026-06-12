@@ -19,6 +19,7 @@ impl BackendService {
         &self,
         query: BackendStatusQuery,
     ) -> Result<BackendStatusView, AppCoreError> {
+        self.model_state.auto_unload().sync_runtime_restart_states().await;
         let canonical_backend = query.backend_id.to_string();
         Ok(BackendStatusView {
             backend: canonical_backend,
@@ -30,6 +31,7 @@ impl BackendService {
     }
 
     pub async fn list_backends(&self) -> Result<Vec<BackendStatusView>, AppCoreError> {
+        self.model_state.auto_unload().sync_runtime_restart_states().await;
         let backends = RuntimeBackendId::ALL
             .into_iter()
             .map(|name| BackendStatusView {

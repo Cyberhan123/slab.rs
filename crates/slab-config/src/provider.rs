@@ -1,6 +1,8 @@
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock as StdRwLock};
+use std::time::SystemTime;
 
 use chrono::Utc;
 use serde_json::{Map, Value, json};
@@ -20,7 +22,7 @@ use std::os::unix::fs::PermissionsExt;
 pub struct SettingsDocumentProvider {
     path: PathBuf,
     base_path: PathBuf,
-    default_document: SettingsDocument,
+    default_document: Arc<StdRwLock<SettingsDocument>>,
     overlay_path: Option<PathBuf>,
     state: Arc<RwLock<SettingsRuntimeState>>,
 }
@@ -30,12 +32,55 @@ struct SettingsRuntimeState {
     document: SettingsDocument,
     overlay: Option<Value>,
     warnings: Vec<String>,
+    fingerprints: SettingsFileFingerprints,
 }
 
 #[derive(Debug)]
 struct LoadedSettingsRuntimeState {
     state: SettingsRuntimeState,
     default_document: SettingsDocument,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct SettingsFileFingerprints {
+    base: Option<SettingsFileFingerprint>,
+    overlay: Option<SettingsFileFingerprint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SettingsFileFingerprint {
+    len: u64,
+    modified: Option<SystemTime>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CorruptSettingsFilePolicy {
+    Recover,
+    PreserveLastValid,
+}
+
+fn settings_file_fingerprints(
+    base_path: &Path,
+    overlay_path: Option<&Path>,
+) -> Result<SettingsFileFingerprints, ConfigError> {
+    Ok(SettingsFileFingerprints {
+        base: settings_file_fingerprint(base_path)?,
+        overlay: overlay_path.map(settings_file_fingerprint).transpose()?.flatten(),
+    })
+}
+
+fn settings_file_fingerprint(path: &Path) -> Result<Option<SettingsFileFingerprint>, ConfigError> {
+    match fs::metadata(path) {
+        Ok(metadata) => Ok(Some(SettingsFileFingerprint {
+            len: metadata.len(),
+            modified: metadata.modified().ok(),
+        })),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(ConfigError::Internal(format!(
+            "failed to inspect settings file '{}': {error}",
+            path.display()
+        ))),
+    }
 }
 
 impl SettingsDocumentProvider {
@@ -61,13 +106,14 @@ impl SettingsDocumentProvider {
         Ok(Self {
             path: write_path,
             base_path: path,
-            default_document: loaded.default_document,
+            default_document: Arc::new(StdRwLock::new(loaded.default_document)),
             overlay_path,
             state: Arc::new(RwLock::new(loaded.state)),
         })
     }
 
     pub async fn document(&self) -> SettingsDocument {
+        self.refresh_if_changed().await;
         self.state.read().await.document.clone()
     }
 
@@ -76,14 +122,16 @@ impl SettingsDocumentProvider {
     }
 
     pub async fn warnings(&self) -> Vec<String> {
+        self.refresh_if_changed().await;
         self.state.read().await.warnings.clone()
     }
 
     pub fn default_document(&self) -> SettingsDocument {
-        self.default_document.clone()
+        self.default_document.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
     }
 
     pub async fn value(&self, path: &str) -> Result<SettingValue, ConfigError> {
+        self.refresh_if_changed().await;
         let state = self.state.read().await;
         setting_value(&state.document, path)
     }
@@ -93,6 +141,7 @@ impl SettingsDocumentProvider {
         path: &str,
         command: UpdateSettingCommand,
     ) -> Result<SettingValue, ConfigError> {
+        self.refresh_if_changed().await;
         let mut state = self.state.write().await;
         if self.overlay_path.is_some() {
             return self.update_overlay(&mut state, path, command);
@@ -118,8 +167,64 @@ impl SettingsDocumentProvider {
 
         write_settings_document_file(&self.path, &next_settings)?;
         state.document = next_settings;
+        state.fingerprints =
+            settings_file_fingerprints(&self.base_path, self.overlay_path.as_deref())?;
 
         Ok(next_value)
+    }
+
+    async fn refresh_if_changed(&self) {
+        let next_fingerprints =
+            match settings_file_fingerprints(&self.base_path, self.overlay_path.as_deref()) {
+                Ok(fingerprints) => fingerprints,
+                Err(error) => {
+                    let mut state = self.state.write().await;
+                    state.warnings =
+                        vec![format!("Failed to inspect settings files for reload: {error}")];
+                    return;
+                }
+            };
+
+        if self.state.read().await.fingerprints == next_fingerprints {
+            return;
+        }
+
+        let base_path = self.base_path.clone();
+        let overlay_path = self.overlay_path.clone();
+        let loaded = tokio::task::spawn_blocking(move || {
+            load_runtime_state_with_policy(
+                &base_path,
+                overlay_path.as_deref(),
+                CorruptSettingsFilePolicy::PreserveLastValid,
+            )
+        })
+        .await;
+
+        match loaded {
+            Ok(Ok(loaded)) => {
+                *self.default_document.write().unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                    loaded.default_document;
+                let mut state = self.state.write().await;
+                state.document = loaded.state.document;
+                state.overlay = loaded.state.overlay;
+                state.warnings = loaded.state.warnings;
+                state.fingerprints = loaded.state.fingerprints;
+            }
+            Ok(Err(error)) => {
+                let mut state = self.state.write().await;
+                state.fingerprints = next_fingerprints;
+                state.warnings = vec![format!(
+                    "Failed to reload settings after external file change; using last valid settings: {error}"
+                )];
+            }
+            Err(error) => {
+                let mut state = self.state.write().await;
+                state.fingerprints = next_fingerprints;
+                state.warnings = vec![format!(
+                    "Failed to reload settings after external file change; using last valid settings: {error}"
+                )];
+            }
+        }
     }
 
     fn update_overlay(
@@ -148,20 +253,25 @@ impl SettingsDocumentProvider {
                 write_json_value_file(&self.path, &overlay)?;
                 state.document = next_settings;
                 state.overlay = Some(overlay);
+                state.fingerprints =
+                    settings_file_fingerprints(&self.base_path, self.overlay_path.as_deref())?;
 
                 Ok(next_value)
             }
             UpdateSettingOperation::Unset => {
-                setting_value(&self.default_document, path)?;
+                let default_document = self.default_document();
+                setting_value(&default_document, path)?;
                 remove_json_path(&mut overlay, path)?;
                 prune_empty_objects(&mut overlay);
                 let next_settings =
-                    merged_settings_document(&self.default_document, &overlay, &self.base_path)?;
+                    merged_settings_document(&default_document, &overlay, &self.base_path)?;
                 let next_value = setting_value(&next_settings, path)?;
 
                 write_json_value_file(&self.path, &overlay)?;
                 state.document = next_settings;
                 state.overlay = Some(overlay);
+                state.fingerprints =
+                    settings_file_fingerprints(&self.base_path, self.overlay_path.as_deref())?;
 
                 Ok(next_value)
             }
@@ -173,34 +283,55 @@ fn load_runtime_state(
     path: &Path,
     overlay_path: Option<&Path>,
 ) -> Result<LoadedSettingsRuntimeState, ConfigError> {
-    let base_state = load_base_runtime_state(path)?;
+    load_runtime_state_with_policy(path, overlay_path, CorruptSettingsFilePolicy::Recover)
+}
+
+fn load_runtime_state_with_policy(
+    path: &Path,
+    overlay_path: Option<&Path>,
+    corrupt_policy: CorruptSettingsFilePolicy,
+) -> Result<LoadedSettingsRuntimeState, ConfigError> {
+    let base_state = load_base_runtime_state(path, corrupt_policy)?;
     let Some(overlay_path) = overlay_path else {
-        return Ok(LoadedSettingsRuntimeState {
+        let mut loaded = LoadedSettingsRuntimeState {
             state: base_state,
             default_document: default_settings_document_for_path(path),
-        });
+        };
+        loaded.state.fingerprints = settings_file_fingerprints(path, None)?;
+        return Ok(loaded);
     };
 
     let overlay = load_overlay_json(overlay_path)?;
     let document = merged_settings_document(&base_state.document, &overlay, path)?;
 
-    Ok(LoadedSettingsRuntimeState {
+    let mut loaded = LoadedSettingsRuntimeState {
         default_document: base_state.document.clone(),
         state: SettingsRuntimeState {
             document,
             overlay: Some(overlay),
             warnings: base_state.warnings,
+            fingerprints: SettingsFileFingerprints::default(),
         },
-    })
+    };
+    loaded.state.fingerprints = settings_file_fingerprints(path, Some(overlay_path))?;
+    Ok(loaded)
 }
 
-fn load_base_runtime_state(path: &Path) -> Result<SettingsRuntimeState, ConfigError> {
+fn load_base_runtime_state(
+    path: &Path,
+    corrupt_policy: CorruptSettingsFilePolicy,
+) -> Result<SettingsRuntimeState, ConfigError> {
     ensure_settings_parent_dir(path)?;
 
     if !path.exists() {
         let document = default_settings_document_for_path(path);
         write_settings_document_file(path, &document)?;
-        return Ok(SettingsRuntimeState { document, overlay: None, warnings: Vec::new() });
+        return Ok(SettingsRuntimeState {
+            document,
+            overlay: None,
+            warnings: Vec::new(),
+            fingerprints: SettingsFileFingerprints::default(),
+        });
     }
 
     let raw = fs::read_to_string(path).map_err(|error| {
@@ -210,12 +341,20 @@ fn load_base_runtime_state(path: &Path) -> Result<SettingsRuntimeState, ConfigEr
     let raw_json: Value = match serde_json::from_str(&raw) {
         Ok(parsed) => parsed,
         Err(error) => {
-            let warning = recover_corrupt_settings_file(path, &error.to_string())?;
-            return Ok(SettingsRuntimeState {
-                document: default_settings_document_for_path(path),
-                overlay: None,
-                warnings: vec![warning],
-            });
+            return match corrupt_policy {
+                CorruptSettingsFilePolicy::Recover => {
+                    let warning = recover_corrupt_settings_file(path, &error.to_string())?;
+                    Ok(SettingsRuntimeState {
+                        document: default_settings_document_for_path(path),
+                        overlay: None,
+                        warnings: vec![warning],
+                        fingerprints: SettingsFileFingerprints::default(),
+                    })
+                }
+                CorruptSettingsFilePolicy::PreserveLastValid => Err(ConfigError::BadRequest(
+                    format!("settings file '{}' is not valid JSON: {error}", path.display()),
+                )),
+            };
         }
     };
 
@@ -239,7 +378,12 @@ fn load_base_runtime_state(path: &Path) -> Result<SettingsRuntimeState, ConfigEr
         if apply_dynamic_defaults(path, &mut document) {
             write_settings_document_file(path, &document)?;
         }
-        return Ok(SettingsRuntimeState { document, overlay: None, warnings: Vec::new() });
+        return Ok(SettingsRuntimeState {
+            document,
+            overlay: None,
+            warnings: Vec::new(),
+            fingerprints: SettingsFileFingerprints::default(),
+        });
     }
 
     Err(invalid_document_error())
@@ -625,6 +769,41 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
         assert_eq!(persisted.logging.level, "info");
         assert_eq!(provider.value("logging.level").await.expect("value"), json!("info").into());
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn provider_refreshes_after_external_base_file_change() {
+        let path = temp_settings_path();
+        let provider = SettingsDocumentProvider::load(path.clone()).await.expect("provider");
+        let mut document: SettingsDocument =
+            serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
+        document.logging.level = "debug".to_owned();
+        fs::write(&path, serde_json::to_string_pretty(&document).expect("serialize"))
+            .expect("external write");
+
+        assert_eq!(provider.value("logging.level").await.expect("value"), json!("debug").into());
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn provider_preserves_last_valid_document_after_external_invalid_json() {
+        let path = temp_settings_path();
+        let provider = SettingsDocumentProvider::load(path.clone()).await.expect("provider");
+        let original = provider.document().await;
+        fs::write(&path, "{ not valid json").expect("external corrupt write");
+
+        assert_eq!(provider.document().await, original);
+        assert!(
+            provider
+                .warnings()
+                .await
+                .iter()
+                .any(|warning| warning.contains("using last valid settings"))
+        );
+        assert_eq!(fs::read_to_string(&path).expect("file"), "{ not valid json");
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }

@@ -273,6 +273,21 @@ fn validate_and_load_plugin(
     )?
     .0;
 
+    let callable_runtime_count = [
+        manifest.runtime.wasm.is_some(),
+        manifest.runtime.js.is_some(),
+        manifest.runtime.python.is_some(),
+    ]
+    .into_iter()
+    .filter(|has_runtime| *has_runtime)
+    .count();
+    if callable_runtime_count > 1 {
+        return Err(
+            "plugins may declare at most one callable runtime: choose one of runtime.js, runtime.python, or runtime.wasm"
+                .to_owned(),
+        );
+    }
+
     let wasm_entry_path = match manifest.runtime.wasm.as_ref() {
         Some(wasm) => Some(
             validate_declared_file(plugin_dir, &files_sha256, &wasm.entry, "runtime.wasm.entry")?.1,
@@ -609,6 +624,51 @@ mod tests {
         assert!(listed[0].valid);
         assert_eq!(listed[0].network_mode, "allowlist");
         assert_eq!(listed[0].allow_hosts, vec!["api.example.test".to_owned()]);
+    }
+
+    #[test]
+    fn registry_rejects_development_plugin_with_multiple_callable_runtimes() {
+        let root = TestDir::new("multi-runtime-plugin");
+        let plugin_dir = root.path().join("sample-plugin");
+        fs::create_dir_all(plugin_dir.join("ui")).expect("create ui directory");
+        fs::create_dir_all(plugin_dir.join("dist")).expect("create js directory");
+        fs::create_dir_all(plugin_dir.join("python")).expect("create python directory");
+        fs::write(plugin_dir.join("ui").join("index.html"), "<html></html>")
+            .expect("write ui entry");
+        fs::write(plugin_dir.join("dist").join("plugin.mjs"), "export function ping() {}")
+            .expect("write js entry");
+        fs::write(
+            plugin_dir.join("python").join("plugin.py"),
+            "def ping(params):\n    return params\n",
+        )
+        .expect("write python entry");
+        fs::write(
+            plugin_dir.join("plugin.json"),
+            r#"{
+                "manifestVersion": 1,
+                "id": "sample-plugin",
+                "name": "Sample Plugin",
+                "version": "0.1.0",
+                "runtime": {
+                    "ui": { "entry": "ui/index.html" },
+                    "js": { "entry": "dist/plugin.mjs" },
+                    "python": { "entry": "python/plugin.py" }
+                }
+            }"#,
+        )
+        .expect("write manifest");
+
+        let registry = PluginRegistry::new(root.path().to_path_buf()).expect("create registry");
+        let listed = registry.list().expect("list plugins");
+
+        assert_eq!(listed.len(), 1);
+        assert!(!listed[0].valid);
+        assert!(
+            listed[0]
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("at most one callable runtime"))
+        );
     }
 
     #[test]

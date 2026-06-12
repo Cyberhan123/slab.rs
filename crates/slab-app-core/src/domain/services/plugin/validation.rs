@@ -22,6 +22,12 @@ pub(super) fn validate_plugin_manifest(
             manifest.id
         ));
     }
+    if is_reserved_plugin_id_namespace(&manifest.id) {
+        return Err(format!(
+            "invalid plugin id `{}`: the slab/system namespace is reserved",
+            manifest.id
+        ));
+    }
 
     let folder_name = root_dir
         .file_name()
@@ -41,6 +47,20 @@ pub(super) fn validate_plugin_manifest(
         "runtime.ui.entry",
         source_kind,
     )?;
+    let callable_runtime_count = [
+        manifest.runtime.wasm.is_some(),
+        manifest.runtime.js.is_some(),
+        manifest.runtime.python.is_some(),
+    ]
+    .into_iter()
+    .filter(|has_runtime| *has_runtime)
+    .count();
+    if callable_runtime_count > 1 {
+        return Err(
+            "plugins may declare at most one callable runtime: choose one of runtime.js, runtime.python, or runtime.wasm"
+                .to_owned(),
+        );
+    }
     if let Some(wasm) = &manifest.runtime.wasm {
         validate_declared_file(
             root_dir,
@@ -612,6 +632,14 @@ fn is_valid_plugin_id(id: &str) -> bool {
             || character == '-'
             || character == '_'
     })
+}
+
+fn is_reserved_plugin_id_namespace(id: &str) -> bool {
+    matches!(id, "slab" | "system")
+        || id.starts_with("slab-")
+        || id.starts_with("slab_")
+        || id.starts_with("system-")
+        || id.starts_with("system_")
 }
 
 fn is_valid_language_id(id: &str) -> bool {

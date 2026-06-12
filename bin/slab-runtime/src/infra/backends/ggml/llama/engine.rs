@@ -11,6 +11,7 @@ use slab_utils::loader::load_library_from_dir;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, watch};
 use tracing::{info, warn};
 
@@ -49,6 +50,7 @@ pub(crate) struct LlamaDispatchOutput {
 
 const THINK_OPEN_MARKER: &str = "<think";
 const THINK_CLOSE_TAG: &str = "</think>";
+const SESSION_BINDING_BUSY_TTL: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ParsedThinkingOutput {
@@ -260,7 +262,7 @@ fn resolve_logit_bias_value(value: &serde_json::Value) -> Option<f32> {
 #[derive(Debug, Clone)]
 enum SessionBinding {
     Ready { snapshot: LlamaSessionSnapshot, cached_prompt: String, grammar: Option<String> },
-    Busy,
+    Busy { request_id: String, started_at: Instant },
 }
 
 #[derive(Debug, Clone)]
@@ -289,15 +291,20 @@ fn plan_session_reuse(
             delta_prompt: full_prompt.to_owned(),
             cached_tokens: 0,
         }),
-        Some(SessionBinding::Busy) => {
-            // A previous request may have left this key in Busy state due to a
-            // crash, cancelled task, or unclean shutdown. Instead of permanently
-            // blocking all future requests on this conversation, we recover by
-            // discarding the stale binding and creating a fresh session.  The
-            // only cost is losing the KV cache for one turn.
+        Some(SessionBinding::Busy { request_id, started_at }) => {
+            if started_at.elapsed() < SESSION_BINDING_BUSY_TTL {
+                warn!(
+                    session_key = key,
+                    request_id, "session binding is already active; rejecting concurrent request"
+                );
+                return Err(GGMLLlamaEngineError::SessionKeyBusy { key: key.to_owned() });
+            }
+
             warn!(
                 session_key = key,
-                "session binding is stuck in Busy state; recovering by creating a fresh session"
+                request_id,
+                busy_seconds = started_at.elapsed().as_secs(),
+                "session binding exceeded busy TTL; recovering by creating a fresh session"
             );
             Ok(SessionReusePlan::CreateFresh {
                 delta_prompt: full_prompt.to_owned(),
@@ -592,7 +599,21 @@ impl GGMLLlamaEngine {
             plan =
                 plan_session_reuse(&key, bindings.get(&key), &full_prompt, request.gbnf.as_deref())
                     .map_err(ggml::EngineError::from)?;
-            bindings.insert(key.clone(), SessionBinding::Busy);
+            let request_id = request
+                .agent_trace
+                .as_ref()
+                .map(|trace| {
+                    let turn = trace
+                        .turn_index
+                        .map(|index| index.to_string())
+                        .unwrap_or_else(|| "unknown".to_owned());
+                    format!("{}:{turn}", trace.session_id)
+                })
+                .unwrap_or_else(|| "untraced".to_owned());
+            bindings.insert(
+                key.clone(),
+                SessionBinding::Busy { request_id, started_at: Instant::now() },
+            );
         }
 
         let options = LlamaSamplingOptions {
@@ -1493,11 +1514,13 @@ fn reasoning_event_payload(reasoning: String) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::{
-        ParsedThinkingOutput, SessionBinding, SessionReusePlan, ThinkingDelta, ThinkingStreamState,
-        parse_generated_thinking_output, parse_thinking_output, plan_session_reuse,
+        ParsedThinkingOutput, SESSION_BINDING_BUSY_TTL, SessionBinding, SessionReusePlan,
+        ThinkingDelta, ThinkingStreamState, parse_generated_thinking_output, parse_thinking_output,
+        plan_session_reuse,
     };
     use slab_llama::LlamaSessionSnapshot;
     use std::sync::Arc;
+    use std::time::{Duration, Instant};
 
     fn snapshot() -> LlamaSessionSnapshot {
         LlamaSessionSnapshot { worker_id: 1, n_past: 12, state: Arc::from([1_u8, 2, 3, 4]) }
@@ -1516,9 +1539,27 @@ mod tests {
     }
 
     #[test]
-    fn plan_session_reuse_recovers_from_busy_binding() {
-        let plan = plan_session_reuse("chat-1", Some(&SessionBinding::Busy), "hello", None)
-            .expect("busy binding should recover with a fresh session");
+    fn plan_session_reuse_rejects_active_busy_binding() {
+        let binding =
+            SessionBinding::Busy { request_id: "request-1".to_owned(), started_at: Instant::now() };
+
+        let error = plan_session_reuse("chat-1", Some(&binding), "hello", None)
+            .expect_err("active busy binding should reject concurrent requests");
+
+        assert!(
+            matches!(error, super::GGMLLlamaEngineError::SessionKeyBusy { key } if key == "chat-1")
+        );
+    }
+
+    #[test]
+    fn plan_session_reuse_recovers_from_stale_busy_binding() {
+        let binding = SessionBinding::Busy {
+            request_id: "request-1".to_owned(),
+            started_at: Instant::now() - SESSION_BINDING_BUSY_TTL - Duration::from_secs(1),
+        };
+
+        let plan = plan_session_reuse("chat-1", Some(&binding), "hello", None)
+            .expect("stale busy binding should recover with a fresh session");
         match plan {
             SessionReusePlan::CreateFresh { delta_prompt, cached_tokens } => {
                 assert_eq!(delta_prompt, "hello");

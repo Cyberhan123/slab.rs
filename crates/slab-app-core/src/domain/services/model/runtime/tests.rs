@@ -176,3 +176,33 @@ async fn model_runtime_unloads_catalog_model_by_model_id() {
     assert_eq!(status.status, "unloaded");
     assert_eq!(app.runtime.unloads(), vec![RuntimeBackendId::GgmlLlama]);
 }
+
+#[tokio::test]
+async fn model_runtime_rejects_manual_unload_while_inference_active() {
+    let app = TestAppCore::new().await;
+    let model_path = app.write_model_file("runtime-unload-busy.gguf");
+    let model = app
+        .model
+        .create_model(ready_local_llama_command("runtime-unload-busy", &model_path))
+        .await
+        .expect("create runtime model");
+    app.runtime.allow_backend(RuntimeBackendId::GgmlLlama);
+    let _guard = app.auto_unload.acquire(RuntimeBackendId::GgmlLlama).await;
+
+    let error = app
+        .model
+        .unload_model(ModelLoadCommand {
+            model_id: Some(model.id),
+            backend_id: None,
+            model_path: None,
+            num_workers: None,
+        })
+        .await
+        .expect_err("active inference should block manual unload");
+
+    assert!(
+        matches!(&error, AppCoreError::Conflict(message) if message.contains("active inference")),
+        "unexpected error: {error}"
+    );
+    assert!(app.runtime.unloads().is_empty());
+}

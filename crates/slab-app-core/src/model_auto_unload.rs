@@ -184,6 +184,63 @@ impl ModelAutoUnloadManager {
         debug!(backend = %backend, "model unload state updated (manual)");
     }
 
+    pub async fn ensure_idle_for_manual_unload(
+        &self,
+        backend_id: RuntimeBackendId,
+    ) -> Result<(), AppCoreError> {
+        let states = self.states.lock().await;
+        let Some(state) = states.get(&backend_id) else {
+            return Ok(());
+        };
+
+        if state.active_refs > 0 {
+            return Err(AppCoreError::Conflict(format!(
+                "model backend '{backend_id}' is busy with {} active inference request(s)",
+                state.active_refs
+            )));
+        }
+
+        Ok(())
+    }
+
+    pub async fn sync_runtime_restart_states(&self) {
+        let mut changed = Vec::new();
+        {
+            let mut states = self.states.lock().await;
+            for (backend, state) in states.iter_mut() {
+                let runtime_snapshot = self.runtime_status.snapshot(*backend);
+                if runtime_snapshot.restart_attempts <= state.runtime_restart_attempts {
+                    continue;
+                }
+
+                let previous_restart_attempts = state.runtime_restart_attempts;
+                state.runtime_restart_attempts = runtime_snapshot.restart_attempts;
+                if state.replay_plan.is_some() {
+                    state.auto_unloaded = true;
+                    state.resident = false;
+                    changed.push((
+                        *backend,
+                        previous_restart_attempts,
+                        runtime_snapshot.restart_attempts,
+                        runtime_snapshot.status.as_str(),
+                    ));
+                }
+            }
+        }
+
+        for (backend, previous_restart_attempts, current_restart_attempts, runtime_status) in
+            changed
+        {
+            info!(
+                backend = %backend,
+                previous_restart_attempts,
+                current_restart_attempts,
+                runtime_status,
+                "runtime restart detected; resident model state marked for replay"
+            );
+        }
+    }
+
     pub async fn invalidate_model_replay(&self, model_id: &str, reason: &'static str) {
         let model_id = model_id.trim();
         if model_id.is_empty() {
@@ -677,5 +734,22 @@ mod tests {
 
         let candidate = choose_pressure_eviction_candidate(&states, RuntimeBackendId::GgmlLlama);
         assert_eq!(candidate, Some(RuntimeBackendId::GgmlWhisper));
+    }
+
+    #[test]
+    fn pressure_eviction_candidate_skips_active_backends() {
+        let mut states = HashMap::new();
+        states.insert(
+            RuntimeBackendId::GgmlWhisper,
+            BackendRefState {
+                resident: true,
+                active_refs: 1,
+                last_access_seq: 1,
+                ..BackendRefState::default()
+            },
+        );
+
+        let candidate = choose_pressure_eviction_candidate(&states, RuntimeBackendId::GgmlLlama);
+        assert_eq!(candidate, None);
     }
 }

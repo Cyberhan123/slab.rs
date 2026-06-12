@@ -127,4 +127,14 @@ mod tests {
 
         assert!(error.contains("audio:transcribe"));
     }
+
+    #[test]
+    fn rejects_plugin_rpc_callback_paths() {
+        let allowed = vec!["plugins:rpc".to_owned(), "models:read".to_owned()];
+
+        let error =
+            authorize_slab_api_request(&allowed, &request("POST", "/v1/plugins/rpc")).unwrap_err();
+
+        assert!(error.contains("not part of the allowed plugin API surface"));
+    }
 }

@@ -50,6 +50,32 @@ fn scan_plugin_dir_validates_integrity() {
 }
 
 #[test]
+fn scan_plugin_dir_rejects_reserved_plugin_id_namespace() {
+    let root = temp_dir("scan-reserved-id");
+    let plugin_root = root.join("slab-core");
+    write(&plugin_root.join("ui/index.html"), "<html></html>");
+    let html_hash = hash_bytes_hex(b"<html></html>");
+    write(
+        &plugin_root.join("plugin.json"),
+        &serde_json::to_string_pretty(&json!({
+            "manifestVersion": 1,
+            "id": "slab-core",
+            "name": "Reserved Plugin",
+            "version": "0.1.0",
+            "runtime": { "ui": { "entry": "ui/index.html" } },
+            "integrity": { "filesSha256": { "ui/index.html": html_hash } },
+            "permissions": { "network": { "mode": "blocked", "allowHosts": [] } }
+        }))
+        .expect("manifest json"),
+    );
+
+    let scanned = scan_plugin_dir(&plugin_root, "dev").expect("scan plugin");
+
+    assert!(!scanned.valid);
+    assert!(scanned.error.as_deref().unwrap().contains("namespace is reserved"));
+}
+
+#[test]
 fn scan_plugin_dir_accepts_dev_manifest_without_integrity() {
     let root = temp_dir("scan-dev-without-integrity");
     let plugin_root = root.join("example-plugin");
@@ -130,6 +156,46 @@ fn scan_plugin_dir_accepts_python_backend_entry() {
 
     assert!(scanned.valid);
     assert!(scanned.manifest.unwrap().runtime.python.is_some());
+}
+
+#[test]
+fn scan_plugin_dir_rejects_multiple_callable_runtimes() {
+    let root = temp_dir("scan-multiple-callable-runtimes");
+    let plugin_root = root.join("multi-runtime");
+    write(&plugin_root.join("ui/index.html"), "<html></html>");
+    write(&plugin_root.join("dist/plugin.js"), "export function run() {}\n");
+    write(&plugin_root.join("python/plugin.py"), "def run(params):\n    return params\n");
+    let html_hash = hash_bytes_hex(b"<html></html>");
+    let js_hash = hash_bytes_hex(b"export function run() {}\n");
+    let python_hash = hash_bytes_hex(b"def run(params):\n    return params\n");
+    write(
+        &plugin_root.join("plugin.json"),
+        &serde_json::to_string_pretty(&json!({
+            "manifestVersion": 1,
+            "id": "multi-runtime",
+            "name": "Multi Runtime",
+            "version": "0.1.0",
+            "runtime": {
+                "ui": { "entry": "ui/index.html" },
+                "js": { "entry": "dist/plugin.js" },
+                "python": { "entry": "python/plugin.py" }
+            },
+            "integrity": {
+                "filesSha256": {
+                    "ui/index.html": html_hash,
+                    "dist/plugin.js": js_hash,
+                    "python/plugin.py": python_hash
+                }
+            },
+            "permissions": { "network": { "mode": "blocked", "allowHosts": [] } }
+        }))
+        .expect("manifest json"),
+    );
+
+    let scanned = scan_plugin_dir(&plugin_root, "dev").expect("scan plugin");
+
+    assert!(!scanned.valid);
+    assert!(scanned.error.as_deref().unwrap().contains("at most one callable runtime"));
 }
 
 #[test]
