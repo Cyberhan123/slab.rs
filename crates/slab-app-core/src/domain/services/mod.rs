@@ -47,6 +47,7 @@ pub(crate) use workspace_lsp::workspace_root_from_config;
 use std::sync::Arc;
 
 use crate::context::{ModelState, WorkerState};
+use crate::infra::agent_runtime::AgentRuntimeReloader;
 use crate::infra::runtime::ManagedRuntimeHost;
 
 #[derive(Clone)]
@@ -71,10 +72,11 @@ pub struct AppServices {
 }
 
 impl AppServices {
-    pub fn new(
+    pub(crate) fn new(
         model_state: ModelState,
         worker_state: WorkerState,
         agent: AgentService,
+        agent_runtime: AgentRuntimeReloader,
         runtime_host: Option<Arc<ManagedRuntimeHost>>,
     ) -> Self {
         let model = ModelService::new(model_state.clone(), worker_state.clone());
@@ -85,8 +87,14 @@ impl AppServices {
             ffmpeg: FfmpegService::new(worker_state.clone()),
             image: ImageService::new(worker_state.clone()),
             model: model.clone(),
-            plugin: PluginService::new(model_state.clone()),
-            settings: SettingsService::new(model_state.clone()),
+            plugin: PluginService::new_with_agent_runtime(
+                model_state.clone(),
+                Some(agent_runtime.clone()),
+            ),
+            settings: SettingsService::new_with_agent_runtime(
+                model_state.clone(),
+                Some(agent_runtime),
+            ),
             session: SessionService::new(model_state.clone()),
             setup: SetupService::new(model_state.clone(), worker_state.clone(), runtime_host),
             subtitle: SubtitleService::new(),

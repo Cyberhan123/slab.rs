@@ -2,9 +2,10 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use slab_types::plugin::{
-    PluginAgentCapabilityContribution, PluginCommandContribution, PluginLanguageServerContribution,
-    PluginLanguageServerTransport, PluginManifest, PluginNetworkMode, PluginPermissionsManifest,
-    PluginRouteContribution, PluginSettingsContribution, PluginSidebarContribution,
+    PluginAgentCapabilityContribution, PluginAgentHookContribution, PluginAgentHookRuntime,
+    PluginCommandContribution, PluginLanguageServerContribution, PluginLanguageServerTransport,
+    PluginManifest, PluginNetworkMode, PluginPermissionsManifest, PluginRouteContribution,
+    PluginSettingsContribution, PluginSidebarContribution,
 };
 use slab_utils::hash::{sha256_hex_file, verify_sha256_hex_expected};
 
@@ -121,6 +122,9 @@ fn validate_contributions(
     for capability in &manifest.contributes.agent_capabilities {
         validate_agent_capability(root_dir, capability, manifest, source_kind)?;
     }
+    for hook in &manifest.contributes.agent_hooks {
+        validate_agent_hook(hook, manifest)?;
+    }
     for provider in &manifest.contributes.language_servers {
         validate_language_server(provider)?;
     }
@@ -174,6 +178,12 @@ const CONTRIBUTION_VALIDATION_RULES: &[ContributionValidationRule] = &[
         ensure_permission: ensure_agent_capabilities_permission,
     },
     ContributionValidationRule {
+        context: "contributes.agentHooks",
+        extract_ids: extract_agent_hook_ids,
+        has_items: has_agent_hooks,
+        ensure_permission: ensure_agent_hooks_permission,
+    },
+    ContributionValidationRule {
         context: "contributes.languageServers",
         extract_ids: extract_language_server_ids,
         has_items: has_language_servers,
@@ -201,6 +211,10 @@ fn extract_agent_capability_ids(manifest: &PluginManifest) -> Vec<String> {
     manifest.contributes.agent_capabilities.iter().map(|item| item.id.clone()).collect()
 }
 
+fn extract_agent_hook_ids(manifest: &PluginManifest) -> Vec<String> {
+    manifest.contributes.agent_hooks.iter().map(|item| item.id.clone()).collect()
+}
+
 fn extract_language_server_ids(manifest: &PluginManifest) -> Vec<String> {
     manifest.contributes.language_servers.iter().map(|item| item.id.clone()).collect()
 }
@@ -223,6 +237,10 @@ fn has_settings(manifest: &PluginManifest) -> bool {
 
 fn has_agent_capabilities(manifest: &PluginManifest) -> bool {
     !manifest.contributes.agent_capabilities.is_empty()
+}
+
+fn has_agent_hooks(manifest: &PluginManifest) -> bool {
+    !manifest.contributes.agent_hooks.is_empty()
 }
 
 fn has_language_servers(manifest: &PluginManifest) -> bool {
@@ -268,6 +286,14 @@ fn ensure_agent_capabilities_permission(
         permissions,
         "capability:declare",
         "contributes.agentCapabilities requires permissions.agent to include capability:declare",
+    )
+}
+
+fn ensure_agent_hooks_permission(permissions: &PluginPermissionsManifest) -> Result<(), String> {
+    ensure_agent_permission(
+        permissions,
+        "hook:declare",
+        "contributes.agentHooks requires permissions.agent to include hook:declare",
     )
 }
 
@@ -379,6 +405,34 @@ fn validate_agent_capability(
             "mcpTool:expose",
             "contributes.agentCapabilities[].exposeAsMcpTool requires permissions.agent to include mcpTool:expose",
         )?;
+    }
+    Ok(())
+}
+
+fn validate_agent_hook(
+    hook: &PluginAgentHookContribution,
+    manifest: &PluginManifest,
+) -> Result<(), String> {
+    if hook.id.trim().is_empty() {
+        return Err("contributes.agentHooks[].id must not be empty".to_owned());
+    }
+    if hook.events.is_empty() {
+        return Err(format!("agent hook `{}` must declare events", hook.id));
+    }
+    if hook.transport.function.trim().is_empty() {
+        return Err(format!("agent hook `{}` must declare transport.function", hook.id));
+    }
+    match hook.transport.runtime {
+        PluginAgentHookRuntime::JavaScript => {
+            if manifest.runtime.js.is_none() {
+                return Err(format!("agent hook `{}` requires runtime.js", hook.id));
+            }
+        }
+        PluginAgentHookRuntime::Python => {
+            if manifest.runtime.python.is_none() {
+                return Err(format!("agent hook `{}` requires runtime.python", hook.id));
+            }
+        }
     }
     Ok(())
 }

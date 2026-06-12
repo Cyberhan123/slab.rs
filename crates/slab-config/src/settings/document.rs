@@ -303,10 +303,18 @@ impl Default for AgentSettingsConfig {
 }
 
 /// Agent lifecycle hook settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct AgentHooksConfig {
+    #[serde(default)]
+    pub enabled: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scripts: Vec<AgentHookScriptConfig>,
+}
+
+impl Default for AgentHooksConfig {
+    fn default() -> Self {
+        Self { enabled: false, scripts: Vec::new() }
+    }
 }
 
 /// Explicit local script registered for agent lifecycle hook execution.
@@ -1295,6 +1303,7 @@ mod tests {
             WebSearchProviderId::Duckduckgo
         );
         assert!(settings.agent.debug);
+        assert!(!settings.agent.hooks.enabled);
         assert!(settings.agent.hooks.scripts.is_empty());
         assert!(!settings.agent.memories.enabled);
         assert_eq!(settings.agent.memories.phase1_concurrency, 2);

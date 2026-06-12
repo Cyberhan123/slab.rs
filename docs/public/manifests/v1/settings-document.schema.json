@@ -61,6 +61,10 @@
     "AgentHooksConfig": {
       "description": "Agent lifecycle hook settings.",
       "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
         "scripts": {
           "items": {
             "$ref": "#/$defs/AgentHookScriptConfig"
@@ -169,7 +173,9 @@
         },
         "hooks": {
           "$ref": "#/$defs/AgentHooksConfig",
-          "default": {}
+          "default": {
+            "enabled": false
+          }
         },
         "memories": {
           "$ref": "#/$defs/AgentMemoriesConfig",
@@ -1428,7 +1434,9 @@
       "$ref": "#/$defs/AgentSettingsConfig",
       "default": {
         "debug": true,
-        "hooks": {},
+        "hooks": {
+          "enabled": false
+        },
         "memories": {
           "enabled": false,
           "extension_retention_days": 30,

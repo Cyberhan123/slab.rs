@@ -241,6 +241,132 @@ fn scan_plugin_dir_rejects_language_server_without_lsp_permission() {
 }
 
 #[test]
+fn scan_plugin_dir_accepts_agent_hook_contribution() {
+    let root = temp_dir("scan-agent-hook");
+    let plugin_root = root.join("hook-plugin");
+    write(&plugin_root.join("ui/index.html"), "<html></html>");
+    write(&plugin_root.join("dist/plugin.js"), "export function onAgentHook() {}\n");
+    let html_hash = hash_bytes_hex(b"<html></html>");
+    let js_hash = hash_bytes_hex(b"export function onAgentHook() {}\n");
+    write(
+        &plugin_root.join("plugin.json"),
+        &serde_json::to_string_pretty(&json!({
+            "manifestVersion": 1,
+            "id": "hook-plugin",
+            "name": "Hook Plugin",
+            "version": "0.1.0",
+            "runtime": {
+                "ui": { "entry": "ui/index.html" },
+                "js": { "entry": "dist/plugin.js" }
+            },
+            "integrity": {
+                "filesSha256": {
+                    "ui/index.html": html_hash,
+                    "dist/plugin.js": js_hash
+                }
+            },
+            "permissions": {
+                "network": { "mode": "blocked", "allowHosts": [] },
+                "agent": ["hook:declare"]
+            },
+            "contributes": {
+                "agentHooks": [{
+                    "id": "memory-context",
+                    "events": ["on_agent_start", "on_llm_start"],
+                    "transport": { "runtime": "javascript", "function": "onAgentHook" }
+                }]
+            }
+        }))
+        .expect("manifest json"),
+    );
+
+    let scanned = scan_plugin_dir(&plugin_root, "dev").expect("scan plugin");
+
+    assert!(scanned.valid, "{:?}", scanned.error);
+    let manifest = scanned.manifest.expect("manifest");
+    assert_eq!(manifest.contributes.agent_hooks[0].id, "memory-context");
+}
+
+#[test]
+fn scan_plugin_dir_rejects_agent_hook_without_agent_permission() {
+    let root = temp_dir("scan-agent-hook-permission");
+    let plugin_root = root.join("hook-plugin");
+    write(&plugin_root.join("ui/index.html"), "<html></html>");
+    write(&plugin_root.join("dist/plugin.js"), "export function onAgentHook() {}\n");
+    let html_hash = hash_bytes_hex(b"<html></html>");
+    let js_hash = hash_bytes_hex(b"export function onAgentHook() {}\n");
+    write(
+        &plugin_root.join("plugin.json"),
+        &serde_json::to_string_pretty(&json!({
+            "manifestVersion": 1,
+            "id": "hook-plugin",
+            "name": "Hook Plugin",
+            "version": "0.1.0",
+            "runtime": {
+                "ui": { "entry": "ui/index.html" },
+                "js": { "entry": "dist/plugin.js" }
+            },
+            "integrity": {
+                "filesSha256": {
+                    "ui/index.html": html_hash,
+                    "dist/plugin.js": js_hash
+                }
+            },
+            "permissions": { "network": { "mode": "blocked", "allowHosts": [] } },
+            "contributes": {
+                "agentHooks": [{
+                    "id": "memory-context",
+                    "events": ["on_agent_start"],
+                    "transport": { "runtime": "javascript", "function": "onAgentHook" }
+                }]
+            }
+        }))
+        .expect("manifest json"),
+    );
+
+    let scanned = scan_plugin_dir(&plugin_root, "dev").expect("scan plugin");
+
+    assert!(!scanned.valid);
+    assert!(scanned.error.as_deref().unwrap().contains("permissions.agent"));
+}
+
+#[test]
+fn scan_plugin_dir_rejects_agent_hook_without_declared_runtime() {
+    let root = temp_dir("scan-agent-hook-runtime");
+    let plugin_root = root.join("hook-plugin");
+    write(&plugin_root.join("ui/index.html"), "<html></html>");
+    let html_hash = hash_bytes_hex(b"<html></html>");
+    write(
+        &plugin_root.join("plugin.json"),
+        &serde_json::to_string_pretty(&json!({
+            "manifestVersion": 1,
+            "id": "hook-plugin",
+            "name": "Hook Plugin",
+            "version": "0.1.0",
+            "runtime": { "ui": { "entry": "ui/index.html" } },
+            "integrity": { "filesSha256": { "ui/index.html": html_hash } },
+            "permissions": {
+                "network": { "mode": "blocked", "allowHosts": [] },
+                "agent": ["hook:declare"]
+            },
+            "contributes": {
+                "agentHooks": [{
+                    "id": "memory-context",
+                    "events": ["on_agent_start"],
+                    "transport": { "runtime": "javascript", "function": "onAgentHook" }
+                }]
+            }
+        }))
+        .expect("manifest json"),
+    );
+
+    let scanned = scan_plugin_dir(&plugin_root, "dev").expect("scan plugin");
+
+    assert!(!scanned.valid);
+    assert!(scanned.error.as_deref().unwrap().contains("runtime.js"));
+}
+
+#[test]
 fn locate_plugin_root_accepts_nested_archive_layout() {
     let root = temp_dir("locate");
     let nested = root.join("archive-root").join("example-plugin");

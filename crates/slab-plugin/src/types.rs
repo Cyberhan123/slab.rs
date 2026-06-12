@@ -7,13 +7,15 @@ pub use slab_types::{PluginApiRequest, PluginApiResponse, PluginEventPayload};
 
 #[allow(unused_imports)]
 pub use slab_types::plugin::{
-    PluginAgentCapabilityContribution, PluginCapabilityKind, PluginCapabilityTransport,
-    PluginCapabilityTransportType, PluginCommandContribution, PluginCompatibilityManifest,
-    PluginContributesManifest, PluginFilePermissions, PluginInfo, PluginIntegrityManifest,
-    PluginJsManifest, PluginLanguageServerContribution, PluginLanguageServerTransport,
-    PluginManifest, PluginNetworkManifest, PluginNetworkMode, PluginPermissionsManifest,
-    PluginPythonManifest, PluginRouteContribution, PluginRuntimeManifest,
-    PluginSettingsContribution, PluginSidebarContribution, PluginUiManifest, PluginWasmManifest,
+    PluginAgentCapabilityContribution, PluginAgentHookContribution, PluginAgentHookLifecycleEvent,
+    PluginAgentHookRuntime, PluginAgentHookTransport, PluginCapabilityKind,
+    PluginCapabilityTransport, PluginCapabilityTransportType, PluginCommandContribution,
+    PluginCompatibilityManifest, PluginContributesManifest, PluginFilePermissions, PluginInfo,
+    PluginIntegrityManifest, PluginJsManifest, PluginLanguageServerContribution,
+    PluginLanguageServerTransport, PluginManifest, PluginNetworkManifest, PluginNetworkMode,
+    PluginPermissionsManifest, PluginPythonManifest, PluginRouteContribution,
+    PluginRuntimeManifest, PluginSettingsContribution, PluginSidebarContribution, PluginUiManifest,
+    PluginWasmManifest,
 };
 
 #[derive(Clone)]

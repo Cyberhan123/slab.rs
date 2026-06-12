@@ -2,6 +2,7 @@ pub mod agent_adapter;
 pub mod agent_event_hub;
 pub(crate) mod agent_hooks;
 pub mod agent_memory;
+pub(crate) mod agent_runtime;
 pub mod db;
 pub(crate) mod endpoint;
 pub mod model_packs;

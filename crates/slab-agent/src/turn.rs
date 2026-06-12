@@ -1,7 +1,5 @@
 //! Single-turn execution logic (private to the crate).
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use chrono::Utc;
 use tokio_util::sync::CancellationToken;
@@ -17,7 +15,7 @@ use crate::{
     config::{AgentConfig, AgentToolChoice},
     error::AgentError,
     event::{AgentEventKind, AgentMetrics},
-    hook::{AgentHook, HookEvent, dispatch_hooks},
+    hook::{AgentHookRegistry, HookEvent, dispatch_registered_hooks},
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, LlmStreamObserver, ParsedToolCall,
         ThreadMessageRecord, ToolSpec, TurnEvent, TurnStateRecord,
@@ -35,6 +33,7 @@ use crate::{
 /// calls), or `false` when the model produced a final answer.
 pub(crate) struct TurnExecutionContext<'a> {
     pub thread_id: &'a str,
+    pub session_id: &'a str,
     pub turn_index: u32,
     pub depth: u32,
     pub config: &'a AgentConfig,
@@ -43,7 +42,7 @@ pub(crate) struct TurnExecutionContext<'a> {
     pub store: &'a dyn AgentStorePort,
     pub notify: &'a dyn AgentNotifyPort,
     pub approval: &'a dyn ApprovalPort,
-    pub hooks: &'a [Arc<dyn AgentHook>],
+    pub hooks: &'a AgentHookRegistry,
     pub risk: &'a dyn ToolRiskAnalyzer,
     pub trace: &'a dyn AgentTraceSink,
     pub trace_context: AgentTraceContext,
@@ -65,10 +64,11 @@ pub(crate) async fn execute_turn(
     }
 
     let tool_specs = allowed_tool_specs(&context)?;
-    let llm_start_effects = dispatch_hooks(
+    let llm_start_effects = dispatch_registered_hooks(
         context.hooks,
         &HookEvent::OnLlmStart {
             thread_id: context.thread_id.to_owned(),
+            session_id: context.session_id.to_owned(),
             turn_index: context.turn_index,
             messages: messages.clone(),
             tools: tool_specs.clone(),
@@ -181,11 +181,13 @@ pub(crate) async fn execute_turn(
         None,
     )
     .await;
-    let llm_end_effects = dispatch_hooks(
+    let llm_end_effects = dispatch_registered_hooks(
         context.hooks,
         &HookEvent::OnLlmEnd {
             thread_id: context.thread_id.to_owned(),
+            session_id: context.session_id.to_owned(),
             turn_index: context.turn_index,
+            messages: messages.clone(),
             response: response.clone(),
         },
     )

@@ -13,7 +13,7 @@ use slab_types::{ConversationMessage, agent::ToolCallStatus};
 use crate::{
     error::AgentError,
     event::{AgentEventKind, ToolRiskAssessment},
-    hook::{HookEvent, HookToolAction, dispatch_hooks},
+    hook::{HookEvent, HookToolAction, dispatch_registered_hooks},
     port::{ApprovalDecision, ParsedToolCall, TurnEvent},
     state::ToolCallStateMachine,
     tool::{ToolApprovalRequest, ToolContext, ToolHandler},
@@ -50,15 +50,18 @@ pub(crate) async fn handle_tool_calls(
     emit_tool_concurrency_started(context, total, concurrency).await;
 
     let mut results = Vec::with_capacity(total);
+    let conversation_context = messages.clone();
     for (chunk_index, chunk) in tool_calls.chunks(concurrency).enumerate() {
         let base_index = chunk_index * concurrency;
         let batch = chunk.iter().enumerate().map(|(offset, tool_call)| {
             let created_at = now.clone();
             let tool_context = tool_context.clone();
+            let conversation_messages = conversation_context.as_slice();
             async move {
                 handle_tool_call(
                     context,
                     &tool_context,
+                    conversation_messages,
                     base_index + offset,
                     tool_call,
                     &created_at,
@@ -162,6 +165,7 @@ async fn emit_tool_concurrency_completed(
 async fn handle_tool_call(
     context: &TurnExecutionContext<'_>,
     tool_context: &ToolContext,
+    messages: &[ConversationMessage],
     _index: usize,
     tool_call: &ParsedToolCall,
     created_at: &str,
@@ -238,12 +242,14 @@ async fn handle_tool_call(
 
     let pre_event = HookEvent::OnToolStart {
         thread_id: context.thread_id.to_owned(),
+        session_id: context.session_id.to_owned(),
         turn_index: context.turn_index,
+        messages: messages.to_vec(),
         call_id: call_id.clone(),
         tool_name: tool_call.name.clone(),
         arguments: parsed_args.clone(),
     };
-    let pre_effects = dispatch_hooks(context.hooks, &pre_event).await;
+    let pre_effects = dispatch_registered_hooks(context.hooks, &pre_event).await;
     let pre_observations = pre_effects.observations;
     let effective_args = match pre_effects.tool_action {
         HookToolAction::Block { reason } => {
@@ -361,14 +367,16 @@ async fn handle_tool_call(
 
     let post_event = HookEvent::OnToolEnd {
         thread_id: context.thread_id.to_owned(),
+        session_id: context.session_id.to_owned(),
         turn_index: context.turn_index,
+        messages: messages.to_vec(),
         call_id: call_id.clone(),
         tool_name: tool_call.name.clone(),
         arguments: effective_args,
         output: output.clone(),
         status: call_status,
     };
-    let post_effects = dispatch_hooks(context.hooks, &post_event).await;
+    let post_effects = dispatch_registered_hooks(context.hooks, &post_event).await;
     append_hook_observations(&mut output, post_effects.observations);
 
     context

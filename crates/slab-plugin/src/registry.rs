@@ -60,6 +60,14 @@ impl PluginRegistry {
             .ok_or_else(|| format!("plugin `{plugin_id}` is not available"))
     }
 
+    pub fn loaded_plugins(&self) -> Result<Vec<LoadedPlugin>, String> {
+        let guard = self
+            .snapshot
+            .read()
+            .map_err(|_| "failed to lock plugin registry for read".to_string())?;
+        Ok(guard.loaded.values().cloned().collect())
+    }
+
     pub fn list(&self) -> Result<Vec<PluginInfo>, String> {
         let guard = self
             .snapshot

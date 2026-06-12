@@ -5,11 +5,19 @@ use crate::error::AppCoreError;
 #[derive(Clone)]
 pub struct SettingsService {
     state: ModelState,
+    agent_runtime: Option<crate::infra::agent_runtime::AgentRuntimeReloader>,
 }
 
 impl SettingsService {
     pub fn new(state: ModelState) -> Self {
-        Self { state }
+        Self::new_with_agent_runtime(state, None)
+    }
+
+    pub(crate) fn new_with_agent_runtime(
+        state: ModelState,
+        agent_runtime: Option<crate::infra::agent_runtime::AgentRuntimeReloader>,
+    ) -> Self {
+        Self { state, agent_runtime }
     }
 
     pub async fn list_settings(&self) -> Result<SettingsDocumentView, AppCoreError> {
@@ -25,6 +33,16 @@ impl SettingsService {
         pmid: &str,
         command: UpdateSettingCommand,
     ) -> Result<SettingPropertyView, AppCoreError> {
-        self.state.pmid().update_setting(pmid, command).await.map_err(Into::into)
+        let property = self.state.pmid().update_setting(pmid, command).await?;
+        if affects_agent_runtime(pmid)
+            && let Some(agent_runtime) = &self.agent_runtime
+        {
+            agent_runtime.reload().await?;
+        }
+        Ok(property)
     }
+}
+
+fn affects_agent_runtime(pmid: &str) -> bool {
+    pmid.starts_with("agent.hooks.") || pmid.starts_with("agent.memories.")
 }

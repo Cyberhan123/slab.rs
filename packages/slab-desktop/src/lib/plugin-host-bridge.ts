@@ -34,6 +34,7 @@ export type PluginContributions = {
   commands: PluginCommandContribution[];
   settings: PluginSettingsContribution[];
   agentCapabilities: PluginAgentCapabilityContribution[];
+  agentHooks: PluginAgentHookContribution[];
   languageServers: PluginLanguageServerContribution[];
 };
 
@@ -82,6 +83,25 @@ export type PluginAgentCapabilityContribution = {
     function: string;
   };
   exposeAsMcpTool: boolean;
+};
+
+export type PluginAgentHookContribution = {
+  id: string;
+  description?: string | null;
+  descriptionKey?: string | null;
+  events: Array<
+    | "on_agent_start"
+    | "on_llm_start"
+    | "on_llm_end"
+    | "on_tool_start"
+    | "on_tool_end"
+    | "on_agent_end"
+    | string
+  >;
+  transport: {
+    runtime: "javascript" | "python" | string;
+    function: string;
+  };
 };
 
 export type PluginLanguageServerContribution = {

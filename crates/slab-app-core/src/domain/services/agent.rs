@@ -159,4 +159,8 @@ impl AgentService {
     pub async fn active_thread_count(&self) -> usize {
         self.control.active_thread_count().await
     }
+
+    pub(crate) fn control(&self) -> Arc<AgentControl> {
+        Arc::clone(&self.control)
+    }
 }

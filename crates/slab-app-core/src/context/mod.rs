@@ -92,16 +92,33 @@ impl AppState {
             store_for_agent,
             Arc::clone(&agent_event_hub),
         );
+        let agent_runtime = crate::infra::agent_runtime::AgentRuntimeReloader::new(
+            (*context.model_state).clone(),
+            agent_service.control(),
+        );
+        schedule_agent_runtime_reload(agent_runtime.clone());
 
         let services = Arc::new(crate::domain::services::AppServices::new(
             (*context.model_state).clone(),
             (*context.worker_state).clone(),
             agent_service,
+            agent_runtime,
             runtime_host,
         ));
 
         Self { context, services }
     }
+}
+
+fn schedule_agent_runtime_reload(agent_runtime: crate::infra::agent_runtime::AgentRuntimeReloader) {
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    handle.spawn(async move {
+        if let Err(error) = agent_runtime.reload().await {
+            tracing::warn!(%error, "failed to reload agent runtime settings at startup");
+        }
+    });
 }
 
 /// Construct the [`slab_agent::AgentControl`] singleton, wiring up the port

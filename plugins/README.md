@@ -168,7 +168,7 @@ assets from host-controlled extension points and agent-facing capabilities:
   "permissions": {
     "network": { "mode": "blocked", "allowHosts": [] },
     "ui": ["route:create", "sidebar:item:create", "command:create", "settings:section:create"],
-    "agent": ["capability:declare", "mcpTool:expose"],
+    "agent": ["capability:declare", "mcpTool:expose", "hook:declare"],
     "lsp": ["languageServer:declare"],
     "slabApi": ["models:read", "tasks:read"],
     "files": {
@@ -199,6 +199,14 @@ assets from host-controlled extension points and agent-facing capabilities:
         "exposeAsMcpTool": true
       }
     ],
+    "agentHooks": [
+      {
+        "id": "example.context",
+        "description": "Inject plugin-owned context into agent lifecycle events.",
+        "events": ["on_agent_start", "on_llm_start", "on_tool_start"],
+        "transport": { "runtime": "javascript", "function": "onAgentHook" }
+      }
+    ],
     "languageServers": [
       {
         "id": "example.python",
@@ -223,8 +231,9 @@ assets from host-controlled extension points and agent-facing capabilities:
 ```
 
 The first supported extension points are routes, sidebar entries, commands,
-settings sections, agent capabilities, and workspace language servers. Header,
-footer, chat toolbar, and other shell slots are intentionally not open yet.
+settings sections, agent capabilities, agent lifecycle hooks, and workspace
+language servers. Header, footer, chat toolbar, and other shell slots are
+intentionally not open yet.
 
 `integrity.filesSha256` is required in `.plugin.slab` packages and optional in
 source plugin directories. The packer writes the package copy after compiling

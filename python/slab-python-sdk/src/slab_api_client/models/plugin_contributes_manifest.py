@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from ..models.plugin_agent_capability_contribution import (
         PluginAgentCapabilityContribution,
     )
+    from ..models.plugin_agent_hook_contribution import PluginAgentHookContribution
     from ..models.plugin_command_contribution import PluginCommandContribution
     from ..models.plugin_language_server_contribution import (
         PluginLanguageServerContribution,
@@ -29,6 +30,7 @@ class PluginContributesManifest:
     """
     Attributes:
         agent_capabilities (list[PluginAgentCapabilityContribution] | Unset):
+        agent_hooks (list[PluginAgentHookContribution] | Unset):
         commands (list[PluginCommandContribution] | Unset):
         language_servers (list[PluginLanguageServerContribution] | Unset):
         routes (list[PluginRouteContribution] | Unset):
@@ -37,6 +39,7 @@ class PluginContributesManifest:
     """
 
     agent_capabilities: list[PluginAgentCapabilityContribution] | Unset = UNSET
+    agent_hooks: list[PluginAgentHookContribution] | Unset = UNSET
     commands: list[PluginCommandContribution] | Unset = UNSET
     language_servers: list[PluginLanguageServerContribution] | Unset = UNSET
     routes: list[PluginRouteContribution] | Unset = UNSET
@@ -51,6 +54,13 @@ class PluginContributesManifest:
             for agent_capabilities_item_data in self.agent_capabilities:
                 agent_capabilities_item = agent_capabilities_item_data.to_dict()
                 agent_capabilities.append(agent_capabilities_item)
+
+        agent_hooks: list[dict[str, Any]] | Unset = UNSET
+        if not isinstance(self.agent_hooks, Unset):
+            agent_hooks = []
+            for agent_hooks_item_data in self.agent_hooks:
+                agent_hooks_item = agent_hooks_item_data.to_dict()
+                agent_hooks.append(agent_hooks_item)
 
         commands: list[dict[str, Any]] | Unset = UNSET
         if not isinstance(self.commands, Unset):
@@ -92,6 +102,8 @@ class PluginContributesManifest:
         field_dict.update({})
         if agent_capabilities is not UNSET:
             field_dict["agentCapabilities"] = agent_capabilities
+        if agent_hooks is not UNSET:
+            field_dict["agentHooks"] = agent_hooks
         if commands is not UNSET:
             field_dict["commands"] = commands
         if language_servers is not UNSET:
@@ -110,6 +122,7 @@ class PluginContributesManifest:
         from ..models.plugin_agent_capability_contribution import (
             PluginAgentCapabilityContribution,
         )
+        from ..models.plugin_agent_hook_contribution import PluginAgentHookContribution
         from ..models.plugin_command_contribution import PluginCommandContribution
         from ..models.plugin_language_server_contribution import (
             PluginLanguageServerContribution,
@@ -129,6 +142,17 @@ class PluginContributesManifest:
                 )
 
                 agent_capabilities.append(agent_capabilities_item)
+
+        _agent_hooks = d.pop("agentHooks", UNSET)
+        agent_hooks: list[PluginAgentHookContribution] | Unset = UNSET
+        if _agent_hooks is not UNSET:
+            agent_hooks = []
+            for agent_hooks_item_data in _agent_hooks:
+                agent_hooks_item = PluginAgentHookContribution.from_dict(
+                    agent_hooks_item_data
+                )
+
+                agent_hooks.append(agent_hooks_item)
 
         _commands = d.pop("commands", UNSET)
         commands: list[PluginCommandContribution] | Unset = UNSET
@@ -179,6 +203,7 @@ class PluginContributesManifest:
 
         plugin_contributes_manifest = cls(
             agent_capabilities=agent_capabilities,
+            agent_hooks=agent_hooks,
             commands=commands,
             language_servers=language_servers,
             routes=routes,

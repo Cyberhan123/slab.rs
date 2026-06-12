@@ -74,6 +74,21 @@ impl SettingsPmidCatalog {
             self.tools.ffmpeg.source.version(),
             self.tools.ffmpeg.source.artifact(),
             self.agent.debug(),
+            self.agent.hooks.enabled(),
+            self.agent.hooks.scripts(),
+            self.agent.memories.enabled(),
+            self.agent.memories.model(),
+            self.agent.memories.memory_root(),
+            self.agent.memories.phase1_scan_limit(),
+            self.agent.memories.phase1_concurrency(),
+            self.agent.memories.phase1_idle_seconds(),
+            self.agent.memories.phase1_lease_seconds(),
+            self.agent.memories.phase1_retry_seconds(),
+            self.agent.memories.phase1_max_age_days(),
+            self.agent.memories.phase2_limit(),
+            self.agent.memories.phase2_lease_seconds(),
+            self.agent.memories.max_unused_days(),
+            self.agent.memories.extension_retention_days(),
             self.agent.tools.mcp.enabled(),
             self.agent.tools.websearch.default_provider(),
             self.agent.tools.websearch.providers(),
@@ -332,11 +347,13 @@ impl Default for FfmpegToolPmids {
 #[derive(Debug, Clone, Copy)]
 pub struct AgentPmids {
     pub tools: AgentToolsPmids,
+    pub hooks: AgentHooksPmids,
+    pub memories: AgentMemoriesPmids,
 }
 
 impl AgentPmids {
     pub const fn new() -> Self {
-        Self { tools: AgentToolsPmids::new() }
+        Self { tools: AgentToolsPmids::new(), hooks: AgentHooksPmids, memories: AgentMemoriesPmids }
     }
 
     pub fn debug(self) -> SettingPmid {
@@ -347,6 +364,76 @@ impl AgentPmids {
 impl Default for AgentPmids {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AgentHooksPmids;
+
+impl AgentHooksPmids {
+    pub fn enabled(self) -> SettingPmid {
+        SettingPmid::from_path("agent.hooks.enabled")
+    }
+
+    pub fn scripts(self) -> SettingPmid {
+        SettingPmid::from_path("agent.hooks.scripts")
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AgentMemoriesPmids;
+
+impl AgentMemoriesPmids {
+    pub fn enabled(self) -> SettingPmid {
+        SettingPmid::from_path("agent.memories.enabled")
+    }
+
+    pub fn model(self) -> SettingPmid {
+        SettingPmid::from_path("agent.memories.model")
+    }
+
+    pub fn memory_root(self) -> SettingPmid {
+        SettingPmid::from_path("agent.memories.memory_root")
+    }
+
+    pub fn phase1_scan_limit(self) -> SettingPmid {
+        SettingPmid::from_path("agent.memories.phase1_scan_limit")
+    }
+
+    pub fn phase1_concurrency(self) -> SettingPmid {
+        SettingPmid::from_path("agent.memories.phase1_concurrency")
+    }
+
+    pub fn phase1_idle_seconds(self) -> SettingPmid {
+        SettingPmid::from_path("agent.memories.phase1_idle_seconds")
+    }
+
+    pub fn phase1_lease_seconds(self) -> SettingPmid {
+        SettingPmid::from_path("agent.memories.phase1_lease_seconds")
+    }
+
+    pub fn phase1_retry_seconds(self) -> SettingPmid {
+        SettingPmid::from_path("agent.memories.phase1_retry_seconds")
+    }
+
+    pub fn phase1_max_age_days(self) -> SettingPmid {
+        SettingPmid::from_path("agent.memories.phase1_max_age_days")
+    }
+
+    pub fn phase2_limit(self) -> SettingPmid {
+        SettingPmid::from_path("agent.memories.phase2_limit")
+    }
+
+    pub fn phase2_lease_seconds(self) -> SettingPmid {
+        SettingPmid::from_path("agent.memories.phase2_lease_seconds")
+    }
+
+    pub fn max_unused_days(self) -> SettingPmid {
+        SettingPmid::from_path("agent.memories.max_unused_days")
+    }
+
+    pub fn extension_retention_days(self) -> SettingPmid {
+        SettingPmid::from_path("agent.memories.extension_retention_days")
     }
 }
 
@@ -798,6 +885,12 @@ mod tests {
         assert!(unique.contains("runtime.ggml.backends.llama.flash_attn"));
         assert!(unique.contains("runtime.ggml.backends.whisper.flash_attn"));
         assert!(unique.contains("runtime.ggml.backends.diffusion.flash_attn"));
+        assert!(unique.contains("agent.hooks.enabled"));
+        assert!(unique.contains("agent.hooks.scripts"));
+        assert!(unique.contains("agent.memories.enabled"));
+        assert!(unique.contains("agent.memories.memory_root"));
+        assert!(unique.contains("agent.memories.phase1_scan_limit"));
+        assert!(unique.contains("agent.memories.phase2_limit"));
         assert!(unique.contains("agent.tools.mcp.enabled"));
         assert!(unique.contains("agent.tools.websearch.default_provider"));
         assert!(unique.contains("agent.tools.websearch.providers"));

@@ -40,6 +40,46 @@ pub(crate) fn setting_descriptor(pmid: &str) -> Option<SettingDescriptor> {
             descriptor!("tools.ffmpeg.source.artifact", tools.ffmpeg.source.artifact)
         }
         "agent.debug" => descriptor!("agent.debug", agent.debug),
+        "agent.hooks.enabled" => descriptor!("agent.hooks.enabled", agent.hooks.enabled),
+        "agent.hooks.scripts" => descriptor!("agent.hooks.scripts", agent.hooks.scripts),
+        "agent.memories.enabled" => {
+            descriptor!("agent.memories.enabled", agent.memories.enabled)
+        }
+        "agent.memories.model" => descriptor!("agent.memories.model", agent.memories.model),
+        "agent.memories.memory_root" => {
+            descriptor!("agent.memories.memory_root", agent.memories.memory_root)
+        }
+        "agent.memories.phase1_scan_limit" => {
+            descriptor!("agent.memories.phase1_scan_limit", agent.memories.phase1_scan_limit)
+        }
+        "agent.memories.phase1_concurrency" => {
+            descriptor!("agent.memories.phase1_concurrency", agent.memories.phase1_concurrency)
+        }
+        "agent.memories.phase1_idle_seconds" => {
+            descriptor!("agent.memories.phase1_idle_seconds", agent.memories.phase1_idle_seconds)
+        }
+        "agent.memories.phase1_lease_seconds" => {
+            descriptor!("agent.memories.phase1_lease_seconds", agent.memories.phase1_lease_seconds)
+        }
+        "agent.memories.phase1_retry_seconds" => {
+            descriptor!("agent.memories.phase1_retry_seconds", agent.memories.phase1_retry_seconds)
+        }
+        "agent.memories.phase1_max_age_days" => {
+            descriptor!("agent.memories.phase1_max_age_days", agent.memories.phase1_max_age_days)
+        }
+        "agent.memories.phase2_limit" => {
+            descriptor!("agent.memories.phase2_limit", agent.memories.phase2_limit)
+        }
+        "agent.memories.phase2_lease_seconds" => {
+            descriptor!("agent.memories.phase2_lease_seconds", agent.memories.phase2_lease_seconds)
+        }
+        "agent.memories.max_unused_days" => {
+            descriptor!("agent.memories.max_unused_days", agent.memories.max_unused_days)
+        }
+        "agent.memories.extension_retention_days" => descriptor!(
+            "agent.memories.extension_retention_days",
+            agent.memories.extension_retention_days
+        ),
         "agent.tools.mcp.enabled" => {
             descriptor!("agent.tools.mcp.enabled", agent.tools.mcp.enabled)
         }

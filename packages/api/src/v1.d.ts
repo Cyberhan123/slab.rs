@@ -1892,6 +1892,21 @@ export interface components {
             outputSchema?: string | null;
             transport: components["schemas"]["PluginCapabilityTransport"];
         };
+        PluginAgentHookContribution: {
+            description?: string | null;
+            descriptionKey?: string | null;
+            events: components["schemas"]["PluginAgentHookLifecycleEvent"][];
+            id: string;
+            transport: components["schemas"]["PluginAgentHookTransport"];
+        };
+        /** @enum {string} */
+        PluginAgentHookLifecycleEvent: "on_agent_start" | "on_llm_start" | "on_llm_end" | "on_tool_start" | "on_tool_end" | "on_agent_end";
+        /** @enum {string} */
+        PluginAgentHookRuntime: "javascript" | "python";
+        PluginAgentHookTransport: {
+            function: string;
+            runtime: components["schemas"]["PluginAgentHookRuntime"];
+        };
         /** @enum {string} */
         PluginCapabilityKind: "tool" | "workflow";
         PluginCapabilityTransport: {
@@ -1913,6 +1928,7 @@ export interface components {
         };
         PluginContributesManifest: {
             agentCapabilities?: components["schemas"]["PluginAgentCapabilityContribution"][];
+            agentHooks?: components["schemas"]["PluginAgentHookContribution"][];
             commands?: components["schemas"]["PluginCommandContribution"][];
             languageServers?: components["schemas"]["PluginLanguageServerContribution"][];
             routes?: components["schemas"]["PluginRouteContribution"][];

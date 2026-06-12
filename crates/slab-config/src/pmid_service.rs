@@ -436,6 +436,21 @@ fn empty_sections() -> Vec<SettingsSectionView> {
                             .to_owned(),
                     properties: Vec::new(),
                 },
+                SettingsSubsectionView {
+                    id: "hooks".to_owned(),
+                    title: "Hooks".to_owned(),
+                    description_md:
+                        "Control external plugin and script hooks for agent lifecycle events."
+                            .to_owned(),
+                    properties: Vec::new(),
+                },
+                SettingsSubsectionView {
+                    id: "memories".to_owned(),
+                    title: "Memories".to_owned(),
+                    description_md: "Configure the built-in agent memory pipeline and workspace."
+                        .to_owned(),
+                    properties: Vec::new(),
+                },
             ],
         },
         SettingsSectionView {
@@ -509,6 +524,8 @@ fn section_location(path: &str) -> (&'static str, &'static str) {
         "agent.debug" => ("agent", "general"),
         _ if path.starts_with("agent.tools.mcp.") => ("agent", "mcp"),
         _ if path.starts_with("agent.tools.websearch.") => ("agent", "websearch"),
+        _ if path.starts_with("agent.hooks.") => ("agent", "hooks"),
+        _ if path.starts_with("agent.memories.") => ("agent", "memories"),
         _ if path.starts_with("runtime.ggml.backends.llama.") => ("runtime", "llama"),
         _ if path.starts_with("runtime.ggml.backends.whisper.") => ("runtime", "whisper"),
         _ if path.starts_with("runtime.ggml.backends.diffusion.") => ("runtime", "diffusion"),
@@ -529,7 +546,10 @@ fn section_location(path: &str) -> (&'static str, &'static str) {
 }
 
 fn value_type(path: &str, effective: &SettingValue, default: &SettingValue) -> SettingValueType {
-    if path == "providers.registry" || path == "server.cors.allowed_origins" {
+    if path == "providers.registry"
+        || path == "server.cors.allowed_origins"
+        || path == "agent.hooks.scripts"
+    {
         return SettingValueType::Array;
     }
     if path == "agent.tools.websearch.providers" {
@@ -548,6 +568,10 @@ fn value_type(path: &str, effective: &SettingValue, default: &SettingValue) -> S
         || path.ends_with(".concurrent_requests")
         || path.ends_with(".idle_minutes")
         || path.ends_with(".context_length")
+        || path.ends_with("_limit")
+        || path.ends_with("_concurrency")
+        || path.ends_with("_seconds")
+        || path.ends_with("_days")
     {
         return SettingValueType::Integer;
     }
@@ -601,6 +625,10 @@ fn minimum_value(path: &str) -> Option<i64> {
         || path.ends_with(".concurrent_requests")
         || path.ends_with(".idle_minutes")
         || path.ends_with(".context_length")
+        || path.ends_with("_limit")
+        || path.ends_with("_concurrency")
+        || path.ends_with("_seconds")
+        || path.ends_with("_days")
     {
         Some(0)
     } else {
@@ -622,7 +650,9 @@ fn secret(path: &str) -> bool {
 }
 
 fn multiline(path: &str) -> bool {
-    path == "providers.registry" || path == "agent.tools.websearch.providers"
+    path == "providers.registry"
+        || path == "agent.tools.websearch.providers"
+        || path == "agent.hooks.scripts"
 }
 
 fn property_label(path: &str) -> String {
@@ -636,6 +666,20 @@ fn property_label(path: &str) -> String {
         "runtime.transport" => "Transport".to_owned(),
         "runtime.sessions.state_dir" => "Session State Directory".to_owned(),
         "agent.debug" => "Agent Debug Trace".to_owned(),
+        "agent.hooks.enabled" => "External Hooks".to_owned(),
+        "agent.hooks.scripts" => "Legacy Hook Scripts".to_owned(),
+        "agent.memories.enabled" => "Agent Memories".to_owned(),
+        "agent.memories.memory_root" => "Memory Root".to_owned(),
+        "agent.memories.phase1_scan_limit" => "Phase 1 Scan Limit".to_owned(),
+        "agent.memories.phase1_concurrency" => "Phase 1 Concurrency".to_owned(),
+        "agent.memories.phase1_idle_seconds" => "Phase 1 Idle Seconds".to_owned(),
+        "agent.memories.phase1_lease_seconds" => "Phase 1 Lease Seconds".to_owned(),
+        "agent.memories.phase1_retry_seconds" => "Phase 1 Retry Seconds".to_owned(),
+        "agent.memories.phase1_max_age_days" => "Phase 1 Max Age Days".to_owned(),
+        "agent.memories.phase2_limit" => "Phase 2 Limit".to_owned(),
+        "agent.memories.phase2_lease_seconds" => "Phase 2 Lease Seconds".to_owned(),
+        "agent.memories.max_unused_days" => "Max Unused Days".to_owned(),
+        "agent.memories.extension_retention_days" => "Extension Retention Days".to_owned(),
         "agent.tools.mcp.enabled" => "MCP Tools".to_owned(),
         "agent.tools.websearch.default_provider" => "Default Provider".to_owned(),
         "agent.tools.websearch.providers" => "Web Search Providers".to_owned(),
@@ -669,6 +713,51 @@ fn property_description(path: &str) -> String {
         "tools.ffmpeg.install_dir" => "Optional install directory for the FFmpeg sidecar.".to_owned(),
         "agent.debug" => {
             "Write full-fidelity per-session agent trace files for prompt, tool, and runtime debugging.".to_owned()
+        }
+        "agent.hooks.enabled" => {
+            "Enable external agent lifecycle hooks registered by plugins or legacy local script settings. Built-in hooks are unaffected.".to_owned()
+        }
+        "agent.hooks.scripts" => {
+            "Legacy local script hooks executed through the supervised JS/Python runtimes when external hooks are enabled.".to_owned()
+        }
+        "agent.memories.enabled" => {
+            "Enable the built-in agent memory instruction and consolidation pipeline.".to_owned()
+        }
+        "agent.memories.model" => {
+            "Optional model override used by the agent memory pipeline.".to_owned()
+        }
+        "agent.memories.memory_root" => {
+            "Optional filesystem root for generated and consolidated agent memories.".to_owned()
+        }
+        "agent.memories.phase1_scan_limit" => {
+            "Maximum completed root agent threads scanned by each memory phase 1 run.".to_owned()
+        }
+        "agent.memories.phase1_concurrency" => {
+            "Maximum concurrent memory phase 1 extraction tasks.".to_owned()
+        }
+        "agent.memories.phase1_idle_seconds" => {
+            "Minimum idle age before a completed thread becomes eligible for memory phase 1.".to_owned()
+        }
+        "agent.memories.phase1_lease_seconds" => {
+            "Lease duration for memory phase 1 extraction claims.".to_owned()
+        }
+        "agent.memories.phase1_retry_seconds" => {
+            "Retry delay after a memory phase 1 extraction failure.".to_owned()
+        }
+        "agent.memories.phase1_max_age_days" => {
+            "Maximum completed-thread age considered by memory phase 1 extraction.".to_owned()
+        }
+        "agent.memories.phase2_limit" => {
+            "Maximum memory candidates consolidated during a phase 2 run.".to_owned()
+        }
+        "agent.memories.phase2_lease_seconds" => {
+            "Lease duration for memory phase 2 consolidation.".to_owned()
+        }
+        "agent.memories.max_unused_days" => {
+            "Maximum age for unused memories kept in phase 2 selection.".to_owned()
+        }
+        "agent.memories.extension_retention_days" => {
+            "Retention window for extension memory files written by phase 2.".to_owned()
         }
         "agent.tools.mcp.enabled" => {
             "Expose configured MCP tools to the agent tool router. Disabled by default.".to_owned()
@@ -1012,6 +1101,16 @@ mod tests {
             .iter()
             .find(|subsection| subsection.id == "websearch")
             .expect("websearch subsection");
+        let hooks_subsection = agent_section
+            .subsections
+            .iter()
+            .find(|subsection| subsection.id == "hooks")
+            .expect("hooks subsection");
+        let memories_subsection = agent_section
+            .subsections
+            .iter()
+            .find(|subsection| subsection.id == "memories")
+            .expect("memories subsection");
         let mcp_enabled = mcp_subsection
             .properties
             .iter()
@@ -1032,6 +1131,31 @@ mod tests {
             .iter()
             .find(|property| property.pmid == "agent.debug")
             .expect("agent debug property");
+        let hooks_enabled = hooks_subsection
+            .properties
+            .iter()
+            .find(|property| property.pmid == "agent.hooks.enabled")
+            .expect("hooks enabled property");
+        let hook_scripts = hooks_subsection
+            .properties
+            .iter()
+            .find(|property| property.pmid == "agent.hooks.scripts")
+            .expect("hook scripts property");
+        let memories_enabled = memories_subsection
+            .properties
+            .iter()
+            .find(|property| property.pmid == "agent.memories.enabled")
+            .expect("memories enabled property");
+        let memory_root = memories_subsection
+            .properties
+            .iter()
+            .find(|property| property.pmid == "agent.memories.memory_root")
+            .expect("memory root property");
+        let phase1_scan_limit = memories_subsection
+            .properties
+            .iter()
+            .find(|property| property.pmid == "agent.memories.phase1_scan_limit")
+            .expect("phase1 scan limit property");
         let provider_enum = default_provider.schema.enum_values.as_ref().expect("provider enum");
         let schema = providers.schema.json_schema.as_ref().expect("providers schema");
 
@@ -1039,6 +1163,15 @@ mod tests {
         assert_eq!(general_subsection.title, "General");
         assert_eq!(agent_debug.schema.value_type, SettingValueType::Boolean);
         assert_eq!(agent_debug.effective_value, SettingValue::Boolean(true));
+        assert_eq!(hooks_subsection.title, "Hooks");
+        assert_eq!(hooks_enabled.schema.value_type, SettingValueType::Boolean);
+        assert_eq!(hooks_enabled.effective_value, SettingValue::Boolean(false));
+        assert_eq!(hook_scripts.schema.value_type, SettingValueType::Array);
+        assert!(hook_scripts.schema.multiline);
+        assert_eq!(memories_subsection.title, "Memories");
+        assert_eq!(memories_enabled.schema.value_type, SettingValueType::Boolean);
+        assert_eq!(memory_root.schema.value_type, SettingValueType::String);
+        assert_eq!(phase1_scan_limit.schema.value_type, SettingValueType::Integer);
         assert_eq!(mcp_subsection.title, "MCP");
         assert_eq!(mcp_enabled.schema.value_type, SettingValueType::Boolean);
         assert_eq!(websearch_subsection.title, "Web Search");
@@ -1098,6 +1231,39 @@ mod tests {
             persisted.agent.tools.websearch.providers.google.cx.as_deref(),
             Some("search-engine-id")
         );
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn update_agent_hooks_enabled_refreshes_cached_snapshot() {
+        let path = temp_settings_path();
+        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&SettingsDocument::default()).expect("serialize"),
+        )
+        .expect("write");
+
+        let service = PmidService::load_from_path(path.clone()).await.expect("pmid service");
+
+        service
+            .update_setting(
+                "agent.hooks.enabled",
+                UpdateSettingCommand {
+                    op: crate::UpdateSettingOperation::Set,
+                    value: Some(json!(true).into()),
+                },
+            )
+            .await
+            .expect("update");
+
+        let config = service.config();
+        let persisted: SettingsDocument =
+            serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
+
+        assert!(config.agent.hooks.enabled);
+        assert!(persisted.agent.hooks.enabled);
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }

@@ -216,6 +216,8 @@ pub struct PluginContributesManifest {
     #[serde(default)]
     pub agent_capabilities: Vec<PluginAgentCapabilityContribution>,
     #[serde(default)]
+    pub agent_hooks: Vec<PluginAgentHookContribution>,
+    #[serde(default)]
     pub language_servers: Vec<PluginLanguageServerContribution>,
 }
 
@@ -291,6 +293,56 @@ pub struct PluginAgentCapabilityContribution {
     pub transport: PluginCapabilityTransport,
     #[serde(default)]
     pub expose_as_mcp_tool: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginAgentHookContribution {
+    pub id: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub description_key: Option<String>,
+    pub events: Vec<PluginAgentHookLifecycleEvent>,
+    pub transport: PluginAgentHookTransport,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginAgentHookLifecycleEvent {
+    OnAgentStart,
+    OnLlmStart,
+    OnLlmEnd,
+    OnToolStart,
+    OnToolEnd,
+    OnAgentEnd,
+}
+
+impl PluginAgentHookLifecycleEvent {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::OnAgentStart => "on_agent_start",
+            Self::OnLlmStart => "on_llm_start",
+            Self::OnLlmEnd => "on_llm_end",
+            Self::OnToolStart => "on_tool_start",
+            Self::OnToolEnd => "on_tool_end",
+            Self::OnAgentEnd => "on_agent_end",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginAgentHookTransport {
+    pub runtime: PluginAgentHookRuntime,
+    pub function: String,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginAgentHookRuntime {
+    JavaScript,
+    Python,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]

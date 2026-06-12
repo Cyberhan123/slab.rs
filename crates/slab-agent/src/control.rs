@@ -14,7 +14,7 @@ use crate::{
     config::AgentConfig,
     error::AgentError,
     event::{AgentEventKind, AgentResponseRef},
-    hook::AgentHook,
+    hook::{AgentHook, AgentHookRegistry},
     port::{AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, ThreadStatus},
     risk::{BasicToolRiskAnalyzer, ToolRiskAnalyzer},
     state::ThreadStateMachine,
@@ -62,7 +62,7 @@ pub struct AgentControl {
     notify: Arc<dyn AgentNotifyPort>,
     approval: Arc<dyn ApprovalPort>,
     tool_router: Arc<ToolRouter>,
-    hooks: Arc<Vec<Arc<dyn AgentHook>>>,
+    hooks: AgentHookRegistry,
     compact: Arc<dyn CompactPort>,
     risk: Arc<dyn ToolRiskAnalyzer>,
     trace: Arc<dyn AgentTraceSink>,
@@ -140,7 +140,7 @@ impl AgentControl {
             notify,
             approval,
             tool_router,
-            hooks: Arc::new(hooks),
+            hooks: AgentHookRegistry::new(hooks),
             compact: Arc::new(SlidingWindowCompactPort::default()),
             risk: Arc::new(BasicToolRiskAnalyzer),
             trace,
@@ -169,7 +169,7 @@ impl AgentControl {
             notify,
             approval,
             tool_router,
-            hooks: Arc::new(Vec::new()),
+            hooks: AgentHookRegistry::default(),
             compact,
             risk,
             trace: Arc::new(NoopAgentTraceSink),
@@ -414,6 +414,16 @@ impl AgentControl {
         self.threads.read().await.len()
     }
 
+    /// Replace hooks used by active threads at their next hook dispatch.
+    pub fn replace_hooks(&self, hooks: Vec<Arc<dyn AgentHook>>) {
+        self.hooks.replace(hooks);
+    }
+
+    /// Return the shared tool router used by active and future threads.
+    pub fn tool_router(&self) -> Arc<ToolRouter> {
+        Arc::clone(&self.tool_router)
+    }
+
     // ── private helpers ──────────────────────────────────────────────────────
 
     async fn spawn_inner(&self, request: SpawnRequest) -> Result<String, AgentError> {
@@ -448,7 +458,7 @@ impl AgentControl {
         let notify = Arc::clone(&self.notify);
         let approval = Arc::clone(&self.approval);
         let tools = Arc::clone(&self.tool_router);
-        let hooks = Arc::clone(&self.hooks);
+        let hooks = self.hooks.clone();
         let compact = Arc::clone(&self.compact);
         let risk = Arc::clone(&self.risk);
         let trace = Arc::clone(&self.trace);

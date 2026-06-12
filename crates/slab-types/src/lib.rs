@@ -49,13 +49,15 @@ pub use load_config::{
     GgmlWhisperLoadConfig, OnnxLoadConfig, RuntimeBackendLoadSpec,
 };
 pub use plugin::{
-    PluginAgentCapabilityContribution, PluginCapabilityKind, PluginCapabilityTransport,
-    PluginCapabilityTransportType, PluginCommandContribution, PluginCompatibilityManifest,
-    PluginContributesManifest, PluginFilePermissions, PluginInfo, PluginIntegrityManifest,
-    PluginJsManifest, PluginLanguageServerContribution, PluginLanguageServerTransport,
-    PluginManifest, PluginNetworkManifest, PluginNetworkMode, PluginPermissionsManifest,
-    PluginPythonManifest, PluginRouteContribution, PluginRuntimeManifest,
-    PluginSettingsContribution, PluginSidebarContribution, PluginUiManifest, PluginWasmManifest,
+    PluginAgentCapabilityContribution, PluginAgentHookContribution, PluginAgentHookLifecycleEvent,
+    PluginAgentHookRuntime, PluginAgentHookTransport, PluginCapabilityKind,
+    PluginCapabilityTransport, PluginCapabilityTransportType, PluginCommandContribution,
+    PluginCompatibilityManifest, PluginContributesManifest, PluginFilePermissions, PluginInfo,
+    PluginIntegrityManifest, PluginJsManifest, PluginLanguageServerContribution,
+    PluginLanguageServerTransport, PluginManifest, PluginNetworkManifest, PluginNetworkMode,
+    PluginPermissionsManifest, PluginPythonManifest, PluginRouteContribution,
+    PluginRuntimeManifest, PluginSettingsContribution, PluginSidebarContribution, PluginUiManifest,
+    PluginWasmManifest,
 };
 pub use plugin_runtime::{
     PluginApiRequest, PluginApiResponse, PluginEventPayload, PluginRuntimeApiHostRequest,

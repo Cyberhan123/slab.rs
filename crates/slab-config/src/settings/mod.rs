@@ -34,10 +34,10 @@ pub use launch::{
     LaunchProfilesConfig, RuntimeTransportMode, ServerLaunchProfileConfig,
 };
 pub use pmid::{
-    AdminPmids, AgentMcpPmids, AgentPmids, AgentToolsPmids, AgentWebSearchPmids, AutoUnloadPmids,
-    CapacityPmids, CorsPmids, DatabasePmids, EndpointPmids, FfmpegToolPmids, GeneralPmids,
-    GgmlBackendPmids, GgmlRuntimePmids, LlamaRuntimePmids, ModelsPmids, PMID, PluginPmids,
-    ProvidersPmids, RuntimeBackendLeafPmids, RuntimePmids, RuntimeSessionsPmids, ServerPmids,
-    SettingPmid, SettingsPmidCatalog, SingleRuntimeFamilyPmids, SourcePmids, SwaggerPmids,
-    ToolsPmids,
+    AdminPmids, AgentHooksPmids, AgentMcpPmids, AgentMemoriesPmids, AgentPmids, AgentToolsPmids,
+    AgentWebSearchPmids, AutoUnloadPmids, CapacityPmids, CorsPmids, DatabasePmids, EndpointPmids,
+    FfmpegToolPmids, GeneralPmids, GgmlBackendPmids, GgmlRuntimePmids, LlamaRuntimePmids,
+    ModelsPmids, PMID, PluginPmids, ProvidersPmids, RuntimeBackendLeafPmids, RuntimePmids,
+    RuntimeSessionsPmids, ServerPmids, SettingPmid, SettingsPmidCatalog, SingleRuntimeFamilyPmids,
+    SourcePmids, SwaggerPmids, ToolsPmids,
 };

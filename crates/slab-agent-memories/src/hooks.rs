@@ -2,7 +2,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use async_trait::async_trait;
 use slab_agent::{AgentHook, HookEvent, HookOutcome, HookToolAction};
-use slab_types::{ConversationMessage, ConversationMessageContent};
+use slab_types::{ConversationMessage, ConversationMessageContent, PluginPermissionsManifest};
 
 use crate::read::{MemoryReadConfig, render_read_developer_turn};
 
@@ -49,14 +49,17 @@ pub enum HookScriptLanguage {
     Python,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HookScript {
     pub name: String,
+    pub plugin_id: Option<String>,
     pub language: HookScriptLanguage,
     pub root_dir: String,
     pub entry: String,
+    pub bundle: Option<String>,
     pub export_name: String,
     pub events: Vec<String>,
+    pub permissions: PluginPermissionsManifest,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -238,28 +241,41 @@ fn hook_event_payload(event: &HookEvent) -> (&'static str, serde_json::Value) {
                 "config": config,
             }),
         ),
-        HookEvent::OnLlmStart { thread_id, turn_index, messages, tools } => (
+        HookEvent::OnLlmStart { thread_id, session_id, turn_index, messages, tools } => (
             "on_llm_start",
             serde_json::json!({
                 "thread_id": thread_id,
+                "session_id": session_id,
                 "turn_index": turn_index,
                 "messages": messages,
                 "tools": tools,
             }),
         ),
-        HookEvent::OnLlmEnd { thread_id, turn_index, response } => (
+        HookEvent::OnLlmEnd { thread_id, session_id, turn_index, messages, response } => (
             "on_llm_end",
             serde_json::json!({
                 "thread_id": thread_id,
+                "session_id": session_id,
                 "turn_index": turn_index,
+                "messages": messages,
                 "response": response,
             }),
         ),
-        HookEvent::OnToolStart { thread_id, turn_index, call_id, tool_name, arguments } => (
+        HookEvent::OnToolStart {
+            thread_id,
+            session_id,
+            turn_index,
+            messages,
+            call_id,
+            tool_name,
+            arguments,
+        } => (
             "on_tool_start",
             serde_json::json!({
                 "thread_id": thread_id,
+                "session_id": session_id,
                 "turn_index": turn_index,
+                "messages": messages,
                 "call_id": call_id,
                 "tool_name": tool_name,
                 "arguments": arguments,
@@ -267,7 +283,9 @@ fn hook_event_payload(event: &HookEvent) -> (&'static str, serde_json::Value) {
         ),
         HookEvent::OnToolEnd {
             thread_id,
+            session_id,
             turn_index,
+            messages,
             call_id,
             tool_name,
             arguments,
@@ -277,7 +295,9 @@ fn hook_event_payload(event: &HookEvent) -> (&'static str, serde_json::Value) {
             "on_tool_end",
             serde_json::json!({
                 "thread_id": thread_id,
+                "session_id": session_id,
                 "turn_index": turn_index,
+                "messages": messages,
                 "call_id": call_id,
                 "tool_name": tool_name,
                 "arguments": arguments,
@@ -285,10 +305,11 @@ fn hook_event_payload(event: &HookEvent) -> (&'static str, serde_json::Value) {
                 "status": status,
             }),
         ),
-        HookEvent::OnAgentEnd { thread_id, status, error } => (
+        HookEvent::OnAgentEnd { thread_id, session_id, status, error } => (
             "on_agent_end",
             serde_json::json!({
                 "thread_id": thread_id,
+                "session_id": session_id,
                 "status": status,
                 "error": error,
             }),
@@ -388,6 +409,7 @@ mod tests {
         let outcome = hook
             .on_event(&HookEvent::OnLlmStart {
                 thread_id: "thread".into(),
+                session_id: "session".into(),
                 turn_index: 0,
                 messages: Vec::new(),
                 tools: Vec::new(),
@@ -402,7 +424,9 @@ mod tests {
         let outcome = hook
             .on_event(&HookEvent::OnToolStart {
                 thread_id: "thread".into(),
+                session_id: "session".into(),
                 turn_index: 0,
+                messages: Vec::new(),
                 call_id: "call".into(),
                 tool_name: "read_file".into(),
                 arguments: serde_json::json!({"path": "old"}),
@@ -435,7 +459,9 @@ mod tests {
         let outcome = hook
             .on_event(&HookEvent::OnToolStart {
                 thread_id: "thread".into(),
+                session_id: "session".into(),
                 turn_index: 0,
+                messages: Vec::new(),
                 call_id: "call".into(),
                 tool_name: "read_file".into(),
                 arguments: serde_json::json!({"path": "old"}),
@@ -452,11 +478,14 @@ mod tests {
     fn script(events: Vec<&str>) -> HookScript {
         HookScript {
             name: "test_hook".to_owned(),
+            plugin_id: None,
             language: HookScriptLanguage::JavaScript,
             root_dir: ".".to_owned(),
             entry: "hook.mjs".to_owned(),
+            bundle: None,
             export_name: "run".to_owned(),
             events: events.into_iter().map(str::to_owned).collect(),
+            permissions: PluginPermissionsManifest::default(),
         }
     }
 }

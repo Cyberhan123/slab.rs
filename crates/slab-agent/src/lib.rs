@@ -51,7 +51,7 @@ pub use event::{
     AgentEventKind, AgentMetrics, AgentResponseRef, AgentStreamEvent, ToolExecutionStatus,
     ToolRiskAssessment, ToolRiskLevel,
 };
-pub use hook::{AgentHook, HookEffects, HookEvent, HookOutcome, HookToolAction};
+pub use hook::{AgentHook, AgentHookRegistry, HookEffects, HookEvent, HookOutcome, HookToolAction};
 pub use llm_output::{
     AgentStreamAssembler, AgentStreamCompletion, AgentStreamDelta, RenderedToolCallOutput,
     parse_rendered_tool_call_output,

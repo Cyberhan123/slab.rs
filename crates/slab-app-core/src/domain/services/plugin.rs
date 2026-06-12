@@ -49,10 +49,18 @@ pub struct PluginService {
     js_runtime: PluginSidecarRuntimeClient,
     python_runtime: PluginSidecarRuntimeClient,
     event_bus: PluginEventBus,
+    agent_runtime: Option<crate::infra::agent_runtime::AgentRuntimeReloader>,
 }
 
 impl PluginService {
     pub fn new(state: ModelState) -> Self {
+        Self::new_with_agent_runtime(state, None)
+    }
+
+    pub(crate) fn new_with_agent_runtime(
+        state: ModelState,
+        agent_runtime: Option<crate::infra::agent_runtime::AgentRuntimeReloader>,
+    ) -> Self {
         let runtime = ensure_http_base_url(state.config().bind_address.as_str())
             .map(PluginRuntime::with_api_base_url)
             .unwrap_or_else(|_| PluginRuntime::default());
@@ -87,6 +95,7 @@ impl PluginService {
             js_runtime,
             python_runtime,
             event_bus,
+            agent_runtime,
         }
     }
 
@@ -267,24 +276,27 @@ impl PluginService {
             })
             .await?;
 
+        self.reload_agent_runtime().await?;
         self.get_plugin(&manifest.id).await
     }
 
     pub async fn enable_plugin(&self, plugin_id: &str) -> Result<PluginView, AppCoreError> {
-        self.ensure_plugin_state(plugin_id).await?;
+        self.ensure_plugin_available(plugin_id).await?;
         self.state
             .store()
             .update_plugin_enabled(plugin_id, true, RUNTIME_STATUS_STOPPED, Utc::now())
             .await?;
+        self.reload_agent_runtime().await?;
         self.get_plugin(plugin_id).await
     }
 
     pub async fn disable_plugin(&self, plugin_id: &str) -> Result<PluginView, AppCoreError> {
-        self.ensure_plugin_state(plugin_id).await?;
+        self.ensure_plugin_available(plugin_id).await?;
         self.state
             .store()
             .update_plugin_enabled(plugin_id, false, RUNTIME_STATUS_STOPPED, Utc::now())
             .await?;
+        self.reload_agent_runtime().await?;
         self.get_plugin(plugin_id).await
     }
 
@@ -346,7 +358,37 @@ impl PluginService {
             safe_remove_dir(&root)?;
         }
         self.state.store().delete_plugin_state(plugin_id).await?;
+        self.reload_agent_runtime().await?;
         Ok(())
+    }
+
+    pub(crate) async fn enabled_agent_hook_plugins(
+        &self,
+    ) -> Result<Vec<crate::infra::agent_hooks::PluginHookSource>, AppCoreError> {
+        let scans = self.scan_and_sync().await?;
+        let states = self
+            .state
+            .store()
+            .list_plugin_states()
+            .await?
+            .into_iter()
+            .map(|record| (record.plugin_id.clone(), record))
+            .collect::<HashMap<_, _>>();
+
+        let plugins = scans
+            .into_iter()
+            .filter(|scan| scan.valid)
+            .filter(|scan| states.get(&scan.id).is_none_or(|record| record.enabled))
+            .filter_map(|scan| {
+                let manifest = scan.manifest?;
+                Some(crate::infra::agent_hooks::PluginHookSource {
+                    manifest,
+                    root_dir: scan.root_dir,
+                })
+            })
+            .filter(|plugin| !plugin.manifest.contributes.agent_hooks.is_empty())
+            .collect();
+        Ok(plugins)
     }
 
     pub async fn dispatch_rpc(
@@ -456,7 +498,7 @@ impl PluginService {
         Ok(registry)
     }
 
-    async fn ensure_plugin_state(&self, plugin_id: &str) -> Result<(), AppCoreError> {
+    async fn ensure_plugin_available(&self, plugin_id: &str) -> Result<(), AppCoreError> {
         let scans = self.scan_and_sync().await?;
         let scan = scans
             .iter()
@@ -468,10 +510,22 @@ impl PluginService {
                 scan.error.clone().unwrap_or_else(|| "unknown plugin validation error".to_owned())
             )));
         }
+        Ok(())
+    }
+
+    async fn ensure_plugin_state(&self, plugin_id: &str) -> Result<(), AppCoreError> {
+        self.ensure_plugin_available(plugin_id).await?;
         if let Some(state) = self.state.store().get_plugin_state(plugin_id).await?
             && !state.enabled
         {
             return Err(AppCoreError::BadRequest(format!("plugin '{plugin_id}' is disabled")));
+        }
+        Ok(())
+    }
+
+    async fn reload_agent_runtime(&self) -> Result<(), AppCoreError> {
+        if let Some(agent_runtime) = &self.agent_runtime {
+            agent_runtime.reload().await?;
         }
         Ok(())
     }
@@ -570,6 +624,5 @@ struct ResolvedInstallSource {
     package_sha256: Option<String>,
 }
 
-#[cfg(test)]
 #[cfg(test)]
 mod tests;

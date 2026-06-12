@@ -17,7 +17,7 @@ use crate::{
     config::AgentConfig,
     error::AgentError,
     event::{AgentEventKind, AgentMetrics, AgentResponseRef},
-    hook::{AgentHook, HookEvent, dispatch_hooks},
+    hook::{AgentHookRegistry, HookEvent, dispatch_registered_hooks},
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, ThreadSnapshot, ThreadStatus,
         TurnEvent,
@@ -52,7 +52,7 @@ pub(crate) struct AgentThreadRuntime {
     pub notify: Arc<dyn AgentNotifyPort>,
     pub approval: Arc<dyn ApprovalPort>,
     pub tools: Arc<ToolRouter>,
-    pub hooks: Arc<Vec<Arc<dyn AgentHook>>>,
+    pub hooks: AgentHookRegistry,
     pub compact: Arc<dyn CompactPort>,
     pub risk: Arc<dyn ToolRiskAnalyzer>,
     pub trace: Arc<dyn AgentTraceSink>,
@@ -206,7 +206,7 @@ impl AgentThread {
             );
         }
 
-        let start_effects = dispatch_hooks(
+        let start_effects = dispatch_registered_hooks(
             &hooks,
             &HookEvent::OnAgentStart {
                 thread_id: thread_id.clone(),
@@ -276,6 +276,7 @@ impl AgentThread {
             match execute_turn(
                 TurnExecutionContext {
                     thread_id: &thread_id,
+                    session_id: &self.session_id,
                     turn_index,
                     depth: self.depth,
                     config: &self.config,
@@ -362,10 +363,11 @@ impl AgentThread {
                 .update_thread_status(&thread_id, ThreadStatus::Interrupted, Some("interrupted"))
                 .await
                 .ok();
-            dispatch_hooks(
+            dispatch_registered_hooks(
                 &hooks,
                 &HookEvent::OnAgentEnd {
                     thread_id: thread_id.clone(),
+                    session_id: self.session_id.clone(),
                     status: ThreadStatus::Interrupted,
                     error: None,
                 },
@@ -406,10 +408,11 @@ impl AgentThread {
                 .update_thread_status(&thread_id, ThreadStatus::Errored, Some(&err.to_string()))
                 .await
                 .ok();
-            dispatch_hooks(
+            dispatch_registered_hooks(
                 &hooks,
                 &HookEvent::OnAgentEnd {
                     thread_id: thread_id.clone(),
+                    session_id: self.session_id.clone(),
                     status: ThreadStatus::Errored,
                     error: Some(err.to_string()),
                 },
@@ -446,10 +449,11 @@ impl AgentThread {
             .update_thread_status(&thread_id, ThreadStatus::Completed, completion_text.as_deref())
             .await
             .ok();
-        dispatch_hooks(
+        dispatch_registered_hooks(
             &hooks,
             &HookEvent::OnAgentEnd {
                 thread_id: thread_id.clone(),
+                session_id: self.session_id.clone(),
                 status: ThreadStatus::Completed,
                 error: None,
             },

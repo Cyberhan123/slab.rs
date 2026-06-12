@@ -146,6 +146,10 @@ from .open_ai_error import OpenAiError
 from .open_ai_error_response import OpenAiErrorResponse
 from .operation_accepted_response import OperationAcceptedResponse
 from .plugin_agent_capability_contribution import PluginAgentCapabilityContribution
+from .plugin_agent_hook_contribution import PluginAgentHookContribution
+from .plugin_agent_hook_lifecycle_event import PluginAgentHookLifecycleEvent
+from .plugin_agent_hook_runtime import PluginAgentHookRuntime
+from .plugin_agent_hook_transport import PluginAgentHookTransport
 from .plugin_capability_kind import PluginCapabilityKind
 from .plugin_capability_transport import PluginCapabilityTransport
 from .plugin_capability_transport_type import PluginCapabilityTransportType
@@ -347,6 +351,10 @@ __all__ = (
     "OpenAiErrorResponse",
     "OperationAcceptedResponse",
     "PluginAgentCapabilityContribution",
+    "PluginAgentHookContribution",
+    "PluginAgentHookLifecycleEvent",
+    "PluginAgentHookRuntime",
+    "PluginAgentHookTransport",
     "PluginCapabilityKind",
     "PluginCapabilityTransport",
     "PluginCapabilityTransportType",
