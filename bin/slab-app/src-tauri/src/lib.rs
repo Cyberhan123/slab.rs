@@ -8,25 +8,16 @@ mod workspace_file_ops;
 mod workspace_search;
 
 use setup::ApiEndpointConfig;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _otel_provider = init_telemetry();
     let api_endpoint = ApiEndpointConfig::desktop();
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_decorum::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
-        .plugin(
-            tauri_plugin_log::Builder::new()
-                .targets([
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
-                        path: slab_utils::app_home::logs_dir(),
-                        file_name: Some("slab-app".to_string()),
-                    }),
-                ])
-                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
-                .build(),
-        )
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -104,4 +95,58 @@ pub fn run() {
         }
         _ => {}
     });
+}
+
+fn init_telemetry() -> Option<slab_otel::OtelProvider> {
+    slab_otel::provider::install_log_bridge();
+    let settings = load_telemetry_settings();
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+
+    match slab_otel::OtelProvider::from(&settings) {
+        Ok(Some(provider)) => {
+            if tracing_subscriber::registry()
+                .with(env_filter)
+                .with(provider.logger_layer())
+                .with(provider.tracing_layer())
+                .try_init()
+                .is_ok()
+            {
+                Some(provider)
+            } else {
+                None
+            }
+        }
+        Ok(None) => {
+            let _ = tracing_subscriber::registry()
+                .with(env_filter)
+                .with(tracing_subscriber::fmt::layer().with_target(true).with_thread_ids(true))
+                .try_init();
+            None
+        }
+        Err(error) => {
+            eprintln!("WARN: failed to initialize slab-app telemetry: {error}");
+            let _ = tracing_subscriber::registry()
+                .with(env_filter)
+                .with(tracing_subscriber::fmt::layer().with_target(true).with_thread_ids(true))
+                .try_init();
+            None
+        }
+    }
+}
+
+fn load_telemetry_settings() -> slab_otel::config::OtelSettings {
+    let path = slab_utils::app_home::settings_path();
+    let mut settings = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<slab_config::SettingsDocument>(&raw).ok())
+        .map(|document| document.telemetry)
+        .unwrap_or_default();
+    if settings.service_name == "slab" {
+        settings.service_name = "slab-app".to_owned();
+    }
+    if settings.service_version.is_none() {
+        settings.service_version = Some(env!("CARGO_PKG_VERSION").to_owned());
+    }
+    settings
 }

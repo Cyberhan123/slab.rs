@@ -28,6 +28,7 @@ onnx = ["dep:ort"]
 slab-runtime-core = { workspace = true }
 slab-runtime-macros = { workspace = true }
 slab-agent-tracing = { workspace = true }
+slab-otel = { workspace = true }
 slab-proto = { workspace = true }
 slab-candle = { workspace = true, optional = true }
 slab-diffusion = { workspace = true }
@@ -55,6 +56,6 @@ bytemuck = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-tracing-appender = { workspace = true }
+tracing-log = { workspace = true }
 parity-tokio-ipc = { workspace = true }
 winapi = { workspace = true }

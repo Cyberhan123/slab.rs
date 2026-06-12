@@ -18,6 +18,7 @@ chrono = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+slab-otel = { workspace = true }
 slab-utils = { workspace = true }
 slab-types = { workspace = true }
 strum = { workspace = true }

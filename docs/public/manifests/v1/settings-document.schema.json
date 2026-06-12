@@ -752,6 +752,165 @@
       },
       "type": "object"
     },
+    "OtelExporter": {
+      "description": "Export target for logs, traces, or metrics.",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "none",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "directory": {
+              "type": "string"
+            },
+            "type": {
+              "const": "local_file",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "directory"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "endpoint": {
+              "type": "string"
+            },
+            "headers": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "protocol": {
+              "$ref": "#/$defs/OtelHttpProtocol",
+              "default": "binary"
+            },
+            "tls": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/OtelTlsConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "const": "otlp_http",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "endpoint"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "OtelHttpProtocol": {
+      "description": "HTTP encoding used by OTLP/HTTP exporters.",
+      "enum": [
+        "binary",
+        "json"
+      ],
+      "type": "string"
+    },
+    "OtelSettings": {
+      "description": "Runtime OpenTelemetry settings shared by Slab hosts.",
+      "properties": {
+        "capture_content": {
+          "default": false,
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "environment": {
+          "default": "dev",
+          "type": "string"
+        },
+        "exporter": {
+          "$ref": "#/$defs/OtelExporter",
+          "default": {
+            "directory": "C:\\Users\\cyberhan\\AppData\\Roaming\\cn.cyberhan.slab\\logs",
+            "type": "local_file"
+          }
+        },
+        "metrics_exporter": {
+          "$ref": "#/$defs/OtelExporter",
+          "default": {
+            "type": "none"
+          }
+        },
+        "service_name": {
+          "default": "slab",
+          "type": "string"
+        },
+        "service_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "slab_home": {
+          "default": "C:\\Users\\cyberhan\\AppData\\Roaming\\cn.cyberhan.slab",
+          "type": "string"
+        },
+        "span_attributes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "trace_exporter": {
+          "$ref": "#/$defs/OtelExporter",
+          "default": {
+            "directory": "C:\\Users\\cyberhan\\AppData\\Roaming\\cn.cyberhan.slab\\logs",
+            "type": "local_file"
+          }
+        },
+        "tracestate": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "OtelTlsConfig": {
+      "description": "Optional TLS hints for remote OTLP exporters.",
+      "properties": {
+        "ca_cert_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "domain_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "PluginJsRuntimeTransport": {
       "description": "Runtime transport used for JS plugin sidecar communication.",
       "enum": [
@@ -1624,6 +1783,27 @@
         "logging": {},
         "swagger": {
           "enabled": true
+        }
+      }
+    },
+    "telemetry": {
+      "$ref": "#/$defs/OtelSettings",
+      "default": {
+        "capture_content": false,
+        "enabled": true,
+        "environment": "dev",
+        "exporter": {
+          "directory": "C:\\Users\\cyberhan\\AppData\\Roaming\\cn.cyberhan.slab\\logs",
+          "type": "local_file"
+        },
+        "metrics_exporter": {
+          "type": "none"
+        },
+        "service_name": "slab",
+        "slab_home": "C:\\Users\\cyberhan\\AppData\\Roaming\\cn.cyberhan.slab",
+        "trace_exporter": {
+          "directory": "C:\\Users\\cyberhan\\AppData\\Roaming\\cn.cyberhan.slab\\logs",
+          "type": "local_file"
         }
       }
     },

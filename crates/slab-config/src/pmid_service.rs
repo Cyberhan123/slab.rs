@@ -10,7 +10,7 @@ use crate::{
     SetupConfig, SetupFfmpegConfig, provider_registry_json_schema, string_list_json_schema,
     websearch_providers_json_schema,
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::descriptor::setting_value;
 use crate::{
@@ -102,6 +102,7 @@ impl PmidService {
 fn load_config(settings: &SettingsDocument) -> PmidConfig {
     PmidConfig {
         logging: settings.logging.clone(),
+        telemetry: settings.telemetry.clone(),
         setup: SetupConfig {
             initialized: false,
             ffmpeg: SetupFfmpegConfig {
@@ -294,6 +295,20 @@ fn empty_sections() -> Vec<SettingsSectionView> {
                 title: "General".to_owned(),
                 description_md:
                     "Choose the default log level, output format, and optional log directory."
+                        .to_owned(),
+                properties: Vec::new(),
+            }],
+        },
+        SettingsSectionView {
+            id: "telemetry".to_owned(),
+            title: "Telemetry".to_owned(),
+            description_md: "OpenTelemetry export, local telemetry files, and GenAI content capture."
+                .to_owned(),
+            subsections: vec![SettingsSubsectionView {
+                id: "general".to_owned(),
+                title: "General".to_owned(),
+                description_md:
+                    "Configure telemetry enablement, local export, and optional remote OTLP targets."
                         .to_owned(),
                 properties: Vec::new(),
             }],
@@ -520,6 +535,7 @@ fn section_location(path: &str) -> (&'static str, &'static str) {
         _ if path.starts_with("general.") => ("general", "general"),
         _ if path.starts_with("database.") => ("database", "general"),
         _ if path.starts_with("logging.") => ("logging", "general"),
+        _ if path.starts_with("telemetry.") => ("telemetry", "general"),
         _ if path.starts_with("tools.ffmpeg.") => ("tools", "ffmpeg"),
         "agent.debug" => ("agent", "general"),
         _ if path.starts_with("agent.tools.mcp.") => ("agent", "mcp"),
@@ -552,7 +568,13 @@ fn value_type(path: &str, effective: &SettingValue, default: &SettingValue) -> S
     {
         return SettingValueType::Array;
     }
-    if path == "agent.tools.websearch.providers" {
+    if path == "agent.tools.websearch.providers"
+        || path == "telemetry.exporter"
+        || path == "telemetry.trace_exporter"
+        || path == "telemetry.metrics_exporter"
+        || path == "telemetry.span_attributes"
+        || path == "telemetry.tracestate"
+    {
         return SettingValueType::Object;
     }
     if path.ends_with(".enabled")
@@ -560,6 +582,7 @@ fn value_type(path: &str, effective: &SettingValue, default: &SettingValue) -> S
         || path.ends_with(".json")
         || path.ends_with(".auto_download")
         || path.ends_with(".flash_attn")
+        || path == "telemetry.capture_content"
         || path == "server.cloud_http_trace"
     {
         return SettingValueType::Boolean;
@@ -641,8 +664,19 @@ fn json_schema(path: &str) -> Option<Value> {
         "providers.registry" => Some(provider_registry_json_schema()),
         "agent.tools.websearch.providers" => Some(websearch_providers_json_schema()),
         "server.cors.allowed_origins" => Some(string_list_json_schema("Allowed Origins")),
+        "telemetry.span_attributes" => Some(string_map_json_schema("Span Attributes")),
+        "telemetry.tracestate" => Some(string_map_json_schema("Trace State")),
         _ => None,
     }
+}
+
+fn string_map_json_schema(title: &str) -> Value {
+    json!({
+        "type": "object",
+        "title": title,
+        "default": {},
+        "additionalProperties": { "type": "string" }
+    })
 }
 
 fn secret(path: &str) -> bool {
@@ -653,6 +687,11 @@ fn multiline(path: &str) -> bool {
     path == "providers.registry"
         || path == "agent.tools.websearch.providers"
         || path == "agent.hooks.scripts"
+        || path == "telemetry.exporter"
+        || path == "telemetry.trace_exporter"
+        || path == "telemetry.metrics_exporter"
+        || path == "telemetry.span_attributes"
+        || path == "telemetry.tracestate"
 }
 
 fn property_label(path: &str) -> String {
@@ -662,6 +701,17 @@ fn property_label(path: &str) -> String {
         "logging.level" => "Log Level".to_owned(),
         "logging.json" => "JSON Logs".to_owned(),
         "logging.path" => "Log Directory".to_owned(),
+        "telemetry.enabled" => "Telemetry".to_owned(),
+        "telemetry.environment" => "Environment".to_owned(),
+        "telemetry.service_name" => "Service Name".to_owned(),
+        "telemetry.service_version" => "Service Version".to_owned(),
+        "telemetry.slab_home" => "Slab Home".to_owned(),
+        "telemetry.exporter" => "Log Exporter".to_owned(),
+        "telemetry.trace_exporter" => "Trace Exporter".to_owned(),
+        "telemetry.metrics_exporter" => "Metrics Exporter".to_owned(),
+        "telemetry.capture_content" => "Capture GenAI Content".to_owned(),
+        "telemetry.span_attributes" => "Span Attributes".to_owned(),
+        "telemetry.tracestate" => "Trace State".to_owned(),
         "runtime.mode" => "Runtime Mode".to_owned(),
         "runtime.transport" => "Transport".to_owned(),
         "runtime.sessions.state_dir" => "Session State Directory".to_owned(),
@@ -708,6 +758,31 @@ fn property_description(path: &str) -> String {
         "logging.level" => "Default tracing filter inherited by server and runtime processes.".to_owned(),
         "logging.json" => "Emit newline-delimited JSON logs by default.".to_owned(),
         "logging.path" => "Optional directory used for persisted log files.".to_owned(),
+        "telemetry.enabled" => {
+            "Enable local telemetry export and session telemetry. Remote export remains controlled by exporter settings.".to_owned()
+        }
+        "telemetry.environment" => "Deployment environment attached to telemetry resources.".to_owned(),
+        "telemetry.service_name" => "OpenTelemetry service.name resource value.".to_owned(),
+        "telemetry.service_version" => {
+            "Optional OpenTelemetry service.version resource value.".to_owned()
+        }
+        "telemetry.slab_home" => {
+            "Application home used when resolving default local telemetry export paths.".to_owned()
+        }
+        "telemetry.exporter" => {
+            "Log exporter. Defaults to local files under the Slab logs directory.".to_owned()
+        }
+        "telemetry.trace_exporter" => {
+            "Trace exporter. Defaults to local files under the Slab logs directory.".to_owned()
+        }
+        "telemetry.metrics_exporter" => {
+            "Metrics exporter. Defaults to none until metrics collection is explicitly enabled.".to_owned()
+        }
+        "telemetry.capture_content" => {
+            "Include GenAI prompt, output, and tool definition content in telemetry events.".to_owned()
+        }
+        "telemetry.span_attributes" => "Additional attributes attached to telemetry spans.".to_owned(),
+        "telemetry.tracestate" => "W3C tracestate entries propagated with trace context.".to_owned(),
         "tools.ffmpeg.enabled" => "Enable FFmpeg integration for media tooling.".to_owned(),
         "tools.ffmpeg.auto_download" => "Download FFmpeg automatically when it is missing.".to_owned(),
         "tools.ffmpeg.install_dir" => "Optional install directory for the FFmpeg sidecar.".to_owned(),
@@ -937,6 +1012,8 @@ mod tests {
         assert_eq!(config.runtime.model_cache_dir.as_deref(), Some("C:/models"));
         assert!(config.agent.debug);
         assert_eq!(config.setup.ffmpeg.dir.as_deref(), Some("C:/ffmpeg"));
+        assert!(config.telemetry.enabled);
+        assert!(!config.telemetry.capture_content);
         assert_eq!(config.chat.providers.len(), 1);
         assert_eq!(property.effective_value, json!("C:/models").into());
         assert_eq!(plugin_install_dir.effective_value, json!(expected_plugin_dir).into());
@@ -1180,6 +1257,55 @@ mod tests {
         assert_eq!(providers.schema.value_type, SettingValueType::Object);
         assert!(providers.schema.multiline);
         assert_eq!(schema["$defs"]["webSearchAuth"]["properties"]["api_key"]["writeOnly"], true);
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn document_view_includes_telemetry_settings() {
+        let path = temp_settings_path();
+        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&SettingsDocument::default()).expect("serialize"),
+        )
+        .expect("write");
+
+        let service = PmidService::load_from_path(path.clone()).await.expect("pmid service");
+        let document = service.document().await;
+        let telemetry_section = document
+            .sections
+            .iter()
+            .find(|section| section.id == "telemetry")
+            .expect("telemetry section");
+        let general = telemetry_section
+            .subsections
+            .iter()
+            .find(|subsection| subsection.id == "general")
+            .expect("telemetry general subsection");
+
+        let enabled = general
+            .properties
+            .iter()
+            .find(|property| property.pmid == "telemetry.enabled")
+            .expect("enabled property");
+        let capture_content = general
+            .properties
+            .iter()
+            .find(|property| property.pmid == "telemetry.capture_content")
+            .expect("capture content property");
+        let exporter = general
+            .properties
+            .iter()
+            .find(|property| property.pmid == "telemetry.exporter")
+            .expect("exporter property");
+
+        assert_eq!(enabled.schema.value_type, SettingValueType::Boolean);
+        assert_eq!(enabled.effective_value, SettingValue::Boolean(true));
+        assert_eq!(capture_content.schema.value_type, SettingValueType::Boolean);
+        assert_eq!(capture_content.effective_value, SettingValue::Boolean(false));
+        assert_eq!(exporter.schema.value_type, SettingValueType::Object);
+        assert!(exporter.schema.multiline);
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }

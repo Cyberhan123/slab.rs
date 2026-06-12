@@ -22,6 +22,7 @@ slab-app-core     = { workspace = true, features = ["axum"] }
 slab-runtime-core = { workspace = true }
 slab-types        = { workspace = true }
 slab-jsonrpc      = { workspace = true }
+slab-otel         = { workspace = true }
 slab-utils        = { workspace = true }
 
 # Async runtime
@@ -58,7 +59,7 @@ utoipa-swagger-ui = { workspace = true, features = ["axum","cache"] }
 # Logging
 tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
-tracing-appender   = { workspace = true }
+tracing-log        = { workspace = true }
 
 # Error handling
 thiserror = { workspace = true }

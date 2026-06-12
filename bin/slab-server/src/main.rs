@@ -4,7 +4,6 @@
 mod api;
 mod error;
 
-use std::fs::OpenOptions;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -15,7 +14,6 @@ use anyhow::anyhow;
 use clap::Parser;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::{error, info, warn};
-use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -211,15 +209,19 @@ async fn main() -> anyhow::Result<()> {
     args.validate_no_legacy_launch_overrides()?;
     args.apply_bootstrap_config(&mut cfg);
 
-    let _log_guards = init_tracing(&cfg.log_level, cfg.log_json, cfg.log_file.as_deref())?;
+    let telemetry_settings = load_telemetry_settings(&cfg).await.unwrap_or_else(|error| {
+        eprintln!("WARN: failed to load telemetry settings ({error}); using defaults");
+        telemetry_settings_from_config(&cfg, slab_otel::config::OtelSettings::default())
+    });
+    let _otel_provider = init_tracing(&cfg.log_level, cfg.log_json, &telemetry_settings)?;
     run_supervisor(args, cfg).await
 }
 
 fn init_tracing(
     log_level: &str,
     log_json: bool,
-    log_file: Option<&Path>,
-) -> anyhow::Result<Vec<WorkerGuard>> {
+    settings: &slab_otel::config::OtelSettings,
+) -> anyhow::Result<Option<slab_otel::OtelProvider>> {
     let env_filter = match tracing_subscriber::EnvFilter::try_from_default_env() {
         Ok(f) => f,
         Err(_) => match log_level.parse::<tracing_subscriber::EnvFilter>() {
@@ -231,53 +233,22 @@ fn init_tracing(
         },
     };
 
-    let mut guards = Vec::new();
+    slab_otel::provider::install_log_bridge();
+    let Some(provider) = slab_otel::OtelProvider::from(settings)? else {
+        init_console_tracing(env_filter, log_json);
+        return Ok(None);
+    };
 
-    if let Some(path) = log_file {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| {
-                anyhow::anyhow!(
-                    "failed to create slab-server log directory '{}': {error}",
-                    parent.display()
-                )
-            })?;
-        }
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(provider.logger_layer())
+        .with(provider.tracing_layer())
+        .init();
+    Ok(Some(provider))
+}
 
-        let file = OpenOptions::new().create(true).append(true).open(path).map_err(|error| {
-            anyhow::anyhow!("failed to open slab-server log file '{}': {error}", path.display())
-        })?;
-        let (file_writer, guard) = tracing_appender::non_blocking(file);
-        guards.push(guard);
-
-        if log_json {
-            tracing_subscriber::registry()
-                .with(env_filter)
-                .with(
-                    tracing_subscriber::fmt::layer().json().with_target(true).with_thread_ids(true),
-                )
-                .with(
-                    tracing_subscriber::fmt::layer()
-                        .json()
-                        .with_ansi(false)
-                        .with_target(true)
-                        .with_thread_ids(true)
-                        .with_writer(file_writer),
-                )
-                .init();
-        } else {
-            tracing_subscriber::registry()
-                .with(env_filter)
-                .with(tracing_subscriber::fmt::layer().with_target(true).with_thread_ids(true))
-                .with(
-                    tracing_subscriber::fmt::layer()
-                        .with_ansi(false)
-                        .with_target(true)
-                        .with_thread_ids(true)
-                        .with_writer(file_writer),
-                )
-                .init();
-        }
-    } else if log_json {
+fn init_console_tracing(env_filter: tracing_subscriber::EnvFilter, log_json: bool) {
+    if log_json {
         tracing_subscriber::registry()
             .with(env_filter)
             .with(tracing_subscriber::fmt::layer().json().with_target(true).with_thread_ids(true))
@@ -288,8 +259,44 @@ fn init_tracing(
             .with(tracing_subscriber::fmt::layer().with_target(true).with_thread_ids(true))
             .init();
     }
+}
 
-    Ok(guards)
+async fn load_telemetry_settings(cfg: &Config) -> anyhow::Result<slab_otel::config::OtelSettings> {
+    let pmid =
+        PmidService::load_from_paths(cfg.settings_path.clone(), cfg.settings_overlay_path.clone())
+            .await?;
+    Ok(telemetry_settings_from_config(cfg, pmid.config().telemetry))
+}
+
+fn telemetry_settings_from_config(
+    cfg: &Config,
+    mut settings: slab_otel::config::OtelSettings,
+) -> slab_otel::config::OtelSettings {
+    if settings.service_name == "slab" {
+        settings.service_name = "slab-server".to_owned();
+    }
+    if settings.service_version.is_none() {
+        settings.service_version = Some(env!("CARGO_PKG_VERSION").to_owned());
+    }
+    if let Some(log_file) = cfg.log_file.as_deref() {
+        apply_log_file_directory_override(&mut settings, log_file);
+    }
+    settings
+}
+
+fn apply_log_file_directory_override(
+    settings: &mut slab_otel::config::OtelSettings,
+    log_file: &Path,
+) {
+    let Some(parent) = log_file.parent() else {
+        return;
+    };
+    settings.exporter =
+        slab_otel::config::OtelExporter::LocalFile { directory: parent.to_path_buf() };
+    if settings.trace_exporter.local_directory().is_some() {
+        settings.trace_exporter =
+            slab_otel::config::OtelExporter::LocalFile { directory: parent.to_path_buf() };
+    }
 }
 
 async fn run_gateway<F>(

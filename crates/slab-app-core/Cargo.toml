@@ -29,6 +29,7 @@ slab-agent-memories = { workspace = true }
 slab-agent-tracing = { workspace = true }
 slab-agent-tools  = { workspace = true }
 slab-mcp          = { workspace = true }
+slab-otel         = { workspace = true }
 slab-proto        = { workspace = true }
 slab-model-pack   = { workspace = true }
 slab-types        = { workspace = true }

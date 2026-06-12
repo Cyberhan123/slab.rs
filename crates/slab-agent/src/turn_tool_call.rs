@@ -1,6 +1,7 @@
 //! Tool-call execution for a single agent turn.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use chrono::Utc;
 use futures::future::join_all;
@@ -465,6 +466,7 @@ async fn run_tool_with_optional_approval(
             emit_tool_execution_started(&run).await;
             Ok(tokio::select! {
                 result = execute_tool_call(
+                    run.call_id,
                     &run.tool_call.name,
                     run.handler.clone(),
                     run.tool_context,
@@ -489,6 +491,7 @@ async fn run_tool_without_approval(
     emit_tool_execution_started(run).await;
     Ok(tokio::select! {
         result = execute_tool_call(
+            run.call_id,
             &run.tool_call.name,
             run.handler.clone(),
             run.tool_context,
@@ -562,24 +565,49 @@ async fn emit_tool_execution_started(run: &ToolRunContext<'_, '_>) {
 }
 
 async fn execute_tool_call(
+    call_id: &str,
     tool_name: &str,
     handler: Option<Arc<dyn ToolHandler>>,
     ctx: &ToolContext,
     arguments: &serde_json::Value,
 ) -> (String, ToolCallStatus) {
-    let Some(handler) = handler else {
+    let started_at = Instant::now();
+    let result = if let Some(handler) = handler {
+        match handler.execute(ctx, arguments).await {
+            Ok(output) => (output.content, ToolCallStatus::Completed),
+            Err(error) => {
+                warn!(tool = handler.name(), error = %error, "tool execution failed");
+                (error.to_string(), ToolCallStatus::Failed)
+            }
+        }
+    } else {
         info!(tool_name = %tool_name, "agent tool call handler not found");
         warn!(tool = tool_name, "tool not found");
-        return (format!("tool not found: {tool_name}"), ToolCallStatus::Failed);
+        (format!("tool not found: {tool_name}"), ToolCallStatus::Failed)
     };
+    let duration = started_at.elapsed();
+    let success = result.1 == ToolCallStatus::Completed;
+    slab_otel::metrics::record_tool_execution(
+        tool_name,
+        slab_otel::gen_ai::TOOL_TYPE_FUNCTION,
+        duration,
+        success,
+    );
+    slab_otel::metrics::record_tool_count(tool_name, slab_otel::gen_ai::TOOL_TYPE_FUNCTION, 1);
+    info!(
+        target: "slab_otel::gen_ai",
+        otel_attributes = %serde_json::json!({
+            "gen_ai.operation.name": slab_otel::gen_ai::OPERATION_EXECUTE_TOOL,
+            "gen_ai.tool.call.id": call_id,
+            "gen_ai.tool.name": tool_name,
+            "gen_ai.tool.type": slab_otel::gen_ai::TOOL_TYPE_FUNCTION,
+        }),
+        duration_ms = duration.as_secs_f64() * 1000.0,
+        success,
+        "gen_ai tool execution"
+    );
 
-    match handler.execute(ctx, arguments).await {
-        Ok(output) => (output.content, ToolCallStatus::Completed),
-        Err(error) => {
-            warn!(tool = handler.name(), error = %error, "tool execution failed");
-            (error.to_string(), ToolCallStatus::Failed)
-        }
-    }
+    result
 }
 
 fn append_hook_observations(output: &mut String, observations: Vec<String>) {

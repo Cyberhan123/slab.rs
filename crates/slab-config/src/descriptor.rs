@@ -26,6 +26,27 @@ pub(crate) fn setting_descriptor(pmid: &str) -> Option<SettingDescriptor> {
         "logging.level" => descriptor!("logging.level", logging.level),
         "logging.json" => descriptor!("logging.json", logging.json),
         "logging.path" => descriptor!("logging.path", logging.path),
+        "telemetry.enabled" => descriptor!("telemetry.enabled", telemetry.enabled),
+        "telemetry.environment" => descriptor!("telemetry.environment", telemetry.environment),
+        "telemetry.service_name" => descriptor!("telemetry.service_name", telemetry.service_name),
+        "telemetry.service_version" => {
+            descriptor!("telemetry.service_version", telemetry.service_version)
+        }
+        "telemetry.slab_home" => descriptor!("telemetry.slab_home", telemetry.slab_home),
+        "telemetry.exporter" => descriptor!("telemetry.exporter", telemetry.exporter),
+        "telemetry.trace_exporter" => {
+            descriptor!("telemetry.trace_exporter", telemetry.trace_exporter)
+        }
+        "telemetry.metrics_exporter" => {
+            descriptor!("telemetry.metrics_exporter", telemetry.metrics_exporter)
+        }
+        "telemetry.capture_content" => {
+            descriptor!("telemetry.capture_content", telemetry.capture_content)
+        }
+        "telemetry.span_attributes" => {
+            descriptor!("telemetry.span_attributes", telemetry.span_attributes)
+        }
+        "telemetry.tracestate" => descriptor!("telemetry.tracestate", telemetry.tracestate),
         "tools.ffmpeg.enabled" => descriptor!("tools.ffmpeg.enabled", tools.ffmpeg.enabled),
         "tools.ffmpeg.auto_download" => {
             descriptor!("tools.ffmpeg.auto_download", tools.ffmpeg.auto_download)

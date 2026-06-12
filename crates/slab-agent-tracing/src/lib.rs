@@ -1,16 +1,13 @@
 //! Session-scoped trace logging for agent and local-runtime diagnostics.
 
 use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
-use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use chrono::{Datelike, Local, NaiveDate, Utc};
+use chrono::{Datelike, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tracing::warn;
 
 /// Context that lets independent layers append trace events to one agent session file.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -94,18 +91,13 @@ impl AgentTraceSink for NoopAgentTraceSink {
 pub struct FileAgentTraceSink {
     log_dir: PathBuf,
     sequence: AtomicU64,
-    writers: Mutex<HashMap<String, BufWriter<File>>>,
 }
 
 static CONTEXT_SINKS: OnceLock<Mutex<HashMap<PathBuf, Arc<FileAgentTraceSink>>>> = OnceLock::new();
 
 impl FileAgentTraceSink {
     pub fn new(log_dir: impl Into<PathBuf>) -> Self {
-        Self {
-            log_dir: log_dir.into(),
-            sequence: AtomicU64::new(0),
-            writers: Mutex::new(HashMap::new()),
-        }
+        Self { log_dir: log_dir.into(), sequence: AtomicU64::new(0) }
     }
 
     pub fn from_context(context: &AgentTraceContext) -> Option<Self> {
@@ -123,23 +115,7 @@ impl FileAgentTraceSink {
         Some(guard.entry(log_dir.clone()).or_insert_with(|| Arc::new(Self::new(log_dir))).clone())
     }
 
-    fn record_inner(
-        &self,
-        context: &AgentTraceContext,
-        event: &AgentTraceEvent,
-    ) -> std::io::Result<()> {
-        std::fs::create_dir_all(&self.log_dir)?;
-        let date = Local::now().date_naive();
-        let file_name = session_log_file_name(&context.session_id, date);
-        let path = self.log_dir.join(file_name);
-        let key = path.to_string_lossy().into_owned();
-
-        let mut writers = self.writers.lock().expect("agent trace writer lock poisoned");
-        if !writers.contains_key(&key) {
-            let file = OpenOptions::new().create(true).append(true).open(&path)?;
-            writers.insert(key.clone(), BufWriter::new(file));
-        }
-
+    fn record_payload(&self, context: &AgentTraceContext, event: &AgentTraceEvent) -> Value {
         let record = AgentTraceRecord {
             timestamp: Utc::now().to_rfc3339(),
             session_id: &context.session_id,
@@ -150,24 +126,32 @@ impl FileAgentTraceSink {
             event: &event.event,
             payload: &event.payload,
         };
-        let writer = writers.get_mut(&key).expect("writer should exist after insertion");
-        serde_json::to_writer(&mut *writer, &record)?;
-        writer.write_all(b"\n")?;
-        writer.flush()
+        let mut value = serde_json::to_value(record).unwrap_or_else(|error| {
+            serde_json::json!({
+                "session_id": context.session_id,
+                "source": event.source,
+                "event": event.event,
+                "serialization_error": error.to_string()
+            })
+        });
+        if let Value::Object(object) = &mut value {
+            object
+                .insert("trace_dir".to_owned(), Value::String(self.log_dir.display().to_string()));
+        }
+        value
     }
 }
 
 impl AgentTraceSink for FileAgentTraceSink {
     fn record(&self, context: &AgentTraceContext, event: AgentTraceEvent) {
-        if let Err(error) = self.record_inner(context, &event) {
-            warn!(
-                session_id = %context.session_id,
-                source = %event.source,
-                event = %event.event,
-                error = %error,
-                "failed to write agent trace event"
-            );
+        let mut telemetry = slab_otel::SessionTelemetry::new(context.session_id.clone());
+        if let Some(thread_id) = context.thread_id.as_deref() {
+            telemetry = telemetry.with_thread(thread_id);
         }
+        if let Some(turn_index) = context.turn_index {
+            telemetry = telemetry.with_turn(turn_index);
+        }
+        telemetry.emit_event(&event.source, &event.event, self.record_payload(context, &event));
     }
 }
 
@@ -222,6 +206,11 @@ pub fn session_log_path(log_dir: &Path, session_id: &str, date: NaiveDate) -> Pa
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+    use tracing::{Event, Subscriber};
+    use tracing_subscriber::Layer;
+    use tracing_subscriber::layer::Context;
+    use tracing_subscriber::layer::SubscriberExt;
 
     #[test]
     fn sanitizes_session_id_for_file_names() {
@@ -255,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn file_sink_writes_jsonl_and_increments_sequence() {
+    fn file_sink_builds_records_and_increments_sequence() {
         let temp = tempfile::tempdir().expect("temp dir should be created");
         let context = AgentTraceContext::new("session")
             .with_thread("thread")
@@ -263,25 +252,48 @@ mod tests {
             .with_trace_dir(temp.path());
         let sink = FileAgentTraceSink::new(temp.path());
 
-        sink.record(
+        let first = sink.record_payload(
             &context,
-            AgentTraceEvent::new("test", "first", serde_json::json!({ "value": 1 })),
+            &AgentTraceEvent::new("test", "first", serde_json::json!({ "value": 1 })),
         );
-        sink.record(
+        let second = sink.record_payload(
             &context,
-            AgentTraceEvent::new("test", "second", serde_json::json!({ "value": 2 })),
+            &AgentTraceEvent::new("test", "second", serde_json::json!({ "value": 2 })),
         );
 
-        let path = session_log_path(temp.path(), "session", Local::now().date_naive());
-        let raw = std::fs::read_to_string(path).expect("trace file should be readable");
-        let lines = raw.lines().collect::<Vec<_>>();
-        assert_eq!(lines.len(), 2);
-        let first: Value = serde_json::from_str(lines[0]).expect("first line should be JSON");
-        let second: Value = serde_json::from_str(lines[1]).expect("second line should be JSON");
         assert_eq!(first["sequence"], 0);
         assert_eq!(second["sequence"], 1);
         assert_eq!(first["session_id"], "session");
         assert_eq!(first["thread_id"], "thread");
         assert_eq!(first["turn_index"], 3);
+    }
+
+    #[test]
+    fn file_sink_emits_session_telemetry() {
+        let temp = tempfile::tempdir().expect("temp dir should be created");
+        let context = AgentTraceContext::new("session").with_trace_dir(temp.path());
+        let sink = FileAgentTraceSink::new(temp.path());
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::registry().with(CaptureTargets(Arc::clone(&events)));
+
+        tracing::subscriber::with_default(subscriber, || {
+            sink.record(
+                &context,
+                AgentTraceEvent::new("test", "first", serde_json::json!({ "value": 1 })),
+            );
+        });
+
+        assert!(events.lock().expect("events").iter().any(|target| target == "slab_otel::session"));
+    }
+
+    struct CaptureTargets(Arc<Mutex<Vec<String>>>);
+
+    impl<S> Layer<S> for CaptureTargets
+    where
+        S: Subscriber,
+    {
+        fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+            self.0.lock().expect("events").push(event.metadata().target().to_owned());
+        }
     }
 }

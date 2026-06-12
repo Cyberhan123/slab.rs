@@ -25,7 +25,6 @@ tauri-build = { workspace = true, features = [] }
 tauri = { workspace = true, features = ["unstable"] }
 tauri-plugin-opener = { workspace = true }
 tauri-plugin-mcp-bridge = { workspace = true }
-tauri-plugin-log = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tauri-plugin-dialog = { workspace = true }
@@ -35,9 +34,13 @@ reqwest = { workspace = true, features = ["blocking"] }
 tokio = { workspace = true }
 tauri-plugin-shell = { workspace = true }
 log = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-log = { workspace = true }
 slab-app-core = { workspace = true }
 slab-types = { workspace = true }
 slab-config = { workspace = true }
+slab-otel = { workspace = true }
 slab-utils = { workspace = true }
 slab-plugin = { workspace = true }
 tokio-tungstenite = { workspace = true }

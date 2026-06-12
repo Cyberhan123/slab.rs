@@ -21,7 +21,7 @@ pub use cli::Cli;
 
 pub async fn run(cli: Cli) -> anyhow::Result<()> {
     let config = Arc::new(cli.into_runtime_config()?);
-    let _log_guards =
+    let _otel_provider =
         telemetry::init_tracing(&config.log_level, config.log_json, config.log_file.as_deref())?;
     telemetry::install_panic_hook();
     telemetry::log_startup(&config);

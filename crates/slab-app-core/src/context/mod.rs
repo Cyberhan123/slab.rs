@@ -181,8 +181,9 @@ fn build_agent_control(
     let tool_router = Arc::new(tool_router);
     let notify_port: Arc<dyn slab_agent::AgentNotifyPort> = notify.clone();
     let approval_port: Arc<dyn slab_agent::ApprovalPort> = notify;
+    let settings = ctx.pmid.config();
     let (trace, trace_dir): (Arc<dyn AgentTraceSink>, Option<PathBuf>) =
-        if ctx.pmid.config().agent.debug {
+        if settings.agent.debug && settings.telemetry.enabled {
             let dir = agent_trace_log_dir(ctx);
             (FileAgentTraceSink::shared(dir.clone()), Some(dir))
         } else {
@@ -254,10 +255,12 @@ fn build_agent_control(
 fn agent_trace_log_dir(ctx: &AppContext) -> PathBuf {
     let settings = ctx.pmid.config();
     settings
-        .logging
-        .path
-        .as_deref()
-        .and_then(normalize_non_empty_path)
+        .telemetry
+        .exporter
+        .local_directory()
+        .cloned()
+        .or_else(|| settings.telemetry.trace_exporter.local_directory().cloned())
+        .or_else(|| settings.logging.path.as_deref().and_then(normalize_non_empty_path))
         .or_else(|| {
             ctx.config.log_file.as_ref().and_then(|path| path.parent()).map(Path::to_path_buf)
         })

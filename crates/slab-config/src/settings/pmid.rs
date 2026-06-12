@@ -36,6 +36,7 @@ pub struct SettingsPmidCatalog {
     pub general: GeneralPmids,
     pub database: DatabasePmids,
     pub logging: LoggingPmids,
+    pub telemetry: TelemetryPmids,
     pub tools: ToolsPmids,
     pub agent: AgentPmids,
     pub runtime: RuntimePmids,
@@ -51,6 +52,7 @@ impl SettingsPmidCatalog {
             general: GeneralPmids,
             database: DatabasePmids,
             logging: LoggingPmids::new("logging"),
+            telemetry: TelemetryPmids,
             tools: ToolsPmids::new(),
             agent: AgentPmids::new(),
             runtime: RuntimePmids::new(),
@@ -68,6 +70,17 @@ impl SettingsPmidCatalog {
             self.logging.level(),
             self.logging.json(),
             self.logging.path(),
+            self.telemetry.enabled(),
+            self.telemetry.environment(),
+            self.telemetry.service_name(),
+            self.telemetry.service_version(),
+            self.telemetry.slab_home(),
+            self.telemetry.exporter(),
+            self.telemetry.trace_exporter(),
+            self.telemetry.metrics_exporter(),
+            self.telemetry.capture_content(),
+            self.telemetry.span_attributes(),
+            self.telemetry.tracestate(),
             self.tools.ffmpeg.enabled(),
             self.tools.ffmpeg.auto_download(),
             self.tools.ffmpeg.install_dir(),
@@ -221,6 +234,55 @@ impl DatabasePmids {
 #[derive(Debug, Clone, Copy)]
 pub struct LoggingPmids {
     prefix: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TelemetryPmids;
+
+impl TelemetryPmids {
+    pub fn enabled(self) -> SettingPmid {
+        SettingPmid::from_path("telemetry.enabled")
+    }
+
+    pub fn environment(self) -> SettingPmid {
+        SettingPmid::from_path("telemetry.environment")
+    }
+
+    pub fn service_name(self) -> SettingPmid {
+        SettingPmid::from_path("telemetry.service_name")
+    }
+
+    pub fn service_version(self) -> SettingPmid {
+        SettingPmid::from_path("telemetry.service_version")
+    }
+
+    pub fn slab_home(self) -> SettingPmid {
+        SettingPmid::from_path("telemetry.slab_home")
+    }
+
+    pub fn exporter(self) -> SettingPmid {
+        SettingPmid::from_path("telemetry.exporter")
+    }
+
+    pub fn trace_exporter(self) -> SettingPmid {
+        SettingPmid::from_path("telemetry.trace_exporter")
+    }
+
+    pub fn metrics_exporter(self) -> SettingPmid {
+        SettingPmid::from_path("telemetry.metrics_exporter")
+    }
+
+    pub fn capture_content(self) -> SettingPmid {
+        SettingPmid::from_path("telemetry.capture_content")
+    }
+
+    pub fn span_attributes(self) -> SettingPmid {
+        SettingPmid::from_path("telemetry.span_attributes")
+    }
+
+    pub fn tracestate(self) -> SettingPmid {
+        SettingPmid::from_path("telemetry.tracestate")
+    }
 }
 
 impl LoggingPmids {
@@ -895,6 +957,8 @@ mod tests {
         assert!(unique.contains("agent.tools.websearch.default_provider"));
         assert!(unique.contains("agent.tools.websearch.providers"));
         assert!(unique.contains("providers.registry"));
+        assert!(unique.contains("telemetry.enabled"));
+        assert!(unique.contains("telemetry.capture_content"));
         assert!(unique.contains("server.cloud_http_trace"));
     }
 }

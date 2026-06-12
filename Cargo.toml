@@ -12,6 +12,7 @@ members = [
     "crates/slab-agent-memories",
     "crates/slab-agent-tracing",
     "crates/slab-agent-tools",
+    "crates/slab-otel",
     "crates/slab-build-utils",
     "crates/slab-candle",
     "crates/slab-model-pack",
@@ -65,6 +66,7 @@ slab-agent = { path = "./crates/slab-agent", package = "slab-agent", version = "
 slab-agent-memories = { path = "./crates/slab-agent-memories", package = "slab-agent-memories", version = "0.1.0" }
 slab-agent-tracing = { path = "./crates/slab-agent-tracing", package = "slab-agent-tracing", version = "0.1.0" }
 slab-agent-tools = { path = "./crates/slab-agent-tools", package = "slab-agent-tools", version = "0.1.0" }
+slab-otel = { path = "./crates/slab-otel", package = "slab-otel", version = "0.1.0" }
 slab-proto = { path = "./crates/slab-proto", package = "slab-proto", version = "0.1.0" }
 slab-candle = { path = "./crates/slab-candle", package = "slab-candle", version = "0.1.0" }
 slab-model-pack = { path = "./crates/slab-model-pack", package = "slab-model-pack", version = "0.1.0" }
@@ -179,7 +181,13 @@ log = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.2"
+tracing-log = "0.2"
+tracing-opentelemetry = "0.28"
 tracing-test = "0.2"
+opentelemetry = "0.27.1"
+opentelemetry-otlp = "0.27.0"
+opentelemetry-semantic-conventions = "0.27.0"
+opentelemetry_sdk = "0.27.1"
 # Web / gRPC
 axum = { version = "0.8", features = ["macros"] }
 tower = { version = "0.5", features = ["util"] }
@@ -261,7 +269,6 @@ tauri = "2"
 tauri-build = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-mcp-bridge = "0.11"
-tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-window-state = "2"

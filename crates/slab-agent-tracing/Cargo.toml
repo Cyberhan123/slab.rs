@@ -12,7 +12,9 @@ license.workspace = true
 chrono     = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
+slab-otel  = { workspace = true }
 tracing    = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tracing-subscriber = { workspace = true }

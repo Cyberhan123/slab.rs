@@ -8,6 +8,8 @@ mod session;
 mod streaming;
 mod template;
 
+use std::time::{Duration, Instant};
+
 use chrono::Utc;
 use futures::stream::BoxStream;
 use tracing::{debug, info, warn};
@@ -108,6 +110,10 @@ async fn create_chat_completion_with_state(
     let max_tokens = command.common.max_tokens.unwrap_or(DEFAULT_COMPLETION_MAX_TOKENS);
     let temperature = command.common.temperature.unwrap_or(0.7);
     let route_to_cloud = cloud::should_route_to_cloud(&state, &resolved_model).await?;
+    let telemetry_config = state.pmid().config().telemetry;
+    let capture_content = telemetry_config.capture_content;
+    let gen_ai_provider = if route_to_cloud { "cloud" } else { "local" };
+    let gen_ai_started_at = Instant::now();
     if command.common.stream && route_to_cloud && !command.common.stop.is_empty() {
         return Err(AppCoreError::NotImplemented(
             "streaming with stop is not supported for cloud chat completions".into(),
@@ -210,7 +216,7 @@ async fn create_chat_completion_with_state(
                     id: format!("chatcmpl-{}", Uuid::new_v4()),
                     object: "chat.completion".into(),
                     created: Utc::now().timestamp(),
-                    model: resolved_model,
+                    model: resolved_model.clone(),
                     system_fingerprint: SYSTEM_FINGERPRINT.into(),
                     choices: vec![ChatResultChoice {
                         index: 0,
@@ -219,9 +225,26 @@ async fn create_chat_completion_with_state(
                     }],
                     usage: text.usage,
                 };
+                record_gen_ai_chat_completion(
+                    gen_ai_provider,
+                    &resolved_model,
+                    &resolved_messages,
+                    &command.tools,
+                    &response,
+                    capture_content,
+                    gen_ai_started_at.elapsed(),
+                );
                 Ok(ChatCompletionOutput::Json(response))
             }
             GeneratedChatOutput::Stream(stream) => {
+                record_gen_ai_chat_stream_started(
+                    gen_ai_provider,
+                    &resolved_model,
+                    &resolved_messages,
+                    &command.tools,
+                    capture_content,
+                    gen_ai_started_at.elapsed(),
+                );
                 let stream = match command.id.clone() {
                     Some(session_id) => {
                         with_stream_session_persistence(stream, state.clone(), session_id)
@@ -332,13 +355,149 @@ async fn create_chat_completion_with_state(
         id: format!("chatcmpl-{}", Uuid::new_v4()),
         object: "chat.completion".into(),
         created: Utc::now().timestamp(),
-        model: resolved_model,
+        model: resolved_model.clone(),
         system_fingerprint: SYSTEM_FINGERPRINT.into(),
         choices,
         usage,
     };
+    record_gen_ai_chat_completion(
+        gen_ai_provider,
+        &resolved_model,
+        &resolved_messages,
+        &command.tools,
+        &response,
+        capture_content,
+        gen_ai_started_at.elapsed(),
+    );
 
     Ok(ChatCompletionOutput::Json(response))
+}
+
+fn record_gen_ai_chat_stream_started(
+    provider_name: &str,
+    model: &str,
+    input_messages: &[DomainConversationMessage],
+    tools: &[slab_proto::openai::FunctionTool],
+    capture_content: bool,
+    duration: Duration,
+) {
+    slab_otel::metrics::record_gen_ai_operation_duration(
+        provider_name,
+        model,
+        slab_otel::gen_ai::OPERATION_CHAT,
+        duration,
+    );
+    if capture_content {
+        let input_messages = slab_otel::gen_ai::messages_attribute(input_messages, true)
+            .unwrap_or_else(|| serde_json::json!([]));
+        let tool_definitions = slab_otel::gen_ai::tool_definitions_attribute(tools, true)
+            .unwrap_or_else(|| serde_json::json!([]));
+        info!(
+            target: "slab_otel::gen_ai",
+            otel_attributes = %serde_json::json!({
+                "gen_ai.provider.name": provider_name,
+                "gen_ai.operation.name": slab_otel::gen_ai::OPERATION_CHAT,
+                "gen_ai.request.model": model,
+                "gen_ai.input.messages": input_messages,
+                "gen_ai.tool.definitions": tool_definitions,
+            }),
+            "gen_ai chat stream started"
+        );
+    } else {
+        info!(
+            target: "slab_otel::gen_ai",
+            otel_attributes = %serde_json::json!({
+                "gen_ai.provider.name": provider_name,
+                "gen_ai.operation.name": slab_otel::gen_ai::OPERATION_CHAT,
+                "gen_ai.request.model": model,
+            }),
+            "gen_ai chat stream started"
+        );
+    }
+}
+
+fn record_gen_ai_chat_completion(
+    provider_name: &str,
+    request_model: &str,
+    input_messages: &[DomainConversationMessage],
+    tools: &[slab_proto::openai::FunctionTool],
+    response: &ChatCompletionResult,
+    capture_content: bool,
+    duration: Duration,
+) {
+    slab_otel::metrics::record_gen_ai_operation_duration(
+        provider_name,
+        request_model,
+        slab_otel::gen_ai::OPERATION_CHAT,
+        duration,
+    );
+    if let Some(usage) = response.usage.as_ref() {
+        slab_otel::metrics::record_gen_ai_token_usage(
+            provider_name,
+            request_model,
+            slab_otel::metrics::GenAiTokenType::Input,
+            usage.prompt_tokens.into(),
+        );
+        slab_otel::metrics::record_gen_ai_token_usage(
+            provider_name,
+            request_model,
+            slab_otel::metrics::GenAiTokenType::Output,
+            usage.completion_tokens.into(),
+        );
+    }
+
+    let input_tokens = response.usage.as_ref().map(|usage| usage.prompt_tokens).unwrap_or_default();
+    let output_tokens =
+        response.usage.as_ref().map(|usage| usage.completion_tokens).unwrap_or_default();
+    let finish_reasons = slab_otel::gen_ai::finish_reasons_attribute(
+        response
+            .choices
+            .iter()
+            .map(|choice| choice.finish_reason.clone().unwrap_or_else(|| "unknown".to_owned())),
+    );
+
+    if capture_content {
+        let input_messages = slab_otel::gen_ai::messages_attribute(input_messages, true)
+            .unwrap_or_else(|| serde_json::json!([]));
+        let output_messages =
+            response.choices.iter().map(|choice| choice.message.clone()).collect::<Vec<_>>();
+        let output_messages = slab_otel::gen_ai::messages_attribute(&output_messages, true)
+            .unwrap_or_else(|| serde_json::json!([]));
+        let tool_definitions = slab_otel::gen_ai::tool_definitions_attribute(tools, true)
+            .unwrap_or_else(|| serde_json::json!([]));
+        info!(
+            target: "slab_otel::gen_ai",
+            otel_attributes = %serde_json::json!({
+                "gen_ai.provider.name": provider_name,
+                "gen_ai.operation.name": slab_otel::gen_ai::OPERATION_CHAT,
+                "gen_ai.request.model": request_model,
+                "gen_ai.response.model": response.model.as_str(),
+                "gen_ai.response.id": response.id.as_str(),
+                "gen_ai.usage.input_tokens": input_tokens,
+                "gen_ai.usage.output_tokens": output_tokens,
+                "gen_ai.response.finish_reasons": finish_reasons,
+                "gen_ai.input.messages": input_messages,
+                "gen_ai.output.messages": output_messages,
+                "gen_ai.tool.definitions": tool_definitions,
+            }),
+            "gen_ai chat completion"
+        );
+    } else {
+        info!(
+            target: "slab_otel::gen_ai",
+            otel_attributes = %serde_json::json!({
+                "gen_ai.provider.name": provider_name,
+                "gen_ai.operation.name": slab_otel::gen_ai::OPERATION_CHAT,
+                "gen_ai.request.model": request_model,
+                "gen_ai.response.model": response.model.as_str(),
+                "gen_ai.response.id": response.id.as_str(),
+                "gen_ai.usage.input_tokens": input_tokens,
+                "gen_ai.usage.output_tokens": output_tokens,
+                "gen_ai.response.finish_reasons": finish_reasons,
+            }),
+            "gen_ai chat completion"
+        );
+    }
 }
 
 async fn create_text_completion_with_state(

@@ -1,9 +1,7 @@
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 
 use tracing::{error, info, warn};
-use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -13,9 +11,7 @@ pub(super) fn init_tracing(
     log_level: &str,
     log_json: bool,
     log_file: Option<&Path>,
-) -> anyhow::Result<Vec<WorkerGuard>> {
-    use tracing_subscriber::Layer;
-
+) -> anyhow::Result<Option<slab_otel::OtelProvider>> {
     let mut bootstrap_warnings = Vec::new();
     let env_filter = match tracing_subscriber::EnvFilter::try_from_default_env() {
         Ok(filter) => filter,
@@ -30,74 +26,59 @@ pub(super) fn init_tracing(
         },
     };
 
-    let stdout_layer: Box<dyn Layer<_> + Send + Sync> = if log_json {
-        Box::new(tracing_subscriber::fmt::layer().json().with_target(true).with_thread_ids(true))
-    } else {
-        Box::new(tracing_subscriber::fmt::layer().with_target(true).with_thread_ids(true))
+    slab_otel::provider::install_log_bridge();
+    let settings = telemetry_settings(log_file);
+    let provider = match slab_otel::OtelProvider::from(&settings) {
+        Ok(provider) => provider,
+        Err(error) => {
+            bootstrap_warnings.push(format!(
+                "failed to initialize slab-runtime OpenTelemetry provider: {error}; continuing with console logging"
+            ));
+            None
+        }
     };
 
-    let mut guards = Vec::new();
-    let registry = tracing_subscriber::registry().with(env_filter).with(stdout_layer);
-
-    if let Some(path) = log_file {
-        if let Some(parent) = path.parent()
-            && let Err(error) = std::fs::create_dir_all(parent)
-        {
-            registry.init();
-            emit_bootstrap_warnings(
-                &mut bootstrap_warnings,
-                Some(format!(
-                    "failed to create slab-runtime log directory '{}': {error}; continuing without file logging",
-                    parent.display()
-                )),
-            );
-            return Ok(guards);
-        }
-
-        match OpenOptions::new().create(true).append(true).open(path) {
-            Ok(file) => {
-                let (file_writer, guard) = tracing_appender::non_blocking(file);
-                guards.push(guard);
-
-                let file_layer: Box<dyn Layer<_> + Send + Sync> = if log_json {
-                    Box::new(
-                        tracing_subscriber::fmt::layer()
-                            .json()
-                            .with_ansi(false)
-                            .with_target(true)
-                            .with_thread_ids(true)
-                            .with_writer(file_writer),
-                    )
-                } else {
-                    Box::new(
-                        tracing_subscriber::fmt::layer()
-                            .with_ansi(false)
-                            .with_target(true)
-                            .with_thread_ids(true)
-                            .with_writer(file_writer),
-                    )
-                };
-
-                registry.with(file_layer).init();
-            }
-            Err(error) => {
-                registry.init();
-                emit_bootstrap_warnings(
-                    &mut bootstrap_warnings,
-                    Some(format!(
-                        "failed to open slab-runtime log file '{}': {error}; continuing without file logging",
-                        path.display()
-                    )),
-                );
-                return Ok(guards);
-            }
-        }
+    if let Some(provider) = provider {
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(provider.logger_layer())
+            .with(provider.tracing_layer())
+            .init();
+        emit_bootstrap_warnings(&mut bootstrap_warnings, None::<String>);
+        Ok(Some(provider))
     } else {
-        registry.init();
+        init_console_tracing(env_filter, log_json);
+        emit_bootstrap_warnings(&mut bootstrap_warnings, None::<String>);
+        Ok(None)
     }
+}
 
-    emit_bootstrap_warnings(&mut bootstrap_warnings, None::<String>);
-    Ok(guards)
+fn telemetry_settings(log_file: Option<&Path>) -> slab_otel::config::OtelSettings {
+    let mut settings = slab_otel::config::OtelSettings::default_for_service("slab-runtime");
+    settings.service_version = Some(env!("CARGO_PKG_VERSION").to_owned());
+    if let Some(log_file) = log_file
+        && let Some(parent) = log_file.parent()
+    {
+        settings.exporter =
+            slab_otel::config::OtelExporter::LocalFile { directory: parent.to_path_buf() };
+        settings.trace_exporter =
+            slab_otel::config::OtelExporter::LocalFile { directory: parent.to_path_buf() };
+    }
+    settings
+}
+
+fn init_console_tracing(env_filter: tracing_subscriber::EnvFilter, log_json: bool) {
+    if log_json {
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(tracing_subscriber::fmt::layer().json().with_target(true).with_thread_ids(true))
+            .init();
+    } else {
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(tracing_subscriber::fmt::layer().with_target(true).with_thread_ids(true))
+            .init();
+    }
 }
 
 pub(super) fn install_panic_hook() {

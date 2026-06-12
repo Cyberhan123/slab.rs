@@ -6,6 +6,7 @@ use super::{
     document::{AgentSettingsConfig, LoggingConfig},
     launch::LaunchConfig,
 };
+use slab_otel::config::OtelSettings;
 
 /// A configured cloud/remote AI provider.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -33,6 +34,7 @@ pub struct CloudProviderConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct PmidConfig {
     pub logging: LoggingConfig,
+    pub telemetry: OtelSettings,
     pub setup: SetupConfig,
     pub agent: AgentSettingsConfig,
     pub runtime: RuntimeConfig,

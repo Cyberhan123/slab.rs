@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use slab_otel::config::OtelSettings;
 
 use super::defaults;
 use super::launch::RuntimeTransportMode;
@@ -82,6 +83,8 @@ pub struct SettingsDocument {
     #[serde(default)]
     pub logging: LoggingConfig,
     #[serde(default)]
+    pub telemetry: OtelSettings,
+    #[serde(default)]
     pub tools: ToolsConfig,
     #[serde(default)]
     pub agent: AgentSettingsConfig,
@@ -107,6 +110,7 @@ impl Default for SettingsDocument {
             general: GeneralSettingsConfig::default(),
             database: DatabaseConfig::default(),
             logging: LoggingConfig::default(),
+            telemetry: OtelSettings::default(),
             tools: ToolsConfig::default(),
             agent: AgentSettingsConfig::default(),
             runtime: RuntimeSettingsConfig::default(),
@@ -1310,6 +1314,12 @@ mod tests {
         assert_eq!(settings.runtime.transport, RuntimeTransportMode::Ipc);
         assert_eq!(settings.server.address, DESKTOP_API_BIND);
         assert!(settings.runtime.logging.level.is_none());
+        assert!(settings.telemetry.enabled);
+        assert!(!settings.telemetry.capture_content);
+        assert!(matches!(
+            settings.telemetry.exporter,
+            slab_otel::config::OtelExporter::LocalFile { .. }
+        ));
         assert!(settings.workspace.plugins.is_empty());
     }
 

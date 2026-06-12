@@ -39,5 +39,6 @@ pub use pmid::{
     FfmpegToolPmids, GeneralPmids, GgmlBackendPmids, GgmlRuntimePmids, LlamaRuntimePmids,
     ModelsPmids, PMID, PluginPmids, ProvidersPmids, RuntimeBackendLeafPmids, RuntimePmids,
     RuntimeSessionsPmids, ServerPmids, SettingPmid, SettingsPmidCatalog, SingleRuntimeFamilyPmids,
-    SourcePmids, SwaggerPmids, ToolsPmids,
+    SourcePmids, SwaggerPmids, TelemetryPmids, ToolsPmids,
 };
+pub use slab_otel::config::{OtelExporter, OtelHttpProtocol, OtelSettings, OtelTlsConfig};
