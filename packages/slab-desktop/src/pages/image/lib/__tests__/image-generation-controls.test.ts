@@ -125,21 +125,30 @@ describe('image generation controls', () => {
   it('uses the advanced resolved inference spec field when the top-level spec is absent', () => {
     expect(
       buildImageGenerationControlsFromModelConfig({
+        ...modelConfigDocument(null),
         sections: [
           {
+            id: 'advanced',
+            label: 'Advanced',
             fields: [
               {
                 path: 'advanced.resolved_inference_spec',
+                scope: 'advanced',
+                label: 'Resolved inference spec',
+                value_type: 'json',
                 effective_value: {
                   width: 1024,
                   height: 768,
                   sample_method: 'lcm',
                 },
+                origin: 'derived',
+                editable: false,
+                locked: true,
               },
             ],
           },
         ],
-      } as ModelConfigDocumentResponse),
+      }),
     ).toMatchObject({
       widthStr: '1024',
       heightStr: '768',
@@ -150,7 +159,27 @@ describe('image generation controls', () => {
 
 function modelConfigDocument(resolved_inference_spec: unknown): ModelConfigDocumentResponse {
   return {
+    model_summary: {
+      capabilities: ['image_generation'],
+      created_at: '2026-01-01T00:00:00Z',
+      display_name: 'Test Image Model',
+      id: 'test-image-model',
+      kind: 'local',
+      spec: {},
+      status: 'ready',
+      updated_at: '2026-01-01T00:00:00Z',
+    },
     resolved_inference_spec,
+    resolved_load_spec: {},
     sections: [],
-  } as ModelConfigDocumentResponse;
+    selection: {
+      presets: [],
+      variants: [],
+    },
+    source_summary: {
+      artifacts: [],
+      source_kind: 'test',
+    },
+    warnings: [],
+  };
 }

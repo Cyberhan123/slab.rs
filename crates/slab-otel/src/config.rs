@@ -28,6 +28,14 @@ fn default_local_file_exporter() -> OtelExporter {
     OtelExporter::LocalFile { directory: default_slab_home().join("logs") }
 }
 
+fn is_default_slab_home(value: &PathBuf) -> bool {
+    value == &default_slab_home()
+}
+
+fn is_default_local_file_exporter(value: &OtelExporter) -> bool {
+    value == &default_local_file_exporter()
+}
+
 /// HTTP encoding used by OTLP/HTTP exporters.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -98,11 +106,20 @@ pub struct OtelSettings {
     pub service_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_version: Option<String>,
-    #[serde(default = "default_slab_home")]
+    #[serde(default = "default_slab_home", skip_serializing_if = "is_default_slab_home")]
+    #[schemars(skip)]
     pub slab_home: PathBuf,
-    #[serde(default = "default_local_file_exporter")]
+    #[serde(
+        default = "default_local_file_exporter",
+        skip_serializing_if = "is_default_local_file_exporter"
+    )]
+    #[schemars(skip)]
     pub exporter: OtelExporter,
-    #[serde(default = "default_local_file_exporter")]
+    #[serde(
+        default = "default_local_file_exporter",
+        skip_serializing_if = "is_default_local_file_exporter"
+    )]
+    #[schemars(skip)]
     pub trace_exporter: OtelExporter,
     #[serde(default)]
     pub metrics_exporter: OtelExporter,
@@ -166,6 +183,16 @@ mod tests {
         assert!(matches!(settings.trace_exporter, OtelExporter::LocalFile { .. }));
         assert_eq!(settings.metrics_exporter, OtelExporter::None);
         assert!(settings.slab_home.ends_with(slab_utils::app_home::APP_ID));
+    }
+
+    #[test]
+    fn default_serialization_omits_runtime_resolved_paths() {
+        let value = serde_json::to_value(OtelSettings::default()).expect("settings json");
+        let object = value.as_object().expect("settings object");
+
+        assert!(!object.contains_key("slab_home"));
+        assert!(!object.contains_key("exporter"));
+        assert!(!object.contains_key("trace_exporter"));
     }
 
     #[test]

@@ -74,9 +74,6 @@ impl SettingsPmidCatalog {
             self.telemetry.environment(),
             self.telemetry.service_name(),
             self.telemetry.service_version(),
-            self.telemetry.slab_home(),
-            self.telemetry.exporter(),
-            self.telemetry.trace_exporter(),
             self.telemetry.metrics_exporter(),
             self.telemetry.capture_content(),
             self.telemetry.span_attributes(),
@@ -254,18 +251,6 @@ impl TelemetryPmids {
 
     pub fn service_version(self) -> SettingPmid {
         SettingPmid::from_path("telemetry.service_version")
-    }
-
-    pub fn slab_home(self) -> SettingPmid {
-        SettingPmid::from_path("telemetry.slab_home")
-    }
-
-    pub fn exporter(self) -> SettingPmid {
-        SettingPmid::from_path("telemetry.exporter")
-    }
-
-    pub fn trace_exporter(self) -> SettingPmid {
-        SettingPmid::from_path("telemetry.trace_exporter")
     }
 
     pub fn metrics_exporter(self) -> SettingPmid {

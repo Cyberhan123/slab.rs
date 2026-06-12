@@ -1350,6 +1350,26 @@ mod tests {
     }
 
     #[test]
+    fn generated_document_schema_omits_runtime_resolved_telemetry_paths() {
+        let schema = settings_document_json_schema();
+        let telemetry_properties = schema
+            .pointer("/$defs/OtelSettings/properties")
+            .and_then(Value::as_object)
+            .expect("telemetry properties");
+        let telemetry_default = schema
+            .pointer("/properties/telemetry/default")
+            .and_then(Value::as_object)
+            .expect("telemetry default");
+
+        assert!(!telemetry_properties.contains_key("slab_home"));
+        assert!(!telemetry_properties.contains_key("exporter"));
+        assert!(!telemetry_properties.contains_key("trace_exporter"));
+        assert!(!telemetry_default.contains_key("slab_home"));
+        assert!(!telemetry_default.contains_key("exporter"));
+        assert!(!telemetry_default.contains_key("trace_exporter"));
+    }
+
+    #[test]
     fn generated_document_schema_matches_checked_in_file() {
         let schema_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../docs/public/manifests/v1/settings-document.schema.json");

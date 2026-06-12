@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 
+import type { WorkspaceFileEntry } from "@/lib/workspace-bridge"
 import {
   supportsWorkspaceLsp,
   workspaceLspDefinitionTargetFromResult,
@@ -106,14 +107,18 @@ describe("workspace LSP helpers", () => {
   })
 
   it("maps workspace entries into expandable tree nodes", () => {
-    expect(entryToTreeNode({ kind: "directory", name: "src", relativePath: "src" })).toEqual({
+    expect(entryToTreeNode(workspaceEntry({ kind: "directory", name: "src", relativePath: "src" }))).toEqual({
+      id: "src",
+      hasChildren: true,
       children: [],
       kind: "directory",
       loaded: false,
       name: "src",
       relativePath: "src",
     })
-    expect(entryToTreeNode({ kind: "file", name: "main.rs", relativePath: "src/main.rs" })).toEqual({
+    expect(entryToTreeNode(workspaceEntry({ kind: "file", name: "main.rs", relativePath: "src/main.rs" }))).toEqual({
+      id: "src/main.rs",
+      hasChildren: false,
       children: undefined,
       kind: "file",
       loaded: true,
@@ -124,11 +129,11 @@ describe("workspace LSP helpers", () => {
 
   it("inserts children at nested tree paths without mutating siblings", () => {
     const nodes = [
-      entryToTreeNode({ kind: "directory", name: "src", relativePath: "src" }),
-      entryToTreeNode({ kind: "file", name: "README.md", relativePath: "README.md" }),
+      entryToTreeNode(workspaceEntry({ kind: "directory", name: "src", relativePath: "src" })),
+      entryToTreeNode(workspaceEntry({ kind: "file", name: "README.md", relativePath: "README.md" })),
     ]
     const next = insertChildren(nodes, "src", [
-      entryToTreeNode({ kind: "file", name: "main.rs", relativePath: "src/main.rs" }),
+      entryToTreeNode(workspaceEntry({ kind: "file", name: "main.rs", relativePath: "src/main.rs" })),
     ])
 
     expect(next[0]?.loaded).toBe(true)
@@ -138,13 +143,11 @@ describe("workspace LSP helpers", () => {
   })
 
   it("upserts file tabs and derives directory ancestors", () => {
-    const tabs = [{ name: "a.ts", relativePath: "src/a.ts", language: "typescript" }]
-    expect(upsertFileTab(tabs, { name: "b.ts", relativePath: "src/b.ts", language: "typescript" })).toHaveLength(
-      2,
-    )
+    const tabs = [{ name: "a.ts", relativePath: "src/a.ts" }]
+    expect(upsertFileTab(tabs, { name: "b.ts", relativePath: "src/b.ts" })).toHaveLength(2)
     expect(
-      upsertFileTab(tabs, { name: "a.tsx", relativePath: "src/a.ts", language: "typescript" }),
-    ).toEqual([{ name: "a.tsx", relativePath: "src/a.ts", language: "typescript" }])
+      upsertFileTab(tabs, { name: "a.tsx", relativePath: "src/a.ts" }),
+    ).toEqual([{ name: "a.tsx", relativePath: "src/a.ts" }])
     expect(directoryAncestors("src/pages/index.tsx")).toEqual(["src", "src/pages"])
     expect(directoryAncestors("src/pages", true)).toEqual(["src", "src/pages"])
     expect(directoryAncestors("")).toEqual([])
@@ -306,3 +309,13 @@ describe("workspace LSP helpers", () => {
     ).toBeNull()
   })
 })
+
+function workspaceEntry(
+  entry: Pick<WorkspaceFileEntry, "kind" | "name" | "relativePath">,
+): WorkspaceFileEntry {
+  return {
+    ...entry,
+    id: entry.relativePath,
+    hasChildren: entry.kind === "directory",
+  }
+}

@@ -844,13 +844,6 @@
           "default": "dev",
           "type": "string"
         },
-        "exporter": {
-          "$ref": "#/$defs/OtelExporter",
-          "default": {
-            "directory": "C:\\Users\\cyberhan\\AppData\\Roaming\\cn.cyberhan.slab\\logs",
-            "type": "local_file"
-          }
-        },
         "metrics_exporter": {
           "$ref": "#/$defs/OtelExporter",
           "default": {
@@ -867,22 +860,11 @@
             "null"
           ]
         },
-        "slab_home": {
-          "default": "C:\\Users\\cyberhan\\AppData\\Roaming\\cn.cyberhan.slab",
-          "type": "string"
-        },
         "span_attributes": {
           "additionalProperties": {
             "type": "string"
           },
           "type": "object"
-        },
-        "trace_exporter": {
-          "$ref": "#/$defs/OtelExporter",
-          "default": {
-            "directory": "C:\\Users\\cyberhan\\AppData\\Roaming\\cn.cyberhan.slab\\logs",
-            "type": "local_file"
-          }
         },
         "tracestate": {
           "additionalProperties": {
@@ -1792,19 +1774,10 @@
         "capture_content": false,
         "enabled": true,
         "environment": "dev",
-        "exporter": {
-          "directory": "C:\\Users\\cyberhan\\AppData\\Roaming\\cn.cyberhan.slab\\logs",
-          "type": "local_file"
-        },
         "metrics_exporter": {
           "type": "none"
         },
-        "service_name": "slab",
-        "slab_home": "C:\\Users\\cyberhan\\AppData\\Roaming\\cn.cyberhan.slab",
-        "trace_exporter": {
-          "directory": "C:\\Users\\cyberhan\\AppData\\Roaming\\cn.cyberhan.slab\\logs",
-          "type": "local_file"
-        }
+        "service_name": "slab"
       }
     },
     "tools": {

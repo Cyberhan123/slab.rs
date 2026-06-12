@@ -111,7 +111,7 @@ describe('assistant message utils', () => {
     )
 
     expect(objectMessage.content).toEqual({ type: 'text', text: 'new', extra: true })
-    expect(withAssistantMessageTextContent({ role: 'assistant', content: null } as AssistantUiMessage, 'new').content).toBe(
+    expect(withAssistantMessageTextContent({ role: 'assistant', content: null }, 'new').content).toBe(
       'new'
     )
     expect(

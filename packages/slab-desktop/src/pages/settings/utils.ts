@@ -148,24 +148,9 @@ export function buildRequestBody(
     if (!trimmed) {
       return { op: 'unset' };
     }
-    const value = parseSettingNumberValue(trimmed, 'integer');
+    const value = parseSettingNumberValue(trimmed);
     if (value === null) {
       throw new Error('Value must be an integer.');
-    }
-    return {
-      op: 'set',
-      value,
-    };
-  }
-
-  if (propertyType === 'number') {
-    const trimmed = rawValue.trim();
-    if (!trimmed) {
-      return { op: 'unset' };
-    }
-    const value = parseSettingNumberValue(trimmed, 'number');
-    if (value === null) {
-      throw new Error('Value must be a number.');
     }
     return {
       op: 'set',
@@ -253,7 +238,7 @@ export function fallbackErrorMessage(error: unknown): string {
 
 export function parseSettingNumberValue(
   rawValue: string,
-  numberType: SettingNumberType,
+  numberType: SettingNumberType = 'integer',
 ): number | null {
   const trimmed = rawValue.trim();
   if (!trimmed) {

@@ -1,9 +1,14 @@
-import type { SSEFields, XModelMessage, XModelResponse } from '@ant-design/x-sdk'
+import type { SSEFields, XModelMessage } from '@ant-design/x-sdk'
 
 import { isRecord, type AssistantAgentRequestMessage, type AssistantUiMessage } from './assistant-types'
 
+type AssistantMessageTextContentTarget = {
+  role: XModelMessage['role']
+  content?: unknown
+} & Omit<AssistantUiMessage, 'role' | 'content'>
+
 export const getAssistantMessageTextContent = (
-  message?: Pick<XModelMessage, 'content'> | null
+  message?: { content?: unknown } | null
 ): string => {
   const content = message?.content
 
@@ -11,7 +16,7 @@ export const getAssistantMessageTextContent = (
     return content
   }
 
-  if (content && typeof content.text === 'string') {
+  if (isRecord(content) && typeof content.text === 'string') {
     return content.text
   }
 
@@ -147,15 +152,13 @@ const parseSsePayload = (value: unknown): unknown => {
   return null
 }
 
-export const extractChunkPayload = (
-  chunk: Partial<Record<SSEFields, XModelResponse>> | undefined
-): unknown => {
+export const extractChunkPayload = (chunk: Partial<Record<SSEFields, unknown>> | undefined): unknown => {
   const chunkData = (chunk as { data?: unknown } | undefined)?.data
   return parseSsePayload(chunkData) ?? chunkData ?? parseSsePayload(chunk) ?? chunk
 }
 
 export const extractSseDeltaTextField = (
-  chunk: Partial<Record<SSEFields, XModelResponse>> | undefined,
+  chunk: Partial<Record<SSEFields, unknown>> | undefined,
   field: string
 ): string => {
   const payload = extractChunkPayload(chunk)
@@ -177,7 +180,7 @@ export const extractSseDeltaTextField = (
 }
 
 export const withAssistantMessageTextContent = (
-  message: AssistantUiMessage,
+  message: AssistantMessageTextContentTarget,
   text: string
 ): AssistantUiMessage => {
   if (typeof message.content === 'string') {
@@ -187,13 +190,13 @@ export const withAssistantMessageTextContent = (
     }
   }
 
-  if (message.content && typeof message.content === 'object') {
+  if (isRecord(message.content)) {
     return {
       ...message,
       content: {
         ...message.content,
         text,
-        type: message.content.type ?? 'text',
+        type: typeof message.content.type === 'string' ? message.content.type : 'text',
       },
     }
   }

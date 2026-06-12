@@ -32,11 +32,6 @@ pub(crate) fn setting_descriptor(pmid: &str) -> Option<SettingDescriptor> {
         "telemetry.service_version" => {
             descriptor!("telemetry.service_version", telemetry.service_version)
         }
-        "telemetry.slab_home" => descriptor!("telemetry.slab_home", telemetry.slab_home),
-        "telemetry.exporter" => descriptor!("telemetry.exporter", telemetry.exporter),
-        "telemetry.trace_exporter" => {
-            descriptor!("telemetry.trace_exporter", telemetry.trace_exporter)
-        }
         "telemetry.metrics_exporter" => {
             descriptor!("telemetry.metrics_exporter", telemetry.metrics_exporter)
         }

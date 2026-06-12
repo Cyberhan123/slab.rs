@@ -585,8 +585,6 @@ fn value_type(path: &str, effective: &SettingValue, default: &SettingValue) -> S
         return SettingValueType::Array;
     }
     if path == "agent.tools.websearch.providers"
-        || path == "telemetry.exporter"
-        || path == "telemetry.trace_exporter"
         || path == "telemetry.metrics_exporter"
         || path == "telemetry.span_attributes"
         || path == "telemetry.tracestate"
@@ -703,8 +701,6 @@ fn multiline(path: &str) -> bool {
     path == "providers.registry"
         || path == "agent.tools.websearch.providers"
         || path == "agent.hooks.scripts"
-        || path == "telemetry.exporter"
-        || path == "telemetry.trace_exporter"
         || path == "telemetry.metrics_exporter"
         || path == "telemetry.span_attributes"
         || path == "telemetry.tracestate"
@@ -721,9 +717,6 @@ fn property_label(path: &str) -> String {
         "telemetry.environment" => "Environment".to_owned(),
         "telemetry.service_name" => "Service Name".to_owned(),
         "telemetry.service_version" => "Service Version".to_owned(),
-        "telemetry.slab_home" => "Slab Home".to_owned(),
-        "telemetry.exporter" => "Log Exporter".to_owned(),
-        "telemetry.trace_exporter" => "Trace Exporter".to_owned(),
         "telemetry.metrics_exporter" => "Metrics Exporter".to_owned(),
         "telemetry.capture_content" => "Capture GenAI Content".to_owned(),
         "telemetry.span_attributes" => "Span Attributes".to_owned(),
@@ -775,21 +768,12 @@ fn property_description(path: &str) -> String {
         "logging.json" => "Emit newline-delimited JSON logs by default.".to_owned(),
         "logging.path" => "Optional directory used for persisted log files.".to_owned(),
         "telemetry.enabled" => {
-            "Enable local telemetry export and session telemetry. Remote export remains controlled by exporter settings.".to_owned()
+            "Enable program-managed local telemetry export and session telemetry.".to_owned()
         }
         "telemetry.environment" => "Deployment environment attached to telemetry resources.".to_owned(),
         "telemetry.service_name" => "OpenTelemetry service.name resource value.".to_owned(),
         "telemetry.service_version" => {
             "Optional OpenTelemetry service.version resource value.".to_owned()
-        }
-        "telemetry.slab_home" => {
-            "Application home used when resolving default local telemetry export paths.".to_owned()
-        }
-        "telemetry.exporter" => {
-            "Log exporter. Defaults to local files under the Slab logs directory.".to_owned()
-        }
-        "telemetry.trace_exporter" => {
-            "Trace exporter. Defaults to local files under the Slab logs directory.".to_owned()
         }
         "telemetry.metrics_exporter" => {
             "Metrics exporter. Defaults to none until metrics collection is explicitly enabled.".to_owned()
@@ -1327,18 +1311,23 @@ mod tests {
             .iter()
             .find(|property| property.pmid == "telemetry.capture_content")
             .expect("capture content property");
-        let exporter = general
+        let metrics_exporter = general
             .properties
             .iter()
-            .find(|property| property.pmid == "telemetry.exporter")
-            .expect("exporter property");
+            .find(|property| property.pmid == "telemetry.metrics_exporter")
+            .expect("metrics exporter property");
 
         assert_eq!(enabled.schema.value_type, SettingValueType::Boolean);
         assert_eq!(enabled.effective_value, SettingValue::Boolean(true));
         assert_eq!(capture_content.schema.value_type, SettingValueType::Boolean);
         assert_eq!(capture_content.effective_value, SettingValue::Boolean(false));
-        assert_eq!(exporter.schema.value_type, SettingValueType::Object);
-        assert!(exporter.schema.multiline);
+        assert_eq!(metrics_exporter.schema.value_type, SettingValueType::Object);
+        assert!(metrics_exporter.schema.multiline);
+        assert!(!general.properties.iter().any(|property| property.pmid == "telemetry.slab_home"));
+        assert!(!general.properties.iter().any(|property| property.pmid == "telemetry.exporter"));
+        assert!(
+            !general.properties.iter().any(|property| property.pmid == "telemetry.trace_exporter")
+        );
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }
