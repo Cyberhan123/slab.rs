@@ -316,6 +316,7 @@ mod tests {
             .expect("delegate");
         let value: serde_json::Value = serde_json::from_str(&output.content).expect("json");
         let child_id = value["child_thread_id"].as_str().expect("child id");
+        assert_eq!(value["status"], "completed");
         assert_eq!(value["completion_text"], "child result");
 
         let child = store.get_thread(child_id).await.expect("thread").expect("child");

@@ -988,6 +988,58 @@ async fn wait_for_persisted_message(store: &PersistingStore, thread_id: &str, te
 }
 
 #[tokio::test]
+async fn wait_for_terminal_snapshot_polls_persisted_status_when_thread_is_not_active() {
+    let store = Arc::new(PersistingStore::default());
+    let now = "2026-01-01T00:00:00Z".to_owned();
+    store.snapshots.lock().unwrap().insert(
+        "orphan-running".to_owned(),
+        ThreadSnapshot {
+            id: "orphan-running".to_owned(),
+            session_id: "session".to_owned(),
+            parent_id: None,
+            depth: 0,
+            status: ThreadStatus::Running,
+            role_name: None,
+            config_json: serde_json::to_string(&AgentConfig::default()).expect("config"),
+            completion_text: None,
+            created_at: now.clone(),
+            updated_at: now,
+        },
+    );
+
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let control = AgentControl::new(
+        Arc::new(MockLlm::new()),
+        store_port,
+        notify.clone(),
+        notify,
+        Arc::new(ToolRouter::new()),
+        8,
+        4,
+    );
+    let store_for_update = Arc::clone(&store);
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        store_for_update
+            .update_thread_status("orphan-running", ThreadStatus::Completed, Some("done"))
+            .await
+            .expect("update thread");
+    });
+
+    let snapshot = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        control.wait_for_terminal_snapshot("orphan-running"),
+    )
+    .await
+    .expect("terminal snapshot timeout")
+    .expect("terminal snapshot");
+
+    assert_eq!(snapshot.status, ThreadStatus::Completed);
+    assert_eq!(snapshot.completion_text.as_deref(), Some("done"));
+}
+
+#[tokio::test]
 async fn smoke_echo_tool_agent_completes() {
     // Wire up the agent control with the echo tool registered.
     let llm = Arc::new(MockLlm::new());

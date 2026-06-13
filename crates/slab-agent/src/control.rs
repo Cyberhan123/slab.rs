@@ -2,7 +2,10 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use tokio::sync::{RwLock, watch};
+use tokio::{
+    sync::{RwLock, watch},
+    time::{Duration, sleep},
+};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
@@ -276,14 +279,13 @@ impl AgentControl {
                     break;
                 }
             },
-            Err(AgentError::ThreadNotFound(_)) => {}
+            Err(AgentError::ThreadNotFound(_)) => {
+                return self.wait_for_persisted_terminal_snapshot(thread_id).await;
+            }
             Err(error) => return Err(error),
         }
 
-        self.store
-            .get_thread(thread_id)
-            .await?
-            .ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))
+        self.wait_for_persisted_terminal_snapshot(thread_id).await
     }
 
     /// Append user input to a persisted thread and run another agent turn.
@@ -510,6 +512,23 @@ impl AgentControl {
         drop(guard);
 
         Ok(thread_id)
+    }
+
+    async fn wait_for_persisted_terminal_snapshot(
+        &self,
+        thread_id: &str,
+    ) -> Result<crate::port::ThreadSnapshot, AgentError> {
+        loop {
+            let snapshot = self
+                .store
+                .get_thread(thread_id)
+                .await?
+                .ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))?;
+            if is_terminal_status(snapshot.status) {
+                return Ok(snapshot);
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
     }
 }
 

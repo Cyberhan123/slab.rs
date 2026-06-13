@@ -210,9 +210,12 @@ fn normalize_template_message(message: &DomainConversationMessage) -> Value {
     if let Some(tool_call_id) = message.tool_call_id.as_ref() {
         object.insert("tool_call_id".to_owned(), Value::String(tool_call_id.clone()));
     }
-    if !message.tool_calls.is_empty() {
-        object.insert("tool_calls".to_owned(), normalize_template_tool_calls(&message.tool_calls));
-    }
+    let tool_calls = if message.tool_calls.is_empty() {
+        Value::Array(Vec::new())
+    } else {
+        normalize_template_tool_calls(&message.tool_calls)
+    };
+    object.insert("tool_calls".to_owned(), tool_calls);
 
     Value::Object(object)
 }
@@ -469,6 +472,39 @@ mod tests {
         .expect("qwen3.5 prompt");
 
         assert!(rendered.ends_with("<|im_start|>assistant\n<think>\n\n</think>\n\n"));
+    }
+
+    #[test]
+    fn qwen35_template_renders_assistant_history_without_tool_calls() {
+        let rendered = build_prompt(
+            &[
+                message("user", "remember CTX"),
+                message("assistant", "stored CTX"),
+                message("user", "recall it"),
+            ],
+            Some(QWEN35_TEMPLATE),
+            Some(ChatReasoningEffort::None),
+            &[],
+        )
+        .expect("qwen3.5 prompt");
+
+        assert!(rendered.contains("<|im_start|>assistant\nstored CTX<|im_end|>"));
+        assert!(rendered.ends_with("<|im_start|>assistant\n<think>\n\n</think>\n\n"));
+    }
+
+    #[test]
+    fn minijinja_template_exposes_empty_tool_calls_for_all_roles() {
+        let template =
+            "{% for message in messages %}{% if message.tool_calls %}tool{% endif %}{% endfor %}";
+        let rendered = build_prompt(
+            &[message("user", "hello"), message("assistant", "hi"), message("tool", "ok")],
+            Some(template),
+            None,
+            &[],
+        )
+        .expect("template prompt");
+
+        assert_eq!(rendered, "");
     }
 
     #[test]
