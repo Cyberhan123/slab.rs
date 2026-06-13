@@ -1,113 +1,69 @@
 # Project Guidelines
 
-Keep repo guidance high signal and task-focused. Prefer concrete local context over broad exploration.
+Use this as the repo-wide AI reference for architecture boundaries, workflow, and documentation ownership. Keep it short; module-specific details belong in the nearest `README.md`.
 
-If a task is blocked by missing product intent, missing access, or conflicting user changes, ask the user. Otherwise continue autonomously.
+## Working Rules
 
-**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+- Inspect current code before changing behavior or docs. Implementation wins when docs and code disagree.
+- Keep changes minimal and task-scoped. Do not add speculative features, abstractions, or configurability.
+- Fix bugs from first principles. Find the root cause instead of masking the symptom with a narrow workaround.
+- Touch only what the task requires. Remove only unused code created by your own changes.
+- Preserve user or unrelated worktree changes. Mention unrelated issues instead of cleaning them up.
 
-## Simplicity First
+## Workflow Source Of Truth
 
-**Minimum code that solves the problem. Nothing speculative.**
-
-- No features beyond what was asked.
-- No abstractions for single-use code.
-- No "flexibility" or "configurability" that wasn't requested.
-- No speculative error handling for scenarios that have no evidence in the current code path.
-- If you write 200 lines and it could be 50, rewrite it.
-
-Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
-
-## Surgical Changes
-
-**Touch only what you must. Clean up only your own mess.**
-
-When editing existing code:
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style, even if you'd do it differently.
-- If you notice unrelated dead code, mention it - don't delete it.
-
-When your changes create orphans:
-- Remove imports/variables/functions that YOUR changes made unused.
-- Don't remove pre-existing dead code unless asked.
-
-## Bug fix 
-
-When fixing bugs, it's essential to start with first principles to find the root cause. You can't compromise the fundamental problem by making minimal fixes.
-
-## Workflow
-- When docs and implementation disagree, verify the current behavior in code before changing docs or behavior.
-- The current top-level build flow is Bun + Cargo. Root `package.json` build, check, test, generation, package, and dev scripts are the canonical entrypoints.
+- The top-level build flow is Bun plus Cargo. Root `package.json` scripts are the canonical daily entrypoints.
 - Do not reintroduce `cargo make`, Bazel wrappers, or parallel top-level build orchestration.
-- Keep repo guidance deterministic: commands should work from the repo root, and local references should come before remote-only advice.
-- `.agents/skills` contains optional task guidance. `plugins/` contains runtime plugin packages, `docs/public/manifests/` contains JSON schemas and model metadata, and `vendor/` contains vendored runtime artifacts.
-- Do not add repo-specific workflow that forces a skill-selection step for every task. Use skills when the active environment requires them or when the task directly matches them.
-- When updating repo guidance, confirm the current workspace members and scripts instead of copying older architecture notes forward.
+- Run commands from the repo root unless a local README says otherwise.
+- Use the narrowest validation command that covers the change before reaching for broader workspace checks.
+- `.agents/skills` contains optional agent guidance. `plugins/` contains runtime plugin packages. `docs/public/manifests/` contains JSON schemas and model metadata. `vendor/` contains vendored runtime artifacts.
 
-## Hard Constraints
+## Architecture Boundaries
 
-- Keep inference behind `bin/slab-app -> bin/slab-server -> crates/slab-app-core runtime supervisor -> GrpcGateway -> bin/slab-runtime -> crates/slab-runtime-core`; the desktop host starts `slab-server`, product API traffic stays on HTTP, and Tauri commands stay host-only.
-- Keep plugin dispatch behind `bin/slab-app -> bin/slab-server /v1/plugins/rpc (WebSocket JSON-RPC 2.0) -> crates/slab-app-core`; JS calls go through supervised `bin/slab-js-runtime`, while WASM/frontend fallback stays behind `crates/slab-plugin`.
+- Inference stays behind `bin/slab-app -> bin/slab-server -> crates/slab-app-core runtime supervisor -> GrpcGateway -> bin/slab-runtime -> crates/slab-runtime-core`.
+- The desktop host starts `slab-server`; product API traffic stays on HTTP; Tauri commands stay host-only.
 - Extend the existing `/v1/*` API surface instead of adding a parallel API tree.
-- Keep long-running AI work in task-oriented flows when the feature already follows that model.
+- Backend API shape changes require `bun run gen:api` to refresh `packages/api/src/v1.d.ts`.
 - Prefer `crates/slab-types` and `crates/slab-proto` for contracts that cross crate boundaries.
-- Keep `crates/slab-app-core` HTTP-free, keep `bin/slab-runtime` as the only runtime composition root, and keep `crates/slab-runtime-core` limited to scheduler/backend protocol concerns.
-- Keep `crates/slab-agent` pure; built-in deterministic tools belong in `crates/slab-agent-tools`, and plugin/API capability adapters are registered by host/app-core layers.
+- Keep `crates/slab-app-core` HTTP-free. Keep `bin/slab-runtime` as the runtime composition root. Keep `crates/slab-runtime-core` limited to scheduler and backend protocol concerns.
+- Keep `crates/slab-agent` pure. Built-in deterministic tools belong in `crates/slab-agent-tools`; plugin/API capability adapters are registered by host or app-core layers.
+- Keep long-running AI work in task-oriented flows when the feature already follows that model.
 - Preserve Tauri CSP, capabilities, permissions, sidecar boundaries, and plugin sandboxing unless the task explicitly changes them.
-- Keep workspace LSP traffic behind `packages/slab-desktop -> bin/slab-server /v1/workspace/lsp/* -> crates/slab-app-core`; `slab-app-core` owns provider resolution and LSP process spawning, and the desktop host must not add a second LSP bridge.
-- Web workspace LSP providers are built-in Slab assets: `plugins/web-language-servers` is a build-only package that emits `resources/libs/language-servers/web/*.mjs`, and `slab-app-core` launches them through `bin/slab-js-runtime lsp --entry <bundle> -- <args>`. Native workspace LSP providers are declarations only and resolve `rust-analyzer`, `gopls`, `pyright-langserver`, and similar tools from existing search paths or `PATH`; do not bundle those binaries into plugin packs or installer payloads unless the task explicitly changes this.
-- Keep Tauri child WebViews as the default third-party plugin UI runtime; do not make Module Federation the default plugin model.
-- Keep `plugin.json` as the static source of truth. `manifestVersion: 1` separates runtime assets, `contributes.*`, `permissions.*`, and agent capabilities.
-- JS plugin runtime calls follow JSON-RPC 2.0 conventions.
-- Frontend-only plugins are UI-focused and non-callable; complex plugin logic belongs in JS runtime or WASM backends.
-- Plugin WebView commands must derive the caller plugin id from the WebView label, not from plugin-supplied payload fields.
-- `plugins/` is runtime plugin content, not AI skill content; `.agents/skills` is only for agent guidance.
 - SQLx migrations in `crates/slab-app-core/migrations/` are append-only.
-- Cargo excludes `packages/slab-desktop/src`, so Rust tooling does not validate the TypeScript frontend.
-- When backend API shapes change, regenerate `packages/api/src/v1.d.ts` with `bun run gen:api`.
 
-## Reference Pointers
+## Plugin And LSP Boundaries
 
-Keep this file focused on always-on constraints. For module-specific role, stack, testing, and layout details, prefer the nearest subproject `README.md` before restating that information here.
+- Plugin dispatch stays behind `bin/slab-app -> bin/slab-server /v1/plugins/rpc` using WebSocket JSON-RPC 2.0 into `crates/slab-app-core`.
+- JS plugin calls go through supervised `bin/slab-js-runtime`; Python plugin calls go through supervised `bin/slab-python-runtime`; WASM/frontend fallback stays behind `crates/slab-plugin`.
+- Keep Tauri child WebViews as the default third-party plugin UI runtime. Do not make Module Federation the default plugin model.
+- `plugin.json` is the static source of truth. `manifestVersion: 1` separates runtime assets, `contributes.*`, `permissions.*`, and agent capabilities.
+- JS plugin runtime calls follow JSON-RPC 2.0 conventions.
+- Frontend-only plugins are UI-focused and non-callable; complex plugin logic belongs in JS runtime, Python runtime, or WASM backends.
+- Plugin WebView commands must derive the caller plugin id from the WebView label, not plugin-supplied payload fields.
+- Workspace LSP traffic stays behind `packages/slab-desktop -> bin/slab-server /v1/workspace/lsp/* -> crates/slab-app-core`.
+- `crates/slab-app-core` owns LSP provider resolution and process spawning. The desktop host must not add a second LSP bridge.
+- `plugins/web-language-servers` is a build-only package that emits `resources/libs/language-servers/web/*.mjs`; it is not a user-installable plugin.
+- Native workspace LSP providers resolve tools such as `rust-analyzer`, `gopls`, and `pyright-langserver` from existing search paths or `PATH`; do not bundle those binaries unless the task explicitly changes this.
 
-- Build, generation, and packaging flow: `docs/development/guides/build.md`
-- Desktop host and Tauri backend: `bin/slab-app/src-tauri/README.md`
-- HTTP gateway: `bin/slab-server/README.md`
-- Runtime worker: `bin/slab-runtime/README.md`
-- Windows full installer: `bin/slab-windows-full-installer/README.md`
-- Shared settings/config library: `crates/slab-config/README.md`
-- Shared business logic: `crates/slab-app-core/README.md`
-- Plugin runtime dispatch: `crates/slab-plugin/README.md`
-- JavaScript plugin runtime: `bin/slab-js-runtime/README.md`
-- Agent control plane: `crates/slab-agent/README.md`
-- Built-in agent tools: `crates/slab-agent-tools/README.md`
-- Agent shell execution: `crates/slab-shell-command/README.md`
-- Agent filesystem helpers: `crates/slab-file/README.md`
-- Agent Git helpers: `crates/slab-git/README.md`
-- Agent MCP protocol helpers: `crates/slab-mcp/README.md`
-- Model hub abstraction: `crates/slab-hub/README.md`
-- Runtime protocol substrate: `crates/slab-runtime-core/README.md`
-- Shared frontend API package: `packages/api/README.md`
-- Desktop frontend: `packages/slab-desktop/README.md`
-- Shared UI primitives: `packages/slab-components/README.md`
-- Plugin author SDK: `packages/slab-plugin-sdk/README.md`
-- Plugin packaging CLI: `packages/slab-plugin-cli/README.md`
-- Python plugin SDK: `python/slab-python-sdk/README.md`
-- Plugin workspace and manifest model: `plugins/README.md`
-- When a crate or package already has its own `README.md` under `crates/*`, `packages/*`, or `bin/*`, prefer that local README over expanding `AGENTS.md`.
+## README Ownership
+
+- Every Cargo workspace member and every Bun workspace package must have a local `README.md`.
+- Each README should cover role, package/crate type, local validation commands, and hard boundaries for that module.
+- Keep `AGENTS.md` focused on always-on constraints. Move module-specific role, stack, testing, and layout details to local README files.
+- When adding or removing workspace members, plugin surfaces, sidecars, or package/crate responsibilities, update this file and the affected local README files in the same change.
+- `CLAUDE.md` and `.github/copilot-instructions.md` should stay thin and point to `AGENTS.md` for repo-wide guidance.
 
 ## Common Root Commands
-
-Run these from the repo root unless a local README says otherwise. Prefer `bun run ...` for day-to-day use. Pick the narrowest command that validates your change before reaching for broader workspace-wide checks:
 
 ```sh
 bun install
 
+bun run dev:app
+bun run dev:desktop
+
 bun run lint
 bun run lint:fix
-
-bun run dev:app
+bun run lint:rust
 
 bun run check
 bun run check:frontend
@@ -116,25 +72,40 @@ bun run check:rust
 bun run test
 bun run test:frontend
 bun run test:rust
+bun run test:rust:cargo
 bun run test:browser
+bun run test:components
+bun run test:server
 
 bun run build:desktop
 bun run build:language-servers
 bun run build:sidecars
+bun run build:sidecars:release
 bun run build:app
 bun run build:windows-installer
 
 bun run gen:api
-bun run gen:plugin-packs
 bun run gen:schemas
+bun run gen:plugin-packs
+bun run gen:model-packs
+
+bun run docs:dev
+bun run docs:build
+bun run docs:preview
 ```
 
-For package-specific or crate-specific workflows, prefer the nearest subproject `README.md` and the local `package.json` / `Cargo.toml` scripts over copying those details into this file.
+## Reference Map
 
-## AI Docs Maintenance
+Start with the nearest local README for the code you are changing.
 
-- `AGENTS.md` is the canonical repo-wide AI reference for architecture, boundaries, and build/test commands.
-- Keep `AGENTS.md` focused on hard constraints and a short set of repo-root commands; move module-specific reference material into subproject `README.md` files when possible.
-- `CLAUDE.md` and `.github/copilot-instructions.md` should stay thin and point to `AGENTS.md` for repo-wide guidance.
-- Keep `AGENTS.md` aligned when workflow, architecture snapshot, plugin/runtime boundaries, or build commands change.
-- When adding or removing workspace members, plugin surfaces, or desktop sidecar behavior, update this doc and the relevant `README.md` files in the same change.
+- Build, generation, and packaging flow: `docs/development/guides/build.md`
+- Desktop host and Tauri backend: `bin/slab-app/README.md` and `bin/slab-app/src-tauri/README.md`
+- HTTP gateway: `bin/slab-server/README.md`
+- Runtime worker: `bin/slab-runtime/README.md`
+- JS and Python plugin runtimes: `bin/slab-js-runtime/README.md`, `bin/slab-python-runtime/README.md`
+- Shared business logic: `crates/slab-app-core/README.md`
+- Runtime protocol substrate: `crates/slab-runtime-core/README.md`
+- Agent control plane and tools: `crates/slab-agent/README.md`, `crates/slab-agent-tools/README.md`
+- Plugin model and packaging: `plugins/README.md`, `crates/slab-plugin/README.md`, `packages/slab-plugin-sdk/README.md`, `packages/slab-plugin-cli/README.md`, `packages/slab-plugin-ui/README.md`
+- Desktop frontend and UI packages: `packages/slab-desktop/README.md`, `packages/slab-components/README.md`, `packages/slab-i18n/README.md`
+- Shared contracts and generated clients: `crates/slab-types/README.md`, `crates/slab-proto/README.md`, `packages/api/README.md`

@@ -26,7 +26,6 @@ pub(super) fn init_tracing(
         },
     };
 
-    slab_otel::provider::install_log_bridge();
     let settings = telemetry_settings(log_file);
     let provider = match slab_otel::OtelProvider::from(&settings) {
         Ok(provider) => provider,

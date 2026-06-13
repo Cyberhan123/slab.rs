@@ -21,3 +21,20 @@ slab-plugin-cli pack --plugin-dir ./my-plugin --out-dir ./dist
 
 Python plugins can declare `python/requirements.txt`; pure-Python packages are
 installed into the `.slabpy` bundle. Native extensions are rejected.
+
+## Type
+
+Bun-managed CLI package.
+
+## Testing
+
+Run focused checks with:
+
+```sh
+bun run --cwd packages/slab-plugin-cli build
+bun run --cwd packages/slab-plugin-cli test:run
+```
+
+## License
+
+AGPL-3.0-only. See the root [LICENSE](../../LICENSE).
