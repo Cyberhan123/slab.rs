@@ -34,6 +34,7 @@
     "test:rust:cargo": "cargo test --workspace --color=never",
     "test:sandbox": "cargo test -p slab-sandboxing",
     "test:browser": "vitest run --project desktop-browser --project components-browser",
+    "test:assistant:fullstack": "vitest run --config packages/slab-desktop/vitest.fullstack.config.ts",
     "test:components": "vitest run --project components-browser",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",

@@ -54,6 +54,15 @@ impl LlmPort for ServerLlmAdapter {
         config: &AgentConfig,
         trace_context: &AgentTraceContext,
     ) -> Result<LlmResponse, AgentError> {
+        #[cfg(any(test, debug_assertions))]
+        {
+            if e2e_llm_enabled() {
+                let response = e2e_llm_response(messages, tools);
+                record_llm_response(trace_context, "e2e_chat_response_normalized", &response);
+                return Ok(response);
+            }
+        }
+
         let command = chat_command_from_agent_config(
             model,
             messages.to_vec(),
@@ -91,6 +100,15 @@ impl LlmPort for ServerLlmAdapter {
         trace_context: &AgentTraceContext,
         observer: &mut dyn LlmStreamObserver,
     ) -> Result<LlmResponse, AgentError> {
+        #[cfg(any(test, debug_assertions))]
+        {
+            if e2e_llm_enabled() {
+                let response = e2e_llm_response_streaming(messages, tools, observer).await?;
+                record_llm_response(trace_context, "e2e_chat_response_normalized", &response);
+                return Ok(response);
+            }
+        }
+
         let command = chat_command_from_agent_config(
             model,
             messages.to_vec(),
@@ -127,6 +145,98 @@ impl LlmPort for ServerLlmAdapter {
             }
         }
     }
+}
+
+#[cfg(any(test, debug_assertions))]
+fn e2e_llm_enabled() -> bool {
+    match std::env::var("SLAB_E2E_MODE") {
+        Ok(value) => {
+            let value = value.trim();
+            value == "1" || value.eq_ignore_ascii_case("true")
+        }
+        Err(_) => false,
+    }
+}
+
+#[cfg(any(test, debug_assertions))]
+async fn e2e_llm_response_streaming(
+    messages: &[ConversationMessage],
+    tools: &[ToolSpec],
+    observer: &mut dyn LlmStreamObserver,
+) -> Result<LlmResponse, AgentError> {
+    let mut response = e2e_llm_response(messages, tools);
+    if response.tool_calls.is_empty()
+        && let Some(content) = response.content.as_deref()
+        && !content.is_empty()
+    {
+        observer.on_text_delta(content).await?;
+        response.content_already_streamed = true;
+    }
+    Ok(response)
+}
+
+#[cfg(any(test, debug_assertions))]
+fn e2e_llm_response(messages: &[ConversationMessage], tools: &[ToolSpec]) -> LlmResponse {
+    let (prompt, has_tool_result_after_prompt) = e2e_latest_user_context(messages);
+    let normalized_prompt = prompt.to_ascii_lowercase();
+    let wants_plan_loop = normalized_prompt.contains("tool loop")
+        || normalized_prompt.contains("plan_update")
+        || normalized_prompt.contains("plan update");
+
+    if wants_plan_loop && !has_tool_result_after_prompt && e2e_tool_available(tools, "plan_update")
+    {
+        return LlmResponse {
+            content: None,
+            content_already_streamed: false,
+            tool_calls: vec![ParsedToolCall {
+                id: "e2e-plan-update".to_owned(),
+                name: "plan_update".to_owned(),
+                arguments: serde_json::json!({
+                    "summary": "e2e assistant loop",
+                    "items": [
+                        { "step": "record plan", "status": "in_progress" },
+                        { "step": "finish answer", "status": "pending" }
+                    ]
+                })
+                .to_string(),
+            }],
+            finish_reason: Some("tool_calls".to_owned()),
+        };
+    }
+
+    let content = if wants_plan_loop && has_tool_result_after_prompt {
+        "E2E loop complete after plan_update tool output.".to_owned()
+    } else if prompt.trim().is_empty() {
+        "E2E assistant persisted reply.".to_owned()
+    } else {
+        format!("E2E assistant persisted reply: {prompt}")
+    };
+
+    LlmResponse {
+        content: Some(content),
+        content_already_streamed: false,
+        tool_calls: Vec::new(),
+        finish_reason: Some("stop".to_owned()),
+    }
+}
+
+#[cfg(any(test, debug_assertions))]
+fn e2e_latest_user_context(messages: &[ConversationMessage]) -> (String, bool) {
+    let Some(latest_user_index) = messages.iter().rposition(|message| message.role == "user")
+    else {
+        return (String::new(), false);
+    };
+
+    let prompt = messages[latest_user_index].rendered_text();
+    let has_tool_result_after_prompt =
+        messages.iter().skip(latest_user_index + 1).any(|message| message.role == "tool");
+
+    (prompt, has_tool_result_after_prompt)
+}
+
+#[cfg(any(test, debug_assertions))]
+fn e2e_tool_available(tools: &[ToolSpec], tool_name: &str) -> bool {
+    tools.iter().any(|tool| tool.name == tool_name)
 }
 
 fn chat_command_from_agent_config(
@@ -378,6 +488,24 @@ fn parsed_tool_calls_payload(tool_calls: &[ParsedToolCall]) -> Vec<Value> {
 mod tests {
     use super::*;
 
+    fn text_message(role: &str, content: &str) -> ConversationMessage {
+        ConversationMessage {
+            role: role.to_owned(),
+            content: ConversationMessageContent::Text(content.to_owned()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: vec![],
+        }
+    }
+
+    fn plan_update_spec() -> ToolSpec {
+        ToolSpec {
+            name: "plan_update".to_owned(),
+            description: "record a plan".to_owned(),
+            parameters_schema: serde_json::json!({ "type": "object" }),
+        }
+    }
+
     #[test]
     fn agent_config_params_are_forwarded_to_chat_command() {
         let config = AgentConfig {
@@ -421,6 +549,37 @@ mod tests {
         );
         assert!(command.common.stream);
         assert!(command.tools.is_empty());
+    }
+
+    #[test]
+    fn e2e_llm_requests_plan_update_before_tool_result() {
+        let response = e2e_llm_response(
+            &[text_message("user", "please run the tool loop")],
+            &[plan_update_spec()],
+        );
+
+        assert_eq!(response.finish_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].name, "plan_update");
+        assert!(response.tool_calls[0].arguments.contains("record plan"));
+    }
+
+    #[test]
+    fn e2e_llm_finishes_after_tool_result() {
+        let response = e2e_llm_response(
+            &[
+                text_message("user", "please run the tool loop"),
+                text_message("tool", "{\"summary\":\"e2e assistant loop\"}"),
+            ],
+            &[plan_update_spec()],
+        );
+
+        assert_eq!(
+            response.content.as_deref(),
+            Some("E2E loop complete after plan_update tool output.")
+        );
+        assert!(response.tool_calls.is_empty());
+        assert_eq!(response.finish_reason.as_deref(), Some("stop"));
     }
 
     #[tokio::test]
