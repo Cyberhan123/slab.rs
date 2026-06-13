@@ -34,7 +34,10 @@ import {
   withThoughts,
 } from '../lib/assistant-agent-state'
 import { withAssistantMessageReasoningContent } from '../lib/assistant-message-utils'
-import { projectAgentThreadMessages } from '../lib/assistant-message-projection'
+import {
+  formatKnownToolResult,
+  projectAgentThreadMessages,
+} from '../lib/assistant-message-projection'
 
 type PendingApproval = {
   callId: string
@@ -107,13 +110,16 @@ export function useAssistantAgent({
     (callId: string, statusValue: AssistantThought['status'], detail?: string) => {
       setThoughts((current) =>
         current.map((thought) =>
-          thought.callId === callId
-            ? {
-                ...thought,
-                detail: detail ?? thought.detail,
-                pendingApproval: undefined,
-                status: statusValue,
-              }
+              thought.callId === callId
+                ? {
+                    ...thought,
+                    detail:
+                      detail === undefined
+                        ? thought.detail
+                        : formatKnownToolResult(thought.toolName, detail),
+                    pendingApproval: undefined,
+                    status: statusValue,
+                  }
             : thought
         )
       )

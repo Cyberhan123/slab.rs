@@ -17,6 +17,14 @@ pub enum AppCoreErrorData {
         error_type: &'static str,
         param: String,
     },
+    ModelDownloadUnavailable {
+        #[serde(rename = "error_type")]
+        error_type: &'static str,
+        param: &'static str,
+        model_id: String,
+        reason: String,
+        suggestion: String,
+    },
 }
 
 impl AppCoreErrorData {
@@ -24,21 +32,38 @@ impl AppCoreErrorData {
         Self::UnsupportedChatParameter { error_type: "invalid_request_error", param: param.into() }
     }
 
+    pub fn model_download_unavailable(
+        model_id: impl Into<String>,
+        reason: impl Into<String>,
+        suggestion: impl Into<String>,
+    ) -> Self {
+        Self::ModelDownloadUnavailable {
+            error_type: "invalid_request_error",
+            param: "model_id",
+            model_id: model_id.into(),
+            reason: reason.into(),
+            suggestion: suggestion.into(),
+        }
+    }
+
     pub fn error_type(&self) -> &'static str {
         match self {
-            Self::UnsupportedChatParameter { error_type, .. } => error_type,
+            Self::UnsupportedChatParameter { error_type, .. }
+            | Self::ModelDownloadUnavailable { error_type, .. } => error_type,
         }
     }
 
     pub fn code(&self) -> &'static str {
         match self {
             Self::UnsupportedChatParameter { .. } => "unsupported_chat_parameter",
+            Self::ModelDownloadUnavailable { .. } => "model_download_unavailable",
         }
     }
 
     pub fn param(&self) -> &str {
         match self {
             Self::UnsupportedChatParameter { param, .. } => param,
+            Self::ModelDownloadUnavailable { param, .. } => param,
         }
     }
 }

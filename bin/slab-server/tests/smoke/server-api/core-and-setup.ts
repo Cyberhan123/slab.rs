@@ -117,6 +117,16 @@ export function registerCoreAndSetupSmoke(
       expect(gpu.body.available).toBeTypeOf("boolean");
       expect(gpu.body.backend).toBeTypeOf("string");
       expect(Array.isArray(gpu.body.devices)).toBe(true);
+
+      const diagnostics = await expectJson<Schema["SystemDiagnosticsResponse"]>(
+        server,
+        "/v1/system/diagnostics"
+      );
+      expect(diagnostics.response.ok).toBe(true);
+      expect(diagnostics.body.status).toBe("ok");
+      expect(diagnostics.body.admin_token_configured).toBeTypeOf("boolean");
+      expect(Array.isArray(diagnostics.body.paths)).toBe(true);
+      expect(diagnostics.body.paths.some((entry) => entry.label === "settings_file")).toBe(true);
     });
   });
 }

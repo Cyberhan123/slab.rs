@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { projectAgentThreadMessages } from '../assistant-message-projection'
+import { formatKnownToolResult, projectAgentThreadMessages } from '../assistant-message-projection'
 
 describe('assistant message projection', () => {
   it('projects persisted agent thread messages and hides tool-only turns', () => {
@@ -135,5 +135,81 @@ describe('assistant message projection', () => {
         status: 'success',
       },
     ])
+  })
+
+  it('formats known coding tool JSON results for replay', () => {
+    expect(
+      projectAgentThreadMessages([
+        {
+          content: '',
+          created_at: '2026-01-01T00:00:01Z',
+          id: 'msg-1',
+          role: 'assistant',
+          thread_id: 'thread-1',
+          turn_index: 0,
+          tool_calls: [
+            {
+              id: 'call-0',
+              type: 'function',
+              function: {
+                name: 'plan_update',
+                arguments: '{"items":[]}',
+              },
+            },
+          ],
+        },
+        {
+          content: JSON.stringify({
+            summary: 'Route map',
+            items: [
+              { step: 'Inspect code', status: 'completed' },
+              { step: 'Implement slice', status: 'in_progress' },
+            ],
+          }),
+          created_at: '2026-01-01T00:00:02Z',
+          id: 'msg-2',
+          role: 'tool',
+          thread_id: 'thread-1',
+          tool_call_id: 'call-0',
+          turn_index: 1,
+        },
+      ])
+    ).toEqual([
+      {
+        id: 'msg-1',
+        message: {
+          content: '',
+          role: 'assistant',
+          thoughts: [
+            {
+              callId: 'call-0',
+              detail: 'Route map\ncompleted: Inspect code\nin_progress: Implement slice',
+              id: 'call-0',
+              status: 'success',
+              summary: 'tool_call id=call-0: plan_update({"items":[]})',
+              title: 'tool_call',
+              toolName: 'plan_update',
+            },
+          ],
+        },
+        status: 'success',
+      },
+    ])
+  })
+
+  it('formats lsp status tool results', () => {
+    expect(
+      formatKnownToolResult(
+        'code_lsp_status',
+        JSON.stringify({
+          language_id: 'rust',
+          provider: {
+            id: 'builtin.rust-analyzer',
+            transport: 'stdio',
+          },
+          workspace_root: 'C:\\repo',
+        })
+      )
+    ).toBe('language: rust\nprovider: builtin.rust-analyzer (stdio)\nworkspace: C:\\repo')
   })
 })

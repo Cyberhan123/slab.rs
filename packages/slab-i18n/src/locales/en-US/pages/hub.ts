@@ -60,6 +60,11 @@ export const hub = {
     source: 'Source',
     updatedAt: 'Updated {{value}}',
     downloadRunning: 'Download task is running',
+    runtimeState: {
+      active: 'Active',
+      loaded: 'Loaded',
+      unloaded: 'Not loaded',
+    },
     downloadPendingDescription:
       'Fetching model files into local storage. The card will refresh when the runtime path is ready.',
     downloadIdleDescription:

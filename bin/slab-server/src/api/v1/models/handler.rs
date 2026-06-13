@@ -11,14 +11,15 @@ const MAX_MODEL_PACK_SIZE: usize = 10 * 1024 * 1024 * 1024; // 10GB
 use crate::api::v1::models::schema::{
     AvailableModelsResponse, CreateModelRequest, DeleteModelResponse, DownloadModelRequest,
     ListAvailableQuery, ListModelsQuery, LoadModelRequest, ModelConfigDocumentResponse,
-    ModelStatusResponse, SwitchModelRequest, UnifiedModelResponse, UnloadModelRequest,
-    UpdateModelConfigSelectionRequest, UpdateModelRequest,
+    ModelRuntimeStateResponse, ModelStatusResponse, SwitchModelRequest, UnifiedModelResponse,
+    UnloadModelRequest, UpdateModelConfigSelectionRequest, UpdateModelRequest,
 };
 use crate::api::v1::path::IdPath;
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::api::validation::{ValidatedJson, ValidatedQuery, validate};
 use crate::error::ServerError;
 use slab_app_core::context::AppState;
+use slab_app_core::domain::models::UnifiedModel;
 use slab_app_core::domain::services::ModelService;
 
 #[allow(dead_code)]
@@ -59,6 +60,7 @@ struct ImportModelPackMultipartRequest {
         AvailableModelsResponse,
         ListAvailableQuery,
         ListModelsQuery,
+        ModelRuntimeStateResponse,
         UnifiedModelResponse,
         ModelConfigDocumentResponse,
         OperationAcceptedResponse
@@ -95,7 +97,8 @@ async fn create_model(
     State(service): State<ModelService>,
     ValidatedJson(req): ValidatedJson<CreateModelRequest>,
 ) -> Result<Json<UnifiedModelResponse>, ServerError> {
-    Ok(Json(service.create_model(req.into()).await?.into()))
+    let model = service.create_model(req.into()).await?;
+    Ok(Json(model_response(&service, model).await))
 }
 
 #[utoipa::path(
@@ -148,7 +151,8 @@ async fn import_model_pack(
             )));
         }
 
-        return Ok(Json(service.import_model_pack_bytes(bytes.as_ref()).await?.into()));
+        let model = service.import_model_pack_bytes(bytes.as_ref()).await?;
+        return Ok(Json(model_response(&service, model).await));
     }
 
     Err(ServerError::BadRequest("multipart body must contain a .slab file field".into()))
@@ -172,7 +176,8 @@ async fn get_model(
     Path(params): Path<IdPath>,
 ) -> Result<Json<UnifiedModelResponse>, ServerError> {
     let params = validate(params)?;
-    Ok(Json(service.get_model(&params.id).await?.into()))
+    let model = service.get_model(&params.id).await?;
+    Ok(Json(model_response(&service, model).await))
 }
 
 #[utoipa::path(
@@ -217,7 +222,8 @@ async fn update_model(
     ValidatedJson(req): ValidatedJson<UpdateModelRequest>,
 ) -> Result<Json<UnifiedModelResponse>, ServerError> {
     let params = validate(params)?;
-    Ok(Json(service.update_model(&params.id, req.into()).await?.into()))
+    let model = service.update_model(&params.id, req.into()).await?;
+    Ok(Json(model_response(&service, model).await))
 }
 
 #[utoipa::path(
@@ -241,7 +247,8 @@ async fn update_model_config_selection(
     ValidatedJson(req): ValidatedJson<UpdateModelConfigSelectionRequest>,
 ) -> Result<Json<UnifiedModelResponse>, ServerError> {
     let params = validate(params)?;
-    Ok(Json(service.update_model_config_selection(&params.id, req.into()).await?.into()))
+    let model = service.update_model_config_selection(&params.id, req.into()).await?;
+    Ok(Json(model_response(&service, model).await))
 }
 
 #[utoipa::path(
@@ -281,8 +288,16 @@ async fn list_models(
     State(service): State<ModelService>,
     Query(query): Query<ListModelsQuery>,
 ) -> Result<Json<Vec<UnifiedModelResponse>>, ServerError> {
-    let items = service.list_models(query.into()).await?.into_iter().map(Into::into).collect();
+    let mut items = Vec::new();
+    for model in service.list_models(query.into()).await? {
+        items.push(model_response(&service, model).await);
+    }
     Ok(Json(items))
+}
+
+async fn model_response(service: &ModelService, model: UnifiedModel) -> UnifiedModelResponse {
+    let runtime_state = service.runtime_state_for_model(&model).await;
+    UnifiedModelResponse::from_model(model, runtime_state)
 }
 
 #[utoipa::path(

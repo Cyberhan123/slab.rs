@@ -554,6 +554,7 @@ Slab 的长期目标是本地优先 AI 桌面工作台：
 - 建立 API 路由、settings schema、plugin manifest、agent event、runtime protobuf 的校验清单。
 - 确认 production-design 是技术设计背景，不把它当成待复制的路线图。
 - 给每个能力域建立 source-of-truth 文件指针。
+- 当前阶段 0 校准入口：`docs/development/planning/slab-source-of-truth-2026-06-13.md`。
 
 验收：
 

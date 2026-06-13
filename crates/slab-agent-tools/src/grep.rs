@@ -10,7 +10,9 @@ use regex::Regex;
 use serde_json::Value;
 use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
 
-const MAX_RESULTS: usize = 200;
+const DEFAULT_MAX_RESULTS: usize = 200;
+const HARD_MAX_RESULTS: usize = 1000;
+const MAX_CONTEXT_LINES: usize = 10;
 
 /// Search files for lines matching a regular expression.
 ///
@@ -21,11 +23,13 @@ const MAX_RESULTS: usize = 200;
 ///   "pattern": "fn execute",
 ///   "path": ".",
 ///   "glob": "*.rs",          // optional
-///   "case_insensitive": false // optional
+///   "case_insensitive": false, // optional
+///   "max_results": 200,        // optional
+///   "context_lines": 0         // optional
 /// }
 /// ```
 ///
-/// Returns up to 200 matches as `[{file, line, text}]`.
+/// Returns matches as `[{file, line, text}]`.
 pub struct GrepTool {
     workspace_root: Option<PathBuf>,
     extra_roots: Vec<PathBuf>,
@@ -77,6 +81,19 @@ impl ToolHandler for GrepTool {
                     "type": "boolean",
                     "description": "If true, match case-insensitively.",
                     "default": false
+                },
+                "max_results": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "default": 200
+                },
+                "context_lines": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 10,
+                    "description": "Number of surrounding lines to include before and after each match.",
+                    "default": 0
                 }
             },
             "required": ["pattern"]
@@ -99,6 +116,16 @@ impl ToolHandler for GrepTool {
         let glob_str = arguments.get("glob").and_then(Value::as_str).map(str::to_owned);
         let case_insensitive =
             arguments.get("case_insensitive").and_then(Value::as_bool).unwrap_or(false);
+        let max_results = arguments
+            .get("max_results")
+            .and_then(Value::as_u64)
+            .map(|value| value.clamp(1, HARD_MAX_RESULTS as u64) as usize)
+            .unwrap_or(DEFAULT_MAX_RESULTS);
+        let context_lines = arguments
+            .get("context_lines")
+            .and_then(Value::as_u64)
+            .map(|value| value.min(MAX_CONTEXT_LINES as u64) as usize)
+            .unwrap_or(0);
 
         let search_root = crate::fs::resolve_agent_path(
             self.workspace_root.as_deref(),
@@ -114,7 +141,7 @@ impl ToolHandler for GrepTool {
 
         // Run the blocking scan on a dedicated thread so we don't block the async runtime.
         let results = tokio::task::spawn_blocking(move || {
-            grep_blocking(&search_root, &re, glob_str.as_deref())
+            grep_blocking(&search_root, &re, glob_str.as_deref(), max_results, context_lines)
         })
         .await
         .map_err(|e| AgentError::ToolExecution(format!("grep task panicked: {e}")))?;
@@ -126,7 +153,7 @@ impl ToolHandler for GrepTool {
             content: serde_json::json!({
                 "matches": results,
                 "total": results.len(),
-                "truncated": results.len() >= MAX_RESULTS
+                "truncated": results.len() >= max_results
             })
             .to_string(),
             metadata: None,
@@ -138,6 +165,8 @@ fn grep_blocking(
     root: &std::path::Path,
     re: &Regex,
     glob: Option<&str>,
+    max_results: usize,
+    context_lines: usize,
 ) -> Result<Vec<serde_json::Value>, String> {
     let mut builder = ignore::WalkBuilder::new(root);
     builder.hidden(false); // don't ignore hidden files (show dot-files)
@@ -152,7 +181,7 @@ fn grep_blocking(
     let mut results = Vec::new();
 
     for result in builder.build() {
-        if results.len() >= MAX_RESULTS {
+        if results.len() >= max_results {
             break;
         }
         let entry = match result {
@@ -167,16 +196,38 @@ fn grep_blocking(
             Ok(c) => c,
             Err(_) => continue, // skip binary / unreadable files
         };
-        for (idx, line) in content.lines().enumerate() {
-            if results.len() >= MAX_RESULTS {
+        let lines = content.lines().collect::<Vec<_>>();
+        for (idx, line) in lines.iter().copied().enumerate() {
+            if results.len() >= max_results {
                 break;
             }
             if re.is_match(line) {
-                results.push(serde_json::json!({
+                let mut match_payload = serde_json::json!({
                     "file": path.display().to_string(),
                     "line": idx + 1,
                     "text": line
-                }));
+                });
+                if context_lines > 0 {
+                    let before_start = idx.saturating_sub(context_lines);
+                    let after_end = (idx + 1 + context_lines).min(lines.len());
+                    match_payload["before_context"] = serde_json::json!(
+                        (before_start..idx)
+                            .map(|line_idx| serde_json::json!({
+                                "line": line_idx + 1,
+                                "text": lines[line_idx]
+                            }))
+                            .collect::<Vec<_>>()
+                    );
+                    match_payload["after_context"] = serde_json::json!(
+                        ((idx + 1)..after_end)
+                            .map(|line_idx| serde_json::json!({
+                                "line": line_idx + 1,
+                                "text": lines[line_idx]
+                            }))
+                            .collect::<Vec<_>>()
+                    );
+                }
+                results.push(match_payload);
             }
         }
     }
@@ -336,13 +387,16 @@ mod tests {
         assert_eq!(schema["properties"]["pattern"]["type"], "string");
         assert_eq!(schema["properties"]["path"]["default"], ".");
         assert_eq!(schema["properties"]["case_insensitive"]["default"], false);
+        assert_eq!(schema["properties"]["max_results"]["default"], 200);
+        assert_eq!(schema["properties"]["context_lines"]["default"], 0);
         assert_eq!(schema["required"], json!(["pattern"]));
     }
 
     #[tokio::test]
     async fn grep_tool_caps_results_and_marks_truncation() {
         let root = temp_root("truncated");
-        let content = std::iter::repeat_n("hit", MAX_RESULTS + 5).collect::<Vec<_>>().join("\n");
+        let content =
+            std::iter::repeat_n("hit", DEFAULT_MAX_RESULTS + 5).collect::<Vec<_>>().join("\n");
         fs::write(root.join("many.txt"), format!("{content}\n")).expect("write matches");
         let tool = GrepTool::new(Some(root.clone()));
 
@@ -352,9 +406,38 @@ mod tests {
             .expect("grep output");
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
-        assert_eq!(value["matches"].as_array().expect("matches").len(), MAX_RESULTS);
-        assert_eq!(value["total"], MAX_RESULTS);
+        assert_eq!(value["matches"].as_array().expect("matches").len(), DEFAULT_MAX_RESULTS);
+        assert_eq!(value["total"], DEFAULT_MAX_RESULTS);
         assert_eq!(value["truncated"], true);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn grep_tool_can_return_context_lines_and_custom_limit() {
+        let root = temp_root("context");
+        fs::write(root.join("notes.txt"), "before\nneedle\nafter\nneedle\n").expect("write file");
+        let tool = GrepTool::new(Some(root.clone()));
+
+        let output = tool
+            .execute(
+                &ctx(),
+                &json!({
+                    "path": ".",
+                    "pattern": "needle",
+                    "context_lines": 1,
+                    "max_results": 1
+                }),
+            )
+            .await
+            .expect("grep output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+
+        assert_eq!(value["total"], 1);
+        assert_eq!(value["truncated"], true);
+        assert_eq!(value["matches"][0]["line"], 2);
+        assert_eq!(value["matches"][0]["before_context"], json!([{ "line": 1, "text": "before" }]));
+        assert_eq!(value["matches"][0]["after_context"], json!([{ "line": 3, "text": "after" }]));
 
         let _ = fs::remove_dir_all(root);
     }

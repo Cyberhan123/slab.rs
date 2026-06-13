@@ -1,5 +1,7 @@
 # Product Functional Logic Documentation
 
+> Current implementation source of truth: `docs/development/planning/slab-source-of-truth-2026-06-13.md`, generated OpenAPI, and the current `bin/slab-server/src/api/v1/*` route handlers. Keep examples in this file aligned with those sources.
+
 ## Executive Summary
 
 **Slab.rs** is a cross-platform desktop application that provides a unified interface for running multiple GGML-based AI inference backends (Whisper, Llama, Stable Diffusion). The application consists of:
@@ -42,15 +44,15 @@
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │              API Routes Layer                         │  │
 │  │  - /health - Health check endpoint                    │  │
-│  │  - /diagnostics - System diagnostics                  │  │
-│  │  - /admin/* - Admin management endpoints              │  │
+│  │  - /v1/system/* - System information                  │  │
+│  │  - /v1/backends/* - Backend status                    │  │
 │  │  - /v1/audio/* - Audio transcription                  │  │
 │  │  - /v1/chat/* - Chat completions                      │  │
-│  │  - /v1/image/* - Image generation                     │  │
+│  │  - /v1/images/* - Image generation                    │  │
 │  └──────────────────────────────────────────────────────┘  │
 │                          ↓                                  │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │              Unified Runtime (slab-core)               │  │
+│  │       app-core services + runtime supervisor           │  │
 │  │  - Orchestrator (Task scheduling)                     │  │
 │  │  - Pipeline (Multi-stage computation)                 │  │
 │  │  - Storage (Task status/result tracking)              │  │
@@ -86,10 +88,10 @@
 ### 2. React Frontend
 
 **Technology Stack**:
-- React 18 with TypeScript
+- React 19 with TypeScript
 - Vite for build tooling
 - TanStack Query for state management
-- shadcn/ui for UI components
+- Ant Design, @ant-design/x, and shared Slab UI components
 - openapi-fetch for type-safe API calls
 - sonner for toast notifications
 
@@ -107,16 +109,16 @@
 **Functionality**:
 ```typescript
 // Check backend status
-GET /admin/backends
+GET /v1/backends
 → Returns: { backends: [{ backend: "ggml.whisper", status: "running" }] }
 
 // Download backend
-POST /admin/backends/download?backend_id=ggml.whisper
-→ Downloads and installs the library
+POST /v1/models/download
+→ Creates a model download task
 
 // Update configuration
-PUT /admin/config/{key}
-→ Updates environment variable or runtime config
+PUT /v1/settings/{pmid}
+→ Updates a typed settings PMIDs value
 ```
 
 #### Chat Page (`/chat`)
@@ -156,33 +158,27 @@ PUT /admin/config/{key}
 
 **API Endpoints**:
 
-#### Health & Diagnostics
+#### Health And System Status
 ```
 GET /health
 → Returns: { status: "ok", version: "0.0.1" }
 
-GET /diagnostics
-→ Returns: { backends: {...}, environment: {...}, recommendations: [...] }
+GET /v1/system/gpu
+→ Returns GPU and accelerator status
 ```
 
-#### Admin Endpoints
+#### Backend And Settings Endpoints
 ```
-GET /admin/backends
+GET /v1/backends
 → List all backends and their status
 
-GET /admin/backends/status?backend_id=ggml.whisper
+GET /v1/backends/status?backend_id=ggml.whisper
 → Get detailed backend status
 
-POST /admin/backends/reload?backend_id=ggml.whisper
-→ Reload backend library
+GET /v1/settings
+→ List configuration PMIDs
 
-POST /admin/backends/download?backend_id=ggml.whisper
-→ Download and install backend library
-
-GET /admin/config
-→ List all configuration
-
-PUT /admin/config/{key}
+PUT /v1/settings/{pmid}
 → Update configuration value
 ```
 
@@ -191,23 +187,29 @@ PUT /admin/config/{key}
 POST /v1/audio/transcriptions
 → Submit audio transcription task
 
-GET /v1/chat/completions
+POST /v1/chat/completions
 → Chat completions (streaming)
 
-POST /v1/image/generations
+POST /v1/images/generations
 → Generate images from text
 
-GET /api/tasks
+GET /v1/tasks
 → List all tasks
 
-GET /api/tasks/{id}
+GET /v1/tasks/{id}
 → Get task status
 
-GET /api/tasks/{id}/result
+GET /v1/tasks/{id}/result
 → Get task result
+
+POST /v1/tasks/{id}/cancel
+→ Cancel task
+
+POST /v1/tasks/{id}/restart
+→ Restart task
 ```
 
-### 4. Unified Runtime (slab-core)
+### 4. Runtime Supervisor And app-core Services
 
 **Purpose**: Provides abstraction layer for managing AI backends
 
@@ -237,19 +239,19 @@ GET /api/tasks/{id}/result
 ```
 User clicks "Download" button
     ↓
-Frontend: downloadBackend(backendId)
+Frontend: start model download
     ↓
-API: POST /admin/backends/download?backend_id=ggml.whisper
+API: POST /v1/models/download
     ↓
-Backend: slab-libfetch downloads library
+Backend: creates a model download task
     ↓
-Backend: Extracts to libraries directory
+Backend: downloads and materializes the selected artifact
     ↓
-Backend: Updates backend status
+Backend: updates task and model download state
     ↓
-Frontend: Polls GET /admin/backends
+Frontend: polls GET /v1/tasks/{id}
     ↓
-Frontend: Updates UI to show "Ready" badge
+Frontend: updates model status from task/model state
 ```
 
 ### Audio Transcription Flow
@@ -266,7 +268,7 @@ Backend: Checks Whisper backend is ready
     ↓
 Backend: Creates task record (status: "running")
     ↓
-Backend: Submits to slab-core pipeline
+Backend: submits work through app-core media services and the runtime gateway
     ↓
 Pipeline Stage 1: FFmpeg (CPU)
     → Converts audio to PCM f32le 16kHz mono
@@ -276,9 +278,9 @@ Pipeline Stage 2: Whisper (GPU)
     ↓
 Backend: Updates task record (status: "succeeded")
     ↓
-Frontend: Polls GET /api/tasks/{id}
+Frontend: polls GET /v1/tasks/{id}
     ↓
-Frontend: GET /api/tasks/{id}/result
+Frontend: GET /v1/tasks/{id}/result
     → Displays transcription result
 ```
 
@@ -296,7 +298,7 @@ Backend: Checks Llama backend is ready
     ↓
 Backend: Creates task record
     ↓
-Backend: Submits to slab-core pipeline
+Backend: uses app-core chat services and GrpcGateway/runtime when the selected model is local
     ↓
 Pipeline Stage 1: Tokenization (CPU)
     ↓
@@ -356,13 +358,13 @@ try {
 
 ```typescript
 // Backend status
-const { data: backends, refetch } = api.useQuery('get', '/admin/backends');
+const { data: backends, refetch } = api.useQuery('get', '/v1/backends');
 
 // Configuration
-const { data: configs } = api.useQuery('get', '/admin/config');
+const { data: settings } = api.useQuery('get', '/v1/settings');
 
 // Mutations
-const downloadMutation = api.useMutation('post', '/admin/backends/download');
+const downloadMutation = api.useMutation('post', '/v1/models/download');
 ```
 
 ### Backend State (SQLite)
@@ -476,21 +478,13 @@ SLAB_BACKEND_CAPACITY=4           # Max concurrent requests per backend
 
 ### Development Build
 ```bash
-# Backend
-cargo build -p slab-server
-
-# Frontend
-cd slab-app && bun install && bun run dev
+bun install
+bun run dev:app
 ```
 
 ### Production Build
 ```bash
-# Backend (optimized)
-cargo build -p slab-server --release
-
-# Frontend (optimized)
-cd slab-app && bun run build
-bun run tauri build
+bun run build:app
 ```
 
 ### Distribution
@@ -504,7 +498,7 @@ bun run tauri build
 
 ### Updating Backend Libraries
 1. Navigate to Settings → Backends
-2. Check backend versions in diagnostics
+2. Check backend status in `/v1/backends` and `/v1/backends/status`
 3. Download newer versions if available
 4. Server automatically reloads libraries
 
@@ -516,7 +510,7 @@ bun run tauri build
 5. Server applies configuration immediately
 
 ### Monitoring
-- Check `/diagnostics` endpoint for system health
+- Check `/health`, `/v1/system/gpu`, `/v1/backends/status`, and `/v1/tasks/{id}` for current system and task health
 - Review server logs for errors
 - Monitor task queue status
 - Track backend worker utilization

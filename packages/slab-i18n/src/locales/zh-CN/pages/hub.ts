@@ -58,6 +58,11 @@ export const hub = {
     source: '来源',
     updatedAt: '更新于 {{value}}',
     downloadRunning: '下载任务正在运行',
+    runtimeState: {
+      active: '运行中',
+      loaded: '已加载',
+      unloaded: '未加载',
+    },
     downloadPendingDescription: '模型文件正在拉取到本地存储中。运行时路径就绪后，卡片会自动刷新。',
     downloadIdleDescription: '导入只会把这个包加入目录。需要本地运行时副本时，再在这里下载即可。',
     descriptions: {

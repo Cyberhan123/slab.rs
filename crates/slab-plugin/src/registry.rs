@@ -287,6 +287,7 @@ fn validate_and_load_plugin(
                 .to_owned(),
         );
     }
+    validate_contribution_permissions(&manifest)?;
 
     let wasm_entry_path = match manifest.runtime.wasm.as_ref() {
         Some(wasm) => Some(
@@ -444,6 +445,73 @@ fn has_node_package_language_server(manifest: &PluginManifest) -> bool {
     manifest.contributes.language_servers.iter().any(|provider| {
         matches!(&provider.transport, PluginLanguageServerTransport::NodePackage { .. })
     })
+}
+
+fn validate_contribution_permissions(manifest: &PluginManifest) -> Result<(), String> {
+    let permissions = &manifest.permissions;
+    for (has_contribution, declared_permissions, expected_permission, error) in [
+        (
+            !manifest.contributes.routes.is_empty(),
+            &permissions.ui,
+            "route:create",
+            "contributes.routes requires permissions.ui to include route:create",
+        ),
+        (
+            !manifest.contributes.sidebar.is_empty(),
+            &permissions.ui,
+            "sidebar:item:create",
+            "contributes.sidebar requires permissions.ui to include sidebar:item:create",
+        ),
+        (
+            !manifest.contributes.commands.is_empty(),
+            &permissions.ui,
+            "command:create",
+            "contributes.commands requires permissions.ui to include command:create",
+        ),
+        (
+            !manifest.contributes.settings.is_empty(),
+            &permissions.ui,
+            "settings:section:create",
+            "contributes.settings requires permissions.ui to include settings:section:create",
+        ),
+        (
+            !manifest.contributes.agent_capabilities.is_empty(),
+            &permissions.agent,
+            "capability:declare",
+            "contributes.agentCapabilities requires permissions.agent to include capability:declare",
+        ),
+        (
+            !manifest.contributes.agent_hooks.is_empty(),
+            &permissions.agent,
+            "hook:declare",
+            "contributes.agentHooks requires permissions.agent to include hook:declare",
+        ),
+        (
+            !manifest.contributes.language_servers.is_empty(),
+            &permissions.lsp,
+            "languageServer:declare",
+            "contributes.languageServers requires permissions.lsp to include languageServer:declare",
+        ),
+    ] {
+        if has_contribution
+            && !declared_permissions.iter().any(|permission| permission == expected_permission)
+        {
+            return Err(error.to_owned());
+        }
+    }
+
+    for capability in &manifest.contributes.agent_capabilities {
+        if capability.expose_as_mcp_tool
+            && !permissions.agent.iter().any(|permission| permission == "mcpTool:expose")
+        {
+            return Err(
+                "contributes.agentCapabilities[].exposeAsMcpTool requires permissions.agent to include mcpTool:expose"
+                    .to_owned(),
+            );
+        }
+    }
+
+    Ok(())
 }
 
 fn validate_declared_file(
@@ -668,6 +736,97 @@ mod tests {
                 .error
                 .as_deref()
                 .is_some_and(|error| error.contains("at most one callable runtime"))
+        );
+    }
+
+    #[test]
+    fn registry_rejects_agent_capability_mcp_exposure_without_permission() {
+        let root = TestDir::new("agent-capability-permission");
+        let plugin_dir = root.path().join("sample-plugin");
+        fs::create_dir_all(plugin_dir.join("ui")).expect("create ui directory");
+        fs::write(plugin_dir.join("ui").join("index.html"), "<html></html>")
+            .expect("write ui entry");
+        fs::write(
+            plugin_dir.join("plugin.json"),
+            r#"{
+                "manifestVersion": 1,
+                "id": "sample-plugin",
+                "name": "Sample Plugin",
+                "version": "0.1.0",
+                "runtime": {
+                    "ui": { "entry": "ui/index.html" }
+                },
+                "permissions": {
+                    "agent": ["capability:declare"]
+                },
+                "contributes": {
+                    "agentCapabilities": [
+                        {
+                            "id": "sample-plugin.translate",
+                            "kind": "tool",
+                            "transport": {
+                                "type": "pluginCall",
+                                "function": "translate"
+                            },
+                            "exposeAsMcpTool": true
+                        }
+                    ]
+                }
+            }"#,
+        )
+        .expect("write manifest");
+
+        let registry = PluginRegistry::new(root.path().to_path_buf()).expect("create registry");
+        let listed = registry.list().expect("list plugins");
+
+        assert_eq!(listed.len(), 1);
+        assert!(!listed[0].valid);
+        assert!(listed[0].error.as_deref().is_some_and(|error| error.contains("mcpTool:expose")));
+    }
+
+    #[test]
+    fn registry_rejects_language_server_without_permission() {
+        let root = TestDir::new("language-server-permission");
+        let plugin_dir = root.path().join("sample-plugin");
+        fs::create_dir_all(plugin_dir.join("ui")).expect("create ui directory");
+        fs::write(plugin_dir.join("ui").join("index.html"), "<html></html>")
+            .expect("write ui entry");
+        fs::write(
+            plugin_dir.join("plugin.json"),
+            r#"{
+                "manifestVersion": 1,
+                "id": "sample-plugin",
+                "name": "Sample Plugin",
+                "version": "0.1.0",
+                "runtime": {
+                    "ui": { "entry": "ui/index.html" }
+                },
+                "contributes": {
+                    "languageServers": [
+                        {
+                            "id": "sample-plugin.typescript",
+                            "languages": ["typescript"],
+                            "transport": {
+                                "type": "nodePackage",
+                                "package": "typescript-language-server"
+                            }
+                        }
+                    ]
+                }
+            }"#,
+        )
+        .expect("write manifest");
+
+        let registry = PluginRegistry::new(root.path().to_path_buf()).expect("create registry");
+        let listed = registry.list().expect("list plugins");
+
+        assert_eq!(listed.len(), 1);
+        assert!(!listed[0].valid);
+        assert!(
+            listed[0]
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("languageServer:declare"))
         );
     }
 

@@ -52,7 +52,14 @@ async fn model_download_requires_repo_id_and_filename() {
         .await
         .expect_err("missing repo_id should fail");
     assert!(
-        matches!(&repo_error, AppCoreError::BadRequest(message) if message.contains("missing repo_id")),
+        matches!(
+            &repo_error,
+            AppCoreError::BadRequestData { message, data }
+                if message.contains("missing repo_id")
+                    && message.contains("Add a repo_id")
+                    && data.code() == "model_download_unavailable"
+                    && data.param() == "model_id"
+        ),
         "unexpected error: {repo_error}"
     );
 
@@ -67,7 +74,14 @@ async fn model_download_requires_repo_id_and_filename() {
         .await
         .expect_err("missing filename should fail");
     assert!(
-        matches!(&filename_error, AppCoreError::BadRequest(message) if message.contains("missing filename")),
+        matches!(
+            &filename_error,
+            AppCoreError::BadRequestData { message, data }
+                if message.contains("missing filename")
+                    && message.contains("Add a filename")
+                    && data.code() == "model_download_unavailable"
+                    && data.param() == "model_id"
+        ),
         "unexpected error: {filename_error}"
     );
 }

@@ -6,6 +6,7 @@ export type UnifiedModelResponse = components['schemas']['UnifiedModelResponse']
 export type ModelCapability = components['schemas']['ModelCapability'];
 export type ChatModelCapabilities = components['schemas']['ChatModelCapabilities'];
 export type CatalogModelStatus = 'ready' | 'not_downloaded' | 'downloading' | 'error';
+export type CatalogModelRuntimeState = components['schemas']['ModelRuntimeStateResponse'];
 
 export type CatalogModel = Omit<UnifiedModelResponse, 'status'> & {
   status: CatalogModelStatus;
@@ -17,6 +18,7 @@ export type CatalogModel = Omit<UnifiedModelResponse, 'status'> & {
   filename: string;
   local_path: string | null;
   pending: boolean;
+  runtime_state: CatalogModelRuntimeState | null;
 };
 
 export function normalizeModelStatus(status: string): CatalogModelStatus {
@@ -39,6 +41,9 @@ export function normalizeCatalogModel(model: UnifiedModelResponse): CatalogModel
     model.chat_capabilities && isChatModelCapabilities(model.chat_capabilities)
       ? model.chat_capabilities
       : null;
+  const runtimeState = isCatalogModelRuntimeState(model.runtime_state)
+    ? model.runtime_state
+    : null;
 
   return {
     ...model,
@@ -51,6 +56,7 @@ export function normalizeCatalogModel(model: UnifiedModelResponse): CatalogModel
     filename: model.spec.filename ?? '',
     local_path: localPath,
     pending: status === 'downloading',
+    runtime_state: runtimeState,
   };
 }
 
@@ -97,11 +103,30 @@ function isUnifiedModelResponse(value: unknown): value is UnifiedModelResponse {
     isOptionalString(model.backend_id) &&
     isCapabilityList(model.capabilities) &&
     isOptionalChatModelCapabilities(model.chat_capabilities) &&
+    isOptionalCatalogModelRuntimeState(model.runtime_state) &&
     isOptionalString(spec.provider_id) &&
     isOptionalString(spec.remote_model_id) &&
     isOptionalString(spec.repo_id) &&
     isOptionalString(spec.filename) &&
     isOptionalString(spec.local_path)
+  );
+}
+
+function isOptionalCatalogModelRuntimeState(
+  value: unknown,
+): value is CatalogModelRuntimeState | null | undefined {
+  return value === undefined || value === null || isCatalogModelRuntimeState(value);
+}
+
+function isCatalogModelRuntimeState(value: unknown): value is CatalogModelRuntimeState {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    typeof (value as UnknownRecord).backend_id === 'string' &&
+    typeof (value as UnknownRecord).loaded === 'boolean' &&
+    typeof (value as UnknownRecord).active === 'boolean' &&
+    typeof (value as UnknownRecord).active_refs === 'number'
   );
 }
 

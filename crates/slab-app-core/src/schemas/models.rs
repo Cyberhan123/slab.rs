@@ -25,7 +25,8 @@ use crate::domain::models::{
     ModelEnhancementPresetOption as DomainModelEnhancementPresetOption,
     ModelEnhancementVariantOption as DomainModelEnhancementVariantOption,
     ModelEnhancementView as DomainModelEnhancementView, ModelLoadCommand as DomainModelLoadCommand,
-    ModelSpec as DomainModelSpec, ModelStatus as DomainModelStatus, Pricing as DomainPricing,
+    ModelRuntimeState as DomainModelRuntimeState, ModelSpec as DomainModelSpec,
+    ModelStatus as DomainModelStatus, Pricing as DomainPricing,
     RuntimePresets as DomainRuntimePresets, UnifiedModel as DomainUnifiedModel,
     UnifiedModelKind as DomainUnifiedModelKind, UpdateModelCommand as DomainUpdateModelCommand,
     UpdateModelConfigSelectionCommand as DomainUpdateModelConfigSelectionCommand,
@@ -255,6 +256,19 @@ pub struct ModelStatusResponse {
     /// Training context window length reported by the loaded model.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub training_context_length: Option<u32>,
+}
+
+/// Runtime lifecycle state for a local catalog model.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ModelRuntimeStateResponse {
+    /// Runtime backend identifier for local models, e.g. `"ggml.llama"`.
+    pub backend_id: String,
+    /// Whether this catalog model is currently resident in its runtime backend.
+    pub loaded: bool,
+    /// Whether this catalog model is currently serving an inference request.
+    pub active: bool,
+    /// Number of active inference references on the backend.
+    pub active_refs: u64,
 }
 
 /// Request body for `POST /v1/models/switch`.
@@ -581,6 +595,8 @@ pub struct UnifiedModelResponse {
     pub spec: ModelSpecResponse,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_presets: Option<RuntimePresetsResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_state: Option<ModelRuntimeStateResponse>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -596,6 +612,17 @@ impl From<DomainModelStatus> for ModelStatusResponse {
             status: status.status,
             context_length: status.context_length,
             training_context_length: status.training_context_length,
+        }
+    }
+}
+
+impl From<DomainModelRuntimeState> for ModelRuntimeStateResponse {
+    fn from(state: DomainModelRuntimeState) -> Self {
+        Self {
+            backend_id: state.backend_id.to_string(),
+            loaded: state.loaded,
+            active: state.active,
+            active_refs: state.active_refs,
         }
     }
 }
@@ -872,6 +899,15 @@ impl From<DomainCapability> for ModelCapability {
 
 impl From<DomainUnifiedModel> for UnifiedModelResponse {
     fn from(model: DomainUnifiedModel) -> Self {
+        Self::from_model(model, None)
+    }
+}
+
+impl UnifiedModelResponse {
+    pub fn from_model(
+        model: DomainUnifiedModel,
+        runtime_state: Option<DomainModelRuntimeState>,
+    ) -> Self {
         let chat_capabilities = model
             .capabilities
             .contains(&DomainCapability::ChatGeneration)
@@ -893,6 +929,7 @@ impl From<DomainUnifiedModel> for UnifiedModelResponse {
             status: model.status.as_str().to_owned(),
             spec: model.spec.into(),
             runtime_presets: model.runtime_presets.map(Into::into),
+            runtime_state: runtime_state.map(Into::into),
             created_at: model.created_at.to_rfc3339(),
             updated_at: model.updated_at.to_rfc3339(),
         }

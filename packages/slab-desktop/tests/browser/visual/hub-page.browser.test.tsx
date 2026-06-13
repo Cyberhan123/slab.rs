@@ -44,6 +44,7 @@ function createMockModel(overrides: Partial<ModelItem> = {}): ModelItem {
     status: 'ready',
     local_path: '/models/llama-3.2-3b.gguf',
     pending: false,
+    runtime_state: null,
     download_task_id: null,
     download_progress: null,
     updated_at: '2024-01-15T10:30:00Z',

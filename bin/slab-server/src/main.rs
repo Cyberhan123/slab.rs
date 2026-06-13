@@ -233,7 +233,6 @@ fn init_tracing(
         },
     };
 
-    slab_otel::provider::install_log_bridge();
     let Some(provider) = slab_otel::OtelProvider::from(settings)? else {
         init_console_tracing(env_filter, log_json);
         return Ok(None);

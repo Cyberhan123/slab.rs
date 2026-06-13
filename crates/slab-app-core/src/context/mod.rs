@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -181,6 +182,12 @@ fn build_agent_control(
         web_search_config,
         shell_rules,
     );
+    tool_router.register(Box::new(crate::infra::agent_code_tools::CodeLspStatusTool::new(
+        crate::domain::services::WorkspaceLspService::new(
+            Arc::clone(&ctx.config),
+            crate::domain::services::PluginService::new((*ctx.model_state).clone()),
+        ),
+    )));
 
     let tool_router = Arc::new(tool_router);
     let notify_port: Arc<dyn slab_agent::AgentNotifyPort> = notify.clone();
@@ -211,6 +218,10 @@ fn build_agent_control(
             extra_roots.clone(),
         )));
         tool_router.register(Box::new(slab_agent_tools::ListDirTool::new_with_extra_roots(
+            workspace_root.clone(),
+            extra_roots.clone(),
+        )));
+        tool_router.register(Box::new(slab_agent_tools::FileGlobTool::new_with_extra_roots(
             workspace_root.clone(),
             extra_roots.clone(),
         )));
@@ -277,14 +288,108 @@ fn normalize_non_empty_path(value: &str) -> Option<PathBuf> {
 }
 
 fn build_agent_mcp_client(ctx: &AppContext) -> Option<Arc<slab_mcp::McpClient>> {
-    if !ctx.pmid.config().agent.tools.mcp.enabled {
+    let settings = ctx.pmid.config().agent.tools.mcp;
+    if !settings.enabled {
         return None;
     }
 
-    tracing::warn!(
-        "agent MCP tools are enabled, but no persisted MCP server launch config is wired yet"
-    );
-    Some(Arc::new(slab_mcp::McpClient::new()))
+    let client = Arc::new(slab_mcp::McpClient::new());
+    let launchers = agent_mcp_client_config(&settings).servers;
+    if !launchers.is_empty() {
+        schedule_agent_mcp_connections(Arc::clone(&client), launchers);
+    }
+    Some(client)
+}
+
+fn schedule_agent_mcp_connections(
+    client: Arc<slab_mcp::McpClient>,
+    launchers: Vec<slab_mcp::McpServerLauncher>,
+) {
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        tracing::warn!("agent MCP server launchers are configured, but no Tokio runtime is active");
+        return;
+    };
+    handle.spawn(async move {
+        for launcher in launchers {
+            let server_name = launcher.name.clone();
+            match client.connect_stdio(launcher).await {
+                Ok(()) => {
+                    tracing::info!(server = %server_name, "connected configured MCP stdio server");
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        server = %server_name,
+                        error = %error,
+                        "failed to connect configured MCP stdio server"
+                    );
+                }
+            }
+        }
+    });
+}
+
+fn agent_mcp_client_config(settings: &slab_config::AgentMcpConfig) -> slab_mcp::McpClientConfig {
+    agent_mcp_client_config_with_env(settings, |name| std::env::var(name))
+}
+
+fn agent_mcp_client_config_with_env<F>(
+    settings: &slab_config::AgentMcpConfig,
+    mut env_lookup: F,
+) -> slab_mcp::McpClientConfig
+where
+    F: FnMut(&str) -> Result<String, std::env::VarError>,
+{
+    let mut servers = Vec::new();
+    for server in &settings.servers {
+        if !server.enabled {
+            continue;
+        }
+        let name = server.name.trim();
+        let command = server.command.trim();
+        if name.is_empty() || command.is_empty() {
+            tracing::warn!("skipping MCP server with empty name or command");
+            continue;
+        }
+
+        let mut env = HashMap::new();
+        for (target_name, env_value) in &server.env {
+            let target_name = target_name.trim();
+            let env_var = env_value.env_var.trim();
+            if target_name.is_empty() || env_var.is_empty() {
+                tracing::warn!(server = %name, "skipping MCP env mapping with empty name");
+                continue;
+            }
+            match env_lookup(env_var) {
+                Ok(value) => {
+                    env.insert(target_name.to_owned(), value);
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        server = %name,
+                        env = %target_name,
+                        env_var = %env_var,
+                        error = %error,
+                        "skipping unresolved MCP env var reference"
+                    );
+                }
+            }
+        }
+
+        servers.push(slab_mcp::McpServerLauncher {
+            name: name.to_owned(),
+            command: command.to_owned(),
+            args: server.args.clone(),
+            env,
+            cwd: server
+                .cwd
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned),
+        });
+    }
+
+    slab_mcp::McpClientConfig { servers }
 }
 
 fn available_sandbox_driver(
@@ -306,12 +411,14 @@ fn available_sandbox_driver(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::sync::Arc;
 
     use async_trait::async_trait;
+    use slab_config::{AgentMcpConfig, AgentMcpEnvValueConfig, AgentMcpServerConfig};
     use slab_sandboxing::{SandboxDriver, SandboxError, SandboxSetupStatus, SandboxedCommand};
 
-    use super::available_sandbox_driver;
+    use super::{agent_mcp_client_config_with_env, available_sandbox_driver};
 
     struct StatusDriver {
         status: SandboxSetupStatus,
@@ -350,6 +457,73 @@ mod tests {
             Arc::new(StatusDriver { status: SandboxSetupStatus::degraded("guard-only mode") });
 
         assert!(available_sandbox_driver(driver).is_some());
+    }
+
+    #[test]
+    fn agent_mcp_config_maps_enabled_servers_and_env_refs() {
+        let mut env = BTreeMap::new();
+        env.insert(
+            "GITHUB_PERSONAL_ACCESS_TOKEN".to_owned(),
+            AgentMcpEnvValueConfig { env_var: "GITHUB_TOKEN".to_owned() },
+        );
+        let settings = AgentMcpConfig {
+            enabled: true,
+            servers: vec![
+                AgentMcpServerConfig {
+                    enabled: true,
+                    name: " github ".to_owned(),
+                    command: " npx ".to_owned(),
+                    args: vec!["-y".to_owned(), "@modelcontextprotocol/server-github".to_owned()],
+                    cwd: Some(" C:/workspace ".to_owned()),
+                    env,
+                },
+                AgentMcpServerConfig {
+                    enabled: false,
+                    name: "disabled".to_owned(),
+                    command: "node".to_owned(),
+                    args: Vec::new(),
+                    cwd: None,
+                    env: BTreeMap::new(),
+                },
+            ],
+        };
+
+        let config = agent_mcp_client_config_with_env(&settings, |name| match name {
+            "GITHUB_TOKEN" => Ok("secret".to_owned()),
+            _ => Err(std::env::VarError::NotPresent),
+        });
+
+        assert_eq!(config.servers.len(), 1);
+        assert_eq!(config.servers[0].name, "github");
+        assert_eq!(config.servers[0].command, "npx");
+        assert_eq!(config.servers[0].cwd.as_deref(), Some("C:/workspace"));
+        assert_eq!(config.servers[0].env["GITHUB_PERSONAL_ACCESS_TOKEN"], "secret");
+    }
+
+    #[test]
+    fn agent_mcp_config_omits_missing_env_refs() {
+        let mut env = BTreeMap::new();
+        env.insert(
+            "TOKEN".to_owned(),
+            AgentMcpEnvValueConfig { env_var: "MISSING_TOKEN".to_owned() },
+        );
+        let settings = AgentMcpConfig {
+            enabled: true,
+            servers: vec![AgentMcpServerConfig {
+                enabled: true,
+                name: "server".to_owned(),
+                command: "node".to_owned(),
+                args: Vec::new(),
+                cwd: None,
+                env,
+            }],
+        };
+
+        let config =
+            agent_mcp_client_config_with_env(&settings, |_| Err(std::env::VarError::NotPresent));
+
+        assert_eq!(config.servers.len(), 1);
+        assert!(config.servers[0].env.is_empty());
     }
 }
 

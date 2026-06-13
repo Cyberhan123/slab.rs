@@ -1,7 +1,14 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
 import type { SlabServerTestHarness } from "../../support/slab-server";
-import { expectError, expectJson, jsonInit, type DeletedModelResponse, type Schema } from "./shared";
+import {
+  expectError,
+  expectJson,
+  expectOpenAiError,
+  jsonInit,
+  type DeletedModelResponse,
+  type Schema
+} from "./shared";
 
 export function registerModelsAndChatSmoke(
   getServer: () => SlabServerTestHarness
@@ -88,7 +95,7 @@ export function registerModelsAndChatSmoke(
         });
       }
 
-      await expectError(
+      await expectOpenAiError(
         server,
         "/v1/chat/completions",
         400,
@@ -102,7 +109,7 @@ export function registerModelsAndChatSmoke(
           { method: "POST" }
         )
       );
-      await expectError(
+      await expectOpenAiError(
         server,
         "/v1/completions",
         400,

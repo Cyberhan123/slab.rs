@@ -4,7 +4,10 @@ import type {
   AssistantMessageRecord,
   AssistantThought,
 } from './assistant-types'
+import { isRecord } from './assistant-types'
 import { stripTrailingAssistantTurnArtifacts } from './assistant-message-utils'
+
+const MAX_TOOL_DETAIL_LINES = 20
 
 function finalizePendingThoughts(
   thoughts: AssistantThought[],
@@ -36,6 +39,86 @@ function isToolOnlyContent(content: string): boolean {
   return content
     .split('\n')
     .every((line) => line.startsWith('tool_call') || line.startsWith('tool_call_id:'))
+}
+
+export function formatKnownToolResult(toolName: string | undefined, rawDetail: string): string {
+  const trimmed = rawDetail.trim()
+  if (!trimmed || !toolName) {
+    return rawDetail
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch {
+    return rawDetail
+  }
+
+  if (!isRecord(parsed)) {
+    return rawDetail
+  }
+
+  if (toolName === 'plan_update') {
+    const lines: string[] = []
+    if (typeof parsed.summary === 'string' && parsed.summary.trim()) {
+      lines.push(parsed.summary.trim())
+    }
+    if (Array.isArray(parsed.items)) {
+      for (const item of parsed.items) {
+        if (!isRecord(item) || typeof item.step !== 'string' || typeof item.status !== 'string') {
+          continue
+        }
+        lines.push(`${item.status.trim()}: ${item.step.trim()}`)
+      }
+    }
+    return lines.length > 0 ? lines.join('\n') : rawDetail
+  }
+
+  if (toolName === 'code_lsp_status') {
+    const lines: string[] = []
+    if (typeof parsed.language_id === 'string') {
+      lines.push(`language: ${parsed.language_id}`)
+    }
+    if (isRecord(parsed.provider)) {
+      const id = typeof parsed.provider.id === 'string' ? parsed.provider.id : 'unknown'
+      const transport =
+        typeof parsed.provider.transport === 'string' ? parsed.provider.transport : 'unknown'
+      lines.push(`provider: ${id} (${transport})`)
+    } else {
+      lines.push('provider: unavailable')
+    }
+    if (typeof parsed.workspace_root === 'string') {
+      lines.push(`workspace: ${parsed.workspace_root}`)
+    }
+    return lines.length > 0 ? lines.join('\n') : rawDetail
+  }
+
+  if (toolName !== 'file_glob' && toolName !== 'grep') {
+    return rawDetail
+  }
+
+  const matches = Array.isArray(parsed.matches) ? parsed.matches : []
+  const total = typeof parsed.total === 'number' ? parsed.total : matches.length
+  const lines = [`${total} matches${parsed.truncated === true ? ' (truncated)' : ''}`]
+  for (const match of matches.slice(0, MAX_TOOL_DETAIL_LINES)) {
+    if (!isRecord(match)) {
+      continue
+    }
+    if (toolName === 'grep') {
+      const file = typeof match.file === 'string' ? match.file : ''
+      const line = typeof match.line === 'number' ? match.line : ''
+      const text = typeof match.text === 'string' ? match.text : ''
+      lines.push(`${file}:${line}: ${text}`.trim())
+      continue
+    }
+    const path = typeof match.path === 'string' ? match.path : ''
+    const kind = typeof match.kind === 'string' ? match.kind : 'match'
+    lines.push(`${kind}: ${path}`.trim())
+  }
+  if (matches.length > MAX_TOOL_DETAIL_LINES) {
+    lines.push(`... ${matches.length - MAX_TOOL_DETAIL_LINES} more`)
+  }
+  return lines.join('\n')
 }
 
 export function projectAgentThreadMessages(
@@ -100,7 +183,7 @@ export function projectAgentThreadMessages(
         matched = true
         return {
           ...thought,
-          detail: message.content.trim() || thought.detail,
+          detail: formatKnownToolResult(thought.toolName, message.content.trim()) || thought.detail,
           status: 'success',
         }
       })

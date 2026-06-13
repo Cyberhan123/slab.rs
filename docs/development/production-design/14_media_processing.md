@@ -434,16 +434,24 @@ stateDiagram-v2
 
 ### 5.2 API 端点
 
-- `POST /v1/audio/transcribe` - 音频转录
-- `POST /v1/video/convert` - 视频转换
-- `POST /v1/video/extract` - 提取流
-- `GET /v1/video/metadata` - 获取元数据
-- `POST /v1/subtitles/parse` - 解析字幕
-- `POST /v1/subtitles/generate` - 生成字幕
-- `POST /v1/ffmpeg/convert` - 媒体转换
-- `POST /v1/tasks/create` - 创建任务
+当前媒体入口以 OpenAPI 和 `bin/slab-server/src/api/v1/*/handler.rs` 为准：
+
+- `GET|POST /v1/audio/transcriptions` - 列出或创建音频转录任务
+- `GET /v1/audio/transcriptions/{id}` - 查询音频转录任务详情
+- `GET|POST /v1/images/generations` - 列出或创建图像生成任务
+- `GET /v1/images/generations/{id}` - 查询图像生成任务详情
+- `GET /v1/images/generations/{id}/artifacts/{index}` - 获取图像 artifact
+- `GET /v1/images/generations/{id}/reference` - 获取图像参考输入
+- `GET|POST /v1/video/generations` - 列出或创建视频生成任务
+- `GET /v1/video/generations/{id}` - 查询视频生成任务详情
+- `GET /v1/video/generations/{id}/artifact` - 获取视频 artifact
+- `GET /v1/video/generations/{id}/reference` - 获取视频参考输入
+- `POST /v1/ffmpeg/convert` - 创建媒体转换任务
+- `POST /v1/subtitles/render` - 渲染字幕
 - `GET /v1/tasks/{id}` - 查询任务状态
-- `DELETE /v1/tasks/{id}` - 取消任务
+- `GET /v1/tasks/{id}/result` - 获取任务结果
+- `POST /v1/tasks/{id}/cancel` - 取消任务
+- `POST /v1/tasks/{id}/restart` - 重启任务
 
 ### 5.3 配置项
 

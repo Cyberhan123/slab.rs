@@ -89,6 +89,45 @@ async fn model_runtime_loads_catalog_llama_by_model_id() {
 }
 
 #[tokio::test]
+async fn model_runtime_state_tracks_loaded_and_active_catalog_model() {
+    let app = TestAppCore::new().await;
+    let model_path = app.write_model_file("runtime-state.gguf");
+    let model = app
+        .model
+        .create_model(ready_local_llama_command("runtime-state", &model_path))
+        .await
+        .expect("create runtime model");
+    app.runtime.allow_backend(RuntimeBackendId::GgmlLlama);
+
+    let initial = app.model.runtime_state_for_model(&model).await.expect("runtime state");
+    assert_eq!(initial.backend_id, RuntimeBackendId::GgmlLlama);
+    assert!(!initial.loaded);
+    assert!(!initial.active);
+    assert_eq!(initial.active_refs, 0);
+
+    app.model
+        .load_model(ModelLoadCommand {
+            model_id: Some(model.id.clone()),
+            backend_id: None,
+            model_path: None,
+            num_workers: None,
+        })
+        .await
+        .expect("load catalog model");
+
+    let loaded = app.model.runtime_state_for_model(&model).await.expect("runtime state");
+    assert!(loaded.loaded);
+    assert!(!loaded.active);
+    assert_eq!(loaded.active_refs, 0);
+
+    let _guard = app.auto_unload.acquire(RuntimeBackendId::GgmlLlama).await;
+    let active = app.model.runtime_state_for_model(&model).await.expect("runtime state");
+    assert!(active.loaded);
+    assert!(active.active);
+    assert_eq!(active.active_refs, 1);
+}
+
+#[tokio::test]
 async fn model_runtime_loads_catalog_candle_llama_by_model_id() {
     let app = TestAppCore::new().await;
     let model_path = app.write_model_file("runtime-ready-candle.gguf");

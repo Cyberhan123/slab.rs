@@ -16,7 +16,7 @@ use tracing::{info, warn};
 use crate::domain::models::{
     AcceptedOperation, DownloadModelCommand, SelectedModelDownloadSource, TaskStatus, UnifiedModel,
 };
-use crate::error::AppCoreError;
+use crate::error::{AppCoreError, AppCoreErrorData};
 use crate::infra::db::{ModelDownloadRecord, ModelDownloadStore, ModelStore, TaskRecord};
 use crate::infra::model_packs;
 
@@ -516,16 +516,18 @@ impl ModelService {
             candidates.push(build_download_task_candidate(
                 &model.id,
                 model.spec.repo_id.clone().ok_or_else(|| {
-                    AppCoreError::BadRequest(format!(
-                        "model {} spec is missing repo_id required for download",
-                        model.id
-                    ))
+                    model_download_unavailable_error(
+                        &model.id,
+                        "missing repo_id required for download",
+                        "Add a repo_id to the model source or import a model pack with a downloadable source.",
+                    )
                 })?,
                 model.spec.filename.clone().ok_or_else(|| {
-                    AppCoreError::BadRequest(format!(
-                        "model {} spec is missing filename required for download",
-                        model.id
-                    ))
+                    model_download_unavailable_error(
+                        &model.id,
+                        "missing filename required for download",
+                        "Add a filename to the model source or select a model pack variant with a downloadable artifact.",
+                    )
                 })?,
                 effective_hub_provider_for_model_spec(
                     model.spec.hub_provider.as_deref(),
@@ -540,10 +542,11 @@ impl ModelService {
         }
 
         let task_candidate = candidates.first().cloned().ok_or_else(|| {
-            AppCoreError::BadRequest(format!(
-                "model {} does not expose any downloadable source candidates",
-                model.id
-            ))
+            model_download_unavailable_error(
+                &model.id,
+                "no downloadable source candidates",
+                "Select a model pack variant with a remote source or add repo_id and filename to the model.",
+            )
         })?;
         let task_key = model_download_source_key_from_parts(
             &model.id,
@@ -552,10 +555,11 @@ impl ModelService {
             &task_candidate.filename,
         )
         .ok_or_else(|| {
-            AppCoreError::BadRequest(format!(
-                "model {} download candidate is missing repo_id or filename",
-                model.id
-            ))
+            model_download_unavailable_error(
+                &model.id,
+                "download candidate is missing repo_id or filename",
+                "Select a model pack variant with a complete remote source.",
+            )
         })?;
 
         Ok(ResolvedModelDownloadPlan { task_key, candidates })
@@ -668,9 +672,11 @@ fn pack_source_candidate_to_download_task_candidate(
         .cloned()
         .or_else(|| artifacts.values().next().cloned())
         .ok_or_else(|| {
-            AppCoreError::BadRequest(format!(
-                "model {model_id} pack source candidate is missing downloadable files"
-            ))
+            model_download_unavailable_error(
+                model_id,
+                "pack source candidate is missing downloadable files",
+                "Select a model pack variant with at least one remote artifact.",
+            )
         })?;
 
     Ok(Some(build_download_task_candidate(
@@ -698,9 +704,11 @@ fn build_download_task_candidate(
         &filename,
     )
     .ok_or_else(|| {
-        AppCoreError::BadRequest(format!(
-            "model {model_id} download candidate is missing repo_id or filename"
-        ))
+        model_download_unavailable_error(
+            model_id,
+            "download candidate is missing repo_id or filename",
+            "Select a model pack variant with a complete remote source.",
+        )
     })?;
 
     Ok(ModelDownloadTaskCandidate {
@@ -747,6 +755,17 @@ fn effective_hub_provider_for_pack_source(
 
 fn is_model_download_conflict(error: &sqlx::Error) -> bool {
     matches!(error, sqlx::Error::Database(db_error) if db_error.message().contains("UNIQUE constraint failed"))
+}
+
+fn model_download_unavailable_error(
+    model_id: &str,
+    reason: &str,
+    suggestion: &str,
+) -> AppCoreError {
+    AppCoreError::BadRequestData {
+        message: format!("model {model_id} cannot be downloaded: {reason}. {suggestion}"),
+        data: AppCoreErrorData::model_download_unavailable(model_id, reason, suggestion),
+    }
 }
 
 #[cfg(test)]

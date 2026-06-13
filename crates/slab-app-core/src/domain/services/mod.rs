@@ -98,7 +98,7 @@ impl AppServices {
             session: SessionService::new(model_state.clone()),
             setup: SetupService::new(model_state.clone(), worker_state.clone(), runtime_host),
             subtitle: SubtitleService::new(),
-            system: SystemService::new(),
+            system: SystemService::new_with_model_state(model_state.clone()),
             task_application: TaskApplicationService::new(worker_state.clone(), model),
             ui_state: UiStateService::new(model_state.clone()),
             video: VideoService::new(worker_state),

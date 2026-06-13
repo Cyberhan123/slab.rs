@@ -142,6 +142,7 @@ from .model_config_source_summary_response import ModelConfigSourceSummaryRespon
 from .model_config_value_type_response import ModelConfigValueTypeResponse
 from .model_config_variant_option_response import ModelConfigVariantOptionResponse
 from .model_kind import ModelKind
+from .model_runtime_state_response import ModelRuntimeStateResponse
 from .model_spec_request import ModelSpecRequest
 from .model_spec_response import ModelSpecResponse
 from .model_status_response import ModelStatusResponse
@@ -204,6 +205,8 @@ from .subtitle_entry_request import SubtitleEntryRequest
 from .subtitle_format_request import SubtitleFormatRequest
 from .subtitle_variant_request import SubtitleVariantRequest
 from .switch_model_request import SwitchModelRequest
+from .system_diagnostic_path_response import SystemDiagnosticPathResponse
+from .system_diagnostics_response import SystemDiagnosticsResponse
 from .task_progress_response import TaskProgressResponse
 from .task_response import TaskResponse
 from .task_result_payload import TaskResultPayload
@@ -351,6 +354,7 @@ __all__ = (
     "ModelConfigValueTypeResponse",
     "ModelConfigVariantOptionResponse",
     "ModelKind",
+    "ModelRuntimeStateResponse",
     "ModelSpecRequest",
     "ModelSpecResponse",
     "ModelStatusResponse",
@@ -407,6 +411,8 @@ __all__ = (
     "SubtitleFormatRequest",
     "SubtitleVariantRequest",
     "SwitchModelRequest",
+    "SystemDiagnosticPathResponse",
+    "SystemDiagnosticsResponse",
     "TaskProgressResponse",
     "TaskResponse",
     "TaskResultPayload",

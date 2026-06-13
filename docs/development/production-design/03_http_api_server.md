@@ -183,14 +183,14 @@ stateDiagram-v2
 | `/v1/audio/*` | GET/POST | 音频处理 | `audio_handler` |
 | `/v1/images/*` | GET/POST | 图像处理 | `images_handler` |
 | `/v1/video/*` | GET/POST | 视频处理 | `video_handler` |
-| `/v1/models/*` | GET | 模型管理 | `models_handler` |
-| `/v1/tasks/*` | GET/POST/DELETE | 任务管理 | `tasks_handler` |
+| `/v1/models/*` | GET/POST/PUT/DELETE | 模型管理 | `models_handler` |
+| `/v1/tasks/*` | GET/POST | 任务管理 | `tasks_handler` |
 | `/v1/sessions/*` | GET/POST | 会话管理 | `sessions_handler` |
 | `/v1/settings/*` | GET/PUT | 设置管理 | `settings_handler` |
 | `/v1/setup/*` | POST | 初始化设置 | `setup_handler` |
 | `/v1/system/*` | GET | 系统信息 | `system_handler` |
-| `/v1/backend/*` | GET/POST | 后端配置 | `backend_handler` |
-| `/v1/agent/*` | GET/POST | Agent API | `agent_handler` |
+| `/v1/backends*` | GET | 后端状态 | `backend_handler` |
+| `/v1/agents/*` | GET/POST | Agent API | `agent_handler` |
 | `/v1/ffmpeg/*` | POST | FFmpeg 操作 | `ffmpeg_handler` |
 | `/v1/subtitles/*` | GET/POST | 字幕处理 | `subtitles_handler` |
 | `/v1/plugins/rpc` | WS | 插件 RPC | `plugin_rpc_ws` |
@@ -671,21 +671,35 @@ let app = Router::new()
 ```markdown
 ## 聊天 API
 - POST   /v1/chat/completions          - 创建聊天补全
-- GET    /v1/chat/sessions             - 列出会话
-- POST   /v1/chat/sessions             - 创建会话
-- GET    /v1/chat/sessions/:id         - 获取会话详情
-- DELETE /v1/chat/sessions/:id         - 删除会话
+- POST   /v1/completions               - 创建文本补全
+- GET    /v1/chat/models               - 聊天模型兼容列表
 
 ## 模型管理
 - GET    /v1/models                    - 列出所有模型
+- POST   /v1/models                    - 创建模型记录
 - GET    /v1/models/:id                - 获取模型详情
-- POST   /v1/models/:id/pull           - 拉取模型
+- PUT    /v1/models/:id                - 更新模型
+- DELETE /v1/models/:id                - 删除模型
+- GET    /v1/models/available          - 列出可下载模型文件
+- POST   /v1/models/import-pack        - 导入模型包
+- POST   /v1/models/download           - 创建模型下载任务
+- POST   /v1/models/load               - 加载模型
+- POST   /v1/models/unload             - 卸载模型
+- POST   /v1/models/switch             - 切换活动模型
 
 ## 任务管理
 - GET    /v1/tasks                      - 列出任务
-- POST   /v1/tasks                     - 创建任务
 - GET    /v1/tasks/:id                 - 获取任务状态
-- DELETE /v1/tasks/:id                 - 取消任务
+- GET    /v1/tasks/:id/result          - 获取任务结果
+- POST   /v1/tasks/:id/cancel          - 取消任务
+- POST   /v1/tasks/:id/restart         - 重启任务
+
+## 会话 API
+- GET    /v1/sessions                  - 列出会话
+- POST   /v1/sessions                  - 创建会话
+- PUT    /v1/sessions/:id              - 更新会话
+- DELETE /v1/sessions/:id              - 删除会话
+- GET    /v1/sessions/:id/messages     - 获取会话消息
 
 ## 插件 API (WebSocket)
 - WS     /v1/plugins/rpc               - 插件 RPC

@@ -66,6 +66,48 @@ impl ToolHandler for McpCallTool {
     }
 }
 
+pub struct McpListToolsTool {
+    client: Arc<McpClient>,
+}
+
+impl McpListToolsTool {
+    pub fn new(client: Arc<McpClient>) -> Self {
+        Self { client }
+    }
+}
+
+#[async_trait]
+impl ToolHandler for McpListToolsTool {
+    fn name(&self) -> &str {
+        "mcp_list_tools"
+    }
+
+    fn description(&self) -> &str {
+        "List tools exposed by configured external MCP servers."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        serde_json::json!({ "type": "object", "properties": {} })
+    }
+
+    async fn execute(
+        &self,
+        _ctx: &ToolContext,
+        _arguments: &Value,
+    ) -> Result<ToolOutput, AgentError> {
+        let tools = self
+            .client
+            .list_tools()
+            .await
+            .map_err(|error| AgentError::ToolExecution(error.to_string()))?;
+        Ok(ToolOutput {
+            content: serde_json::to_string(&tools)
+                .map_err(|error| AgentError::ToolExecution(error.to_string()))?,
+            metadata: None,
+        })
+    }
+}
+
 pub struct McpProxyTool {
     client: Arc<McpClient>,
     spec: McpToolSpec,
@@ -168,5 +210,16 @@ mod tests {
         assert_eq!(tool.name(), "mcp_call");
         assert_eq!(schema["required"], json!(["server_name", "tool_name"]));
         assert_eq!(schema["properties"]["arguments"]["default"], json!({}));
+    }
+
+    #[tokio::test]
+    async fn mcp_list_tools_returns_json_array() {
+        let tool = McpListToolsTool::new(Arc::new(McpClient::new()));
+        let ctx = ToolContext { thread_id: "thread".into(), turn_index: 0, depth: 0 };
+        let output = tool.execute(&ctx, &json!({})).await.expect("list tools output");
+
+        assert_eq!(tool.name(), "mcp_list_tools");
+        assert_eq!(tool.parameters_schema(), json!({"type": "object", "properties": {}}));
+        assert_eq!(serde_json::from_str::<Value>(&output.content).expect("json"), json!([]));
     }
 }

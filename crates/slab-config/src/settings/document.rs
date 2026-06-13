@@ -453,6 +453,29 @@ pub struct AgentToolsConfig {
 pub struct AgentMcpConfig {
     #[serde(default)]
     pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub servers: Vec<AgentMcpServerConfig>,
+}
+
+/// External stdio MCP server registered for Agent tool access.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct AgentMcpServerConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    pub name: String,
+    pub command: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, AgentMcpEnvValueConfig>,
+}
+
+/// Environment value resolved from the host process environment at launch time.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct AgentMcpEnvValueConfig {
+    pub env_var: String,
 }
 
 /// Supported `websearch` crate providers.
@@ -1402,6 +1425,38 @@ mod tests {
     }
 
     #[test]
+    fn agent_mcp_servers_parse_secret_env_refs() {
+        let settings = serde_json::from_value::<SettingsDocument>(json!({
+            "agent": {
+                "tools": {
+                    "mcp": {
+                        "enabled": true,
+                        "servers": [{
+                            "name": "github",
+                            "command": "npx",
+                            "args": ["-y", "@modelcontextprotocol/server-github"],
+                            "cwd": "C:/workspace",
+                            "env": {
+                                "GITHUB_PERSONAL_ACCESS_TOKEN": {
+                                    "env_var": "GITHUB_TOKEN"
+                                }
+                            }
+                        }]
+                    }
+                }
+            }
+        }))
+        .expect("settings");
+
+        let mcp = &settings.agent.tools.mcp;
+        assert!(mcp.enabled);
+        assert_eq!(mcp.servers.len(), 1);
+        assert!(mcp.servers[0].enabled);
+        assert_eq!(mcp.servers[0].name, "github");
+        assert_eq!(mcp.servers[0].env["GITHUB_PERSONAL_ACCESS_TOKEN"].env_var, "GITHUB_TOKEN");
+    }
+
+    #[test]
     fn generated_provider_registry_schema_is_editor_friendly() {
         let schema = provider_registry_json_schema();
         let items = schema.get("items").and_then(Value::as_object).expect("items");
@@ -1438,5 +1493,17 @@ mod tests {
             .expect("api key schema");
 
         assert_eq!(api_key.get("writeOnly"), Some(&Value::Bool(true)));
+    }
+
+    #[test]
+    fn generated_document_schema_keeps_mcp_env_values_as_references() {
+        let schema = settings_document_json_schema();
+        let env_properties = schema
+            .pointer("/$defs/AgentMcpEnvValueConfig/properties")
+            .and_then(Value::as_object)
+            .expect("mcp env value properties");
+
+        assert!(env_properties.contains_key("env_var"));
+        assert!(!env_properties.contains_key("value"));
     }
 }

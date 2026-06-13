@@ -12,6 +12,7 @@ from ..types import UNSET, Unset
 
 if TYPE_CHECKING:
     from ..models.chat_model_capabilities import ChatModelCapabilities
+    from ..models.model_runtime_state_response import ModelRuntimeStateResponse
     from ..models.model_spec_response import ModelSpecResponse
     from ..models.runtime_presets_response import RuntimePresetsResponse
 
@@ -35,6 +36,7 @@ class UnifiedModelResponse:
         backend_id (None | str | Unset): Runtime backend identifier for local models, e.g. `"ggml.llama"`.
         chat_capabilities (ChatModelCapabilities | None | Unset):
         runtime_presets (None | RuntimePresetsResponse | Unset):
+        runtime_state (ModelRuntimeStateResponse | None | Unset):
     """
 
     capabilities: list[ModelCapability]
@@ -48,10 +50,12 @@ class UnifiedModelResponse:
     backend_id: None | str | Unset = UNSET
     chat_capabilities: ChatModelCapabilities | None | Unset = UNSET
     runtime_presets: None | RuntimePresetsResponse | Unset = UNSET
+    runtime_state: ModelRuntimeStateResponse | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.chat_model_capabilities import ChatModelCapabilities
+        from ..models.model_runtime_state_response import ModelRuntimeStateResponse
         from ..models.runtime_presets_response import RuntimePresetsResponse
 
         capabilities = []
@@ -95,6 +99,14 @@ class UnifiedModelResponse:
         else:
             runtime_presets = self.runtime_presets
 
+        runtime_state: dict[str, Any] | None | Unset
+        if isinstance(self.runtime_state, Unset):
+            runtime_state = UNSET
+        elif isinstance(self.runtime_state, ModelRuntimeStateResponse):
+            runtime_state = self.runtime_state.to_dict()
+        else:
+            runtime_state = self.runtime_state
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update(
@@ -115,12 +127,15 @@ class UnifiedModelResponse:
             field_dict["chat_capabilities"] = chat_capabilities
         if runtime_presets is not UNSET:
             field_dict["runtime_presets"] = runtime_presets
+        if runtime_state is not UNSET:
+            field_dict["runtime_state"] = runtime_state
 
         return field_dict
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.chat_model_capabilities import ChatModelCapabilities
+        from ..models.model_runtime_state_response import ModelRuntimeStateResponse
         from ..models.model_spec_response import ModelSpecResponse
         from ..models.runtime_presets_response import RuntimePresetsResponse
 
@@ -193,6 +208,25 @@ class UnifiedModelResponse:
 
         runtime_presets = _parse_runtime_presets(d.pop("runtime_presets", UNSET))
 
+        def _parse_runtime_state(
+            data: object,
+        ) -> ModelRuntimeStateResponse | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                runtime_state_type_1 = ModelRuntimeStateResponse.from_dict(data)
+
+                return runtime_state_type_1
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(ModelRuntimeStateResponse | None | Unset, data)
+
+        runtime_state = _parse_runtime_state(d.pop("runtime_state", UNSET))
+
         unified_model_response = cls(
             capabilities=capabilities,
             created_at=created_at,
@@ -205,6 +239,7 @@ class UnifiedModelResponse:
             backend_id=backend_id,
             chat_capabilities=chat_capabilities,
             runtime_presets=runtime_presets,
+            runtime_state=runtime_state,
         )
 
         unified_model_response.additional_properties = d

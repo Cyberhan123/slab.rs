@@ -1,15 +1,27 @@
-use crate::domain::models::{GpuDeviceSnapshot, GpuStatusSnapshot};
+use std::path::Path;
+
+use crate::context::ModelState;
+use crate::domain::models::{
+    GpuDeviceSnapshot, GpuStatusSnapshot, SystemDiagnosticPath, SystemDiagnosticsSnapshot,
+};
+use crate::error::AppCoreError;
 #[cfg(feature = "gpu-telemetry")]
 use all_smi::AllSmi;
 use chrono::Utc;
 use tracing::{debug, warn};
 
 #[derive(Clone, Default)]
-pub struct SystemService;
+pub struct SystemService {
+    model_state: Option<ModelState>,
+}
 
 impl SystemService {
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    pub fn new_with_model_state(model_state: ModelState) -> Self {
+        Self { model_state: Some(model_state) }
     }
 
     pub async fn gpu_status(&self) -> GpuStatusSnapshot {
@@ -41,6 +53,67 @@ impl SystemService {
             devices,
             error,
         }
+    }
+
+    pub async fn diagnostics(&self) -> Result<SystemDiagnosticsSnapshot, AppCoreError> {
+        let model_state = self.model_state.as_ref().ok_or_else(|| {
+            AppCoreError::Internal("system diagnostics require app state".to_owned())
+        })?;
+        let config = model_state.config();
+        let settings = model_state.pmid().config();
+
+        let mut paths = vec![
+            diagnostic_path("settings_file", &config.settings_path),
+            diagnostic_path("model_config_dir", &config.model_config_dir),
+            diagnostic_path("plugin_install_dir", &config.plugins_dir),
+            diagnostic_path("session_state_dir", Path::new(&config.session_state_dir)),
+            diagnostic_path("exec_rules_dir", &config.exec_rules_dir),
+            diagnostic_path("logs_dir", &slab_utils::app_home::logs_dir()),
+        ];
+        if let Some(path) = config.settings_overlay_path.as_ref() {
+            paths.push(diagnostic_path("settings_overlay_file", path));
+        }
+        if let Some(path) = config.log_file.as_ref() {
+            paths.push(diagnostic_path("server_log_file", path));
+        }
+        if let Some(path) = settings.runtime.model_cache_dir.as_deref() {
+            paths.push(diagnostic_path("model_cache_dir", Path::new(path)));
+        }
+        if let Some(path) = settings.setup.backends.dir.as_deref() {
+            paths.push(diagnostic_path("setup_backend_dir", Path::new(path)));
+        }
+        if let Some(path) = settings.setup.ffmpeg.dir.as_deref() {
+            paths.push(diagnostic_path("setup_ffmpeg_dir", Path::new(path)));
+        }
+        if let Some(path) = config.lib_dir.as_ref() {
+            paths.push(diagnostic_path("runtime_lib_dir", path));
+        }
+        if let Some(path) = config.workspace_root.as_ref() {
+            paths.push(diagnostic_path("workspace_root", path));
+        }
+
+        Ok(SystemDiagnosticsSnapshot {
+            status: "ok".to_owned(),
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+            generated_at: Utc::now().to_rfc3339(),
+            transport_mode: config.transport_mode.clone(),
+            swagger_enabled: config.enable_swagger,
+            admin_token_configured: config
+                .admin_api_token
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty()),
+            cloud_http_trace_enabled: config.cloud_http_trace,
+            cors_allowed_origins: config.cors_allowed_origins.clone(),
+            paths,
+        })
+    }
+}
+
+fn diagnostic_path(label: &str, path: &Path) -> SystemDiagnosticPath {
+    SystemDiagnosticPath {
+        label: label.to_owned(),
+        path: path.display().to_string(),
+        exists: path.exists(),
     }
 }
 

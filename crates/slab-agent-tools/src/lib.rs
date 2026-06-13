@@ -15,8 +15,10 @@ mod args;
 pub mod fs;
 pub mod fs_watch;
 pub mod git;
+pub mod glob;
 pub mod grep;
 pub mod mcp;
+pub mod plan;
 pub mod shell;
 pub mod subagent;
 pub mod web_search;
@@ -25,8 +27,10 @@ pub use apply_patch::ApplyPatchTool;
 pub use fs::{ListDirTool, ReadFileTool, WriteFileTool};
 pub use fs_watch::FsWatchTool;
 pub use git::{GitCommitTool, GitDiffTool, GitStatusTool};
+pub use glob::FileGlobTool;
 pub use grep::GrepTool;
-pub use mcp::{McpCallTool, McpProxyTool};
+pub use mcp::{McpCallTool, McpListToolsTool, McpProxyTool};
+pub use plan::PlanUpdateTool;
 pub use shell::{ShellPolicy, ShellTool};
 pub use slab_shell_command::{
     ShellRule, ShellRuleAction, ShellRuleError, ShellRuleMatcher, ShellRuleSet,
@@ -77,7 +81,9 @@ pub fn register_all_tools_with_shell_rules(
     router.register(Box::new(ReadFileTool::new(workspace_root.clone())));
     router.register(Box::new(WriteFileTool::new(workspace_root.clone())));
     router.register(Box::new(ListDirTool::new(workspace_root.clone())));
+    router.register(Box::new(FileGlobTool::new(workspace_root.clone())));
     router.register(Box::new(GrepTool::new(workspace_root.clone())));
+    router.register(Box::new(PlanUpdateTool::new()));
     router.register(Box::new(WebSearchTool::new(web_search_config)));
     if let Some(watcher) = FsWatchTool::new() {
         router.register(Box::new(watcher));
@@ -91,6 +97,7 @@ pub fn register_all_tools_with_shell_rules(
         }
     }
     if let Some(client) = mcp_client {
+        router.register(Box::new(McpListToolsTool::new(Arc::clone(&client))));
         router.register(Box::new(McpCallTool::new(Arc::clone(&client))));
         for spec in client.cached_tools_blocking() {
             let tool = McpProxyTool::new(Arc::clone(&client), spec);
@@ -120,6 +127,8 @@ mod tests {
             AgentWebSearchConfig::default(),
         );
         assert!(router.get("shell").is_some());
+        assert!(router.get("file_glob").is_some());
+        assert!(router.get("plan_update").is_some());
         assert!(router.get("web_search").is_some());
         assert!(router.get("apply_patch").is_none());
         assert!(router.get("git_status").is_none());
@@ -134,6 +143,8 @@ mod tests {
             false,
             AgentWebSearchConfig::default(),
         );
+        assert!(router.get("file_glob").is_some());
+        assert!(router.get("plan_update").is_some());
         assert!(router.get("apply_patch").is_some());
         assert!(router.get("git_status").is_none());
 

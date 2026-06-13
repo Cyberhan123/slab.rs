@@ -77,6 +77,7 @@ function HubModelCard({
   const downloadProgressValue = getDownloadProgressValue(downloadProgress);
   const downloadProgressLabel = getDownloadProgressLabel(downloadProgress);
   const downloadProgressSummary = getDownloadProgressSummary(downloadProgress);
+  const runtimeStateLabel = getRuntimeStateLabel(model, t);
 
   return (
     <article
@@ -90,7 +91,17 @@ function HubModelCard({
             <Icon className="size-6" />
           </div>
 
-          <StatusBadge status={model.status} />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <StatusBadge status={model.status} />
+            {runtimeStateLabel ? (
+              <Badge
+                variant="chip"
+                className="bg-[var(--surface-1)] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground"
+              >
+                {runtimeStateLabel}
+              </Badge>
+            ) : null}
+          </div>
         </div>
 
         <div className="flex min-w-0 flex-1 flex-col gap-4">
@@ -241,6 +252,26 @@ function describeModel(
     backend: backendLabel,
     repo: model.repo_id || t('pages.hub.catalog.configuredRepository'),
   });
+}
+
+function getRuntimeStateLabel(
+  model: ModelItem,
+  t: (key: string, options?: Record<string, unknown>) => string,
+) {
+  const runtimeState = model.runtime_state;
+  if (!runtimeState || (!model.local_path && !runtimeState.loaded && !runtimeState.active)) {
+    return null;
+  }
+
+  if (runtimeState.active) {
+    return t('pages.hub.catalog.runtimeState.active');
+  }
+
+  if (runtimeState.loaded) {
+    return t('pages.hub.catalog.runtimeState.loaded');
+  }
+
+  return t('pages.hub.catalog.runtimeState.unloaded');
 }
 
 function formatBackend(

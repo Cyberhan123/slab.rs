@@ -66,6 +66,9 @@ describe("plugin pack generation", () => {
           name: "LSP Plugin",
           version: "0.1.0",
           runtime: { ui: { entry: "ui/index.html" } },
+          permissions: {
+            lsp: ["languageServer:declare"],
+          },
           contributes: {
             languageServers: [
               {
@@ -90,6 +93,49 @@ describe("plugin pack generation", () => {
         "ui/index.html",
       ]);
       expect(archive.file("lsp-plugin/package.json")).not.toBeNull();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects MCP-exposed agent capabilities without permission", async () => {
+    const root = await createTempRoot("agent-permission");
+    try {
+      const pluginRoot = path.join(root, "plugins", "agent-plugin");
+      await writePluginFile(pluginRoot, "ui/index.html", "<!doctype html>");
+      await writeFile(
+        path.join(pluginRoot, "plugin.json"),
+        JSON.stringify({
+          manifestVersion: 1,
+          id: "agent-plugin",
+          name: "Agent Plugin",
+          version: "0.1.0",
+          runtime: { ui: { entry: "ui/index.html" } },
+          permissions: {
+            agent: ["capability:declare"],
+          },
+          contributes: {
+            agentCapabilities: [
+              {
+                id: "agent-plugin.translate",
+                kind: "tool",
+                transport: {
+                  type: "pluginCall",
+                  function: "translate",
+                },
+                exposeAsMcpTool: true,
+              },
+            ],
+          },
+        }),
+      );
+
+      await expect(
+        packPlugin({
+          outDir: path.join(root, "out"),
+          pluginDir: pluginRoot,
+        }),
+      ).rejects.toThrow("mcpTool:expose");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

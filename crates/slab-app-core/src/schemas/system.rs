@@ -3,7 +3,9 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::domain::models::{GpuDeviceSnapshot, GpuStatusSnapshot};
+use crate::domain::models::{
+    GpuDeviceSnapshot, GpuStatusSnapshot, SystemDiagnosticPath, SystemDiagnosticsSnapshot,
+};
 
 /// Per-GPU snapshot from `all-smi`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -43,6 +45,29 @@ pub struct GpuStatusResponse {
     pub error: Option<String>,
 }
 
+/// One local filesystem path included in the diagnostics snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SystemDiagnosticPathResponse {
+    pub label: String,
+    pub path: String,
+    pub exists: bool,
+}
+
+/// Read-only support snapshot for local desktop diagnostics.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SystemDiagnosticsResponse {
+    pub status: String,
+    pub version: String,
+    pub generated_at: String,
+    pub transport_mode: String,
+    pub swagger_enabled: bool,
+    pub admin_token_configured: bool,
+    pub cloud_http_trace_enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cors_allowed_origins: Option<String>,
+    pub paths: Vec<SystemDiagnosticPathResponse>,
+}
+
 impl From<GpuDeviceSnapshot> for GpuDeviceStatus {
     fn from(snapshot: GpuDeviceSnapshot) -> Self {
         Self {
@@ -67,6 +92,28 @@ impl From<GpuStatusSnapshot> for GpuStatusResponse {
             updated_at: snapshot.updated_at,
             devices: snapshot.devices.into_iter().map(Into::into).collect(),
             error: snapshot.error,
+        }
+    }
+}
+
+impl From<SystemDiagnosticPath> for SystemDiagnosticPathResponse {
+    fn from(path: SystemDiagnosticPath) -> Self {
+        Self { label: path.label, path: path.path, exists: path.exists }
+    }
+}
+
+impl From<SystemDiagnosticsSnapshot> for SystemDiagnosticsResponse {
+    fn from(snapshot: SystemDiagnosticsSnapshot) -> Self {
+        Self {
+            status: snapshot.status,
+            version: snapshot.version,
+            generated_at: snapshot.generated_at,
+            transport_mode: snapshot.transport_mode,
+            swagger_enabled: snapshot.swagger_enabled,
+            admin_token_configured: snapshot.admin_token_configured,
+            cloud_http_trace_enabled: snapshot.cloud_http_trace_enabled,
+            cors_allowed_origins: snapshot.cors_allowed_origins,
+            paths: snapshot.paths.into_iter().map(Into::into).collect(),
         }
     }
 }

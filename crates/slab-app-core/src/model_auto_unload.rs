@@ -29,6 +29,13 @@ struct BackendRefState {
     runtime_restart_attempts: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelRuntimeStateSnapshot {
+    pub backend_id: RuntimeBackendId,
+    pub loaded: bool,
+    pub active_refs: u64,
+}
+
 #[derive(Debug)]
 pub struct ModelAutoUnloadManager {
     pmid: Arc<crate::domain::services::PmidService>,
@@ -201,6 +208,30 @@ impl ModelAutoUnloadManager {
         }
 
         Ok(())
+    }
+
+    pub async fn snapshot_for_model(
+        &self,
+        backend_id: RuntimeBackendId,
+        model_id: &str,
+    ) -> Option<ModelRuntimeStateSnapshot> {
+        let model_id = model_id.trim();
+        if model_id.is_empty() {
+            return None;
+        }
+
+        let states = self.states.lock().await;
+        let state = states.get(&backend_id)?;
+        let matches_model = state
+            .replay_plan
+            .as_ref()
+            .and_then(|plan| plan.model_id.as_deref())
+            .is_some_and(|candidate| candidate == model_id);
+        matches_model.then_some(ModelRuntimeStateSnapshot {
+            backend_id,
+            loaded: state.resident,
+            active_refs: state.active_refs,
+        })
     }
 
     pub async fn sync_runtime_restart_states(&self) {

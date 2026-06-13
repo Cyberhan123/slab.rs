@@ -380,6 +380,7 @@ mod tests {
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
     use serde_json::Value;
+    use slab_app_core::error::AppCoreErrorData;
 
     use super::ServerError;
 
@@ -408,5 +409,29 @@ mod tests {
         assert_eq!(payload["message"], "model: required");
         assert_eq!(payload["i18n"]["message"]["key"], "server.errors.requestValidationFailed");
         assert_eq!(payload["i18n"]["message"]["params"]["detail"], "model: required");
+    }
+
+    #[tokio::test]
+    async fn bad_request_data_response_preserves_stable_code_and_suggestion() {
+        let response = ServerError::BadRequestData {
+            message: "model local-qwen cannot be downloaded: missing repo_id. Add a repo_id."
+                .to_owned(),
+            data: AppCoreErrorData::model_download_unavailable(
+                "local-qwen",
+                "missing repo_id",
+                "Add a repo_id.",
+            ),
+        }
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.expect("read body");
+        let payload: Value = serde_json::from_slice(&body).expect("json body");
+
+        assert_eq!(payload["data"]["code"], "model_download_unavailable");
+        assert_eq!(payload["data"]["param"], "model_id");
+        assert_eq!(payload["data"]["model_id"], "local-qwen");
+        assert_eq!(payload["data"]["reason"], "missing repo_id");
+        assert_eq!(payload["data"]["suggestion"], "Add a repo_id.");
     }
 }

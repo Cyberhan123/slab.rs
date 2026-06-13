@@ -21,6 +21,7 @@ pub struct StdioLaunchConfig {
     pub command: String,
     pub args: Vec<String>,
     pub env: HashMap<String, String>,
+    pub cwd: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -46,6 +47,9 @@ impl StdioMcpClient {
     pub async fn connect(config: StdioLaunchConfig) -> Result<Self, McpClientError> {
         let mut command = Command::new(&config.command);
         command.args(&config.args);
+        if let Some(cwd) = config.cwd.as_deref() {
+            command.current_dir(cwd);
+        }
         for (key, value) in &config.env {
             command.env(key, value);
         }

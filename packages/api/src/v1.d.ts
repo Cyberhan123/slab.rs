@@ -699,6 +699,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/system/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["system_diagnostics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/system/gpu": {
         parameters: {
             query?: never;
@@ -1828,6 +1844,20 @@ export interface components {
         };
         /** @enum {string} */
         ModelKind: "local" | "cloud";
+        /** @description Runtime lifecycle state for a local catalog model. */
+        ModelRuntimeStateResponse: {
+            /** @description Whether this catalog model is currently serving an inference request. */
+            active: boolean;
+            /**
+             * Format: int64
+             * @description Number of active inference references on the backend.
+             */
+            active_refs: number;
+            /** @description Runtime backend identifier for local models, e.g. `"ggml.llama"`. */
+            backend_id: string;
+            /** @description Whether this catalog model is currently resident in its runtime backend. */
+            loaded: boolean;
+        };
         /** @description Provider-specific model configuration (request). */
         ModelSpecRequest: {
             /**
@@ -2256,6 +2286,24 @@ export interface components {
             /** Format: int32 */
             num_workers?: number | null;
         };
+        /** @description One local filesystem path included in the diagnostics snapshot. */
+        SystemDiagnosticPathResponse: {
+            exists: boolean;
+            label: string;
+            path: string;
+        };
+        /** @description Read-only support snapshot for local desktop diagnostics. */
+        SystemDiagnosticsResponse: {
+            admin_token_configured: boolean;
+            cloud_http_trace_enabled: boolean;
+            cors_allowed_origins?: string | null;
+            generated_at: string;
+            paths: components["schemas"]["SystemDiagnosticPathResponse"][];
+            status: string;
+            swagger_enabled: boolean;
+            transport_mode: string;
+            version: string;
+        };
         TaskProgressResponse: {
             /** Format: int64 */
             current: number;
@@ -2488,6 +2536,7 @@ export interface components {
             /** @description Whether this model is backed by the local runtime or a cloud provider. */
             kind: components["schemas"]["ModelKind"];
             runtime_presets?: null | components["schemas"]["RuntimePresetsResponse"];
+            runtime_state?: null | components["schemas"]["ModelRuntimeStateResponse"];
             spec: components["schemas"]["ModelSpecResponse"];
             /** @description Status: `"ready"`, `"not_downloaded"`, `"downloading"`, `"error"`. */
             status: string;
@@ -4432,6 +4481,33 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    system_diagnostics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Read-only local diagnostics snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemDiagnosticsResponse"];
+                };
             };
             /** @description Backend error */
             500: {

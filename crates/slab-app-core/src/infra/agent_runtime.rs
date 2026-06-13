@@ -59,6 +59,10 @@ impl AgentRuntimeReloader {
             workspace_root.clone(),
             extra_roots.clone(),
         )));
+        self.tool_router.register(Box::new(slab_agent_tools::FileGlobTool::new_with_extra_roots(
+            workspace_root.clone(),
+            extra_roots.clone(),
+        )));
         self.tool_router.register(Box::new(slab_agent_tools::GrepTool::new_with_extra_roots(
             workspace_root,
             extra_roots,

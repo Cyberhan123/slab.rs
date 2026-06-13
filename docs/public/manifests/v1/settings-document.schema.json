@@ -80,8 +80,64 @@
         "enabled": {
           "default": false,
           "type": "boolean"
+        },
+        "servers": {
+          "items": {
+            "$ref": "#/$defs/AgentMcpServerConfig"
+          },
+          "type": "array"
         }
       },
+      "type": "object"
+    },
+    "AgentMcpEnvValueConfig": {
+      "description": "Environment value resolved from the host process environment at launch time.",
+      "properties": {
+        "env_var": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "env_var"
+      ],
+      "type": "object"
+    },
+    "AgentMcpServerConfig": {
+      "description": "External stdio MCP server registered for Agent tool access.",
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "env": {
+          "additionalProperties": {
+            "$ref": "#/$defs/AgentMcpEnvValueConfig"
+          },
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "command"
+      ],
       "type": "object"
     },
     "AgentMemoriesConfig": {

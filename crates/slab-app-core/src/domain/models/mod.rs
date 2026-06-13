@@ -48,8 +48,8 @@ pub use model::{
     ModelConfigSectionView, ModelConfigSelectionView, ModelConfigSourceArtifact,
     ModelConfigSourceSummary, ModelConfigValueType, ModelConfigVariantOption,
     ModelEnhancementPresetOption, ModelEnhancementVariantOption, ModelEnhancementView,
-    ModelLoadCommand, ModelPackSelection, ModelSpec, ModelStatus, Pricing, RuntimePresets,
-    SelectedModelDownloadSource, StoredModelConfig, UnifiedModel, UnifiedModelKind,
+    ModelLoadCommand, ModelPackSelection, ModelRuntimeState, ModelSpec, ModelStatus, Pricing,
+    RuntimePresets, SelectedModelDownloadSource, StoredModelConfig, UnifiedModel, UnifiedModelKind,
     UnifiedModelStatus, UpdateModelCommand, UpdateModelConfigSelectionCommand,
     UpdateModelEnhancementCommand, default_model_capabilities, normalize_model_capabilities,
     validate_stored_model_config,
@@ -66,7 +66,9 @@ pub use setup::{CompleteSetupCommand, ComponentStatus, EnvironmentStatus};
 pub use subtitle::{
     RenderSubtitleCommand, RenderSubtitleEntry, RenderSubtitleResult, SubtitleVariant,
 };
-pub use system::{GpuDeviceSnapshot, GpuStatusSnapshot};
+pub use system::{
+    GpuDeviceSnapshot, GpuStatusSnapshot, SystemDiagnosticPath, SystemDiagnosticsSnapshot,
+};
 pub(crate) use task::task_progress_from_payload;
 pub use task::{
     AcceptedOperation, TaskPayloadEnvelope, TaskProgress, TaskResult, TaskStatus, TaskView,

@@ -18,6 +18,14 @@ export type ServerErrorResponse = {
   data?: unknown;
   message?: string;
 };
+export type OpenAiErrorResponse = {
+  error?: {
+    code?: string | null;
+    message?: string;
+    param?: string | null;
+    type?: string;
+  };
+};
 export type DeletedModelResponse = {
   id: string;
   status: string;
@@ -87,6 +95,7 @@ export const executableSmokeOperations = [
   { method: "post", path: "/v1/setup/complete" },
   { method: "get", path: "/v1/setup/status" },
   { method: "post", path: "/v1/subtitles/render" },
+  { method: "get", path: "/v1/system/diagnostics" },
   { method: "get", path: "/v1/system/gpu" },
   { method: "get", path: "/v1/tasks" },
   { method: "get", path: "/v1/tasks/{id}" },
@@ -176,6 +185,21 @@ export async function expectError(
   expect(response.status).toBe(status);
   expect(body.message).toBeTypeOf("string");
   expect(body.code).toBeTypeOf("number");
+
+  return body;
+}
+
+export async function expectOpenAiError(
+  server: SlabServerTestHarness,
+  path: string,
+  status: number,
+  init?: RequestInit
+): Promise<OpenAiErrorResponse> {
+  const { response, body } = await expectJson<OpenAiErrorResponse>(server, path, init);
+
+  expect(response.status).toBe(status);
+  expect(body.error?.message).toBeTypeOf("string");
+  expect(body.error?.type).toBeTypeOf("string");
 
   return body;
 }

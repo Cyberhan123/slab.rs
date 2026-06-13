@@ -51,6 +51,7 @@ impl McpClient {
             command: launcher.command,
             args: launcher.args,
             env: launcher.env,
+            cwd: launcher.cwd,
         })
         .await
         .map_err(|source| transport_error(&server_name, source))?;

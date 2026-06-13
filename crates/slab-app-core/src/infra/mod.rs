@@ -1,4 +1,5 @@
 pub mod agent_adapter;
+pub(crate) mod agent_code_tools;
 pub mod agent_event_hub;
 pub(crate) mod agent_hooks;
 pub mod agent_memory;

@@ -24,17 +24,30 @@ export type PackPluginOptions = {
 
 type PluginManifest = {
   contributes?: {
+    agentCapabilities?: Array<{
+      exposeAsMcpTool?: boolean;
+    }>;
+    agentHooks?: unknown[];
+    commands?: unknown[];
     languageServers?: Array<{
       transport?: {
         type?: string;
       };
     }>;
+    routes?: unknown[];
+    settings?: unknown[];
+    sidebar?: unknown[];
   };
   id: string;
   integrity?: {
     filesSha256?: Record<string, string>;
   };
   name: string;
+  permissions?: {
+    agent?: string[];
+    lsp?: string[];
+    ui?: string[];
+  };
   runtime?: {
     ui?: {
       entry?: unknown;
@@ -445,6 +458,75 @@ function validateManifest(manifest: PluginManifest, pluginDir: string): void {
   }
   if (typeof manifest.version !== "string" || manifest.version.trim().length === 0) {
     throw new Error(`Plugin '${manifest.id}' is missing 'version'.`);
+  }
+  validateContributionPermissions(manifest);
+}
+
+function validateContributionPermissions(manifest: PluginManifest): void {
+  const contributes = manifest.contributes ?? {};
+  const permissions = manifest.permissions ?? {};
+  const uiPermissions = permissions.ui ?? [];
+  const agentPermissions = permissions.agent ?? [];
+  const lspPermissions = permissions.lsp ?? [];
+
+  const rules: Array<[unknown[] | undefined, string[], string, string]> = [
+    [
+      contributes.routes,
+      uiPermissions,
+      "route:create",
+      "contributes.routes requires permissions.ui to include route:create",
+    ],
+    [
+      contributes.sidebar,
+      uiPermissions,
+      "sidebar:item:create",
+      "contributes.sidebar requires permissions.ui to include sidebar:item:create",
+    ],
+    [
+      contributes.commands,
+      uiPermissions,
+      "command:create",
+      "contributes.commands requires permissions.ui to include command:create",
+    ],
+    [
+      contributes.settings,
+      uiPermissions,
+      "settings:section:create",
+      "contributes.settings requires permissions.ui to include settings:section:create",
+    ],
+    [
+      contributes.agentCapabilities,
+      agentPermissions,
+      "capability:declare",
+      "contributes.agentCapabilities requires permissions.agent to include capability:declare",
+    ],
+    [
+      contributes.agentHooks,
+      agentPermissions,
+      "hook:declare",
+      "contributes.agentHooks requires permissions.agent to include hook:declare",
+    ],
+    [
+      contributes.languageServers,
+      lspPermissions,
+      "languageServer:declare",
+      "contributes.languageServers requires permissions.lsp to include languageServer:declare",
+    ],
+  ];
+
+  for (const [items, declaredPermissions, expectedPermission, error] of rules) {
+    if ((items?.length ?? 0) > 0 && !declaredPermissions.includes(expectedPermission)) {
+      throw new Error(`Plugin '${manifest.id}' ${error}.`);
+    }
+  }
+
+  if (
+    contributes.agentCapabilities?.some((capability) => capability.exposeAsMcpTool === true) &&
+    !agentPermissions.includes("mcpTool:expose")
+  ) {
+    throw new Error(
+      `Plugin '${manifest.id}' contributes.agentCapabilities[].exposeAsMcpTool requires permissions.agent to include mcpTool:expose.`,
+    );
   }
 }
 

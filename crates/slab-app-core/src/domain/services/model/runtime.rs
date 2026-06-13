@@ -9,7 +9,9 @@ use slab_types::{RuntimeBackendId, RuntimeBackendLoadSpec};
 use tracing::info;
 
 use crate::context::{ModelState, WorkerState};
-use crate::domain::models::{ModelLoadCommand, ModelStatus, UnifiedModel, UnifiedModelKind};
+use crate::domain::models::{
+    ModelLoadCommand, ModelRuntimeState, ModelStatus, UnifiedModel, UnifiedModelKind,
+};
 use crate::domain::ports::RuntimeBackendStatus;
 use crate::error::AppCoreError;
 use crate::infra::db::{ModelConfigStateStore, ModelStore};
@@ -59,6 +61,24 @@ impl ModelService {
         command: ModelLoadCommand,
     ) -> Result<ModelStatus, AppCoreError> {
         self.load_model_command("switch_model", "switching model", command).await
+    }
+
+    pub async fn runtime_state_for_model(&self, model: &UnifiedModel) -> Option<ModelRuntimeState> {
+        self.model_state.auto_unload().sync_runtime_restart_states().await;
+        let backend_id = model.backend_id?;
+        let backend_id = backend_id.into();
+        let snapshot =
+            self.model_state.auto_unload().snapshot_for_model(backend_id, &model.id).await;
+
+        Some(match snapshot {
+            Some(snapshot) => ModelRuntimeState {
+                backend_id: snapshot.backend_id,
+                loaded: snapshot.loaded,
+                active: snapshot.active_refs > 0,
+                active_refs: snapshot.active_refs,
+            },
+            None => ModelRuntimeState { backend_id, loaded: false, active: false, active_refs: 0 },
+        })
     }
 
     async fn load_model_command(

@@ -523,6 +523,14 @@ pub struct ModelStatus {
 }
 
 #[derive(Debug, Clone)]
+pub struct ModelRuntimeState {
+    pub backend_id: RuntimeBackendId,
+    pub loaded: bool,
+    pub active: bool,
+    pub active_refs: u64,
+}
+
+#[derive(Debug, Clone)]
 pub struct DeletedModelView {
     pub id: String,
     pub status: String,

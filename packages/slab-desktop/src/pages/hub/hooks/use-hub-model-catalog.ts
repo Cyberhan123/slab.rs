@@ -9,6 +9,7 @@ import type { components } from '@slab/api/v1';
 import {
   modelSupportsCapability,
   toCatalogModelList,
+  type CatalogModelRuntimeState,
   type CatalogModelStatus,
   type ModelCapability,
 } from '@slab/api/models';
@@ -52,6 +53,7 @@ export type ModelItem = {
   status: ModelStatus;
   local_path: string | null;
   pending: boolean;
+  runtime_state: CatalogModelRuntimeState | null;
   download_task_id: string | null;
   download_progress: ModelDownloadProgress | null;
   updated_at: string;
@@ -430,6 +432,7 @@ function toModelItem(
     status,
     local_path: model.local_path,
     pending,
+    runtime_state: model.runtime_state,
     download_task_id: tracking?.taskId ?? null,
     download_progress: tracking?.progress ?? null,
     updated_at: model.updated_at,
