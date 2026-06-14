@@ -99,6 +99,9 @@ pub(crate) fn setting_descriptor(pmid: &str) -> Option<SettingDescriptor> {
         "agent.tools.mcp.enabled" => {
             descriptor!("agent.tools.mcp.enabled", agent.tools.mcp.enabled)
         }
+        "agent.tools.mcp.servers" => {
+            descriptor!("agent.tools.mcp.servers", agent.tools.mcp.servers)
+        }
         "agent.tools.websearch.default_provider" => descriptor!(
             "agent.tools.websearch.default_provider",
             agent.tools.websearch.default_provider

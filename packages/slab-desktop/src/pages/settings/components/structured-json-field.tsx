@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 
 import { Badge } from '@slab/components/badge';
@@ -120,8 +121,14 @@ function ObjectEditor({
   const objectValue = isJsonObject(value) ? value : {};
   const required = new Set(schema.required ?? []);
   const properties = Object.entries(schema.properties ?? {});
+  const additionalSchema =
+    schema.additionalProperties && typeof schema.additionalProperties === 'object'
+      ? schema.additionalProperties
+      : schema.additionalProperties === true
+        ? ({ type: 'string' } satisfies JsonSchemaNode)
+        : null;
 
-  if (properties.length === 0) {
+  if (properties.length === 0 && !additionalSchema) {
     return (
       <div className="rounded-2xl border border-dashed border-border/70 px-4 py-3 text-sm text-muted-foreground">
         No fields are defined for this object.
@@ -178,6 +185,160 @@ function ObjectEditor({
           </div>
         );
       })}
+
+      {additionalSchema ? (
+        <AdditionalPropertiesEditor
+          schema={additionalSchema}
+          objectValue={objectValue}
+          definedKeys={new Set(properties.map(([key]) => key))}
+          path={path}
+          depth={depth}
+          errorState={errorState}
+          onChange={onChange}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function AdditionalPropertiesEditor({
+  schema,
+  objectValue,
+  definedKeys,
+  path,
+  depth,
+  errorState,
+  onChange,
+}: {
+  schema: JsonSchemaNode;
+  objectValue: Record<string, JsonValue>;
+  definedKeys: Set<string>;
+  path: string;
+  depth: number;
+  errorState?: FieldErrorState;
+  onChange: (value: JsonValue) => void;
+}) {
+  const [newKey, setNewKey] = useState('');
+  const entries = Object.entries(objectValue).filter(([key]) => !definedKeys.has(key));
+  const trimmedKey = newKey.trim();
+  const canAdd =
+    trimmedKey.length > 0 && !definedKeys.has(trimmedKey) && !(trimmedKey in objectValue);
+
+  function addEntry() {
+    if (!canAdd) {
+      return;
+    }
+
+    onChange({
+      ...objectValue,
+      [trimmedKey]: createDefaultJsonValue(schema),
+    });
+    setNewKey('');
+  }
+
+  function removeEntry(key: string) {
+    const nextValue = { ...objectValue };
+    delete nextValue[key];
+    onChange(nextValue);
+  }
+
+  return (
+    <div className="space-y-3 rounded-2xl border border-dashed border-border/70 bg-background/60 p-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-end">
+        <div className="min-w-0 flex-1 space-y-1">
+          <p className="text-sm font-medium">{schema.title ?? 'Additional properties'}</p>
+          <p className="text-xs text-muted-foreground">{entries.length} configured</p>
+        </div>
+        <div className="flex min-w-0 flex-1 gap-2">
+          <Input
+            value={newKey}
+            onChange={(event) => setNewKey(event.target.value)}
+            placeholder="Property name"
+            className="h-10 min-w-0 rounded-2xl"
+          />
+          <Button variant="outline" size="sm" onClick={addEntry} disabled={!canAdd}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add
+          </Button>
+        </div>
+      </div>
+
+      {entries.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-border/70 px-4 py-3 text-sm text-muted-foreground">
+          No entries configured yet.
+        </div>
+      ) : null}
+
+      {entries.map(([key, entryValue]) => (
+        <AdditionalPropertyEntry
+          key={jsonPointerAppend(path, key)}
+          schema={schema}
+          propertyKey={key}
+          value={entryValue}
+          path={jsonPointerAppend(path, key)}
+          depth={depth}
+          errorState={errorState}
+          onRemove={() => removeEntry(key)}
+          onChange={(nextValue) =>
+            onChange({
+              ...objectValue,
+              [key]: nextValue,
+            })
+          }
+        />
+      ))}
+    </div>
+  );
+}
+
+function AdditionalPropertyEntry({
+  schema,
+  propertyKey,
+  value,
+  path,
+  depth,
+  errorState,
+  onRemove,
+  onChange,
+}: {
+  schema: JsonSchemaNode;
+  propertyKey: string;
+  value: JsonValue;
+  path: string;
+  depth: number;
+  errorState?: FieldErrorState;
+  onRemove: () => void;
+  onChange: (value: JsonValue) => void;
+}) {
+  const hasError = pathContainsError(path, errorState?.path);
+
+  return (
+    <div
+      className={cn(
+        'space-y-3 rounded-2xl border border-border/70 bg-background/80 p-4',
+        hasError && 'border-destructive/60 bg-destructive/5',
+      )}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Badge variant="outline">{propertyKey}</Badge>
+        <Button variant="ghost" size="sm" onClick={onRemove}>
+          <Trash2 className="mr-2 h-4 w-4" />
+          Remove
+        </Button>
+      </div>
+
+      <SchemaNodeEditor
+        schema={schema}
+        value={value}
+        path={path}
+        depth={depth + 1}
+        errorState={errorState}
+        onChange={onChange}
+      />
+
+      {errorState?.path === path ? (
+        <p className="text-sm text-destructive">{errorState.message}</p>
+      ) : null}
     </div>
   );
 }

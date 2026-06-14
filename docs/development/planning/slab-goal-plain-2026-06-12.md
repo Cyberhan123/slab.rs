@@ -32,23 +32,25 @@
 
 当前可确认的关键入口包括：
 
-- Chat：`POST /v1/chat/completions`
+- Health：`GET /health`
+- Chat：`POST /v1/chat/completions`、`POST /v1/completions`、`GET /v1/chat/models`
 - Agent：`GET|POST /v1/agents/responses`
-- Models：`/v1/models`、`/v1/models/download`、`/v1/models/load`、`/v1/models/unload`、`/v1/models/switch`
+- Backends：`/v1/backends`、`/v1/backends/status`
+- Models：`GET|POST /v1/models`、`GET|PUT|DELETE /v1/models/{id}`、`/v1/models/available`、`/v1/models/import-pack`、`/v1/models/download`、`/v1/models/load`、`/v1/models/unload`、`/v1/models/switch`
 - Tasks：`/v1/tasks`、`/v1/tasks/{id}`、`/v1/tasks/{id}/result`、`/v1/tasks/{id}/cancel`、`/v1/tasks/{id}/restart`
-- Audio：`/v1/audio/transcriptions`
-- Image：`/v1/images/generations`
-- Video：`/v1/video/generations`
+- Media：`/v1/audio/transcriptions`、`/v1/images/generations`、`/v1/video/generations`、`/v1/ffmpeg/convert`、`/v1/subtitles/render`
 - Plugin：`/v1/plugins/rpc`、`/v1/plugins/events`、`/v1/plugins/import-pack`、启停和删除接口
+- Sessions：`/v1/sessions`、`/v1/sessions/{id}`、`/v1/sessions/{id}/messages`
 - Workspace LSP：`/v1/workspace/lsp/{language}`
-- Settings：`/v1/settings`、`/v1/settings/{pmid}`
+- Settings 与 setup：`/v1/settings`、`/v1/settings/{pmid}`、`/v1/setup/status`、`/v1/setup/provision`、`/v1/setup/complete`
 - UI State：`/v1/ui-state/{key}`
+- System：`/v1/system/gpu`
 
 ### 2.3 当前 Agent 基础
 
 - Agent thread 状态已有 `pending/running/interrupting/interrupted/completed/errored/shutdown`。
 - Tool call 状态已有 `pending/running/completed/failed`。
-- 内置工具注册面已有 `shell`、`read_file`、`write_file`、`list_dir`、`grep`、`web_search`、`fs_watch`、`apply_patch`、MCP 调用与动态 MCP proxy、`delegate_subagent`，Git 工具可按开关注册。
+- 内置工具注册面已有 `shell`、`read_file`、`write_file`、`list_dir`、`file_glob`、增强 `grep`、`plan_update`、`web_search`、`fs_watch`、`apply_patch`、MCP 调用与动态 MCP proxy、`delegate_subagent`，Git 工具可按开关注册。
 - shell 默认受 sandbox 与 shell rules 约束。
 - memory pipeline 已有 settings、startup hook、instruction hook、memory root、phase1/phase2 参数。
 - hook 基础已存在：本地脚本 hook、Agent lifecycle event、插件 hook source 接入。
@@ -57,8 +59,8 @@
 
 - `slab-mcp-client` 已支持 stdio 外部 MCP 的 `initialize`、`notifications/initialized`、`ping`、`tools/list`、`tools/call`。
 - `crates/slab-mcp` 已有多 server client、cached tools、server_name 路由和 stdio launch config。
-- `bin/slab-mcp-server` 当前仍是协议壳：`tools/list` 返回空列表，`tools/call` 返回 tool not found。
-- app-core 当前打开 `agent.tools.mcp.enabled` 时会创建空 `McpClient`，但尚未接入持久化 MCP server launch config。
+- `bin/slab-mcp-server` 已暴露最小只读 `slab_server_info` 工具，并带 Slab source、permission 和 audit metadata。
+- app-core 打开 `agent.tools.mcp.enabled` 时会创建 `McpClient`，读取 `agent.tools.mcp.servers` 中启用的 stdio server launch config，并把环境变量引用解析成子进程 env。
 
 ### 2.5 当前插件基础
 
@@ -72,7 +74,7 @@
 
 ### 2.6 当前产品页面基础
 
-前端已有 Assistant、Hub、Settings、Workspace、Plugins、Image、Audio、Video、Task、About 等页面骨架。路线图的重点不是新增入口数量，而是让这些页面形成闭环：可恢复、可解释、可诊断、可配置、可扩展、可验证。
+前端已有 Assistant、Hub、Settings、Workspace、Plugins、Image、Audio、Video、Task、Setup、About 等页面；其中 Hub、Settings、Workspace、Plugins、Tasks 已具备基础工作流。路线图的重点不是新增入口数量，而是把已有页面增强成闭环：可恢复、可解释、可诊断、可配置、可扩展、可验证。
 
 ## 3. 产品北极星
 
@@ -145,24 +147,24 @@ Slab 的长期目标是本地优先 AI 桌面工作台：
 
 已有基础：
 
-- `slab-agent-tools` 已有 shell、文件读写、list、grep、apply_patch、fs_watch、web_search、subagent、MCP。
+- `slab-agent-tools` 已有 shell、文件读写、list、`file_glob`、增强 grep、`plan_update`、apply_patch、fs_watch、web_search、subagent、MCP。
 - Workspace 已有文件树、搜索、Git 面板、终端/控制台和 Monaco 编辑器。
 - LSP 主链路已经在 app-core 侧解析 provider。
 
 缺失点：
 
 - 文件编辑还需要更强的“最小变更”体验：patch 预览、失败原因、冲突处理、用户确认、回滚。
-- 文件搜索需要 glob、文件名搜索、ignore/gitignore 规则、大小限制、二进制跳过和结构化结果。
-- grep 需要上下文行、多模式、文件类型过滤、结果分页、跨 workspace 限流。
+- `file_glob` 已有 gitignore-aware 基础版，后续还需要文件名搜索、文件类型过滤、大小限制、二进制策略、结果分页和跨 workspace 限流。
+- grep 已有 gitignore-aware、glob 过滤、大小写、上下文行、二进制跳过和结果上限，后续还需要多模式、结果分页、跨 workspace 限流和 UI 回放。
 - Agent 需要可用的只读代码智能：diagnostics、symbols、definition、references、hover、completion 摘要。
 - Agent 修改文件后，Workspace UI、Git diff、文件树 dirty state、诊断刷新需要联动。
 - shell 工具需要 profile 化：PowerShell、cmd、bash、项目脚本、超时、工作目录、环境变量模板。
 - 用户澄清能力需要产品化：Agent 在缺信息时能提出短问题，前端能暂停并恢复执行。
-- Todo/Plan 需要变成可见状态，而不是只存在模型输出文本里。
+- `plan_update` 已能把计划状态结构化写入工具输出，后续需要进入 Agent 时间线、可恢复状态和用户可编辑 UI，而不是只停留在模型输出文本里。
 
 目标能力：
 
-- `file.glob`：按 workspace root、ignore 规则、最大结果数、文件类型过滤返回结构化文件清单。
+- `file.glob`：在已实现 workspace root、gitignore、最大结果数和结构化清单基础上，补文件类型过滤、分页和 UI 结果选择。
 - `file.patch.preview`：生成 diff、检查目标文件版本、展示影响范围。
 - `file.patch.apply`：只对用户确认或低风险 patch 生效，失败时返回冲突位置。
 - `code.diagnostics`：从 app-core LSP 服务读取当前文件或项目诊断摘要。
@@ -170,7 +172,7 @@ Slab 的长期目标是本地优先 AI 桌面工作台：
 - `code.references`：为重命名、删除、调用链分析提供只读引用查询。
 - `workspace.context_pack`：从文件树、搜索结果、Git diff、终端输出、LSP 诊断裁剪上下文。
 - `user.ask`：Agent 发出短问题，UI 收集用户回答并恢复当前 turn。
-- `plan.update`：记录任务计划、状态、阻塞原因，支持用户手动调整。
+- `plan.update`：在已实现结构化工具基础上，记录任务计划、状态、阻塞原因，并支持用户手动调整。
 - `shell.profile`：常用脚本、允许规则和风险等级可视化。
 
 验收：
@@ -258,33 +260,34 @@ Slab 的长期目标是本地优先 AI 桌面工作台：
 - MCP client 支持 stdio 初始化、ping、tools/list、tools/call。
 - MCP 多 server client 已有 cached tools 与 server_name 路由。
 - Agent 工具注册中已有 MCP call 与 proxy tool 的基础入口。
-- 独立 `slab-mcp-server` 已有协议响应壳。
+- settings 已有 `agent.tools.mcp.enabled` 和 `agent.tools.mcp.servers` 持久化 stdio server 配置，app-core 会在启用 MCP 时解析 enabled server 并异步连接。
+- 独立 `slab-mcp-server` 已暴露最小只读 `slab_server_info` 工具，工具声明包含 permission、source 和 audit metadata。
 
 缺失点：
 
-- app-core 尚未把持久化 MCP server 配置接到 Agent MCP client。
-- 缺少 MCP 管理 UI：新增 server、启停、测试连接、查看工具、查看日志。
+- 缺少 MCP 管理 UI：新增 server、启停、测试连接、查看工具、查看日志和连接错误分类。
+- 缺少 MCP server 运行状态的持久化/实时视图：当前连接结果主要进入日志，用户看不到 server 在线、工具缓存、最近错误和重连状态。
 - 缺少资源能力：resources/list、resources/read、prompt、sampling 等协议面尚未规划落地。
 - 缺少传输扩展策略：stdio 稳定后再进入 HTTP/SSE 或 streamable HTTP。
-- 缺少 secret 管理：MCP server 环境变量和 token 不应明文散落。
-- `slab-mcp-server` 目前不能暴露 Slab 工具，只能返回空 tools。
+- MCP env 已使用 host env 引用避免在 settings 中存普通 secret value，但还缺统一本地 secret store 和 UI writeOnly 输入。
+- `slab-mcp-server` 目前只暴露 `slab_server_info`，尚未暴露文件只读、搜索、任务查询、模型状态、插件能力等可控 Slab 工具集。
 - 插件 `exposeAsMcpTool` 与 Slab MCP server 暴露路径需要合并治理。
 
 目标能力：
 
-- MCP server 配置：name、command、args、env secret 引用、cwd、enabled、workspace scope。
+- MCP server 配置：在已实现 name、command、args、env 引用、cwd、enabled 的基础上，补 workspace scope、连接测试、状态和日志。
 - 连接生命周期：启动、initialize、健康检查、重连、禁用、错误分类、日志。
 - 工具目录：按 server 分组展示 tools、input schema、风险等级、最近调用。
 - Agent 工具来源：Agent 时间线标明工具来自内置、MCP server、插件或 Slab API。
 - MCP resources：支持列出和读取外部资源，进入 Agent 上下文选择器。
-- MCP secret：支持环境变量引用、本地 secret 引用、UI writeOnly 输入。
-- Slab MCP server：安全暴露文件只读、搜索、任务查询、模型状态、插件能力等可控工具。
+- MCP secret：在已实现环境变量引用基础上，支持本地 secret 引用和 UI writeOnly 输入。
+- Slab MCP server：从当前只读 server info 扩展到安全暴露文件只读、搜索、任务查询、模型状态、插件能力等可控工具。
 - 插件 MCP 暴露：插件能力先进入统一 registry，再由 MCP server 暴露，避免重复命名。
 
 验收：
 
-- 开启 MCP 后至少一个 stdio server 能持久化、重启后自动恢复、工具可被 Agent 调用。
-- `bin/slab-mcp-server` 的 `tools/list` 不再是空列表时，所有工具必须有权限、来源和审计。
+- 开启 MCP 后至少一个 stdio server 能通过 Settings 持久化、重启后自动连接、工具可被 Agent 调用，并在 UI 中显示连接状态。
+- `bin/slab-mcp-server` 新增任何 Slab 能力工具时，所有工具必须有权限、来源和审计。
 - MCP 配置中的 secret 不以普通明文字段回显。
 
 ### 5.6 插件生态与市场
@@ -446,12 +449,13 @@ Slab 的长期目标是本地优先 AI 桌面工作台：
 - `slab-config` 独立管理 settings document、PMID、schema 和类型安全视图。
 - settings 覆盖 general、database、logging、telemetry、tools、agent、runtime、providers、models、plugin、workspace、server。
 - server admin token 已有配置字段。
-- websearch provider schema 已标记 API key writeOnly。
+- Settings UI 已按 schema 渲染布尔、枚举、整数、结构化 object/array、provider registry 和 writeOnly/password 字段。
+- websearch provider schema 已标记 API key writeOnly，MCP server env 已使用 host env var 引用而不是直接保存 secret value。
 
 缺失点：
 
-- Settings UI 需要把复杂 JSON 字段变成更安全的表单，而不是只暴露结构化 JSON。
-- secret 类型需要统一：provider key、MCP env、plugin secret、server admin token。
+- Settings UI 已有结构化表单基础，但复杂配置仍需要专门的产品语义：MCP 连接测试、provider 凭证状态、hook 风险、memory root 状态和重启影响提示。
+- secret 类型需要统一：provider key、MCP env 引用、本地 secret store、plugin secret、server admin token。
 - 配置变更影响范围需要提示：是否需要重启、是否影响 runtime、是否影响插件、是否影响当前任务。
 - 工作区覆盖、全局默认、插件设置之间需要清晰优先级和恢复默认。
 - 配置损坏、迁移失败、外部修改需要用户可恢复。
@@ -460,7 +464,7 @@ Slab 的长期目标是本地优先 AI 桌面工作台：
 目标能力：
 
 - 设置影响提示：每个设置显示影响模块、是否立即生效、是否需重启。
-- Secret 字段：writeOnly、不可回显、支持环境变量引用、支持本地 secret store。
+- Secret 字段：在 writeOnly/password 和环境变量引用基础上，补不可回显状态、本地 secret store 和迁移路径。
 - 配置审计：最近修改、来源、旧值摘要、新值摘要、回滚。
 - 配置导入导出：隐去 secret，可选择包含/不包含模型和插件路径。
 - 工作区覆盖：明确哪些设置可 workspace override，显示继承关系。
@@ -571,7 +575,7 @@ Slab 的长期目标是本地优先 AI 桌面工作台：
 - Assistant 发送、模型下载/加载、任务等待、错误重试闭环。
 - Task 中心统一模型下载、媒体任务和失败恢复。
 - Hub 模型状态从下载到 loaded/active 一致显示。
-- Settings 中 Agent memory、hook、MCP、websearch 的基础配置可见。
+- Settings 中 Agent memory、hook、MCP、websearch 的基础配置可见；MCP servers 需能通过结构化表单编辑 env 引用。
 - Runtime 崩溃后 ModelState 自动校正。
 
 验收：
@@ -586,7 +590,7 @@ Slab 的长期目标是本地优先 AI 桌面工作台：
 要做：
 
 - Agent 时间线、工具回放、审批队列、中断恢复。
-- 精确编辑、glob、增强 grep、用户澄清、plan/todo 工具。
+- 精确编辑、用户澄清、只读代码智能、workspace context pack，并把已实现的 `file_glob`、增强 grep、`plan_update` 接入 UI 时间线和上下文选择。
 - Memory 中心和 Hook 中心最小版本。
 - Agent trace、tool metadata、hook outcome 进入 UI。
 
@@ -620,8 +624,8 @@ Slab 的长期目标是本地优先 AI 桌面工作台：
 要做：
 
 - 插件中心完善权限、日志、启停、更新、registry。
-- MCP server 配置持久化、连接管理、工具目录、resources。
-- `slab-mcp-server` 暴露安全 Slab 工具集。
+- 在已实现 MCP server 配置持久化基础上，补连接管理、工具目录、resources 和状态日志。
+- `slab-mcp-server` 从最小只读 server info 扩展为安全 Slab 工具集。
 - 插件 agentCapabilities、agentHooks、languageServers、MCP 暴露统一治理。
 
 验收：
@@ -672,9 +676,9 @@ Slab 的长期目标是本地优先 AI 桌面工作台：
 1. 清理路线图中的外部参照依赖，并把所有路径、状态、边界改成源码可验证描述。
 2. Assistant 运行闭环：模型准备、发送、等待、工具回放、审批、中断、恢复、错误可操作。
 3. Task 中心闭环：模型下载、媒体任务、插件任务、Agent 任务统一可见。
-4. Agent 编程工具补齐：glob、增强 grep、patch preview/apply、user.ask、plan.update。
+4. Agent 编程工具产品化：已实现的 `file_glob`、增强 grep、`plan_update` 进入 UI 时间线和上下文选择，同时补 patch preview/apply、user.ask。
 5. Memory/Hook 管理界面：启停、审计、注入记录、失败记录。
-6. MCP 持久化配置：stdio server 管理、工具目录、调用来源、resources。
+6. MCP 集成中心：在已实现 stdio server 持久化配置基础上，补管理 UI、工具目录、调用来源、resources。
 7. Plugin 中心：权限、日志、启停、pack 导入、私有 registry。
 8. Model/Runtime 稳定性：下载去重、ModelState 恢复、能力矩阵、OOM 错误。
 9. Workspace/LSP 状态：provider 可用性、诊断、Agent 上下文选择。

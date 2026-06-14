@@ -53,6 +53,7 @@ Validation:
 
 - Run `bun run gen:schemas` after settings schema changes.
 - Agent memory, hook, MCP, and websearch settings are current under `agent.memories.*`, `agent.hooks.*`, `agent.tools.mcp.*`, and `agent.tools.websearch.*`.
+- MCP stdio server launch configs are stored at `agent.tools.mcp.servers` and are exposed through the Settings PMID view with env values represented as host environment variable references.
 
 ## Plugin Manifest
 

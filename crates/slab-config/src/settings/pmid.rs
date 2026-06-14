@@ -100,6 +100,7 @@ impl SettingsPmidCatalog {
             self.agent.memories.max_unused_days(),
             self.agent.memories.extension_retention_days(),
             self.agent.tools.mcp.enabled(),
+            self.agent.tools.mcp.servers(),
             self.agent.tools.websearch.default_provider(),
             self.agent.tools.websearch.providers(),
             self.runtime.mode(),
@@ -508,6 +509,10 @@ pub struct AgentMcpPmids;
 impl AgentMcpPmids {
     pub fn enabled(self) -> SettingPmid {
         SettingPmid::from_path("agent.tools.mcp.enabled")
+    }
+
+    pub fn servers(self) -> SettingPmid {
+        SettingPmid::from_path("agent.tools.mcp.servers")
     }
 }
 
@@ -939,6 +944,7 @@ mod tests {
         assert!(unique.contains("agent.memories.phase1_scan_limit"));
         assert!(unique.contains("agent.memories.phase2_limit"));
         assert!(unique.contains("agent.tools.mcp.enabled"));
+        assert!(unique.contains("agent.tools.mcp.servers"));
         assert!(unique.contains("agent.tools.websearch.default_provider"));
         assert!(unique.contains("agent.tools.websearch.providers"));
         assert!(unique.contains("providers.registry"));

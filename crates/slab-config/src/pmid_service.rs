@@ -8,8 +8,8 @@ use crate::{
     LaunchProfilesConfig, ModelDownloadSourcePreference, PMID, PmidConfig, ProviderRegistryEntry,
     RuntimeConfig, RuntimeLlamaConfig, RuntimeModelAutoUnloadConfig, RuntimeWhisperConfig,
     RuntimeWorkerConfig, ServerLaunchProfileConfig, SettingsDocument, SetupBackendsConfig,
-    SetupConfig, SetupFfmpegConfig, provider_registry_json_schema, string_list_json_schema,
-    websearch_providers_json_schema,
+    SetupConfig, SetupFfmpegConfig, mcp_servers_json_schema, provider_registry_json_schema,
+    string_list_json_schema, websearch_providers_json_schema,
 };
 use serde_json::{Value, json};
 use slab_types::{I18nMessageRef, I18nPayload, ServerI18nKey};
@@ -909,6 +909,7 @@ fn minimum_value(path: &str) -> Option<i64> {
 fn json_schema(path: &str) -> Option<Value> {
     match path {
         "providers.registry" => Some(provider_registry_json_schema()),
+        "agent.tools.mcp.servers" => Some(mcp_servers_json_schema()),
         "agent.tools.websearch.providers" => Some(websearch_providers_json_schema()),
         "server.cors.allowed_origins" => Some(string_list_json_schema("Allowed Origins")),
         "telemetry.span_attributes" => Some(string_map_json_schema("Span Attributes")),
@@ -932,6 +933,7 @@ fn secret(path: &str) -> bool {
 
 fn multiline(path: &str) -> bool {
     path == "providers.registry"
+        || path == "agent.tools.mcp.servers"
         || path == "agent.tools.websearch.providers"
         || path == "agent.hooks.scripts"
         || path == "telemetry.metrics_exporter"
@@ -973,6 +975,7 @@ fn property_label(path: &str) -> String {
         "agent.memories.max_unused_days" => "Max Unused Days".to_owned(),
         "agent.memories.extension_retention_days" => "Extension Retention Days".to_owned(),
         "agent.tools.mcp.enabled" => "MCP Tools".to_owned(),
+        "agent.tools.mcp.servers" => "MCP Servers".to_owned(),
         "agent.tools.websearch.default_provider" => "Default Provider".to_owned(),
         "agent.tools.websearch.providers" => "Web Search Providers".to_owned(),
         _ if path.ends_with(".flash_attn") => "Flash Attention".to_owned(),
@@ -1069,6 +1072,9 @@ fn property_description(path: &str) -> String {
         }
         "agent.tools.mcp.enabled" => {
             "Expose configured MCP tools to the agent tool router. Disabled by default.".to_owned()
+        }
+        "agent.tools.mcp.servers" => {
+            "Persistent stdio MCP server launch configurations used when MCP tools are enabled. Environment values reference host variables instead of storing secrets directly.".to_owned()
         }
         "agent.tools.websearch.default_provider" => {
             "Provider used by the agent web_search tool when the tool call omits provider.".to_owned()
@@ -1679,6 +1685,11 @@ mod tests {
             .iter()
             .find(|property| property.pmid == "agent.tools.mcp.enabled")
             .expect("mcp enabled property");
+        let mcp_servers = mcp_subsection
+            .properties
+            .iter()
+            .find(|property| property.pmid == "agent.tools.mcp.servers")
+            .expect("mcp servers property");
         let default_provider = websearch_subsection
             .properties
             .iter()
@@ -1737,6 +1748,17 @@ mod tests {
         assert_eq!(phase1_scan_limit.schema.value_type, SettingValueType::Integer);
         assert_eq!(mcp_subsection.title, "MCP");
         assert_eq!(mcp_enabled.schema.value_type, SettingValueType::Boolean);
+        assert_eq!(mcp_servers.schema.value_type, SettingValueType::Array);
+        assert!(mcp_servers.schema.multiline);
+        assert_eq!(
+            mcp_servers
+                .schema
+                .json_schema
+                .as_ref()
+                .expect("mcp servers schema")
+                .pointer("/items/properties/env/additionalProperties/properties/env_var/type"),
+            Some(&json!("string"))
+        );
         assert_eq!(websearch_subsection.title, "Web Search");
         assert!(provider_enum.contains(&"duckduckgo".to_owned()));
         assert!(provider_enum.contains(&"searxng".to_owned()));

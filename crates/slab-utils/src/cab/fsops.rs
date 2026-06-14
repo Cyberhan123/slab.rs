@@ -33,7 +33,8 @@ fn collect_files_recursive_inner(root: &Path, files: &mut Vec<PathBuf>) -> Resul
 }
 
 pub fn normalize_relative_path(path: &Path) -> Result<String> {
-    crate::path::normalize_relative_path(&path.to_string_lossy())
+    let portable_path = path.to_string_lossy().replace('\\', "/");
+    crate::path::normalize_relative_path(&portable_path)
 }
 
 pub fn validate_relative_path(path: &Path) -> Result<()> {
@@ -225,6 +226,12 @@ mod tests {
     fn normalizes_windows_paths() {
         let normalized = normalize_relative_path(Path::new("a\\b\\c.dll")).unwrap();
         assert_eq!(normalized, "a/b/c.dll");
+    }
+
+    #[test]
+    fn normalizes_mixed_path_separators() {
+        let normalized = normalize_relative_path(Path::new("a\\b/c\\d.dll")).unwrap();
+        assert_eq!(normalized, "a/b/c/d.dll");
     }
 
     #[test]

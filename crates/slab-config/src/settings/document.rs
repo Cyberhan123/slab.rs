@@ -1299,6 +1299,70 @@ pub fn websearch_providers_json_schema() -> Value {
     })
 }
 
+pub fn mcp_servers_json_schema() -> Value {
+    json!({
+        "type": "array",
+        "title": "MCP Servers",
+        "default": [],
+        "items": {
+            "type": "object",
+            "title": "MCP Server",
+            "required": ["name", "command"],
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "title": "Enabled",
+                    "default": true
+                },
+                "name": {
+                    "type": "string",
+                    "title": "Server Name",
+                    "description": "Stable local name used to route MCP tool calls.",
+                    "default": ""
+                },
+                "command": {
+                    "type": "string",
+                    "title": "Command",
+                    "description": "Executable used to launch the stdio MCP server.",
+                    "default": ""
+                },
+                "args": {
+                    "type": "array",
+                    "title": "Arguments",
+                    "default": [],
+                    "items": {
+                        "type": "string",
+                        "default": ""
+                    }
+                },
+                "cwd": {
+                    "type": ["string", "null"],
+                    "title": "Working Directory",
+                    "default": null
+                },
+                "env": {
+                    "type": "object",
+                    "title": "Environment Variable References",
+                    "description": "Map target MCP process environment names to host environment variable references. Secret values are resolved at launch and are not stored here.",
+                    "default": {},
+                    "additionalProperties": {
+                        "type": "object",
+                        "title": "Environment Reference",
+                        "required": ["env_var"],
+                        "properties": {
+                            "env_var": {
+                                "type": "string",
+                                "title": "Host Environment Variable",
+                                "default": ""
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
 pub fn string_list_json_schema(title: &str) -> Value {
     json!({
         "type": "array",
@@ -1493,6 +1557,18 @@ mod tests {
             .expect("api key schema");
 
         assert_eq!(api_key.get("writeOnly"), Some(&Value::Bool(true)));
+    }
+
+    #[test]
+    fn generated_mcp_servers_schema_keeps_env_values_as_references() {
+        let schema = mcp_servers_json_schema();
+        let env_schema = schema
+            .pointer("/items/properties/env/additionalProperties/properties")
+            .and_then(Value::as_object)
+            .expect("mcp server env properties");
+
+        assert!(env_schema.contains_key("env_var"));
+        assert!(!env_schema.contains_key("value"));
     }
 
     #[test]

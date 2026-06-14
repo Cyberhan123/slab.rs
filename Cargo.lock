@@ -15524,6 +15524,7 @@ dependencies = [
  "assert_cmd",
  "async-io",
  "clap",
+ "core-foundation 0.10.1",
  "dirs",
  "dunce",
  "filedescriptor",
