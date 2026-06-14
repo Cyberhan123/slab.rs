@@ -157,16 +157,16 @@ describe('hub and task core flows e2e', () => {
   it('starts a model download and confirms catalog deletion', async () => {
     await renderDesktopScene(<HubPage />, { route: '/hub' });
 
-    await page.getByRole('button', { name: 'Download' }).click();
+    await page.getByTestId('hub-model-download-sdxl').click();
     expect(mockDownloadModel).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'sdxl',
       }),
     );
 
-    await page.getByRole('button', { name: 'Delete Stable Diffusion XL' }).click();
-    await expect.element(page.getByRole('alertdialog')).toBeVisible();
-    await page.getByRole('button', { name: 'Delete entry' }).click();
+    await page.getByTestId('hub-model-delete-sdxl').click();
+    await expect.element(page.getByTestId('hub-delete-model-dialog')).toBeVisible();
+    await page.getByTestId('hub-delete-model-confirm').click();
 
     expect(mockDeleteModel).toHaveBeenCalled();
   });
@@ -174,12 +174,14 @@ describe('hub and task core flows e2e', () => {
   it('opens task details and cancels a running task', async () => {
     await renderDesktopScene(<TaskPage />, { route: '/task' });
 
-    await page.getByRole('button', { name: 'Details' }).click();
-    await expect.element(page.getByRole('dialog')).toBeVisible();
-    await expect.element(page.getByText('Task ID: task-running-1')).toBeVisible();
+    await page.getByTestId('task-details-open-task-running-1').click();
+    await expect.element(page.getByTestId('task-details-task-running-1')).toBeVisible();
+    await expect.element(page.getByTestId('task-details-task-running-1')).toHaveTextContent(
+      'task-running-1',
+    );
     expect(mockFetchTaskDetail).toHaveBeenCalledWith('task-running-1');
 
-    await page.getByRole('button', { name: 'Cancel task' }).click();
+    await page.getByTestId('task-cancel-task-running-1').click();
     expect(mockCancelTask).toHaveBeenCalledWith('task-running-1');
   });
 });

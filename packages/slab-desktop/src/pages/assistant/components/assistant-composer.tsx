@@ -57,7 +57,9 @@ function renderSenderSuffix(
       {isRequesting ? (
         <LoadingButton aria-label={labels.cancel} />
       ) : (
-        <SendButton aria-label={labels.send} />
+        <span data-testid="assistant-send-button">
+          <SendButton aria-label={labels.send} />
+        </span>
       )}
     </div>
   )
@@ -158,100 +160,102 @@ export function AssistantComposer({
   }
 
   return (
-    <div className="relative space-y-3">
+    <div className="relative space-y-3" data-testid="assistant-composer">
       <Suggestion<{ query: string }>
         block
         items={commandSuggestions}
         onSelect={(command) => insertCommand(command)}
       >
         {({ onTrigger, onKeyDown, open }) => (
-          <Sender
-            value={value}
-            loading={isRequesting}
-            disabled={disabled}
-            submitType="enter"
-            onCancel={onCancel}
-            onChange={(nextValue) => {
-              onValueChange(nextValue)
-              const nextQuery = nextValue.match(/^\/([^\s/]*)$/)?.[1]?.toLowerCase()
-              if (nextQuery === undefined || disabled || matchCommandItems(nextQuery).length === 0) {
-                onTrigger(false)
-                return
+          <div data-testid="assistant-composer-input">
+            <Sender
+              value={value}
+              loading={isRequesting}
+              disabled={disabled}
+              submitType="enter"
+              onCancel={onCancel}
+              onChange={(nextValue) => {
+                onValueChange(nextValue)
+                const nextQuery = nextValue.match(/^\/([^\s/]*)$/)?.[1]?.toLowerCase()
+                if (nextQuery === undefined || disabled || matchCommandItems(nextQuery).length === 0) {
+                  onTrigger(false)
+                  return
+                }
+
+                onTrigger({ query: nextQuery })
+              }}
+              onSubmit={(message) => handleSubmit(message)}
+              onKeyDown={(event) => {
+                if (open && event.key === "Enter" && !event.shiftKey && matchingCommandItems[0]) {
+                  event.preventDefault()
+                  insertCommand(matchingCommandItems[0].command)
+                  onTrigger(false)
+                  return false
+                }
+
+                return onKeyDown(event)
+              }}
+              placeholder={t("pages.assistant.composer.placeholder")}
+              autoSize={{ minRows: 2, maxRows: 6 }}
+              className="rounded-[24px] border-0 bg-[var(--surface-input)] p-[5px] shadow-[var(--shell-elevation)]"
+              classNames={{
+                content: "flex items-end gap-2 px-4 py-2",
+                input:
+                  "min-h-[48px] max-h-48 resize-none bg-transparent px-3 py-3 text-base text-foreground placeholder:text-muted-foreground/60",
+                prefix: "pb-1",
+                suffix: "pb-1",
+              }}
+              prefix={
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="quiet"
+                      size="icon"
+                      disabled={disabled}
+                      className="size-10 rounded-full border border-transparent bg-transparent text-muted-foreground hover:bg-[var(--shell-card)]/45 hover:text-foreground"
+                    >
+                      <Plus className="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="rounded-2xl border-border/70">
+                    {commandItems.map((item) => {
+                      const Icon = item.icon
+
+                      return (
+                        <DropdownMenuItem
+                          key={item.command}
+                          onClick={() => insertCommand(item.command)}
+                        >
+                          <Icon className="size-4" />
+                          <span className="font-mono text-xs">{item.command}</span>
+                          <span>{item.label}</span>
+                        </DropdownMenuItem>
+                      )
+                    })}
+                    <DropdownMenuItem onClick={onGenerateImage}>
+                      <ImagePlus className="size-4" />
+                      {t("pages.assistant.composer.generateImage")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem disabled>
+                      <Mic className="size-4" />
+                      {t("pages.assistant.composer.voiceCapture")}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               }
-
-              onTrigger({ query: nextQuery })
-            }}
-            onSubmit={(message) => handleSubmit(message)}
-            onKeyDown={(event) => {
-              if (open && event.key === "Enter" && !event.shiftKey && matchingCommandItems[0]) {
-                event.preventDefault()
-                insertCommand(matchingCommandItems[0].command)
-                onTrigger(false)
-                return false
+              suffix={(_, { components }) =>
+                renderSenderSuffix(
+                  components,
+                  {
+                    cancel: t("pages.assistant.composer.cancel"),
+                    send: t("pages.assistant.composer.sendMessage"),
+                    voice: t("pages.assistant.composer.voiceCapture"),
+                  },
+                  isRequesting
+                )
               }
-
-              return onKeyDown(event)
-            }}
-            placeholder={t("pages.assistant.composer.placeholder")}
-            autoSize={{ minRows: 2, maxRows: 6 }}
-            className="rounded-[24px] border-0 bg-[var(--surface-input)] p-[5px] shadow-[var(--shell-elevation)]"
-            classNames={{
-              content: "flex items-end gap-2 px-4 py-2",
-              input:
-                "min-h-[48px] max-h-48 resize-none bg-transparent px-3 py-3 text-base text-foreground placeholder:text-muted-foreground/60",
-              prefix: "pb-1",
-              suffix: "pb-1",
-            }}
-            prefix={
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="quiet"
-                    size="icon"
-                    disabled={disabled}
-                    className="size-10 rounded-full border border-transparent bg-transparent text-muted-foreground hover:bg-[var(--shell-card)]/45 hover:text-foreground"
-                  >
-                    <Plus className="size-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="rounded-2xl border-border/70">
-                  {commandItems.map((item) => {
-                    const Icon = item.icon
-
-                    return (
-                      <DropdownMenuItem
-                        key={item.command}
-                        onClick={() => insertCommand(item.command)}
-                      >
-                        <Icon className="size-4" />
-                        <span className="font-mono text-xs">{item.command}</span>
-                        <span>{item.label}</span>
-                      </DropdownMenuItem>
-                    )
-                  })}
-                  <DropdownMenuItem onClick={onGenerateImage}>
-                    <ImagePlus className="size-4" />
-                    {t("pages.assistant.composer.generateImage")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem disabled>
-                    <Mic className="size-4" />
-                    {t("pages.assistant.composer.voiceCapture")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            }
-            suffix={(_, { components }) =>
-              renderSenderSuffix(
-                components,
-                {
-                  cancel: t("pages.assistant.composer.cancel"),
-                  send: t("pages.assistant.composer.sendMessage"),
-                  voice: t("pages.assistant.composer.voiceCapture"),
-                },
-                isRequesting
-              )
-            }
-          />
+            />
+          </div>
         )}
       </Suggestion>
 
@@ -261,6 +265,7 @@ export function AssistantComposer({
             type="button"
             disabled={disabled}
             aria-pressed={webSearchActive}
+            data-testid="assistant-web-search-toggle"
             onClick={() => insertCommand("/web_search")}
             className={cn(
               "inline-flex items-center gap-1.5 text-[11px] font-bold transition",
@@ -278,6 +283,7 @@ export function AssistantComposer({
             type="button"
             disabled={disabled || !reasoningSupported}
             aria-pressed={deepThink}
+            data-testid="assistant-deep-think-toggle"
             onClick={() => setDeepThink(!deepThink)}
             className={cn(
               "inline-flex items-center gap-1.5 text-[11px] font-bold transition",
@@ -303,6 +309,7 @@ export function AssistantComposer({
           <button
             type="button"
             disabled={disabled}
+            data-testid="assistant-generate-image-button"
             onClick={onGenerateImage}
             className={cn(
               "inline-flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground transition hover:text-foreground",

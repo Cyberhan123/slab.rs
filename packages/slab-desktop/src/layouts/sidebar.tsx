@@ -88,6 +88,7 @@ export function AppSidebar({ variant = "default" }: AppSidebarProps) {
         key={item.to}
         to={item.to}
         aria-current={active ? "page" : undefined}
+        data-testid={`sidebar-link-${item.to === "/" ? "assistant" : item.to.replace(/^\/+/, "").replaceAll("/", "-")}`}
         data-active={active ? "true" : "false"}
         className={cn(
           "flex flex-col items-center justify-center rounded-[12px] outline-none transition-[background-color,color,box-shadow,opacity,transform] duration-200 focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--brand-teal)_28%,transparent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--shell-rail-bg)]",

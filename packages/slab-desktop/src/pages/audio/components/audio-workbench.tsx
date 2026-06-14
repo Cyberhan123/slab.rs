@@ -386,6 +386,7 @@ export function AudioWorkbench({
             className="mt-8 h-14 w-full rounded-[14px] text-base font-semibold"
             onClick={handleTranscribe}
             disabled={!canStartTranscription}
+            data-testid="audio-transcribe-button"
           >
             {isBusy ? <Loader2 className="size-4 animate-spin" /> : null}
             {preparingStage === 'prepare'
@@ -486,6 +487,7 @@ export function AudioWorkbench({
                 <button
                   key={task.task_id}
                   type="button"
+                  data-testid={`audio-history-item-${task.task_id}`}
                   className="w-full rounded-[18px] border border-border/50 bg-[var(--shell-card)] px-4 py-3 text-left transition hover:border-[var(--brand-teal)]/50"
                   onClick={() => void openHistoryDetail(task.task_id)}
                 >

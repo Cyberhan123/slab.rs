@@ -120,7 +120,10 @@ function renderThoughtContent(
 ) {
   if (thought.pendingApproval) {
     return (
-      <div className="min-w-0 max-w-full space-y-3 overflow-hidden">
+      <div
+        className="min-w-0 max-w-full space-y-3 overflow-hidden"
+        data-testid={`assistant-thought-${thought.id}`}
+      >
         <div className="min-w-0 max-w-full overflow-x-auto">
           <CodeHighlighter
             lang="shell"
@@ -162,7 +165,7 @@ function renderThoughtContent(
   const detail = language === "json" ? formatJsonCode(thought.detail) : thought.detail
 
   return (
-    <div className="min-w-0 max-w-full overflow-x-auto">
+    <div className="min-w-0 max-w-full overflow-x-auto" data-testid={`assistant-thought-${thought.id}`}>
       <CodeHighlighter
         lang={language}
         className="max-w-full rounded-[14px] border border-border/60 text-xs"
@@ -208,12 +211,14 @@ function toThoughtChainItems(
       blink: thinking.loading,
       collapsible: true,
       content: (
-        <AssistantMarkdown
-          className="assistant-markdown--assistant"
-          hasNextChunk={thinking.loading}
-        >
-          {thinking.content}
-        </AssistantMarkdown>
+        <div data-testid={`assistant-thinking-${thinking.key.replace(/-thinking$/, "")}`}>
+          <AssistantMarkdown
+            className="assistant-markdown--assistant"
+            hasNextChunk={thinking.loading}
+          >
+            {thinking.content}
+          </AssistantMarkdown>
+        </div>
       ),
       icon: false,
       key: thinking.key,
@@ -290,7 +295,10 @@ const AssistantBubbleContentView = memo(function AssistantBubbleContentView({
   )
 
   return (
-    <div className="min-w-0 max-w-full space-y-4 overflow-hidden">
+    <div
+      className="min-w-0 max-w-full space-y-4 overflow-hidden"
+      data-testid={`assistant-message-${content.item.id}`}
+    >
       {isAssistant && thoughtItems.length > 0 ? (
         <ThoughtChain
           items={thoughtItems}

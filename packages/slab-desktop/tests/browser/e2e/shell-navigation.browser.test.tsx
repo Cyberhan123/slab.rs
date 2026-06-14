@@ -11,8 +11,8 @@ vi.mock('@/pages/plugins/hooks/use-runtime-plugins', () => ({
   })),
 }));
 
-function RouteMarker({ label }: { label: string }) {
-  return <div className="p-4">{label}</div>;
+function RouteMarker({ id, label }: { id: string; label: string }) {
+  return <div className="p-4" data-testid={`route-marker-${id}`}>{label}</div>;
 }
 
 describe('desktop shell navigation e2e', () => {
@@ -20,31 +20,31 @@ describe('desktop shell navigation e2e', () => {
     await renderDesktopScene(
       <Routes>
         <Route element={<Layout />} path="/">
-          <Route index element={<RouteMarker label="Assistant route" />} />
-          <Route path="workspace" element={<RouteMarker label="Workspace route" />} />
-          <Route path="image" element={<RouteMarker label="Image route" />} />
-          <Route path="settings" element={<RouteMarker label="Settings route" />} />
+          <Route index element={<RouteMarker id="assistant" label="Assistant route" />} />
+          <Route path="workspace" element={<RouteMarker id="workspace" label="Workspace route" />} />
+          <Route path="image" element={<RouteMarker id="image" label="Image route" />} />
+          <Route path="settings" element={<RouteMarker id="settings" label="Settings route" />} />
         </Route>
       </Routes>,
       { route: '/' },
     );
 
-    await expect.element(page.getByText('Assistant route')).toBeVisible();
-    await expect.element(page.getByRole('link', { name: 'Assistant' })).toHaveAttribute(
+    await expect.element(page.getByTestId('route-marker-assistant')).toBeVisible();
+    await expect.element(page.getByTestId('sidebar-link-assistant')).toHaveAttribute(
       'aria-current',
       'page',
     );
 
-    await page.getByRole('link', { name: 'Image' }).click();
-    await expect.element(page.getByText('Image route')).toBeVisible();
-    await expect.element(page.getByRole('link', { name: 'Image' })).toHaveAttribute(
+    await page.getByTestId('sidebar-link-image').click();
+    await expect.element(page.getByTestId('route-marker-image')).toBeVisible();
+    await expect.element(page.getByTestId('sidebar-link-image')).toHaveAttribute(
       'aria-current',
       'page',
     );
 
-    await page.getByRole('link', { name: 'Settings' }).click();
-    await expect.element(page.getByText('Settings route')).toBeVisible();
-    await expect.element(page.getByRole('link', { name: 'Settings' })).toHaveAttribute(
+    await page.getByTestId('sidebar-link-settings').click();
+    await expect.element(page.getByTestId('route-marker-settings')).toBeVisible();
+    await expect.element(page.getByTestId('sidebar-link-settings')).toHaveAttribute(
       'aria-current',
       'page',
     );

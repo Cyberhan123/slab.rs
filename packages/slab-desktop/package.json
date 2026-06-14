@@ -13,7 +13,6 @@
     "test": "vitest",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:browser:update": "vitest run --config vitest.browser.config.ts -u",
-    "test:fullstack": "vitest run --config vitest.fullstack.config.ts",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage"
   },

@@ -15,6 +15,7 @@ cargo-make wrappers for the top-level build flow.
 bun install
 
 # Development
+bun run dev
 bun run dev:app
 bun run dev:desktop
 
@@ -29,6 +30,7 @@ bun run test
 bun run test:frontend
 bun run test:rust
 bun run test:browser
+bun run test:e2e
 
 # Builds
 bun run build:sidecars
@@ -43,6 +45,12 @@ bun run build:windows-installer
 `bin/slab-app/src-tauri/binaries/` for Tauri `externalBin` packaging.
 `bun run build:windows-installer` uses release sidecars before building the NSIS
 bundle.
+
+`bun run dev` is the canonical full development stack alias for `bun run dev:app`.
+`bun run test:e2e` is the only root E2E entrypoint; it owns starting that full
+dev stack, waiting for the desktop UI and server `/health`, running
+`packages/slab-desktop/tests/e2e`, and cleaning up the spawned process tree.
+Browser-mode component and visual tests remain under `bun run test:browser`.
 
 ## Generated Assets
 

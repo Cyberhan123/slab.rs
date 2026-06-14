@@ -32,7 +32,7 @@ export function HubDeleteModelDialog({
   const { t } = useTranslation();
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
+      <AlertDialogContent data-testid="hub-delete-model-dialog">
         <AlertDialogHeader>
           <AlertDialogTitle>{t('pages.hub.dialogs.delete.title')}</AlertDialogTitle>
           <AlertDialogDescription>
@@ -54,6 +54,7 @@ export function HubDeleteModelDialog({
           <AlertDialogAction
             variant="destructive"
             disabled={pending}
+            data-testid="hub-delete-model-confirm"
             onClick={(event) => {
               event.preventDefault();
               onConfirm();

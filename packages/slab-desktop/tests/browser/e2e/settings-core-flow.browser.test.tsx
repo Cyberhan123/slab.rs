@@ -84,7 +84,7 @@ describe('settings core flow e2e', () => {
   it('auto-saves edited settings and resets an override through the API contract', async () => {
     await renderDesktopScene(<SettingsPage />, { route: '/settings' });
 
-    const contextLength = page.getByPlaceholder('Enter a whole number');
+    const contextLength = page.getByTestId('settings-input-runtime.ggml.backends.llama.context_length');
     await contextLength.fill('8192');
     await vi.advanceTimersByTimeAsync(700);
 
@@ -103,7 +103,7 @@ describe('settings core flow e2e', () => {
     });
 
     mockMutateAsync.mockClear();
-    await page.getByRole('button', { name: 'Reset' }).click();
+    await page.getByTestId('settings-reset-runtime.ggml.backends.llama.context_length').click();
 
     await vi.waitFor(() => {
       expect(mockMutateAsync).toHaveBeenCalledWith({

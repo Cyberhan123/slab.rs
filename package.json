@@ -9,6 +9,7 @@
   },
   "type": "module",
   "scripts": {
+    "dev": "bun run dev:app",
     "dev:app": "bun run build:language-servers && bun run build:sidecars && bun run --cwd bin/slab-app tauri dev",
     "check:frontend": "bun run lint && bun run --cwd packages/api build && bun run --cwd packages/slab-plugin-sdk build && bun run --cwd packages/slab-plugin-cli build && bun run --cwd packages/slab-plugin-ui build && bun run --cwd packages/slab-desktop build",
     "check:rust": "cargo check --workspace",
@@ -34,7 +35,7 @@
     "test:rust:cargo": "cargo test --workspace --color=never",
     "test:sandbox": "cargo test -p slab-sandboxing",
     "test:browser": "vitest run --project desktop-browser --project components-browser",
-    "test:e2e-fuzzing": "vitest run --config packages/slab-desktop/vitest.e2e-fuzzing.config.ts",
+    "test:e2e": "vitest run --config packages/slab-desktop/vitest.e2e.config.ts",
     "test:components": "vitest run --project components-browser",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",

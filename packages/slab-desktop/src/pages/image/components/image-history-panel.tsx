@@ -76,6 +76,7 @@ export function ImageHistoryPanel({
               <button
                 key={task.task_id}
                 type="button"
+                data-testid={`image-history-item-${task.task_id}`}
                 className="group flex gap-3 rounded-[18px] border border-border/50 bg-[var(--shell-card)] p-3 text-left transition hover:border-[var(--brand-teal)]/50 hover:shadow-[0_18px_36px_-28px_color-mix(in_oklab,var(--foreground)_35%,transparent)]"
                 onClick={() => void openHistoryDetail(task.task_id)}
               >

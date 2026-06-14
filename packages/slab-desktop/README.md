@@ -31,9 +31,13 @@ Bun-managed frontend package.
 
 - `src/**/__tests__/*.test.ts[x]`: pure unit tests for hooks, stores, and logic helpers.
 - `tests/browser/visual/*.browser.test.tsx`: browser-mode page tests that use `page` from `vitest/browser` and `toMatchScreenshot` for visual regression.
+- `tests/browser/e2e/*.browser.test.tsx`: browser-mode component/page flows backed by mocked APIs. These stay under `bun run test:browser`.
+- `tests/e2e/**/*.test.ts`: fullstack E2E tests. Run only from the repository root with `bun run test:e2e`; the shared harness starts `bun run dev`, waits for the desktop UI and `/health`, and kills its dev process tree after the run.
+- `tests/manual/*.test.ts`: opt-in diagnostics for real local-dev environments. These are not part of the root E2E command.
 - Run unit tests with `bun run test:run`.
 - Run page/browser regression tests with `bun run test:browser`.
 - Refresh desktop screenshot baselines with `bun run test:browser:update`.
+- Run fullstack E2E tests with root `bun run test:e2e`.
 
 ## License
 

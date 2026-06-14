@@ -81,6 +81,7 @@ function HubModelCard({
 
   return (
     <article
+      data-testid={`hub-model-card-${model.id}`}
       className="group relative overflow-hidden rounded-[30px] border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-1)_92%,var(--background))] p-6 shadow-[0_24px_56px_-40px_color-mix(in_oklab,var(--foreground)_40%,transparent)]"
     >
       <div className="absolute inset-0 opacity-70 [background:radial-gradient(circle_at_top_right,color-mix(in_oklab,var(--brand-teal)_9%,transparent),transparent_34%),radial-gradient(circle_at_bottom_left,color-mix(in_oklab,var(--brand-gold)_12%,transparent),transparent_30%)]" />
@@ -123,6 +124,7 @@ function HubModelCard({
                 onClick={() => onEnhanceClick(model)}
                 disabled={model.pending}
                 aria-label={t('pages.hub.catalog.actions.enhanceAria', { model: model.display_name })}
+                data-testid={`hub-model-enhance-${model.id}`}
               >
                 <Settings2 className="size-4" />
               </Button>
@@ -133,6 +135,7 @@ function HubModelCard({
                 onClick={() => onDeleteClick(model)}
                 disabled={deletePending || model.pending}
                 aria-label={t('pages.hub.catalog.actions.deleteAria', { model: model.display_name })}
+                data-testid={`hub-model-delete-${model.id}`}
               >
                 <Trash2 className="size-4" />
               </Button>
@@ -169,6 +172,7 @@ function HubModelCard({
                   size="sm"
                   onClick={() => onDownloadClick(model)}
                   disabled={model.pending}
+                  data-testid={`hub-model-download-${model.id}`}
                 >
                   {model.pending ? (
                     <Loader2 className="size-4 animate-spin" />

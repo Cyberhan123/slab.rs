@@ -194,6 +194,7 @@ export function VideoWorkbench({
                 <Textarea
                   id="video-prompt"
                   variant="soft"
+                  data-testid="video-prompt-input"
                   placeholder={t('pages.video.workbench.prompt.placeholder')}
                   rows={4}
                   value={prompt}
@@ -471,6 +472,7 @@ export function VideoWorkbench({
                 className="h-[68px] w-full rounded-[18px] text-base font-semibold shadow-[0_24px_40px_-18px_color-mix(in_oklab,var(--brand-teal)_58%,transparent)]"
                 onClick={handleSubmit}
                 disabled={isGenerating || !prompt.trim() || !hasSelectedModel}
+                data-testid="video-generate-button"
               >
                 {isGenerating ? (
                   <>
@@ -603,6 +605,7 @@ export function VideoWorkbench({
                   <button
                     key={task.task_id}
                     type="button"
+                    data-testid={`video-history-item-${task.task_id}`}
                     className="rounded-[18px] border border-border/50 bg-[var(--shell-card)] px-4 py-3 text-left transition hover:border-[var(--brand-teal)]/50 hover:shadow-[0_18px_36px_-30px_color-mix(in_oklab,var(--foreground)_38%,transparent)]"
                     onClick={() => void openHistoryDetail(task.task_id)}
                   >

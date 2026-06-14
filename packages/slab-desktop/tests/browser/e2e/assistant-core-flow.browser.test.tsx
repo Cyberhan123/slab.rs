@@ -198,11 +198,13 @@ describe('assistant core flow e2e', () => {
 
     await renderDesktopScene(<AssistantPage />, { route: '/' });
 
-    const composer = page.getByPlaceholder('Type a message or drop files...');
+    const composer = page.getByTestId('assistant-composer-input').getByRole('textbox');
     await composer.fill('Investigate failing desktop tests');
-    await page.getByRole('button', { name: 'Send message' }).click();
+    await page.getByTestId('assistant-send-button').getByRole('button').click();
 
-    await expect.element(page.getByText('Investigate failing desktop tests')).toBeVisible();
+    await expect.element(page.getByTestId('assistant-message-echo-user-message')).toHaveTextContent(
+      'Investigate failing desktop tests',
+    );
     expect(labelDone).toBe(false);
     expect(mockHandleSubmit).toHaveBeenCalledWith('Investigate failing desktop tests');
     expect(mockUpdateSessionLabel).toHaveBeenCalledWith(
@@ -216,8 +218,8 @@ describe('assistant core flow e2e', () => {
   it('inserts the web search slash command from the helper control', async () => {
     await renderDesktopScene(<AssistantPage />, { route: '/' });
 
-    const composer = page.getByPlaceholder('Type a message or drop files...');
-    await page.getByRole('button', { name: 'Web search' }).click();
+    const composer = page.getByTestId('assistant-composer-input').getByRole('textbox');
+    await page.getByTestId('assistant-web-search-toggle').click();
 
     await expect.element(composer).toHaveValue('/web_search ');
   });
@@ -238,8 +240,10 @@ describe('assistant core flow e2e', () => {
 
     await renderDesktopScene(<AssistantPage />, { route: '/' });
 
-    await expect.element(page.getByText('Use the local model for this answer')).toBeVisible();
-    await expect.element(page.getByText('Loading model...')).toBeVisible();
+    await expect.element(page.getByTestId('assistant-message-user-before-model-load')).toHaveTextContent(
+      'Use the local model for this answer',
+    );
+    await expect.element(page.getByTestId('assistant-model-loading')).toBeVisible();
 
     const sceneText = document.querySelector('[data-testid="desktop-browser-scene"]')?.textContent ?? '';
     expect(sceneText.indexOf('Use the local model for this answer')).toBeLessThan(
@@ -263,8 +267,12 @@ describe('assistant core flow e2e', () => {
 
     await renderDesktopScene(<AssistantPage />, { route: '/' });
 
-    await expect.element(page.getByText('Final answer body')).toBeVisible();
-    await expect.element(page.getByText('plan-only-thinking')).toBeVisible();
+    await expect.element(page.getByTestId('assistant-message-assistant-with-thinking')).toHaveTextContent(
+      'Final answer body',
+    );
+    await expect.element(page.getByTestId('assistant-thinking-assistant-with-thinking')).toHaveTextContent(
+      'plan-only-thinking',
+    );
 
     const sceneText = document.querySelector('[data-testid="desktop-browser-scene"]')?.textContent ?? '';
     expect(sceneText.match(/plan-only-thinking/g)).toHaveLength(1);
@@ -299,7 +307,9 @@ describe('assistant core flow e2e', () => {
 
     await renderDesktopScene(<AssistantPage />, { route: '/' });
 
-    await expect.element(page.getByText('slab-server.log')).toBeVisible();
+    await expect.element(page.getByTestId('assistant-thought-call-1')).toHaveTextContent(
+      'slab-server.log',
+    );
     const sceneText = document.querySelector('[data-testid="desktop-browser-scene"]')?.textContent ?? '';
     expect(sceneText).toContain('"entries": [');
     expect(sceneText).not.toContain('{"entries":[{"name":"ipc"');

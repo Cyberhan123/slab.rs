@@ -285,6 +285,7 @@ export function ImageWorkbench({
                     </Label>
                     <Textarea
                       id="prompt"
+                      data-testid="image-prompt-input"
                       placeholder={t('pages.image.workbench.prompt.placeholder')}
                       rows={5}
                       value={prompt}
@@ -552,6 +553,7 @@ export function ImageWorkbench({
                       className="h-14 w-full rounded-xl bg-[linear-gradient(135deg,var(--brand-teal)_0%,color-mix(in_oklab,var(--brand-teal)_85%,var(--shell-card))_100%)] text-base font-semibold text-[var(--brand-teal-foreground)] shadow-[0_10px_15px_-3px_color-mix(in_oklab,var(--brand-teal)_20%,transparent),0_4px_6px_-4px_color-mix(in_oklab,var(--brand-teal)_20%,transparent)] hover:brightness-[1.03]"
                       onClick={handleSubmit}
                       disabled={isBusy || !prompt.trim() || !selectedModelId}
+                      data-testid="image-generate-button"
                     >
                       {isResolvingModelState ? (
                         <>

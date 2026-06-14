@@ -52,6 +52,7 @@ export function AssistantSessionSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
+        data-testid="assistant-session-sheet"
         className="w-full overflow-hidden border-l border-border/60 bg-[var(--surface-1)] p-0 sm:max-w-xl"
       >
         <SheetHeader className="shrink-0 border-b border-border/60 px-6 py-5 pr-14">
@@ -72,6 +73,7 @@ export function AssistantSessionSheet({
               return (
                 <div
                   key={conversation.key}
+                  data-testid={`assistant-session-row-${conversation.key}`}
                   className={cn(
                     "workspace-soft-panel flex items-center gap-3 rounded-[24px] px-4 py-3",
                     isCurrent && "border-[color:var(--brand-teal)] bg-[color:color-mix(in_oklab,var(--brand-teal)_8%,var(--surface-soft))]"
@@ -80,6 +82,7 @@ export function AssistantSessionSheet({
                   <button
                     type="button"
                     disabled={busy}
+                    data-testid={`assistant-session-select-${conversation.key}`}
                     className="flex min-w-0 flex-1 flex-col items-start text-left"
                     onClick={() => onSelect(conversation.key)}
                   >
@@ -99,17 +102,29 @@ export function AssistantSessionSheet({
 
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="quiet" size="icon-sm" className="rounded-full" disabled={busy}>
+                      <Button
+                        variant="quiet"
+                        size="icon-sm"
+                        className="rounded-full"
+                        disabled={busy}
+                        data-testid={`assistant-session-actions-${conversation.key}`}
+                      >
+                        <span className="sr-only">{t("pages.assistant.sessionSheet.open")}</span>
                         <MoreHorizontal className="size-4" />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="rounded-2xl border-border/70">
-                      <DropdownMenuItem disabled={busy} onClick={() => onSelect(conversation.key)}>
+                      <DropdownMenuItem
+                        disabled={busy}
+                        data-testid={`assistant-session-open-${conversation.key}`}
+                        onClick={() => onSelect(conversation.key)}
+                      >
                         {t("pages.assistant.sessionSheet.open")}
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         disabled={busy}
                         variant="destructive"
+                        data-testid={`assistant-session-delete-${conversation.key}`}
                         onClick={() => onDelete(conversation.key)}
                       >
                         <Trash2 className="size-4" />

@@ -94,6 +94,7 @@ export function SettingFieldCard({
   return (
     <div
       id={`setting-${property.pmid}`}
+      data-testid={`settings-field-${property.pmid}`}
       className={cn(
         'rounded-[16px] border border-border/60 bg-[var(--shell-card)] p-5 shadow-[0_1px_2px_color-mix(in_oklab,var(--foreground)_8%,transparent)]',
         errorState && 'border-destructive/70 bg-destructive/5',
@@ -117,6 +118,7 @@ export function SettingFieldCard({
             size="sm"
             onClick={() => onReset(property)}
             disabled={isResetting || !canReset}
+            data-testid={`settings-reset-${property.pmid}`}
             className="h-8 rounded-[12px] border-border/60 bg-transparent px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground shadow-none hover:bg-accent hover:text-accent-foreground"
           >
             {isResetting ? (
@@ -133,6 +135,7 @@ export function SettingFieldCard({
               variant="workspace"
               checked={booleanValue}
               onCheckedChange={(value) => onChange(property, value)}
+              data-testid={`settings-input-${property.pmid}`}
               className="data-[size=default]:h-[1.35rem] data-[size=default]:w-10"
             />
           ) : null}
@@ -146,6 +149,7 @@ export function SettingFieldCard({
               <SelectTrigger
                 id={property.pmid}
                 variant="soft"
+                data-testid={`settings-input-${property.pmid}`}
                 className="h-[42px] w-full rounded-[12px] border-border/70 bg-[var(--surface-soft)] px-4 text-xs shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
               >
                 <SelectValue placeholder={t('pages.settings.field.selectOption')} />
@@ -167,6 +171,7 @@ export function SettingFieldCard({
               id={property.pmid}
               inputMode="numeric"
               variant="soft"
+              data-testid={`settings-input-${property.pmid}`}
               value={textValue}
               onChange={(event) => onChange(property, event.target.value)}
               placeholder={t('pages.settings.field.integerPlaceholder')}
@@ -193,6 +198,7 @@ export function SettingFieldCard({
             <Textarea
               id={property.pmid}
               variant="soft"
+              data-testid={`settings-input-${property.pmid}`}
               value={textValue}
               onChange={(event) => onChange(property, event.target.value)}
               placeholder={
@@ -208,6 +214,7 @@ export function SettingFieldCard({
               id={property.pmid}
               type={property.schema.secret ? 'password' : 'text'}
               variant="soft"
+              data-testid={`settings-input-${property.pmid}`}
               value={textValue}
               onChange={(event) => onChange(property, event.target.value)}
               placeholder={t('pages.settings.field.valuePlaceholder')}

@@ -17,6 +17,7 @@ type AssistantSessionSummaryCardProps = {
   onNewSession: () => void
   onSelectSession: (key: string) => void
   disableNewSession?: boolean
+  testIdPrefix: string
 }
 
 export function AssistantSessionSummaryCard({
@@ -25,6 +26,7 @@ export function AssistantSessionSummaryCard({
   onNewSession,
   onSelectSession,
   disableNewSession = false,
+  testIdPrefix,
 }: AssistantSessionSummaryCardProps) {
   const { t } = useTranslation()
 
@@ -41,6 +43,7 @@ export function AssistantSessionSummaryCard({
           className="rounded-full"
           onClick={onNewSession}
           disabled={disableNewSession}
+          data-testid={`${testIdPrefix}-new-session-button`}
         >
           <MessageSquareDot className="size-3.5" />
           <span className="sr-only">{t("pages.assistant.summaryCard.createSession")}</span>
@@ -55,6 +58,7 @@ export function AssistantSessionSummaryCard({
             <button
               key={item.key}
               type="button"
+              data-testid={`${testIdPrefix}-session-${item.key}`}
               onClick={() => onSelectSession(item.key)}
               className="flex w-full items-center gap-3 text-left"
             >
@@ -85,6 +89,7 @@ export function AssistantSessionSummaryCard({
         variant="outline"
         className="mt-5 h-[38px] w-full rounded-[12px] border-border/60 bg-[var(--shell-card)] text-foreground/70 hover:bg-[var(--surface-soft)]"
         onClick={onManageSessions}
+        data-testid={`${testIdPrefix}-manage-sessions-button`}
       >
         {t("pages.assistant.summaryCard.manageSessions")}
       </Button>

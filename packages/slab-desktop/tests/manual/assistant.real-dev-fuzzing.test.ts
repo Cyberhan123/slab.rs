@@ -314,7 +314,7 @@ async function preflightRealDevEnvironment(): Promise<string> {
 
   const setup = await requestJson<SetupStatusResponse>("/v1/setup/status")
   if (!setup.initialized) {
-    throw new Error("slab-server setup is not initialized. Complete setup before running test:e2e-fuzzing.")
+    throw new Error("slab-server setup is not initialized. Complete setup before running the manual real-dev fuzzing suite.")
   }
 
   const ui = await fetch(uiBaseUrl).catch((error) => {
@@ -346,7 +346,7 @@ async function preflightRealDevEnvironment(): Promise<string> {
   if (!modelUsableWithoutDownload(model)) {
     throw new Error(
       `Required assistant fuzzing model '${assistantModelId}' is not ready. ` +
-        `status=${model.status}, kind=${model.kind}. Import/download it before running test:e2e-fuzzing.`
+        `status=${model.status}, kind=${model.kind}. Import/download it before running the manual real-dev fuzzing suite.`
     )
   }
   if (!model.chat_capabilities?.reasoning_controls) {

@@ -57,11 +57,12 @@ export function TaskDetailDialog({
           onClick={() => {
             onOpen(task.id);
           }}
+          data-testid={`task-details-open-${task.id}`}
         >
           {t('pages.task.dialog.detailsButton')}
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="max-w-3xl" data-testid={`task-details-${task.id}`}>
         <DialogHeader>
           <DialogTitle>{t('pages.task.dialog.title')}</DialogTitle>
           <DialogDescription>
@@ -163,6 +164,7 @@ export function TaskDetailDialog({
                     size="sm"
                     onClick={() => void onCancel(selectedTask.id)}
                     disabled={cancelTaskMutation.isPending}
+                    data-testid={`task-cancel-${selectedTask.id}`}
                   >
                     {cancelTaskMutation.isPending
                       ? t('pages.task.dialog.cancelling')
@@ -178,6 +180,7 @@ export function TaskDetailDialog({
                     size="sm"
                     onClick={() => void onRestart(selectedTask.id)}
                     disabled={restartTaskMutation.isPending}
+                    data-testid={`task-restart-${selectedTask.id}`}
                   >
                     {restartTaskMutation.isPending
                       ? t('pages.task.dialog.restarting')

@@ -319,32 +319,32 @@ describe('media core flows e2e', () => {
   it('submits an image prompt and opens image history detail', async () => {
     await renderDesktopScene(<ImagePage />, { route: '/image' });
 
-    await page.getByPlaceholder('A cinematic portrait with moody rim light...').fill('Generate a calm lake');
-    await page.getByRole('button', { name: 'Generate Images' }).click();
+    await page.getByTestId('image-prompt-input').fill('Generate a calm lake');
+    await page.getByTestId('image-generate-button').click();
     expect(mockImageSubmit).toHaveBeenCalled();
 
-    await page.getByText('previous image prompt').click();
+    await page.getByTestId('image-history-item-image-history-1').click();
     expect(mockImageHistoryDetail).toHaveBeenCalledWith('image-history-1');
   });
 
   it('submits a video prompt and opens video history detail', async () => {
     await renderDesktopScene(<VideoPage />, { route: '/video' });
 
-    await page.getByPlaceholder('Describe the scene in cinematic detail...').fill('Generate a sunrise timelapse');
-    await page.getByRole('button', { name: 'Generate Video' }).click();
+    await page.getByTestId('video-prompt-input').fill('Generate a sunrise timelapse');
+    await page.getByTestId('video-generate-button').click();
     expect(mockVideoSubmit).toHaveBeenCalled();
 
-    await page.getByText('previous video prompt').click();
+    await page.getByTestId('video-history-item-video-history-1').click();
     expect(mockVideoHistoryDetail).toHaveBeenCalledWith('video-history-1');
   });
 
   it('starts audio transcription and opens transcription history detail', async () => {
     await renderDesktopScene(<AudioPage />, { route: '/audio' });
 
-    await page.getByRole('button', { name: 'Start Transcription' }).click();
+    await page.getByTestId('audio-transcribe-button').click();
     expect(mockAudioTranscribe).toHaveBeenCalled();
 
-    await page.getByText('hello world transcript').click();
+    await page.getByTestId('audio-history-item-audio-history-1').click();
     expect(mockAudioHistoryDetail).toHaveBeenCalledWith('audio-history-1');
   });
 });

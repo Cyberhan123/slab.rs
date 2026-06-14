@@ -117,6 +117,7 @@ Use these commands from the repository root for the most common day-to-day workf
 
 ```sh
 # Start the main development stack
+bun run dev
 bun run dev:app
 
 # Start the desktop frontend only
@@ -138,6 +139,9 @@ bun run test
 
 # Run browser and visual tests
 bun run test:browser
+
+# Run fullstack frontend E2E tests
+bun run test:e2e
 
 # Build the desktop frontend only
 bun run build:desktop

@@ -210,6 +210,7 @@ export default function Task() {
                   return (
                     <TableRow
                       key={task.id}
+                      data-testid={`task-row-${task.id}`}
                       className="border-b border-border/50 hover:bg-[var(--surface-soft)]"
                     >
                       <TableCell

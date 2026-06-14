@@ -646,7 +646,11 @@ function Assistant() {
 
       if (isPreparingModel || modelLoading) {
         items.push({
-          content: t("pages.assistant.message.loadingModel"),
+          content: (
+            <span data-testid="assistant-model-loading">
+              {t("pages.assistant.message.loadingModel")}
+            </span>
+          ),
           key: "assistant-model-loading",
           role: "system",
           status: "loading",
@@ -677,6 +681,7 @@ function Assistant() {
               onNewSession={handleCreateConversation}
               onSelectSession={handleSelectConversation}
               disableNewSession={isSessionBusy || isSessionBootstrapping}
+              testIdPrefix="assistant-summary-desktop"
             />
           </div>
         </div>
@@ -699,13 +704,17 @@ function Assistant() {
             onNewSession={handleCreateConversation}
             onSelectSession={handleSelectConversation}
             disableNewSession={isSessionBusy || isSessionBootstrapping}
+            testIdPrefix="assistant-summary-mobile"
           />
         </div>
 
         <ScrollArea className="min-h-0 flex-1">
           <div className="mx-auto flex w-full max-w-[682px] flex-col gap-8 px-6 pb-24 pt-2 md:px-8 md:pb-28 lg:px-0">
             {isSessionBootstrapping || (isHistoryLoading && safeMessages.length === 0) ? (
-              <div className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center">
+              <div
+                className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center"
+                data-testid="assistant-loading-state"
+              >
                 <div className="max-w-md space-y-3">
                   <p className="text-base font-medium text-foreground">
                     {t("pages.assistant.loading.title")}
@@ -716,7 +725,10 @@ function Assistant() {
                 </div>
               </div>
             ) : safeMessages.length === 0 ? (
-              <div className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center">
+              <div
+                className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center"
+                data-testid="assistant-empty-state"
+              >
                 <div className="max-w-md space-y-3">
                   <p className="text-base font-medium text-foreground">
                     {t("pages.assistant.emptyState.title")}
