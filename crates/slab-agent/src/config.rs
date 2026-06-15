@@ -8,19 +8,16 @@ pub const DEFAULT_INVALID_TOOL_CALL_RETRIES: u8 = 1;
 pub const MAX_INVALID_TOOL_CALL_RETRIES: u8 = 3;
 
 /// Tool-call mode requested for an agent thread.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentToolChoice {
+    #[default]
     Auto,
     None,
     Required,
-    Tool { name: String },
-}
-
-impl Default for AgentToolChoice {
-    fn default() -> Self {
-        Self::Auto
-    }
+    Tool {
+        name: String,
+    },
 }
 
 /// Runtime configuration for a single agent thread.

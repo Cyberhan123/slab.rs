@@ -65,7 +65,7 @@ pub enum ServerError {
 
     /// The caller sent an invalid or malformed request with structured details.
     #[error("bad request: {message}")]
-    BadRequestData { message: String, data: AppCoreErrorData },
+    BadRequestData { message: String, data: Box<AppCoreErrorData> },
 
     /// The caller sent a syntactically valid request that failed schema validation.
     #[error("request validation failed: {0}")]
@@ -165,7 +165,7 @@ impl IntoResponse for ServerError {
             ServerError::BadRequestData { message, data } => (
                 StatusCode::BAD_REQUEST,
                 error_codes::BAD_REQUEST,
-                Some(data.clone()),
+                Some(data.as_ref().clone()),
                 message.clone(),
                 message_i18n_with_detail(ServerI18nKey::ErrorBadRequest, message),
             ),
@@ -416,11 +416,11 @@ mod tests {
         let response = ServerError::BadRequestData {
             message: "model local-qwen cannot be downloaded: missing repo_id. Add a repo_id."
                 .to_owned(),
-            data: AppCoreErrorData::model_download_unavailable(
+            data: Box::new(AppCoreErrorData::model_download_unavailable(
                 "local-qwen",
                 "missing repo_id",
                 "Add a repo_id.",
-            ),
+            )),
         }
         .into_response();
 

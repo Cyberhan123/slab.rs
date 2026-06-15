@@ -54,9 +54,10 @@ pub struct OtelTlsConfig {
 }
 
 /// Export target for logs, traces, or metrics.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OtelExporter {
+    #[default]
     None,
     LocalFile {
         directory: PathBuf,
@@ -82,12 +83,6 @@ impl OtelExporter {
             Self::LocalFile { directory } => Some(directory),
             Self::None | Self::OtlpHttp { .. } => None,
         }
-    }
-}
-
-impl Default for OtelExporter {
-    fn default() -> Self {
-        Self::None
     }
 }
 

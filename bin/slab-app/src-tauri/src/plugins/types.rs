@@ -133,6 +133,7 @@ mod tests {
     #[test]
     fn rejects_manifest_without_runtime_ui() {
         let error = serde_json::from_value::<PluginManifest>(serde_json::json!({
+            "manifestVersion": 1,
             "id": "legacy-plugin",
             "name": "Legacy Plugin",
             "version": "0.1.0",

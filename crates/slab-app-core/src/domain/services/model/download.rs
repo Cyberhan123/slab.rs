@@ -764,7 +764,7 @@ fn model_download_unavailable_error(
 ) -> AppCoreError {
     AppCoreError::BadRequestData {
         message: format!("model {model_id} cannot be downloaded: {reason}. {suggestion}"),
-        data: AppCoreErrorData::model_download_unavailable(model_id, reason, suggestion),
+        data: Box::new(AppCoreErrorData::model_download_unavailable(model_id, reason, suggestion)),
     }
 }
 

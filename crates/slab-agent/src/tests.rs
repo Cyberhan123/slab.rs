@@ -1562,7 +1562,7 @@ async fn sliding_window_compaction_drops_leading_orphan_tool_result() {
         panic!("expected replaced outcome");
     };
     assert_eq!(messages.first().map(|message| message.role.as_str()), Some("system"));
-    assert!(messages.iter().skip(1).next().is_some_and(|message| message.role != "tool"));
+    assert!(messages.get(1).is_some_and(|message| message.role != "tool"));
     assert!(messages.iter().any(|message| message.rendered_text() == "next"));
 }
 

@@ -111,8 +111,9 @@ mod platform {
     pub(super) async fn prepare_private_socket_directory(socket_dir: &Path) -> IoResult<()> {
         let mut dir_builder = fs::DirBuilder::new();
         dir_builder.mode(SOCKET_DIR_MODE);
+        dir_builder.recursive(true);
         match dir_builder.create(socket_dir).await {
-            Ok(()) => return Ok(()),
+            Ok(()) => {}
             Err(err) if err.kind() == ErrorKind::AlreadyExists => {}
             Err(err) => return Err(err),
         }
@@ -341,7 +342,7 @@ mod tests {
     #[tokio::test]
     async fn prepare_private_socket_directory_creates_directory() {
         let temp_dir = tempfile::TempDir::new().expect("temp dir");
-        let socket_dir = temp_dir.path().join("app-server-control");
+        let socket_dir = temp_dir.path().join("slab-runtime").join("plugin-runtime");
 
         prepare_private_socket_directory(&socket_dir).await.expect("socket dir should be created");
 

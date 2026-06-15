@@ -264,7 +264,7 @@ async fn handle_agent_command(
         }
         AgentResponsesClientMessage::ResponseCreate { session_id, config, messages, .. } => {
             let messages = messages.into_iter().map(Into::into).collect();
-            let thread_id = service.spawn(session_id, config.into(), messages).await?;
+            let thread_id = service.spawn(session_id, (*config).into(), messages).await?;
             Ok(CommandResult {
                 message: AgentResponsesServerMessage::Ack {
                     request_id,

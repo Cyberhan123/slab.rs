@@ -2,6 +2,7 @@ use hf_hub::api::sync::Api;
 use hf_hub::{Repo, RepoType};
 use slab_diffusion::{ContextParams, Diffusion, ImgParams, SampleMethod, SampleParams};
 use std::path::{Path, PathBuf};
+#[cfg(windows)]
 use std::sync::OnceLock;
 
 const MINI_SD_REPO_ID: &str = "justinpinkney/miniSD";

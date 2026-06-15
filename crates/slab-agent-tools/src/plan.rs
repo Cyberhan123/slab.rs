@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
 
+#[derive(Default)]
 pub struct PlanUpdateTool;
 
 impl PlanUpdateTool {

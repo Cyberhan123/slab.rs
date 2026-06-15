@@ -497,22 +497,30 @@ mod tests {
 
     #[test]
     fn resolves_workspace_root_from_slab_settings_path() {
-        let root = workspace_root_from_settings_path(std::path::Path::new(
-            r"C:\Users\cyberhan\Desktop\demo\.slab\settings.json",
-        ))
-        .expect("workspace root");
+        #[cfg(windows)]
+        let (settings_path, expected_root) = (
+            std::path::Path::new(r"C:\Users\cyberhan\Desktop\demo\.slab\settings.json"),
+            std::path::PathBuf::from(r"C:\Users\cyberhan\Desktop\demo"),
+        );
+        #[cfg(not(windows))]
+        let (settings_path, expected_root) = (
+            std::path::Path::new("/Users/cyberhan/Desktop/demo/.slab/settings.json"),
+            std::path::PathBuf::from("/Users/cyberhan/Desktop/demo"),
+        );
 
-        assert_eq!(root, std::path::PathBuf::from(r"C:\Users\cyberhan\Desktop\demo"));
+        let root = workspace_root_from_settings_path(settings_path).expect("workspace root");
+
+        assert_eq!(root, expected_root);
     }
 
     #[test]
     fn rejects_non_workspace_settings_path() {
-        assert!(
-            workspace_root_from_settings_path(std::path::Path::new(
-                r"C:\Users\cyberhan\Desktop\demo\settings.json",
-            ))
-            .is_none()
-        );
+        #[cfg(windows)]
+        let settings_path = std::path::Path::new(r"C:\Users\cyberhan\Desktop\demo\settings.json");
+        #[cfg(not(windows))]
+        let settings_path = std::path::Path::new("/Users/cyberhan/Desktop/demo/settings.json");
+
+        assert!(workspace_root_from_settings_path(settings_path).is_none());
     }
 
     #[test]

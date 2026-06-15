@@ -12,16 +12,16 @@ use std::path::{Path, PathBuf};
 ///
 /// # Example
 /// ```rust,no_run
-/// # tokio_test::block_on(async {
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// use slab_libfetch::Api;
 /// Api::new()
 ///     .set_install_dir("./llamalib")
 ///     .repo("ggml-org/llama.cpp")
 ///     .latest()
 ///     .install(|v| format!("llama-{v}-bin-win-cpu-x64.zip"))
-///     .await
-///     .unwrap();
-/// # })
+///     .await?;
+/// # Ok(())
+/// # }
 /// ```
 pub struct Api {
     pub(crate) install_dir: PathBuf,

@@ -43,8 +43,6 @@ impl TtyModeStore {
     }
 }
 
-use deno_process::JsNixError;
-
 #[derive(Debug, thiserror::Error, deno_error::JsError)]
 pub enum TtyError {
     #[class(inherit)]
@@ -61,9 +59,6 @@ pub enum TtyError {
         #[inherit]
         Error,
     ),
-    #[class(inherit)]
-    #[error(transparent)]
-    Nix(#[inherit] JsNixError),
     #[class(inherit)]
     #[error(transparent)]
     Other(#[inherit] JsErrorBox),
@@ -122,7 +117,7 @@ fn op_set_raw(state: &mut OpState, rid: u32, is_raw: bool, cbreak: bool) -> Resu
             None => {
                 // Save original mode.
                 let original_mode =
-                    termios::tcgetattr(raw_fd).map_err(|e| TtyError::Nix(JsNixError(e)))?;
+                    termios::tcgetattr(raw_fd).map_err(|e| TtyError::Io(Error::from(e)))?;
                 tty_mode_store.set(rid, original_mode.clone());
                 original_mode
             }
@@ -145,12 +140,12 @@ fn op_set_raw(state: &mut OpState, rid: u32, is_raw: bool, cbreak: bool) -> Resu
         raw.control_chars[termios::SpecialCharacterIndices::VMIN as usize] = 1;
         raw.control_chars[termios::SpecialCharacterIndices::VTIME as usize] = 0;
         termios::tcsetattr(raw_fd, termios::SetArg::TCSADRAIN, &raw)
-            .map_err(|e| TtyError::Nix(JsNixError(e)))?;
+            .map_err(|e| TtyError::Io(Error::from(e)))?;
     } else {
         // Try restore saved mode.
         if let Some(mode) = tty_mode_store.take(rid) {
             termios::tcsetattr(raw_fd, termios::SetArg::TCSADRAIN, &mode)
-                .map_err(|e| TtyError::Nix(JsNixError(e)))?;
+                .map_err(|e| TtyError::Io(Error::from(e)))?;
         }
     }
 
@@ -200,7 +195,7 @@ fn console_size_from_fd(fd: std::os::unix::prelude::RawFd) -> Result<ConsoleSize
     // SAFETY: libc calls
     unsafe {
         let mut size: libc::winsize = std::mem::zeroed();
-        if libc::ioctl(fd, libc::TIOCGWINSZ, &mut size as *mut _) != 0 {
+        if libc::ioctl(fd, libc::TIOCGWINSZ, std::ptr::from_mut(&mut size)) != 0 {
             return Err(Error::last_os_error());
         }
         Ok(ConsoleSize { cols: size.ws_col as u32, rows: size.ws_row as u32 })
@@ -210,10 +205,10 @@ fn console_size_from_fd(fd: std::os::unix::prelude::RawFd) -> Result<ConsoleSize
 deno_error::js_error_wrapper!(ReadlineError, JsReadlineError, |err| {
     match err {
         ReadlineError::Io(e) => e.get_class(),
-        ReadlineError::Eof => GENERIC_ERROR.into(),
-        ReadlineError::Interrupted => GENERIC_ERROR.into(),
-        ReadlineError::Errno(e) => JsNixError(*e).get_class(),
-        ReadlineError::WindowResized => GENERIC_ERROR.into(),
+        ReadlineError::Eof
+        | ReadlineError::Interrupted
+        | ReadlineError::Errno(_)
+        | ReadlineError::Signal(_) => GENERIC_ERROR.into(),
         _ => GENERIC_ERROR.into(),
     }
 });
@@ -227,7 +222,7 @@ pub fn op_read_line_prompt(
     let mut editor =
         Editor::<(), rustyline::history::DefaultHistory>::new().expect("Failed to create editor.");
 
-    editor.set_keyseq_timeout(1);
+    editor.set_keyseq_timeout(Some(1));
     editor.bind_sequence(KeyEvent(KeyCode::Esc, Modifiers::empty()), Cmd::Interrupt);
 
     let read_result = editor.readline_with_initial(prompt_text, (default_value, ""));

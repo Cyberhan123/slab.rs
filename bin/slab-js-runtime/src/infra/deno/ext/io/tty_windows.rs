@@ -228,7 +228,8 @@ deno_error::js_error_wrapper!(ReadlineError, JsReadlineError, |err| {
         | ReadlineError::Interrupted
         | ReadlineError::Decode(_)
         | ReadlineError::SystemError(_)
-        | _ => GENERIC_ERROR.into(),
+        | ReadlineError::Signal(_) => GENERIC_ERROR.into(),
+        _ => GENERIC_ERROR.into(),
     }
 });
 

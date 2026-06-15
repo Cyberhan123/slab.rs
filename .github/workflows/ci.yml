@@ -51,13 +51,13 @@ jobs:
         run: bun run scripts/apply-patches.ts
 
       - name: cargo check
-        run: cargo check --workspace
+        run: bun ./scripts/cargo/validate.ts check
 
       - name: cargo clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: bun ./scripts/cargo/validate.ts clippy
 
       - name: cargo test
-        run: cargo test --workspace
+        run: bun ./scripts/cargo/validate.ts test
 
   frontend-check:
     name: Frontend build check

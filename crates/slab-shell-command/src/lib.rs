@@ -463,6 +463,9 @@ mod tests {
             .expect("timed out commands should return output");
 
         assert!(output.timed_out);
+        #[cfg(windows)]
         assert_eq!(output.exit_code, 1);
+        #[cfg(not(windows))]
+        assert_eq!(output.exit_code, -1);
     }
 }

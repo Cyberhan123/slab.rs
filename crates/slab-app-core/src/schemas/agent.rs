@@ -164,7 +164,7 @@ pub enum AgentResponsesClientMessage {
         request_id: Option<String>,
         session_id: String,
         #[serde(default)]
-        config: AgentConfigInput,
+        config: Box<AgentConfigInput>,
         #[serde(default)]
         messages: Vec<MessageInput>,
     },
@@ -478,12 +478,12 @@ mod tests {
         let message = AgentResponsesClientMessage::ResponseCreate {
             request_id: None,
             session_id: "session-1".into(),
-            config: AgentConfigInput {
+            config: Box::new(AgentConfigInput {
                 tool_concurrency: Some(5),
                 invalid_tool_call_retries: Some(4),
                 tool_choice: Some(AgentToolChoiceInput::Tool { name: " ".into() }),
                 ..AgentConfigInput::default()
-            },
+            }),
             messages: Vec::new(),
         };
 

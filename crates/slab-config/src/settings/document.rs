@@ -307,18 +307,12 @@ impl Default for AgentSettingsConfig {
 }
 
 /// Agent lifecycle hook settings.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct AgentHooksConfig {
     #[serde(default)]
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scripts: Vec<AgentHookScriptConfig>,
-}
-
-impl Default for AgentHooksConfig {
-    fn default() -> Self {
-        Self { enabled: false, scripts: Vec::new() }
-    }
 }
 
 /// Explicit local script registered for agent lifecycle hook execution.

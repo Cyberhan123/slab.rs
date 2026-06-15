@@ -89,7 +89,7 @@ pub enum AppCoreError {
 
     /// The caller sent an invalid or malformed request with structured details.
     #[error("bad request: {message}")]
-    BadRequestData { message: String, data: AppCoreErrorData },
+    BadRequestData { message: String, data: Box<AppCoreErrorData> },
 
     /// The request conflicts with the current resource state.
     #[error("conflict: {0}")]

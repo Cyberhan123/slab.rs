@@ -68,17 +68,16 @@ pub enum HookEvent {
 }
 
 /// Tool-specific action requested by a hook.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum HookToolAction {
+    #[default]
     Continue,
-    Block { reason: String },
-    ModifyArgs { arguments: Value },
-}
-
-impl Default for HookToolAction {
-    fn default() -> Self {
-        Self::Continue
-    }
+    Block {
+        reason: String,
+    },
+    ModifyArgs {
+        arguments: Value,
+    },
 }
 
 /// The decision returned by a hook handler.

@@ -138,6 +138,18 @@ pub fn register(
     Ok(())
 }
 
+fn load_llama_engine(path: &Path) -> Result<Arc<GGMLLlamaEngine>, CoreError> {
+    GGMLLlamaEngine::from_path(path)
+}
+
+fn load_whisper_engine(path: &Path) -> Result<GGMLWhisperEngine, CoreError> {
+    GGMLWhisperEngine::from_path(path)
+}
+
+fn load_diffusion_engine(path: &Path) -> Result<GGMLDiffusionEngine, CoreError> {
+    GGMLDiffusionEngine::from_path(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,16 +163,4 @@ mod tests {
             matches!(core_error, CoreError::Busy { backend_id } if backend_id.contains("session key 'chat-1'"))
         );
     }
-}
-
-fn load_llama_engine(path: &Path) -> Result<Arc<GGMLLlamaEngine>, CoreError> {
-    GGMLLlamaEngine::from_path(path)
-}
-
-fn load_whisper_engine(path: &Path) -> Result<GGMLWhisperEngine, CoreError> {
-    GGMLWhisperEngine::from_path(path)
-}
-
-fn load_diffusion_engine(path: &Path) -> Result<GGMLDiffusionEngine, CoreError> {
-    GGMLDiffusionEngine::from_path(path)
 }

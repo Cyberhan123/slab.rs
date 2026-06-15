@@ -6,13 +6,13 @@ use std::path::PathBuf;
 use tempfile::tempdir;
 
 fn run_apply_patch_in_dir(dir: &Path, patch: &str) -> anyhow::Result<assert_cmd::assert::Assert> {
-    let mut cmd = Command::new(slab_utils::cargo_bin("apply_patch")?);
+    let mut cmd = Command::new(slab_utils::cargo_bin::cargo_bin("apply_patch")?);
     cmd.current_dir(dir);
     Ok(cmd.arg(patch).assert())
 }
 
 fn apply_patch_command(dir: &Path) -> anyhow::Result<Command> {
-    let mut cmd = Command::new(slab_utils::cargo_bin("apply_patch")?);
+    let mut cmd = Command::new(slab_utils::cargo_bin::cargo_bin("apply_patch")?);
     cmd.current_dir(dir);
     Ok(cmd)
 }

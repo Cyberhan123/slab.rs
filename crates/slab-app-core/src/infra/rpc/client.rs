@@ -490,8 +490,7 @@ pub async fn unload_model(
     debug!(backend = %backend_id, "sending gRPC unload_model request");
 
     for attempt in 1..=UNARY_RPC_MAX_ATTEMPTS {
-        let (response, request_id) =
-            unload_model_once(channel.clone(), backend_id, req.clone()).await?;
+        let (response, request_id) = unload_model_once(channel.clone(), backend_id, req).await?;
         match response {
             Ok(response) => return Ok(response.into_inner()),
             Err(status) => {

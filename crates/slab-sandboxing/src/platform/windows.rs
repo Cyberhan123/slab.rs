@@ -1,10 +1,12 @@
 use async_trait::async_trait;
+#[cfg(target_os = "windows")]
 use tracing::{debug, warn};
 
+#[cfg(target_os = "windows")]
+use crate::guard::validate_command;
 use crate::{
     SandboxCapabilities, SandboxDriver, SandboxEnvironment, SandboxError, SandboxIsolation,
     SandboxPlatform, SandboxSetupStatus, SandboxedCommand, SandboxedOutput,
-    guard::validate_command,
 };
 
 pub struct WindowsSandboxDriver {

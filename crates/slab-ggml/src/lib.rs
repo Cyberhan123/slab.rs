@@ -7,9 +7,10 @@ pub use backend::GGMLBackendReg;
 pub use error::GGMLError;
 pub use logging::GgmlLogLevel;
 use slab_ggml_sys::GGmlLib;
+#[cfg(windows)]
+use slab_utils::loader::open_native_library;
 use slab_utils::loader::{
     RuntimeLibrary, library_path, load_library_from_dir, load_runtime_library_from_dir,
-    open_native_library,
 };
 use std::ffi::CStr;
 use std::fmt;

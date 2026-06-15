@@ -482,8 +482,9 @@ mod tests {
             Some(PathBuf::from("workspace")),
             SandboxPolicy::WorkspaceWrite,
         );
+        let command = if cfg!(windows) { "echo x > .GiT\\config" } else { "echo x > .GiT/config" };
         let cmd = SandboxedCommand {
-            argv: vec!["cmd".into(), "/c".into(), "echo x > .GiT\\config".into()],
+            argv: vec!["cmd".into(), "/c".into(), command.into()],
             env: Default::default(),
             cwd: Some(PathBuf::from("workspace")),
             timeout: None,

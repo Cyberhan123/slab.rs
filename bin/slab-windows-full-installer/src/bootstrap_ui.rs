@@ -1,15 +1,22 @@
+#[cfg(windows)]
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
+#[cfg(windows)]
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::Result;
+#[cfg(windows)]
+use anyhow::{Context, anyhow};
+#[cfg(windows)]
 use eframe::egui::{self, Color32, RichText};
 
+use crate::RunArgs;
+#[cfg(windows)]
 use crate::{
-    BootstrapProgressSink, PreparedBootstrap, RunArgs, finalize_bootstrap,
-    launch_prepared_bootstrap, prepare_bootstrap,
+    BootstrapProgressSink, PreparedBootstrap, finalize_bootstrap, launch_prepared_bootstrap,
+    prepare_bootstrap,
 };
 
 pub fn run_bootstrap_with_ui(args: RunArgs) -> Result<()> {

@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::Duration;
 
 use slab_sandboxing::{
@@ -9,24 +8,31 @@ use slab_sandboxing::{
 };
 use tempfile::TempDir;
 
-fn smoke_workspace(policy: SandboxPolicy) -> (TempDir, Arc<dyn SandboxDriver>) {
+fn smoke_workspace(policy: SandboxPolicy) -> Option<(TempDir, std::sync::Arc<dyn SandboxDriver>)> {
     let workspace = tempfile::tempdir().expect("temp workspace");
     let env = SandboxEnvironment::new(Some(workspace.path().to_path_buf()), policy);
+    let driver = smoke_driver(env)?;
+    Some((workspace, driver))
+}
+
+fn smoke_driver(env: SandboxEnvironment) -> Option<std::sync::Arc<dyn SandboxDriver>> {
     let driver = create_platform_driver(env).expect("platform sandbox driver");
     let status = driver.setup_status();
     if !status.available {
         if std::env::var("SLAB_SANDBOX_SMOKE_ALLOW_SKIP").ok().as_deref() == Some("1") {
             eprintln!("skipping sandbox smoke: {}", status.details);
-            return (workspace, driver);
+            return None;
         }
         panic!("{}", status.details);
     }
-    (workspace, driver)
+    Some(driver)
 }
 
 #[tokio::test]
 async fn platform_driver_reports_capabilities() {
-    let (_workspace, driver) = smoke_workspace(SandboxPolicy::WorkspaceWrite);
+    let Some((_workspace, driver)) = smoke_workspace(SandboxPolicy::WorkspaceWrite) else {
+        return;
+    };
     let capabilities = driver.capabilities();
 
     assert!(driver.setup_status().available);
@@ -35,7 +41,9 @@ async fn platform_driver_reports_capabilities() {
 
 #[tokio::test]
 async fn read_only_denies_workspace_write() {
-    let (workspace, driver) = smoke_workspace(SandboxPolicy::ReadOnly);
+    let Some((workspace, driver)) = smoke_workspace(SandboxPolicy::ReadOnly) else {
+        return;
+    };
     let target = workspace.path().join("ro-denied.txt");
 
     let result = driver.run(shell_command("echo denied > ro-denied.txt", workspace.path())).await;
@@ -46,7 +54,9 @@ async fn read_only_denies_workspace_write() {
 
 #[tokio::test]
 async fn workspace_write_allows_workspace_write() {
-    let (workspace, driver) = smoke_workspace(SandboxPolicy::WorkspaceWrite);
+    let Some((workspace, driver)) = smoke_workspace(SandboxPolicy::WorkspaceWrite) else {
+        return;
+    };
     let target = workspace.path().join("allowed.txt");
 
     let output = driver
@@ -60,7 +70,9 @@ async fn workspace_write_allows_workspace_write() {
 
 #[tokio::test]
 async fn workspace_write_denies_outside_write() {
-    let (workspace, driver) = smoke_workspace(SandboxPolicy::WorkspaceWrite);
+    let Some((workspace, driver)) = smoke_workspace(SandboxPolicy::WorkspaceWrite) else {
+        return;
+    };
     let outside =
         std::env::current_dir().expect("cwd").join("target").join("sandbox-outside-smoke");
     std::fs::create_dir_all(&outside).expect("outside dir");
@@ -76,11 +88,18 @@ async fn workspace_write_denies_outside_write() {
 
 #[tokio::test]
 async fn workspace_write_denies_protected_metadata_write() {
-    let (workspace, driver) = smoke_workspace(SandboxPolicy::WorkspaceWrite);
+    let Some((workspace, driver)) = smoke_workspace(SandboxPolicy::WorkspaceWrite) else {
+        return;
+    };
     std::fs::create_dir_all(workspace.path().join(".GiT")).expect("metadata dir");
     let target = workspace.path().join(".GiT").join("config");
+    let command = if cfg!(target_os = "windows") {
+        "echo blocked > .GiT\\config"
+    } else {
+        "echo blocked > .GiT/config"
+    };
 
-    let result = driver.run(shell_command("echo blocked > .GiT\\config", workspace.path())).await;
+    let result = driver.run(shell_command(command, workspace.path())).await;
 
     assert!(matches!(result, Err(SandboxError::PermissionDenied(_))));
     assert!(!target.exists());
@@ -94,7 +113,9 @@ async fn blocked_network_denies_http_command() {
         SandboxPolicy::WorkspaceWrite,
     );
     env.permissions.network = NetworkPolicy::Blocked;
-    let driver = create_platform_driver(env).expect("platform sandbox driver");
+    let Some(driver) = smoke_driver(env) else {
+        return;
+    };
 
     let result =
         driver.run(shell_command("curl --max-time 1 https://example.com", workspace.path())).await;
@@ -105,7 +126,9 @@ async fn blocked_network_denies_http_command() {
 #[cfg(target_os = "windows")]
 #[tokio::test]
 async fn workspace_write_denies_windows_namespace_escape() {
-    let (workspace, driver) = smoke_workspace(SandboxPolicy::WorkspaceWrite);
+    let Some((workspace, driver)) = smoke_workspace(SandboxPolicy::WorkspaceWrite) else {
+        return;
+    };
 
     let result = driver
         .run(shell_command("echo blocked > \\\\?\\C:\\slab-sandbox-escape.txt", workspace.path()))

@@ -11,7 +11,7 @@ use crate::WhisperError;
 ///
 /// # Examples
 /// ```
-/// # use whisper_rs::convert_integer_to_float_audio;
+/// # use slab_whisper::convert_integer_to_float_audio;
 /// let samples = [0i16; 1024];
 /// let mut output = vec![0.0f32; samples.len()];
 /// convert_integer_to_float_audio(&samples, &mut output).expect("input and output lengths should be equal");
@@ -49,7 +49,7 @@ pub fn convert_integer_to_float_audio(
 ///
 /// # Examples
 /// ```
-/// # use whisper_rs::convert_stereo_to_mono_audio;
+/// # use slab_whisper::convert_stereo_to_mono_audio;
 /// let samples = [0.0f32; 1024];
 /// let mut mono_samples = [0.0f32; 512];
 /// convert_stereo_to_mono_audio(&samples, &mut mono_samples).expect("should be no half samples missing");

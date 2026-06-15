@@ -79,7 +79,11 @@ mod tests {
 
     #[test]
     fn resolve_base_lib_path_makes_relative_paths_absolute() {
+        #[cfg(windows)]
         let cwd = Path::new("C:/slab/bin/slab-app/src-tauri");
+        #[cfg(not(windows))]
+        let cwd = Path::new("/slab/bin/slab-app/src-tauri");
+
         let resolved = resolve_base_lib_path(PathBuf::from("./resources/libs"), cwd);
 
         assert!(resolved.is_absolute());
@@ -88,8 +92,15 @@ mod tests {
 
     #[test]
     fn resolve_base_lib_path_keeps_absolute_paths_stable() {
-        let cwd = Path::new("C:/slab/bin/slab-app/src-tauri");
-        let input = PathBuf::from("C:/slab/vendor/runtime/libs");
+        #[cfg(windows)]
+        let (cwd, input) = (
+            Path::new("C:/slab/bin/slab-app/src-tauri"),
+            PathBuf::from("C:/slab/vendor/runtime/libs"),
+        );
+        #[cfg(not(windows))]
+        let (cwd, input) =
+            (Path::new("/slab/bin/slab-app/src-tauri"), PathBuf::from("/slab/vendor/runtime/libs"));
+
         let resolved = resolve_base_lib_path(input.clone(), cwd);
 
         assert_eq!(resolved, input);

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use slab_agent::{AgentControl, AgentHook, ToolRouter};
@@ -44,9 +44,9 @@ impl AgentRuntimeReloader {
         Ok(())
     }
 
-    fn refresh_memory_tools(&self, config: &AgentMemoriesConfig, memory_root: &PathBuf) {
+    fn refresh_memory_tools(&self, config: &AgentMemoriesConfig, memory_root: &Path) {
         let workspace_root = workspace_root_from_config(self.state.config());
-        let extra_roots = if config.enabled { vec![memory_root.clone()] } else { Vec::new() };
+        let extra_roots = if config.enabled { vec![memory_root.to_path_buf()] } else { Vec::new() };
         self.tool_router.register(Box::new(slab_agent_tools::ReadFileTool::new_with_extra_roots(
             workspace_root.clone(),
             extra_roots.clone(),

@@ -1,7 +1,6 @@
 [env]
 
 [build]
-rustc-wrapper = "sccache"
 
 [profile.dev]
 incremental = false

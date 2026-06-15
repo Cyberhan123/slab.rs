@@ -114,7 +114,7 @@ pub(super) fn validate_cloud_structured_output(
 fn unsupported_chat_parameter(param: &str, message: impl Into<String>) -> AppCoreError {
     AppCoreError::BadRequestData {
         message: message.into(),
-        data: AppCoreErrorData::unsupported_chat_parameter(param),
+        data: Box::new(AppCoreErrorData::unsupported_chat_parameter(param)),
     }
 }
 

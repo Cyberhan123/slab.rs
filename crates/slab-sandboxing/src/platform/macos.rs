@@ -123,12 +123,12 @@ fn build_seatbelt_profile(env: &SandboxEnvironment) -> String {
         SandboxPolicy::ReadOnly => {}
         SandboxPolicy::WorkspaceWrite => {
             if let Some(root) = &env.workspace_root {
-                allow_write_subpath(&mut lines, root);
+                allow_write_subpaths(&mut lines, root);
             }
             for root in &env.permissions.writable_roots {
-                allow_write_subpath(&mut lines, root);
+                allow_write_subpaths(&mut lines, root);
             }
-            allow_write_subpath(&mut lines, &std::env::temp_dir());
+            allow_write_subpaths(&mut lines, &std::env::temp_dir());
         }
         SandboxPolicy::DangerFullAccess => {
             lines.push("(allow file-write*)".to_string());
@@ -136,14 +136,11 @@ fn build_seatbelt_profile(env: &SandboxEnvironment) -> String {
     }
 
     for denied in &env.permissions.denied_paths {
-        lines.push(format!("(deny file* (subpath \"{}\"))", escape_sbpl_path(denied)));
+        deny_file_subpaths(&mut lines, denied);
     }
     for name in &env.permissions.protected_path_names {
         if let Some(root) = &env.workspace_root {
-            lines.push(format!(
-                "(deny file-write* (subpath \"{}\"))",
-                escape_sbpl_path(&root.join(name))
-            ));
+            deny_write_subpaths(&mut lines, &root.join(name));
         }
     }
 
@@ -151,8 +148,35 @@ fn build_seatbelt_profile(env: &SandboxEnvironment) -> String {
 }
 
 #[cfg(target_os = "macos")]
-fn allow_write_subpath(lines: &mut Vec<String>, path: &std::path::Path) {
-    lines.push(format!("(allow file-write* (subpath \"{}\"))", escape_sbpl_path(path)));
+fn allow_write_subpaths(lines: &mut Vec<String>, path: &std::path::Path) {
+    for path in seatbelt_paths(path) {
+        lines.push(format!("(allow file-write* (subpath \"{}\"))", escape_sbpl_path(&path)));
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn deny_file_subpaths(lines: &mut Vec<String>, path: &std::path::Path) {
+    for path in seatbelt_paths(path) {
+        lines.push(format!("(deny file* (subpath \"{}\"))", escape_sbpl_path(&path)));
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn deny_write_subpaths(lines: &mut Vec<String>, path: &std::path::Path) {
+    for path in seatbelt_paths(path) {
+        lines.push(format!("(deny file-write* (subpath \"{}\"))", escape_sbpl_path(&path)));
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn seatbelt_paths(path: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut paths = vec![path.to_path_buf()];
+    if let Ok(canonical) = dunce::canonicalize(path)
+        && !paths.iter().any(|candidate| candidate == &canonical)
+    {
+        paths.push(canonical);
+    }
+    paths
 }
 
 #[cfg(target_os = "macos")]
