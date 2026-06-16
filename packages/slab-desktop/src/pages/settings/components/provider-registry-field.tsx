@@ -12,12 +12,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@slab/components/select';
+import { useTranslation } from '@slab/i18n';
 import { cn } from '@/lib/utils';
 
 import {
   jsonPointerAppend,
   pathContainsError,
+  schemaFieldDescription,
+  schemaFieldLabel,
   type JsonSchemaNode,
+  type SettingsTranslate,
 } from '../schema';
 import type { FieldErrorState, JsonObject, JsonValue } from '../types';
 
@@ -53,8 +57,23 @@ export function ProviderRegistryField({
   errorState,
   onChange,
 }: ProviderRegistryFieldProps) {
+  const { t } = useTranslation();
   const entries = coerceProviderRegistryEntries(value);
   const familyOptions = providerFamilyOptions(schema);
+  const entrySchema = schema.items;
+  const entryProperties = entrySchema?.properties ?? {};
+  const authProperties = entryProperties.auth?.properties ?? {};
+  const defaultsProperties = entryProperties.defaults?.properties ?? {};
+  const idSchema = entryProperties.id;
+  const familySchema = entryProperties.family;
+  const displayNameSchema = entryProperties.display_name;
+  const apiBaseSchema = entryProperties.api_base;
+  const apiKeySchema = authProperties.api_key;
+  const apiKeyEnvSchema = authProperties.api_key_env;
+  const headersSchema = defaultsProperties.headers;
+  const querySchema = defaultsProperties.query;
+  const registryTitle =
+    schemaFieldLabel('', schema, t) || t('pages.settings.providerRegistry.title');
 
   function updateEntry(index: number, nextEntry: ProviderRegistryEntryDraft) {
     onChange(entries.map((entry, entryIndex) => (entryIndex === index ? toJsonEntry(nextEntry) : toJsonEntry(entry))));
@@ -74,22 +93,24 @@ export function ProviderRegistryField({
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <Shield className="h-4 w-4 text-muted-foreground" />
-            <p className="text-sm font-medium">Provider Registry</p>
+            <p className="text-sm font-medium">{registryTitle}</p>
           </div>
           <p className="text-xs text-muted-foreground">
-            {entries.length} configured provider{entries.length === 1 ? '' : 's'}
+            {t('pages.settings.providerRegistry.configuredProviders', {
+              count: entries.length,
+            })}
           </p>
         </div>
 
         <Button variant="outline" size="sm" onClick={addEntry}>
           <Plus className="mr-2 h-4 w-4" />
-          Add provider
+          {t('pages.settings.providerRegistry.addProvider')}
         </Button>
       </div>
 
       {entries.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">
-          No providers configured yet.
+          {t('pages.settings.providerRegistry.empty')}
         </div>
       ) : null}
 
@@ -97,7 +118,13 @@ export function ProviderRegistryField({
         {entries.map((entry, index) => {
           const entryPath = jsonPointerAppend('', index);
           const entryHasError = pathContainsError(entryPath, errorState?.path);
-          const title = entry.display_name.trim() || entry.id.trim() || `Provider ${index + 1}`;
+          const entryDescription = entrySchema
+            ? schemaFieldDescription(entrySchema, t)
+            : '';
+          const title =
+            entry.display_name.trim() ||
+            entry.id.trim() ||
+            t('pages.settings.providerRegistry.entryFallback', { index: index + 1 });
 
           return (
             <section
@@ -118,7 +145,7 @@ export function ProviderRegistryField({
                     </Badge>
                   </div>
                   <p className="text-xs leading-5 text-muted-foreground">
-                    Configure connection details and optional request defaults for one remote provider.
+                    {entryDescription || t('pages.settings.providerRegistry.entryDescription')}
                   </p>
                   {errorState?.path === entryPath ? (
                     <p className="text-sm text-destructive">{errorState.message}</p>
@@ -132,14 +159,17 @@ export function ProviderRegistryField({
                   className="text-destructive hover:text-destructive"
                 >
                   <Trash2 className="mr-2 h-4 w-4" />
-                  Remove
+                  {t('pages.settings.providerRegistry.remove')}
                 </Button>
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
                 <FieldBlock
-                  label="Provider ID"
-                  description="Stable internal identifier used by the app."
+                  label={schemaFieldLabel('id', idSchema ?? {}, t)}
+                  description={
+                    schemaFieldDescription(idSchema ?? {}, t) ||
+                    t('pages.settings.providerRegistry.fields.id.description')
+                  }
                   path={jsonPointerAppend(entryPath, 'id')}
                   errorState={errorState}
                 >
@@ -154,8 +184,8 @@ export function ProviderRegistryField({
                 </FieldBlock>
 
                 <FieldBlock
-                  label="Display name"
-                  description="Friendly label shown in the UI."
+                  label={schemaFieldLabel('display_name', displayNameSchema ?? {}, t)}
+                  description={t('pages.settings.providerRegistry.fields.displayName.description')}
                   path={jsonPointerAppend(entryPath, 'display_name')}
                   errorState={errorState}
                 >
@@ -170,8 +200,8 @@ export function ProviderRegistryField({
                 </FieldBlock>
 
                 <FieldBlock
-                  label="Family"
-                  description="Protocol family used by this provider."
+                  label={schemaFieldLabel('family', familySchema ?? {}, t)}
+                  description={t('pages.settings.providerRegistry.fields.family.description')}
                   path={jsonPointerAppend(entryPath, 'family')}
                   errorState={errorState}
                 >
@@ -180,7 +210,9 @@ export function ProviderRegistryField({
                     onValueChange={(family) => updateEntry(index, { ...entry, family })}
                   >
                     <SelectTrigger className="h-11 rounded-2xl">
-                      <SelectValue placeholder="Select a provider family" />
+                      <SelectValue
+                        placeholder={t('pages.settings.providerRegistry.selectFamily')}
+                      />
                     </SelectTrigger>
                     <SelectContent>
                       {familyOptions.map((option) => (
@@ -193,8 +225,8 @@ export function ProviderRegistryField({
                 </FieldBlock>
 
                 <FieldBlock
-                  label="API base URL"
-                  description="Base URL for the provider endpoint."
+                  label={schemaFieldLabel('api_base', apiBaseSchema ?? {}, t)}
+                  description={t('pages.settings.providerRegistry.fields.apiBase.description')}
                   path={jsonPointerAppend(entryPath, 'api_base')}
                   errorState={errorState}
                 >
@@ -214,8 +246,8 @@ export function ProviderRegistryField({
 
               <div className="grid gap-4 md:grid-cols-2">
                 <FieldBlock
-                  label="Literal API key"
-                  description="Optional secret stored directly in settings."
+                  label={schemaFieldLabel('api_key', apiKeySchema ?? {}, t)}
+                  description={t('pages.settings.providerRegistry.fields.apiKey.description')}
                   path={jsonPointerAppend(jsonPointerAppend(entryPath, 'auth'), 'api_key')}
                   errorState={errorState}
                 >
@@ -240,8 +272,8 @@ export function ProviderRegistryField({
                 </FieldBlock>
 
                 <FieldBlock
-                  label="API key env var"
-                  description="Environment variable name used when no literal key is stored."
+                  label={schemaFieldLabel('api_key_env', apiKeyEnvSchema ?? {}, t)}
+                  description={t('pages.settings.providerRegistry.fields.apiKeyEnv.description')}
                   path={jsonPointerAppend(jsonPointerAppend(entryPath, 'auth'), 'api_key_env')}
                   errorState={errorState}
                 >
@@ -264,10 +296,11 @@ export function ProviderRegistryField({
 
               <div className="grid gap-4 xl:grid-cols-2">
                 <KeyValueMapEditor
-                  label="Default headers"
-                  description="Optional headers added to every request sent through this provider."
+                  label={schemaFieldLabel('headers', headersSchema ?? {}, t)}
+                  description={t('pages.settings.providerRegistry.fields.headers.description')}
                   value={entry.defaults.headers}
                   path={jsonPointerAppend(jsonPointerAppend(entryPath, 'defaults'), 'headers')}
+                  t={t}
                   errorState={errorState}
                   onChange={(headers) =>
                     updateEntry(index, {
@@ -280,10 +313,11 @@ export function ProviderRegistryField({
                   }
                 />
                 <KeyValueMapEditor
-                  label="Default query params"
-                  description="Optional query parameters added to every request."
+                  label={schemaFieldLabel('query', querySchema ?? {}, t)}
+                  description={t('pages.settings.providerRegistry.fields.query.description')}
                   value={entry.defaults.query}
                   path={jsonPointerAppend(jsonPointerAppend(entryPath, 'defaults'), 'query')}
+                  t={t}
                   errorState={errorState}
                   onChange={(query) =>
                     updateEntry(index, {
@@ -343,6 +377,7 @@ function KeyValueMapEditor({
   description,
   value,
   path,
+  t,
   errorState,
   onChange,
 }: {
@@ -350,6 +385,7 @@ function KeyValueMapEditor({
   description: string;
   value: StringMap;
   path: string;
+  t: SettingsTranslate;
   errorState?: FieldErrorState;
   onChange: (value: StringMap) => void;
 }) {
@@ -399,7 +435,7 @@ function KeyValueMapEditor({
 
       {entries.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border/70 px-4 py-3 text-sm text-muted-foreground">
-          No entries configured.
+          {t('pages.settings.providerRegistry.map.empty')}
         </div>
       ) : null}
 
@@ -410,12 +446,12 @@ function KeyValueMapEditor({
             <Input
               value={entryValue}
               onChange={(event) => updateValue(key, event.target.value)}
-              placeholder="Value"
+              placeholder={t('pages.settings.providerRegistry.map.valuePlaceholder')}
               className="h-11 rounded-2xl"
             />
             <Button variant="ghost" size="sm" onClick={() => removeValue(key)}>
               <Trash2 className="mr-2 h-4 w-4" />
-              Remove
+              {t('pages.settings.providerRegistry.remove')}
             </Button>
           </div>
         ))}
@@ -425,18 +461,18 @@ function KeyValueMapEditor({
         <Input
           value={pendingKey}
           onChange={(event) => setPendingKey(event.target.value)}
-          placeholder="Key"
+          placeholder={t('pages.settings.providerRegistry.map.keyPlaceholder')}
           className="h-11 rounded-2xl font-mono text-xs"
         />
         <Input
           value={pendingValue}
           onChange={(event) => setPendingValue(event.target.value)}
-          placeholder="Value"
+          placeholder={t('pages.settings.providerRegistry.map.valuePlaceholder')}
           className="h-11 rounded-2xl"
         />
         <Button variant="outline" size="sm" onClick={addPair} disabled={pendingKey.trim().length === 0}>
           <Plus className="mr-2 h-4 w-4" />
-          Add
+          {t('pages.settings.providerRegistry.map.add')}
         </Button>
       </div>
 

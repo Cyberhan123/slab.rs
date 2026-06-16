@@ -15,6 +15,7 @@ import type {
   FieldStatusState,
   SettingResponse,
 } from '../types';
+import { settingsPropertyLabel } from '../display';
 import { autoSaveDelay, buildRequestBody, extractStructuredError } from '../utils';
 
 type UseSettingsAutosaveArgs = {
@@ -105,7 +106,10 @@ export function useSettingsAutosave({
 
     let body;
     try {
-      body = buildRequestBody(property, draftSnapshot);
+      body = buildRequestBody(property, draftSnapshot, {
+        integer: t('pages.settings.validation.integer'),
+        json: t('pages.settings.validation.json'),
+      });
     } catch (error) {
       const message = getErrorMessage(error);
       setFieldErrors((current) => ({
@@ -244,7 +248,7 @@ export function useSettingsAutosave({
       await refetch();
       toast.success(
         t('pages.settings.autosave.resetToast', {
-          label: property.label,
+          label: settingsPropertyLabel(property, t),
         }),
       );
     } catch (error) {

@@ -12,9 +12,23 @@ import type {
 } from './types';
 
 type SettingNumberType = 'integer' | 'number';
+type SummaryMessages = {
+  emptyString: string;
+};
+type RequestValidationMessages = {
+  integer: string;
+  json: string;
+};
 
 const INTEGER_VALUE_PATTERN = /^-?\d+$/;
 const NUMBER_VALUE_PATTERN = /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+const DEFAULT_SUMMARY_MESSAGES: SummaryMessages = {
+  emptyString: '(empty string)',
+};
+const DEFAULT_REQUEST_VALIDATION_MESSAGES: RequestValidationMessages = {
+  integer: 'Value must be an integer.',
+  json: 'Value must be valid JSON.',
+};
 
 export function countProperties(sections: SettingsSectionResponse[]): number {
   return sections.reduce(
@@ -88,9 +102,12 @@ export function valueToEditorString(value: unknown): string {
   }
 }
 
-export function summarizeValue(value: unknown): string {
+export function summarizeValue(
+  value: unknown,
+  messages: SummaryMessages = DEFAULT_SUMMARY_MESSAGES,
+): string {
   if (typeof value === 'string') {
-    return value.length === 0 ? '(empty string)' : value;
+    return value.length === 0 ? messages.emptyString : value;
   }
 
   if (
@@ -125,6 +142,7 @@ export function extractStructuredError(error: unknown): FieldErrorState | null {
 export function buildRequestBody(
   property: SettingResponse,
   draftValue: DraftValue | undefined,
+  messages: RequestValidationMessages = DEFAULT_REQUEST_VALIDATION_MESSAGES,
 ): UpdateSettingRequest {
   const propertyType = property.schema.type;
 
@@ -150,7 +168,7 @@ export function buildRequestBody(
     }
     const value = parseSettingNumberValue(trimmed);
     if (value === null) {
-      throw new Error('Value must be an integer.');
+      throw new Error(messages.integer);
     }
     return {
       op: 'set',
@@ -184,7 +202,7 @@ export function buildRequestBody(
         value: JSON.parse(trimmed),
       };
     } catch {
-      throw new Error('Value must be valid JSON.');
+      throw new Error(messages.json);
     }
   }
 

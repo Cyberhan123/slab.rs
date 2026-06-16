@@ -911,17 +911,27 @@ fn json_schema(path: &str) -> Option<Value> {
         "providers.registry" => Some(provider_registry_json_schema()),
         "agent.tools.mcp.servers" => Some(mcp_servers_json_schema()),
         "agent.tools.websearch.providers" => Some(websearch_providers_json_schema()),
-        "server.cors.allowed_origins" => Some(string_list_json_schema("Allowed Origins")),
-        "telemetry.span_attributes" => Some(string_map_json_schema("Span Attributes")),
-        "telemetry.tracestate" => Some(string_map_json_schema("Trace State")),
+        "server.cors.allowed_origins" => Some(string_list_json_schema(
+            "Allowed Origins",
+            ServerI18nKey::SettingsPropertyLabelAllowedOrigins,
+        )),
+        "telemetry.span_attributes" => Some(string_map_json_schema(
+            "Span Attributes",
+            ServerI18nKey::SettingsPropertyLabelSpanAttributes,
+        )),
+        "telemetry.tracestate" => Some(string_map_json_schema(
+            "Trace State",
+            ServerI18nKey::SettingsPropertyLabelTraceState,
+        )),
         _ => None,
     }
 }
 
-fn string_map_json_schema(title: &str) -> Value {
+fn string_map_json_schema(title: &str, title_key: ServerI18nKey) -> Value {
     json!({
         "type": "object",
         "title": title,
+        "x-i18n": metadata_i18n(Some(title_key), None),
         "default": {},
         "additionalProperties": { "type": "string" }
     })
@@ -1162,6 +1172,7 @@ fn property_label_key(path: &str) -> Option<ServerI18nKey> {
         "agent.hooks.enabled" => Some(ServerI18nKey::SettingsPropertyLabelExternalHooks),
         "agent.hooks.scripts" => Some(ServerI18nKey::SettingsPropertyLabelLegacyHookScripts),
         "agent.memories.enabled" => Some(ServerI18nKey::SettingsPropertyLabelAgentMemories),
+        "agent.memories.model" => Some(ServerI18nKey::SettingsPropertyLabelAgentMemoryModel),
         "agent.memories.memory_root" => Some(ServerI18nKey::SettingsPropertyLabelMemoryRoot),
         "agent.memories.phase1_scan_limit" => {
             Some(ServerI18nKey::SettingsPropertyLabelPhase1ScanLimit)
@@ -1190,6 +1201,7 @@ fn property_label_key(path: &str) -> Option<ServerI18nKey> {
             Some(ServerI18nKey::SettingsPropertyLabelExtensionRetentionDays)
         }
         "agent.tools.mcp.enabled" => Some(ServerI18nKey::SettingsPropertyLabelMcpTools),
+        "agent.tools.mcp.servers" => Some(ServerI18nKey::SettingsPropertyLabelMcpServers),
         "agent.tools.websearch.default_provider" => {
             Some(ServerI18nKey::SettingsPropertyLabelDefaultProvider)
         }
@@ -1214,6 +1226,43 @@ fn property_label_key(path: &str) -> Option<ServerI18nKey> {
         "server.admin.token" => Some(ServerI18nKey::SettingsPropertyLabelAdminToken),
         "server.cors.allowed_origins" => Some(ServerI18nKey::SettingsPropertyLabelAllowedOrigins),
         "server.cloud_http_trace" => Some(ServerI18nKey::SettingsPropertyLabelCloudHttpTrace),
+        "models.auto_unload.idle_minutes" => {
+            Some(ServerI18nKey::SettingsPropertyLabelAutoUnloadIdleMinutes)
+        }
+        "models.auto_unload.min_free_system_memory_bytes" => {
+            Some(ServerI18nKey::SettingsPropertyLabelAutoUnloadMinFreeSystemMemoryBytes)
+        }
+        "models.auto_unload.min_free_gpu_memory_bytes" => {
+            Some(ServerI18nKey::SettingsPropertyLabelAutoUnloadMinFreeGpuMemoryBytes)
+        }
+        "models.auto_unload.max_pressure_evictions_per_load" => {
+            Some(ServerI18nKey::SettingsPropertyLabelAutoUnloadMaxPressureEvictionsPerLoad)
+        }
+        _ if path.ends_with(".enabled") => Some(ServerI18nKey::SettingsPropertyLabelGenericEnabled),
+        _ if path.ends_with(".auto_download") => {
+            Some(ServerI18nKey::SettingsPropertyLabelGenericAutoDownload)
+        }
+        _ if path.ends_with(".install_dir") => {
+            Some(ServerI18nKey::SettingsPropertyLabelGenericInstallDirectory)
+        }
+        _ if path.ends_with(".level") => Some(ServerI18nKey::SettingsPropertyLabelGenericLogLevel),
+        _ if path.ends_with(".json") => Some(ServerI18nKey::SettingsPropertyLabelGenericJsonLogs),
+        _ if path.ends_with(".path") => Some(ServerI18nKey::SettingsPropertyLabelGenericPath),
+        _ if path.ends_with(".queue") => Some(ServerI18nKey::SettingsPropertyLabelGenericQueue),
+        _ if path.ends_with(".concurrent_requests") => {
+            Some(ServerI18nKey::SettingsPropertyLabelGenericConcurrentRequests)
+        }
+        _ if path.ends_with(".address") => Some(ServerI18nKey::SettingsPropertyLabelGenericAddress),
+        _ if path.ends_with(".ipc.path") => {
+            Some(ServerI18nKey::SettingsPropertyLabelGenericIpcPath)
+        }
+        _ if path.ends_with(".version") => Some(ServerI18nKey::SettingsPropertyLabelGenericVersion),
+        _ if path.ends_with(".artifact") => {
+            Some(ServerI18nKey::SettingsPropertyLabelGenericArtifact)
+        }
+        _ if path.ends_with(".context_length") => {
+            Some(ServerI18nKey::SettingsPropertyLabelGenericContextLength)
+        }
         _ => None,
     }
 }
@@ -1285,6 +1334,7 @@ fn property_description_key(path: &str) -> Option<ServerI18nKey> {
             Some(ServerI18nKey::SettingsPropertyDescriptionExtensionRetentionDays)
         }
         "agent.tools.mcp.enabled" => Some(ServerI18nKey::SettingsPropertyDescriptionMcpTools),
+        "agent.tools.mcp.servers" => Some(ServerI18nKey::SettingsPropertyDescriptionMcpServers),
         "agent.tools.websearch.default_provider" => {
             Some(ServerI18nKey::SettingsPropertyDescriptionDefaultProvider)
         }

@@ -83,6 +83,7 @@ describe('settings utils', () => {
     expect(valueToEditorString(circular)).toBe('');
 
     expect(summarizeValue('')).toBe('(empty string)');
+    expect(summarizeValue('', { emptyString: '（空字符串）' })).toBe('（空字符串）');
     expect(summarizeValue(false)).toBe('false');
     expect(summarizeValue(null)).toBe('null');
     expect(summarizeValue(undefined)).toBe('null');
@@ -128,6 +129,12 @@ describe('settings utils', () => {
     expect(() => buildRequestBody(integerSetting(), '42ms')).toThrow(
       'Value must be an integer.',
     );
+    expect(() =>
+      buildRequestBody(integerSetting(), '42ms', {
+        integer: '值必须是整数。',
+        json: '值必须是有效的 JSON。',
+      }),
+    ).toThrow('值必须是整数。');
   });
 
   it('builds boolean and string request bodies from draft and effective values', () => {
@@ -169,6 +176,12 @@ describe('settings utils', () => {
     expect(() => buildRequestBody(objectSetting(), '{"path":')).toThrow(
       'Value must be valid JSON.',
     );
+    expect(() =>
+      buildRequestBody(objectSetting(), '{"path":', {
+        integer: '值必须是整数。',
+        json: '值必须是有效的 JSON。',
+      }),
+    ).toThrow('值必须是有效的 JSON。');
   });
 
   it('falls back to editor strings for unknown setting schema types', () => {

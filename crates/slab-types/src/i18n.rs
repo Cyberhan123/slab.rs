@@ -294,6 +294,44 @@ pub enum ServerI18nKey {
     SettingsPropertyLabelAllowedOrigins,
     #[serde(rename = "server.settings.properties.label.cloudHttpTrace")]
     SettingsPropertyLabelCloudHttpTrace,
+    #[serde(rename = "server.settings.properties.label.agentMemoryModel")]
+    SettingsPropertyLabelAgentMemoryModel,
+    #[serde(rename = "server.settings.properties.label.mcpServers")]
+    SettingsPropertyLabelMcpServers,
+    #[serde(rename = "server.settings.properties.label.autoUnloadIdleMinutes")]
+    SettingsPropertyLabelAutoUnloadIdleMinutes,
+    #[serde(rename = "server.settings.properties.label.autoUnloadMinFreeSystemMemoryBytes")]
+    SettingsPropertyLabelAutoUnloadMinFreeSystemMemoryBytes,
+    #[serde(rename = "server.settings.properties.label.autoUnloadMinFreeGpuMemoryBytes")]
+    SettingsPropertyLabelAutoUnloadMinFreeGpuMemoryBytes,
+    #[serde(rename = "server.settings.properties.label.autoUnloadMaxPressureEvictionsPerLoad")]
+    SettingsPropertyLabelAutoUnloadMaxPressureEvictionsPerLoad,
+    #[serde(rename = "server.settings.properties.label.genericEnabled")]
+    SettingsPropertyLabelGenericEnabled,
+    #[serde(rename = "server.settings.properties.label.genericAutoDownload")]
+    SettingsPropertyLabelGenericAutoDownload,
+    #[serde(rename = "server.settings.properties.label.genericInstallDirectory")]
+    SettingsPropertyLabelGenericInstallDirectory,
+    #[serde(rename = "server.settings.properties.label.genericLogLevel")]
+    SettingsPropertyLabelGenericLogLevel,
+    #[serde(rename = "server.settings.properties.label.genericJsonLogs")]
+    SettingsPropertyLabelGenericJsonLogs,
+    #[serde(rename = "server.settings.properties.label.genericPath")]
+    SettingsPropertyLabelGenericPath,
+    #[serde(rename = "server.settings.properties.label.genericQueue")]
+    SettingsPropertyLabelGenericQueue,
+    #[serde(rename = "server.settings.properties.label.genericConcurrentRequests")]
+    SettingsPropertyLabelGenericConcurrentRequests,
+    #[serde(rename = "server.settings.properties.label.genericAddress")]
+    SettingsPropertyLabelGenericAddress,
+    #[serde(rename = "server.settings.properties.label.genericIpcPath")]
+    SettingsPropertyLabelGenericIpcPath,
+    #[serde(rename = "server.settings.properties.label.genericVersion")]
+    SettingsPropertyLabelGenericVersion,
+    #[serde(rename = "server.settings.properties.label.genericArtifact")]
+    SettingsPropertyLabelGenericArtifact,
+    #[serde(rename = "server.settings.properties.label.genericContextLength")]
+    SettingsPropertyLabelGenericContextLength,
     #[serde(rename = "server.settings.properties.description.interfaceLanguage")]
     SettingsPropertyDescriptionInterfaceLanguage,
     #[serde(rename = "server.settings.properties.description.databaseUrl")]
@@ -360,6 +398,8 @@ pub enum ServerI18nKey {
     SettingsPropertyDescriptionExtensionRetentionDays,
     #[serde(rename = "server.settings.properties.description.mcpTools")]
     SettingsPropertyDescriptionMcpTools,
+    #[serde(rename = "server.settings.properties.description.mcpServers")]
+    SettingsPropertyDescriptionMcpServers,
     #[serde(rename = "server.settings.properties.description.defaultProvider")]
     SettingsPropertyDescriptionDefaultProvider,
     #[serde(rename = "server.settings.properties.description.webSearchProviders")]
@@ -432,6 +472,78 @@ pub enum ServerI18nKey {
     SettingsPropertyDescriptionGenericArtifact,
     #[serde(rename = "server.settings.properties.description.genericContextLength")]
     SettingsPropertyDescriptionGenericContextLength,
+    #[serde(rename = "server.settings.schemas.provider.entry.title")]
+    SettingsSchemaProviderEntryTitle,
+    #[serde(rename = "server.settings.schemas.provider.id.title")]
+    SettingsSchemaProviderIdTitle,
+    #[serde(rename = "server.settings.schemas.provider.id.description")]
+    SettingsSchemaProviderIdDescription,
+    #[serde(rename = "server.settings.schemas.provider.family.title")]
+    SettingsSchemaProviderFamilyTitle,
+    #[serde(rename = "server.settings.schemas.provider.displayName.title")]
+    SettingsSchemaProviderDisplayNameTitle,
+    #[serde(rename = "server.settings.schemas.provider.apiBase.title")]
+    SettingsSchemaProviderApiBaseTitle,
+    #[serde(rename = "server.settings.schemas.provider.auth.title")]
+    SettingsSchemaProviderAuthTitle,
+    #[serde(rename = "server.settings.schemas.provider.apiKey.title")]
+    SettingsSchemaProviderApiKeyTitle,
+    #[serde(rename = "server.settings.schemas.provider.apiKeyEnv.title")]
+    SettingsSchemaProviderApiKeyEnvTitle,
+    #[serde(rename = "server.settings.schemas.provider.requestDefaults.title")]
+    SettingsSchemaProviderRequestDefaultsTitle,
+    #[serde(rename = "server.settings.schemas.provider.headers.title")]
+    SettingsSchemaProviderHeadersTitle,
+    #[serde(rename = "server.settings.schemas.provider.query.title")]
+    SettingsSchemaProviderQueryTitle,
+    #[serde(rename = "server.settings.schemas.webSearch.baseUrl.title")]
+    SettingsSchemaWebSearchBaseUrlTitle,
+    #[serde(rename = "server.settings.schemas.webSearch.userAgent.title")]
+    SettingsSchemaWebSearchUserAgentTitle,
+    #[serde(rename = "server.settings.schemas.webSearch.useLite.title")]
+    SettingsSchemaWebSearchUseLiteTitle,
+    #[serde(rename = "server.settings.schemas.webSearch.searchEngineId.title")]
+    SettingsSchemaWebSearchSearchEngineIdTitle,
+    #[serde(rename = "server.settings.schemas.webSearch.searchDepth.title")]
+    SettingsSchemaWebSearchSearchDepthTitle,
+    #[serde(rename = "server.settings.schemas.webSearch.includeAnswer.title")]
+    SettingsSchemaWebSearchIncludeAnswerTitle,
+    #[serde(rename = "server.settings.schemas.webSearch.includeImages.title")]
+    SettingsSchemaWebSearchIncludeImagesTitle,
+    #[serde(rename = "server.settings.schemas.webSearch.includeRawContent.title")]
+    SettingsSchemaWebSearchIncludeRawContentTitle,
+    #[serde(rename = "server.settings.schemas.webSearch.includeContents.title")]
+    SettingsSchemaWebSearchIncludeContentsTitle,
+    #[serde(rename = "server.settings.schemas.webSearch.engine.title")]
+    SettingsSchemaWebSearchEngineTitle,
+    #[serde(rename = "server.settings.schemas.webSearch.model.title")]
+    SettingsSchemaWebSearchModelTitle,
+    #[serde(rename = "server.settings.schemas.mcp.server.title")]
+    SettingsSchemaMcpServerTitle,
+    #[serde(rename = "server.settings.schemas.mcp.enabled.title")]
+    SettingsSchemaMcpEnabledTitle,
+    #[serde(rename = "server.settings.schemas.mcp.name.title")]
+    SettingsSchemaMcpNameTitle,
+    #[serde(rename = "server.settings.schemas.mcp.name.description")]
+    SettingsSchemaMcpNameDescription,
+    #[serde(rename = "server.settings.schemas.mcp.command.title")]
+    SettingsSchemaMcpCommandTitle,
+    #[serde(rename = "server.settings.schemas.mcp.command.description")]
+    SettingsSchemaMcpCommandDescription,
+    #[serde(rename = "server.settings.schemas.mcp.args.title")]
+    SettingsSchemaMcpArgsTitle,
+    #[serde(rename = "server.settings.schemas.mcp.cwd.title")]
+    SettingsSchemaMcpCwdTitle,
+    #[serde(rename = "server.settings.schemas.mcp.env.title")]
+    SettingsSchemaMcpEnvTitle,
+    #[serde(rename = "server.settings.schemas.mcp.env.description")]
+    SettingsSchemaMcpEnvDescription,
+    #[serde(rename = "server.settings.schemas.mcp.envReference.title")]
+    SettingsSchemaMcpEnvReferenceTitle,
+    #[serde(rename = "server.settings.schemas.mcp.envVar.title")]
+    SettingsSchemaMcpEnvVarTitle,
+    #[serde(rename = "server.settings.schemas.stringEntry.title")]
+    SettingsSchemaStringEntryTitle,
     #[serde(rename = "server.modelConfig.sections.summary.label")]
     ModelConfigSectionSummaryLabel,
     #[serde(rename = "server.modelConfig.sections.summary.description")]

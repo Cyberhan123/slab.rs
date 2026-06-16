@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 import openapiTS, { astToString } from "openapi-typescript";
 import ts from "typescript";
 
+import { cargoEnv } from "../cargo/env";
+
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../..");
 const outputPath = path.join(repoRoot, "packages", "api", "src", "v1.d.ts");
@@ -64,7 +66,9 @@ async function ensureServerBinary() {
     "debug",
     process.platform === "win32" ? "slab-server.exe" : "slab-server",
   );
-  await runCommand("cargo", ["build", "-p", "slab-server"]);
+  await runCommand("cargo", ["build", "-p", "slab-server"], {
+    env: cargoEnv(),
+  });
   return serverBinaryPath;
 }
 
@@ -189,11 +193,15 @@ async function copyDirectory(sourceDir: string, destDir: string) {
   );
 }
 
-async function runCommand(command: string, args: string[]) {
+async function runCommand(
+  command: string,
+  args: string[],
+  options: { env?: NodeJS.ProcessEnv } = {},
+) {
   await new Promise<void>((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: repoRoot,
-      env: process.env,
+      env: options.env ?? process.env,
       shell: false,
       stdio: "inherit",
       windowsHide: true,

@@ -7,7 +7,7 @@ use slab_otel::config::OtelSettings;
 
 use super::defaults;
 use super::launch::RuntimeTransportMode;
-use slab_types::DESKTOP_API_BIND;
+use slab_types::{DESKTOP_API_BIND, I18nMessageRef, I18nPayload, ServerI18nKey};
 
 pub const PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL: &str =
     "https://slab.reorgix.com/manifests/v1/settings-document.schema.json";
@@ -1103,41 +1103,62 @@ pub fn render_settings_document_json_schema() -> String {
     rendered
 }
 
+fn schema_i18n(title: Option<ServerI18nKey>, description: Option<ServerI18nKey>) -> Value {
+    let mut payload = I18nPayload::new();
+    if let Some(key) = title {
+        payload.insert("title", I18nMessageRef::new(key));
+    }
+    if let Some(key) = description {
+        payload.insert("description", I18nMessageRef::new(key));
+    }
+    serde_json::to_value(payload).expect("schema i18n payload should serialize")
+}
+
 pub fn provider_registry_json_schema() -> Value {
     json!({
         "type": "array",
         "title": "Provider Registry",
+        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsPropertyLabelProviderRegistry), None),
         "default": [],
         "items": {
             "type": "object",
             "title": "Provider Entry",
+            "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderEntryTitle), None),
             "required": ["id", "family", "display_name", "api_base"],
             "properties": {
                 "id": {
                     "type": "string",
                     "title": "Provider ID",
                     "description": "Stable provider identifier.",
+                    "x-i18n": schema_i18n(
+                        Some(ServerI18nKey::SettingsSchemaProviderIdTitle),
+                        Some(ServerI18nKey::SettingsSchemaProviderIdDescription),
+                    ),
                     "default": ""
                 },
                 "family": {
                     "type": "string",
                     "title": "Provider Family",
+                    "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderFamilyTitle), None),
                     "enum": ["openai_compatible"],
                     "default": "openai_compatible"
                 },
                 "display_name": {
                     "type": "string",
                     "title": "Display Name",
+                    "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderDisplayNameTitle), None),
                     "default": ""
                 },
                 "api_base": {
                     "type": "string",
                     "title": "API Base URL",
+                    "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderApiBaseTitle), None),
                     "default": ""
                 },
                 "auth": {
                     "type": "object",
                     "title": "Authentication",
+                    "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderAuthTitle), None),
                     "default": {
                         "api_key": null,
                         "api_key_env": null
@@ -1146,12 +1167,14 @@ pub fn provider_registry_json_schema() -> Value {
                         "api_key": {
                             "type": ["string", "null"],
                             "title": "API Key",
+                            "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderApiKeyTitle), None),
                             "writeOnly": true,
                             "default": null
                         },
                         "api_key_env": {
                             "type": ["string", "null"],
                             "title": "API Key Environment Variable",
+                            "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderApiKeyEnvTitle), None),
                             "default": null
                         }
                     }
@@ -1159,6 +1182,7 @@ pub fn provider_registry_json_schema() -> Value {
                 "defaults": {
                     "type": "object",
                     "title": "Request Defaults",
+                    "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderRequestDefaultsTitle), None),
                     "default": {
                         "headers": {},
                         "query": {}
@@ -1167,12 +1191,14 @@ pub fn provider_registry_json_schema() -> Value {
                         "headers": {
                             "type": "object",
                             "title": "Headers",
+                            "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderHeadersTitle), None),
                             "default": {},
                             "additionalProperties": { "type": "string" }
                         },
                         "query": {
                             "type": "object",
                             "title": "Query Parameters",
+                            "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderQueryTitle), None),
                             "default": {},
                             "additionalProperties": { "type": "string" }
                         }
@@ -1187,15 +1213,31 @@ pub fn websearch_providers_json_schema() -> Value {
     json!({
         "type": "object",
         "title": "Web Search Providers",
+        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsPropertyLabelWebSearchProviders), None),
         "default": {},
         "properties": {
             "duckduckgo": {
                 "type": "object",
                 "title": "DuckDuckGo",
                 "properties": {
-                    "base_url": { "type": ["string", "null"], "default": null },
-                    "user_agent": { "type": ["string", "null"], "default": null },
-                    "use_lite": { "type": ["boolean", "null"], "default": null }
+                    "base_url": {
+                        "type": ["string", "null"],
+                        "title": "Base URL",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaWebSearchBaseUrlTitle), None),
+                        "default": null
+                    },
+                    "user_agent": {
+                        "type": ["string", "null"],
+                        "title": "User Agent",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaWebSearchUserAgentTitle), None),
+                        "default": null
+                    },
+                    "use_lite": {
+                        "type": ["boolean", "null"],
+                        "title": "Use Lite",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaWebSearchUseLiteTitle), None),
+                        "default": null
+                    }
                 }
             },
             "arxiv": {
@@ -1208,62 +1250,141 @@ pub fn websearch_providers_json_schema() -> Value {
                 "type": "object",
                 "title": "Google Custom Search",
                 "properties": {
-                    "auth": { "$ref": "#/$defs/webSearchAuth" },
-                    "cx": { "type": ["string", "null"], "default": null },
-                    "base_url": { "type": ["string", "null"], "default": null }
+                    "auth": {
+                        "$ref": "#/$defs/webSearchAuth",
+                        "title": "Authentication",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderAuthTitle), None)
+                    },
+                    "cx": {
+                        "type": ["string", "null"],
+                        "title": "Search Engine ID",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaWebSearchSearchEngineIdTitle), None),
+                        "default": null
+                    },
+                    "base_url": {
+                        "type": ["string", "null"],
+                        "title": "Base URL",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaWebSearchBaseUrlTitle), None),
+                        "default": null
+                    }
                 }
             },
             "tavily": {
                 "type": "object",
                 "title": "Tavily",
                 "properties": {
-                    "auth": { "$ref": "#/$defs/webSearchAuth" },
-                    "base_url": { "type": ["string", "null"], "default": null },
+                    "auth": {
+                        "$ref": "#/$defs/webSearchAuth",
+                        "title": "Authentication",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderAuthTitle), None)
+                    },
+                    "base_url": {
+                        "type": ["string", "null"],
+                        "title": "Base URL",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaWebSearchBaseUrlTitle), None),
+                        "default": null
+                    },
                     "search_depth": {
                         "type": ["string", "null"],
+                        "title": "Search Depth",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaWebSearchSearchDepthTitle), None),
                         "enum": ["basic", "advanced", null],
                         "default": null
                     },
-                    "include_answer": { "type": ["boolean", "null"], "default": null },
-                    "include_images": { "type": ["boolean", "null"], "default": null },
-                    "include_raw_content": { "type": ["boolean", "null"], "default": null }
+                    "include_answer": {
+                        "type": ["boolean", "null"],
+                        "title": "Include Answer",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaWebSearchIncludeAnswerTitle), None),
+                        "default": null
+                    },
+                    "include_images": {
+                        "type": ["boolean", "null"],
+                        "title": "Include Images",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaWebSearchIncludeImagesTitle), None),
+                        "default": null
+                    },
+                    "include_raw_content": {
+                        "type": ["boolean", "null"],
+                        "title": "Include Raw Content",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaWebSearchIncludeRawContentTitle), None),
+                        "default": null
+                    }
                 }
             },
             "exa": {
                 "type": "object",
                 "title": "Exa",
                 "properties": {
-                    "auth": { "$ref": "#/$defs/webSearchAuth" },
-                    "base_url": { "type": ["string", "null"], "default": null },
+                    "auth": {
+                        "$ref": "#/$defs/webSearchAuth",
+                        "title": "Authentication",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderAuthTitle), None)
+                    },
+                    "base_url": {
+                        "type": ["string", "null"],
+                        "title": "Base URL",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaWebSearchBaseUrlTitle), None),
+                        "default": null
+                    },
                     "model": {
                         "type": ["string", "null"],
+                        "title": "Model",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaWebSearchModelTitle), None),
                         "enum": ["keyword", "embeddings", null],
                         "default": null
                     },
-                    "include_contents": { "type": ["boolean", "null"], "default": null }
+                    "include_contents": {
+                        "type": ["boolean", "null"],
+                        "title": "Include Contents",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaWebSearchIncludeContentsTitle), None),
+                        "default": null
+                    }
                 }
             },
             "serpapi": {
                 "type": "object",
                 "title": "SerpAPI",
                 "properties": {
-                    "auth": { "$ref": "#/$defs/webSearchAuth" },
-                    "engine": { "type": ["string", "null"], "default": null },
-                    "base_url": { "type": ["string", "null"], "default": null }
+                    "auth": {
+                        "$ref": "#/$defs/webSearchAuth",
+                        "title": "Authentication",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderAuthTitle), None)
+                    },
+                    "engine": {
+                        "type": ["string", "null"],
+                        "title": "Engine",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaWebSearchEngineTitle), None),
+                        "default": null
+                    },
+                    "base_url": {
+                        "type": ["string", "null"],
+                        "title": "Base URL",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaWebSearchBaseUrlTitle), None),
+                        "default": null
+                    }
                 }
             },
             "brave": {
                 "type": "object",
                 "title": "Brave",
                 "properties": {
-                    "auth": { "$ref": "#/$defs/webSearchAuth" }
+                    "auth": {
+                        "$ref": "#/$defs/webSearchAuth",
+                        "title": "Authentication",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderAuthTitle), None)
+                    }
                 }
             },
             "searxng": {
                 "type": "object",
                 "title": "SearXNG",
                 "properties": {
-                    "base_url": { "type": ["string", "null"], "default": null }
+                    "base_url": {
+                        "type": ["string", "null"],
+                        "title": "Base URL",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaWebSearchBaseUrlTitle), None),
+                        "default": null
+                    }
                 }
             }
         },
@@ -1271,6 +1392,7 @@ pub fn websearch_providers_json_schema() -> Value {
             "webSearchAuth": {
                 "type": "object",
                 "title": "Authentication",
+                "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderAuthTitle), None),
                 "default": {
                     "api_key": null,
                     "api_key_env": null
@@ -1279,12 +1401,14 @@ pub fn websearch_providers_json_schema() -> Value {
                     "api_key": {
                         "type": ["string", "null"],
                         "title": "API Key",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderApiKeyTitle), None),
                         "writeOnly": true,
                         "default": null
                     },
                     "api_key_env": {
                         "type": ["string", "null"],
                         "title": "API Key Environment Variable",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderApiKeyEnvTitle), None),
                         "default": null
                     }
                 }
@@ -1297,56 +1421,77 @@ pub fn mcp_servers_json_schema() -> Value {
     json!({
         "type": "array",
         "title": "MCP Servers",
+        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsPropertyLabelMcpServers), None),
         "default": [],
         "items": {
             "type": "object",
             "title": "MCP Server",
+            "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaMcpServerTitle), None),
             "required": ["name", "command"],
             "properties": {
                 "enabled": {
                     "type": "boolean",
                     "title": "Enabled",
+                    "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaMcpEnabledTitle), None),
                     "default": true
                 },
                 "name": {
                     "type": "string",
                     "title": "Server Name",
                     "description": "Stable local name used to route MCP tool calls.",
+                    "x-i18n": schema_i18n(
+                        Some(ServerI18nKey::SettingsSchemaMcpNameTitle),
+                        Some(ServerI18nKey::SettingsSchemaMcpNameDescription),
+                    ),
                     "default": ""
                 },
                 "command": {
                     "type": "string",
                     "title": "Command",
                     "description": "Executable used to launch the stdio MCP server.",
+                    "x-i18n": schema_i18n(
+                        Some(ServerI18nKey::SettingsSchemaMcpCommandTitle),
+                        Some(ServerI18nKey::SettingsSchemaMcpCommandDescription),
+                    ),
                     "default": ""
                 },
                 "args": {
                     "type": "array",
                     "title": "Arguments",
+                    "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaMcpArgsTitle), None),
                     "default": [],
                     "items": {
                         "type": "string",
+                        "title": "Entry",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaStringEntryTitle), None),
                         "default": ""
                     }
                 },
                 "cwd": {
                     "type": ["string", "null"],
                     "title": "Working Directory",
+                    "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaMcpCwdTitle), None),
                     "default": null
                 },
                 "env": {
                     "type": "object",
                     "title": "Environment Variable References",
                     "description": "Map target MCP process environment names to host environment variable references. Secret values are resolved at launch and are not stored here.",
+                    "x-i18n": schema_i18n(
+                        Some(ServerI18nKey::SettingsSchemaMcpEnvTitle),
+                        Some(ServerI18nKey::SettingsSchemaMcpEnvDescription),
+                    ),
                     "default": {},
                     "additionalProperties": {
                         "type": "object",
                         "title": "Environment Reference",
+                        "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaMcpEnvReferenceTitle), None),
                         "required": ["env_var"],
                         "properties": {
                             "env_var": {
                                 "type": "string",
                                 "title": "Host Environment Variable",
+                                "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaMcpEnvVarTitle), None),
                                 "default": ""
                             }
                         }
@@ -1357,13 +1502,16 @@ pub fn mcp_servers_json_schema() -> Value {
     })
 }
 
-pub fn string_list_json_schema(title: &str) -> Value {
+pub fn string_list_json_schema(title: &str, title_key: ServerI18nKey) -> Value {
     json!({
         "type": "array",
         "title": title,
+        "x-i18n": schema_i18n(Some(title_key), None),
         "default": [],
         "items": {
             "type": "string",
+            "title": "Entry",
+            "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaStringEntryTitle), None),
             "default": ""
         }
     })

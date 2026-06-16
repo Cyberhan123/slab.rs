@@ -9,9 +9,11 @@ import {
   parseStructuredJsonSchema,
   pathContainsError,
   schemaAllowsNull,
+  schemaFieldDescription,
   schemaFieldLabel,
   schemaFieldPlaceholder,
   schemaPrimaryType,
+  type SettingsTranslate,
 } from '../schema';
 import type { SettingResponse } from '../types';
 
@@ -84,6 +86,31 @@ describe('settings schema helpers', () => {
     expect(itemSummary({ other: 'value' })).toBeNull();
     expect(itemSummary('value')).toBeNull();
   });
+
+  it('translates schema labels, descriptions, and placeholders from server i18n metadata', () => {
+    const t = testTranslate({
+      'server.settings.schemas.mcp.name.title': '服务器名称',
+      'server.settings.schemas.mcp.name.description': '用于路由 MCP 工具调用的稳定本地名称。',
+      'pages.settings.field.enterNamedValue': '输入{{label}}',
+    });
+    const schema = {
+      type: 'string' as const,
+      title: 'Server Name',
+      description: 'Stable local name used to route MCP tool calls.',
+      'x-i18n': {
+        title: {
+          key: 'server.settings.schemas.mcp.name.title',
+        },
+        description: {
+          key: 'server.settings.schemas.mcp.name.description',
+        },
+      },
+    };
+
+    expect(schemaFieldLabel('name', schema, t)).toBe('服务器名称');
+    expect(schemaFieldDescription(schema, t)).toBe('用于路由 MCP 工具调用的稳定本地名称。');
+    expect(schemaFieldPlaceholder(schema, t)).toBe('输入服务器名称');
+  });
 });
 
 function setting(type: SettingResponse['schema']['type'], json_schema: unknown): SettingResponse {
@@ -93,4 +120,14 @@ function setting(type: SettingResponse['schema']['type'], json_schema: unknown):
       type,
     },
   } as SettingResponse;
+}
+
+function testTranslate(messages: Record<string, string>): SettingsTranslate {
+  return ((key: string, options?: Record<string, unknown>) => {
+    let message = messages[key] ?? key;
+    for (const [name, value] of Object.entries(options ?? {})) {
+      message = message.replaceAll(`{{${name}}}`, String(value));
+    }
+    return message;
+  }) as SettingsTranslate;
 }

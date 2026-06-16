@@ -41,10 +41,77 @@ export const settings = {
   },
   field: {
     reset: '重置',
+    required: '必填',
     selectOption: '选择一个选项',
     integerPlaceholder: '输入整数',
     jsonPlaceholder: '输入有效的 JSON',
     valuePlaceholder: '输入值',
+    enterNamedValue: '输入{{label}}',
+    propertyNamePlaceholder: '属性名',
+    enabled: '已启用',
+    disabled: '已禁用',
+  },
+  structured: {
+    noObjectFields: '此对象未定义任何字段。',
+    additionalProperties: '额外属性',
+    configured_one: '已配置 {{count}} 项',
+    configured_other: '已配置 {{count}} 项',
+    add: '添加',
+    remove: '移除',
+    noEntries: '暂无配置条目。',
+    listNoItemShape: '此列表尚未描述条目结构。',
+    items: '条目',
+    item: '条目',
+    addNamedItem: '添加{{label}}',
+    itemTitle: '{{label}} {{index}}',
+  },
+  providerRegistry: {
+    title: '提供商注册表',
+    configuredProviders_one: '已配置 {{count}} 个提供商',
+    configuredProviders_other: '已配置 {{count}} 个提供商',
+    addProvider: '添加提供商',
+    empty: '暂无配置的提供商。',
+    entryFallback: '提供商 {{index}}',
+    entryDescription: '配置一个远程提供商的连接详情和可选请求默认值。',
+    remove: '移除',
+    selectFamily: '选择提供商家族',
+    fields: {
+      id: {
+        description: '应用使用的稳定内部标识符。',
+      },
+      displayName: {
+        description: '界面中显示的友好名称。',
+      },
+      family: {
+        description: '此提供商使用的协议家族。',
+      },
+      apiBase: {
+        description: '提供商端点的基础 URL。',
+      },
+      apiKey: {
+        description: '直接存储在设置中的可选密钥。',
+      },
+      apiKeyEnv: {
+        description: '未存储明文密钥时使用的环境变量名。',
+      },
+      headers: {
+        description: '发送到此提供商的每个请求都会附加的可选请求头。',
+      },
+      query: {
+        description: '每个请求都会附加的可选查询参数。',
+      },
+    },
+    map: {
+      empty: '暂无配置条目。',
+      keyPlaceholder: '键',
+      valuePlaceholder: '值',
+      add: '添加',
+    },
+  },
+  validation: {
+    integer: '值必须是整数。',
+    json: '值必须是有效的 JSON。',
+    emptyString: '（空字符串）',
   },
   autosave: {
     needsAttention: '自动保存前需要先处理此项。',

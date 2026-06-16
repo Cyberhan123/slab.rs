@@ -42,10 +42,78 @@ export const settings = {
   },
   field: {
     reset: 'Reset',
+    required: 'Required',
     selectOption: 'Select an option',
     integerPlaceholder: 'Enter a whole number',
     jsonPlaceholder: 'Enter valid JSON',
     valuePlaceholder: 'Enter a value',
+    enterNamedValue: 'Enter {{label}}',
+    propertyNamePlaceholder: 'Property name',
+    enabled: 'Enabled',
+    disabled: 'Disabled',
+  },
+  structured: {
+    noObjectFields: 'No fields are defined for this object.',
+    additionalProperties: 'Additional properties',
+    configured_one: '{{count}} configured',
+    configured_other: '{{count}} configured',
+    add: 'Add',
+    remove: 'Remove',
+    noEntries: 'No entries configured yet.',
+    listNoItemShape: 'This list does not describe its item shape yet.',
+    items: 'Items',
+    item: 'item',
+    addNamedItem: 'Add {{label}}',
+    itemTitle: '{{label}} {{index}}',
+  },
+  providerRegistry: {
+    title: 'Provider Registry',
+    configuredProviders_one: '{{count}} configured provider',
+    configuredProviders_other: '{{count}} configured providers',
+    addProvider: 'Add provider',
+    empty: 'No providers configured yet.',
+    entryFallback: 'Provider {{index}}',
+    entryDescription:
+      'Configure connection details and optional request defaults for one remote provider.',
+    remove: 'Remove',
+    selectFamily: 'Select a provider family',
+    fields: {
+      id: {
+        description: 'Stable internal identifier used by the app.',
+      },
+      displayName: {
+        description: 'Friendly label shown in the UI.',
+      },
+      family: {
+        description: 'Protocol family used by this provider.',
+      },
+      apiBase: {
+        description: 'Base URL for the provider endpoint.',
+      },
+      apiKey: {
+        description: 'Optional secret stored directly in settings.',
+      },
+      apiKeyEnv: {
+        description: 'Environment variable name used when no literal key is stored.',
+      },
+      headers: {
+        description: 'Optional headers added to every request sent through this provider.',
+      },
+      query: {
+        description: 'Optional query parameters added to every request.',
+      },
+    },
+    map: {
+      empty: 'No entries configured.',
+      keyPlaceholder: 'Key',
+      valuePlaceholder: 'Value',
+      add: 'Add',
+    },
+  },
+  validation: {
+    integer: 'Value must be an integer.',
+    json: 'Value must be valid JSON.',
+    emptyString: '(empty string)',
   },
   autosave: {
     needsAttention: 'Needs attention before auto-save.',

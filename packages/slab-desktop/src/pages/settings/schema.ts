@@ -1,5 +1,7 @@
 import { clamp, compact } from 'lodash-es';
 
+import { translateServerField, type ServerI18nPayload } from '@slab/i18n';
+
 import type { JsonObject, JsonValue, SettingResponse } from './types';
 
 type JsonSchemaType =
@@ -12,6 +14,7 @@ type JsonSchemaType =
   | 'string';
 
 export type JsonSchemaNode = {
+  'x-i18n'?: ServerI18nPayload;
   additionalProperties?: boolean | JsonSchemaNode;
   default?: JsonValue;
   description?: string;
@@ -30,6 +33,8 @@ export type JsonSchemaNode = {
   type?: JsonSchemaType | JsonSchemaType[];
   writeOnly?: boolean;
 };
+
+export type SettingsTranslate = Parameters<typeof translateServerField>[3];
 
 export function parseStructuredJsonSchema(
   property: SettingResponse,
@@ -123,17 +128,41 @@ export function pathContainsError(targetPath: string, errorPath?: string): boole
   return errorPath === targetPath || errorPath.startsWith(`${targetPath}/`);
 }
 
-export function schemaFieldLabel(key: string, schema: JsonSchemaNode): string {
-  return schema.title ?? humanizeIdentifier(key);
+export function schemaFieldLabel(
+  key: string,
+  schema: JsonSchemaNode,
+  t?: SettingsTranslate,
+): string {
+  const fallback = schema.title ?? humanizeIdentifier(key);
+  return t ? translateServerField(schema['x-i18n'], 'title', fallback, t) : fallback;
 }
 
-export function schemaFieldPlaceholder(schema: JsonSchemaNode): string | undefined {
+export function schemaFieldDescription(
+  schema: JsonSchemaNode,
+  t?: SettingsTranslate,
+): string {
+  return t
+    ? translateServerField(schema['x-i18n'], 'description', schema.description, t)
+    : (schema.description ?? '');
+}
+
+export function schemaFieldPlaceholder(
+  schema: JsonSchemaNode,
+  t?: SettingsTranslate,
+): string | undefined {
   const example = schema.examples?.find((value): value is string => typeof value === 'string');
   if (example) {
     return example;
   }
 
-  return schema.title ? `Enter ${schema.title.toLowerCase()}` : undefined;
+  const label = schemaFieldLabel('', schema, t);
+  if (!label) {
+    return undefined;
+  }
+
+  return t
+    ? t('pages.settings.field.enterNamedValue', { label })
+    : `Enter ${label.toLowerCase()}`;
 }
 
 export function itemSummary(value: JsonValue): string | null {

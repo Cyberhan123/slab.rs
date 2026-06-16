@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from '@slab/components/select';
 import { Switch } from '@slab/components/switch';
+import { useTranslation } from '@slab/i18n';
 import { cn } from '@/lib/utils';
 
 import {
@@ -21,10 +22,12 @@ import {
   jsonPointerAppend,
   pathContainsError,
   schemaAllowsNull,
+  schemaFieldDescription,
   schemaFieldLabel,
   schemaFieldPlaceholder,
   schemaPrimaryType,
   type JsonSchemaNode,
+  type SettingsTranslate,
 } from '../schema';
 import type { FieldErrorState, JsonValue } from '../types';
 import { parseSettingNumberValue } from '../utils';
@@ -41,6 +44,7 @@ type SchemaEditorProps = {
   value: JsonValue;
   path: string;
   depth: number;
+  t: SettingsTranslate;
   errorState?: FieldErrorState;
   onChange: (value: JsonValue) => void;
 };
@@ -51,6 +55,8 @@ export function StructuredJsonField({
   errorState,
   onChange,
 }: StructuredJsonFieldProps) {
+  const { t } = useTranslation();
+
   return (
     <div className="space-y-3 rounded-3xl border border-border/70 bg-muted/10 p-4">
       <SchemaNodeEditor
@@ -58,6 +64,7 @@ export function StructuredJsonField({
         value={value}
         path=""
         depth={0}
+        t={t}
         errorState={errorState}
         onChange={onChange}
       />
@@ -73,6 +80,7 @@ function SchemaNodeEditor({
   value,
   path,
   depth,
+  t,
   errorState,
   onChange,
 }: SchemaEditorProps) {
@@ -84,15 +92,16 @@ function SchemaNodeEditor({
           value={value}
           path={path}
           depth={depth}
+          t={t}
           errorState={errorState}
           onChange={onChange}
         />
       );
     case 'boolean':
-      return <BooleanEditor value={value} onChange={onChange} />;
+      return <BooleanEditor value={value} t={t} onChange={onChange} />;
     case 'integer':
     case 'number':
-      return <NumberEditor schema={schema} value={value} onChange={onChange} />;
+      return <NumberEditor schema={schema} value={value} t={t} onChange={onChange} />;
     case 'object':
       return (
         <ObjectEditor
@@ -100,13 +109,14 @@ function SchemaNodeEditor({
           value={value}
           path={path}
           depth={depth}
+          t={t}
           errorState={errorState}
           onChange={onChange}
         />
       );
     case 'string':
     default:
-      return <StringEditor schema={schema} value={value} onChange={onChange} />;
+      return <StringEditor schema={schema} value={value} t={t} onChange={onChange} />;
   }
 }
 
@@ -115,6 +125,7 @@ function ObjectEditor({
   value,
   path,
   depth,
+  t,
   errorState,
   onChange,
 }: SchemaEditorProps) {
@@ -131,7 +142,7 @@ function ObjectEditor({
   if (properties.length === 0 && !additionalSchema) {
     return (
       <div className="rounded-2xl border border-dashed border-border/70 px-4 py-3 text-sm text-muted-foreground">
-        No fields are defined for this object.
+        {t('pages.settings.structured.noObjectFields')}
       </div>
     );
   }
@@ -143,6 +154,7 @@ function ObjectEditor({
         const childValue =
           key in objectValue ? objectValue[key] : createDefaultJsonValue(childSchema);
         const fieldHasError = pathContainsError(childPath, errorState?.path);
+        const childDescription = schemaFieldDescription(childSchema, t);
 
         return (
           <div
@@ -155,12 +167,14 @@ function ObjectEditor({
           >
             <div className="space-y-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h4 className="text-sm font-medium">{schemaFieldLabel(key, childSchema)}</h4>
-                {required.has(key) ? <Badge variant="secondary">Required</Badge> : null}
+                <h4 className="text-sm font-medium">{schemaFieldLabel(key, childSchema, t)}</h4>
+                {required.has(key) ? (
+                  <Badge variant="secondary">{t('pages.settings.field.required')}</Badge>
+                ) : null}
               </div>
-              {childSchema.description ? (
+              {childDescription ? (
                 <p className="text-xs leading-5 text-muted-foreground">
-                  {childSchema.description}
+                  {childDescription}
                 </p>
               ) : null}
             </div>
@@ -170,6 +184,7 @@ function ObjectEditor({
               value={childValue}
               path={childPath}
               depth={depth + 1}
+              t={t}
               errorState={errorState}
               onChange={(nextValue) =>
                 onChange({
@@ -193,6 +208,7 @@ function ObjectEditor({
           definedKeys={new Set(properties.map(([key]) => key))}
           path={path}
           depth={depth}
+          t={t}
           errorState={errorState}
           onChange={onChange}
         />
@@ -207,6 +223,7 @@ function AdditionalPropertiesEditor({
   definedKeys,
   path,
   depth,
+  t,
   errorState,
   onChange,
 }: {
@@ -215,6 +232,7 @@ function AdditionalPropertiesEditor({
   definedKeys: Set<string>;
   path: string;
   depth: number;
+  t: SettingsTranslate;
   errorState?: FieldErrorState;
   onChange: (value: JsonValue) => void;
 }) {
@@ -246,26 +264,30 @@ function AdditionalPropertiesEditor({
     <div className="space-y-3 rounded-2xl border border-dashed border-border/70 bg-background/60 p-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-end">
         <div className="min-w-0 flex-1 space-y-1">
-          <p className="text-sm font-medium">{schema.title ?? 'Additional properties'}</p>
-          <p className="text-xs text-muted-foreground">{entries.length} configured</p>
+          <p className="text-sm font-medium">
+            {schemaFieldLabel('', schema, t) || t('pages.settings.structured.additionalProperties')}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {t('pages.settings.structured.configured', { count: entries.length })}
+          </p>
         </div>
         <div className="flex min-w-0 flex-1 gap-2">
           <Input
             value={newKey}
             onChange={(event) => setNewKey(event.target.value)}
-            placeholder="Property name"
+            placeholder={t('pages.settings.field.propertyNamePlaceholder')}
             className="h-10 min-w-0 rounded-2xl"
           />
           <Button variant="outline" size="sm" onClick={addEntry} disabled={!canAdd}>
             <Plus className="mr-2 h-4 w-4" />
-            Add
+            {t('pages.settings.structured.add')}
           </Button>
         </div>
       </div>
 
       {entries.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border/70 px-4 py-3 text-sm text-muted-foreground">
-          No entries configured yet.
+          {t('pages.settings.structured.noEntries')}
         </div>
       ) : null}
 
@@ -277,6 +299,7 @@ function AdditionalPropertiesEditor({
           value={entryValue}
           path={jsonPointerAppend(path, key)}
           depth={depth}
+          t={t}
           errorState={errorState}
           onRemove={() => removeEntry(key)}
           onChange={(nextValue) =>
@@ -297,6 +320,7 @@ function AdditionalPropertyEntry({
   value,
   path,
   depth,
+  t,
   errorState,
   onRemove,
   onChange,
@@ -306,6 +330,7 @@ function AdditionalPropertyEntry({
   value: JsonValue;
   path: string;
   depth: number;
+  t: SettingsTranslate;
   errorState?: FieldErrorState;
   onRemove: () => void;
   onChange: (value: JsonValue) => void;
@@ -323,7 +348,7 @@ function AdditionalPropertyEntry({
         <Badge variant="outline">{propertyKey}</Badge>
         <Button variant="ghost" size="sm" onClick={onRemove}>
           <Trash2 className="mr-2 h-4 w-4" />
-          Remove
+          {t('pages.settings.structured.remove')}
         </Button>
       </div>
 
@@ -332,6 +357,7 @@ function AdditionalPropertyEntry({
         value={value}
         path={path}
         depth={depth + 1}
+        t={t}
         errorState={errorState}
         onChange={onChange}
       />
@@ -348,6 +374,7 @@ function ArrayEditor({
   value,
   path,
   depth,
+  t,
   errorState,
   onChange,
 }: SchemaEditorProps) {
@@ -358,12 +385,15 @@ function ArrayEditor({
   if (!itemSchema) {
     return (
       <div className="rounded-2xl border border-dashed border-border/70 px-4 py-3 text-sm text-muted-foreground">
-        This list does not describe its item shape yet.
+        {t('pages.settings.structured.listNoItemShape')}
       </div>
     );
   }
 
   const resolvedItemSchema = itemSchema;
+  const listLabel = schemaFieldLabel('', schema, t) || t('pages.settings.structured.items');
+  const itemLabel = schemaFieldLabel('', resolvedItemSchema, t) || t('pages.settings.structured.item');
+  const itemDescription = schemaFieldDescription(resolvedItemSchema, t);
 
   function addItem() {
     onChange([...items, createDefaultJsonValue(resolvedItemSchema)]);
@@ -381,20 +411,20 @@ function ArrayEditor({
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-background/70 px-4 py-3">
         <div className="space-y-1">
-          <p className="text-sm font-medium">{schema.title ?? 'Items'}</p>
+          <p className="text-sm font-medium">{listLabel}</p>
           <p className="text-xs text-muted-foreground">
-            {items.length} configured
+            {t('pages.settings.structured.configured', { count: items.length })}
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={addItem}>
           <Plus className="mr-2 h-4 w-4" />
-          Add {resolvedItemSchema.title ?? 'item'}
+          {t('pages.settings.structured.addNamedItem', { label: itemLabel })}
         </Button>
       </div>
 
       {items.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border/70 px-4 py-4 text-sm text-muted-foreground">
-          No entries configured yet.
+          {t('pages.settings.structured.noEntries')}
         </div>
       ) : null}
 
@@ -416,13 +446,16 @@ function ArrayEditor({
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h4 className="text-sm font-medium">
-                    {resolvedItemSchema.title ?? 'Item'} {index + 1}
+                    {t('pages.settings.structured.itemTitle', {
+                      index: index + 1,
+                      label: itemLabel,
+                    })}
                   </h4>
                   {summary ? <Badge variant="outline">{summary}</Badge> : null}
                 </div>
-                {resolvedItemSchema.description ? (
+                {itemDescription ? (
                   <p className="text-xs leading-5 text-muted-foreground">
-                    {resolvedItemSchema.description}
+                    {itemDescription}
                   </p>
                 ) : null}
               </div>
@@ -434,7 +467,7 @@ function ArrayEditor({
                 disabled={items.length <= minItems}
               >
                 <Trash2 className="mr-2 h-4 w-4" />
-                Remove
+                {t('pages.settings.structured.remove')}
               </Button>
             </div>
 
@@ -443,6 +476,7 @@ function ArrayEditor({
               value={item}
               path={itemPath}
               depth={depth + 1}
+              t={t}
               errorState={errorState}
               onChange={(nextValue) => updateItem(index, nextValue)}
             />
@@ -460,16 +494,17 @@ function ArrayEditor({
 function StringEditor({
   schema,
   value,
+  t,
   onChange,
-}: Pick<SchemaEditorProps, 'schema' | 'value' | 'onChange'>) {
+}: Pick<SchemaEditorProps, 'schema' | 'value' | 't' | 'onChange'>) {
   const currentValue = typeof value === 'string' ? value : '';
-  const placeholder = schemaFieldPlaceholder(schema);
+  const placeholder = schemaFieldPlaceholder(schema, t);
 
   if (Array.isArray(schema.enum) && schema.enum.length > 0) {
     return (
       <Select value={currentValue} onValueChange={(nextValue) => onChange(nextValue)}>
         <SelectTrigger className="h-11 w-full rounded-2xl">
-          <SelectValue placeholder={placeholder ?? 'Select an option'} />
+          <SelectValue placeholder={placeholder ?? t('pages.settings.field.selectOption')} />
         </SelectTrigger>
         <SelectContent>
           {schema.enum.map((option) => (
@@ -504,8 +539,9 @@ function StringEditor({
 function NumberEditor({
   schema,
   value,
+  t,
   onChange,
-}: Pick<SchemaEditorProps, 'schema' | 'value' | 'onChange'>) {
+}: Pick<SchemaEditorProps, 'schema' | 'value' | 't' | 'onChange'>) {
   const numberType = schemaPrimaryType(schema) === 'integer' ? 'integer' : 'number';
   const currentValue = typeof value === 'number' ? String(value) : '';
 
@@ -526,7 +562,7 @@ function NumberEditor({
           onChange(nextValue);
         }
       }}
-      placeholder={schemaFieldPlaceholder(schema)}
+      placeholder={schemaFieldPlaceholder(schema, t)}
       className="h-11 rounded-2xl"
     />
   );
@@ -534,12 +570,15 @@ function NumberEditor({
 
 function BooleanEditor({
   value,
+  t,
   onChange,
-}: Pick<SchemaEditorProps, 'value' | 'onChange'>) {
+}: Pick<SchemaEditorProps, 'value' | 't' | 'onChange'>) {
   return (
     <div className="flex items-center justify-between rounded-2xl border border-border/70 bg-background/70 px-4 py-3">
       <span className="text-sm text-muted-foreground">
-        {value === true ? 'Enabled' : 'Disabled'}
+        {value === true
+          ? t('pages.settings.field.enabled')
+          : t('pages.settings.field.disabled')}
       </span>
       <Switch checked={value === true} onCheckedChange={(nextValue) => onChange(nextValue)} />
     </div>
