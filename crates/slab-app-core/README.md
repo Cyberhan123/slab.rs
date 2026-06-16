@@ -12,6 +12,7 @@ HTTP-free business logic library for Slab.
 - `config` / `launch` - thin re-exports of shared settings and launch helpers from `crates/slab-config`.
 - `model_auto_unload` - automatic model eviction to manage memory.
 - `schemas/` - shared request/response DTO types used by HTTP consumers.
+- Local chat prompt rendering, chat template application, and default stop-sequence inference live in domain services because they depend on Slab chat messages, tool calls, reasoning settings, and runtime prompt profiles.
 
 Workspace LSP provider resolution, workspace-root validation, and language-server process spawning live here so `bin/slab-server` can stay limited to HTTP/WebSocket routing. Built-in web providers launch `bin/slab-js-runtime lsp --entry <bundle> -- --stdio` against bundled `resources/libs/language-servers/web/*.mjs` assets. Built-in native providers only declare commands such as `rust-analyzer`, `gopls`, and `pyright-langserver --stdio`; those binaries are resolved from existing search paths or `PATH` and are not shipped by the installer. Valid and enabled third-party plugins may still contribute additional providers through `contributes.languageServers`.
 

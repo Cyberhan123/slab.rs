@@ -1,7 +1,6 @@
 pub mod app_home;
 pub mod cab;
 pub mod cargo_bin;
-pub mod chat_template;
 pub mod fs;
 pub mod fuzzy_match;
 pub mod hash;

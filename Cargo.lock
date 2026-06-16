@@ -15533,7 +15533,6 @@ dependencies = [
  "libc",
  "libloading 0.9.0",
  "log",
- "minijinja",
  "portable-pty",
  "pretty_assertions",
  "regex-lite",

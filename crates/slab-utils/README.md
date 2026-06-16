@@ -10,7 +10,7 @@ Shared low-level utility crate for Slab.
 - Atomic filesystem helpers, absolute path handling, JSON helpers, hashing, and library loading.
 - PTY and process helpers used by workspace terminal flows.
 - UDS compatibility helpers and Cargo/Bazel runfile resolution.
-- Chat template rendering, fuzzy matching, string truncation, and timing helpers.
+- Fuzzy matching, string truncation, and timing helpers.
 - Windows installer payload helpers and sleep inhibition utilities.
 
 Do not put HTTP handlers, Tauri commands, app-core business services, plugin policy decisions, or model-runtime orchestration in this crate.
