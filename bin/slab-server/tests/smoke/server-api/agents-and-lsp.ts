@@ -1,7 +1,14 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
 import type { SlabServerTestHarness } from "../../support/slab-server";
-import { expectError, expectJson, jsonInit, type Schema } from "./shared";
+import {
+  expectError,
+  expectJson,
+  expectWebSocketJsonReply,
+  expectWebSocketOpens,
+  jsonInit,
+  type Schema
+} from "./shared";
 
 export function registerAgentsAndLspSmoke(getServer: () => SlabServerTestHarness): void {
   describe("slab-server smoke agents and workspace lsp", () => {
@@ -75,8 +82,17 @@ export function registerAgentsAndLspSmoke(getServer: () => SlabServerTestHarness
       const oldAgentRoute = await server.request("/v1/agents/missing-agent/events");
       expect(oldAgentRoute.status).toBe(404);
 
-      const lspUpgradeMissing = await server.request("/v1/workspace/lsp/typescript");
-      expect(lspUpgradeMissing.status).not.toBe(404);
+      const wsError = await expectWebSocketJsonReply<Schema["AgentResponsesServerMessage"]>(
+        server,
+        "/v1/agents/responses",
+        "not json"
+      );
+      expect(wsError).toMatchObject({
+        code: "bad_request",
+        type: "agent.error"
+      });
+
+      await expectWebSocketOpens(server, "/v1/workspace/lsp/smoke-no-provider");
     });
   });
 }

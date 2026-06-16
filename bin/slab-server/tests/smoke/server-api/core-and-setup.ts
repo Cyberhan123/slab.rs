@@ -3,12 +3,14 @@ import { beforeAll, describe, expect, it } from "vitest";
 import type { SlabServerTestHarness } from "../../support/slab-server";
 import {
   documentedOperationKeys,
+  externalBaseUrl,
   executableSmokeOperations,
   expectError,
   expectJson,
   jsonInit,
   operationKey,
   todoSmokeOperations,
+  waitForTask,
   type HealthResponse,
   type OpenApiDocument,
   type Schema
@@ -41,7 +43,7 @@ export function registerCoreAndSetupSmoke(
 
       const covered = [...executableSmokeOperations, ...todoSmokeOperations]
         .map(operationKey)
-        .sort();
+        .toSorted();
       expect(new Set(covered).size).toBe(covered.length);
       expect(documentedOperationKeys(openapi.body)).toEqual(covered);
     });
@@ -92,6 +94,47 @@ export function registerCoreAndSetupSmoke(
       expect(settings.response.ok).toBe(true);
       expect(Array.isArray(settings.body.sections)).toBe(true);
 
+      const originalLanguage = await expectJson<Schema["SettingPropertyView"]>(
+        server,
+        "/v1/settings/general.language"
+      );
+      const nextLanguage =
+        originalLanguage.body.effective_value === "zh-CN" ? "en-US" : "zh-CN";
+      try {
+        const updatedLanguage = await expectJson<Schema["SettingPropertyView"]>(
+          server,
+          "/v1/settings/general.language",
+          jsonInit(
+            {
+              op: "set",
+              value: nextLanguage
+            } satisfies Schema["UpdateSettingCommand"],
+            { method: "PUT" }
+          )
+        );
+        expect(updatedLanguage.body.pmid).toBe("general.language");
+        expect(updatedLanguage.body.effective_value).toBe(nextLanguage);
+        expect(updatedLanguage.body.is_overridden).toBe(true);
+
+        const fetchedLanguage = await expectJson<Schema["SettingPropertyView"]>(
+          server,
+          "/v1/settings/general.language"
+        );
+        expect(fetchedLanguage.body.effective_value).toBe(nextLanguage);
+      } finally {
+        const restoreCommand = originalLanguage.body.is_overridden
+          ? ({
+              op: "set",
+              value: originalLanguage.body.override_value ?? originalLanguage.body.effective_value
+            } satisfies Schema["UpdateSettingCommand"])
+          : ({ op: "unset" } satisfies Schema["UpdateSettingCommand"]);
+        await expectJson<Schema["SettingPropertyView"]>(
+          server,
+          "/v1/settings/general.language",
+          jsonInit(restoreCommand, { method: "PUT" })
+        );
+      }
+
       await expectError(server, "/v1/settings/smoke.missing", 404);
       await expectError(
         server,
@@ -128,5 +171,29 @@ export function registerCoreAndSetupSmoke(
       expect(Array.isArray(diagnostics.body.paths)).toBe(true);
       expect(diagnostics.body.paths.some((entry) => entry.label === "settings_file")).toBe(true);
     });
+
+    it.skipIf(Boolean(externalBaseUrl))(
+      "accepts setup provisioning and exposes the created task",
+      async () => {
+        const accepted = await expectJson<Schema["OperationAcceptedResponse"]>(
+          server,
+          "/v1/setup/provision",
+          { method: "POST" }
+        );
+        expect(accepted.response.status).toBe(202);
+        expect(accepted.body.operation_id).toBeTypeOf("string");
+        expect(accepted.body.operation_id.length).toBeGreaterThan(0);
+
+        const task = await waitForTask(
+          server,
+          accepted.body.operation_id,
+          (provisionTask) => provisionTask.task_type === "setup_provision"
+        );
+        expect(task.id).toBe(accepted.body.operation_id);
+        expect(["pending", "running", "succeeded", "failed", "interrupted"]).toContain(
+          task.status
+        );
+      }
+    );
   });
 }

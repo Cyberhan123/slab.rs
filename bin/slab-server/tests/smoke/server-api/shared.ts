@@ -1,4 +1,5 @@
 import type { components, paths } from "@slab/api";
+import { createHash } from "node:crypto";
 import { expect } from "vitest";
 
 import type { JsonResponse, SlabServerTestHarness } from "../../support/slab-server";
@@ -31,6 +32,7 @@ export type DeletedModelResponse = {
   status: string;
 };
 export type Schema = components["schemas"];
+export type TaskResponse = Schema["TaskResponse"];
 export type SmokeOperation = {
   method: HttpMethod;
   path: ApiPath;
@@ -93,6 +95,7 @@ export const executableSmokeOperations = [
   { method: "get", path: "/v1/settings/{pmid}" },
   { method: "put", path: "/v1/settings/{pmid}" },
   { method: "post", path: "/v1/setup/complete" },
+  { method: "post", path: "/v1/setup/provision" },
   { method: "get", path: "/v1/setup/status" },
   { method: "post", path: "/v1/subtitles/render" },
   { method: "get", path: "/v1/system/diagnostics" },
@@ -100,6 +103,7 @@ export const executableSmokeOperations = [
   { method: "get", path: "/v1/tasks" },
   { method: "get", path: "/v1/tasks/{id}" },
   { method: "post", path: "/v1/tasks/{id}/cancel" },
+  { method: "post", path: "/v1/tasks/{id}/restart" },
   { method: "get", path: "/v1/tasks/{id}/result" },
   { method: "delete", path: "/v1/ui-state/{key}" },
   { method: "get", path: "/v1/ui-state/{key}" },
@@ -111,10 +115,7 @@ export const executableSmokeOperations = [
   { method: "get", path: "/v1/video/generations/{id}/reference" }
 ] as const satisfies readonly SmokeOperation[];
 
-export const todoSmokeOperations = [
-  { method: "post", path: "/v1/setup/provision" },
-  { method: "post", path: "/v1/tasks/{id}/restart" }
-] as const satisfies readonly SmokeOperation[];
+export const todoSmokeOperations = [] as const satisfies readonly SmokeOperation[];
 
 export const futureCompatibilityScenarios = [
   "POST /v1/embeddings accepts single and batch inputs with deterministic usage fields",
@@ -150,7 +151,7 @@ export function documentedOperationKeys(openapi: OpenApiDocument): string[] {
     }
   }
 
-  return keys.sort();
+  return keys.toSorted();
 }
 
 export function jsonInit<T>(body: T, init: RequestInit = {}): RequestInit {
@@ -202,4 +203,272 @@ export async function expectOpenAiError(
   expect(body.error?.type).toBeTypeOf("string");
 
   return body;
+}
+
+export async function eventually<T>(
+  label: string,
+  assertion: () => Promise<T | false | null | undefined> | T | false | null | undefined,
+  timeoutMs = 30_000,
+  intervalMs = 250
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+
+  while (Date.now() < deadline) {
+    try {
+      const result = await assertion();
+      if (result) {
+        return result;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, intervalMs));
+  }
+
+  const suffix = lastError instanceof Error ? ` Last error: ${lastError.message}` : "";
+  throw new Error(`${label} timed out after ${timeoutMs}ms.${suffix}`);
+}
+
+export async function waitForTask(
+  server: SlabServerTestHarness,
+  taskId: string,
+  predicate: (task: TaskResponse) => boolean,
+  timeoutMs = 30_000
+): Promise<TaskResponse> {
+  return eventually(
+    `task ${taskId}`,
+    async () => {
+      const task = await expectJson<TaskResponse>(server, `/v1/tasks/${taskId}`);
+      return predicate(task.body) ? task.body : null;
+    },
+    timeoutMs
+  );
+}
+
+export async function buildCloudModelPackFile(modelId: string): Promise<File> {
+  return buildZipFile(`${modelId}.slab`, {
+    "manifest.json": JSON.stringify({
+      family: "llama",
+      id: modelId,
+      label: `Smoke ${modelId}`,
+      source: {
+        kind: "cloud",
+        provider_id: "smoke-provider",
+        remote_model_id: modelId
+      },
+      status: "ready",
+      version: 2
+    })
+  });
+}
+
+export async function buildPluginPackFile(pluginId: string): Promise<File> {
+  const htmlPath = "ui/index.html";
+  const html = "<!doctype html><html><body>Smoke plugin</body></html>";
+  return buildZipFile(`${pluginId}.plugin.slab`, {
+    [`${pluginId}/${htmlPath}`]: html,
+    [`${pluginId}/plugin.json`]: JSON.stringify({
+      id: pluginId,
+      integrity: {
+        filesSha256: {
+          [htmlPath]: sha256Hex(html)
+        }
+      },
+      manifestVersion: 1,
+      name: "Smoke Plugin",
+      permissions: {
+        network: {
+          allowHosts: [],
+          mode: "blocked"
+        }
+      },
+      runtime: {
+        ui: {
+          entry: htmlPath
+        }
+      },
+      version: "0.1.0"
+    })
+  });
+}
+
+export function formDataWithFile(file: File): FormData {
+  const body = new FormData();
+  body.set("file", file);
+  return body;
+}
+
+export async function expectWebSocketOpens(
+  server: SlabServerTestHarness,
+  path: string
+): Promise<void> {
+  const socket = await openWebSocket(server, path);
+  socket.close();
+}
+
+export async function expectWebSocketJsonReply<T>(
+  server: SlabServerTestHarness,
+  path: string,
+  payload: unknown
+): Promise<T> {
+  const socket = await openWebSocket(server, path);
+  try {
+    socket.send(typeof payload === "string" ? payload : JSON.stringify(payload));
+    const text = await waitForWebSocketMessage(socket);
+    return JSON.parse(text) as T;
+  } finally {
+    socket.close();
+  }
+}
+
+async function buildZipFile(fileName: string, entries: Record<string, string>): Promise<File> {
+  const bytes = buildStoredZip(entries);
+  return new File([bytes], fileName, { type: "application/octet-stream" });
+}
+
+function sha256Hex(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function buildStoredZip(entries: Record<string, string>): Uint8Array {
+  const localRecords: Buffer[] = [];
+  const centralRecords: Buffer[] = [];
+  let offset = 0;
+
+  for (const [path, content] of Object.entries(entries)) {
+    const name = Buffer.from(path, "utf8");
+    const data = Buffer.from(content, "utf8");
+    const crc = crc32(data);
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0, 6);
+    localHeader.writeUInt16LE(0, 8);
+    localHeader.writeUInt16LE(0, 10);
+    localHeader.writeUInt16LE(0, 12);
+    localHeader.writeUInt32LE(crc, 14);
+    localHeader.writeUInt32LE(data.byteLength, 18);
+    localHeader.writeUInt32LE(data.byteLength, 22);
+    localHeader.writeUInt16LE(name.byteLength, 26);
+    localHeader.writeUInt16LE(0, 28);
+    localRecords.push(localHeader, name, data);
+
+    const centralHeader = Buffer.alloc(46);
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(0, 8);
+    centralHeader.writeUInt16LE(0, 10);
+    centralHeader.writeUInt16LE(0, 12);
+    centralHeader.writeUInt16LE(0, 14);
+    centralHeader.writeUInt32LE(crc, 16);
+    centralHeader.writeUInt32LE(data.byteLength, 20);
+    centralHeader.writeUInt32LE(data.byteLength, 24);
+    centralHeader.writeUInt16LE(name.byteLength, 28);
+    centralHeader.writeUInt16LE(0, 30);
+    centralHeader.writeUInt16LE(0, 32);
+    centralHeader.writeUInt16LE(0, 34);
+    centralHeader.writeUInt16LE(0, 36);
+    centralHeader.writeUInt32LE(0, 38);
+    centralHeader.writeUInt32LE(offset, 42);
+    centralRecords.push(centralHeader, name);
+
+    offset += localHeader.byteLength + name.byteLength + data.byteLength;
+  }
+
+  const localBytes = Buffer.concat(localRecords);
+  const centralBytes = Buffer.concat(centralRecords);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(0, 4);
+  end.writeUInt16LE(0, 6);
+  end.writeUInt16LE(Object.keys(entries).length, 8);
+  end.writeUInt16LE(Object.keys(entries).length, 10);
+  end.writeUInt32LE(centralBytes.byteLength, 12);
+  end.writeUInt32LE(localBytes.byteLength, 16);
+  end.writeUInt16LE(0, 20);
+
+  return Buffer.concat([localBytes, centralBytes, end]);
+}
+
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc = CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+const CRC32_TABLE = new Uint32Array(
+  Array.from({ length: 256 }, (_, index) => {
+    let value = index;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    }
+    return value >>> 0;
+  })
+);
+
+function openWebSocket(server: SlabServerTestHarness, path: string): Promise<WebSocket> {
+  return new Promise((resolveOpen, reject) => {
+    const socket = new WebSocket(webSocketUrl(server.baseUrl, path));
+    const timeout = setTimeout(() => {
+      cleanup();
+      socket.close();
+      reject(new Error(`Timed out opening websocket ${path}`));
+    }, 10_000);
+    const cleanup = () => {
+      clearTimeout(timeout);
+      socket.removeEventListener("open", onOpen);
+      socket.removeEventListener("error", onError);
+    };
+    const onOpen = () => {
+      cleanup();
+      resolveOpen(socket);
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error(`Failed to open websocket ${path}`));
+    };
+    socket.addEventListener("open", onOpen);
+    socket.addEventListener("error", onError);
+  });
+}
+
+function waitForWebSocketMessage(socket: WebSocket): Promise<string> {
+  return new Promise((resolveMessage, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("Timed out waiting for websocket message"));
+    }, 10_000);
+    const cleanup = () => {
+      clearTimeout(timeout);
+      socket.removeEventListener("message", onMessage);
+      socket.removeEventListener("error", onError);
+      socket.removeEventListener("close", onClose);
+    };
+    const onMessage = (event: MessageEvent) => {
+      cleanup();
+      resolveMessage(String(event.data));
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error("WebSocket failed while waiting for a message"));
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new Error("WebSocket closed before a message arrived"));
+    };
+    socket.addEventListener("message", onMessage);
+    socket.addEventListener("error", onError);
+    socket.addEventListener("close", onClose);
+  });
+}
+
+function webSocketUrl(baseUrl: string, path: string): string {
+  const url = new URL(path, baseUrl);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
 }

@@ -1,11 +1,15 @@
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createServer } from "node:net";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+import { cargoEnv } from "../../../../scripts/cargo/env";
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const runtimeLibDir = resolve(repoRoot, "bin/slab-app/src-tauri/resources/libs");
 const startupTimeoutMs = 120_000;
 const serverBinaryName = globalThis.process.platform === "win32" ? "slab-server.exe" : "slab-server";
@@ -99,11 +103,19 @@ export interface JsonResponse<T> {
   body: T;
 }
 
+export interface SeededModelDownloadTask {
+  modelId: string;
+  sourceKey: string;
+  taskId: string;
+}
+
 export interface SlabServerTestHarness {
   readonly baseUrl: string;
+  readonly databasePath?: string;
   request(path: string, init?: RequestInit): Promise<Response>;
   requestFormData(path: string, body: FormData, init?: Omit<RequestInit, "body">): Promise<Response>;
   requestJson<T>(path: string, init?: RequestInit): Promise<JsonResponse<T>>;
+  seedFailedModelDownloadTask(): Promise<SeededModelDownloadTask>;
   stop(): Promise<void>;
 }
 
@@ -120,6 +132,9 @@ export async function startSlabServerHarness(
         const response = await fetch(`${externalBaseUrl}${path}`, init);
         const body = (await response.json()) as T;
         return { response, body };
+      },
+      seedFailedModelDownloadTask: async () => {
+        throw new Error("Model download task seeding is only available for the local test harness.");
       },
       stop: async () => {}
     };
@@ -151,6 +166,8 @@ export async function startSlabServerHarness(
         modelConfigDir
       ]
     : [
+        "--config",
+        "build.rustc-wrapper=\"\"",
         "run",
         "--bin",
         "slab-server",
@@ -162,18 +179,21 @@ export async function startSlabServerHarness(
         "--model-config-dir",
         modelConfigDir
       ];
+  const childEnv: NodeJS.ProcessEnv = {
+    ...cargoEnv(),
+    SLAB_BIND: bindAddress,
+    SLAB_ADMIN_TOKEN: options.adminToken,
+    SLAB_LIB_DIR: runtimeLibDir,
+    SLAB_LOG: process.env.SLAB_LOG ?? "warn",
+    SLAB_ENABLE_SWAGGER: "true",
+    NO_COLOR: "1"
+  };
+  childEnv.CARGO_BUILD_RUSTC_WRAPPER = "";
+  delete childEnv.RUSTC_WRAPPER;
 
   const child = spawn(command, args, {
     cwd: repoRoot,
-    env: {
-      ...process.env,
-      SLAB_BIND: bindAddress,
-      SLAB_ADMIN_TOKEN: options.adminToken,
-      SLAB_LIB_DIR: runtimeLibDir,
-      SLAB_LOG: process.env.SLAB_LOG ?? "warn",
-      SLAB_ENABLE_SWAGGER: "true",
-      NO_COLOR: "1"
-    },
+    env: childEnv,
     stdio: "pipe"
   });
 
@@ -214,10 +234,11 @@ export async function startSlabServerHarness(
       }
 
       try {
-        const response = await fetch(`${baseUrl}/health`);
-        if (response.ok) {
+        const healthResponse = await fetch(`${baseUrl}/health`);
+        if (healthResponse.ok) {
           return {
             baseUrl,
+            databasePath,
             request: (path, init) => fetch(`${baseUrl}${path}`, init),
             requestFormData: (path, body, init) => fetch(`${baseUrl}${path}`, { ...init, body }),
             async requestJson<T>(path: string, init?: RequestInit) {
@@ -225,6 +246,7 @@ export async function startSlabServerHarness(
               const body = (await response.json()) as T;
               return { response, body };
             },
+            seedFailedModelDownloadTask: async () => seedFailedModelDownloadTask(databasePath),
             stop
           };
         }
@@ -242,4 +264,86 @@ export async function startSlabServerHarness(
     await stop();
     throw error;
   }
+}
+
+function seedFailedModelDownloadTask(databasePath: string): SeededModelDownloadTask {
+  const modelId = `smoke-download-model-${randomUUID()}`;
+  const taskId = `smoke-download-task-${randomUUID()}`;
+  const repoId = "slab/smoke-download";
+  const filename = "smoke-model.gguf";
+  const hubProvider = "hf_hub";
+  const sourceKey = `hugging_face::${repoId}::${filename}`;
+  const now = new Date().toISOString();
+  const inputData = JSON.stringify({
+    backend_id: "ggml.llama",
+    candidates: [
+      {
+        artifacts: {
+          model: filename
+        },
+        filename,
+        hub_provider: hubProvider,
+        primary_artifact_id: "model",
+        repo_id: repoId,
+        source_key: sourceKey
+      }
+    ],
+    model_id: modelId
+  });
+
+  const db = new DatabaseSync(databasePath);
+  try {
+    db.exec("PRAGMA foreign_keys = ON");
+    db.prepare(
+      `INSERT INTO models (
+        id, display_name, status, spec, runtime_presets, created_at, updated_at, kind, backend_id,
+        config_schema_version, config_policy_version, capabilities, materialized_artifacts,
+        selected_download_source
+      ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
+    ).run(
+      modelId,
+      "Smoke restart model",
+      "not_downloaded",
+      JSON.stringify({
+        filename,
+        hub_provider: hubProvider,
+        repo_id: repoId
+      }),
+      now,
+      now,
+      "local",
+      "ggml.llama",
+      2,
+      3,
+      JSON.stringify(["text_generation"]),
+      "{}"
+    );
+    db.prepare(
+      `INSERT INTO tasks (
+        id, core_task_id, model_id, task_type, status, input_data, result_data, error_msg,
+        created_at, updated_at
+      ) VALUES (?, NULL, ?, ?, ?, ?, NULL, ?, ?, ?)`
+    ).run(taskId, modelId, "model_download", "failed", inputData, "seeded failed download", now, now);
+    db.prepare(
+      `INSERT INTO model_downloads (
+        task_id, model_id, source_key, repo_id, filename, hub_provider, status, error_msg,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      taskId,
+      modelId,
+      sourceKey,
+      repoId,
+      filename,
+      hubProvider,
+      "failed",
+      "seeded failed download",
+      now,
+      now
+    );
+  } finally {
+    db.close();
+  }
+
+  return { modelId, sourceKey, taskId };
 }

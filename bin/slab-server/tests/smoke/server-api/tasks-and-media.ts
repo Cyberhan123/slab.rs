@@ -1,9 +1,18 @@
-import { resolve } from "node:path";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 import { beforeAll, describe, expect, it } from "vitest";
 
 import type { SlabServerTestHarness } from "../../support/slab-server";
-import { expectError, expectJson, jsonInit, type Schema } from "./shared";
+import {
+  expectError,
+  expectJson,
+  externalBaseUrl,
+  jsonInit,
+  waitForTask,
+  type Schema
+} from "./shared";
 
 export function registerTasksAndMediaSmoke(getServer: () => SlabServerTestHarness): void {
   describe("slab-server smoke tasks and media", () => {
@@ -95,6 +104,7 @@ export function registerTasksAndMediaSmoke(getServer: () => SlabServerTestHarnes
           { method: "POST" }
         )
       );
+
       await expectError(
         server,
         "/v1/subtitles/render",
@@ -110,5 +120,111 @@ export function registerTasksAndMediaSmoke(getServer: () => SlabServerTestHarnes
         )
       );
     });
+
+    it.skipIf(Boolean(externalBaseUrl))(
+      "restarts a seeded failed model download task through public task APIs",
+      async () => {
+        const seeded = await server.seedFailedModelDownloadTask();
+        const restarted = await expectJson<Schema["TaskResponse"]>(
+          server,
+          `/v1/tasks/${seeded.taskId}/restart`,
+          { method: "POST" }
+        );
+        expect(restarted.response.ok).toBe(true);
+        expect(restarted.body.id).toBe(seeded.taskId);
+        expect(restarted.body.task_type).toBe("model_download");
+        expect(["pending", "running", "failed"]).toContain(restarted.body.status);
+
+        const visible = await waitForTask(
+          server,
+          seeded.taskId,
+          (task) => task.task_type === "model_download" && task.id === seeded.taskId
+        );
+        expect(["pending", "running", "failed"]).toContain(visible.status);
+
+        const modelDownloadTasks = await expectJson<Schema["TaskResponse"][]>(
+          server,
+          "/v1/tasks?type=model_download"
+        );
+        expect(modelDownloadTasks.body.some((task) => task.id === seeded.taskId)).toBe(true);
+      }
+    );
+
+    it.skipIf(Boolean(externalBaseUrl))(
+      "renders subtitles and accepts an ffmpeg conversion task for temp media",
+      async () => {
+        const mediaRoot = await mkdtemp(join(tmpdir(), "slab-server-media-smoke-"));
+        try {
+          const subtitleSourcePath = join(mediaRoot, "clip.mp4");
+          await writeFile(subtitleSourcePath, "");
+          const rendered = await expectJson<Schema["RenderSubtitleResponse"]>(
+            server,
+            "/v1/subtitles/render",
+            jsonInit(
+              {
+                entries: [{ end_ms: 1500, start_ms: 0, text: "Hello world" }],
+                format: "srt",
+                overwrite: true,
+                source_path: subtitleSourcePath,
+                variant: "source"
+              } satisfies Schema["RenderSubtitleRequest"],
+              { method: "POST" }
+            )
+          );
+          expect(rendered.response.ok).toBe(true);
+          expect(rendered.body.entry_count).toBe(1);
+          expect(rendered.body.format).toBe("srt");
+          const subtitleBody = await readFile(rendered.body.output_path, "utf8");
+          expect(subtitleBody).toContain("00:00:00,000 --> 00:00:01,500");
+          expect(subtitleBody).toContain("Hello world");
+
+          const sampleRate = 8000;
+          const sampleCount = sampleRate / 10;
+          const dataSize = sampleCount * 2;
+          const wav = Buffer.alloc(44 + dataSize);
+          wav.write("RIFF", 0, "ascii");
+          wav.writeUInt32LE(36 + dataSize, 4);
+          wav.write("WAVE", 8, "ascii");
+          wav.write("fmt ", 12, "ascii");
+          wav.writeUInt32LE(16, 16);
+          wav.writeUInt16LE(1, 20);
+          wav.writeUInt16LE(1, 22);
+          wav.writeUInt32LE(sampleRate, 24);
+          wav.writeUInt32LE(sampleRate * 2, 28);
+          wav.writeUInt16LE(2, 32);
+          wav.writeUInt16LE(16, 34);
+          wav.write("data", 36, "ascii");
+          wav.writeUInt32LE(dataSize, 40);
+
+          const wavPath = join(mediaRoot, "input.wav");
+          await writeFile(wavPath, wav);
+          const converted = await expectJson<Schema["OperationAcceptedResponse"]>(
+            server,
+            "/v1/ffmpeg/convert",
+            jsonInit(
+              {
+                output_format: "wav",
+                output_path: join(mediaRoot, "converted.wav"),
+                source_path: wavPath
+              } satisfies Schema["ConvertRequest"],
+              { method: "POST" }
+            )
+          );
+          expect(converted.response.status).toBe(202);
+          expect(converted.body.operation_id).toBeTypeOf("string");
+
+          const convertedTask = await waitForTask(
+            server,
+            converted.body.operation_id,
+            (task) => task.status === "succeeded" || task.status === "failed",
+            30_000
+          );
+          expect(convertedTask.task_type).toBe("ffmpeg");
+          expect(["succeeded", "failed"]).toContain(convertedTask.status);
+        } finally {
+          await rm(mediaRoot, { force: true, recursive: true });
+        }
+      }
+    );
   });
 }
