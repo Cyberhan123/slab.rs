@@ -57,17 +57,26 @@ async fn runtime_endpoint_ready(
         }
         slab_config::RuntimeTransportMode::Ipc => {
             let target = normalize_ipc_probe_target(&child_spec.grpc_bind_address)?;
-            match tokio::time::timeout(
-                RUNTIME_CHILD_READY_CONNECT_TIMEOUT,
-                parity_tokio_ipc::Endpoint::connect(target),
-            )
-            .await
+
+            #[cfg(unix)]
             {
-                Ok(Ok(stream)) => {
-                    drop(stream);
-                    Ok(true)
+                runtime_ipc_endpoint_ready_unix(&target).await
+            }
+
+            #[cfg(not(unix))]
+            {
+                match tokio::time::timeout(
+                    RUNTIME_CHILD_READY_CONNECT_TIMEOUT,
+                    parity_tokio_ipc::Endpoint::connect(target),
+                )
+                .await
+                {
+                    Ok(Ok(stream)) => {
+                        drop(stream);
+                        Ok(true)
+                    }
+                    Ok(Err(_)) | Err(_) => Ok(false),
                 }
-                Ok(Err(_)) | Err(_) => Ok(false),
             }
         }
     }
@@ -91,6 +100,19 @@ fn invalid_runtime_bind_address(
     AppCoreError::Internal(format!(
         "runtime child {transport} bind address '{bind_address}' is invalid: {error}"
     ))
+}
+
+#[cfg(unix)]
+async fn runtime_ipc_endpoint_ready_unix(path: &str) -> Result<bool, AppCoreError> {
+    use std::os::unix::fs::FileTypeExt;
+
+    match tokio::fs::metadata(path).await {
+        Ok(metadata) => Ok(metadata.file_type().is_socket()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => {
+            Err(AppCoreError::Internal(format!("failed to inspect IPC endpoint '{path}': {error}")))
+        }
+    }
 }
 
 async fn terminate_failed_start_child(child_spec: &ResolvedRuntimeChildSpec, child: &mut Child) {
@@ -336,6 +358,31 @@ mod tests {
         let spec = test_child_spec(listener.local_addr().unwrap().to_string());
 
         assert!(runtime_endpoint_ready(&spec).await.unwrap());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn runtime_endpoint_ready_reports_listening_ipc_socket_without_connecting() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket_path = dir.path().join("runtime.sock");
+        let _incoming = parity_tokio_ipc::Endpoint::new(socket_path.to_string_lossy().into_owned())
+            .incoming()
+            .unwrap();
+        let mut spec = test_child_spec(format!("ipc://{}", socket_path.display()));
+        spec.transport = RuntimeTransportMode::Ipc;
+
+        assert!(runtime_endpoint_ready(&spec).await.unwrap());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn runtime_endpoint_ready_reports_missing_ipc_socket_not_ready() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket_path = dir.path().join("missing.sock");
+        let mut spec = test_child_spec(format!("ipc://{}", socket_path.display()));
+        spec.transport = RuntimeTransportMode::Ipc;
+
+        assert!(!runtime_endpoint_ready(&spec).await.unwrap());
     }
 
     #[tokio::test]

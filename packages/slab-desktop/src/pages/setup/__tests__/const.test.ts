@@ -16,6 +16,18 @@ function createTask(progress?: Partial<TaskProgress>): TaskRecord {
   } as TaskRecord;
 }
 
+function translate(key: string, options?: Record<string, unknown>) {
+  if (key === 'pages.setup.hints.step') {
+    return `translated step ${options?.step}/${options?.count}`;
+  }
+
+  if (key === 'pages.setup.summary.percentComplete') {
+    return `translated ${options?.percentage}%`;
+  }
+
+  return `translated ${key}`;
+}
+
 describe('setup progress helpers', () => {
   it('normalizes valid progress payloads and preserves typed values', () => {
     expect(
@@ -111,6 +123,35 @@ describe('setup progress helpers', () => {
         }),
       ),
     ).toBe('Step 2 of 5');
+  });
+
+  it('translates fallback labels, hints, and summaries when a translator is provided', () => {
+    expect(getProvisionStageLabel('starting', null, true, translate)).toBe(
+      'translated pages.setup.stages.checkingPrerequisites',
+    );
+    expect(
+      getProvisionStageHint(
+        'running',
+        createTask({
+          current: 0,
+          step: 2,
+          step_count: 5,
+        }),
+        false,
+        translate,
+      ),
+    ).toBe('translated step 2/5');
+    expect(
+      getProvisionProgressSummary(
+        'running',
+        createTask({
+          current: 25,
+          total: 50,
+        }),
+        false,
+        translate,
+      ),
+    ).toBe('translated 50%');
   });
 
   it('calculates stepped progress and caps unfinished work below 100%', () => {

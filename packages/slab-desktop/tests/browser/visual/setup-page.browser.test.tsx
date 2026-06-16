@@ -6,8 +6,24 @@ import type { SetupViewModel } from '@/pages/setup/hooks/use-setup';
 
 import { renderDesktopScene } from '../test-utils';
 
-const { mockUseSetup } = vi.hoisted(() => ({
+const {
+  mockUseDesktopPlatform,
+  mockUseIsTauri,
+  mockUseSetup,
+} = vi.hoisted(() => ({
+  mockUseDesktopPlatform: vi.fn<() => 'macos' | 'windows' | 'linux' | 'unknown'>(),
+  mockUseIsTauri: vi.fn<() => boolean>(),
   mockUseSetup: vi.fn<() => SetupViewModel>(),
+}));
+
+vi.mock('@/hooks/use-desktop-platform', () => ({
+  default: mockUseDesktopPlatform,
+  getDesktopPlatform: mockUseDesktopPlatform,
+}));
+
+vi.mock('@/hooks/use-tauri', () => ({
+  default: mockUseIsTauri,
+  isTauri: mockUseIsTauri,
 }));
 
 vi.mock('@/pages/setup/hooks/use-setup', () => ({
@@ -37,6 +53,7 @@ function createViewModel(overrides: Partial<SetupViewModel> = {}): SetupViewMode
         },
       ],
     },
+    runtimePayloadMode: 'packaged',
     isChecking: false,
     checkError: null,
     provisionState: 'running',
@@ -53,6 +70,8 @@ function createViewModel(overrides: Partial<SetupViewModel> = {}): SetupViewMode
 
 describe('SetupPage browser visual regression', () => {
   beforeEach(() => {
+    mockUseDesktopPlatform.mockReturnValue('unknown');
+    mockUseIsTauri.mockReturnValue(false);
     mockUseSetup.mockReset();
   });
 
@@ -95,5 +114,45 @@ describe('SetupPage browser visual regression', () => {
 
     await retryButton.click();
     expect(handleRetry).toHaveBeenCalledOnce();
+  });
+
+  it('renders macOS traffic-light controls at the top of the setup sidebar', async () => {
+    mockUseDesktopPlatform.mockReturnValue('macos');
+    mockUseIsTauri.mockReturnValue(true);
+    mockUseSetup.mockReturnValue(
+      createViewModel({
+        runtimePayloadMode: 'bundled',
+      }),
+    );
+
+    await renderDesktopScene(<SetupPage />);
+
+    await expect.element(page.getByTestId('setup-sidebar')).toBeVisible();
+    await expect.element(
+      page.getByRole('toolbar', { name: 'Window controls' }),
+    ).toBeVisible();
+    await expect.element(page.getByRole('button', { name: 'Close window' })).toBeVisible();
+    await expect.element(page.getByRole('button', { name: 'Minimize window' })).toBeVisible();
+    await expect.element(page.getByRole('button', { name: 'Maximize window' })).toBeVisible();
+    const setupSidebar = document.querySelector('[data-testid="setup-sidebar"]');
+    expect(setupSidebar?.firstElementChild?.getAttribute('role')).toBe('toolbar');
+    expect(document.querySelector('header [role="toolbar"]')).toBeNull();
+  });
+
+  it('keeps Windows window controls in the setup header', async () => {
+    mockUseDesktopPlatform.mockReturnValue('windows');
+    mockUseIsTauri.mockReturnValue(true);
+    mockUseSetup.mockReturnValue(createViewModel());
+
+    await renderDesktopScene(<SetupPage />);
+
+    await expect.element(
+      page.getByRole('toolbar', { name: 'Window controls' }),
+    ).toBeVisible();
+    await expect.element(page.getByRole('button', { name: 'Minimize window' })).toBeVisible();
+    await expect.element(page.getByRole('button', { name: 'Maximize window' })).toBeVisible();
+    await expect.element(page.getByRole('button', { name: 'Close window' })).toBeVisible();
+    expect(document.querySelector('[data-testid="setup-sidebar"]')).toBeNull();
+    expect(document.querySelector('header [role="toolbar"]')).not.toBeNull();
   });
 });

@@ -38,6 +38,8 @@ const RUNTIME_READY_TIMEOUT: Duration = Duration::from_secs(60);
 const RUNTIME_READY_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const PROVISION_STEP_COUNT: u32 = 6;
 const DOWNLOAD_PROGRESS_DELTA_BYTES: u64 = 1024 * 1024 * 4;
+const MACOS_BUNDLED_RUNTIME_LIBRARIES: &[&str] =
+    &["libllama.dylib", "libwhisper.dylib", "libstable-diffusion.dylib", "libggml-base.dylib"];
 const EMBEDDED_PAYLOAD_MANIFEST_JSON: &str =
     include_str!(concat!(env!("OUT_DIR"), "/payload-manifest.json"));
 
@@ -50,6 +52,12 @@ enum ProvisionStep {
     InstallPayload = 4,
     EnsureFfmpeg = 5,
     RestartRuntime = 6,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SetupPayloadMode {
+    PackagedCab,
+    MacosBundledRuntime,
 }
 
 #[derive(Serialize)]
@@ -91,13 +99,21 @@ impl SetupService {
 
     pub async fn environment_status(&self) -> Result<EnvironmentStatus, AppCoreError> {
         self.model_state.auto_unload().sync_runtime_restart_states().await;
-        let initialized = self.load_setup_initialized().await?;
+        let stored_initialized = self.load_setup_initialized().await?;
         let runtime_payload_installed = self.runtime_payload_installed();
         let configured_dir = self.model_state.pmid().config().setup.ffmpeg.dir;
         let ffmpeg_probe =
             tokio::task::spawn_blocking(move || probe_ffmpeg_runtime(configured_dir.as_deref()))
                 .await
                 .unwrap_or_else(|_| probe_ffmpeg_runtime(None));
+        let initialized = effective_setup_initialized(
+            stored_initialized,
+            runtime_payload_installed,
+            ffmpeg_probe.installed,
+        );
+        if initialized && !stored_initialized {
+            self.persist_setup_initialized(true).await?;
+        }
 
         let backends: Vec<ComponentStatus> = RuntimeBackendId::ALL
             .into_iter()
@@ -171,15 +187,21 @@ impl SetupService {
     }
 
     async fn provision_inner(&self, operation: &OperationContext) -> Result<String, AppCoreError> {
-        let variant = tokio::task::spawn_blocking(detect_best_variant)
-            .await
-            .map_err(|error| {
-                AppCoreError::Internal(format!("failed to join GPU detection task: {error}"))
-            })?
-            .map_err(AppCoreError::from)?;
+        let payload_mode = setup_payload_mode(std::env::consts::OS);
+        let variant = match payload_mode {
+            SetupPayloadMode::PackagedCab => tokio::task::spawn_blocking(detect_best_variant)
+                .await
+                .map_err(|error| {
+                    AppCoreError::Internal(format!("failed to join GPU detection task: {error}"))
+                })?
+                .map_err(AppCoreError::from)?,
+            SetupPayloadMode::MacosBundledRuntime => RuntimeVariant::Base,
+        };
         let version = env!("CARGO_PKG_VERSION").to_owned();
         let target_dir = self.runtime_lib_dir()?;
         let runtime_payload_installed = self.runtime_payload_installed();
+        let runtime_restart_required =
+            setup_runtime_restart_required(payload_mode, runtime_payload_installed);
 
         publish_stage_progress(
             operation,
@@ -202,72 +224,91 @@ impl SetupService {
                 )
                 .await?;
             } else {
-                let manifest = embedded_payload_manifest()?;
-                ensure_packaged_payload_manifest_available(&manifest)?;
-                let selected_variants = selected_packages(variant);
-                let selected_manifest =
-                    manifest.selected_for(&selected_variants).map_err(AppCoreError::from)?;
-                let download_cache_dir = self.payload_cache_dir(&version);
-                let expand_root = std::env::temp_dir()
-                    .join("Slab")
-                    .join("setup")
-                    .join(format!("payload-{}", Uuid::new_v4()));
+                match payload_mode {
+                    SetupPayloadMode::MacosBundledRuntime => {
+                        ensure_runtime_payload_source_available(payload_mode, &target_dir, None)?;
+                    }
+                    SetupPayloadMode::PackagedCab => {
+                        let manifest = embedded_payload_manifest()?;
+                        ensure_runtime_payload_source_available(
+                            payload_mode,
+                            &target_dir,
+                            Some(&manifest),
+                        )?;
+                        let selected_variants = selected_packages(variant);
+                        let selected_manifest = manifest
+                            .selected_for(&selected_variants)
+                            .map_err(AppCoreError::from)?;
+                        let download_cache_dir = self.payload_cache_dir(&version);
+                        let expand_root = std::env::temp_dir()
+                            .join("Slab")
+                            .join("setup")
+                            .join(format!("payload-{}", Uuid::new_v4()));
 
-                tokio::fs::create_dir_all(&download_cache_dir).await.map_err(|error| {
-                    AppCoreError::Internal(format!(
-                        "failed to create payload cache directory '{}': {error}",
-                        download_cache_dir.display()
-                    ))
-                })?;
-                tokio::fs::create_dir_all(&expand_root).await.map_err(|error| {
-                    AppCoreError::Internal(format!(
-                        "failed to create payload staging directory '{}': {error}",
-                        expand_root.display()
-                    ))
-                })?;
+                        tokio::fs::create_dir_all(&download_cache_dir).await.map_err(|error| {
+                            AppCoreError::Internal(format!(
+                                "failed to create payload cache directory '{}': {error}",
+                                download_cache_dir.display()
+                            ))
+                        })?;
+                        tokio::fs::create_dir_all(&expand_root).await.map_err(|error| {
+                            AppCoreError::Internal(format!(
+                                "failed to create payload staging directory '{}': {error}",
+                                expand_root.display()
+                            ))
+                        })?;
 
-                let install_result = async {
-                    self.download_required_cabs(
-                        operation,
-                        &version,
-                        &selected_variants,
-                        &download_cache_dir,
-                    )
-                    .await?;
+                        let install_result = async {
+                            self.download_required_cabs(
+                                operation,
+                                &version,
+                                &selected_variants,
+                                &download_cache_dir,
+                            )
+                            .await?;
 
-                    publish_progress(
-                        operation,
-                        "Expanding runtime payload",
-                        0,
-                        Some(100),
-                        ProvisionStep::ExpandPayload.index(),
-                        PROVISION_STEP_COUNT,
-                        Some(label_i18n(ServerI18nKey::TaskSetupExpandingRuntimePayload)),
-                    )
-                    .await?;
-                    self.expand_selected_cabs(
-                        &selected_variants,
-                        &download_cache_dir,
-                        &expand_root,
-                    )
-                    .await?;
+                            publish_progress(
+                                operation,
+                                "Expanding runtime payload",
+                                0,
+                                Some(100),
+                                ProvisionStep::ExpandPayload.index(),
+                                PROVISION_STEP_COUNT,
+                                Some(label_i18n(ServerI18nKey::TaskSetupExpandingRuntimePayload)),
+                            )
+                            .await?;
+                            self.expand_selected_cabs(
+                                &selected_variants,
+                                &download_cache_dir,
+                                &expand_root,
+                            )
+                            .await?;
 
-                    publish_progress(
-                        operation,
-                        "Installing runtime libraries",
-                        0,
-                        Some(100),
-                        ProvisionStep::InstallPayload.index(),
-                        PROVISION_STEP_COUNT,
-                        Some(label_i18n(ServerI18nKey::TaskSetupInstallingRuntimeLibraries)),
-                    )
-                    .await?;
-                    self.apply_selected_payload(&expand_root, &target_dir, &selected_manifest).await
+                            publish_progress(
+                                operation,
+                                "Installing runtime libraries",
+                                0,
+                                Some(100),
+                                ProvisionStep::InstallPayload.index(),
+                                PROVISION_STEP_COUNT,
+                                Some(label_i18n(
+                                    ServerI18nKey::TaskSetupInstallingRuntimeLibraries,
+                                )),
+                            )
+                            .await?;
+                            self.apply_selected_payload(
+                                &expand_root,
+                                &target_dir,
+                                &selected_manifest,
+                            )
+                            .await
+                        }
+                        .await;
+
+                        let _ = remove_dir_if_exists(&expand_root);
+                        install_result?;
+                    }
                 }
-                .await;
-
-                let _ = remove_dir_if_exists(&expand_root);
-                install_result?;
             }
 
             publish_progress(
@@ -292,9 +333,11 @@ impl SetupService {
                 Some(label_i18n(ServerI18nKey::TaskSetupRestartingRuntimeWorkers)),
             )
             .await?;
-            let restarted_backends = self.restart_runtime_backends().await?;
-            self.wait_for_backends_ready(&restarted_backends).await?;
-            self.reconnect_runtime_gateway().await?;
+            if runtime_restart_required {
+                let restarted_backends = self.restart_runtime_backends().await?;
+                self.wait_for_backends_ready(&restarted_backends).await?;
+                self.reconnect_runtime_gateway().await?;
+            }
 
             self.persist_setup_initialized(true).await?;
             Ok::<PathBuf, AppCoreError>(ffmpeg_path)
@@ -309,7 +352,7 @@ impl SetupService {
                 runtime_host
                     .managed_backends()
                     .into_iter()
-                    .filter(|backend| backend.is_runtime_worker_backend())
+                    .filter(|backend| is_setup_runtime_worker_backend(*backend))
                     .map(|backend| backend.canonical_id().to_owned())
                     .collect::<Vec<_>>()
             })
@@ -448,7 +491,7 @@ impl SetupService {
         let managed_ggml_backends: Vec<_> = runtime_host
             .managed_backends()
             .into_iter()
-            .filter(|backend| backend.is_runtime_worker_backend())
+            .filter(|backend| is_setup_runtime_worker_backend(*backend))
             .collect();
         runtime_host.restart_or_start_backends(&managed_ggml_backends).await
     }
@@ -506,7 +549,7 @@ impl SetupService {
     async fn reconnect_runtime_gateway(&self) -> Result<(), AppCoreError> {
         self.model_state
             .grpc()
-            .refresh_from_config(self.model_state.config().as_ref())
+            .refresh_from_config_best_effort(self.model_state.config().as_ref())
             .await
             .map_err(AppCoreError::from)
     }
@@ -562,6 +605,11 @@ impl SetupService {
         let Some(lib_dir) = self.model_state.config().lib_dir.as_ref() else {
             return false;
         };
+
+        if setup_payload_mode(std::env::consts::OS) == SetupPayloadMode::MacosBundledRuntime {
+            return macos_bundled_runtime_payload_installed(lib_dir);
+        }
+
         let Ok(manifest) = embedded_payload_manifest() else {
             return false;
         };
@@ -577,6 +625,33 @@ impl SetupService {
 
         selected_payload_files_exist(lib_dir, &selected_manifest)
     }
+}
+
+fn setup_payload_mode(target_os: &str) -> SetupPayloadMode {
+    match target_os {
+        "macos" => SetupPayloadMode::MacosBundledRuntime,
+        "windows" => SetupPayloadMode::PackagedCab,
+        _ => SetupPayloadMode::PackagedCab,
+    }
+}
+
+fn effective_setup_initialized(
+    stored_initialized: bool,
+    runtime_payload_installed: bool,
+    ffmpeg_installed: bool,
+) -> bool {
+    stored_initialized || (runtime_payload_installed && ffmpeg_installed)
+}
+
+fn setup_runtime_restart_required(
+    payload_mode: SetupPayloadMode,
+    runtime_payload_was_installed: bool,
+) -> bool {
+    payload_mode == SetupPayloadMode::PackagedCab && !runtime_payload_was_installed
+}
+
+fn is_setup_runtime_worker_backend(backend: RuntimeBackendId) -> bool {
+    matches!(backend, RuntimeBackendId::GgmlLlama | RuntimeBackendId::GgmlWhisper)
 }
 
 fn embedded_payload_manifest() -> Result<PackagedPayloadManifest, AppCoreError> {
@@ -605,6 +680,35 @@ fn ensure_packaged_payload_manifest_available(
     Ok(())
 }
 
+fn ensure_runtime_payload_source_available(
+    payload_mode: SetupPayloadMode,
+    target_dir: &Path,
+    manifest: Option<&PackagedPayloadManifest>,
+) -> Result<(), AppCoreError> {
+    match payload_mode {
+        SetupPayloadMode::PackagedCab => {
+            let Some(manifest) = manifest else {
+                return Err(AppCoreError::Internal(
+                    "packaged CAB setup requires an embedded payload manifest".to_owned(),
+                ));
+            };
+            ensure_packaged_payload_manifest_available(manifest)
+        }
+        SetupPayloadMode::MacosBundledRuntime => {
+            let missing = missing_macos_bundled_runtime_libraries(target_dir);
+            if missing.is_empty() {
+                return Ok(());
+            }
+
+            Err(AppCoreError::Internal(format!(
+                "macOS setup expected bundled runtime libraries under '{}', but these required dylibs are missing: {}",
+                target_dir.display(),
+                missing.join(", ")
+            )))
+        }
+    }
+}
+
 fn selected_payload_files_exist(dest_root: &Path, manifest: &SelectedPayloadManifest) -> bool {
     !manifest.files.is_empty()
         && manifest.files.iter().all(|file| payload_file_matches(dest_root, file))
@@ -615,6 +719,18 @@ fn payload_file_matches(dest_root: &Path, file: &SelectedPayloadFile) -> bool {
     std::fs::metadata(path)
         .map(|metadata| metadata.is_file() && metadata.len() == file.size)
         .unwrap_or(false)
+}
+
+fn macos_bundled_runtime_payload_installed(lib_dir: &Path) -> bool {
+    missing_macos_bundled_runtime_libraries(lib_dir).is_empty()
+}
+
+fn missing_macos_bundled_runtime_libraries(lib_dir: &Path) -> Vec<String> {
+    MACOS_BUNDLED_RUNTIME_LIBRARIES
+        .iter()
+        .filter(|library| !lib_dir.join(library).is_file())
+        .map(|library| (*library).to_owned())
+        .collect()
 }
 
 async fn publish_progress(
@@ -788,7 +904,7 @@ fn label_i18n_with_file(key: ServerI18nKey, file_name: &str) -> I18nPayload {
     I18nPayload::with_field_params(
         "label",
         key,
-        BTreeMap::from([("fileName".to_owned(), Value::String(file_name.to_owned()))]),
+        BTreeMap::from([("file_name".to_owned(), Value::String(file_name.to_owned()))]),
     )
 }
 
@@ -805,17 +921,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn setup_provisioning_rejects_empty_embedded_manifest() {
-        let error =
-            ensure_packaged_payload_manifest_available(&PackagedPayloadManifest::empty("0.1.0"))
-                .expect_err("empty payload manifests should not allow setup provisioning");
+    fn setup_payload_mode_uses_macos_bundled_runtime_only_on_macos() {
+        assert_eq!(setup_payload_mode("macos"), SetupPayloadMode::MacosBundledRuntime);
+        assert_eq!(setup_payload_mode("windows"), SetupPayloadMode::PackagedCab);
+        assert_eq!(setup_payload_mode("linux"), SetupPayloadMode::PackagedCab);
+    }
+
+    #[test]
+    fn windows_packaged_payload_source_rejects_empty_embedded_manifest() {
+        let manifest = PackagedPayloadManifest::empty("0.1.0");
+        let error = ensure_runtime_payload_source_available(
+            SetupPayloadMode::PackagedCab,
+            Path::new("unused"),
+            Some(&manifest),
+        )
+        .expect_err("empty payload manifests should not allow Windows setup provisioning");
 
         assert!(matches!(error, AppCoreError::NotImplemented(_)));
         assert!(error.to_string().contains("setup provisioning"));
     }
 
     #[test]
-    fn setup_provisioning_accepts_non_empty_manifest() {
+    fn windows_packaged_payload_source_accepts_non_empty_manifest() {
         let mut manifest = PackagedPayloadManifest::empty("0.1.0");
         manifest.packages.push(slab_utils::cab::PackagedPayloadPackage {
             variant: RuntimeVariant::Base,
@@ -823,7 +950,78 @@ mod tests {
             files: Vec::new(),
         });
 
-        assert!(ensure_packaged_payload_manifest_available(&manifest).is_ok());
+        assert!(
+            ensure_runtime_payload_source_available(
+                SetupPayloadMode::PackagedCab,
+                Path::new("unused"),
+                Some(&manifest),
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn macos_bundled_payload_source_ignores_empty_packaged_manifest() {
+        let dir = std::env::temp_dir().join(format!("slab-setup-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).expect("create temp setup dir");
+
+        for library in MACOS_BUNDLED_RUNTIME_LIBRARIES {
+            fs::write(dir.join(library), b"payload").expect("write macOS runtime library");
+        }
+
+        let manifest = PackagedPayloadManifest::empty("0.1.0");
+        assert!(
+            ensure_runtime_payload_source_available(
+                SetupPayloadMode::MacosBundledRuntime,
+                &dir,
+                Some(&manifest),
+            )
+            .is_ok()
+        );
+
+        fs::remove_dir_all(&dir).expect("cleanup temp setup dir");
+    }
+
+    #[test]
+    fn macos_bundled_runtime_payload_requires_expected_dylibs() {
+        let dir = std::env::temp_dir().join(format!("slab-setup-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).expect("create temp setup dir");
+
+        assert!(!macos_bundled_runtime_payload_installed(&dir));
+        let expected_missing =
+            MACOS_BUNDLED_RUNTIME_LIBRARIES.iter().copied().map(str::to_owned).collect::<Vec<_>>();
+        assert_eq!(missing_macos_bundled_runtime_libraries(&dir), expected_missing);
+
+        for library in MACOS_BUNDLED_RUNTIME_LIBRARIES {
+            fs::write(dir.join(library), b"payload").expect("write macOS runtime library");
+        }
+
+        assert!(macos_bundled_runtime_payload_installed(&dir));
+
+        fs::remove_dir_all(&dir).expect("cleanup temp setup dir");
+    }
+
+    #[test]
+    fn setup_status_is_initialized_when_prerequisites_are_already_available() {
+        assert!(effective_setup_initialized(false, true, true));
+        assert!(effective_setup_initialized(true, false, false));
+        assert!(!effective_setup_initialized(false, true, false));
+        assert!(!effective_setup_initialized(false, false, true));
+    }
+
+    #[test]
+    fn setup_runtime_restart_is_needed_only_after_packaged_payload_install() {
+        assert!(setup_runtime_restart_required(SetupPayloadMode::PackagedCab, false));
+        assert!(!setup_runtime_restart_required(SetupPayloadMode::PackagedCab, true));
+        assert!(!setup_runtime_restart_required(SetupPayloadMode::MacosBundledRuntime, false));
+        assert!(!setup_runtime_restart_required(SetupPayloadMode::MacosBundledRuntime, true));
+    }
+
+    #[test]
+    fn setup_runtime_restart_excludes_diffusion_worker() {
+        assert!(is_setup_runtime_worker_backend(RuntimeBackendId::GgmlLlama));
+        assert!(is_setup_runtime_worker_backend(RuntimeBackendId::GgmlWhisper));
+        assert!(!is_setup_runtime_worker_backend(RuntimeBackendId::GgmlDiffusion));
     }
 
     #[test]

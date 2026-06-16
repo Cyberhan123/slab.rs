@@ -59,7 +59,9 @@ function HeaderSelect({ control }: { control: HeaderSelectControl }) {
   )
 }
 
-export default function Header({ variant = "default" }: HeaderProps) {
+export default function Header({
+  variant = "default",
+}: HeaderProps) {
   const { t } = useTranslation()
   const {
     meta: { title, subtitle },

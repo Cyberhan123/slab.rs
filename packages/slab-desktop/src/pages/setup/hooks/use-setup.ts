@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 
 import api, { getErrorMessage } from '@slab/api';
 import { translateServerField, useTranslation } from '@slab/i18n';
+import useDesktopPlatform from '@/hooks/use-desktop-platform';
 import { queryClient } from '@/lib/query-client';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
@@ -15,12 +16,14 @@ import {
   getProvisionStageHint,
   getProvisionStageLabel,
   type ProvisionState,
+  type RuntimePayloadMode,
   type SetupStatus,
   type TaskRecord,
 } from '../const';
 
 export interface SetupViewModel {
   setupStatus: SetupStatus | null;
+  runtimePayloadMode: RuntimePayloadMode;
   isChecking: boolean;
   checkError: string | null;
   provisionState: ProvisionState;
@@ -36,11 +39,17 @@ export interface SetupViewModel {
 export function useSetup(): SetupViewModel {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const platform = useDesktopPlatform();
+  const runtimePayloadMode: RuntimePayloadMode = platform === 'macos' ? 'bundled' : 'packaged';
   const autoStartedRef = useRef(false);
   const setupMountedRef = useRef(true);
   const provisionTaskIdRef = useRef<string | null>(null);
 
-  usePageHeader(PAGE_HEADER_META.setup);
+  usePageHeader({
+    ...PAGE_HEADER_META.setup,
+    title: t('pages.setup.header.title'),
+    subtitle: t('pages.setup.header.subtitle'),
+  });
 
   const [provisionState, setProvisionState] = useState<ProvisionState>('idle');
   const [provisionTaskId, setProvisionTaskId] = useState<string | null>(null);
@@ -64,6 +73,8 @@ export function useSetup(): SetupViewModel {
   const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
 
   const status: SetupStatus | null = setupStatus ?? null;
+  const runtimePayloadUsesBundledResources =
+    runtimePayloadMode === 'bundled' || (status?.runtime_payload_installed ?? false);
 
   useEffect(() => {
     setupMountedRef.current = true;
@@ -152,7 +163,7 @@ export function useSetup(): SetupViewModel {
       setProvisionTaskId(null);
       setProvisionError(
         translateServerField(task.i18n, 'error_msg', task.error_msg, t) ||
-          'Setup failed before provisioning could finish.',
+          t('pages.setup.errors.failedBeforeFinish'),
       );
     },
     [markSetupInitialized, navigate, refetchSetupStatus, t],
@@ -227,6 +238,7 @@ export function useSetup(): SetupViewModel {
 
   return {
     setupStatus: status,
+    runtimePayloadMode,
     isChecking: isCheckingSetupStatus,
     checkError: setupStatusError ? getErrorMessage(setupStatusError) : null,
     provisionState,
@@ -234,20 +246,21 @@ export function useSetup(): SetupViewModel {
     stageLabel: getProvisionStageLabel(
       provisionState,
       provisionTask,
-      status?.runtime_payload_installed ?? false,
+      runtimePayloadUsesBundledResources,
       t,
     ),
     stageHint: getProvisionStageHint(
       provisionState,
       provisionTask,
-      status?.runtime_payload_installed ?? false,
+      runtimePayloadUsesBundledResources,
       t,
     ),
     progressPercent: getProvisionProgressValue(provisionState, provisionTask),
     progressSummary: getProvisionProgressSummary(
       provisionState,
       provisionTask,
-      status?.runtime_payload_installed ?? false,
+      runtimePayloadUsesBundledResources,
+      t,
     ),
     canRetry: provisionState === 'failed',
     handleRetry,

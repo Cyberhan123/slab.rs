@@ -252,7 +252,6 @@ fn resolve_managed_launch_spec(
             transport,
             host_paths,
             backend,
-            alias,
             slot,
             pid,
             single_backend,
@@ -445,7 +444,6 @@ fn resolve_managed_backend_endpoint(
     transport: RuntimeTransportMode,
     host_paths: &LaunchHostPaths,
     backend: RuntimeBackendId,
-    backend_alias: &str,
     slot: u32,
     pid: u32,
     single_backend: bool,
@@ -463,7 +461,7 @@ fn resolve_managed_backend_endpoint(
         }
     }
 
-    default_generated_backend_endpoint(profile, transport, host_paths, backend_alias, slot, pid)
+    default_generated_backend_endpoint(profile, transport, host_paths, slot, pid)
 }
 
 fn resolve_external_backend_endpoint(
@@ -501,7 +499,7 @@ fn resolve_managed_candle_endpoint(
         return normalize_runtime_endpoint(explicit, transport);
     }
 
-    default_generated_backend_endpoint(profile, transport, host_paths, "candle", slot, pid)
+    default_generated_backend_endpoint(profile, transport, host_paths, slot, pid)
 }
 
 fn resolve_external_candle_endpoint(
@@ -741,7 +739,6 @@ fn default_generated_backend_endpoint(
     profile: LaunchProfile,
     transport: RuntimeTransportMode,
     host_paths: &LaunchHostPaths,
-    backend_alias: &str,
     slot: u32,
     pid: u32,
 ) -> Result<String, ConfigError> {
@@ -770,22 +767,14 @@ fn default_generated_backend_endpoint(
             #[cfg(windows)]
             {
                 let _ = host_paths;
-                Ok(format!(
-                    r"ipc://\\.\pipe\slab-runtime-{}-{}-{}",
-                    pid,
-                    profile.as_str(),
-                    backend_alias
-                ))
+                Ok(format!(r"ipc://\\.\pipe\slab-runtime-{pid}-{slot}"))
             }
 
             #[cfg(not(windows))]
             {
-                let path = host_paths.runtime_ipc_dir_fallback.join(format!(
-                    "slab-runtime-{}-{}-{}.sock",
-                    pid,
-                    profile.as_str(),
-                    backend_alias
-                ));
+                let path = host_paths
+                    .runtime_ipc_dir_fallback
+                    .join(format!("slab-runtime-{pid}-{slot}.sock"));
                 Ok(format!("ipc://{}", path.to_string_lossy()))
             }
         }
@@ -936,6 +925,30 @@ mod tests {
             spec.gateway.as_ref().map(|gateway| gateway.bind_address.as_str()),
             Some("127.0.0.1:3000")
         );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn managed_ipc_planner_keeps_default_socket_paths_below_macos_limit() {
+        let mut settings = SettingsDocument::default();
+        settings.runtime.transport = RuntimeTransportMode::Ipc;
+        let mut host_paths = host_paths();
+        host_paths.runtime_ipc_dir_fallback =
+            PathBuf::from("/Users/cyberhan/Library/Application Support/cn.cyberhan.slab/ipc");
+
+        let spec = resolve_launch_spec(&settings, LaunchProfile::Server, &host_paths).unwrap();
+
+        assert_eq!(spec.children.len(), 3);
+        for child in &spec.children {
+            let path =
+                child.grpc_bind_address.strip_prefix("ipc://").expect("managed IPC endpoint");
+            assert!(
+                path.len() < 104,
+                "macOS IPC socket path is too long for {}: {path}",
+                child.backend.canonical_id()
+            );
+            assert!(!path.contains(child.backend.short_name()));
+        }
     }
 
     #[test]

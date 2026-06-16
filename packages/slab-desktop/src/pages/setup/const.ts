@@ -17,6 +17,7 @@ export type TaskRecord = components['schemas']['TaskResponse'];
 export type TaskProgress = components['schemas']['TaskProgressResponse'];
 export { normalizeTaskProgress, type NormalizedTaskProgress };
 type Translate = (key: string, options?: Record<string, unknown>) => string;
+export type RuntimePayloadMode = 'bundled' | 'packaged';
 
 export type ProvisionState =
   | 'idle'
@@ -38,15 +39,21 @@ export function getProvisionStageLabel(
 
   switch (state) {
     case 'failed':
-      return 'Setup failed';
+      return translate(t, 'pages.setup.stages.failed', 'Setup failed');
     case 'succeeded':
-      return 'Setup finished';
+      return translate(t, 'pages.setup.stages.finished', 'Setup finished');
     case 'starting':
-      return runtimePayloadInstalled ? 'Checking desktop prerequisites' : 'Starting setup';
+      return runtimePayloadInstalled
+        ? translate(t, 'pages.setup.stages.checkingPrerequisites', 'Checking desktop prerequisites')
+        : translate(t, 'pages.setup.stages.starting', 'Starting setup');
     case 'running':
-      return runtimePayloadInstalled ? 'Verifying installed runtime' : 'Preparing Slab runtime';
+      return runtimePayloadInstalled
+        ? translate(t, 'pages.setup.stages.verifyingInstalledRuntime', 'Verifying installed runtime')
+        : translate(t, 'pages.setup.stages.preparingRuntime', 'Preparing Slab runtime');
     default:
-      return runtimePayloadInstalled ? 'Checking desktop environment' : 'Preparing environment';
+      return runtimePayloadInstalled
+        ? translate(t, 'pages.setup.stages.checkingEnvironment', 'Checking desktop environment')
+        : translate(t, 'pages.setup.stages.preparingEnvironment', 'Preparing environment');
   }
 }
 
@@ -61,30 +68,73 @@ export function getProvisionStageHint(
     return progress.message.trim();
   }
   if (progress?.step && progress.stepCount) {
-    return `Step ${progress.step} of ${progress.stepCount}`;
+    return translate(t, 'pages.setup.hints.step', 'Step {{step}} of {{count}}', {
+      count: progress.stepCount,
+      step: progress.step,
+    });
   }
 
   switch (state) {
     case 'failed':
       return runtimePayloadInstalled
-        ? 'Review the error below, then retry the local prerequisite check.'
-        : 'Review the error below, then retry the setup task.';
+        ? translate(
+            t,
+            'pages.setup.hints.failedBundled',
+            'Review the error below, then retry the local prerequisite check.',
+          )
+        : translate(
+            t,
+            'pages.setup.hints.failedPackaged',
+            'Review the error below, then retry the setup task.',
+          );
     case 'succeeded':
       return runtimePayloadInstalled
-        ? 'FFmpeg and local runtime checks are complete. Launching Slab now.'
-        : 'Runtime payloads are in place. Launching Slab now.';
+        ? translate(
+            t,
+            'pages.setup.hints.succeededBundled',
+            'FFmpeg and local runtime checks are complete. Launching Slab now.',
+          )
+        : translate(
+            t,
+            'pages.setup.hints.succeededPackaged',
+            'Runtime payloads are in place. Launching Slab now.',
+          );
     case 'starting':
       return runtimePayloadInstalled
-        ? 'Inspecting the installed runtime and checking whether FFmpeg is already available.'
-        : 'Creating the setup task and connecting to the local host.';
+        ? translate(
+            t,
+            'pages.setup.hints.startingBundled',
+            'Inspecting the installed runtime and checking whether FFmpeg is already available.',
+          )
+        : translate(
+            t,
+            'pages.setup.hints.startingPackaged',
+            'Creating the setup task and connecting to the local host.',
+          );
     case 'running':
       return runtimePayloadInstalled
-        ? 'Checking FFmpeg runtime availability and confirming local workers are ready.'
-        : 'Downloading payloads, verifying CABs, checking FFmpeg, and restarting runtime workers.';
+        ? translate(
+            t,
+            'pages.setup.hints.runningBundled',
+            'Checking FFmpeg runtime availability and confirming local workers are ready.',
+          )
+        : translate(
+            t,
+            'pages.setup.hints.runningPackaged',
+            'Downloading payloads, verifying CABs, checking FFmpeg, and restarting runtime workers.',
+          );
     default:
       return runtimePayloadInstalled
-        ? 'Inspecting the local desktop installation and FFmpeg availability.'
-        : 'Inspecting the local desktop installation.';
+        ? translate(
+            t,
+            'pages.setup.hints.idleBundled',
+            'Inspecting the local desktop installation and FFmpeg availability.',
+          )
+        : translate(
+            t,
+            'pages.setup.hints.idlePackaged',
+            'Inspecting the local desktop installation.',
+          );
   }
 }
 
@@ -121,36 +171,68 @@ export function getProvisionProgressSummary(
   state: ProvisionState,
   task: TaskRecord | null,
   runtimePayloadInstalled = false,
+  t?: Translate,
 ) {
   if (state === 'failed') {
     return runtimePayloadInstalled
-      ? 'Desktop prerequisite checks stopped before setup could complete.'
-      : 'Provisioning stopped before setup could complete.';
+      ? translate(
+          t,
+          'pages.setup.summary.failedBundled',
+          'Desktop prerequisite checks stopped before setup could complete.',
+        )
+      : translate(
+          t,
+          'pages.setup.summary.failedPackaged',
+          'Provisioning stopped before setup could complete.',
+        );
   }
 
   if (state === 'succeeded') {
-    return '100% complete';
+    return translate(t, 'pages.setup.summary.complete', '100% complete');
   }
 
   const progress = normalizeTaskProgress(task?.progress);
   if (progress?.total && progress.total > 0) {
     const percentage = Math.round((progress.current / progress.total) * 100);
-    return `${percentage}% complete`;
+    return translate(t, 'pages.setup.summary.percentComplete', '{{percentage}}% complete', {
+      percentage,
+    });
   }
 
   if (progress?.step && progress.stepCount) {
-    return `Stage ${progress.step}/${progress.stepCount}`;
+    return translate(t, 'pages.setup.summary.stage', 'Stage {{step}}/{{count}}', {
+      count: progress.stepCount,
+      step: progress.step,
+    });
   }
 
   if (state === 'starting') {
-    return runtimePayloadInstalled ? 'Checking installed runtime...' : 'Creating setup task...';
+    return runtimePayloadInstalled
+      ? translate(t, 'pages.setup.summary.startingBundled', 'Checking installed runtime...')
+      : translate(t, 'pages.setup.summary.startingPackaged', 'Creating setup task...');
   }
 
   if (state === 'running') {
     return runtimePayloadInstalled
-      ? 'Checking FFmpeg and local workers...'
-      : 'Waiting for progress updates...';
+      ? translate(t, 'pages.setup.summary.runningBundled', 'Checking FFmpeg and local workers...')
+      : translate(t, 'pages.setup.summary.runningPackaged', 'Waiting for progress updates...');
   }
 
-  return 'Waiting to begin';
+  return translate(t, 'pages.setup.summary.idle', 'Waiting to begin');
+}
+
+function translate(
+  t: Translate | undefined,
+  key: string,
+  defaultValue: string,
+  options: Record<string, unknown> = {},
+) {
+  const interpolatedDefaultValue = interpolateDefaultValue(defaultValue, options);
+  return t ? t(key, { defaultValue: interpolatedDefaultValue, ...options }) : interpolatedDefaultValue;
+}
+
+function interpolateDefaultValue(value: string, options: Record<string, unknown>) {
+  return Object.entries(options).reduce((nextValue, [key, option]) => {
+    return nextValue.replaceAll(`{{${key}}}`, String(option));
+  }, value);
 }

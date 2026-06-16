@@ -2,6 +2,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window"
 import { Minus, Plus, Square, X } from "lucide-react"
 import { toast } from "sonner"
 import { getErrorMessage } from "@slab/api"
+import { useTranslation } from "@slab/i18n"
 
 import { Button } from "@slab/components/button"
 import useDesktopPlatform, { type DesktopPlatform } from "@/hooks/use-desktop-platform"
@@ -15,16 +16,22 @@ type WindowControlsConfig = {
   placement: WindowControlsPlacement
   variant: WindowControlsVariant
 }
+type Translate = (key: string, options?: Record<string, unknown>) => string
 
-const WINDOW_CONTROL_LABELS: Record<WindowControlAction, string> = {
-  minimize: "Minimize window",
-  toggleMaximize: "Maximize window",
-  close: "Close window",
+const WINDOW_CONTROL_LABEL_KEYS: Record<WindowControlAction, string> = {
+  minimize: "layouts.header.windowControls.minimize",
+  toggleMaximize: "layouts.header.windowControls.toggleMaximize",
+  close: "layouts.header.windowControls.close",
+}
+
+const WINDOW_CONTROL_ERROR_KEYS: Record<WindowControlAction, string> = {
+  minimize: "layouts.header.windowControls.errors.minimize",
+  toggleMaximize: "layouts.header.windowControls.errors.toggleMaximize",
+  close: "layouts.header.windowControls.errors.close",
 }
 
 type MacControl = {
   action: WindowControlAction
-  label: string
   toneClassName: string
   icon: typeof X
 }
@@ -32,21 +39,18 @@ type MacControl = {
 const MAC_CONTROLS: MacControl[] = [
   {
     action: "close",
-    label: WINDOW_CONTROL_LABELS.close,
     toneClassName:
       "border-[#ec6a5f] bg-[#ff5f57] text-[#5a1f1b] shadow-[inset_0_1px_0_rgb(255_255_255_/_0.18)]",
     icon: X,
   },
   {
     action: "minimize",
-    label: WINDOW_CONTROL_LABELS.minimize,
     toneClassName:
       "border-[#d8a23a] bg-[#ffbd2e] text-[#6a4a00] shadow-[inset_0_1px_0_rgb(255_255_255_/_0.18)]",
     icon: Minus,
   },
   {
     action: "toggleMaximize",
-    label: WINDOW_CONTROL_LABELS.toggleMaximize,
     toneClassName:
       "border-[#3ca44a] bg-[#28c840] text-[#0b4f19] shadow-[inset_0_1px_0_rgb(255_255_255_/_0.18)]",
     icon: Plus,
@@ -72,17 +76,21 @@ const WINDOW_CONTROLS_CONFIG_BY_PLATFORM: Record<DesktopPlatform, WindowControls
   },
 }
 
-function getWindowControlErrorMessage(error: unknown) {
+function getWindowControlLabel(action: WindowControlAction, t: Translate) {
+  return t(WINDOW_CONTROL_LABEL_KEYS[action])
+}
+
+function getWindowControlErrorMessage(error: unknown, t: Translate) {
   const message = getErrorMessage(error)
 
   if (message.includes("not allowed")) {
-    return "Window controls need a Tauri restart after capability changes."
+    return t("layouts.header.windowControls.errors.capabilityRestart")
   }
 
   return message
 }
 
-async function runWindowAction(action: WindowControlAction) {
+async function runWindowAction(action: WindowControlAction, t: Translate) {
   try {
     const appWindow = getCurrentWindow()
 
@@ -98,13 +106,15 @@ async function runWindowAction(action: WindowControlAction) {
         break
     }
   } catch (error) {
-    toast.error(`Failed to ${WINDOW_CONTROL_LABELS[action].toLowerCase()}.`, {
-      description: getWindowControlErrorMessage(error),
+    toast.error(t(WINDOW_CONTROL_ERROR_KEYS[action]), {
+      description: getWindowControlErrorMessage(error, t),
     })
   }
 }
 
 function MacWindowControls({ placement }: { placement: WindowControlsPlacement }) {
+  const { t } = useTranslation()
+
   return (
     <div
       className={cn(
@@ -113,43 +123,52 @@ function MacWindowControls({ placement }: { placement: WindowControlsPlacement }
       )}
       data-tauri-drag-region="false"
       role="toolbar"
-      aria-label="Window controls"
+      aria-label={t("layouts.header.windowControls.toolbar")}
     >
-      {MAC_CONTROLS.map(({ action, label, toneClassName, icon: Icon }) => (
-        <button
-          key={action}
-          type="button"
-          aria-label={label}
-          title={label}
-          className={`group flex size-3 items-center justify-center rounded-full border transition-transform hover:scale-105 ${toneClassName}`}
-          onClick={() => {
-            void runWindowAction(action)
-          }}
-        >
-          <Icon className="size-2.5 opacity-0 transition-opacity group-hover:opacity-85" strokeWidth={2.6} />
-        </button>
-      ))}
+      {MAC_CONTROLS.map(({ action, toneClassName, icon: Icon }) => {
+        const label = getWindowControlLabel(action, t)
+
+        return (
+          <button
+            key={action}
+            type="button"
+            aria-label={label}
+            title={label}
+            className={`group flex size-3 items-center justify-center rounded-full border transition-transform hover:scale-105 ${toneClassName}`}
+            onClick={() => {
+              void runWindowAction(action, t)
+            }}
+          >
+            <Icon className="size-2.5 opacity-0 transition-opacity group-hover:opacity-85" strokeWidth={2.6} />
+          </button>
+        )
+      })}
     </div>
   )
 }
 
 function DesktopWindowControls() {
+  const { t } = useTranslation()
+  const minimizeLabel = getWindowControlLabel("minimize", t)
+  const toggleMaximizeLabel = getWindowControlLabel("toggleMaximize", t)
+  const closeLabel = getWindowControlLabel("close", t)
+
   return (
     <div
       className="shell-window-controls mr-2 flex items-center gap-1"
       data-tauri-drag-region="false"
       role="toolbar"
-      aria-label="Window controls"
+      aria-label={t("layouts.header.windowControls.toolbar")}
     >
       <Button
         type="button"
         variant="ghost"
         size="icon-sm"
-        aria-label={WINDOW_CONTROL_LABELS.minimize}
-        title={WINDOW_CONTROL_LABELS.minimize}
+        aria-label={minimizeLabel}
+        title={minimizeLabel}
         className="size-7 rounded-[10px] text-[var(--shell-rail-label)] hover:bg-[var(--shell-card)]/80 hover:text-[var(--shell-title)]"
         onClick={() => {
-          void runWindowAction("minimize")
+          void runWindowAction("minimize", t)
         }}
       >
         <Minus className="size-4" />
@@ -159,11 +178,11 @@ function DesktopWindowControls() {
         type="button"
         variant="ghost"
         size="icon-sm"
-        aria-label={WINDOW_CONTROL_LABELS.toggleMaximize}
-        title={WINDOW_CONTROL_LABELS.toggleMaximize}
+        aria-label={toggleMaximizeLabel}
+        title={toggleMaximizeLabel}
         className="size-7 rounded-[10px] text-[var(--shell-rail-label)] hover:bg-[var(--shell-card)]/80 hover:text-[var(--shell-title)]"
         onClick={() => {
-          void runWindowAction("toggleMaximize")
+          void runWindowAction("toggleMaximize", t)
         }}
       >
         <Square className="size-[13px]" />
@@ -173,11 +192,11 @@ function DesktopWindowControls() {
         type="button"
         variant="ghost"
         size="icon-sm"
-        aria-label={WINDOW_CONTROL_LABELS.close}
-        title={WINDOW_CONTROL_LABELS.close}
+        aria-label={closeLabel}
+        title={closeLabel}
         className="size-7 rounded-[10px] text-[var(--shell-rail-label)] hover:bg-destructive/12 hover:text-destructive"
         onClick={() => {
-          void runWindowAction("close")
+          void runWindowAction("close", t)
         }}
       >
         <X className="size-4" />
@@ -194,7 +213,9 @@ function getWindowControlsConfig(platform: DesktopPlatform) {
   return WINDOW_CONTROLS_CONFIG_BY_PLATFORM[platform]
 }
 
-export function WindowControls({ placement = "header" }: WindowControlsProps) {
+export function WindowControls({
+  placement = "header",
+}: WindowControlsProps) {
   const isTauri = useIsTauri()
   const platform = useDesktopPlatform()
   const config = getWindowControlsConfig(platform)

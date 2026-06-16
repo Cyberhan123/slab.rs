@@ -411,6 +411,14 @@ pub struct ManagedRuntimeSupervisor {
     shutdown_started: AtomicBool,
 }
 
+struct RuntimeChildStartup {
+    child_spec: ResolvedRuntimeChildSpec,
+    handle: Option<Box<dyn RuntimeChildHandle>>,
+    command_rx: mpsc::UnboundedReceiver<RuntimeSupervisorCommand>,
+    initial_consecutive_failures: usize,
+    initial_restart_attempts: usize,
+}
+
 impl ManagedRuntimeSupervisor {
     pub async fn start(
         launch_spec: ResolvedLaunchSpec,
@@ -427,12 +435,23 @@ impl ManagedRuntimeSupervisor {
         spawner: Arc<dyn RuntimeChildSpawner>,
         options: RuntimeSupervisorOptions,
     ) -> Result<Self, AppCoreError> {
-        let mut started_children = Vec::new();
+        let mut child_startups = Vec::new();
+        let mut command_senders = HashMap::new();
+        let mut started_child_count = 0usize;
+        let mut failed_child_count = 0usize;
+        let mut first_startup_error = None;
 
         for child_spec in &launch_spec.children {
-            match spawner.spawn_child(child_spec).await {
+            let child_spec = child_spec.clone();
+            let service_backends = child_service_backends(&child_spec);
+            let (command_tx, command_rx) = mpsc::unbounded_channel();
+            for backend in &service_backends {
+                command_senders.insert(*backend, command_tx.clone());
+            }
+
+            match spawner.spawn_child(&child_spec).await {
                 Ok(handle) => {
-                    let service_backends = child_service_backends(child_spec);
+                    started_child_count = started_child_count.saturating_add(1);
                     status.mark_ready_all(&service_backends, 0);
                     info!(
                         backend = child_spec.backend.canonical_id(),
@@ -444,39 +463,94 @@ impl ManagedRuntimeSupervisor {
                         shutdown_on_stdin_close = child_spec.shutdown_on_stdin_close,
                         "runtime child started"
                     );
-                    started_children.push((child_spec.clone(), handle));
+                    child_startups.push(RuntimeChildStartup {
+                        child_spec,
+                        handle: Some(handle),
+                        command_rx,
+                        initial_consecutive_failures: 0,
+                        initial_restart_attempts: 0,
+                    });
                 }
                 Err(error) => {
-                    error!(
+                    failed_child_count = failed_child_count.saturating_add(1);
+                    let error_text = error.to_string();
+                    let initial_consecutive_failures = 1usize;
+                    let restart_delay = options.restart_delay(initial_consecutive_failures);
+                    let transition_status =
+                        options.status_for_failures(initial_consecutive_failures);
+                    status.mark_failure_all(
+                        &service_backends,
+                        transition_status,
+                        initial_consecutive_failures,
+                        0,
+                        format!("failed to start runtime child: {error_text}"),
+                        UnexpectedRuntimeExit {
+                            backend: child_spec.backend,
+                            bind_address: child_spec.grpc_bind_address.clone(),
+                            exit: RuntimeChildExit {
+                                code: None,
+                                signal: None,
+                                message: Some(format!("startup spawn failed: {error_text}")),
+                            },
+                            consecutive_failures: initial_consecutive_failures,
+                            restart_delay,
+                        },
+                    );
+                    warn!(
                         backend = child_spec.backend.canonical_id(),
                         bind_address = %child_spec.grpc_bind_address,
                         log_file = %child_spec.log_file.display(),
-                        error = %error,
-                        "failed to start runtime child"
+                        retry_delay_ms = restart_delay.as_millis(),
+                        error = %error_text,
+                        "failed to start runtime child; will retry without stopping other runtime children"
                     );
-                    rollback_started_children(&mut started_children, &options).await;
-                    return Err(error);
+                    if first_startup_error.is_none() {
+                        first_startup_error = Some(error);
+                    }
+                    child_startups.push(RuntimeChildStartup {
+                        child_spec,
+                        handle: None,
+                        command_rx,
+                        initial_consecutive_failures,
+                        initial_restart_attempts: 0,
+                    });
                 }
             }
         }
 
+        if started_child_count == 0 && failed_child_count > 0 {
+            let error = first_startup_error.expect("startup error should exist");
+            mark_startup_failed_all(&status, &launch_spec, &error);
+            return Err(error);
+        }
+
         let (shutdown_tx, _) = watch::channel(false);
         let mut tasks = Vec::new();
-        let mut command_senders = HashMap::new();
-        for (child_spec, handle) in started_children {
-            let (command_tx, command_rx) = mpsc::unbounded_channel();
-            for backend in child_service_backends(&child_spec) {
-                command_senders.insert(backend, command_tx.clone());
+        for startup in child_startups {
+            if let Some(handle) = startup.handle {
+                tasks.push(tokio::spawn(supervise_backend(
+                    startup.child_spec,
+                    handle,
+                    Arc::clone(&spawner),
+                    Arc::clone(&status),
+                    shutdown_tx.subscribe(),
+                    startup.command_rx,
+                    options.clone(),
+                    startup.initial_consecutive_failures,
+                    startup.initial_restart_attempts,
+                )));
+            } else {
+                tasks.push(tokio::spawn(supervise_backend_startup_retry(
+                    startup.child_spec,
+                    Arc::clone(&spawner),
+                    Arc::clone(&status),
+                    shutdown_tx.subscribe(),
+                    startup.command_rx,
+                    options.clone(),
+                    startup.initial_consecutive_failures,
+                    startup.initial_restart_attempts,
+                )));
             }
-            tasks.push(tokio::spawn(supervise_backend(
-                child_spec,
-                handle,
-                Arc::clone(&spawner),
-                Arc::clone(&status),
-                shutdown_tx.subscribe(),
-                command_rx,
-                options.clone(),
-            )));
         }
         let control = RuntimeSupervisorControlHandle {
             senders: Arc::new(command_senders),
@@ -532,13 +606,59 @@ impl ManagedRuntimeSupervisor {
     }
 }
 
-async fn rollback_started_children(
-    children: &mut Vec<(ResolvedRuntimeChildSpec, Box<dyn RuntimeChildHandle>)>,
-    options: &RuntimeSupervisorOptions,
+fn mark_startup_failed_all(
+    status: &RuntimeSupervisorStatus,
+    launch_spec: &ResolvedLaunchSpec,
+    error: &AppCoreError,
 ) {
-    while let Some((child_spec, mut handle)) = children.pop() {
-        shutdown_child(&child_spec, &mut handle, options).await;
+    let detail = format!("managed runtime startup failed: {error}");
+    for child_spec in &launch_spec.children {
+        for backend in child_service_backends(child_spec) {
+            status.mark_unavailable(backend, detail.clone());
+        }
     }
+}
+
+async fn supervise_backend_startup_retry(
+    child_spec: ResolvedRuntimeChildSpec,
+    spawner: Arc<dyn RuntimeChildSpawner>,
+    status: Arc<RuntimeSupervisorStatus>,
+    mut shutdown_rx: watch::Receiver<bool>,
+    command_rx: mpsc::UnboundedReceiver<RuntimeSupervisorCommand>,
+    options: RuntimeSupervisorOptions,
+    mut consecutive_failures: usize,
+    mut restart_attempts: usize,
+) {
+    let bind_address = child_spec.grpc_bind_address.clone();
+    let initial_delay = options.restart_delay(consecutive_failures);
+    let Some(handle) = restart_child_with_retries(
+        &child_spec,
+        Arc::clone(&spawner),
+        Arc::clone(&status),
+        &mut shutdown_rx,
+        &options,
+        &bind_address,
+        &mut consecutive_failures,
+        &mut restart_attempts,
+        initial_delay,
+    )
+    .await
+    else {
+        return;
+    };
+
+    supervise_backend(
+        child_spec,
+        handle,
+        spawner,
+        status,
+        shutdown_rx,
+        command_rx,
+        options,
+        consecutive_failures,
+        restart_attempts,
+    )
+    .await;
 }
 
 async fn supervise_backend(
@@ -549,12 +669,14 @@ async fn supervise_backend(
     mut shutdown_rx: watch::Receiver<bool>,
     mut command_rx: mpsc::UnboundedReceiver<RuntimeSupervisorCommand>,
     options: RuntimeSupervisorOptions,
+    initial_consecutive_failures: usize,
+    initial_restart_attempts: usize,
 ) {
     let backend = child_spec.backend;
     let service_backends = child_service_backends(&child_spec);
     let bind_address = child_spec.grpc_bind_address.clone();
-    let mut consecutive_failures = 0usize;
-    let mut restart_attempts = 0usize;
+    let mut consecutive_failures = initial_consecutive_failures;
+    let mut restart_attempts = initial_restart_attempts;
     let mut last_started_at = tokio::time::Instant::now();
 
     loop {
@@ -1079,25 +1201,76 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn startup_failure_rolls_back_started_children() {
+    #[tokio::test(start_paused = true)]
+    async fn startup_failure_keeps_started_children_and_retries_failed_child() {
         let spawner = FakeSpawner::default();
         let llama = FakeChildControl::new();
+        let whisper = FakeChildControl::new();
         spawner.push_success(RuntimeBackendId::GgmlLlama, Arc::clone(&llama));
         spawner.push_failure(RuntimeBackendId::GgmlWhisper, "boom");
+        spawner.push_success(RuntimeBackendId::GgmlWhisper, Arc::clone(&whisper));
 
-        let result = ManagedRuntimeSupervisor::start(
+        let supervisor = ManagedRuntimeSupervisor::start(
             launch_spec(vec![
                 child_spec(RuntimeBackendId::GgmlLlama, "127.0.0.1:50051"),
                 child_spec(RuntimeBackendId::GgmlWhisper, "127.0.0.1:50052"),
             ]),
             Arc::new(spawner),
-            RuntimeSupervisorOptions::default(),
+            test_options(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(llama.graceful_shutdowns.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            supervisor.status_registry().status(RuntimeBackendId::GgmlLlama),
+            RuntimeBackendRuntimeStatus::Ready
+        );
+        assert_eq!(
+            supervisor.status_registry().status(RuntimeBackendId::GgmlWhisper),
+            RuntimeBackendRuntimeStatus::Restarting
+        );
+
+        advance_and_settle(Duration::from_secs(1)).await;
+        yield_until(|| {
+            supervisor.status_registry().status(RuntimeBackendId::GgmlWhisper)
+                == RuntimeBackendRuntimeStatus::Ready
+        })
+        .await;
+
+        supervisor.shutdown().await;
+        assert_eq!(llama.graceful_shutdowns.load(Ordering::SeqCst), 1);
+        assert_eq!(whisper.graceful_shutdowns.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn startup_failure_returns_error_when_no_children_start() {
+        let spawner = FakeSpawner::default();
+        spawner.push_failure(RuntimeBackendId::GgmlLlama, "llama boom");
+        spawner.push_failure(RuntimeBackendId::GgmlWhisper, "whisper boom");
+
+        let spec = launch_spec(vec![
+            child_spec(RuntimeBackendId::GgmlLlama, "127.0.0.1:50051"),
+            child_spec(RuntimeBackendId::GgmlWhisper, "127.0.0.1:50052"),
+        ]);
+        let status = Arc::new(RuntimeSupervisorStatus::from_launch_spec(&spec));
+        let result = ManagedRuntimeSupervisor::start_with_status(
+            spec,
+            Arc::clone(&status),
+            Arc::new(spawner),
+            test_options(),
         )
         .await;
 
         assert!(result.is_err());
-        assert_eq!(llama.graceful_shutdowns.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            status.status(RuntimeBackendId::GgmlLlama),
+            RuntimeBackendRuntimeStatus::Unavailable
+        );
+        assert_eq!(
+            status.status(RuntimeBackendId::GgmlWhisper),
+            RuntimeBackendRuntimeStatus::Unavailable
+        );
     }
 
     #[tokio::test(start_paused = true)]

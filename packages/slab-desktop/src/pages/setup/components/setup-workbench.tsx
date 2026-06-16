@@ -8,19 +8,37 @@ import {
 } from 'lucide-react';
 
 import { Button } from '@slab/components/button';
+import { Trans, useTranslation } from '@slab/i18n';
+import useDesktopPlatform from '@/hooks/use-desktop-platform';
+import useIsTauri from '@/hooks/use-tauri';
 import { cn } from '@/lib/utils';
 import Header from '@/layouts/header';
+import { WindowControls } from '@/layouts/window-controls';
 
 import { SETUP_ACTIVE_TONE, SETUP_CTA_GRADIENT } from '../const';
 import type { SetupViewModel } from '../hooks/use-setup';
 
 function SetupScaffold({ children }: { children: ReactNode }) {
+  const platform = useDesktopPlatform();
+  const isTauri = useIsTauri();
+  const showMacSidebar = isTauri && platform === 'macos';
+
   return (
     <div className="h-screen overflow-hidden bg-app-canvas">
-      <div className="mx-auto flex h-full w-full flex-col bg-surface-1">
-        <Header variant="minimal" />
-        <div className="min-h-0 flex-1 overflow-auto">
-          {children}
+      <div className="mx-auto flex h-full w-full bg-surface-1">
+        {showMacSidebar ? (
+          <aside
+            className="flex min-h-0 w-[var(--shell-rail-width)] shrink-0 flex-col items-center bg-[var(--shell-rail-bg)] py-6 shadow-[inset_-1px_0_0_var(--shell-line)]"
+            data-testid="setup-sidebar"
+          >
+            <WindowControls placement="sidebar" />
+          </aside>
+        ) : null}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <Header variant="minimal" />
+          <div className="min-h-0 flex-1 overflow-auto">
+            {children}
+          </div>
         </div>
       </div>
     </div>
@@ -79,6 +97,7 @@ function SetupBadge({
 
 export function SetupWorkbench({
   setupStatus,
+  runtimePayloadMode,
   isChecking,
   checkError,
   provisionState,
@@ -90,16 +109,21 @@ export function SetupWorkbench({
   canRetry,
   handleRetry,
 }: SetupViewModel) {
+  const { t } = useTranslation();
+  const codeComponent = (
+    <code className="mx-1 rounded bg-surface-soft px-1.5 py-0.5 text-[0.9em]" />
+  );
+
   if (isChecking) {
     return (
       <SetupStateCard
         icon={Loader2}
-        title="Checking desktop environment"
-        description="Inspecting the local Slab host, the packaged runtime, and FFmpeg availability."
+        title={t('pages.setup.checking.title')}
+        description={t('pages.setup.checking.description')}
         action={
           <div className="flex items-center gap-3 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
-            <span>Please wait a moment.</span>
+            <span>{t('pages.setup.checking.wait')}</span>
           </div>
         }
       />
@@ -110,12 +134,15 @@ export function SetupWorkbench({
     return (
       <SetupStateCard
         icon={TriangleAlert}
-        title="Could not reach the local host"
+        title={t('pages.setup.hostError.title')}
         description={
           <>
             <p>{checkError}</p>
             <p className="mt-2">
-              Make sure <code>slab-server</code> is running, then reload this page.
+              <Trans
+                i18nKey="pages.setup.hostError.hint"
+                components={{ code: <code /> }}
+              />
             </p>
           </>
         }
@@ -128,7 +155,7 @@ export function SetupWorkbench({
             }}
           >
             <RefreshCw className="size-4" />
-            Reload
+            {t('pages.setup.hostError.reload')}
           </Button>
         }
       />
@@ -139,6 +166,7 @@ export function SetupWorkbench({
   const isSucceeded = provisionState === 'succeeded';
   const isActive = provisionState === 'starting' || provisionState === 'running';
   const runtimePayloadInstalled = setupStatus?.runtime_payload_installed ?? false;
+  const usesBundledRuntimePayload = runtimePayloadMode === 'bundled';
   const ffmpegInstalled = setupStatus?.ffmpeg.installed ?? false;
   const readyBackends = setupStatus?.backends.filter((backend) => backend.installed).length ?? 0;
   const totalBackends = setupStatus?.backends.length ?? 0;
@@ -149,22 +177,43 @@ export function SetupWorkbench({
     Icon = CheckCircle2;
   }
 
-  let stageBadgeLabel = 'Running';
+  let stageBadgeLabel = t('pages.setup.badge.running');
   let stageBadgeTone: 'active' | 'success' | 'error' = 'active';
   if (isFailed) {
-    stageBadgeLabel = 'Failed';
+    stageBadgeLabel = t('pages.setup.badge.failed');
     stageBadgeTone = 'error';
   } else if (isSucceeded) {
-    stageBadgeLabel = 'Complete';
+    stageBadgeLabel = t('pages.setup.badge.complete');
     stageBadgeTone = 'success';
   }
 
-  let progressHint = 'Keep this window open while the local setup task finishes provisioning the runtime.';
+  let progressHint = t('pages.setup.progressHint.activePackaged');
   if (isSucceeded) {
-    progressHint = 'Setup has completed. Slab will enter the application automatically.';
-  } else if (runtimePayloadInstalled) {
-    progressHint = 'Keep this window open while Slab checks FFmpeg and confirms the packaged runtime is ready.';
+    progressHint = t('pages.setup.progressHint.succeeded');
+  } else if (runtimePayloadInstalled || usesBundledRuntimePayload) {
+    progressHint = t('pages.setup.progressHint.activeBundled');
   }
+  const heroTitle =
+    runtimePayloadInstalled || usesBundledRuntimePayload
+      ? t('pages.setup.hero.titleBundled')
+      : t('pages.setup.hero.titlePackaged');
+  const heroDescriptionKey = runtimePayloadInstalled
+    ? 'pages.setup.hero.descriptionBundled'
+    : usesBundledRuntimePayload
+      ? 'pages.setup.hero.descriptionMacosMissing'
+      : 'pages.setup.hero.descriptionPackaged';
+  const runtimePayloadStatus = runtimePayloadInstalled
+    ? t('pages.setup.metrics.runtimePayload.installed')
+    : usesBundledRuntimePayload
+      ? t('pages.setup.metrics.runtimePayload.missingBundled')
+      : t('pages.setup.metrics.runtimePayload.needsSetup');
+  const backendStatus =
+    totalBackends > 0
+      ? t('pages.setup.metrics.backendWorkers.ready', {
+          ready: readyBackends,
+          total: totalBackends,
+        })
+      : t('pages.setup.metrics.backendWorkers.notReported');
 
   return (
     <SetupScaffold>
@@ -181,60 +230,45 @@ export function SetupWorkbench({
               <div className="space-y-4">
                 <div className="space-y-2">
                   <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    Desktop Setup
+                    {t('pages.setup.hero.eyebrow')}
                   </p>
                   <h1 className="max-w-2xl text-4xl font-semibold tracking-tight text-foreground md:text-[2.8rem]">
-                    {runtimePayloadInstalled
-                      ? 'Slab is checking your local tools.'
-                      : 'Slab is preparing your local runtime.'}
+                    {heroTitle}
                   </h1>
                 </div>
 
                 <p className="max-w-2xl text-sm leading-7 text-secondary-foreground md:text-base">
-                  {runtimePayloadInstalled ? (
-                    <>
-                      This installation already includes the packaged runtime payload under
-                      <code className="mx-1 rounded bg-surface-soft px-1.5 py-0.5 text-[0.9em]">
-                        resources/libs
-                      </code>
-                      . Slab is now checking whether FFmpeg is already available and will install
-                      it automatically when needed before continuing.
-                    </>
-                  ) : (
-                    <>
-                      Slab will reuse the release CAB payloads for your current version, verify
-                      them against the embedded manifest, install the runtime into
-                      <code className="mx-1 rounded bg-surface-soft px-1.5 py-0.5 text-[0.9em]">
-                        resources/libs
-                      </code>
-                      , check FFmpeg, and restart the managed runtime workers.
-                    </>
-                  )}
+                  <Trans
+                    i18nKey={heroDescriptionKey}
+                    components={{ code: codeComponent }}
+                  />
                 </p>
 
                 <div className="grid gap-3 pt-2 sm:grid-cols-3">
                   <div className="rounded-2xl border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-1)_88%,white)] p-4">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                      Runtime Payload
+                      {t('pages.setup.metrics.runtimePayload.label')}
                     </p>
                     <p className="mt-2 text-sm font-medium text-foreground">
-                      {runtimePayloadInstalled ? 'Installed locally' : 'Needs setup'}
+                      {runtimePayloadStatus}
                     </p>
                   </div>
                   <div className="rounded-2xl border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-1)_88%,white)] p-4">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                      FFmpeg
+                      {t('pages.setup.metrics.ffmpeg.label')}
                     </p>
                     <p className="mt-2 text-sm font-medium text-foreground">
-                      {ffmpegInstalled ? 'Available' : 'Will be installed'}
+                      {ffmpegInstalled
+                        ? t('pages.setup.metrics.ffmpeg.available')
+                        : t('pages.setup.metrics.ffmpeg.willBeInstalled')}
                     </p>
                   </div>
                   <div className="rounded-2xl border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-1)_88%,white)] p-4">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                      Backend Workers
+                      {t('pages.setup.metrics.backendWorkers.label')}
                     </p>
                     <p className="mt-2 text-sm font-medium text-foreground">
-                      {totalBackends > 0 ? `${readyBackends}/${totalBackends} ready` : 'Not reported'}
+                      {backendStatus}
                     </p>
                   </div>
                 </div>
@@ -245,7 +279,7 @@ export function SetupWorkbench({
               <div className="flex items-start justify-between gap-4">
                 <div className="space-y-2">
                   <p className="text-[12px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                    Current Stage
+                    {t('pages.setup.currentStage')}
                   </p>
                   <h2 className="text-xl font-semibold text-foreground">{stageLabel}</h2>
                   <p className="text-sm leading-6 text-muted-foreground">{stageHint}</p>
@@ -296,17 +330,17 @@ export function SetupWorkbench({
                     }}
                   >
                     <RefreshCw className="size-4" />
-                    Retry setup
+                    {t('pages.setup.actions.retry')}
                   </Button>
                 ) : (
                   <div className="inline-flex items-center gap-3 rounded-xl bg-surface-soft px-4 py-3 text-sm text-muted-foreground">
                     <Loader2 className={cn('size-4', isActive && 'animate-spin')} />
                     <span>
                       {isSucceeded
-                        ? 'Launching Slab...'
-                        : runtimePayloadInstalled
-                          ? 'Checking desktop prerequisites'
-                          : 'Provisioning in progress'}
+                        ? t('pages.setup.actions.launching')
+                        : runtimePayloadInstalled || usesBundledRuntimePayload
+                          ? t('pages.setup.actions.checkingPrerequisites')
+                          : t('pages.setup.actions.provisioning')}
                     </span>
                   </div>
                 )}

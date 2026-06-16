@@ -83,12 +83,12 @@ pub(super) async fn serve_grpc(
             }
         }
 
-        info!(transport = "ipc", path = %ipc_path, "slab-runtime gRPC listening");
         let incoming = parity_tokio_ipc::Endpoint::new(ipc_path.to_owned())
             .incoming()
             .with_context(|| format!("failed to bind IPC endpoint '{ipc_path}'"))?
             .map(|stream| stream.map(IpcIo::new));
 
+        info!(transport = "ipc", path = %ipc_path, "slab-runtime gRPC listening");
         grpc_server(grpc_service.clone())
             .serve_with_incoming_shutdown(
                 incoming,
