@@ -43,3 +43,48 @@ impl ToolRiskAnalyzer for BasicToolRiskAnalyzer {
         ToolRiskAssessment { level: ToolRiskLevel::Low, labels: Vec::new(), reason: None }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{BasicToolRiskAnalyzer, ToolRiskAnalyzer};
+    use crate::event::ToolRiskLevel;
+
+    async fn analyze_shell(command: &str) -> crate::ToolRiskAssessment {
+        BasicToolRiskAnalyzer.analyze("shell", &json!({ "command": command })).await
+    }
+
+    #[tokio::test]
+    async fn flags_destructive_shell_commands_as_high_risk() {
+        for command in
+            ["rm -rf target", "Remove-Item -Recurse .", "git reset --hard", "DEL output.log"]
+        {
+            let risk = analyze_shell(command).await;
+
+            assert_eq!(risk.level, ToolRiskLevel::High);
+            assert_eq!(risk.labels, ["destructive_command", "shell"]);
+            assert_eq!(risk.reason.as_deref(), Some("shell command may modify or delete files"));
+        }
+    }
+
+    #[tokio::test]
+    async fn classifies_other_shell_commands_as_medium_risk() {
+        for command in ["echo hello", "git status", "rm", "del"] {
+            let risk = analyze_shell(command).await;
+
+            assert_eq!(risk.level, ToolRiskLevel::Medium);
+            assert_eq!(risk.labels, ["shell"]);
+            assert_eq!(risk.reason.as_deref(), Some("shell commands require host review"));
+        }
+    }
+
+    #[tokio::test]
+    async fn classifies_non_shell_tools_as_low_risk() {
+        let risk = BasicToolRiskAnalyzer.analyze("web_search", &json!({ "query": "slab" })).await;
+
+        assert_eq!(risk.level, ToolRiskLevel::Low);
+        assert!(risk.labels.is_empty());
+        assert!(risk.reason.is_none());
+    }
+}

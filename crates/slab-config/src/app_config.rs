@@ -60,7 +60,8 @@ pub struct Config {
     ///
     /// Set `SLAB_ADMIN_TOKEN=<secret>` to require an
     /// `Authorization: Bearer <secret>` header on those routes.
-    /// When `None`, admin endpoints are unauthenticated.
+    /// When `None`, unauthenticated management access is allowed only on
+    /// loopback bind addresses.
     pub admin_api_token: Option<String>,
 
     /// Runtime transport mode between slab-server and slab-runtime:

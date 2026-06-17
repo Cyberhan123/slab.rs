@@ -83,3 +83,20 @@ impl std::fmt::Display for ApplyPatchCallStatus {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_display_matches_wire_values() {
+        assert_eq!(ApplyPatchCallOutputStatusParam::Completed.to_string(), "completed");
+        assert_eq!(ApplyPatchCallOutputStatusParam::Failed.to_string(), "failed");
+        assert_eq!(ApplyPatchCallOutputStatus::Completed.to_string(), "completed");
+        assert_eq!(ApplyPatchCallOutputStatus::Failed.to_string(), "failed");
+        assert_eq!(ApplyPatchCallStatusParam::InProgress.to_string(), "in_progress");
+        assert_eq!(ApplyPatchCallStatusParam::Completed.to_string(), "completed");
+        assert_eq!(ApplyPatchCallStatus::InProgress.to_string(), "in_progress");
+        assert_eq!(ApplyPatchCallStatus::Completed.to_string(), "completed");
+    }
+}

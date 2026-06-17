@@ -70,49 +70,11 @@ impl ChatStore for AnyStore {
 mod tests {
     use super::ChatStore;
     use crate::infra::db::{AnyStore, ChatMessage};
+    use crate::test_support::migrated_test_store;
     use chrono::Utc;
-    use std::str::FromStr;
 
     async fn new_store() -> AnyStore {
-        let options = sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")
-            .expect("sqlite options");
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await
-            .expect("connect in-memory db");
-        let store = AnyStore { pool };
-
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&store.pool)
-            .await
-            .expect("enable foreign keys");
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS chat_sessions (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                state_path TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )",
-        )
-        .execute(&store.pool)
-        .await
-        .expect("create chat_sessions table");
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS chat_messages (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )",
-        )
-        .execute(&store.pool)
-        .await
-        .expect("create chat_messages table");
-
-        store
+        migrated_test_store().await
     }
 
     #[tokio::test]

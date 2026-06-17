@@ -187,7 +187,12 @@ where
             Ok(response) => return Ok(response),
             Err(status) => {
                 log_grpc_error(rpc, &request_id, &status);
-                if is_transient_runtime_status(&status) && attempt < UNARY_RPC_MAX_ATTEMPTS {
+                if let Some(retry_delay) = retry_delay_for_status(
+                    &status,
+                    attempt,
+                    UNARY_RPC_MAX_ATTEMPTS,
+                    UNARY_RPC_RETRY_DELAY,
+                ) {
                     warn!(
                         rpc,
                         request_id,
@@ -195,10 +200,10 @@ where
                         max_attempts = UNARY_RPC_MAX_ATTEMPTS,
                         grpc.code = %status.code(),
                         grpc.message = %status.message(),
-                        retry_delay_ms = UNARY_RPC_RETRY_DELAY.as_millis(),
+                        retry_delay_ms = retry_delay.as_millis(),
                         "gRPC request failed with transient transport error before response; retrying"
                     );
-                    tokio::time::sleep(UNARY_RPC_RETRY_DELAY).await;
+                    tokio::time::sleep(retry_delay).await;
                     continue;
                 }
                 return Err(status);
@@ -217,6 +222,15 @@ pub fn is_transient_runtime_status(status: &tonic::Status) -> bool {
                 || message.contains("broken pipe")
                 || message.contains("connection error")
                 || message.contains("os error 2")))
+}
+
+fn retry_delay_for_status(
+    status: &tonic::Status,
+    attempt: usize,
+    max_attempts: usize,
+    retry_delay: Duration,
+) -> Option<Duration> {
+    (is_transient_runtime_status(status) && attempt < max_attempts).then_some(retry_delay)
 }
 
 pub fn transient_runtime_detail(err: &anyhow::Error) -> Option<String> {
@@ -396,8 +410,12 @@ pub async fn load_model(
                 return Ok(response.into_inner());
             }
             Err(status) => {
-                let retryable = is_transient_runtime_status(&status);
-                if retryable && attempt < LOAD_MODEL_MAX_ATTEMPTS {
+                if let Some(retry_delay) = retry_delay_for_status(
+                    &status,
+                    attempt,
+                    LOAD_MODEL_MAX_ATTEMPTS,
+                    LOAD_MODEL_RETRY_DELAY,
+                ) {
                     warn!(
                         backend = %backend_id,
                         request_id = %request_id,
@@ -405,10 +423,10 @@ pub async fn load_model(
                         max_attempts = LOAD_MODEL_MAX_ATTEMPTS,
                         grpc.code = %status.code(),
                         grpc.message = %status.message(),
-                        retry_delay_ms = LOAD_MODEL_RETRY_DELAY.as_millis(),
+                        retry_delay_ms = retry_delay.as_millis(),
                         "gRPC load_model failed with transient transport error; retrying"
                     );
-                    tokio::time::sleep(LOAD_MODEL_RETRY_DELAY).await;
+                    tokio::time::sleep(retry_delay).await;
                     continue;
                 }
 
@@ -494,7 +512,12 @@ pub async fn unload_model(
         match response {
             Ok(response) => return Ok(response.into_inner()),
             Err(status) => {
-                if is_transient_runtime_status(&status) && attempt < UNARY_RPC_MAX_ATTEMPTS {
+                if let Some(retry_delay) = retry_delay_for_status(
+                    &status,
+                    attempt,
+                    UNARY_RPC_MAX_ATTEMPTS,
+                    UNARY_RPC_RETRY_DELAY,
+                ) {
                     warn!(
                         backend = %backend_id,
                         request_id = %request_id,
@@ -502,10 +525,10 @@ pub async fn unload_model(
                         max_attempts = UNARY_RPC_MAX_ATTEMPTS,
                         grpc.code = %status.code(),
                         grpc.message = %status.message(),
-                        retry_delay_ms = UNARY_RPC_RETRY_DELAY.as_millis(),
+                        retry_delay_ms = retry_delay.as_millis(),
                         "gRPC unload_model failed with transient transport error before response; retrying"
                     );
-                    tokio::time::sleep(UNARY_RPC_RETRY_DELAY).await;
+                    tokio::time::sleep(retry_delay).await;
                     continue;
                 }
 
@@ -588,4 +611,54 @@ async fn unload_model_once(
     };
 
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retry_delay_allows_transient_status_before_final_attempt() {
+        let status = tonic::Status::new(tonic::Code::Unavailable, "runtime starting");
+
+        assert_eq!(
+            retry_delay_for_status(&status, 1, 2, Duration::from_millis(25)),
+            Some(Duration::from_millis(25))
+        );
+    }
+
+    #[test]
+    fn retry_delay_stops_on_final_attempt() {
+        let status = tonic::Status::new(tonic::Code::Unavailable, "runtime starting");
+
+        assert_eq!(retry_delay_for_status(&status, 2, 2, Duration::from_millis(25)), None);
+    }
+
+    #[test]
+    fn retry_delay_rejects_non_transient_status() {
+        let status = tonic::Status::new(tonic::Code::InvalidArgument, "bad request");
+
+        assert_eq!(retry_delay_for_status(&status, 1, 2, Duration::from_millis(25)), None);
+    }
+
+    #[test]
+    fn transient_status_classifies_runtime_transport_failures() {
+        for message in
+            ["transport error: connection reset", "broken pipe", "connection error", "os error 2"]
+        {
+            let status = tonic::Status::new(tonic::Code::Unknown, message);
+            assert!(is_transient_runtime_status(&status), "{message}");
+        }
+
+        let unknown_app_error = tonic::Status::new(tonic::Code::Unknown, "model failed");
+        assert!(!is_transient_runtime_status(&unknown_app_error));
+    }
+
+    #[test]
+    fn transient_runtime_detail_extracts_status_message() {
+        let error =
+            anyhow::Error::from(tonic::Status::new(tonic::Code::Unknown, "transport error: reset"));
+
+        assert_eq!(transient_runtime_detail(&error).as_deref(), Some("transport error: reset"));
+    }
 }

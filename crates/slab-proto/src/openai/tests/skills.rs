@@ -24,11 +24,6 @@ fn skills_item_delete_response_deserializes() {
 }
 
 #[test]
-fn skills_item_content_get_raw_body_matches_fixture() {
-    assert_eq!(SKILL_CONTENT_RAW, b"string");
-}
-
-#[test]
 fn skills_versions_get_collection_response_deserializes() {
     let version_list: SkillVersionListResource =
         assert_json_deserializes(SKILL_VERSION_LIST_RESPONSE);
@@ -51,9 +46,4 @@ fn skills_versions_item_delete_response_deserializes() {
         assert_json_deserializes(SKILL_VERSION_DELETE_RESPONSE);
 
     assert!(version_delete.deleted);
-}
-
-#[test]
-fn skills_versions_item_content_get_raw_body_matches_fixture() {
-    assert_eq!(SKILL_VERSION_CONTENT_RAW, b"string");
 }

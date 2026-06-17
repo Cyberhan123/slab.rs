@@ -36,7 +36,7 @@
 
 ### 2.1 跨 crate / 跨 package 根因型（优先治理）
 
-**R1. 7 个 repository 测试手写 `CREATE TABLE IF NOT EXISTS` DDL，而非运行真实 migration —— 存在 schema drift 风险 [High]**
+**R1. [已修复] 7 个 repository 测试手写 `CREATE TABLE IF NOT EXISTS` DDL，而非运行真实 migration —— 存在 schema drift 风险 [High]**
 - 涉及文件：
   - `crates/slab-app-core/src/infra/db/repository/chat.rs:91,103`（chat_sessions, chat_messages）
   - `crates/slab-app-core/src/infra/db/repository/plugin.rs:287`（plugin_states）
@@ -45,7 +45,7 @@
   - `crates/slab-app-core/src/infra/db/repository/{model,model_download,task}.rs`（CREATE TABLE）
 - 对比正解：`crates/slab-app-core/src/infra/db/repository/mod.rs:39,78`（`SqlxStore::connect` → `migrate!`），以及 `model.rs:196` 已存在的 `migrated_pool()` 半成品 helper。
 - 根因 & 风险：这些测试断言的行为所依赖的表结构**不是生产结构**——任何 migration 增加列/CHECK 约束后，仓库测试仍按陈旧 schema 通过。子系统审计只点到"样板重复"，**跨切面升级点是 schema drift**。
-- 建议：在 `src/test_support.rs` 暴露 `pub(crate) async fn migrated_pool() -> AnyStore`，删除所有手写 DDL 块。此修复同时**免费闭合 migration 覆盖盲区**（见 G15）。
+- 当前已在 `src/test_support.rs` 增加 `migrated_test_store()` / `migrated_test_pool()`，普通 repository CRUD 测试已改为跑完整 migrations；仅保留两类**故意构造旧 schema**的单迁移测试（`remove_models_provider`、`task_payload_envelopes`）。切换后暴露并修复了一个真实 drift：`model_config_state` 的外键在 `models` rebuild 后仍指向 `models_old`，已通过 append-only migration `20260617000000_rebuild_model_config_state_fk.sql` 重建外键。
 
 **R2. `run_git` 测试 helper 在两个 Rust crate 逐字符重复 [Low]**
 - `crates/slab-git/src/repository.rs:621` vs `crates/slab-agent-tools/src/git.rs:267`
@@ -147,36 +147,41 @@
   ```
   即 registry 与**活的** `/api-docs/openapi.json` 必须**逐项相等**——任何人新增 `/v1` 路由而不更新 registry，此测试即 fail。README "Smoke policy"（`tests/README.md:47-56`）也把这条写成显式契约。**这与多数代码库的"占位冒充覆盖"恰恰相反**，是该子系统最值得肯定之处。首轮审计把 `it.todo` 模式判为"弱点/未强制"的猜测**被推翻**。
 - **真实盲区 1（Low-Medium）**：enforcement 测试只校验 *registry == doc*，**不校验每条 `executableSmokeOperation` 真的被某个 `it()` flow 调用过**。一条操作可被声明（满足 doc-equality）却从未被任何 flow 实际请求。建议补一条 meta-test：对每条 `executableSmokeOperation` 断言其 `operationKey` 出现在某次 flow 的请求记录里。
-- **真实盲区 2（Low）**：`admin-auth.ts` 注册了 describe 但 `it()`=0（grep 确认），即 admin 鉴权 smoke 为空壳；而 `/v1/settings`、`/v1/setup/*` 等 admin 路由已在 68 条 executable 中声明。建议落实 admin-auth flow。
+- **真实盲区 2（已纠正）**：重新按当前代码核实后，`admin-auth.ts` 已有 `it.skipIf(Boolean(externalBaseUrl))("requires bearer auth for management routes", ...)`，本地 harness 会用 `SLAB_ADMIN_TOKEN=vitest-admin-token` 覆盖未授权/已授权两条路径；原先 "`it()`=0 / admin 鉴权 smoke 为空壳" 的描述已过时。剩余风险不在 admin-auth flow 是否存在，而在外部目标模式会跳过该 smoke、以及非 loopback 且未配置 token 的失败路径需要直接单测守护（见 G3）。
 - **真实盲区 3（设计性，非缺陷）**：smoke 按 README 设计即"stable validation / not-found / error-envelope，而非真实下载模型或推理"——它是 **presence/shape 层**，不是行为/推理覆盖。这是 smoke 的合理天花板，不是 bug；但意味着它**不能替代** §3.3/§3.7 中那些缺失的深集成测试。
 
 ### 3.2 安全 / 关键路径回归保护（本轮新增的核心盲区）
 
-**G2. [High, 本轮新盲区] Workspace 路径越界测试极薄——主安全边界**
+**G2. [High → Medium, 已补核心边界测试] Workspace 路径越界测试——主安全边界**
 - `crates/slab-file/src/system.rs:149` `resolve_path` 仅 1 个 escape 测试（`resolve_path_rejects_workspace_escape` @ line 461，只喂 `../outside.txt`）。未测：symlink 越界、Windows 绝对路径、UNC `\\?\`、write-to-new-file 路径（`existing_ancestor(parent)` 仅校验、未最终 canonicalize，line 170-175）、parent-of-parent 越界、`..` 在 normalize 后的残留。
 - `crates/slab-app-core/src/domain/services/workspace/file_system.rs` `LocalExecutorFileSystem`（170 LOC，实际接到 Tauri `WorkspaceService`）**0 测试**，且 write 时不查 `policy`/`writable_roots`/`denied_paths`。
-- 建议：表驱动越界用例（symlink/UNC/绝对路径/`..` 残留），并为 `LocalExecutorFileSystem` 加 round-trip 测试。
+- 当前已补 `resolve_path` 边界测试：绝对路径、Windows extended path（`\\?\`）、任何 `..` 段拒绝、symlink 指向 workspace 外部时 existing-file 与 new-file 两条路径都拒绝。实测发现当前实现比原审计假设更严格：`dir/../inside.txt` 也会被拒绝，而不是 normalize 后放行。
+- 当前已为 `LocalExecutorFileSystem` 补基本 round-trip/escape 测试：write 自动建目录、read、metadata、read_directory、`../` escape 拒绝。
+- 剩余建议：单独定义并测试 `FileSystemSandboxContext.policy`、`writable_roots`、`denied_paths` 的语义；当前 `LocalExecutorFileSystem` 仍主要依赖 workspace root containment，而不是完整 sandbox policy evaluator。
 
-**G3. [High, 本轮新盲区 + carry-forward 升级] Auth middleware `None` token fail-open 无测试**
-- `bin/slab-server/src/api/middleware/auth.rs:24-26`：`admin_api_token` 为 `None` 时 `match` 返回 `true`——**所有管理路由 (`/backend`,`/settings`,`/workspace`) 对任意调用者开放**。无测试断言空/whitespace token fail-closed。整个文件 0 测试。
-- 注意：carry-forward 把"timing-attack [Medium-High]"列为 lead concern，本轮**降级** timing-attack 为 **Low-Medium**（localhost/loopback 单用户 Tauri sidecar token，timing 攻击 largely 理论）；**lead concern 应改为 fail-open-on-None**。
-- 建议：加测试覆盖 None token 拒绝、空串/whitespace 拒绝；token 比较改 `subtle::ConstantTimeEq`（防御性，非首要）。
+**G3. [High → Low-Medium, 已部分修复] Auth middleware `None` token fail-open**
+- 当前代码已从原先 `admin_api_token == None` 直接放行，改为**仅 loopback bind address 允许未配置 token 的本地管理访问**；`0.0.0.0`、`[::]`、局域网 IP 等非 loopback bind 在未配置 token 时 fail-closed。显式配置空串/whitespace token 也 fail-closed。直接单测已覆盖 loopback 例外、非 loopback 拒绝、空/whitespace token 拒绝、匹配/不匹配 bearer token。
+- 纠正：原审计把 "`None` token 必须一律拒绝" 写成唯一正确修复，但当前 repo 文档和桌面本地开发契约仍把未配置 token 的 loopback 管理访问视为允许行为；因此真实安全边界应是**远程/非 loopback 不得无 token 开放**，而不是破坏本地默认流。
+- 注意：carry-forward 把"timing-attack [Medium-High]"列为 lead concern，本轮**降级** timing-attack 为 **Low-Medium**（localhost/loopback 单用户 Tauri sidecar token，timing 攻击 largely 理论）；lead concern 已收窄为 remote bind fail-open 与空白 token 配置。
+- 剩余建议：如后续产品决定所有管理路由都必须强制 token，需要先补齐桌面/前端 token 注入链，再移除 loopback 例外；也可补非 loopback no-token 的集成 smoke。
 
-**G4. [High, confirmed] `BasicToolRiskAnalyzer`（唯一 risk impl，gatekeep host approval）零直接测试**
+**G4. [High → Low, 已补直接测试] `BasicToolRiskAnalyzer`（唯一 risk impl，gatekeep host approval）**
 - `crates/slab-agent/src/risk.rs:13-45`：`rm `/`remove-item`/`git reset`/`del ` → High/`destructive_command`；其他 shell → Medium；非 shell → Low。lowercase 处理。
 - `tests.rs:840/854/870` 的 approval mock 全部 `_risk:` 丢弃；唯一相关断言 `tests.rs:1786-1794` 只对 echo 命令断言 `risk: Some(_)`（非 null 即过，不断言 level/label）。
-- 未覆盖：trailing-space 要求（`rm`/`del` 单独 token 会落到 Medium）、`git reset` 子串匹配副作用、大小写、Medium/Low fallback。
-- 建议：risk.rs 内加 `#[tokio::test]` 套件，覆盖每个 High 触发短语 + fallback。
+- 当前已在 `risk.rs` 内补 `#[tokio::test]` 直接套件，覆盖 destructive shell 命令 High、普通 shell Medium、非 shell Low、大小写触发、label/reason 形状。
+- 剩余 edge：当前实现仍是字符串包含启发式，不是 shell parser；`rm`/`del` 单独 token 明确保持 Medium，`git reset` 子串匹配仍偏保守。若后续要降低误报/漏报，应作为行为设计变更单独处理。
 
-**G5. [High, confirmed] Secret redaction 仅 1 个测试**
+**G5. [High → Low, 已补表驱动测试] Secret redaction 覆盖不足**
 - `crates/slab-agent-memories/src/redaction.rs:14-23`：3 个 regex。唯一测试 `redacts_common_secret_shapes` @ :29 只测 `api_key=` 与 `Authorization: Bearer`。未测：`sk-` 前缀（regex 3）、`token=`/`password=`/`passwd=`/`secret:` 变体、大小写、**12 字符下限边界**（11 字符 token 不应 redact 的 false-positive guard）、引号风格、一行多 secret、benign 字符串透传。
 - 风险面：`redact_secrets` 在写 `raw_memories.md` 前运行（`phase1.rs:72,112-114`），under-coverage = 数据外泄面。
-- 建议：表驱动测试每个 keyword + sk- + 12-char 边界 + no-op 用例。
+- 当前已补表驱动测试覆盖 keyword 变体、Bearer、`sk-`、短值误报保护、一行多 secret、benign 字符串透传，并修复带引号 secret 被替换后丢闭合引号的问题。
+- 剩余策略边界：regex redaction 仍是启发式，不保证覆盖所有供应商 token 形态；如后续引入 secret store，应把具体 credential 类型投影到结构化 redaction，而不是继续扩 regex 表。
 
-**G6. [High → Medium, confirmed, 严重级纠正] slab-config secret-redaction contract 实现错误且未测**
+**G6. [High → Low, 已修复主要泄漏路径] slab-config secret-redaction contract**
 - `crates/slab-config/src/pmid_service.rs:265` 设 `secret: secret(pmid)` 但 :269 原样返回 `effective_value`——flag 纯装饰；`secret()` (:940-942) 仅匹配 `server.admin.token`，故 `providers.registry`（`auth.api_key` @ 1469-1470 逐字 clone）、websearch/MCP key 从不标记 secret。
 - 严重级纠正：High→**Medium**。`/v1/settings` 路由在 `auth_middleware` 之后（需 admin bearer token），能读 api_key 的攻击者已持有 admin token，可直接读原始 settings 文件——属 defense-in-depth/correctness 缺口，非未授权披露。
-- 建议：修 `secret()` 覆盖所有 credential PMID，`build_property` 真正消费 flag 做 mask；加测试断言 view 序列化不含明文。
+- 当前已修 `server.admin.token`、`providers.registry`、`agent.tools.websearch.providers` 的 property view：`schema.secret=true`，`effective_value`/`override_value` 中 literal secret 使用 `[REDACTED_SECRET]`，且 `PUT /settings/{pmid}` 收到占位值时会恢复当前真实 secret，避免结构化 autosave 覆盖密钥。已补测试断言 view 序列化不含明文、占位更新不会污染持久化文件。
+- 纠正：MCP server 配置当前只保存 `env_var` 引用名，不保存 secret 明文，因此不应把 `agent.tools.mcp.servers` 整体标成 secret。
 
 **G7. [High → Medium, confirmed] Config descriptor get/set 类型校验对 ~100 PMID 无直接测试**
 - `crates/slab-config/src/descriptor.rs`（447 行）+ `view.rs`（185 行）均无 `#[cfg(test)]`。`set_setting_value`（descriptor.rs:438-447）包装 `serde_json::from_value`；`view.rs:42-52` u64→i64 `try_from` 对 >i64::MAX 静默落到 f64；`:68-70` NaN/Infinity → Null。
@@ -201,11 +206,13 @@
 - caveat：已有单测并非全 trivial（chat.rs 验 UNIQUE 回滚、agent.rs 验字段保留、ui_state.rs 验 round-trip）——"CRUD round-trip 大多未验"略过述。
 - 建议：按 `model_download.rs` 模板补 round-trip（insert→get→update→delete→get-none）+ unique-violation + 并发写。
 
-**G11. [High → Medium, partial, 严重级纠正 + 头条措辞纠正] Migration 覆盖率**
+**G11. [High → Low-Medium, partial, 已补 post-apply 约束/级联断言] Migration 覆盖率**
 - 真相（已 verify）：19 个 migration 文件**全部有 forward-apply smoke 覆盖**（`storage_value_checks` @ model.rs:275、`turn_state_upsert` @ agent.rs:313、`connect_configures_sqlite_concurrency_pragmas` @ mod.rs:77 均 `migrate!` 全量）。仅 **~3-4 个**有 post-apply schema/constraint 断言；**ZERO rollback** 测试。
 - **纠正 06-08 与首轮原始发现的"2 of 19 forward-tested"——错误**。准确表述：全部 forward-apply-tested，~3-4 有 post-apply 断言，0 rollback。
 - 严重级：High→**Medium**（单用户 SQLite 桌面应用，blast radius 是本地 DB，可 re-init 恢复）。
-- 建议：migration 测试矩阵（PRAGMA table_info 断言每个 migration 后的列/约束）+ 每个 migration 一条 forward→rollback round-trip，优先 `agent_memories`/`media_tasks`（含 CHECK 约束）。
+- 当前 repository 测试已改用真实 migrations，并新增 `20260617000000_rebuild_model_config_state_fk.sql` 修复 `model_config_state` 外键漂移；这证明 R1 的手写 DDL 确实遮蔽了 schema drift。
+- 当前已补真实 post-apply 断言：`infra::db::repository::tests::migrations_apply_expected_constraints_and_indexes` 校验 `model_config_state`、media task、agent memory 相关 FK/default/index/CHECK 约束；`migrations_preserve_media_and_agent_memory_cascades` 插入真实 parent/child 行并验证 media tasks 与 agent memory phase1 级联删除、`agent_memory_usage_events.source_kind` 默认值。
+- 纠正：当前 `migrations/` 目录全部是 SQLx simple `.sql` migration；SQLx 0.9 禁止 simple 与 reversible `.up.sql`/`.down.sql` 混用，因此不能在不重组整套 migration 的前提下只补某几个 rollback 脚本。剩余建议改为：若产品需要 rollback gate，先规划一次全量 reversible migration 迁移；短期继续扩大 post-apply schema/constraint/data-preservation 矩阵。
 
 **G12. [Medium] model_auto_unload.rs 只测纯 helper，async eviction state machine 未测**
 - 786 LOC，4 个测试仅覆盖 `is_under_memory_pressure` 等纯函数。`ModelAutoUnloadManager` loop（轮询、触发 eviction、与 supervisor 协调、`max_pressure_evictions_per_load` cap、`RuntimeMemoryPressure` 恢复）未测。
@@ -220,10 +227,10 @@
 
 ### 3.4 并发 / 状态机 / 取消安全
 
-**G15. [Medium-High, 本轮新盲区] Supervisor panic/cancellation 安全——panic 的 supervised task 被静默吞**
-- `crates/slab-app-core/src/infra/runtime/supervisor.rs:597-601`：shutdown 时 `if let Err(error) = handle.await { warn!(...) }`——panic 的 `supervise_backend`/`supervise_backend_startup_retry`（spawn @ 531/543）产生 `JoinError` 仅被 log，**不标记 backend unavailable、不重启、不升级**。该 backend 从 supervision 静默消失。无测试驱动 panic fake child 断言 supervisor 状态。
-- 这是 carry-forward "tokio::select! 在 6 个 runtime 文件无 interleaving/cancel/drop-order 测试"在 app-core 侧的具体 failure mode。
-- 建议：用 panic 的 fake child 驱动，断言 supervisor 后续状态（unavailable 标记、crash-loop 计数）。
+**G15. [Medium-High → Low-Medium, 已补运行期 panic 可观测性] Supervisor panic/cancellation 安全**
+- 当前 `crates/slab-app-core/src/infra/runtime/supervisor.rs` 已把 `supervise_backend`/`supervise_backend_startup_retry` 包在 `spawn_supervisor_task` monitor 中：非 shutdown 场景下的 task panic/cancel 会把该 child 的 service backends 标为 `Unavailable`，并通过 `consecutive_failures` 记录 crash-loop 信号。
+- 已新增 panic fake child 直接测试：`supervisor_task_panic_marks_backend_unavailable` 驱动 `wait_for_exit()` panic，断言状态从 `Ready` 转为 `Unavailable`、`consecutive_failures == 1`、`last_error` 记录 supervisor task panic。
+- 剩余风险：当前修复选择 fail-closed 标记 unavailable，不自动重建已经 panic 的 supervisor task；如果后续产品要求 supervisor 自愈，需要单独设计 task-level restart 和 backoff，而不是把它混入 child restart 路径。
 
 **G16. [Medium-High, 本轮新盲区] 跨进程 JSON-RPC/gRPC 传输恢复：mid-stream drop、partial framing、backpressure**
 - tonic streaming 响应 mid-stream drop（chat token 流）、WS JSON-RPC（`bin/slab-js-runtime`/`bin/slab-python-runtime` mod.rs 各 0 测试）partial-frame/reconnect、`infra/plugin_runtime/sidecar.rs`（619 LOC，仅 2 测试）method-call 中途断连。
@@ -250,10 +257,10 @@
 - `packages/slab-desktop/src/store/useWorkspaceUiStore.ts:62-102`。是 7 个 store 中唯一无 co-located 测试的。
 - 建议：镜像 sibling store 测试，覆盖 patchWorkspaceState create/update/default-merge、empty-rootPath no-op、多 workspace 隔离、onRehydrateStorage error→hasHydrated(true)。
 
-**G22. [High, confirmed] `src/hooks/`（6 hooks, 324 LOC）零测试**
+**G22. [High → Medium, partially fixed] `src/hooks/`（6 hooks, 324 LOC）核心状态 hooks 已补首批测试，薄包装仍待补**
 - `use-global-header-meta.ts`(154)、`use-persisted-header-select.ts`(73)、`use-file.ts`(41)、`use-desktop-platform.ts`(34)、`use-tauri.ts`(13)、`use-mobile.ts`(9)。
-- grep 全 test 套件：所有引用都是 `vi.mock(...)` 替换或 type-only import；`use-desktop-platform`/`use-mobile` 从未被任何测试触及。
-- 建议：用 `renderHook()` 测 `use-persisted-header-select`（hydration race、stale selection、disabled-option clearing、fallback）与 `use-global-header-meta`（effect timing、subscription、cleanup）。
+- 当前已新增 `packages/slab-desktop/src/hooks/__tests__/use-persisted-header-select.test.ts`，覆盖 hydration 后 fallback、stale persisted value、disabled-option clearing、setter→store；已新增 `use-global-header-meta.test.tsx`，通过真实 `GlobalHeaderProvider` 覆盖 page meta/control/search 的注册、更新与清理。
+- 剩余：`use-file.ts`、`use-desktop-platform.ts`、`use-tauri.ts`、`use-mobile.ts` 仍是薄包装/环境检测 hooks，尚无直接测试；下一步应补 web/Tauri 分支、platform/userAgent 分支、matchMedia 初值行为。
 
 **G23. [Medium] `assistant-agent-state.ts`（158 LOC）未测**
 - `toAgentConfig`（条件展开 7 preset + reasoning_effort）、`updateLastAssistantMessage`/`withThoughts`（fallback append loading message）、`agentEventKey`（malformed JSON null）、ws/sse URL 协议改写。
@@ -282,7 +289,12 @@
 
 ### 3.7 协议 / 契约（carry-forward）
 
-**G29. [High] slab-proto 反序列化单方向，无 round-trip；零 negative/missing-field/type-mismatch/unknown-field 测试；crate 级无 `deny_unknown_fields`。** `apply_patch` 契约（`ApplyPatchOperation` tagged enum，4 手写 Display）未测。skills.rs 的 `SKILL_CONTENT_RAW==b"string"` 占位比较**不可能失败**（假测试，应删）。
+**G29. [High → Medium, 已补 apply_patch 契约核心覆盖] slab-proto 协议测试仍偏单向**
+- 当前已修正并覆盖 `apply_patch` 核心契约：`ApplyPatchOperation`/`ApplyPatchOperationParam` 从错误的 Rust variant-name tagged enum 改为真实 wire shape 的 untagged enum，使用 payload 内部 `type: create_file/delete_file/update_file` 作为判别；新增 create/delete/update round-trip、unknown operation、missing field、type mismatch 负例测试。
+- 4 个 apply_patch status `Display` 映射已补 `status_display_matches_wire_values`。
+- `skills.rs` 的 `SKILL_CONTENT_RAW==b"string"` / `SKILL_VERSION_CONTENT_RAW==b"string"` 假测试已删除；当前模型层没有 raw-body 类型可做有意义反序列化断言。
+- 纠正：crate-wide `deny_unknown_fields` 不适合作为 OpenAI 兼容模型的默认策略；OpenAI API 会增量扩展字段，模型层应默认容忍 unknown fields。若某个内部-only 契约需要 strict unknown-field rejection，应在该具体类型上单独加并测试。
+- 剩余建议：继续按高风险 API 面补 round-trip 与 negative/missing-field/type-mismatch 测试，优先 Responses event union、tool call union、chat message content union。
 
 **G30. [High] 6 个 gRPC handler 文件零测试（carry-forward confirmed）。**
 
@@ -329,25 +341,25 @@
 
 | # | 行动 | Owner | Effort | 闭合的 finding |
 |---|------|-------|--------|----------------|
-| 1 | **修 auth fail-open**：`auth.rs` None/空 token fail-closed + 测试；token 比较改 `ConstantTimeEq` | slab-server | S | G7 |
+| 1 | **修 auth fail-open**：`auth.rs` 非 loopback 无 token fail-closed、空/whitespace token fail-closed + 直接单测；保留现有 loopback 本地例外 | slab-server | S | G3 |
 | 2 | **`resolve_path` + `LocalExecutorFileSystem` 表驱动越界测试**（symlink/UNC/绝对路径/`..` 残留） | slab-file + app-core | M | G6, G31 |
-| 3 | **`BasicToolRiskAnalyzer` + `redact_secrets` + slab-config secret 表驱动测试/修复** | slab-agent + memories + config | M | G8, G9, G10 |
-| 4 | **提取 `migrated_pool()` helper，删除 7 处手写 DDL**（同时闭合 migration 断言盲区） | slab-app-core | M | R1, G15 |
-| 5 | **`rpc/client.rs` retry/backoff 决策提取为纯函数并单测** | slab-app-core | M | G13 |
-| 6 | **Repository round-trip 套件**（按 `model_download.rs` 模板），优先 `media_task.rs`（24 方法 0 测） | slab-app-core | L | G14 |
-| 7 | **Supervisor panic-safety 测试**（panic fake child → 断言 unavailable 标记 + crash-loop） | slab-app-core | M | G19 |
-| 8 | **TS hooks + `useWorkspaceUiStore` + `ui-state-storage` 测试**（`renderHook` + fake timers） | slab-desktop | M | G24, G25, G26 |
-| 9 | **Coverage threshold + `lint-staged` 配置**（核心包阈值，pre-commit 真正生效）；smoke 补"每条 executable 必被 flow 实调"meta-test + 落实 admin-auth flow | release/CI + slab-server | S | G2, G4, G3 |
+| 3 | **`redact_secrets` + slab-config secret 表驱动测试/修复**（`BasicToolRiskAnalyzer` 直接测试已补） | slab-agent + memories + config | M | G4, G5, G6 |
+| 4 | **提取 `migrated_pool()` helper，删除 7 处手写 DDL**（已完成，并修复 `model_config_state` 外键 drift） | slab-app-core | M | R1, G11 |
+| 5 | **`rpc/client.rs` retry/backoff 决策提取为纯函数并单测**（已完成：transient/status/attempt 边界覆盖） | slab-app-core | M | G13 |
+| 6 | **Repository round-trip 套件**（已完成首批：`media_task.rs` image/video/audio insert→update→get/list） | slab-app-core | L | G14 |
+| 7 | **Supervisor panic-safety 测试/修复**（已完成：panic fake child → unavailable 标记 + crash-loop 计数） | slab-app-core | M | G15 |
+| 8 | **TS hooks/store 测试**（已完成首批：`ui-state-storage` fake timers + `useWorkspaceUiStore` store 行为；hooks 仍待扩展） | slab-desktop | M | G20, G21, G22 |
+| 9 | **Coverage threshold + `lint-staged` 配置**（核心包阈值，pre-commit 真正生效）；smoke 补"每条 executable 必被 flow 实调"meta-test，并明确外部目标模式下 admin-auth smoke 的跳过策略 | release/CI + slab-server | S | G2, G4, G3 |
 
 ### 4.2 分阶段路线图
 
 **Phase 1安全边界 + 持久化加固**
-- 行动 #2（路径越界）、#3（risk/redaction/secret）、#4（migrated_pool）、#7（supervisor panic）。
-- 补 G15 migration post-apply 断言矩阵 + 至少 consolidated rollback round-trip（优先 agent_memories/media_tasks）。
-- carry-forward：slab-proto 加 negative/round-trip 测试 + crate 级 `deny_unknown_fields`（G29）。
+- 已完成行动 #2（路径越界）、#3（risk/redaction/secret）、#4（migrated_pool）、#7（supervisor panic）。
+- 已补 G11 migration post-apply 断言矩阵（优先覆盖 agent_memories/media_tasks）；rollback round-trip 因当前 SQLx simple migration 目录不能混用 reversible down 脚本，改为架构性剩余项。
+- 已补 G29 apply_patch 核心 negative/round-trip 测试并删除 skills 假测试；crate-wide `deny_unknown_fields` 已纠正为不适合 OpenAI 兼容模型的默认策略，剩余为 Responses/tool/chat unions 的扩大覆盖。
 
 **Phase 2覆盖深度 + 冗余根因治理**
-- 行动 #5（RPC retry）、#6（Repository round-trip）、#8（TS hooks/store）。
+- 已完成行动 #5（RPC retry）、#6 首批 repository round-trip（media_task image/video/audio）、#8 首批 TS store 覆盖（ui-state-storage/useWorkspaceUiStore）与 hooks 首批覆盖（usePersistedHeaderSelect/useGlobalHeaderMeta）；薄包装 hooks 仍待扩展。
 - 治理**冗余根因**：建立共享 test-support——Rust 侧 `slab-test-utils`（含 `migrated_pool`/`run_git_test`/`build_pack_bytes`/fixture builders）；TS 侧每个 package 建 `src/test/` + `__mocks__/`（R12/R13/R5/R18 收敛）。
 - 抽取 `crates/slab-plugin-jsonrpc` 闭合 R3 + G32。
 - 6 gRPC handler boilerplate 抽取（R15/R16）。

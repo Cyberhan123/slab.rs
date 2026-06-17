@@ -71,8 +71,6 @@ const SKILL_VERSION_LIST_RESPONSE: &str = r#"{"object":"list","data":[{"object":
 const SKILL_VERSION_RESPONSE: &str = r#"{"object":"skill.version","id":"string","skill_id":"string","version":"string","created_at":0,"name":"string","description":"string"}"#;
 const SKILL_VERSION_DELETE_RESPONSE: &str =
     r#"{"object":"skill.version.deleted","deleted":true,"id":"string","version":"string"}"#;
-const SKILL_CONTENT_RAW: &[u8] = b"string";
-const SKILL_VERSION_CONTENT_RAW: &[u8] = b"string";
 const AUDIO_SPEECH_DELTA_EVENT: &str = r#"{"type":"speech.audio.delta","audio":"c3RyaW5n"}"#;
 const AUDIO_SPEECH_DONE_EVENT: &str =
     r#"{"type":"speech.audio.done","usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}"#;

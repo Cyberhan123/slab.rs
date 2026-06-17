@@ -161,6 +161,12 @@ impl RuntimeSupervisorStatus {
         entry.last_unexpected_exit = None;
     }
 
+    fn mark_unavailable_all(&self, backends: &[RuntimeBackendId], error: String) {
+        for backend in backends {
+            self.mark_unavailable(*backend, error.clone());
+        }
+    }
+
     fn mark_ready(&self, backend: RuntimeBackendId, restart_attempts: usize) {
         let mut guard = self.inner.lock().unwrap_or_else(|error| error.into_inner());
         let entry = guard.entry(backend).or_insert_with(|| {
@@ -528,28 +534,40 @@ impl ManagedRuntimeSupervisor {
         let mut tasks = Vec::new();
         for startup in child_startups {
             if let Some(handle) = startup.handle {
-                tasks.push(tokio::spawn(supervise_backend(
-                    startup.child_spec,
-                    handle,
-                    Arc::clone(&spawner),
+                let child_spec = startup.child_spec;
+                tasks.push(spawn_supervisor_task(
+                    child_spec.clone(),
                     Arc::clone(&status),
                     shutdown_tx.subscribe(),
-                    startup.command_rx,
-                    options.clone(),
-                    startup.initial_consecutive_failures,
-                    startup.initial_restart_attempts,
-                )));
+                    supervise_backend(
+                        child_spec,
+                        handle,
+                        Arc::clone(&spawner),
+                        Arc::clone(&status),
+                        shutdown_tx.subscribe(),
+                        startup.command_rx,
+                        options.clone(),
+                        startup.initial_consecutive_failures,
+                        startup.initial_restart_attempts,
+                    ),
+                ));
             } else {
-                tasks.push(tokio::spawn(supervise_backend_startup_retry(
-                    startup.child_spec,
-                    Arc::clone(&spawner),
+                let child_spec = startup.child_spec;
+                tasks.push(spawn_supervisor_task(
+                    child_spec.clone(),
                     Arc::clone(&status),
                     shutdown_tx.subscribe(),
-                    startup.command_rx,
-                    options.clone(),
-                    startup.initial_consecutive_failures,
-                    startup.initial_restart_attempts,
-                )));
+                    supervise_backend_startup_retry(
+                        child_spec,
+                        Arc::clone(&spawner),
+                        Arc::clone(&status),
+                        shutdown_tx.subscribe(),
+                        startup.command_rx,
+                        options.clone(),
+                        startup.initial_consecutive_failures,
+                        startup.initial_restart_attempts,
+                    ),
+                ));
             }
         }
         let control = RuntimeSupervisorControlHandle {
@@ -604,6 +622,51 @@ impl ManagedRuntimeSupervisor {
             self.status.mark_disabled_all(&child_service_backends(child_spec));
         }
     }
+}
+
+fn spawn_supervisor_task(
+    child_spec: ResolvedRuntimeChildSpec,
+    status: Arc<RuntimeSupervisorStatus>,
+    shutdown_rx: watch::Receiver<bool>,
+    task: impl std::future::Future<Output = ()> + Send + 'static,
+) -> JoinHandle<()> {
+    let backend = child_spec.backend;
+    let service_backends = child_service_backends(&child_spec);
+    let bind_address = child_spec.grpc_bind_address.clone();
+    let log_file = child_spec.log_file.clone();
+
+    tokio::spawn(async move {
+        let handle = tokio::spawn(task);
+        if let Err(error) = handle.await {
+            if *shutdown_rx.borrow() {
+                warn!(
+                    backend = backend.canonical_id(),
+                    bind_address = %bind_address,
+                    log_file = %log_file.display(),
+                    error = %error,
+                    "runtime supervisor task join failed during shutdown"
+                );
+                return;
+            }
+
+            let failure_kind = if error.is_panic() {
+                "panicked"
+            } else if error.is_cancelled() {
+                "was cancelled"
+            } else {
+                "failed"
+            };
+            let detail = format!("runtime supervisor task {failure_kind}: {error}");
+            status.mark_unavailable_all(&service_backends, detail.clone());
+            error!(
+                backend = backend.canonical_id(),
+                bind_address = %bind_address,
+                log_file = %log_file.display(),
+                error = %error,
+                "runtime supervisor task stopped unexpectedly"
+            );
+        }
+    })
 }
 
 fn mark_startup_failed_all(
@@ -1003,11 +1066,16 @@ mod tests {
         exit_rx: Option<oneshot::Receiver<RuntimeChildExit>>,
         graceful_exit: RuntimeChildExit,
         force_exit: RuntimeChildExit,
+        panic_on_wait: Option<String>,
     }
 
     #[async_trait]
     impl RuntimeChildHandle for FakeChildHandle {
         async fn wait_for_exit(&mut self) -> Result<RuntimeChildExit, AppCoreError> {
+            if let Some(message) = self.panic_on_wait.take() {
+                panic!("{message}");
+            }
+
             let exit = self
                 .exit_rx
                 .as_mut()
@@ -1033,6 +1101,7 @@ mod tests {
 
     enum SpawnPlan {
         Success(Arc<FakeChildControl>),
+        PanicOnWait(Arc<FakeChildControl>),
         Fail(String),
     }
 
@@ -1050,6 +1119,15 @@ mod tests {
                 .entry(backend)
                 .or_default()
                 .push_back(SpawnPlan::Success(control));
+        }
+
+        fn push_panic_on_wait(&self, backend: RuntimeBackendId, control: Arc<FakeChildControl>) {
+            self.plans
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .entry(backend)
+                .or_default()
+                .push_back(SpawnPlan::PanicOnWait(control));
         }
 
         fn push_failure(&self, backend: RuntimeBackendId, error: impl Into<String>) {
@@ -1085,27 +1163,31 @@ mod tests {
                     ))
                 })?;
 
-            match plan {
-                SpawnPlan::Success(control) => {
-                    let (exit_tx, exit_rx) = oneshot::channel();
-                    control.install_sender(exit_tx);
-                    self.spawned
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner())
-                        .push(Arc::clone(&control));
-                    Ok(Box::new(FakeChildHandle {
-                        control,
-                        exit_rx: Some(exit_rx),
-                        graceful_exit: RuntimeChildExit::success(),
-                        force_exit: RuntimeChildExit {
-                            code: Some(-9),
-                            signal: None,
-                            message: Some("forced kill".to_owned()),
-                        },
-                    }))
+            let (control, panic_on_wait) = match plan {
+                SpawnPlan::Success(control) => (control, None),
+                SpawnPlan::PanicOnWait(control) => {
+                    (control, Some("fake supervisor child wait panic".to_owned()))
                 }
-                SpawnPlan::Fail(error) => Err(AppCoreError::Internal(error)),
-            }
+                SpawnPlan::Fail(error) => return Err(AppCoreError::Internal(error)),
+            };
+
+            let (exit_tx, exit_rx) = oneshot::channel();
+            control.install_sender(exit_tx);
+            self.spawned
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .push(Arc::clone(&control));
+            Ok(Box::new(FakeChildHandle {
+                control,
+                exit_rx: Some(exit_rx),
+                graceful_exit: RuntimeChildExit::success(),
+                force_exit: RuntimeChildExit {
+                    code: Some(-9),
+                    signal: None,
+                    message: Some("forced kill".to_owned()),
+                },
+                panic_on_wait,
+            }))
         }
     }
 
@@ -1357,6 +1439,33 @@ mod tests {
             supervisor.status_registry().status(RuntimeBackendId::GgmlLlama),
             RuntimeBackendRuntimeStatus::Ready
         );
+        supervisor.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn supervisor_task_panic_marks_backend_unavailable() {
+        let spawner = FakeSpawner::default();
+        spawner.push_panic_on_wait(RuntimeBackendId::GgmlLlama, FakeChildControl::new());
+
+        let supervisor = ManagedRuntimeSupervisor::start(
+            launch_spec(vec![child_spec(RuntimeBackendId::GgmlLlama, "127.0.0.1:50051")]),
+            Arc::new(spawner),
+            test_options(),
+        )
+        .await
+        .unwrap();
+
+        yield_until(|| {
+            supervisor.status_registry().status(RuntimeBackendId::GgmlLlama)
+                == RuntimeBackendRuntimeStatus::Unavailable
+        })
+        .await;
+
+        let snapshot = supervisor.status_registry().snapshot(RuntimeBackendId::GgmlLlama);
+        assert_eq!(snapshot.consecutive_failures, 1);
+        let last_error = snapshot.last_error.as_deref().unwrap_or_default();
+        assert!(last_error.contains("runtime supervisor task panicked"), "{last_error}");
+
         supervisor.shutdown().await;
     }
 

@@ -493,3 +493,201 @@ fn decode_string_array(raw: Option<&str>) -> Vec<String> {
 fn to_u32(value: i64) -> u32 {
     value.try_into().unwrap_or_default()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::models::{
+        AUDIO_TRANSCRIPTION_TASK_TYPE, IMAGE_GENERATION_TASK_TYPE, VIDEO_GENERATION_TASK_TYPE,
+    };
+    use crate::test_support::migrated_test_store;
+
+    #[tokio::test]
+    async fn image_generation_task_round_trips_result_fields() {
+        let store = migrated_test_store().await;
+        let task = task_record("image-task", IMAGE_GENERATION_TASK_TYPE);
+        let created_at = timestamp();
+
+        store
+            .insert_image_generation_operation(
+                task,
+                NewImageGenerationTaskRecord {
+                    task_id: "image-task".to_owned(),
+                    backend_id: "ggml.diffusion".to_owned(),
+                    model_id: Some("model-1".to_owned()),
+                    model_path: "models/image.safetensors".to_owned(),
+                    prompt: "a quiet test".to_owned(),
+                    negative_prompt: Some("noise".to_owned()),
+                    mode: "txt2img".to_owned(),
+                    width: 512,
+                    height: 768,
+                    requested_count: 2,
+                    reference_image_path: Some("input.png".to_owned()),
+                    request_data: r#"{"prompt":"a quiet test"}"#.to_owned(),
+                    created_at,
+                    updated_at: created_at,
+                },
+            )
+            .await
+            .expect("insert image operation");
+
+        store
+            .update_image_generation_result(
+                "image-task",
+                &["first.png".to_owned(), "second.png".to_owned()],
+                Some("first.png"),
+                Some(r#"{"primary_image_path":"first.png"}"#),
+            )
+            .await
+            .expect("update image result");
+
+        let view = store
+            .get_image_generation_task("image-task")
+            .await
+            .expect("get image task")
+            .expect("image task exists");
+        assert_eq!(view.task.backend_id, "ggml.diffusion");
+        assert_eq!(view.task.model_id.as_deref(), Some("model-1"));
+        assert_eq!(view.task.width, 512);
+        assert_eq!(view.task.height, 768);
+        assert_eq!(view.task.requested_count, 2);
+        assert_eq!(view.task.primary_image_path.as_deref(), Some("first.png"));
+        assert_eq!(view.task.artifact_paths, vec!["first.png", "second.png"]);
+        assert_eq!(view.state.status, TaskStatus::Pending);
+
+        let list = store.list_image_generation_tasks().await.expect("list image tasks");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].task.task_id, "image-task");
+    }
+
+    #[tokio::test]
+    async fn video_generation_task_round_trips_result_fields() {
+        let store = migrated_test_store().await;
+        let task = task_record("video-task", VIDEO_GENERATION_TASK_TYPE);
+        let created_at = timestamp();
+
+        store
+            .insert_video_generation_operation(
+                task,
+                NewVideoGenerationTaskRecord {
+                    task_id: "video-task".to_owned(),
+                    backend_id: "ggml.diffusion".to_owned(),
+                    model_id: Some("model-2".to_owned()),
+                    model_path: "models/video.safetensors".to_owned(),
+                    prompt: "a moving test".to_owned(),
+                    negative_prompt: None,
+                    width: 640,
+                    height: 360,
+                    frames: 24,
+                    fps: 12.5,
+                    reference_image_path: Some("frame.png".to_owned()),
+                    request_data: r#"{"prompt":"a moving test"}"#.to_owned(),
+                    created_at,
+                    updated_at: created_at,
+                },
+            )
+            .await
+            .expect("insert video operation");
+
+        store
+            .update_video_generation_result(
+                "video-task",
+                Some("video.mp4"),
+                Some(r#"{"video_path":"video.mp4"}"#),
+            )
+            .await
+            .expect("update video result");
+
+        let view = store
+            .get_video_generation_task("video-task")
+            .await
+            .expect("get video task")
+            .expect("video task exists");
+        assert_eq!(view.task.backend_id, "ggml.diffusion");
+        assert_eq!(view.task.model_id.as_deref(), Some("model-2"));
+        assert_eq!(view.task.frames, 24);
+        assert_eq!(view.task.fps, 12.5);
+        assert_eq!(view.task.video_path.as_deref(), Some("video.mp4"));
+        assert_eq!(view.state.status, TaskStatus::Pending);
+
+        let list = store.list_video_generation_tasks().await.expect("list video tasks");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].task.task_id, "video-task");
+    }
+
+    #[tokio::test]
+    async fn audio_transcription_task_round_trips_result_fields() {
+        let store = migrated_test_store().await;
+        let task = task_record("audio-task", AUDIO_TRANSCRIPTION_TASK_TYPE);
+        let created_at = timestamp();
+
+        store
+            .insert_audio_transcription_operation(
+                task,
+                NewAudioTranscriptionTaskRecord {
+                    task_id: "audio-task".to_owned(),
+                    backend_id: "ggml.whisper".to_owned(),
+                    model_id: Some("model-3".to_owned()),
+                    source_path: "audio.wav".to_owned(),
+                    language: Some("en".to_owned()),
+                    prompt: Some("domain words".to_owned()),
+                    detect_language: Some(true),
+                    vad_json: Some(r#"{"enabled":true}"#.to_owned()),
+                    decode_json: Some(r#"{"temperature":0.2}"#.to_owned()),
+                    request_data: r#"{"source_path":"audio.wav"}"#.to_owned(),
+                    created_at,
+                    updated_at: created_at,
+                },
+            )
+            .await
+            .expect("insert audio operation");
+
+        store
+            .update_audio_transcription_result(
+                "audio-task",
+                Some("hello world"),
+                Some(r#"{"text":"hello world","segments":[]}"#),
+            )
+            .await
+            .expect("update audio result");
+
+        let view = store
+            .get_audio_transcription_task("audio-task")
+            .await
+            .expect("get audio task")
+            .expect("audio task exists");
+        assert_eq!(view.task.backend_id, "ggml.whisper");
+        assert_eq!(view.task.model_id.as_deref(), Some("model-3"));
+        assert_eq!(view.task.language.as_deref(), Some("en"));
+        assert_eq!(view.task.prompt.as_deref(), Some("domain words"));
+        assert_eq!(view.task.detect_language, Some(true));
+        assert_eq!(view.task.transcript_text.as_deref(), Some("hello world"));
+        assert_eq!(view.state.status, TaskStatus::Pending);
+
+        let list = store.list_audio_transcription_tasks().await.expect("list audio tasks");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].task.task_id, "audio-task");
+    }
+
+    fn task_record(id: &str, task_type: &str) -> TaskRecord {
+        let now = timestamp();
+        TaskRecord {
+            id: id.to_owned(),
+            task_type: task_type.to_owned(),
+            status: TaskStatus::Pending,
+            model_id: None,
+            input_data: None,
+            result_data: None,
+            error_msg: None,
+            core_task_id: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn timestamp() -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339("2026-06-17T00:00:00Z")
+            .expect("test timestamp")
+            .with_timezone(&Utc)
+    }
+}

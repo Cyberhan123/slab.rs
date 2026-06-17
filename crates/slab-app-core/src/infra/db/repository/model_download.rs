@@ -247,73 +247,36 @@ impl ModelDownloadStore for AnyStore {
 #[cfg(test)]
 mod tests {
     use super::ModelDownloadStore;
-    use crate::domain::models::TaskStatus;
-    use crate::infra::db::{AnyStore, ModelDownloadRecord, TaskRecord, TaskStore};
+    use crate::domain::models::{
+        CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
+        TaskStatus, UnifiedModelKind, UnifiedModelStatus,
+    };
+    use crate::infra::db::{
+        AnyStore, ModelDownloadRecord, ModelStore, TaskRecord, TaskStore, UnifiedModelRecord,
+    };
+    use crate::test_support::migrated_test_store;
     use chrono::Utc;
-    use std::str::FromStr;
 
     async fn new_store() -> AnyStore {
-        let options = sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")
-            .expect("sqlite options");
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await
-            .expect("connect in-memory db");
-        let store = AnyStore { pool };
-
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&store.pool)
-            .await
-            .expect("enable foreign keys");
-        sqlx::query("CREATE TABLE IF NOT EXISTS models (id TEXT PRIMARY KEY)")
-            .execute(&store.pool)
-            .await
-            .expect("create models table");
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS tasks (
-                id TEXT PRIMARY KEY,
-                core_task_id INTEGER,
-                model_id TEXT,
-                task_type TEXT NOT NULL,
-                status TEXT NOT NULL,
-                input_data TEXT,
-                result_data TEXT,
-                error_msg TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )",
-        )
-        .execute(&store.pool)
-        .await
-        .expect("create tasks table");
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS model_downloads (
-                task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
-                model_id TEXT NOT NULL REFERENCES models(id) ON DELETE CASCADE,
-                source_key TEXT NOT NULL,
-                repo_id TEXT NOT NULL,
-                filename TEXT NOT NULL,
-                hub_provider TEXT,
-                status TEXT NOT NULL,
-                error_msg TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )",
-        )
-        .execute(&store.pool)
-        .await
-        .expect("create model_downloads table");
-        sqlx::query(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_model_downloads_active_source
-             ON model_downloads(model_id, source_key)
-             WHERE status IN ('pending', 'running')",
-        )
-        .execute(&store.pool)
-        .await
-        .expect("create active download unique index");
-        sqlx::query("INSERT INTO models (id) VALUES ('model-a')")
-            .execute(&store.pool)
+        let store = migrated_test_store().await;
+        let now = Utc::now();
+        store
+            .upsert_model(UnifiedModelRecord {
+                id: "model-a".to_owned(),
+                display_name: "Model A".to_owned(),
+                kind: UnifiedModelKind::Local.as_str().to_owned(),
+                backend_id: None,
+                capabilities: "[]".to_owned(),
+                status: UnifiedModelStatus::NotDownloaded.as_str().to_owned(),
+                spec: "{}".to_owned(),
+                runtime_presets: None,
+                materialized_artifacts: "{}".to_owned(),
+                selected_download_source: None,
+                config_schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION as i64,
+                config_policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION as i64,
+                created_at: now,
+                updated_at: now,
+            })
             .await
             .expect("insert model");
 

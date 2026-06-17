@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -40,6 +41,23 @@ pub(crate) const TEST_PROVIDER_ID: &str = "openai-main";
 pub(crate) const TEST_REPO_ID: &str = "slab/test-llama";
 pub(crate) const TEST_FILENAME: &str = "test-model.gguf";
 pub(crate) const TEST_HUB_PROVIDER: &str = "hf_hub";
+
+pub(crate) async fn migrated_test_store() -> AnyStore {
+    let options = sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")
+        .expect("sqlite test url")
+        .foreign_keys(true);
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(options)
+        .await
+        .expect("connect migrated in-memory db");
+    sqlx::migrate!("./migrations").run(&pool).await.expect("run migrations");
+    AnyStore { pool }
+}
+
+pub(crate) async fn migrated_test_pool() -> sqlx::Pool<sqlx::Sqlite> {
+    migrated_test_store().await.pool
+}
 
 #[derive(Debug, Default)]
 pub(crate) struct RecordingRuntimeGateway {

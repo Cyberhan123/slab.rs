@@ -466,6 +466,60 @@ mod tests {
     }
 
     #[test]
+    fn resolve_path_rejects_absolute_paths_when_workspace_root_is_set() {
+        let root = temp_root("absolute");
+        let absolute = root.join("inside.txt");
+        let result = resolve_path(Some(&root), &absolute.to_string_lossy());
+
+        assert!(matches!(result, Err(FileSystemError::AbsolutePath(_))));
+
+        #[cfg(windows)]
+        {
+            let result = resolve_path(Some(&root), r"\\?\C:\Windows\system.ini");
+            assert!(matches!(result, Err(FileSystemError::AbsolutePath(_))));
+        }
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolve_path_rejects_parent_segments_even_when_they_stay_in_root() {
+        let root = temp_root("normalize");
+        fs::write(root.join("inside.txt"), "inside").expect("seed file");
+
+        assert!(matches!(
+            resolve_path(Some(&root), "dir/../inside.txt"),
+            Err(FileSystemError::InvalidPath(_))
+        ));
+        assert!(matches!(
+            resolve_path(Some(&root), "dir/../../outside.txt"),
+            Err(FileSystemError::InvalidPath(_))
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolve_path_rejects_symlink_escapes_for_existing_and_new_files() {
+        let root = temp_root("symlink_escape");
+        let outside = temp_root("symlink_outside");
+        fs::write(outside.join("secret.txt"), "secret").expect("seed outside file");
+        let link = root.join("outside-link");
+        if !create_dir_symlink(&outside, &link) {
+            let _ = fs::remove_dir_all(root);
+            let _ = fs::remove_dir_all(outside);
+            return;
+        }
+
+        let existing = resolve_path(Some(&root), "outside-link/secret.txt");
+        let missing = resolve_path(Some(&root), "outside-link/new.txt");
+
+        assert!(matches!(existing, Err(FileSystemError::PathEscapesRoot(_))));
+        assert!(matches!(missing, Err(FileSystemError::PathEscapesRoot(_))));
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(outside);
+    }
+
+    #[test]
     fn filesystem_sandbox_policy_uses_shared_sandbox_policy() {
         assert_eq!(FileSystemSandboxContext::default().policy, FileSystemSandboxPolicy::ReadOnly);
         assert_eq!(
@@ -581,6 +635,16 @@ mod tests {
             std::env::temp_dir().join(format!("slab_file_{name}_{}_{}", std::process::id(), nonce));
         fs::create_dir_all(&root).expect("create temp root");
         root
+    }
+
+    #[cfg(unix)]
+    fn create_dir_symlink(target: &Path, link: &Path) -> bool {
+        std::os::unix::fs::symlink(target, link).is_ok()
+    }
+
+    #[cfg(windows)]
+    fn create_dir_symlink(target: &Path, link: &Path) -> bool {
+        std::os::windows::fs::symlink_dir(target, link).is_ok()
     }
 
     fn assert_tmp_files(root: &Path, expected: &[&str]) {

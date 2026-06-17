@@ -128,7 +128,7 @@ async function waitForPluginFrame(page: Page, browserEvents: string[]): Promise<
         `browser events: ${browserEvents.join("\n")}`,
       ].join("\n")
     }
-    throw new Error(`${error instanceof Error ? error.message : String(error)}\n${assetDebug}`)
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\n${assetDebug}`, { cause: error })
   }
 
   return pluginFrame

@@ -64,29 +64,12 @@ impl UiStateStore for AnyStore {
 mod tests {
     use super::UiStateStore;
     use crate::infra::db::{AnyStore, UiStateRecord};
+    use crate::test_support::migrated_test_store;
     use chrono::Utc;
-    use std::str::FromStr;
 
     #[tokio::test]
     async fn ui_state_store_round_trips_values() {
-        let options = sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")
-            .expect("sqlite options");
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await
-            .expect("connect in-memory db");
-        let store = AnyStore { pool };
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS ui_state (
-                \"key\" TEXT PRIMARY KEY,
-                \"value\" TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )",
-        )
-        .execute(&store.pool)
-        .await
-        .expect("create ui_state table");
+        let store = new_store().await;
 
         let now = Utc::now();
         store
@@ -110,5 +93,9 @@ mod tests {
         store.delete_ui_state("zustand:chat-ui").await.expect("delete ui state");
 
         assert!(store.get_ui_state("zustand:chat-ui").await.expect("load deleted row").is_none());
+    }
+
+    async fn new_store() -> AnyStore {
+        migrated_test_store().await
     }
 }

@@ -22,12 +22,14 @@ use crate::{
 use crate::{
     SettingPropertySchema, SettingPropertyView, SettingValue, SettingValueType,
     SettingsDocumentView, SettingsSectionView, SettingsSubsectionView, UpdateSettingCommand,
+    UpdateSettingOperation,
 };
 
 const DEFAULT_SERVER_RUNTIME_BIND_HOST: &str = "127.0.0.1";
 const DEFAULT_SERVER_RUNTIME_BASE_PORT: u32 = 3001;
 const DEFAULT_DESKTOP_RUNTIME_BIND_HOST: &str = "127.0.0.1";
 const DEFAULT_DESKTOP_RUNTIME_BASE_PORT: u32 = 50051;
+const SECRET_PLACEHOLDER: &str = "[REDACTED_SECRET]";
 
 #[derive(Debug, Clone)]
 pub struct PmidService {
@@ -101,6 +103,17 @@ impl PmidService {
         command: UpdateSettingCommand,
     ) -> Result<SettingPropertyView, ConfigError> {
         let pmid = pmid.as_ref();
+        let UpdateSettingCommand { op, value } = command;
+        let command = match (op, value) {
+            (UpdateSettingOperation::Set, Some(value)) if secret(pmid) => {
+                let current_value = self.settings.value(pmid).await?;
+                UpdateSettingCommand {
+                    op: UpdateSettingOperation::Set,
+                    value: Some(restore_secret_placeholders(pmid, value, Some(&current_value))),
+                }
+            }
+            (op, value) => UpdateSettingCommand { op, value },
+        };
         self.settings.update(pmid, command).await?;
         self.refresh().await?;
         self.property(pmid).await
@@ -247,6 +260,24 @@ fn build_property_view_from_documents(
     let effective_value = setting_value(current, pmid)?;
     let default_value = setting_value(default_document, pmid)?;
     let is_overridden = effective_value != default_value;
+    let is_secret = secret(pmid);
+    let view_effective_value = if is_secret {
+        redact_setting_value(pmid, effective_value.clone())
+    } else {
+        effective_value.clone()
+    };
+    let view_default_value = if is_secret {
+        redact_setting_value(pmid, default_value.clone())
+    } else {
+        default_value.clone()
+    };
+    let view_override_value = is_overridden.then(|| {
+        if is_secret {
+            redact_setting_value(pmid, effective_value.clone())
+        } else {
+            effective_value.clone()
+        }
+    });
 
     Ok(SettingPropertyView {
         pmid: pmid.to_owned(),
@@ -261,13 +292,13 @@ fn build_property_view_from_documents(
             maximum: None,
             pattern: None,
             json_schema: json_schema(pmid),
-            default_value: default_value.clone(),
-            secret: secret(pmid),
+            default_value: view_default_value,
+            secret: is_secret,
             multiline: multiline(pmid),
             order: 0,
         },
-        effective_value: effective_value.clone(),
-        override_value: is_overridden.then_some(effective_value),
+        effective_value: view_effective_value,
+        override_value: view_override_value,
         is_overridden,
         search_terms: search_terms(pmid),
     })
@@ -939,6 +970,137 @@ fn string_map_json_schema(title: &str, title_key: ServerI18nKey) -> Value {
 
 fn secret(path: &str) -> bool {
     path == "server.admin.token"
+        || path == "providers.registry"
+        || path == "agent.tools.websearch.providers"
+}
+
+fn redact_setting_value(path: &str, value: SettingValue) -> SettingValue {
+    match path {
+        "server.admin.token" => redact_secret_leaf(value),
+        "providers.registry" | "agent.tools.websearch.providers" => redact_api_key_fields(value),
+        _ => value,
+    }
+}
+
+fn redact_secret_leaf(value: SettingValue) -> SettingValue {
+    match value {
+        SettingValue::String(value) if !value.is_empty() => {
+            SettingValue::String(SECRET_PLACEHOLDER.to_owned())
+        }
+        other => other,
+    }
+}
+
+fn redact_api_key_fields(value: SettingValue) -> SettingValue {
+    match value {
+        SettingValue::Array(values) => {
+            SettingValue::Array(values.into_iter().map(redact_api_key_fields).collect())
+        }
+        SettingValue::Object(values) => SettingValue::Object(
+            values
+                .into_iter()
+                .map(|(key, value)| {
+                    let value = if key == "api_key" {
+                        redact_secret_leaf(value)
+                    } else {
+                        redact_api_key_fields(value)
+                    };
+                    (key, value)
+                })
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+fn restore_secret_placeholders(
+    path: &str,
+    requested: SettingValue,
+    current: Option<&SettingValue>,
+) -> SettingValue {
+    match path {
+        "server.admin.token" => restore_secret_leaf(requested, current),
+        "providers.registry" | "agent.tools.websearch.providers" => {
+            restore_api_key_placeholders(requested, current)
+        }
+        _ => requested,
+    }
+}
+
+fn restore_secret_leaf(requested: SettingValue, current: Option<&SettingValue>) -> SettingValue {
+    match requested {
+        SettingValue::String(value) if value == SECRET_PLACEHOLDER => {
+            current.cloned().unwrap_or(SettingValue::Null)
+        }
+        other => other,
+    }
+}
+
+fn restore_api_key_placeholders(
+    requested: SettingValue,
+    current: Option<&SettingValue>,
+) -> SettingValue {
+    match requested {
+        SettingValue::Array(values) => SettingValue::Array(
+            values
+                .into_iter()
+                .enumerate()
+                .map(|(index, value)| {
+                    let current_item = current_array_item_for_request(current, index, &value);
+                    restore_api_key_placeholders(value, current_item)
+                })
+                .collect(),
+        ),
+        SettingValue::Object(values) => SettingValue::Object(
+            values
+                .into_iter()
+                .map(|(key, value)| {
+                    let current_child = current_object_child(current, &key);
+                    let value = if key == "api_key" {
+                        restore_secret_leaf(value, current_child)
+                    } else {
+                        restore_api_key_placeholders(value, current_child)
+                    };
+                    (key, value)
+                })
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+fn current_object_child<'a>(
+    current: Option<&'a SettingValue>,
+    key: &str,
+) -> Option<&'a SettingValue> {
+    match current {
+        Some(SettingValue::Object(values)) => values.get(key),
+        _ => None,
+    }
+}
+
+fn current_array_item_for_request<'a>(
+    current: Option<&'a SettingValue>,
+    index: usize,
+    requested: &SettingValue,
+) -> Option<&'a SettingValue> {
+    let Some(SettingValue::Array(values)) = current else {
+        return None;
+    };
+
+    setting_object_string(requested, "id")
+        .and_then(|id| values.iter().find(|value| setting_object_string(value, "id") == Some(id)))
+        .or_else(|| values.get(index))
+}
+
+fn setting_object_string<'a>(value: &'a SettingValue, key: &str) -> Option<&'a str> {
+    match value {
+        SettingValue::Object(values) => match values.get(key) {
+            Some(SettingValue::String(value)) => Some(value.as_str()),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn multiline(path: &str) -> bool {
@@ -1544,6 +1706,127 @@ mod tests {
         assert_eq!(plugin_install_dir.effective_value, json!(expected_plugin_dir).into());
         assert_eq!(plugin_install_dir.schema.default_value, plugin_install_dir.effective_value);
         assert!(!plugin_install_dir.is_overridden);
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn secret_setting_views_redact_literal_secret_values() {
+        let path = temp_settings_path();
+        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        let mut document = SettingsDocument::default();
+        document.server.admin.token = Some("admin-secret-token".to_owned());
+        document.providers.registry.push(ProviderRegistryEntry {
+            id: "openai-main".to_owned(),
+            family: ProviderFamily::OpenaiCompatible,
+            display_name: "OpenAI".to_owned(),
+            api_base: "https://api.openai.com/v1".to_owned(),
+            auth: ProviderAuthConfig {
+                api_key: Some("provider-secret-token".to_owned()),
+                api_key_env: Some("OPENAI_API_KEY".to_owned()),
+            },
+            defaults: ProviderDefaultsConfig::default(),
+        });
+        document.agent.tools.websearch.providers.google.auth.api_key =
+            Some("google-secret-token".to_owned());
+        document.agent.tools.websearch.providers.google.auth.api_key_env =
+            Some("GOOGLE_API_KEY".to_owned());
+        fs::write(&path, serde_json::to_string_pretty(&document).expect("serialize"))
+            .expect("write");
+
+        let service = PmidService::load_from_path(path.clone()).await.expect("pmid service");
+        let admin = service.property("server.admin.token").await.expect("admin token");
+        let registry = service.property("providers.registry").await.expect("provider registry");
+        let websearch =
+            service.property("agent.tools.websearch.providers").await.expect("websearch providers");
+        let mcp = service.property("agent.tools.mcp.servers").await.expect("mcp servers");
+        let registry_value = registry.effective_value.clone().into_json_value();
+        let websearch_value = websearch.effective_value.clone().into_json_value();
+
+        assert!(admin.schema.secret);
+        assert_eq!(admin.effective_value, SettingValue::String(SECRET_PLACEHOLDER.to_owned()));
+        assert!(registry.schema.secret);
+        assert_eq!(registry_value.pointer("/0/auth/api_key"), Some(&json!(SECRET_PLACEHOLDER)));
+        assert_eq!(registry_value.pointer("/0/auth/api_key_env"), Some(&json!("OPENAI_API_KEY")));
+        assert!(websearch.schema.secret);
+        assert_eq!(
+            websearch_value.pointer("/google/auth/api_key"),
+            Some(&json!(SECRET_PLACEHOLDER))
+        );
+        assert_eq!(
+            websearch_value.pointer("/google/auth/api_key_env"),
+            Some(&json!("GOOGLE_API_KEY"))
+        );
+        assert!(!mcp.schema.secret);
+        assert!(!registry_value.to_string().contains("provider-secret-token"));
+        assert!(!websearch_value.to_string().contains("google-secret-token"));
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn update_setting_preserves_redacted_secret_placeholders() {
+        let path = temp_settings_path();
+        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        let mut document = SettingsDocument::default();
+        document.server.admin.token = Some("admin-secret-token".to_owned());
+        document.providers.registry.push(ProviderRegistryEntry {
+            id: "openai-main".to_owned(),
+            family: ProviderFamily::OpenaiCompatible,
+            display_name: "OpenAI".to_owned(),
+            api_base: "https://api.openai.com/v1".to_owned(),
+            auth: ProviderAuthConfig {
+                api_key: Some("provider-secret-token".to_owned()),
+                api_key_env: None,
+            },
+            defaults: ProviderDefaultsConfig::default(),
+        });
+        fs::write(&path, serde_json::to_string_pretty(&document).expect("serialize"))
+            .expect("write");
+
+        let service = PmidService::load_from_path(path.clone()).await.expect("pmid service");
+        let admin = service.property("server.admin.token").await.expect("admin token");
+        service
+            .update_setting(
+                "server.admin.token",
+                UpdateSettingCommand {
+                    op: crate::UpdateSettingOperation::Set,
+                    value: Some(admin.effective_value),
+                },
+            )
+            .await
+            .expect("admin token update");
+
+        let registry = service.property("providers.registry").await.expect("provider registry");
+        let mut registry_value = registry.effective_value.into_json_value();
+        registry_value[0]["display_name"] = json!("OpenAI Updated");
+        service
+            .update_setting(
+                "providers.registry",
+                UpdateSettingCommand {
+                    op: crate::UpdateSettingOperation::Set,
+                    value: Some(registry_value.into()),
+                },
+            )
+            .await
+            .expect("registry update");
+
+        let persisted: SettingsDocument =
+            serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
+        let provider = persisted.providers.registry.first().expect("provider");
+
+        assert_eq!(persisted.server.admin.token.as_deref(), Some("admin-secret-token"));
+        assert_eq!(provider.display_name, "OpenAI Updated");
+        assert_eq!(provider.auth.api_key.as_deref(), Some("provider-secret-token"));
+
+        let returned = service.property("providers.registry").await.expect("provider registry");
+        assert!(
+            !returned
+                .effective_value
+                .into_json_value()
+                .to_string()
+                .contains("provider-secret-token")
+        );
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }

@@ -188,3 +188,54 @@ fn system_time_millis(time: Result<std::time::SystemTime, std::io::Error>) -> u6
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn local_executor_file_system_round_trips_workspace_files() {
+        let root = temp_root("round_trip");
+        let file_system = LocalExecutorFileSystem::new(&root).expect("filesystem");
+        let context = file_system.context.clone();
+
+        file_system.write_file(&context, "notes/today.md", b"hello").await.expect("write");
+        let content = file_system.read_file(&context, "notes/today.md").await.expect("read");
+        let metadata =
+            file_system.get_metadata(&context, "notes/today.md").await.expect("metadata");
+        let entries = file_system.read_directory(&context, "notes").await.expect("directory");
+
+        assert_eq!(content, b"hello");
+        assert!(metadata.is_file);
+        assert!(!metadata.is_directory);
+        assert!(entries.iter().any(|entry| entry.path == "notes/today.md"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn local_executor_file_system_rejects_workspace_escapes() {
+        let root = temp_root("escape");
+        let file_system = LocalExecutorFileSystem::new(&root).expect("filesystem");
+        let context = file_system.context.clone();
+
+        let read = file_system.read_file(&context, "../outside.txt").await;
+        let write = file_system.write_file(&context, "../outside.txt", b"outside").await;
+
+        assert!(matches!(read, Err(FileSystemError::InvalidPath(_))));
+        assert!(matches!(write, Err(FileSystemError::InvalidPath(_))));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn temp_root(name: &str) -> PathBuf {
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "slab_workspace_fs_{name}_{}_{}",
+            std::process::id(),
+            nonce
+        ));
+        fs::create_dir_all(&root).expect("create temp root");
+        root
+    }
+}

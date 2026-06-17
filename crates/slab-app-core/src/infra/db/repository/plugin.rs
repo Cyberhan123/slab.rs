@@ -210,20 +210,12 @@ fn row_to_record(row: PluginStateRow) -> PluginStateRecord {
 mod tests {
     use super::PluginStateStore;
     use crate::infra::db::{AnyStore, PluginStateRecord};
+    use crate::test_support::migrated_test_store;
     use chrono::Utc;
-    use std::str::FromStr;
 
     #[tokio::test]
     async fn plugin_state_store_round_trips_lifecycle_fields() {
-        let options = sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")
-            .expect("sqlite options");
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await
-            .expect("connect in-memory db");
-        let store = AnyStore { pool };
-        create_table(&store).await;
+        let store = new_store().await;
 
         let now = Utc::now();
         store
@@ -282,27 +274,7 @@ mod tests {
         );
     }
 
-    async fn create_table(store: &AnyStore) {
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS plugin_states (
-                plugin_id TEXT PRIMARY KEY NOT NULL,
-                source_kind TEXT NOT NULL,
-                source_ref TEXT,
-                install_root TEXT,
-                installed_version TEXT,
-                manifest_hash TEXT,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                runtime_status TEXT NOT NULL DEFAULT 'stopped',
-                last_error TEXT,
-                installed_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                last_seen_at TEXT,
-                last_started_at TEXT,
-                last_stopped_at TEXT
-            )",
-        )
-        .execute(&store.pool)
-        .await
-        .expect("create plugin_states table");
+    async fn new_store() -> AnyStore {
+        migrated_test_store().await
     }
 }

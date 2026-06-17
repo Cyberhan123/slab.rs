@@ -243,8 +243,8 @@ mod tests {
     use super::{TaskStore, decode_task_payload, encode_task_payload};
     use crate::domain::models::TaskStatus;
     use crate::infra::db::{AnyStore, TaskRecord};
+    use crate::test_support::migrated_test_store;
     use chrono::Utc;
-    use std::str::FromStr;
 
     #[test]
     fn envelope_round_trips_json_payload() {
@@ -359,33 +359,6 @@ mod tests {
     }
 
     async fn new_store() -> AnyStore {
-        let options = sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")
-            .expect("sqlite options");
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await
-            .expect("connect in-memory db");
-        let store = AnyStore { pool };
-
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS tasks (
-                id TEXT PRIMARY KEY,
-                core_task_id INTEGER,
-                model_id TEXT,
-                task_type TEXT NOT NULL,
-                status TEXT NOT NULL,
-                input_data TEXT,
-                result_data TEXT,
-                error_msg TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )",
-        )
-        .execute(&store.pool)
-        .await
-        .expect("create tasks table");
-
-        store
+        migrated_test_store().await
     }
 }

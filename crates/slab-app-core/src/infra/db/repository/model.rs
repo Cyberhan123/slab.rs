@@ -183,19 +183,7 @@ impl ModelStore for AnyStore {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
-    async fn migrated_pool() -> sqlx::Pool<sqlx::Sqlite> {
-        let options =
-            sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:").expect("sqlite url");
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await
-            .expect("connect in-memory db");
-        sqlx::migrate!("./migrations").run(&pool).await.expect("run migrations");
-        pool
-    }
+    use crate::test_support::migrated_test_pool;
 
     #[tokio::test]
     async fn remove_provider_migration_keeps_canonical_model_columns() {
@@ -273,7 +261,7 @@ mod tests {
 
     #[tokio::test]
     async fn storage_value_checks_reject_invalid_closed_values() {
-        let pool = migrated_pool().await;
+        let pool = migrated_test_pool().await;
 
         sqlx::query(
             "INSERT INTO models (
