@@ -13,7 +13,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@slab/components/toolti
 import { SoftPanel, StageEmptyState, StatusPill } from "@slab/components/workspace"
 import {
   Command as CommandPaletteIcon,
+  FileCode2,
   Files,
+  Folder,
   FolderKanban,
   FolderOpen,
   GitBranch,
@@ -23,6 +25,10 @@ import {
   X,
 } from "lucide-react"
 
+import {
+  workspaceReadDirectory,
+  type WorkspaceDirectoryResponse,
+} from "@/lib/workspace-bridge"
 import { cn } from "@/lib/utils"
 import type { WorkspacePageState } from "../hooks/use-workspace-page"
 import { runWorkspaceVscodeCommand } from "../lib/workspace-lsp"
@@ -41,6 +47,7 @@ const EXPLORER_MAX_WIDTH = 640
 export function WorkspaceWorkbench({
   activeFilePath,
   consoleOpen,
+  editorContent,
   editorSettings,
   editorTheme,
   explorerPanel,
@@ -76,6 +83,8 @@ export function WorkspaceWorkbench({
   selectedGitDiff,
   selectedGitDiffEntry,
   selectedFileDirty,
+  savingFile,
+  setEditorContent,
   setTextSearchQuery,
   textSearchFetching,
   textSearchQuery,
@@ -86,6 +95,7 @@ export function WorkspaceWorkbench({
   const { t } = useTranslation()
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [explorerWidth, setExplorerWidth] = useState(380)
+  const [pathInput, setPathInput] = useState("")
   const explorerResizeStartWidthRef = useRef(explorerWidth)
   const previousResizeCursorRef = useRef("")
   const previousResizeUserSelectRef = useRef("")
@@ -203,18 +213,13 @@ export function WorkspaceWorkbench({
     />
   )
 
-  if (!isDesktopTauri) {
-    return (
-      <div className="h-full w-full overflow-y-auto px-1 pb-10">
-        <StageEmptyState
-          icon={FolderKanban}
-          title={t("pages.workspace.empty.title")}
-          description={t("pages.plugins.desktopOnly.description")}
-          className="min-h-[520px]"
-        />
-      </div>
-    )
-  }
+  const browserPathForm = !isDesktopTauri ? (
+    <WorkspacePathOpenForm
+      pathInput={pathInput}
+      setPathInput={setPathInput}
+      onOpenWorkspacePath={openWorkspacePath}
+    />
+  ) : null
 
   if (!workspace) {
     return (
@@ -225,11 +230,15 @@ export function WorkspaceWorkbench({
             title={t("pages.workspace.empty.title")}
             description={t("pages.workspace.empty.description")}
             action={
-              <div className="flex items-center gap-2">
-                <Button variant="cta" size="pill" onClick={handleOpenFolder}>
-                  <FolderOpen className="size-4" />
-                  {t("pages.workspace.actions.openFolder")}
-                </Button>
+              <div className="flex flex-col items-center gap-3">
+                {isDesktopTauri ? (
+                  <Button variant="cta" size="pill" onClick={handleOpenFolder}>
+                    <FolderOpen className="size-4" />
+                    {t("pages.workspace.actions.openFolder")}
+                  </Button>
+                ) : (
+                  browserPathForm
+                )}
                 {commandPaletteButton}
               </div>
             }
@@ -259,11 +268,18 @@ export function WorkspaceWorkbench({
           <p className="mt-1 truncate text-xs text-muted-foreground">{workspace.rootPath}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="pill" size="sm" onClick={handleOpenFolder}>
-            <FolderOpen className="size-4" />
-            {t("pages.workspace.actions.openFolder")}
-          </Button>
-          <Button variant="quiet" size="sm" onClick={handleCloseWorkspace}>
+          {isDesktopTauri ? (
+            <Button variant="pill" size="sm" onClick={handleOpenFolder}>
+              <FolderOpen className="size-4" />
+              {t("pages.workspace.actions.openFolder")}
+            </Button>
+          ) : null}
+          <Button
+            variant="quiet"
+            size="sm"
+            onClick={handleCloseWorkspace}
+            data-testid="workspace-close-button"
+          >
             <X className="size-4" />
             {t("pages.workspace.actions.closeWorkspace")}
           </Button>
@@ -330,7 +346,14 @@ export function WorkspaceWorkbench({
 
             {explorerPanel === "files" ? (
               <div className="h-full min-h-0 flex-1 overflow-hidden rounded-[12px] bg-[var(--surface-1)]">
-                <WorkspaceVscodePart part="explorer" workspaceRoot={workspace.rootPath} />
+                {isDesktopTauri ? (
+                  <WorkspaceVscodePart part="explorer" workspaceRoot={workspace.rootPath} />
+                ) : (
+                  <WorkspaceServerFileTree
+                    activeFilePath={activeFilePath}
+                    onOpenFile={handleOpenFile}
+                  />
+                )}
               </div>
             ) : explorerPanel === "search" ? (
               <div className="h-full min-h-0 flex-1 overflow-hidden">
@@ -399,11 +422,22 @@ export function WorkspaceWorkbench({
                 </div>
               </>
             ) : (
-              <WorkspaceVscodePart
-                part="editor"
-                workspaceRoot={workspace.rootPath}
-                className="min-h-[420px] flex-1"
-              />
+              isDesktopTauri ? (
+                <WorkspaceVscodePart
+                  part="editor"
+                  workspaceRoot={workspace.rootPath}
+                  className="min-h-[420px] flex-1"
+                />
+              ) : (
+                <WorkspaceBrowserEditor
+                  editorContent={editorContent}
+                  onChange={setEditorContent}
+                  onSave={handleSaveFile}
+                  savingFile={savingFile}
+                  selectedFile={selectedFile}
+                  selectedFileDirty={selectedFileDirty}
+                />
+              )
             )}
           </SoftPanel>
 
@@ -418,4 +452,219 @@ export function WorkspaceWorkbench({
       {commandPalette}
     </div>
   )
+}
+
+function WorkspacePathOpenForm({
+  onOpenWorkspacePath,
+  pathInput,
+  setPathInput,
+}: {
+  onOpenWorkspacePath: (rootPath: string) => Promise<void>
+  pathInput: string
+  setPathInput: (value: string) => void
+}) {
+  const { t } = useTranslation()
+  const trimmedPath = pathInput.trim()
+
+  return (
+    <form
+      className="flex w-full max-w-2xl flex-col gap-2 sm:flex-row"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (trimmedPath) {
+          void onOpenWorkspacePath(trimmedPath)
+        }
+      }}
+    >
+      <input
+        value={pathInput}
+        onChange={(event) => setPathInput(event.target.value)}
+        className="h-10 min-w-0 flex-1 rounded-[8px] border border-border/60 bg-background px-3 text-sm outline-none transition focus:border-[var(--brand-teal)]"
+        placeholder={t("pages.workspace.actions.pathPlaceholder")}
+        aria-label={t("pages.workspace.actions.pathPlaceholder")}
+        data-testid="workspace-path-input"
+      />
+      <Button
+        type="submit"
+        variant="cta"
+        size="pill"
+        disabled={!trimmedPath}
+        data-testid="workspace-open-path-button"
+      >
+        <FolderOpen className="size-4" />
+        {t("pages.workspace.actions.openFolder")}
+      </Button>
+    </form>
+  )
+}
+
+function WorkspaceServerFileTree({
+  activeFilePath,
+  onOpenFile,
+}: {
+  activeFilePath: string | null
+  onOpenFile: (relativePath: string) => Promise<unknown>
+}) {
+  const { t } = useTranslation()
+  const [directoryPath, setDirectoryPath] = useState("")
+  const [directory, setDirectory] = useState<WorkspaceDirectoryResponse | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    void workspaceReadDirectory(directoryPath)
+      .then((response) => {
+        if (!cancelled) {
+          setDirectory(response)
+        }
+      })
+      .catch((readError: unknown) => {
+        if (!cancelled) {
+          setError(readError instanceof Error ? readError.message : String(readError))
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [directoryPath])
+
+  const parentPath = directoryPath.split("/").slice(0, -1).join("/")
+
+  return (
+    <div className="flex h-full min-h-0 flex-col" data-testid="workspace-file-tree">
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/50 px-2">
+        <Button
+          type="button"
+          variant="quiet"
+          size="xs"
+          disabled={!directoryPath}
+          onClick={() => setDirectoryPath(parentPath)}
+          data-testid="workspace-tree-up"
+        >
+          {t("pages.workspace.actions.upDirectory")}
+        </Button>
+        <span
+          className="min-w-0 truncate font-mono text-[11px] text-muted-foreground"
+          data-testid="workspace-current-directory"
+        >
+          {directoryPath || t("pages.workspace.tree.root")}
+        </span>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto py-1" data-testid="workspace-file-list">
+        {loading ? (
+          <div className="flex h-full min-h-[160px] items-center justify-center">
+            <Loader2 className="size-4 animate-spin text-muted-foreground" />
+          </div>
+        ) : error ? (
+          <div className="px-3 py-2 text-sm text-destructive">{error}</div>
+        ) : directory?.entries.length ? (
+          directory.entries.map((entry) => {
+            const active = activeFilePath === entry.relativePath
+            const isDirectory = entry.kind === "directory"
+            const Icon = isDirectory ? Folder : FileCode2
+
+            return (
+              <button
+                key={entry.relativePath}
+                type="button"
+                className={cn(
+                  "flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left text-sm transition hover:bg-[var(--surface-selected)]",
+                  active && "bg-[var(--surface-selected)] text-[var(--brand-teal)]",
+                )}
+                title={entry.relativePath}
+                data-testid={`workspace-${isDirectory ? "directory" : "file"}-${testIdPath(entry.relativePath)}`}
+                onClick={() => {
+                  if (isDirectory) {
+                    setDirectoryPath(entry.relativePath)
+                    return
+                  }
+                  void onOpenFile(entry.relativePath)
+                }}
+              >
+                <Icon className={cn("size-4 shrink-0", isDirectory ? "text-[var(--brand-teal)]" : "text-muted-foreground")} />
+                <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+              </button>
+            )
+          })
+        ) : (
+          <div className="flex h-full min-h-[160px] items-center justify-center px-4 text-center text-sm text-muted-foreground">
+            {t("pages.workspace.tree.empty")}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function WorkspaceBrowserEditor({
+  editorContent,
+  onChange,
+  onSave,
+  savingFile,
+  selectedFile,
+  selectedFileDirty,
+}: {
+  editorContent: string
+  onChange: (value: string) => void
+  onSave: () => Promise<void>
+  savingFile: boolean
+  selectedFile: WorkspacePageState["selectedFile"]
+  selectedFileDirty: boolean
+}) {
+  const { t } = useTranslation()
+
+  if (!selectedFile) {
+    return (
+      <StageEmptyState
+        icon={FileCode2}
+        title={t("pages.workspace.editor.emptyTitle")}
+        description={t("pages.workspace.editor.emptyDescription")}
+        className="min-h-[420px]"
+      />
+    )
+  }
+
+  return (
+    <div className="flex h-full min-h-[420px] flex-col" data-testid="workspace-browser-editor">
+      <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-background/80 px-3">
+        <div className="min-w-0 truncate font-mono text-xs text-muted-foreground" title={selectedFile.relativePath}>
+          {selectedFile.relativePath}
+        </div>
+        <Button
+          type="button"
+          variant={selectedFileDirty ? "cta" : "quiet"}
+          size="sm"
+          disabled={savingFile || !selectedFileDirty}
+          onClick={() => {
+            void onSave()
+          }}
+          data-testid="workspace-save-button"
+        >
+          {savingFile ? <Loader2 className="size-3.5 animate-spin" /> : null}
+          {t("pages.workspace.editor.save")}
+        </Button>
+      </div>
+      <textarea
+        value={editorContent}
+        onChange={(event) => onChange(event.target.value)}
+        className="min-h-0 flex-1 resize-none bg-[var(--surface-1)] p-3 font-mono text-sm leading-6 outline-none"
+        spellCheck={false}
+        aria-label={selectedFile.relativePath}
+        data-testid="workspace-editor-textarea"
+      />
+    </div>
+  )
+}
+
+function testIdPath(path: string) {
+  return path.replace(/[^A-Za-z0-9_-]/g, "-")
 }

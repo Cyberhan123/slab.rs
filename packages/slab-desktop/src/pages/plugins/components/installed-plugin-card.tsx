@@ -70,7 +70,10 @@ export function InstalledPluginCard({
   }
 
   return (
-    <article className="relative flex min-h-[194px] flex-col gap-4 rounded-[12px] border border-[color-mix(in_oklab,var(--border)_54%,transparent)] bg-[var(--shell-card)] p-[17px] shadow-[var(--shell-elevation)] transition hover:-translate-y-0.5 hover:border-[color-mix(in_oklab,var(--brand-teal)_28%,var(--border))] hover:shadow-[0_24px_50px_-40px_color-mix(in_oklab,var(--foreground)_38%,transparent)]">
+    <article
+      className="relative flex min-h-[194px] flex-col gap-4 rounded-[12px] border border-[color-mix(in_oklab,var(--border)_54%,transparent)] bg-[var(--shell-card)] p-[17px] shadow-[var(--shell-elevation)] transition hover:-translate-y-0.5 hover:border-[color-mix(in_oklab,var(--brand-teal)_28%,var(--border))] hover:shadow-[0_24px_50px_-40px_color-mix(in_oklab,var(--foreground)_38%,transparent)]"
+      data-testid={`plugin-card-${plugin.id}`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className={cn('flex size-10 items-center justify-center rounded-[8px]', toneSurfaceClassName(tone))}>
           <Icon className={cn('size-[19px]', toneTextClassName(tone))} />
@@ -107,6 +110,7 @@ export function InstalledPluginCard({
             !running && plugin.enabled && 'bg-[linear-gradient(135deg,#00685f_0%,#008378_100%)] text-white',
           )}
           onClick={onPrimaryAction}
+          data-testid={`plugin-primary-action-${plugin.id}`}
         >
           {busy ? <Loader2 className="size-3.5 animate-spin" /> : <PrimaryIcon className="size-3.5" />}
           {primaryLabel}
@@ -122,6 +126,7 @@ export function InstalledPluginCard({
               ? t('pages.plugins.actions.disableAria', { name: plugin.name })
               : t('pages.plugins.actions.enableAria', { name: plugin.name })
           }
+          data-testid={`plugin-toggle-enabled-${plugin.id}`}
         >
           <Power className="size-3.5" />
         </Button>

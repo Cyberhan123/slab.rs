@@ -1,11 +1,12 @@
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 pub type WorkspaceGitStatusView = slab_git::GitStatus;
 pub type WorkspaceGitStatusSummary = slab_git::GitStatusSummary;
 pub type WorkspaceGitStatusEntry = slab_git::GitStatusEntry;
 pub type WorkspaceGitFileStatus = slab_git::GitFileStatus;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceConsoleOutput {
     pub command: String,
@@ -15,7 +16,7 @@ pub struct WorkspaceConsoleOutput {
     pub timed_out: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceWriteFileCommand {
     pub relative_path: String,
@@ -23,7 +24,7 @@ pub struct WorkspaceWriteFileCommand {
     pub expected_hash: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceWriteFileView {
     pub relative_path: String,
@@ -31,7 +32,7 @@ pub struct WorkspaceWriteFileView {
     pub content_hash: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceDirectoryView {
     pub relative_path: String,
@@ -39,7 +40,7 @@ pub struct WorkspaceDirectoryView {
     pub truncated: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceFileSearchView {
     pub query: String,
@@ -47,7 +48,32 @@ pub struct WorkspaceFileSearchView {
     pub truncated: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceTextSearchView {
+    pub query: String,
+    pub matches: Vec<WorkspaceTextSearchFileMatch>,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceTextSearchFileMatch {
+    pub relative_path: String,
+    pub name: String,
+    pub line_matches: Vec<WorkspaceTextSearchLineMatch>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceTextSearchLineMatch {
+    pub line_number: usize,
+    pub line_text: String,
+    pub match_start: usize,
+    pub match_end: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceFileEntry {
     pub id: String,
@@ -63,14 +89,14 @@ pub struct WorkspaceFileEntry {
     pub created_at: Option<u64>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum WorkspaceFileKind {
     Directory,
     File,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacePathMetadata {
     pub relative_path: String,
@@ -80,7 +106,7 @@ pub struct WorkspacePathMetadata {
     pub created_at: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceFileContent {
     pub relative_path: String,
@@ -90,33 +116,33 @@ pub struct WorkspaceFileContent {
     pub content_hash: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceCreateFileCommand {
     pub relative_path: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceCreateDirectoryCommand {
     pub relative_path: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceRenamePathCommand {
     pub from_relative_path: String,
     pub to_relative_path: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceDeletePathCommand {
     pub relative_path: String,
     pub recursive: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacePathView {
     pub relative_path: String,

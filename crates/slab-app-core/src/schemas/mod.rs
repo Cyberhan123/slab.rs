@@ -20,6 +20,7 @@ pub mod tasks;
 pub mod ui_state;
 pub mod validation;
 pub mod video;
+pub mod workspace;
 
 use base64::Engine as _;
 use image::GenericImageView;

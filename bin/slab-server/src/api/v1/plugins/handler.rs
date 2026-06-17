@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Multipart, Path, State};
-use axum::response::IntoResponse;
+use axum::http::{StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::{Json, Router, body::Body};
 use futures::StreamExt;
 use utoipa::{OpenApi, ToSchema};
 
@@ -15,7 +16,8 @@ use crate::error::ServerError;
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::PluginService;
 use slab_app_core::schemas::plugin::{
-    DeletePluginResponse, InstallPluginRequest, PluginPath, PluginResponse, StopPluginRequest,
+    DeletePluginResponse, InstallPluginRequest, PluginApiRequest, PluginApiResponse, PluginPath,
+    PluginResponse, StopPluginRequest,
 };
 
 use super::rpc;
@@ -36,6 +38,7 @@ struct ImportPluginPackMultipartRequest {
         import_plugin_pack,
         plugin_rpc,
         plugin_events,
+        plugin_api_request,
         enable_plugin,
         disable_plugin,
         start_plugin,
@@ -46,6 +49,8 @@ struct ImportPluginPackMultipartRequest {
         DeletePluginResponse,
         ImportPluginPackMultipartRequest,
         InstallPluginRequest,
+        PluginApiRequest,
+        PluginApiResponse,
         PluginPath,
         PluginResponse,
         StopPluginRequest
@@ -60,6 +65,8 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/plugins/import-pack", post(import_plugin_pack))
         .route("/plugins/rpc", get(plugin_rpc))
         .route("/plugins/events", get(plugin_events))
+        .route("/plugins/{id}/api-request", post(plugin_api_request))
+        .route("/plugins/{id}/ui/{*asset_path}", get(plugin_ui_asset))
         .route("/plugins/{id}", get(get_plugin).delete(delete_plugin))
         .route("/plugins/{id}/enable", post(enable_plugin))
         .route("/plugins/{id}/disable", post(disable_plugin))
@@ -167,6 +174,44 @@ async fn plugin_rpc_socket(mut socket: WebSocket, service: PluginService) {
         let response = rpc::handle_payload(&service, &payload).await;
         let _ = socket.send(Message::Text(response.into())).await;
     }
+}
+
+async fn plugin_ui_asset(
+    State(service): State<PluginService>,
+    Path((id, asset_path)): Path<(String, String)>,
+) -> Result<Response, ServerError> {
+    let asset = service.plugin_ui_asset(&id, &asset_path).await?;
+    let cache_control = if cfg!(debug_assertions) { "no-store" } else { "public, max-age=3600" };
+    let mut builder = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, asset.content_type)
+        .header(header::CACHE_CONTROL, cache_control)
+        .header("X-Content-Type-Options", "nosniff");
+
+    if let Some(csp) = asset.csp {
+        builder = builder.header("Content-Security-Policy", csp);
+    }
+
+    builder.body(Body::from(asset.bytes)).map_err(|error| {
+        ServerError::Internal(format!("failed to build plugin asset response: {error}"))
+    })
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/plugins/{id}/api-request",
+    tag = "plugins",
+    params(PluginPath),
+    request_body = PluginApiRequest,
+    responses((status = 200, description = "Proxied plugin Slab API response", body = PluginApiResponse))
+)]
+async fn plugin_api_request(
+    State(service): State<PluginService>,
+    Path(params): Path<PluginPath>,
+    Json(request): Json<PluginApiRequest>,
+) -> Result<Json<PluginApiResponse>, ServerError> {
+    let params = validate(params)?;
+    Ok(Json(service.plugin_api_request(&params.id, request).await?))
 }
 
 #[utoipa::path(
@@ -312,6 +357,7 @@ mod tests {
         let openapi = serde_json::to_value(PluginApi::openapi()).expect("serialize plugin openapi");
         assert!(openapi["paths"]["/v1/plugins/install"]["post"].is_object());
         assert!(openapi["paths"]["/v1/plugins/import-pack"]["post"].is_object());
+        assert!(openapi["paths"]["/v1/plugins/{id}/api-request"]["post"].is_object());
         assert!(openapi["paths"]["/v1/plugins/{id}/start"]["post"].is_object());
     }
 }

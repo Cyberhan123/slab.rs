@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 pub mod config;
@@ -65,6 +66,7 @@ impl AppContext {
 pub struct AppState {
     pub context: Arc<AppContext>,
     pub services: Arc<crate::domain::services::AppServices>,
+    workspace_root: Arc<RwLock<Option<PathBuf>>>,
 }
 
 impl AppState {
@@ -97,7 +99,24 @@ impl AppState {
             runtime_host,
         ));
 
-        Self { context, services }
+        let workspace_root = Arc::new(RwLock::new(
+            crate::domain::services::workspace_root_from_config(config.as_ref()),
+        ));
+
+        Self { context, services, workspace_root }
+    }
+
+    pub fn workspace_root(&self) -> Option<PathBuf> {
+        self.workspace_root.read().ok().and_then(|guard| guard.clone())
+    }
+
+    pub fn set_workspace_root(&self, workspace_root: Option<PathBuf>) -> Result<(), String> {
+        let mut guard = self
+            .workspace_root
+            .write()
+            .map_err(|_| "failed to lock workspace root for write".to_string())?;
+        *guard = workspace_root;
+        Ok(())
     }
 }
 

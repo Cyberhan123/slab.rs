@@ -310,6 +310,9 @@ class ServerI18NKey(str, Enum):
     SERVER_SETTINGS_PROPERTIES_DESCRIPTION_MAXUNUSEDDAYS = (
         "server.settings.properties.description.maxUnusedDays"
     )
+    SERVER_SETTINGS_PROPERTIES_DESCRIPTION_MCPSERVERS = (
+        "server.settings.properties.description.mcpServers"
+    )
     SERVER_SETTINGS_PROPERTIES_DESCRIPTION_MCPTOOLS = (
         "server.settings.properties.description.mcpTools"
     )
@@ -403,8 +406,23 @@ class ServerI18NKey(str, Enum):
     SERVER_SETTINGS_PROPERTIES_LABEL_AGENTMEMORIES = (
         "server.settings.properties.label.agentMemories"
     )
+    SERVER_SETTINGS_PROPERTIES_LABEL_AGENTMEMORYMODEL = (
+        "server.settings.properties.label.agentMemoryModel"
+    )
     SERVER_SETTINGS_PROPERTIES_LABEL_ALLOWEDORIGINS = (
         "server.settings.properties.label.allowedOrigins"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_AUTOUNLOADIDLEMINUTES = (
+        "server.settings.properties.label.autoUnloadIdleMinutes"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_AUTOUNLOADMAXPRESSUREEVICTIONSPERLOAD = (
+        "server.settings.properties.label.autoUnloadMaxPressureEvictionsPerLoad"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_AUTOUNLOADMINFREEGPUMEMORYBYTES = (
+        "server.settings.properties.label.autoUnloadMinFreeGpuMemoryBytes"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_AUTOUNLOADMINFREESYSTEMMEMORYBYTES = (
+        "server.settings.properties.label.autoUnloadMinFreeSystemMemoryBytes"
     )
     SERVER_SETTINGS_PROPERTIES_LABEL_BINDADDRESS = (
         "server.settings.properties.label.bindAddress"
@@ -433,6 +451,45 @@ class ServerI18NKey(str, Enum):
     SERVER_SETTINGS_PROPERTIES_LABEL_FLASHATTENTION = (
         "server.settings.properties.label.flashAttention"
     )
+    SERVER_SETTINGS_PROPERTIES_LABEL_GENERICADDRESS = (
+        "server.settings.properties.label.genericAddress"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_GENERICARTIFACT = (
+        "server.settings.properties.label.genericArtifact"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_GENERICAUTODOWNLOAD = (
+        "server.settings.properties.label.genericAutoDownload"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_GENERICCONCURRENTREQUESTS = (
+        "server.settings.properties.label.genericConcurrentRequests"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_GENERICCONTEXTLENGTH = (
+        "server.settings.properties.label.genericContextLength"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_GENERICENABLED = (
+        "server.settings.properties.label.genericEnabled"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_GENERICINSTALLDIRECTORY = (
+        "server.settings.properties.label.genericInstallDirectory"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_GENERICIPCPATH = (
+        "server.settings.properties.label.genericIpcPath"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_GENERICJSONLOGS = (
+        "server.settings.properties.label.genericJsonLogs"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_GENERICLOGLEVEL = (
+        "server.settings.properties.label.genericLogLevel"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_GENERICPATH = (
+        "server.settings.properties.label.genericPath"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_GENERICQUEUE = (
+        "server.settings.properties.label.genericQueue"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_GENERICVERSION = (
+        "server.settings.properties.label.genericVersion"
+    )
     SERVER_SETTINGS_PROPERTIES_LABEL_INTERFACELANGUAGE = (
         "server.settings.properties.label.interfaceLanguage"
     )
@@ -453,6 +510,9 @@ class ServerI18NKey(str, Enum):
     )
     SERVER_SETTINGS_PROPERTIES_LABEL_MAXUNUSEDDAYS = (
         "server.settings.properties.label.maxUnusedDays"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_MCPSERVERS = (
+        "server.settings.properties.label.mcpServers"
     )
     SERVER_SETTINGS_PROPERTIES_LABEL_MCPTOOLS = (
         "server.settings.properties.label.mcpTools"
@@ -531,6 +591,106 @@ class ServerI18NKey(str, Enum):
     )
     SERVER_SETTINGS_PROPERTIES_LABEL_WEBSEARCHPROVIDERS = (
         "server.settings.properties.label.webSearchProviders"
+    )
+    SERVER_SETTINGS_SCHEMAS_MCP_ARGS_TITLE = "server.settings.schemas.mcp.args.title"
+    SERVER_SETTINGS_SCHEMAS_MCP_COMMAND_DESCRIPTION = (
+        "server.settings.schemas.mcp.command.description"
+    )
+    SERVER_SETTINGS_SCHEMAS_MCP_COMMAND_TITLE = (
+        "server.settings.schemas.mcp.command.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_MCP_CWD_TITLE = "server.settings.schemas.mcp.cwd.title"
+    SERVER_SETTINGS_SCHEMAS_MCP_ENABLED_TITLE = (
+        "server.settings.schemas.mcp.enabled.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_MCP_ENVREFERENCE_TITLE = (
+        "server.settings.schemas.mcp.envReference.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_MCP_ENVVAR_TITLE = (
+        "server.settings.schemas.mcp.envVar.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_MCP_ENV_DESCRIPTION = (
+        "server.settings.schemas.mcp.env.description"
+    )
+    SERVER_SETTINGS_SCHEMAS_MCP_ENV_TITLE = "server.settings.schemas.mcp.env.title"
+    SERVER_SETTINGS_SCHEMAS_MCP_NAME_DESCRIPTION = (
+        "server.settings.schemas.mcp.name.description"
+    )
+    SERVER_SETTINGS_SCHEMAS_MCP_NAME_TITLE = "server.settings.schemas.mcp.name.title"
+    SERVER_SETTINGS_SCHEMAS_MCP_SERVER_TITLE = (
+        "server.settings.schemas.mcp.server.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_PROVIDER_APIBASE_TITLE = (
+        "server.settings.schemas.provider.apiBase.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_PROVIDER_APIKEYENV_TITLE = (
+        "server.settings.schemas.provider.apiKeyEnv.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_PROVIDER_APIKEY_TITLE = (
+        "server.settings.schemas.provider.apiKey.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_PROVIDER_AUTH_TITLE = (
+        "server.settings.schemas.provider.auth.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_PROVIDER_DISPLAYNAME_TITLE = (
+        "server.settings.schemas.provider.displayName.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_PROVIDER_ENTRY_TITLE = (
+        "server.settings.schemas.provider.entry.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_PROVIDER_FAMILY_TITLE = (
+        "server.settings.schemas.provider.family.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_PROVIDER_HEADERS_TITLE = (
+        "server.settings.schemas.provider.headers.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_PROVIDER_ID_DESCRIPTION = (
+        "server.settings.schemas.provider.id.description"
+    )
+    SERVER_SETTINGS_SCHEMAS_PROVIDER_ID_TITLE = (
+        "server.settings.schemas.provider.id.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_PROVIDER_QUERY_TITLE = (
+        "server.settings.schemas.provider.query.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_PROVIDER_REQUESTDEFAULTS_TITLE = (
+        "server.settings.schemas.provider.requestDefaults.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_STRINGENTRY_TITLE = (
+        "server.settings.schemas.stringEntry.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_WEBSEARCH_BASEURL_TITLE = (
+        "server.settings.schemas.webSearch.baseUrl.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_WEBSEARCH_ENGINE_TITLE = (
+        "server.settings.schemas.webSearch.engine.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_WEBSEARCH_INCLUDEANSWER_TITLE = (
+        "server.settings.schemas.webSearch.includeAnswer.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_WEBSEARCH_INCLUDECONTENTS_TITLE = (
+        "server.settings.schemas.webSearch.includeContents.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_WEBSEARCH_INCLUDEIMAGES_TITLE = (
+        "server.settings.schemas.webSearch.includeImages.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_WEBSEARCH_INCLUDERAWCONTENT_TITLE = (
+        "server.settings.schemas.webSearch.includeRawContent.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_WEBSEARCH_MODEL_TITLE = (
+        "server.settings.schemas.webSearch.model.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_WEBSEARCH_SEARCHDEPTH_TITLE = (
+        "server.settings.schemas.webSearch.searchDepth.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_WEBSEARCH_SEARCHENGINEID_TITLE = (
+        "server.settings.schemas.webSearch.searchEngineId.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_WEBSEARCH_USELITE_TITLE = (
+        "server.settings.schemas.webSearch.useLite.title"
+    )
+    SERVER_SETTINGS_SCHEMAS_WEBSEARCH_USERAGENT_TITLE = (
+        "server.settings.schemas.webSearch.userAgent.title"
     )
     SERVER_SETTINGS_SECTIONS_AGENT_DESCRIPTION = (
         "server.settings.sections.agent.description"

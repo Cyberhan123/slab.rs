@@ -59,11 +59,11 @@ export function AppSidebar({ variant = "default" }: AppSidebarProps) {
   const { data: runtimePlugins = [] } = useRuntimePlugins()
   const isChatVariant = variant === "chat"
   const pluginItems = runtimePlugins
-    .filter((plugin) => plugin.valid && plugin.uiEntry)
+    .filter((plugin) => plugin.valid && plugin.enabled && plugin.uiEntry && plugin.uiUrl)
     .flatMap((plugin) =>
-      plugin.contributions.sidebar
+      (plugin.contributions?.sidebar ?? [])
         .map((item): SidebarItem | null => {
-          const targetRoute = plugin.contributions.routes.find(
+          const targetRoute = (plugin.contributions?.routes ?? []).find(
             (contributedRoute) =>
               contributedRoute.id === item.route || contributedRoute.path === item.route
           )

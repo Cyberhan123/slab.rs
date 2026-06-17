@@ -9,14 +9,14 @@ const DEFAULT_HTTP_TIMEOUT_MS: u64 = 15_000;
 const MAX_HTTP_TIMEOUT_MS: u64 = 60_000;
 const MAX_API_RESPONSE_BYTES: usize = 1024 * 1024;
 
-pub(super) fn authorize_slab_api_request(
+pub(crate) fn authorize_slab_api_request(
     allowed: &[String],
     request: &PluginApiRequest,
 ) -> Result<(), String> {
     authorize_plugin_slab_api_request(allowed, request)
 }
 
-pub(super) async fn execute_plugin_api_request(
+pub(crate) async fn execute_plugin_api_request(
     api_base_url: &str,
     request: &PluginApiRequest,
 ) -> Result<PluginApiResponse, String> {

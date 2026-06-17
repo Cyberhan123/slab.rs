@@ -49,6 +49,7 @@ class PluginResponse:
         permissions (None | PluginPermissionsManifest | Unset):
         source_ref (None | str | Unset):
         ui_entry (None | str | Unset):
+        ui_url (None | str | Unset):
         updated_at (None | str | Unset):
     """
 
@@ -80,6 +81,7 @@ class PluginResponse:
     permissions: None | PluginPermissionsManifest | Unset = UNSET
     source_ref: None | str | Unset = UNSET
     ui_entry: None | str | Unset = UNSET
+    ui_url: None | str | Unset = UNSET
     updated_at: None | str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -210,6 +212,12 @@ class PluginResponse:
         else:
             ui_entry = self.ui_entry
 
+        ui_url: None | str | Unset
+        if isinstance(self.ui_url, Unset):
+            ui_url = UNSET
+        else:
+            ui_url = self.ui_url
+
         updated_at: None | str | Unset
         if isinstance(self.updated_at, Unset):
             updated_at = UNSET
@@ -265,6 +273,8 @@ class PluginResponse:
             field_dict["sourceRef"] = source_ref
         if ui_entry is not UNSET:
             field_dict["uiEntry"] = ui_entry
+        if ui_url is not UNSET:
+            field_dict["uiUrl"] = ui_url
         if updated_at is not UNSET:
             field_dict["updatedAt"] = updated_at
 
@@ -468,6 +478,15 @@ class PluginResponse:
 
         ui_entry = _parse_ui_entry(d.pop("uiEntry", UNSET))
 
+        def _parse_ui_url(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        ui_url = _parse_ui_url(d.pop("uiUrl", UNSET))
+
         def _parse_updated_at(data: object) -> None | str | Unset:
             if data is None:
                 return data
@@ -506,6 +525,7 @@ class PluginResponse:
             permissions=permissions,
             source_ref=source_ref,
             ui_entry=ui_entry,
+            ui_url=ui_url,
             updated_at=updated_at,
         )
 

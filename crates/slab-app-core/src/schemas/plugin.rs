@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+pub use slab_types::{PluginApiRequest, PluginApiResponse};
 use slab_types::{
     PluginCompatibilityManifest, PluginContributesManifest, PluginPermissionsManifest,
 };
@@ -47,6 +48,7 @@ pub struct PluginResponse {
     pub manifest_version: u32,
     pub compatibility: Option<PluginCompatibilityManifest>,
     pub ui_entry: Option<String>,
+    pub ui_url: Option<String>,
     pub has_wasm: bool,
     pub network_mode: String,
     pub allow_hosts: Vec<String>,
@@ -100,6 +102,7 @@ impl From<PluginView> for PluginResponse {
             manifest_version: value.manifest_version,
             compatibility: value.compatibility,
             ui_entry: value.ui_entry,
+            ui_url: value.ui_url,
             has_wasm: value.has_wasm,
             network_mode: value.network_mode,
             allow_hosts: value.allow_hosts,

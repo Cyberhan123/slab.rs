@@ -7,6 +7,8 @@ export const workspace = {
     openFolder: '打开文件夹',
     closeWorkspace: '关闭',
     reopen: '打开',
+    pathPlaceholder: '工作区文件夹路径',
+    upDirectory: '上级',
   },
   empty: {
     title: '未打开工作区',
@@ -20,6 +22,8 @@ export const workspace = {
     title: '文件',
     loading: '正在加载文件',
     truncated: '目录数量已达上限',
+    empty: '没有文件',
+    root: '根目录',
   },
   explorer: {
     title: '资源管理器',

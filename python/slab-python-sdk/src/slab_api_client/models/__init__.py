@@ -154,6 +154,8 @@ from .plugin_agent_hook_contribution import PluginAgentHookContribution
 from .plugin_agent_hook_lifecycle_event import PluginAgentHookLifecycleEvent
 from .plugin_agent_hook_runtime import PluginAgentHookRuntime
 from .plugin_agent_hook_transport import PluginAgentHookTransport
+from .plugin_api_request import PluginApiRequest
+from .plugin_api_response import PluginApiResponse
 from .plugin_capability_kind import PluginCapabilityKind
 from .plugin_capability_transport import PluginCapabilityTransport
 from .plugin_capability_transport_type import PluginCapabilityTransportType
@@ -184,6 +186,7 @@ from .plugin_settings_contribution import PluginSettingsContribution
 from .plugin_sidebar_contribution import PluginSidebarContribution
 from .pricing_request import PricingRequest
 from .pricing_response import PricingResponse
+from .recent_workspace_response import RecentWorkspaceResponse
 from .render_subtitle_request import RenderSubtitleRequest
 from .render_subtitle_response import RenderSubtitleResponse
 from .runtime_presets_request import RuntimePresetsRequest
@@ -232,6 +235,37 @@ from .video_generation_request import VideoGenerationRequest
 from .video_generation_request_data import VideoGenerationRequestData
 from .video_generation_result_data import VideoGenerationResultData
 from .video_generation_task_response import VideoGenerationTaskResponse
+from .workspace_config_response import WorkspaceConfigResponse
+from .workspace_console_output import WorkspaceConsoleOutput
+from .workspace_console_run_command import WorkspaceConsoleRunCommand
+from .workspace_create_directory_command import WorkspaceCreateDirectoryCommand
+from .workspace_create_file_command import WorkspaceCreateFileCommand
+from .workspace_delete_path_command import WorkspaceDeletePathCommand
+from .workspace_directory_view import WorkspaceDirectoryView
+from .workspace_file_content import WorkspaceFileContent
+from .workspace_file_entry import WorkspaceFileEntry
+from .workspace_file_kind import WorkspaceFileKind
+from .workspace_file_search_view import WorkspaceFileSearchView
+from .workspace_git_commit_command import WorkspaceGitCommitCommand
+from .workspace_git_diff_command import WorkspaceGitDiffCommand
+from .workspace_git_diff_view import WorkspaceGitDiffView
+from .workspace_git_file_status import WorkspaceGitFileStatus
+from .workspace_git_operation_view import WorkspaceGitOperationView
+from .workspace_git_path_command import WorkspaceGitPathCommand
+from .workspace_git_status_entry import WorkspaceGitStatusEntry
+from .workspace_git_status_summary import WorkspaceGitStatusSummary
+from .workspace_git_status_view import WorkspaceGitStatusView
+from .workspace_info_response import WorkspaceInfoResponse
+from .workspace_open_command import WorkspaceOpenCommand
+from .workspace_path_metadata import WorkspacePathMetadata
+from .workspace_path_view import WorkspacePathView
+from .workspace_rename_path_command import WorkspaceRenamePathCommand
+from .workspace_state_response import WorkspaceStateResponse
+from .workspace_text_search_file_match import WorkspaceTextSearchFileMatch
+from .workspace_text_search_line_match import WorkspaceTextSearchLineMatch
+from .workspace_text_search_view import WorkspaceTextSearchView
+from .workspace_write_file_command import WorkspaceWriteFileCommand
+from .workspace_write_file_view import WorkspaceWriteFileView
 
 __all__ = (
     "AgentConfigInput",
@@ -366,6 +400,8 @@ __all__ = (
     "PluginAgentHookLifecycleEvent",
     "PluginAgentHookRuntime",
     "PluginAgentHookTransport",
+    "PluginApiRequest",
+    "PluginApiResponse",
     "PluginCapabilityKind",
     "PluginCapabilityTransport",
     "PluginCapabilityTransportType",
@@ -390,6 +426,7 @@ __all__ = (
     "PluginSidebarContribution",
     "PricingRequest",
     "PricingResponse",
+    "RecentWorkspaceResponse",
     "RenderSubtitleRequest",
     "RenderSubtitleResponse",
     "RuntimePresetsRequest",
@@ -438,4 +475,35 @@ __all__ = (
     "VideoGenerationRequestData",
     "VideoGenerationResultData",
     "VideoGenerationTaskResponse",
+    "WorkspaceConfigResponse",
+    "WorkspaceConsoleOutput",
+    "WorkspaceConsoleRunCommand",
+    "WorkspaceCreateDirectoryCommand",
+    "WorkspaceCreateFileCommand",
+    "WorkspaceDeletePathCommand",
+    "WorkspaceDirectoryView",
+    "WorkspaceFileContent",
+    "WorkspaceFileEntry",
+    "WorkspaceFileKind",
+    "WorkspaceFileSearchView",
+    "WorkspaceGitCommitCommand",
+    "WorkspaceGitDiffCommand",
+    "WorkspaceGitDiffView",
+    "WorkspaceGitFileStatus",
+    "WorkspaceGitOperationView",
+    "WorkspaceGitPathCommand",
+    "WorkspaceGitStatusEntry",
+    "WorkspaceGitStatusSummary",
+    "WorkspaceGitStatusView",
+    "WorkspaceInfoResponse",
+    "WorkspaceOpenCommand",
+    "WorkspacePathMetadata",
+    "WorkspacePathView",
+    "WorkspaceRenamePathCommand",
+    "WorkspaceStateResponse",
+    "WorkspaceTextSearchFileMatch",
+    "WorkspaceTextSearchLineMatch",
+    "WorkspaceTextSearchView",
+    "WorkspaceWriteFileCommand",
+    "WorkspaceWriteFileView",
 )

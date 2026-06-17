@@ -645,6 +645,11 @@
   ];
   var JSON_HEADERS = { "content-type": "application/json" };
   var THEME_EVENT_NAME = "plugin://host/theme";
+  var PLUGIN_SDK_MESSAGE_SOURCE = "slab-plugin-sdk";
+  var PLUGIN_HOST_MESSAGE_SOURCE = "slab-plugin-host";
+  var browserBridgeSequence = 0;
+  var browserBridgeListenerWindow = null;
+  var pendingBrowserBridgeRequests = new Map;
 
   class SlabPluginApiError extends Error {
     response;
@@ -666,9 +671,75 @@
     }
     return core;
   }
+  function resolveCore(target) {
+    const core = resolveWindow(target)["__TAURI__"]?.core;
+    return core && typeof core.invoke === "function" ? core : null;
+  }
   function resolveEventApi(target) {
     const eventApi = resolveWindow(target)["__TAURI__"]?.event;
     return eventApi && typeof eventApi.listen === "function" ? eventApi : null;
+  }
+  function hasBrowserBridge(target) {
+    const resolvedWindow = resolveWindow(target);
+    return resolvedWindow.parent !== resolvedWindow;
+  }
+  function ensureBrowserBridgeListener(targetWindow) {
+    if (browserBridgeListenerWindow === targetWindow) {
+      return;
+    }
+    browserBridgeListenerWindow?.removeEventListener("message", handleBrowserBridgeMessage);
+    browserBridgeListenerWindow = targetWindow;
+    browserBridgeListenerWindow.addEventListener("message", handleBrowserBridgeMessage);
+  }
+  function handleBrowserBridgeMessage(event) {
+    if (browserBridgeListenerWindow && event.source !== browserBridgeListenerWindow.parent) {
+      return;
+    }
+    const message = readBrowserBridgeResponse(event.data);
+    if (!message) {
+      return;
+    }
+    const pending = pendingBrowserBridgeRequests.get(message.id);
+    if (!pending) {
+      return;
+    }
+    pendingBrowserBridgeRequests.delete(message.id);
+    if (message.ok) {
+      pending.resolve(message.response);
+    } else {
+      pending.reject(new Error(message.error));
+    }
+  }
+  function readBrowserBridgeResponse(data) {
+    if (!data || typeof data !== "object") {
+      return null;
+    }
+    const record = data;
+    if (record.source !== PLUGIN_HOST_MESSAGE_SOURCE || record.type !== "api.response" || typeof record.id !== "string" || typeof record.ok !== "boolean") {
+      return null;
+    }
+    if (record.ok === true) {
+      return record.response && typeof record.response === "object" ? record : null;
+    }
+    return typeof record.error === "string" ? record : null;
+  }
+  function requestViaBrowserBridge(request, target) {
+    const targetWindow = resolveWindow(target);
+    if (targetWindow.parent === targetWindow) {
+      throw new Error("Slab plugin browser bridge is not available outside an iframe.");
+    }
+    ensureBrowserBridgeListener(targetWindow);
+    const id = `${Date.now()}:${++browserBridgeSequence}`;
+    const message = {
+      source: PLUGIN_SDK_MESSAGE_SOURCE,
+      type: "api.request",
+      id,
+      request
+    };
+    return new Promise((resolve, reject) => {
+      pendingBrowserBridgeRequests.set(id, { resolve, reject });
+      targetWindow.parent.postMessage(message, "*");
+    });
   }
   function serializeJsonRequest(request) {
     const headers = { ...request.headers };
@@ -730,19 +801,18 @@
   function createSlabPluginSdk(target) {
     const invokeApiRequest = (request) => {
       assertSlabPluginApiSurface(request.method, request.path);
-      return requireCore(target).invoke("plugin_api_request", { request });
+      const core = resolveCore(target);
+      if (core) {
+        return core.invoke("plugin_api_request", { request });
+      }
+      return requestViaBrowserBridge(request, target);
     };
     const apiFetch = createSlabPluginApiFetch(invokeApiRequest);
     const apiClient = createSlabPluginApiClient(invokeApiRequest);
     return {
       host: {
         isAvailable: () => {
-          try {
-            requireCore(target);
-            return true;
-          } catch {
-            return false;
-          }
+          return Boolean(resolveCore(target)) || hasBrowserBridge(target);
         },
         invoke: (command, args) => requireCore(target).invoke(command, args)
       },

@@ -17,8 +17,9 @@ use crate::infra::plugin_runtime::{
 };
 use slab_config::{PluginJsRuntimeTransport, PluginPythonRuntimeTransport};
 use slab_plugin::{PluginCallRequest, PluginRegistry, PluginRuntime};
-use slab_types::{PluginRuntimeCallRequest, PluginRuntimeFileGrant};
+use slab_types::{DESKTOP_API_ORIGIN, PluginRuntimeCallRequest, PluginRuntimeFileGrant};
 
+mod assets;
 mod package;
 mod scan;
 mod validation;
@@ -116,9 +117,10 @@ impl PluginService {
             .map(|record| (record.plugin_id.clone(), record))
             .collect::<HashMap<_, _>>();
 
+        let api_base_url = self.plugin_api_base_url();
         let mut rows = scans
             .iter()
-            .map(|scan| build_plugin_view(scan, states.get(&scan.id)))
+            .map(|scan| build_plugin_view(scan, states.get(&scan.id), &api_base_url))
             .collect::<Vec<_>>();
 
         for (plugin_id, state) in &states {
@@ -614,6 +616,11 @@ impl PluginService {
             .unwrap_or_else(|| self.state.config().plugins_dir.join(plugin_id));
         ensure_path_within(&root, &self.state.config().plugins_dir)?;
         Ok(root)
+    }
+
+    fn plugin_api_base_url(&self) -> String {
+        ensure_http_base_url(self.state.config().bind_address.as_str())
+            .unwrap_or_else(|_| DESKTOP_API_ORIGIN.to_owned())
     }
 }
 

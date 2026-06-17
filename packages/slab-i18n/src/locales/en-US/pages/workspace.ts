@@ -7,6 +7,8 @@ export const workspace = {
     openFolder: 'Open folder',
     closeWorkspace: 'Close',
     reopen: 'Open',
+    pathPlaceholder: 'Workspace folder path',
+    upDirectory: 'Up',
   },
   empty: {
     title: 'No workspace open',
@@ -20,6 +22,8 @@ export const workspace = {
     title: 'Files',
     loading: 'Loading files',
     truncated: 'Directory limit reached',
+    empty: 'No files',
+    root: 'Root',
   },
   explorer: {
     title: 'Explorer',

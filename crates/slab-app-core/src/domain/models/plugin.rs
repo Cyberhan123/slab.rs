@@ -14,6 +14,7 @@ pub struct PluginView {
     pub manifest_version: u32,
     pub compatibility: Option<PluginCompatibilityManifest>,
     pub ui_entry: Option<String>,
+    pub ui_url: Option<String>,
     pub has_wasm: bool,
     pub network_mode: String,
     pub allow_hosts: Vec<String>,

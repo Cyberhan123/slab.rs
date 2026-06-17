@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core"
+import { ApiError, apiClient } from "@slab/api"
 
 import { isTauri } from "@/hooks/use-tauri"
 
@@ -9,7 +10,7 @@ export type WorkspaceInfo = {
   name: string
   slabDir: string
   settingsPath: string
-  databasePath: string
+  databasePath?: string
   modelConfigDir: string
   sessionStateDir: string
 }
@@ -26,13 +27,13 @@ export type WorkspacePluginConfig = {
 
 export type WorkspaceConfig = {
   schemaVersion: number
-  plugins: Record<string, WorkspacePluginConfig>
+  plugins?: Record<string, WorkspacePluginConfig>
 }
 
 export type WorkspaceStateResponse = {
-  current: WorkspaceInfo | null
-  recent: RecentWorkspace[]
-  config: WorkspaceConfig | null
+  current?: WorkspaceInfo | null
+  recent?: RecentWorkspace[]
+  config?: WorkspaceConfig | null
 }
 
 export type WorkspaceFileEntry = {
@@ -41,9 +42,9 @@ export type WorkspaceFileEntry = {
   relativePath: string
   kind: "directory" | "file"
   hasChildren: boolean
-  sizeBytes?: number
-  modifiedAt?: number
-  createdAt?: number
+  sizeBytes?: number | null
+  modifiedAt?: number | null
+  createdAt?: number | null
 }
 
 export type WorkspaceDirectoryResponse = {
@@ -104,7 +105,7 @@ export type WorkspaceGitFileStatus =
 
 export type WorkspaceGitStatusEntry = {
   path: string
-  originalPath: string | null
+  originalPath?: string | null
   status: WorkspaceGitFileStatus
   staged: boolean
 }
@@ -122,16 +123,16 @@ export type WorkspaceGitStatusSummary = {
 export type WorkspaceGitStatus = {
   available: boolean
   isRepository: boolean
-  branch: string | null
-  repositoryRoot: string | null
-  message: string | null
+  branch?: string | null
+  repositoryRoot?: string | null
+  message?: string | null
   summary: WorkspaceGitStatusSummary
   entries: WorkspaceGitStatusEntry[]
 }
 
 export type WorkspaceConsoleOutput = {
   command: string
-  exitCode: number | null
+  exitCode?: number | null
   stdout: string
   stderr: string
   timedOut: boolean
@@ -195,186 +196,201 @@ export type WorkspacePluginPreferenceUpdate = {
   enabled?: boolean | null
 }
 
-export async function workspaceState(): Promise<WorkspaceStateResponse> {
-  if (!isTauri()) {
-    return { current: null, recent: [], config: null }
+function requireWorkspaceData<T>(
+  result: { data?: T; error?: unknown; response: Response },
+  emptyMessage: string,
+): T {
+  if (!result.response.ok || result.error) {
+    throw ApiError.fromResponse(result.response, result.error)
   }
 
-  return invoke<WorkspaceStateResponse>("workspace_state")
+  if (result.data === undefined) {
+    throw new Error(emptyMessage)
+  }
+
+  return result.data
+}
+
+export async function workspaceState(): Promise<WorkspaceStateResponse> {
+  return requireWorkspaceData(
+    await apiClient.GET("/v1/workspace"),
+    "Workspace state returned an empty response.",
+  )
 }
 
 export async function workspaceOpen(rootPath: string): Promise<WorkspaceStateResponse> {
-  if (!isTauri()) {
-    throw new Error("workspaces are only available in the desktop app")
-  }
-
-  return invoke<WorkspaceStateResponse>("workspace_open", { rootPath })
+  return requireWorkspaceData(
+    await apiClient.POST("/v1/workspace/open", {
+      body: { rootPath },
+    }),
+    "Workspace open returned an empty response.",
+  )
 }
 
 export async function workspaceClose(): Promise<WorkspaceStateResponse> {
-  if (!isTauri()) {
-    return { current: null, recent: [], config: null }
-  }
-
-  return invoke<WorkspaceStateResponse>("workspace_close")
+  return requireWorkspaceData(
+    await apiClient.POST("/v1/workspace/close"),
+    "Workspace close returned an empty response.",
+  )
 }
 
 export async function workspaceReadDirectory(
   relativePath?: string,
   options?: { includeIgnored?: boolean },
 ): Promise<WorkspaceDirectoryResponse> {
-  if (!isTauri()) {
-    return { relativePath: relativePath ?? "", entries: [], truncated: false }
-  }
-
-  return invoke<WorkspaceDirectoryResponse>("workspace_read_directory", {
-    includeIgnored: options?.includeIgnored,
-    relativePath,
-  })
+  return requireWorkspaceData(
+    await apiClient.GET("/v1/workspace/directory", {
+      params: {
+        query: {
+          includeIgnored: options?.includeIgnored,
+          relativePath,
+        },
+      },
+    }),
+    "Workspace directory returned an empty response.",
+  )
 }
 
 export async function workspaceReadFile(relativePath: string): Promise<WorkspaceFileContent> {
-  if (!isTauri()) {
-    throw new Error("workspace files are only available in the desktop app")
-  }
-
-  return invoke<WorkspaceFileContent>("workspace_read_file", { relativePath })
+  return requireWorkspaceData(
+    await apiClient.GET("/v1/workspace/files", {
+      params: { query: { relativePath } },
+    }),
+    `Workspace file '${relativePath}' returned an empty response.`,
+  )
 }
 
 export async function workspaceStatPath(relativePath: string): Promise<WorkspacePathMetadata> {
-  if (!isTauri()) {
-    throw new Error("workspace files are only available in the desktop app")
-  }
-
-  return invoke<WorkspacePathMetadata>("workspace_stat_path", { relativePath })
+  return requireWorkspaceData(
+    await apiClient.GET("/v1/workspace/path/stat", {
+      params: { query: { relativePath } },
+    }),
+    `Workspace path '${relativePath}' returned an empty response.`,
+  )
 }
 
 export async function workspaceSearchFiles(query: string): Promise<WorkspaceFileSearchResponse> {
-  if (!isTauri()) {
-    return { query, entries: [], truncated: false }
-  }
-
-  return invoke<WorkspaceFileSearchResponse>("workspace_search_files", { query })
+  return requireWorkspaceData(
+    await apiClient.GET("/v1/workspace/search", {
+      params: { query: { query } },
+    }),
+    "Workspace file search returned an empty response.",
+  )
 }
 
 export async function workspaceSearchText(query: string): Promise<WorkspaceTextSearchResponse> {
-  if (!isTauri()) {
-    return { query, matches: [], truncated: false }
-  }
-
-  return invoke<WorkspaceTextSearchResponse>("workspace_search_text", { query })
+  return requireWorkspaceData(
+    await apiClient.GET("/v1/workspace/search/text", {
+      params: { query: { query } },
+    }),
+    "Workspace text search returned an empty response.",
+  )
 }
 
 export async function workspaceWriteFile(command: WorkspaceWriteFileCommand): Promise<WorkspaceWriteFileResult> {
-  if (!isTauri()) {
-    throw new Error("workspace files are only available in the desktop app")
-  }
-
-  return invoke<WorkspaceWriteFileResult>("workspace_write_file", { command })
+  return requireWorkspaceData(
+    await apiClient.PUT("/v1/workspace/files", {
+      body: command,
+    }),
+    `Workspace file '${command.relativePath}' write returned an empty response.`,
+  )
 }
 
 export async function workspaceCreateFile(command: WorkspaceCreateFileCommand): Promise<WorkspacePathResult> {
-  if (!isTauri()) {
-    throw new Error("workspace files are only available in the desktop app")
-  }
-
-  return invoke<WorkspacePathResult>("workspace_create_file", { command })
+  return requireWorkspaceData(
+    await apiClient.POST("/v1/workspace/files", {
+      body: command,
+    }),
+    `Workspace file '${command.relativePath}' create returned an empty response.`,
+  )
 }
 
 export async function workspaceCreateDirectory(command: WorkspaceCreateDirectoryCommand): Promise<WorkspacePathResult> {
-  if (!isTauri()) {
-    throw new Error("workspace files are only available in the desktop app")
-  }
-
-  return invoke<WorkspacePathResult>("workspace_create_directory", { command })
+  return requireWorkspaceData(
+    await apiClient.POST("/v1/workspace/directories", {
+      body: command,
+    }),
+    `Workspace directory '${command.relativePath}' create returned an empty response.`,
+  )
 }
 
 export async function workspaceRenamePath(command: WorkspaceRenamePathCommand): Promise<WorkspacePathResult> {
-  if (!isTauri()) {
-    throw new Error("workspace files are only available in the desktop app")
-  }
-
-  return invoke<WorkspacePathResult>("workspace_rename_path", { command })
+  return requireWorkspaceData(
+    await apiClient.PATCH("/v1/workspace/path", {
+      body: command,
+    }),
+    `Workspace path '${command.fromRelativePath}' rename returned an empty response.`,
+  )
 }
 
 export async function workspaceDeletePath(command: WorkspaceDeletePathCommand): Promise<WorkspacePathResult> {
-  if (!isTauri()) {
-    throw new Error("workspace files are only available in the desktop app")
-  }
-
-  return invoke<WorkspacePathResult>("workspace_delete_path", { command })
+  return requireWorkspaceData(
+    await apiClient.DELETE("/v1/workspace/path", {
+      body: command,
+    }),
+    `Workspace path '${command.relativePath}' delete returned an empty response.`,
+  )
 }
 
 export async function workspaceGitStatus(): Promise<WorkspaceGitStatus> {
-  if (!isTauri()) {
-    return {
-      available: false,
-      isRepository: false,
-      branch: null,
-      repositoryRoot: null,
-      message: "Git is only available in the desktop app.",
-      summary: {
-        added: 0,
-        modified: 0,
-        deleted: 0,
-        renamed: 0,
-        copied: 0,
-        untracked: 0,
-        conflicted: 0,
-      },
-      entries: [],
-    }
-  }
-
-  return invoke<WorkspaceGitStatus>("workspace_git_status")
+  return requireWorkspaceData(
+    await apiClient.GET("/v1/workspace/git/status"),
+    "Workspace Git status returned an empty response.",
+  )
 }
 
 export async function workspaceGitStage(path: string): Promise<WorkspaceGitOperationResult> {
-  if (!isTauri()) {
-    throw new Error("workspace Git operations are only available in the desktop app")
-  }
-
-  return invoke<WorkspaceGitOperationResult>("workspace_git_stage", { command: { path } })
+  return requireWorkspaceData(
+    await apiClient.POST("/v1/workspace/git/stage", {
+      body: { path },
+    }),
+    `Workspace Git stage '${path}' returned an empty response.`,
+  )
 }
 
 export async function workspaceGitUnstage(path: string): Promise<WorkspaceGitOperationResult> {
-  if (!isTauri()) {
-    throw new Error("workspace Git operations are only available in the desktop app")
-  }
-
-  return invoke<WorkspaceGitOperationResult>("workspace_git_unstage", { command: { path } })
+  return requireWorkspaceData(
+    await apiClient.POST("/v1/workspace/git/unstage", {
+      body: { path },
+    }),
+    `Workspace Git unstage '${path}' returned an empty response.`,
+  )
 }
 
 export async function workspaceGitDiscard(path: string): Promise<WorkspaceGitOperationResult> {
-  if (!isTauri()) {
-    throw new Error("workspace Git operations are only available in the desktop app")
-  }
-
-  return invoke<WorkspaceGitOperationResult>("workspace_git_discard", { command: { path } })
+  return requireWorkspaceData(
+    await apiClient.POST("/v1/workspace/git/discard", {
+      body: { path },
+    }),
+    `Workspace Git discard '${path}' returned an empty response.`,
+  )
 }
 
 export async function workspaceGitCommit(message: string): Promise<WorkspaceGitOperationResult> {
-  if (!isTauri()) {
-    throw new Error("workspace Git operations are only available in the desktop app")
-  }
-
-  return invoke<WorkspaceGitOperationResult>("workspace_git_commit", { command: { message } })
+  return requireWorkspaceData(
+    await apiClient.POST("/v1/workspace/git/commit", {
+      body: { message },
+    }),
+    "Workspace Git commit returned an empty response.",
+  )
 }
 
 export async function workspaceGitDiff(command: WorkspaceGitDiffCommand): Promise<WorkspaceGitDiff> {
-  if (!isTauri()) {
-    return { path: command.path, staged: command.staged, diff: "" }
-  }
-
-  return invoke<WorkspaceGitDiff>("workspace_git_diff", { command })
+  return requireWorkspaceData(
+    await apiClient.POST("/v1/workspace/git/diff", {
+      body: command,
+    }),
+    `Workspace Git diff '${command.path}' returned an empty response.`,
+  )
 }
 
 export async function workspaceConsoleRun(command: string): Promise<WorkspaceConsoleOutput> {
-  if (!isTauri()) {
-    throw new Error("workspace console is only available in the desktop app")
-  }
-
-  return invoke<WorkspaceConsoleOutput>("workspace_console_run", { command })
+  return requireWorkspaceData(
+    await apiClient.POST("/v1/workspace/console/run", {
+      body: { command },
+    }),
+    "Workspace console command returned an empty response.",
+  )
 }
 
 export async function workspaceTerminalSession(): Promise<WorkspaceTerminalSession> {

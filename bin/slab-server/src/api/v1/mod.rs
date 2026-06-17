@@ -16,6 +16,7 @@ pub mod system;
 pub mod tasks;
 pub mod ui_state;
 pub mod video;
+pub mod workspace;
 pub mod workspace_lsp;
 
 use std::sync::Arc;
@@ -47,6 +48,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .merge(subtitles::router())
         .merge(ui_state::router())
         .merge(setup::router())
+        .merge(workspace::router(state.clone()))
         .merge(workspace_lsp::router())
         .merge(backend::router(state))
 }
@@ -68,6 +70,7 @@ pub fn api_docs() -> utoipa::openapi::OpenApi {
     spec.merge(subtitles::SubtitleApi::openapi());
     spec.merge(ui_state::UiStateApi::openapi());
     spec.merge(setup::SetupApi::openapi());
+    spec.merge(workspace::WorkspaceApi::openapi());
     spec.merge(backend::BackendApi::openapi());
 
     spec

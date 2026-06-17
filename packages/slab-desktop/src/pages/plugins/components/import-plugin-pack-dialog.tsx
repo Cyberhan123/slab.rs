@@ -52,6 +52,7 @@ export function ImportPluginPackDialog({
                 accept=".plugin.slab"
                 onChange={(event) => setImportFile(event.target.files?.[0] ?? null)}
                 disabled={importPending}
+                data-testid="plugin-import-file-input"
               />
             </div>
 
@@ -75,7 +76,7 @@ export function ImportPluginPackDialog({
         </div>
 
         <DialogFooter showCloseButton className="border-t border-border/60 px-5 py-4">
-          <Button onClick={onImport} disabled={!canImport}>
+          <Button onClick={onImport} disabled={!canImport} data-testid="plugin-import-submit-button">
             {importPending ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (

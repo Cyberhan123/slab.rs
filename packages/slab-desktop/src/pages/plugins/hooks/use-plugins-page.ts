@@ -4,7 +4,6 @@ import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
 import { usePageHeader, usePageHeaderSearch } from '@/hooks/use-global-header-meta';
-import { isTauri } from '@/hooks/use-tauri';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import api, { getErrorMessage, postFormData } from '@slab/api';
 import {
@@ -27,7 +26,6 @@ async function importPluginPack(file: File, invalidFileMessage: string): Promise
 export function usePluginsPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const isDesktopTauri = isTauri();
 
   usePageHeader({
     icon: PAGE_HEADER_META.plugins.icon,
@@ -42,17 +40,14 @@ export function usePluginsPage() {
   const [importPluginPending, setImportPluginPending] = useState(false);
 
   const headerSearch = useMemo(
-    () =>
-      isDesktopTauri
-        ? {
-            type: 'search' as const,
-            value: searchQuery,
-            onValueChange: setSearchQuery,
-            placeholder: t('pages.plugins.search.placeholder'),
-            ariaLabel: t('pages.plugins.search.ariaLabel'),
-          }
-        : null,
-    [isDesktopTauri, searchQuery, t],
+    () => ({
+      type: 'search' as const,
+      value: searchQuery,
+      onValueChange: setSearchQuery,
+      placeholder: t('pages.plugins.search.placeholder'),
+      ariaLabel: t('pages.plugins.search.ariaLabel'),
+    }),
+    [searchQuery, t],
   );
 
   usePageHeaderSearch(headerSearch);
@@ -64,7 +59,6 @@ export function usePluginsPage() {
     isFetching: pluginsFetching,
     refetch: refetchPlugins,
   } = api.useQuery('get', '/v1/plugins', undefined, {
-    enabled: isDesktopTauri,
     retry: false,
   });
   const enablePluginMutation = api.useMutation('post', '/v1/plugins/{id}/enable');
@@ -88,19 +82,20 @@ export function usePluginsPage() {
   }, [normalizedSearchQuery, plugins]);
 
   const refreshData = useCallback(async () => {
-    if (!isDesktopTauri) return;
-
     try {
       await Promise.all([
         refetchPlugins(),
         queryClient.invalidateQueries({ queryKey: RUNTIME_PLUGINS_QUERY_KEY }),
+        queryClient.invalidateQueries({
+          predicate: (query) => JSON.stringify(query.queryKey).includes('/v1/plugins'),
+        }),
       ]);
     } catch (error) {
       toast.error(t('pages.plugins.toast.loadFailed'), {
         description: getErrorMessage(error),
       });
     }
-  }, [isDesktopTauri, queryClient, refetchPlugins, t]);
+  }, [queryClient, refetchPlugins, t]);
 
   const runAction = useCallback(
     async (pluginId: string, errorTitle: string, action: () => Promise<void>) => {
@@ -248,7 +243,6 @@ export function usePluginsPage() {
     importFileName: importFile?.name ?? null,
     importPluginPending,
     isImportOpen,
-    isDesktopTauri,
     loading,
     plugins,
     refreshData,

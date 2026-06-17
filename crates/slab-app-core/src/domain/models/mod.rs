@@ -83,5 +83,6 @@ pub use workspace::{
     WorkspaceGitDiffView, WorkspaceGitFileStatus, WorkspaceGitOperationView,
     WorkspaceGitPathCommand, WorkspaceGitStatusEntry, WorkspaceGitStatusSummary,
     WorkspaceGitStatusView, WorkspacePathMetadata, WorkspacePathView, WorkspaceRenamePathCommand,
+    WorkspaceTextSearchFileMatch, WorkspaceTextSearchLineMatch, WorkspaceTextSearchView,
     WorkspaceWriteFileCommand, WorkspaceWriteFileView,
 };

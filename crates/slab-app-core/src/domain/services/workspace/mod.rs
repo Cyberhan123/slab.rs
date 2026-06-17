@@ -5,7 +5,8 @@ pub use lsp::WorkspaceLspService;
 pub(crate) use lsp::workspace_root_from_config;
 
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -16,11 +17,13 @@ use slab_utils::pty::spawn_pipe_process_no_stdin;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
+use crate::context::AppConfig;
 use crate::domain::models::{
     WorkspaceConsoleOutput, WorkspaceCreateDirectoryCommand, WorkspaceCreateFileCommand,
     WorkspaceDeletePathCommand, WorkspaceDirectoryView, WorkspaceFileContent, WorkspaceFileEntry,
     WorkspaceFileKind, WorkspaceFileSearchView, WorkspaceGitDiffView, WorkspaceGitOperationView,
     WorkspaceGitStatusView, WorkspacePathMetadata, WorkspacePathView, WorkspaceRenamePathCommand,
+    WorkspaceTextSearchFileMatch, WorkspaceTextSearchLineMatch, WorkspaceTextSearchView,
     WorkspaceWriteFileCommand, WorkspaceWriteFileView,
 };
 use crate::error::AppCoreError;
@@ -32,6 +35,7 @@ const MAX_CONSOLE_COMMAND_BYTES: usize = 2_000;
 const MAX_CONSOLE_OUTPUT_BYTES: usize = 64 * 1024;
 const MAX_DIRECTORY_ENTRIES: usize = 500;
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
+const MAX_LINE_MATCHES_PER_FILE: usize = 20;
 const MAX_SEARCH_RESULTS: usize = 100;
 const MAX_WRITE_FILE_BYTES: usize = 2 * 1024 * 1024;
 const SLAB_DIR_NAME: &str = ".slab";
@@ -54,6 +58,10 @@ const IGNORED_DIR_NAMES: &[&str] = &[
 pub struct WorkspaceService;
 
 impl WorkspaceService {
+    pub fn workspace_root_from_config(config: &AppConfig) -> Option<PathBuf> {
+        lsp::workspace_root_from_config(config)
+    }
+
     pub fn read_directory(
         root: impl AsRef<Path>,
         relative_path: Option<&str>,
@@ -212,6 +220,24 @@ impl WorkspaceService {
             .collect();
 
         Ok(WorkspaceFileSearchView { query, entries, truncated: snapshot.truncated })
+    }
+
+    pub fn search_text(
+        root: impl AsRef<Path>,
+        query: &str,
+    ) -> Result<WorkspaceTextSearchView, AppCoreError> {
+        let query = query.trim().to_owned();
+        if query.is_empty() {
+            return Ok(WorkspaceTextSearchView { query, matches: Vec::new(), truncated: false });
+        }
+
+        let root = root.as_ref();
+        let search_query = query.to_ascii_lowercase();
+        let mut matches = Vec::new();
+        let mut truncated = false;
+        search_text_directory(root, "", &search_query, &mut matches, &mut truncated)?;
+
+        Ok(WorkspaceTextSearchView { query, matches, truncated })
     }
 
     pub fn create_file(
@@ -680,6 +706,134 @@ fn content_hash(bytes: &[u8]) -> String {
     sha256_hex_bytes(bytes)
 }
 
+fn search_text_directory(
+    directory: &Path,
+    relative_path: &str,
+    query: &str,
+    matches: &mut Vec<WorkspaceTextSearchFileMatch>,
+    truncated: &mut bool,
+) -> Result<(), AppCoreError> {
+    if matches.len() >= MAX_SEARCH_RESULTS {
+        *truncated = true;
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(directory).map_err(|error| {
+        AppCoreError::Internal(format!("failed to read directory {}: {error}", directory.display()))
+    })? {
+        if matches.len() >= MAX_SEARCH_RESULTS {
+            *truncated = true;
+            break;
+        }
+
+        let entry = entry.map_err(|error| {
+            AppCoreError::Internal(format!("failed to read directory entry: {error}"))
+        })?;
+        let file_type = entry.file_type().map_err(|error| {
+            AppCoreError::Internal(format!(
+                "failed to read file type {}: {error}",
+                entry.path().display()
+            ))
+        })?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if should_hide_entry(&name, file_type.is_dir(), false) {
+            continue;
+        }
+
+        let entry_relative_path = join_relative_path(relative_path, &name);
+        if file_type.is_dir() {
+            search_text_directory(&entry.path(), &entry_relative_path, query, matches, truncated)?;
+            continue;
+        }
+        if !file_type.is_file() {
+            continue;
+        }
+
+        if let Some(file_match) =
+            search_text_file(&entry.path(), &entry_relative_path, &name, query, truncated)?
+        {
+            matches.push(file_match);
+            if matches.len() >= MAX_SEARCH_RESULTS {
+                *truncated = true;
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn search_text_file(
+    path: &Path,
+    relative_path: &str,
+    name: &str,
+    query: &str,
+    truncated: &mut bool,
+) -> Result<Option<WorkspaceTextSearchFileMatch>, AppCoreError> {
+    let Some(content) = read_searchable_file(path)? else {
+        return Ok(None);
+    };
+
+    let mut line_matches = Vec::new();
+    for (index, line) in content.lines().enumerate() {
+        let lower_line = line.to_ascii_lowercase();
+        let Some(match_byte_start) = lower_line.find(query) else {
+            continue;
+        };
+        let match_byte_end = match_byte_start + query.len();
+        line_matches.push(WorkspaceTextSearchLineMatch {
+            line_number: index + 1,
+            line_text: line.to_owned(),
+            match_start: line[..match_byte_start].chars().count(),
+            match_end: line[..match_byte_end].chars().count(),
+        });
+
+        if line_matches.len() >= MAX_LINE_MATCHES_PER_FILE {
+            *truncated = true;
+            break;
+        }
+    }
+
+    if line_matches.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(WorkspaceTextSearchFileMatch {
+        relative_path: relative_path.to_owned(),
+        name: name.to_owned(),
+        line_matches,
+    }))
+}
+
+fn read_searchable_file(path: &Path) -> Result<Option<String>, AppCoreError> {
+    let metadata = fs::metadata(path).map_err(|error| {
+        AppCoreError::Internal(format!("failed to read file metadata {}: {error}", path.display()))
+    })?;
+    if metadata.len() > MAX_FILE_BYTES {
+        return Ok(None);
+    }
+
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    File::open(path)
+        .map_err(|error| {
+            AppCoreError::Internal(format!("failed to open file {}: {error}", path.display()))
+        })?
+        .take(MAX_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| {
+            AppCoreError::Internal(format!("failed to read file {}: {error}", path.display()))
+        })?;
+    if bytes.contains(&0) {
+        return Ok(None);
+    }
+
+    Ok(String::from_utf8(bytes).ok())
+}
+
+fn join_relative_path(parent: &str, child: &str) -> String {
+    if parent.is_empty() { child.to_owned() } else { format!("{parent}/{child}") }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -720,5 +874,26 @@ mod tests {
 
         assert_eq!(view.entries.len(), 1);
         assert_eq!(view.entries[0].relative_path, "src/workspace_search.rs");
+    }
+
+    #[test]
+    fn search_text_skips_binary_and_ignored_directories() {
+        let root = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(root.path().join("src")).expect("src");
+        fs::create_dir_all(root.path().join("node_modules")).expect("node modules");
+        fs::write(root.path().join("src").join("main.rs"), "fn main() {\n  let Value = 1;\n}\n")
+            .expect("write source");
+        fs::write(root.path().join("node_modules").join("ignored.rs"), "let Value = 2;\n")
+            .expect("write ignored");
+        fs::write(root.path().join("binary.bin"), b"Value\0").expect("write binary");
+
+        let response = WorkspaceService::search_text(root.path(), "value").expect("search text");
+
+        assert!(!response.truncated);
+        assert_eq!(response.matches.len(), 1);
+        assert_eq!(response.matches[0].relative_path, "src/main.rs");
+        assert_eq!(response.matches[0].line_matches[0].line_number, 2);
+        assert_eq!(response.matches[0].line_matches[0].match_start, 6);
+        assert_eq!(response.matches[0].line_matches[0].match_end, 11);
     }
 }

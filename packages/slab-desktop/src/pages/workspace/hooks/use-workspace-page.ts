@@ -80,7 +80,6 @@ export function useWorkspacePage() {
   const workspaceQuery = useQuery({
     queryKey: WORKSPACE_STATE_QUERY_KEY,
     queryFn: workspaceState,
-    enabled: isDesktopTauri,
     retry: false,
   })
   const workspace = workspaceQuery.data?.current ?? null
@@ -105,7 +104,7 @@ export function useWorkspacePage() {
   } = useQuery({
     queryKey: ["workspace-git-status", workspace?.rootPath],
     queryFn: workspaceGitStatus,
-    enabled: isDesktopTauri && Boolean(workspace),
+    enabled: Boolean(workspace),
     refetchInterval: 30_000,
     retry: false,
   })
@@ -115,7 +114,7 @@ export function useWorkspacePage() {
   } = useQuery({
     queryKey: ["workspace-file-search", workspace?.rootPath, trimmedTextSearchQuery],
     queryFn: () => workspaceSearchFiles(trimmedTextSearchQuery),
-    enabled: isDesktopTauri && Boolean(workspace && trimmedTextSearchQuery),
+    enabled: Boolean(workspace && trimmedTextSearchQuery),
     retry: false,
   })
   const {
@@ -124,7 +123,7 @@ export function useWorkspacePage() {
   } = useQuery({
     queryKey: ["workspace-text-search", workspace?.rootPath, trimmedTextSearchQuery],
     queryFn: () => workspaceSearchText(trimmedTextSearchQuery),
-    enabled: isDesktopTauri && Boolean(workspace && trimmedTextSearchQuery),
+    enabled: Boolean(workspace && trimmedTextSearchQuery),
     retry: false,
   })
   const visibleGitDiffEntry = useMemo(
@@ -209,11 +208,15 @@ export function useWorkspacePage() {
   )
 
   const handleOpenFolder = useCallback(async () => {
+    if (!isDesktopTauri) {
+      return
+    }
+
     const selected = await open({ directory: true, multiple: false })
     if (typeof selected === "string") {
       await openWorkspacePath(selected)
     }
-  }, [openWorkspacePath])
+  }, [isDesktopTauri, openWorkspacePath])
 
   const handleCloseWorkspace = useCallback(async () => {
     try {

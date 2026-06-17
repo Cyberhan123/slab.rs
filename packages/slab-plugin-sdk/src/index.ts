@@ -120,6 +120,40 @@ type TauriPluginWindow = Window & {
 
 const JSON_HEADERS = { "content-type": "application/json" };
 const THEME_EVENT_NAME = "plugin://host/theme";
+const PLUGIN_SDK_MESSAGE_SOURCE = "slab-plugin-sdk";
+const PLUGIN_HOST_MESSAGE_SOURCE = "slab-plugin-host";
+
+type BrowserBridgeRequestMessage = {
+  source: typeof PLUGIN_SDK_MESSAGE_SOURCE;
+  type: "api.request";
+  id: string;
+  request: SlabPluginApiRequest;
+};
+
+type BrowserBridgeResponseMessage =
+  | {
+      source: typeof PLUGIN_HOST_MESSAGE_SOURCE;
+      type: "api.response";
+      id: string;
+      ok: true;
+      response: SlabPluginApiResponse;
+    }
+  | {
+      source: typeof PLUGIN_HOST_MESSAGE_SOURCE;
+      type: "api.response";
+      id: string;
+      ok: false;
+      error: string;
+    };
+
+type PendingBrowserBridgeRequest = {
+  resolve: (response: SlabPluginApiResponse) => void;
+  reject: (error: Error) => void;
+};
+
+let browserBridgeSequence = 0;
+let browserBridgeListenerWindow: Window | null = null;
+const pendingBrowserBridgeRequests = new Map<string, PendingBrowserBridgeRequest>();
 
 export class SlabPluginApiError extends Error {
   readonly response: SlabPluginApiResponse;
@@ -145,9 +179,100 @@ function requireCore(target?: Window): TauriCoreApi {
   return core;
 }
 
+function resolveCore(target?: Window): TauriCoreApi | null {
+  const core = resolveWindow(target)["__TAURI__"]?.core;
+  return core && typeof core.invoke === "function" ? core : null;
+}
+
 function resolveEventApi(target?: Window): TauriEventApi | null {
   const eventApi = resolveWindow(target)["__TAURI__"]?.event;
   return eventApi && typeof eventApi.listen === "function" ? eventApi : null;
+}
+
+function hasBrowserBridge(target?: Window): boolean {
+  const resolvedWindow = resolveWindow(target);
+  return resolvedWindow.parent !== resolvedWindow;
+}
+
+function ensureBrowserBridgeListener(targetWindow: Window): void {
+  if (browserBridgeListenerWindow === targetWindow) {
+    return;
+  }
+
+  browserBridgeListenerWindow?.removeEventListener("message", handleBrowserBridgeMessage);
+  browserBridgeListenerWindow = targetWindow;
+  browserBridgeListenerWindow.addEventListener("message", handleBrowserBridgeMessage);
+}
+
+function handleBrowserBridgeMessage(event: MessageEvent): void {
+  if (browserBridgeListenerWindow && event.source !== browserBridgeListenerWindow.parent) {
+    return;
+  }
+
+  const message = readBrowserBridgeResponse(event.data);
+  if (!message) {
+    return;
+  }
+
+  const pending = pendingBrowserBridgeRequests.get(message.id);
+  if (!pending) {
+    return;
+  }
+
+  pendingBrowserBridgeRequests.delete(message.id);
+  if (message.ok) {
+    pending.resolve(message.response);
+  } else {
+    pending.reject(new Error(message.error));
+  }
+}
+
+function readBrowserBridgeResponse(data: unknown): BrowserBridgeResponseMessage | null {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  const record = data as Record<string, unknown>;
+  if (
+    record.source !== PLUGIN_HOST_MESSAGE_SOURCE ||
+    record.type !== "api.response" ||
+    typeof record.id !== "string" ||
+    typeof record.ok !== "boolean"
+  ) {
+    return null;
+  }
+
+  if (record.ok === true) {
+    return record.response && typeof record.response === "object"
+      ? (record as BrowserBridgeResponseMessage)
+      : null;
+  }
+
+  return typeof record.error === "string" ? (record as BrowserBridgeResponseMessage) : null;
+}
+
+function requestViaBrowserBridge(
+  request: SlabPluginApiRequest,
+  target?: Window,
+): Promise<SlabPluginApiResponse> {
+  const targetWindow = resolveWindow(target);
+  if (targetWindow.parent === targetWindow) {
+    throw new Error("Slab plugin browser bridge is not available outside an iframe.");
+  }
+
+  ensureBrowserBridgeListener(targetWindow);
+  const id = `${Date.now()}:${++browserBridgeSequence}`;
+  const message: BrowserBridgeRequestMessage = {
+    source: PLUGIN_SDK_MESSAGE_SOURCE,
+    type: "api.request",
+    id,
+    request,
+  };
+
+  return new Promise((resolve, reject) => {
+    pendingBrowserBridgeRequests.set(id, { resolve, reject });
+    targetWindow.parent.postMessage(message, "*");
+  });
 }
 
 function serializeJsonRequest(request: SlabPluginJsonRequest): SlabPluginApiRequest {
@@ -226,7 +351,11 @@ export type SlabPluginSdk = ReturnType<typeof createSlabPluginSdk>;
 export function createSlabPluginSdk(target?: Window) {
   const invokeApiRequest = (request: SlabPluginApiRequest) => {
     assertSlabPluginApiSurface(request.method, request.path);
-    return requireCore(target).invoke<SlabPluginApiResponse>("plugin_api_request", { request });
+    const core = resolveCore(target);
+    if (core) {
+      return core.invoke<SlabPluginApiResponse>("plugin_api_request", { request });
+    }
+    return requestViaBrowserBridge(request, target);
   };
   const apiFetch = createSlabPluginApiFetch(invokeApiRequest);
   const apiClient = createSlabPluginApiClient(invokeApiRequest);
@@ -234,12 +363,7 @@ export function createSlabPluginSdk(target?: Window) {
   return {
     host: {
       isAvailable: () => {
-        try {
-          requireCore(target);
-          return true;
-        } catch {
-          return false;
-        }
+        return Boolean(resolveCore(target)) || hasBrowserBridge(target);
       },
       invoke: <T>(command: string, args?: unknown) => requireCore(target).invoke<T>(command, args),
     },

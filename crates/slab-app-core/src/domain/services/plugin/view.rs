@@ -11,11 +11,13 @@ use super::{
 pub(super) fn build_plugin_view(
     scan: &ScannedPlugin,
     state: Option<&PluginStateRecord>,
+    api_base_url: &str,
 ) -> PluginView {
     let manifest = scan.manifest.as_ref();
     let installed_version = manifest
         .map(|value| value.version.clone())
         .or_else(|| state.and_then(|record| record.installed_version.clone()));
+    let ui_entry = manifest.map(|value| value.runtime.ui.entry.clone());
 
     PluginView {
         id: scan.id.clone(),
@@ -29,7 +31,8 @@ pub(super) fn build_plugin_view(
         error: scan.error.clone(),
         manifest_version: manifest.map(|value| value.manifest_version).unwrap_or(0),
         compatibility: manifest.map(|value| value.compatibility.clone()),
-        ui_entry: manifest.map(|value| value.runtime.ui.entry.clone()),
+        ui_url: ui_entry.as_deref().and_then(|entry| plugin_ui_url(api_base_url, &scan.id, entry)),
+        ui_entry,
         has_wasm: manifest.and_then(|value| value.runtime.wasm.as_ref()).is_some(),
         network_mode: manifest
             .map(|value| network_mode_label(&value.permissions.network.mode).to_owned())
@@ -82,6 +85,7 @@ pub(super) fn build_missing_plugin_view(state: &PluginStateRecord) -> PluginView
         manifest_version: 0,
         compatibility: None,
         ui_entry: None,
+        ui_url: None,
         has_wasm: false,
         network_mode: "blocked".to_owned(),
         allow_hosts: Vec::new(),
@@ -104,6 +108,19 @@ pub(super) fn build_missing_plugin_view(state: &PluginStateRecord) -> PluginView
         update_available: false,
         removable: is_pack_managed_source_kind(&state.source_kind),
     }
+}
+
+pub(super) fn plugin_ui_url(api_base_url: &str, plugin_id: &str, ui_entry: &str) -> Option<String> {
+    let mut url = reqwest::Url::parse(api_base_url).ok()?;
+    {
+        let mut path_segments = url.path_segments_mut().ok()?;
+        path_segments.pop_if_empty();
+        path_segments.extend(["v1", "plugins", plugin_id, "ui"]);
+        for segment in ui_entry.split('/') {
+            path_segments.push(segment);
+        }
+    }
+    Some(url.to_string())
 }
 
 pub(super) fn is_pack_managed_source_kind(source_kind: &str) -> bool {

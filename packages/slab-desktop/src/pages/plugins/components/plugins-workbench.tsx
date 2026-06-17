@@ -1,7 +1,6 @@
 import {
   Loader2,
   PackagePlus,
-  PackageOpen,
   PlugZap,
   RefreshCw,
   Search,
@@ -11,7 +10,6 @@ import { useTranslation } from '@slab/i18n';
 
 import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
 import { Button } from '@slab/components/button';
-import { StageEmptyState } from '@slab/components/workspace';
 import type { PluginsPageState } from '../hooks/use-plugins-page';
 import { PLUGIN_ICONS, PLUGIN_TONES } from '../utils';
 import { EmptyPanel } from './empty-panel';
@@ -34,26 +32,12 @@ export function PluginsWorkbench({
   importFileName,
   importPluginPending,
   isImportOpen,
-  isDesktopTauri,
   loading,
   plugins,
   refreshData,
   refreshing,
 }: PluginsPageState) {
   const { t } = useTranslation();
-
-  if (!isDesktopTauri) {
-    return (
-      <div className="h-full w-full overflow-y-auto px-1 pb-10">
-        <StageEmptyState
-          icon={PackageOpen}
-          title={t('pages.plugins.desktopOnly.title')}
-          description={t('pages.plugins.desktopOnly.description')}
-          className="min-h-[520px]"
-        />
-      </div>
-    );
-  }
 
   return (
     <div className="h-full w-full overflow-y-auto">
@@ -78,6 +62,7 @@ export function PluginsWorkbench({
                   onClick={() => handleImportOpenChange(true)}
                   disabled={importPluginPending}
                   className="rounded-[12px] bg-[var(--shell-card)]/80"
+                  data-testid="plugin-import-open-button"
                 >
                   {importPluginPending ? (
                     <Loader2 className="size-4 animate-spin" />
@@ -92,6 +77,7 @@ export function PluginsWorkbench({
                   onClick={() => void refreshData()}
                   disabled={refreshing}
                   className="rounded-[12px] bg-[var(--shell-card)]/80"
+                  data-testid="plugin-refresh-button"
                 >
                   {refreshing ? (
                     <Loader2 className="size-4 animate-spin" />

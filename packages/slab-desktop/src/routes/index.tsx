@@ -23,9 +23,9 @@ const WorkspacePage = lazy(() => import("@/pages/workspace"));
 function AppRoutes() {
   const { data: runtimePlugins = [] } = useRuntimePlugins();
   const pluginRoutes = runtimePlugins
-    .filter((plugin) => plugin.valid && plugin.uiEntry)
+    .filter((plugin) => plugin.valid && plugin.enabled && plugin.uiEntry && plugin.uiUrl)
     .flatMap((plugin) =>
-      plugin.contributions.routes.map((route) => ({
+      (plugin.contributions?.routes ?? []).map((route) => ({
         path: route.path.replace(/^\//, ''),
         element: <PluginWebviewPage plugin={plugin} />,
       })),
