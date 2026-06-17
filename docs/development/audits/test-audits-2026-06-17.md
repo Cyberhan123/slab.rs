@@ -257,20 +257,25 @@
 - `packages/slab-desktop/src/store/useWorkspaceUiStore.ts:62-102`。是 7 个 store 中唯一无 co-located 测试的。
 - 建议：镜像 sibling store 测试，覆盖 patchWorkspaceState create/update/default-merge、empty-rootPath no-op、多 workspace 隔离、onRehydrateStorage error→hasHydrated(true)。
 
-**G22. [High → Medium, partially fixed] `src/hooks/`（6 hooks, 324 LOC）核心状态 hooks 已补首批测试，薄包装仍待补**
+**G22. [High → Low, 已补当前 hooks 直接测试] `src/hooks/`（6 hooks, 324 LOC）核心状态 hooks 与薄包装 hooks 均已有直接覆盖**
 - `use-global-header-meta.ts`(154)、`use-persisted-header-select.ts`(73)、`use-file.ts`(41)、`use-desktop-platform.ts`(34)、`use-tauri.ts`(13)、`use-mobile.ts`(9)。
 - 当前已新增 `packages/slab-desktop/src/hooks/__tests__/use-persisted-header-select.test.ts`，覆盖 hydration 后 fallback、stale persisted value、disabled-option clearing、setter→store；已新增 `use-global-header-meta.test.tsx`，通过真实 `GlobalHeaderProvider` 覆盖 page meta/control/search 的注册、更新与清理。
-- 剩余：`use-file.ts`、`use-desktop-platform.ts`、`use-tauri.ts`、`use-mobile.ts` 仍是薄包装/环境检测 hooks，尚无直接测试；下一步应补 web/Tauri 分支、platform/userAgent 分支、matchMedia 初值行为。
+- 当前已新增 `use-file.test.ts`、`use-desktop-platform.test.ts`、`use-tauri.test.ts`、`use-mobile.test.ts`，覆盖 web/Tauri 文件选择、platform/userAgent 分支、Tauri internals 检测、mobile breakpoint 与 effect-time 初值契约。
+- 剩余：本项按当前 hook surface 已收口；若后续这些 hooks 承载更多环境分支，应继续 co-located 补测试。
 
-**G23. [Medium] `assistant-agent-state.ts`（158 LOC）未测**
-- `toAgentConfig`（条件展开 7 preset + reasoning_effort）、`updateLastAssistantMessage`/`withThoughts`（fallback append loading message）、`agentEventKey`（malformed JSON null）、ws/sse URL 协议改写。
+**G23. [Medium → Low, 已补直接测试] `assistant-agent-state.ts`（158 LOC）核心状态辅助函数已有覆盖**
+- 当前已新增 `assistant-agent-state.test.ts`，覆盖 `toAgentConfig` 的条件 preset 展开与 `reasoning_effort`、`updateLastAssistantMessage` 仅更新最后一个 unfinished assistant message 的行为、`withThoughts` 的 last-assistant attach 与 fallback append loading shell。
+- 同一套测试还覆盖了 `agentResponsesWebSocketUrl` / `agentResponsesSseUrl` 的协议改写，以及 `agentEventKey` malformed JSON/null 路径与 `serverMessageThreadId` 的 thread id 提取。
+- 剩余：本项当前主要剩集成级风险，即这些 helper 与 `use-assistant-agent.ts` 的联动是否被更高层测试覆盖；helper 自身的纯逻辑盲区已基本收口。
 
 **G24. [Medium] Page index.tsx 组件（~1797 LOC）无单元覆盖**
 - 仅 `assistant-markdown.tsx`（叶子）被 render。重逻辑内联处抽到 lib（如 `assistant-page-state.ts` 153 LOC，亦未测）是可测 seam。
 
-**G25. [Medium-High, 本轮新盲区] i18n 完整性完全无监管**
-- `packages/slab-i18n` 2 locale × ~15 namespace（~1800 LOC）**零 `.test.ts`**、package.json 无 `test` script。无 locale-parity 脚本。spot-check 当前 key 对齐（settings 101/101, workspace 141/141），但无机制捕获：缺 key、嵌套 drift、ICU placeholder 不匹配（`{{name}}` vs `{{名称}}`）、stale key。近期 commit `dfc0b8ba` 表明此面在动。
-- 建议：加 parity 脚本对比两 locale 的 key 集合 + placeholder 形状。
+**G25. [Medium-High → Low, 已补 locale parity 与 placeholder 验证] i18n 完整性已有基础监管**
+- 当前已为 `packages/slab-i18n` 新增 `vitest.config.ts`、`src/__tests__/locale-parity.test.ts` 与 package-level `test`/`test:run` 脚本；root `vitest.config.ts` 与 `package.json:test:frontend` 也已纳入 `i18n` project。
+- `locale-parity.test.ts` 会递归展开 `en-US` / `zh-CN` 的运行时 locale tree，断言 leaf path 集合一致，并逐项校验 placeholder 形状一致（如 `{{name}}` 不得漂移成 `{{名称}}`），从而捕获缺 key、嵌套 drift、stale key 与 ICU placeholder 不匹配。
+- 纠正：`zh-CN` 原本已经通过 `satisfies LocaleSchema` 继承 `en-US` 的编译期结构约束，因此真正缺的是**运行时 guard** 与测试入口，而不是完全没有任何 shape protection。
+- 剩余：当前覆盖的是 locale 完整性，不是组件级翻译渲染/回退策略；若后续语言切换逻辑继续扩展，仍应在 `@slab/desktop` 补端到端或集成级断言。
 
 ### 3.6 Tauri / Desktop IPC 层（本轮新盲区）
 
@@ -279,8 +284,10 @@
 - 31 个 command 是 renderer 调用的特权 IPC 面（读写删文件、起终端、跑 git、管 plugin），其 wrapper 本身无测试，且委托的 `WorkspaceService::*` 路径包含保证**在此层未测**。
 - 建议：command 层加 round-trip 测试，断言路径包含与权限。
 
-**G27. [Medium-High, 本轮新盲区] `run_console_command` shell-out 无注入/转义/cwd 测试**
-- `crates/slab-app-core/src/domain/services/workspace/mod.rs`（5 测试）。在 workspace root 内 shell out，无 command-injection / arg-escaping / cwd containment 测试。仅 desktop E2E（CI 不跑）覆盖。
+**G27. [Medium-High → Low-Medium, 已补关键契约测试] `run_console_command` shell-out 已有 cwd / quoted path / 相对写入守护**
+- 当前已在 `crates/slab-app-core/src/domain/services/workspace/mod.rs` 补 async 单测，直接断言 shell 进程的 `cwd` 落在 workspace root、带空格的 quoted relative path 能在当前平台 shell 下被正确读取、相对写入会落到 workspace 目录内。
+- 纠正：这里的 `run_console_command` 设计本来就是**显式 shell passthrough**，允许 first-party workspace UI 执行任意 shell 命令；因此“command-injection”不是与实现意图独立的 bug 类别，真正需要守护的是 `cwd` 契约、平台 quoting 行为与调用边界。
+- 剩余：当前仍没有更高层的 Tauri/HTTP wrapper 测试来证明 command surface 的权限边界，也没有对超长输出/timeout 的端到端断言；若要把风险继续压低，应在 `G26/G31` 层补 wrapper 级回归。
 
 **G28. [Medium, 本轮新盲区] Test harness 自身的 flakiness/race 面未审计**
 - `bin/slab-server/tests/support/slab-server.ts` 与 `fullstack-dev.ts` free-port `listen(0)`、process-tree kill、log ring buffer **无 retry、无 hermetic temp 隔离**；`fileParallelism:false` 仅 browser/server project；TS 侧无 per-test timeout 分层（除 slab-server 120s）；无 flaky marker 约定（grep `@flaky|retry` 在真实测试上零命中）。
@@ -300,38 +307,59 @@
 
 **G31. [High] 13/16 v1 HTTP route handler 无 inline 单测；14 个 schema.rs 零测试；crate 无 Rust integration-tests dir。**
 
-**G32. [High] WebSocket JSON-RPC plugin dispatch（两个 `api/jsonrpc/mod.rs`）无 mod 测试。**
+**G32. [High → Low-Medium, 已补 transport glue 直接测试] WebSocket JSON-RPC plugin dispatch（两个 `api/jsonrpc/mod.rs`）已有 mod 测试**
+- 当前已在 `bin/slab-js-runtime/src/api/jsonrpc/mod.rs` 与 `bin/slab-python-runtime/src/api/jsonrpc/mod.rs` 新增直接测试，覆盖：`runtime.ready` 通知形状、`plugin.call` 请求经 `serve_reader` 分发并返回 JSON-RPC success response、以及 malformed JSON payload 的错误响应。
+- 这一步闭合的是此前“**transport adapter 本身零测试**”的盲区；现有测试不再只依赖更高层的 runtime/integration 间接覆盖。
+- 剩余：当前仍未逐项覆盖 no-id request ignore、`jsonrpc != 2.0`、`drain_outbound` writer error/flush error，以及 UDS/stdout wiring 的更细分支；结构性重复（R3，抽 `crates/slab-plugin-jsonrpc`）也仍未处理。
 
 **G33. [High] runtime_to_status 仅覆盖 5/20 RuntimeError variant**（06-08 "3/13 CoreError" 双重错误，已纠正）。Scheduler admission 仅 2 测试；inference_lease vs management_lease mutex、poison/Busy/Timeout/next_seq 并发未测。Orchestrator 状态机 + ResultStorage ~1 测试；`wait_stream` 5-branch match 未测。
 
 ### 3.8 TS 测试基础设施自测（carry-forward）
 
-**G34. [Medium] `vitest-rust-reporter` 单测默认 CI/test 脚本不跑**（需 `--project vitest-rust-reporter-unit`）。
+**G34. [Medium → Resolved] `vitest-rust-reporter` unit project 已纳入默认前端测试入口**
+- 当前 root `vitest.config.ts` 已注册 `packages/vitest-rust-reporter/vitest.unit.config.ts`，`package.json:test:frontend` 也已加入 `--project vitest-rust-reporter-unit`，因此 reporter unit tests 不再是“默认不跑”的孤岛。
 
-**G35. [High] Reporter 核心模块未测**：`command.ts`（timeout/kill/exitCode=null）、`report.ts`（infrastructureError heuristic、missingTool 双拼写、if-available vs fatal）、`project.ts` 默认解析、`utils.ts`（trimOutput/count=0 edge）。
+**G35. [High → Low-Medium, 已补核心 unit coverage] Reporter 核心模块已有直接测试**
+- 当前已新增 `command.unit.test.ts`、`runtime/report.unit.test.ts`、`project.unit.test.ts`、`utils.unit.test.ts`，覆盖：
+  - `command.ts`：stdout/stderr 收集、non-zero exit、timeout、missing executable / `exitCode=null`
+  - `report.ts`：`infrastructureError` heuristic、`if-available` 下的 missing `llvm-cov`、fatal coverage failure、成功 coverage parse、缺失 reporter options
+  - `project.ts`：默认 project option 解析与显式 override
+  - `utils.ts`：`trimOutput`、`buildCoverageGroupName`、`createCoverageMetric(count=0)`、format helpers
+- 剩余：runtime 投影测试 `rust.test.ts` 仍主要依赖整体验证而非更细粒度的 task registration 断言，但最核心的 command/report/project/utils 逻辑已不再裸奔。
 
-**G36. [Low] `slab-plugin-ui`（17 LOC re-export barrel）零测试、无 test script。**
+**G36. [Low → Resolved] `slab-plugin-ui` 已有 ABI smoke test 与 test script**
+- 当前已为 `packages/slab-plugin-ui` 新增 `vitest.config.ts`、`src/index.test.ts` 与 package-level `test` / `test:run` 脚本；测试会验证稳定 re-export surface 和 `cn` helper 的基本可用性。
 
-**G37. [Medium, 本轮新盲区] Visual regression 仅 snapshot-PNG equality；Win32-only baselines（1/14 darwin、0 linux）；无 diffThreshold；CI 不跑 browser（影响 local-only）。** 14 个 legacy auto-named `*-1.png` 与当前共存；orphan chat-page baselines（test 已删，4 PNG 残留）。**a11y 全前端零覆盖**（test 源无 `aria-`/`role=`/a11y）。
+**G37. [Medium → Low-Medium, 已清理历史基线噪音] Visual regression 仍主要依赖 snapshot-PNG equality，但 orphan/legacy 基线已收敛**
+- 当前已删除两类历史遗留基线：没有对应测试文件的 `chat-page.browser.test.tsx` 截图目录，以及旧的自动命名 `*-1.png` 基线；当前仓库只保留现行 `toMatchScreenshot(...)` 命名约定下仍被测试引用的 PNG。
+- 剩余高权重问题仍在：baselines 依旧明显偏向 Win32（darwin 仅 setup-page，linux 仍空白）、无 diffThreshold、CI 默认不跑 browser，因此 visual regression 仍主要是 local-only 信号。
+- `a11y` 覆盖仍是空白：当前前端测试源里依旧没有成体系的 `role` / `aria-*` / 可访问性断言。
 
 **G38. [Medium] `slab-windows-full-installer`（1118 LOC）零测试。**
 
-**G39. [Low] `test:frontend` 项目列表手维护子集，drift 于 root projects**（`package.json:34` 硬编码 4 project，漏 server-tests/desktop-browser/components-browser/rust）。
+**G39. [Low → Low-Medium, 已消除 package.json 级别双写漂移] `test:frontend` 仍是有意收窄的子集，但前端 project 列表已集中到共享 Vitest config**
+- 当前 `package.json:test:frontend` 已改为 `vitest run --config vitest.frontend.config.ts`；`vitest.frontend.config.ts` 与 root `vitest.config.ts` 共同复用 `vitest.projects.ts` 中的 `frontendVitestProjects` / `allVitestProjects`，不再在 `package.json` 里硬编码 7 个 project 名。
+- 纠正：此前问题的核心不是“子集本身错误”，而是**子集列表分散在脚本字符串里、易与 root workspace projects 漂移**；这一层双写现在已收敛到单一项目清单。
+- 剩余：`test:frontend` 依然是有意收窄的入口，仍不覆盖 browser/server/rust runtime projects；若后续默认前端测试边界要扩展，仍需显式调整 `frontendVitestProjects`。
 
 ### 3.9 通用 infra 缺口
 
-**G40. [Medium] `slab-utils/lsp.rs` 错误/滥用分支与 8KB header guard 未测**
-- 3 个 lsp 测试仅覆盖 happy round-trip 与大小写 Content-Length。未测：header 超 8192 字节（DoS guard）、UnexpectedEof partial header、缺 Content-Length、非数字 Content-Length、非 UTF-8。
+**G40. [Medium → Low-Medium, 已补 header/error guards] `slab-utils/lsp.rs` 关键 framing 错误路径已有覆盖**
+- 当前已补 `read_lsp_stdio_message` 的 header 超 8192 字节、UnexpectedEof partial header、缺失 `Content-Length`、非数字 `Content-Length`、非 UTF-8 header 这些错误路径测试；happy round-trip 与大小写 `Content-Length` 也仍有覆盖。
+- 剩余：尚未直接覆盖 body 非 UTF-8、body 提前 EOF、以及更细粒度的 header 变体组合，但最关键的 8KB guard 与基础 framing 错误面已不再裸奔。
 
 **G41. [Medium] `slab-utils/loader.rs` native-library 加载从未端到端测**
 - 13 个测试全用 closure mock。`open_native_library` 的 Windows `LOAD_LIBRARY_SEARCH_*` flags（DLL planting 防护，line 62-67）零覆盖。
 
-**G42. [Medium] `slab-config/app_config.rs from_env` 大部分 env var 与解析 edge 未测**
-- 20+ env var，7 测试覆盖 5。未测：`SLAB_DATABASE_URL` override、`SLAB_LOG_JSON`/`SLAB_CLOUD_HTTP_TRACE` truthiness（仅 "1"/"true"，"yes"/"TRUE"/"on" 静默 false）、`SLAB_ENABLE_SWAGGER` 反语义、`SLAB_QUEUE_CAPACITY`/`SLAB_BACKEND_CAPACITY` 非数字/0/overflow、`SLAB_ADMIN_TOKEN`/`SLAB_CORS_ORIGINS`/`SLAB_TRANSPORT`。无 negative 测 malformed capacity（当前静默用 default——silent-failure footgun）。
+**G42. [Medium → Low-Medium, 已补主要 env parsing guards] `slab-config/app_config.rs from_env` 关键 override 与解析 edge 已有直接测试**
+- 当前已补 `SLAB_DATABASE_URL` override、`SLAB_LOG_JSON` / `SLAB_CLOUD_HTTP_TRACE` truthiness、`SLAB_ENABLE_SWAGGER` 反语义、`SLAB_QUEUE_CAPACITY` / `SLAB_BACKEND_CAPACITY` 的非数字/overflow fallback、以及 `SLAB_ADMIN_TOKEN` / `SLAB_CORS_ORIGINS` / `SLAB_TRANSPORT` 覆盖。
+- 纠正：此前审计里把 `"TRUE"` 也归入“静默 false”是错误的；当前实现对 `"true"` 使用 `eq_ignore_ascii_case`，因此 `"TRUE"` 会被接受，而 `"yes"` / `"on"` 仍会解析为 false。`SLAB_QUEUE_CAPACITY=0` 当前也会被接受为合法值，而不是回退默认值。
+- 剩余：现有实现对 malformed capacity 仍是 silent fallback 到 default，这个行为现在已有测试但是否应改成显式报错，仍是产品/配置契约层面的后续决策；此外 `SLAB_BIND` 以外的更多 endpoint/path env 仍未逐项做 exhaustiveness 覆盖。
 
-**G43. [Medium] `env_lock` + `EnvGuard` unsafe env-var 脚手架进程全局且不可验证**
-- `crates/slab-config/src/app_config.rs:303-326`，`unsafe { std::env::set_var(...) }` 串行化于单 `OnceLock<Mutex<()>>`。Rust 2024 下 set_var/remove_var 是 unsafe 正因线程不安全；强制串行、test order 可观察、不兼容未来并行 runner。06-08 已点，**本轮未修，仍存**。
-- 建议：`Config::from_env` 改接受 env-source trait（或 `&HashMap`），消除 mutex + unsafe + 串行要求。
+**G43. [Medium → Resolved] `Config::from_env` 测试脚手架已移除进程全局 `unsafe` env 变更**
+- 当前 `crates/slab-config/src/app_config.rs` 已将解析逻辑下沉到可注入的 `from_env_source` 路径，生产代码仍走真实 `ProcessEnv`，测试则通过局部 `HashMap<String, String>` fixture 驱动，不再依赖 `env_lock` / `EnvGuard`、`unsafe { std::env::set_var/remove_var }` 或可观察的全局串行。
+- 同一轮调整还把 `temp_settings_path()` 的手写临时目录改成 RAII `tempfile::tempdir()` fixture，避免 panic 时遗留 test temp 目录。
+- 纠正：此前审计对这个问题的风险判断成立，但当前代码已不再保留该脚手架，因此本项应从“仍存”改为已闭合。
 
 ---
 
@@ -348,7 +376,7 @@
 | 5 | **`rpc/client.rs` retry/backoff 决策提取为纯函数并单测**（已完成：transient/status/attempt 边界覆盖） | slab-app-core | M | G13 |
 | 6 | **Repository round-trip 套件**（已完成首批：`media_task.rs` image/video/audio insert→update→get/list） | slab-app-core | L | G14 |
 | 7 | **Supervisor panic-safety 测试/修复**（已完成：panic fake child → unavailable 标记 + crash-loop 计数） | slab-app-core | M | G15 |
-| 8 | **TS hooks/store 测试**（已完成首批：`ui-state-storage` fake timers + `useWorkspaceUiStore` store 行为；hooks 仍待扩展） | slab-desktop | M | G20, G21, G22 |
+| 8 | **TS hooks/store 测试**（已完成：`ui-state-storage` fake timers + `useWorkspaceUiStore` store 行为；当前 hooks surface 直接覆盖已补齐） | slab-desktop | M | G20, G21, G22 |
 | 9 | **Coverage threshold + `lint-staged` 配置**（核心包阈值，pre-commit 真正生效）；smoke 补"每条 executable 必被 flow 实调"meta-test，并明确外部目标模式下 admin-auth smoke 的跳过策略 | release/CI + slab-server | S | G2, G4, G3 |
 
 ### 4.2 分阶段路线图
@@ -359,15 +387,14 @@
 - 已补 G29 apply_patch 核心 negative/round-trip 测试并删除 skills 假测试；crate-wide `deny_unknown_fields` 已纠正为不适合 OpenAI 兼容模型的默认策略，剩余为 Responses/tool/chat unions 的扩大覆盖。
 
 **Phase 2覆盖深度 + 冗余根因治理**
-- 已完成行动 #5（RPC retry）、#6 首批 repository round-trip（media_task image/video/audio）、#8 首批 TS store 覆盖（ui-state-storage/useWorkspaceUiStore）与 hooks 首批覆盖（usePersistedHeaderSelect/useGlobalHeaderMeta）；薄包装 hooks 仍待扩展。
+- 已完成行动 #5（RPC retry）、#6 首批 repository round-trip（media_task image/video/audio）、#8 首批 TS store 覆盖（ui-state-storage/useWorkspaceUiStore）、当前 hooks surface 覆盖（usePersistedHeaderSelect/useGlobalHeaderMeta/useFile/useDesktopPlatform/useTauri/useMobile），以及 `assistant-agent-state.ts` 的纯逻辑覆盖。
 - 治理**冗余根因**：建立共享 test-support——Rust 侧 `slab-test-utils`（含 `migrated_pool`/`run_git_test`/`build_pack_bytes`/fixture builders）；TS 侧每个 package 建 `src/test/` + `__mocks__/`（R12/R13/R5/R18 收敛）。
-- 抽取 `crates/slab-plugin-jsonrpc` 闭合 R3 + G32。
+- 已为两个 `api/jsonrpc/mod.rs` 补 transport glue 直接测试（G32）；剩余是抽取 `crates/slab-plugin-jsonrpc` 收敛重复（R3）。
 - 6 gRPC handler boilerplate 抽取（R15/R16）。
-- i18n parity 脚本（G25）、visual baselines 清理（G37 orphan/legacy PNG）、a11y 起步。
+- 已完成 i18n parity 脚本与 `test:frontend` 接线（G25），并清理 G37 的 orphan/legacy PNG 基线；剩余为 visual/browser 覆盖结构升级与 a11y 起步。
 
 **Phase 4（持续，工具链升级）**
-- 采用 `cargo-nextest`（更快、retry、partitioning）；CI 装 `cargo-llvm-cov` + 阈值（G1）。
-- `Config::from_env` 改 env-source trait，消除 `env_lock` unsafe（G43）。
+- 已完成 `Config::from_env` 的 env-source 注入改造，消除 `env_lock` / `EnvGuard` unsafe（G43）。
 - proptest/criterion 推广到 parser/config/migration/state-machine crate。
 - TS 测试 harness 加 flaky 隔离约定 + per-project timeout 分层（G28）。
 

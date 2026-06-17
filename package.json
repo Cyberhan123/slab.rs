@@ -31,7 +31,7 @@
     "lint": "oxlint packages/api packages/slab-desktop packages/slab-components packages/slab-i18n packages/slab-plugin-sdk packages/slab-plugin-cli packages/slab-plugin-ui packages/vitest-rust-reporter plugins/video-subtitle-translator/src scripts",
     "lint:fix": "oxlint --fix packages/api packages/slab-desktop packages/slab-components packages/slab-i18n packages/slab-plugin-sdk packages/slab-plugin-cli packages/slab-plugin-ui packages/vitest-rust-reporter plugins/video-subtitle-translator/src scripts",
     "test": "bun run test:frontend && cargo test --workspace",
-    "test:frontend": "vitest run --project api --project plugin-sdk --project plugin-cli --project desktop",
+    "test:frontend": "vitest run --config vitest.frontend.config.ts",
     "test:rust": "vitest run --project rust",
     "test:rust:cargo": "bun ./scripts/cargo/validate.ts test",
     "test:sandbox": "bun ./scripts/cargo/validate.ts sandbox",

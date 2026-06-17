@@ -6,7 +6,9 @@
   "main": "./src/index.ts",
   "scripts": {
     "lint": "oxlint src",
-    "lint:fix": "oxlint --fix src"
+    "lint:fix": "oxlint --fix src",
+    "test": "vitest",
+    "test:run": "vitest run"
   },
   "exports": {
     ".": "./src/index.ts"

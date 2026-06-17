@@ -28,6 +28,12 @@ Run focused linting with:
 bun run --cwd packages/slab-i18n lint
 ```
 
+Run locale integrity tests with:
+
+```sh
+bun run --cwd packages/slab-i18n test:run
+```
+
 ## License
 
 AGPL-3.0-only. See the root [LICENSE](../../LICENSE).

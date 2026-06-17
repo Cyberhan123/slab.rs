@@ -117,4 +117,48 @@ mod tests {
 
         assert_eq!(message, r#"{"jsonrpc":"2.0"}"#);
     }
+
+    #[tokio::test]
+    async fn rejects_oversized_stdio_headers() {
+        let mut framed = std::io::Cursor::new(vec![b'a'; 8193]);
+
+        let error = read_lsp_stdio_message(&mut framed).await.expect_err("oversized header");
+
+        assert_eq!(error, "language server response header is too large");
+    }
+
+    #[tokio::test]
+    async fn rejects_partial_stdio_headers() {
+        let mut framed = std::io::Cursor::new(b"Content-Length: 24\r\n".to_vec());
+
+        let error = read_lsp_stdio_message(&mut framed).await.expect_err("partial header");
+
+        assert_eq!(error, "language server closed while sending response header");
+    }
+
+    #[tokio::test]
+    async fn rejects_missing_or_invalid_content_length_headers() {
+        let mut missing = std::io::Cursor::new(
+            b"Content-Type: application/vscode-jsonrpc\r\n\r\n{\"jsonrpc\":\"2.0\"}".to_vec(),
+        );
+        let mut invalid =
+            std::io::Cursor::new(b"Content-Length: nope\r\n\r\n{\"jsonrpc\":\"2.0\"}".to_vec());
+
+        let missing_error =
+            read_lsp_stdio_message(&mut missing).await.expect_err("missing content length");
+        let invalid_error =
+            read_lsp_stdio_message(&mut invalid).await.expect_err("invalid content length");
+
+        assert_eq!(missing_error, "language server response missing Content-Length header");
+        assert_eq!(invalid_error, "invalid language server Content-Length header");
+    }
+
+    #[tokio::test]
+    async fn rejects_non_utf8_stdio_headers() {
+        let mut framed = std::io::Cursor::new(vec![0xff, b'\r', b'\n', b'\r', b'\n']);
+
+        let error = read_lsp_stdio_message(&mut framed).await.expect_err("non-utf8 header");
+
+        assert_eq!(error, "language server response header is not UTF-8");
+    }
 }

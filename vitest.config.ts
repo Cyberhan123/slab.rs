@@ -1,17 +1,10 @@
 import { defineConfig } from "vitest/config";
 
+import { allVitestProjects } from "./vitest.projects";
+
 export default defineConfig({
   test: {
-    projects: [
-      "packages/api/vitest.config.ts",
-      "packages/slab-desktop/vitest.config.ts",
-      "packages/slab-desktop/vitest.browser.config.ts",
-      "packages/slab-components/vitest.config.ts",
-      "packages/slab-plugin-sdk/vitest.config.ts",
-      "packages/slab-plugin-cli/vitest.config.ts",
-      "packages/vitest-rust-reporter/vitest.config.ts",
-      "bin/slab-server/tests/vitest.config.ts",
-    ],
+    projects: [...allVitestProjects],
     reporters: ["default"],
     coverage: {
       provider: "v8",

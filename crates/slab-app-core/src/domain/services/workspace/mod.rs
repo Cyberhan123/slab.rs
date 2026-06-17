@@ -837,6 +837,7 @@ fn join_relative_path(parent: &str, child: &str) -> String {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::PathBuf;
 
     use super::{WorkspaceService, normalize_relative_path};
 
@@ -895,5 +896,71 @@ mod tests {
         assert_eq!(response.matches[0].line_matches[0].line_number, 2);
         assert_eq!(response.matches[0].line_matches[0].match_start, 6);
         assert_eq!(response.matches[0].line_matches[0].match_end, 11);
+    }
+
+    #[tokio::test]
+    async fn run_console_command_uses_workspace_root_as_cwd() {
+        let root = tempfile::tempdir().expect("tempdir");
+
+        let command =
+            if cfg!(windows) { "(Get-Location).Path".to_string() } else { "pwd".to_string() };
+        let output = WorkspaceService::run_console_command(root.path(), &command)
+            .await
+            .expect("console output");
+
+        assert_eq!(output.exit_code, Some(0));
+        assert!(!output.timed_out);
+
+        let reported_cwd = PathBuf::from(output.stdout.trim());
+        let canonical_reported = reported_cwd.canonicalize().expect("reported cwd");
+        let canonical_root = root.path().canonicalize().expect("canonical root");
+        assert_eq!(canonical_reported, canonical_root);
+    }
+
+    #[tokio::test]
+    async fn run_console_command_supports_quoted_relative_paths() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let relative_path = PathBuf::from("nested dir").join("file with spaces.txt");
+        let file_path = root.path().join(&relative_path);
+        fs::create_dir_all(file_path.parent().expect("parent")).expect("create nested dir");
+        fs::write(&file_path, "quoted path content").expect("write test file");
+
+        let command = if cfg!(windows) {
+            "Get-Content -Raw '.\\nested dir\\file with spaces.txt'".to_string()
+        } else {
+            "cat './nested dir/file with spaces.txt'".to_string()
+        };
+        let output = WorkspaceService::run_console_command(root.path(), &command)
+            .await
+            .expect("console output");
+
+        assert_eq!(output.exit_code, Some(0));
+        assert_eq!(output.stdout.trim_end_matches(['\r', '\n']), "quoted path content");
+        assert!(output.stderr.is_empty());
+        assert!(!output.timed_out);
+    }
+
+    #[tokio::test]
+    async fn run_console_command_writes_relative_paths_inside_workspace_root() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let relative_path = "created by command.txt";
+        let expected_content = "created from workspace command";
+
+        let command = if cfg!(windows) {
+            format!("Set-Content -NoNewline -Path '.\\{relative_path}' -Value '{expected_content}'")
+        } else {
+            format!("printf '{expected_content}' > './{relative_path}'")
+        };
+        let output = WorkspaceService::run_console_command(root.path(), &command)
+            .await
+            .expect("console output");
+
+        assert_eq!(output.exit_code, Some(0));
+        assert!(output.stderr.is_empty());
+        assert!(!output.timed_out);
+        assert_eq!(
+            fs::read_to_string(root.path().join(relative_path)).expect("created file"),
+            expected_content
+        );
     }
 }

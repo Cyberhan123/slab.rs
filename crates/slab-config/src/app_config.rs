@@ -6,6 +6,20 @@ use std::path::{Path, PathBuf};
 
 use crate::{PluginJsRuntimeTransport, PluginPythonRuntimeTransport, SettingsDocument};
 
+/// Supplies environment values to [`Config::from_env_source`] so tests can
+/// exercise config parsing without mutating process-global state.
+trait EnvSource {
+    fn var(&self, key: &str) -> Option<String>;
+}
+
+struct ProcessEnv;
+
+impl EnvSource for ProcessEnv {
+    fn var(&self, key: &str) -> Option<String> {
+        std::env::var(key).ok()
+    }
+}
+
 /// Runtime configuration for slab-server.
 ///
 /// Every field has a sensible default so the server works out-of-the-box
@@ -126,55 +140,53 @@ pub type AppConfig = Config;
 impl Config {
     /// Build [`Config`] from environment variables, falling back to defaults.
     pub fn from_env() -> Self {
-        let settings_path = std::env::var("SLAB_SETTINGS_PATH")
-            .ok()
+        Self::from_env_source(&ProcessEnv)
+    }
+
+    fn from_env_source(source: &impl EnvSource) -> Self {
+        let settings_path = source
+            .var("SLAB_SETTINGS_PATH")
             .map(PathBuf::from)
             .unwrap_or_else(default_settings_path);
-        let model_config_dir = std::env::var("SLAB_MODEL_CONFIG_DIR")
-            .ok()
+        let model_config_dir = source
+            .var("SLAB_MODEL_CONFIG_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| default_model_config_dir_for_settings_path(&settings_path));
 
         Self {
-            bind_address: env_or("SLAB_BIND", DESKTOP_API_BIND),
-            database_url: std::env::var("SLAB_DATABASE_URL")
-                .unwrap_or_else(|_| default_database_url()),
-            log_level: env_or("SLAB_LOG", "info"),
-            log_json: std::env::var("SLAB_LOG_JSON")
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false),
-            log_file: std::env::var("SLAB_LOG_FILE").ok().map(PathBuf::from),
-            cloud_http_trace: std::env::var("SLAB_CLOUD_HTTP_TRACE")
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false),
-            queue_capacity: parse_env("SLAB_QUEUE_CAPACITY", 64),
-            backend_capacity: parse_env("SLAB_BACKEND_CAPACITY", 4),
-            enable_swagger: std::env::var("SLAB_ENABLE_SWAGGER")
+            bind_address: env_or(source, "SLAB_BIND", DESKTOP_API_BIND),
+            database_url: source.var("SLAB_DATABASE_URL").unwrap_or_else(default_database_url),
+            log_level: env_or(source, "SLAB_LOG", "info"),
+            log_json: parse_trueish_env(source, "SLAB_LOG_JSON"),
+            log_file: source.var("SLAB_LOG_FILE").map(PathBuf::from),
+            cloud_http_trace: parse_trueish_env(source, "SLAB_CLOUD_HTTP_TRACE"),
+            queue_capacity: parse_env(source, "SLAB_QUEUE_CAPACITY", 64),
+            backend_capacity: parse_env(source, "SLAB_BACKEND_CAPACITY", 4),
+            enable_swagger: source
+                .var("SLAB_ENABLE_SWAGGER")
                 .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
                 .unwrap_or(true),
-            cors_allowed_origins: std::env::var("SLAB_CORS_ORIGINS").ok(),
-            admin_api_token: std::env::var("SLAB_ADMIN_TOKEN").ok(),
-            transport_mode: env_or("SLAB_TRANSPORT", "http"),
-            llama_grpc_endpoint: std::env::var("SLAB_LLAMA_GRPC_ENDPOINT").ok(),
-            whisper_grpc_endpoint: std::env::var("SLAB_WHISPER_GRPC_ENDPOINT").ok(),
-            diffusion_grpc_endpoint: std::env::var("SLAB_DIFFUSION_GRPC_ENDPOINT").ok(),
-            candle_llama_grpc_endpoint: std::env::var("SLAB_CANDLE_LLAMA_GRPC_ENDPOINT").ok(),
-            candle_whisper_grpc_endpoint: std::env::var("SLAB_CANDLE_WHISPER_GRPC_ENDPOINT").ok(),
-            candle_diffusion_grpc_endpoint: std::env::var("SLAB_CANDLE_DIFFUSION_GRPC_ENDPOINT")
-                .ok(),
-            lib_dir: std::env::var("SLAB_LIB_DIR").ok().map(PathBuf::from),
-            session_state_dir: std::env::var("SLAB_SESSION_STATE_DIR")
-                .unwrap_or_else(|_| default_session_state_dir().to_string_lossy().into_owned()),
+            cors_allowed_origins: source.var("SLAB_CORS_ORIGINS"),
+            admin_api_token: source.var("SLAB_ADMIN_TOKEN"),
+            transport_mode: env_or(source, "SLAB_TRANSPORT", "http"),
+            llama_grpc_endpoint: source.var("SLAB_LLAMA_GRPC_ENDPOINT"),
+            whisper_grpc_endpoint: source.var("SLAB_WHISPER_GRPC_ENDPOINT"),
+            diffusion_grpc_endpoint: source.var("SLAB_DIFFUSION_GRPC_ENDPOINT"),
+            candle_llama_grpc_endpoint: source.var("SLAB_CANDLE_LLAMA_GRPC_ENDPOINT"),
+            candle_whisper_grpc_endpoint: source.var("SLAB_CANDLE_WHISPER_GRPC_ENDPOINT"),
+            candle_diffusion_grpc_endpoint: source.var("SLAB_CANDLE_DIFFUSION_GRPC_ENDPOINT"),
+            lib_dir: source.var("SLAB_LIB_DIR").map(PathBuf::from),
+            session_state_dir: source
+                .var("SLAB_SESSION_STATE_DIR")
+                .unwrap_or_else(|| default_session_state_dir().to_string_lossy().into_owned()),
             settings_path: settings_path.clone(),
-            settings_overlay_path: std::env::var("SLAB_SETTINGS_OVERLAY_PATH")
-                .ok()
-                .map(PathBuf::from),
-            workspace_root: std::env::var("SLAB_WORKSPACE_ROOT").ok().map(PathBuf::from),
+            settings_overlay_path: source.var("SLAB_SETTINGS_OVERLAY_PATH").map(PathBuf::from),
+            workspace_root: source.var("SLAB_WORKSPACE_ROOT").map(PathBuf::from),
             model_config_dir,
             plugins_dir: plugin_install_dir_from_settings(&settings_path)
                 .unwrap_or_else(|| default_plugin_install_dir_for_settings_path(&settings_path)),
-            exec_rules_dir: std::env::var("SLAB_EXEC_RULES_DIR")
-                .ok()
+            exec_rules_dir: source
+                .var("SLAB_EXEC_RULES_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(default_exec_rules_dir),
             plugin_js_runtime_transport: plugin_js_runtime_transport_from_settings(&settings_path)
@@ -189,12 +201,16 @@ impl Config {
 
 // ── private helpers ──────────────────────────────────────────────────────────
 
-fn env_or(key: &str, default: &str) -> String {
-    std::env::var(key).unwrap_or_else(|_| default.to_owned())
+fn env_or(source: &impl EnvSource, key: &str, default: &str) -> String {
+    source.var(key).unwrap_or_else(|| default.to_owned())
 }
 
-fn parse_env<T: std::str::FromStr>(key: &str, default: T) -> T {
-    std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+fn parse_env<T: std::str::FromStr>(source: &impl EnvSource, key: &str, default: T) -> T {
+    source.var(key).and_then(|v| v.parse().ok()).unwrap_or(default)
+}
+
+fn parse_trueish_env(source: &impl EnvSource, key: &str) -> bool {
+    source.var(key).map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false)
 }
 
 pub fn default_app_dir() -> PathBuf {
@@ -290,46 +306,32 @@ pub fn default_output_dir_for_settings_path(settings_path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        Config, default_database_path, default_exec_rules_dir,
+        Config, EnvSource, default_database_path, default_exec_rules_dir,
         default_exec_rules_dir_for_settings_path, default_model_config_dir,
         default_plugin_install_dir_for_settings_path, default_plugins_dir, default_runtime_ipc_dir,
         default_runtime_log_dir, default_session_state_dir, default_settings_path,
     };
     use slab_types::DESKTOP_API_BIND;
     use slab_utils::app_home;
+    use std::collections::HashMap;
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::sync::{Mutex, OnceLock};
+    use tempfile::TempDir;
 
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
-
-    struct EnvGuard {
-        key: &'static str,
-        value: Option<String>,
-    }
-
-    impl EnvGuard {
-        fn capture(key: &'static str) -> Self {
-            Self { key, value: std::env::var(key).ok() }
+    impl EnvSource for HashMap<String, String> {
+        fn var(&self, key: &str) -> Option<String> {
+            self.get(key).cloned()
         }
     }
 
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            match &self.value {
-                Some(value) => unsafe { std::env::set_var(self.key, value) },
-                None => unsafe { std::env::remove_var(self.key) },
-            }
-        }
+    fn env_vars<const N: usize>(entries: [(&str, &str); N]) -> HashMap<String, String> {
+        entries.into_iter().map(|(key, value)| (key.to_owned(), value.to_owned())).collect()
     }
 
-    fn temp_settings_path() -> PathBuf {
-        std::env::temp_dir()
-            .join(format!("slab-config-test-{}", uuid::Uuid::new_v4()))
-            .join("settings.json")
+    fn temp_settings_fixture() -> (TempDir, PathBuf) {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let settings_path = temp_dir.path().join("settings.json");
+        (temp_dir, settings_path)
     }
 
     fn write_json(path: &Path, value: serde_json::Value) {
@@ -339,22 +341,8 @@ mod tests {
 
     #[test]
     fn from_env_uses_desktop_api_bind_by_default() {
-        let _lock = env_lock().lock().unwrap();
-        let _bind = EnvGuard::capture("SLAB_BIND");
-        let _settings = EnvGuard::capture("SLAB_SETTINGS_PATH");
-        let _model_config = EnvGuard::capture("SLAB_MODEL_CONFIG_DIR");
-        let _plugins = EnvGuard::capture("SLAB_PLUGINS_DIR");
-        let _rules = EnvGuard::capture("SLAB_EXEC_RULES_DIR");
-
-        unsafe {
-            std::env::remove_var("SLAB_BIND");
-            std::env::remove_var("SLAB_SETTINGS_PATH");
-            std::env::remove_var("SLAB_MODEL_CONFIG_DIR");
-            std::env::remove_var("SLAB_PLUGINS_DIR");
-            std::env::remove_var("SLAB_EXEC_RULES_DIR");
-        }
-
-        let config = Config::from_env();
+        let env = HashMap::<String, String>::new();
+        let config = Config::from_env_source(&env);
         assert_eq!(config.bind_address, DESKTOP_API_BIND);
     }
 
@@ -383,58 +371,38 @@ mod tests {
 
     #[test]
     fn from_env_defaults_plugins_dir_to_app_home() {
-        let _lock = env_lock().lock().unwrap();
-        let _settings = EnvGuard::capture("SLAB_SETTINGS_PATH");
-        let _model_config = EnvGuard::capture("SLAB_MODEL_CONFIG_DIR");
-        let _plugins = EnvGuard::capture("SLAB_PLUGINS_DIR");
-        let _rules = EnvGuard::capture("SLAB_EXEC_RULES_DIR");
-        let settings_path = temp_settings_path();
-
-        unsafe {
-            std::env::set_var("SLAB_SETTINGS_PATH", &settings_path);
-            std::env::remove_var("SLAB_MODEL_CONFIG_DIR");
-            std::env::remove_var("SLAB_PLUGINS_DIR");
-            std::env::remove_var("SLAB_EXEC_RULES_DIR");
-        }
-
-        let config = Config::from_env();
+        let (_temp_dir, settings_path) = temp_settings_fixture();
+        let settings_path = settings_path.to_string_lossy().into_owned();
+        let env = env_vars([("SLAB_SETTINGS_PATH", settings_path.as_str())]);
+        let config = Config::from_env_source(&env);
 
         assert_eq!(
             config.plugins_dir,
-            default_plugin_install_dir_for_settings_path(&settings_path)
+            default_plugin_install_dir_for_settings_path(Path::new(&settings_path))
         );
     }
 
     #[test]
     fn from_env_ignores_slab_plugins_dir_override() {
-        let _lock = env_lock().lock().unwrap();
-        let _settings = EnvGuard::capture("SLAB_SETTINGS_PATH");
-        let _plugins = EnvGuard::capture("SLAB_PLUGINS_DIR");
-        let _rules = EnvGuard::capture("SLAB_EXEC_RULES_DIR");
-        let settings_path = temp_settings_path();
+        let (_temp_dir, settings_path) = temp_settings_fixture();
         let ignored_plugins_dir = settings_path.parent().expect("parent").join("ignored-plugins");
-
-        unsafe {
-            std::env::set_var("SLAB_SETTINGS_PATH", &settings_path);
-            std::env::set_var("SLAB_PLUGINS_DIR", &ignored_plugins_dir);
-            std::env::remove_var("SLAB_EXEC_RULES_DIR");
-        }
-
-        let config = Config::from_env();
+        let settings_path = settings_path.to_string_lossy().into_owned();
+        let ignored_plugins_dir = ignored_plugins_dir.to_string_lossy().into_owned();
+        let env = env_vars([
+            ("SLAB_SETTINGS_PATH", settings_path.as_str()),
+            ("SLAB_PLUGINS_DIR", ignored_plugins_dir.as_str()),
+        ]);
+        let config = Config::from_env_source(&env);
 
         assert_eq!(
             config.plugins_dir,
-            default_plugin_install_dir_for_settings_path(&settings_path)
+            default_plugin_install_dir_for_settings_path(Path::new(&settings_path))
         );
     }
 
     #[test]
     fn from_env_uses_settings_plugin_install_dir_when_present() {
-        let _lock = env_lock().lock().unwrap();
-        let _settings = EnvGuard::capture("SLAB_SETTINGS_PATH");
-        let _plugins = EnvGuard::capture("SLAB_PLUGINS_DIR");
-        let _rules = EnvGuard::capture("SLAB_EXEC_RULES_DIR");
-        let settings_path = temp_settings_path();
+        let (_temp_dir, settings_path) = temp_settings_fixture();
         let configured_plugins_dir =
             settings_path.parent().expect("parent").join("configured-plugins");
         write_json(
@@ -445,17 +413,11 @@ mod tests {
                 }
             }),
         );
-
-        unsafe {
-            std::env::set_var("SLAB_SETTINGS_PATH", &settings_path);
-            std::env::remove_var("SLAB_PLUGINS_DIR");
-            std::env::remove_var("SLAB_EXEC_RULES_DIR");
-        }
-
-        let config = Config::from_env();
+        let settings_path = settings_path.to_string_lossy().into_owned();
+        let env = env_vars([("SLAB_SETTINGS_PATH", settings_path.as_str())]);
+        let config = Config::from_env_source(&env);
 
         assert_eq!(config.plugins_dir, configured_plugins_dir);
-        let _ = fs::remove_dir_all(settings_path.parent().expect("parent"));
     }
 
     #[test]
@@ -467,14 +429,58 @@ mod tests {
 
     #[test]
     fn from_env_uses_exec_rules_dir_override() {
-        let _lock = env_lock().lock().unwrap();
-        let _rules = EnvGuard::capture("SLAB_EXEC_RULES_DIR");
         let rules_dir = PathBuf::from("D:/Slab/rules");
+        let rules_dir = rules_dir.to_string_lossy().into_owned();
+        let env = env_vars([("SLAB_EXEC_RULES_DIR", rules_dir.as_str())]);
+        let config = Config::from_env_source(&env);
 
-        unsafe { std::env::set_var("SLAB_EXEC_RULES_DIR", &rules_dir) };
+        assert_eq!(config.exec_rules_dir, PathBuf::from(rules_dir));
+    }
 
-        let config = Config::from_env();
+    #[test]
+    fn from_env_reads_network_logging_and_auth_overrides() {
+        let env = env_vars([
+            ("SLAB_DATABASE_URL", "sqlite:///tmp/slab-test.db"),
+            ("SLAB_LOG_JSON", "TRUE"),
+            ("SLAB_CLOUD_HTTP_TRACE", "1"),
+            ("SLAB_ENABLE_SWAGGER", "false"),
+            ("SLAB_QUEUE_CAPACITY", "0"),
+            ("SLAB_BACKEND_CAPACITY", "12"),
+            ("SLAB_ADMIN_TOKEN", "test-admin-token"),
+            ("SLAB_CORS_ORIGINS", "https://app.example.com,https://admin.example.com"),
+            ("SLAB_TRANSPORT", "ipc"),
+        ]);
+        let config = Config::from_env_source(&env);
 
-        assert_eq!(config.exec_rules_dir, rules_dir);
+        assert_eq!(config.database_url, "sqlite:///tmp/slab-test.db");
+        assert!(config.log_json);
+        assert!(config.cloud_http_trace);
+        assert!(!config.enable_swagger);
+        assert_eq!(config.queue_capacity, 0);
+        assert_eq!(config.backend_capacity, 12);
+        assert_eq!(config.admin_api_token.as_deref(), Some("test-admin-token"));
+        assert_eq!(
+            config.cors_allowed_origins.as_deref(),
+            Some("https://app.example.com,https://admin.example.com")
+        );
+        assert_eq!(config.transport_mode, "ipc");
+    }
+
+    #[test]
+    fn from_env_falls_back_for_invalid_capacity_and_unrecognized_boolean_values() {
+        let env = env_vars([
+            ("SLAB_LOG_JSON", "yes"),
+            ("SLAB_CLOUD_HTTP_TRACE", "on"),
+            ("SLAB_ENABLE_SWAGGER", "0"),
+            ("SLAB_QUEUE_CAPACITY", "not-a-number"),
+            ("SLAB_BACKEND_CAPACITY", "999999999999999999999999999999999999"),
+        ]);
+        let config = Config::from_env_source(&env);
+
+        assert!(!config.log_json);
+        assert!(!config.cloud_http_trace);
+        assert!(!config.enable_swagger);
+        assert_eq!(config.queue_capacity, 64);
+        assert_eq!(config.backend_capacity, 4);
     }
 }

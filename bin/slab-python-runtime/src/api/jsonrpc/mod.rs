@@ -222,3 +222,140 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use serde_json::{Value, json};
+    use slab_types::{PluginPermissionsManifest, PluginRuntimeCallRequest};
+    use tokio::io::{AsyncWriteExt, BufReader};
+
+    use super::{JsonRpcRuntimeHost, serve_reader};
+    use crate::PythonRuntime;
+
+    fn plugin_call_request(root_dir: &str) -> PluginRuntimeCallRequest {
+        PluginRuntimeCallRequest {
+            call_id: "call-1".to_owned(),
+            plugin_id: "plugin-1".to_owned(),
+            root_dir: root_dir.to_owned(),
+            entry: "plugin.py".to_owned(),
+            bundle: None,
+            export_name: "run".to_owned(),
+            params: json!({"value": 2}),
+            permissions: PluginPermissionsManifest::default(),
+            file_grants: Vec::new(),
+            blocked_fetch_origins: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn serves_runtime_ready_and_plugin_call() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            temp_dir.path().join("plugin.py"),
+            "def run(params):\n    return {'value': params['value'] + 1}\n",
+        )
+        .expect("write plugin");
+
+        let (host, mut outbound) = JsonRpcRuntimeHost::new();
+        let host = Arc::new(host);
+        host.send_notification(
+            "runtime.ready",
+            json!({
+                "runtime": "slab-python-runtime",
+                "engine": "cpython-pyo3"
+            }),
+        );
+        let runtime = Arc::new(PythonRuntime::new());
+
+        let (mut writer, reader) = tokio::io::duplex(1024);
+        let serve = tokio::spawn(serve_reader(Arc::clone(&host), runtime, BufReader::new(reader)));
+
+        let line = json!({
+            "jsonrpc": "2.0",
+            "id": "1",
+            "method": "plugin.call",
+            "params": plugin_call_request(&temp_dir.path().to_string_lossy()),
+        });
+        writer.write_all(format!("{line}\n").as_bytes()).await.expect("write request");
+        writer.shutdown().await.expect("shutdown");
+
+        let ready: Value = serde_json::from_str(
+            &tokio::time::timeout(Duration::from_secs(5), outbound.recv())
+                .await
+                .expect("ready timeout")
+                .expect("ready message"),
+        )
+        .expect("parse ready message");
+        assert_eq!(
+            ready,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "runtime.ready",
+                "params": {
+                    "engine": "cpython-pyo3",
+                    "runtime": "slab-python-runtime"
+                }
+            })
+        );
+
+        let response: Value = serde_json::from_str(
+            &tokio::time::timeout(Duration::from_secs(5), outbound.recv())
+                .await
+                .expect("response timeout")
+                .expect("response message"),
+        )
+        .expect("parse response message");
+        assert_eq!(response["id"], "1");
+        assert_eq!(response["result"], json!({ "result": { "value": 3 } }));
+
+        serve.await.expect("join").expect("serve");
+    }
+
+    #[tokio::test]
+    async fn rejects_invalid_jsonrpc_payloads() {
+        let (host, mut outbound) = JsonRpcRuntimeHost::new();
+        let host = Arc::new(host);
+        host.send_notification(
+            "runtime.ready",
+            json!({
+                "runtime": "slab-python-runtime",
+                "engine": "cpython-pyo3"
+            }),
+        );
+        let runtime = Arc::new(PythonRuntime::new());
+
+        let (mut writer, reader) = tokio::io::duplex(1024);
+        let serve = tokio::spawn(serve_reader(Arc::clone(&host), runtime, BufReader::new(reader)));
+
+        writer.write_all(b"{not json}\n").await.expect("write request");
+        writer.shutdown().await.expect("shutdown");
+
+        let ready: Value = serde_json::from_str(
+            &tokio::time::timeout(Duration::from_secs(5), outbound.recv())
+                .await
+                .expect("ready timeout")
+                .expect("ready message"),
+        )
+        .expect("parse ready message");
+        assert_eq!(ready["method"], "runtime.ready");
+
+        let response: Value = serde_json::from_str(
+            &tokio::time::timeout(Duration::from_secs(5), outbound.recv())
+                .await
+                .expect("response timeout")
+                .expect("response message"),
+        )
+        .expect("parse response message");
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .expect("error message")
+                .contains("invalid json-rpc payload from host")
+        );
+
+        serve.await.expect("join").expect("serve");
+    }
+}

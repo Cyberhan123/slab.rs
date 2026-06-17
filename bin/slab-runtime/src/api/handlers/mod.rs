@@ -131,4 +131,118 @@ mod tests {
         assert_eq!(status.code(), Code::FailedPrecondition);
         assert!(status.message().contains("disabled"));
     }
+
+    #[test]
+    fn maps_all_runtime_error_variants_to_expected_grpc_codes() {
+        let cases = vec![
+            (
+                CoreError::QueueFull { queue: "ingress".into(), capacity: 4 },
+                Code::ResourceExhausted,
+                "queue full: ingress",
+            ),
+            (
+                CoreError::Busy { backend_id: "ggml.llama".into() },
+                Code::ResourceExhausted,
+                "backend busy: ggml.llama",
+            ),
+            (CoreError::TaskNotFound { task_id: 42 }, Code::NotFound, "task not found: 42"),
+            (
+                CoreError::CpuStageFailed {
+                    stage_name: "tokenize".into(),
+                    message: "bad vocab".into(),
+                },
+                Code::Internal,
+                "cpu stage 'tokenize' failed",
+            ),
+            (
+                CoreError::GpuStageFailed {
+                    stage_name: "decode".into(),
+                    message: "device lost".into(),
+                },
+                Code::Internal,
+                "gpu stage 'decode' failed",
+            ),
+            (CoreError::BackendShutdown, Code::Unavailable, "backend worker shutdown"),
+            (
+                CoreError::OrchestratorQueueFull { capacity: 16 },
+                Code::ResourceExhausted,
+                "orchestrator queue full",
+            ),
+            (CoreError::Timeout, Code::DeadlineExceeded, "operation timed out"),
+            (CoreError::Cancelled, Code::Cancelled, "task cancelled"),
+            (
+                CoreError::UnsupportedOperation {
+                    backend: "ggml.llama".into(),
+                    op: "embed".into(),
+                },
+                Code::Unimplemented,
+                "unsupported operation 'embed'",
+            ),
+            (
+                CoreError::InvalidRequestPayload { message: "missing prompt".into() },
+                Code::InvalidArgument,
+                "invalid request payload: missing prompt",
+            ),
+            (
+                CoreError::DriverNotRegistered { driver_id: "onnx".into() },
+                Code::FailedPrecondition,
+                "driver not registered: onnx",
+            ),
+            (
+                CoreError::BackendDisabled { backend: "onnx".into() },
+                Code::FailedPrecondition,
+                "backend 'onnx' is disabled",
+            ),
+            (
+                CoreError::InternalPoisoned { lock_name: "resource_manager".into() },
+                Code::Internal,
+                "internal lock poisoned: resource_manager",
+            ),
+            (CoreError::ModelNotLoaded, Code::FailedPrecondition, "model is not loaded"),
+            (
+                CoreError::ResultDecodeFailed {
+                    task_kind: "chat".into(),
+                    message: "unexpected shape".into(),
+                },
+                Code::Internal,
+                "result decode failed for 'chat'",
+            ),
+            (
+                CoreError::EngineIo("disk offline".into()),
+                Code::Internal,
+                "engine I/O error: disk offline",
+            ),
+            (
+                CoreError::GGMLEngine {
+                    component: "ggml.llama".into(),
+                    message: "session missing".into(),
+                },
+                Code::Internal,
+                "GGML engine error in ggml.llama",
+            ),
+            (
+                CoreError::OnnxEngine("provider mismatch".into()),
+                Code::Internal,
+                "ONNX engine error: provider mismatch",
+            ),
+            (
+                CoreError::CandleEngine {
+                    component: "candle.llama".into(),
+                    message: "tensor mismatch".into(),
+                },
+                Code::Internal,
+                "Candle engine error in candle.llama",
+            ),
+        ];
+
+        for (error, expected_code, expected_message) in cases {
+            let status = runtime_to_status(error);
+            assert_eq!(status.code(), expected_code);
+            assert!(
+                status.message().contains(expected_message),
+                "expected `{}` to contain `{expected_message}`",
+                status.message()
+            );
+        }
+    }
 }

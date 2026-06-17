@@ -20,6 +20,7 @@ export default defineProject({
       "**/dist/**",
       "tests/browser/**",
       "tests/e2e/**",
+      "tests/manual/**",
     ],
   },
   resolve: {

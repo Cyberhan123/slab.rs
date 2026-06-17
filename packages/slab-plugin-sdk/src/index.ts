@@ -191,7 +191,12 @@ function resolveEventApi(target?: Window): TauriEventApi | null {
 
 function hasBrowserBridge(target?: Window): boolean {
   const resolvedWindow = resolveWindow(target);
-  return resolvedWindow.parent !== resolvedWindow;
+  const parentWindow = resolvedWindow.parent;
+  return Boolean(
+    parentWindow &&
+      parentWindow !== resolvedWindow &&
+      typeof parentWindow.postMessage === "function",
+  );
 }
 
 function ensureBrowserBridgeListener(targetWindow: Window): void {

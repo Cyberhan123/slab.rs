@@ -194,3 +194,164 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use serde_json::{Value, json};
+    use slab_types::{
+        PluginPermissionsManifest, PluginRuntimeCallRequest, PluginRuntimeCallResponse,
+    };
+    use tokio::io::{AsyncWriteExt, BufReader};
+
+    use super::{JsonRpcRuntimeHost, serve_reader};
+    use crate::application::{PluginExecutor, PluginRuntimeServer};
+
+    #[derive(Default)]
+    struct RecordingExecutor {
+        requests: Mutex<Vec<(String, String, Value)>>,
+    }
+
+    #[async_trait::async_trait]
+    impl PluginExecutor for RecordingExecutor {
+        async fn execute(
+            &self,
+            request: PluginRuntimeCallRequest,
+        ) -> Result<PluginRuntimeCallResponse, anyhow::Error> {
+            self.requests.lock().expect("lock").push((
+                request.plugin_id.clone(),
+                request.export_name.clone(),
+                request.params.clone(),
+            ));
+            Ok(PluginRuntimeCallResponse {
+                result: json!({
+                    "pluginId": request.plugin_id,
+                    "exportName": request.export_name,
+                }),
+            })
+        }
+    }
+
+    fn plugin_call_request() -> PluginRuntimeCallRequest {
+        PluginRuntimeCallRequest {
+            call_id: "call-1".to_owned(),
+            plugin_id: "plugin-1".to_owned(),
+            root_dir: ".".to_owned(),
+            entry: "main.ts".to_owned(),
+            bundle: None,
+            export_name: "run".to_owned(),
+            params: json!({"value": 2}),
+            permissions: PluginPermissionsManifest::default(),
+            file_grants: Vec::new(),
+            blocked_fetch_origins: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn serves_runtime_ready_and_plugin_call() {
+        let (host, mut outbound) = JsonRpcRuntimeHost::new();
+        let host = Arc::new(host);
+        let executor = Arc::new(RecordingExecutor::default());
+        let server = Arc::new(PluginRuntimeServer::new(executor.clone()));
+        host.send_notification("runtime.ready", server.ready_payload());
+
+        let (mut writer, reader) = tokio::io::duplex(1024);
+        let serve = tokio::spawn(serve_reader(Arc::clone(&host), server, BufReader::new(reader)));
+
+        let request = plugin_call_request();
+        let line = json!({
+            "jsonrpc": "2.0",
+            "id": "1",
+            "method": "plugin.call",
+            "params": request,
+        });
+        writer.write_all(format!("{line}\n").as_bytes()).await.expect("write request");
+        writer.shutdown().await.expect("shutdown");
+
+        let ready: Value = serde_json::from_str(
+            &tokio::time::timeout(Duration::from_secs(5), outbound.recv())
+                .await
+                .expect("ready timeout")
+                .expect("ready message"),
+        )
+        .expect("parse ready message");
+        assert_eq!(
+            ready,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "runtime.ready",
+                "params": {
+                    "engine": "deno",
+                    "runtime": "slab-js-runtime"
+                }
+            })
+        );
+
+        let response: Value = serde_json::from_str(
+            &tokio::time::timeout(Duration::from_secs(5), outbound.recv())
+                .await
+                .expect("response timeout")
+                .expect("response message"),
+        )
+        .expect("parse response message");
+        assert_eq!(response["id"], "1");
+        assert_eq!(
+            response["result"],
+            json!({
+                "result": {
+                    "exportName": "run",
+                    "pluginId": "plugin-1"
+                }
+            })
+        );
+
+        serve.await.expect("join").expect("serve");
+
+        let requests = executor.requests.lock().expect("lock");
+        assert_eq!(
+            requests.as_slice(),
+            &[("plugin-1".to_owned(), "run".to_owned(), json!({"value": 2}),)]
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_invalid_jsonrpc_payloads() {
+        let (host, mut outbound) = JsonRpcRuntimeHost::new();
+        let host = Arc::new(host);
+        let server = Arc::new(PluginRuntimeServer::new(Arc::new(RecordingExecutor::default())));
+        host.send_notification("runtime.ready", server.ready_payload());
+
+        let (mut writer, reader) = tokio::io::duplex(1024);
+        let serve = tokio::spawn(serve_reader(Arc::clone(&host), server, BufReader::new(reader)));
+
+        writer.write_all(b"{not json}\n").await.expect("write request");
+        writer.shutdown().await.expect("shutdown");
+
+        let ready: Value = serde_json::from_str(
+            &tokio::time::timeout(Duration::from_secs(5), outbound.recv())
+                .await
+                .expect("ready timeout")
+                .expect("ready message"),
+        )
+        .expect("parse ready message");
+        assert_eq!(ready["method"], "runtime.ready");
+
+        let response: Value = serde_json::from_str(
+            &tokio::time::timeout(Duration::from_secs(5), outbound.recv())
+                .await
+                .expect("response timeout")
+                .expect("response message"),
+        )
+        .expect("parse response message");
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .expect("error message")
+                .contains("invalid json-rpc payload from host")
+        );
+
+        serve.await.expect("join").expect("serve");
+    }
+}

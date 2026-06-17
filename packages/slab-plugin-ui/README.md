@@ -19,6 +19,7 @@ Run focused checks with:
 ```sh
 bun run --cwd packages/slab-plugin-ui build
 bun run --cwd packages/slab-plugin-ui lint
+bun run --cwd packages/slab-plugin-ui test:run
 ```
 
 ## License
