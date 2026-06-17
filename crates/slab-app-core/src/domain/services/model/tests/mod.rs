@@ -17,6 +17,10 @@ use super::catalog::{
 use super::pack::build_local_model_command_from_pack_preset;
 use super::runtime::validate_and_normalize_model_workers;
 
+mod catalog;
+mod download;
+mod runtime;
+
 #[test]
 fn cloud_models_require_provider_reference() {
     let error = canonicalize_model_spec(UnifiedModelKind::Cloud, None, ModelSpec::default())

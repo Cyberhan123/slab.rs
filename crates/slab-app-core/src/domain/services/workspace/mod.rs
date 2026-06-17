@@ -1,3 +1,9 @@
+mod file_system;
+mod lsp;
+
+pub use lsp::WorkspaceLspService;
+pub(crate) use lsp::workspace_root_from_config;
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,7 +25,7 @@ use crate::domain::models::{
 };
 use crate::error::AppCoreError;
 
-use super::workspace_file_system::LocalExecutorFileSystem;
+use self::file_system::LocalExecutorFileSystem;
 
 const CONSOLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_CONSOLE_COMMAND_BYTES: usize = 2_000;

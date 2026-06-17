@@ -29,11 +29,12 @@ impl AgentRuntimeReloader {
 
         let mut hooks = self.internal_memory_hooks(memory_config, memory_root);
         if settings.agent.hooks.enabled {
-            let mut scripts = crate::infra::agent_hooks::legacy_hook_scripts(&settings.agent.hooks);
+            let mut scripts =
+                crate::infra::agent::hooks::legacy_hook_scripts(&settings.agent.hooks);
             let plugins =
                 PluginService::new(self.state.clone()).enabled_agent_hook_plugins().await?;
-            scripts.extend(crate::infra::agent_hooks::plugin_hook_scripts(&plugins));
-            if let Some(script_hook) = crate::infra::agent_hooks::registered_hook_from_scripts(
+            scripts.extend(crate::infra::agent::hooks::plugin_hook_scripts(&plugins));
+            if let Some(script_hook) = crate::infra::agent::hooks::registered_hook_from_scripts(
                 scripts,
                 self.state.config(),
             ) {
@@ -74,7 +75,7 @@ impl AgentRuntimeReloader {
         memory_config: AgentMemoriesConfig,
         memory_root: PathBuf,
     ) -> Vec<Arc<dyn AgentHook>> {
-        let memory_pipeline = crate::infra::agent_memory::AgentMemoryPipeline::new(
+        let memory_pipeline = crate::infra::agent::memory::AgentMemoryPipeline::new(
             Arc::clone(self.state.store()),
             Arc::new(self.state.clone()),
             memory_config.clone(),
@@ -86,7 +87,7 @@ impl AgentRuntimeReloader {
                 memory_config.enabled,
                 memory_root,
             )),
-            Arc::new(crate::infra::agent_memory::AgentMemoryStartupHook::new(memory_pipeline)),
+            Arc::new(crate::infra::agent::memory::AgentMemoryStartupHook::new(memory_pipeline)),
         ]
     }
 }

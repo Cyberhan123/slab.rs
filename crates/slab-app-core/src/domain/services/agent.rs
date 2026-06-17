@@ -12,7 +12,7 @@ use slab_agent::port::{AgentStorePort, ThreadMessageRecord, ThreadSnapshot};
 use slab_types::ConversationMessage;
 
 use crate::error::AppCoreError;
-use crate::infra::agent_event_hub::{AgentEventHub, AgentEventSubscription};
+use crate::infra::agent::event_hub::{AgentEventHub, AgentEventSubscription};
 
 /// Thin wrapper around [`AgentControl`] that exposes an application-layer API.
 #[derive(Clone)]

@@ -5,7 +5,7 @@ use crate::error::AppCoreError;
 #[derive(Clone)]
 pub struct SettingsService {
     state: ModelState,
-    agent_runtime: Option<crate::infra::agent_runtime::AgentRuntimeReloader>,
+    agent_runtime: Option<crate::infra::agent::runtime::AgentRuntimeReloader>,
 }
 
 impl SettingsService {
@@ -15,7 +15,7 @@ impl SettingsService {
 
     pub(crate) fn new_with_agent_runtime(
         state: ModelState,
-        agent_runtime: Option<crate::infra::agent_runtime::AgentRuntimeReloader>,
+        agent_runtime: Option<crate::infra::agent::runtime::AgentRuntimeReloader>,
     ) -> Self {
         Self { state, agent_runtime }
     }

@@ -482,8 +482,8 @@ mod tests {
         }
     }
 
-    fn temp_dir(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("slab-workspace-lsp-{name}-{}", uuid::Uuid::new_v4()))
+    fn temp_workspace() -> tempfile::TempDir {
+        tempfile::tempdir().expect("workspace temp dir")
     }
 
     fn command_file_name(command: &str) -> String {
@@ -497,57 +497,49 @@ mod tests {
 
     #[test]
     fn resolves_workspace_root_from_slab_settings_path() {
-        #[cfg(windows)]
-        let (settings_path, expected_root) = (
-            std::path::Path::new(r"C:\Users\cyberhan\Desktop\demo\.slab\settings.json"),
-            std::path::PathBuf::from(r"C:\Users\cyberhan\Desktop\demo"),
-        );
-        #[cfg(not(windows))]
-        let (settings_path, expected_root) = (
-            std::path::Path::new("/Users/cyberhan/Desktop/demo/.slab/settings.json"),
-            std::path::PathBuf::from("/Users/cyberhan/Desktop/demo"),
-        );
+        let workspace = temp_workspace();
+        let settings_path = workspace.path().join(".slab").join("settings.json");
+        let expected_root = workspace.path().to_path_buf();
 
-        let root = workspace_root_from_settings_path(settings_path).expect("workspace root");
+        let root = workspace_root_from_settings_path(&settings_path).expect("workspace root");
 
         assert_eq!(root, expected_root);
     }
 
     #[test]
     fn rejects_non_workspace_settings_path() {
-        #[cfg(windows)]
-        let settings_path = std::path::Path::new(r"C:\Users\cyberhan\Desktop\demo\settings.json");
-        #[cfg(not(windows))]
-        let settings_path = std::path::Path::new("/Users/cyberhan/Desktop/demo/settings.json");
+        let workspace = temp_workspace();
+        let settings_path = workspace.path().join("settings.json");
 
-        assert!(workspace_root_from_settings_path(settings_path).is_none());
+        assert!(workspace_root_from_settings_path(&settings_path).is_none());
     }
 
     #[test]
     fn explicit_workspace_root_overrides_settings_path_in_config() {
-        let mut config = test_config(PathBuf::from(
-            "C:/Users/example/AppData/Roaming/cn.cyberhan.slab/settings.json",
-        ));
-        config.workspace_root = Some(PathBuf::from("D:/Workspace"));
+        let config_root = temp_workspace();
+        let workspace = temp_workspace();
+        let mut config = test_config(config_root.path().join("settings.json"));
+        config.workspace_root = Some(workspace.path().to_path_buf());
 
-        assert_eq!(workspace_root_from_config(&config), Some(PathBuf::from("D:/Workspace")));
+        assert_eq!(workspace_root_from_config(&config), Some(workspace.path().to_path_buf()));
     }
 
     #[test]
     fn builtin_provider_matches_supported_language() {
-        let root = temp_dir("builtin-provider");
+        let temp = temp_workspace();
+        let root = temp.path();
         let settings_path = root.join(".slab").join("settings.json");
         let config = test_config(settings_path);
 
         let provider = builtin_language_server_provider("typescript", &config).expect("provider");
 
         assert_eq!(provider.id, "builtin.typescript");
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn builtin_web_provider_runs_through_slab_js_runtime_lsp_mode() {
-        let root = temp_dir("builtin-web-provider");
+        let temp = temp_workspace();
+        let root = temp.path();
         let settings_path = root.join(".slab").join("settings.json");
         let config = test_config(settings_path);
 
@@ -565,12 +557,12 @@ mod tests {
         );
         assert_eq!(args[3], "--");
         assert_eq!(args[4], "--stdio");
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn resolves_workspace_node_bin_language_server_before_path_fallback() {
-        let root = temp_dir("workspace-node-bin");
+        let temp = temp_workspace();
+        let root = temp.path();
         let settings_path = root.join(".slab").join("settings.json");
         let config = test_config(settings_path);
         let binary = root
@@ -580,15 +572,15 @@ mod tests {
         write_file(&binary);
 
         let resolution =
-            resolve_language_server_command("typescript-language-server", &root, &config, None);
+            resolve_language_server_command("typescript-language-server", root, &config, None);
 
         assert_eq!(PathBuf::from(resolution.command), binary);
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn ignores_packaged_native_language_server_payloads() {
-        let root = temp_dir("lib-dir");
+        let temp = temp_workspace();
+        let root = temp.path();
         let settings_path = root.join(".slab").join("settings.json");
         let config = test_config(settings_path);
         let binary = root
@@ -600,16 +592,16 @@ mod tests {
             .join(command_file_name("rust-analyzer"));
         write_file(&binary);
 
-        let resolution = resolve_language_server_command("rust-analyzer", &root, &config, None);
+        let resolution = resolve_language_server_command("rust-analyzer", root, &config, None);
 
         assert_eq!(resolution.command, "rust-analyzer");
         assert!(!resolution.searched_locations.contains(&binary));
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn ignores_packaged_language_server_node_modules_bin() {
-        let root = temp_dir("lib-dir-node-modules");
+        let temp = temp_workspace();
+        let root = temp.path();
         let settings_path = root.join(".slab").join("settings.json");
         let config = test_config(settings_path);
         let binary = root
@@ -623,16 +615,16 @@ mod tests {
         write_file(&binary);
 
         let resolution =
-            resolve_language_server_command("typescript-language-server", &root, &config, None);
+            resolve_language_server_command("typescript-language-server", root, &config, None);
 
         assert_eq!(resolution.command, "typescript-language-server");
         assert!(!resolution.searched_locations.contains(&binary));
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn resolves_plugin_node_bin_language_server() {
-        let root = temp_dir("plugin-node-bin");
+        let temp = temp_workspace();
+        let root = temp.path();
         let settings_path = root.join(".slab").join("settings.json");
         let config = test_config(settings_path);
         let plugin_root = root.join("plugins").join("example-lsp");
@@ -644,18 +636,18 @@ mod tests {
 
         let resolution = resolve_language_server_command(
             "example-language-server",
-            &root,
+            root,
             &config,
             Some(&plugin_root),
         );
 
         assert_eq!(PathBuf::from(resolution.command), binary);
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn resolves_relative_plugin_command_before_workspace() {
-        let root = temp_dir("plugin-relative-command");
+        let temp = temp_workspace();
+        let root = temp.path();
         let settings_path = root.join(".slab").join("settings.json");
         let config = test_config(settings_path);
         let plugin_root = root.join("plugins").join("example-lsp");
@@ -666,43 +658,42 @@ mod tests {
 
         let resolution = resolve_language_server_command(
             "bin/language-server.cmd",
-            &root,
+            root,
             &config,
             Some(&plugin_root),
         );
 
         assert_eq!(PathBuf::from(resolution.command), plugin_binary);
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn resolves_relative_command_inside_workspace() {
-        let root = temp_dir("relative-command");
+        let temp = temp_workspace();
+        let root = temp.path();
         let settings_path = root.join(".slab").join("settings.json");
         let config = test_config(settings_path);
         let binary = root.join("tools").join("language-server.cmd");
         write_file(&binary);
 
         let resolution =
-            resolve_language_server_command("tools/language-server.cmd", &root, &config, None);
+            resolve_language_server_command("tools/language-server.cmd", root, &config, None);
 
         assert_eq!(PathBuf::from(resolution.command), binary);
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn unresolved_command_keeps_path_fallback_and_records_candidates() {
-        let root = temp_dir("missing-command");
+        let temp = temp_workspace();
+        let root = temp.path();
         let settings_path = root.join(".slab").join("settings.json");
         let config = test_config(settings_path);
 
-        let resolution = resolve_language_server_command("missing-lsp", &root, &config, None);
+        let resolution = resolve_language_server_command("missing-lsp", root, &config, None);
 
         assert_eq!(resolution.command, "missing-lsp");
         assert!(resolution.searched_locations.iter().any(|path| path.ends_with(
             Path::new("node_modules").join(".bin").join(command_file_name("missing-lsp"))
         )));
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

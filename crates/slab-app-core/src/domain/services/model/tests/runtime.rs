@@ -1,11 +1,16 @@
 use chrono::Utc;
+use slab_types::{RuntimeBackendId, RuntimeBackendLoadSpec};
+use std::path::{Path, PathBuf};
 
-use super::*;
 use crate::domain::models::{
-    ManagedModelBackendId, ModelLoadCommand, ModelSpec, UnifiedModelStatus,
+    ManagedModelBackendId, ModelLoadCommand, ModelSpec, UnifiedModel, UnifiedModelKind,
+    UnifiedModelStatus,
 };
 use crate::error::AppCoreError;
+use crate::infra::model_packs;
 use crate::test_support::{TestAppCore, ready_local_llama_command};
+
+use super::super::runtime::*;
 
 fn local_llama_model(id: &str, local_path: &str) -> UnifiedModel {
     UnifiedModel {

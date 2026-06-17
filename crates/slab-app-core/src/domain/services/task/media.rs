@@ -5,24 +5,24 @@ use serde::de::DeserializeOwned;
 
 use crate::error::AppCoreError;
 
-pub(super) fn parse_json_payload<T>(raw: &str) -> T
+pub(crate) fn parse_json_payload<T>(raw: &str) -> T
 where
     T: DeserializeOwned + Default,
 {
     serde_json::from_str(raw).unwrap_or_default()
 }
 
-pub(super) fn parse_json_payload_optional<T: DeserializeOwned>(raw: &str) -> Option<T> {
+pub(crate) fn parse_json_payload_optional<T: DeserializeOwned>(raw: &str) -> Option<T> {
     serde_json::from_str(raw).ok()
 }
 
-pub(super) fn serialize_json_payload<T: Serialize>(payload: &T) -> Result<String, AppCoreError> {
+pub(crate) fn serialize_json_payload<T: Serialize>(payload: &T) -> Result<String, AppCoreError> {
     serde_json::to_string(payload).map_err(|error| {
         AppCoreError::Internal(format!("failed to serialize task payload: {error}"))
     })
 }
 
-pub(super) async fn save_rgb_png(
+pub(crate) async fn save_rgb_png(
     path: &Path,
     data: &[u8],
     width: u32,
@@ -48,7 +48,7 @@ pub(super) async fn save_rgb_png(
     })
 }
 
-pub(super) async fn read_managed_file(
+pub(crate) async fn read_managed_file(
     path: &str,
     output_root: &Path,
 ) -> Result<Vec<u8>, AppCoreError> {
@@ -67,6 +67,6 @@ pub(super) async fn read_managed_file(
     })
 }
 
-pub(super) async fn cleanup_dir(path: &Path) {
+pub(crate) async fn cleanup_dir(path: &Path) {
     tokio::fs::remove_dir_all(path).await.ok();
 }

@@ -3,11 +3,7 @@ mod audio;
 mod backend;
 mod chat;
 mod ffmpeg;
-mod ffmpeg_next_audio;
-mod ffmpeg_next_remux;
-mod ffmpeg_runtime;
 mod image;
-mod media_task;
 mod model;
 mod plugin;
 mod pmid;
@@ -20,8 +16,6 @@ mod task;
 mod ui_state;
 mod video;
 mod workspace;
-mod workspace_file_system;
-mod workspace_lsp;
 
 pub use agent::AgentService;
 pub use audio::AudioService;
@@ -40,14 +34,13 @@ pub use system::SystemService;
 pub use task::TaskApplicationService;
 pub use ui_state::UiStateService;
 pub use video::VideoService;
-pub use workspace::WorkspaceService;
-pub use workspace_lsp::WorkspaceLspService;
-pub(crate) use workspace_lsp::workspace_root_from_config;
+pub(crate) use workspace::workspace_root_from_config;
+pub use workspace::{WorkspaceLspService, WorkspaceService};
 
 use std::sync::Arc;
 
 use crate::context::{ModelState, WorkerState};
-use crate::infra::agent_runtime::AgentRuntimeReloader;
+use crate::infra::agent::runtime::AgentRuntimeReloader;
 use crate::infra::runtime::ManagedRuntimeHost;
 
 #[derive(Clone)]

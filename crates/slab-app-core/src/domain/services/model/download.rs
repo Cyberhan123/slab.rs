@@ -1,8 +1,5 @@
-mod progress;
-mod status;
-
-use progress::ModelDownloadProgressReporter;
-pub(super) use status::{effective_model_status, load_model_download_status_index};
+use super::download_progress::ModelDownloadProgressReporter;
+pub(super) use super::download_status::{effective_model_status, load_model_download_status_index};
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -20,8 +17,8 @@ use crate::error::{AppCoreError, AppCoreErrorData};
 use crate::infra::db::{ModelDownloadRecord, ModelDownloadStore, ModelStore, TaskRecord};
 use crate::infra::model_packs;
 
+use super::download_status::{ModelDownloadSourceKey, model_download_source_key_from_parts};
 use super::{ModelService, catalog, pack, runtime};
-use status::{ModelDownloadSourceKey, model_download_source_key_from_parts};
 
 pub(crate) const MODEL_DOWNLOAD_TASK_TYPE: &str = "model_download";
 
@@ -767,6 +764,3 @@ fn model_download_unavailable_error(
         data: Box::new(AppCoreErrorData::model_download_unavailable(model_id, reason, suggestion)),
     }
 }
-
-#[cfg(test)]
-mod tests;

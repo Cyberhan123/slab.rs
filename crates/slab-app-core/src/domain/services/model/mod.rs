@@ -1,6 +1,8 @@
 mod catalog;
 mod config_document;
 mod download;
+mod download_progress;
+mod download_status;
 mod pack;
 mod runtime;
 

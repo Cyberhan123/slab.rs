@@ -638,7 +638,3 @@ pub(super) fn model_to_record(model: &UnifiedModel) -> Result<UnifiedModelRecord
         updated_at: model.updated_at,
     })
 }
-
-#[cfg(test)]
-#[path = "catalog/tests.rs"]
-mod model_catalog_tests;

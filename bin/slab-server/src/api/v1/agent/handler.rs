@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use slab_agent::{AgentEventKind, AgentStreamEvent, TurnEvent};
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::AgentService;
-use slab_app_core::infra::agent_event_hub::AgentEventEnvelope;
+use slab_app_core::infra::agent::event_hub::AgentEventEnvelope;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use utoipa::OpenApi;

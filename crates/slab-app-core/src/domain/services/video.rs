@@ -12,10 +12,10 @@ use crate::domain::models::{
     VideoGenerationRequestData, VideoGenerationResultData, VideoGenerationTaskView,
 };
 use crate::domain::ports::{RuntimeDiffusionVideoRequest, RuntimeRawImageInput};
-use crate::domain::services::ffmpeg_runtime::{
+use crate::domain::services::ffmpeg::runtime::{
     ensure_dynamic_runtime_ready, resolve_ffmpeg_binary,
 };
-use crate::domain::services::media_task::{
+use crate::domain::services::task::{
     cleanup_dir, parse_json_payload, read_managed_file, save_rgb_png, serialize_json_payload,
 };
 use crate::error::AppCoreError;

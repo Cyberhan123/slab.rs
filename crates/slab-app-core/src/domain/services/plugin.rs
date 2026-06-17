@@ -49,7 +49,7 @@ pub struct PluginService {
     js_runtime: PluginSidecarRuntimeClient,
     python_runtime: PluginSidecarRuntimeClient,
     event_bus: PluginEventBus,
-    agent_runtime: Option<crate::infra::agent_runtime::AgentRuntimeReloader>,
+    agent_runtime: Option<crate::infra::agent::runtime::AgentRuntimeReloader>,
 }
 
 impl PluginService {
@@ -59,7 +59,7 @@ impl PluginService {
 
     pub(crate) fn new_with_agent_runtime(
         state: ModelState,
-        agent_runtime: Option<crate::infra::agent_runtime::AgentRuntimeReloader>,
+        agent_runtime: Option<crate::infra::agent::runtime::AgentRuntimeReloader>,
     ) -> Self {
         let runtime = ensure_http_base_url(state.config().bind_address.as_str())
             .map(PluginRuntime::with_api_base_url)
@@ -364,7 +364,7 @@ impl PluginService {
 
     pub(crate) async fn enabled_agent_hook_plugins(
         &self,
-    ) -> Result<Vec<crate::infra::agent_hooks::PluginHookSource>, AppCoreError> {
+    ) -> Result<Vec<crate::infra::agent::hooks::PluginHookSource>, AppCoreError> {
         let scans = self.scan_and_sync().await?;
         let states = self
             .state
@@ -381,7 +381,7 @@ impl PluginService {
             .filter(|scan| states.get(&scan.id).is_none_or(|record| record.enabled))
             .filter_map(|scan| {
                 let manifest = scan.manifest?;
-                Some(crate::infra::agent_hooks::PluginHookSource {
+                Some(crate::infra::agent::hooks::PluginHookSource {
                     manifest,
                     root_dir: scan.root_dir,
                 })

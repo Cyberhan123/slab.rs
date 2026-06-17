@@ -14,10 +14,10 @@ use crate::domain::ports::{
     RuntimeTranscriptionDecodeOptions, RuntimeTranscriptionRequest, RuntimeTranscriptionVadOptions,
     RuntimeTranscriptionVadParams,
 };
-use crate::domain::services::media_task::{
+use crate::domain::services::model;
+use crate::domain::services::task::{
     parse_json_payload, parse_json_payload_optional, serialize_json_payload,
 };
-use crate::domain::services::model;
 use crate::error::AppCoreError;
 use crate::infra::db::{
     AudioTranscriptionTaskViewRecord, MediaTaskStore, NewAudioTranscriptionTaskRecord, TaskRecord,

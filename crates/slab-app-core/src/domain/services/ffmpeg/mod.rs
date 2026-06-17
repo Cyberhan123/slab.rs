@@ -1,4 +1,9 @@
+mod audio;
+mod remux;
+pub(crate) mod runtime;
+
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -8,12 +13,11 @@ use tracing::{info, warn};
 use crate::context::worker_state::OperationContext;
 use crate::context::{SubmitOperation, WorkerState};
 use crate::domain::models::{AcceptedOperation, FfmpegConvertCommand, TaskProgress, TaskStatus};
-use crate::domain::services::ffmpeg_next_audio::{supports_output_format, transcode_audio};
-use crate::domain::services::ffmpeg_next_remux::{
-    remux_media, supports_output_format as supports_remux_output_format,
-};
-use crate::domain::services::ffmpeg_runtime::ensure_dynamic_runtime_ready;
 use crate::error::AppCoreError;
+
+use audio::{supports_output_format, transcode_audio};
+use remux::{remux_media, supports_output_format as supports_remux_output_format};
+use runtime::ensure_dynamic_runtime_ready;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct FfmpegConvertInputData {
@@ -83,14 +87,7 @@ impl FfmpegService {
                     let source_path = input.source_path;
                     let output_format = input.output_format;
                     let output_path = input.output_path.unwrap_or_else(|| {
-                        let base = std::path::Path::new(&source_path)
-                            .file_stem()
-                            .and_then(|stem| stem.to_str())
-                            .unwrap_or("output");
-                        std::env::temp_dir()
-                            .join(format!("{base}.{output_format}"))
-                            .to_string_lossy()
-                            .into_owned()
+                        default_output_path(&source_path, &output_format, std::env::temp_dir())
                     });
 
                     let mut progress = FfmpegProgressState::new(output_path.clone());
@@ -369,6 +366,16 @@ fn detail_params(detail: &str) -> BTreeMap<String, Value> {
     BTreeMap::from([("detail".to_owned(), Value::String(detail.to_owned()))])
 }
 
+fn default_output_path(
+    source_path: &str,
+    output_format: &str,
+    output_dir: impl AsRef<Path>,
+) -> String {
+    let base =
+        Path::new(source_path).file_stem().and_then(|stem| stem.to_str()).unwrap_or("output");
+    output_dir.as_ref().join(format!("{base}.{output_format}")).to_string_lossy().into_owned()
+}
+
 async fn publish_ffmpeg_progress(
     operation: &OperationContext,
     progress: &FfmpegProgressState,
@@ -379,19 +386,20 @@ async fn publish_ffmpeg_progress(
 
 #[cfg(test)]
 mod test {
+    use super::default_output_path;
+
     #[test]
     fn output_path_defaults_to_temp_dir_when_missing() {
-        let source_path = std::path::Path::new("/tmp/source.wav");
+        let output_dir = tempfile::tempdir().expect("output dir");
+        let source_path = output_dir.path().join("source.wav");
         let output_format = "mp3";
-        let output_path = std::env::temp_dir()
-            .join(format!(
-                "{}.{}",
-                source_path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("output"),
-                output_format
-            ))
-            .to_string_lossy()
-            .into_owned();
+        let output_path = default_output_path(
+            source_path.to_str().expect("source path"),
+            output_format,
+            output_dir.path(),
+        );
 
+        assert!(std::path::Path::new(&output_path).starts_with(output_dir.path()));
         assert!(output_path.ends_with(".mp3"));
     }
 }

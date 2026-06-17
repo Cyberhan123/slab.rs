@@ -529,7 +529,7 @@ async fn build_catalog_model_pack_load_target(
     build_selected_model_pack_load_target(state, &model.id, &pack_path).await.map(Some)
 }
 
-fn catalog_model_pack_path(
+pub(super) fn catalog_model_pack_path(
     model_config_dir: &Path,
     model: &UnifiedModel,
     model_path: &str,
@@ -679,6 +679,3 @@ fn resolve_local_model_path(model: &UnifiedModel) -> Result<String, AppCoreError
             ))
         })
 }
-
-#[cfg(test)]
-mod tests;

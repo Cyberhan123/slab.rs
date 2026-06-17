@@ -1,3 +1,10 @@
+mod media;
+
+pub(crate) use media::{
+    cleanup_dir, parse_json_payload, parse_json_payload_optional, read_managed_file, save_rgb_png,
+    serialize_json_payload,
+};
+
 use tracing::info;
 
 use super::ModelService;

@@ -38,7 +38,7 @@ async fn model_catalog_list_fails_on_corrupt_model_record() {
     let app = TestAppCore::new().await;
     let created =
         app.model.create_model(downloadable_llama_command("catalog-corrupt")).await.unwrap();
-    let mut record = super::model_to_record(&created).expect("model record");
+    let mut record = super::super::catalog::model_to_record(&created).expect("model record");
     record.spec = "{".to_owned();
     app.store.upsert_model(record).await.expect("replace model record");
 

@@ -22,7 +22,7 @@ use crate::domain::models::{
     AcceptedOperation, CompleteSetupCommand, ComponentStatus, EnvironmentStatus, TaskProgress,
     TaskStatus,
 };
-use crate::domain::services::ffmpeg_runtime::probe_ffmpeg_runtime;
+use crate::domain::services::ffmpeg::runtime::probe_ffmpeg_runtime;
 use crate::error::AppCoreError;
 use crate::infra::db::repository::config::ConfigStore;
 use crate::infra::runtime::ManagedRuntimeHost;
