@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright"
+import { chromium, type Browser, type BrowserContext, type Frame, type Page } from "playwright"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 import {
@@ -52,6 +52,20 @@ describe.sequential("plugins e2e", () => {
 
   it("imports a browser plugin and enforces the plugin API bridge permissions", async () => {
     const testEnv = requireEnv()
+    const browserEvents: string[] = []
+    page.on("console", (message) => {
+      browserEvents.push(`[console:${message.type()}] ${message.text()}`)
+    })
+    page.on("requestfailed", (request) => {
+      if (request.url().includes(pluginId)) {
+        browserEvents.push(`[requestfailed] ${request.url()} ${request.failure()?.errorText ?? ""}`)
+      }
+    })
+    page.on("response", (response) => {
+      if (response.url().includes(pluginId)) {
+        browserEvents.push(`[response] ${response.status()} ${response.url()}`)
+      }
+    })
 
     await page.goto(`${testEnv.uiBaseUrl}/plugins`, {
       waitUntil: "domcontentloaded",
@@ -70,7 +84,7 @@ describe.sequential("plugins e2e", () => {
     await page.getByTestId(`sidebar-link-plugins-${pluginId}`).click()
 
     await page.getByTestId(`plugin-view-${pluginId}`).waitFor({ state: "visible", timeout: 60_000 })
-    const pluginFrame = await waitForPluginFrame(page)
+    const pluginFrame = await waitForPluginFrame(page, browserEvents)
 
     await eventually("plugin bridge returns models", async () => {
       const text = await pluginFrame.getByTestId("plugin-models-status").textContent()
@@ -87,10 +101,14 @@ describe.sequential("plugins e2e", () => {
   })
 })
 
-async function waitForPluginFrame(page: Page) {
+async function waitForPluginFrame(page: Page, browserEvents: string[]): Promise<Frame> {
   const iframe = page.getByTestId(`plugin-frame-${pluginId}`)
   await iframe.waitFor({ state: "attached", timeout: 60_000 })
-  const pluginFrame = page.frameLocator(`[data-testid="plugin-frame-${pluginId}"]`)
+  const iframeElement = await iframe.elementHandle()
+  const pluginFrame = await iframeElement?.contentFrame()
+  if (!pluginFrame) {
+    throw new Error(`Plugin iframe did not expose a content frame. Frames: ${page.frames().map((frame) => frame.url()).join(", ")}`)
+  }
 
   try {
     await pluginFrame.getByTestId("plugin-static").waitFor({ state: "visible", timeout: 60_000 })
@@ -104,6 +122,10 @@ async function waitForPluginFrame(page: Page) {
         `asset status: ${response.status}`,
         `asset csp: ${response.headers.get("content-security-policy") ?? "missing"}`,
         `asset body: ${(await response.text()).slice(0, 240)}`,
+        `frame url: ${pluginFrame.url()}`,
+        `frame body: ${(await pluginFrame.content()).slice(0, 240)}`,
+        `all frames: ${page.frames().map((frame) => frame.url()).join(", ")}`,
+        `browser events: ${browserEvents.join("\n")}`,
       ].join("\n")
     }
     throw new Error(`${error instanceof Error ? error.message : String(error)}\n${assetDebug}`)

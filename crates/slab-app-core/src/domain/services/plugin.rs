@@ -62,12 +62,10 @@ impl PluginService {
         state: ModelState,
         agent_runtime: Option<crate::infra::agent::runtime::AgentRuntimeReloader>,
     ) -> Self {
-        let runtime = ensure_http_base_url(state.config().bind_address.as_str())
-            .map(PluginRuntime::with_api_base_url)
-            .unwrap_or_else(|_| PluginRuntime::default());
+        let api_base_url =
+            plugin_api_base_url_from_bind_address(state.config().bind_address.as_str());
+        let runtime = PluginRuntime::with_api_base_url(api_base_url.clone());
         let event_bus = PluginEventBus::new();
-        let api_base_url = ensure_http_base_url(state.config().bind_address.as_str())
-            .unwrap_or_else(|_| slab_types::DESKTOP_API_ORIGIN.to_owned());
         let js_transport = match state.config().plugin_js_runtime_transport {
             PluginJsRuntimeTransport::Stdio => PluginSidecarTransport::Stdio,
             PluginJsRuntimeTransport::Uds => PluginSidecarTransport::Uds,
@@ -619,9 +617,15 @@ impl PluginService {
     }
 
     fn plugin_api_base_url(&self) -> String {
-        ensure_http_base_url(self.state.config().bind_address.as_str())
-            .unwrap_or_else(|_| DESKTOP_API_ORIGIN.to_owned())
+        plugin_api_base_url_from_bind_address(self.state.config().bind_address.as_str())
     }
+}
+
+fn plugin_api_base_url_from_bind_address(bind_address: &str) -> String {
+    let trimmed = bind_address.trim();
+    let candidate =
+        if trimmed.contains("://") { trimmed.to_owned() } else { format!("http://{trimmed}") };
+    ensure_http_base_url(&candidate).unwrap_or_else(|_| DESKTOP_API_ORIGIN.to_owned())
 }
 
 #[derive(Debug, Clone)]

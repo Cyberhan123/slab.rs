@@ -4,6 +4,7 @@ use std::fs;
 
 use super::SOURCE_KIND_IMPORT_PACK;
 use super::package::locate_plugin_root;
+use super::plugin_api_base_url_from_bind_address;
 use super::scan::{scan_plugin_dir, scan_plugins};
 use super::validation::normalize_relative_path;
 
@@ -22,6 +23,11 @@ fn write(path: &std::path::Path, content: &str) {
 fn normalize_relative_path_rejects_parent_segments() {
     assert!(normalize_relative_path("../plugin.json").is_err());
     assert_eq!(normalize_relative_path("ui/index.html").expect("normalize"), "ui/index.html");
+}
+
+#[test]
+fn plugin_api_base_url_accepts_bare_bind_address() {
+    assert_eq!(plugin_api_base_url_from_bind_address("127.0.0.1:51843"), "http://127.0.0.1:51843/");
 }
 
 #[test]
