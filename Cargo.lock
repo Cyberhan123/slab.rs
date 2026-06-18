@@ -15454,6 +15454,7 @@ dependencies = [
  "serde_json",
  "slab-agent",
  "slab-app-core",
+ "slab-config",
  "slab-jsonrpc",
  "slab-otel",
  "slab-runtime-core",

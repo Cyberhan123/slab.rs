@@ -90,3 +90,14 @@ pub fn register(
 
     Ok(())
 }
+
+#[cfg(test)]
+pub(super) mod test_support {
+    use slab_runtime_core::backend::{PeerControlBus, WorkerCommand};
+    use tokio::sync::broadcast;
+
+    pub(super) fn peer_control_bus() -> PeerControlBus {
+        let (bc_tx, _) = broadcast::channel::<WorkerCommand>(8);
+        PeerControlBus::new(bc_tx, 0)
+    }
+}

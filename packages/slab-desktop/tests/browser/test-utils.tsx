@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { expect } from 'vitest';
 import { render } from 'vitest-browser-react';
 
@@ -55,4 +55,14 @@ export async function renderDesktopScene(
 
 export async function expectDesktopSceneAccessible() {
   await expect.element(page.getByRole('main', { name: 'Slab desktop scene' })).toBeVisible();
+}
+
+export async function expectDesktopSceneKeyboardReachable() {
+  await userEvent.tab();
+
+  const scene = document.querySelector('[data-testid="desktop-browser-scene"]');
+  const active = document.activeElement;
+
+  expect(active).not.toBe(document.body);
+  expect(scene?.contains(active)).toBe(true);
 }

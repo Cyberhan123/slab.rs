@@ -223,15 +223,12 @@ mod tests {
 
     use super::CandleWhisperWorker;
     use crate::domain::models::CandleWhisperLoadConfig;
+    use crate::infra::backends::candle::test_support::peer_control_bus;
     use slab_runtime_core::Payload;
-    use slab_runtime_core::backend::{
-        ControlOpId, DeploymentSnapshot, PeerControlBus, WorkerCommand,
-    };
-    use tokio::sync::broadcast;
+    use slab_runtime_core::backend::{ControlOpId, DeploymentSnapshot};
 
     fn make_worker() -> CandleWhisperWorker {
-        let (bc_tx, _bc_rx) = broadcast::channel::<WorkerCommand>(8);
-        CandleWhisperWorker::new(None, PeerControlBus::new(bc_tx, 0))
+        CandleWhisperWorker::new(None, peer_control_bus())
     }
 
     #[test]

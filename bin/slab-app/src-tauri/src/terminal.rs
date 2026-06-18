@@ -22,7 +22,7 @@ const DEFAULT_COLS: u16 = 100;
 const DEFAULT_ROWS: u16 = 24;
 const WORKSPACE_TERMINAL_ROUTE: &str = "/workspace-terminal";
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct TerminalServerInner {
     sessions: Arc<Mutex<HashMap<String, TerminalSessionRequest>>>,
 }
@@ -78,7 +78,14 @@ pub fn workspace_terminal_session(
     workspace_state: TauriState<'_, WorkspaceState>,
     terminal_state: TauriState<'_, WorkspaceTerminalState>,
 ) -> Result<WorkspaceTerminalSession, String> {
-    let workspace = active_workspace(&workspace_state)?;
+    workspace_terminal_session_for_state(&workspace_state, &terminal_state)
+}
+
+fn workspace_terminal_session_for_state(
+    workspace_state: &WorkspaceState,
+    terminal_state: &WorkspaceTerminalState,
+) -> Result<WorkspaceTerminalSession, String> {
+    let workspace = active_workspace(workspace_state)?;
     terminal_state.create_session(PathBuf::from(workspace.root_path))
 }
 
@@ -91,7 +98,7 @@ pub fn init<R: tauri::Runtime>(app: &mut tauri::App<R>) -> Result<(), String> {
     let local_addr = listener
         .local_addr()
         .map_err(|error| format!("failed to read workspace terminal server address: {error}"))?;
-    let inner = TerminalServerInner { sessions: Arc::new(Mutex::new(HashMap::new())) };
+    let inner = TerminalServerInner::default();
     app.manage(WorkspaceTerminalState {
         endpoint_origin: format!("ws://{}", local_addr),
         inner: inner.clone(),
@@ -246,4 +253,74 @@ fn configure_prompt(env: &mut HashMap<String, String>) {
 
 fn terminal_cwd(path: &Path) -> PathBuf {
     remove_windows_extended_path_prefix(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use super::{
+        WORKSPACE_TERMINAL_ROUTE, WorkspaceTerminalState, terminal_cwd,
+        workspace_terminal_session_for_state,
+    };
+    use crate::workspace::{workspace_info_for_test, workspace_state_for_test};
+
+    #[test]
+    fn workspace_terminal_session_requires_active_workspace() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workspace_state = workspace_state_for_test(temp.path().join("recent.json"), None);
+        let terminal_state = terminal_state_for_test();
+
+        let error = workspace_terminal_session_for_state(&workspace_state, &terminal_state)
+            .expect_err("workspace should be required");
+
+        assert_eq!(error, "no workspace is currently open");
+    }
+
+    #[test]
+    fn workspace_terminal_session_enqueues_active_workspace_root() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workspace_state = workspace_state_for_test(
+            temp.path().join("recent.json"),
+            Some(workspace_info_for_test(temp.path())),
+        );
+        let terminal_state = terminal_state_for_test();
+
+        let session = workspace_terminal_session_for_state(&workspace_state, &terminal_state)
+            .expect("terminal session");
+
+        let prefix = format!("ws://127.0.0.1:3210{WORKSPACE_TERMINAL_ROUTE}/");
+        assert!(session.url.starts_with(&prefix));
+        let session_id = session.url.strip_prefix(&prefix).expect("session id");
+        assert!(!session_id.is_empty());
+        let request = terminal_state.inner.take_session(session_id).expect("queued session");
+        assert_eq!(request.root_path, PathBuf::from(temp.path()));
+        assert!(terminal_state.inner.take_session(session_id).is_none());
+    }
+
+    #[test]
+    fn workspace_terminal_rejects_unknown_session_id() {
+        let terminal_state = terminal_state_for_test();
+
+        assert!(terminal_state.inner.take_session("missing-session").is_none());
+    }
+
+    #[test]
+    fn terminal_cwd_normalizes_shell_working_directory() {
+        #[cfg(windows)]
+        assert_eq!(
+            terminal_cwd(Path::new(r"\\?\C:\Users\example\repo")),
+            Path::new(r"C:\Users\example\repo")
+        );
+
+        #[cfg(not(windows))]
+        assert_eq!(terminal_cwd(Path::new("workspace")), Path::new("workspace"));
+    }
+
+    fn terminal_state_for_test() -> WorkspaceTerminalState {
+        WorkspaceTerminalState {
+            endpoint_origin: "ws://127.0.0.1:3210".to_string(),
+            inner: Default::default(),
+        }
+    }
 }

@@ -107,3 +107,60 @@ async fn update_setting(
     let params = validate(params)?;
     Ok(Json(service.update_setting(&params.pmid, body).await?))
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::http::StatusCode;
+
+    use crate::api::test_support::{TestServer, TestServerOptions};
+
+    #[tokio::test]
+    async fn settings_routes_allow_loopback_without_admin_token() {
+        let server = TestServer::new().await;
+
+        let response = server.get("/v1/settings").await;
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert!(response.body["sections"].as_array().is_some());
+    }
+
+    #[tokio::test]
+    async fn settings_routes_require_configured_admin_token() {
+        let server = TestServer::new_with(TestServerOptions {
+            bind_address: Some("0.0.0.0:0".to_owned()),
+            admin_api_token: Some("test-admin-token".to_owned()),
+            workspace_root: None,
+        })
+        .await;
+
+        let missing = server.get("/v1/settings").await;
+        assert_eq!(missing.status, StatusCode::UNAUTHORIZED);
+
+        let allowed = server.get_with_token("/v1/settings", "test-admin-token").await;
+        assert_eq!(allowed.status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn settings_path_validation_rejects_blank_pmid() {
+        let server = TestServer::new().await;
+
+        let response = server.get("/v1/settings/%20").await;
+
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        assert!(response.body["message"].as_str().unwrap_or_default().contains("pmid"));
+        assert_eq!(
+            response.body["i18n"]["message"]["key"],
+            "server.errors.requestValidationFailed"
+        );
+    }
+
+    #[tokio::test]
+    async fn settings_missing_pmid_maps_to_not_found() {
+        let server = TestServer::new().await;
+
+        let response = server.get("/v1/settings/missing.setting").await;
+
+        assert_eq!(response.status, StatusCode::NOT_FOUND);
+        assert_eq!(response.body["i18n"]["message"]["key"], "server.errors.notFound");
+    }
+}

@@ -392,3 +392,117 @@ async fn download_model(
     let response = service.download_model(req.into()).await?;
     Ok((StatusCode::ACCEPTED, Json(response.into())))
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::body::Body;
+    use axum::http::{Method, Request, StatusCode, header};
+    use serde_json::json;
+
+    use crate::api::test_support::{TEST_PROVIDER_ID, TestServer, response_json};
+
+    #[tokio::test]
+    async fn create_model_validates_request_body() {
+        let server = TestServer::new().await;
+
+        let response = server
+            .post_json(
+                "/v1/models",
+                json!({
+                    "display_name": " ",
+                    "kind": "local",
+                    "backend_id": "ggml.llama",
+                    "spec": {}
+                }),
+            )
+            .await;
+
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        assert!(response.body["message"].as_str().unwrap_or_default().contains("display_name"));
+    }
+
+    #[tokio::test]
+    async fn model_path_validation_rejects_blank_ids() {
+        let server = TestServer::new().await;
+
+        let response = server.get("/v1/models/%20").await;
+
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        assert!(response.body["message"].as_str().unwrap_or_default().contains("id"));
+    }
+
+    #[tokio::test]
+    async fn create_and_get_cloud_model_round_trip_over_http() {
+        let server = TestServer::new().await;
+
+        let created = server
+            .post_json(
+                "/v1/models",
+                json!({
+                    "display_name": "Cloud Chat",
+                    "kind": "cloud",
+                    "capabilities": ["chat_generation"],
+                    "spec": {
+                        "provider_id": TEST_PROVIDER_ID,
+                        "remote_model_id": "gpt-4.1-mini"
+                    }
+                }),
+            )
+            .await;
+
+        assert_eq!(created.status, StatusCode::OK);
+        let id = created.body["id"].as_str().expect("created id");
+
+        let fetched = server.get(&format!("/v1/models/{id}")).await;
+        assert_eq!(fetched.status, StatusCode::OK);
+        assert_eq!(fetched.body["id"], id);
+        assert_eq!(fetched.body["display_name"], "Cloud Chat");
+        assert_eq!(fetched.body["spec"]["provider_id"], TEST_PROVIDER_ID);
+    }
+
+    #[tokio::test]
+    async fn list_available_models_validates_repo_id_query() {
+        let server = TestServer::new().await;
+
+        let response = server.get("/v1/models/available?repo_id=%20").await;
+
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        assert!(response.body["message"].as_str().unwrap_or_default().contains("repo_id"));
+    }
+
+    #[tokio::test]
+    async fn download_model_maps_missing_model_to_not_found() {
+        let server = TestServer::new().await;
+
+        let response =
+            server.post_json("/v1/models/download", json!({ "model_id": "missing-model" })).await;
+
+        assert_eq!(response.status, StatusCode::NOT_FOUND);
+        assert_eq!(response.body["i18n"]["message"]["key"], "server.errors.notFound");
+    }
+
+    #[tokio::test]
+    async fn import_model_pack_rejects_non_slab_extension_before_service_call() {
+        let server = TestServer::new().await;
+        let boundary = "slab-test-boundary";
+        let body = concat!(
+            "--slab-test-boundary\r\n",
+            "Content-Disposition: form-data; name=\"file\"; filename=\"pack.txt\"\r\n",
+            "Content-Type: application/octet-stream\r\n",
+            "\r\n",
+            "not a slab pack\r\n",
+            "--slab-test-boundary--\r\n"
+        );
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/models/import-pack")
+            .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={boundary}"))
+            .body(Body::from(body))
+            .expect("multipart request");
+
+        let response = response_json(server.raw(request).await).await;
+
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        assert!(response.body["message"].as_str().unwrap_or_default().contains(".slab extension"));
+    }
+}

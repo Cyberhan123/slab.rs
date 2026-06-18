@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AssistantPage from '@/pages/assistant';
 import type { AssistantMessageRecord } from '@/pages/assistant/assistant-context';
 import type { AssistantConversationItem } from '@/pages/assistant/hooks/use-assistant-sessions';
-import { expectDesktopSceneAccessible, renderDesktopScene } from '../test-utils';
+import {
+  expectDesktopSceneAccessible,
+  expectDesktopSceneKeyboardReachable,
+  renderDesktopScene,
+} from '../test-utils';
 
 const { mockUseAssistantAgent } = vi.hoisted(() => ({
   mockUseAssistantAgent: vi.fn<() => unknown>(),
@@ -66,28 +70,11 @@ vi.mock('@/store/useAssistantUiStore', () => ({
   }),
 }));
 
-vi.mock('@slab/api', () => ({
-  apiClient: {
-    DELETE: vi.fn<(...args: unknown[]) => unknown>(),
-    GET: vi.fn<(...args: unknown[]) => unknown>(),
-    POST: vi.fn<(...args: unknown[]) => unknown>(),
-    PUT: vi.fn<(...args: unknown[]) => unknown>(),
-  },
-  default: {
-    useMutation: vi.fn<() => unknown>(() => ({
-      isPending: false,
-      mutateAsync: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    })),
-    useQuery: vi.fn<() => unknown>(() => ({
-      data: null,
-      isLoading: false,
-      refetch: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    })),
-  },
-  getErrorMessage: vi.fn<(err: Error) => string>((err) => err.message),
-  isApiError: vi.fn<() => boolean>(() => false),
-  queryClient: {},
-}));
+vi.mock('@slab/api', async () => {
+  const { createSlabApiMock } = await import('../support/mock-slab-api');
+
+  return createSlabApiMock();
+});
 
 vi.mock('@slab/i18n', () => ({
   DEFAULT_ASSISTANT_LABELS: ['New assistant'],
@@ -185,6 +172,7 @@ describe('AssistantPage browser visual regression', () => {
     await renderDesktopScene(<AssistantPage />, { route: '/' });
 
     await expectDesktopSceneAccessible();
+    await expectDesktopSceneKeyboardReachable();
     await expect.element(page.getByRole('button', { name: /send/i })).toBeVisible();
     await expect.element(page.getByTestId('desktop-browser-scene')).toBeVisible();
     await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot('assistant-page-empty.png');

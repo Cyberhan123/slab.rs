@@ -633,3 +633,79 @@ mod tests {
         assert!(matches!(file_error, ServerError::BadRequest(_)));
     }
 }
+
+#[cfg(test)]
+mod route_tests {
+    use std::fs;
+
+    use axum::http::StatusCode;
+
+    use crate::api::test_support::{TestServer, TestServerOptions};
+
+    #[tokio::test]
+    async fn workspace_state_reports_configured_root() {
+        let workspace_root = tempfile::tempdir().expect("workspace root");
+        let server = TestServer::new_with(TestServerOptions {
+            workspace_root: Some(workspace_root.path().to_path_buf()),
+            ..Default::default()
+        })
+        .await;
+
+        let response = server.get("/v1/workspace").await;
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(
+            response.body["current"]["rootPath"],
+            workspace_root
+                .path()
+                .canonicalize()
+                .expect("canonical root")
+                .to_string_lossy()
+                .into_owned()
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_directory_route_rejects_missing_active_workspace() {
+        let server = TestServer::new().await;
+
+        let response = server.get("/v1/workspace/directory?relativePath=src").await;
+
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        assert!(
+            response.body["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("no workspace is currently open")
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_open_rejects_blank_root_path() {
+        let server = TestServer::new().await;
+
+        let response =
+            server.post_json("/v1/workspace/open", serde_json::json!({ "rootPath": " " })).await;
+
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        assert!(response.body["message"].as_str().unwrap_or_default().contains("root path"));
+    }
+
+    #[tokio::test]
+    async fn workspace_file_routes_use_active_workspace_root() {
+        let workspace_root = tempfile::tempdir().expect("workspace root");
+        fs::create_dir_all(workspace_root.path().join("src")).expect("create workspace dir");
+        fs::write(workspace_root.path().join("src/main.rs"), "fn main() {}").expect("seed file");
+
+        let server = TestServer::new_with(TestServerOptions {
+            workspace_root: Some(workspace_root.path().to_path_buf()),
+            ..Default::default()
+        })
+        .await;
+
+        let response = server.get("/v1/workspace/files?relativePath=src/main.rs").await;
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(response.body["content"], "fn main() {}");
+    }
+}

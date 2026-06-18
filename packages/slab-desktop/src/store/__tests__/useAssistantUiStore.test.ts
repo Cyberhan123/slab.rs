@@ -1,14 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
+import './mock-ui-state-storage';
 import { useAssistantUiStore } from '../useAssistantUiStore';
-
-// Mock the UI state storage
-vi.mock('../ui-state-storage', () => ({
-  createUiStateStorage: () => ({
-    getItem: vi.fn<() => Promise<null>>(async () => null),
-    setItem: vi.fn<() => Promise<void>>(async () => {}),
-    removeItem: vi.fn<() => Promise<void>>(async () => {}),
-  }),
-}));
 
 describe('useAssistantUiStore', () => {
   beforeEach(() => {

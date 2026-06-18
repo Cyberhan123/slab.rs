@@ -22,6 +22,8 @@ pub enum FileSystemError {
     Root(std::io::Error),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("filesystem access denied: {0}")]
+    PermissionDenied(String),
     #[error("invalid patch: {0}")]
     InvalidPatch(String),
     #[error("patch does not apply to `{path}` at line {line}")]
@@ -175,6 +177,149 @@ pub fn resolve_path(workspace_root: Option<&Path>, path: &str) -> Result<PathBuf
     }
 
     Ok(candidate)
+}
+
+pub fn resolve_sandbox_path_for_read(
+    context: &FileSystemSandboxContext,
+    path: &str,
+) -> Result<PathBuf, FileSystemError> {
+    resolve_sandbox_path(context, path, SandboxAccess::Read)
+}
+
+pub fn resolve_sandbox_path_for_write(
+    context: &FileSystemSandboxContext,
+    path: &str,
+) -> Result<PathBuf, FileSystemError> {
+    resolve_sandbox_path(context, path, SandboxAccess::Write)
+}
+
+#[derive(Clone, Copy)]
+enum SandboxAccess {
+    Read,
+    Write,
+}
+
+fn resolve_sandbox_path(
+    context: &FileSystemSandboxContext,
+    path: &str,
+    access: SandboxAccess,
+) -> Result<PathBuf, FileSystemError> {
+    if matches!(access, SandboxAccess::Write)
+        && matches!(context.policy, FileSystemSandboxPolicy::ReadOnly)
+    {
+        return Err(FileSystemError::PermissionDenied(
+            "read-only filesystem sandbox refused mutation".to_string(),
+        ));
+    }
+
+    let path_buf = PathBuf::from(path);
+    let candidate = if path_buf.is_absolute() {
+        path_buf
+    } else {
+        resolve_path(context.workspace_root.as_deref().or(context.cwd.as_deref()), path)?
+    };
+    ensure_sandbox_path_allowed(context, &candidate, access)?;
+    Ok(candidate)
+}
+
+fn ensure_sandbox_path_allowed(
+    context: &FileSystemSandboxContext,
+    candidate: &Path,
+    access: SandboxAccess,
+) -> Result<(), FileSystemError> {
+    ensure_sandbox_path_not_denied(context, candidate)?;
+    if matches!(context.policy, FileSystemSandboxPolicy::DangerFullAccess) {
+        return Ok(());
+    }
+
+    let allowed_roots = allowed_roots_for_access(context, access);
+    if allowed_roots.iter().any(|root| path_is_within_policy_root(candidate, root)) {
+        return Ok(());
+    }
+
+    let access_name = match access {
+        SandboxAccess::Read => "read",
+        SandboxAccess::Write => "write",
+    };
+    Err(FileSystemError::PermissionDenied(format!(
+        "path is outside sandbox {access_name} roots: {}",
+        candidate.display()
+    )))
+}
+
+fn allowed_roots_for_access(
+    context: &FileSystemSandboxContext,
+    access: SandboxAccess,
+) -> Vec<&Path> {
+    let mut roots = Vec::new();
+    if let Some(root) = context.workspace_root.as_deref() {
+        roots.push(root);
+    }
+    match access {
+        SandboxAccess::Read => {
+            roots.extend(context.readable_roots.iter().map(PathBuf::as_path));
+            if matches!(context.policy, FileSystemSandboxPolicy::WorkspaceWrite) {
+                roots.extend(context.writable_roots.iter().map(PathBuf::as_path));
+            }
+        }
+        SandboxAccess::Write => {
+            if matches!(context.policy, FileSystemSandboxPolicy::WorkspaceWrite) {
+                roots.extend(context.writable_roots.iter().map(PathBuf::as_path));
+            }
+        }
+    }
+    roots
+}
+
+fn ensure_sandbox_path_not_denied(
+    context: &FileSystemSandboxContext,
+    candidate: &Path,
+) -> Result<(), FileSystemError> {
+    for denied in &context.denied_paths {
+        let denied = resolve_policy_path(context, denied)?;
+        if path_is_within_policy_root(candidate, &denied) {
+            return Err(FileSystemError::PermissionDenied(format!(
+                "path is denied by filesystem sandbox policy: {}",
+                candidate.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn resolve_policy_path(
+    context: &FileSystemSandboxContext,
+    path: &Path,
+) -> Result<PathBuf, FileSystemError> {
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+    let path = path.to_string_lossy();
+    resolve_path(context.workspace_root.as_deref().or(context.cwd.as_deref()), &path)
+}
+
+fn path_is_within_policy_root(path: &Path, root: &Path) -> bool {
+    let Ok(path) = canonical_policy_path(path) else {
+        return false;
+    };
+    let Ok(root) = canonical_policy_path(root) else {
+        return false;
+    };
+    path.starts_with(root)
+}
+
+fn canonical_policy_path(path: &Path) -> Result<PathBuf, std::io::Error> {
+    if path.exists() {
+        return path.canonicalize();
+    }
+
+    let Some(parent) = path.parent() else {
+        return Ok(path.to_path_buf());
+    };
+    let ancestor = slab_utils::fs::existing_ancestor(parent)?;
+    let canonical_ancestor = ancestor.canonicalize()?;
+    let suffix = path.strip_prefix(&ancestor).unwrap_or(Path::new(""));
+    Ok(canonical_ancestor.join(suffix))
 }
 
 pub async fn read_to_string(
@@ -528,6 +673,80 @@ mod tests {
         );
     }
 
+    #[test]
+    fn sandbox_context_read_only_rejects_write_resolution() {
+        let root = temp_root("sandbox_read_only");
+        let context = sandbox_context(&root, FileSystemSandboxPolicy::ReadOnly);
+
+        let error = resolve_sandbox_path_for_write(&context, "note.md").expect_err("write denied");
+
+        assert!(matches!(error, FileSystemError::PermissionDenied(_)));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn sandbox_context_denied_paths_override_read_and_write_roots() {
+        let root = temp_root("sandbox_denied");
+        let denied = root.join("secret");
+        fs::create_dir_all(&denied).expect("denied dir");
+        fs::write(denied.join("note.md"), "secret").expect("denied file");
+        let mut context = sandbox_context(&root, FileSystemSandboxPolicy::WorkspaceWrite);
+        context.writable_roots.push(root.clone());
+        context.denied_paths.push(denied);
+
+        let read =
+            resolve_sandbox_path_for_read(&context, "secret/note.md").expect_err("read denied");
+        let write =
+            resolve_sandbox_path_for_write(&context, "secret/new.md").expect_err("write denied");
+
+        assert!(matches!(read, FileSystemError::PermissionDenied(_)));
+        assert!(matches!(write, FileSystemError::PermissionDenied(_)));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn sandbox_context_workspace_write_allows_workspace_and_writable_roots() {
+        let root = temp_root("sandbox_workspace");
+        let writable = temp_root("sandbox_writable");
+        let outside = temp_root("sandbox_outside");
+        fs::write(writable.join("readable.txt"), "ok").expect("writable file");
+        let mut context = sandbox_context(&root, FileSystemSandboxPolicy::WorkspaceWrite);
+        context.writable_roots.push(writable.clone());
+
+        let workspace_path =
+            resolve_sandbox_path_for_write(&context, "note.md").expect("workspace write");
+        let writable_path = resolve_sandbox_path_for_write(
+            &context,
+            &writable.join("created.txt").to_string_lossy(),
+        )
+        .expect("writable root write");
+        let readable_path = resolve_sandbox_path_for_read(
+            &context,
+            &writable.join("readable.txt").to_string_lossy(),
+        )
+        .expect("writable root read");
+        let outside_error =
+            resolve_sandbox_path_for_write(&context, &outside.join("denied.txt").to_string_lossy())
+                .expect_err("outside write denied");
+
+        assert_eq!(
+            workspace_path.parent().expect("workspace parent").canonicalize().expect("root"),
+            root.canonicalize().expect("root")
+        );
+        assert_eq!(
+            writable_path.parent().expect("writable parent").canonicalize().expect("writable"),
+            writable.canonicalize().expect("writable")
+        );
+        assert_eq!(
+            readable_path.canonicalize().expect("readable"),
+            writable.join("readable.txt").canonicalize().expect("readable")
+        );
+        assert!(matches!(outside_error, FileSystemError::PermissionDenied(_)));
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(writable);
+        let _ = fs::remove_dir_all(outside);
+    }
+
     #[tokio::test]
     async fn write_string_uses_unique_sibling_tmp_file_name() {
         let root = temp_root("write");
@@ -635,6 +854,17 @@ mod tests {
             std::env::temp_dir().join(format!("slab_file_{name}_{}_{}", std::process::id(), nonce));
         fs::create_dir_all(&root).expect("create temp root");
         root
+    }
+
+    fn sandbox_context(root: &Path, policy: FileSystemSandboxPolicy) -> FileSystemSandboxContext {
+        FileSystemSandboxContext {
+            policy,
+            cwd: Some(root.to_path_buf()),
+            workspace_root: Some(root.to_path_buf()),
+            readable_roots: Vec::new(),
+            writable_roots: Vec::new(),
+            denied_paths: Vec::new(),
+        }
     }
 
     #[cfg(unix)]

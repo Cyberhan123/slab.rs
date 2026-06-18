@@ -9,6 +9,8 @@
 pub mod doc;
 pub mod health;
 mod middleware;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub(crate) mod v1;
 pub mod validation;
 use crate::api::middleware::{cors, trace};

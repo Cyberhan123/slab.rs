@@ -328,6 +328,7 @@ fn file_system_error_to_io(error: FileSystemError) -> io::Error {
         FileSystemError::AbsolutePath(message)
         | FileSystemError::PathEscapesRoot(message)
         | FileSystemError::InvalidPath(message)
+        | FileSystemError::PermissionDenied(message)
         | FileSystemError::InvalidPatch(message) => {
             io::Error::new(io::ErrorKind::InvalidInput, message)
         }

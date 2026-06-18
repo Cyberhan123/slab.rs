@@ -1,18 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
+import './mock-ui-state-storage';
 import {
   defaultEditorSettings,
   emptyWorkspaceUiSnapshot,
   useWorkspaceUiStore,
 } from '../useWorkspaceUiStore';
-
-vi.mock('../ui-state-storage', () => ({
-  createUiStateStorage: () => ({
-    getItem: vi.fn<() => Promise<null>>(async () => null),
-    removeItem: vi.fn<() => Promise<void>>(async () => {}),
-    setItem: vi.fn<() => Promise<void>>(async () => {}),
-  }),
-}));
 
 describe('useWorkspaceUiStore', () => {
   beforeEach(() => {

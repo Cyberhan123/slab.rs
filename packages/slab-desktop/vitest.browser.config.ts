@@ -1,17 +1,14 @@
-import path from "node:path";
-
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { playwright } from "@vitest/browser-playwright";
 import { defineProject } from "vitest/config";
 
-const componentSourcePath = path.resolve(__dirname, "../slab-components/src");
-const componentSourceUrl = componentSourcePath.replace(/\\/g, "/");
-const apiSourcePath = path.resolve(__dirname, "../api/src");
-const apiSourceUrl = apiSourcePath.replace(/\\/g, "/");
+import { desktopVitestResolve } from "./vitest.shared";
+
 const browserActionTimeoutMs = 5_000;
 const browserTestTimeoutMs = 30_000;
 const browserTeardownTimeoutMs = 10_000;
+const screenshotAllowedMismatchedPixelRatio = 0.0005;
 
 export default defineProject({
   plugins: [react(), tailwindcss()],
@@ -32,6 +29,15 @@ export default defineProject({
       enabled: true,
       headless: true,
       api: { host: "127.0.0.1", port: 64115 },
+      expect: {
+        toMatchScreenshot: {
+          comparatorOptions: {
+            allowedMismatchedPixelRatio: screenshotAllowedMismatchedPixelRatio,
+            threshold: 0.1,
+          },
+          timeout: browserActionTimeoutMs,
+        },
+      },
       provider: playwright({
         actionTimeout: browserActionTimeoutMs,
       }),
@@ -42,37 +48,5 @@ export default defineProject({
       instances: [{ browser: "chromium" }],
     },
   },
-  resolve: {
-    dedupe: ["react", "react-dom"],
-    alias: [
-      {
-        find: "@slab/components/globals.css",
-        replacement: path.resolve(componentSourcePath, "styles/globals.css"),
-      },
-      {
-        find: /^@slab\/components\/(.+)$/,
-        replacement: `${componentSourceUrl}/$1`,
-      },
-      {
-        find: "@slab/components",
-        replacement: path.resolve(componentSourcePath, "index.ts"),
-      },
-      {
-        find: /^@slab\/api\/(.+)$/,
-        replacement: `${apiSourceUrl}/$1`,
-      },
-      {
-        find: "@slab/api",
-        replacement: path.resolve(apiSourcePath, "index.ts"),
-      },
-      {
-        find: "@slab/i18n",
-        replacement: path.resolve(__dirname, "../slab-i18n/src/index.ts"),
-      },
-      {
-        find: "@",
-        replacement: path.resolve(__dirname, "./src"),
-      },
-    ],
-  },
+  resolve: desktopVitestResolve,
 });

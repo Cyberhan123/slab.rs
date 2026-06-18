@@ -491,6 +491,14 @@ impl WorkspaceService {
         root: impl AsRef<Path>,
         command: &str,
     ) -> Result<WorkspaceConsoleOutput, AppCoreError> {
+        Self::run_console_command_with_timeout(root.as_ref(), command, CONSOLE_TIMEOUT).await
+    }
+
+    async fn run_console_command_with_timeout(
+        root: &Path,
+        command: &str,
+        timeout_duration: Duration,
+    ) -> Result<WorkspaceConsoleOutput, AppCoreError> {
         let command = command.trim();
         if command.is_empty() {
             return Err(AppCoreError::BadRequest("command cannot be empty".to_string()));
@@ -503,11 +511,10 @@ impl WorkspaceService {
 
         let (program, args) = shell_command(command);
         let env: HashMap<String, String> = std::env::vars().collect();
-        let spawned = spawn_pipe_process_no_stdin(&program, &args, root.as_ref(), &env, &None)
-            .await
-            .map_err(|error| {
-                AppCoreError::Internal(format!("failed to run workspace command: {error}"))
-            })?;
+        let spawned =
+            spawn_pipe_process_no_stdin(&program, &args, root, &env, &None).await.map_err(
+                |error| AppCoreError::Internal(format!("failed to run workspace command: {error}")),
+            )?;
         let session = spawned.session;
         let stdout_task = tokio::spawn(collect_limited_output(spawned.stdout_rx));
         let stderr_task = tokio::spawn(collect_limited_output(spawned.stderr_rx));
@@ -518,7 +525,7 @@ impl WorkspaceService {
             let stderr = stderr_task.await.unwrap_or_default();
             (exit_code, stdout, stderr)
         };
-        let (exit_code, stdout, stderr) = match timeout(CONSOLE_TIMEOUT, console_output).await {
+        let (exit_code, stdout, stderr) = match timeout(timeout_duration, console_output).await {
             Ok(output) => output,
             Err(_) => {
                 session.terminate();
@@ -528,7 +535,7 @@ impl WorkspaceService {
                     stdout: String::new(),
                     stderr: format!(
                         "Command timed out after {} seconds.",
-                        CONSOLE_TIMEOUT.as_secs()
+                        timeout_duration.as_secs()
                     ),
                     timed_out: true,
                 });
@@ -557,7 +564,8 @@ fn map_fs_error(error: FileSystemError) -> AppCoreError {
     match error {
         FileSystemError::AbsolutePath(message)
         | FileSystemError::PathEscapesRoot(message)
-        | FileSystemError::InvalidPath(message) => AppCoreError::BadRequest(message),
+        | FileSystemError::InvalidPath(message)
+        | FileSystemError::PermissionDenied(message) => AppCoreError::BadRequest(message),
         FileSystemError::Root(error) | FileSystemError::Io(error) => {
             AppCoreError::Internal(error.to_string())
         }
@@ -838,8 +846,9 @@ fn join_relative_path(parent: &str, child: &str) -> String {
 mod tests {
     use std::fs;
     use std::path::PathBuf;
+    use std::time::Duration;
 
-    use super::{WorkspaceService, normalize_relative_path};
+    use super::{MAX_CONSOLE_OUTPUT_BYTES, WorkspaceService, normalize_relative_path};
 
     #[test]
     fn normalize_relative_path_rejects_parent_segments() {
@@ -962,5 +971,43 @@ mod tests {
             fs::read_to_string(root.path().join(relative_path)).expect("created file"),
             expected_content
         );
+    }
+
+    #[tokio::test]
+    async fn run_console_command_truncates_long_stdout() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let command = if cfg!(windows) {
+            "'x' * 70000".to_string()
+        } else {
+            "i=0; while [ \"$i\" -lt 70000 ]; do printf x; i=$((i + 1)); done".to_string()
+        };
+
+        let output = WorkspaceService::run_console_command(root.path(), &command)
+            .await
+            .expect("console output");
+
+        assert_eq!(output.exit_code, Some(0));
+        assert!(!output.timed_out);
+        assert!(output.stdout.contains("[output truncated]"));
+        assert!(output.stdout.len() <= MAX_CONSOLE_OUTPUT_BYTES + "\n[output truncated]\n".len());
+    }
+
+    #[tokio::test]
+    async fn run_console_command_reports_timeout_without_waiting_for_default_timeout() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let command = if cfg!(windows) { "Start-Sleep -Seconds 2" } else { "sleep 2" }.to_string();
+
+        let output = WorkspaceService::run_console_command_with_timeout(
+            root.path(),
+            &command,
+            Duration::from_millis(100),
+        )
+        .await
+        .expect("console output");
+
+        assert_eq!(output.exit_code, None);
+        assert!(output.timed_out);
+        assert!(output.stdout.is_empty());
+        assert!(output.stderr.contains("Command timed out after"));
     }
 }

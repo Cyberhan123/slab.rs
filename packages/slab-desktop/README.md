@@ -34,6 +34,7 @@ Bun-managed frontend package.
 - `tests/browser/e2e/*.browser.test.tsx`: browser-mode component/page flows backed by mocked APIs. These stay under `bun run test:browser`.
 - `tests/e2e/**/*.test.ts`: fullstack E2E tests. Run only from the repository root with `bun run test:e2e`; the shared harness starts `bun run dev`, waits for the desktop UI and `/health`, and kills its dev process tree after the run.
 - `tests/manual/*.test.ts`: opt-in diagnostics for real local-dev environments. These are not part of the root E2E command.
+- Browser visual screenshots are platform-scoped by Vitest (`*-chromium-<platform>.png`). Keep baselines per platform and refresh them with `bun run test:browser:update` on the platform that produced the drift; do not copy a baseline across OS families.
 - Run unit tests with `bun run test:run`.
 - Run page/browser regression tests with `bun run test:browser`.
 - Refresh desktop screenshot baselines with `bun run test:browser:update`.

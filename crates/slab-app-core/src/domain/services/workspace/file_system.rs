@@ -30,7 +30,7 @@ impl LocalExecutorFileSystem {
     }
 
     pub fn resolve_existing(&self, relative_path: &str) -> Result<PathBuf, FileSystemError> {
-        slab_file::resolve_path(self.context.workspace_root.as_deref(), relative_path)
+        slab_file::resolve_sandbox_path_for_read(&self.context, relative_path)
     }
 
     pub fn read_file_bytes(&self, relative_path: &str) -> Result<Vec<u8>, FileSystemError> {
@@ -69,7 +69,7 @@ impl ExecutorFileSystem for LocalExecutorFileSystem {
         context: &FileSystemSandboxContext,
         path: &str,
     ) -> Result<Vec<u8>, FileSystemError> {
-        let path = slab_file::resolve_path(context.workspace_root.as_deref(), path)?;
+        let path = slab_file::resolve_sandbox_path_for_read(context, path)?;
         Ok(tokio::fs::read(path).await?)
     }
 
@@ -79,7 +79,7 @@ impl ExecutorFileSystem for LocalExecutorFileSystem {
         path: &str,
         content: &[u8],
     ) -> Result<(), FileSystemError> {
-        let path = slab_file::resolve_path(context.workspace_root.as_deref(), path)?;
+        let path = slab_file::resolve_sandbox_path_for_write(context, path)?;
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
@@ -92,7 +92,7 @@ impl ExecutorFileSystem for LocalExecutorFileSystem {
         context: &FileSystemSandboxContext,
         path: &str,
     ) -> Result<(), FileSystemError> {
-        let path = slab_file::resolve_path(context.workspace_root.as_deref(), path)?;
+        let path = slab_file::resolve_sandbox_path_for_write(context, path)?;
         tokio::fs::create_dir_all(path).await?;
         Ok(())
     }
@@ -102,7 +102,7 @@ impl ExecutorFileSystem for LocalExecutorFileSystem {
         context: &FileSystemSandboxContext,
         path: &str,
     ) -> Result<FileMetadata, FileSystemError> {
-        let path = slab_file::resolve_path(context.workspace_root.as_deref(), path)?;
+        let path = slab_file::resolve_sandbox_path_for_read(context, path)?;
         metadata_for_path(&path)
     }
 
@@ -111,9 +111,8 @@ impl ExecutorFileSystem for LocalExecutorFileSystem {
         context: &FileSystemSandboxContext,
         path: &str,
     ) -> Result<Vec<DirectoryEntry>, FileSystemError> {
-        let root = context.workspace_root.as_deref();
         let relative_path = slab_file::normalize_relative_path(path)?;
-        let directory = slab_file::resolve_path(root, &relative_path)?;
+        let directory = slab_file::resolve_sandbox_path_for_read(context, &relative_path)?;
         let mut read_dir = tokio::fs::read_dir(directory).await?;
         let mut entries = Vec::new();
         while let Some(entry) = read_dir.next_entry().await? {
@@ -135,7 +134,7 @@ impl ExecutorFileSystem for LocalExecutorFileSystem {
         path: &str,
         options: RemoveOptions,
     ) -> Result<(), FileSystemError> {
-        let path = slab_file::resolve_path(context.workspace_root.as_deref(), path)?;
+        let path = slab_file::resolve_sandbox_path_for_write(context, path)?;
         let metadata = tokio::fs::metadata(&path).await?;
         if metadata.is_dir() {
             if options.recursive {
@@ -156,8 +155,8 @@ impl ExecutorFileSystem for LocalExecutorFileSystem {
         to: &str,
         options: CopyOptions,
     ) -> Result<(), FileSystemError> {
-        let from = slab_file::resolve_path(context.workspace_root.as_deref(), from)?;
-        let to = slab_file::resolve_path(context.workspace_root.as_deref(), to)?;
+        let from = slab_file::resolve_sandbox_path_for_read(context, from)?;
+        let to = slab_file::resolve_sandbox_path_for_write(context, to)?;
         if to.exists() && !options.overwrite {
             return Err(FileSystemError::InvalidPath(to.display().to_string()));
         }
@@ -226,6 +225,91 @@ mod tests {
         assert!(matches!(read, Err(FileSystemError::InvalidPath(_))));
         assert!(matches!(write, Err(FileSystemError::InvalidPath(_))));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn local_executor_file_system_read_only_rejects_mutations() {
+        let root = temp_root("read_only");
+        fs::write(root.join("source.txt"), "source").expect("seed source");
+        fs::write(root.join("delete.txt"), "delete").expect("seed delete");
+        let file_system = LocalExecutorFileSystem::new(&root).expect("filesystem");
+        let mut context = file_system.context.clone();
+        context.policy = FileSystemSandboxPolicy::ReadOnly;
+
+        let write = file_system.write_file(&context, "created.txt", b"created").await;
+        let create_dir = file_system.create_directory(&context, "created-dir").await;
+        let remove = file_system.remove(&context, "delete.txt", RemoveOptions::default()).await;
+        let copy =
+            file_system.copy(&context, "source.txt", "copied.txt", CopyOptions::default()).await;
+
+        assert!(matches!(write, Err(FileSystemError::PermissionDenied(_))));
+        assert!(matches!(create_dir, Err(FileSystemError::PermissionDenied(_))));
+        assert!(matches!(remove, Err(FileSystemError::PermissionDenied(_))));
+        assert!(matches!(copy, Err(FileSystemError::PermissionDenied(_))));
+        assert!(root.join("delete.txt").is_file());
+        assert!(!root.join("copied.txt").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn local_executor_file_system_denied_paths_override_workspace_access() {
+        let root = temp_root("denied");
+        fs::create_dir_all(root.join("secret")).expect("secret dir");
+        fs::write(root.join("secret").join("note.md"), "secret").expect("secret file");
+        let file_system = LocalExecutorFileSystem::new(&root).expect("filesystem");
+        let mut context = file_system.context.clone();
+        context.denied_paths.push(root.join("secret"));
+
+        let read = file_system.read_file(&context, "secret/note.md").await;
+        let write = file_system.write_file(&context, "secret/new.md", b"new").await;
+
+        assert!(matches!(read, Err(FileSystemError::PermissionDenied(_))));
+        assert!(matches!(write, Err(FileSystemError::PermissionDenied(_))));
+        assert!(!root.join("secret").join("new.md").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn local_executor_file_system_allows_configured_writable_roots() {
+        let root = temp_root("workspace_root");
+        let writable = temp_root("writable_root");
+        let file_system = LocalExecutorFileSystem::new(&root).expect("filesystem");
+        let mut context = file_system.context.clone();
+        context.writable_roots.push(writable.clone());
+        let writable_path = writable.join("created.txt");
+
+        file_system
+            .write_file(&context, &writable_path.to_string_lossy(), b"created")
+            .await
+            .expect("write into configured root");
+        let content = file_system
+            .read_file(&context, &writable_path.to_string_lossy())
+            .await
+            .expect("read from configured root");
+
+        assert_eq!(content, b"created");
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(writable);
+    }
+
+    #[tokio::test]
+    async fn local_executor_file_system_denied_paths_override_writable_roots() {
+        let root = temp_root("workspace_root_denied");
+        let writable = temp_root("writable_root_denied");
+        fs::create_dir_all(writable.join("secret")).expect("secret dir");
+        let file_system = LocalExecutorFileSystem::new(&root).expect("filesystem");
+        let mut context = file_system.context.clone();
+        context.writable_roots.push(writable.clone());
+        context.denied_paths.push(writable.join("secret"));
+        let denied_path = writable.join("secret").join("created.txt");
+
+        let write =
+            file_system.write_file(&context, &denied_path.to_string_lossy(), b"created").await;
+
+        assert!(matches!(write, Err(FileSystemError::PermissionDenied(_))));
+        assert!(!denied_path.exists());
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(writable);
     }
 
     fn temp_root(name: &str) -> PathBuf {

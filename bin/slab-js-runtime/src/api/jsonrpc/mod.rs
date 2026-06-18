@@ -11,7 +11,7 @@ use slab_jsonrpc::{
     IncomingMessage, application_error_response, id_key, notification, parse_message, request,
     success_response,
 };
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{Mutex, mpsc, oneshot};
 
 use crate::application::PluginRuntimeServer;
@@ -100,13 +100,7 @@ pub async fn serve_stdio(
     server: Arc<PluginRuntimeServer>,
     outbound: mpsc::UnboundedReceiver<String>,
 ) -> anyhow::Result<()> {
-    tokio::spawn(drain_outbound(outbound, tokio::io::stdout()));
-
-    host.send_notification("runtime.ready", server.ready_payload());
-
-    let stdin = tokio::io::stdin();
-    let lines = BufReader::new(stdin);
-    serve_reader(host, server, lines).await
+    serve_io(host, server, outbound, tokio::io::stdin(), tokio::io::stdout()).await
 }
 
 pub async fn serve_uds(
@@ -122,11 +116,24 @@ pub async fn serve_uds(
         )
     })?;
     let (socket_reader, socket_writer) = tokio::io::split(stream);
-    tokio::spawn(drain_outbound(outbound, socket_writer));
 
+    serve_io(host, server, outbound, socket_reader, socket_writer).await
+}
+
+async fn serve_io<R, W>(
+    host: Arc<JsonRpcRuntimeHost>,
+    server: Arc<PluginRuntimeServer>,
+    outbound: mpsc::UnboundedReceiver<String>,
+    reader: R,
+    writer: W,
+) -> anyhow::Result<()>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin + Send + 'static,
+{
+    tokio::spawn(drain_outbound(outbound, writer));
     host.send_notification("runtime.ready", server.ready_payload());
-    let lines = BufReader::new(socket_reader);
-    serve_reader(host, server, lines).await
+    serve_reader(host, server, BufReader::new(reader)).await
 }
 
 async fn serve_reader<R>(
@@ -197,16 +204,20 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::io;
+    use std::pin::Pin;
     use std::sync::{Arc, Mutex};
+    use std::task::{Context, Poll};
     use std::time::Duration;
 
     use serde_json::{Value, json};
     use slab_types::{
         PluginPermissionsManifest, PluginRuntimeCallRequest, PluginRuntimeCallResponse,
     };
-    use tokio::io::{AsyncWriteExt, BufReader};
+    use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+    use tokio::sync::mpsc;
 
-    use super::{JsonRpcRuntimeHost, serve_reader};
+    use super::{JsonRpcRuntimeHost, drain_outbound, serve_io, serve_reader};
     use crate::application::{PluginExecutor, PluginRuntimeServer};
 
     #[derive(Default)]
@@ -247,6 +258,28 @@ mod tests {
             file_grants: Vec::new(),
             blocked_fetch_origins: Vec::new(),
         }
+    }
+
+    async fn serve_messages(lines: Vec<Value>, executor: Arc<RecordingExecutor>) -> Vec<Value> {
+        let (host, mut outbound) = JsonRpcRuntimeHost::new();
+        let host = Arc::new(host);
+        let server = Arc::new(PluginRuntimeServer::new(executor));
+        let (mut writer, reader) = tokio::io::duplex(4096);
+        let serve = tokio::spawn(serve_reader(Arc::clone(&host), server, BufReader::new(reader)));
+
+        for line in lines {
+            writer.write_all(format!("{line}\n").as_bytes()).await.expect("write request");
+        }
+        writer.shutdown().await.expect("shutdown");
+        serve.await.expect("join").expect("serve");
+
+        let mut messages = Vec::new();
+        while let Ok(Some(line)) =
+            tokio::time::timeout(Duration::from_millis(100), outbound.recv()).await
+        {
+            messages.push(serde_json::from_str(&line).expect("json-rpc message"));
+        }
+        messages
     }
 
     #[tokio::test]
@@ -353,5 +386,173 @@ mod tests {
         );
 
         serve.await.expect("join").expect("serve");
+    }
+
+    #[tokio::test]
+    async fn ignores_no_id_requests_without_running_plugins() {
+        let executor = Arc::new(RecordingExecutor::default());
+
+        let messages = serve_messages(
+            vec![json!({
+                "jsonrpc": "2.0",
+                "method": "plugin.call",
+                "params": plugin_call_request(),
+            })],
+            Arc::clone(&executor),
+        )
+        .await;
+
+        assert!(messages.is_empty());
+        assert!(executor.requests.lock().expect("lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn rejects_bad_jsonrpc_version_with_id_without_running_plugins() {
+        let executor = Arc::new(RecordingExecutor::default());
+
+        let messages = serve_messages(
+            vec![json!({
+                "jsonrpc": "1.0",
+                "id": "bad-version",
+                "method": "plugin.call",
+                "params": plugin_call_request(),
+            })],
+            Arc::clone(&executor),
+        )
+        .await;
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["id"], "bad-version");
+        assert_eq!(messages[0]["error"]["message"], "jsonrpc must be `2.0`");
+        assert!(executor.requests.lock().expect("lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn ignores_bad_version_notifications_without_running_plugins() {
+        let executor = Arc::new(RecordingExecutor::default());
+
+        let messages = serve_messages(
+            vec![json!({
+                "jsonrpc": "1.0",
+                "method": "plugin.call",
+                "params": plugin_call_request(),
+            })],
+            Arc::clone(&executor),
+        )
+        .await;
+
+        assert!(messages.is_empty());
+        assert!(executor.requests.lock().expect("lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn response_messages_do_not_run_plugins() {
+        let executor = Arc::new(RecordingExecutor::default());
+
+        let messages = serve_messages(
+            vec![json!({
+                "jsonrpc": "2.0",
+                "id": "host-1",
+                "result": { "ok": true },
+            })],
+            Arc::clone(&executor),
+        )
+        .await;
+
+        assert!(messages.is_empty());
+        assert!(executor.requests.lock().expect("lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn serve_io_sends_ready_and_dispatches_reader_messages() {
+        let executor = Arc::new(RecordingExecutor::default());
+        let (host, outbound) = JsonRpcRuntimeHost::new();
+        let host = Arc::new(host);
+        let server = Arc::new(PluginRuntimeServer::new(executor));
+        let (mut input_host, input_runtime) = tokio::io::duplex(4096);
+        let (output_runtime, output_host) = tokio::io::duplex(4096);
+        let request = plugin_call_request();
+
+        input_host
+            .write_all(
+                serde_json::to_string(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "plugin.call",
+                    "params": request,
+                }))
+                .unwrap()
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        input_host.write_all(b"\n").await.unwrap();
+        input_host.shutdown().await.unwrap();
+
+        let serve = tokio::spawn(serve_io(host, server, outbound, input_runtime, output_runtime));
+        let mut lines = BufReader::new(output_host).lines();
+        let ready: Value =
+            serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+        let response: Value =
+            serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), serve).await.unwrap().unwrap().unwrap();
+
+        assert_eq!(ready["method"], "runtime.ready");
+        assert_eq!(response["id"], 1);
+        assert_eq!(response["result"]["result"]["pluginId"], "plugin-1");
+    }
+
+    #[tokio::test]
+    async fn drain_outbound_stops_on_writer_and_flush_failures() {
+        for writer in [FailingWriter::write_error(), FailingWriter::flush_error()] {
+            let (tx, rx) = mpsc::unbounded_channel();
+            tx.send("{}".to_string()).expect("queue message");
+            drop(tx);
+
+            tokio::time::timeout(Duration::from_secs(1), drain_outbound(rx, writer))
+                .await
+                .expect("drain should stop on writer failure");
+        }
+    }
+
+    struct FailingWriter {
+        fail_on_write: bool,
+    }
+
+    impl FailingWriter {
+        fn write_error() -> Self {
+            Self { fail_on_write: true }
+        }
+
+        fn flush_error() -> Self {
+            Self { fail_on_write: false }
+        }
+    }
+
+    impl AsyncWrite for FailingWriter {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            if self.fail_on_write {
+                Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, "write failed")))
+            } else {
+                Poll::Ready(Ok(buf.len()))
+            }
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            if self.fail_on_write {
+                Poll::Ready(Ok(()))
+            } else {
+                Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, "flush failed")))
+            }
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
     }
 }

@@ -11,7 +11,7 @@ use slab_jsonrpc::{
     IncomingMessage, application_error_response, id_key, notification, parse_message, request,
     success_response,
 };
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{Mutex, mpsc, oneshot};
 
 use crate::PythonRuntime;
@@ -100,19 +100,7 @@ pub async fn serve_stdio(
     runtime: Arc<PythonRuntime>,
     outbound: mpsc::UnboundedReceiver<String>,
 ) -> anyhow::Result<()> {
-    tokio::spawn(drain_outbound(outbound, tokio::io::stdout()));
-
-    host.send_notification(
-        "runtime.ready",
-        serde_json::json!({
-            "runtime": "slab-python-runtime",
-            "engine": "cpython-pyo3"
-        }),
-    );
-
-    let stdin = tokio::io::stdin();
-    let lines = BufReader::new(stdin);
-    serve_reader(host, runtime, lines).await
+    serve_io(host, runtime, outbound, tokio::io::stdin(), tokio::io::stdout()).await
 }
 
 pub async fn serve_uds(
@@ -128,17 +116,31 @@ pub async fn serve_uds(
         )
     })?;
     let (socket_reader, socket_writer) = tokio::io::split(stream);
-    tokio::spawn(drain_outbound(outbound, socket_writer));
 
-    host.send_notification(
-        "runtime.ready",
-        serde_json::json!({
-            "runtime": "slab-python-runtime",
-            "engine": "cpython-pyo3"
-        }),
-    );
-    let lines = BufReader::new(socket_reader);
-    serve_reader(host, runtime, lines).await
+    serve_io(host, runtime, outbound, socket_reader, socket_writer).await
+}
+
+async fn serve_io<R, W>(
+    host: Arc<JsonRpcRuntimeHost>,
+    runtime: Arc<PythonRuntime>,
+    outbound: mpsc::UnboundedReceiver<String>,
+    reader: R,
+    writer: W,
+) -> anyhow::Result<()>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin + Send + 'static,
+{
+    tokio::spawn(drain_outbound(outbound, writer));
+    host.send_notification("runtime.ready", ready_payload());
+    serve_reader(host, runtime, BufReader::new(reader)).await
+}
+
+fn ready_payload() -> Value {
+    serde_json::json!({
+        "runtime": "slab-python-runtime",
+        "engine": "cpython-pyo3"
+    })
 }
 
 async fn serve_reader<R>(
@@ -225,17 +227,26 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::io;
+    use std::path::Path;
+    use std::pin::Pin;
     use std::sync::Arc;
+    use std::task::{Context, Poll};
     use std::time::Duration;
 
     use serde_json::{Value, json};
     use slab_types::{PluginPermissionsManifest, PluginRuntimeCallRequest};
-    use tokio::io::{AsyncWriteExt, BufReader};
+    use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+    use tokio::sync::mpsc;
 
-    use super::{JsonRpcRuntimeHost, serve_reader};
+    use super::{JsonRpcRuntimeHost, drain_outbound, serve_io, serve_reader};
     use crate::PythonRuntime;
 
     fn plugin_call_request(root_dir: &str) -> PluginRuntimeCallRequest {
+        plugin_call_request_with_params(root_dir, json!({"value": 2}))
+    }
+
+    fn plugin_call_request_with_params(root_dir: &str, params: Value) -> PluginRuntimeCallRequest {
         PluginRuntimeCallRequest {
             call_id: "call-1".to_owned(),
             plugin_id: "plugin-1".to_owned(),
@@ -243,11 +254,50 @@ mod tests {
             entry: "plugin.py".to_owned(),
             bundle: None,
             export_name: "run".to_owned(),
-            params: json!({"value": 2}),
+            params,
             permissions: PluginPermissionsManifest::default(),
             file_grants: Vec::new(),
             blocked_fetch_origins: Vec::new(),
         }
+    }
+
+    fn side_effect_plugin_request(root_dir: &Path, marker_path: &Path) -> PluginRuntimeCallRequest {
+        let root_dir = root_dir.to_string_lossy().into_owned();
+        let marker_path = marker_path.to_string_lossy().into_owned();
+        plugin_call_request_with_params(&root_dir, json!({ "marker": marker_path }))
+    }
+
+    fn write_side_effect_plugin(root_dir: &Path) {
+        std::fs::write(
+            root_dir.join("plugin.py"),
+            "from pathlib import Path\n\n\
+def run(params):\n\
+    Path(params['marker']).write_text('called')\n\
+    return {'called': True}\n",
+        )
+        .expect("write plugin");
+    }
+
+    async fn serve_messages(lines: Vec<Value>) -> Vec<Value> {
+        let (host, mut outbound) = JsonRpcRuntimeHost::new();
+        let host = Arc::new(host);
+        let runtime = Arc::new(PythonRuntime::new());
+        let (mut writer, reader) = tokio::io::duplex(4096);
+        let serve = tokio::spawn(serve_reader(Arc::clone(&host), runtime, BufReader::new(reader)));
+
+        for line in lines {
+            writer.write_all(format!("{line}\n").as_bytes()).await.expect("write request");
+        }
+        writer.shutdown().await.expect("shutdown");
+        serve.await.expect("join").expect("serve");
+
+        let mut messages = Vec::new();
+        while let Ok(Some(line)) =
+            tokio::time::timeout(Duration::from_millis(100), outbound.recv()).await
+        {
+            messages.push(serde_json::from_str(&line).expect("json-rpc message"));
+        }
+        messages
     }
 
     #[tokio::test]
@@ -357,5 +407,175 @@ mod tests {
         );
 
         serve.await.expect("join").expect("serve");
+    }
+
+    #[tokio::test]
+    async fn ignores_no_id_requests_without_running_plugins() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        write_side_effect_plugin(temp_dir.path());
+        let marker_path = temp_dir.path().join("called.txt");
+
+        let messages = serve_messages(vec![json!({
+            "jsonrpc": "2.0",
+            "method": "plugin.call",
+            "params": side_effect_plugin_request(temp_dir.path(), &marker_path),
+        })])
+        .await;
+
+        assert!(messages.is_empty());
+        assert!(!marker_path.exists());
+    }
+
+    #[tokio::test]
+    async fn rejects_bad_jsonrpc_version_with_id_without_running_plugins() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        write_side_effect_plugin(temp_dir.path());
+        let marker_path = temp_dir.path().join("called.txt");
+
+        let messages = serve_messages(vec![json!({
+            "jsonrpc": "1.0",
+            "id": "bad-version",
+            "method": "plugin.call",
+            "params": side_effect_plugin_request(temp_dir.path(), &marker_path),
+        })])
+        .await;
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["id"], "bad-version");
+        assert_eq!(messages[0]["error"]["message"], "jsonrpc must be `2.0`");
+        assert!(!marker_path.exists());
+    }
+
+    #[tokio::test]
+    async fn ignores_bad_version_notifications_without_running_plugins() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        write_side_effect_plugin(temp_dir.path());
+        let marker_path = temp_dir.path().join("called.txt");
+
+        let messages = serve_messages(vec![json!({
+            "jsonrpc": "1.0",
+            "method": "plugin.call",
+            "params": side_effect_plugin_request(temp_dir.path(), &marker_path),
+        })])
+        .await;
+
+        assert!(messages.is_empty());
+        assert!(!marker_path.exists());
+    }
+
+    #[tokio::test]
+    async fn response_messages_do_not_run_plugins() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        write_side_effect_plugin(temp_dir.path());
+        let marker_path = temp_dir.path().join("called.txt");
+
+        let messages = serve_messages(vec![json!({
+            "jsonrpc": "2.0",
+            "id": "host-1",
+            "result": { "ok": true },
+            "params": side_effect_plugin_request(temp_dir.path(), &marker_path),
+        })])
+        .await;
+
+        assert!(messages.is_empty());
+        assert!(!marker_path.exists());
+    }
+
+    #[tokio::test]
+    async fn serve_io_sends_ready_and_dispatches_reader_messages() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            temp_dir.path().join("plugin.py"),
+            "def run(params):\n    return {'value': params['value'] + 1}\n",
+        )
+        .expect("write plugin");
+
+        let (host, outbound) = JsonRpcRuntimeHost::new();
+        let host = Arc::new(host);
+        let runtime = Arc::new(PythonRuntime::new());
+        let (mut input_host, input_runtime) = tokio::io::duplex(4096);
+        let (output_runtime, output_host) = tokio::io::duplex(4096);
+
+        input_host
+            .write_all(
+                serde_json::to_string(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "plugin.call",
+                    "params": plugin_call_request(&temp_dir.path().to_string_lossy()),
+                }))
+                .unwrap()
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        input_host.write_all(b"\n").await.unwrap();
+        input_host.shutdown().await.unwrap();
+
+        let serve = tokio::spawn(serve_io(host, runtime, outbound, input_runtime, output_runtime));
+        let mut lines = BufReader::new(output_host).lines();
+        let ready: Value =
+            serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+        let response: Value =
+            serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), serve).await.unwrap().unwrap().unwrap();
+
+        assert_eq!(ready["method"], "runtime.ready");
+        assert_eq!(response["id"], 1);
+        assert_eq!(response["result"], json!({ "result": { "value": 3 } }));
+    }
+
+    #[tokio::test]
+    async fn drain_outbound_stops_on_writer_and_flush_failures() {
+        for writer in [FailingWriter::write_error(), FailingWriter::flush_error()] {
+            let (tx, rx) = mpsc::unbounded_channel();
+            tx.send("{}".to_string()).expect("queue message");
+            drop(tx);
+
+            tokio::time::timeout(Duration::from_secs(1), drain_outbound(rx, writer))
+                .await
+                .expect("drain should stop on writer failure");
+        }
+    }
+
+    struct FailingWriter {
+        fail_on_write: bool,
+    }
+
+    impl FailingWriter {
+        fn write_error() -> Self {
+            Self { fail_on_write: true }
+        }
+
+        fn flush_error() -> Self {
+            Self { fail_on_write: false }
+        }
+    }
+
+    impl AsyncWrite for FailingWriter {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            if self.fail_on_write {
+                Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, "write failed")))
+            } else {
+                Poll::Ready(Ok(buf.len()))
+            }
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            if self.fail_on_write {
+                Poll::Ready(Ok(()))
+            } else {
+                Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, "flush failed")))
+            }
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
     }
 }

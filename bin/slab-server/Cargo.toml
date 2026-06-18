@@ -71,4 +71,5 @@ async-trait   = { workspace = true }
 clap = { workspace = true }
 
 [dev-dependencies]
+slab-config = { workspace = true }
 tempfile = { workspace = true }

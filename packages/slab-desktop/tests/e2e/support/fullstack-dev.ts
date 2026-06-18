@@ -79,6 +79,16 @@ const packageRoot = resolve(supportDir, "../../..")
 const repoRoot = resolve(packageRoot, "../..")
 const persistentE2eRootDir = join(repoRoot, ".slab", "e2e")
 const modelPackDir = join(repoRoot, "models", "dist")
+const processStartSkewMs = 1_000
+const serverReadinessTimeoutMs = 600_000
+const uiReadinessTimeoutMs = 180_000
+const modelDownloadTaskTimeoutMs = 1_800_000
+const defaultTaskTimeoutMs = 900_000
+const taskPollIntervalMs = 1_000
+const defaultEventuallyTimeoutMs = 30_000
+const defaultEventuallyIntervalMs = 250
+const managedProcessStopTimeoutMs = 12_000
+const devLogRingLimit = 500
 
 export async function createFullstackDevEnvironment(): Promise<FullstackDevEnvironment> {
   const serverPort = await reserveTcpPort()
@@ -153,7 +163,7 @@ export async function startFullstackDev(
   await assertTcpPortAvailable(testEnv.uiPort, "desktop Vite")
 
   const logs: string[] = []
-  const startedAt = new Date(Date.now() - 1_000)
+  const startedAt = new Date(Date.now() - processStartSkewMs)
   const cargoShimPath = installCargoShim(testEnv.rootDir)
   const commonEnv: NodeJS.ProcessEnv = {
     ...process.env,
@@ -195,7 +205,7 @@ export async function startFullstackDev(
       "slab-server health",
       server,
       logs,
-      600_000
+      serverReadinessTimeoutMs
     )
 
     const vite = spawn("bun", [
@@ -217,7 +227,7 @@ export async function startFullstackDev(
     children.push({ child: vite, label: "desktop-vite" })
     rememberOutput("desktop-vite", vite, logs)
 
-    await waitForHttpOk(testEnv.uiBaseUrl, "desktop dev UI", vite, logs, 180_000)
+    await waitForHttpOk(testEnv.uiBaseUrl, "desktop dev UI", vite, logs, uiReadinessTimeoutMs)
     return processHandle
   } catch (error) {
     await processHandle.stop().catch(() => {})
@@ -309,7 +319,7 @@ export async function ensureModelDownloaded(
       method: "POST",
     }
   )
-  await waitForTaskSucceeded(baseUrl, accepted.operation_id, 1_800_000)
+  await waitForTaskSucceeded(baseUrl, accepted.operation_id, modelDownloadTaskTimeoutMs)
 
   const downloaded = await getModel(baseUrl, modelId)
   if (!modelHasLocalPath(downloaded)) {
@@ -321,7 +331,7 @@ export async function ensureModelDownloaded(
 export async function waitForTaskSucceeded(
   baseUrl: string,
   taskId: string,
-  timeoutMs = 900_000
+  timeoutMs = defaultTaskTimeoutMs
 ): Promise<TaskResponse> {
   return eventually(
     `task ${taskId} succeeded`,
@@ -338,7 +348,7 @@ export async function waitForTaskSucceeded(
       return null
     },
     timeoutMs,
-    1_000
+    taskPollIntervalMs
   )
 }
 
@@ -476,8 +486,8 @@ export async function requestJson<T>(
 export async function eventually<T>(
   label: string,
   assertion: () => Promise<T | false | null | undefined> | T | false | null | undefined,
-  timeoutMs = 30_000,
-  intervalMs = 250
+  timeoutMs = defaultEventuallyTimeoutMs,
+  intervalMs = defaultEventuallyIntervalMs
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs
   let lastError: unknown
@@ -744,7 +754,7 @@ function rememberOutput(label: string, child: ChildProcessWithoutNullStreams, lo
         continue
       }
       logs.push(`[${label}] ${line}`)
-      if (logs.length > 500) {
+      if (logs.length > devLogRingLimit) {
         logs.shift()
       }
     }
@@ -836,7 +846,7 @@ async function stopManagedChildren(
     }
     killProcessTree(child.child)
     // eslint-disable-next-line no-await-in-loop
-    await waitForExit(child.child, 12_000).catch(() => {
+    await waitForExit(child.child, managedProcessStopTimeoutMs).catch(() => {
       logs.push(`[${child.label}] timed out while stopping process ${child.child.pid}`)
     })
   }

@@ -1,18 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   createDefaultImageGenerationControls,
   type ImageGenerationControls,
 } from '@/pages/image/lib/image-generation-controls';
+import './mock-ui-state-storage';
 import { useImageUiStore } from '../useImageUiStore';
-
-// Mock the UI state storage
-vi.mock('../ui-state-storage', () => ({
-  createUiStateStorage: () => ({
-    getItem: vi.fn<() => Promise<null>>(async () => null),
-    setItem: vi.fn<() => Promise<void>>(async () => {}),
-    removeItem: vi.fn<() => Promise<void>>(async () => {}),
-  }),
-}));
 
 function makeControls(
   overrides: Partial<ImageGenerationControls> = {},

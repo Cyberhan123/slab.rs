@@ -12,6 +12,8 @@ import { cargoEnv } from "../../../../scripts/cargo/env";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const runtimeLibDir = resolve(repoRoot, "bin/slab-app/src-tauri/resources/libs");
 const startupTimeoutMs = 120_000;
+const healthPollIntervalMs = 500;
+const serverLogRingLimit = 200;
 const serverBinaryName = globalThis.process.platform === "win32" ? "slab-server.exe" : "slab-server";
 const serverBinaryPath = resolve(repoRoot, "target", "debug", serverBinaryName);
 
@@ -238,7 +240,7 @@ export async function startSlabServerHarness(
   const rememberOutput = (chunk: Buffer) => {
     for (const line of splitLines(chunk.toString("utf8"))) {
       logLines.push(line);
-      if (logLines.length > 200) {
+      if (logLines.length > serverLogRingLimit) {
         logLines.shift();
       }
     }
@@ -301,7 +303,7 @@ export async function startSlabServerHarness(
         // Keep polling until the server comes up or the process exits.
       }
 
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 500));
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, healthPollIntervalMs));
     }
 
     throw new Error(

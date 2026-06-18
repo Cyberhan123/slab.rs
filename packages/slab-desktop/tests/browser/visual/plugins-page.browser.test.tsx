@@ -33,14 +33,19 @@ vi.mock("@/hooks/use-global-header-meta", () => ({
   usePageHeaderSearch: vi.fn<() => void>(),
 }));
 
-vi.mock("@slab/api", () => ({
-  default: {
-    useMutation: mockUseMutation,
-    useQuery: mockUseQuery,
-  },
-  getErrorMessage: (error: unknown) => (error instanceof Error ? error.message : String(error)),
-  postFormData: vi.fn<() => Promise<Record<string, never>>>().mockResolvedValue({}),
-}));
+vi.mock("@slab/api", async () => {
+  const { createSlabApiMock } = await import("../support/mock-slab-api");
+
+  return createSlabApiMock({
+    defaultExport: {
+      useMutation: mockUseMutation,
+      useQuery: mockUseQuery,
+    },
+    extra: {
+      postFormData: vi.fn<() => Promise<Record<string, never>>>().mockResolvedValue({}),
+    },
+  });
+});
 
 vi.mock("@/lib/plugin-host-bridge", () => ({
   pluginRuntimeList: vi.fn<() => Promise<unknown[]>>().mockResolvedValue([]),

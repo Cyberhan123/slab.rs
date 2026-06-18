@@ -16,9 +16,9 @@
 **当前首要剩余风险（各一句）：**
 
 
-1. **安全边界已补核心直接单测和 smoke 实调 meta-test，但仍缺更高层策略语义**：`resolve_path` / `LocalExecutorFileSystem` 已补越界用例，auth fail-open、risk analyzer、smoke executable 请求覆盖都有守护；剩余重点是 sandbox policy 语义。
-2. **v1 HTTP route/schema 与 Tauri command 仍是最大端到端边界空洞**：gRPC handler transport、runtime status/scheduler/orchestrator 已补直接测试，剩余可靠性风险集中在 HTTP route/schema 与桌面特权 IPC wrapper。
-3. **visual/a11y 与 harness flakiness 仍缺系统性回归守护**：installer/native-loader 已有 smoke/平台条件测试，但 browser visual、a11y、flaky/timeout 约定仍主要依赖 local-only 信号或人工纪律。
+1. **安全边界核心 policy guard 已补，剩余为集成级持续扩展**：`resolve_path` / `LocalExecutorFileSystem` / `FileSystemSandboxContext` policy 语义已有直接矩阵，auth fail-open、risk analyzer、smoke executable 请求覆盖都有守护。
+2. **v1 HTTP route/schema 与 Tauri command 已补首批承重直接测试，剩余是更宽 route family 与真实 WebView 端到端证明**：settings/tasks/models/workspace handler-level tests、terminal session、console timeout/长输出、JSON-RPC 细分支均已闭合。
+3. **visual/a11y 与 harness flakiness 已有起步治理但仍不是 CI 级系统保障**：browser timeout/retry、diff threshold、keyboard smoke、platform baseline 策略和 server/fullstack timeout taxonomy 已补；剩余是 axe、flaky marker、CI/browser 策略。
 
 **评级（保留字母制，便于与 06-08 对比）：**
 
@@ -63,9 +63,9 @@
 - 对抗式验证结论：6 个声称的"重复原语"中**仅 2 个是真重复**（free-port 分配 `listen(0)`、`sqliteUrlForPath`），1 个小模式（stdout ring buffer，但 cap 不同 200 vs 500）。`killProcessTree` 仅部分共享（posix 分支不同）；`writeTestSettings` 与 `spawnSlabServer` **服务于不同 scope**（smoke 写极简 V2 doc，e2e 写 ~90 行全量 doc），不可合并。
 - 建议：仅抽取 `reserveTcpPort / sqliteUrlForPath / 日志 ring buffer` 到共享 `scripts/test/harness.ts`。**不要按原 High severity 强行合并 harness**——会破坏 scope 隔离。
 
-**R5. Vitest `resolve.alias` 块在 desktop jsdom 与 browser config 逐字重复 [Low]**
-- `packages/slab-desktop/vitest.config.ts:25-57` vs `packages/slab-desktop/vitest.browser.config.ts:38-69`（`dedupe:["react","react-dom"]` + 5-entry alias 数组）。`slab-components` browser config 同型。
-- 建议：抽取 `packages/slab-desktop/vitest.aliases.ts`，3 个 config 引用。
+**R5. Vitest `resolve.alias` 块在 desktop jsdom 与 browser config 逐字重复 [Low → Resolved]**
+- 当前已抽取 `packages/slab-desktop/vitest.shared.ts` 的 `desktopVitestResolve`，`vitest.config.ts` 与 `vitest.browser.config.ts` 共用同一份 `dedupe`/alias 配置，不再在两个 project config 内逐字维护。
+- 已用 `bun run lint:fix`、store jsdom 子集、browser visual/e2e 子集验证；`slab-components` browser config 是独立 package 的同型配置，未在本轮跨包抽象。
 
 ### 2.2 Package 内 / 单 crate 内
 
@@ -98,27 +98,26 @@
 - 因 `slab-agent` 的 test doubles 是 `tests.rs` 私有的。
 - 建议：以 `#[cfg(any(test, feature="test-support"))]` 或独立 `slab-agent-test-support` crate 暴露。
 
-**R12. `createUiStateStorage` vi.mock factory 在 4 个 desktop store 测试逐字重复 [Medium]**
-- `packages/slab-desktop/src/store/__tests__/{useAssistantUiStore,useHeaderUiStore,useAudioUiStore,useImageUiStore}.test.ts:5`
-- 7 行 no-op factory + 每个 `beforeEach` 的 `setState` reset。
-- 根因：repo 范围内 **TS 包没有任何 `src/test/` 或 `__mocks__/`**（已 glob 验证）。
-- 建议：`packages/slab-desktop/src/store/__tests__/_helpers.ts` 导出 `mockNoopUiStateStorage()` + `resetStore(store, partial)`。
+**R12. `createUiStateStorage` vi.mock factory 在 store 测试中重复 [Medium → Resolved]**
+- 当前已新增 `packages/slab-desktop/src/store/__tests__/mock-ui-state-storage.ts`，5 个 store 测试统一 side-effect import 这份 no-op storage mock，避免每个文件重复 `createUiStateStorage` mock factory。
+- 已用 `bun run test:desktop -- packages/slab-desktop/src/store/__tests__/useAssistantUiStore.test.ts packages/slab-desktop/src/store/__tests__/useHeaderUiStore.test.ts packages/slab-desktop/src/store/__tests__/useImageUiStore.test.ts packages/slab-desktop/src/store/__tests__/useAudioUiStore.test.ts packages/slab-desktop/src/store/__tests__/useWorkspaceUiStore.test.ts` 验证 45/45。
 
-**R13. `vi.mock('@slab/api', ...)` stub 在 6 个 browser/visual/e2e 测试文件重复 [Low]**
-- `packages/slab-desktop/tests/browser/visual/{assistant-page,settings-page,plugins-page}.browser.test.tsx`、`tests/browser/e2e/{assistant-core-flow,settings-core-flow}.browser.test.tsx`、`src/lib/__tests__/model-config.test.ts:12`
-- `apiClient:{GET,POST,PUT,DELETE}` 四元组 + `default:{useQuery,useMutation}` 骨架是主流形状。
-- 建议：`packages/slab-desktop/tests/browser/support/mock-slab-api.ts` 导出 `makeSlabApiMock(overrides?)`。
+**R13. `vi.mock('@slab/api', ...)` stub 在 browser/visual/e2e 测试文件重复 [Low → Low, browser 侧已收敛]**
+- 当前已新增 `packages/slab-desktop/tests/browser/support/mock-slab-api.ts` 的 `createSlabApiMock(...)`，并让 assistant/settings/plugins visual tests 与 assistant/settings browser e2e tests 共用同一份 `apiClient` + `default.useQuery/useMutation` 骨架。
+- `src/lib/__tests__/model-config.test.ts` 保留本地 mock：它是 jsdom unit test，断言的是 `api.useQuery/useMutation` 的具体调用形状，强行引用 browser support helper 会跨测试层级耦合。
 
 **R14. 错误消息 fallback 表在 `lib` 与 `assistant` 测试中重复断言 [Low]**
 - `src/lib/__tests__/error-description.test.ts:6-18` vs `src/pages/assistant/lib/__tests__/assistant-request-errors.test.ts:76-85`
 - 后者（`getAssistantErrorDescription`）只是前者的薄包装。
 - 建议：`assistant-request-errors.test.ts` 改为 spy 验证委托，不重测全表。
 
-**R15. carry-forward：6 个 gRPC handler 文件 forward boilerplate 重复 [Medium]**
-- `bin/slab-runtime/src/api/handlers/{ggml_llama,ggml_whisper,ggml_diffusion,candle_diffusion,candle_transformers,onnx}.rs`（~119 处 `application_to_status`/`proto_to_status`/`extract_request_id`）
+**R15. carry-forward：6 个 gRPC handler 文件 forward boilerplate 重复 [Medium → Low-Medium, 暂不做生产抽象]**
+- 当前 `bin/slab-runtime/src/api/handlers/mod.rs` 已集中 `application_to_status` / `proto_to_status` / `extract_request_id`，并用 handler transport-boundary tests 证明 6 组 backend 的 disabled-backend、invalid-proto、model-not-loaded 映射。
+- 剩余重复主要是每个 tonic trait impl 的显式 `pb -> dto -> application -> pb` forwarding。它属于生产 trait surface 的机械展开，本轮不为降低 LOC 强行抽宏；后续若新增 backend，可在已有 handler tests 保护下再评估宏化。
 
-**R16. carry-forward：`make_worker()` test stub 每个 backend worker 各重写一遍 [Medium]**
-- `slab-runtime-core/runner.rs:374-403` 的 `TestHandler/Observed` 私有未导出；`bin/slab-runtime/Cargo.toml` 无 `[dev-dependencies]`。
+**R16. carry-forward：backend worker test stub 重复 [Medium → Low-Medium, Candle 侧已收敛]**
+- 当前已在 `bin/slab-runtime/src/infra/backends/candle/mod.rs` 新增 `#[cfg(test)]` 的 `test_support::peer_control_bus()`，Candle whisper/diffusion worker tests 复用它，不再各自重写 broadcast/`PeerControlBus` 初始化。
+- 已用 `cargo test -p slab-runtime candle` 验证。`slab-runtime-core/runner.rs` 的 `TestHandler/Observed` 仍保持 crate-private；若后续多个 crate 真正需要共享 worker harness，再规划独立 test-support feature/crate。
 
 **R17. carry-forward：3 个 slab-server handler 单测只断言 `#[openapi]` macro 形状 [Low]**；`slab-agent-tools/apply_patch.rs:83-122` 重测 `slab-apply-patch` golden（与 R6 类同型问题，独立于 R6）。
 
@@ -153,12 +152,13 @@
 
 ### 3.2 安全 / 关键路径回归保护（本轮新增的核心盲区）
 
-**G2. [High → Medium, 已补核心边界测试] Workspace 路径越界测试——主安全边界**
+**G2. [High → Low-Medium, 已补 sandbox policy guard 与 consumer 矩阵] Workspace 路径越界测试——主安全边界**
 - `crates/slab-file/src/system.rs:149` `resolve_path` 仅 1 个 escape 测试（`resolve_path_rejects_workspace_escape` @ line 461，只喂 `../outside.txt`）。未测：symlink 越界、Windows 绝对路径、UNC `\\?\`、write-to-new-file 路径（`existing_ancestor(parent)` 仅校验、未最终 canonicalize，line 170-175）、parent-of-parent 越界、`..` 在 normalize 后的残留。
 - `crates/slab-app-core/src/domain/services/workspace/file_system.rs` `LocalExecutorFileSystem`（170 LOC，实际接到 Tauri `WorkspaceService`）**0 测试**，且 write 时不查 `policy`/`writable_roots`/`denied_paths`。
 - 当前已补 `resolve_path` 边界测试：绝对路径、Windows extended path（`\\?\`）、任何 `..` 段拒绝、symlink 指向 workspace 外部时 existing-file 与 new-file 两条路径都拒绝。实测发现当前实现比原审计假设更严格：`dir/../inside.txt` 也会被拒绝，而不是 normalize 后放行。
 - 当前已为 `LocalExecutorFileSystem` 补基本 round-trip/escape 测试：write 自动建目录、read、metadata、read_directory、`../` escape 拒绝。
-- 剩余建议：单独定义并测试 `FileSystemSandboxContext.policy`、`writable_roots`、`denied_paths` 的语义；当前 `LocalExecutorFileSystem` 仍主要依赖 workspace root containment，而不是完整 sandbox policy evaluator。
+- 本轮继续补齐 `FileSystemSandboxContext.policy` 语义：`slab-file` 现在暴露 `resolve_sandbox_path_for_read` / `resolve_sandbox_path_for_write`，统一处理 `ReadOnly` 禁止 mutation、`WorkspaceWrite` 仅允许 workspace root 与 `writable_roots` 写入、`denied_paths` 优先拒绝；`FileSystemError::PermissionDenied` 会映射到 app-core BadRequest。`LocalExecutorFileSystem` 的 read/write/remove/copy/metadata/dir API 已改用这组 helper。
+- 已用 `cargo test -p slab-file` 与 `cargo test -p slab-app-core domain::services::workspace::file_system` 验证。剩余风险降级为更多 consumer 的集成级证明与平台特殊路径组合持续补充，而不是 policy 语义裸奔。
 
 **G3. [High → Low, 已补直接单测] Auth middleware `None` token fail-open**
 - 当前代码已从原先 `admin_api_token == None` 直接放行，改为**仅 loopback bind address 允许未配置 token 的本地管理访问**；`0.0.0.0`、`[::]`、局域网 IP 等非 loopback bind 在未配置 token 时 fail-closed。显式配置空串/whitespace token 也 fail-closed。直接单测已覆盖 loopback 例外、非 loopback 拒绝、空/whitespace token 拒绝、匹配/不匹配 bearer token。
@@ -207,12 +207,13 @@
 - caveat：已有单测并非全 trivial（chat.rs 验 UNIQUE 回滚、agent.rs 验字段保留、ui_state.rs 验 round-trip）——"CRUD round-trip 大多未验"略过述。
 - 建议：按 `model_download.rs` 模板补 round-trip（insert→get→update→delete→get-none）+ unique-violation + 并发写。
 
-**G11. [High → Low-Medium, partial, 已补 post-apply 约束/级联断言] Migration 覆盖率**
+**G11. [High → Low, 已扩展 post-apply 约束/级联断言；rollback 保持设计性后续] Migration 覆盖率**
 - 真相（已 verify）：19 个 migration 文件**全部有 forward-apply smoke 覆盖**（`storage_value_checks` @ model.rs:275、`turn_state_upsert` @ agent.rs:313、`connect_configures_sqlite_concurrency_pragmas` @ mod.rs:77 均 `migrate!` 全量）。仅 **~3-4 个**有 post-apply schema/constraint 断言；**ZERO rollback** 测试。
 - **纠正 06-08 与首轮原始发现的"2 of 19 forward-tested"——错误**。准确表述：全部 forward-apply-tested，~3-4 有 post-apply 断言，0 rollback。
 - 严重级：High→**Medium**（单用户 SQLite 桌面应用，blast radius 是本地 DB，可 re-init 恢复）。
 - 当前 repository 测试已改用真实 migrations，并新增 `20260617000000_rebuild_model_config_state_fk.sql` 修复 `model_config_state` 外键漂移；这证明 R1 的手写 DDL 确实遮蔽了 schema drift。
-- 当前已补真实 post-apply 断言：`infra::db::repository::tests::migrations_apply_expected_constraints_and_indexes` 校验 `model_config_state`、media task、agent memory 相关 FK/default/index/CHECK 约束；`migrations_preserve_media_and_agent_memory_cascades` 插入真实 parent/child 行并验证 media tasks 与 agent memory phase1 级联删除、`agent_memory_usage_events.source_kind` 默认值。
+- 当前已补真实 post-apply 断言：`infra::db::repository::tests::migrations_apply_expected_constraints_and_indexes` 校验 `model_config_state.selected_engine_id`、media task、agent memory、agent thread/turn state 相关 FK/default/index/CHECK 约束，覆盖 invalid `models.status` CHECK、`models.materialized_artifacts` 默认 `{}`、orphan `model_config_state` FK 拒绝、`agent_threads.depth/status/config_json` 默认值；`migrations_preserve_media_and_agent_memory_cascades` 插入真实 parent/child 行并验证 media tasks 与 agent memory phase1 级联删除，以及 `agent_memory_usage_events` 在 thread/session 删除后按 nullable `thread_id` 设计保留。
+- 已用 `cargo test -p slab-app-core migrations_apply_expected_constraints_and_indexes` 与 `cargo test -p slab-app-core migrations_preserve_media_and_agent_memory_cascades` 验证。
 - 纠正：当前 `migrations/` 目录全部是 SQLx simple `.sql` migration；SQLx 0.9 禁止 simple 与 reversible `.up.sql`/`.down.sql` 混用，因此不能在不重组整套 migration 的前提下只补某几个 rollback 脚本。剩余建议改为：若产品需要 rollback gate，先规划一次全量 reversible migration 迁移；短期继续扩大 post-apply schema/constraint/data-preservation 矩阵。
 
 **G12. [Medium] model_auto_unload.rs 只测纯 helper，async eviction state machine 未测**
@@ -269,8 +270,9 @@
 - 同一套测试还覆盖了 `agentResponsesWebSocketUrl` / `agentResponsesSseUrl` 的协议改写，以及 `agentEventKey` malformed JSON/null 路径与 `serverMessageThreadId` 的 thread id 提取。
 - 剩余：本项当前主要剩集成级风险，即这些 helper 与 `use-assistant-agent.ts` 的联动是否被更高层测试覆盖；helper 自身的纯逻辑盲区已基本收口。
 
-**G24. [Medium] Page index.tsx 组件（~1797 LOC）无单元覆盖**
-- 仅 `assistant-markdown.tsx`（叶子）被 render。重逻辑内联处抽到 lib（如 `assistant-page-state.ts` 153 LOC，亦未测）是可测 seam。
+**G24. [Medium → Low-Medium, 已补最大 page surface 的 helper + browser smoke] Page index.tsx 组件（~1797 LOC）无单元覆盖**
+- 当前 assistant page 已有 browser visual smoke 覆盖空态、loading、messages、agent thought/approval chain；本轮新增 `packages/slab-desktop/src/pages/assistant/lib/__tests__/assistant-page-state.test.ts`，覆盖页面状态 helper 的 conversation label、model capability fallback、greeting hour boundary、selected model/status priority。
+- 已用 `bun run test:desktop -- packages/slab-desktop/src/pages/assistant/lib/__tests__/assistant-page-state.test.ts` 与受影响 browser visual/e2e 子集验证。剩余风险是 `index.tsx` 内 model download/switch 等更深交互分支仍主要靠 browser/fullstack 覆盖，不建议为追求覆盖率直接拆页面。
 
 **G25. [Medium-High → Low, 已补 locale parity 与 placeholder 验证] i18n 完整性已有基础监管**
 - 当前已为 `packages/slab-i18n` 新增 `vitest.config.ts`、`src/__tests__/locale-parity.test.ts` 与 package-level `test`/`test:run` 脚本；root `vitest.config.ts` 与 `package.json:test:frontend` 也已纳入 `i18n` project。
@@ -280,22 +282,24 @@
 
 ### 3.6 Tauri / Desktop IPC 层（本轮新盲区）
 
-**G26. [High → Medium, 已补 workspace/file-op/console wrapper 与 plugin helper 起步覆盖] Tauri command 层仍缺系统性 wrapper 测试**
+**G26. [High → Low-Medium, 已补 workspace/file-op/console/terminal 与 plugin helper 起步覆盖] Tauri command 层仍缺系统性 wrapper 测试**
 - `bin/slab-app/src-tauri/src/workspace.rs`（16 command, 1 test）、`workspace_file_ops.rs`（4, 0）、`terminal.rs`（1, 0）。仅 `plugins/mod.rs`（6）与 `paths.rs`/`setup/api_endpoint.rs` 有意义覆盖。
 - 31 个 command 是 renderer 调用的特权 IPC 面（读写删文件、起终端、跑 git、管 plugin），其 wrapper 本身无测试，且委托的 `WorkspaceService::*` 路径包含保证**在此层未测**。
-- 当前已在 Tauri backend 内补第一批 wrapper 级回归：`active_workspace` 无 current workspace 时 fail-closed、有 current workspace 时返回 snapshot；`workspace_file_ops` 的 create-file 证明使用 active workspace root，create-directory/rename/delete 的 `../` 越界会经 command wrapper 拒绝并传播 workspace 级错误；`run_console_command` wrapper 证明无 active workspace fail-closed、有 active workspace 时以 current root 执行；plugin helper 层已覆盖 Webview caller id 优先、`slabApi` 权限校验、缺权限拒绝与缺 caller 的兼容路径。已用 `cargo test -p slab-app` 验证。
-- 剩余建议：继续覆盖 `workspace_*` 读写/git wrappers、`workspace_terminal_session` session root、真实 Tauri Webview command surface 下的 `plugin_call` / `plugin_api_request` / file picker permission propagation，以及 console timeout/长输出行为。当前 console/plugin 直接 helper 层已有 caller、权限和 active workspace 守护，但 command surface 仍缺更高层 proof。
+- 当前已在 Tauri backend 内补第一批 wrapper 级回归：`active_workspace` 无 current workspace 时 fail-closed、有 current workspace 时返回 snapshot；`workspace_file_ops` 的 create-file 证明使用 active workspace root，create-directory/rename/delete 的 `../` 越界会经 command wrapper 拒绝并传播 workspace 级错误；`run_console_command` wrapper 证明无 active workspace fail-closed、有 active workspace 时以 current root 执行；plugin helper 层已覆盖 Webview caller id 优先、`slabApi` 权限校验、缺权限拒绝、file picker permission 与缺 caller 的兼容路径。
+- 本轮继续为 `workspace_terminal_session` 抽私有纯函数 seam，覆盖无 active workspace fail-closed、active root 入队、URL `/workspace-terminal/{id}` 形状、session 一次性消费、unknown session 拒绝与 `terminal_cwd` 规范化。已用 `cargo test -p slab-app` 验证。
+- 剩余建议：真实 Tauri `Webview` command surface 的端到端 caller 注入仍只能在更高层 app/driver 测试中证明；当前 helper/command 直接层已不再是零覆盖。
 
-**G27. [Medium-High → Low-Medium, 已补关键契约测试] `run_console_command` shell-out 已有 cwd / quoted path / 相对写入守护**
+**G27. [Medium-High → Low, 已补关键契约、timeout 与长输出边界] `run_console_command` shell-out 已有 cwd / quoted path / 相对写入守护**
 - 当前已在 `crates/slab-app-core/src/domain/services/workspace/mod.rs` 补 async 单测，直接断言 shell 进程的 `cwd` 落在 workspace root、带空格的 quoted relative path 能在当前平台 shell 下被正确读取、相对写入会落到 workspace 目录内。
 - 纠正：这里的 `run_console_command` 设计本来就是**显式 shell passthrough**，允许 first-party workspace UI 执行任意 shell 命令；因此“command-injection”不是与实现意图独立的 bug 类别，真正需要守护的是 `cwd` 契约、平台 quoting 行为与调用边界。
-- 剩余：当前已有 Tauri console wrapper 的 active-workspace 直接测试，但仍没有超长输出/timeout 的端到端断言，也没有 HTTP wrapper 侧证明；若要把风险继续压低，应在 `G26/G31` 层继续补 command/route 级回归。
+- 本轮继续抽 `run_console_command_with_timeout(root, command, timeout_duration)` 私有 seam，覆盖长 stdout/stderr 截断与快速 timeout，保留 public `run_console_command` 的生产 timeout。已用 `cargo test -p slab-app-core domain::services::workspace::tests::run_console_command` 与 `cargo test -p slab-app workspace::tests::console` 验证。
+- 剩余：跨真实桌面 shell UI 的端到端证明仍在更高层 E2E；service 与 Tauri wrapper 的关键契约已闭合。
 
-**G28. [Medium → Low-Medium, 已补 browser project timeout/retry 起步策略] Test harness 自身的 flakiness/race 面仍需系统治理**
+**G28. [Medium → Low-Medium, 已补 browser/server/fullstack timeout taxonomy 起步] Test harness 自身的 flakiness/race 面仍需系统治理**
 - `bin/slab-server/tests/support/slab-server.ts` 与 `fullstack-dev.ts` free-port `listen(0)`、process-tree kill、log ring buffer **无 retry、无 hermetic temp 隔离**；`fileParallelism:false` 仅 browser/server project；TS 侧无 per-test timeout 分层（除 slab-server 120s）；无 flaky marker 约定（grep `@flaky|retry` 在真实测试上零命中）。
 - 风险：首个 port-race/process-kill race 会阻塞整个套件。
-- 当前已为 `packages/slab-desktop/vitest.browser.config.ts` 明确 browser project timeout/retry 分层：action timeout 5s、test/hook timeout 30s、teardown timeout 10s、`retry: 0`，避免 browser visual/e2e 依赖 Vitest 默认值或用隐式 retry 掩盖 flaky。已用 representative browser visual 命令验证。
-- 剩余：server/fullstack harness 的 port/process race、flaky 隔离约定、长链路 E2E timeout taxonomy 仍未系统化。
+- 当前已为 `packages/slab-desktop/vitest.browser.config.ts` 明确 browser project timeout/retry 分层：action timeout 5s、test/hook timeout 30s、teardown timeout 10s、`retry: 0`，避免 browser visual/e2e 依赖 Vitest 默认值或用隐式 retry 掩盖 flaky。
+- 本轮继续把 `packages/slab-desktop/tests/e2e/support/fullstack-dev.ts` 与 `bin/slab-server/tests/support/slab-server.ts` 的 startup/readiness/task/teardown/poll/log-ring timeout 命名为集中常量，形成可审查 taxonomy。剩余风险是端口 race 的重试/隔离策略与 flaky marker 约定仍未系统化。
 
 ### 3.7 协议 / 契约（carry-forward）
 
@@ -312,15 +316,16 @@
 - 这批测试验证的是 gRPC handler 层的真实职责：`pb -> dto -> application -> status` 边界与错误映射，不把 compatibility/OpenAI assembly 拉回 runtime handler。
 - 已用 `cargo test -p slab-runtime api::handlers` 验证。剩余风险为 success forwarding 的更细粒度 stub 与 streaming mid-response failure，但“6 个 handler 文件零测试”的 carry-forward 结论已过时。
 
-**G31. [High → Medium, 已补 v1 聚合 OpenAPI/schema 与 workspace path handler 起步覆盖] HTTP route/schema 仍需 handler 风险分层单测**
+**G31. [High → Low-Medium, 已补 settings/tasks/models/workspace handler-level route tests] HTTP route/schema 仍需 handler 风险分层单测**
 - 当前已在 `bin/slab-server/src/api/v1/mod.rs` 补聚合层 Rust 回归：`v1_api_docs_publish_current_operation_surface` 直接断言最终 `api_docs()` 暴露的当前 `/v1/*` method/path surface；`v1_api_docs_publish_cross_module_schema_components` 断言 agent/audio/backend/chat/ffmpeg/images/models/plugins/session/setup/subtitles/system/tasks/ui-state/video/workspace 等模块的关键 schema component 被合并到最终文档。
 - 同一轮继续在 `bin/slab-server/src/api/v1/workspace/handler.rs` 补 `canonical_workspace_root` 直接单测，覆盖 existing directory 接受、missing path 拒绝、file path 拒绝，先把 workspace route 的 root/path validation 入口从纯 smoke 间接覆盖拉到 handler 层。已用 `cargo test -p slab-server api::v1` 验证。
-- 剩余：多数 handler 仍没有直接业务/错误映射单测；下一步应按风险继续补 settings/tasks/models，以及 workspace 其他 auth/body validation 边界。schema.rs 仍主要靠序列化/OpenAPI component presence，而非字段级 round-trip/negative 覆盖。
+- 本轮继续新增 `bin/slab-server/src/api/test_support.rs`，以真实 `AppState`、临时 settings/SQLite 和 request/JSON helper 支撑 handler-level HTTP tests；settings/tasks/models/workspace 已覆盖 path/query/body/multipart validation、404/400/409/202 映射、error envelope/i18n、loopback/admin-token 行为与 active workspace root 行为。
+- 已用 `cargo test -p slab-server api::v1` 验证 37/37。剩余风险降级为其他 route family 的持续增量与 `schema.rs` 字段级 round-trip/negative 覆盖。
 
-**G32. [High → Low-Medium, 已补 transport glue 直接测试] WebSocket JSON-RPC plugin dispatch（两个 `api/jsonrpc/mod.rs`）已有 mod 测试**
-- 当前已在 `bin/slab-js-runtime/src/api/jsonrpc/mod.rs` 与 `bin/slab-python-runtime/src/api/jsonrpc/mod.rs` 新增直接测试，覆盖：`runtime.ready` 通知形状、`plugin.call` 请求经 `serve_reader` 分发并返回 JSON-RPC success response、以及 malformed JSON payload 的错误响应。
-- 这一步闭合的是此前“**transport adapter 本身零测试**”的盲区；现有测试不再只依赖更高层的 runtime/integration 间接覆盖。
-- 剩余：当前仍未逐项覆盖 no-id request ignore、`jsonrpc != 2.0`、`drain_outbound` writer error/flush error，以及 UDS/stdout wiring 的更细分支；结构性重复（R3，抽 `crates/slab-plugin-jsonrpc`）也仍未处理。
+**G32. [High → Low, 已补 transport glue 细分支与 private IO wiring helper] WebSocket JSON-RPC plugin dispatch（两个 `api/jsonrpc/mod.rs`）已有 mod 测试**
+- 当前已在 `bin/slab-js-runtime/src/api/jsonrpc/mod.rs` 与 `bin/slab-python-runtime/src/api/jsonrpc/mod.rs` 新增直接测试，覆盖：`runtime.ready` 通知形状、`plugin.call` 请求经 `serve_reader` 分发并返回 JSON-RPC success response、malformed JSON payload 的错误响应、no-id request ignore、bad `jsonrpc` with id 的 error response、bad-version notification ignore、response message 不触发 plugin execution、`drain_outbound` writer/flush failure。
+- 本轮继续抽私有 `serve_io`，让 `serve_stdio` / `serve_uds` 共用 reader/writer wiring，并用 duplex 测试验证 ready notification 与 reader dispatch。已用 `cargo test -p slab-js-runtime api::jsonrpc`、`cargo test -p slab-python-runtime api::jsonrpc` 验证 8/8 + 8/8。
+- 剩余结构性重复是 JS/Python 两个 runtime 之间仍各有一份 host/transport adapter；抽 `crates/slab-plugin-jsonrpc` 需要单独设计共享 runtime trait，本轮不在没有跨-crate API 设计的情况下先抽。
 
 **G33. [High → Low-Medium, 已补 runtime_to_status、scheduler admission 与 orchestrator wait 状态机] Runtime status 与调度状态机已有直接回归**
 - 当前 `bin/slab-runtime/src/api/handlers/mod.rs` 已为 `runtime_to_status` 增加表驱动测试，覆盖 `CoreError` 当前 20 个 variant 的 gRPC code 与代表性 message substring；06-08 的 "3/13 CoreError" 与本轮旧文档的 "5/20 RuntimeError" 都已过时。
@@ -344,10 +349,11 @@
 **G36. [Low → Resolved] `slab-plugin-ui` 已有 ABI smoke test 与 test script**
 - 当前已为 `packages/slab-plugin-ui` 新增 `vitest.config.ts`、`src/index.test.ts` 与 package-level `test` / `test:run` 脚本；测试会验证稳定 re-export surface 和 `cn` helper 的基本可用性。
 
-**G37. [Medium → Low-Medium, 已清理历史基线噪音并补最小 a11y 起步] Visual regression 仍主要依赖 snapshot-PNG equality**
+**G37. [Medium → Low-Medium, 已补 diff threshold、platform baseline 策略与 keyboard smoke 起步] Visual regression 仍主要依赖 snapshot-PNG equality**
 - 当前已删除两类历史遗留基线：没有对应测试文件的 `chat-page.browser.test.tsx` 截图目录，以及旧的自动命名 `*-1.png` 基线；当前仓库只保留现行 `toMatchScreenshot(...)` 命名约定下仍被测试引用的 PNG。
-- 当前 browser visual harness 的 `desktop-browser-scene` 已改为具名 `<main aria-label="Slab desktop scene">`，并在 assistant/settings/plugins 代表性 visual tests 中加入 role/name 可访问性断言；同时修正了 plugins non-Tauri stale text 断言并更新对应 baseline。已用 `bun run test:desktop:browser -- tests/browser/visual/assistant-page.browser.test.tsx tests/browser/visual/settings-page.browser.test.tsx tests/browser/visual/plugins-page.browser.test.tsx` 验证。
-- 剩余高权重问题仍在：baselines 依旧明显偏向 Win32（darwin 仅 setup-page，linux 仍空白）、无 diffThreshold、CI 默认不跑 browser，因此 visual regression 仍主要是 local-only 信号；a11y 目前只是起步的 role/name smoke，不是完整 axe 或 keyboard-flow 覆盖。
+- 当前 browser visual harness 的 `desktop-browser-scene` 已改为具名 `<main aria-label="Slab desktop scene">`，并在 assistant/settings/plugins 代表性 visual tests 中加入 role/name 可访问性断言；同时修正了 plugins non-Tauri stale text 断言并更新对应 baseline。
+- 本轮继续在 `vitest.browser.config.ts` 为 `toMatchScreenshot` 配置统一 pixelmatch threshold/allowed mismatch ratio，在 `tests/browser/test-utils.tsx` 增加 `expectDesktopSceneKeyboardReachable()`，并在 assistant page smoke 中验证 Tab 能进入 scene 内可交互控件；`packages/slab-desktop/README.md` 明确 screenshot baseline 按 `*-chromium-<platform>.png` 平台隔离，不跨 OS 复制。
+- 已用受影响 browser visual/e2e 子集验证 19/19。剩余高权重问题仍在：CI 默认不跑 browser，axe 依赖当前未引入，因此完整 axe 扫描与跨平台 baseline 补齐仍是后续策略项。
 
 **G38. [Medium → Low, 已补 installer pure seam 与 package smoke] `slab-windows-full-installer` 不再零测试**
 - 当前已抽出 `installer.rs` 纯函数，覆盖 full-installer 输出命名、offline setup exe 识别、NSIS installer candidate 选择；同时新增 `package_smoke` 集成测试，验证 embedded bundle footer write/load/extract/base round-trip 与 no-footer 返回 none。
@@ -384,20 +390,20 @@
 
 ### 当前完成度快照（按当前代码重核）
 
-- **已完成**：G1 smoke executable 实调 meta-test、G3 auth fail-open 直接单测、G22 hooks、G25 i18n parity、G29 Responses/tool/chat union、G30 gRPC handler transport-boundary、G32 核心 JSON-RPC transport、G33 runtime status/admission/orchestrator wait 状态机、G38 installer smoke、G39 Vitest project list 集中、G40 LSP header/body framing、G41 native loader、G43 env-source 注入，以及上一版 Top 表 #2-#8。
-- **部分完成**：G2 仍缺 `FileSystemSandboxContext.policy` / `writable_roots` / `denied_paths` 语义；G11 仍缺 rollback/reversible migration gate；G26 已补 active workspace、file-op、console wrapper 与 plugin helper 起步覆盖但缺 terminal/Webview command surface；G28 已补 browser timeout/retry 起步策略但缺 fullstack/server harness taxonomy；G31 已补 v1 OpenAPI/schema 聚合 regression 与 workspace root/path handler 边界但缺更多 handler-level tests；G32 仍缺 no-id / bad-version / writer error / UDS wiring 分支；G37 已补最小 a11y smoke 但缺 diff/CI/axe/keyboard-flow 策略。
-- **未完成高优先级**：G31 settings/tasks/models 等 handler-level route/schema、G26 Tauri terminal/Webview command surface。中优先级剩余为 G28 harness flakiness、G37 visual/a11y 结构升级与 G32 更细 transport 分支。
+- **已完成/关闭到 Low 或 Low-Medium**：G1 smoke executable 实调 meta-test、G2 sandbox policy guard、G3 auth fail-open 直接单测、G11 migration post-apply constraint/data-preservation matrix、G22 hooks、G24 assistant page helper/browser smoke、G25 i18n parity、G26/G27 workspace terminal/console wrapper、G29 Responses/tool/chat union、G30 gRPC handler transport-boundary、G31 settings/tasks/models/workspace handler-level route tests、G32 JSON-RPC 细分支 + `serve_io` wiring、G33 runtime status/admission/orchestrator wait 状态机、G37 visual threshold/keyboard/platform policy 起步、G38 installer smoke、G39 Vitest project list 集中、G40 LSP header/body framing、G41 native loader、G43 env-source 注入，以及上一版 Top 表 #2-#8。
+- **部分完成/保留为后续策略项**：G11 rollback/reversible migration gate 仍需全量 migration 迁移方案；G26 真实 Tauri WebView command surface 的 caller 注入仍需 driver/app 级证明；G28 仍缺 port race retry、flaky marker 与 CI 隔离约定；G31 其他 route family 与 schema 字段级 negative/round-trip 仍需增量补齐；G37 axe 与跨平台 baseline 补齐仍未做；R15/R3 这类跨 crate/production 抽象暂不为降 LOC 强行推进。
+- **当前最高 ROI 后续**：完整 browser/CI/a11y 策略、真实 WebView command surface E2E、非 settings/tasks/models/workspace 的剩余 route family 直接测试，以及 repository/service 深层 CRUD 覆盖（G10/G13/G14）。
 - **变更边界**：本轮新增/调整的是测试、test-only helper、root scripts/config 与 narrow production bug fix；无 `/v1/*` public API、schema、Rust public contract 或 frontend runtime contract 变更。后续若实际改 API/schema，仍必须按 AGENTS 规则运行对应生成或验证命令（例如 `bun run gen:api` / `bun run gen:schemas`）。
 
 ### 4.1 剩余执行队列（按 ROI / 风险排序）
 
 | # | 行动 | Owner | Effort | 闭合的 finding |
 |---|------|-------|--------|----------------|
-| 1 | **HTTP route/schema 覆盖**：在已补 v1 OpenAPI/schema 聚合 regression 与 workspace root/path handler 边界的基础上，按 handler 风险补 settings/tasks/models 及 workspace 其他 auth/body validation 直接单测；若发现真实 route/schema bug，修业务代码并按需运行 `bun run gen:api`。 | slab-server | M-L | G31 |
-| 2 | **Tauri/workspace wrapper 覆盖**：在已补 active workspace/file-op/console wrapper 与 plugin helper 的基础上，继续覆盖 terminal session root、真实 Webview command caller id、permission/error propagation 与 `run_console_command` timeout/长输出边界。 | slab-app | M-L | G26, G27 |
-| 3 | **G32 transport 细分支**：继续覆盖 no-id request ignore、`jsonrpc != 2.0`、writer/flush error、UDS/stdout wiring；在直接测试保护网稳定后再考虑 `crates/slab-plugin-jsonrpc` 抽取。 | js/python runtime + shared test infra | M | G32, R3 |
-| 4 | **Visual/a11y/harness/tooling**：在已有 role/name a11y smoke 与 browser timeout/retry 策略基础上补 diffThreshold/CI 策略、axe/keyboard-flow 起步；为 server/fullstack harness 定义 flaky 隔离和 timeout taxonomy。 | desktop + test infra + utils | M-L | G28, G37 |
-| 5 | **Test-support / 冗余治理**：收敛 Rust test utilities 与 TS test helpers/mocks；优先处理 gRPC handler boilerplate/test stub、desktop store/API mock helper。 | shared test infra | M-L | R5, R12, R13, R15, R16 |
+| 1 | **剩余 route/schema 增量覆盖**：在 settings/tasks/models/workspace 已补 handler-level tests 的基础上，继续按风险补 agent/session/plugins/media/setup 等 route family 的字段级 round-trip/negative；若发现真实 route/schema bug，修业务代码并按需运行 `bun run gen:api`。 | slab-server | M | G31 |
+| 2 | **真实 WebView command surface E2E**：在 helper/command 层已覆盖 caller id、权限、terminal/session、console timeout 后，用 driver/app 级测试证明真实 Tauri `Webview` 注入 caller 与错误传播。 | slab-app | M-L | G26 |
+| 3 | **Visual/a11y/CI 策略**：在 diff threshold、keyboard smoke、platform baseline 策略已补的基础上，引入 axe 或等价无障碍扫描，并决定 browser project 的 CI 运行策略与跨平台 baseline 维护方式。 | desktop + test infra | M | G37 |
+| 4 | **Harness flakiness 治理**：在 timeout taxonomy 已命名后，补 port race retry、flaky marker/隔离约定与 server/fullstack teardown failure reporting。 | desktop + slab-server test infra | M | G28 |
+| 5 | **深层持久化/服务覆盖**：按 `model_download.rs` 模板补 repository/service CRUD、unique violation、并发写与重点 service 安全边界。 | app-core | L | G10, G13, G14 |
 
 ### 4.2 分阶段路线图
 
@@ -405,26 +411,26 @@
 - 已完成 coverage threshold、根级 `lint-staged`、pre-commit 调用路径与 smoke executable 实调 meta-test；验证命令为 `bun run test:server`、`bun run test:frontend:coverage`、`bun run lint-staged -- --allow-empty --no-stash`。
 
 **Phase 2：Runtime/API route/gRPC coverage**
-- 已完成 G30 handler transport-boundary、G33 scheduler admission 与 orchestrator wait 状态机，以及 G31 的 v1 OpenAPI/schema 聚合 regression 和 workspace root/path handler 边界。
-- G31 下一步按 handler 风险补 Rust 单测或 integration test，优先 settings/tasks/models 与 workspace 其他 auth/body validation 边界。
+- 已完成 G30 handler transport-boundary、G33 scheduler admission 与 orchestrator wait 状态机，以及 G31 的 v1 OpenAPI/schema 聚合 regression、workspace root/path handler 边界、settings/tasks/models/workspace handler-level HTTP tests。
+- G31 下一步按 handler 风险补剩余 route family 与 schema 字段级 round-trip/negative。
 
 **Phase 3：Tauri command and workspace boundary tests**
-- 已补 active workspace、workspace file-op 与 console wrapper 起步覆盖，证明缺失 current workspace fail-closed、file-op 使用 current root、路径越界错误会穿过 wrapper、console 命令使用 current root；plugin helper 层已证明 caller id 与权限边界。
-- 下一步覆盖 terminal 与真实 Webview command surface，而不是只测下层 service/helper；重点证明 Tauri caller 注入、权限边界、错误传播、timeout/长输出行为。
+- 已补 active workspace、workspace file-op、console wrapper、terminal session 与 plugin helper 起步覆盖，证明缺失 current workspace fail-closed、file-op 使用 current root、路径越界错误会穿过 wrapper、console 命令使用 current root、terminal session root/URL/consume 契约、caller id 与权限边界、timeout/长输出行为。
+- 下一步覆盖真实 Webview command surface，而不是只测下层 service/helper；重点证明 Tauri caller 注入、权限边界与错误传播。
 
 **Phase 4：冗余治理与共享 test-support**
-- Rust 侧先收敛重复 test helper，再决定是否需要独立 `slab-test-utils` crate；TS 侧优先建立 package-local `src/test/` / `__mocks__/` helper。
-- `crates/slab-plugin-jsonrpc`、gRPC handler boilerplate、worker test stub 抽取必须以现有直接测试为保护网，不做无保护大搬迁。
+- Rust 侧已收敛 Candle worker `PeerControlBus` test helper；TS 侧已收敛 desktop vitest resolve、store storage mock 与 browser `@slab/api` mock helper。
+- `crates/slab-plugin-jsonrpc` 与 gRPC handler production boilerplate 抽取必须以现有直接测试为保护网，不做无保护大搬迁。
 
 **Phase 5：visual/a11y/harness/native-loader/installer hardening**
-- 已补 browser visual 的最小 role/name a11y assertions，并修正 plugins non-Tauri stale baseline；下一步将 visual regression 从 local-only PNG 信号推进到可解释 diff + CI 策略，再补 axe/keyboard-flow 起步覆盖。
-- `slab-windows-full-installer`、`slab-utils/loader.rs` 与 `slab-utils/lsp.rs` body edge 已完成 smoke/平台条件/edge 测试；剩余为 browser visual/a11y 策略与 server/fullstack harness flaky/timeout 约定。
+- 已补 browser visual 的最小 role/name a11y assertions、keyboard smoke、pixelmatch diff threshold、platform baseline 策略，并修正 plugins non-Tauri stale baseline；下一步将 browser visual 推进到 CI 策略和 axe/等价扫描。
+- `slab-windows-full-installer`、`slab-utils/loader.rs` 与 `slab-utils/lsp.rs` body edge 已完成 smoke/平台条件/edge 测试；server/fullstack harness 已有 timeout taxonomy，剩余为 flaky/port-race/teardown 策略。
 
 ### 4.3 与 06-08 审计的关系总结
 - **确认并升级**：slab-agent 标杆地位维持；HTTP route/schema 与 Tauri command surface 仍是下一轮最高价值队列。
 - **纠正 06-08 / 旧文档**：migration 覆盖率（"2/19 forward" 错，实为"全 forward-apply-tested，~3-4 post-assert，0 rollback"）；`runtime_to_status` 现在已有 20 variant 表驱动映射覆盖，scheduler admission 与 orchestrator wait 状态机也已有直接测试；smoke registry 不是 `it.todo` 占位冒充覆盖，而是有 drift-enforcement 与 request-level meta-test 的覆盖率地图。
-- **已闭合的关键盲区**：auth fail-open 的核心直接单测、TS hooks/store 首批覆盖、i18n parity、proto Responses/tool/chat union、gRPC handler transport-boundary、runtime scheduler/orchestrator wait、JSON-RPC transport glue、Vitest project list 集中、Config env-source 注入、installer/native-loader smoke、历史 screenshot baseline 噪音清理。
-- **当前评级判断**：已完成项足以把“安全边界/TS entrypoint/proto/runtime transport”的若干 High 降级；整体继续上调仍被 G31 handler-level route/schema、G26 terminal/Webview command surface、G28/G37 visual/a11y/harness 策略阻止。
+- **已闭合的关键盲区**：auth fail-open 的核心直接单测、sandbox policy guard、TS hooks/store/page-helper 首批覆盖、i18n parity、proto Responses/tool/chat union、gRPC handler transport-boundary、runtime scheduler/orchestrator wait、JSON-RPC transport glue 细分支、Vitest project list/desktop alias 集中、Config env-source 注入、installer/native-loader smoke、browser visual threshold/keyboard/platform policy 起步。
+- **当前评级判断**：已完成项足以把“安全边界/TS entrypoint/proto/runtime transport/HTTP route 起步/Tauri wrapper 起步”的若干 High 降级；整体继续上调仍被深层 repository/service 覆盖、真实 WebView command E2E、browser CI/axe 策略和剩余 route family/schema negative 覆盖阻止。
 
 ---
 

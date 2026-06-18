@@ -78,39 +78,43 @@ vi.mock('@/store/useAssistantUiStore', () => ({
   }),
 }));
 
-vi.mock('@slab/api', () => ({
-  default: {
-    useMutation: vi.fn<() => unknown>(() => ({
-      isPending: mockMutationState.isPending,
-      mutateAsync: vi.fn<() => Promise<Record<string, never>>>().mockResolvedValue({}),
-    })),
-    useQuery: vi.fn<() => unknown>(() => ({
-      data: [
-        {
-          backend_ids: ['cloud.openai'],
-          capabilities: ['chat_generation'],
-          chat_capabilities: {
-            raw_gbnf: false,
-            reasoning_controls: true,
-            structured_output: true,
+vi.mock('@slab/api', async () => {
+  const { createSlabApiMock } = await import('../support/mock-slab-api');
+
+  return createSlabApiMock({
+    defaultExport: {
+      useMutation: vi.fn<() => unknown>(() => ({
+        isPending: mockMutationState.isPending,
+        mutateAsync: vi.fn<() => Promise<Record<string, never>>>().mockResolvedValue({}),
+      })),
+      useQuery: vi.fn<() => unknown>(() => ({
+        data: [
+          {
+            backend_ids: ['cloud.openai'],
+            capabilities: ['chat_generation'],
+            chat_capabilities: {
+              raw_gbnf: false,
+              reasoning_controls: true,
+              structured_output: true,
+            },
+            display_name: 'Cloud Assistant',
+            id: 'cloud-model',
+            kind: 'cloud',
+            local_path: null,
+            pending: false,
+            runtime_presets: null,
+            spec: {
+              context_window: 8192,
+            },
+            status: 'ready',
           },
-          display_name: 'Cloud Assistant',
-          id: 'cloud-model',
-          kind: 'cloud',
-          local_path: null,
-          pending: false,
-          runtime_presets: null,
-          spec: {
-            context_window: 8192,
-          },
-          status: 'ready',
-        },
-      ],
-      isLoading: mockCatalogState.isLoading,
-      refetch: vi.fn<() => Promise<{ data: unknown[] }>>().mockResolvedValue({ data: [] }),
-    })),
-  },
-}));
+        ],
+        isLoading: mockCatalogState.isLoading,
+        refetch: vi.fn<() => Promise<{ data: unknown[] }>>().mockResolvedValue({ data: [] }),
+      })),
+    },
+  });
+});
 
 vi.mock('@slab/api/models', () => ({
   toCatalogModelList: vi.fn<(data: unknown) => unknown[]>((data) => (Array.isArray(data) ? data : [])),

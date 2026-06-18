@@ -22,24 +22,15 @@ const { mockApiUseQuery } = vi.hoisted(() => ({
   mockApiUseQuery: vi.fn<() => unknown>(),
 }));
 
-vi.mock('@slab/api', () => ({
-  apiClient: {
-    GET: vi.fn<(...args: unknown[]) => unknown>(),
-    POST: vi.fn<(...args: unknown[]) => unknown>(),
-    PUT: vi.fn<(...args: unknown[]) => unknown>(),
-    DELETE: vi.fn<(...args: unknown[]) => unknown>(),
-  },
-  default: {
-    useQuery: mockApiUseQuery,
-    useMutation: vi.fn<() => unknown>(() => ({
-      isPending: false,
-      mutateAsync: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    })),
-  },
-  getErrorMessage: vi.fn<(err: Error) => string>((err) => err.message),
-  isApiError: vi.fn<() => boolean>(() => false),
-  queryClient: {},
-}));
+vi.mock('@slab/api', async () => {
+  const { createSlabApiMock } = await import('../support/mock-slab-api');
+
+  return createSlabApiMock({
+    defaultExport: {
+      useQuery: mockApiUseQuery,
+    },
+  });
+});
 
 vi.mock('@slab/i18n', () => ({
   useTranslation: vi.fn<() => unknown>(() => ({

@@ -55,22 +55,24 @@ vi.mock('@/hooks/use-global-header-meta', () => ({
   usePageHeader: vi.fn<() => void>(),
 }));
 
-vi.mock('@slab/api', () => ({
-  default: {
-    useMutation: vi.fn<() => unknown>(() => ({
-      isPending: false,
-      mutateAsync: mockMutateAsync,
-    })),
-    useQuery: vi.fn<() => unknown>(() => ({
-      data: mockSettingsData,
-      error: null,
-      isLoading: false,
-      refetch: mockRefetch,
-    })),
-  },
-  getErrorMessage: (error: unknown) => (error instanceof Error ? error.message : String(error)),
-  isApiError: vi.fn<() => boolean>(() => false),
-}));
+vi.mock('@slab/api', async () => {
+  const { createSlabApiMock } = await import('../support/mock-slab-api');
+
+  return createSlabApiMock({
+    defaultExport: {
+      useMutation: vi.fn<() => unknown>(() => ({
+        isPending: false,
+        mutateAsync: mockMutateAsync,
+      })),
+      useQuery: vi.fn<() => unknown>(() => ({
+        data: mockSettingsData,
+        error: null,
+        isLoading: false,
+        refetch: mockRefetch,
+      })),
+    },
+  });
+});
 
 describe('settings core flow e2e', () => {
   beforeEach(() => {

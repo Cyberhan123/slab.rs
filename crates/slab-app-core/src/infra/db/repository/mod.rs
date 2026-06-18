@@ -115,6 +115,8 @@ mod tests {
 
         let usage_columns = table_columns(&pool, "agent_memory_usage_events").await;
         assert!(usage_columns.contains("source_kind"));
+        let config_state_columns = table_columns(&pool, "model_config_state").await;
+        assert!(config_state_columns.contains("selected_engine_id"));
         let (not_null, default_value): (i64, Option<String>) = sqlx::query_as(
             "SELECT [notnull], dflt_value \
              FROM pragma_table_info('agent_memory_usage_events') \
@@ -132,6 +134,11 @@ mod tests {
             "idx_video_generation_tasks_created_at",
             "idx_audio_transcription_tasks_created_at",
             "idx_model_config_state_updated_at",
+            "idx_agent_threads_session",
+            "idx_agent_turn_states_status",
+            "idx_agent_memory_phase1_status",
+            "idx_agent_memory_phase2_runs_status",
+            "idx_agent_memory_usage_events_thread",
         ] {
             assert_index_exists(&pool, index).await;
         }
@@ -144,6 +151,19 @@ mod tests {
         .await;
         assert!(invalid_status.is_err());
 
+        let invalid_model_status = sqlx::query(
+            "INSERT INTO models (\
+                id, display_name, status, spec, created_at, updated_at, kind, \
+                config_schema_version, config_policy_version, capabilities\
+             ) VALUES (\
+                'bad-model-status', 'Bad', 'bogus', '{}', '2026-06-17T00:00:00Z', \
+                '2026-06-17T00:00:00Z', 'local', 2, 1, '[]'\
+             )",
+        )
+        .execute(&pool)
+        .await;
+        assert!(invalid_model_status.is_err());
+
         let invalid_lock = sqlx::query(
             "INSERT INTO agent_memory_phase2_lock (id, status, updated_at) \
              VALUES (2, 'idle', '2026-06-17T00:00:00Z')",
@@ -151,6 +171,58 @@ mod tests {
         .execute(&pool)
         .await;
         assert!(invalid_lock.is_err());
+
+        sqlx::query(
+            "INSERT INTO models (\
+                id, display_name, status, spec, created_at, updated_at, kind, \
+                config_schema_version, config_policy_version, capabilities\
+             ) VALUES (\
+                'model-1', 'Model', 'ready', '{}', '2026-06-17T00:00:00Z', \
+                '2026-06-17T00:00:00Z', 'local', 2, 1, '[]'\
+             )",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert model with defaults");
+        let materialized_artifacts: String =
+            sqlx::query_scalar("SELECT materialized_artifacts FROM models WHERE id = 'model-1'")
+                .fetch_one(&pool)
+                .await
+                .expect("materialized artifacts default");
+        assert_eq!(materialized_artifacts, "{}");
+
+        let orphan_config_state = sqlx::query(
+            "INSERT INTO model_config_state (model_id, updated_at) \
+             VALUES ('missing-model', '2026-06-17T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await;
+        assert!(orphan_config_state.is_err());
+
+        sqlx::query(
+            "INSERT INTO chat_sessions (id, created_at, updated_at) \
+             VALUES ('session-defaults', '2026-06-17T00:00:00Z', '2026-06-17T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert default session");
+        sqlx::query(
+            "INSERT INTO agent_threads (id, session_id, created_at, updated_at) \
+             VALUES ('thread-defaults', 'session-defaults', '2026-06-17T00:00:00Z', \
+                '2026-06-17T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert agent thread defaults");
+        let (depth, status, config_json): (i64, String, String) = sqlx::query_as(
+            "SELECT depth, status, config_json FROM agent_threads WHERE id = 'thread-defaults'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("agent thread defaults");
+        assert_eq!(depth, 0);
+        assert_eq!(status, "pending");
+        assert_eq!(config_json, "{}");
     }
 
     #[tokio::test]
@@ -220,6 +292,7 @@ mod tests {
             .expect("delete chat session");
         assert_eq!(row_count(&pool, "agent_threads").await, 0);
         assert_eq!(row_count(&pool, "agent_memory_phase1_outputs").await, 0);
+        assert_eq!(row_count(&pool, "agent_memory_usage_events").await, 1);
     }
 
     async fn table_columns(pool: &sqlx::SqlitePool, table: &str) -> HashSet<String> {
