@@ -224,11 +224,6 @@ fn console_size_from_fd(handle: RawHandle) -> Result<ConsoleSize, std::io::Error
 deno_error::js_error_wrapper!(ReadlineError, JsReadlineError, |err| {
     match err {
         ReadlineError::Io(e) => e.get_class(),
-        ReadlineError::Eof
-        | ReadlineError::Interrupted
-        | ReadlineError::Decode(_)
-        | ReadlineError::SystemError(_)
-        | ReadlineError::Signal(_) => GENERIC_ERROR.into(),
         _ => GENERIC_ERROR.into(),
     }
 });

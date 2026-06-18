@@ -302,4 +302,21 @@ mod tests {
             runtime_dir.join(library_file_name("sidecar"))
         );
     }
+
+    #[test]
+    fn open_native_library_reports_missing_library() {
+        let missing = std::env::temp_dir()
+            .join(library_file_name("slab-definitely-missing-native-loader-test"));
+
+        assert!(open_native_library(&missing).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn open_native_library_loads_windows_system_library_with_search_flags() {
+        let library = open_native_library(Path::new("kernel32.dll"))
+            .expect("kernel32.dll should load from Windows system search paths");
+
+        drop(library);
+    }
 }

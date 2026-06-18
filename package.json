@@ -30,8 +30,10 @@
     "color:oklch": "bun ./scripts/design/figma-color-to-oklch.ts",
     "lint": "oxlint packages/api packages/slab-desktop packages/slab-components packages/slab-i18n packages/slab-plugin-sdk packages/slab-plugin-cli packages/slab-plugin-ui packages/vitest-rust-reporter plugins/video-subtitle-translator/src scripts",
     "lint:fix": "oxlint --fix packages/api packages/slab-desktop packages/slab-components packages/slab-i18n packages/slab-plugin-sdk packages/slab-plugin-cli packages/slab-plugin-ui packages/vitest-rust-reporter plugins/video-subtitle-translator/src scripts",
+    "lint-staged": "lint-staged",
     "test": "bun run test:frontend && cargo test --workspace",
     "test:frontend": "vitest run --config vitest.frontend.config.ts",
+    "test:frontend:coverage": "vitest run --config vitest.frontend.config.ts --coverage",
     "test:rust": "vitest run --project rust",
     "test:rust:cargo": "bun ./scripts/cargo/validate.ts test",
     "test:sandbox": "bun ./scripts/cargo/validate.ts sandbox",
@@ -42,7 +44,7 @@
     "test:coverage": "vitest run --coverage",
     "test:desktop": "vitest run --project desktop",
     "test:desktop:browser": "vitest run --project desktop-browser",
-    "test:server": "vitest run --project slab-server-tests",
+    "test:server": "bun ./scripts/cargo/run.ts build -p slab-server && vitest run --project slab-server-tests",
     "test:update-screenshots": "vitest run --project desktop-browser --project components-browser -u",
     "docs:dev": "bun run gen:schemas && vitepress dev docs",
     "docs:build": "bun run gen:schemas && vitepress build docs",
@@ -63,6 +65,10 @@
     "models",
     "docs"
   ],
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,mjs,cjs}": "bun run lint",
+    "*.rs": "cargo fmt -- --check"
+  },
   "catalog": {
     "@ant-design/icons": "^6.1.1",
     "@ant-design/x": "^2.5.0",

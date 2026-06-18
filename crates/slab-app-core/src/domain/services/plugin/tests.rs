@@ -3,7 +3,7 @@ use slab_utils::hash::sha256_hex_bytes as hash_bytes_hex;
 use std::fs;
 
 use super::SOURCE_KIND_IMPORT_PACK;
-use super::package::locate_plugin_root;
+use super::package::{ensure_path_within, locate_plugin_root};
 use super::plugin_api_base_url_from_bind_address;
 use super::scan::{scan_plugin_dir, scan_plugins};
 use super::validation::normalize_relative_path;
@@ -23,6 +23,20 @@ fn write(path: &std::path::Path, content: &str) {
 fn normalize_relative_path_rejects_parent_segments() {
     assert!(normalize_relative_path("../plugin.json").is_err());
     assert_eq!(normalize_relative_path("ui/index.html").expect("normalize"), "ui/index.html");
+}
+
+#[test]
+fn ensure_path_within_accepts_canonical_root_and_absolute_child() {
+    let root = temp_dir("ensure-path-within");
+    let child = root.join("plugin");
+    fs::create_dir_all(&child).expect("create child");
+
+    let canonical_root = root.canonicalize().expect("canonical root");
+
+    ensure_path_within(&child, &canonical_root).expect("child should be within root");
+    ensure_path_within(&child.join("missing").join("asset.txt"), &canonical_root)
+        .expect("missing descendant should be within root");
+    assert!(ensure_path_within(&root.with_file_name("outside-plugin"), &canonical_root).is_err());
 }
 
 #[test]

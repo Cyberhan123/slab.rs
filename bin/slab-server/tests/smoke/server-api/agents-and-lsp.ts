@@ -82,6 +82,147 @@ export function registerAgentsAndLspSmoke(getServer: () => SlabServerTestHarness
       const oldAgentRoute = await server.request("/v1/agents/missing-agent/events");
       expect(oldAgentRoute.status).toBe(404);
 
+      const workspaceState = await expectJson<Schema["WorkspaceStateResponse"]>(
+        server,
+        "/v1/workspace"
+      );
+      expect(workspaceState.response.ok).toBe(true);
+      expect(Array.isArray(workspaceState.body.recent)).toBe(true);
+
+      await expectError(
+        server,
+        "/v1/workspace/open",
+        400,
+        jsonInit({ rootPath: "" } satisfies Schema["WorkspaceOpenCommand"], { method: "POST" })
+      );
+      const closedWorkspace = await expectJson<Schema["WorkspaceStateResponse"]>(
+        server,
+        "/v1/workspace/close",
+        { method: "POST" }
+      );
+      expect(closedWorkspace.response.ok).toBe(true);
+      expect(closedWorkspace.body.current).toBeNull();
+
+      await Promise.all([
+        expectError(server, "/v1/workspace/directory", 400),
+        expectError(server, "/v1/workspace/files?relativePath=smoke.txt", 400),
+        expectError(server, "/v1/workspace/path/stat?relativePath=smoke.txt", 400),
+        expectError(server, "/v1/workspace/search?query=smoke", 400),
+        expectError(server, "/v1/workspace/search/text?query=smoke", 400),
+        expectError(server, "/v1/workspace/git/status", 400)
+      ]);
+      await Promise.all([
+        expectError(
+          server,
+          "/v1/workspace/files",
+          400,
+          jsonInit(
+            {
+              content: "smoke",
+              expectedHash: null,
+              relativePath: "smoke.txt"
+            } satisfies Schema["WorkspaceWriteFileCommand"],
+            { method: "PUT" }
+          )
+        ),
+        expectError(
+          server,
+          "/v1/workspace/files",
+          400,
+          jsonInit(
+            { relativePath: "smoke.txt" } satisfies Schema["WorkspaceCreateFileCommand"],
+            { method: "POST" }
+          )
+        ),
+        expectError(
+          server,
+          "/v1/workspace/directories",
+          400,
+          jsonInit(
+            { relativePath: "smoke-dir" } satisfies Schema["WorkspaceCreateDirectoryCommand"],
+            { method: "POST" }
+          )
+        ),
+        expectError(
+          server,
+          "/v1/workspace/path",
+          400,
+          jsonInit(
+            {
+              fromRelativePath: "smoke.txt",
+              toRelativePath: "renamed.txt"
+            } satisfies Schema["WorkspaceRenamePathCommand"],
+            { method: "PATCH" }
+          )
+        ),
+        expectError(
+          server,
+          "/v1/workspace/path",
+          400,
+          jsonInit(
+            {
+              recursive: false,
+              relativePath: "smoke.txt"
+            } satisfies Schema["WorkspaceDeletePathCommand"],
+            { method: "DELETE" }
+          )
+        )
+      ]);
+      await Promise.all([
+        expectError(
+          server,
+          "/v1/workspace/git/stage",
+          400,
+          jsonInit({ path: "smoke.txt" } satisfies Schema["WorkspaceGitPathCommand"], {
+            method: "POST"
+          })
+        ),
+        expectError(
+          server,
+          "/v1/workspace/git/unstage",
+          400,
+          jsonInit({ path: "smoke.txt" } satisfies Schema["WorkspaceGitPathCommand"], {
+            method: "POST"
+          })
+        ),
+        expectError(
+          server,
+          "/v1/workspace/git/discard",
+          400,
+          jsonInit({ path: "smoke.txt" } satisfies Schema["WorkspaceGitPathCommand"], {
+            method: "POST"
+          })
+        ),
+        expectError(
+          server,
+          "/v1/workspace/git/commit",
+          400,
+          jsonInit({ message: "smoke" } satisfies Schema["WorkspaceGitCommitCommand"], {
+            method: "POST"
+          })
+        ),
+        expectError(
+          server,
+          "/v1/workspace/git/diff",
+          400,
+          jsonInit(
+            {
+              path: "smoke.txt",
+              staged: false
+            } satisfies Schema["WorkspaceGitDiffCommand"],
+            { method: "POST" }
+          )
+        ),
+        expectError(
+          server,
+          "/v1/workspace/console/run",
+          400,
+          jsonInit({ command: "pwd" } satisfies Schema["WorkspaceConsoleRunCommand"], {
+            method: "POST"
+          })
+        )
+      ]);
+
       const wsError = await expectWebSocketJsonReply<Schema["AgentResponsesServerMessage"]>(
         server,
         "/v1/agents/responses",

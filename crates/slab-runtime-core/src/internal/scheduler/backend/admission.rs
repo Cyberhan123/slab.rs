@@ -260,4 +260,90 @@ mod tests {
 
         assert!(matches!(err, CoreError::DriverNotRegistered { .. }));
     }
+
+    #[tokio::test]
+    async fn inference_lease_times_out_when_capacity_is_unavailable() {
+        let mut manager = ResourceManager::with_config(ResourceManagerConfig {
+            backend_capacity: 1,
+            ..ResourceManagerConfig::default()
+        });
+        manager.register_backend("serial-backend", |_shared_rx, _control_tx| {});
+
+        let lease = manager
+            .acquire_inference_lease("serial-backend", std::time::Duration::from_secs(1))
+            .await
+            .expect("first lease should succeed");
+        let err = manager
+            .acquire_inference_lease("serial-backend", std::time::Duration::from_millis(5))
+            .await
+            .expect_err("second lease should time out while capacity is held");
+
+        drop(lease);
+        assert!(matches!(err, CoreError::Timeout));
+    }
+
+    #[tokio::test]
+    async fn management_lease_blocks_inference_until_released() {
+        let mut manager = ResourceManager::new();
+        manager.register_backend("managed-backend", |_shared_rx, _control_tx| {});
+
+        let lease = manager
+            .acquire_management_lease("managed-backend")
+            .await
+            .expect("management lease should succeed");
+        let clone = manager.clone();
+        let waiter = tokio::spawn(async move {
+            clone
+                .acquire_inference_lease("managed-backend", std::time::Duration::from_secs(1))
+                .await
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!waiter.is_finished(), "inference should wait for management lease");
+        drop(lease);
+
+        let inference = tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
+            .await
+            .expect("waiter should complete after management lease is released")
+            .expect("waiter task should not panic")
+            .expect("inference lease should succeed");
+        drop(inference);
+    }
+
+    #[tokio::test]
+    async fn inference_lease_blocks_management_until_released() {
+        let mut manager = ResourceManager::new();
+        manager.register_backend("managed-backend", |_shared_rx, _control_tx| {});
+
+        let lease = manager
+            .acquire_inference_lease("managed-backend", std::time::Duration::from_secs(1))
+            .await
+            .expect("inference lease should succeed");
+        let clone = manager.clone();
+        let waiter =
+            tokio::spawn(async move { clone.acquire_management_lease("managed-backend").await });
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!waiter.is_finished(), "management should wait for inference lease");
+        drop(lease);
+
+        let management = tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
+            .await
+            .expect("waiter should complete after inference lease is released")
+            .expect("waiter task should not panic")
+            .expect("management lease should succeed");
+        drop(management);
+    }
+
+    #[test]
+    fn next_seq_is_monotonic_per_backend() {
+        let mut manager = ResourceManager::new();
+        manager.register_backend("backend-a", |_shared_rx, _control_tx| {});
+        manager.register_backend("backend-b", |_shared_rx, _control_tx| {});
+
+        assert_eq!(manager.next_seq("backend-a").expect("seq"), 1);
+        assert_eq!(manager.next_seq("backend-a").expect("seq"), 2);
+        assert_eq!(manager.next_seq("backend-b").expect("seq"), 1);
+        assert_eq!(manager.next_seq("backend-a").expect("seq"), 3);
+    }
 }

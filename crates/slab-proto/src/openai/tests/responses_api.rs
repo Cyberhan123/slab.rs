@@ -5,6 +5,12 @@ fn responses_post_response_deserializes() {
     let create_response: Response = assert_json_deserializes(RESPONSE_RESOURCE);
 
     assert_eq!(create_response.id, "resp_67ccd3a9da748190baa7f1570fe91ac604becb25c45c1d41");
+    let output = create_response.output.first().expect("response fixture should include output");
+    assert!(matches!(
+        output,
+        OutputItem::OutputMessage(message)
+            if matches!(message.content.first(), Some(OutputMessageContent::OutputTextContent(_)))
+    ));
 }
 
 #[test]
@@ -114,4 +120,48 @@ fn responses_post_sse_function_call_events_deserialize() {
     assert!(delta_event.delta.contains("city"));
     assert_eq!(done_event.name, "get_weather");
     assert!(done_event.arguments.contains("Shanghai"));
+}
+
+#[test]
+fn responses_stream_event_union_round_trips_known_events() {
+    let queued_event: ResponseStreamEvent = assert_json_deserializes(RESPONSE_QUEUED_EVENT);
+    let text_delta_event: ResponseStreamEvent =
+        assert_json_round_trips(RESPONSE_OUTPUT_TEXT_DELTA_EVENT);
+    let function_done_event: ResponsesServerEvent =
+        assert_json_round_trips(RESPONSE_FUNCTION_CALL_ARGS_DONE_EVENT);
+
+    assert!(matches!(queued_event, ResponseStreamEvent::ResponseQueuedEvent(_)));
+    assert!(matches!(text_delta_event, ResponseStreamEvent::ResponseTextDeltaEvent(_)));
+    assert!(matches!(
+        function_done_event,
+        ResponsesServerEvent::ResponseFunctionCallArgumentsDoneEvent(_)
+    ));
+}
+
+#[test]
+fn responses_stream_event_union_rejects_unknown_missing_and_mismatched_shapes() {
+    let unknown_type = json!({
+        "type": "response.not_real",
+        "sequence_number": 1
+    });
+    let missing_required_field = json!({
+        "type": "response.output_text.delta",
+        "item_id": "msg_1",
+        "output_index": 0,
+        "content_index": 0,
+        "sequence_number": 1,
+        "logprobs": []
+    });
+    let mismatched_field_type = json!({
+        "type": "response.function_call_arguments.done",
+        "item_id": "fc_1",
+        "name": "get_weather",
+        "output_index": 0,
+        "sequence_number": "bad",
+        "arguments": "{}"
+    });
+
+    assert!(serde_json::from_value::<ResponseStreamEvent>(unknown_type).is_err());
+    assert!(serde_json::from_value::<ResponseStreamEvent>(missing_required_field).is_err());
+    assert!(serde_json::from_value::<ResponsesServerEvent>(mismatched_field_type).is_err());
 }

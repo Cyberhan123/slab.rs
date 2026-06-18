@@ -370,3 +370,181 @@ impl Orchestrator {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use slab_runtime_core::Payload;
+    use slab_runtime_core::backend::StreamChunk;
+    use tokio::sync::mpsc;
+
+    use super::*;
+
+    fn orchestrator_with_storage() -> (Orchestrator, ResultStorage) {
+        let (submit_tx, _submit_rx) = mpsc::channel::<OrchestratorCommand>(1);
+        let storage = ResultStorage::new(submit_tx);
+        let orchestrator =
+            Orchestrator { storage: storage.clone(), resource_manager: ResourceManager::new() };
+        (orchestrator, storage)
+    }
+
+    #[tokio::test]
+    async fn wait_result_returns_payload_and_marks_result_consumed() {
+        let (orchestrator, storage) = orchestrator_with_storage();
+        let task_id = storage.create_task(0).await;
+        storage.set_status(task_id, TaskStatus::Succeeded { result: Payload::from("done") }).await;
+
+        let result = orchestrator
+            .wait_result(task_id, Duration::from_millis(10))
+            .await
+            .expect("result should be available");
+
+        assert_eq!(result.to_str().expect("text payload"), "done");
+        let err = orchestrator
+            .wait_result(task_id, Duration::from_millis(10))
+            .await
+            .expect_err("second wait should report consumed result");
+        assert!(matches!(
+            err,
+            CoreError::GpuStageFailed { stage_name, message }
+                if stage_name == "result" && message.contains("already been consumed")
+        ));
+    }
+
+    #[tokio::test]
+    async fn wait_result_rejects_streaming_tasks() {
+        let (orchestrator, storage) = orchestrator_with_storage();
+        let task_id = storage.create_task(0).await;
+        storage.set_status(task_id, TaskStatus::SucceededStreaming).await;
+
+        let err = orchestrator
+            .wait_result(task_id, Duration::from_millis(10))
+            .await
+            .expect_err("streaming task should not produce unary result");
+
+        assert!(matches!(
+            err,
+            CoreError::GpuStageFailed { stage_name, message }
+                if stage_name == "result" && message.contains("streaming task")
+        ));
+    }
+
+    #[tokio::test]
+    async fn wait_result_propagates_failed_and_cancelled_statuses() {
+        let (orchestrator, storage) = orchestrator_with_storage();
+        let failed_task = storage.create_task(0).await;
+        storage
+            .set_status(failed_task, TaskStatus::Failed { error: CoreError::ModelNotLoaded })
+            .await;
+        let cancelled_task = storage.create_task(0).await;
+        storage.set_status(cancelled_task, TaskStatus::Cancelled).await;
+
+        let failed = orchestrator
+            .wait_result(failed_task, Duration::from_millis(10))
+            .await
+            .expect_err("failed task should propagate error");
+        let cancelled = orchestrator
+            .wait_result(cancelled_task, Duration::from_millis(10))
+            .await
+            .expect_err("cancelled task should propagate cancellation");
+
+        assert!(matches!(failed, CoreError::ModelNotLoaded));
+        assert!(matches!(cancelled, CoreError::Cancelled));
+    }
+
+    #[tokio::test]
+    async fn wait_result_timeout_purges_task() {
+        let (orchestrator, storage) = orchestrator_with_storage();
+        let task_id = storage.create_task(0).await;
+
+        let err = orchestrator
+            .wait_result(task_id, Duration::from_millis(1))
+            .await
+            .expect_err("pending task should time out");
+
+        assert!(matches!(err, CoreError::Timeout));
+        assert!(matches!(
+            orchestrator.get_status(task_id).await,
+            Err(CoreError::TaskNotFound { task_id: missing }) if missing == task_id
+        ));
+    }
+
+    #[tokio::test]
+    async fn wait_stream_returns_stream_handle() {
+        let (orchestrator, storage) = orchestrator_with_storage();
+        let task_id = storage.create_task(0).await;
+        let (tx, rx) = mpsc::channel(1);
+        storage.set_stream_handle(task_id, rx).await;
+        storage.set_status(task_id, TaskStatus::SucceededStreaming).await;
+
+        let mut stream = orchestrator
+            .wait_stream(task_id, Duration::from_millis(10))
+            .await
+            .expect("stream should be available");
+        tx.send(StreamChunk::Done).await.expect("send stream chunk");
+
+        assert!(matches!(stream.recv().await, Some(StreamChunk::Done)));
+    }
+
+    #[tokio::test]
+    async fn wait_stream_rejects_non_streaming_tasks() {
+        let (orchestrator, storage) = orchestrator_with_storage();
+        let succeeded_task = storage.create_task(0).await;
+        storage
+            .set_status(succeeded_task, TaskStatus::Succeeded { result: Payload::from("done") })
+            .await;
+        let consumed_task = storage.create_task(0).await;
+        storage.set_status(consumed_task, TaskStatus::ResultConsumed).await;
+
+        for task_id in [succeeded_task, consumed_task] {
+            let err = orchestrator
+                .wait_stream(task_id, Duration::from_millis(10))
+                .await
+                .expect_err("non-streaming task should not produce stream");
+            assert!(matches!(
+                err,
+                CoreError::GpuStageFailed { stage_name, message }
+                    if stage_name == "stream" && message.contains("non-streaming task")
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn wait_stream_propagates_failed_and_cancelled_statuses() {
+        let (orchestrator, storage) = orchestrator_with_storage();
+        let failed_task = storage.create_task(0).await;
+        storage
+            .set_status(failed_task, TaskStatus::Failed { error: CoreError::ModelNotLoaded })
+            .await;
+        let cancelled_task = storage.create_task(0).await;
+        storage.set_status(cancelled_task, TaskStatus::Cancelled).await;
+
+        let failed = orchestrator
+            .wait_stream(failed_task, Duration::from_millis(10))
+            .await
+            .expect_err("failed task should propagate error");
+        let cancelled = orchestrator
+            .wait_stream(cancelled_task, Duration::from_millis(10))
+            .await
+            .expect_err("cancelled task should propagate cancellation");
+
+        assert!(matches!(failed, CoreError::ModelNotLoaded));
+        assert!(matches!(cancelled, CoreError::Cancelled));
+    }
+
+    #[tokio::test]
+    async fn wait_stream_timeout_purges_task() {
+        let (orchestrator, storage) = orchestrator_with_storage();
+        let task_id = storage.create_task(0).await;
+
+        let err = orchestrator
+            .wait_stream(task_id, Duration::from_millis(1))
+            .await
+            .expect_err("pending task should time out");
+
+        assert!(matches!(err, CoreError::Timeout));
+        assert!(matches!(
+            orchestrator.get_status(task_id).await,
+            Err(CoreError::TaskNotFound { task_id: missing }) if missing == task_id
+        ));
+    }
+}

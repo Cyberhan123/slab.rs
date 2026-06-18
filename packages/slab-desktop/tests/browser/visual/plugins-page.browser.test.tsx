@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import PluginsPage from "@/pages/plugins";
 import type { components } from "@slab/api/v1";
-import { renderDesktopScene } from "../test-utils";
+import { expectDesktopSceneAccessible, renderDesktopScene } from "../test-utils";
 
 type PluginRecord = components["schemas"]["PluginResponse"];
 
@@ -124,9 +124,8 @@ describe("PluginsPage browser visual regression", () => {
 
     await renderDesktopScene(<PluginsPage />, { route: "/plugins" });
 
-    await expect
-      .element(page.getByText("Plugins require Tauri desktop runtime"))
-      .toBeVisible();
+    await expectDesktopSceneAccessible();
+    await expect.element(page.getByText("No installed plugins found.")).toBeVisible();
     await expect(page.getByTestId("desktop-browser-scene")).toMatchScreenshot(
       "plugins-page-non-tauri.png",
     );
@@ -170,6 +169,7 @@ describe("PluginsPage browser visual regression", () => {
     await renderDesktopScene(<PluginsPage />, { route: "/plugins" });
     await new Promise((resolve) => setTimeout(resolve, 100));
 
+    await expectDesktopSceneAccessible();
     await expect.element(page.getByRole("heading", { name: "Image Enhancer" })).toBeVisible();
     await expect(page.getByTestId("desktop-browser-scene")).toMatchScreenshot(
       "plugins-page-with-plugins.png",

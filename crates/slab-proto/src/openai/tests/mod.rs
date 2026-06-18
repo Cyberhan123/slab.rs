@@ -1,5 +1,5 @@
-use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::openai::audio::{
@@ -7,18 +7,22 @@ use crate::openai::audio::{
     VoiceConsentDeletedResource, VoiceConsentListResource, VoiceConsentResource,
 };
 use crate::openai::{
-    ChatCompletionDeleted, CompactResource, CreateChatCompletionRequest,
-    CreateChatCompletionResponse, CreateChatCompletionStreamResponse, CreateCompletionRequest,
-    CreateCompletionRequestModel, CreateCompletionResponse, CreateEmbeddingRequest,
-    CreateEmbeddingResponse, CreateTranscription200Response,
-    CreateTranscriptionResponseDiarizedJson, CreateTranscriptionResponseDiarizedJsonTask,
-    CreateTranslation200Response, CreateVideoEditJsonBody, CreateVideoExtendJsonBody,
-    CreateVideoJsonBody, CreateVideoRemixBody, DeletedSkillResource, DeletedSkillVersionResource,
-    ImagesResponse, ListModelsResponse, Model, Response, ResponseCompletedEvent,
-    ResponseCreatedEvent, ResponseErrorEvent, ResponseFailedEvent,
-    ResponseFunctionCallArgumentsDeltaEvent, ResponseFunctionCallArgumentsDoneEvent,
-    ResponseInProgressEvent, ResponseIncompleteEvent, ResponseItemList, ResponseQueuedEvent,
-    ResponseStatus, ResponseTextDeltaEvent, ResponseTextDoneEvent, SkillListResource,
+    ChatCompletionDeleted, ChatCompletionMessageToolCallsInner,
+    ChatCompletionRequestAssistantMessage, ChatCompletionRequestAssistantMessageContent,
+    ChatCompletionRequestAssistantMessageContentPart, ChatCompletionRequestMessage,
+    ChatCompletionRequestUserMessageContent, ChatCompletionRequestUserMessageContentPart,
+    CompactResource, CreateChatCompletionRequest, CreateChatCompletionResponse,
+    CreateChatCompletionStreamResponse, CreateCompletionRequest, CreateCompletionRequestModel,
+    CreateCompletionResponse, CreateEmbeddingRequest, CreateEmbeddingResponse,
+    CreateTranscription200Response, CreateTranscriptionResponseDiarizedJson,
+    CreateTranscriptionResponseDiarizedJsonTask, CreateTranslation200Response,
+    CreateVideoEditJsonBody, CreateVideoExtendJsonBody, CreateVideoJsonBody, CreateVideoRemixBody,
+    DeletedSkillResource, DeletedSkillVersionResource, ImagesResponse, ListModelsResponse, Model,
+    OutputItem, OutputMessageContent, Response, ResponseCompletedEvent, ResponseCreatedEvent,
+    ResponseErrorEvent, ResponseFailedEvent, ResponseFunctionCallArgumentsDeltaEvent,
+    ResponseFunctionCallArgumentsDoneEvent, ResponseInProgressEvent, ResponseIncompleteEvent,
+    ResponseItemList, ResponseQueuedEvent, ResponseStatus, ResponseStreamEvent,
+    ResponseTextDeltaEvent, ResponseTextDoneEvent, ResponsesServerEvent, SkillListResource,
     SkillResource, SkillVersionListResource, SkillVersionResource, TranscriptTextDeltaEvent,
     TranscriptTextDoneEvent, TranscriptTextSegmentEvent, UpdateChatCompletionRequest,
     VideoCharacterResource, VideoContentVariant, VideoListResource, VideoResource,
@@ -101,6 +105,18 @@ where
 {
     serde_json::from_str(fixture)
         .unwrap_or_else(|error| panic!("failed to deserialize fixture: {error}\n{fixture}"))
+}
+
+fn assert_json_round_trips<T>(fixture: &str) -> T
+where
+    T: DeserializeOwned + Serialize,
+{
+    let expected: serde_json::Value =
+        serde_json::from_str(fixture).expect("fixture should be valid JSON");
+    let parsed: T = assert_json_deserializes(fixture);
+    let actual = serde_json::to_value(&parsed).expect("parsed fixture should serialize");
+    assert_eq!(actual, expected);
+    parsed
 }
 
 mod audio;

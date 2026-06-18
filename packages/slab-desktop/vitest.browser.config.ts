@@ -9,6 +9,9 @@ const componentSourcePath = path.resolve(__dirname, "../slab-components/src");
 const componentSourceUrl = componentSourcePath.replace(/\\/g, "/");
 const apiSourcePath = path.resolve(__dirname, "../api/src");
 const apiSourceUrl = apiSourcePath.replace(/\\/g, "/");
+const browserActionTimeoutMs = 5_000;
+const browserTestTimeoutMs = 30_000;
+const browserTeardownTimeoutMs = 10_000;
 
 export default defineProject({
   plugins: [react(), tailwindcss()],
@@ -20,13 +23,17 @@ export default defineProject({
     include: ["tests/browser/**/*.browser.test.tsx"],
     css: true,
     fileParallelism: false,
+    hookTimeout: browserTestTimeoutMs,
+    retry: 0,
     setupFiles: ["./tests/browser/vitest.setup.ts"],
+    teardownTimeout: browserTeardownTimeoutMs,
+    testTimeout: browserTestTimeoutMs,
     browser: {
       enabled: true,
       headless: true,
       api: { host: "127.0.0.1", port: 64115 },
       provider: playwright({
-        actionTimeout: 5_000,
+        actionTimeout: browserActionTimeoutMs,
       }),
       viewport: {
         width: 1440,

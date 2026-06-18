@@ -69,3 +69,6 @@ validator = { workspace = true, features = ["derive"] }
 # Misc
 async-trait   = { workspace = true }
 clap = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

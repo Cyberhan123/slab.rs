@@ -16,10 +16,6 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage"
   },
-  "lint-staged": {
-    "*.{js,jsx,ts,tsx,mjs,cjs}": "bun run lint",
-    "*.rs": "cargo fmt -- --check"
-  },
   "dependencies": {
     "@ant-design/icons": "catalog:",
     "@ant-design/x": "catalog:",

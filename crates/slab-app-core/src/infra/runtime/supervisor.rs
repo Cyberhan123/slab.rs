@@ -425,6 +425,15 @@ struct RuntimeChildStartup {
     initial_restart_attempts: usize,
 }
 
+struct RuntimeSupervisorTaskContext {
+    child_spec: ResolvedRuntimeChildSpec,
+    spawner: Arc<dyn RuntimeChildSpawner>,
+    status: Arc<RuntimeSupervisorStatus>,
+    shutdown_rx: watch::Receiver<bool>,
+    command_rx: mpsc::UnboundedReceiver<RuntimeSupervisorCommand>,
+    options: RuntimeSupervisorOptions,
+}
+
 impl ManagedRuntimeSupervisor {
     pub async fn start(
         launch_spec: ResolvedLaunchSpec,
@@ -535,35 +544,41 @@ impl ManagedRuntimeSupervisor {
         for startup in child_startups {
             if let Some(handle) = startup.handle {
                 let child_spec = startup.child_spec;
+                let task_context = RuntimeSupervisorTaskContext {
+                    child_spec: child_spec.clone(),
+                    spawner: Arc::clone(&spawner),
+                    status: Arc::clone(&status),
+                    shutdown_rx: shutdown_tx.subscribe(),
+                    command_rx: startup.command_rx,
+                    options: options.clone(),
+                };
                 tasks.push(spawn_supervisor_task(
                     child_spec.clone(),
                     Arc::clone(&status),
                     shutdown_tx.subscribe(),
                     supervise_backend(
-                        child_spec,
+                        task_context,
                         handle,
-                        Arc::clone(&spawner),
-                        Arc::clone(&status),
-                        shutdown_tx.subscribe(),
-                        startup.command_rx,
-                        options.clone(),
                         startup.initial_consecutive_failures,
                         startup.initial_restart_attempts,
                     ),
                 ));
             } else {
                 let child_spec = startup.child_spec;
+                let task_context = RuntimeSupervisorTaskContext {
+                    child_spec: child_spec.clone(),
+                    spawner: Arc::clone(&spawner),
+                    status: Arc::clone(&status),
+                    shutdown_rx: shutdown_tx.subscribe(),
+                    command_rx: startup.command_rx,
+                    options: options.clone(),
+                };
                 tasks.push(spawn_supervisor_task(
                     child_spec.clone(),
                     Arc::clone(&status),
                     shutdown_tx.subscribe(),
                     supervise_backend_startup_retry(
-                        child_spec,
-                        Arc::clone(&spawner),
-                        Arc::clone(&status),
-                        shutdown_tx.subscribe(),
-                        startup.command_rx,
-                        options.clone(),
+                        task_context,
                         startup.initial_consecutive_failures,
                         startup.initial_restart_attempts,
                     ),
@@ -683,23 +698,18 @@ fn mark_startup_failed_all(
 }
 
 async fn supervise_backend_startup_retry(
-    child_spec: ResolvedRuntimeChildSpec,
-    spawner: Arc<dyn RuntimeChildSpawner>,
-    status: Arc<RuntimeSupervisorStatus>,
-    mut shutdown_rx: watch::Receiver<bool>,
-    command_rx: mpsc::UnboundedReceiver<RuntimeSupervisorCommand>,
-    options: RuntimeSupervisorOptions,
+    mut context: RuntimeSupervisorTaskContext,
     mut consecutive_failures: usize,
     mut restart_attempts: usize,
 ) {
-    let bind_address = child_spec.grpc_bind_address.clone();
-    let initial_delay = options.restart_delay(consecutive_failures);
+    let bind_address = context.child_spec.grpc_bind_address.clone();
+    let initial_delay = context.options.restart_delay(consecutive_failures);
     let Some(handle) = restart_child_with_retries(
-        &child_spec,
-        Arc::clone(&spawner),
-        Arc::clone(&status),
-        &mut shutdown_rx,
-        &options,
+        &context.child_spec,
+        Arc::clone(&context.spawner),
+        Arc::clone(&context.status),
+        &mut context.shutdown_rx,
+        &context.options,
         &bind_address,
         &mut consecutive_failures,
         &mut restart_attempts,
@@ -710,31 +720,23 @@ async fn supervise_backend_startup_retry(
         return;
     };
 
-    supervise_backend(
-        child_spec,
-        handle,
-        spawner,
-        status,
-        shutdown_rx,
-        command_rx,
-        options,
-        consecutive_failures,
-        restart_attempts,
-    )
-    .await;
+    supervise_backend(context, handle, consecutive_failures, restart_attempts).await;
 }
 
 async fn supervise_backend(
-    child_spec: ResolvedRuntimeChildSpec,
+    context: RuntimeSupervisorTaskContext,
     mut handle: Box<dyn RuntimeChildHandle>,
-    spawner: Arc<dyn RuntimeChildSpawner>,
-    status: Arc<RuntimeSupervisorStatus>,
-    mut shutdown_rx: watch::Receiver<bool>,
-    mut command_rx: mpsc::UnboundedReceiver<RuntimeSupervisorCommand>,
-    options: RuntimeSupervisorOptions,
     initial_consecutive_failures: usize,
     initial_restart_attempts: usize,
 ) {
+    let RuntimeSupervisorTaskContext {
+        child_spec,
+        spawner,
+        status,
+        mut shutdown_rx,
+        mut command_rx,
+        options,
+    } = context;
     let backend = child_spec.backend;
     let service_backends = child_service_backends(&child_spec);
     let bind_address = child_spec.grpc_bind_address.clone();

@@ -91,9 +91,36 @@ pub(super) fn extract_request_id(metadata: &tonic::metadata::MetadataMap) -> Str
 
 #[cfg(test)]
 mod tests {
-    use super::runtime_to_status;
+    use super::{GrpcServiceImpl, runtime_to_status};
+    use crate::application::services::RuntimeApplication;
+    use crate::domain::models::RuntimeEnabledBackends;
     use crate::domain::runtime::CoreError;
-    use tonic::Code;
+    use crate::domain::runtime::Orchestrator;
+    use crate::domain::services::ExecutionHub;
+    use slab_proto::slab::ipc::v1 as pb;
+    use slab_runtime_core::backend::ResourceManager;
+    use tonic::{Code, Request, Status};
+
+    fn grpc_service_with_backends(
+        backends: impl IntoIterator<Item = &'static str>,
+    ) -> GrpcServiceImpl {
+        let orchestrator = Orchestrator::start(ResourceManager::new(), 1);
+        let execution = ExecutionHub::new(orchestrator, RuntimeEnabledBackends::new(backends));
+        GrpcServiceImpl::new(RuntimeApplication::new(execution))
+    }
+
+    fn expect_status<T>(result: Result<T, Status>, code: Code, message: &str) {
+        let status = match result {
+            Ok(_) => panic!("handler should return status"),
+            Err(status) => status,
+        };
+        assert_eq!(status.code(), code);
+        assert!(
+            status.message().contains(message),
+            "expected `{}` to contain `{message}`",
+            status.message()
+        );
+    }
 
     #[test]
     fn engine_errors_map_to_internal_status() {
@@ -244,5 +271,113 @@ mod tests {
                 status.message()
             );
         }
+    }
+
+    #[tokio::test]
+    async fn handlers_map_disabled_backends_to_failed_precondition() {
+        let service = grpc_service_with_backends([]);
+
+        expect_status(
+            <GrpcServiceImpl as pb::ggml_llama_service_server::GgmlLlamaService>::unload_model(
+                &service,
+                Request::new(pb::ModelUnloadRequest::default()),
+            )
+            .await,
+            Code::FailedPrecondition,
+            "disabled",
+        );
+        expect_status(
+            <GrpcServiceImpl as pb::ggml_whisper_service_server::GgmlWhisperService>::unload_model(
+                &service,
+                Request::new(pb::ModelUnloadRequest::default()),
+            )
+            .await,
+            Code::FailedPrecondition,
+            "disabled",
+        );
+        expect_status(
+            <GrpcServiceImpl as pb::ggml_diffusion_service_server::GgmlDiffusionService>::unload_model(
+                &service,
+                Request::new(pb::ModelUnloadRequest::default()),
+            )
+            .await,
+            Code::FailedPrecondition,
+            "disabled",
+        );
+        expect_status(
+            <GrpcServiceImpl as pb::candle_transformers_service_server::CandleTransformersService>::unload_llama_model(
+                &service,
+                Request::new(pb::ModelUnloadRequest::default()),
+            )
+            .await,
+            Code::FailedPrecondition,
+            "disabled",
+        );
+        expect_status(
+            <GrpcServiceImpl as pb::candle_diffusion_service_server::CandleDiffusionService>::unload_model(
+                &service,
+                Request::new(pb::ModelUnloadRequest::default()),
+            )
+            .await,
+            Code::FailedPrecondition,
+            "disabled",
+        );
+        expect_status(
+            <GrpcServiceImpl as pb::onnx_service_server::OnnxService>::unload_text_model(
+                &service,
+                Request::new(pb::ModelUnloadRequest::default()),
+            )
+            .await,
+            Code::FailedPrecondition,
+            "disabled",
+        );
+    }
+
+    #[tokio::test]
+    async fn handlers_reject_invalid_proto_before_application_dispatch() {
+        let service = grpc_service_with_backends([]);
+
+        expect_status(
+            <GrpcServiceImpl as pb::ggml_llama_service_server::GgmlLlamaService>::chat(
+                &service,
+                Request::new(pb::GgmlLlamaChatRequest {
+                    agent_trace_json: Some("not json".to_owned()),
+                    ..pb::GgmlLlamaChatRequest::default()
+                }),
+            )
+            .await,
+            Code::InvalidArgument,
+            "protobuf conversion failed",
+        );
+        expect_status(
+            <GrpcServiceImpl as pb::candle_transformers_service_server::CandleTransformersService>::load_llama_model(
+                &service,
+                Request::new(pb::CandleLlamaLoadRequest {
+                    device: Some("not-a-device".to_owned()),
+                    ..pb::CandleLlamaLoadRequest::default()
+                }),
+            )
+            .await,
+            Code::InvalidArgument,
+            "protobuf conversion failed",
+        );
+    }
+
+    #[tokio::test]
+    async fn handlers_map_model_not_loaded_to_failed_precondition() {
+        let service = grpc_service_with_backends(["ggml.llama"]);
+
+        expect_status(
+            <GrpcServiceImpl as pb::ggml_llama_service_server::GgmlLlamaService>::chat(
+                &service,
+                Request::new(pb::GgmlLlamaChatRequest {
+                    prompt: Some("hello".to_owned()),
+                    ..pb::GgmlLlamaChatRequest::default()
+                }),
+            )
+            .await,
+            Code::FailedPrecondition,
+            "model is not loaded",
+        );
     }
 }

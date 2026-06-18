@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AssistantPage from '@/pages/assistant';
 import type { AssistantMessageRecord } from '@/pages/assistant/assistant-context';
 import type { AssistantConversationItem } from '@/pages/assistant/hooks/use-assistant-sessions';
-import { renderDesktopScene } from '../test-utils';
+import { expectDesktopSceneAccessible, renderDesktopScene } from '../test-utils';
 
 const { mockUseAssistantAgent } = vi.hoisted(() => ({
   mockUseAssistantAgent: vi.fn<() => unknown>(),
@@ -184,6 +184,8 @@ describe('AssistantPage browser visual regression', () => {
 
     await renderDesktopScene(<AssistantPage />, { route: '/' });
 
+    await expectDesktopSceneAccessible();
+    await expect.element(page.getByRole('button', { name: /send/i })).toBeVisible();
     await expect.element(page.getByTestId('desktop-browser-scene')).toBeVisible();
     await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot('assistant-page-empty.png');
   });

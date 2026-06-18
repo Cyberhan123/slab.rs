@@ -109,9 +109,16 @@ export interface SeededModelDownloadTask {
   taskId: string;
 }
 
+export interface RecordedRequest {
+  method: string;
+  path: string;
+}
+
 export interface SlabServerTestHarness {
   readonly baseUrl: string;
   readonly databasePath?: string;
+  recordRequest(path: string, init?: RequestInit | string): void;
+  recordedRequests(): readonly RecordedRequest[];
   request(path: string, init?: RequestInit): Promise<Response>;
   requestFormData(path: string, body: FormData, init?: Omit<RequestInit, "body">): Promise<Response>;
   requestJson<T>(path: string, init?: RequestInit): Promise<JsonResponse<T>>;
@@ -119,16 +126,47 @@ export interface SlabServerTestHarness {
   stop(): Promise<void>;
 }
 
+function requestMethod(init?: RequestInit | string): string {
+  if (typeof init === "string") {
+    return init.toUpperCase();
+  }
+
+  return (init?.method ?? "GET").toUpperCase();
+}
+
+function createRequestRecorder() {
+  const requests: RecordedRequest[] = [];
+
+  return {
+    record(path: string, init?: RequestInit | string): void {
+      requests.push({ method: requestMethod(init), path });
+    },
+    snapshot(): readonly RecordedRequest[] {
+      return [...requests];
+    }
+  };
+}
+
 export async function startSlabServerHarness(
   options: SlabServerTestHarnessOptions = {}
 ): Promise<SlabServerTestHarness> {
   const externalBaseUrl = options.externalBaseUrl?.trim().replace(/\/+$/, "");
+  const recorder = createRequestRecorder();
   if (externalBaseUrl) {
     return {
       baseUrl: externalBaseUrl,
-      request: (path, init) => fetch(`${externalBaseUrl}${path}`, init),
-      requestFormData: (path, body, init) => fetch(`${externalBaseUrl}${path}`, { ...init, body }),
+      recordRequest: recorder.record,
+      recordedRequests: recorder.snapshot,
+      request(path, init) {
+        recorder.record(path, init);
+        return fetch(`${externalBaseUrl}${path}`, init);
+      },
+      requestFormData(path, body, init) {
+        recorder.record(path, init);
+        return fetch(`${externalBaseUrl}${path}`, { ...init, body });
+      },
       async requestJson<T>(path: string, init?: RequestInit) {
+        recorder.record(path, init);
         const response = await fetch(`${externalBaseUrl}${path}`, init);
         const body = (await response.json()) as T;
         return { response, body };
@@ -239,9 +277,18 @@ export async function startSlabServerHarness(
           return {
             baseUrl,
             databasePath,
-            request: (path, init) => fetch(`${baseUrl}${path}`, init),
-            requestFormData: (path, body, init) => fetch(`${baseUrl}${path}`, { ...init, body }),
+            recordRequest: recorder.record,
+            recordedRequests: recorder.snapshot,
+            request(path, init) {
+              recorder.record(path, init);
+              return fetch(`${baseUrl}${path}`, init);
+            },
+            requestFormData(path, body, init) {
+              recorder.record(path, init);
+              return fetch(`${baseUrl}${path}`, { ...init, body });
+            },
             async requestJson<T>(path: string, init?: RequestInit) {
+              recorder.record(path, init);
               const response = await fetch(`${baseUrl}${path}`, init);
               const body = (await response.json()) as T;
               return { response, body };

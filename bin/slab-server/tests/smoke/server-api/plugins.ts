@@ -43,6 +43,18 @@ export function registerPluginsSmoke(getServer: () => SlabServerTestHarness): vo
       await expectError(server, "/v1/plugins/missing-plugin", 404);
       await expectError(
         server,
+        "/v1/plugins/missing-plugin/api-request",
+        404,
+        jsonInit(
+          {
+            method: "GET",
+            path: "/v1/models"
+          } satisfies Schema["PluginApiRequest"],
+          { method: "POST" }
+        )
+      );
+      await expectError(
+        server,
         "/v1/plugins/install",
         400,
         jsonInit(

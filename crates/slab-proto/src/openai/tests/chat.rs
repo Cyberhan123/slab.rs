@@ -73,3 +73,152 @@ fn chat_completions_post_response_with_content_filter_deserializes() {
     ));
     assert!(matches!(response.service_tier, Some(None)));
 }
+
+#[test]
+fn chat_completion_tool_call_union_round_trips_function_and_custom_calls() {
+    let function_call = json!({
+        "id": "call_1",
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "arguments": "{\"city\":\"Shanghai\"}"
+        }
+    });
+    let custom_call = json!({
+        "id": "call_2",
+        "type": "custom",
+        "custom": {
+            "name": "shell",
+            "input": "pwd"
+        }
+    });
+
+    let parsed_function: ChatCompletionMessageToolCallsInner =
+        serde_json::from_value(function_call.clone()).expect("function tool call");
+    let parsed_custom: ChatCompletionMessageToolCallsInner =
+        serde_json::from_value(custom_call.clone()).expect("custom tool call");
+
+    assert!(matches!(
+        parsed_function,
+        ChatCompletionMessageToolCallsInner::ChatCompletionMessageToolCall(_)
+    ));
+    assert!(matches!(
+        parsed_custom,
+        ChatCompletionMessageToolCallsInner::ChatCompletionMessageCustomToolCall(_)
+    ));
+    assert_eq!(serde_json::to_value(parsed_function).expect("serialize"), function_call);
+    assert_eq!(serde_json::to_value(parsed_custom).expect("serialize"), custom_call);
+}
+
+#[test]
+fn chat_completion_tool_call_union_rejects_unknown_missing_and_mismatched_shapes() {
+    let unknown_type = json!({
+        "id": "call_1",
+        "type": "web_search",
+        "web_search": {}
+    });
+    let missing_function = json!({
+        "id": "call_1",
+        "type": "function"
+    });
+    let mismatched_function = json!({
+        "id": "call_1",
+        "type": "function",
+        "function": "not an object"
+    });
+
+    assert!(serde_json::from_value::<ChatCompletionMessageToolCallsInner>(unknown_type).is_err());
+    assert!(
+        serde_json::from_value::<ChatCompletionMessageToolCallsInner>(missing_function).is_err()
+    );
+    assert!(
+        serde_json::from_value::<ChatCompletionMessageToolCallsInner>(mismatched_function).is_err()
+    );
+}
+
+#[test]
+fn chat_completion_request_message_content_unions_round_trip() {
+    let assistant_message = json!({
+        "role": "assistant",
+        "content": [
+            {
+                "type": "text",
+                "text": "partial answer"
+            },
+            {
+                "type": "refusal",
+                "refusal": "I cannot comply"
+            }
+        ]
+    });
+    let user_content = json!([
+        {
+            "type": "text",
+            "text": "what is in this image?"
+        },
+        {
+            "type": "image_url",
+            "image_url": {
+                "url": "https://example.test/image.png"
+            }
+        }
+    ]);
+
+    let assistant: ChatCompletionRequestAssistantMessage =
+        serde_json::from_value(assistant_message.clone()).expect("assistant message content");
+    let message: ChatCompletionRequestMessage =
+        serde_json::from_value(assistant_message.clone()).expect("assistant request message");
+    let user: ChatCompletionRequestUserMessageContent =
+        serde_json::from_value(user_content.clone()).expect("user multimodal content");
+
+    let assistant_content = assistant.content.as_ref().and_then(|content| content.as_ref());
+    assert!(matches!(
+        assistant_content,
+        Some(content) if matches!(content.as_ref(), ChatCompletionRequestAssistantMessageContent::ArrayContentParts(parts) if parts.len() == 2)
+    ));
+    assert!(matches!(
+        message,
+        ChatCompletionRequestMessage::ChatCompletionRequestAssistantMessage(_)
+    ));
+    assert!(matches!(
+        &user,
+        ChatCompletionRequestUserMessageContent::ArrayContentParts(parts) if parts.len() == 2
+    ));
+    assert_eq!(serde_json::to_value(assistant).expect("serialize assistant"), assistant_message);
+    assert_eq!(serde_json::to_value(user).expect("serialize user content"), user_content);
+}
+
+#[test]
+fn chat_completion_request_message_content_unions_reject_invalid_parts() {
+    let unknown_user_part = json!({
+        "type": "video",
+        "video": {
+            "url": "https://example.test/video.mp4"
+        }
+    });
+    let missing_assistant_text = json!({
+        "type": "text",
+        "refusal": "wrong field for text part"
+    });
+    let mismatched_user_content = json!([
+        {
+            "type": "image_url",
+            "image_url": "not an object"
+        }
+    ]);
+
+    assert!(
+        serde_json::from_value::<ChatCompletionRequestUserMessageContentPart>(unknown_user_part)
+            .is_err()
+    );
+    assert!(
+        serde_json::from_value::<ChatCompletionRequestAssistantMessageContentPart>(
+            missing_assistant_text
+        )
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<ChatCompletionRequestUserMessageContent>(mismatched_user_content)
+            .is_err()
+    );
+}

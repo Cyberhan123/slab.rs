@@ -62,7 +62,7 @@ pub struct OutputTextContent {
     /// The annotations of the text output.
     #[serde(rename = "annotations")]
     pub annotations: Vec<models::Annotation>,
-    #[serde(rename = "logprobs")]
+    #[serde(rename = "logprobs", default, skip_serializing_if = "Vec::is_empty")]
     pub logprobs: Vec<models::LogProb>,
 }
 

@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
+import { page } from 'vitest/browser';
+import { expect } from 'vitest';
 import { render } from 'vitest-browser-react';
 
 import { Toaster } from '@slab/components/sonner';
@@ -27,12 +29,13 @@ export async function renderDesktopScene(
   });
 
   return render(
-    <div
+    <main
+      aria-label="Slab desktop scene"
       data-testid="desktop-browser-scene"
       className="min-h-screen bg-app-canvas px-6 py-8 text-foreground"
     >
       {ui}
-    </div>,
+    </main>,
     {
       wrapper: ({ children }) => (
         <MemoryRouter initialEntries={[route]}>
@@ -48,4 +51,8 @@ export async function renderDesktopScene(
       ),
     },
   );
+}
+
+export async function expectDesktopSceneAccessible() {
+  await expect.element(page.getByRole('main', { name: 'Slab desktop scene' })).toBeVisible();
 }

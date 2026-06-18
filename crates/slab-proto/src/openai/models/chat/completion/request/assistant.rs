@@ -17,13 +17,11 @@ impl ChatCompletionRequestAssistantMessageAudio {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[serde(untagged)]
 pub enum ChatCompletionRequestAssistantMessageContentPart {
-    #[serde(rename = "ChatCompletionRequestMessageContentPartText")]
     ChatCompletionRequestMessageContentPartText(
         Box<models::ChatCompletionRequestMessageContentPartText>,
     ),
-    #[serde(rename = "ChatCompletionRequestMessageContentPartRefusal")]
     ChatCompletionRequestMessageContentPartRefusal(
         Box<models::ChatCompletionRequestMessageContentPartRefusal>,
     ),

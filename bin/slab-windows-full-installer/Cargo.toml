@@ -13,6 +13,9 @@ name = "slab-windows-full-installer"
 path = "src/main.rs"
 test = false
 
+[lib]
+test = false
+
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }

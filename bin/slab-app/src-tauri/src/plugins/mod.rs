@@ -114,9 +114,8 @@ pub async fn plugin_call(
     runtime_client: State<'_, PluginRpcWsClient>,
     request: PluginCallRequest,
 ) -> Result<PluginCallResponse, String> {
-    if let Some(caller_plugin_id) = caller_plugin_id(&webview) {
-        ensure_same_plugin_call(&caller_plugin_id, &request.plugin_id)?;
-    }
+    let caller_plugin_id = caller_plugin_id(&webview);
+    authorize_plugin_call_request(caller_plugin_id.as_deref(), &request)?;
 
     runtime_client.call(&request).await
 }
@@ -128,10 +127,12 @@ pub async fn plugin_api_request(
     registry: State<'_, PluginRegistryState>,
     request: PluginApiRequest,
 ) -> Result<PluginApiResponse, String> {
-    if let Some(caller_plugin_id) = caller_plugin_id(&webview) {
-        let plugin = registry.get_plugin(&caller_plugin_id)?;
-        authorize_slab_api_request(&plugin.manifest.permissions.slab_api, &request)?;
-    }
+    let caller_plugin_id = caller_plugin_id(&webview);
+    authorize_plugin_api_request_from_caller(
+        caller_plugin_id.as_deref(),
+        registry.inner(),
+        &request,
+    )?;
 
     execute_plugin_api_request_async(api_endpoint.inner(), &request).await
 }
@@ -209,6 +210,29 @@ fn caller_plugin_id(webview: &Webview) -> Option<String> {
     view::plugin_id_from_webview_label(webview.label())
 }
 
+fn authorize_plugin_call_request(
+    caller_plugin_id: Option<&str>,
+    request: &PluginCallRequest,
+) -> Result<(), String> {
+    if let Some(caller_plugin_id) = caller_plugin_id {
+        ensure_same_plugin_call(caller_plugin_id, &request.plugin_id)?;
+    }
+    Ok(())
+}
+
+fn authorize_plugin_api_request_from_caller(
+    caller_plugin_id: Option<&str>,
+    registry: &PluginRegistryState,
+    request: &PluginApiRequest,
+) -> Result<(), String> {
+    let Some(caller_plugin_id) = caller_plugin_id else {
+        return Ok(());
+    };
+
+    let plugin = registry.get_plugin(caller_plugin_id)?;
+    authorize_slab_api_request(&plugin.manifest.permissions.slab_api, request)
+}
+
 fn ensure_same_plugin_call(
     caller_plugin_id: &str,
     requested_plugin_id: &str,
@@ -278,9 +302,11 @@ fn path_matches(path: &str, base: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        PluginThemeSnapshot, PluginThemeState, authorize_slab_api_request, ensure_same_plugin_call,
+        PluginThemeSnapshot, PluginThemeState, authorize_plugin_api_request_from_caller,
+        authorize_plugin_call_request, authorize_slab_api_request, ensure_same_plugin_call,
         ensure_video_file_read_permission, is_allowed_video_path,
     };
+    use std::fs;
     use std::path::Path;
 
     #[test]
@@ -361,6 +387,73 @@ mod tests {
     }
 
     #[test]
+    fn plugin_call_authorization_uses_webview_caller_when_present() {
+        let request = super::PluginCallRequest {
+            plugin_id: "video-subtitle-translator".to_string(),
+            function: "run".to_string(),
+            input: String::new(),
+        };
+
+        assert!(authorize_plugin_call_request(None, &request).is_ok());
+        assert!(authorize_plugin_call_request(Some("video-subtitle-translator"), &request).is_ok());
+        assert!(authorize_plugin_call_request(Some("other-plugin"), &request).is_err());
+    }
+
+    #[test]
+    fn plugin_api_authorization_uses_registered_caller_permissions() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let registry = registry_with_plugin(
+            root.path(),
+            "video-subtitle-translator",
+            &["models:read", "chat:complete"],
+        );
+        let request = super::PluginApiRequest {
+            method: "GET".to_string(),
+            path: "/v1/models".to_string(),
+            headers: Default::default(),
+            body: None,
+            timeout_ms: None,
+        };
+
+        assert!(
+            authorize_plugin_api_request_from_caller(
+                Some("video-subtitle-translator"),
+                &registry,
+                &request
+            )
+            .is_ok()
+        );
+        assert!(
+            authorize_plugin_api_request_from_caller(Some("missing-plugin"), &registry, &request)
+                .expect_err("missing plugin should fail")
+                .contains("not available")
+        );
+    }
+
+    #[test]
+    fn plugin_api_authorization_rejects_missing_caller_permission() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let registry = registry_with_plugin(root.path(), "video-subtitle-translator", &[]);
+        let request = super::PluginApiRequest {
+            method: "POST".to_string(),
+            path: "/v1/chat/completions".to_string(),
+            headers: Default::default(),
+            body: None,
+            timeout_ms: None,
+        };
+
+        let error = authorize_plugin_api_request_from_caller(
+            Some("video-subtitle-translator"),
+            &registry,
+            &request,
+        )
+        .expect_err("missing permission should fail");
+
+        assert!(error.contains("requires permissions.slabApi `chat:complete`"));
+        assert!(authorize_plugin_api_request_from_caller(None, &registry, &request).is_ok());
+    }
+
+    #[test]
     fn theme_state_roundtrips_snapshot() {
         let state = PluginThemeState::default();
         let mut snapshot = PluginThemeSnapshot::default();
@@ -369,5 +462,35 @@ mod tests {
         state.set_snapshot(snapshot.clone()).unwrap();
 
         assert_eq!(state.snapshot().unwrap(), snapshot);
+    }
+
+    fn registry_with_plugin(
+        root: &Path,
+        plugin_id: &str,
+        slab_api_permissions: &[&str],
+    ) -> super::PluginRegistryState {
+        let plugin_dir = root.join(plugin_id);
+        fs::create_dir_all(plugin_dir.join("ui")).expect("plugin ui dir");
+        fs::write(plugin_dir.join("ui").join("index.html"), "<!doctype html>").expect("plugin ui");
+        fs::write(
+            plugin_dir.join("plugin.json"),
+            serde_json::json!({
+                "manifestVersion": 1,
+                "id": plugin_id,
+                "name": "Video Subtitle Translator",
+                "version": "0.1.0",
+                "runtime": {
+                    "ui": { "entry": "ui/index.html" }
+                },
+                "permissions": {
+                    "network": { "mode": "blocked", "allowHosts": [] },
+                    "slabApi": slab_api_permissions
+                }
+            })
+            .to_string(),
+        )
+        .expect("plugin manifest");
+
+        super::PluginRegistryState::new(root.to_path_buf()).expect("plugin registry")
     }
 }

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SettingsPage from '@/pages/settings';
 import type { SettingsDocumentResponse } from '@/pages/settings/types';
-import { renderDesktopScene } from '../test-utils';
+import { expectDesktopSceneAccessible, renderDesktopScene } from '../test-utils';
 
 const { mockUseSettingsAutosave } = vi.hoisted(() => ({
   mockUseSettingsAutosave: vi.fn<() => unknown>(),
@@ -171,6 +171,7 @@ describe('SettingsPage browser visual regression', () => {
 
     await renderDesktopScene(<SettingsPage />, { route: '/settings' });
 
+    await expectDesktopSceneAccessible();
     await expect.element(page.getByRole('heading', { name: 'General' })).toBeVisible();
     await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot('settings-page-with-data.png');
   });

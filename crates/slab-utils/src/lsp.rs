@@ -161,4 +161,23 @@ mod tests {
 
         assert_eq!(error, "language server response header is not UTF-8");
     }
+
+    #[tokio::test]
+    async fn rejects_partial_stdio_bodies() {
+        let mut framed =
+            std::io::Cursor::new(b"Content-Length: 24\r\n\r\n{\"jsonrpc\":\"2.0\"}".to_vec());
+
+        let error = read_lsp_stdio_message(&mut framed).await.expect_err("partial body");
+
+        assert!(error.starts_with("failed to read language server body:"));
+    }
+
+    #[tokio::test]
+    async fn rejects_non_utf8_stdio_bodies() {
+        let mut framed = std::io::Cursor::new(b"Content-Length: 1\r\n\r\n\xff".to_vec());
+
+        let error = read_lsp_stdio_message(&mut framed).await.expect_err("non-utf8 body");
+
+        assert_eq!(error, "language server response body is not UTF-8");
+    }
 }

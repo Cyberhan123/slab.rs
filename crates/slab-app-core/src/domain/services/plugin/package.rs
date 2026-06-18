@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -207,6 +208,7 @@ pub(super) fn ensure_path_within(path: &Path, root: &Path) -> Result<(), AppCore
         ))
     })?;
     let path = if path.is_absolute() { path.to_path_buf() } else { root.join(path) };
+    let path = canonicalize_existing_or_nearest(&path);
     if path.starts_with(&root) {
         Ok(())
     } else {
@@ -216,4 +218,26 @@ pub(super) fn ensure_path_within(path: &Path, root: &Path) -> Result<(), AppCore
             root.display()
         )))
     }
+}
+
+fn canonicalize_existing_or_nearest(path: &Path) -> PathBuf {
+    if let Ok(canonical) = path.canonicalize() {
+        return canonical;
+    }
+
+    let mut current = path;
+    let mut tail = Vec::<OsString>::new();
+    while let (Some(parent), Some(file_name)) = (current.parent(), current.file_name()) {
+        tail.push(file_name.to_os_string());
+        if let Ok(canonical_parent) = parent.canonicalize() {
+            let mut resolved = canonical_parent;
+            for segment in tail.iter().rev() {
+                resolved.push(segment);
+            }
+            return resolved;
+        }
+        current = parent;
+    }
+
+    path.to_path_buf()
 }

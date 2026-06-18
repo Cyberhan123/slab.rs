@@ -308,8 +308,15 @@ pub async fn workspace_console_run(
     state: State<'_, WorkspaceState>,
     command: String,
 ) -> Result<WorkspaceConsoleOutput, String> {
-    let workspace = active_workspace(&state)?;
-    WorkspaceService::run_console_command(PathBuf::from(workspace.root_path), &command)
+    run_console_command_in_active_workspace(&state, &command).await
+}
+
+async fn run_console_command_in_active_workspace(
+    state: &WorkspaceState,
+    command: &str,
+) -> Result<WorkspaceConsoleOutput, String> {
+    let workspace = active_workspace(state)?;
+    WorkspaceService::run_console_command(PathBuf::from(workspace.root_path), command)
         .await
         .map_err(|error| error.to_string())
 }
@@ -337,6 +344,28 @@ fn state_response(state: &WorkspaceState) -> Result<WorkspaceStateResponse, Stri
 
 pub(crate) fn active_workspace(state: &WorkspaceState) -> Result<WorkspaceInfo, String> {
     state.snapshot()?.current.ok_or_else(|| "no workspace is currently open".to_string())
+}
+
+#[cfg(test)]
+pub(crate) fn workspace_state_for_test(
+    recent_store_path: PathBuf,
+    current: Option<WorkspaceInfo>,
+) -> WorkspaceState {
+    WorkspaceState::new(recent_store_path, current)
+}
+
+#[cfg(test)]
+pub(crate) fn workspace_info_for_test(root: &Path) -> WorkspaceInfo {
+    let slab_dir = root.join(SLAB_DIR_NAME);
+    WorkspaceInfo {
+        root_path: display_path_string(root),
+        name: root.file_name().and_then(|name| name.to_str()).unwrap_or("Workspace").to_owned(),
+        slab_dir: display_path_string(&slab_dir),
+        settings_path: display_path_string(&slab_dir.join(SETTINGS_FILE)),
+        database_path: display_path_string(&slab_dir.join("test.sqlite")),
+        model_config_dir: display_path_string(&slab_dir.join("models")),
+        session_state_dir: display_path_string(&slab_dir.join("sessions")),
+    }
 }
 
 fn prepare_workspace(root_path: PathBuf) -> Result<WorkspaceInfo, String> {
@@ -616,11 +645,72 @@ fn now_millis() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_plugin_id;
+    use std::path::PathBuf;
+
+    use super::{
+        active_workspace, run_console_command_in_active_workspace, validate_plugin_id,
+        workspace_info_for_test, workspace_state_for_test,
+    };
 
     #[test]
     fn validate_plugin_id_accepts_manifest_style_ids() {
         assert!(validate_plugin_id("video-subtitle_translator").is_ok());
         assert!(validate_plugin_id("Plugin").is_err());
+    }
+
+    #[test]
+    fn active_workspace_requires_current_workspace() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = workspace_state_for_test(temp.path().join("recent.json"), None);
+
+        let error = active_workspace(&state).expect_err("workspace should be required");
+
+        assert_eq!(error, "no workspace is currently open");
+    }
+
+    #[test]
+    fn active_workspace_returns_current_workspace_snapshot() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workspace = workspace_info_for_test(temp.path());
+        let state = workspace_state_for_test(temp.path().join("recent.json"), Some(workspace));
+
+        let current = active_workspace(&state).expect("active workspace");
+
+        assert_eq!(current.root_path, temp.path().to_string_lossy());
+    }
+
+    #[tokio::test]
+    async fn console_run_requires_active_workspace() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = workspace_state_for_test(temp.path().join("recent.json"), None);
+
+        let error = run_console_command_in_active_workspace(&state, "echo should-not-run")
+            .await
+            .expect_err("workspace should be required");
+
+        assert_eq!(error, "no workspace is currently open");
+    }
+
+    #[tokio::test]
+    async fn console_run_uses_active_workspace_root() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = workspace_state_for_test(
+            temp.path().join("recent.json"),
+            Some(workspace_info_for_test(temp.path())),
+        );
+        let command =
+            if cfg!(windows) { "(Get-Location).Path".to_string() } else { "pwd".to_string() };
+
+        let output = run_console_command_in_active_workspace(&state, &command)
+            .await
+            .expect("console output");
+
+        assert_eq!(output.exit_code, Some(0));
+        assert!(!output.timed_out);
+        let reported_cwd = PathBuf::from(output.stdout.trim());
+        assert_eq!(
+            reported_cwd.canonicalize().expect("reported cwd"),
+            temp.path().canonicalize().expect("canonical temp")
+        );
     }
 }

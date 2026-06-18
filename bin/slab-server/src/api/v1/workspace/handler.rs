@@ -559,10 +559,13 @@ fn path_string(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use serde_json::Value;
     use utoipa::OpenApi;
 
-    use super::WorkspaceApi;
+    use super::{WorkspaceApi, canonical_workspace_root};
+    use crate::error::ServerError;
 
     #[test]
     fn workspace_routes_publish_rest_slice_in_openapi() {
@@ -604,5 +607,29 @@ mod tests {
             parameter["name"] == Value::String("relativePath".to_owned())
                 && parameter["in"] == Value::String("query".to_owned())
         }));
+    }
+
+    #[test]
+    fn canonical_workspace_root_accepts_existing_directories() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let nested = temp.path().join("workspace");
+        fs::create_dir(&nested).expect("workspace dir");
+
+        let canonical = canonical_workspace_root(nested.clone()).expect("canonical workspace");
+
+        assert_eq!(canonical, nested.canonicalize().expect("expected canonical path"));
+    }
+
+    #[test]
+    fn canonical_workspace_root_rejects_missing_paths_and_files() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let missing = temp.path().join("missing");
+        let missing_error = canonical_workspace_root(missing).expect_err("missing path rejected");
+        assert!(matches!(missing_error, ServerError::BadRequest(_)));
+
+        let file = temp.path().join("not-a-directory.txt");
+        fs::write(&file, "content").expect("write file");
+        let file_error = canonical_workspace_root(file).expect_err("file path rejected");
+        assert!(matches!(file_error, ServerError::BadRequest(_)));
     }
 }

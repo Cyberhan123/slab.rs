@@ -2,7 +2,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod bootstrap_ui;
-mod bundle;
 
 use std::env;
 use std::fs;
@@ -14,13 +13,16 @@ use clap::{Args, Parser, Subcommand};
 use uuid::Uuid;
 
 use crate::bootstrap_ui::run_bootstrap_with_ui;
-use crate::bundle::{
-    AssetInput, AssetKind, EmbeddedBundle, load_embedded_bundle, write_embedded_bundle,
-};
 use slab_utils::cab::{
     PackagedPayloadManifest, RequestedVariant, RuntimeVariant, SelectedPayloadManifest,
     apply_selected_payload, detect_best_variant, expand_cab_with_progress, remove_dir_if_exists,
     selected_packages, stage_runtime_payloads, write_json,
+};
+use slab_windows_full_installer::bundle::{
+    AssetInput, AssetKind, EmbeddedBundle, load_embedded_bundle, write_embedded_bundle,
+};
+use slab_windows_full_installer::installer::{
+    full_installer_output_name, nsis_installer_candidate, select_nsis_installer_candidate,
 };
 
 const PAYLOAD_MANIFEST_FILE_NAME: &str = "payload-manifest.json";
@@ -379,10 +381,6 @@ fn workspace_root() -> Result<PathBuf> {
         .context("failed to resolve workspace root")
 }
 
-fn full_installer_output_name(version: &str) -> String {
-    format!("Slab_{version}_x64-offline-setup.exe")
-}
-
 fn resolve_nsis_installer(workspace_root: &Path, explicit: Option<PathBuf>) -> Result<PathBuf> {
     if let Some(path) = explicit {
         if !path.is_file() {
@@ -405,34 +403,16 @@ fn resolve_nsis_installer(workspace_root: &Path, explicit: Option<PathBuf>) -> R
             continue;
         }
 
-        let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
-            continue;
-        };
-        if path.extension().and_then(|value| value.to_str()) != Some("exe") {
-            continue;
-        }
-        if is_offline_setup_executable(file_name) {
-            continue;
-        }
-
         let modified = entry
             .metadata()
             .with_context(|| format!("failed to read metadata for {}", path.display()))?
             .modified()
             .with_context(|| format!("failed to read modified time for {}", path.display()))?;
-        let looks_like_setup = file_name.to_ascii_lowercase().contains("setup");
-        candidates.push((looks_like_setup, modified, path));
+        if let Some(candidate) = nsis_installer_candidate(path, modified) {
+            candidates.push(candidate);
+        }
     }
 
-    candidates.sort_by(|left, right| right.cmp(left));
-    candidates
-        .into_iter()
-        .next()
-        .map(|(_, _, path)| path)
+    select_nsis_installer_candidate(candidates)
         .ok_or_else(|| anyhow!("no NSIS setup executable was found under {}", bundle_dir.display()))
-}
-
-fn is_offline_setup_executable(file_name: &str) -> bool {
-    let lowered = file_name.to_ascii_lowercase();
-    lowered.starts_with("slab_") && lowered.ends_with("_x64-offline-setup.exe")
 }

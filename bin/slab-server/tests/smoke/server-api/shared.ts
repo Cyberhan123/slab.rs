@@ -2,10 +2,14 @@ import type { components, paths } from "@slab/api";
 import { createHash } from "node:crypto";
 import { expect } from "vitest";
 
-import type { JsonResponse, SlabServerTestHarness } from "../../support/slab-server";
+import type {
+  JsonResponse,
+  RecordedRequest,
+  SlabServerTestHarness
+} from "../../support/slab-server";
 
 export type ApiPath = keyof paths;
-export type HttpMethod = "delete" | "get" | "post" | "put";
+export type HttpMethod = "delete" | "get" | "patch" | "post" | "put";
 export type OpenApiDocument = {
   openapi?: string;
   paths?: Record<string, Partial<Record<HttpMethod, unknown>>>;
@@ -42,7 +46,8 @@ export const externalBaseUrl = process.env.SLAB_SERVER_BASE_URL?.trim();
 export const jsonHeaders = {
   "Content-Type": "application/json"
 };
-const documentedMethods: readonly HttpMethod[] = ["delete", "get", "post", "put"];
+const documentedMethods: readonly HttpMethod[] = ["delete", "get", "patch", "post", "put"];
+const locallySeededOperationKeys = new Set(["POST /v1/tasks/{id}/restart"]);
 
 export const executableSmokeOperations = [
   { method: "get", path: "/health" },
@@ -82,6 +87,7 @@ export const executableSmokeOperations = [
   { method: "get", path: "/v1/plugins/rpc" },
   { method: "delete", path: "/v1/plugins/{id}" },
   { method: "get", path: "/v1/plugins/{id}" },
+  { method: "post", path: "/v1/plugins/{id}/api-request" },
   { method: "post", path: "/v1/plugins/{id}/disable" },
   { method: "post", path: "/v1/plugins/{id}/enable" },
   { method: "post", path: "/v1/plugins/{id}/start" },
@@ -112,7 +118,27 @@ export const executableSmokeOperations = [
   { method: "post", path: "/v1/video/generations" },
   { method: "get", path: "/v1/video/generations/{id}" },
   { method: "get", path: "/v1/video/generations/{id}/artifact" },
-  { method: "get", path: "/v1/video/generations/{id}/reference" }
+  { method: "get", path: "/v1/video/generations/{id}/reference" },
+  { method: "get", path: "/v1/workspace" },
+  { method: "post", path: "/v1/workspace/close" },
+  { method: "post", path: "/v1/workspace/console/run" },
+  { method: "post", path: "/v1/workspace/directories" },
+  { method: "get", path: "/v1/workspace/directory" },
+  { method: "get", path: "/v1/workspace/files" },
+  { method: "post", path: "/v1/workspace/files" },
+  { method: "put", path: "/v1/workspace/files" },
+  { method: "post", path: "/v1/workspace/git/commit" },
+  { method: "post", path: "/v1/workspace/git/diff" },
+  { method: "post", path: "/v1/workspace/git/discard" },
+  { method: "post", path: "/v1/workspace/git/stage" },
+  { method: "get", path: "/v1/workspace/git/status" },
+  { method: "post", path: "/v1/workspace/git/unstage" },
+  { method: "post", path: "/v1/workspace/open" },
+  { method: "delete", path: "/v1/workspace/path" },
+  { method: "patch", path: "/v1/workspace/path" },
+  { method: "get", path: "/v1/workspace/path/stat" },
+  { method: "get", path: "/v1/workspace/search" },
+  { method: "get", path: "/v1/workspace/search/text" }
 ] as const satisfies readonly SmokeOperation[];
 
 export const todoSmokeOperations = [] as const satisfies readonly SmokeOperation[];
@@ -152,6 +178,70 @@ export function documentedOperationKeys(openapi: OpenApiDocument): string[] {
   }
 
   return keys.toSorted();
+}
+
+export function expectExecutableSmokeOperationsCovered(server: SlabServerTestHarness): void {
+  const actual = recordedExecutableOperationKeys(server.recordedRequests());
+  const expected = executableSmokeOperations
+    .map(operationKey)
+    .filter((key) => !externalBaseUrl || !locallySeededOperationKeys.has(key))
+    .toSorted();
+  expect(actual).toEqual(expected);
+}
+
+function recordedExecutableOperationKeys(requests: readonly RecordedRequest[]): string[] {
+  const keys = new Set<string>();
+
+  for (const request of requests) {
+    const operation = executableOperationForRequest(request);
+    if (operation) {
+      keys.add(operationKey(operation));
+    }
+  }
+
+  return [...keys].toSorted();
+}
+
+function executableOperationForRequest(request: RecordedRequest): SmokeOperation | undefined {
+  const method = request.method.toLowerCase();
+  if (!isHttpMethod(method)) {
+    return undefined;
+  }
+
+  const path = new URL(request.path, "http://slab.test").pathname;
+  return [...executableSmokeOperations]
+    .filter((operation) => operation.method === method)
+    .toSorted((left, right) => placeholderCount(left.path) - placeholderCount(right.path))
+    .find((operation) => matchesPathTemplate(operation.path, path));
+}
+
+function isHttpMethod(value: string): value is HttpMethod {
+  return documentedMethods.includes(value as HttpMethod);
+}
+
+function placeholderCount(path: string): number {
+  return path.split("/").filter((segment) => isPlaceholderSegment(segment)).length;
+}
+
+function matchesPathTemplate(template: string, path: string): boolean {
+  if (template === path) {
+    return true;
+  }
+
+  const templateSegments = template.split("/");
+  const pathSegments = path.split("/");
+  if (templateSegments.length !== pathSegments.length) {
+    return false;
+  }
+
+  return templateSegments.every((segment, index) => {
+    const pathSegment = pathSegments[index];
+    return segment === pathSegment || (isPlaceholderSegment(segment) && pathSegment.length > 0);
+  });
+}
+
+function isPlaceholderSegment(segment: string): boolean {
+  return segment.startsWith("{") && segment.endsWith("}");
 }
 
 export function jsonInit<T>(body: T, init: RequestInit = {}): RequestInit {
@@ -250,16 +340,16 @@ export async function waitForTask(
 export async function buildCloudModelPackFile(modelId: string): Promise<File> {
   return buildZipFile(`${modelId}.slab`, {
     "manifest.json": JSON.stringify({
+      capabilities: ["text_generation", "chat_generation"],
+      cloud: {
+        provider_id: "openai-main",
+        remote_model_id: modelId
+      },
+      deployment: "cloud",
       family: "llama",
       id: modelId,
       label: `Smoke ${modelId}`,
-      source: {
-        kind: "cloud",
-        provider_id: "smoke-provider",
-        remote_model_id: modelId
-      },
-      status: "ready",
-      version: 2
+      schema_version: 3
     })
   });
 }
@@ -412,6 +502,7 @@ const CRC32_TABLE = new Uint32Array(
 );
 
 function openWebSocket(server: SlabServerTestHarness, path: string): Promise<WebSocket> {
+  server.recordRequest(path, "GET");
   return new Promise((resolveOpen, reject) => {
     const socket = new WebSocket(webSocketUrl(server.baseUrl, path));
     const timeout = setTimeout(() => {

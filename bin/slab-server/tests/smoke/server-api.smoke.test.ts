@@ -10,7 +10,7 @@ import { registerCoreAndSetupSmoke } from "./server-api/core-and-setup";
 import { registerModelsAndChatSmoke } from "./server-api/models-and-chat";
 import { registerPluginsSmoke } from "./server-api/plugins";
 import { registerSessionsAndUiStateSmoke } from "./server-api/sessions-and-ui-state";
-import { externalBaseUrl } from "./server-api/shared";
+import { expectExecutableSmokeOperationsCovered, externalBaseUrl } from "./server-api/shared";
 import { registerTasksAndMediaSmoke } from "./server-api/tasks-and-media";
 import { registerSmokeTodoSuites } from "./server-api/todos";
 
@@ -24,7 +24,13 @@ describe("slab-server smoke API", () => {
   });
 
   afterAll(async () => {
-    await server?.stop();
+    try {
+      if (server) {
+        expectExecutableSmokeOperationsCovered(server);
+      }
+    } finally {
+      await server?.stop();
+    }
   });
 
   registerCoreAndSetupSmoke(() => server!);

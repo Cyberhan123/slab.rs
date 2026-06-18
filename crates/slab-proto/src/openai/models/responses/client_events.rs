@@ -405,148 +405,74 @@ pub enum ResponseCreateTruncation {
     Disabled,
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ResponsesServerEvent {
-    /// The event type identifier.
-    #[serde(rename = "type")]
-    pub r#type: ServerEventType,
-    /// The sequence number of this event.
-    #[serde(rename = "sequence_number")]
-    pub sequence_number: i32,
-    /// The incremental input data (delta) for the custom tool call.
-    #[serde(rename = "delta")]
-    pub delta: String,
-    /// The index of the output this event applies to.
-    #[serde(rename = "output_index")]
-    pub output_index: i32,
-    /// Unique identifier for the API item associated with this event.
-    #[serde(rename = "item_id")]
-    pub item_id: String,
-    /// The error code.
-    #[serde(rename = "code")]
-    pub code: String,
-    /// The full response object that is queued.
-    #[serde(rename = "response")]
-    pub response: Box<models::Response>,
-    /// The index of the content part within the output item.
-    #[serde(rename = "content_index")]
-    pub content_index: i32,
-    #[serde(rename = "part")]
-    pub part: Box<models::ResponseReasoningSummaryPartDoneEventPart>,
-    /// The error message.
-    #[serde(rename = "message")]
-    pub message: String,
-    /// The error parameter.
-    #[serde(rename = "param")]
-    pub param: String,
-    /// The name of the function that was called.
-    #[serde(rename = "name")]
-    pub name: String,
-    /// A JSON string containing the finalized arguments for the MCP tool call.
-    #[serde(rename = "arguments")]
-    pub arguments: String,
-    /// The output item that was marked done.
-    #[serde(rename = "item")]
-    pub item: Box<models::OutputItem>,
-    /// The index of the summary part within the reasoning summary.
-    #[serde(rename = "summary_index")]
-    pub summary_index: i32,
-    /// The text content that is finalized.
-    #[serde(rename = "text")]
-    pub text: String,
-    /// The refusal text that is finalized.
-    #[serde(rename = "refusal")]
-    pub refusal: String,
-    /// The log probabilities of the tokens in the delta.
-    #[serde(rename = "logprobs")]
-    pub logprobs: Vec<models::ResponseLogProb>,
-    /// 0-based index for the partial image (backend is 1-based, but this is 0-based for the user).
-    #[serde(rename = "partial_image_index")]
-    pub partial_image_index: i32,
-    /// Base64-encoded partial image data, suitable for rendering as an image.
-    #[serde(rename = "partial_image_b64")]
-    pub partial_image_b64: String,
-    /// The index of the annotation within the content part.
-    #[serde(rename = "annotation_index")]
-    pub annotation_index: i32,
-    /// The annotation object being added. (See annotation schema for details.)
-    #[serde(rename = "annotation")]
-    pub annotation: serde_json::Value,
-    /// The complete input data for the custom tool call.
-    #[serde(rename = "input")]
-    pub input: String,
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ResponsesServerEvent {
+    ResponseAudioDeltaEvent(Box<models::ResponseAudioDeltaEvent>),
+    ResponseAudioDoneEvent(Box<models::ResponseAudioDoneEvent>),
+    ResponseAudioTranscriptDeltaEvent(Box<models::ResponseAudioTranscriptDeltaEvent>),
+    ResponseAudioTranscriptDoneEvent(Box<models::ResponseAudioTranscriptDoneEvent>),
+    ResponseCodeInterpreterCallCodeDeltaEvent(
+        Box<models::ResponseCodeInterpreterCallCodeDeltaEvent>,
+    ),
+    ResponseCodeInterpreterCallCodeDoneEvent(Box<models::ResponseCodeInterpreterCallCodeDoneEvent>),
+    ResponseCodeInterpreterCallCompletedEvent(
+        Box<models::ResponseCodeInterpreterCallCompletedEvent>,
+    ),
+    ResponseCodeInterpreterCallInProgressEvent(
+        Box<models::ResponseCodeInterpreterCallInProgressEvent>,
+    ),
+    ResponseCodeInterpreterCallInterpretingEvent(
+        Box<models::ResponseCodeInterpreterCallInterpretingEvent>,
+    ),
+    ResponseCompletedEvent(Box<models::ResponseCompletedEvent>),
+    ResponseContentPartAddedEvent(Box<models::ResponseContentPartAddedEvent>),
+    ResponseContentPartDoneEvent(Box<models::ResponseContentPartDoneEvent>),
+    ResponseCreatedEvent(Box<models::ResponseCreatedEvent>),
+    ResponseCustomToolCallInputDeltaEvent(Box<models::ResponseCustomToolCallInputDeltaEvent>),
+    ResponseCustomToolCallInputDoneEvent(Box<models::ResponseCustomToolCallInputDoneEvent>),
+    ResponseErrorEvent(Box<models::ResponseErrorEvent>),
+    ResponseFailedEvent(Box<models::ResponseFailedEvent>),
+    ResponseFileSearchCallCompletedEvent(Box<models::ResponseFileSearchCallCompletedEvent>),
+    ResponseFileSearchCallInProgressEvent(Box<models::ResponseFileSearchCallInProgressEvent>),
+    ResponseFileSearchCallSearchingEvent(Box<models::ResponseFileSearchCallSearchingEvent>),
+    ResponseFunctionCallArgumentsDeltaEvent(Box<models::ResponseFunctionCallArgumentsDeltaEvent>),
+    ResponseFunctionCallArgumentsDoneEvent(Box<models::ResponseFunctionCallArgumentsDoneEvent>),
+    ResponseImageGenCallCompletedEvent(Box<models::ResponseImageGenCallCompletedEvent>),
+    ResponseImageGenCallGeneratingEvent(Box<models::ResponseImageGenCallGeneratingEvent>),
+    ResponseImageGenCallInProgressEvent(Box<models::ResponseImageGenCallInProgressEvent>),
+    ResponseImageGenCallPartialImageEvent(Box<models::ResponseImageGenCallPartialImageEvent>),
+    ResponseInProgressEvent(Box<models::ResponseInProgressEvent>),
+    ResponseIncompleteEvent(Box<models::ResponseIncompleteEvent>),
+    ResponseMcpCallArgumentsDeltaEvent(Box<models::ResponseMcpCallArgumentsDeltaEvent>),
+    ResponseMcpCallArgumentsDoneEvent(Box<models::ResponseMcpCallArgumentsDoneEvent>),
+    ResponseMcpCallCompletedEvent(Box<models::ResponseMcpCallCompletedEvent>),
+    ResponseMcpCallFailedEvent(Box<models::ResponseMcpCallFailedEvent>),
+    ResponseMcpCallInProgressEvent(Box<models::ResponseMcpCallInProgressEvent>),
+    ResponseMcpListToolsCompletedEvent(Box<models::ResponseMcpListToolsCompletedEvent>),
+    ResponseMcpListToolsFailedEvent(Box<models::ResponseMcpListToolsFailedEvent>),
+    ResponseMcpListToolsInProgressEvent(Box<models::ResponseMcpListToolsInProgressEvent>),
+    ResponseOutputItemAddedEvent(Box<models::ResponseOutputItemAddedEvent>),
+    ResponseOutputItemDoneEvent(Box<models::ResponseOutputItemDoneEvent>),
+    ResponseOutputTextAnnotationAddedEvent(Box<models::ResponseOutputTextAnnotationAddedEvent>),
+    ResponseQueuedEvent(Box<models::ResponseQueuedEvent>),
+    ResponseReasoningSummaryPartAddedEvent(Box<models::ResponseReasoningSummaryPartAddedEvent>),
+    ResponseReasoningSummaryPartDoneEvent(Box<models::ResponseReasoningSummaryPartDoneEvent>),
+    ResponseReasoningSummaryTextDeltaEvent(Box<models::ResponseReasoningSummaryTextDeltaEvent>),
+    ResponseReasoningSummaryTextDoneEvent(Box<models::ResponseReasoningSummaryTextDoneEvent>),
+    ResponseReasoningTextDeltaEvent(Box<models::ResponseReasoningTextDeltaEvent>),
+    ResponseReasoningTextDoneEvent(Box<models::ResponseReasoningTextDoneEvent>),
+    ResponseRefusalDeltaEvent(Box<models::ResponseRefusalDeltaEvent>),
+    ResponseRefusalDoneEvent(Box<models::ResponseRefusalDoneEvent>),
+    ResponseTextDeltaEvent(Box<models::ResponseTextDeltaEvent>),
+    ResponseTextDoneEvent(Box<models::ResponseTextDoneEvent>),
+    ResponseWebSearchCallCompletedEvent(Box<models::ResponseWebSearchCallCompletedEvent>),
+    ResponseWebSearchCallInProgressEvent(Box<models::ResponseWebSearchCallInProgressEvent>),
+    ResponseWebSearchCallSearchingEvent(Box<models::ResponseWebSearchCallSearchingEvent>),
 }
 
-impl ResponsesServerEvent {
-    /// Server events emitted by the Responses WebSocket server.
-    pub fn new(
-        r#type: ServerEventType,
-        sequence_number: i32,
-        delta: String,
-        output_index: i32,
-        item_id: String,
-        code: String,
-        response: models::Response,
-        content_index: i32,
-        part: models::ResponseReasoningSummaryPartDoneEventPart,
-        message: String,
-        param: String,
-        name: String,
-        arguments: String,
-        item: models::OutputItem,
-        summary_index: i32,
-        text: String,
-        refusal: String,
-        logprobs: Vec<models::ResponseLogProb>,
-        partial_image_index: i32,
-        partial_image_b64: String,
-        annotation_index: i32,
-        annotation: serde_json::Value,
-        input: String,
-    ) -> ResponsesServerEvent {
-        ResponsesServerEvent {
-            r#type,
-            sequence_number,
-            delta,
-            output_index,
-            item_id,
-            code,
-            response: Box::new(response),
-            content_index,
-            part: Box::new(part),
-            message,
-            param,
-            name,
-            arguments,
-            item: Box::new(item),
-            summary_index,
-            text,
-            refusal,
-            logprobs,
-            partial_image_index,
-            partial_image_b64,
-            annotation_index,
-            annotation,
-            input,
-        }
+impl Default for ResponsesServerEvent {
+    fn default() -> Self {
+        Self::ResponseCustomToolCallInputDoneEvent(Default::default())
     }
-}
-/// The event type identifier.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    Default,
-)]
-pub enum ServerEventType {
-    #[serde(rename = "response.custom_tool_call_input.done")]
-    #[default]
-    ResponseCustomToolCallInputDone,
 }
