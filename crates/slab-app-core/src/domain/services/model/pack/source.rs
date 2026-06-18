@@ -46,8 +46,8 @@ fn pack_source_hub_provider(source: &slab_model_pack::PackSource) -> Option<Stri
         slab_model_pack::PackSource::HuggingFace { .. } => Some("hf_hub".to_owned()),
         slab_model_pack::PackSource::ModelScope { .. } => Some("models_cat".to_owned()),
         slab_model_pack::PackSource::LocalPath { .. }
-        | slab_model_pack::PackSource::LocalFiles { .. }
-        | slab_model_pack::PackSource::Cloud { .. } => None,
+        | slab_model_pack::PackSource::LocalFiles { .. } => None,
+        _ => None,
     }
 }
 
@@ -85,7 +85,7 @@ pub(in crate::domain::services::model) fn source_preview_from_pack_source(
                 .map(|file| file.path.clone()),
             ..Default::default()
         },
-        Some(slab_model_pack::PackSource::Cloud { .. }) | None => ModelSourcePreview::default(),
+        Some(_) | None => ModelSourcePreview::default(),
     }
 }
 
@@ -177,6 +177,10 @@ pub(in crate::domain::services::model) fn apply_materialized_source_to_bridge(
 ) {
     bridge.model_spec.source =
         materialized_model_source(&bridge.model_spec.source, persisted, source_hint);
+    for engine in &mut bridge.engine_load_specs {
+        engine.model_spec.source =
+            materialized_model_source(&engine.model_spec.source, persisted, source_hint);
+    }
 }
 
 pub(in crate::domain::services::model) fn apply_selected_download_source_to_spec(

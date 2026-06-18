@@ -3,13 +3,15 @@ use std::fs;
 use std::io::{Cursor, Read};
 use std::path::Path;
 
-use slab_types::{Capability, ModelFamily};
+use serde_json::Value;
+use slab_types::{ArtifactFormat, Capability, ModelFamily};
 use zip::ZipArchive;
 
 use crate::error::ModelPackError;
 use crate::manifest::{
-    BackendConfigDocument, BackendConfigScope, ComponentDocument, ModelPackManifest, PackDocument,
-    PresetDocument, VariantDocument,
+    BackendConfigDocument, BackendConfigScope, ComponentDocument, ConfigEntryRef,
+    MODEL_PACK_SCHEMA_VERSION, ModelPackManifest, PackDeployment, PackDocument, PresetDocument,
+    PresetEntryRef, VariantDocument,
 };
 use crate::refs::ConfigRef;
 
@@ -73,7 +75,7 @@ impl ModelPack {
                         return Err(ModelPackError::DuplicateDocumentPath { path });
                     }
 
-                    manifest = Some(parse_json_document(&path, &raw)?);
+                    manifest = Some(parse_manifest_document(&path, &raw)?);
                     continue;
                 }
 
@@ -94,7 +96,10 @@ impl ModelPack {
 
         let pack = Self { manifest, documents, text_assets };
 
+        pack.validate_manifest_shape()?;
+        pack.validate_unique_ids()?;
         pack.validate_manifest_references()?;
+        pack.validate_backend_config_payloads()?;
         Ok(pack)
     }
 
@@ -195,6 +200,10 @@ impl ModelPack {
     }
 
     fn validate_manifest_references(&self) -> Result<(), ModelPackError> {
+        if self.manifest.deployment == PackDeployment::Cloud {
+            return Ok(());
+        }
+
         for reference in &self.manifest.components {
             self.validate_entry_ref(&reference.id, &reference.config_ref, "component")?;
         }
@@ -216,23 +225,24 @@ impl ModelPack {
             match document {
                 PackDocument::Variant(variant) => {
                     self.validate_component_ids(&variant.component_ids, &component_ids)?;
+                    if !self.manifest.engines.iter().any(|engine| engine.format == variant.format) {
+                        return Err(ModelPackError::IncompatibleVariantFormat {
+                            variant_id: variant.id.clone(),
+                            format: artifact_format_name(variant.format).to_owned(),
+                        });
+                    }
                     if let Some(config_ref) = &variant.load_config {
                         self.resolve_backend_config(config_ref, BackendConfigScope::Load)?;
-                    }
-                    if let Some(config_ref) = &variant.inference_config {
-                        self.resolve_backend_config(config_ref, BackendConfigScope::Inference)?;
                     }
                 }
                 PackDocument::Adapter(adapter) => {
                     self.validate_component_ids(&adapter.component_ids, &component_ids)?;
                 }
                 PackDocument::Preset(preset) => {
-                    if let Some(variant_id) = &preset.variant_id
-                        && !variant_ids.contains(variant_id)
-                    {
+                    if !variant_ids.contains(&preset.variant_id) {
                         return Err(ModelPackError::MissingNamedDocument {
                             kind: "variant",
-                            id: variant_id.clone(),
+                            id: preset.variant_id.clone(),
                         });
                     }
                     for adapter_id in &preset.adapter_ids {
@@ -243,14 +253,108 @@ impl ModelPack {
                             });
                         }
                     }
-                    if let Some(config_ref) = &preset.load_config {
-                        self.resolve_backend_config(config_ref, BackendConfigScope::Load)?;
-                    }
                     if let Some(config_ref) = &preset.inference_config {
                         self.resolve_backend_config(config_ref, BackendConfigScope::Inference)?;
                     }
                 }
                 PackDocument::Component(_) | PackDocument::BackendConfig(_) => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_manifest_shape(&self) -> Result<(), ModelPackError> {
+        if self.manifest.schema_version != MODEL_PACK_SCHEMA_VERSION {
+            return Err(ModelPackError::UnsupportedSchemaVersion {
+                found: self.manifest.schema_version,
+            });
+        }
+
+        match self.manifest.deployment {
+            PackDeployment::Local => {
+                if self.manifest.cloud.is_some() {
+                    return Err(ModelPackError::UnexpectedCloudTarget {
+                        id: self.manifest.id.clone(),
+                    });
+                }
+                if self.manifest.engines.is_empty() {
+                    return Err(ModelPackError::MissingLocalEngines {
+                        id: self.manifest.id.clone(),
+                    });
+                }
+                if self.manifest.variants.is_empty() {
+                    return Err(ModelPackError::MissingLocalVariants {
+                        id: self.manifest.id.clone(),
+                    });
+                }
+                if self.manifest.presets.is_empty() {
+                    return Err(ModelPackError::MissingLocalPresets {
+                        id: self.manifest.id.clone(),
+                    });
+                }
+            }
+            PackDeployment::Cloud => {
+                if self.manifest.cloud.is_none() {
+                    return Err(ModelPackError::MissingCloudTarget {
+                        id: self.manifest.id.clone(),
+                    });
+                }
+                if !self.manifest.engines.is_empty()
+                    || !self.manifest.sources.is_empty()
+                    || !self.manifest.components.is_empty()
+                    || !self.manifest.variants.is_empty()
+                    || !self.manifest.adapters.is_empty()
+                    || !self.manifest.presets.is_empty()
+                    || self.manifest.default_preset.is_some()
+                {
+                    return Err(ModelPackError::UnexpectedLocalRuntimeFields {
+                        id: self.manifest.id.clone(),
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_unique_ids(&self) -> Result<(), ModelPackError> {
+        validate_unique_config_entries("component", &self.manifest.components)?;
+        validate_unique_config_entries("variant", &self.manifest.variants)?;
+        validate_unique_config_entries("adapter", &self.manifest.adapters)?;
+        validate_unique_preset_entries(&self.manifest.presets)?;
+        validate_unique_engine_targets(&self.manifest.engines)?;
+
+        let mut ids_by_kind: BTreeMap<&'static str, BTreeSet<String>> = BTreeMap::new();
+        for document in self.documents.values() {
+            let Some(id) = document.declared_id().filter(|id| !id.trim().is_empty()) else {
+                continue;
+            };
+            let kind = document.kind();
+            if !ids_by_kind.entry(kind).or_default().insert(id.to_owned()) {
+                return Err(ModelPackError::DuplicateId { kind, id: id.to_owned() });
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_backend_config_payloads(&self) -> Result<(), ModelPackError> {
+        for (path, document) in &self.documents {
+            let PackDocument::BackendConfig(config) = document else {
+                continue;
+            };
+            let config_id = backend_config_id(path, config);
+            let Value::Object(payload) = &config.payload else {
+                return Err(ModelPackError::InvalidBackendConfigPayloadShape { id: config_id });
+            };
+            for field in ["chat_template", "gbnf"] {
+                validate_optional_asset_ref(
+                    field,
+                    &config_id,
+                    payload.get(field),
+                    &self.text_assets,
+                )?;
             }
         }
 
@@ -277,11 +381,11 @@ impl ModelPack {
             });
         }
 
-        if document.id() != id {
+        if document.declared_id().is_some_and(|document_id| document_id != id) {
             return Err(ModelPackError::DocumentIdMismatch {
                 path: config_ref.path().into(),
                 expected: id.to_owned(),
-                found: document.id().to_owned(),
+                found: document.declared_id().unwrap_or_default().to_owned(),
             });
         }
 
@@ -335,6 +439,122 @@ fn parse_json_document<T: serde::de::DeserializeOwned>(
         .map_err(|source| ModelPackError::InvalidJsonDocument { path: path.to_owned(), source })
 }
 
+fn parse_manifest_document(path: &str, raw: &str) -> Result<ModelPackManifest, ModelPackError> {
+    let value: Value = parse_json_document(path, raw)?;
+    let schema_version = value
+        .get("schema_version")
+        .and_then(Value::as_u64)
+        .or_else(|| value.get("version").and_then(Value::as_u64))
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or(0);
+    if schema_version != MODEL_PACK_SCHEMA_VERSION {
+        return Err(ModelPackError::UnsupportedSchemaVersion { found: schema_version });
+    }
+
+    serde_json::from_value(value)
+        .map_err(|source| ModelPackError::InvalidJsonDocument { path: path.to_owned(), source })
+}
+
+fn validate_unique_config_entries(
+    kind: &'static str,
+    entries: &[ConfigEntryRef],
+) -> Result<(), ModelPackError> {
+    let mut ids = BTreeSet::new();
+    for entry in entries {
+        if !ids.insert(entry.id.clone()) {
+            return Err(ModelPackError::DuplicateId { kind, id: entry.id.clone() });
+        }
+    }
+    Ok(())
+}
+
+fn validate_unique_preset_entries(entries: &[PresetEntryRef]) -> Result<(), ModelPackError> {
+    let mut ids = BTreeSet::new();
+    for entry in entries {
+        if !ids.insert(entry.id.clone()) {
+            return Err(ModelPackError::DuplicateId { kind: "preset", id: entry.id.clone() });
+        }
+    }
+    Ok(())
+}
+
+fn validate_unique_engine_targets(
+    entries: &[crate::manifest::EngineTarget],
+) -> Result<(), ModelPackError> {
+    let mut ids = BTreeSet::new();
+    for entry in entries {
+        let id = entry.id.canonical_id().to_owned();
+        if !ids.insert((id.clone(), artifact_format_name(entry.format).to_owned())) {
+            return Err(ModelPackError::DuplicateId { kind: "engine", id });
+        }
+    }
+    Ok(())
+}
+
+fn validate_optional_asset_ref(
+    field: &str,
+    config_id: &str,
+    value: Option<&Value>,
+    text_assets: &BTreeMap<String, String>,
+) -> Result<(), ModelPackError> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    if value.is_null() {
+        return Ok(());
+    }
+
+    let asset_ref: slab_types::AssetRef =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            ModelPackError::InvalidBackendConfigAssetRef {
+                id: config_id.to_owned(),
+                field: field.to_owned(),
+                message: error.to_string(),
+            }
+        })?;
+    let Some(asset_ref) = asset_ref.validate_configured(field).map_err(|error| {
+        ModelPackError::InvalidBackendConfigAssetRef {
+            id: config_id.to_owned(),
+            field: field.to_owned(),
+            message: error.to_string(),
+        }
+    })?
+    else {
+        return Ok(());
+    };
+    let path = asset_ref.path.as_deref().expect("validated asset ref has path");
+    let config_ref = ConfigRef::parse(path.to_owned()).map_err(|error| {
+        ModelPackError::InvalidBackendConfigAssetRef {
+            id: config_id.to_owned(),
+            field: field.to_owned(),
+            message: error.to_string(),
+        }
+    })?;
+    if !text_assets.contains_key(config_ref.path()) {
+        return Err(ModelPackError::MissingBackendConfigAsset {
+            id: config_id.to_owned(),
+            field: field.to_owned(),
+            path: config_ref.path().to_owned(),
+        });
+    }
+
+    Ok(())
+}
+
+fn backend_config_id(path: &str, config: &BackendConfigDocument) -> String {
+    config.id.clone().unwrap_or_else(|| path.to_owned())
+}
+
+fn artifact_format_name(format: ArtifactFormat) -> &'static str {
+    match format {
+        ArtifactFormat::Gguf => "gguf",
+        ArtifactFormat::Ggml => "ggml",
+        ArtifactFormat::Safetensors => "safetensors",
+        ArtifactFormat::Onnx => "onnx",
+        ArtifactFormat::Ckpt => "ckpt",
+    }
+}
+
 fn normalized_manifest_capabilities(manifest: &ModelPackManifest) -> Vec<Capability> {
     let mut capabilities = if manifest.capabilities.is_empty() {
         default_manifest_capabilities(manifest.family)
@@ -382,131 +602,13 @@ mod tests {
     use super::{MANIFEST_FILE_NAME, ModelPack};
 
     #[test]
-    fn loads_manifest_and_referenced_documents_from_slab_bytes() {
-        let bytes = build_pack(vec![
-            (
-                MANIFEST_FILE_NAME,
-                json!({
-                    "version": 2,
-                    "id": "qwen2.5-7b-instruct",
-                    "label": "Qwen2.5 7B Instruct",
-                    "family": "llama",
-                    "capabilities": ["text_generation"],
-                    "backend_hints": {
-                        "prefer_drivers": ["ggml.llama"],
-                        "avoid_drivers": [],
-                        "require_streaming": true
-                    },
-                    "metadata": {
-                        "author": "slab"
-                    },
-                    "variants": [
-                        {
-                            "id": "q4_k_m",
-                            "label": "Q4_K_M",
-                            "$config": "ref://models/variants/q4_k_m.json"
-                        }
-                    ],
-                    "components": [
-                        {
-                            "id": "model",
-                            "label": "Primary model",
-                            "$config": "ref://models/components/model.json"
-                        }
-                    ],
-                    "presets": [
-                        {
-                            "id": "default",
-                            "label": "Default",
-                            "$config": "ref://models/presets/default.json"
-                        }
-                    ],
-                    "default_preset": "default",
-                    "footprint": {
-                        "ram_mb": 4096,
-                        "vram_mb": 8192
-                    }
-                })
-                .to_string(),
-            ),
-            (
-                "models/components/model.json",
-                json!({
-                    "kind": "component",
-                    "id": "model",
-                    "label": "Primary model",
-                    "source": {
-                        "kind": "hugging_face",
-                        "repo_id": "Qwen/Qwen2.5-7B-Instruct-GGUF",
-                        "revision": "main",
-                        "files": [
-                            {
-                                "id": "model",
-                                "path": "Qwen2.5-7B-Instruct-Q4_K_M.gguf"
-                            }
-                        ]
-                    }
-                })
-                .to_string(),
-            ),
-            (
-                "models/configs/load.json",
-                json!({
-                    "kind": "backend_config",
-                    "id": "load-default",
-                    "label": "Default load",
-                    "scope": "load",
-                    "payload": {
-                        "context_length": 8192,
-                        "num_workers": 1
-                    }
-                })
-                .to_string(),
-            ),
-            (
-                "models/configs/inference.json",
-                json!({
-                    "kind": "backend_config",
-                    "id": "inference-default",
-                    "label": "Default inference",
-                    // "backend": "ggml_llama",
-                    "scope": "inference",
-                    "payload": {
-                        "temperature": 0.7,
-                        "top_p": 0.95,
-                        "max_tokens": 2048
-                    }
-                })
-                .to_string(),
-            ),
-            (
-                "models/variants/q4_k_m.json",
-                json!({
-                    "kind": "variant",
-                    "id": "q4_k_m",
-                    "label": "Q4_K_M",
-                    "component_ids": ["model"],
-                    "$load_config": "ref://models/configs/load.json",
-                    "$inference_config": "ref://models/configs/inference.json"
-                })
-                .to_string(),
-            ),
-            (
-                "models/presets/default.json",
-                json!({
-                    "kind": "preset",
-                    "id": "default",
-                    "label": "Default",
-                    "$load_config": "ref://models/configs/load.json",
-                    "$inference_config": "ref://models/configs/inference.json"
-                })
-                .to_string(),
-            ),
-        ]);
+    fn loads_v3_manifest_and_referenced_documents_from_slab_bytes() {
+        let bytes = build_pack(valid_pack_entries());
 
         let pack = ModelPack::from_bytes(&bytes).expect("pack should load");
 
         assert_eq!(pack.manifest().id, "qwen2.5-7b-instruct");
+        assert_eq!(pack.manifest().schema_version, 3);
         assert_eq!(pack.documents().len(), 5);
         assert_eq!(
             pack.resolve_variant(&pack.manifest().variants[0].config_ref)
@@ -518,120 +620,58 @@ mod tests {
             pack.resolve_preset(&pack.manifest().presets[0].config_ref)
                 .expect("preset should resolve")
                 .variant_id,
-            None
+            "q4_k_m"
         );
     }
 
     #[test]
-    fn rejects_legacy_ref_field_names_without_dollar_prefix() {
-        let bytes = build_pack(vec![
-            (
-                MANIFEST_FILE_NAME,
-                json!({
-                    "version": 2,
-                    "id": "demo",
-                    "label": "Demo",
-                    "family": "llama",
-                    "variants": [
-                        {
-                            "id": "q4_k_m",
-                            "label": "Q4_K_M",
-                            "$config": "ref://models/variants/q4_k_m.json"
-                        }
-                    ]
-                })
-                .to_string(),
-            ),
-            (
-                "models/variants/q4_k_m.json",
-                json!({
-                    "kind": "variant",
-                    "id": "q4_k_m",
-                    "label": "Q4_K_M",
-                    "load_config": "ref://models/configs/load.json"
-                })
-                .to_string(),
-            ),
-            (
-                "models/configs/load.json",
-                json!({
-                    "kind": "backend_config",
-                    "id": "load-default",
-                    "label": "Default load",
-                    "scope": "load",
-                    "payload": {
-                        "context_length": 8192
-                    }
-                })
-                .to_string(),
-            ),
-        ]);
+    fn rejects_v2_pack_before_legacy_alias_parsing() {
+        let bytes = build_pack(vec![(
+            MANIFEST_FILE_NAME,
+            json!({
+                "version": 2,
+                "id": "demo",
+                "label": "Demo",
+                "family": "llama"
+            })
+            .to_string(),
+        )]);
 
         let error = ModelPack::from_bytes(&bytes).unwrap_err();
-        assert!(error.to_string().contains("unknown field `load_config`"));
+        assert!(error.to_string().contains("only schema_version 3"));
     }
 
     #[test]
-    fn rejects_removed_backend_field_in_sub_configs() {
-        let bytes = build_pack(vec![
-            (
-                MANIFEST_FILE_NAME,
-                json!({
-                    "version": 2,
-                    "id": "demo",
-                    "label": "Demo",
-                    "family": "llama",
-                    "variants": [
-                        {
-                            "id": "q4_k_m",
-                            "label": "Q4_K_M",
-                            "$config": "ref://models/variants/q4_k_m.json"
-                        }
-                    ]
-                })
-                .to_string(),
-            ),
-            (
-                "models/variants/q4_k_m.json",
-                json!({
-                    "kind": "variant",
-                    "id": "q4_k_m",
-                    "label": "Q4_K_M",
-                    "$load_config": "ref://models/configs/load.json"
-                })
-                .to_string(),
-            ),
-            (
-                "models/configs/load.json",
-                json!({
-                    "kind": "backend_config",
-                    "id": "load-default",
-                    "label": "Default load",
-                    "backend": "ggml_llama",
-                    "scope": "load",
-                    "payload": {
-                        "context_length": 8192
-                    }
-                })
-                .to_string(),
-            ),
-        ]);
+    fn rejects_legacy_config_ref_field() {
+        let mut entries = valid_pack_entries();
+        entries[0].1 = json!({
+            "schema_version": 3,
+            "deployment": "local",
+            "id": "demo",
+            "label": "Demo",
+            "family": "llama",
+            "engines": [{"id": "ggml.llama", "format": "gguf"}],
+            "variants": [{
+                "id": "q4_k_m",
+                "label": "Q4_K_M",
+                "$config": "ref://models/variants/q4_k_m.json"
+            }],
+            "presets": [{
+                "id": "default",
+                "label": "Default",
+                "$ref": "ref://models/presets/default.json"
+            }],
+            "default_preset": "default"
+        })
+        .to_string();
 
-        let error = ModelPack::from_bytes(&bytes).unwrap_err();
-        assert!(error.to_string().contains("unknown field `backend`"));
+        let error = ModelPack::from_bytes(&build_pack(entries)).unwrap_err();
+        assert!(error.to_string().contains("$config"));
     }
 
     #[test]
     fn rejects_pack_without_manifest() {
-        let bytes = build_pack(vec![(
-            "models/variants/q4.json",
-            json!({
-                "kind": "variant",
-                "id": "q4",
-                "label": "Q4"
-            })
-            .to_string(),
-        )]);
+        let bytes = build_pack(vec![("models/assets/readme.txt", "no manifest".to_owned())]);
 
         let error = ModelPack::from_bytes(&bytes).unwrap_err();
         assert!(error.to_string().contains("manifest.json"));
@@ -639,22 +679,9 @@ mod tests {
 
     #[test]
     fn normalizes_chat_only_capabilities_to_include_text_generation() {
-        let bytes = build_pack(vec![(
-            MANIFEST_FILE_NAME,
-            json!({
-                "version": 2,
-                "id": "qwen2.5-0.5b-instruct",
-                "label": "Qwen2.5 0.5B Instruct",
-                "family": "llama",
-                "capabilities": ["chat_generation"],
-                "backend_hints": {
-                    "prefer_drivers": ["ggml.llama"],
-                    "avoid_drivers": [],
-                    "require_streaming": true
-                }
-            })
-            .to_string(),
-        )]);
+        let mut entries = valid_pack_entries();
+        entries[0].1 = manifest_json(json!(["chat_generation"])).to_string();
+        let bytes = build_pack(entries);
 
         let pack = ModelPack::from_bytes(&bytes).expect("pack should load");
 
@@ -666,21 +693,34 @@ mod tests {
 
     #[test]
     fn infers_default_llama_capabilities_when_manifest_omits_them() {
-        let bytes = build_pack(vec![(
-            MANIFEST_FILE_NAME,
-            json!({
-                "version": 2,
-                "id": "qwen2.5-0.5b-instruct",
-                "label": "Qwen2.5 0.5B Instruct",
-                "family": "llama",
-                "backend_hints": {
-                    "prefer_drivers": ["ggml.llama"],
-                    "avoid_drivers": [],
-                    "require_streaming": true
-                }
-            })
-            .to_string(),
-        )]);
+        let mut entries = valid_pack_entries();
+        entries[0].1 = json!({
+            "schema_version": 3,
+            "deployment": "local",
+            "id": "qwen2.5-7b-instruct",
+            "label": "Qwen2.5 7B Instruct",
+            "family": "llama",
+            "context_window": 8192,
+            "engines": [{"id": "ggml.llama", "format": "gguf"}],
+            "components": [{
+                "id": "model",
+                "label": "Primary model",
+                "$ref": "ref://models/components/model.json"
+            }],
+            "variants": [{
+                "id": "q4_k_m",
+                "label": "Q4_K_M",
+                "$ref": "ref://models/variants/q4_k_m.json"
+            }],
+            "presets": [{
+                "id": "default",
+                "label": "Default",
+                "$ref": "ref://models/presets/default.json"
+            }],
+            "default_preset": "default"
+        })
+        .to_string();
+        let bytes = build_pack(entries);
 
         let pack = ModelPack::from_bytes(&bytes).expect("pack should load");
 
@@ -688,6 +728,181 @@ mod tests {
             pack.manifest().capabilities,
             vec![Capability::TextGeneration, Capability::ChatGeneration]
         );
+    }
+
+    #[test]
+    fn rejects_duplicate_manifest_entry_ids() {
+        let mut entries = valid_pack_entries();
+        entries[0].1 = json!({
+            "schema_version": 3,
+            "deployment": "local",
+            "id": "demo",
+            "label": "Demo",
+            "family": "llama",
+            "engines": [{"id": "ggml.llama", "format": "gguf"}],
+            "variants": [
+                {"id": "q4_k_m", "label": "Q4", "$ref": "ref://models/variants/q4_k_m.json"},
+                {"id": "q4_k_m", "label": "Q4 duplicate", "$ref": "ref://models/variants/q4_k_m.json"}
+            ],
+            "presets": [{"id": "default", "label": "Default", "$ref": "ref://models/presets/default.json"}],
+            "default_preset": "default"
+        })
+        .to_string();
+
+        let error = ModelPack::from_bytes(&build_pack(entries)).unwrap_err();
+        assert!(error.to_string().contains("duplicate variant id"));
+    }
+
+    #[test]
+    fn rejects_backend_config_payload_that_is_not_object() {
+        let mut entries = valid_pack_entries();
+        entries[2].1 = json!({
+            "kind": "backend_config",
+            "label": "Default load",
+            "scope": "load",
+            "payload": "nope"
+        })
+        .to_string();
+
+        let error = ModelPack::from_bytes(&build_pack(entries)).unwrap_err();
+        assert!(error.to_string().contains("payload must be a JSON object"));
+    }
+
+    #[test]
+    fn rejects_missing_text_asset_reference() {
+        let mut entries = valid_pack_entries();
+        entries[2].1 = json!({
+            "kind": "backend_config",
+            "label": "Default load",
+            "scope": "load",
+            "payload": {
+                "chat_template": {
+                    "$path": "ref://models/assets/missing.jinja"
+                }
+            }
+        })
+        .to_string();
+
+        let error = ModelPack::from_bytes(&build_pack(entries)).unwrap_err();
+        assert!(error.to_string().contains("references missing asset"));
+    }
+
+    #[test]
+    fn rejects_variant_format_without_matching_engine() {
+        let mut entries = valid_pack_entries();
+        entries[4].1 = json!({
+            "kind": "variant",
+            "id": "q4_k_m",
+            "label": "Q4_K_M",
+            "format": "safetensors",
+            "component_ids": ["model"],
+            "$load_config": "ref://models/configs/load.json"
+        })
+        .to_string();
+
+        let error = ModelPack::from_bytes(&build_pack(entries)).unwrap_err();
+        assert!(error.to_string().contains("not supported by any declared engine"));
+    }
+
+    fn valid_pack_entries() -> Vec<(&'static str, String)> {
+        vec![
+            (MANIFEST_FILE_NAME, manifest_json(json!(["text_generation"])).to_string()),
+            (
+                "models/components/model.json",
+                json!({
+                    "kind": "component",
+                    "id": "model",
+                    "label": "Primary model",
+                    "source": {
+                        "kind": "hugging_face",
+                        "repo_id": "Qwen/Qwen2.5-7B-Instruct-GGUF",
+                        "revision": "main",
+                        "files": [{"id": "model", "path": "Qwen2.5-7B-Instruct-Q4_K_M.gguf"}]
+                    }
+                })
+                .to_string(),
+            ),
+            (
+                "models/configs/load.json",
+                json!({
+                    "kind": "backend_config",
+                    "label": "Default load",
+                    "scope": "load",
+                    "payload": {
+                        "num_workers": 1,
+                        "chat_template": {
+                            "$path": "ref://models/assets/chat_template.jinja"
+                        }
+                    }
+                })
+                .to_string(),
+            ),
+            (
+                "models/configs/inference.json",
+                json!({
+                    "kind": "backend_config",
+                    "label": "Default inference",
+                    "scope": "inference",
+                    "payload": {"temperature": 0.7}
+                })
+                .to_string(),
+            ),
+            (
+                "models/variants/q4_k_m.json",
+                json!({
+                    "kind": "variant",
+                    "id": "q4_k_m",
+                    "label": "Q4_K_M",
+                    "format": "gguf",
+                    "component_ids": ["model"],
+                    "$load_config": "ref://models/configs/load.json"
+                })
+                .to_string(),
+            ),
+            (
+                "models/presets/default.json",
+                json!({
+                    "kind": "preset",
+                    "id": "default",
+                    "label": "Default",
+                    "variant_id": "q4_k_m",
+                    "$inference_config": "ref://models/configs/inference.json"
+                })
+                .to_string(),
+            ),
+            ("models/assets/chat_template.jinja", "{{ messages }}".to_owned()),
+        ]
+    }
+
+    fn manifest_json(capabilities: serde_json::Value) -> serde_json::Value {
+        json!({
+            "schema_version": 3,
+            "deployment": "local",
+            "id": "qwen2.5-7b-instruct",
+            "label": "Qwen2.5 7B Instruct",
+            "family": "llama",
+            "capabilities": capabilities,
+            "context_window": 8192,
+            "engines": [{"id": "ggml.llama", "format": "gguf"}],
+            "metadata": {"author": "slab"},
+            "components": [{
+                "id": "model",
+                "label": "Primary model",
+                "$ref": "ref://models/components/model.json"
+            }],
+            "variants": [{
+                "id": "q4_k_m",
+                "label": "Q4_K_M",
+                "$ref": "ref://models/variants/q4_k_m.json"
+            }],
+            "presets": [{
+                "id": "default",
+                "label": "Default",
+                "$ref": "ref://models/presets/default.json"
+            }],
+            "default_preset": "default",
+            "footprint": {"ram_mb": 4096, "vram_mb": 8192}
+        })
     }
 
     fn build_pack(entries: Vec<(&str, String)>) -> Vec<u8> {

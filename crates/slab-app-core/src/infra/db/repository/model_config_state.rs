@@ -3,7 +3,7 @@ use crate::infra::db::entities::ModelConfigStateRecord;
 use chrono::{DateTime, Utc};
 use std::future::Future;
 
-type ModelConfigStateRow = (String, Option<String>, Option<String>, DateTime<Utc>);
+type ModelConfigStateRow = (String, Option<String>, Option<String>, Option<String>, DateTime<Utc>);
 
 pub trait ModelConfigStateStore: Send + Sync + 'static {
     fn upsert_model_config_state(
@@ -21,9 +21,21 @@ pub trait ModelConfigStateStore: Send + Sync + 'static {
 }
 
 fn row_to_record(
-    (model_id, selected_preset_id, selected_variant_id, updated_at): ModelConfigStateRow,
+    (
+        model_id,
+        selected_preset_id,
+        selected_variant_id,
+        selected_engine_id,
+        updated_at,
+    ): ModelConfigStateRow,
 ) -> ModelConfigStateRecord {
-    ModelConfigStateRecord { model_id, selected_preset_id, selected_variant_id, updated_at }
+    ModelConfigStateRecord {
+        model_id,
+        selected_preset_id,
+        selected_variant_id,
+        selected_engine_id,
+        updated_at,
+    }
 }
 
 impl ModelConfigStateStore for AnyStore {
@@ -33,16 +45,18 @@ impl ModelConfigStateStore for AnyStore {
     ) -> Result<(), sqlx::Error> {
         let updated_at = record.updated_at.to_rfc3339();
         sqlx::query(
-            "INSERT INTO model_config_state (model_id, selected_preset_id, selected_variant_id, updated_at) \
-             VALUES (?1, ?2, ?3, ?4) \
+            "INSERT INTO model_config_state (model_id, selected_preset_id, selected_variant_id, selected_engine_id, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5) \
              ON CONFLICT(model_id) DO UPDATE SET \
                 selected_preset_id = excluded.selected_preset_id, \
                 selected_variant_id = excluded.selected_variant_id, \
+                selected_engine_id = excluded.selected_engine_id, \
                 updated_at = excluded.updated_at",
         )
         .bind(&record.model_id)
         .bind(&record.selected_preset_id)
         .bind(&record.selected_variant_id)
+        .bind(&record.selected_engine_id)
         .bind(&updated_at)
         .execute(&self.pool)
         .await?;
@@ -54,7 +68,7 @@ impl ModelConfigStateStore for AnyStore {
         model_id: &str,
     ) -> Result<Option<ModelConfigStateRecord>, sqlx::Error> {
         let row: Option<ModelConfigStateRow> = sqlx::query_as(
-            "SELECT model_id, selected_preset_id, selected_variant_id, updated_at \
+            "SELECT model_id, selected_preset_id, selected_variant_id, selected_engine_id, updated_at \
              FROM model_config_state WHERE model_id = ?1",
         )
         .bind(model_id)
@@ -124,6 +138,7 @@ mod tests {
                 model_id: "local-qwen".to_owned(),
                 selected_preset_id: Some("default".to_owned()),
                 selected_variant_id: Some("Q8_0".to_owned()),
+                selected_engine_id: Some("ggml.llama".to_owned()),
                 updated_at: now,
             })
             .await
@@ -137,6 +152,7 @@ mod tests {
 
         assert_eq!(record.selected_preset_id.as_deref(), Some("default"));
         assert_eq!(record.selected_variant_id.as_deref(), Some("Q8_0"));
+        assert_eq!(record.selected_engine_id.as_deref(), Some("ggml.llama"));
     }
 
     async fn new_store() -> AnyStore {

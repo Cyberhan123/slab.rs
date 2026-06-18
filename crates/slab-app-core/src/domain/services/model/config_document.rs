@@ -133,26 +133,15 @@ pub(super) fn build_model_config_source_fields(
 }
 
 pub(super) fn build_model_config_inference_fields(
-    resolved: &slab_model_pack::ResolvedModelPack,
+    _resolved: &slab_model_pack::ResolvedModelPack,
     resolved_inference_spec: &Value,
 ) -> Vec<ModelConfigFieldView> {
-    let runtime_presets = resolved.manifest.runtime_presets.as_ref();
     let mut fields = Vec::new();
-    for (path, label, description, from_manifest) in [
-        (
-            "temperature",
-            "Temperature",
-            "Resolved sampling temperature exposed by the pack.",
-            runtime_presets.and_then(|value| value.temperature).is_some(),
-        ),
-        (
-            "top_p",
-            "Top P",
-            "Resolved nucleus sampling value exposed by the pack.",
-            runtime_presets.and_then(|value| value.top_p).is_some(),
-        ),
+    for (path, label, description) in [
+        ("temperature", "Temperature", "Resolved sampling temperature exposed by the pack."),
+        ("top_p", "Top P", "Resolved nucleus sampling value exposed by the pack."),
     ] {
-        if !from_manifest && !value_is_present(resolved_inference_spec, path) {
+        if !value_is_present(resolved_inference_spec, path) {
             continue;
         }
         fields.push(build_model_config_field(
@@ -162,11 +151,7 @@ pub(super) fn build_model_config_inference_fields(
             Some(description.into()),
             ModelConfigValueType::Number,
             json_property_or_null(resolved_inference_spec, path),
-            if from_manifest {
-                ModelConfigOrigin::PackManifest
-            } else {
-                ModelConfigOrigin::SelectedBackendConfig
-            },
+            ModelConfigOrigin::SelectedBackendConfig,
         ));
     }
     fields
@@ -185,11 +170,7 @@ pub(super) fn build_model_config_selection_view(
             id: preset.document.id.clone(),
             label: preset.document.label.clone(),
             description: preset.document.description.clone(),
-            variant_id: preset
-                .document
-                .variant_id
-                .clone()
-                .or_else(|| pack::non_empty_variant_id(&preset.variant.document.id)),
+            variant_id: Some(preset.document.variant_id.clone()),
             is_default: resolved.default_preset_id.as_deref() == Some(preset.document.id.as_str()),
         })
         .collect();

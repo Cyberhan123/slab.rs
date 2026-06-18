@@ -416,13 +416,13 @@ pub(crate) fn cloud_model_pack_bytes(id: &str) -> Vec<u8> {
     build_pack_bytes(vec![(
         "manifest.json",
         serde_json::json!({
-            "version": 2,
+            "schema_version": 3,
+            "deployment": "cloud",
             "id": id,
             "label": id,
-            "status": "ready",
             "family": "llama",
-            "source": {
-                "kind": "cloud",
+            "capabilities": ["text_generation", "chat_generation"],
+            "cloud": {
                 "provider_id": TEST_PROVIDER_ID,
                 "remote_model_id": "gpt-4.1-mini"
             }

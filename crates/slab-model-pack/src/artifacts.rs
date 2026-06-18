@@ -107,20 +107,22 @@ mod tests {
             (
                 "manifest.json",
                 json!({
-                    "version": 2,
+                    "schema_version": 3,
+                    "deployment": "local",
                     "id": "sdxl-base-1.0",
                     "label": "SDXL Base 1.0",
                     "family": "diffusion",
                     "capabilities": ["image_generation"],
+                    "engines": [{"id": "ggml.diffusion", "format": "safetensors"}],
                     "components": [
-                        { "id": "model", "label": "Model", "$config": "ref://models/components/model.json" },
-                        { "id": "vae", "label": "VAE", "$config": "ref://models/components/vae.json" }
+                        { "id": "model", "label": "Model", "$ref": "ref://models/components/model.json" },
+                        { "id": "vae", "label": "VAE", "$ref": "ref://models/components/vae.json" }
                     ],
                     "variants": [
-                        { "id": "fp16", "label": "FP16", "$config": "ref://models/variants/fp16.json" }
+                        { "id": "fp16", "label": "FP16", "$ref": "ref://models/variants/fp16.json" }
                     ],
                     "presets": [
-                        { "id": "default", "label": "Default", "$config": "ref://models/presets/default.json" }
+                        { "id": "default", "label": "Default", "$ref": "ref://models/presets/default.json" }
                     ],
                     "default_preset": "default"
                 })
@@ -162,6 +164,7 @@ mod tests {
                     "kind": "variant",
                     "id": "fp16",
                     "label": "FP16",
+                    "format": "safetensors",
                     "component_ids": ["model", "vae"]
                 })
                 .to_string(),

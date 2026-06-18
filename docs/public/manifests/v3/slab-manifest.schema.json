@@ -1,5 +1,15 @@
 {
   "$defs": {
+    "ArtifactFormat": {
+      "enum": [
+        "gguf",
+        "ggml",
+        "safetensors",
+        "onnx",
+        "ckpt"
+      ],
+      "type": "string"
+    },
     "Capability": {
       "enum": [
         "text_generation",
@@ -12,9 +22,54 @@
       ],
       "type": "string"
     },
-    "ConfigEntryRef": {
+    "CloudCredentials": {
+      "additionalProperties": false,
       "properties": {
-        "$config": {
+        "secret_ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "secret_ref"
+      ],
+      "type": "object"
+    },
+    "CloudModelTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "credentials": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CloudCredentials"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "preferred_api_base": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "remote_model_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider_id",
+        "remote_model_id"
+      ],
+      "type": "object"
+    },
+    "ConfigEntryRef": {
+      "additionalProperties": false,
+      "properties": {
+        "$ref": {
           "$ref": "#/$defs/ConfigRef"
         },
         "description": {
@@ -33,34 +88,26 @@
       "required": [
         "id",
         "label",
-        "$config"
+        "$ref"
       ],
       "type": "object"
     },
     "ConfigRef": {
       "type": "string"
     },
-    "DriverHints": {
+    "EngineTarget": {
       "properties": {
-        "avoid_drivers": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
+        "format": {
+          "$ref": "#/$defs/ArtifactFormat"
         },
-        "prefer_drivers": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "require_streaming": {
-          "default": false,
-          "type": "boolean"
+        "id": {
+          "$ref": "#/$defs/RuntimeBackendId"
         }
       },
+      "required": [
+        "id",
+        "format"
+      ],
       "type": "object"
     },
     "ModelFamily": {
@@ -72,12 +119,10 @@
       ],
       "type": "string"
     },
-    "PackModelStatus": {
+    "PackDeployment": {
       "enum": [
-        "ready",
-        "not_downloaded",
-        "downloading",
-        "error"
+        "local",
+        "cloud"
       ],
       "type": "string"
     },
@@ -96,61 +141,6 @@
         "input",
         "output"
       ],
-      "type": "object"
-    },
-    "PackRuntimePresets": {
-      "properties": {
-        "max_tokens": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "min_p": {
-          "format": "float",
-          "type": [
-            "number",
-            "null"
-          ]
-        },
-        "presence_penalty": {
-          "format": "float",
-          "type": [
-            "number",
-            "null"
-          ]
-        },
-        "repetition_penalty": {
-          "format": "float",
-          "type": [
-            "number",
-            "null"
-          ]
-        },
-        "temperature": {
-          "format": "float",
-          "type": [
-            "number",
-            "null"
-          ]
-        },
-        "top_k": {
-          "format": "int32",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "top_p": {
-          "format": "float",
-          "type": [
-            "number",
-            "null"
-          ]
-        }
-      },
       "type": "object"
     },
     "PackSourceCandidate": {
@@ -244,26 +234,6 @@
             "repo_id"
           ],
           "type": "object"
-        },
-        {
-          "properties": {
-            "kind": {
-              "const": "cloud",
-              "type": "string"
-            },
-            "provider_id": {
-              "type": "string"
-            },
-            "remote_model_id": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "provider_id",
-            "remote_model_id"
-          ],
-          "type": "object"
         }
       ],
       "properties": {
@@ -278,6 +248,7 @@
       "type": "object"
     },
     "PackSourceFile": {
+      "additionalProperties": false,
       "properties": {
         "description": {
           "type": [
@@ -305,8 +276,9 @@
       "type": "object"
     },
     "PresetEntryRef": {
+      "additionalProperties": false,
       "properties": {
-        "$config": {
+        "$ref": {
           "$ref": "#/$defs/ConfigRef"
         },
         "description": {
@@ -320,18 +292,12 @@
         },
         "label": {
           "type": "string"
-        },
-        "variant_id": {
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
         "id",
         "label",
-        "$config"
+        "$ref"
       ],
       "type": "object"
     },
@@ -355,10 +321,24 @@
         }
       },
       "type": "object"
+    },
+    "RuntimeBackendId": {
+      "description": "Canonical backend identifiers exposed on the runtime boundary today.",
+      "enum": [
+        "ggml_llama",
+        "ggml_whisper",
+        "ggml_diffusion",
+        "candle_llama",
+        "candle_whisper",
+        "candle_diffusion",
+        "onnx"
+      ],
+      "type": "string"
     }
   },
-  "$id": "https://slab.reorgix.com/manifests/v1/slab-manifest.schema.json",
+  "$id": "https://slab.reorgix.com/manifests/v3/slab-manifest.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "description": "Schema for the manifest.json file stored at the root of a .slab model pack.",
   "properties": {
     "$schema": {
@@ -370,20 +350,22 @@
       },
       "type": "array"
     },
-    "backend_hints": {
-      "$ref": "#/$defs/DriverHints",
-      "default": {
-        "avoid_drivers": [],
-        "prefer_drivers": [],
-        "require_streaming": false
-      }
-    },
     "capabilities": {
       "default": [],
       "items": {
         "$ref": "#/$defs/Capability"
       },
       "type": "array"
+    },
+    "cloud": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CloudModelTarget"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "components": {
       "items": {
@@ -404,6 +386,15 @@
         "string",
         "null"
       ]
+    },
+    "deployment": {
+      "$ref": "#/$defs/PackDeployment"
+    },
+    "engines": {
+      "items": {
+        "$ref": "#/$defs/EngineTarget"
+      },
+      "type": "array"
     },
     "family": {
       "$ref": "#/$defs/ModelFamily"
@@ -440,15 +431,10 @@
         }
       ]
     },
-    "runtime_presets": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/PackRuntimePresets"
-        },
-        {
-          "type": "null"
-        }
-      ]
+    "schema_version": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
     },
     "sources": {
       "items": {
@@ -456,30 +442,16 @@
       },
       "type": "array"
     },
-    "status": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/PackModelStatus"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
     "variants": {
       "items": {
         "$ref": "#/$defs/ConfigEntryRef"
       },
       "type": "array"
-    },
-    "version": {
-      "format": "uint32",
-      "minimum": 0,
-      "type": "integer"
     }
   },
   "required": [
-    "version",
+    "schema_version",
+    "deployment",
     "id",
     "label",
     "family"

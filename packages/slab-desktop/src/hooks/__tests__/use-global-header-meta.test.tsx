@@ -3,6 +3,7 @@ import { Settings } from 'lucide-react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { GlobalHeaderProvider } from '@/layouts/global-header-provider';
+import type { HeaderSearchControl, HeaderSelectControl } from '@/layouts/header-controls';
 import {
   useGlobalHeaderMeta,
   useGlobalHeaderState,
@@ -18,12 +19,12 @@ const selectControl = {
   value: 'model-a',
   options: [{ id: 'model-a', label: 'Model A' }],
   onValueChange: onControlChange,
-} as const;
+} satisfies HeaderSelectControl;
 const searchControl = {
   type: 'search',
   value: 'draft query',
   onValueChange: onSearchChange,
-} as const;
+} satisfies HeaderSearchControl;
 
 function HeaderMetaProbe() {
   const meta = useGlobalHeaderMeta();

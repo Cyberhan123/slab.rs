@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::str::FromStr;
 
 use serde_json::Value;
 use slab_types::{
@@ -11,7 +10,7 @@ use slab_types::{
 };
 
 use crate::error::ModelPackError;
-use crate::manifest::{BackendConfigDocument, PackSource, PackSourceFile};
+use crate::manifest::{BackendConfigDocument, PackDeployment, PackSource, PackSourceFile};
 use crate::refs::ConfigRef;
 use crate::resolve::{ResolvedModelPack, ResolvedPreset};
 
@@ -33,6 +32,14 @@ pub struct ModelPackRuntimeBridge {
     pub model_spec: ModelSpec,
     pub load_defaults: ModelPackLoadDefaults,
     pub inference_defaults: JsonOptions,
+    pub engine_load_specs: Vec<ModelPackEngineLoadSpec>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelPackEngineLoadSpec {
+    pub backend: RuntimeBackendId,
+    pub model_spec: ModelSpec,
+    pub load_defaults: ModelPackLoadDefaults,
 }
 
 impl ResolvedModelPack {
@@ -53,6 +60,12 @@ impl ResolvedModelPack {
         &self,
         preset: &ResolvedPreset,
     ) -> Result<ModelPackRuntimeBridge, ModelPackError> {
+        if self.manifest.deployment == PackDeployment::Cloud {
+            return Err(ModelPackError::UnsupportedRuntimeBridgeSource {
+                source_kind: "cloud".into(),
+            });
+        }
+
         let capability = self
             .manifest
             .capabilities
@@ -60,37 +73,71 @@ impl ResolvedModelPack {
             .copied()
             .find(|capability| capability.is_runtime_execution())
             .ok_or(ModelPackError::MissingRuntimeCapability)?;
-        let backend = resolve_runtime_backend(&self.manifest.backend_hints, &preset.document.id)?;
         let source = build_model_source(preset)?;
-        let load_options = config_payload_as_options(preset.effective_load_config.as_ref())?;
+        let load_config = preset.variant.load_config.as_ref();
+        let load_options = config_payload_as_options(load_config)?;
         let inference_defaults =
             config_payload_as_options(preset.effective_inference_config.as_ref())?;
-        let load_defaults = build_load_defaults(
-            self,
-            &preset.document.id,
-            backend,
-            &source,
-            preset.effective_load_config.as_ref(),
-        )?;
         let metadata = merged_metadata(self, preset);
+        let mut engine_load_specs = Vec::new();
 
-        let mut model_spec = ModelSpec::new(self.manifest.family, capability, source)
-            .named(self.manifest.id.clone())
-            .with_driver_hints(self.manifest.backend_hints.clone());
-        model_spec.load_options = load_options;
-        model_spec.metadata = metadata;
+        for engine in &preset.engine_candidates {
+            let backend = engine.id;
+            let load_defaults =
+                build_load_defaults(self, &preset.document.id, backend, &source, load_config)?;
+            let mut model_spec = ModelSpec::new(self.manifest.family, capability, source.clone())
+                .named(self.manifest.id.clone())
+                .with_driver_hints(DriverHints {
+                    prefer_drivers: vec![backend.canonical_id().to_owned()],
+                    avoid_drivers: Vec::new(),
+                    require_streaming: false,
+                });
+            model_spec.load_options = load_options.clone();
+            model_spec.metadata = metadata.clone();
+            engine_load_specs.push(ModelPackEngineLoadSpec { backend, model_spec, load_defaults });
+        }
+
+        let primary = engine_load_specs.first().cloned().ok_or_else(|| {
+            ModelPackError::MissingCompatibleEngines {
+                preset_id: preset.document.id.clone(),
+                variant_id: preset.variant.document.id.clone(),
+            }
+        })?;
 
         Ok(ModelPackRuntimeBridge {
-            backend,
+            backend: primary.backend,
             capability,
-            model_spec,
-            load_defaults,
+            model_spec: primary.model_spec,
+            load_defaults: primary.load_defaults,
             inference_defaults,
+            engine_load_specs,
         })
     }
 }
 
 impl ModelPackRuntimeBridge {
+    pub fn runtime_load_command(
+        &self,
+        preset_id: &str,
+    ) -> Result<RuntimeModelLoadCommand, ModelPackError> {
+        self.engine_load_specs
+            .first()
+            .ok_or_else(|| ModelPackError::MissingRuntimeBackend { preset_id: preset_id.into() })?
+            .runtime_load_command(preset_id)
+    }
+
+    pub fn runtime_load_spec(
+        &self,
+        preset_id: &str,
+    ) -> Result<RuntimeBackendLoadSpec, ModelPackError> {
+        self.engine_load_specs
+            .first()
+            .ok_or_else(|| ModelPackError::MissingRuntimeBackend { preset_id: preset_id.into() })?
+            .runtime_load_spec(preset_id)
+    }
+}
+
+impl ModelPackEngineLoadSpec {
     pub fn runtime_load_command(
         &self,
         preset_id: &str,
@@ -211,29 +258,6 @@ impl ModelPackRuntimeBridge {
     }
 }
 
-pub(crate) fn preferred_runtime_backends_from_hints(hints: &DriverHints) -> Vec<RuntimeBackendId> {
-    let mut backends = Vec::new();
-    for driver in &hints.prefer_drivers {
-        let Ok(backend) = RuntimeBackendId::from_str(driver) else {
-            continue;
-        };
-        if !backends.contains(&backend) {
-            backends.push(backend);
-        }
-    }
-    backends
-}
-
-fn resolve_runtime_backend(
-    hints: &DriverHints,
-    preset_id: &str,
-) -> Result<RuntimeBackendId, ModelPackError> {
-    preferred_runtime_backends_from_hints(hints)
-        .into_iter()
-        .next()
-        .ok_or_else(|| ModelPackError::MissingRuntimeBackend { preset_id: preset_id.to_owned() })
-}
-
 fn build_model_source(preset: &ResolvedPreset) -> Result<ModelSource, ModelPackError> {
     if !preset.variant.components.is_empty() {
         return build_model_source_from_components(preset);
@@ -286,11 +310,6 @@ fn build_model_source_from_components(
                     local_files.insert(key, path);
                 }
             }
-            PackSource::Cloud { .. } => {
-                return Err(ModelPackError::UnsupportedRuntimeBridgeSource {
-                    source_kind: "cloud".into(),
-                });
-            }
         }
     }
 
@@ -329,11 +348,6 @@ fn pack_source_to_model_source(source: &PackSource) -> Result<ModelSource, Model
             revision: revision.clone(),
             files: source_file_map(None, files),
         },
-        PackSource::Cloud { .. } => {
-            return Err(ModelPackError::UnsupportedRuntimeBridgeSource {
-                source_kind: "cloud".into(),
-            });
-        }
     })
 }
 
@@ -366,10 +380,14 @@ fn config_payload_as_options(
         return Ok(JsonOptions::default());
     };
     let Value::Object(object) = &config.payload else {
-        return Err(ModelPackError::InvalidBackendConfigPayloadShape { id: config.id.clone() });
+        return Err(ModelPackError::InvalidBackendConfigPayloadShape { id: config_id(config) });
     };
 
     Ok(object.iter().map(|(key, value)| (key.clone(), value.clone())).collect())
+}
+
+fn config_id(config: &BackendConfigDocument) -> String {
+    config.id.clone().unwrap_or_else(|| config.label.clone())
 }
 
 fn build_load_defaults(
@@ -380,22 +398,25 @@ fn build_load_defaults(
     config: Option<&BackendConfigDocument>,
 ) -> Result<ModelPackLoadDefaults, ModelPackError> {
     let options = config_payload_as_options(config)?;
-    let config_id = config.map(|value| value.id.as_str()).unwrap_or(preset_id);
-    reject_legacy_llama_load_fields(backend, config_id, &options)?;
-    let chat_template = parse_optional_asset_ref(&options, "chat_template", config_id)?;
-    let gbnf = parse_optional_asset_ref(&options, "gbnf", config_id)?;
+    let config_id = config.map(config_id).unwrap_or_else(|| preset_id.to_owned());
+    reject_legacy_llama_load_fields(backend, &config_id, &options)?;
+    let chat_template = parse_optional_asset_ref(&options, "chat_template", &config_id)?;
+    let gbnf = parse_optional_asset_ref(&options, "gbnf", &config_id)?;
 
     Ok(ModelPackLoadDefaults {
         num_workers: options.get("num_workers").and_then(as_u32),
-        context_length: options.get("context_length").and_then(as_u32),
+        context_length: resolved
+            .manifest
+            .context_window
+            .or_else(|| options.get("context_length").and_then(as_u32)),
         chat_template_source: resolve_text_asset_ref(
             resolved,
-            config_id,
+            &config_id,
             "chat_template",
             chat_template.as_ref(),
         )?,
         chat_template,
-        gbnf_source: resolve_text_asset_ref(resolved, config_id, "gbnf", gbnf.as_ref())?,
+        gbnf_source: resolve_text_asset_ref(resolved, &config_id, "gbnf", gbnf.as_ref())?,
         gbnf,
         diffusion: matches!(
             backend,
@@ -551,15 +572,148 @@ fn reject_legacy_llama_load_fields(
 }
 
 #[cfg(test)]
-mod tests {
+mod v3_tests {
     use std::io::Write;
 
     use serde_json::{Value, json};
-    use zip::CompressionMethod;
-    use zip::ZipWriter;
     use zip::write::SimpleFileOptions;
+    use zip::{CompressionMethod, ZipWriter};
 
     use crate::pack::ModelPack;
+
+    #[test]
+    fn compiles_default_runtime_bridge_for_llama_v3() {
+        let pack = ModelPack::from_bytes(&build_pack(local_pack_entries())).expect("load pack");
+        let resolved = pack.resolve().expect("resolve pack");
+        let bridge = resolved.compile_default_runtime_bridge().expect("compile bridge");
+
+        assert_eq!(bridge.backend.canonical_id(), "ggml.llama");
+        assert_eq!(bridge.engine_load_specs.len(), 1);
+        assert_eq!(
+            bridge
+                .model_spec
+                .source
+                .primary_path()
+                .map(|path| path.to_string_lossy().to_string())
+                .as_deref(),
+            Some("C:/models/qwen.gguf")
+        );
+        assert_eq!(bridge.load_defaults.context_length, Some(8192));
+        assert_eq!(bridge.inference_defaults.get("temperature").and_then(Value::as_f64), Some(0.7));
+    }
+
+    #[test]
+    fn cloud_pack_does_not_compile_runtime_bridge() {
+        let pack = ModelPack::from_bytes(&build_pack(vec![(
+            "manifest.json",
+            json!({
+                "schema_version": 3,
+                "deployment": "cloud",
+                "id": "gpt-4.1-mini",
+                "label": "GPT-4.1 mini",
+                "family": "llama",
+                "capabilities": ["text_generation"],
+                "cloud": {
+                    "provider_id": "openai-main",
+                    "remote_model_id": "gpt-4.1-mini"
+                }
+            })
+            .to_string(),
+        )]))
+        .expect("load pack");
+        let resolved = pack.resolve().expect("resolve pack");
+        let error = resolved
+            .compile_default_runtime_bridge()
+            .expect_err("cloud pack must not compile runtime bridge");
+
+        assert!(error.to_string().contains("default_preset"));
+    }
+
+    #[test]
+    fn rejects_legacy_grammar_field_in_llama_load_payload() {
+        let mut entries = local_pack_entries();
+        entries[1].1 = json!({
+            "kind": "backend_config",
+            "label": "Load",
+            "scope": "load",
+            "payload": {
+                "grammar": "root ::= \"ok\""
+            }
+        })
+        .to_string();
+
+        let pack = ModelPack::from_bytes(&build_pack(entries)).expect("load pack");
+        let resolved = pack.resolve().expect("resolve pack");
+        let error =
+            resolved.compile_default_runtime_bridge().expect_err("legacy grammar field must fail");
+
+        assert!(error.to_string().contains("use 'gbnf' instead"));
+    }
+
+    fn local_pack_entries() -> Vec<(&'static str, String)> {
+        vec![
+            (
+                "manifest.json",
+                json!({
+                    "schema_version": 3,
+                    "deployment": "local",
+                    "id": "qwen2.5-7b-instruct",
+                    "label": "Qwen2.5 7B Instruct",
+                    "family": "llama",
+                    "capabilities": ["text_generation"],
+                    "context_window": 8192,
+                    "engines": [{"id": "ggml.llama", "format": "gguf"}],
+                    "variants": [{"id": "q4_k_m", "label": "Q4_K_M", "$ref": "ref://models/variants/q4.json"}],
+                    "presets": [{"id": "default", "label": "Default", "$ref": "ref://models/presets/default.json"}],
+                    "default_preset": "default"
+                })
+                .to_string(),
+            ),
+            (
+                "models/configs/load.json",
+                json!({
+                    "kind": "backend_config",
+                    "label": "Load",
+                    "scope": "load",
+                    "payload": {"num_workers": 2}
+                })
+                .to_string(),
+            ),
+            (
+                "models/configs/inference.json",
+                json!({
+                    "kind": "backend_config",
+                    "label": "Inference",
+                    "scope": "inference",
+                    "payload": {"temperature": 0.7}
+                })
+                .to_string(),
+            ),
+            (
+                "models/variants/q4.json",
+                json!({
+                    "kind": "variant",
+                    "id": "q4_k_m",
+                    "label": "Q4",
+                    "format": "gguf",
+                    "sources": [{"kind": "local_path", "path": "C:/models/qwen.gguf"}],
+                    "$load_config": "ref://models/configs/load.json"
+                })
+                .to_string(),
+            ),
+            (
+                "models/presets/default.json",
+                json!({
+                    "kind": "preset",
+                    "id": "default",
+                    "label": "Default",
+                    "variant_id": "q4_k_m",
+                    "$inference_config": "ref://models/configs/inference.json"
+                })
+                .to_string(),
+            ),
+        ]
+    }
 
     fn build_pack(entries: Vec<(&str, String)>) -> Vec<u8> {
         let mut cursor = std::io::Cursor::new(Vec::new());
@@ -573,313 +727,5 @@ mod tests {
 
         writer.finish().expect("finish zip");
         cursor.into_inner()
-    }
-
-    #[test]
-    fn compiles_default_runtime_bridge_for_llama() {
-        let bytes = build_pack(vec![
-            ("manifest.json", json!({
-                "version": 2,
-                "id": "qwen2.5-7b-instruct",
-                "label": "Qwen2.5 7B Instruct",
-                "family": "llama",
-                "capabilities": ["text_generation"],
-                "backend_hints": {"prefer_drivers": ["ggml.llama"], "avoid_drivers": [], "require_streaming": true},
-                "components": [{"id": "model", "label": "Model", "$config": "ref://models/components/model.json"}],
-                "variants": [{"id": "q4_k_m", "label": "Q4_K_M", "$config": "ref://models/variants/q4.json"}],
-                "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
-                "default_preset": "default"
-            }).to_string()),
-            ("models/components/model.json", json!({
-                "kind": "component", "id": "model", "label": "Model",
-                "source": {"kind": "local_path", "path": "C:/models/qwen.gguf"}
-            }).to_string()),
-            ("models/configs/load.json", json!({
-                "kind": "backend_config", "id": "load", "label": "Load", "scope": "load",
-                "payload": {
-                    "context_length": 8192,
-                    "chat_template": {
-                        "id": "chatml-template",
-                        "name": "ChatML",
-                        "$path": "ref://models/assets/chat_template.jinja"
-                    },
-                    "num_workers": 2
-                }
-            }).to_string()),
-            (
-                "models/assets/chat_template.jinja",
-                "{% for message in messages %}<|im_start|>{{ message.role }}\n{{ message.content }}<|im_end|>\n{% endfor %}{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}".to_owned(),
-            ),
-            ("models/configs/inference.json", json!({
-                "kind": "backend_config", "id": "inference", "label": "Inference", "scope": "inference",
-                "payload": {"temperature": 0.7, "top_p": 0.95}
-            }).to_string()),
-            ("models/variants/q4.json", json!({
-                "kind": "variant", "id": "q4_k_m", "label": "Q4", "component_ids": ["model"]
-            }).to_string()),
-            ("models/presets/default.json", json!({
-                "kind": "preset", "id": "default", "label": "Default",
-                "$load_config": "ref://models/configs/load.json", "$inference_config": "ref://models/configs/inference.json"
-            }).to_string()),
-        ]);
-
-        let pack = ModelPack::from_bytes(&bytes).expect("load pack");
-        let resolved = pack.resolve().expect("resolve pack");
-        let bridge = resolved.compile_default_runtime_bridge().expect("compile bridge");
-        let load_spec = bridge.runtime_load_spec("default").expect("load spec");
-        let slab_types::RuntimeBackendLoadSpec::GgmlLlama(load_spec) = load_spec else {
-            panic!("expected ggml llama load spec");
-        };
-
-        assert_eq!(bridge.backend.canonical_id(), "ggml.llama");
-        assert_eq!(
-            bridge
-                .model_spec
-                .source
-                .primary_path()
-                .map(|path| path.to_string_lossy().to_string())
-                .as_deref(),
-            Some("C:/models/qwen.gguf")
-        );
-        assert_eq!(load_spec.context_length, Some(8192));
-        assert!(bridge.load_defaults.chat_template.is_some());
-        assert!(bridge.load_defaults.chat_template_source.is_some());
-        assert!(load_spec.chat_template.is_some());
-        assert_eq!(bridge.inference_defaults.get("temperature").and_then(Value::as_f64), Some(0.7));
-    }
-
-    #[test]
-    fn rejects_cloud_source_when_building_runtime_bridge() {
-        let bytes = build_pack(vec![
-            (
-                "manifest.json",
-                json!({
-                    "version": 2,
-                    "id": "gpt-4.1-mini",
-                    "label": "GPT-4.1 mini",
-                    "family": "llama",
-                    "capabilities": ["text_generation"],
-                    "backend_hints": {"prefer_drivers": ["ggml.llama"], "avoid_drivers": [], "require_streaming": true},
-                    "source": {
-                        "kind": "cloud",
-                        "provider_id": "openai-main",
-                        "remote_model_id": "gpt-4.1-mini"
-                    },
-                    "variants": [{"id": "default-variant", "label": "Default Variant", "$config": "ref://models/variants/default.json"}],
-                    "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
-                    "default_preset": "default"
-                })
-                .to_string(),
-            ),
-            (
-                "models/variants/default.json",
-                json!({
-                    "kind": "variant",
-                    "id": "default-variant",
-                    "label": "Default Variant"
-                })
-                .to_string(),
-            ),
-            (
-                "models/presets/default.json",
-                json!({
-                    "kind": "preset",
-                    "id": "default",
-                    "label": "Default",
-                    "variant_id": "default-variant"
-                })
-                .to_string(),
-            ),
-        ]);
-
-        let pack = ModelPack::from_bytes(&bytes).expect("load pack");
-        let resolved = pack.resolve().expect("resolve pack");
-        let error = resolved
-            .compile_default_runtime_bridge()
-            .expect_err("cloud source must not compile runtime bridge");
-
-        assert!(error.to_string().contains("source kind 'cloud'"));
-    }
-
-    #[test]
-    fn rejects_legacy_grammar_field_in_llama_load_payload() {
-        let bytes = build_pack(vec![
-            ("manifest.json", json!({
-                "version": 2,
-                "id": "qwen2.5-7b-instruct",
-                "label": "Qwen2.5 7B Instruct",
-                "family": "llama",
-                "capabilities": ["text_generation"],
-                "backend_hints": {"prefer_drivers": ["ggml.llama"], "avoid_drivers": [], "require_streaming": true},
-                "components": [{"id": "model", "label": "Model", "$config": "ref://models/components/model.json"}],
-                "variants": [{"id": "q4_k_m", "label": "Q4_K_M", "$config": "ref://models/variants/q4.json"}],
-                "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
-                "default_preset": "default"
-            }).to_string()),
-            ("models/components/model.json", json!({
-                "kind": "component", "id": "model", "label": "Model",
-                "source": {"kind": "local_path", "path": "C:/models/qwen.gguf"}
-            }).to_string()),
-            ("models/configs/load.json", json!({
-                "kind": "backend_config", "id": "load", "label": "Load", "scope": "load",
-                "payload": {
-                    "grammar": "root ::= \"ok\"",
-                    "num_workers": 2
-                }
-            }).to_string()),
-            ("models/variants/q4.json", json!({
-                "kind": "variant", "id": "q4_k_m", "label": "Q4", "component_ids": ["model"]
-            }).to_string()),
-            ("models/presets/default.json", json!({
-                "kind": "preset", "id": "default", "label": "Default",
-                "$load_config": "ref://models/configs/load.json"
-            }).to_string()),
-        ]);
-
-        let pack = ModelPack::from_bytes(&bytes).expect("load pack");
-        let resolved = pack.resolve().expect("resolve pack");
-        let error =
-            resolved.compile_default_runtime_bridge().expect_err("legacy grammar field must fail");
-
-        assert!(error.to_string().contains("use 'gbnf' instead"));
-    }
-
-    #[test]
-    fn compiles_diffusion_bridge_for_hugging_face_source_without_materialized_paths() {
-        let bytes = build_pack(vec![
-            (
-                "manifest.json",
-                json!({
-                    "version": 2,
-                    "id": "sdxl-turbo",
-                    "label": "SDXL Turbo",
-                    "family": "diffusion",
-                    "capabilities": ["image_generation"],
-                    "backend_hints": {"prefer_drivers": ["ggml.diffusion"], "avoid_drivers": [], "require_streaming": false},
-                    "source": {
-                        "kind": "hugging_face",
-                        "repo_id": "stabilityai/sdxl-turbo",
-                        "files": [
-                            {"id": "diffusion_model", "path": "sdxl_turbo.safetensors"},
-                            {"id": "vae", "path": "vae.safetensors"}
-                        ]
-                    },
-                    "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
-                    "default_preset": "default"
-                })
-                .to_string(),
-            ),
-            (
-                "models/configs/load.json",
-                json!({
-                    "kind": "backend_config",
-                    "id": "load",
-                    "label": "Load",
-                    "scope": "load",
-                    "payload": {
-                        "flash_attn": true,
-                        "vae_device": "cpu"
-                    }
-                })
-                .to_string(),
-            ),
-            (
-                "models/presets/default.json",
-                json!({
-                    "kind": "preset",
-                    "id": "default",
-                    "label": "Default",
-                    "$load_config": "ref://models/configs/load.json"
-                })
-                .to_string(),
-            ),
-        ]);
-
-        let pack = ModelPack::from_bytes(&bytes).expect("load pack");
-        let resolved = pack.resolve().expect("resolve pack");
-        let bridge = resolved.compile_default_runtime_bridge().expect("compile bridge");
-        let diffusion =
-            bridge.load_defaults.diffusion.as_ref().expect("diffusion defaults should exist");
-        let load_error =
-            bridge.runtime_load_spec("default").expect_err("load spec should require download");
-
-        assert_eq!(bridge.backend.canonical_id(), "ggml.diffusion");
-        assert!(diffusion.diffusion_model_path.is_none());
-        assert!(diffusion.vae_path.is_none());
-        assert!(diffusion.clip_l_path.is_none());
-        assert!(diffusion.flash_attn);
-        assert_eq!(diffusion.vae_device, "cpu");
-        assert!(load_error.to_string().contains("hugging_face"));
-    }
-
-    #[test]
-    fn compiles_hugging_face_bridge_using_selected_variant_file() {
-        let bytes = build_pack(vec![
-            (
-                "manifest.json",
-                json!({
-                    "version": 2,
-                    "id": "qwen2.5-0.5b-instruct",
-                    "label": "Qwen2.5 0.5B Instruct",
-                    "family": "llama",
-                    "capabilities": ["text_generation"],
-                    "backend_hints": {"prefer_drivers": ["ggml.llama"], "avoid_drivers": [], "require_streaming": false},
-                    "source": {
-                        "kind": "hugging_face",
-                        "repo_id": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
-                        "files": [
-                            {"id": "model", "path": "Qwen2.5-0.5B-Instruct-f16.gguf"},
-                            {"id": "Q8_0", "path": "Qwen2.5-0.5B-Instruct-Q8_0.gguf"}
-                        ]
-                    },
-                    "variants": [{"id": "Q8_0", "label": "Q8_0", "$config": "ref://models/variants/q8_0.json"}],
-                    "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
-                    "default_preset": "default"
-                })
-                .to_string(),
-            ),
-            (
-                "models/variants/q8_0.json",
-                json!({
-                    "kind": "variant",
-                    "id": "Q8_0",
-                    "label": "Q8_0"
-                })
-                .to_string(),
-            ),
-            (
-                "models/presets/default.json",
-                json!({
-                    "kind": "preset",
-                    "id": "default",
-                    "label": "Default",
-                    "variant_id": "Q8_0"
-                })
-                .to_string(),
-            ),
-        ]);
-
-        let pack = ModelPack::from_bytes(&bytes).expect("load pack");
-        let resolved = pack.resolve().expect("resolve pack");
-        let bridge = resolved.compile_default_runtime_bridge().expect("compile bridge");
-
-        assert_eq!(
-            bridge
-                .model_spec
-                .source
-                .artifact("model")
-                .map(|path| path.to_string_lossy().to_string())
-                .as_deref(),
-            Some("Qwen2.5-0.5B-Instruct-Q8_0.gguf")
-        );
-        assert_eq!(
-            bridge
-                .model_spec
-                .source
-                .primary_path()
-                .map(|path| path.to_string_lossy().to_string())
-                .as_deref(),
-            Some("Qwen2.5-0.5B-Instruct-Q8_0.gguf")
-        );
     }
 }

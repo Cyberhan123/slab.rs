@@ -1,16 +1,13 @@
-use slab_types::{Capability, DriverHints, ModelFamily, RuntimeBackendId};
+use slab_types::{Capability, ModelFamily, RuntimeBackendId};
 
 use crate::manifest::ResourceFootprint;
 use crate::resolve::ResolvedModelPack;
-use crate::runtime_bridge::preferred_runtime_backends_from_hints;
-
 #[derive(Debug, Clone)]
 pub struct ModelPackCatalogSummary {
     pub id: String,
     pub label: String,
     pub family: ModelFamily,
     pub capabilities: Vec<Capability>,
-    pub backend_hints: DriverHints,
     pub backends: Vec<RuntimeBackendId>,
     pub component_ids: Vec<String>,
     pub variant_ids: Vec<String>,
@@ -27,8 +24,7 @@ impl ResolvedModelPack {
             label: self.manifest.label.clone(),
             family: self.manifest.family,
             capabilities: self.manifest.capabilities.clone(),
-            backend_hints: self.manifest.backend_hints.clone(),
-            backends: preferred_runtime_backends_from_hints(&self.manifest.backend_hints),
+            backends: self.manifest.engines.iter().map(|engine| engine.id).collect(),
             component_ids: self.components.keys().cloned().collect(),
             variant_ids: self.variants.keys().cloned().collect(),
             adapter_ids: self.adapters.keys().cloned().collect(),

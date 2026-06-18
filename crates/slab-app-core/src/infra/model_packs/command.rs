@@ -1,8 +1,7 @@
 use std::path::Path;
 
 use slab_model_pack::{
-    ModelPackManifest, ModelPackRuntimeBridge, PackModelStatus, PackPricing, PackRuntimePresets,
-    PackSource,
+    ModelPackManifest, ModelPackRuntimeBridge, PackDeployment, PackPricing, PackSource,
 };
 
 use crate::domain::models::{
@@ -18,11 +17,9 @@ pub(super) fn build_model_command(
     manifest: &ModelPackManifest,
     resolved: &slab_model_pack::ResolvedModelPack,
 ) -> Result<CreateModelCommand, AppCoreError> {
-    match manifest.sources.first().map(|candidate| &candidate.source) {
-        Some(PackSource::Cloud { provider_id, remote_model_id }) => {
-            build_cloud_model_command(manifest, provider_id, remote_model_id)
-        }
-        _ => build_local_model_command(path, manifest, resolved),
+    match manifest.deployment {
+        PackDeployment::Cloud => build_cloud_model_command(manifest),
+        PackDeployment::Local => build_local_model_command(path, manifest, resolved),
     }
 }
 
@@ -84,10 +81,8 @@ fn build_local_model_command(
             bridge.backend, error
         ))
     })?;
-    let status = manifest_status(manifest.status)
-        .unwrap_or_else(|| default_status_for_runtime_bridge(&bridge));
-    let runtime_presets = build_runtime_presets_from_manifest(manifest.runtime_presets.as_ref())
-        .or_else(|| build_runtime_presets(&bridge.inference_defaults));
+    let status = default_status_for_runtime_bridge(&bridge);
+    let runtime_presets = build_runtime_presets(&bridge.inference_defaults);
     let (repo_id, filename, local_path) = local_source_fields(resolved, &bridge);
     let allow_local_path_fallback = repo_id.is_none();
 
@@ -122,12 +117,16 @@ fn build_local_model_command(
 
 fn build_cloud_model_command(
     manifest: &ModelPackManifest,
-    provider_id: &str,
-    remote_model_id: &str,
 ) -> Result<CreateModelCommand, AppCoreError> {
-    let provider_id = normalize_required_manifest_text(provider_id, "source.provider_id")?;
+    let cloud = manifest.cloud.as_ref().ok_or_else(|| {
+        AppCoreError::BadRequest(format!(
+            "cloud model pack '{}' is missing cloud target",
+            manifest.id
+        ))
+    })?;
+    let provider_id = normalize_required_manifest_text(&cloud.provider_id, "cloud.provider_id")?;
     let remote_model_id =
-        normalize_required_manifest_text(remote_model_id, "source.remote_model_id")?;
+        normalize_required_manifest_text(&cloud.remote_model_id, "cloud.remote_model_id")?;
 
     Ok(CreateModelCommand {
         id: Some(manifest.id.clone()),
@@ -135,7 +134,7 @@ fn build_cloud_model_command(
         kind: UnifiedModelKind::Cloud,
         backend_id: None,
         capabilities: Some(manifest.capabilities.clone()),
-        status: manifest_status(manifest.status),
+        status: Some(UnifiedModelStatus::Ready),
         spec: ModelSpec {
             provider_id: Some(provider_id),
             remote_model_id: Some(remote_model_id),
@@ -143,43 +142,12 @@ fn build_cloud_model_command(
             context_window: manifest.context_window,
             ..Default::default()
         },
-        runtime_presets: build_runtime_presets_from_manifest(manifest.runtime_presets.as_ref()),
-    })
-}
-
-fn manifest_status(status: Option<PackModelStatus>) -> Option<UnifiedModelStatus> {
-    status.map(|status| match status {
-        PackModelStatus::Ready => UnifiedModelStatus::Ready,
-        PackModelStatus::NotDownloaded => UnifiedModelStatus::NotDownloaded,
-        PackModelStatus::Downloading => UnifiedModelStatus::Downloading,
-        PackModelStatus::Error => UnifiedModelStatus::Error,
+        runtime_presets: None,
     })
 }
 
 fn build_pricing_from_manifest(pricing: Option<&PackPricing>) -> Option<Pricing> {
     pricing.map(|pricing| Pricing { input: pricing.input, output: pricing.output })
-}
-
-fn build_runtime_presets_from_manifest(
-    runtime_presets: Option<&PackRuntimePresets>,
-) -> Option<RuntimePresets> {
-    let runtime_presets = runtime_presets?;
-    (runtime_presets.max_tokens.is_some()
-        || runtime_presets.temperature.is_some()
-        || runtime_presets.top_p.is_some()
-        || runtime_presets.top_k.is_some()
-        || runtime_presets.min_p.is_some()
-        || runtime_presets.presence_penalty.is_some()
-        || runtime_presets.repetition_penalty.is_some())
-    .then_some(RuntimePresets {
-        max_tokens: runtime_presets.max_tokens,
-        temperature: runtime_presets.temperature,
-        top_p: runtime_presets.top_p,
-        top_k: runtime_presets.top_k,
-        min_p: runtime_presets.min_p,
-        presence_penalty: runtime_presets.presence_penalty,
-        repetition_penalty: runtime_presets.repetition_penalty,
-    })
 }
 
 fn normalize_optional_manifest_text(value: Option<&str>) -> Option<String> {

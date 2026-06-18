@@ -73,7 +73,7 @@ impl ModelService {
                         bridge.backend,
                         &command,
                         &bridge,
-                        selection.selected_preset.effective_load_config.as_ref(),
+                        selection.selected_preset.variant.load_config.as_ref(),
                     )
                     .await?;
                 let resolved_inference_spec = Value::Object(

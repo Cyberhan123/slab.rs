@@ -13,7 +13,7 @@ use crate::domain::models::{
     ModelLoadCommand, ModelRuntimeState, ModelStatus, UnifiedModel, UnifiedModelKind,
 };
 use crate::domain::ports::RuntimeBackendStatus;
-use crate::error::AppCoreError;
+use crate::error::{AppCoreError, AppCoreErrorData, RuntimeEngineAttemptError};
 use crate::infra::db::{ModelConfigStateStore, ModelStore};
 use crate::infra::model_packs;
 use crate::model_auto_unload::ModelReplayPlan;
@@ -31,9 +31,15 @@ pub(crate) struct LocalLlamaPromptProfile {
 
 #[derive(Debug, Clone)]
 struct ResolvedModelLoadTarget {
+    model_id: Option<String>,
+    candidates: Vec<ResolvedModelLoadCandidate>,
+    persist_selected_engine_id: bool,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedModelLoadCandidate {
     backend_id: RuntimeBackendId,
     model_path: String,
-    model_id: Option<String>,
     pack_load_defaults: Option<slab_model_pack::ModelPackLoadDefaults>,
 }
 
@@ -65,8 +71,9 @@ impl ModelService {
 
     pub async fn runtime_state_for_model(&self, model: &UnifiedModel) -> Option<ModelRuntimeState> {
         self.model_state.auto_unload().sync_runtime_restart_states().await;
-        let backend_id = model.backend_id?;
-        let backend_id = backend_id.into();
+        let backend_id = resolve_model_selected_engine(&self.model_state, model)
+            .await
+            .or_else(|| model.backend_id.map(Into::into))?;
         let snapshot =
             self.model_state.auto_unload().snapshot_for_model(backend_id, &model.id).await;
 
@@ -115,7 +122,7 @@ pub(crate) async fn resolve_local_chat_prompt_profile(
         build_catalog_model_pack_load_target(state, &model, model_path).await?
     {
         return Ok(LocalLlamaPromptProfile {
-            backend_id,
+            backend_id: pack_target.backend_id,
             chat_template_source: pack_target.load_defaults.chat_template_source,
             default_gbnf: pack_target.load_defaults.gbnf_source,
         });
@@ -139,6 +146,12 @@ pub(crate) async fn resolve_worker_model_backend_or_default(
         .ok_or_else(|| AppCoreError::NotFound(format!("model {model_id} not found")))?;
     let model: UnifiedModel =
         record.try_into().map_err(|error: String| AppCoreError::Internal(error))?;
+
+    if let Some(backend_id) =
+        resolve_model_selected_engine_from_store(state.store(), &model).await?
+    {
+        return Ok(backend_id);
+    }
 
     resolve_local_backend_from_model(&model)
 }
@@ -276,36 +289,76 @@ async fn load_model_with_state(
     command: ModelLoadCommand,
 ) -> Result<ModelStatus, AppCoreError> {
     let resolved_target = resolve_model_load_target(&state, &command).await?;
+    let mut retryable_attempts = Vec::new();
 
-    catalog::validate_path("model_path", &resolved_target.model_path)?;
-    catalog::validate_existing_model_file(&resolved_target.model_path)?;
+    for candidate in &resolved_target.candidates {
+        match load_model_candidate(&state, log_message, &command, &resolved_target, candidate).await
+        {
+            Ok(status) => return Ok(status),
+            Err(error) if is_retryable_engine_load_error(&error) => {
+                retryable_attempts.push(RuntimeEngineAttemptError {
+                    engine: candidate.backend_id.canonical_id().to_owned(),
+                    outcome: runtime_engine_attempt_outcome(&error).to_owned(),
+                    message: error.to_string(),
+                });
+            }
+            Err(error) => return Err(error),
+        }
+    }
 
-    ensure_runtime_backend_available(&state, resolved_target.backend_id)?;
+    Err(AppCoreError::BadRequestData {
+        message: format!(
+            "all compatible runtime engines failed to load model{}",
+            resolved_target.model_id.as_ref().map(|id| format!(" '{id}'")).unwrap_or_default()
+        ),
+        data: Box::new(AppCoreErrorData::runtime_engine_exhausted(
+            resolved_target.model_id,
+            retryable_attempts,
+        )),
+    })
+}
+
+async fn load_model_candidate(
+    state: &ModelState,
+    log_message: &'static str,
+    command: &ModelLoadCommand,
+    resolved_target: &ResolvedModelLoadTarget,
+    candidate: &ResolvedModelLoadCandidate,
+) -> Result<ModelStatus, AppCoreError> {
+    catalog::validate_path("model_path", &candidate.model_path)?;
+    catalog::validate_existing_model_file(&candidate.model_path)?;
+
+    ensure_runtime_backend_available(state, candidate.backend_id)?;
     let (num_workers, worker_source) = if let Some(workers) = command.num_workers {
-        validate_and_normalize_model_workers(resolved_target.backend_id, workers, "request")?
+        validate_and_normalize_model_workers(candidate.backend_id, workers, "request")?
     } else if let Some(workers) =
-        resolved_target.pack_load_defaults.as_ref().and_then(|defaults| defaults.num_workers)
+        candidate.pack_load_defaults.as_ref().and_then(|defaults| defaults.num_workers)
     {
-        validate_and_normalize_model_workers(resolved_target.backend_id, workers, "model_pack")?
+        validate_and_normalize_model_workers(candidate.backend_id, workers, "model_pack")?
     } else {
-        resolve_model_workers(&state, resolved_target.backend_id, None).await?
+        resolve_model_workers(state, candidate.backend_id, None).await?
     };
-    let (context_length, context_source) =
-        resolve_llama_context_length(&state, resolved_target.backend_id).await?;
-    let flash_attn = resolve_backend_flash_attn(&state, resolved_target.backend_id);
-    let diffusion = if let Some(defaults) = resolved_target.pack_load_defaults.as_ref() {
+    let (context_length, context_source) = if let Some(context_length) =
+        candidate.pack_load_defaults.as_ref().and_then(|defaults| defaults.context_length)
+    {
+        (context_length, "model_pack")
+    } else {
+        resolve_llama_context_length(state, candidate.backend_id).await?
+    };
+    let flash_attn = resolve_backend_flash_attn(state, candidate.backend_id);
+    let diffusion = if let Some(defaults) = candidate.pack_load_defaults.as_ref() {
         model_packs::merge_diffusion_load_defaults(
             defaults.diffusion.clone(),
-            resolve_diffusion_context_params(&state, resolved_target.backend_id).await?,
+            resolve_diffusion_context_params(state, candidate.backend_id).await?,
         )
     } else {
-        resolve_diffusion_context_params(&state, resolved_target.backend_id).await?
+        resolve_diffusion_context_params(state, candidate.backend_id).await?
     };
 
     info!(
-        backend = %resolved_target.backend_id,
+        backend = %candidate.backend_id,
         model_id = ?resolved_target.model_id,
-        model_path = %resolved_target.model_path,
+        model_path = %candidate.model_path,
         workers = num_workers,
         worker_source = worker_source,
         context_length = context_length,
@@ -315,16 +368,16 @@ async fn load_model_with_state(
     );
 
     let load_spec = build_backend_load_spec(
-        resolved_target.backend_id,
-        &resolved_target.model_path,
+        candidate.backend_id,
+        &candidate.model_path,
         BackendLoadSpecOptions {
             num_workers,
             context_length,
-            chat_template: resolved_target
+            chat_template: candidate
                 .pack_load_defaults
                 .as_ref()
                 .and_then(|defaults| defaults.chat_template_source.clone()),
-            gbnf: resolved_target
+            gbnf: candidate
                 .pack_load_defaults
                 .as_ref()
                 .and_then(|defaults| defaults.gbnf_source.clone()),
@@ -336,13 +389,51 @@ async fn load_model_with_state(
     state
         .auto_unload()
         .notify_model_loaded(ModelReplayPlan {
-            backend_id: resolved_target.backend_id,
-            model_id: resolved_target.model_id,
+            backend_id: candidate.backend_id,
+            model_id: resolved_target.model_id.clone(),
             load_spec,
         })
         .await;
 
+    if resolved_target.persist_selected_engine_id
+        && let Some(model_id) = resolved_target.model_id.as_deref()
+    {
+        persist_selected_engine_id(state, model_id, candidate.backend_id).await?;
+    }
+
     decode_model_status(response)
+}
+
+fn is_retryable_engine_load_error(error: &AppCoreError) -> bool {
+    matches!(error, AppCoreError::BackendNotReady(_) | AppCoreError::RuntimeMemoryPressure(_))
+}
+
+fn runtime_engine_attempt_outcome(error: &AppCoreError) -> &'static str {
+    match error {
+        AppCoreError::BackendNotReady(_) => "backend_not_ready",
+        AppCoreError::RuntimeMemoryPressure(_) => "memory_pressure",
+        _ => "failed",
+    }
+}
+
+async fn persist_selected_engine_id(
+    state: &ModelState,
+    model_id: &str,
+    backend_id: RuntimeBackendId,
+) -> Result<(), AppCoreError> {
+    let mut record = state.store().get_model_config_state(model_id).await?.unwrap_or_else(|| {
+        crate::infra::db::ModelConfigStateRecord {
+            model_id: model_id.to_owned(),
+            selected_preset_id: None,
+            selected_variant_id: None,
+            selected_engine_id: None,
+            updated_at: chrono::Utc::now(),
+        }
+    });
+    record.selected_engine_id = Some(backend_id.canonical_id().to_owned());
+    record.updated_at = chrono::Utc::now();
+    state.store().upsert_model_config_state(record).await?;
+    Ok(())
 }
 
 struct BackendLoadSpecOptions {
@@ -452,24 +543,20 @@ async fn resolve_model_load_target(
         if let Some(pack_target) =
             build_catalog_model_pack_load_target(state, &model, &model_path).await?
         {
-            if pack_target.backend_id != backend_id {
-                return Err(AppCoreError::BadRequest(format!(
-                    "model '{}' pack backend '{}' does not match catalog backend '{}'",
-                    model.id, pack_target.backend_id, backend_id
-                )));
-            }
             return Ok(ResolvedModelLoadTarget {
-                backend_id,
-                model_path: pack_target.model_path,
                 model_id: Some(model.id),
-                pack_load_defaults: Some(pack_target.load_defaults),
+                candidates: resolved_candidates_from_pack_target(pack_target),
+                persist_selected_engine_id: true,
             });
         }
         return Ok(ResolvedModelLoadTarget {
-            backend_id,
-            model_path,
             model_id: Some(model.id),
-            pack_load_defaults: None,
+            candidates: vec![ResolvedModelLoadCandidate {
+                backend_id,
+                model_path,
+                pack_load_defaults: None,
+            }],
+            persist_selected_engine_id: false,
         });
     }
 
@@ -493,26 +580,34 @@ async fn resolve_model_load_target(
     let backend_id: RuntimeBackendId = backend_id
         .parse()
         .map_err(|_| AppCoreError::BadRequest(format!("unknown backend: {backend_id}")))?;
-    ensure_runtime_backend_available(state, backend_id)?;
 
     if model_packs::is_model_pack_path(&model_path) {
-        let pack_target =
+        let mut pack_target =
             model_packs::build_model_pack_load_target(std::path::Path::new(&model_path))?;
-        if pack_target.backend_id != backend_id {
+        pack_target.candidates.retain(|candidate| candidate.backend_id == backend_id);
+        if pack_target.candidates.is_empty() {
             return Err(AppCoreError::BadRequest(format!(
-                "model pack backend '{}' does not match requested backend '{}'",
-                pack_target.backend_id, backend_id
+                "model pack has no candidate for requested backend '{}'",
+                backend_id
             )));
         }
+        sync_pack_target_primary_from_candidates(&mut pack_target);
         return Ok(ResolvedModelLoadTarget {
-            backend_id,
-            model_path: pack_target.model_path,
             model_id: None,
-            pack_load_defaults: Some(pack_target.load_defaults),
+            candidates: resolved_candidates_from_pack_target(pack_target),
+            persist_selected_engine_id: false,
         });
     }
 
-    Ok(ResolvedModelLoadTarget { backend_id, model_path, model_id: None, pack_load_defaults: None })
+    Ok(ResolvedModelLoadTarget {
+        model_id: None,
+        candidates: vec![ResolvedModelLoadCandidate {
+            backend_id,
+            model_path,
+            pack_load_defaults: None,
+        }],
+        persist_selected_engine_id: false,
+    })
 }
 
 async fn build_catalog_model_pack_load_target(
@@ -527,6 +622,28 @@ async fn build_catalog_model_pack_load_target(
     };
 
     build_selected_model_pack_load_target(state, &model.id, &pack_path).await.map(Some)
+}
+
+fn resolved_candidates_from_pack_target(
+    target: model_packs::ModelPackLoadTarget,
+) -> Vec<ResolvedModelLoadCandidate> {
+    target
+        .candidates
+        .into_iter()
+        .map(|candidate| ResolvedModelLoadCandidate {
+            backend_id: candidate.backend_id,
+            model_path: candidate.model_path,
+            pack_load_defaults: Some(candidate.load_defaults),
+        })
+        .collect()
+}
+
+fn sync_pack_target_primary_from_candidates(target: &mut model_packs::ModelPackLoadTarget) {
+    if let Some(primary) = target.candidates.first().cloned() {
+        target.backend_id = primary.backend_id;
+        target.model_path = primary.model_path;
+        target.load_defaults = primary.load_defaults;
+    }
 }
 
 pub(super) fn catalog_model_pack_path(
@@ -583,24 +700,21 @@ async fn build_selected_model_pack_load_target(
         .preset_id
         .clone()
         .unwrap_or_else(|| selected_preset.document.id.clone());
-    let load_spec = bridge.runtime_load_spec(&preset_id).map_err(|error| match error {
-        slab_model_pack::ModelPackError::NonMaterializedSource { .. } => AppCoreError::BadRequest(
-            format!(
-                "model pack '{}' points to a remote source and must be downloaded from the model catalog before loading",
-                pack_path.display()
-            ),
-        ),
-        other => AppCoreError::BadRequest(format!(
-            "failed to build selected model pack load target '{}': {other}",
-            pack_path.display()
-        )),
-    })?;
+    let mut target =
+        model_packs::model_pack_load_target_from_bridge(pack_path, &preset_id, bridge)?;
+    if let Some(selected_engine_id) = state_record
+        .as_ref()
+        .and_then(|record| catalog::normalize_optional_text(record.selected_engine_id.clone()))
+        && let Some(position) = target
+            .candidates
+            .iter()
+            .position(|candidate| candidate.backend_id.canonical_id() == selected_engine_id)
+    {
+        target.candidates.swap(0, position);
+        sync_pack_target_primary_from_candidates(&mut target);
+    }
 
-    Ok(model_packs::ModelPackLoadTarget {
-        backend_id: bridge.backend,
-        model_path: load_spec.model_path().to_string_lossy().into_owned(),
-        load_defaults: bridge.load_defaults,
-    })
+    Ok(target)
 }
 
 async fn resolve_unload_backend(
@@ -611,7 +725,15 @@ async fn resolve_unload_backend(
         command.model_id.as_deref().map(str::trim).filter(|value| !value.is_empty())
     {
         let model = resolve_local_catalog_model(state, model_id).await?;
-        let backend_id = resolve_local_backend_from_model(&model)?;
+        let backend_id = resolve_model_selected_engine(state, &model)
+            .await
+            .or_else(|| model.backend_id.map(Into::into))
+            .ok_or_else(|| {
+                AppCoreError::BadRequest(format!(
+                    "model '{}' is local but is missing backend_id",
+                    model.id
+                ))
+            })?;
         ensure_runtime_backend_available(state, backend_id)?;
         return Ok(backend_id);
     }
@@ -629,6 +751,28 @@ async fn resolve_unload_backend(
         .map_err(|_| AppCoreError::BadRequest(format!("unknown backend: {backend_id}")))?;
     ensure_runtime_backend_available(state, backend_id)?;
     Ok(backend_id)
+}
+
+async fn resolve_model_selected_engine(
+    state: &ModelState,
+    model: &UnifiedModel,
+) -> Option<RuntimeBackendId> {
+    resolve_model_selected_engine_from_store(state.store(), model).await.ok().flatten()
+}
+
+async fn resolve_model_selected_engine_from_store(
+    store: &std::sync::Arc<crate::infra::db::AnyStore>,
+    model: &UnifiedModel,
+) -> Result<Option<RuntimeBackendId>, AppCoreError> {
+    let Some(record) = store.get_model_config_state(&model.id).await? else {
+        return Ok(None);
+    };
+    let Some(engine_id) = catalog::normalize_optional_text(record.selected_engine_id)
+        .and_then(|value| value.parse::<RuntimeBackendId>().ok())
+    else {
+        return Ok(None);
+    };
+    Ok(Some(engine_id))
 }
 
 async fn resolve_local_catalog_model(

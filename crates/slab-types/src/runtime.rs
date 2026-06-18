@@ -72,6 +72,16 @@ pub enum ModelSourceKind {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
+pub enum ArtifactFormat {
+    Gguf,
+    Ggml,
+    Safetensors,
+    Onnx,
+    Ckpt,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
 pub enum DriverLoadStyle {
     DynamicLibraryThenModel,
     ModelOnly,

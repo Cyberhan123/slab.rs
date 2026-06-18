@@ -6,7 +6,7 @@ use crate::domain::models::{
     ManagedModelBackendId, ModelLoadCommand, ModelSpec, UnifiedModel, UnifiedModelKind,
     UnifiedModelStatus,
 };
-use crate::error::AppCoreError;
+use crate::error::{AppCoreError, AppCoreErrorData};
 use crate::infra::model_packs;
 use crate::test_support::{TestAppCore, ready_local_llama_command};
 
@@ -187,10 +187,15 @@ async fn model_runtime_unavailable_backend_rejects_before_gateway_call() {
         .await
         .expect_err("unavailable backend should reject");
 
-    assert!(
-        matches!(&error, AppCoreError::BackendNotReady(message) if message.contains("gRPC endpoint is not configured")),
-        "unexpected error: {error}"
-    );
+    let AppCoreError::BadRequestData { data, .. } = &error else {
+        panic!("unexpected error: {error}");
+    };
+    let AppCoreErrorData::RuntimeEngineExhausted { attempts, .. } = data.as_ref() else {
+        panic!("unexpected error data: {data:?}");
+    };
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].engine, RuntimeBackendId::GgmlLlama.to_string());
+    assert!(attempts[0].message.contains("gRPC endpoint is not configured"));
     assert!(app.runtime.loads().is_empty());
 }
 

@@ -158,10 +158,7 @@ impl ModelService {
         id: &str,
     ) -> Result<CreateModelCommand, AppCoreError> {
         let context = self.load_model_pack_context(id).await?;
-        if matches!(
-            context.resolved.manifest.sources.first().map(|candidate| &candidate.source),
-            Some(slab_model_pack::PackSource::Cloud { .. })
-        ) {
+        if context.resolved.manifest.deployment == slab_model_pack::PackDeployment::Cloud {
             let command = model_packs::build_model_command_from_pack(&context.path)?;
             return Ok(command);
         }
@@ -221,14 +218,13 @@ pub(super) fn resolve_projection_backend_for_pack(
     manifest: &slab_model_pack::ModelPackManifest,
 ) -> Result<ManagedModelBackendId, AppCoreError> {
     manifest
-        .backend_hints
-        .prefer_drivers
+        .engines
         .iter()
-        .find_map(|driver| driver.parse::<ManagedModelBackendId>().ok())
+        .find_map(|engine| ManagedModelBackendId::try_from(engine.id).ok())
         .or_else(|| default_managed_backend_for_pack_family(manifest.family))
         .ok_or_else(|| {
             AppCoreError::BadRequest(format!(
-                "pack '{}' declares only non-runtime capabilities; add a managed backend hint such as ggml.whisper",
+                "pack '{}' declares only non-runtime capabilities; add a managed engine such as ggml.whisper",
                 manifest.id
             ))
         })
@@ -244,26 +240,41 @@ pub(super) fn resolve_pack_model_source(
         .map_err(|error| AppCoreError::BadRequest(format!("{error_context}: {error}")))
 }
 
-fn runtime_presets_from_manifest(
-    manifest: &slab_model_pack::ModelPackManifest,
+fn runtime_presets_from_inference_defaults(
+    bridge: &slab_model_pack::ModelPackRuntimeBridge,
 ) -> Option<RuntimePresets> {
-    manifest.runtime_presets.as_ref().and_then(|presets| {
-        (presets.max_tokens.is_some()
-            || presets.temperature.is_some()
-            || presets.top_p.is_some()
-            || presets.top_k.is_some()
-            || presets.min_p.is_some()
-            || presets.presence_penalty.is_some()
-            || presets.repetition_penalty.is_some())
-        .then_some(RuntimePresets {
-            max_tokens: presets.max_tokens,
-            temperature: presets.temperature,
-            top_p: presets.top_p,
-            top_k: presets.top_k,
-            min_p: presets.min_p,
-            presence_penalty: presets.presence_penalty,
-            repetition_penalty: presets.repetition_penalty,
-        })
+    let defaults = &bridge.inference_defaults;
+    let max_tokens = defaults
+        .get("max_tokens")
+        .and_then(|value| value.as_u64().and_then(|value| u32::try_from(value).ok()));
+    let temperature =
+        defaults.get("temperature").and_then(|value| value.as_f64().map(|value| value as f32));
+    let top_p = defaults.get("top_p").and_then(|value| value.as_f64().map(|value| value as f32));
+    let top_k = defaults
+        .get("top_k")
+        .and_then(|value| value.as_i64().and_then(|value| i32::try_from(value).ok()));
+    let min_p = defaults.get("min_p").and_then(|value| value.as_f64().map(|value| value as f32));
+    let presence_penalty =
+        defaults.get("presence_penalty").and_then(|value| value.as_f64().map(|value| value as f32));
+    let repetition_penalty = defaults
+        .get("repetition_penalty")
+        .and_then(|value| value.as_f64().map(|value| value as f32));
+
+    (max_tokens.is_some()
+        || temperature.is_some()
+        || top_p.is_some()
+        || top_k.is_some()
+        || min_p.is_some()
+        || presence_penalty.is_some()
+        || repetition_penalty.is_some())
+    .then_some(RuntimePresets {
+        max_tokens,
+        temperature,
+        top_p,
+        top_k,
+        min_p,
+        presence_penalty,
+        repetition_penalty,
     })
 }
 
@@ -341,25 +352,26 @@ pub(super) fn resolve_selected_model_pack_preset(
     })?;
 
     let mut document = base_preset.document.clone();
-    document.variant_id = Some(variant_id.to_owned());
-
-    let effective_load_config = if base_preset.document.load_config.is_some() {
-        base_preset.effective_load_config.clone()
-    } else {
-        selected_variant.load_config.clone()
-    };
-    let effective_inference_config = if base_preset.document.inference_config.is_some() {
-        base_preset.effective_inference_config.clone()
-    } else {
-        selected_variant.inference_config.clone()
-    };
+    document.variant_id = variant_id.to_owned();
+    let engine_candidates = resolved
+        .manifest
+        .engines
+        .iter()
+        .copied()
+        .filter(|engine| engine.format == selected_variant.document.format)
+        .collect::<Vec<_>>();
+    if engine_candidates.is_empty() {
+        return Err(AppCoreError::BadRequest(format!(
+            "model pack variant '{variant_id}' has no compatible engine"
+        )));
+    }
 
     Ok(slab_model_pack::ResolvedPreset {
         document,
         variant: selected_variant,
         adapters: base_preset.adapters.clone(),
-        effective_load_config,
-        effective_inference_config,
+        effective_inference_config: base_preset.effective_inference_config.clone(),
+        engine_candidates,
     })
 }
 
@@ -376,70 +388,11 @@ pub(super) fn build_local_model_command_from_pack_preset(
                     bridge.backend, error
                 ))
             })?;
-            let status = manifest
-                .status
-                .map(|status| match status {
-                    slab_model_pack::PackModelStatus::Ready => UnifiedModelStatus::Ready,
-                    slab_model_pack::PackModelStatus::NotDownloaded => {
-                        UnifiedModelStatus::NotDownloaded
-                    }
-                    slab_model_pack::PackModelStatus::Downloading => {
-                        UnifiedModelStatus::Downloading
-                    }
-                    slab_model_pack::PackModelStatus::Error => UnifiedModelStatus::Error,
-                })
-                .unwrap_or_else(|| match &bridge.model_spec.source {
-                    slab_types::ModelSource::HuggingFace { .. } => {
-                        UnifiedModelStatus::NotDownloaded
-                    }
-                    _ => UnifiedModelStatus::Ready,
-                });
-            let runtime_presets = runtime_presets_from_manifest(manifest).or_else(|| {
-                let max_tokens = bridge
-                    .inference_defaults
-                    .get("max_tokens")
-                    .and_then(|value| value.as_u64().and_then(|value| u32::try_from(value).ok()));
-                let temperature = bridge
-                    .inference_defaults
-                    .get("temperature")
-                    .and_then(|value| value.as_f64().map(|value| value as f32));
-                let top_p = bridge
-                    .inference_defaults
-                    .get("top_p")
-                    .and_then(|value| value.as_f64().map(|value| value as f32));
-                let top_k = bridge
-                    .inference_defaults
-                    .get("top_k")
-                    .and_then(|value| value.as_i64().and_then(|value| i32::try_from(value).ok()));
-                let min_p = bridge
-                    .inference_defaults
-                    .get("min_p")
-                    .and_then(|value| value.as_f64().map(|value| value as f32));
-                let presence_penalty = bridge
-                    .inference_defaults
-                    .get("presence_penalty")
-                    .and_then(|value| value.as_f64().map(|value| value as f32));
-                let repetition_penalty = bridge
-                    .inference_defaults
-                    .get("repetition_penalty")
-                    .and_then(|value| value.as_f64().map(|value| value as f32));
-                (max_tokens.is_some()
-                    || temperature.is_some()
-                    || top_p.is_some()
-                    || top_k.is_some()
-                    || min_p.is_some()
-                    || presence_penalty.is_some()
-                    || repetition_penalty.is_some())
-                .then_some(RuntimePresets {
-                    max_tokens,
-                    temperature,
-                    top_p,
-                    top_k,
-                    min_p,
-                    presence_penalty,
-                    repetition_penalty,
-                })
-            });
+            let status = match &bridge.model_spec.source {
+                slab_types::ModelSource::HuggingFace { .. } => UnifiedModelStatus::NotDownloaded,
+                _ => UnifiedModelStatus::Ready,
+            };
+            let runtime_presets = runtime_presets_from_inference_defaults(&bridge);
             let source_preview = preview_from_pack_candidate_or_model_source(
                 preset.variant.effective_sources.first(),
                 &bridge.model_spec.source,
@@ -489,24 +442,10 @@ pub(super) fn build_local_model_command_from_pack_preset(
                 "failed to resolve selected pack preset source",
             )?;
             let backend_id = resolve_projection_backend_for_pack(manifest)?;
-            let status = manifest
-                .status
-                .map(|status| match status {
-                    slab_model_pack::PackModelStatus::Ready => UnifiedModelStatus::Ready,
-                    slab_model_pack::PackModelStatus::NotDownloaded => {
-                        UnifiedModelStatus::NotDownloaded
-                    }
-                    slab_model_pack::PackModelStatus::Downloading => {
-                        UnifiedModelStatus::Downloading
-                    }
-                    slab_model_pack::PackModelStatus::Error => UnifiedModelStatus::Error,
-                })
-                .unwrap_or_else(|| match &source {
-                    slab_types::ModelSource::HuggingFace { .. } => {
-                        UnifiedModelStatus::NotDownloaded
-                    }
-                    _ => UnifiedModelStatus::Ready,
-                });
+            let status = match &source {
+                slab_types::ModelSource::HuggingFace { .. } => UnifiedModelStatus::NotDownloaded,
+                _ => UnifiedModelStatus::Ready,
+            };
             let source_preview = preview_from_pack_candidate_or_model_source(
                 preset.variant.effective_sources.first(),
                 &source,
@@ -542,7 +481,7 @@ pub(super) fn build_local_model_command_from_pack_preset(
                     context_window: manifest.context_window,
                     ..Default::default()
                 },
-                runtime_presets: runtime_presets_from_manifest(manifest),
+                runtime_presets: None,
             })
         }
         Err(error) => Err(AppCoreError::BadRequest(format!(
@@ -677,6 +616,7 @@ pub(super) fn model_config_state_record(
         model_id: model_id.to_owned(),
         selected_preset_id,
         selected_variant_id,
+        selected_engine_id: None,
         updated_at: Utc::now(),
     }
 }

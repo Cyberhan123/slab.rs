@@ -681,7 +681,8 @@
   }
   function hasBrowserBridge(target) {
     const resolvedWindow = resolveWindow(target);
-    return resolvedWindow.parent !== resolvedWindow;
+    const parentWindow = resolvedWindow.parent;
+    return Boolean(parentWindow && parentWindow !== resolvedWindow && typeof parentWindow.postMessage === "function");
   }
   function ensureBrowserBridgeListener(targetWindow) {
     if (browserBridgeListenerWindow === targetWindow) {

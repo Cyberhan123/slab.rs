@@ -1,6 +1,7 @@
 {
-  "$schema": "https://slab.reorgix.com/manifests/v1/slab-manifest.schema.json",
-  "version": 2,
+  "$schema": "https://slab.reorgix.com/manifests/v3/slab-manifest.schema.json",
+  "schema_version": 3,
+  "deployment": "local",
   "id": "whisper-large-v3",
   "label": "whisper-large-v3",
   "family": "whisper",
@@ -10,11 +11,12 @@
   "capabilities": [
     "audio_transcription"
   ],
-  "backend_hints": {
-    "prefer_drivers": [
-      "ggml.whisper"
-    ]
-  },
+  "engines": [
+    {
+      "id": "ggml.whisper",
+      "format": "ggml"
+    }
+  ],
   "sources": [
     {
       "kind": "hugging_face",
@@ -35,12 +37,12 @@
     {
       "id": "model",
       "label": "whisper-large-v3",
-      "$config": "ref://variants/model.json"
+      "$ref": "ref://variants/model.json"
     },
     {
       "id": "Q5_0",
       "label": "whisper-large-v3-Q5_0",
-      "$config": "ref://variants/Q5_0.json"
+      "$ref": "ref://variants/Q5_0.json"
     }
   ],
   "presets": [
@@ -48,7 +50,7 @@
       "id": "default",
       "label": "Default",
       "description": "Default preset for whisper-large-v3.",
-      "$config": "ref://presets/default.json"
+      "$ref": "ref://presets/default.json"
     }
   ],
   "default_preset": "default"

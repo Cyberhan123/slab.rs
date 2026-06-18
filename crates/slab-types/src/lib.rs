@@ -69,7 +69,8 @@ pub use plugin_runtime::{
     required_plugin_slab_api_permission,
 };
 pub use runtime::{
-    Capability, DiffusionLoadOptions, DriverDescriptor, DriverHints, DriverLoadStyle, ModelFamily,
-    ModelSource, ModelSourceKind, ModelSpec, RuntimeModelLoadCommand, RuntimeModelStatus,
+    ArtifactFormat, Capability, DiffusionLoadOptions, DriverDescriptor, DriverHints,
+    DriverLoadStyle, ModelFamily, ModelSource, ModelSourceKind, ModelSpec, RuntimeModelLoadCommand,
+    RuntimeModelStatus,
 };
 pub use sqlite::sqlite_url_for_path;

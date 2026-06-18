@@ -25,6 +25,20 @@ pub enum AppCoreErrorData {
         reason: String,
         suggestion: String,
     },
+    RuntimeEngineExhausted {
+        #[serde(rename = "error_type")]
+        error_type: &'static str,
+        param: &'static str,
+        model_id: Option<String>,
+        attempts: Vec<RuntimeEngineAttemptError>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RuntimeEngineAttemptError {
+    pub engine: String,
+    pub outcome: String,
+    pub message: String,
 }
 
 impl AppCoreErrorData {
@@ -46,10 +60,23 @@ impl AppCoreErrorData {
         }
     }
 
+    pub fn runtime_engine_exhausted(
+        model_id: Option<String>,
+        attempts: Vec<RuntimeEngineAttemptError>,
+    ) -> Self {
+        Self::RuntimeEngineExhausted {
+            error_type: "invalid_request_error",
+            param: "model_id",
+            model_id,
+            attempts,
+        }
+    }
+
     pub fn error_type(&self) -> &'static str {
         match self {
             Self::UnsupportedChatParameter { error_type, .. }
-            | Self::ModelDownloadUnavailable { error_type, .. } => error_type,
+            | Self::ModelDownloadUnavailable { error_type, .. }
+            | Self::RuntimeEngineExhausted { error_type, .. } => error_type,
         }
     }
 
@@ -57,13 +84,15 @@ impl AppCoreErrorData {
         match self {
             Self::UnsupportedChatParameter { .. } => "unsupported_chat_parameter",
             Self::ModelDownloadUnavailable { .. } => "model_download_unavailable",
+            Self::RuntimeEngineExhausted { .. } => "runtime_engine_exhausted",
         }
     }
 
     pub fn param(&self) -> &str {
         match self {
             Self::UnsupportedChatParameter { param, .. } => param,
-            Self::ModelDownloadUnavailable { param, .. } => param,
+            Self::ModelDownloadUnavailable { param, .. }
+            | Self::RuntimeEngineExhausted { param, .. } => param,
         }
     }
 }

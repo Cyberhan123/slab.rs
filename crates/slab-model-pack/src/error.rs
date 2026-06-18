@@ -49,6 +49,9 @@ pub enum ModelPackError {
         source: serde_json::Error,
     },
 
+    #[error("unsupported model pack schema_version {found}; only schema_version 3 is supported")]
+    UnsupportedSchemaVersion { found: u32 },
+
     #[error("invalid UTF-8 text asset '{path}': {source}")]
     InvalidTextAsset {
         path: String,
@@ -58,6 +61,27 @@ pub enum ModelPackError {
 
     #[error("duplicate JSON document path '{path}' in .slab archive")]
     DuplicateDocumentPath { path: String },
+
+    #[error("duplicate {kind} id '{id}'")]
+    DuplicateId { kind: &'static str, id: String },
+
+    #[error("local model pack '{id}' must declare at least one engine")]
+    MissingLocalEngines { id: String },
+
+    #[error("local model pack '{id}' must declare at least one variant")]
+    MissingLocalVariants { id: String },
+
+    #[error("local model pack '{id}' must declare at least one preset")]
+    MissingLocalPresets { id: String },
+
+    #[error("local model pack '{id}' must not declare cloud target")]
+    UnexpectedCloudTarget { id: String },
+
+    #[error("cloud model pack '{id}' must declare cloud target")]
+    MissingCloudTarget { id: String },
+
+    #[error("cloud model pack '{id}' must not declare local runtime fields")]
+    UnexpectedLocalRuntimeFields { id: String },
 
     #[error("invalid config reference '{value}': {reason}")]
     InvalidConfigRef { value: String, reason: String },
@@ -84,6 +108,12 @@ pub enum ModelPackError {
 
     #[error("backend config '{id}' payload must be a JSON object")]
     InvalidBackendConfigPayloadShape { id: String },
+
+    #[error("variant '{variant_id}' format '{format}' is not supported by any declared engine")]
+    IncompatibleVariantFormat { variant_id: String, format: String },
+
+    #[error("preset '{preset_id}' has no compatible engine candidates for variant '{variant_id}'")]
+    MissingCompatibleEngines { preset_id: String, variant_id: String },
 
     #[error("backend config '{id}' field '{field}' is not supported: {message}")]
     UnsupportedBackendConfigField { id: String, field: String, message: String },

@@ -9,7 +9,7 @@ The public reference surface currently focuses on the two schema families that e
 
 ## Raw schema URLs
 
-- [`https://slab.reorgix.com/manifests/v1/slab-manifest.schema.json`](https://slab.reorgix.com/manifests/v1/slab-manifest.schema.json)
+- [`https://slab.reorgix.com/manifests/v3/slab-manifest.schema.json`](https://slab.reorgix.com/manifests/v3/slab-manifest.schema.json)
 - [`https://slab.reorgix.com/manifests/v1/settings-document.schema.json`](https://slab.reorgix.com/manifests/v1/settings-document.schema.json)
 
 ## Pages

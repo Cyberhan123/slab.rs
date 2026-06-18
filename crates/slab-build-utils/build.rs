@@ -5,7 +5,7 @@ fn main() {
     let rendered = slab_model_pack::render_manifest_schema();
 
     let output_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../docs/public/manifests/v1/slab-manifest.schema.json");
+        .join("../../docs/public/manifests/v3/slab-manifest.schema.json");
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent)
             .unwrap_or_else(|error| panic!("failed to create {}: {error}", parent.display()));

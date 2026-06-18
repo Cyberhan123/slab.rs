@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use chrono::Utc;
 use slab_hub::HubErrorKind;
-use slab_types::{Capability, DriverHints, ModelFamily, RuntimeBackendId};
+use slab_types::{ArtifactFormat, Capability, ModelFamily, RuntimeBackendId};
 
 use crate::domain::models::{
     ChatModelSource, ModelSpec, RuntimePresets, UnifiedModel, UnifiedModelKind, UnifiedModelStatus,
@@ -264,21 +264,20 @@ fn non_diffusion_workers_keep_requested_count() {
 #[test]
 fn product_only_vad_pack_projects_into_local_catalog_model() {
     let manifest = slab_model_pack::ModelPackManifest {
-        version: 2,
+        schema: None,
+        schema_version: slab_model_pack::MODEL_PACK_SCHEMA_VERSION,
+        deployment: slab_model_pack::PackDeployment::Local,
         id: "whisper-vad".into(),
         label: "whisper-vad".into(),
-        status: None,
         family: ModelFamily::Whisper,
         capabilities: vec![Capability::AudioVad],
-        backend_hints: DriverHints {
-            prefer_drivers: vec!["ggml.whisper".into()],
-            avoid_drivers: Vec::new(),
-            require_streaming: false,
-        },
         context_window: None,
         pricing: None,
-        runtime_presets: None,
         metadata: BTreeMap::new(),
+        engines: vec![slab_model_pack::EngineTarget {
+            id: RuntimeBackendId::GgmlWhisper,
+            format: ArtifactFormat::Ggml,
+        }],
         sources: vec![slab_model_pack::PackSourceCandidate::new(
             slab_model_pack::PackSource::HuggingFace {
                 repo_id: "ggml-org/whisper-vad".into(),
@@ -297,15 +296,15 @@ fn product_only_vad_pack_projects_into_local_catalog_model() {
         presets: Vec::new(),
         default_preset: Some("default".into()),
         footprint: Default::default(),
+        cloud: None,
     };
     let preset = slab_model_pack::ResolvedPreset {
         document: slab_model_pack::PresetDocument {
             id: "default".into(),
             label: "Default".into(),
-            variant_id: None,
+            variant_id: "model".into(),
             description: None,
             adapter_ids: Vec::new(),
-            load_config: None,
             inference_config: None,
             footprint: Default::default(),
             metadata: BTreeMap::new(),
@@ -315,20 +314,19 @@ fn product_only_vad_pack_projects_into_local_catalog_model() {
                 id: String::new(),
                 label: "Original Model".into(),
                 description: None,
+                format: ArtifactFormat::Ggml,
                 sources: Vec::new(),
                 component_ids: Vec::new(),
                 load_config: None,
-                inference_config: None,
                 metadata: BTreeMap::new(),
             },
             effective_sources: manifest.sources.clone(),
             components: BTreeMap::new(),
             load_config: None,
-            inference_config: None,
         },
         adapters: BTreeMap::new(),
-        effective_load_config: None,
         effective_inference_config: None,
+        engine_candidates: manifest.engines.clone(),
     };
     let mut presets = BTreeMap::new();
     presets.insert("default".into(), preset.clone());

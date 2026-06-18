@@ -2,5 +2,6 @@
     "kind": "variant",
     "id": "Q8_0",
     "label": "Q8_0",
-    "$inference_config": "ref://configs/inference.json"
+    "format": "ggml",
+    "$load_config": "ref://configs/load.json"
 }

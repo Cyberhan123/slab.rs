@@ -188,10 +188,8 @@ describe('assistant agent state helpers', () => {
     ).toBe('thread-1')
     expect(
       serverMessageThreadId({
-        error: {
-          message: 'boom',
-          type: 'server_error',
-        },
+        code: 'server_error',
+        message: 'boom',
         request_id: 'req-2',
         thread_id: 'thread-2',
         type: 'agent.error',
@@ -201,9 +199,11 @@ describe('assistant agent state helpers', () => {
       serverMessageThreadId({
         messages: [],
         request_id: 'req-3',
+        session_id: 'session-1',
         thread: {
           completion_text: null,
           created_at: '2026-01-01T00:00:00Z',
+          depth: 0,
           id: 'thread-3',
           session_id: 'session-1',
           status: 'completed',

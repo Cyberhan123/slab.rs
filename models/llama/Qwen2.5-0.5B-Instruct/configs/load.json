@@ -4,8 +4,11 @@
     "label": "Load",
     "scope": "load",
     "payload": {
-        "context_length": 4096,
-        "chat_template": "chatml",
+        "chat_template": {
+            "id": "chatml_template",
+            "name": "ChatML",
+            "$path": "ref://configs/chat_template.jinja"
+        },
         "num_workers": 4
     }
 }

@@ -11,16 +11,17 @@ pub mod summary;
 pub use artifacts::{ResolvedArtifact, ResolvedArtifactMap};
 pub use error::ModelPackError;
 pub use manifest::{
-    AdapterDocument, BackendConfigDocument, BackendConfigScope, ComponentDocument, ConfigEntryRef,
-    DynamicFootprint, ModelPackManifest, PackDocument, PackDocumentKind, PackModelStatus,
-    PackPricing, PackRemoteRepository, PackRuntimePresets, PackSource, PackSourceCandidate,
-    PackSourceFile, PresetDocument, PresetEntryRef, ResourceFootprint, VariantDocument,
+    AdapterDocument, BackendConfigDocument, BackendConfigScope, CloudCredentials, CloudModelTarget,
+    ComponentDocument, ConfigEntryRef, DynamicFootprint, EngineTarget, MODEL_PACK_SCHEMA_VERSION,
+    ModelPackManifest, PackDeployment, PackDocument, PackDocumentKind, PackPricing,
+    PackRemoteRepository, PackSource, PackSourceCandidate, PackSourceFile, PresetDocument,
+    PresetEntryRef, ResourceFootprint, VariantDocument,
 };
 pub use pack::{MANIFEST_FILE_NAME, ModelPack, PACK_EXTENSION};
 pub use refs::ConfigRef;
 pub use resolve::{
     ResolvedAdapter, ResolvedComponent, ResolvedModelPack, ResolvedPreset, ResolvedVariant,
 };
-pub use runtime_bridge::{ModelPackLoadDefaults, ModelPackRuntimeBridge};
+pub use runtime_bridge::{ModelPackEngineLoadSpec, ModelPackLoadDefaults, ModelPackRuntimeBridge};
 pub use schema::{generate_manifest_schema, render_manifest_schema};
 pub use summary::ModelPackCatalogSummary;

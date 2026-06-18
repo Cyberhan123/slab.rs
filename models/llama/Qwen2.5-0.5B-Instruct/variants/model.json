@@ -2,5 +2,6 @@
     "kind": "variant",
     "id": "model",
     "label": "Qwen2.5-0.5B-Instruct",
-    "$inference_config": "ref://configs/inference.json"
+    "format": "gguf",
+    "$load_config": "ref://configs/load.json"
 }

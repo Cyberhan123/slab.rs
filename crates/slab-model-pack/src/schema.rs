@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use crate::manifest::ModelPackManifest;
 
 pub const PUBLIC_MANIFEST_SCHEMA_URL: &str =
-    "https://slab.reorgix.com/manifests/v1/slab-manifest.schema.json";
+    "https://slab.reorgix.com/manifests/v3/slab-manifest.schema.json";
 
 pub fn generate_manifest_schema() -> Value {
     let mut schema = serde_json::to_value(schemars::schema_for!(ModelPackManifest))
@@ -68,7 +68,7 @@ mod tests {
 
     #[test]
     fn generated_manifest_schema_matches_checked_in_file() {
-        let expected = include_str!("../../../docs/public/manifests/v1/slab-manifest.schema.json");
+        let expected = include_str!("../../../docs/public/manifests/v3/slab-manifest.schema.json");
 
         assert_eq!(render_manifest_schema(), expected);
     }

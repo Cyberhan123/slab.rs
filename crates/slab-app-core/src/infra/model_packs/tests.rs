@@ -39,22 +39,18 @@ fn builds_cloud_model_command_from_pack_manifest() {
     let bytes = build_pack(vec![(
         "manifest.json",
         json!({
-            "version": 2,
+            "schema_version": 3,
+            "deployment": "cloud",
             "id": "gpt_4_1_mini",
             "label": "GPT-4.1 mini",
-            "status": "ready",
             "family": "llama",
+            "capabilities": ["text_generation", "chat_generation"],
             "context_window": 128000,
             "pricing": {
                 "input": 0.4,
                 "output": 1.6
             },
-            "runtime_presets": {
-                "temperature": 0.7,
-                "top_p": 0.95
-            },
-            "source": {
-                "kind": "cloud",
+            "cloud": {
                 "provider_id": "openai-main",
                 "remote_model_id": "gpt-4.1-mini"
             }
@@ -75,8 +71,7 @@ fn builds_cloud_model_command_from_pack_manifest() {
     assert_eq!(command.spec.context_window, Some(128000));
     assert_eq!(command.spec.pricing.as_ref().map(|pricing| pricing.input), Some(0.4));
     assert_eq!(command.spec.pricing.as_ref().map(|pricing| pricing.output), Some(1.6));
-    assert_eq!(command.runtime_presets.as_ref().and_then(|presets| presets.temperature), Some(0.7));
-    assert_eq!(command.runtime_presets.as_ref().and_then(|presets| presets.top_p), Some(0.95));
+    assert!(command.runtime_presets.is_none());
 }
 
 #[test]
@@ -85,22 +80,15 @@ fn builds_local_model_command_from_pack_manifest() {
         (
             "manifest.json",
             json!({
-                "version": 2,
+                "schema_version": 3,
+                "deployment": "local",
                 "id": "qwen2.5-7b-instruct",
                 "label": "Qwen2.5 7B Instruct",
                 "family": "llama",
                 "context_window": 32768,
-                "runtime_presets": {
-                    "temperature": 0.4,
-                    "top_p": 0.9
-                },
                 "capabilities": ["text_generation"],
-                "backend_hints": {
-                    "prefer_drivers": ["ggml.llama"],
-                    "avoid_drivers": [],
-                    "require_streaming": false
-                },
-                "source": {
+                "engines": [{"id": "ggml.llama", "format": "gguf"}],
+                "sources": [{
                     "kind": "hugging_face",
                     "repo_id": "bartowski/Qwen2.5-7B-Instruct-GGUF",
                     "files": [
@@ -109,9 +97,9 @@ fn builds_local_model_command_from_pack_manifest() {
                             "path": "Qwen2.5-7B-Instruct-Q4_K_M.gguf"
                         }
                     ]
-                },
-                "variants": [{"id": "q4_k_m", "label": "Q4_K_M", "$config": "ref://models/variants/q4.json"}],
-                "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
+                }],
+                "variants": [{"id": "q4_k_m", "label": "Q4_K_M", "$ref": "ref://models/variants/q4.json"}],
+                "presets": [{"id": "default", "label": "Default", "$ref": "ref://models/presets/default.json"}],
                 "default_preset": "default"
             })
             .to_string(),
@@ -124,7 +112,6 @@ fn builds_local_model_command_from_pack_manifest() {
                 "label": "Load",
                 "scope": "load",
                 "payload": {
-                    "context_length": 8192,
                     "chat_template": {
                         "id": "chatml-template",
                         "name": "ChatML",
@@ -158,7 +145,9 @@ fn builds_local_model_command_from_pack_manifest() {
             json!({
                 "kind": "variant",
                 "id": "q4_k_m",
-                "label": "Q4"
+                "label": "Q4",
+                "format": "gguf",
+                "$load_config": "ref://models/configs/load.json"
             })
             .to_string(),
         ),
@@ -168,7 +157,7 @@ fn builds_local_model_command_from_pack_manifest() {
                 "kind": "preset",
                 "id": "default",
                 "label": "Default",
-                "$load_config": "ref://models/configs/load.json",
+                "variant_id": "q4_k_m",
                 "$inference_config": "ref://models/configs/inference.json"
             })
             .to_string(),
@@ -186,8 +175,8 @@ fn builds_local_model_command_from_pack_manifest() {
     assert_eq!(command.spec.filename.as_deref(), Some("Qwen2.5-7B-Instruct-Q4_K_M.gguf"));
     assert_eq!(command.spec.local_path, None);
     assert_eq!(command.spec.context_window, Some(32768));
-    assert_eq!(command.runtime_presets.as_ref().and_then(|presets| presets.temperature), Some(0.4));
-    assert_eq!(command.runtime_presets.as_ref().and_then(|presets| presets.top_p), Some(0.9));
+    assert_eq!(command.runtime_presets.as_ref().and_then(|presets| presets.temperature), Some(0.7));
+    assert_eq!(command.runtime_presets.as_ref().and_then(|presets| presets.top_p), Some(0.95));
 }
 
 #[test]
@@ -196,17 +185,14 @@ fn builds_diffusion_model_command_from_hugging_face_pack_without_local_paths() {
         (
             "manifest.json",
             json!({
-                "version": 2,
+                "schema_version": 3,
+                "deployment": "local",
                 "id": "sdxl-turbo",
                 "label": "SDXL Turbo",
                 "family": "diffusion",
                 "capabilities": ["image_generation"],
-                "backend_hints": {
-                    "prefer_drivers": ["ggml.diffusion"],
-                    "avoid_drivers": [],
-                    "require_streaming": false
-                },
-                "source": {
+                "engines": [{"id": "ggml.diffusion", "format": "safetensors"}],
+                "sources": [{
                     "kind": "hugging_face",
                     "repo_id": "stabilityai/sdxl-turbo",
                     "files": [
@@ -215,8 +201,9 @@ fn builds_diffusion_model_command_from_hugging_face_pack_without_local_paths() {
                             "path": "sdxl_turbo.safetensors"
                         }
                     ]
-                },
-                "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
+                }],
+                "variants": [{"id": "model", "label": "Model", "$ref": "ref://models/variants/model.json"}],
+                "presets": [{"id": "default", "label": "Default", "$ref": "ref://models/presets/default.json"}],
                 "default_preset": "default"
             })
             .to_string(),
@@ -236,12 +223,23 @@ fn builds_diffusion_model_command_from_hugging_face_pack_without_local_paths() {
             .to_string(),
         ),
         (
+            "models/variants/model.json",
+            json!({
+                "kind": "variant",
+                "id": "model",
+                "label": "Model",
+                "format": "safetensors",
+                "$load_config": "ref://models/configs/load.json"
+            })
+            .to_string(),
+        ),
+        (
             "models/presets/default.json",
             json!({
                 "kind": "preset",
                 "id": "default",
                 "label": "Default",
-                "$load_config": "ref://models/configs/load.json"
+                "variant_id": "model"
             })
             .to_string(),
         ),
@@ -264,17 +262,14 @@ fn builds_local_model_command_using_selected_variant_file_from_manifest_source()
         (
             "manifest.json",
             json!({
-                "version": 2,
+                "schema_version": 3,
+                "deployment": "local",
                 "id": "qwen2.5-0.5b-instruct",
                 "label": "Qwen2.5 0.5B Instruct",
                 "family": "llama",
                 "capabilities": ["text_generation"],
-                "backend_hints": {
-                    "prefer_drivers": ["ggml.llama"],
-                    "avoid_drivers": [],
-                    "require_streaming": false
-                },
-                "source": {
+                "engines": [{"id": "ggml.llama", "format": "gguf"}],
+                "sources": [{
                     "kind": "hugging_face",
                     "repo_id": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
                     "files": [
@@ -291,9 +286,9 @@ fn builds_local_model_command_using_selected_variant_file_from_manifest_source()
                             "path": "Qwen2.5-0.5B-Instruct-Q8_0.gguf"
                         }
                     ]
-                },
-                "variants": [{"id": "Q8_0", "label": "Q8_0", "$config": "ref://models/variants/q8_0.json"}],
-                "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
+                }],
+                "variants": [{"id": "Q8_0", "label": "Q8_0", "$ref": "ref://models/variants/q8_0.json"}],
+                "presets": [{"id": "default", "label": "Default", "$ref": "ref://models/presets/default.json"}],
                 "default_preset": "default"
             })
             .to_string(),
@@ -303,7 +298,8 @@ fn builds_local_model_command_using_selected_variant_file_from_manifest_source()
             json!({
                 "kind": "variant",
                 "id": "Q8_0",
-                "label": "Q8_0"
+                "label": "Q8_0",
+                "format": "gguf"
             })
             .to_string(),
         ),
@@ -332,22 +328,19 @@ fn builds_local_model_command_using_selected_variant_file_from_manifest_source()
 }
 
 #[test]
-fn builds_local_model_command_using_manifest_preset_variant_override() {
+fn builds_local_model_command_using_preset_document_variant() {
     let bytes = build_pack(vec![
         (
             "manifest.json",
             json!({
-                "version": 2,
+                "schema_version": 3,
+                "deployment": "local",
                 "id": "qwen2.5-0.5b-instruct",
                 "label": "Qwen2.5 0.5B Instruct",
                 "family": "llama",
                 "capabilities": ["text_generation"],
-                "backend_hints": {
-                    "prefer_drivers": ["ggml.llama"],
-                    "avoid_drivers": [],
-                    "require_streaming": false
-                },
-                "source": {
+                "engines": [{"id": "ggml.llama", "format": "gguf"}],
+                "sources": [{
                     "kind": "hugging_face",
                     "repo_id": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
                     "files": [
@@ -360,14 +353,9 @@ fn builds_local_model_command_using_manifest_preset_variant_override() {
                             "path": "Qwen2.5-0.5B-Instruct-Q8_0.gguf"
                         }
                     ]
-                },
-                "variants": [{"id": "Q8_0", "label": "Q8_0", "$config": "ref://models/variants/q8_0.json"}],
-                "presets": [{
-                    "id": "default",
-                    "label": "Default",
-                    "variant_id": "Q8_0",
-                    "$config": "ref://models/presets/default.json"
                 }],
+                "variants": [{"id": "Q8_0", "label": "Q8_0", "$ref": "ref://models/variants/q8_0.json"}],
+                "presets": [{"id": "default", "label": "Default", "$ref": "ref://models/presets/default.json"}],
                 "default_preset": "default"
             })
             .to_string(),
@@ -377,7 +365,8 @@ fn builds_local_model_command_using_manifest_preset_variant_override() {
             json!({
                 "kind": "variant",
                 "id": "Q8_0",
-                "label": "Q8_0"
+                "label": "Q8_0",
+                "format": "gguf"
             })
             .to_string(),
         ),
@@ -386,7 +375,8 @@ fn builds_local_model_command_using_manifest_preset_variant_override() {
             json!({
                 "kind": "preset",
                 "id": "default",
-                "label": "Default"
+                "label": "Default",
+                "variant_id": "Q8_0"
             })
             .to_string(),
         ),
@@ -404,13 +394,13 @@ fn manifest_remains_the_source_of_truth_when_persisted_state_matches() {
     let base_bytes = build_pack(vec![(
         "manifest.json",
         json!({
-            "version": 1,
+            "schema_version": 3,
+            "deployment": "cloud",
             "id": "openrouter-llama-3_1-8b-instruct",
             "label": "Manifest Label",
             "family": "llama",
             "capabilities": ["text_generation"],
-            "source": {
-                "kind": "cloud",
+            "cloud": {
                 "provider_id": "openrouter-main",
                 "remote_model_id": "meta-llama/llama-3.1-8b-instruct"
             }
@@ -455,13 +445,13 @@ fn ignores_persisted_state_after_manifest_change() {
     let base_bytes = build_pack(vec![(
         "manifest.json",
         json!({
-            "version": 1,
+            "schema_version": 3,
+            "deployment": "cloud",
             "id": "openrouter-llama-3_1-8b-instruct",
             "label": "Original Manifest Label",
             "family": "llama",
             "capabilities": ["text_generation"],
-            "source": {
-                "kind": "cloud",
+            "cloud": {
                 "provider_id": "openrouter-main",
                 "remote_model_id": "meta-llama/llama-3.1-8b-instruct"
             }
@@ -494,13 +484,13 @@ fn ignores_persisted_state_after_manifest_change() {
     for (path, payload) in &mut entries {
         if path == "manifest.json" {
             *payload = serde_json::to_vec_pretty(&json!({
-                "version": 1,
+                "schema_version": 3,
+                "deployment": "cloud",
                 "id": "openrouter-llama-3_1-8b-instruct",
                 "label": "Changed Manifest Label",
                 "family": "llama",
                 "capabilities": ["text_generation"],
-                "source": {
-                    "kind": "cloud",
+                "cloud": {
                     "provider_id": "openrouter-main",
                     "remote_model_id": "meta-llama/llama-3.1-8b-instruct"
                 }
@@ -562,13 +552,12 @@ fn persisted_state_with_schema_version_one_is_rejected() {
     let base_bytes = build_pack(vec![(
         "manifest.json",
         json!({
-            "version": 2,
+            "schema_version": 3,
+            "deployment": "cloud",
             "id": "gpt_4_1_mini",
             "label": "GPT-4.1 mini",
-            "status": "ready",
             "family": "llama",
-            "source": {
-                "kind": "cloud",
+            "cloud": {
                 "provider_id": "openai-main",
                 "remote_model_id": "gpt-4.1-mini"
             }
@@ -615,13 +604,12 @@ fn future_persisted_state_versions_are_rejected() {
     let base_bytes = build_pack(vec![(
         "manifest.json",
         json!({
-            "version": 2,
+            "schema_version": 3,
+            "deployment": "cloud",
             "id": "gpt_4_1_mini",
             "label": "GPT-4.1 mini",
-            "status": "ready",
             "family": "llama",
-            "source": {
-                "kind": "cloud",
+            "cloud": {
                 "provider_id": "openai-main",
                 "remote_model_id": "gpt-4.1-mini"
             }
@@ -665,23 +653,20 @@ fn persisted_state_preserves_download_projection_without_overriding_pack_selecti
         (
             "manifest.json",
             json!({
-                "version": 2,
+                "schema_version": 3,
+                "deployment": "local",
                 "id": "local-qwen",
                 "label": "Local Qwen",
                 "family": "llama",
                 "capabilities": ["text_generation", "chat_generation"],
-                "backend_hints": {
-                    "prefer_drivers": ["ggml.llama"],
-                    "avoid_drivers": [],
-                    "require_streaming": false
-                },
-                "source": {
+                "engines": [{"id": "ggml.llama", "format": "gguf"}],
+                "sources": [{
                     "kind": "hugging_face",
                     "repo_id": "bartowski/Qwen2.5-7B-Instruct-GGUF",
                     "files": [{ "id": "model", "path": "Qwen2.5-7B-Instruct-Q4_K_M.gguf" }]
-                },
-                "variants": [{"id": "q4_k_m", "label": "Q4_K_M", "$config": "ref://models/variants/q4.json"}],
-                "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
+                }],
+                "variants": [{"id": "q4_k_m", "label": "Q4_K_M", "$ref": "ref://models/variants/q4.json"}],
+                "presets": [{"id": "default", "label": "Default", "$ref": "ref://models/presets/default.json"}],
                 "default_preset": "default"
             })
             .to_string(),
@@ -691,7 +676,8 @@ fn persisted_state_preserves_download_projection_without_overriding_pack_selecti
             json!({
                 "kind": "variant",
                 "id": "q4_k_m",
-                "label": "Q4_K_M"
+                "label": "Q4_K_M",
+                "format": "gguf"
             })
             .to_string(),
         ),
@@ -700,7 +686,8 @@ fn persisted_state_preserves_download_projection_without_overriding_pack_selecti
             json!({
                 "kind": "preset",
                 "id": "default",
-                "label": "Default"
+                "label": "Default",
+                "variant_id": "q4_k_m"
             })
             .to_string(),
         ),

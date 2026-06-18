@@ -5,18 +5,18 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use slab_model_pack::{
-    BackendConfigDocument, BackendConfigScope, ConfigEntryRef, ConfigRef, MANIFEST_FILE_NAME,
-    ModelPack, ModelPackCatalogSummary, ModelPackError, ModelPackLoadDefaults, ModelPackManifest,
-    ModelPackRuntimeBridge, PackDocument, PackModelStatus, PackPricing, PackRuntimePresets,
-    PackSource, PackSourceCandidate, PackSourceFile, PresetDocument, PresetEntryRef,
-    VariantDocument,
+    BackendConfigDocument, BackendConfigScope, CloudModelTarget, ConfigEntryRef, ConfigRef,
+    EngineTarget, MANIFEST_FILE_NAME, MODEL_PACK_SCHEMA_VERSION, ModelPack,
+    ModelPackCatalogSummary, ModelPackError, ModelPackLoadDefaults, ModelPackManifest,
+    ModelPackRuntimeBridge, PackDeployment, PackDocument, PackPricing, PackSource,
+    PackSourceCandidate, PackSourceFile, PresetDocument, PresetEntryRef, VariantDocument,
 };
-use slab_types::{DiffusionLoadOptions, DriverHints, ModelFamily, RuntimeBackendId};
+use slab_types::{ArtifactFormat, DiffusionLoadOptions, ModelFamily, RuntimeBackendId};
 use slab_utils::hash::{sha256_hex_bytes, verify_sha256_hex_expected};
 
 use crate::domain::models::{
-    CreateModelCommand, ManagedModelBackendId, ModelSpec, RuntimePresets, StoredModelConfig,
-    UnifiedModel, UnifiedModelKind, UnifiedModelStatus, validate_stored_model_config,
+    CreateModelCommand, ManagedModelBackendId, ModelSpec, StoredModelConfig, UnifiedModel,
+    UnifiedModelKind, validate_stored_model_config,
 };
 use crate::error::AppCoreError;
 
@@ -34,7 +34,6 @@ const GENERATED_VARIANT_ID: &str = "default-variant";
 const GENERATED_VARIANT_PATH: &str = "models/variants/default.json";
 const GENERATED_PRESET_ID: &str = "default";
 const GENERATED_PRESET_PATH: &str = "models/presets/default.json";
-const GENERATED_LOAD_CONFIG_ID: &str = "load";
 const GENERATED_LOAD_CONFIG_PATH: &str = "models/configs/load.json";
 const GENERATED_INFERENCE_CONFIG_ID: &str = "inference";
 const GENERATED_INFERENCE_CONFIG_PATH: &str = "models/configs/inference.json";
@@ -221,23 +220,13 @@ pub fn delete_model_pack_at_path(path: &Path) -> Result<bool, AppCoreError> {
 
 pub fn build_model_pack_load_target(path: &Path) -> Result<ModelPackLoadTarget, AppCoreError> {
     let bridge = read_model_pack_runtime_bridge(path)?;
-    let default_preset =
-        bridge.model_spec.metadata.get("default_preset").map(String::as_str).unwrap_or("default");
-    let load_spec = bridge
-        .runtime_load_spec(default_preset)
-        .map_err(|error| match error {
-            ModelPackError::NonMaterializedSource { .. } => AppCoreError::BadRequest(format!(
-                "model pack '{}' points to a remote source and must be downloaded from the model catalog before loading",
-                path.display()
-            )),
-            other => map_model_pack_error(other),
-        })?;
-
-    Ok(ModelPackLoadTarget {
-        backend_id: bridge.backend,
-        model_path: load_spec.model_path().to_string_lossy().into_owned(),
-        load_defaults: bridge.load_defaults,
-    })
+    let default_preset = bridge
+        .model_spec
+        .metadata
+        .get("default_preset")
+        .cloned()
+        .unwrap_or_else(|| "default".to_owned());
+    model_pack_load_target_from_bridge(path, &default_preset, bridge)
 }
 
 pub fn is_model_pack_path(path: &str) -> bool {
@@ -249,6 +238,49 @@ pub struct ModelPackLoadTarget {
     pub backend_id: RuntimeBackendId,
     pub model_path: String,
     pub load_defaults: ModelPackLoadDefaults,
+    pub candidates: Vec<ModelPackLoadCandidate>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelPackLoadCandidate {
+    pub backend_id: RuntimeBackendId,
+    pub model_path: String,
+    pub load_defaults: ModelPackLoadDefaults,
+}
+
+pub fn model_pack_load_target_from_bridge(
+    path: &Path,
+    preset_id: &str,
+    bridge: ModelPackRuntimeBridge,
+) -> Result<ModelPackLoadTarget, AppCoreError> {
+    let mut candidates = Vec::new();
+    for engine in bridge.engine_load_specs {
+        let load_spec = engine.runtime_load_spec(preset_id).map_err(|error| match error {
+            ModelPackError::NonMaterializedSource { .. } => AppCoreError::BadRequest(format!(
+                "model pack '{}' points to a remote source and must be downloaded from the model catalog before loading",
+                path.display()
+            )),
+            other => map_model_pack_error(other),
+        })?;
+        candidates.push(ModelPackLoadCandidate {
+            backend_id: engine.backend,
+            model_path: load_spec.model_path().to_string_lossy().into_owned(),
+            load_defaults: engine.load_defaults,
+        });
+    }
+    let primary = candidates.first().cloned().ok_or_else(|| {
+        AppCoreError::BadRequest(format!(
+            "model pack '{}' produced no compatible runtime engine candidates",
+            path.display()
+        ))
+    })?;
+
+    Ok(ModelPackLoadTarget {
+        backend_id: primary.backend_id,
+        model_path: primary.model_path,
+        load_defaults: primary.load_defaults,
+        candidates,
+    })
 }
 
 fn read_persisted_model_config_from_pack_bytes(
@@ -376,7 +408,6 @@ fn build_generated_pack_entries(
             id: GENERATED_PRESET_ID.to_owned(),
             label: "Default".to_owned(),
             description: Some("Generated from catalog state".to_owned()),
-            variant_id: None,
             config_ref: ConfigRef::parse(format!("ref://{GENERATED_PRESET_PATH}"))
                 .map_err(map_model_pack_error)?,
         };
@@ -418,20 +449,19 @@ fn build_generated_pack_entries(
             id: GENERATED_VARIANT_ID.to_owned(),
             label: "Default Variant".to_owned(),
             description: Some("Generated from catalog state".to_owned()),
+            format: infer_artifact_format_from_config(config),
             sources: Vec::new(),
             component_ids: Vec::new(),
             load_config: load_config_ref,
-            inference_config: inference_config_ref,
             metadata: BTreeMap::new(),
         };
         let preset = PresetDocument {
             id: GENERATED_PRESET_ID.to_owned(),
             label: "Default".to_owned(),
-            variant_id: Some(GENERATED_VARIANT_ID.to_owned()),
+            variant_id: GENERATED_VARIANT_ID.to_owned(),
             description: Some("Generated from catalog state".to_owned()),
             adapter_ids: Vec::new(),
-            load_config: None,
-            inference_config: None,
+            inference_config: inference_config_ref,
             footprint: Default::default(),
             metadata: BTreeMap::new(),
         };
@@ -461,23 +491,31 @@ fn build_generated_manifest(config: &StoredModelConfig) -> ModelPackManifest {
     let family = infer_model_family(config.kind, config.backend_id);
     let mut metadata = BTreeMap::new();
     metadata.insert("generated_by".into(), "slab-app-core".into());
+    let backend = infer_runtime_backend_from_config(config);
+    let deployment = if config.kind == UnifiedModelKind::Cloud {
+        PackDeployment::Cloud
+    } else {
+        PackDeployment::Local
+    };
 
     ModelPackManifest {
-        version: 1,
+        schema: None,
+        schema_version: MODEL_PACK_SCHEMA_VERSION,
+        deployment,
         id: config.id.clone(),
         label: config.display_name.clone(),
-        status: config.status.clone().map(pack_status_from_unified),
         family,
         capabilities: config.capabilities.clone(),
-        backend_hints: build_generated_backend_hints(config.backend_id),
         context_window: config.spec.context_window,
         pricing: config
             .spec
             .pricing
             .as_ref()
             .map(|pricing| PackPricing { input: pricing.input, output: pricing.output }),
-        runtime_presets: config.runtime_presets.as_ref().and_then(pack_runtime_presets_from_model),
         metadata,
+        engines: backend
+            .map(|id| vec![EngineTarget { id, format: infer_artifact_format_from_config(config) }])
+            .unwrap_or_default(),
         sources: build_pack_sources_from_config(config),
         components: Vec::new(),
         variants: Vec::new(),
@@ -485,20 +523,24 @@ fn build_generated_manifest(config: &StoredModelConfig) -> ModelPackManifest {
         presets: Vec::new(),
         default_preset: None,
         footprint: Default::default(),
+        cloud: build_cloud_target_from_config(config),
     }
+}
+
+fn build_cloud_target_from_config(config: &StoredModelConfig) -> Option<CloudModelTarget> {
+    if config.kind != UnifiedModelKind::Cloud {
+        return None;
+    }
+    Some(CloudModelTarget {
+        provider_id: config.spec.provider_id.clone()?,
+        remote_model_id: config.spec.remote_model_id.clone()?,
+        preferred_api_base: None,
+        credentials: None,
+    })
 }
 
 fn build_pack_sources_from_config(config: &StoredModelConfig) -> Vec<PackSourceCandidate> {
     if config.kind == UnifiedModelKind::Cloud {
-        if let (Some(provider_id), Some(remote_model_id)) =
-            (config.spec.provider_id.as_deref(), config.spec.remote_model_id.as_deref())
-        {
-            return vec![PackSourceCandidate::new(PackSource::Cloud {
-                provider_id: provider_id.to_owned(),
-                remote_model_id: remote_model_id.to_owned(),
-            })];
-        }
-
         return Vec::new();
     }
 
@@ -548,35 +590,10 @@ fn build_remote_pack_source_from_spec(
     }
 }
 
-fn build_generated_backend_hints(backend: Option<ManagedModelBackendId>) -> DriverHints {
-    let Some(backend) = backend else {
-        return DriverHints::default();
-    };
-
-    DriverHints {
-        prefer_drivers: vec![backend.canonical_id().to_owned()],
-        avoid_drivers: Vec::new(),
-        require_streaming: false,
-    }
-}
-
 fn build_generated_load_config(
-    config: &StoredModelConfig,
+    _config: &StoredModelConfig,
 ) -> Option<Result<BackendConfigDocument, AppCoreError>> {
-    let mut payload = Map::new();
-
-    if let Some(context_window) = config.spec.context_window {
-        payload.insert("context_length".into(), Value::from(context_window));
-    }
-
-    (!payload.is_empty()).then_some(Ok(BackendConfigDocument {
-        id: GENERATED_LOAD_CONFIG_ID.to_owned(),
-        label: "Generated Load Config".to_owned(),
-        scope: BackendConfigScope::Load,
-        description: Some("Generated from catalog state".to_owned()),
-        payload: Value::Object(payload),
-        metadata: BTreeMap::new(),
-    }))
+    None
 }
 
 fn build_generated_inference_config(
@@ -593,7 +610,7 @@ fn build_generated_inference_config(
     }
 
     (!payload.is_empty()).then_some(Ok(BackendConfigDocument {
-        id: GENERATED_INFERENCE_CONFIG_ID.to_owned(),
+        id: Some(GENERATED_INFERENCE_CONFIG_ID.to_owned()),
         label: "Generated Inference Config".to_owned(),
         scope: BackendConfigScope::Inference,
         description: Some("Generated from catalog state".to_owned()),
@@ -630,6 +647,42 @@ fn infer_runtime_backend_from_config(config: &StoredModelConfig) -> Option<Runti
     config.backend_id.map(Into::into)
 }
 
+fn infer_artifact_format_from_config(config: &StoredModelConfig) -> ArtifactFormat {
+    let candidate = config
+        .spec
+        .filename
+        .as_deref()
+        .or(config.spec.local_path.as_deref())
+        .or_else(|| config.materialized_artifacts.values().next().map(String::as_str));
+    if let Some(path) = candidate.map(str::trim).filter(|value| !value.is_empty()) {
+        let lower = path.to_ascii_lowercase();
+        if lower.ends_with(".gguf") {
+            return ArtifactFormat::Gguf;
+        }
+        if lower.ends_with(".safetensors") {
+            return ArtifactFormat::Safetensors;
+        }
+        if lower.ends_with(".onnx") {
+            return ArtifactFormat::Onnx;
+        }
+        if lower.ends_with(".ckpt") {
+            return ArtifactFormat::Ckpt;
+        }
+        if lower.ends_with(".bin") {
+            return ArtifactFormat::Ggml;
+        }
+    }
+
+    match config.backend_id {
+        Some(ManagedModelBackendId::GgmlWhisper) => ArtifactFormat::Ggml,
+        Some(ManagedModelBackendId::GgmlDiffusion) => ArtifactFormat::Ckpt,
+        Some(ManagedModelBackendId::CandleLlama)
+        | Some(ManagedModelBackendId::CandleWhisper)
+        | Some(ManagedModelBackendId::CandleDiffusion) => ArtifactFormat::Safetensors,
+        Some(ManagedModelBackendId::GgmlLlama) | None => ArtifactFormat::Gguf,
+    }
+}
+
 fn infer_model_family(
     kind: UnifiedModelKind,
     backend_id: Option<ManagedModelBackendId>,
@@ -647,34 +700,6 @@ fn infer_model_family(
         }
         ManagedModelBackendId::GgmlLlama | ManagedModelBackendId::CandleLlama => ModelFamily::Llama,
     }
-}
-
-fn pack_status_from_unified(status: UnifiedModelStatus) -> PackModelStatus {
-    match status {
-        UnifiedModelStatus::Ready => PackModelStatus::Ready,
-        UnifiedModelStatus::NotDownloaded => PackModelStatus::NotDownloaded,
-        UnifiedModelStatus::Downloading => PackModelStatus::Downloading,
-        UnifiedModelStatus::Error => PackModelStatus::Error,
-    }
-}
-
-fn pack_runtime_presets_from_model(runtime_presets: &RuntimePresets) -> Option<PackRuntimePresets> {
-    (runtime_presets.max_tokens.is_some()
-        || runtime_presets.temperature.is_some()
-        || runtime_presets.top_p.is_some()
-        || runtime_presets.top_k.is_some()
-        || runtime_presets.min_p.is_some()
-        || runtime_presets.presence_penalty.is_some()
-        || runtime_presets.repetition_penalty.is_some())
-    .then_some(PackRuntimePresets {
-        max_tokens: runtime_presets.max_tokens,
-        temperature: runtime_presets.temperature,
-        top_p: runtime_presets.top_p,
-        top_k: runtime_presets.top_k,
-        min_p: runtime_presets.min_p,
-        presence_penalty: runtime_presets.presence_penalty,
-        repetition_penalty: runtime_presets.repetition_penalty,
-    })
 }
 
 pub fn merge_diffusion_load_defaults(
