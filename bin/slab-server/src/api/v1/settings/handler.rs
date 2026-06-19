@@ -12,9 +12,9 @@ use crate::api::validation::validate;
 use crate::error::ServerError;
 use slab_app_core::context::AppState;
 use slab_app_core::domain::models::{
-    SettingPropertySchema, SettingPropertyView, SettingValidationErrorData, SettingValueType,
-    SettingsDocumentView, SettingsSectionView, SettingsSubsectionView, UpdateSettingCommand,
-    UpdateSettingOperation,
+    SettingChangeEffect, SettingOverrideSource, SettingPropertySchema, SettingPropertyView,
+    SettingValidationErrorData, SettingValueType, SettingsDocumentView, SettingsSectionView,
+    SettingsSubsectionView, UpdateSettingCommand, UpdateSettingOperation,
 };
 use slab_app_core::domain::services::SettingsService;
 
@@ -37,6 +37,8 @@ struct SettingPmidPath {
         SettingPropertyView,
         SettingPropertySchema,
         SettingValueType,
+        SettingChangeEffect,
+        SettingOverrideSource,
         UpdateSettingCommand,
         UpdateSettingOperation,
         SettingValidationErrorData
@@ -111,6 +113,7 @@ async fn update_setting(
 #[cfg(test)]
 mod tests {
     use axum::http::StatusCode;
+    use serde_json::json;
 
     use crate::api::test_support::{TestServer, TestServerOptions};
 
@@ -137,6 +140,40 @@ mod tests {
         assert_eq!(missing.status, StatusCode::UNAUTHORIZED);
 
         let allowed = server.get_with_token("/v1/settings", "test-admin-token").await;
+        assert_eq!(allowed.status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn settings_admin_token_update_changes_next_request_authorization() {
+        let server = TestServer::new().await;
+
+        let token_update = server
+            .put_json(
+                "/v1/settings/server.admin.token",
+                json!({
+                    "op": "set",
+                    "value": "next-admin-token"
+                }),
+            )
+            .await;
+        assert_eq!(token_update.status, StatusCode::OK);
+
+        let address_update = server
+            .put_json_with_token(
+                "/v1/settings/server.address",
+                json!({
+                    "op": "set",
+                    "value": "0.0.0.0:0"
+                }),
+                "next-admin-token",
+            )
+            .await;
+        assert_eq!(address_update.status, StatusCode::OK);
+
+        let missing = server.get("/v1/settings").await;
+        assert_eq!(missing.status, StatusCode::UNAUTHORIZED);
+
+        let allowed = server.get_with_token("/v1/settings", "next-admin-token").await;
         assert_eq!(allowed.status, StatusCode::OK);
     }
 

@@ -8,6 +8,19 @@
 
 ---
 
+## 0. 实施闭环记录（2026-06-18）
+
+本专项已按当前代码落地，范围限定为 PMID/settings 治理；未扩展到 model_pack、DB 契约、JSON-RPC/gRPC 错误结构或路径安全专项。
+
+- `crates/slab-config`：`SettingValue` 增加 unsigned 无损表示，`SettingValueType` 增加 `float`/`unsigned`/`tagged_union`；`telemetry.metrics_exporter` 发射 `OtelExporter` JSON schema；`setting_value_from` 序列化失败进入 view warnings，不再伪装为 Null；写路径强制 `minimum`；`writeOnly` 驱动脱敏；env bool/number 解析失败 warn；新增 settings 文件首次创建时的 env seed-once helper。
+- `crates/slab-app-core` / `bin/slab-server`：`PmidConfig` 投影 `server`；`auth_middleware` 改读当前 PMID `server.admin.token` 与 `server.address`；`SettingsService` 使用 `change_effect_for`，仅 live agent 项继续触发 reload；`pmid.rs` 挂载 app-core 的设置变更语义入口。
+- `packages/api` / 设置页：`createSlabApiFetchClient` 支持 `getAdminToken` 注入 `Authorization: Bearer ...`；401 返回可操作诊断；设置页展示 `change_effect` 与 `overridden_by` 徽标，并在非 loopback 且无 `server.admin.token` 时提示。
+- logging 修正说明：launch 侧已存在运行时级联解析；本次未新增第二套运行时解析器，只在 PMID 回显层展示未设置 leaf 的父级继承值与 `overridden_by: { type: "parent" }`。
+- 自动生成：已运行 `bun run gen:api`，更新 `packages/api/src/v1.d.ts`；该脚本同时刷新 `python/slab-python-sdk` settings DTO，这是 OpenAPI 形状变化的生成物。
+- 已通过验证：`cargo test -p slab-config`、`cargo test -p slab-app-core settings`、`cargo test -p slab-server settings`、`bun run test:frontend -- packages/slab-desktop/src/pages/settings packages/api`、`cargo check -p slab-server`。
+
+已关闭本专项项：PMID-F1–F11、F-Stack-1、F-Stack-2、G4-config 中 parse_env/setting_value_from 部分、G5、P1-1、P1-2、P1-3、P1-4、P2-3。其它审计治理项仍由各自专项承接。
+
 ## 1. 背景与目标
 
 ### 1.1 现状与痛点

@@ -19,9 +19,10 @@ pub async fn auth_middleware(
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "));
 
+    let settings = state.context.pmid.config();
     let is_authorized = is_authorized(
-        state.context.config.admin_api_token.as_deref(),
-        &state.context.config.bind_address,
+        settings.server.admin.token.as_deref(),
+        settings.server.address.as_str(),
         provided,
     );
 

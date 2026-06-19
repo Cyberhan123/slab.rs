@@ -4,6 +4,9 @@ export const settings = {
     subtitle: '配置应用与后端选项',
   },
   page: {
+    adminTokenWarningTitle: '需要管理员令牌',
+    adminTokenWarningDescription:
+      '服务器地址不是 loopback。开放到网络前，请先设置 server.admin.token。',
     loadingTitle: '正在加载设置文档',
     loadingDescription: '正在获取运行时 schema 与当前值。',
     failedLoadTitle: '设置加载失败',
@@ -40,6 +43,7 @@ export const settings = {
     },
   },
   field: {
+    numberPlaceholder: '输入数字',
     reset: '重置',
     required: '必填',
     selectOption: '选择一个选项',
@@ -50,6 +54,14 @@ export const settings = {
     propertyNamePlaceholder: '属性名',
     enabled: '已启用',
     disabled: '已禁用',
+  },
+  effect: {
+    live: '实时生效',
+    needsRestart: '需要重启',
+    needsModelReload: '需要重载模型',
+    inheritedFrom: '继承 {{pmid}}',
+    envPresent: '{{varName}} 已设置',
+    envMissing: '{{varName}} 未设置',
   },
   structured: {
     noObjectFields: '此对象未定义任何字段。',
@@ -109,6 +121,7 @@ export const settings = {
     },
   },
   validation: {
+    number: '值必须是有限数字。',
     integer: '值必须是整数。',
     json: '值必须是有效的 JSON。',
     emptyString: '（空字符串）',

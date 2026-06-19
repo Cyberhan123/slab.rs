@@ -2505,6 +2505,18 @@ export interface components {
             state_path?: string | null;
             updated_at: string;
         };
+        /** @enum {string} */
+        SettingChangeEffect: "none" | "live" | "needs_restart" | "needs_model_reload";
+        SettingOverrideSource: {
+            /** @enum {string} */
+            type: "env";
+            var_name: string;
+            var_value_present: boolean;
+        } | {
+            pmid: string;
+            /** @enum {string} */
+            type: "parent";
+        };
         SettingPropertySchema: {
             default_value?: components["schemas"]["SettingValue"];
             enum?: string[] | null;
@@ -2521,12 +2533,14 @@ export interface components {
             type: components["schemas"]["SettingValueType"];
         };
         SettingPropertyView: {
+            change_effect?: components["schemas"]["SettingChangeEffect"];
             description_md?: string;
             editable: boolean;
             effective_value: components["schemas"]["SettingValue"];
             i18n?: null | components["schemas"]["I18nPayload"];
             is_overridden: boolean;
             label: string;
+            overridden_by?: null | components["schemas"]["SettingOverrideSource"];
             override_value?: null | components["schemas"]["SettingValue"];
             pmid: string;
             schema: components["schemas"]["SettingPropertySchema"];
@@ -2540,7 +2554,7 @@ export interface components {
         };
         SettingValue: unknown;
         /** @enum {string} */
-        SettingValueType: "boolean" | "integer" | "string" | "array" | "object";
+        SettingValueType: "boolean" | "integer" | "unsigned" | "float" | "string" | "array" | "object" | "tagged_union";
         SettingsDocumentView: {
             /** Format: int32 */
             schema_version: number;

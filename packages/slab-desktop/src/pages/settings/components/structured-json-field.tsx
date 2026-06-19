@@ -542,7 +542,7 @@ function NumberEditor({
   t,
   onChange,
 }: Pick<SchemaEditorProps, 'schema' | 'value' | 't' | 'onChange'>) {
-  const numberType = schemaPrimaryType(schema) === 'integer' ? 'integer' : 'number';
+  const numberType = schemaPrimaryType(schema) === 'integer' ? 'integer' : 'float';
   const currentValue = typeof value === 'number' ? String(value) : '';
 
   return (

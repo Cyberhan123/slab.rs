@@ -17,7 +17,9 @@ use tracing::{error, info, warn};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-use slab_app_core::config::{Config, default_model_config_dir_for_settings_path};
+use slab_app_core::config::{
+    Config, default_model_config_dir_for_settings_path, seed_settings_document_from_env_if_missing,
+};
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::PmidService;
 use slab_app_core::infra::db::{AnyStore, TaskStore};
@@ -208,6 +210,7 @@ async fn main() -> anyhow::Result<()> {
     let mut cfg = Config::from_env();
     args.validate_no_legacy_launch_overrides()?;
     args.apply_bootstrap_config(&mut cfg);
+    seed_settings_document_from_env_if_missing(&cfg.settings_path)?;
 
     let telemetry_settings = load_telemetry_settings(&cfg).await.unwrap_or_else(|error| {
         eprintln!("WARN: failed to load telemetry settings ({error}); using defaults");

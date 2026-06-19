@@ -2,7 +2,9 @@
 
 use slab_types::{DESKTOP_API_BIND, sqlite_url_for_path};
 use slab_utils::app_home;
+use std::fmt::Display;
 use std::path::{Path, PathBuf};
+use tracing::warn;
 
 use crate::{PluginJsRuntimeTransport, PluginPythonRuntimeTransport, SettingsDocument};
 
@@ -157,15 +159,12 @@ impl Config {
             bind_address: env_or(source, "SLAB_BIND", DESKTOP_API_BIND),
             database_url: source.var("SLAB_DATABASE_URL").unwrap_or_else(default_database_url),
             log_level: env_or(source, "SLAB_LOG", "info"),
-            log_json: parse_trueish_env(source, "SLAB_LOG_JSON"),
+            log_json: parse_bool_env(source, "SLAB_LOG_JSON", false),
             log_file: source.var("SLAB_LOG_FILE").map(PathBuf::from),
-            cloud_http_trace: parse_trueish_env(source, "SLAB_CLOUD_HTTP_TRACE"),
+            cloud_http_trace: parse_bool_env(source, "SLAB_CLOUD_HTTP_TRACE", false),
             queue_capacity: parse_env(source, "SLAB_QUEUE_CAPACITY", 64),
             backend_capacity: parse_env(source, "SLAB_BACKEND_CAPACITY", 4),
-            enable_swagger: source
-                .var("SLAB_ENABLE_SWAGGER")
-                .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-                .unwrap_or(true),
+            enable_swagger: parse_bool_env(source, "SLAB_ENABLE_SWAGGER", true),
             cors_allowed_origins: source.var("SLAB_CORS_ORIGINS"),
             admin_api_token: source.var("SLAB_ADMIN_TOKEN"),
             transport_mode: env_or(source, "SLAB_TRANSPORT", "http"),
@@ -205,12 +204,37 @@ fn env_or(source: &impl EnvSource, key: &str, default: &str) -> String {
     source.var(key).unwrap_or_else(|| default.to_owned())
 }
 
-fn parse_env<T: std::str::FromStr>(source: &impl EnvSource, key: &str, default: T) -> T {
-    source.var(key).and_then(|v| v.parse().ok()).unwrap_or(default)
+fn parse_env<T>(source: &impl EnvSource, key: &str, default: T) -> T
+where
+    T: std::str::FromStr,
+    T::Err: Display,
+{
+    let Some(raw) = source.var(key) else {
+        return default;
+    };
+
+    match raw.parse() {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(env_var = key, value = %raw, %error, "invalid environment value; using default");
+            default
+        }
+    }
 }
 
-fn parse_trueish_env(source: &impl EnvSource, key: &str) -> bool {
-    source.var(key).map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false)
+fn parse_bool_env(source: &impl EnvSource, key: &str, default: bool) -> bool {
+    let Some(raw) = source.var(key) else {
+        return default;
+    };
+
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => true,
+        "0" | "false" | "no" | "off" => false,
+        _ => {
+            warn!(env_var = key, value = %raw, "invalid boolean environment value; using default");
+            default
+        }
+    }
 }
 
 pub fn default_app_dir() -> PathBuf {
@@ -469,9 +493,9 @@ mod tests {
     #[test]
     fn from_env_falls_back_for_invalid_capacity_and_unrecognized_boolean_values() {
         let env = env_vars([
-            ("SLAB_LOG_JSON", "yes"),
-            ("SLAB_CLOUD_HTTP_TRACE", "on"),
-            ("SLAB_ENABLE_SWAGGER", "0"),
+            ("SLAB_LOG_JSON", "maybe"),
+            ("SLAB_CLOUD_HTTP_TRACE", "maybe"),
+            ("SLAB_ENABLE_SWAGGER", "maybe"),
             ("SLAB_QUEUE_CAPACITY", "not-a-number"),
             ("SLAB_BACKEND_CAPACITY", "999999999999999999999999999999999999"),
         ]);
@@ -479,8 +503,22 @@ mod tests {
 
         assert!(!config.log_json);
         assert!(!config.cloud_http_trace);
-        assert!(!config.enable_swagger);
+        assert!(config.enable_swagger);
         assert_eq!(config.queue_capacity, 64);
         assert_eq!(config.backend_capacity, 4);
+    }
+
+    #[test]
+    fn from_env_accepts_explicit_boolean_words() {
+        let env = env_vars([
+            ("SLAB_LOG_JSON", "yes"),
+            ("SLAB_CLOUD_HTTP_TRACE", "on"),
+            ("SLAB_ENABLE_SWAGGER", "no"),
+        ]);
+        let config = Config::from_env_source(&env);
+
+        assert!(config.log_json);
+        assert!(config.cloud_http_trace);
+        assert!(!config.enable_swagger);
     }
 }

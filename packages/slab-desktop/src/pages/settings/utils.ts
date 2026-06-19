@@ -11,16 +11,18 @@ import type {
   UpdateSettingRequest,
 } from './types';
 
-type SettingNumberType = 'integer' | 'number';
+type SettingNumberType = 'float' | 'integer' | 'unsigned';
 type SummaryMessages = {
   emptyString: string;
 };
 type RequestValidationMessages = {
   integer: string;
   json: string;
+  number?: string;
 };
 
 const INTEGER_VALUE_PATTERN = /^-?\d+$/;
+const UNSIGNED_INTEGER_VALUE_PATTERN = /^\d+$/;
 const NUMBER_VALUE_PATTERN = /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 const DEFAULT_SUMMARY_MESSAGES: SummaryMessages = {
   emptyString: '(empty string)',
@@ -28,6 +30,7 @@ const DEFAULT_SUMMARY_MESSAGES: SummaryMessages = {
 const DEFAULT_REQUEST_VALIDATION_MESSAGES: RequestValidationMessages = {
   integer: 'Value must be an integer.',
   json: 'Value must be valid JSON.',
+  number: 'Value must be a finite number.',
 };
 
 export function countProperties(sections: SettingsSectionResponse[]): number {
@@ -161,14 +164,18 @@ export function buildRequestBody(
       ? draftValue
       : valueToEditorString(property.effective_value);
 
-  if (propertyType === 'integer') {
+  if (propertyType === 'integer' || propertyType === 'unsigned' || propertyType === 'float') {
     const trimmed = rawValue.trim();
     if (!trimmed) {
       return { op: 'unset' };
     }
-    const value = parseSettingNumberValue(trimmed);
+    const value = parseSettingNumberValue(trimmed, propertyType);
     if (value === null) {
-      throw new Error(messages.integer);
+      throw new Error(
+        propertyType === 'float'
+          ? (messages.number ?? DEFAULT_REQUEST_VALIDATION_MESSAGES.number)
+          : messages.integer,
+      );
     }
     return {
       op: 'set',
@@ -176,8 +183,15 @@ export function buildRequestBody(
     };
   }
 
-  if (propertyType === 'array' || propertyType === 'object') {
+  if (propertyType === 'array' || propertyType === 'object' || propertyType === 'tagged_union') {
     if (propertyType === 'array' && Array.isArray(draftValue)) {
+      return {
+        op: 'set',
+        value: draftValue,
+      };
+    }
+
+    if (propertyType === 'tagged_union' && (Array.isArray(draftValue) || isJsonObject(draftValue))) {
       return {
         op: 'set',
         value: draftValue,
@@ -235,7 +249,12 @@ export function autoSaveDelay(property: SettingResponse): number {
     return 150;
   }
 
-  if (propertyType === 'array' || propertyType === 'object' || property.schema.multiline) {
+  if (
+    propertyType === 'array' ||
+    propertyType === 'object' ||
+    propertyType === 'tagged_union' ||
+    property.schema.multiline
+  ) {
     return 900;
   }
 
@@ -265,6 +284,10 @@ export function parseSettingNumberValue(
 
   if (numberType === 'integer') {
     return INTEGER_VALUE_PATTERN.test(trimmed) ? Number.parseInt(trimmed, 10) : null;
+  }
+
+  if (numberType === 'unsigned') {
+    return UNSIGNED_INTEGER_VALUE_PATTERN.test(trimmed) ? Number.parseInt(trimmed, 10) : null;
   }
 
   if (!NUMBER_VALUE_PATTERN.test(trimmed)) {

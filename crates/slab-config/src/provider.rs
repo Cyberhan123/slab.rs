@@ -8,6 +8,7 @@ use chrono::Utc;
 use serde_json::{Map, Value, json};
 use slab_utils::fs::{AtomicWriteOptions, atomic_write_bytes_with_options};
 use tokio::sync::RwLock;
+use tracing::warn;
 
 use crate::SettingsDocument;
 
@@ -41,10 +42,26 @@ struct LoadedSettingsRuntimeState {
     default_document: SettingsDocument,
 }
 
+trait EnvSeedSource {
+    fn var(&self, key: &str) -> Option<String>;
+}
+
+struct ProcessEnvSeedSource;
+
+impl EnvSeedSource for ProcessEnvSeedSource {
+    fn var(&self, key: &str) -> Option<String> {
+        std::env::var(key).ok()
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct SettingsFileFingerprints {
     base: Option<SettingsFileFingerprint>,
     overlay: Option<SettingsFileFingerprint>,
+}
+
+pub fn seed_settings_document_from_env_if_missing(path: &Path) -> Result<bool, ConfigError> {
+    seed_settings_document_from_env_source_if_missing(path, &ProcessEnvSeedSource)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -248,7 +265,7 @@ impl SettingsDocumentProvider {
                 apply_dynamic_defaults(&self.base_path, &mut next_settings);
                 let next_value = setting_value(&next_settings, path)?;
 
-                set_json_path(&mut overlay, path, requested_value.into_json_value())?;
+                set_json_path(&mut overlay, path, requested_value.try_into_json_value()?)?;
                 prune_empty_objects(&mut overlay);
                 write_json_value_file(&self.path, &overlay)?;
                 state.document = next_settings;
@@ -387,6 +404,116 @@ fn load_base_runtime_state(
     }
 
     Err(invalid_document_error())
+}
+
+fn seed_settings_document_from_env_source_if_missing(
+    path: &Path,
+    source: &impl EnvSeedSource,
+) -> Result<bool, ConfigError> {
+    ensure_settings_parent_dir(path)?;
+    if path.exists() {
+        return Ok(false);
+    }
+
+    let mut document = default_settings_document_for_path(path);
+    seed_env_string(source, &mut document, "SLAB_BIND", "server.address");
+    seed_env_string(source, &mut document, "SLAB_ADMIN_TOKEN", "server.admin.token");
+    seed_env_string(source, &mut document, "SLAB_LOG", "logging.level");
+    seed_env_bool(source, &mut document, "SLAB_LOG_JSON", "logging.json");
+    seed_env_u32(source, &mut document, "SLAB_QUEUE_CAPACITY", "runtime.capacity.queue");
+    seed_env_u32(
+        source,
+        &mut document,
+        "SLAB_BACKEND_CAPACITY",
+        "runtime.capacity.concurrent_requests",
+    );
+    seed_env_bool(source, &mut document, "SLAB_ENABLE_SWAGGER", "server.swagger.enabled");
+    seed_env_bool(source, &mut document, "SLAB_CLOUD_HTTP_TRACE", "server.cloud_http_trace");
+    seed_env_string(source, &mut document, "SLAB_TRANSPORT", "runtime.transport");
+    seed_env_string_list(source, &mut document, "SLAB_CORS_ORIGINS", "server.cors.allowed_origins");
+
+    write_settings_document_file(path, &document)?;
+    Ok(true)
+}
+
+fn seed_env_string(
+    source: &impl EnvSeedSource,
+    document: &mut SettingsDocument,
+    env_var: &'static str,
+    pmid: &'static str,
+) {
+    let Some(value) = source.var(env_var) else {
+        return;
+    };
+    set_seeded_env_value(document, env_var, pmid, SettingValue::String(value));
+}
+
+fn seed_env_u32(
+    source: &impl EnvSeedSource,
+    document: &mut SettingsDocument,
+    env_var: &'static str,
+    pmid: &'static str,
+) {
+    let Some(raw) = source.var(env_var) else {
+        return;
+    };
+    let value = match raw.parse::<u32>() {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(env_var, value = %raw, %error, "invalid settings seed value; skipping");
+            return;
+        }
+    };
+    set_seeded_env_value(document, env_var, pmid, SettingValue::Unsigned(u64::from(value)));
+}
+
+fn seed_env_bool(
+    source: &impl EnvSeedSource,
+    document: &mut SettingsDocument,
+    env_var: &'static str,
+    pmid: &'static str,
+) {
+    let Some(raw) = source.var(env_var) else {
+        return;
+    };
+    let value = match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => true,
+        "0" | "false" | "no" | "off" => false,
+        _ => {
+            warn!(env_var, value = %raw, "invalid boolean settings seed value; skipping");
+            return;
+        }
+    };
+    set_seeded_env_value(document, env_var, pmid, SettingValue::Boolean(value));
+}
+
+fn seed_env_string_list(
+    source: &impl EnvSeedSource,
+    document: &mut SettingsDocument,
+    env_var: &'static str,
+    pmid: &'static str,
+) {
+    let Some(raw) = source.var(env_var) else {
+        return;
+    };
+    let values = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| SettingValue::String(value.to_owned()))
+        .collect::<Vec<_>>();
+    set_seeded_env_value(document, env_var, pmid, SettingValue::Array(values));
+}
+
+fn set_seeded_env_value(
+    document: &mut SettingsDocument,
+    env_var: &'static str,
+    pmid: &'static str,
+    value: SettingValue,
+) {
+    if let Err(error) = set_document_value(document, pmid, value) {
+        warn!(env_var, pmid, %error, "failed to seed settings value from environment");
+    }
 }
 
 fn load_overlay_json(path: &Path) -> Result<Value, ConfigError> {
@@ -668,6 +795,13 @@ pub fn settings_document_to_json_value(document: &SettingsDocument) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    impl EnvSeedSource for HashMap<String, String> {
+        fn var(&self, key: &str) -> Option<String> {
+            self.get(key).cloned()
+        }
+    }
 
     fn temp_settings_path() -> PathBuf {
         let base =
@@ -690,6 +824,59 @@ mod tests {
         assert_eq!(provider.document().await, expected);
         assert_eq!(file.schema_version, SettingsDocument::default().schema_version);
         assert_eq!(file.plugin.install_dir, expected.plugin.install_dir);
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn env_seed_creates_missing_document_without_overlaying_existing_settings() {
+        let path = temp_settings_path();
+        let env = HashMap::from([
+            ("SLAB_BIND".to_owned(), "0.0.0.0:17890".to_owned()),
+            ("SLAB_ADMIN_TOKEN".to_owned(), "seed-admin-token".to_owned()),
+            ("SLAB_LOG".to_owned(), "debug".to_owned()),
+            ("SLAB_LOG_JSON".to_owned(), "yes".to_owned()),
+            ("SLAB_QUEUE_CAPACITY".to_owned(), "16".to_owned()),
+            ("SLAB_BACKEND_CAPACITY".to_owned(), "3".to_owned()),
+            ("SLAB_ENABLE_SWAGGER".to_owned(), "no".to_owned()),
+            ("SLAB_CLOUD_HTTP_TRACE".to_owned(), "on".to_owned()),
+            ("SLAB_TRANSPORT".to_owned(), "http".to_owned()),
+            (
+                "SLAB_CORS_ORIGINS".to_owned(),
+                "https://app.example.com, https://admin.example.com".to_owned(),
+            ),
+        ]);
+
+        assert!(
+            seed_settings_document_from_env_source_if_missing(&path, &env)
+                .expect("seed missing settings")
+        );
+
+        let document: SettingsDocument =
+            serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
+        assert_eq!(document.server.address, "0.0.0.0:17890");
+        assert_eq!(document.server.admin.token.as_deref(), Some("seed-admin-token"));
+        assert_eq!(document.logging.level, "debug");
+        assert!(document.logging.json);
+        assert_eq!(document.runtime.capacity.queue, 16);
+        assert_eq!(document.runtime.capacity.concurrent_requests, 3);
+        assert!(!document.server.swagger.enabled);
+        assert!(document.server.cloud_http_trace);
+        assert_eq!(document.runtime.transport, crate::RuntimeTransportMode::Http);
+        assert_eq!(
+            document.server.cors.allowed_origins,
+            vec!["https://app.example.com", "https://admin.example.com"]
+        );
+
+        let overwrite_env =
+            HashMap::from([("SLAB_ADMIN_TOKEN".to_owned(), "overwritten-admin-token".to_owned())]);
+        assert!(
+            !seed_settings_document_from_env_source_if_missing(&path, &overwrite_env)
+                .expect("existing settings skipped")
+        );
+        let persisted: SettingsDocument =
+            serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
+        assert_eq!(persisted.server.admin.token.as_deref(), Some("seed-admin-token"));
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }

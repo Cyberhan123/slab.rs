@@ -9,6 +9,9 @@ export const settings = {
     failedLoadTitle: 'Settings failed to load',
     tryAgain: 'Try again',
     warningsTitle: 'Recovered settings warnings',
+    adminTokenWarningTitle: 'Admin token required',
+    adminTokenWarningDescription:
+      'The server address is not loopback. Set server.admin.token before applying this network exposure.',
     noSettingsTitle: 'No settings available',
     noSettingsDescription: 'The settings document is empty.',
     settingsCount_one: '{{count}} setting',
@@ -45,12 +48,21 @@ export const settings = {
     required: 'Required',
     selectOption: 'Select an option',
     integerPlaceholder: 'Enter a whole number',
+    numberPlaceholder: 'Enter a number',
     jsonPlaceholder: 'Enter valid JSON',
     valuePlaceholder: 'Enter a value',
     enterNamedValue: 'Enter {{label}}',
     propertyNamePlaceholder: 'Property name',
     enabled: 'Enabled',
     disabled: 'Disabled',
+  },
+  effect: {
+    live: 'Live',
+    needsRestart: 'Restart required',
+    needsModelReload: 'Model reload',
+    inheritedFrom: 'Inherits {{pmid}}',
+    envPresent: '{{varName}} set',
+    envMissing: '{{varName}} missing',
   },
   structured: {
     noObjectFields: 'No fields are defined for this object.',
@@ -113,6 +125,7 @@ export const settings = {
   validation: {
     integer: 'Value must be an integer.',
     json: 'Value must be valid JSON.',
+    number: 'Value must be a finite number.',
     emptyString: '(empty string)',
   },
   autosave: {

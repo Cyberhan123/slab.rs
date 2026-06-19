@@ -21,11 +21,14 @@ pub use launch::{
     LaunchHostPaths, LaunchProfile, ResolvedGatewaySpec, ResolvedLaunchSpec,
     ResolvedRuntimeChildSpec, ResolvedRuntimeEndpoints, resolve_launch_spec,
 };
-pub use pmid_service::PmidService;
-pub use provider::{SettingsDocumentProvider, settings_document_to_json_value};
+pub use pmid_service::{PmidService, change_effect_for};
+pub use provider::{
+    SettingsDocumentProvider, seed_settings_document_from_env_if_missing,
+    settings_document_to_json_value,
+};
 pub use settings::*;
 pub use view::{
-    SettingPropertySchema, SettingPropertyView, SettingValidationErrorData, SettingValue,
-    SettingValueType, SettingsDocumentView, SettingsSectionView, SettingsSubsectionView,
-    UpdateSettingCommand, UpdateSettingOperation,
+    SettingChangeEffect, SettingOverrideSource, SettingPropertySchema, SettingPropertyView,
+    SettingValidationErrorData, SettingValue, SettingValueType, SettingsDocumentView,
+    SettingsSectionView, SettingsSubsectionView, UpdateSettingCommand, UpdateSettingOperation,
 };

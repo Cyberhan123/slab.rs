@@ -65,6 +65,16 @@ describe('ApiError', () => {
       expect(error.message).toBe('500 Internal Server Error');
       expect(error.status).toBe(500);
     });
+
+    it('should create actionable errors for unauthorized responses', () => {
+      const response = new Response(null, { status: 401, statusText: 'Unauthorized' });
+
+      const error = ApiError.fromResponse(response);
+
+      expect(error.code).toBe(ErrorCodes.UNAUTHORIZED);
+      expect(error.getUserMessage()).toContain('server.admin.token');
+      expect(error.status).toBe(401);
+    });
   });
 
   describe('isClientError', () => {
@@ -109,6 +119,7 @@ describe('ApiError', () => {
 
     it.each([
       [4000, 'Invalid request. Please check your input and try again.'],
+      [4010, 'Admin API authorization failed. Configure server.admin.token or provide the matching bearer token.'],
       [5000, 'An error occurred while processing your request.'],
       [5001, 'A database error occurred. Please try again later.'],
       [5002, 'An internal server error occurred. Please try again later.'],
@@ -161,6 +172,21 @@ describe('errorMiddleware', () => {
     });
   });
 
+  it('throws actionable ApiError for unauthorized responses', async () => {
+    await expect(
+      errorMiddleware.onResponse?.({
+        response: new Response('', {
+          status: 401,
+          statusText: 'Unauthorized',
+        }),
+      } as never),
+    ).rejects.toMatchObject({
+      code: ErrorCodes.UNAUTHORIZED,
+      message: expect.stringContaining('server.admin.token'),
+      status: 401,
+    });
+  });
+
   it('throws a generic error for malformed JSON error bodies', async () => {
     await expect(
       errorMiddleware.onResponse?.({
@@ -185,6 +211,7 @@ describe('errorMiddleware', () => {
 describe('ErrorCodes', () => {
   it('should have correct error code values', () => {
     expect(ErrorCodes.NOT_FOUND).toBe(4004);
+    expect(ErrorCodes.UNAUTHORIZED).toBe(4010);
     expect(ErrorCodes.BAD_REQUEST).toBe(4000);
     expect(ErrorCodes.BACKEND_NOT_READY).toBe(5003);
     expect(ErrorCodes.RUNTIME_ERROR).toBe(5000);

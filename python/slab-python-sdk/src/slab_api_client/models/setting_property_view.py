@@ -6,10 +6,13 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
+from ..models.setting_change_effect import SettingChangeEffect
 from ..types import UNSET, Unset
 
 if TYPE_CHECKING:
     from ..models.i18n_payload import I18NPayload
+    from ..models.setting_override_source_type_0 import SettingOverrideSourceType0
+    from ..models.setting_override_source_type_1 import SettingOverrideSourceType1
     from ..models.setting_property_schema import SettingPropertySchema
 
 
@@ -27,8 +30,10 @@ class SettingPropertyView:
         pmid (str):
         schema (SettingPropertySchema):
         search_terms (list[str]):
+        change_effect (SettingChangeEffect | Unset):
         description_md (str | Unset):
         i18n (I18NPayload | None | Unset):
+        overridden_by (None | SettingOverrideSourceType0 | SettingOverrideSourceType1 | Unset):
         override_value (Any | None | Unset):
     """
 
@@ -39,13 +44,19 @@ class SettingPropertyView:
     pmid: str
     schema: SettingPropertySchema
     search_terms: list[str]
+    change_effect: SettingChangeEffect | Unset = UNSET
     description_md: str | Unset = UNSET
     i18n: I18NPayload | None | Unset = UNSET
+    overridden_by: (
+        None | SettingOverrideSourceType0 | SettingOverrideSourceType1 | Unset
+    ) = UNSET
     override_value: Any | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.i18n_payload import I18NPayload
+        from ..models.setting_override_source_type_0 import SettingOverrideSourceType0
+        from ..models.setting_override_source_type_1 import SettingOverrideSourceType1
 
         editable = self.editable
 
@@ -61,6 +72,10 @@ class SettingPropertyView:
 
         search_terms = self.search_terms
 
+        change_effect: str | Unset = UNSET
+        if not isinstance(self.change_effect, Unset):
+            change_effect = self.change_effect.value
+
         description_md = self.description_md
 
         i18n: dict[str, Any] | None | Unset
@@ -70,6 +85,16 @@ class SettingPropertyView:
             i18n = self.i18n.to_dict()
         else:
             i18n = self.i18n
+
+        overridden_by: dict[str, Any] | None | Unset
+        if isinstance(self.overridden_by, Unset):
+            overridden_by = UNSET
+        elif isinstance(self.overridden_by, SettingOverrideSourceType0):
+            overridden_by = self.overridden_by.to_dict()
+        elif isinstance(self.overridden_by, SettingOverrideSourceType1):
+            overridden_by = self.overridden_by.to_dict()
+        else:
+            overridden_by = self.overridden_by
 
         override_value: Any | None | Unset
         if isinstance(self.override_value, Unset):
@@ -90,10 +115,14 @@ class SettingPropertyView:
                 "search_terms": search_terms,
             }
         )
+        if change_effect is not UNSET:
+            field_dict["change_effect"] = change_effect
         if description_md is not UNSET:
             field_dict["description_md"] = description_md
         if i18n is not UNSET:
             field_dict["i18n"] = i18n
+        if overridden_by is not UNSET:
+            field_dict["overridden_by"] = overridden_by
         if override_value is not UNSET:
             field_dict["override_value"] = override_value
 
@@ -102,6 +131,8 @@ class SettingPropertyView:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.i18n_payload import I18NPayload
+        from ..models.setting_override_source_type_0 import SettingOverrideSourceType0
+        from ..models.setting_override_source_type_1 import SettingOverrideSourceType1
         from ..models.setting_property_schema import SettingPropertySchema
 
         d = dict(src_dict)
@@ -118,6 +149,13 @@ class SettingPropertyView:
         schema = SettingPropertySchema.from_dict(d.pop("schema"))
 
         search_terms = cast(list[str], d.pop("search_terms"))
+
+        _change_effect = d.pop("change_effect", UNSET)
+        change_effect: SettingChangeEffect | Unset
+        if isinstance(_change_effect, Unset):
+            change_effect = UNSET
+        else:
+            change_effect = SettingChangeEffect(_change_effect)
 
         description_md = d.pop("description_md", UNSET)
 
@@ -138,6 +176,40 @@ class SettingPropertyView:
 
         i18n = _parse_i18n(d.pop("i18n", UNSET))
 
+        def _parse_overridden_by(
+            data: object,
+        ) -> None | SettingOverrideSourceType0 | SettingOverrideSourceType1 | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                componentsschemas_setting_override_source_type_0 = (
+                    SettingOverrideSourceType0.from_dict(data)
+                )
+
+                return componentsschemas_setting_override_source_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                componentsschemas_setting_override_source_type_1 = (
+                    SettingOverrideSourceType1.from_dict(data)
+                )
+
+                return componentsschemas_setting_override_source_type_1
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(
+                None | SettingOverrideSourceType0 | SettingOverrideSourceType1 | Unset,
+                data,
+            )
+
+        overridden_by = _parse_overridden_by(d.pop("overridden_by", UNSET))
+
         def _parse_override_value(data: object) -> Any | None | Unset:
             if data is None:
                 return data
@@ -155,8 +227,10 @@ class SettingPropertyView:
             pmid=pmid,
             schema=schema,
             search_terms=search_terms,
+            change_effect=change_effect,
             description_md=description_md,
             i18n=i18n,
+            overridden_by=overridden_by,
             override_value=override_value,
         )
 

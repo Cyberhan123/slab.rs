@@ -5,7 +5,7 @@ use crate::{ConfigError, SettingValue, SettingsDocument};
 
 pub(crate) struct SettingDescriptor {
     pub pmid: &'static str,
-    pub get: fn(&SettingsDocument) -> SettingValue,
+    pub get: fn(&SettingsDocument) -> Result<SettingValue, ConfigError>,
     pub set: fn(&mut SettingsDocument, SettingValue) -> Result<(), ConfigError>,
 }
 
@@ -13,7 +13,7 @@ macro_rules! descriptor {
     ($pmid:literal, $($field:ident).+) => {
         SettingDescriptor {
             pmid: $pmid,
-            get: |document| setting_value_from(&document.$($field).+),
+            get: |document| setting_value_from(&document.$($field).+, $pmid),
             set: |document, value| set_setting_value(&mut document.$($field).+, value, $pmid),
         }
     };
@@ -417,7 +417,7 @@ pub(crate) fn setting_value(
     let descriptor = setting_descriptor(pmid)
         .ok_or_else(|| ConfigError::NotFound(format!("setting pmid '{pmid}' not found")))?;
     debug_assert_eq!(descriptor.pmid, pmid);
-    Ok((descriptor.get)(document))
+    (descriptor.get)(document)
 }
 
 pub(crate) fn set_document_value(
@@ -431,8 +431,10 @@ pub(crate) fn set_document_value(
     (descriptor.set)(document, value)
 }
 
-fn setting_value_from<T: Serialize>(value: &T) -> SettingValue {
-    serde_json::to_value(value).map(SettingValue::from).unwrap_or_default()
+fn setting_value_from<T: Serialize>(value: &T, pmid: &str) -> Result<SettingValue, ConfigError> {
+    serde_json::to_value(value).map(SettingValue::from).map_err(|error| {
+        ConfigError::Internal(format!("setting '{pmid}' failed to serialize: {error}"))
+    })
 }
 
 fn set_setting_value<T: DeserializeOwned>(
@@ -440,8 +442,63 @@ fn set_setting_value<T: DeserializeOwned>(
     value: SettingValue,
     pmid: &str,
 ) -> Result<(), ConfigError> {
-    *target = serde_json::from_value(value.into_json_value()).map_err(|error| {
+    validate_numeric_constraints(pmid, &value)?;
+    *target = serde_json::from_value(value.try_into_json_value()?).map_err(|error| {
         ConfigError::BadRequest(format!("setting '{pmid}' value has invalid shape: {error}"))
     })?;
     Ok(())
+}
+
+fn validate_numeric_constraints(pmid: &str, value: &SettingValue) -> Result<(), ConfigError> {
+    let Some(number) = numeric_value(value) else {
+        return Ok(());
+    };
+
+    if let Some(minimum) = minimum_value(pmid)
+        && number < minimum as f64
+    {
+        return Err(ConfigError::BadRequest(format!(
+            "setting '{pmid}' must be greater than or equal to {minimum}"
+        )));
+    }
+
+    if let Some(maximum) = maximum_value(pmid)
+        && number > maximum as f64
+    {
+        return Err(ConfigError::BadRequest(format!(
+            "setting '{pmid}' must be less than or equal to {maximum}"
+        )));
+    }
+
+    Ok(())
+}
+
+fn numeric_value(value: &SettingValue) -> Option<f64> {
+    match value {
+        SettingValue::Integer(value) => Some(*value as f64),
+        SettingValue::Unsigned(value) => Some(*value as f64),
+        SettingValue::Number(value) if value.is_finite() => Some(*value),
+        SettingValue::Number(_) => None,
+        _ => None,
+    }
+}
+
+fn minimum_value(path: &str) -> Option<i64> {
+    if path.ends_with(".queue")
+        || path.ends_with(".concurrent_requests")
+        || path.ends_with(".idle_minutes")
+        || path.ends_with(".context_length")
+        || path.ends_with("_limit")
+        || path.ends_with("_concurrency")
+        || path.ends_with("_seconds")
+        || path.ends_with("_days")
+    {
+        Some(0)
+    } else {
+        None
+    }
+}
+
+fn maximum_value(_path: &str) -> Option<i64> {
+    None
 }

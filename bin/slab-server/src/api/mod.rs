@@ -28,7 +28,7 @@ pub fn build(state: Arc<AppState>) -> Router {
     let mut app = Router::new().merge(api_router);
     let api_doc = doc::get_docs();
 
-    if state.context.config.enable_swagger {
+    if state.context.pmid.config().server.swagger.enabled {
         app = app.merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", api_doc));
     }
 

@@ -6,6 +6,16 @@
 
 ---
 
+## 0. 2026-06-18 PMID/settings 专项闭环
+
+`docs/development/planning/slab-pmid-settings-2026-06-17.md` 已按当前代码实施，关闭范围仅限 PMID/settings 专项：
+
+- 已关闭：PMID-F1–F11、F-Stack-1、F-Stack-2、G4-config 中 parse_env/setting_value_from 部分、G5、P1-1、P1-2、P1-3、P1-4、P2-3。
+- 关键代码落点：`crates/slab-config` 回显类型/脱敏/约束/env seed，`crates/slab-app-core` 设置变更语义，`bin/slab-server` PMID admin 鉴权投影，`packages/api` token 注入与 401 诊断，`packages/slab-desktop/src/pages/settings` 生效/继承徽标。
+- 验证记录：`cargo test -p slab-config`、`cargo test -p slab-app-core settings`、`cargo test -p slab-server settings`、`bun run test:frontend -- packages/slab-desktop/src/pages/settings packages/api`、`bun run gen:api`。
+- 非本轮范围：model_pack、DB 契约、JSON-RPC/gRPC 错误结构、路径安全治理仍按各自专项处理，本闭环不改变这些条目的状态。
+
+
 ## 1. 审计综述（整体设计质量与健康度）
 
 ### 1.1 总体评级：**B−（弱 B，倾向 C+）**

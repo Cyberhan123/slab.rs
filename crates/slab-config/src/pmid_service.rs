@@ -11,6 +11,7 @@ use crate::{
     SetupConfig, SetupFfmpegConfig, mcp_servers_json_schema, provider_registry_json_schema,
     string_list_json_schema, websearch_providers_json_schema,
 };
+use schemars::schema_for;
 use serde_json::{Value, json};
 use slab_types::{I18nMessageRef, I18nPayload, ServerI18nKey};
 use tracing::warn;
@@ -20,9 +21,9 @@ use crate::{
     ConfigError, LaunchHostPaths, LaunchProfile, ResolvedLaunchSpec, SettingsDocumentProvider,
 };
 use crate::{
-    SettingPropertySchema, SettingPropertyView, SettingValue, SettingValueType,
-    SettingsDocumentView, SettingsSectionView, SettingsSubsectionView, UpdateSettingCommand,
-    UpdateSettingOperation,
+    SettingChangeEffect, SettingOverrideSource, SettingPropertySchema, SettingPropertyView,
+    SettingValue, SettingValueType, SettingsDocumentView, SettingsSectionView,
+    SettingsSubsectionView, UpdateSettingCommand, UpdateSettingOperation,
 };
 
 const DEFAULT_SERVER_RUNTIME_BIND_HOST: &str = "127.0.0.1";
@@ -123,7 +124,7 @@ impl PmidService {
         &self,
     ) -> Result<ModelDownloadSourcePreference, ConfigError> {
         let value = self.settings.value(PMID.models.download_source().as_str()).await?;
-        serde_json::from_value(value.into_json_value()).map_err(|error| {
+        serde_json::from_value(value.try_into_json_value()?).map_err(|error| {
             ConfigError::Internal(format!("invalid models.download_source setting value: {error}"))
         })
     }
@@ -203,6 +204,7 @@ fn load_config(settings: &SettingsDocument) -> PmidConfig {
                 },
             },
         },
+        server: settings.server.clone(),
         chat: ChatConfig {
             providers: settings
                 .providers
@@ -226,19 +228,22 @@ async fn build_document_view(
 ) -> Result<SettingsDocumentView, ConfigError> {
     let current = settings.document().await;
     let default_document = settings.default_document();
+    let mut warnings = settings.warnings().await;
     let mut sections = empty_sections();
 
     for pmid in PMID.all() {
-        let property =
-            build_property_view_from_documents(pmid.as_str(), &current, &default_document)?;
-        push_property(&mut sections, property)?;
+        match build_property_view_from_documents(pmid.as_str(), &current, &default_document) {
+            Ok(property) => push_property(&mut sections, property)?,
+            Err(error) => warnings
+                .push(format!("Failed to build setting view for '{}': {error}", pmid.as_str())),
+        }
     }
     attach_settings_i18n(&mut sections);
 
     Ok(SettingsDocumentView {
         schema_version: current.schema_version,
         settings_path: settings.path().display().to_string(),
-        warnings: settings.warnings().await,
+        warnings,
         sections,
     })
 }
@@ -260,7 +265,8 @@ fn build_property_view_from_documents(
     let effective_value = setting_value(current, pmid)?;
     let default_value = setting_value(default_document, pmid)?;
     let is_overridden = effective_value != default_value;
-    let is_secret = secret(pmid);
+    let json_schema = json_schema(pmid);
+    let is_secret = json_schema.as_ref().is_some_and(schema_has_write_only);
     let view_effective_value = if is_secret {
         redact_setting_value(pmid, effective_value.clone())
     } else {
@@ -278,6 +284,8 @@ fn build_property_view_from_documents(
             effective_value.clone()
         }
     });
+    let (view_override_value, overridden_by) =
+        inherited_parent_view(pmid, current, view_override_value)?;
 
     Ok(SettingPropertyView {
         pmid: pmid.to_owned(),
@@ -291,7 +299,7 @@ fn build_property_view_from_documents(
             minimum: minimum_value(pmid),
             maximum: None,
             pattern: None,
-            json_schema: json_schema(pmid),
+            json_schema,
             default_value: view_default_value,
             secret: is_secret,
             multiline: multiline(pmid),
@@ -299,6 +307,8 @@ fn build_property_view_from_documents(
         },
         effective_value: view_effective_value,
         override_value: view_override_value,
+        change_effect: change_effect_for(pmid),
+        overridden_by,
         is_overridden,
         search_terms: search_terms(pmid),
     })
@@ -848,8 +858,13 @@ fn value_type(path: &str, effective: &SettingValue, default: &SettingValue) -> S
     {
         return SettingValueType::Array;
     }
+    if path == "telemetry.metrics_exporter" {
+        return SettingValueType::TaggedUnion;
+    }
+    if path.ends_with("_bytes") {
+        return SettingValueType::Unsigned;
+    }
     if path == "agent.tools.websearch.providers"
-        || path == "telemetry.metrics_exporter"
         || path == "telemetry.span_attributes"
         || path == "telemetry.tracestate"
     {
@@ -879,12 +894,16 @@ fn value_type(path: &str, effective: &SettingValue, default: &SettingValue) -> S
 
     match effective {
         SettingValue::Boolean(_) => SettingValueType::Boolean,
-        SettingValue::Integer(_) | SettingValue::Number(_) => SettingValueType::Integer,
+        SettingValue::Integer(_) => SettingValueType::Integer,
+        SettingValue::Unsigned(_) => SettingValueType::Unsigned,
+        SettingValue::Number(_) => SettingValueType::Float,
         SettingValue::Array(_) => SettingValueType::Array,
         SettingValue::Object(_) => SettingValueType::Object,
         SettingValue::Null => match default {
             SettingValue::Boolean(_) => SettingValueType::Boolean,
-            SettingValue::Integer(_) | SettingValue::Number(_) => SettingValueType::Integer,
+            SettingValue::Integer(_) => SettingValueType::Integer,
+            SettingValue::Unsigned(_) => SettingValueType::Unsigned,
+            SettingValue::Number(_) => SettingValueType::Float,
             SettingValue::Array(_) => SettingValueType::Array,
             SettingValue::Object(_) => SettingValueType::Object,
             _ => SettingValueType::String,
@@ -942,6 +961,8 @@ fn json_schema(path: &str) -> Option<Value> {
         "providers.registry" => Some(provider_registry_json_schema()),
         "agent.tools.mcp.servers" => Some(mcp_servers_json_schema()),
         "agent.tools.websearch.providers" => Some(websearch_providers_json_schema()),
+        "server.admin.token" => Some(secret_leaf_json_schema("Admin Token")),
+        "telemetry.metrics_exporter" => Some(otel_exporter_json_schema()),
         "server.cors.allowed_origins" => Some(string_list_json_schema(
             "Allowed Origins",
             ServerI18nKey::SettingsPropertyLabelAllowedOrigins,
@@ -958,6 +979,20 @@ fn json_schema(path: &str) -> Option<Value> {
     }
 }
 
+fn otel_exporter_json_schema() -> Value {
+    serde_json::to_value(schema_for!(slab_otel::config::OtelExporter))
+        .expect("OpenTelemetry exporter schema should serialize")
+}
+
+fn secret_leaf_json_schema(title: &str) -> Value {
+    json!({
+        "type": ["string", "null"],
+        "title": title,
+        "writeOnly": true,
+        "default": null
+    })
+}
+
 fn string_map_json_schema(title: &str, title_key: ServerI18nKey) -> Value {
     json!({
         "type": "object",
@@ -968,18 +1003,123 @@ fn string_map_json_schema(title: &str, title_key: ServerI18nKey) -> Value {
     })
 }
 
+pub fn change_effect_for(path: &str) -> SettingChangeEffect {
+    if path.starts_with("agent.hooks.") || path.starts_with("agent.memories.") {
+        return SettingChangeEffect::Live;
+    }
+
+    if path == "providers.registry"
+        || path == "models.download_source"
+        || path.starts_with("models.auto_unload.")
+        || path == "server.admin.token"
+        || path == "server.cloud_http_trace"
+    {
+        return SettingChangeEffect::Live;
+    }
+
+    if path.starts_with("runtime.ggml.backends.llama.context_length")
+        || path.starts_with("runtime.ggml.backends.llama.flash_attn")
+        || path.starts_with("runtime.ggml.backends.whisper.flash_attn")
+        || path.starts_with("runtime.ggml.backends.diffusion.flash_attn")
+    {
+        return SettingChangeEffect::NeedsModelReload;
+    }
+
+    if path.starts_with("runtime.")
+        || path.starts_with("server.")
+        || path.starts_with("plugin.")
+        || path.starts_with("tools.")
+        || path.starts_with("agent.tools.")
+        || path.starts_with("database.")
+        || path == "logging.level"
+        || path == "logging.json"
+        || path == "logging.path"
+        || path.starts_with("telemetry.")
+    {
+        return SettingChangeEffect::NeedsRestart;
+    }
+
+    SettingChangeEffect::None
+}
+
+fn inherited_parent_view(
+    path: &str,
+    current: &SettingsDocument,
+    current_override: Option<SettingValue>,
+) -> Result<(Option<SettingValue>, Option<SettingOverrideSource>), ConfigError> {
+    if current_override.is_some() {
+        return Ok((current_override, None));
+    }
+
+    let Some((parent_pmid, value)) = inherited_logging_value(path, current)? else {
+        return Ok((None, None));
+    };
+
+    Ok((Some(value), Some(SettingOverrideSource::Parent { pmid: parent_pmid.to_owned() })))
+}
+
+fn inherited_logging_value<'a>(
+    path: &str,
+    current: &SettingsDocument,
+) -> Result<Option<(&'static str, SettingValue)>, ConfigError> {
+    for parent in logging_parent_chain(path) {
+        let value = setting_value(current, parent)?;
+        if value != SettingValue::Null {
+            return Ok(Some((parent, value)));
+        }
+    }
+
+    Ok(None)
+}
+
+fn logging_parent_chain(path: &str) -> Vec<&'static str> {
+    match path {
+        "runtime.logging.level" => vec!["logging.level"],
+        "runtime.logging.json" => vec!["logging.json"],
+        "runtime.logging.path" => vec!["logging.path"],
+        "runtime.ggml.logging.level" => vec!["runtime.logging.level", "logging.level"],
+        "runtime.ggml.logging.json" => vec!["runtime.logging.json", "logging.json"],
+        "runtime.ggml.logging.path" => vec!["runtime.logging.path", "logging.path"],
+        "runtime.ggml.backends.llama.logging.level"
+        | "runtime.ggml.backends.whisper.logging.level"
+        | "runtime.ggml.backends.diffusion.logging.level" => {
+            vec!["runtime.ggml.logging.level", "runtime.logging.level", "logging.level"]
+        }
+        "runtime.ggml.backends.llama.logging.json"
+        | "runtime.ggml.backends.whisper.logging.json"
+        | "runtime.ggml.backends.diffusion.logging.json" => {
+            vec!["runtime.ggml.logging.json", "runtime.logging.json", "logging.json"]
+        }
+        "runtime.ggml.backends.llama.logging.path"
+        | "runtime.ggml.backends.whisper.logging.path"
+        | "runtime.ggml.backends.diffusion.logging.path" => {
+            vec!["runtime.ggml.logging.path", "runtime.logging.path", "logging.path"]
+        }
+        "runtime.candle.logging.level" | "runtime.onnx.logging.level" => {
+            vec!["runtime.logging.level", "logging.level"]
+        }
+        "runtime.candle.logging.json" | "runtime.onnx.logging.json" => {
+            vec!["runtime.logging.json", "logging.json"]
+        }
+        "runtime.candle.logging.path" | "runtime.onnx.logging.path" => {
+            vec!["runtime.logging.path", "logging.path"]
+        }
+        "server.logging.level" => vec!["logging.level"],
+        "server.logging.json" => vec!["logging.json"],
+        "server.logging.path" => vec!["logging.path"],
+        _ => Vec::new(),
+    }
+}
+
 fn secret(path: &str) -> bool {
-    path == "server.admin.token"
-        || path == "providers.registry"
-        || path == "agent.tools.websearch.providers"
+    json_schema(path).as_ref().is_some_and(schema_has_write_only)
 }
 
 fn redact_setting_value(path: &str, value: SettingValue) -> SettingValue {
-    match path {
-        "server.admin.token" => redact_secret_leaf(value),
-        "providers.registry" | "agent.tools.websearch.providers" => redact_api_key_fields(value),
-        _ => value,
-    }
+    json_schema(path)
+        .as_ref()
+        .map(|schema| redact_setting_value_by_schema(value.clone(), schema, schema))
+        .unwrap_or(value)
 }
 
 fn redact_secret_leaf(value: SettingValue) -> SettingValue {
@@ -991,40 +1131,17 @@ fn redact_secret_leaf(value: SettingValue) -> SettingValue {
     }
 }
 
-fn redact_api_key_fields(value: SettingValue) -> SettingValue {
-    match value {
-        SettingValue::Array(values) => {
-            SettingValue::Array(values.into_iter().map(redact_api_key_fields).collect())
-        }
-        SettingValue::Object(values) => SettingValue::Object(
-            values
-                .into_iter()
-                .map(|(key, value)| {
-                    let value = if key == "api_key" {
-                        redact_secret_leaf(value)
-                    } else {
-                        redact_api_key_fields(value)
-                    };
-                    (key, value)
-                })
-                .collect(),
-        ),
-        other => other,
-    }
-}
-
 fn restore_secret_placeholders(
     path: &str,
     requested: SettingValue,
     current: Option<&SettingValue>,
 ) -> SettingValue {
-    match path {
-        "server.admin.token" => restore_secret_leaf(requested, current),
-        "providers.registry" | "agent.tools.websearch.providers" => {
-            restore_api_key_placeholders(requested, current)
-        }
-        _ => requested,
-    }
+    json_schema(path)
+        .as_ref()
+        .map(|schema| {
+            restore_secret_placeholders_by_schema(requested.clone(), current, schema, schema)
+        })
+        .unwrap_or(requested)
 }
 
 fn restore_secret_leaf(requested: SettingValue, current: Option<&SettingValue>) -> SettingValue {
@@ -1036,37 +1153,164 @@ fn restore_secret_leaf(requested: SettingValue, current: Option<&SettingValue>) 
     }
 }
 
-fn restore_api_key_placeholders(
-    requested: SettingValue,
-    current: Option<&SettingValue>,
+fn schema_has_write_only(schema: &Value) -> bool {
+    schema_has_write_only_inner(schema, schema)
+}
+
+fn schema_has_write_only_inner(schema: &Value, root: &Value) -> bool {
+    let schema = dereference_schema(schema, root);
+    if schema.get("writeOnly").and_then(Value::as_bool).unwrap_or(false) {
+        return true;
+    }
+
+    let object_children = ["properties", "$defs"];
+    for key in object_children {
+        if let Some(children) = schema.get(key).and_then(Value::as_object)
+            && children.values().any(|child| schema_has_write_only_inner(child, root))
+        {
+            return true;
+        }
+    }
+
+    let schema_children = ["items", "additionalProperties"];
+    for key in schema_children {
+        if let Some(child) = schema.get(key)
+            && child.is_object()
+            && schema_has_write_only_inner(child, root)
+        {
+            return true;
+        }
+    }
+
+    let list_children = ["oneOf", "anyOf", "allOf"];
+    for key in list_children {
+        if let Some(children) = schema.get(key).and_then(Value::as_array)
+            && children.iter().any(|child| schema_has_write_only_inner(child, root))
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn redact_setting_value_by_schema(
+    value: SettingValue,
+    schema: &Value,
+    root: &Value,
 ) -> SettingValue {
-    match requested {
-        SettingValue::Array(values) => SettingValue::Array(
-            values
-                .into_iter()
-                .enumerate()
-                .map(|(index, value)| {
-                    let current_item = current_array_item_for_request(current, index, &value);
-                    restore_api_key_placeholders(value, current_item)
-                })
-                .collect(),
-        ),
-        SettingValue::Object(values) => SettingValue::Object(
-            values
-                .into_iter()
-                .map(|(key, value)| {
-                    let current_child = current_object_child(current, &key);
-                    let value = if key == "api_key" {
-                        restore_secret_leaf(value, current_child)
-                    } else {
-                        restore_api_key_placeholders(value, current_child)
-                    };
-                    (key, value)
-                })
-                .collect(),
-        ),
+    let schema = dereference_schema(schema, root);
+    if schema.get("writeOnly").and_then(Value::as_bool).unwrap_or(false) {
+        return redact_secret_leaf(value);
+    }
+
+    match value {
+        SettingValue::Array(values) => {
+            let item_schema = schema.get("items").filter(|value| value.is_object());
+            SettingValue::Array(
+                values
+                    .into_iter()
+                    .map(|value| {
+                        item_schema
+                            .map(|schema| {
+                                redact_setting_value_by_schema(value.clone(), schema, root)
+                            })
+                            .unwrap_or(value)
+                    })
+                    .collect(),
+            )
+        }
+        SettingValue::Object(values) => {
+            let properties = schema.get("properties").and_then(Value::as_object);
+            SettingValue::Object(
+                values
+                    .into_iter()
+                    .map(|(key, value)| {
+                        let value = properties
+                            .and_then(|properties| properties.get(&key))
+                            .map(|schema| {
+                                redact_setting_value_by_schema(value.clone(), schema, root)
+                            })
+                            .unwrap_or(value);
+                        (key, value)
+                    })
+                    .collect(),
+            )
+        }
         other => other,
     }
+}
+
+fn restore_secret_placeholders_by_schema(
+    requested: SettingValue,
+    current: Option<&SettingValue>,
+    schema: &Value,
+    root: &Value,
+) -> SettingValue {
+    let schema = dereference_schema(schema, root);
+    if schema.get("writeOnly").and_then(Value::as_bool).unwrap_or(false) {
+        return restore_secret_leaf(requested, current);
+    }
+
+    match requested {
+        SettingValue::Array(values) => {
+            let item_schema = schema.get("items").filter(|value| value.is_object());
+            SettingValue::Array(
+                values
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, value)| {
+                        let current_item = current_array_item_for_request(current, index, &value);
+                        item_schema
+                            .map(|schema| {
+                                restore_secret_placeholders_by_schema(
+                                    value.clone(),
+                                    current_item,
+                                    schema,
+                                    root,
+                                )
+                            })
+                            .unwrap_or(value)
+                    })
+                    .collect(),
+            )
+        }
+        SettingValue::Object(values) => {
+            let properties = schema.get("properties").and_then(Value::as_object);
+            SettingValue::Object(
+                values
+                    .into_iter()
+                    .map(|(key, value)| {
+                        let current_child = current_object_child(current, &key);
+                        let value = properties
+                            .and_then(|properties| properties.get(&key))
+                            .map(|schema| {
+                                restore_secret_placeholders_by_schema(
+                                    value.clone(),
+                                    current_child,
+                                    schema,
+                                    root,
+                                )
+                            })
+                            .unwrap_or(value);
+                        (key, value)
+                    })
+                    .collect(),
+            )
+        }
+        other => other,
+    }
+}
+
+fn dereference_schema<'a>(schema: &'a Value, root: &'a Value) -> &'a Value {
+    let Some(reference) = schema.get("$ref").and_then(Value::as_str) else {
+        return schema;
+    };
+    let Some(pointer) = reference.strip_prefix('#') else {
+        return schema;
+    };
+
+    root.pointer(pointer).unwrap_or(schema)
 }
 
 fn current_object_child<'a>(
@@ -1184,7 +1428,7 @@ fn property_description(path: &str) -> String {
             "Optional OpenTelemetry service.version resource value.".to_owned()
         }
         "telemetry.metrics_exporter" => {
-            "Metrics exporter. Defaults to none until metrics collection is explicitly enabled.".to_owned()
+            "Metrics exporter. Logs and traces derive their local file target from the Slab telemetry home unless explicitly configured by runtime launch settings.".to_owned()
         }
         "telemetry.capture_content" => {
             "Include GenAI prompt, output, and tool definition content in telemetry events.".to_owned()
@@ -1701,6 +1945,8 @@ mod tests {
         assert_eq!(config.setup.ffmpeg.dir.as_deref(), Some("C:/ffmpeg"));
         assert!(config.telemetry.enabled);
         assert!(!config.telemetry.capture_content);
+        assert_eq!(config.server.address, document.server.address);
+        assert_eq!(config.server.admin.token, document.server.admin.token);
         assert_eq!(config.chat.providers.len(), 1);
         assert_eq!(property.effective_value, json!("C:/models").into());
         assert_eq!(plugin_install_dir.effective_value, json!(expected_plugin_dir).into());
@@ -1926,6 +2172,138 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn update_setting_rejects_values_below_numeric_minimum() {
+        let path = temp_settings_path();
+        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&SettingsDocument::default()).expect("serialize"),
+        )
+        .expect("write");
+
+        let service = PmidService::load_from_path(path.clone()).await.expect("pmid service");
+        let error = service
+            .update_setting(
+                "runtime.capacity.queue",
+                UpdateSettingCommand {
+                    op: crate::UpdateSettingOperation::Set,
+                    value: Some(json!(-5).into()),
+                },
+            )
+            .await
+            .expect_err("negative capacity should fail");
+
+        assert!(matches!(error, ConfigError::BadRequest(_)));
+        assert!(error.to_string().contains("runtime.capacity.queue"));
+        assert!(error.to_string().contains("greater than or equal to 0"));
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn setting_value_rejects_non_finite_numbers() {
+        let value = SettingValue::Number(f64::NAN);
+
+        assert!(value.clone().try_into_json_value().is_err());
+        assert!(serde_json::to_value(value).is_err());
+    }
+
+    #[tokio::test]
+    async fn logging_leaf_views_echo_inherited_parent_override() {
+        let path = temp_settings_path();
+        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        let mut document = SettingsDocument::default();
+        document.runtime.logging.level = Some("debug".to_owned());
+        fs::write(&path, serde_json::to_string_pretty(&document).expect("serialize"))
+            .expect("write");
+
+        let service = PmidService::load_from_path(path.clone()).await.expect("pmid service");
+        let property = service
+            .property("runtime.ggml.backends.llama.logging.level")
+            .await
+            .expect("logging leaf");
+
+        assert_eq!(property.effective_value, SettingValue::Null);
+        assert_eq!(property.override_value, Some(SettingValue::String("debug".to_owned())));
+        assert_eq!(
+            property.overridden_by,
+            Some(SettingOverrideSource::Parent { pmid: "runtime.logging.level".to_owned() })
+        );
+        assert_eq!(property.change_effect, SettingChangeEffect::NeedsRestart);
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn change_effects_match_runtime_consumption_boundaries() {
+        let path = temp_settings_path();
+        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&SettingsDocument::default()).expect("serialize"),
+        )
+        .expect("write");
+
+        let service = PmidService::load_from_path(path.clone()).await.expect("pmid service");
+
+        for pmid in [
+            "agent.hooks.enabled",
+            "agent.memories.enabled",
+            "providers.registry",
+            "models.download_source",
+            "models.auto_unload.enabled",
+            "server.admin.token",
+            "server.cloud_http_trace",
+        ] {
+            assert_eq!(
+                service.property(pmid).await.expect(pmid).change_effect,
+                SettingChangeEffect::Live,
+                "{pmid}"
+            );
+        }
+
+        assert_eq!(
+            service
+                .property("runtime.ggml.backends.llama.context_length")
+                .await
+                .expect("context length")
+                .change_effect,
+            SettingChangeEffect::NeedsModelReload
+        );
+        assert_eq!(
+            service.property("runtime.capacity.queue").await.expect("queue").change_effect,
+            SettingChangeEffect::NeedsRestart
+        );
+        assert_eq!(
+            service.property("agent.tools.mcp.servers").await.expect("mcp servers").change_effect,
+            SettingChangeEffect::NeedsRestart
+        );
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn unsigned_integer_settings_are_reported_without_float_downgrade() {
+        let path = temp_settings_path();
+        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        let mut document = SettingsDocument::default();
+        document.models.auto_unload.min_free_system_memory_bytes = i64::MAX as u64 + 1;
+        fs::write(&path, serde_json::to_string_pretty(&document).expect("serialize"))
+            .expect("write");
+
+        let service = PmidService::load_from_path(path.clone()).await.expect("pmid service");
+        let property = service
+            .property("models.auto_unload.min_free_system_memory_bytes")
+            .await
+            .expect("memory threshold");
+
+        assert_eq!(property.schema.value_type, SettingValueType::Unsigned);
+        assert_eq!(property.effective_value, SettingValue::Unsigned(i64::MAX as u64 + 1));
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
     async fn general_language_setting_is_grouped_and_persisted() {
         let path = temp_settings_path();
         fs::create_dir_all(path.parent().expect("parent")).expect("dir");
@@ -2145,8 +2523,13 @@ mod tests {
         assert_eq!(enabled.effective_value, SettingValue::Boolean(true));
         assert_eq!(capture_content.schema.value_type, SettingValueType::Boolean);
         assert_eq!(capture_content.effective_value, SettingValue::Boolean(false));
-        assert_eq!(metrics_exporter.schema.value_type, SettingValueType::Object);
+        assert_eq!(metrics_exporter.schema.value_type, SettingValueType::TaggedUnion);
         assert!(metrics_exporter.schema.multiline);
+        assert!(metrics_exporter.schema.json_schema.as_ref().is_some_and(|schema| {
+            schema.get("oneOf").is_some()
+                || schema.get("anyOf").is_some()
+                || schema.get("$defs").is_some()
+        }));
         assert!(!general.properties.iter().any(|property| property.pmid == "telemetry.slab_home"));
         assert!(!general.properties.iter().any(|property| property.pmid == "telemetry.exporter"));
         assert!(

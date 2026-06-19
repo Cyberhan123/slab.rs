@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     defaults,
-    document::{AgentSettingsConfig, LoggingConfig},
+    document::{AgentSettingsConfig, LoggingConfig, ServerSettingsConfig},
     launch::LaunchConfig,
 };
 use slab_otel::config::OtelSettings;
@@ -39,6 +39,7 @@ pub struct PmidConfig {
     pub agent: AgentSettingsConfig,
     pub runtime: RuntimeConfig,
     pub launch: LaunchConfig,
+    pub server: ServerSettingsConfig,
     pub chat: ChatConfig,
     pub diffusion: DiffusionConfig,
 }

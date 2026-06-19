@@ -1,5 +1,5 @@
 pub use slab_config::{
-    SettingPropertySchema, SettingPropertyView, SettingValidationErrorData, SettingValue,
-    SettingValueType, SettingsDocumentView, SettingsSectionView, SettingsSubsectionView,
-    UpdateSettingCommand, UpdateSettingOperation,
+    SettingChangeEffect, SettingOverrideSource, SettingPropertySchema, SettingPropertyView,
+    SettingValidationErrorData, SettingValue, SettingValueType, SettingsDocumentView,
+    SettingsSectionView, SettingsSubsectionView, UpdateSettingCommand, UpdateSettingOperation,
 };

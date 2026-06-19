@@ -109,15 +109,17 @@ describe('settings utils', () => {
   it('parses complete integer and number strings', () => {
     expect(parseSettingNumberValue('42')).toBe(42);
     expect(parseSettingNumberValue('-7')).toBe(-7);
-    expect(parseSettingNumberValue('1.5', 'number')).toBe(1.5);
-    expect(parseSettingNumberValue('1e3', 'number')).toBe(1000);
+    expect(parseSettingNumberValue('7', 'unsigned')).toBe(7);
+    expect(parseSettingNumberValue('-7', 'unsigned')).toBeNull();
+    expect(parseSettingNumberValue('1.5', 'float')).toBe(1.5);
+    expect(parseSettingNumberValue('1e3', 'float')).toBe(1000);
   });
 
   it('rejects partial numeric strings', () => {
     expect(parseSettingNumberValue('12px')).toBeNull();
     expect(parseSettingNumberValue('1.5')).toBeNull();
-    expect(parseSettingNumberValue('1e', 'number')).toBeNull();
-    expect(parseSettingNumberValue('Infinity', 'number')).toBeNull();
+    expect(parseSettingNumberValue('1e', 'float')).toBeNull();
+    expect(parseSettingNumberValue('Infinity', 'float')).toBeNull();
   });
 
   it('uses the shared integer parser when building update requests', () => {
@@ -128,6 +130,20 @@ describe('settings utils', () => {
     expect(buildRequestBody(integerSetting(), '  ')).toEqual({ op: 'unset' });
     expect(() => buildRequestBody(integerSetting(), '42ms')).toThrow(
       'Value must be an integer.',
+    );
+    expect(buildRequestBody(unsignedSetting(), '42')).toEqual({
+      op: 'set',
+      value: 42,
+    });
+    expect(() => buildRequestBody(unsignedSetting(), '-1')).toThrow(
+      'Value must be an integer.',
+    );
+    expect(buildRequestBody(floatSetting(), '1.5')).toEqual({
+      op: 'set',
+      value: 1.5,
+    });
+    expect(() => buildRequestBody(floatSetting(), 'NaN')).toThrow(
+      'Value must be a finite number.',
     );
     expect(() =>
       buildRequestBody(integerSetting(), '42ms', {
@@ -172,6 +188,10 @@ describe('settings utils', () => {
       op: 'set',
       value: { path: 'runtime' },
     });
+    expect(buildRequestBody(taggedUnionSetting(), '{"type":"none"}')).toEqual({
+      op: 'set',
+      value: { type: 'none' },
+    });
     expect(buildRequestBody(objectSetting(), '  ')).toEqual({ op: 'unset' });
     expect(() => buildRequestBody(objectSetting(), '{"path":')).toThrow(
       'Value must be valid JSON.',
@@ -207,6 +227,7 @@ describe('settings utils', () => {
     expect(autoSaveDelay(stringSetting({ schema: { enum: ['auto'], type: 'string' } }))).toBe(150);
     expect(autoSaveDelay(arraySetting())).toBe(900);
     expect(autoSaveDelay(objectSetting())).toBe(900);
+    expect(autoSaveDelay(taggedUnionSetting())).toBe(900);
     expect(autoSaveDelay(stringSetting({ schema: { multiline: true, type: 'string' } }))).toBe(900);
     expect(autoSaveDelay(stringSetting({ schema: { type: 'string' } }))).toBe(650);
   });
@@ -277,6 +298,26 @@ function integerSetting(): SettingResponse {
   });
 }
 
+function unsignedSetting(): SettingResponse {
+  return settingFixture({
+    effective_value: 0,
+    schema: {
+      default_value: null,
+      type: 'unsigned',
+    },
+  });
+}
+
+function floatSetting(): SettingResponse {
+  return settingFixture({
+    effective_value: 0,
+    schema: {
+      default_value: null,
+      type: 'float',
+    },
+  });
+}
+
 function stringSetting(overrides: Partial<SettingResponse> = {}): SettingResponse {
   return settingFixture({
     effective_value: '',
@@ -304,6 +345,16 @@ function objectSetting(): SettingResponse {
     schema: {
       default_value: {},
       type: 'object',
+    },
+  });
+}
+
+function taggedUnionSetting(): SettingResponse {
+  return settingFixture({
+    effective_value: {},
+    schema: {
+      default_value: {},
+      type: 'tagged_union',
     },
   });
 }

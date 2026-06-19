@@ -43,6 +43,10 @@ export default function SettingsPage() {
   }, [data]);
 
   const sections = useMemo(() => data?.sections ?? [], [data?.sections]);
+  const shouldShowAdminTokenWarning = useMemo(
+    () => shouldWarnForMissingAdminToken(propertyMap),
+    [propertyMap],
+  );
   const activeSection = useMemo(
     () => sections.find((section) => section.id === activeSectionId) ?? sections[0] ?? null,
     [activeSectionId, sections],
@@ -147,6 +151,16 @@ export default function SettingsPage() {
                     <p key={warning}>{warning}</p>
                   ))}
                 </div>
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
+          {shouldShowAdminTokenWarning ? (
+            <Alert variant="destructive">
+              <TriangleAlert className="h-4 w-4" />
+              <AlertTitle>{t('pages.settings.page.adminTokenWarningTitle')}</AlertTitle>
+              <AlertDescription>
+                {t('pages.settings.page.adminTokenWarningDescription')}
               </AlertDescription>
             </Alert>
           ) : null}
@@ -300,6 +314,10 @@ function shouldPropertySpanFullWidth(property: SettingResponse) {
     return true;
   }
 
+  if (property.schema.type === 'tagged_union') {
+    return true;
+  }
+
   const label = property.label.toLowerCase();
 
   return (
@@ -308,4 +326,35 @@ function shouldPropertySpanFullWidth(property: SettingResponse) {
     label.includes('providers') ||
     label.includes('path')
   );
+}
+
+function shouldWarnForMissingAdminToken(propertyMap: Map<string, SettingResponse>) {
+  const address = propertyMap.get('server.address')?.effective_value;
+  const token = propertyMap.get('server.admin.token')?.effective_value;
+
+  return typeof address === 'string' && !isLoopbackBindAddress(address) && !hasAdminToken(token);
+}
+
+function hasAdminToken(value: unknown) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isLoopbackBindAddress(bindAddress: string) {
+  const host = bindHost(bindAddress);
+  return (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    host.startsWith('127.')
+  );
+}
+
+function bindHost(bindAddress: string) {
+  const trimmed = bindAddress.trim();
+  const bracketed = trimmed.match(/^\[([^\]]+)\](?::\d+)?$/);
+  if (bracketed) {
+    return bracketed[1].toLowerCase();
+  }
+
+  return trimmed.split(':')[0].toLowerCase();
 }

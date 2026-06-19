@@ -70,11 +70,19 @@ impl TestServer {
         }
 
         let settings_path = settings_dir.join("settings.json");
-        write_test_settings(&settings_path, &model_cache_dir, &model_config_dir, &plugins_dir);
+        let bind_address = options.bind_address.unwrap_or_else(|| "127.0.0.1:0".to_owned());
+        write_test_settings(
+            &settings_path,
+            &model_cache_dir,
+            &model_config_dir,
+            &plugins_dir,
+            &bind_address,
+            options.admin_api_token.as_deref(),
+        );
 
         let database_url = sqlite_url_for_path(&root.join("slab.db"));
         let config = Arc::new(Config {
-            bind_address: options.bind_address.unwrap_or_else(|| "127.0.0.1:0".to_owned()),
+            bind_address,
             database_url: database_url.clone(),
             log_level: "warn".to_owned(),
             log_json: false,
@@ -139,8 +147,21 @@ impl TestServer {
         self.send_json(Method::POST, uri, Some(body), None).await
     }
 
+    pub(crate) async fn put_json(&self, uri: &str, body: Value) -> TestResponse {
+        self.send_json(Method::PUT, uri, Some(body), None).await
+    }
+
     pub(crate) async fn get_with_token(&self, uri: &str, token: &str) -> TestResponse {
         self.send_json(Method::GET, uri, None, Some(token)).await
+    }
+
+    pub(crate) async fn put_json_with_token(
+        &self,
+        uri: &str,
+        body: Value,
+        token: &str,
+    ) -> TestResponse {
+        self.send_json(Method::PUT, uri, Some(body), Some(token)).await
     }
 
     pub(crate) async fn raw(&self, request: Request<Body>) -> axum::http::Response<Body> {
@@ -187,8 +208,12 @@ fn write_test_settings(
     model_cache_dir: &std::path::Path,
     model_config_dir: &std::path::Path,
     plugins_dir: &std::path::Path,
+    bind_address: &str,
+    admin_api_token: Option<&str>,
 ) {
     let mut document = SettingsDocument::default();
+    document.server.address = bind_address.to_owned();
+    document.server.admin.token = admin_api_token.map(ToOwned::to_owned);
     document.models.cache_dir = Some(model_cache_dir.to_string_lossy().into_owned());
     document.models.config_dir = Some(model_config_dir.to_string_lossy().into_owned());
     document.plugin.install_dir = Some(plugins_dir.to_string_lossy().into_owned());

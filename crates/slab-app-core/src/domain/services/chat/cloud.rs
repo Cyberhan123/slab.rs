@@ -102,7 +102,7 @@ pub(super) async fn create_chat_completion(
     config: CloudChatRequestConfig,
 ) -> Result<GeneratedChatOutput, AppCoreError> {
     let target = resolve_cloud_model(state, requested_model).await?;
-    let trace_http = state.config().cloud_http_trace;
+    let trace_http = state.pmid().config().server.cloud_http_trace;
 
     if config.stream && !config.tools.is_empty() {
         warn!(
@@ -230,7 +230,8 @@ pub(super) async fn create_text_completion(
         tool_calls: Vec::new(),
     }];
 
-    cloud_chat_completion(&target, &messages, config, state.config().cloud_http_trace).await
+    cloud_chat_completion(&target, &messages, config, state.pmid().config().server.cloud_http_trace)
+        .await
 }
 
 fn looks_like_env_var_name(value: &str) -> bool {

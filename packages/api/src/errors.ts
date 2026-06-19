@@ -7,6 +7,10 @@
 
 import type { Middleware } from "openapi-fetch";
 
+const UNAUTHORIZED_CODE = 4010;
+const ADMIN_AUTH_MESSAGE =
+  "Admin API authorization failed. Configure server.admin.token or provide the matching bearer token.";
+
 /**
  * Standard error response format from the backend
  */
@@ -43,6 +47,10 @@ export class ApiError extends Error {
   }
 
   static fromResponse(response: Response, errorData?: unknown): ApiError {
+    if (response.status === 401) {
+      return new ApiError(UNAUTHORIZED_CODE, ADMIN_AUTH_MESSAGE, errorData, response.status);
+    }
+
     if (
       typeof errorData === "object" &&
       errorData !== null &&
@@ -81,6 +89,10 @@ export class ApiError extends Error {
    * Get user-friendly error message based on error code
    */
   getUserMessage(): string {
+    if (this.status === 401 || this.code === UNAUTHORIZED_CODE) {
+      return ADMIN_AUTH_MESSAGE;
+    }
+
     // If message already contains details, return it
     if (this.message && !this.message.includes("error:")) {
       return this.message;
@@ -110,6 +122,7 @@ export class ApiError extends Error {
  * Error codes for different error types
  */
 export const ErrorCodes = {
+  UNAUTHORIZED: UNAUTHORIZED_CODE,
   NOT_FOUND: 4004,
   BAD_REQUEST: 4000,
   BACKEND_NOT_READY: 5003,
@@ -140,6 +153,10 @@ export const errorMiddleware: Middleware = {
     // If response is ok, let it pass through
     if (response.ok) {
       return undefined;
+    }
+
+    if (response.status === 401) {
+      throw new ApiError(UNAUTHORIZED_CODE, ADMIN_AUTH_MESSAGE, null, response.status);
     }
 
     // Clone the response to avoid consuming the original

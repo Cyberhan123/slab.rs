@@ -7,6 +7,7 @@
  */
 
 import createFetchClient from "openapi-fetch";
+import type { Middleware } from "openapi-fetch";
 import createClient from "openapi-react-query";
 
 import { SERVER_BASE_URL, normalizeApiBaseUrl } from "./config";
@@ -16,6 +17,7 @@ import type { components, paths } from "./v1.d.ts";
 export type SlabApiClientOptions = {
   baseUrl?: string | null;
   fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  getAdminToken?: () => string | null;
   useErrorMiddleware?: boolean;
 };
 
@@ -29,11 +31,27 @@ function buildClientConfig(options: SlabApiClientOptions = {}) {
 export function createSlabApiFetchClient(options: SlabApiClientOptions = {}) {
   const client = createFetchClient<paths>(buildClientConfig(options));
 
+  if (options.getAdminToken) {
+    client.use(adminTokenMiddleware(options.getAdminToken));
+  }
+
   if (options.useErrorMiddleware) {
     client.use(errorMiddleware);
   }
 
   return client;
+}
+
+function adminTokenMiddleware(getAdminToken: () => string | null): Middleware {
+  return {
+    onRequest({ request }) {
+      const token = getAdminToken()?.trim();
+      if (token) {
+        request.headers.set("Authorization", `Bearer ${token}`);
+      }
+      return request;
+    },
+  };
 }
 
 export function createSlabApiQueryHooks(options: SlabApiClientOptions = {}) {

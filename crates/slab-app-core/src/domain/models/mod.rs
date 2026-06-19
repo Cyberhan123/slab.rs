@@ -58,9 +58,9 @@ pub use plugin::{InstallPluginCommand, PluginView};
 pub use pmid::PMID;
 pub use session::{CreateSessionCommand, DeleteSessionView, SessionMessageView, SessionView};
 pub use settings::{
-    SettingPropertySchema, SettingPropertyView, SettingValidationErrorData, SettingValue,
-    SettingValueType, SettingsDocumentView, SettingsSectionView, SettingsSubsectionView,
-    UpdateSettingCommand, UpdateSettingOperation,
+    SettingChangeEffect, SettingOverrideSource, SettingPropertySchema, SettingPropertyView,
+    SettingValidationErrorData, SettingValue, SettingValueType, SettingsDocumentView,
+    SettingsSectionView, SettingsSubsectionView, UpdateSettingCommand, UpdateSettingOperation,
 };
 pub use setup::{CompleteSetupCommand, ComponentStatus, EnvironmentStatus};
 pub use subtitle::{

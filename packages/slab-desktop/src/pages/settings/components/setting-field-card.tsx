@@ -1,9 +1,12 @@
 import {
   CheckCircle2,
   Clock3,
+  Layers3,
   Loader2,
+  RefreshCw,
   RotateCcw,
   TriangleAlert,
+  Zap,
 } from 'lucide-react';
 
 import { Button } from '@slab/components/button';
@@ -55,6 +58,10 @@ export function SettingFieldCard({
   const { t } = useTranslation();
   const propertyType = property.schema.type;
   const structuredSchema = parseStructuredJsonSchema(property);
+  const isNumeric =
+    propertyType === 'integer' ||
+    propertyType === 'unsigned' ||
+    propertyType === 'float';
   const isEnum =
     propertyType === 'string' &&
     Array.isArray(property.schema.enum) &&
@@ -103,6 +110,8 @@ export function SettingFieldCard({
         </div>
 
         <div className="flex flex-wrap items-center gap-2 self-start">
+          <ChangeEffectBadge effect={property.change_effect} />
+          <OverrideSourceBadge source={property.overridden_by} />
           <FieldStatusBadge status={fieldStatus} />
           <Button
             variant="outline"
@@ -157,15 +166,19 @@ export function SettingFieldCard({
                 ))}
               </SelectContent>
             </Select>
-          ) : propertyType === 'integer' ? (
+          ) : isNumeric ? (
             <Input
               id={property.pmid}
-              inputMode="numeric"
+              inputMode={propertyType === 'float' ? 'decimal' : 'numeric'}
               variant="soft"
               data-testid={`settings-input-${property.pmid}`}
               value={textValue}
               onChange={(event) => onChange(property, event.target.value)}
-              placeholder={t('pages.settings.field.integerPlaceholder')}
+              placeholder={
+                propertyType === 'float'
+                  ? t('pages.settings.field.numberPlaceholder')
+                  : t('pages.settings.field.integerPlaceholder')
+              }
               className="h-[42px] rounded-[12px] border-border/70 bg-[var(--surface-soft)] px-4 font-mono text-xs shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
               aria-invalid={Boolean(errorState)}
             />
@@ -185,6 +198,7 @@ export function SettingFieldCard({
             />
           ) : propertyType === 'array' ||
             propertyType === 'object' ||
+            propertyType === 'tagged_union' ||
             property.schema.multiline ? (
             <Textarea
               id={property.pmid}
@@ -194,6 +208,7 @@ export function SettingFieldCard({
               onChange={(event) => onChange(property, event.target.value)}
               placeholder={
                 propertyType === 'array' || propertyType === 'object'
+                  || propertyType === 'tagged_union'
                   ? t('pages.settings.field.jsonPlaceholder')
                   : t('pages.settings.field.valuePlaceholder')
               }
@@ -220,6 +235,68 @@ export function SettingFieldCard({
         </div>
       )}
     </div>
+  );
+}
+
+function ChangeEffectBadge({ effect }: { effect?: SettingResponse['change_effect'] }) {
+  const { t } = useTranslation();
+
+  if (!effect || effect === 'none') {
+    return null;
+  }
+
+  if (effect === 'live') {
+    return (
+      <StatusPill status="success" className="h-8 gap-2 rounded-full px-3 text-[11px] font-semibold">
+        <Zap className="h-3.5 w-3.5" />
+        {t('pages.settings.effect.live')}
+      </StatusPill>
+    );
+  }
+
+  if (effect === 'needs_model_reload') {
+    return (
+      <StatusPill status="info" className="h-8 gap-2 rounded-full px-3 text-[11px] font-semibold">
+        <RefreshCw className="h-3.5 w-3.5" />
+        {t('pages.settings.effect.needsModelReload')}
+      </StatusPill>
+    );
+  }
+
+  return (
+    <StatusPill status="neutral" className="h-8 gap-2 rounded-full px-3 text-[11px] font-semibold">
+      <RefreshCw className="h-3.5 w-3.5" />
+      {t('pages.settings.effect.needsRestart')}
+    </StatusPill>
+  );
+}
+
+function OverrideSourceBadge({ source }: { source?: SettingResponse['overridden_by'] }) {
+  const { t } = useTranslation();
+
+  if (!source) {
+    return null;
+  }
+
+  if (source.type === 'parent') {
+    return (
+      <StatusPill status="info" className="h-8 gap-2 rounded-full px-3 text-[11px] font-semibold">
+        <Layers3 className="h-3.5 w-3.5" />
+        {t('pages.settings.effect.inheritedFrom', { pmid: source.pmid })}
+      </StatusPill>
+    );
+  }
+
+  return (
+    <StatusPill status="neutral" className="h-8 gap-2 rounded-full px-3 text-[11px] font-semibold">
+      <Layers3 className="h-3.5 w-3.5" />
+      {t(
+        source.var_value_present
+          ? 'pages.settings.effect.envPresent'
+          : 'pages.settings.effect.envMissing',
+        { varName: source.var_name },
+      )}
+    </StatusPill>
   );
 }
 

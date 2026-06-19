@@ -109,6 +109,7 @@ export function useSettingsAutosave({
       body = buildRequestBody(property, draftSnapshot, {
         integer: t('pages.settings.validation.integer'),
         json: t('pages.settings.validation.json'),
+        number: t('pages.settings.validation.number'),
       });
     } catch (error) {
       const message = getErrorMessage(error);

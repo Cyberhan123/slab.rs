@@ -97,13 +97,16 @@ impl SystemService {
             version: env!("CARGO_PKG_VERSION").to_owned(),
             generated_at: Utc::now().to_rfc3339(),
             transport_mode: config.transport_mode.clone(),
-            swagger_enabled: config.enable_swagger,
-            admin_token_configured: config
-                .admin_api_token
+            swagger_enabled: settings.server.swagger.enabled,
+            admin_token_configured: settings
+                .server
+                .admin
+                .token
                 .as_deref()
                 .is_some_and(|value| !value.trim().is_empty()),
-            cloud_http_trace_enabled: config.cloud_http_trace,
-            cors_allowed_origins: config.cors_allowed_origins.clone(),
+            cloud_http_trace_enabled: settings.server.cloud_http_trace,
+            cors_allowed_origins: (!settings.server.cors.allowed_origins.is_empty())
+                .then(|| settings.server.cors.allowed_origins.join(",")),
             paths,
         })
     }
