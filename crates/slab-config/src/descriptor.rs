@@ -114,6 +114,18 @@ pub(crate) fn setting_descriptor(pmid: &str) -> Option<SettingDescriptor> {
         "runtime.sessions.state_dir" => {
             descriptor!("runtime.sessions.state_dir", runtime.sessions.state_dir)
         }
+        "runtime.launch.server.bind_host" => {
+            descriptor!("runtime.launch.server.bind_host", runtime.launch.server.bind_host)
+        }
+        "runtime.launch.server.base_port" => {
+            descriptor!("runtime.launch.server.base_port", runtime.launch.server.base_port)
+        }
+        "runtime.launch.desktop.bind_host" => {
+            descriptor!("runtime.launch.desktop.bind_host", runtime.launch.desktop.bind_host)
+        }
+        "runtime.launch.desktop.base_port" => {
+            descriptor!("runtime.launch.desktop.base_port", runtime.launch.desktop.base_port)
+        }
         "runtime.logging.level" => descriptor!("runtime.logging.level", runtime.logging.level),
         "runtime.logging.json" => descriptor!("runtime.logging.json", runtime.logging.json),
         "runtime.logging.path" => descriptor!("runtime.logging.path", runtime.logging.path),
@@ -484,6 +496,9 @@ fn numeric_value(value: &SettingValue) -> Option<f64> {
 }
 
 fn minimum_value(path: &str) -> Option<i64> {
+    if path.ends_with(".base_port") {
+        return Some(1);
+    }
     if path.ends_with(".queue")
         || path.ends_with(".concurrent_requests")
         || path.ends_with(".idle_minutes")
@@ -499,6 +514,6 @@ fn minimum_value(path: &str) -> Option<i64> {
     }
 }
 
-fn maximum_value(_path: &str) -> Option<i64> {
-    None
+fn maximum_value(path: &str) -> Option<i64> {
+    if path.ends_with(".base_port") { Some(65_535) } else { None }
 }

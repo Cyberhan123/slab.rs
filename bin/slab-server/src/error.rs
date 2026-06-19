@@ -79,6 +79,10 @@ pub enum ServerError {
     #[error("backend not ready: {0}")]
     BackendNotReady(String),
 
+    /// Runtime returned structured failure metadata.
+    #[error("runtime failure: {message}")]
+    RuntimeFailure { message: String, data: Box<AppCoreErrorData> },
+
     /// The requested operation is not yet implemented.
     #[error("not implemented: {0}")]
     NotImplemented(String),
@@ -93,50 +97,60 @@ pub enum ServerError {
 }
 
 impl ServerError {
-    pub(crate) fn agent_code_message(self) -> (&'static str, String, I18nPayload) {
+    pub(crate) fn agent_code_message(self) -> (String, String, I18nPayload) {
         match self {
             ServerError::NotFound(message) => (
-                "not_found",
+                "not_found".to_owned(),
                 message.clone(),
                 message_i18n_with_detail(ServerI18nKey::ErrorNotFound, &message),
             ),
             ServerError::BadRequest(message) => (
-                "bad_request",
+                "bad_request".to_owned(),
                 message.clone(),
                 message_i18n_with_detail(ServerI18nKey::ErrorBadRequest, &message),
             ),
             ServerError::BadRequestData { message, .. } => (
-                "bad_request",
+                "bad_request".to_owned(),
                 message.clone(),
                 message_i18n_with_detail(ServerI18nKey::ErrorBadRequest, &message),
             ),
             ServerError::RequestValidationFailed(message) => (
-                "bad_request",
+                "bad_request".to_owned(),
                 message.clone(),
                 message_i18n_with_detail(ServerI18nKey::ErrorRequestValidationFailed, &message),
             ),
             ServerError::Conflict(message) => (
-                "conflict",
+                "conflict".to_owned(),
                 message.clone(),
                 message_i18n_with_detail(ServerI18nKey::ErrorConflict, &message),
             ),
             ServerError::BackendNotReady(message) => (
-                "backend_not_ready",
+                "backend_not_ready".to_owned(),
                 message.clone(),
                 message_i18n_with_detail(ServerI18nKey::ErrorBackendNotReady, &message),
             ),
+            ServerError::RuntimeFailure { message, data } => (
+                data.runtime_code().unwrap_or("runtime_failure").to_owned(),
+                message.clone(),
+                message_i18n_with_detail(ServerI18nKey::ErrorRuntimeError, &message),
+            ),
             ServerError::NotImplemented(message) => (
-                "not_implemented",
+                "not_implemented".to_owned(),
                 message.clone(),
                 message_i18n_with_detail(ServerI18nKey::ErrorNotImplemented, &message),
             ),
             ServerError::TooManyRequests(message) => (
-                "too_many_requests",
+                "too_many_requests".to_owned(),
                 message.clone(),
                 message_i18n_with_detail(ServerI18nKey::ErrorTooManyRequests, &message),
             ),
-            ServerError::Runtime(_) | ServerError::Database(_) | ServerError::Internal(_) => (
-                "internal_error",
+            ServerError::Runtime(error) => (
+                error.runtime_code().to_owned(),
+                runtime_client_message(&error),
+                message_i18n(ServerI18nKey::ErrorRuntimeError),
+            ),
+            ServerError::Database(_) | ServerError::Internal(_) => (
+                "internal_error".to_owned(),
                 "internal server error".to_owned(),
                 message_i18n(ServerI18nKey::ErrorInternalError),
             ),
@@ -190,6 +204,13 @@ impl IntoResponse for ServerError {
                 m.clone(),
                 message_i18n_with_detail(ServerI18nKey::ErrorBackendNotReady, m),
             ),
+            ServerError::RuntimeFailure { message, data } => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error_codes::RUNTIME_ERROR,
+                Some(data.as_ref().clone()),
+                message.clone(),
+                message_i18n_with_detail(ServerI18nKey::ErrorRuntimeError, message),
+            ),
 
             ServerError::NotImplemented(m) => (
                 StatusCode::NOT_IMPLEMENTED,
@@ -211,22 +232,7 @@ impl IntoResponse for ServerError {
             // for common errors while keeping sensitive details private.
             ServerError::Runtime(e) => {
                 error!(error = %e, "AI runtime error");
-                let message = match e {
-                    slab_runtime_core::CoreError::QueueFull { .. }
-                    | slab_runtime_core::CoreError::Busy { .. } => {
-                        "inference backend is busy".to_owned()
-                    }
-                    slab_runtime_core::CoreError::BackendShutdown => {
-                        "inference backend is unavailable".to_owned()
-                    }
-                    slab_runtime_core::CoreError::UnsupportedOperation { .. } => {
-                        "requested runtime operation is not supported".to_owned()
-                    }
-                    slab_runtime_core::CoreError::DriverNotRegistered { .. } => {
-                        "inference backend is not registered".to_owned()
-                    }
-                    _ => "inference backend error".to_owned(),
-                };
+                let message = runtime_client_message(e);
                 let key = match e {
                     slab_runtime_core::CoreError::QueueFull { .. }
                     | slab_runtime_core::CoreError::Busy { .. } => ServerI18nKey::ErrorRuntimeBusy,
@@ -244,7 +250,7 @@ impl IntoResponse for ServerError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     error_codes::RUNTIME_ERROR,
-                    None,
+                    Some(runtime_error_data(e)),
                     message,
                     message_i18n(key),
                 )
@@ -291,6 +297,9 @@ impl From<slab_app_core::error::AppCoreError> for ServerError {
             slab_app_core::error::AppCoreError::BackendNotReady(m) => {
                 ServerError::BackendNotReady(m)
             }
+            slab_app_core::error::AppCoreError::RuntimeFailure { message, data } => {
+                ServerError::RuntimeFailure { message, data }
+            }
             slab_app_core::error::AppCoreError::RuntimeMemoryPressure(m) => {
                 ServerError::BackendNotReady(m)
             }
@@ -317,6 +326,32 @@ impl From<ValidationErrors> for ServerError {
     fn from(errors: ValidationErrors) -> Self {
         ServerError::RequestValidationFailed(format_validation_errors(&errors))
     }
+}
+
+fn runtime_client_message(error: &slab_runtime_core::CoreError) -> String {
+    match error {
+        slab_runtime_core::CoreError::QueueFull { .. }
+        | slab_runtime_core::CoreError::Busy { .. } => "inference backend is busy".to_owned(),
+        slab_runtime_core::CoreError::BackendShutdown => {
+            "inference backend is unavailable".to_owned()
+        }
+        slab_runtime_core::CoreError::UnsupportedOperation { .. } => {
+            "requested runtime operation is not supported".to_owned()
+        }
+        slab_runtime_core::CoreError::DriverNotRegistered { .. } => {
+            "inference backend is not registered".to_owned()
+        }
+        slab_runtime_core::CoreError::Timeout
+        | slab_runtime_core::CoreError::InternalPoisoned { .. }
+        | slab_runtime_core::CoreError::EngineIo(_)
+        | slab_runtime_core::CoreError::GGMLEngine { .. }
+        | slab_runtime_core::CoreError::OnnxEngine(_)
+        | slab_runtime_core::CoreError::CandleEngine { .. } => "inference backend error".to_owned(),
+    }
+}
+
+fn runtime_error_data(error: &slab_runtime_core::CoreError) -> AppCoreErrorData {
+    AppCoreErrorData::runtime_failure(error.runtime_code(), error.runtime_detail())
 }
 
 fn format_validation_errors(errors: &ValidationErrors) -> String {
@@ -433,5 +468,87 @@ mod tests {
         assert_eq!(payload["data"]["model_id"], "local-qwen");
         assert_eq!(payload["data"]["reason"], "missing repo_id");
         assert_eq!(payload["data"]["suggestion"], "Add a repo_id.");
+    }
+
+    #[tokio::test]
+    async fn runtime_failure_response_preserves_runtime_code_data() {
+        let response = ServerError::RuntimeFailure {
+            message: "backend busy".to_owned(),
+            data: Box::new(AppCoreErrorData::runtime_failure(
+                "runtime_backend_busy",
+                serde_json::json!({"backend_id": "ggml.llama"}),
+            )),
+        }
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = to_bytes(response.into_body(), usize::MAX).await.expect("read body");
+        let payload: Value = serde_json::from_slice(&body).expect("json body");
+
+        assert_eq!(payload["code"], 5000);
+        assert_eq!(payload["data"]["code"], "runtime_failure");
+        assert_eq!(payload["data"]["runtime_code"], "runtime_backend_busy");
+        assert_eq!(payload["data"]["detail"]["backend_id"], "ggml.llama");
+    }
+
+    #[tokio::test]
+    async fn runtime_engine_exhausted_response_uses_runtime_failure_envelope() {
+        let response = ServerError::RuntimeFailure {
+            message: "all compatible runtime engines failed to load model 'qwen'".to_owned(),
+            data: Box::new(AppCoreErrorData::runtime_failure(
+                "runtime_engine_exhausted",
+                serde_json::json!({
+                    "model_id": "qwen",
+                    "attempts": [
+                        {
+                            "engine": "ggml.llama",
+                            "outcome": "backend_not_ready",
+                            "message": "ggml.llama gRPC endpoint is not configured"
+                        }
+                    ]
+                }),
+            )),
+        }
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = to_bytes(response.into_body(), usize::MAX).await.expect("read body");
+        let payload: Value = serde_json::from_slice(&body).expect("json body");
+
+        assert_eq!(payload["code"], 5000);
+        assert_eq!(payload["data"]["code"], "runtime_failure");
+        assert_eq!(payload["data"]["runtime_code"], "runtime_engine_exhausted");
+        assert_eq!(payload["data"]["detail"]["model_id"], "qwen");
+        assert_eq!(payload["data"]["detail"]["attempts"][0]["engine"], "ggml.llama");
+    }
+
+    #[test]
+    fn agent_runtime_failure_uses_runtime_code() {
+        let (code, message, _) = ServerError::RuntimeFailure {
+            message: "backend busy".to_owned(),
+            data: Box::new(AppCoreErrorData::runtime_failure(
+                "runtime_backend_busy",
+                serde_json::json!({"backend_id": "ggml.llama"}),
+            )),
+        }
+        .agent_code_message();
+
+        assert_eq!(code, "runtime_backend_busy");
+        assert_eq!(message, "backend busy");
+    }
+
+    #[test]
+    fn agent_runtime_engine_exhausted_uses_runtime_code() {
+        let (code, message, _) = ServerError::RuntimeFailure {
+            message: "all compatible runtime engines failed to load model 'qwen'".to_owned(),
+            data: Box::new(AppCoreErrorData::runtime_failure(
+                "runtime_engine_exhausted",
+                serde_json::json!({"model_id": "qwen", "attempts": []}),
+            )),
+        }
+        .agent_code_message();
+
+        assert_eq!(code, "runtime_engine_exhausted");
+        assert_eq!(message, "all compatible runtime engines failed to load model 'qwen'");
     }
 }

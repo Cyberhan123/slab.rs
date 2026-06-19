@@ -15,6 +15,16 @@
 - 验证记录：`cargo test -p slab-config`、`cargo test -p slab-app-core settings`、`cargo test -p slab-server settings`、`bun run test:frontend -- packages/slab-desktop/src/pages/settings packages/api`、`bun run gen:api`。
 - 非本轮范围：model_pack、DB 契约、JSON-RPC/gRPC 错误结构、路径安全治理仍按各自专项处理，本闭环不改变这些条目的状态。
 
+## 0.1 2026-06-19 Track C runtime reliability 专项闭环
+
+`docs/development/planning/slab-runtime-reliability-2026-06-17.md` 已按当前代码实施，关闭范围为 Track C：R1/R5/R6、G1/G2/G3/G6/G7/G8/G9、F-Stack-3 general。
+
+- 已关闭：P0-1、P0-6、P1-7、P1-10、P2-2、P2-4，以及 G7/G8/G9 观测性与配置闭环。
+- 关键代码落点：`crates/slab-utils::path` 统一插件 root containment；`crates/slab-jsonrpc::host` 提供通用 sidecar host 管道；`bin/slab-js-runtime`/`bin/slab-python-runtime` 只保留各自 `RequestHandler` 适配；`crates/slab-app-core::process_supervisor` drop abort IO/wait tasks；runtime `CoreError` 经 tonic metadata、app-core、server HTTP `data.runtime_code/detail` 与 agent `Error.code` 保结构；`bin/slab-runtime/src/api/handlers` 通过 `forward` 去样板；`crates/slab-config` 新增 `runtime.launch.{server,desktop}.{bind_host,base_port}`。
+- 计划语义修正：模型 `model_path`/`model_cache_dir` 是任意绝对路径，只做绝对路径校验；root containment 只用于插件包/资源边界。不新增 `slab-jsonrpc-host` crate，公共宿主管道放在既有 `slab-jsonrpc`。G8 中 OpenAI URL 三处为测试 fixture，已去重；runtime launch port 这次已补最小 settings/PMID/schema 闭环。
+- 验证记录：`cargo test -p slab-utils path`、`cargo test -p slab-jsonrpc`、`cargo test -p slab-plugin registry`、`cargo test -p slab-config pmid`、`cargo test -p slab-app-core runtime_gateway`、`cargo test -p slab-app-core process_supervisor`、`cargo test -p slab-app-core model_packs`、`cargo test -p slab-app-core memory_pressure`、`cargo test -p slab-runtime api::handlers`、`cargo test -p slab-server error`、`cargo test -p slab-server agent`、`cargo test -p slab-js-runtime jsonrpc`、`cargo test -p slab-python-runtime jsonrpc`、`bun run gen:schemas`、`bun run gen:api`。
+- 跨计划闭环：model-pack engine exhaustion 已消费 general envelope（`runtime_engine_exhausted` + `detail.attempts[]`），不再发送 `data.rollback` 特化信封；G4 data-path 由存储-契约计划承接/闭环，G4 config-path 由 PMID/settings 计划承接/闭环，Track C 不重复承接。
+
 
 ## 1. 审计综述（整体设计质量与健康度）
 
@@ -320,11 +330,11 @@
 
 ### 5.1 跨模块冗余
 
-**R1. [HIGH] 路径包含校验 3 套实现，语义不一致（安全相关）**
-- `domain/services/model/catalog.rs:581-585` `validate_path`：纯词法（`Path::components().any(ParentDir)`），**不 canonicalize**——symlink/绝对分量绕过。
+**R1. [HIGH] 路径校验 / 插件包含校验 3 套实现混杂，语义不一致（安全相关）**
+- `domain/services/model/catalog.rs:581-585` `validate_path`：纯词法（`Path::components().any(ParentDir)`），**不 canonicalize**。Track C 闭环时已纠正语义：模型 `model_path`/`model_cache_dir` 是任意绝对路径，不应套插件 root containment。
 - `crates/slab-plugin` 的 `is_path_within_root`（用于 `plugin/assets.rs:40`）：canonicalize 式。
 - `domain/services/plugin/package.rs:202-218` `ensure_path_within`：第三套，`root.canonicalize()?` 后 `path.starts_with(&root)`——**canonicalize root 但不 canonicalize path**，非规范 path（`root/./../root/evil`）可绕过。
-- 修复：抽 `slab_utils::path::ensure_within_root(root, path)` 对**两侧** canonicalize，单一真源。
+- 修复：插件包/资源 root containment 抽 `slab_utils::path::ensure_within_root(root, path)` 对**两侧** canonicalize，单一真源；模型路径改用绝对路径 helper。
 
 **R2. [HIGH] `RuntimePresets` 组装在 4 处重复（漂移几乎必然）**
 - `infra/model_packs/command.rs:36-61`（`build_runtime_presets`，读 `JsonOptions`）与 `:163-183`（`build_runtime_presets_from_manifest`，读 `PackRuntimePresets`）——同一 `RuntimePresets` 结构 + 同一"至少一字段 set"门控；`build_local_model_command`（`:89-90`）以 `.or_else` 串联。再加 `schemas/models.rs:657-669`（响应映射）与 `:954-966`（请求→domain）。`RuntimePresets` 加一字段须改 **4 处**。
@@ -340,7 +350,7 @@
 
 **R5. [HIGH] js-runtime vs python-runtime JSON-RPC 宿主骨架 ~95% 重复**
 - `bin/slab-js-runtime/src/api/jsonrpc/mod.rs`（196 行）与 `bin/slab-python-runtime/src/api/jsonrpc/mod.rs`（224 行）：struct+`PendingMap`（`:21-28`）、`resolve_response`（`:43-56`）、`send_response`/`send_notification`/`send_serialized`（`:58-79`）、`impl RuntimeHost`（`:82-96` 逐字节同）、parse 循环（`:142-175` vs `:154-177`）、`drain_outbound`（`:181-196` vs `:209-224`）几乎全同。两者已 import 共享 `slab_jsonrpc`，但**只用于信封原语**，宿主态管道零共享。
-- 修复：把 `JsonRpcRuntimeHost`/`drain_outbound`/`serve_reader` 移入 `slab_jsonrpc`（或新 `slab-jsonrpc-host`），参数化 `RequestHandler` trait。消除 ~150 行重复。
+- 修复：把 `JsonRpcRuntimeHost`/`drain_outbound`/`serve_reader` 移入既有 `slab_jsonrpc::host`，参数化 `RequestHandler` trait；不新增 `slab-jsonrpc-host` crate。消除 ~150 行重复。
 
 **R6. [MED] gRPC handler boilerplate ×80**
 - `bin/slab-runtime/src/api/handlers/{candle_diffusion,candle_transformers,ggml_diffusion,ggml_llama,ggml_whisper,onnx}.rs` 共 **80** 处 `map_err(application_to_status|proto_to_status)?`（grep 核实）。映射函数本身已在 `handlers/mod.rs:36-82` 正确集中，故**非逻辑重复**而是样板。

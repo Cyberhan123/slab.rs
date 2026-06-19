@@ -5,6 +5,7 @@ use std::sync::RwLock;
 
 use percent_encoding::percent_decode_str;
 use slab_utils::hash::{sha256_hex_file, verify_sha256_hex_expected};
+use slab_utils::path::ensure_within_root;
 
 use crate::types::{
     LoadedPlugin, PluginInfo, PluginLanguageServerTransport, PluginManifest, PluginNetworkMode,
@@ -146,13 +147,7 @@ pub fn normalize_relative_path(raw: &str) -> Result<String, String> {
 }
 
 pub fn is_path_within_root(root: &Path, path: &Path) -> bool {
-    let Ok(canonical_root) = root.canonicalize() else {
-        return false;
-    };
-    let Ok(canonical_path) = path.canonicalize() else {
-        return false;
-    };
-    canonical_path.starts_with(canonical_root)
+    ensure_within_root(root, path).is_ok()
 }
 
 fn scan_plugins(root_dir: &Path) -> Result<PluginRegistrySnapshot, String> {

@@ -466,13 +466,7 @@ fn server_error_message(
     thread_id: Option<String>,
 ) -> AgentResponsesServerMessage {
     let (code, message, i18n) = error.agent_code_message();
-    AgentResponsesServerMessage::Error {
-        request_id,
-        code: code.to_owned(),
-        message,
-        i18n: Some(i18n),
-        thread_id,
-    }
+    AgentResponsesServerMessage::Error { request_id, code, message, i18n: Some(i18n), thread_id }
 }
 
 #[cfg(test)]

@@ -5,10 +5,11 @@
 //! the HTTP server layer and from native Tauri IPC commands.
 
 use serde::Serialize;
+use serde_json::Value;
 use slab_agent::error::AgentError;
 use thiserror::Error;
 
-/// Structured client-facing error details for known bad-request cases.
+/// Structured client-facing error details for known typed failures.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "code", rename_all = "snake_case")]
 pub enum AppCoreErrorData {
@@ -25,12 +26,11 @@ pub enum AppCoreErrorData {
         reason: String,
         suggestion: String,
     },
-    RuntimeEngineExhausted {
+    RuntimeFailure {
         #[serde(rename = "error_type")]
         error_type: &'static str,
-        param: &'static str,
-        model_id: Option<String>,
-        attempts: Vec<RuntimeEngineAttemptError>,
+        runtime_code: String,
+        detail: Value,
     },
 }
 
@@ -60,15 +60,11 @@ impl AppCoreErrorData {
         }
     }
 
-    pub fn runtime_engine_exhausted(
-        model_id: Option<String>,
-        attempts: Vec<RuntimeEngineAttemptError>,
-    ) -> Self {
-        Self::RuntimeEngineExhausted {
-            error_type: "invalid_request_error",
-            param: "model_id",
-            model_id,
-            attempts,
+    pub fn runtime_failure(runtime_code: impl Into<String>, detail: Value) -> Self {
+        Self::RuntimeFailure {
+            error_type: "runtime_error",
+            runtime_code: runtime_code.into(),
+            detail,
         }
     }
 
@@ -76,7 +72,7 @@ impl AppCoreErrorData {
         match self {
             Self::UnsupportedChatParameter { error_type, .. }
             | Self::ModelDownloadUnavailable { error_type, .. }
-            | Self::RuntimeEngineExhausted { error_type, .. } => error_type,
+            | Self::RuntimeFailure { error_type, .. } => error_type,
         }
     }
 
@@ -84,15 +80,22 @@ impl AppCoreErrorData {
         match self {
             Self::UnsupportedChatParameter { .. } => "unsupported_chat_parameter",
             Self::ModelDownloadUnavailable { .. } => "model_download_unavailable",
-            Self::RuntimeEngineExhausted { .. } => "runtime_engine_exhausted",
+            Self::RuntimeFailure { .. } => "runtime_failure",
+        }
+    }
+
+    pub fn runtime_code(&self) -> Option<&str> {
+        match self {
+            Self::RuntimeFailure { runtime_code, .. } => Some(runtime_code),
+            Self::UnsupportedChatParameter { .. } | Self::ModelDownloadUnavailable { .. } => None,
         }
     }
 
     pub fn param(&self) -> &str {
         match self {
             Self::UnsupportedChatParameter { param, .. } => param,
-            Self::ModelDownloadUnavailable { param, .. }
-            | Self::RuntimeEngineExhausted { param, .. } => param,
+            Self::ModelDownloadUnavailable { param, .. } => param,
+            Self::RuntimeFailure { .. } => "runtime",
         }
     }
 }
@@ -131,6 +134,10 @@ pub enum AppCoreError {
     /// Runtime reported resource pressure while loading or running a model.
     #[error("runtime memory pressure: {0}")]
     RuntimeMemoryPressure(String),
+
+    /// Runtime returned structured failure metadata.
+    #[error("runtime failure: {message}")]
+    RuntimeFailure { message: String, data: Box<AppCoreErrorData> },
 
     /// The requested operation is not yet implemented.
     #[error("not implemented: {0}")]

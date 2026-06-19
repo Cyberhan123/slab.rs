@@ -518,11 +518,12 @@ pub(super) fn ensure_json_object(value: &mut Value) -> &mut Map<String, Value> {
     if !value.is_object() {
         *value = Value::Object(Map::new());
     }
+    debug_assert!(value.is_object(), "json payload should have been normalized to an object");
 
-    match value {
-        Value::Object(map) => map,
-        _ => unreachable!("json payload should have been normalized to an object"),
+    if value.as_object_mut().is_none() {
+        *value = Value::Object(Map::new());
     }
+    value.as_object_mut().expect("json object fallback should be present")
 }
 
 pub(super) fn insert_optional_path(

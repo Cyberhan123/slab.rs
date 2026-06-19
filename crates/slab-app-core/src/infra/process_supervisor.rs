@@ -3,13 +3,14 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::Stdio;
 use std::sync::{
-    Arc,
+    Arc, Mutex, Weak,
     atomic::{AtomicBool, Ordering},
 };
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command as TokioCommand;
 use tokio::sync::mpsc;
+use tokio::task::AbortHandle;
 
 use crate::error::AppCoreError;
 
@@ -36,9 +37,24 @@ pub(crate) struct SupervisedStdioProcessConfig {
 
 #[derive(Clone)]
 pub(crate) struct SupervisedStdioProcess {
+    inner: Arc<SupervisedStdioProcessInner>,
+}
+
+struct SupervisedStdioProcessInner {
     label: Arc<str>,
     stdin: mpsc::UnboundedSender<String>,
     alive: Arc<AtomicBool>,
+    tasks: Mutex<Vec<AbortHandle>>,
+}
+
+impl Drop for SupervisedStdioProcessInner {
+    fn drop(&mut self) {
+        self.alive.store(false, Ordering::SeqCst);
+        for task in self.tasks.lock().expect("lock process task handles").drain(..) {
+            task.abort();
+        }
+        tracing::debug!(process = %self.label, "supervised process handles dropped");
+    }
 }
 
 impl SupervisedStdioProcess {
@@ -50,6 +66,7 @@ impl SupervisedStdioProcess {
         let mut command = TokioCommand::new(&config.executable);
         command.args(&config.arguments);
         command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        command.kill_on_drop(true);
         let mut process = command.spawn().map_err(|error| {
             AppCoreError::Internal(format!(
                 "failed to spawn {} from {}: {error}",
@@ -67,15 +84,18 @@ impl SupervisedStdioProcess {
         let stderr = process.stderr.take();
         let (stdin_tx, mut stdin_rx) = mpsc::unbounded_channel::<String>();
         let alive = Arc::new(AtomicBool::new(true));
-        let handle = Self {
+        let inner = Arc::new(SupervisedStdioProcessInner {
             label: Arc::from(config.label.as_str()),
             stdin: stdin_tx,
             alive: Arc::clone(&alive),
-        };
+            tasks: Mutex::new(Vec::new()),
+        });
+        let handle = Self { inner: Arc::clone(&inner) };
+        let mut task_handles = Vec::new();
 
         let writer_alive = Arc::clone(&alive);
         let writer_label = config.label.clone();
-        tokio::spawn(async move {
+        let writer_task = tokio::spawn(async move {
             let mut stdin = stdin;
             while let Some(line) = stdin_rx.recv().await {
                 if stdin.write_all(line.as_bytes()).await.is_err() {
@@ -93,30 +113,36 @@ impl SupervisedStdioProcess {
             }
             tracing::debug!(process = %writer_label, "supervised process stdin writer ended");
         });
+        task_handles.push(writer_task.abort_handle());
 
         if let Some(stderr) = stderr {
             let stderr_label = config.label.clone();
-            tokio::spawn(async move {
+            let stderr_task = tokio::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     tracing::warn!(process = %stderr_label, "{line}");
                 }
             });
+            task_handles.push(stderr_task.abort_handle());
         }
 
         let stdout_alive = Arc::clone(&alive);
-        let stdout_process = handle.clone();
-        tokio::spawn(async move {
+        let stdout_process: Weak<SupervisedStdioProcessInner> = Arc::downgrade(&inner);
+        let stdout_task = tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                stdout_handler(line, stdout_process.clone()).await;
+                let Some(inner) = stdout_process.upgrade() else {
+                    break;
+                };
+                stdout_handler(line, SupervisedStdioProcess { inner }).await;
             }
             stdout_alive.store(false, Ordering::SeqCst);
         });
+        task_handles.push(stdout_task.abort_handle());
 
         let wait_alive = Arc::clone(&alive);
         let wait_label = config.label;
-        tokio::spawn(async move {
+        let wait_task = tokio::spawn(async move {
             let exit = match process.wait().await {
                 Ok(status) => {
                     tracing::warn!(process = %wait_label, %status, "supervised process exited");
@@ -134,21 +160,25 @@ impl SupervisedStdioProcess {
             wait_alive.store(false, Ordering::SeqCst);
             exit_handler(exit).await;
         });
+        task_handles.push(wait_task.abort_handle());
+
+        inner.tasks.lock().expect("lock process task handles").extend(task_handles);
 
         Ok(handle)
     }
 
     pub fn is_alive(&self) -> bool {
-        self.alive.load(Ordering::SeqCst)
+        self.inner.alive.load(Ordering::SeqCst)
     }
 
     pub fn send_line(&self, line: String) -> Result<(), AppCoreError> {
         if !self.is_alive() {
-            return Err(AppCoreError::Internal(format!("{} is not running", self.label)));
+            return Err(AppCoreError::Internal(format!("{} is not running", self.inner.label)));
         }
-        self.stdin
+        self.inner
+            .stdin
             .send(line)
-            .map_err(|_| AppCoreError::Internal(format!("{} stdin is closed", self.label)))
+            .map_err(|_| AppCoreError::Internal(format!("{} stdin is closed", self.inner.label)))
     }
 }
 

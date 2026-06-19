@@ -653,6 +653,11 @@ fn is_under_memory_pressure(
 
 fn is_memory_pressure_error(error: &AppCoreError) -> bool {
     matches!(error, AppCoreError::RuntimeMemoryPressure(_))
+        || matches!(
+            error,
+            AppCoreError::RuntimeFailure { data, .. }
+                if data.runtime_code() == Some("runtime_memory_pressure")
+        )
 }
 
 fn choose_pressure_eviction_candidate(
@@ -734,6 +739,14 @@ mod tests {
         let memory_error =
             AppCoreError::RuntimeMemoryPressure("GPU out of memory while allocating tensor".into());
         assert!(is_memory_pressure_error(&memory_error));
+        let structured_memory_error = AppCoreError::RuntimeFailure {
+            message: "GPU out of memory while allocating tensor".into(),
+            data: Box::new(crate::error::AppCoreErrorData::runtime_failure(
+                "runtime_memory_pressure",
+                serde_json::json!({"message": "oom"}),
+            )),
+        };
+        assert!(is_memory_pressure_error(&structured_memory_error));
 
         let queue_error = AppCoreError::Internal(
             "load_model RPC failed: status: ResourceExhausted, message: queue full: ggml.llama"

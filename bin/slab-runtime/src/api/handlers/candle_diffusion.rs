@@ -5,7 +5,7 @@ use slab_proto::slab::ipc::v1 as pb;
 
 use crate::application::dtos as dto;
 
-use super::{GrpcServiceImpl, application_to_status, extract_request_id, proto_to_status};
+use super::{GrpcServiceImpl, extract_request_id, forward};
 
 #[tonic::async_trait]
 impl pb::candle_diffusion_service_server::CandleDiffusionService for GrpcServiceImpl {
@@ -17,16 +17,14 @@ impl pb::candle_diffusion_service_server::CandleDiffusionService for GrpcService
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto = dto::decode_candle_diffusion_generate_image_request(&request.into_inner())
-            .map_err(proto_to_status)?;
-        let response = self
-            .application
-            .candle_diffusion()
-            .map_err(application_to_status)?
-            .generate_image(dto)
-            .await
-            .map_err(application_to_status)?;
-        Ok(Response::new(dto::encode_candle_diffusion_generate_image_response(&response)))
+        forward(
+            request,
+            dto::decode_candle_diffusion_generate_image_request,
+            || self.application.candle_diffusion(),
+            |service, dto| async move { service.generate_image(dto).await },
+            dto::encode_candle_diffusion_generate_image_response,
+        )
+        .await
     }
 
     #[instrument(skip_all, fields(request_id, backend = "candle.diffusion"))]
@@ -37,16 +35,14 @@ impl pb::candle_diffusion_service_server::CandleDiffusionService for GrpcService
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto = dto::decode_candle_diffusion_load_request(&request.into_inner())
-            .map_err(proto_to_status)?;
-        let status = self
-            .application
-            .candle_diffusion()
-            .map_err(application_to_status)?
-            .load_model(dto)
-            .await
-            .map_err(application_to_status)?;
-        Ok(Response::new(dto::encode_model_status_response(&status)))
+        forward(
+            request,
+            dto::decode_candle_diffusion_load_request,
+            || self.application.candle_diffusion(),
+            |service, dto| async move { service.load_model(dto).await },
+            dto::encode_model_status_response,
+        )
+        .await
     }
 
     #[instrument(skip_all, fields(request_id, backend = "candle.diffusion"))]
@@ -56,15 +52,13 @@ impl pb::candle_diffusion_service_server::CandleDiffusionService for GrpcService
     ) -> Result<Response<pb::ModelStatusResponse>, Status> {
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
-        let _ = request.into_inner();
-
-        let status = self
-            .application
-            .candle_diffusion()
-            .map_err(application_to_status)?
-            .unload_model()
-            .await
-            .map_err(application_to_status)?;
-        Ok(Response::new(dto::encode_model_status_response(&status)))
+        forward(
+            request,
+            |_| Ok(()),
+            || self.application.candle_diffusion(),
+            |service, _| async move { service.unload_model().await },
+            dto::encode_model_status_response,
+        )
+        .await
     }
 }

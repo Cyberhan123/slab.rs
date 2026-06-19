@@ -14,6 +14,6 @@ mod internal;
 
 /// Backend-facing error surface for worker registration, admission, control,
 /// and engine adapters. This is not the runtime application's domain error.
-pub use base::error::CoreError;
+pub use base::error::{CoreError, RUNTIME_ERROR_CODE_METADATA, RUNTIME_ERROR_DETAIL_METADATA_BIN};
 /// In-process backend payload envelope. This is not a public transport DTO.
 pub use base::types::Payload;

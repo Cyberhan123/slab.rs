@@ -222,6 +222,7 @@ impl PluginSidecarRuntimeClient {
                 )));
             }
             Ok(Err(_)) => {
+                child.pending.lock().await.remove(&key);
                 return Err(AppCoreError::Internal(format!(
                     "{} plugin runtime response channel closed",
                     self.inner.kind.error_label()

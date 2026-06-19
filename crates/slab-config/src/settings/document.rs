@@ -32,6 +32,18 @@ const fn default_runtime_concurrent_requests() -> u32 {
     4
 }
 
+fn default_runtime_bind_host() -> String {
+    "127.0.0.1".to_owned()
+}
+
+const fn default_server_runtime_base_port() -> u32 {
+    3001
+}
+
+const fn default_desktop_runtime_base_port() -> u32 {
+    50051
+}
+
 fn default_root_capacity() -> CapacityConfig {
     CapacityConfig {
         queue: default_runtime_queue(),
@@ -658,6 +670,8 @@ pub struct RuntimeSettingsConfig {
     pub sessions: RuntimeSessionsConfig,
     #[serde(default)]
     pub logging: LoggingOverrideConfig,
+    #[serde(default)]
+    pub launch: RuntimeLaunchSettingsConfig,
     #[serde(default = "default_root_capacity")]
     pub capacity: CapacityConfig,
     #[serde(default)]
@@ -677,12 +691,101 @@ impl Default for RuntimeSettingsConfig {
             transport: default_runtime_transport(),
             sessions: RuntimeSessionsConfig::default(),
             logging: LoggingOverrideConfig::default(),
+            launch: RuntimeLaunchSettingsConfig::default(),
             capacity: default_root_capacity(),
             endpoint: EndpointConfig::default(),
             ggml: GgmlRuntimeFamilyConfig::default(),
             candle: SingleRuntimeFamilyConfig::default(),
             onnx: SingleRuntimeFamilyConfig::default(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq)]
+pub struct RuntimeLaunchSettingsConfig {
+    #[serde(default = "default_server_runtime_launch_profile")]
+    pub server: RuntimeLaunchProfileSettingsConfig,
+    #[serde(default = "default_desktop_runtime_launch_profile")]
+    pub desktop: RuntimeLaunchProfileSettingsConfig,
+}
+
+impl Default for RuntimeLaunchSettingsConfig {
+    fn default() -> Self {
+        Self {
+            server: default_server_runtime_launch_profile(),
+            desktop: default_desktop_runtime_launch_profile(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for RuntimeLaunchSettingsConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = RuntimeLaunchSettingsConfigWire::deserialize(deserializer)?;
+        Ok(Self {
+            server: wire.server.with_defaults(default_server_runtime_launch_profile()),
+            desktop: wire.desktop.with_defaults(default_desktop_runtime_launch_profile()),
+        })
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RuntimeLaunchSettingsConfigWire {
+    #[serde(default)]
+    server: RuntimeLaunchProfileSettingsConfigWire,
+    #[serde(default)]
+    desktop: RuntimeLaunchProfileSettingsConfigWire,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RuntimeLaunchProfileSettingsConfigWire {
+    bind_host: Option<String>,
+    base_port: Option<u32>,
+}
+
+impl RuntimeLaunchProfileSettingsConfigWire {
+    fn with_defaults(
+        self,
+        defaults: RuntimeLaunchProfileSettingsConfig,
+    ) -> RuntimeLaunchProfileSettingsConfig {
+        RuntimeLaunchProfileSettingsConfig {
+            bind_host: self.bind_host.unwrap_or(defaults.bind_host),
+            base_port: self.base_port.unwrap_or(defaults.base_port),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct RuntimeLaunchProfileSettingsConfig {
+    #[serde(default = "default_runtime_bind_host")]
+    pub bind_host: String,
+    #[serde(default = "default_server_runtime_base_port")]
+    #[schemars(range(min = 1, max = 65_535))]
+    pub base_port: u32,
+}
+
+impl Default for RuntimeLaunchProfileSettingsConfig {
+    fn default() -> Self {
+        Self {
+            bind_host: default_runtime_bind_host(),
+            base_port: default_server_runtime_base_port(),
+        }
+    }
+}
+
+fn default_server_runtime_launch_profile() -> RuntimeLaunchProfileSettingsConfig {
+    RuntimeLaunchProfileSettingsConfig {
+        bind_host: default_runtime_bind_host(),
+        base_port: default_server_runtime_base_port(),
+    }
+}
+
+fn default_desktop_runtime_launch_profile() -> RuntimeLaunchProfileSettingsConfig {
+    RuntimeLaunchProfileSettingsConfig {
+        bind_host: default_runtime_bind_host(),
+        base_port: default_desktop_runtime_base_port(),
     }
 }
 
@@ -1541,6 +1644,10 @@ mod tests {
         assert!(!settings.agent.memories.enabled);
         assert_eq!(settings.agent.memories.phase1_concurrency, 2);
         assert_eq!(settings.runtime.transport, RuntimeTransportMode::Ipc);
+        assert_eq!(settings.runtime.launch.server.bind_host, "127.0.0.1");
+        assert_eq!(settings.runtime.launch.server.base_port, 3001);
+        assert_eq!(settings.runtime.launch.desktop.bind_host, "127.0.0.1");
+        assert_eq!(settings.runtime.launch.desktop.base_port, 50051);
         assert_eq!(settings.server.address, DESKTOP_API_BIND);
         assert!(settings.runtime.logging.level.is_none());
         assert!(settings.telemetry.enabled);
@@ -1564,6 +1671,25 @@ mod tests {
         assert!(!settings.runtime.candle.enabled);
         assert!(settings.runtime.ggml.backends.llama.capacity.concurrent_requests.is_none());
         assert_eq!(settings.runtime.capacity.concurrent_requests, 4);
+    }
+
+    #[test]
+    fn partial_runtime_launch_profiles_use_profile_specific_defaults() {
+        let settings: SettingsDocument = serde_json::from_value(json!({
+            "runtime": {
+                "launch": {
+                    "desktop": {
+                        "bind_host": "0.0.0.0"
+                    }
+                }
+            }
+        }))
+        .expect("partial launch settings");
+
+        assert_eq!(settings.runtime.launch.server.bind_host, "127.0.0.1");
+        assert_eq!(settings.runtime.launch.server.base_port, 3001);
+        assert_eq!(settings.runtime.launch.desktop.bind_host, "0.0.0.0");
+        assert_eq!(settings.runtime.launch.desktop.base_port, 50051);
     }
 
     #[test]

@@ -8,6 +8,8 @@
 >
 > **闭环定位**：本计划是审计 §6 行动表的**收口计划**（Track C：跨进程可靠性、冗余治理与安全收敛）。它覆盖 §6 中归属 Track C 的全部 P0/P1/P2 条款；与三份姊妹计划（[slab-model-pack-2026-06-17.md](slab-model-pack-2026-06-17.md) / 存储-契约计划 / PMID-设置计划）一起构成 §6 全表的闭环（见 §8）。
 
+> **实施闭环（2026-06-19）**：Track C 已按当前代码完成落地。实现时修正两处计划语义：模型 `model_path`/`model_cache_dir` 只要求合法绝对路径，不纳入插件 root containment；JSON-RPC 宿主管道落在既有 `crates/slab-jsonrpc::host`，不新增 `slab-jsonrpc-host` workspace crate。G8 拆分项中，OpenAI URL 测试 fixture 已去重，runtime launch bind/base port 已补 `runtime.launch.{server,desktop}.{bind_host,base_port}` PMID 与 settings schema。model-pack 的 engine exhaustion 已消费本计划的 general envelope：`runtime_code = "runtime_engine_exhausted"`，`detail = { model_id, attempts[] }`，不再保留 `data.rollback` 特化生产信封。
+
 ---
 
 ## 1. 背景与目标
@@ -68,18 +70,18 @@ async fn request(&self, method: &str, params: Value) -> Result<Value, String> {
 
 | 目标 | 衡量标准 |
 |------|----------|
-| **G-SAFE 路径单一真源** | 仓库内"路径包含校验"只有一处实现 `slab_utils::path::ensure_within_root(root, path)`，两侧 canonicalize；`catalog.rs::validate_path` 与 `package.rs::ensure_path_within` 两套删除。对齐 R1 / P0-1。 |
+| **G-SAFE 路径单一真源** | 插件包/资源的 root containment 只有一处实现 `slab_utils::path::ensure_within_root(root, path)`，两侧 canonicalize；`slab-plugin::is_path_within_root` 与 `plugin/package::ensure_path_within` 仅保留 thin wrapper/错误映射。模型 `model_path`/`model_cache_dir` 是任意绝对路径，`catalog.rs::validate_path` 只做绝对路径校验，不强行归入 root containment。对齐 R1 / P0-1。 |
 | **G-BOUND pending-map 有界** | `request()` 的 `rx.await` 包 `tokio::time::timeout`，超时/err 删 key；`PendingMap` 加 `cap`，达上限拒绝新请求而非无限增长。对齐 G1 / P0-6。 |
 | **G-SUPER task 可监督** | per-request 用 `JoinSet` + 并发上限 + panic 兜底响应；`SupervisedStdioProcess` 加 `Drop` impl abort 四 task。对齐 G2 / G3 / P2-2。 |
 | **G-CODE 错误跨边界保结构** | `CoreError` 变体保 machine-readable `code`（snake_case 字符串）穿过 HTTP 边界进响应体 `data`；统一 agent 协议 `Error{code,message,i18n}` 入口。对齐 F-Stack-3 general / P1-10。 |
-| **G-DEDUP 宿主骨架去重** | `JsonRpcRuntimeHost`/`drain_outbound`/`serve_reader` 抽入 `slab_jsonrpc`（或新 `slab-jsonrpc-host`），参数化 `RequestHandler` trait，消除 ~150 行重复 + 补 dispatch 测试。对齐 R5 / P1-7。 |
+| **G-DEDUP 宿主骨架去重** | `JsonRpcRuntimeHost`/`drain_outbound`/`serve_reader` 抽入既有 `slab_jsonrpc::host`，参数化 `RequestHandler` trait，消除 ~150 行重复 + 补 dispatch 测试。调用方仍负责进程生命周期与业务派发。对齐 R5 / P1-7。 |
 | **G-FORWARD gRPC 样板消除** | `forward<Req,Resp,S>(req, decode, svc, encode)` 泛型消除 ×80 `map_err` 样板。对齐 R6。 |
 | **G-INVARIANT 承重不变式用类型表达** | 三处 `unreachable!()` 改 `return Err("exhausted retries")` 或注释证明不变式；`config_document` 那处注释 normalizer 不变式。对齐 G6 / P2-4。 |
 | **G-OBS 静默行为可见** | G7 canonicalize 失败 `warn!` + 区分"用默认"；G9 manifest SHA 不匹配 `warn!`；G8 端口常量升 PMID、测试 OpenAI fixture 抽单一构造器。对齐 G7/G8/G9。 |
 
 ### 1.3 非目标（指向姊妹计划）
 
-- **不**改 `model_pack` 配置体系（Schema/variant/engine chain）——见 [slab-model-pack-2026-06-17.md](slab-model-pack-2026-06-17.md)。该计划 Phase 2 新增的 `ServerError::RuntimeEngineExhausted` + `data.rollback` 信封是本规范 §4 general envelope 的**首个消费者**——本规范提供 substrate，model_pack plan 的特定变体迁移到 general 机制上。
+- **不**改 `model_pack` 配置体系（Schema/variant/engine chain）——见 [slab-model-pack-2026-06-17.md](slab-model-pack-2026-06-17.md)。该计划 Phase 2 的 engine exhaustion 已迁入本规范 §4 general envelope：生产路径使用 `RuntimeFailure` + `data.runtime_code = "runtime_engine_exhausted"` + `detail = { model_id, attempts[] }`，不再新增特化 `ServerError` 或 `data.rollback` 信封。
 - **不**改 DB 契约、迁移、`tasks.result_data` 信封、CHECK 约束——属存储-契约计划（覆盖 T1/T2/T3/D1-D13/P0-2/P0-3/P0-5/P0-7/P1-5/P1-6/P1-8 部分/P2-5/P2-6/P2-7）。
 - **不**改 PMID 双源桥、logging 级联、热重载拓宽、`parse_env` 诊断——属 PMID-设置计划（覆盖 PMID-F1/F2/F3/F4/F5/F6/F7/F8/F9/F10/F11/F-Stack-1/P1-1/P1-2/P1-3/P1-4/P2-1 配置部分/P2-3/P2-8/P2-9 `$config`→`$document` 部分）。
 - **不**改 `slab-runtime-core` 内部 backend 加载实现、`slab-hub` 多源路由——分别属 model_pack Phase 2/3 与存储契约。
@@ -94,9 +96,9 @@ async fn request(&self, method: &str, params: Value) -> Result<Value, String> {
 
 > 审计 §5.1 R1 的"三套路径校验语义不一致"是本规范第一驱动力。同型决策只允许一处实现。
 
-**P1. 路径包含校验只有一处。** `slab_utils::path::ensure_within_root(root, path)` 是仓库唯一的"判断 path 是否在 root 内"实现。`catalog.rs::validate_path`、`package.rs::ensure_path_within` 删除并改调它。第三套 `is_path_within_root` 的语义（两侧 canonicalize）被吸收为唯一语义基线。
+**P1. 路径包含校验只有一处。** `slab_utils::path::ensure_within_root(root, path)` 是仓库唯一的"判断 path 是否在 root 内"实现，适用于插件包/资源边界。`package.rs::ensure_path_within` 与 `slab-plugin::is_path_within_root` 仅作为兼容 wrapper/错误映射存在。`catalog.rs::validate_path` 不属于 root containment：模型 `model_path`/`model_cache_dir` 允许任意绝对路径，因此只调用绝对路径输入校验 helper。
 
-**P2. JSON-RPC 宿主态只有一处。** `JsonRpcRuntimeHost`/`PendingMap`/`drain_outbound`/`serve_reader` 只存在于 `slab_jsonrpc`（或新 `slab-jsonrpc-host`）。js-runtime 与 python-runtime 各自的 `jsonrpc/mod.rs` 只保留**宿主语言协议差异**（python 的 `plugin.call` 派发分支、js 的 `handle_request` 调用形态），其余全部 import 共享宿主。
+**P2. JSON-RPC 宿主态只有一处。** `JsonRpcRuntimeHost`/`PendingMap`/`drain_outbound`/`serve_reader` 只存在于既有 `slab_jsonrpc::host`，不新增 workspace crate。js-runtime 与 python-runtime 各自的 `jsonrpc/mod.rs` 只保留**宿主语言协议差异**（python 的 `plugin.call` 派发分支、js 的 `handle_request` 调用形态），其余全部 import 共享宿主；进程生命周期、ready payload、业务派发仍归各调用方。
 
 ### 2.2 两侧 canonicalize（Defense-in-Depth Path Validation）
 
@@ -199,8 +201,8 @@ pub fn ensure_within_root_or_nearest(
 
 | 原实现 | 替换为 | 备注 |
 |--------|--------|------|
-| [catalog.rs:572-588](../../../crates/slab-app-core/src/domain/services/model/catalog.rs#L572-L588) `validate_path` | 删除函数；调用方改 `slab_utils::path::ensure_within_root(&models_dir, Path::new(path))?` 抛 `BadRequest` | 同时获得"is absolute"检查（canonicalize 隐式要求）与"无 `..`"检查（canonicalize 展开） |
-| [package.rs:203-221](../../../crates/slab-app-core/src/domain/services/plugin/package.rs#L203-L221) `ensure_path_within` | 删除函数；调用方改 `ensure_within_root_or_nearest(root, path)?` | plugin asset 可能未落盘，用 `_or_nearest` 变体 |
+| [catalog.rs:572-588](../../../crates/slab-app-core/src/domain/services/model/catalog.rs#L572-L588) `validate_path` | 改调 `slab_utils::path::validate_absolute_path(label, path)` 抛 `BadRequest` | 模型 `model_path`/`model_cache_dir` 是任意绝对路径，不使用 root containment。这样避免把模型缓存目录错误限制到插件/资源 root 下 |
+| [package.rs:203-221](../../../crates/slab-app-core/src/domain/services/plugin/package.rs#L203-L221) `ensure_path_within` | 保留为 app-core 错误映射 wrapper；内部改调 `ensure_within_root_or_nearest(root, path)?` | plugin asset 可能未落盘，用 `_or_nearest` 变体 |
 | [registry.rs:148-156](../../../crates/slab-plugin/src/registry.rs#L148-L156) `is_path_within_root` | **保留为 thin wrapper** `pub fn is_path_within_root(root, path) -> bool { slab_utils::path::ensure_within_root(root, path).is_ok() }`（保 bool API 兼容现有 [plugin/assets.rs:40](../../../crates/slab-app-core/src/domain/services/plugin/assets.rs#L40) 等调用点） | 避免一次性改全部调用点；wrapper 内委托单一真源 |
 
 **调用点新增（G7 同步闭合）**：[workspace/handler.rs:534](../../../bin/slab-server/src/api/v1/workspace/handler.rs#L534) 的 `root.canonicalize().ok()` 改为：
@@ -228,7 +230,7 @@ let configured_root = match config.workspace_root.as_deref() {
 
 **根因**：[slab-jsonrpc/src/lib.rs](../../../crates/slab-jsonrpc/src/lib.rs)（257 行）当前**仅**含 JSON-RPC 2.0 信封原语（`request`/`response`/`notification` 构造与解析）。js-runtime（357 行）与 python-runtime（361 行）各自重复实现了完整的**宿主态管道**：`JsonRpcRuntimeHost` 结构 + `PendingMap` + `resolve_response` + `send_response`/`send_notification`/`send_serialized` + `impl RuntimeHost` + `drain_outbound`，这些在两文件里逐字节相同。
 
-**修复**：把宿主态管道抽入 `slab_jsonrpc`（若担心 crate 职责膨胀，可新建 `slab-jsonrpc-host`；本规范倾向**复用 `slab_jsonrpc`**——它本就是 JSON-RPC 协议 crate，宿主管道是协议的服务端实现，归属合理）。
+**修复**：把宿主态管道抽入既有 `slab_jsonrpc::host`。不新增 `slab-jsonrpc-host` workspace crate；该模块只提供通用管道、pending 管理、reader/writer loop 与并发保护，进程生命周期和业务派发仍由调用方实现。
 
 **抽出的 API 形态**：
 
@@ -719,7 +721,7 @@ ServerError::Runtime(e) => {
 }
 ```
 
-**(d) `RuntimeMemoryPressure` 不再映 `BackendNotReady`**：[error.rs:294-296](../../../bin/slab-server/src/error.rs#L294-L296) 当前把 OOM 类故障与"还在加载"合并。改为独立 `ServerError::RuntimeMemoryPressure` 变体（或 `ServerError::Runtime(_)` 路径下 `runtime_memory_pressure` code）——OOM 与"还在加载"前端处理不同（OOM 应提示"显存不足/换引擎"，加载中应轮询）。**注意**：model_pack Phase 2 的 `RuntimeEngineExhausted` 是这个 code 命名空间的另一个变体（engine 回退耗尽），它携带 `data.rollback` 信封——见 §4。
+**(d) `RuntimeMemoryPressure` 不再映 `BackendNotReady`**：[error.rs:294-296](../../../bin/slab-server/src/error.rs#L294-L296) 当前把 OOM 类故障与"还在加载"合并。改为独立 `ServerError::RuntimeMemoryPressure` 变体（或 `ServerError::Runtime(_)` 路径下 `runtime_memory_pressure` code）——OOM 与"还在加载"前端处理不同（OOM 应提示"显存不足/换引擎"，加载中应轮询）。**注意**：model_pack Phase 2 的 engine exhaustion 已接入同一 code 命名空间，使用 `runtime_engine_exhausted` + `detail = { model_id, attempts[] }`，见 §4。
 
 **(e) `map_runtime_error` fallback 保 gRPC status code**：[runtime_gateway.rs:229](../../../crates/slab-app-core/src/infra/rpc/runtime_gateway.rs#L229) 当前一律 `Internal("grpc {action} failed: {error:#}")`。改为保留 tonic `Code`（`Status::code()`）映 `runtime_grpc_<snake_case_code>`（如 `runtime_grpc_unavailable` / `runtime_grpc_deadline_exceeded`），仍进 `AppCoreError::Internal` 路径但 message 带 code 前缀，且 `data.runtime_code = "runtime_grpc_<code>"`。**未识别的 tonic status 不再被压平为不透明 500**。
 
@@ -759,7 +761,7 @@ mod test_fixtures {
 // → document.providers.registry.push(test_fixtures::openai_provider("sk-test"));
 ```
 
-**修复（端口常量 PMID 化，生产）**：[pmid_service.rs:29-31](../../../crates/slab-config/src/pmid_service.rs#L29-L31) 的 `DEFAULT_SERVER_RUNTIME_BASE_PORT = 3001` / `DEFAULT_DESKTOP_RUNTIME_BASE_PORT = 50051` 是 const 但**不可配**。把它们作为新 PMID `server.runtime.base_port` / `desktop.runtime.base_port` 的默认值（PMID 计划负责暴露字段、settings 文档化），本规范仅确认默认值迁移路径。**注**：这一改动属于 PMID 计划的字段添加范围，本规范仅声明依赖——实际改 PMID descriptor 由 PMID 计划执行。本规范在 Phase 表（§5）的 G8 条目标注"端口 PMID 化委托 PMID 计划"。
+**修复（端口常量 PMID 化，生产）**：[pmid_service.rs](../../../crates/slab-config/src/pmid_service.rs) 原 `DEFAULT_SERVER_RUNTIME_BASE_PORT = 3001` / `DEFAULT_DESKTOP_RUNTIME_BASE_PORT = 50051` 是 const 但**不可配**。本次按最小设置闭环新增 `runtime.launch.server.bind_host` / `runtime.launch.server.base_port` / `runtime.launch.desktop.bind_host` / `runtime.launch.desktop.base_port`，默认分别为 `127.0.0.1:3001` 与 `127.0.0.1:50051`，并把 `base_port` 约束为 `1..=65535`。`load_config` 用这些设置填充 `LaunchConfig.profiles`；settings document schema 已通过 `bun run gen:schemas` 更新。
 
 > **`$config`→`$document` 部分**：审计 P2-9 还含 model_pack 的 `$config`→`$document` 命名去歧义——该条**归 model_pack 计划**（其 Phase 1 已含 `$config`→`$ref` alias 化，语义等价）。本规范不重复。
 
@@ -790,7 +792,7 @@ if verify_sha256_hex_expected(&actual_manifest_sha256, manifest_sha256).is_err()
 
 ## 4. 错误信封统一模型（Cross-Boundary Error Envelope）
 
-> 本节是 §3.8 的展开，回答："如何让 `CoreError` 变体、HTTP `ErrorResponse`、agent 协议 `Error` 三者在 code 上收敛？model_pack Phase 2 的 `RuntimeEngineExhausted` 如何挂在同一信封上？"
+> 本节是 §3.8 的展开，回答："如何让 `CoreError` 变体、HTTP `ErrorResponse`、agent 协议 `Error` 三者在 code 上收敛？model_pack Phase 2 的 engine exhaustion 如何消费同一信封？"
 
 ### 4.1 三层错误的当前形态
 
@@ -840,7 +842,7 @@ HTTP body  +  agent Error{code: "runtime_queue_full", message, i18n}
 | `DriverNotRegistered{driver_id}` | `runtime_driver_not_registered` | 503 | `server.errors.runtime.driverNotRegistered` | **是**（缺编译 → 触发跨引擎回退） |
 | `EngineIo` / `GGMLEngine` / `OnnxEngine` / `CandleEngine` | `runtime_engine_io` / `runtime_ggml_engine` / `runtime_onnx_engine` / `runtime_candle_engine` | 500 | `server.errors.runtime.engine` | 部分（OOM 经 `RuntimeMemoryPressure` 走下条） |
 | （新）`RuntimeMemoryPressure` | `runtime_memory_pressure` | 503 | `server.errors.runtime.memoryPressure` | **是**（OOM → 触发跨引擎回退） |
-| （model_pack Phase 2 新）`RuntimeEngineExhausted` | `runtime_engine_exhausted` | 503 | `server.errors.runtime.engineExhausted` | **是**（本信封的首个特化消费者） |
+| （model_pack 已消费）engine fallback exhausted | `runtime_engine_exhausted` | 500（外层 code 5000） | `server.errors.runtime.engineExhausted` | **是**（本信封的 model-pack 消费者） |
 | （gRPC fallback）未识别 tonic status | `runtime_grpc_<snake_code>` | 500/503 据 tonic code | `server.errors.runtime.grpc` | 否 |
 
 ### 4.4 决策：`runtime_code` 跨 tonic 边界如何传播
@@ -857,13 +859,16 @@ HTTP body  +  agent Error{code: "runtime_queue_full", message, i18n}
 
 > **关键洞察**：`slab-runtime-core::CoreError` 在 slab-app-core 的 gRPC 客户端（[rpc/client.rs](../../../crates/slab-app-core/src/infra/rpc/client.rs)）反序列化点已可得完整变体（若 tonic status 经 `runtime_to_status` 反向映射回 CoreError——当前未做，是 §4.5 的小改动）。故 `runtime_code` + `detail` 在 slab-app-core 侧本地可得，**不需跨 tonic wire**——wire 只需保 `runtime_code` ASCII 让网关 fast-path 分支。
 
-### 4.5 model_pack `RuntimeEngineExhausted` 迁移路径
+### 4.5 model_pack engine exhaustion 闭环
 
-[slab-model-pack-2026-06-17.md](slab-model-pack-2026-06-17.md) Phase 2 新增 `ServerError::RuntimeEngineExhausted { model_id, attempts }` + `data.rollback` 信封。本规范的 general envelope 提供迁移目标：
+[slab-model-pack-2026-06-17.md](slab-model-pack-2026-06-17.md) Phase 2 的 engine exhaustion 已按当前代码消费本规范的 general envelope：
 
-**短期（model_pack Phase 2 落地时）**：`RuntimeEngineExhausted` 作为 `ServerError` 的**特化变体**存在，`code` u16 用 `5011`（新），`data.runtime_code = "runtime_engine_exhausted"`，`data.rollback = {model_id, attempts[]}`。它与本规范的 general envelope **并存**——agent `code` 字段取 `"runtime_engine_exhausted"`，与本表一致。
+- `crates/slab-app-core/src/domain/services/model/runtime.rs` 在候选引擎全部耗尽时返回 `AppCoreError::RuntimeFailure`。
+- `AppCoreErrorData::runtime_failure("runtime_engine_exhausted", detail)` 携带 `detail = { "model_id": ..., "attempts": [...] }`。
+- `attempts[]` 复用 `RuntimeEngineAttemptError { engine, outcome, message }`。
+- `bin/slab-server/src/error.rs` 继续保持外层 numeric `code = 5000` 兼容旧客户端，HTTP `data.runtime_code` 与 agent `Error.code` 均为 `"runtime_engine_exhausted"`。
 
-**中期（本规范 Phase 2 完成后）**：`RuntimeEngineExhausted` 可重构为 `ServerError::Runtime(CoreError::RuntimeEngineExhausted{...})` 路径（若 `CoreError` 加该变体）或保持特化——两者经 `data.runtime_code` 在前端口径统一。本规范**不强制** model_pack 重构，仅要求其 `data.runtime_code` 与本表对齐。
+因此生产路径不再使用 `ServerError::RuntimeEngineExhausted`、`AppCoreErrorData::RuntimeEngineExhausted` 或 `data.rollback` 特化信封；model-pack 已完成对 general envelope 的消费。
 
 **前端收益**：前端按 `data.runtime_code` 分支——`runtime_engine_exhausted` 显示"所有引擎失败 + 回退详情"，`runtime_memory_pressure` 显示"显存不足，建议换 CPU 引擎"，`runtime_queue_full` 显示"推理队列满，请稍后重试"。无需解析 message 字符串。
 
@@ -943,7 +948,7 @@ HTTP body  +  agent Error{code: "runtime_queue_full", message, i18n}
 - **退出标准**：
   - 每个 `CoreError` 变体有 stable `code`；HTTP body 携带；agent `code` 与 HTTP 一致。
   - `ServerError::Runtime(_)` 不再折叠为 `"internal_error"`。
-  - model_pack Phase 2 的 `RuntimeEngineExhausted` 与本信封并存（`data.runtime_code = "runtime_engine_exhausted"`）。
+  - model_pack Phase 2 的 engine exhaustion 已消费本信封（`data.runtime_code = "runtime_engine_exhausted"`，`detail` 携带 `model_id` 与 `attempts[]`）。
   - 前端 v1.d.ts 暴露 `data.runtime_code`。
 
 ### Phase 5 — 不变式与观测性清理（G6 / G9 / G8 测试）
@@ -952,15 +957,17 @@ HTTP body  +  agent Error{code: "runtime_queue_full", message, i18n}
   - [crates/slab-app-core/src/infra/rpc/client.rs](../../../crates/slab-app-core/src/infra/rpc/client.rs)：三处 `unreachable!()`（:214/:440/:542）改 `return Err(typed)`。
   - [crates/slab-app-core/src/domain/services/model/config_document.rs](../../../crates/slab-app-core/src/domain/services/model/config_document.rs)：`ensure_json_object`（:524）改注释 + `debug_assert` + 兜底路径（不 `unreachable!`）。
   - [crates/slab-app-core/src/infra/model_packs/mod.rs](../../../crates/slab-app-core/src/infra/model_packs/mod.rs)：`read_persisted_model_config_from_pack_bytes`（:307）SHA 不匹配分支加 `warn!`。
-  - [crates/slab-config/src/pmid_service.rs](../../../crates/slab-config/src/pmid_service.rs)：`#[cfg(test)] mod test_fixtures` 加 `openai_provider(api_key)` 单一构造器；三个测试（:1685/:1723/:1777）改调它。
-- **关闭**：**G6 / P2-4**（unreachable! 改 return Err / 注释证明）；**G9**（manifest_sha256 不匹配 warn）；**G8 测试部分**（OpenAI fixture 去重）。**G8 端口 PMID 化委托 PMID 计划**（声明依赖，不在本计划执行）。
+  - [crates/slab-config/src/pmid_service.rs](../../../crates/slab-config/src/pmid_service.rs)：`#[cfg(test)]` helper 加 `openai_provider(api_key, api_key_env)` 单一构造器；OpenAI URL fixture 只保留一个硬编码点；新增 runtime launch PMID 到 `LaunchConfig.profiles` 的映射。
+  - [crates/slab-config/src/settings/document.rs](../../../crates/slab-config/src/settings/document.rs) / [settings/pmid.rs](../../../crates/slab-config/src/settings/pmid.rs) / [descriptor.rs](../../../crates/slab-config/src/descriptor.rs)：新增 `runtime.launch.{server,desktop}.{bind_host,base_port}` 默认值、PMID 与约束。
+- **关闭**：**G6 / P2-4**（unreachable! 改 return Err / 注释证明）；**G9**（manifest_sha256 不匹配 warn）；**G8**（OpenAI fixture 去重 + runtime launch bind/base port PMID 化）。
 - **校验**：
   - `bun run check:rust`。
   - `bun run test:rust:cargo`——rpc/client.rs 重试循环测试全过（return Err 路径覆盖）；config_document.rs 测试全过。
 - **退出标准**：
   - 仓库 grep `unreachable!` 在 Track C 范围内零命中（三处 rpc/client.rs + 一处 config_document.rs）。
   - SHA 不匹配进 `warn!` 日志（手动注入坏 SHA 验证）。
-  - 测试代码 `https://api.openai.com/v1` grep 仅 1 处（`test_fixtures::openai_provider`）。
+  - 测试代码 `https://api.openai.com/v1` grep 仅 1 处（`openai_provider` helper）。
+  - `runtime.launch.*.base_port` 写路径拒绝 `<1` 与 `>65535`，settings schema 生成物包含四个新字段。
 
 ### 5.1 验证策略（对齐审计 §6.4）
 
@@ -1010,7 +1017,7 @@ HTTP body  +  agent Error{code: "runtime_queue_full", message, i18n}
 
 | 审计发现（[code-audits-2026-06-17.md](../audits/code-audits-2026-06-17.md)） | §6 行动项 | 本计划条款 | 实现阶段 | 状态 |
 |---|---|---|---|---|
-| **§5.1 R1** 路径校验 3 套语义不一致（catalog.rs:572-588 / package.rs:203-221 / registry.rs:148-156） | **P0-1** | §3.1 `slab_utils::path::ensure_within_root` 单一真源，两侧 canonicalize；删 catalog/package 两套；registry 改 thin wrapper | Phase 1 | 关闭 |
+| **§5.1 R1** 路径校验 3 套实现混杂（catalog.rs:572-588 / package.rs:203-221 / registry.rs:148-156） | **P0-1** | §3.1 插件 root containment 归 `slab_utils::path::ensure_within_root` 单一真源，两侧 canonicalize；registry/package 保 thin wrapper/错误映射；catalog 模型路径改绝对路径 helper，不套 root containment | Phase 1 | 关闭 |
 | **§5.1 R5** js/py JSON-RPC 宿主 ~95% 重复 ~150 行 | **P1-7** | §3.2 抽 `JsonRpcRuntimeHost`/`RequestHandler`/`serve_reader`/`drain_outbound` 入 `slab_jsonrpc::host` | Phase 2 | 关闭 |
 | **§5.1 R6** gRPC handler 样板 ×80 | （§6 P2 隐含） | §3.6 `forward<Req,Resp,S>` 泛型消除 73 处 `map_err` | Phase 3 | 关闭 |
 | **§5.2 G1** JSON-RPC pending-map 无界泄漏 | **P0-6** | §3.3 `rx.await` 包 timeout + 超时/err 删 key + cap（256） | Phase 1（临时）+ Phase 2（共享宿主继承） | 关闭 |
@@ -1018,10 +1025,10 @@ HTTP body  +  agent Error{code: "runtime_queue_full", message, i18n}
 | **§5.2 G3** process_supervisor 四 fire-and-forget task 无 Drop abort | **P2-2**（部分） | §3.5 `SupervisedStdioProcess` 持四 `AbortHandle` + `Drop` impl abort | Phase 2 | 关闭 |
 | **§5.2 G6** `unreachable!()` 承重且脆弱（rpc/client.rs:214/440/542 + config_document.rs:524） | **P2-4** | §3.7 retry loop 末尾改 `return Err`；config_document 改注释 + debug_assert + 兜底 | Phase 5 | 关闭 |
 | **§5.2 G7** workspace_info canonicalize 失败静默当无 overlay | （§6 隐含 LOW） | §3.1（末尾）canonicalize 失败 `warn!` + 区分"用默认" | Phase 1 | 关闭 |
-| **§5.2 G8** 硬编码 OpenAI base URL ×3 + 端口常量 | **P2-9**（G8 部分） | §3.9 OpenAI URL 三处证实为测试 fixture（审计纠错）→ `test_fixtures::openai_provider` 去重；端口常量 PMID 化**委托 PMID 计划** | Phase 5（测试）+ PMID 计划（端口） | 部分（测试关闭；端口委托） |
+| **§5.2 G8** 硬编码 OpenAI base URL ×3 + 端口常量 | **P2-9**（G8 部分） | §3.9 OpenAI URL 三处证实为测试 fixture（审计纠错）→ `openai_provider` helper 去重；端口常量补 `runtime.launch.{server,desktop}.{bind_host,base_port}` PMID 与 schema | Phase 5 | 关闭 |
 | **§5.2 G9** manifest_sha256 不匹配静默重置下载状态 | （§6 隐含 LOW） | §3.10 SHA 不匹配分支加 `warn!` | Phase 5 | 关闭 |
 | **§2.3 F-Stack-3 general** CoreError 变体跨 HTTP 边界压平为不透明字符串 | **P1-10** | §3.8 + §4 `CoreError::code()`/`detail()`；`ServerError::Runtime` 不折叠；`ErrorResponse.data.runtime_code`；agent `code` 统一 | Phase 4 | 关闭（general） |
-| **§2.3 F-Stack-3 特化** `RuntimeEngineExhausted` + `data.rollback` | （model_pack P2） | §4.5 model_pack Phase 2 的特化变体挂本规范 general envelope（`data.runtime_code = "runtime_engine_exhausted"`） | model_pack Phase 2 | **委托 model_pack**（消费者） |
+| **§2.3 F-Stack-3 model-pack engine exhaustion** | （model_pack P2） | §4.5 model-pack 已消费本规范 general envelope（`data.runtime_code = "runtime_engine_exhausted"`，`detail = { model_id, attempts[] }`） | model_pack Phase 2 | 关闭（model-pack 已消费） |
 
 > **审计纠错记录（2026-06-18 核实）**：
 > 1. **G6 config_document 路径**：审计引 `crates/slab-config/src/config_document.rs:543`；实际为 `crates/slab-app-core/src/domain/services/model/config_document.rs:524`（不同 crate，行号 524）。本计划用正确路径。
@@ -1128,17 +1135,16 @@ bin/slab-app → bin/slab-server → crates/slab-app-core runtime supervisor
 | P2-6 | 文档腐烂清理 | 存储-契约计划 | 委托 |
 | P2-7 | config_json 暴露 + DTO 字段 | 存储-契约 + model_pack | 委托 |
 | P2-8 | manifest version/default_preset/status | model_pack | 委托 |
-| P2-9 | `$config`→`$document` + OpenAI base URL const | `$config`→`$document` 归 model_pack；**OpenAI URL 归本计划 §3.9 / Phase 5**（测试去重）；端口 PMID 化委托 PMID | 部分（OpenAI 测试关闭；端口委托） |
+| P2-9 | `$config`→`$document` + OpenAI base URL const | `$config`→`$document` 归 model_pack；**OpenAI URL 归本计划 §3.9 / Phase 5**（测试去重）；runtime launch 端口由本计划补最小 PMID 闭环 | G8 关闭；`$config` 命名委托 model_pack |
 
-### 残留/延期项（显式列出）
+### 跨计划归属确认
 
-1. **P2-9 端口常量 PMID 化**：本计划声明依赖，实际改 PMID descriptor 由 PMID-设置计划执行。`DEFAULT_SERVER_RUNTIME_BASE_PORT`/`DEFAULT_DESKTOP_RUNTIME_BASE_PORT` 在本计划完成后仍是 const，等 PMID 计划暴露字段。
-2. **F-Stack-3 特化 `RuntimeEngineExhausted`**：本计划提供 general envelope substrate；特化变体由 model_pack Phase 2 落地，挂 `data.runtime_code = "runtime_engine_exhausted"`。
-3. **G4 数据路径 `.ok()`/`unwrap_or_default()`**：data 部分归存储-契约计划，config 部分（`parse_env`）归 PMID 计划。本计划仅负责 G6 + 跨进程原则（§2.6 P10）。
+1. **F-Stack-3 model-pack engine exhaustion**：已由 model-pack 消费本计划 general envelope，生产路径使用 `runtime_engine_exhausted` + `detail.attempts[]`，不再作为 Track C 残留。
+2. **G4 数据路径 `.ok()`/`unwrap_or_default()`**：data-path 由存储-契约计划承接/闭环，config-path（`parse_env` / setting value）由 PMID/settings 计划承接/闭环；Track C 不重复承接。
 
 ### 闭环声明
 
-**本计划（Track C：跨进程可靠性、冗余治理与安全收敛）+ model_pack 计划（[slab-model-pack-2026-06-17.md](slab-model-pack-2026-06-17.md)）+ 存储-契约计划 + PMID-设置计划，四份计划合计覆盖审计 [code-audits-2026-06-17.md](../audits/code-audits-2026-06-17.md) §6 行动表的全部 P0（7/7）、P1（10/10）、P2（9/9）条款。** 残留项仅上述三项显式声明的跨计划依赖，无遗漏。审计 §6 全表闭环。
+**本计划（Track C：跨进程可靠性、冗余治理与安全收敛）+ model_pack 计划（[slab-model-pack-2026-06-17.md](slab-model-pack-2026-06-17.md)）+ 存储-契约计划 + PMID-设置计划，四份计划合计覆盖审计 [code-audits-2026-06-17.md](../audits/code-audits-2026-06-17.md) §6 行动表的全部 P0（7/7）、P1（10/10）、P2（9/9）条款。** Track C 无未承接残留；G4 由姊妹计划归属闭环。审计 §6 全表闭环。
 
 ---
 

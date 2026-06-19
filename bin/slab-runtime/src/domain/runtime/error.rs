@@ -101,6 +101,98 @@ impl From<std::io::Error> for RuntimeError {
     }
 }
 
+impl RuntimeError {
+    pub fn runtime_code(&self) -> &'static str {
+        match self {
+            Self::QueueFull { .. } => "runtime_queue_full",
+            Self::Busy { .. } => "runtime_backend_busy",
+            Self::TaskNotFound { .. } => "runtime_task_not_found",
+            Self::CpuStageFailed { .. } => "runtime_cpu_stage_failed",
+            Self::GpuStageFailed { .. } => "runtime_gpu_stage_failed",
+            Self::BackendShutdown => "runtime_backend_shutdown",
+            Self::OrchestratorQueueFull { .. } => "runtime_orchestrator_queue_full",
+            Self::Timeout => "runtime_timeout",
+            Self::Cancelled => "runtime_cancelled",
+            Self::UnsupportedOperation { .. } => "runtime_unsupported_operation",
+            Self::InvalidRequestPayload { .. } => "runtime_invalid_request_payload",
+            Self::DriverNotRegistered { .. } => "runtime_driver_not_registered",
+            Self::BackendDisabled { .. } => "runtime_backend_disabled",
+            Self::InternalPoisoned { .. } => "runtime_internal_poisoned",
+            Self::ModelNotLoaded => "runtime_model_not_loaded",
+            Self::ResultDecodeFailed { .. } => "runtime_result_decode_failed",
+            Self::EngineIo(_) => "runtime_engine_io",
+            Self::GGMLEngine { .. } => "runtime_ggml_engine",
+            Self::OnnxEngine(_) => "runtime_onnx_engine",
+            Self::CandleEngine { .. } => "runtime_candle_engine",
+        }
+    }
+
+    pub fn runtime_detail(&self) -> serde_json::Value {
+        match self {
+            Self::QueueFull { queue, capacity } => serde_json::json!({
+                "queue": queue,
+                "capacity": capacity,
+                "message": self.to_string(),
+            }),
+            Self::Busy { backend_id } => serde_json::json!({
+                "backend_id": backend_id,
+                "message": self.to_string(),
+            }),
+            Self::TaskNotFound { task_id } => serde_json::json!({
+                "task_id": task_id,
+                "message": self.to_string(),
+            }),
+            Self::CpuStageFailed { stage_name, message }
+            | Self::GpuStageFailed { stage_name, message } => serde_json::json!({
+                "stage_name": stage_name,
+                "message": message,
+            }),
+            Self::BackendShutdown | Self::Timeout | Self::Cancelled | Self::ModelNotLoaded => {
+                serde_json::json!({
+                    "message": self.to_string(),
+                })
+            }
+            Self::OrchestratorQueueFull { capacity } => serde_json::json!({
+                "capacity": capacity,
+                "message": self.to_string(),
+            }),
+            Self::UnsupportedOperation { backend, op } => serde_json::json!({
+                "backend": backend,
+                "operation": op,
+                "message": self.to_string(),
+            }),
+            Self::InvalidRequestPayload { message } => serde_json::json!({
+                "message": message,
+            }),
+            Self::DriverNotRegistered { driver_id } => serde_json::json!({
+                "driver_id": driver_id,
+                "message": self.to_string(),
+            }),
+            Self::BackendDisabled { backend } => serde_json::json!({
+                "backend": backend,
+                "message": self.to_string(),
+            }),
+            Self::InternalPoisoned { lock_name } => serde_json::json!({
+                "lock_name": lock_name,
+                "message": self.to_string(),
+            }),
+            Self::ResultDecodeFailed { task_kind, message } => serde_json::json!({
+                "task_kind": task_kind,
+                "message": message,
+            }),
+            Self::EngineIo(message) | Self::OnnxEngine(message) => serde_json::json!({
+                "message": message,
+            }),
+            Self::GGMLEngine { component, message } | Self::CandleEngine { component, message } => {
+                serde_json::json!({
+                    "component": component,
+                    "message": message,
+                })
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::RuntimeError;

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use chrono::Utc;
 use slab_hub::{HubClient, HubErrorKind, HubProviderPreference};
 use slab_types::Capability;
+use slab_utils::path::validate_absolute_path;
 
 use crate::context::ModelState;
 use crate::domain::models::{
@@ -575,20 +576,8 @@ pub(super) fn map_hub_client_error(
 }
 
 pub(super) fn validate_path(label: &str, path: &str) -> Result<(), AppCoreError> {
-    if path.is_empty() {
-        return Err(AppCoreError::BadRequest(format!("{label} must not be empty")));
-    }
-    if !std::path::Path::new(path).is_absolute() {
-        return Err(AppCoreError::BadRequest(format!(
-            "{label} must be an absolute path (got: {path})"
-        )));
-    }
-    let has_traversal = std::path::Path::new(path)
-        .components()
-        .any(|component| component == std::path::Component::ParentDir);
-    if has_traversal {
-        return Err(AppCoreError::BadRequest(format!("{label} must not contain '..' components")));
-    }
+    validate_absolute_path(label, std::path::Path::new(path))
+        .map_err(|error| AppCoreError::BadRequest(error.to_string()))?;
     Ok(())
 }
 

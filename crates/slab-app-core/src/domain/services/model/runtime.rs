@@ -306,14 +306,17 @@ async fn load_model_with_state(
         }
     }
 
-    Err(AppCoreError::BadRequestData {
+    Err(AppCoreError::RuntimeFailure {
         message: format!(
             "all compatible runtime engines failed to load model{}",
             resolved_target.model_id.as_ref().map(|id| format!(" '{id}'")).unwrap_or_default()
         ),
-        data: Box::new(AppCoreErrorData::runtime_engine_exhausted(
-            resolved_target.model_id,
-            retryable_attempts,
+        data: Box::new(AppCoreErrorData::runtime_failure(
+            "runtime_engine_exhausted",
+            serde_json::json!({
+                "model_id": resolved_target.model_id,
+                "attempts": retryable_attempts,
+            }),
         )),
     })
 }
@@ -406,14 +409,24 @@ async fn load_model_candidate(
 
 fn is_retryable_engine_load_error(error: &AppCoreError) -> bool {
     matches!(error, AppCoreError::BackendNotReady(_) | AppCoreError::RuntimeMemoryPressure(_))
+        || is_runtime_memory_pressure(error)
 }
 
 fn runtime_engine_attempt_outcome(error: &AppCoreError) -> &'static str {
     match error {
         AppCoreError::BackendNotReady(_) => "backend_not_ready",
         AppCoreError::RuntimeMemoryPressure(_) => "memory_pressure",
+        _ if is_runtime_memory_pressure(error) => "memory_pressure",
         _ => "failed",
     }
+}
+
+fn is_runtime_memory_pressure(error: &AppCoreError) -> bool {
+    matches!(
+        error,
+        AppCoreError::RuntimeFailure { data, .. }
+            if data.runtime_code() == Some("runtime_memory_pressure")
+    )
 }
 
 async fn persist_selected_engine_id(

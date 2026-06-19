@@ -5,7 +5,7 @@ use slab_proto::slab::ipc::v1 as pb;
 
 use crate::application::dtos as dto;
 
-use super::{GrpcServiceImpl, application_to_status, extract_request_id, proto_to_status};
+use super::{GrpcServiceImpl, extract_request_id, forward};
 
 #[tonic::async_trait]
 impl pb::onnx_service_server::OnnxService for GrpcServiceImpl {
@@ -17,15 +17,14 @@ impl pb::onnx_service_server::OnnxService for GrpcServiceImpl {
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto = dto::decode_onnx_text_request(&request.into_inner()).map_err(proto_to_status)?;
-        let response = self
-            .application
-            .onnx_text()
-            .map_err(application_to_status)?
-            .run_text(dto)
-            .await
-            .map_err(application_to_status)?;
-        Ok(Response::new(dto::encode_onnx_text_response(&response)))
+        forward(
+            request,
+            dto::decode_onnx_text_request,
+            || self.application.onnx_text(),
+            |service, dto| async move { service.run_text(dto).await },
+            dto::encode_onnx_text_response,
+        )
+        .await
     }
 
     #[instrument(skip_all, fields(request_id, backend = "onnx.embedding"))]
@@ -36,16 +35,14 @@ impl pb::onnx_service_server::OnnxService for GrpcServiceImpl {
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto =
-            dto::decode_onnx_embedding_request(&request.into_inner()).map_err(proto_to_status)?;
-        let response = self
-            .application
-            .onnx_embedding()
-            .map_err(application_to_status)?
-            .run_embedding(dto)
-            .await
-            .map_err(application_to_status)?;
-        Ok(Response::new(dto::encode_onnx_embedding_response(&response)))
+        forward(
+            request,
+            dto::decode_onnx_embedding_request,
+            || self.application.onnx_embedding(),
+            |service, dto| async move { service.run_embedding(dto).await },
+            dto::encode_onnx_embedding_response,
+        )
+        .await
     }
 
     #[instrument(skip_all, fields(request_id, backend = "onnx.text"))]
@@ -56,16 +53,14 @@ impl pb::onnx_service_server::OnnxService for GrpcServiceImpl {
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto =
-            dto::decode_onnx_text_load_request(&request.into_inner()).map_err(proto_to_status)?;
-        let status = self
-            .application
-            .onnx_text()
-            .map_err(application_to_status)?
-            .load_text_model(dto)
-            .await
-            .map_err(application_to_status)?;
-        Ok(Response::new(dto::encode_model_status_response(&status)))
+        forward(
+            request,
+            dto::decode_onnx_text_load_request,
+            || self.application.onnx_text(),
+            |service, dto| async move { service.load_text_model(dto).await },
+            dto::encode_model_status_response,
+        )
+        .await
     }
 
     #[instrument(skip_all, fields(request_id, backend = "onnx.text"))]
@@ -75,16 +70,14 @@ impl pb::onnx_service_server::OnnxService for GrpcServiceImpl {
     ) -> Result<Response<pb::ModelStatusResponse>, Status> {
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
-        let _ = request.into_inner();
-
-        let status = self
-            .application
-            .onnx_text()
-            .map_err(application_to_status)?
-            .unload_text_model()
-            .await
-            .map_err(application_to_status)?;
-        Ok(Response::new(dto::encode_model_status_response(&status)))
+        forward(
+            request,
+            |_| Ok(()),
+            || self.application.onnx_text(),
+            |service, _| async move { service.unload_text_model().await },
+            dto::encode_model_status_response,
+        )
+        .await
     }
 
     #[instrument(skip_all, fields(request_id, backend = "onnx.embedding"))]
@@ -95,16 +88,14 @@ impl pb::onnx_service_server::OnnxService for GrpcServiceImpl {
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto = dto::decode_onnx_embedding_load_request(&request.into_inner())
-            .map_err(proto_to_status)?;
-        let status = self
-            .application
-            .onnx_embedding()
-            .map_err(application_to_status)?
-            .load_embedding_model(dto)
-            .await
-            .map_err(application_to_status)?;
-        Ok(Response::new(dto::encode_model_status_response(&status)))
+        forward(
+            request,
+            dto::decode_onnx_embedding_load_request,
+            || self.application.onnx_embedding(),
+            |service, dto| async move { service.load_embedding_model(dto).await },
+            dto::encode_model_status_response,
+        )
+        .await
     }
 
     #[instrument(skip_all, fields(request_id, backend = "onnx.embedding"))]
@@ -114,15 +105,13 @@ impl pb::onnx_service_server::OnnxService for GrpcServiceImpl {
     ) -> Result<Response<pb::ModelStatusResponse>, Status> {
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
-        let _ = request.into_inner();
-
-        let status = self
-            .application
-            .onnx_embedding()
-            .map_err(application_to_status)?
-            .unload_embedding_model()
-            .await
-            .map_err(application_to_status)?;
-        Ok(Response::new(dto::encode_model_status_response(&status)))
+        forward(
+            request,
+            |_| Ok(()),
+            || self.application.onnx_embedding(),
+            |service, _| async move { service.unload_embedding_model().await },
+            dto::encode_model_status_response,
+        )
+        .await
     }
 }

@@ -187,15 +187,23 @@ async fn model_runtime_unavailable_backend_rejects_before_gateway_call() {
         .await
         .expect_err("unavailable backend should reject");
 
-    let AppCoreError::BadRequestData { data, .. } = &error else {
+    let AppCoreError::RuntimeFailure { data, .. } = &error else {
         panic!("unexpected error: {error}");
     };
-    let AppCoreErrorData::RuntimeEngineExhausted { attempts, .. } = data.as_ref() else {
+    let AppCoreErrorData::RuntimeFailure { detail, .. } = data.as_ref() else {
         panic!("unexpected error data: {data:?}");
     };
+    assert_eq!(data.runtime_code(), Some("runtime_engine_exhausted"));
+    assert_eq!(detail["model_id"], "runtime-unavailable");
+    let attempts = detail["attempts"].as_array().expect("attempts array");
     assert_eq!(attempts.len(), 1);
-    assert_eq!(attempts[0].engine, RuntimeBackendId::GgmlLlama.to_string());
-    assert!(attempts[0].message.contains("gRPC endpoint is not configured"));
+    assert_eq!(attempts[0]["engine"], RuntimeBackendId::GgmlLlama.to_string());
+    assert!(
+        attempts[0]["message"]
+            .as_str()
+            .expect("attempt message")
+            .contains("gRPC endpoint is not configured")
+    );
     assert!(app.runtime.loads().is_empty());
 }
 

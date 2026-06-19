@@ -10,8 +10,13 @@ Shared JSON-RPC 2.0 envelope helpers for Slab.
 - Incoming message parsing.
 - Response serialization.
 - Stable id key normalization.
+- A reusable sidecar host pipe in `slab_jsonrpc::host` for line-delimited
+  JSON-RPC transports, bounded pending requests, request timeouts, outbound
+  draining, and inbound dispatch through a caller-provided `RequestHandler`.
 
-Protocol transports, authorization, plugin dispatch, and runtime lifecycle management belong in the host crates that use these envelopes.
+The host pipe owns transport mechanics only. Runtime process lifecycle, ready
+payload content, authorization, plugin dispatch, and business routing belong in
+the host crates that use this crate.
 
 ## Type
 

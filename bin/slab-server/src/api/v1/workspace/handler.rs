@@ -531,7 +531,17 @@ fn canonical_workspace_root(root: PathBuf) -> Result<PathBuf, ServerError> {
 fn workspace_info(state: &AppState, root: &Path) -> WorkspaceInfoResponse {
     let config = &state.context.config;
     let workspace_settings_path = root.join(".slab").join("settings.json");
-    let configured_root = config.workspace_root.as_ref().and_then(|root| root.canonicalize().ok());
+    let configured_root = config.workspace_root.as_ref().and_then(|root| {
+        root.canonicalize()
+            .inspect_err(|error| {
+                tracing::warn!(
+                    workspace_root = %root.display(),
+                    %error,
+                    "failed to canonicalize configured workspace root"
+                );
+            })
+            .ok()
+    });
     let settings_path = config
         .settings_overlay_path
         .as_ref()

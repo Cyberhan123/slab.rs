@@ -211,7 +211,7 @@ where
         }
     }
 
-    unreachable!("unary gRPC retry loop should always return")
+    Err(tonic::Status::unknown(format!("{rpc} RPC retry loop exhausted without response")))
 }
 
 pub fn is_transient_runtime_status(status: &tonic::Status) -> bool {
@@ -437,7 +437,9 @@ pub async fn load_model(
         }
     }
 
-    unreachable!("load_model retry loop should always return")
+    Err(anyhow::anyhow!(
+        "load_model RPC retry loop exhausted without response for backend: {backend_id}"
+    ))
 }
 
 async fn load_model_once(
@@ -539,7 +541,9 @@ pub async fn unload_model(
         }
     }
 
-    unreachable!("unload_model retry loop should always return")
+    Err(anyhow::anyhow!(
+        "unload_model RPC retry loop exhausted without response for backend: {backend_id}"
+    ))
 }
 
 async fn unload_model_once(

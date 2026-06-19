@@ -60,7 +60,7 @@ function canUsePrebuiltBinary(): boolean {
   }
 }
 
-function writeTestSettings(path: string, bindAddress: string): void {
+function writeTestSettings(path: string, bindAddress: string, adminToken?: string): void {
   const settings = {
     $schema: "https://slab.reorgix.com/manifests/v1/settings-document.schema.json",
     schema_version: 2,
@@ -76,6 +76,9 @@ function writeTestSettings(path: string, bindAddress: string): void {
     },
     server: {
       address: bindAddress,
+      admin: {
+        token: adminToken
+      },
     },
   };
 
@@ -192,7 +195,7 @@ export async function startSlabServerHarness(
   const logLines: string[] = [];
 
   mkdirSync(modelConfigDir, { recursive: true });
-  writeTestSettings(settingsPath, bindAddress);
+  writeTestSettings(settingsPath, bindAddress, options.adminToken);
 
   const prebuiltBinary = canUsePrebuiltBinary();
   const command = prebuiltBinary ? serverBinaryPath : "cargo";

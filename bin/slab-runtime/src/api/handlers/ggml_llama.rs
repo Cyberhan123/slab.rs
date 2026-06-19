@@ -9,7 +9,8 @@ use slab_proto::slab::ipc::v1 as pb;
 use crate::application::dtos as dto;
 
 use super::{
-    GrpcServiceImpl, application_to_status, extract_request_id, proto_to_status, runtime_to_status,
+    GrpcServiceImpl, application_result, extract_request_id, forward, proto_to_status,
+    runtime_to_status,
 };
 
 #[tonic::async_trait]
@@ -22,16 +23,14 @@ impl pb::ggml_llama_service_server::GgmlLlamaService for GrpcServiceImpl {
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto =
-            dto::decode_ggml_llama_chat_request(&request.into_inner()).map_err(proto_to_status)?;
-        let response = self
-            .application
-            .ggml_llama()
-            .map_err(application_to_status)?
-            .chat(dto)
-            .await
-            .map_err(application_to_status)?;
-        Ok(Response::new(dto::encode_ggml_llama_chat_response(&response)))
+        forward(
+            request,
+            dto::decode_ggml_llama_chat_request,
+            || self.application.ggml_llama(),
+            |service, dto| async move { service.chat(dto).await },
+            dto::encode_ggml_llama_chat_response,
+        )
+        .await
     }
 
     type ChatStreamStream = ReceiverStream<Result<pb::GgmlLlamaChatStreamChunk, Status>>;
@@ -46,13 +45,8 @@ impl pb::ggml_llama_service_server::GgmlLlamaService for GrpcServiceImpl {
 
         let dto =
             dto::decode_ggml_llama_chat_request(&request.into_inner()).map_err(proto_to_status)?;
-        let stream = self
-            .application
-            .ggml_llama()
-            .map_err(application_to_status)?
-            .chat_stream(dto)
-            .await
-            .map_err(application_to_status)?;
+        let service = application_result(self.application.ggml_llama())?;
+        let stream = application_result(service.chat_stream(dto).await)?;
 
         let (tx, rx) = mpsc::channel::<Result<pb::GgmlLlamaChatStreamChunk, Status>>(32);
         tokio::spawn(async move {
@@ -83,16 +77,14 @@ impl pb::ggml_llama_service_server::GgmlLlamaService for GrpcServiceImpl {
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto =
-            dto::decode_ggml_llama_load_request(&request.into_inner()).map_err(proto_to_status)?;
-        let status = self
-            .application
-            .ggml_llama()
-            .map_err(application_to_status)?
-            .load_model(dto)
-            .await
-            .map_err(application_to_status)?;
-        Ok(Response::new(dto::encode_model_status_response(&status)))
+        forward(
+            request,
+            dto::decode_ggml_llama_load_request,
+            || self.application.ggml_llama(),
+            |service, dto| async move { service.load_model(dto).await },
+            dto::encode_model_status_response,
+        )
+        .await
     }
 
     #[instrument(skip_all, fields(request_id, backend = "ggml.llama"))]
@@ -102,15 +94,13 @@ impl pb::ggml_llama_service_server::GgmlLlamaService for GrpcServiceImpl {
     ) -> Result<Response<pb::ModelStatusResponse>, Status> {
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
-        let _ = request.into_inner();
-
-        let status = self
-            .application
-            .ggml_llama()
-            .map_err(application_to_status)?
-            .unload_model()
-            .await
-            .map_err(application_to_status)?;
-        Ok(Response::new(dto::encode_model_status_response(&status)))
+        forward(
+            request,
+            |_| Ok(()),
+            || self.application.ggml_llama(),
+            |service, _| async move { service.unload_model().await },
+            dto::encode_model_status_response,
+        )
+        .await
     }
 }

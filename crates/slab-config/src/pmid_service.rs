@@ -26,10 +26,6 @@ use crate::{
     SettingsSubsectionView, UpdateSettingCommand, UpdateSettingOperation,
 };
 
-const DEFAULT_SERVER_RUNTIME_BIND_HOST: &str = "127.0.0.1";
-const DEFAULT_SERVER_RUNTIME_BASE_PORT: u32 = 3001;
-const DEFAULT_DESKTOP_RUNTIME_BIND_HOST: &str = "127.0.0.1";
-const DEFAULT_DESKTOP_RUNTIME_BASE_PORT: u32 = 50051;
 const SECRET_PLACEHOLDER: &str = "[REDACTED_SECRET]";
 
 #[derive(Debug, Clone)]
@@ -195,12 +191,12 @@ fn load_config(settings: &SettingsDocument) -> PmidConfig {
             profiles: LaunchProfilesConfig {
                 server: ServerLaunchProfileConfig {
                     gateway_bind: settings.server.address.clone(),
-                    runtime_bind_host: DEFAULT_SERVER_RUNTIME_BIND_HOST.to_owned(),
-                    runtime_bind_base_port: DEFAULT_SERVER_RUNTIME_BASE_PORT,
+                    runtime_bind_host: settings.runtime.launch.server.bind_host.clone(),
+                    runtime_bind_base_port: settings.runtime.launch.server.base_port,
                 },
                 desktop: DesktopLaunchProfileConfig {
-                    runtime_bind_host: DEFAULT_DESKTOP_RUNTIME_BIND_HOST.to_owned(),
-                    runtime_bind_base_port: DEFAULT_DESKTOP_RUNTIME_BASE_PORT,
+                    runtime_bind_host: settings.runtime.launch.desktop.bind_host.clone(),
+                    runtime_bind_base_port: settings.runtime.launch.desktop.base_port,
                 },
             },
         },
@@ -297,7 +293,7 @@ fn build_property_view_from_documents(
             value_type: value_type(pmid, &effective_value, &default_value),
             enum_values: enum_values(pmid),
             minimum: minimum_value(pmid),
-            maximum: None,
+            maximum: maximum_value(pmid),
             pattern: None,
             json_schema,
             default_value: view_default_value,
@@ -864,6 +860,9 @@ fn value_type(path: &str, effective: &SettingValue, default: &SettingValue) -> S
     if path.ends_with("_bytes") {
         return SettingValueType::Unsigned;
     }
+    if path.ends_with(".base_port") {
+        return SettingValueType::Integer;
+    }
     if path == "agent.tools.websearch.providers"
         || path == "telemetry.span_attributes"
         || path == "telemetry.tracestate"
@@ -941,6 +940,9 @@ fn enum_values(path: &str) -> Option<Vec<String>> {
 }
 
 fn minimum_value(path: &str) -> Option<i64> {
+    if path.ends_with(".base_port") {
+        return Some(1);
+    }
     if path.ends_with(".queue")
         || path.ends_with(".concurrent_requests")
         || path.ends_with(".idle_minutes")
@@ -954,6 +956,10 @@ fn minimum_value(path: &str) -> Option<i64> {
     } else {
         None
     }
+}
+
+fn maximum_value(path: &str) -> Option<i64> {
+    if path.ends_with(".base_port") { Some(65_535) } else { None }
 }
 
 fn json_schema(path: &str) -> Option<Value> {
@@ -1058,7 +1064,7 @@ fn inherited_parent_view(
     Ok((Some(value), Some(SettingOverrideSource::Parent { pmid: parent_pmid.to_owned() })))
 }
 
-fn inherited_logging_value<'a>(
+fn inherited_logging_value(
     path: &str,
     current: &SettingsDocument,
 ) -> Result<Option<(&'static str, SettingValue)>, ConfigError> {
@@ -1375,6 +1381,10 @@ fn property_label(path: &str) -> String {
         "runtime.mode" => "Runtime Mode".to_owned(),
         "runtime.transport" => "Transport".to_owned(),
         "runtime.sessions.state_dir" => "Session State Directory".to_owned(),
+        "runtime.launch.server.bind_host" => "Server Runtime Bind Host".to_owned(),
+        "runtime.launch.server.base_port" => "Server Runtime Base Port".to_owned(),
+        "runtime.launch.desktop.bind_host" => "Desktop Runtime Bind Host".to_owned(),
+        "runtime.launch.desktop.base_port" => "Desktop Runtime Base Port".to_owned(),
         "agent.debug" => "Agent Debug Trace".to_owned(),
         "agent.hooks.enabled" => "External Hooks".to_owned(),
         "agent.hooks.scripts" => "Legacy Hook Scripts".to_owned(),
@@ -1501,6 +1511,22 @@ fn property_description(path: &str) -> String {
         "runtime.mode" => "Choose whether runtimes are launched as managed child processes or discovered through explicit endpoints.".to_owned(),
         "runtime.transport" => "Transport protocol used between the gateway and runtime workers.".to_owned(),
         "runtime.sessions.state_dir" => "Directory used for persisted runtime-backed session state.".to_owned(),
+        "runtime.launch.server.bind_host" => {
+            "Host address assigned to runtime worker HTTP endpoints when launched by slab-server."
+                .to_owned()
+        }
+        "runtime.launch.server.base_port" => {
+            "First runtime worker port assigned by slab-server; backend slots increment from this value."
+                .to_owned()
+        }
+        "runtime.launch.desktop.bind_host" => {
+            "Host address assigned to runtime worker HTTP endpoints when launched by the desktop host."
+                .to_owned()
+        }
+        "runtime.launch.desktop.base_port" => {
+            "First runtime worker port assigned by the desktop host; backend slots increment from this value."
+                .to_owned()
+        }
         "providers.registry" => "Structured list of remote providers, credentials, and request defaults.".to_owned(),
         "models.cache_dir" => "Directory used for cached model artifacts.".to_owned(),
         "models.config_dir" => "Directory scanned for persisted model configuration documents.".to_owned(),
@@ -1915,6 +1941,20 @@ mod tests {
         base.join("settings.json")
     }
 
+    fn openai_provider(api_key: Option<&str>, api_key_env: Option<&str>) -> ProviderRegistryEntry {
+        ProviderRegistryEntry {
+            id: "openai-main".to_owned(),
+            family: ProviderFamily::OpenaiCompatible,
+            display_name: "OpenAI".to_owned(),
+            api_base: "https://api.openai.com/v1".to_owned(),
+            auth: ProviderAuthConfig {
+                api_key: api_key.map(str::to_owned),
+                api_key_env: api_key_env.map(str::to_owned),
+            },
+            defaults: ProviderDefaultsConfig::default(),
+        }
+    }
+
     #[tokio::test]
     async fn load_from_path_supports_current_settings_document() {
         let path = temp_settings_path();
@@ -1922,14 +1962,11 @@ mod tests {
         let mut document = SettingsDocument::default();
         document.models.cache_dir = Some("C:/models".to_owned());
         document.tools.ffmpeg.install_dir = Some("C:/ffmpeg".to_owned());
-        document.providers.registry.push(ProviderRegistryEntry {
-            id: "openai-main".to_owned(),
-            family: ProviderFamily::OpenaiCompatible,
-            display_name: "OpenAI".to_owned(),
-            api_base: "https://api.openai.com/v1".to_owned(),
-            auth: ProviderAuthConfig { api_key: Some("sk-test".to_owned()), api_key_env: None },
-            defaults: ProviderDefaultsConfig::default(),
-        });
+        document.runtime.launch.server.bind_host = "127.0.0.1".to_owned();
+        document.runtime.launch.server.base_port = 3001;
+        document.runtime.launch.desktop.bind_host = "127.0.0.1".to_owned();
+        document.runtime.launch.desktop.base_port = 50051;
+        document.providers.registry.push(openai_provider(Some("sk-test"), None));
         fs::write(&path, serde_json::to_string_pretty(&document).expect("serialize"))
             .expect("write");
 
@@ -1947,11 +1984,23 @@ mod tests {
         assert!(!config.telemetry.capture_content);
         assert_eq!(config.server.address, document.server.address);
         assert_eq!(config.server.admin.token, document.server.admin.token);
+        assert_eq!(config.launch.profiles.server.runtime_bind_host, "127.0.0.1");
+        assert_eq!(config.launch.profiles.server.runtime_bind_base_port, 3001);
+        assert_eq!(config.launch.profiles.desktop.runtime_bind_host, "127.0.0.1");
+        assert_eq!(config.launch.profiles.desktop.runtime_bind_base_port, 50051);
         assert_eq!(config.chat.providers.len(), 1);
         assert_eq!(property.effective_value, json!("C:/models").into());
         assert_eq!(plugin_install_dir.effective_value, json!(expected_plugin_dir).into());
         assert_eq!(plugin_install_dir.schema.default_value, plugin_install_dir.effective_value);
         assert!(!plugin_install_dir.is_overridden);
+        assert_eq!(
+            service
+                .property("runtime.launch.server.base_port")
+                .await
+                .expect("server port")
+                .effective_value,
+            json!(3001).into()
+        );
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }
@@ -1962,17 +2011,10 @@ mod tests {
         fs::create_dir_all(path.parent().expect("parent")).expect("dir");
         let mut document = SettingsDocument::default();
         document.server.admin.token = Some("admin-secret-token".to_owned());
-        document.providers.registry.push(ProviderRegistryEntry {
-            id: "openai-main".to_owned(),
-            family: ProviderFamily::OpenaiCompatible,
-            display_name: "OpenAI".to_owned(),
-            api_base: "https://api.openai.com/v1".to_owned(),
-            auth: ProviderAuthConfig {
-                api_key: Some("provider-secret-token".to_owned()),
-                api_key_env: Some("OPENAI_API_KEY".to_owned()),
-            },
-            defaults: ProviderDefaultsConfig::default(),
-        });
+        document
+            .providers
+            .registry
+            .push(openai_provider(Some("provider-secret-token"), Some("OPENAI_API_KEY")));
         document.agent.tools.websearch.providers.google.auth.api_key =
             Some("google-secret-token".to_owned());
         document.agent.tools.websearch.providers.google.auth.api_key_env =
@@ -2016,17 +2058,7 @@ mod tests {
         fs::create_dir_all(path.parent().expect("parent")).expect("dir");
         let mut document = SettingsDocument::default();
         document.server.admin.token = Some("admin-secret-token".to_owned());
-        document.providers.registry.push(ProviderRegistryEntry {
-            id: "openai-main".to_owned(),
-            family: ProviderFamily::OpenaiCompatible,
-            display_name: "OpenAI".to_owned(),
-            api_base: "https://api.openai.com/v1".to_owned(),
-            auth: ProviderAuthConfig {
-                api_key: Some("provider-secret-token".to_owned()),
-                api_key_env: None,
-            },
-            defaults: ProviderDefaultsConfig::default(),
-        });
+        document.providers.registry.push(openai_provider(Some("provider-secret-token"), None));
         fs::write(&path, serde_json::to_string_pretty(&document).expect("serialize"))
             .expect("write");
 
@@ -2196,6 +2228,35 @@ mod tests {
         assert!(matches!(error, ConfigError::BadRequest(_)));
         assert!(error.to_string().contains("runtime.capacity.queue"));
         assert!(error.to_string().contains("greater than or equal to 0"));
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn update_setting_rejects_runtime_base_ports_above_u16_range() {
+        let path = temp_settings_path();
+        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&SettingsDocument::default()).expect("serialize"),
+        )
+        .expect("write");
+
+        let service = PmidService::load_from_path(path.clone()).await.expect("pmid service");
+        let error = service
+            .update_setting(
+                "runtime.launch.server.base_port",
+                UpdateSettingCommand {
+                    op: crate::UpdateSettingOperation::Set,
+                    value: Some(json!(65_536).into()),
+                },
+            )
+            .await
+            .expect_err("port above u16 should fail");
+
+        assert!(matches!(error, ConfigError::BadRequest(_)));
+        assert!(error.to_string().contains("runtime.launch.server.base_port"));
+        assert!(error.to_string().contains("less than or equal to 65535"));
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }

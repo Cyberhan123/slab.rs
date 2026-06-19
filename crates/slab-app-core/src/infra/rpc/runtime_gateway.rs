@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::{StreamExt, stream::BoxStream};
+use serde_json::{Value, json};
+use slab_runtime_core::{RUNTIME_ERROR_CODE_METADATA, RUNTIME_ERROR_DETAIL_METADATA_BIN};
 use slab_types::{RuntimeBackendId, RuntimeBackendLoadSpec};
 use tonic::transport::Channel;
 
@@ -13,6 +15,7 @@ use crate::domain::ports::{
     RuntimeTranscriptionVadOptions, RuntimeTranscriptionVadParams,
 };
 use crate::error::AppCoreError;
+use crate::error::AppCoreErrorData;
 
 use super::{client, codec, gateway::GrpcGateway, pb, runtime_protocol};
 
@@ -215,6 +218,9 @@ impl RuntimeInferenceGateway for GrpcRuntimeInferenceGateway {
 
 fn map_runtime_error(action: &'static str) -> impl Fn(anyhow::Error) -> AppCoreError {
     move |error| {
+        if let Some(error) = structured_runtime_failure(action, &error) {
+            return error;
+        }
         if let Some(detail) = client::transient_runtime_detail(&error) {
             return AppCoreError::BackendNotReady(detail);
         }
@@ -222,24 +228,76 @@ fn map_runtime_error(action: &'static str) -> impl Fn(anyhow::Error) -> AppCoreE
             return AppCoreError::Conflict(detail);
         }
         if is_memory_pressure_error(&error) {
-            return AppCoreError::RuntimeMemoryPressure(format!(
-                "runtime reported memory pressure during {action}: {error:#}"
-            ));
+            return runtime_failure(
+                "runtime_memory_pressure",
+                format!("runtime reported memory pressure during {action}: {error:#}"),
+                json!({
+                    "action": action,
+                    "message": error.to_string(),
+                }),
+            );
         }
         AppCoreError::Internal(format!("grpc {action} failed: {error:#}"))
     }
 }
 
 fn map_model_load_error(error: anyhow::Error) -> AppCoreError {
+    if let Some(error) = structured_runtime_failure("load model", &error) {
+        return error;
+    }
     if let Some(detail) = client::transient_runtime_detail(&error) {
         return AppCoreError::BackendNotReady(detail);
     }
     if is_memory_pressure_error(&error) {
-        return AppCoreError::RuntimeMemoryPressure(format!(
-            "runtime reported memory pressure during model load: {error:#}"
-        ));
+        return runtime_failure(
+            "runtime_memory_pressure",
+            format!("runtime reported memory pressure during model load: {error:#}"),
+            json!({
+                "action": "load model",
+                "message": error.to_string(),
+            }),
+        );
     }
     AppCoreError::Internal(format!("grpc load model failed: {error:#}"))
+}
+
+fn structured_runtime_failure(action: &'static str, error: &anyhow::Error) -> Option<AppCoreError> {
+    let status = error.chain().find_map(|cause| cause.downcast_ref::<tonic::Status>())?;
+    let runtime_code = status
+        .metadata()
+        .get(RUNTIME_ERROR_CODE_METADATA)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)?;
+    let detail = runtime_detail_from_status(status).unwrap_or_else(|| {
+        json!({
+            "action": action,
+            "grpc_code": format!("{:?}", status.code()),
+            "message": status.message(),
+        })
+    });
+    let message = if status.message().trim().is_empty() {
+        format!("runtime {action} failed with {runtime_code}")
+    } else {
+        status.message().trim().to_owned()
+    };
+    Some(runtime_failure(runtime_code, message, detail))
+}
+
+fn runtime_detail_from_status(status: &tonic::Status) -> Option<Value> {
+    let value = status.metadata().get_bin(RUNTIME_ERROR_DETAIL_METADATA_BIN)?;
+    let bytes = value.to_bytes().ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn runtime_failure(
+    runtime_code: impl Into<String>,
+    message: impl Into<String>,
+    detail: Value,
+) -> AppCoreError {
+    AppCoreError::RuntimeFailure {
+        message: message.into(),
+        data: Box::new(AppCoreErrorData::runtime_failure(runtime_code, detail)),
+    }
 }
 
 fn session_busy_detail(error: &anyhow::Error) -> Option<String> {
@@ -386,9 +444,32 @@ mod tests {
         let error = map_runtime_error("chat")(anyhow::Error::new(status));
 
         assert!(
-            matches!(&error, AppCoreError::RuntimeMemoryPressure(message) if message.contains("chat")),
+            matches!(&error, AppCoreError::RuntimeFailure { message, data }
+                if message.contains("chat")
+                    && data.runtime_code() == Some("runtime_memory_pressure")),
             "unexpected error: {error}"
         );
+    }
+
+    #[test]
+    fn map_runtime_error_preserves_runtime_metadata() {
+        let mut status = tonic::Status::new(tonic::Code::ResourceExhausted, "backend busy");
+        status.metadata_mut().insert(
+            RUNTIME_ERROR_CODE_METADATA,
+            tonic::metadata::MetadataValue::try_from("runtime_backend_busy").unwrap(),
+        );
+        status.metadata_mut().insert_bin(
+            RUNTIME_ERROR_DETAIL_METADATA_BIN,
+            tonic::metadata::MetadataValue::from_bytes(br#"{"backend_id":"ggml.llama"}"#),
+        );
+
+        let error = map_runtime_error("chat")(anyhow::Error::new(status));
+
+        let AppCoreError::RuntimeFailure { message, data } = error else {
+            panic!("expected RuntimeFailure");
+        };
+        assert_eq!(message, "backend busy");
+        assert_eq!(data.runtime_code(), Some("runtime_backend_busy"));
     }
 
     #[test]

@@ -7,7 +7,10 @@
 //! request/response construction belong to the server/app-core boundary above
 //! runtime.
 
-use tonic::Status;
+use slab_runtime_core::{RUNTIME_ERROR_CODE_METADATA, RUNTIME_ERROR_DETAIL_METADATA_BIN};
+use std::future::Future;
+use tonic::metadata::MetadataValue;
+use tonic::{Request, Response, Status};
 
 use crate::application::{
     dtos as dto,
@@ -39,6 +42,30 @@ fn application_to_status(err: RuntimeApplicationError) -> Status {
     }
 }
 
+fn application_result<T>(result: Result<T, RuntimeApplicationError>) -> Result<T, Status> {
+    result.map_err(application_to_status)
+}
+
+async fn forward<P, D, S, R, O, Decode, Resolve, Call, Fut, Encode>(
+    request: Request<P>,
+    decode: Decode,
+    resolve: Resolve,
+    call: Call,
+    encode: Encode,
+) -> Result<Response<O>, Status>
+where
+    Decode: FnOnce(&P) -> Result<D, dto::ProtoConversionError>,
+    Resolve: FnOnce() -> Result<S, RuntimeApplicationError>,
+    Call: FnOnce(S, D) -> Fut,
+    Fut: Future<Output = Result<R, RuntimeApplicationError>>,
+    Encode: FnOnce(&R) -> O,
+{
+    let dto = decode(&request.into_inner()).map_err(proto_to_status)?;
+    let service = resolve().map_err(application_to_status)?;
+    let response = call(service, dto).await.map_err(application_to_status)?;
+    Ok(Response::new(encode(&response)))
+}
+
 fn format_error_chain(err: &dyn std::error::Error) -> String {
     let mut msg = err.to_string();
     let mut source = err.source();
@@ -52,7 +79,7 @@ fn format_error_chain(err: &dyn std::error::Error) -> String {
 
 pub(super) fn runtime_to_status(err: CoreError) -> Status {
     let msg = format_error_chain(&err);
-    match err {
+    let mut status = match &err {
         CoreError::ModelNotLoaded | CoreError::BackendDisabled { .. } => {
             Status::failed_precondition(msg)
         }
@@ -74,11 +101,24 @@ pub(super) fn runtime_to_status(err: CoreError) -> Status {
         | CoreError::OnnxEngine(_)
         | CoreError::CandleEngine { .. }
         | CoreError::InternalPoisoned { .. } => Status::internal(msg),
-    }
+    };
+    attach_runtime_error_metadata(&mut status, &err);
+    status
 }
 
 pub(super) fn proto_to_status(err: dto::ProtoConversionError) -> Status {
     Status::invalid_argument(err.to_string())
+}
+
+fn attach_runtime_error_metadata(status: &mut Status, err: &CoreError) {
+    if let Ok(value) = MetadataValue::try_from(err.runtime_code()) {
+        status.metadata_mut().insert(RUNTIME_ERROR_CODE_METADATA, value);
+    }
+    if let Ok(detail) = serde_json::to_vec(&err.runtime_detail()) {
+        status
+            .metadata_mut()
+            .insert_bin(RUNTIME_ERROR_DETAIL_METADATA_BIN, MetadataValue::from_bytes(&detail));
+    }
 }
 
 pub(super) fn extract_request_id(metadata: &tonic::metadata::MetadataMap) -> String {
@@ -98,7 +138,9 @@ mod tests {
     use crate::domain::runtime::Orchestrator;
     use crate::domain::services::ExecutionHub;
     use slab_proto::slab::ipc::v1 as pb;
-    use slab_runtime_core::backend::ResourceManager;
+    use slab_runtime_core::{
+        RUNTIME_ERROR_CODE_METADATA, RUNTIME_ERROR_DETAIL_METADATA_BIN, backend::ResourceManager,
+    };
     use tonic::{Code, Request, Status};
 
     fn grpc_service_with_backends(
@@ -127,6 +169,13 @@ mod tests {
         let engine_io = runtime_to_status(CoreError::EngineIo("disk offline".into()));
         assert_eq!(engine_io.code(), Code::Internal);
         assert!(engine_io.message().contains("engine I/O error"));
+        assert_eq!(
+            engine_io
+                .metadata()
+                .get(RUNTIME_ERROR_CODE_METADATA)
+                .and_then(|value| value.to_str().ok()),
+            Some("runtime_engine_io")
+        );
 
         let ggml = runtime_to_status(CoreError::GGMLEngine {
             component: "ggml.llama".into(),
@@ -263,8 +312,17 @@ mod tests {
         ];
 
         for (error, expected_code, expected_message) in cases {
+            let expected_runtime_code = error.runtime_code();
             let status = runtime_to_status(error);
             assert_eq!(status.code(), expected_code);
+            assert_eq!(
+                status
+                    .metadata()
+                    .get(RUNTIME_ERROR_CODE_METADATA)
+                    .and_then(|value| value.to_str().ok()),
+                Some(expected_runtime_code)
+            );
+            assert!(status.metadata().get_bin(RUNTIME_ERROR_DETAIL_METADATA_BIN).is_some());
             assert!(
                 status.message().contains(expected_message),
                 "expected `{}` to contain `{expected_message}`",

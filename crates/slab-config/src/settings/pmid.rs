@@ -106,6 +106,10 @@ impl SettingsPmidCatalog {
             self.runtime.mode(),
             self.runtime.transport(),
             self.runtime.sessions.state_dir(),
+            self.runtime.launch.server.bind_host(),
+            self.runtime.launch.server.base_port(),
+            self.runtime.launch.desktop.bind_host(),
+            self.runtime.launch.desktop.base_port(),
             self.runtime.logging.level(),
             self.runtime.logging.json(),
             self.runtime.logging.path(),
@@ -532,6 +536,7 @@ impl AgentWebSearchPmids {
 #[derive(Debug, Clone, Copy)]
 pub struct RuntimePmids {
     pub sessions: RuntimeSessionsPmids,
+    pub launch: RuntimeLaunchPmids,
     pub logging: LoggingPmids,
     pub capacity: CapacityPmids,
     pub endpoint: EndpointPmids,
@@ -544,6 +549,7 @@ impl RuntimePmids {
     pub const fn new() -> Self {
         Self {
             sessions: RuntimeSessionsPmids,
+            launch: RuntimeLaunchPmids::new(),
             logging: LoggingPmids::new("runtime.logging"),
             capacity: CapacityPmids::new("runtime.capacity"),
             endpoint: EndpointPmids::new("runtime.endpoint"),
@@ -574,6 +580,46 @@ pub struct RuntimeSessionsPmids;
 impl RuntimeSessionsPmids {
     pub fn state_dir(self) -> SettingPmid {
         SettingPmid::from_path("runtime.sessions.state_dir")
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RuntimeLaunchPmids {
+    pub server: RuntimeLaunchProfilePmids,
+    pub desktop: RuntimeLaunchProfilePmids,
+}
+
+impl RuntimeLaunchPmids {
+    pub const fn new() -> Self {
+        Self {
+            server: RuntimeLaunchProfilePmids::new("runtime.launch.server"),
+            desktop: RuntimeLaunchProfilePmids::new("runtime.launch.desktop"),
+        }
+    }
+}
+
+impl Default for RuntimeLaunchPmids {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RuntimeLaunchProfilePmids {
+    prefix: &'static str,
+}
+
+impl RuntimeLaunchProfilePmids {
+    pub const fn new(prefix: &'static str) -> Self {
+        Self { prefix }
+    }
+
+    pub fn bind_host(self) -> SettingPmid {
+        SettingPmid::from_path(format!("{}.bind_host", self.prefix))
+    }
+
+    pub fn base_port(self) -> SettingPmid {
+        SettingPmid::from_path(format!("{}.base_port", self.prefix))
     }
 }
 
@@ -934,6 +980,10 @@ mod tests {
         assert_eq!(all.len(), unique.len());
         assert!(unique.contains("general.language"));
         assert!(unique.contains("runtime.ggml.backends.llama.context_length"));
+        assert!(unique.contains("runtime.launch.server.bind_host"));
+        assert!(unique.contains("runtime.launch.server.base_port"));
+        assert!(unique.contains("runtime.launch.desktop.bind_host"));
+        assert!(unique.contains("runtime.launch.desktop.base_port"));
         assert!(unique.contains("runtime.ggml.backends.llama.flash_attn"));
         assert!(unique.contains("runtime.ggml.backends.whisper.flash_attn"));
         assert!(unique.contains("runtime.ggml.backends.diffusion.flash_attn"));

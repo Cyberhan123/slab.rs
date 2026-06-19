@@ -1082,6 +1082,41 @@
       },
       "type": "object"
     },
+    "RuntimeLaunchProfileSettingsConfig": {
+      "properties": {
+        "base_port": {
+          "default": 3001,
+          "format": "uint32",
+          "maximum": 65535,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "bind_host": {
+          "default": "127.0.0.1",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "RuntimeLaunchSettingsConfig": {
+      "properties": {
+        "desktop": {
+          "$ref": "#/$defs/RuntimeLaunchProfileSettingsConfig",
+          "default": {
+            "base_port": 50051,
+            "bind_host": "127.0.0.1"
+          }
+        },
+        "server": {
+          "$ref": "#/$defs/RuntimeLaunchProfileSettingsConfig",
+          "default": {
+            "base_port": 3001,
+            "bind_host": "127.0.0.1"
+          }
+        }
+      },
+      "type": "object"
+    },
     "RuntimeLeafConfig": {
       "description": "Shared runtime leaf configuration.",
       "properties": {
@@ -1214,6 +1249,19 @@
             },
             "logging": {},
             "source": {}
+          }
+        },
+        "launch": {
+          "$ref": "#/$defs/RuntimeLaunchSettingsConfig",
+          "default": {
+            "desktop": {
+              "base_port": 50051,
+              "bind_host": "127.0.0.1"
+            },
+            "server": {
+              "base_port": 3001,
+              "bind_host": "127.0.0.1"
+            }
           }
         },
         "logging": {
@@ -1787,6 +1835,16 @@
           },
           "logging": {},
           "source": {}
+        },
+        "launch": {
+          "desktop": {
+            "base_port": 50051,
+            "bind_host": "127.0.0.1"
+          },
+          "server": {
+            "base_port": 3001,
+            "bind_host": "127.0.0.1"
+          }
         },
         "logging": {},
         "mode": "managed_children",

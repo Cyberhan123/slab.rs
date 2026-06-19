@@ -305,6 +305,11 @@ fn read_persisted_model_config_from_pack_bytes(
 
     let actual_manifest_sha256 = manifest_sha256_from_pack_bytes(bytes)?;
     if verify_sha256_hex_expected(&actual_manifest_sha256, manifest_sha256).is_err() {
+        tracing::warn!(
+            expected_manifest_sha256 = manifest_sha256,
+            actual_manifest_sha256,
+            "ignoring persisted model pack config because manifest sha256 does not match"
+        );
         return Ok(None);
     }
 

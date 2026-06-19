@@ -1,9 +1,9 @@
-use std::ffi::OsString;
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 use reqwest::Url;
+use slab_utils::path::ensure_within_root_or_nearest;
 use uuid::Uuid;
 use zip::ZipArchive;
 
@@ -201,43 +201,25 @@ pub(super) fn safe_remove_dir(path: &Path) -> Result<(), AppCoreError> {
 }
 
 pub(super) fn ensure_path_within(path: &Path, root: &Path) -> Result<(), AppCoreError> {
-    let root = root.canonicalize().map_err(|error| {
-        AppCoreError::Internal(format!(
-            "failed to resolve plugins root {}: {error}",
-            root.display()
-        ))
-    })?;
-    let path = if path.is_absolute() { path.to_path_buf() } else { root.join(path) };
-    let path = canonicalize_existing_or_nearest(&path);
-    if path.starts_with(&root) {
-        Ok(())
-    } else {
-        Err(AppCoreError::BadRequest(format!(
-            "plugin path {} escapes plugins root {}",
-            path.display(),
-            root.display()
-        )))
-    }
-}
-
-fn canonicalize_existing_or_nearest(path: &Path) -> PathBuf {
-    if let Ok(canonical) = path.canonicalize() {
-        return canonical;
-    }
-
-    let mut current = path;
-    let mut tail = Vec::<OsString>::new();
-    while let (Some(parent), Some(file_name)) = (current.parent(), current.file_name()) {
-        tail.push(file_name.to_os_string());
-        if let Ok(canonical_parent) = parent.canonicalize() {
-            let mut resolved = canonical_parent;
-            for segment in tail.iter().rev() {
-                resolved.push(segment);
-            }
-            return resolved;
+    ensure_within_root_or_nearest(root, path).map(|_| ()).map_err(|error| match error {
+        slab_utils::path::EnsureWithinRootError::RootCanonicalize { path, source } => {
+            AppCoreError::Internal(format!(
+                "failed to resolve plugins root {}: {source}",
+                path.display()
+            ))
         }
-        current = parent;
-    }
-
-    path.to_path_buf()
+        slab_utils::path::EnsureWithinRootError::PathCanonicalize { path, source } => {
+            AppCoreError::Internal(format!(
+                "failed to resolve plugin path {}: {source}",
+                path.display()
+            ))
+        }
+        slab_utils::path::EnsureWithinRootError::OutsideRoot { root, path } => {
+            AppCoreError::BadRequest(format!(
+                "plugin path {} escapes plugins root {}",
+                path.display(),
+                root.display()
+            ))
+        }
+    })
 }

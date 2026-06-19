@@ -209,6 +209,14 @@ fn openai_error_response(error: ServerError) -> Response {
             None,
             Some(message_i18n_with_detail(ServerI18nKey::ErrorBackendNotReady, &message)),
         ),
+        ServerError::RuntimeFailure { message, data } => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            message.clone(),
+            data.error_type().to_owned(),
+            data.runtime_code().map(str::to_owned),
+            None,
+            Some(message_i18n_with_detail(ServerI18nKey::ErrorRuntimeError, &message)),
+        ),
         ServerError::NotImplemented(message) => (
             StatusCode::NOT_IMPLEMENTED,
             message.clone(),
