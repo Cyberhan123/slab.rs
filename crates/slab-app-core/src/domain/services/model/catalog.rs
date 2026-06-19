@@ -14,7 +14,10 @@ use crate::domain::models::{
     UpdateModelCommand, UpdateModelConfigSelectionCommand, normalize_model_capabilities,
 };
 use crate::error::AppCoreError;
-use crate::infra::db::{ModelConfigStateStore, ModelDownloadStore, ModelStore, UnifiedModelRecord};
+use crate::infra::db::{
+    ModelConfigStateRecord, ModelConfigStateStore, ModelDownloadStore, ModelStore,
+    UnifiedModelRecord,
+};
 use crate::infra::model_packs;
 
 use super::{ModelService, download, pack, runtime};
@@ -107,12 +110,8 @@ impl ModelService {
             &explicit_selection,
             &effective_selection,
         );
-        let stored_model = self.store_model_definition(next_model).await?;
-
-        match stored_selection {
-            Some(record) => self.model_state.store().upsert_model_config_state(record).await?,
-            None => self.model_state.store().delete_model_config_state(id).await?,
-        }
+        let stored_model =
+            self.store_model_definition_with_config_state(next_model, stored_selection).await?;
 
         Ok(stored_model)
     }
@@ -194,6 +193,20 @@ impl ModelService {
     ) -> Result<UnifiedModel, AppCoreError> {
         let record = model_to_record(&model)?;
         self.model_state.store().upsert_model(record).await?;
+        self.model_state
+            .auto_unload()
+            .invalidate_model_replay(&model.id, "model definition upserted")
+            .await;
+        Ok(model)
+    }
+
+    pub(super) async fn store_model_definition_with_config_state(
+        &self,
+        model: UnifiedModel,
+        config_state: Option<ModelConfigStateRecord>,
+    ) -> Result<UnifiedModel, AppCoreError> {
+        let record = model_to_record(&model)?;
+        self.model_state.store().upsert_model_with_config_state(record, config_state).await?;
         self.model_state
             .auto_unload()
             .invalidate_model_replay(&model.id, "model definition upserted")
@@ -496,15 +509,7 @@ pub(super) fn canonicalize_model_spec(
 pub(super) fn canonicalize_runtime_presets(
     runtime_presets: Option<crate::domain::models::RuntimePresets>,
 ) -> Option<crate::domain::models::RuntimePresets> {
-    runtime_presets.filter(|presets| {
-        presets.max_tokens.is_some()
-            || presets.temperature.is_some()
-            || presets.top_p.is_some()
-            || presets.top_k.is_some()
-            || presets.min_p.is_some()
-            || presets.presence_penalty.is_some()
-            || presets.repetition_penalty.is_some()
-    })
+    runtime_presets.and_then(crate::domain::models::RuntimePresets::into_non_empty)
 }
 
 fn default_status_for_kind(kind: UnifiedModelKind) -> UnifiedModelStatus {

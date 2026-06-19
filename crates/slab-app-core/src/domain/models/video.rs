@@ -15,7 +15,7 @@ pub struct VideoGenerationCommand {
     pub width: u32,
     pub height: u32,
     pub video_frames: i32,
-    pub fps: f32,
+    pub fps: f64,
     pub cfg_scale: Option<f32>,
     pub guidance: Option<f32>,
     pub steps: Option<i32>,

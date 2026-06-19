@@ -243,39 +243,7 @@ pub(super) fn resolve_pack_model_source(
 fn runtime_presets_from_inference_defaults(
     bridge: &slab_model_pack::ModelPackRuntimeBridge,
 ) -> Option<RuntimePresets> {
-    let defaults = &bridge.inference_defaults;
-    let max_tokens = defaults
-        .get("max_tokens")
-        .and_then(|value| value.as_u64().and_then(|value| u32::try_from(value).ok()));
-    let temperature =
-        defaults.get("temperature").and_then(|value| value.as_f64().map(|value| value as f32));
-    let top_p = defaults.get("top_p").and_then(|value| value.as_f64().map(|value| value as f32));
-    let top_k = defaults
-        .get("top_k")
-        .and_then(|value| value.as_i64().and_then(|value| i32::try_from(value).ok()));
-    let min_p = defaults.get("min_p").and_then(|value| value.as_f64().map(|value| value as f32));
-    let presence_penalty =
-        defaults.get("presence_penalty").and_then(|value| value.as_f64().map(|value| value as f32));
-    let repetition_penalty = defaults
-        .get("repetition_penalty")
-        .and_then(|value| value.as_f64().map(|value| value as f32));
-
-    (max_tokens.is_some()
-        || temperature.is_some()
-        || top_p.is_some()
-        || top_k.is_some()
-        || min_p.is_some()
-        || presence_penalty.is_some()
-        || repetition_penalty.is_some())
-    .then_some(RuntimePresets {
-        max_tokens,
-        temperature,
-        top_p,
-        top_k,
-        min_p,
-        presence_penalty,
-        repetition_penalty,
-    })
+    RuntimePresets::from_json_options(&bridge.inference_defaults)
 }
 
 pub(super) fn primary_materialized_artifact_path(config: &StoredModelConfig) -> Option<String> {

@@ -202,6 +202,7 @@ describe('assistant agent state helpers', () => {
         session_id: 'session-1',
         thread: {
           completion_text: null,
+          config_json: '{}',
           created_at: '2026-01-01T00:00:00Z',
           depth: 0,
           id: 'thread-3',

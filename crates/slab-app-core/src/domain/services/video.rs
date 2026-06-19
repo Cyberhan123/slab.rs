@@ -9,7 +9,7 @@ use crate::config::default_output_dir_for_settings_path;
 use crate::context::WorkerState;
 use crate::domain::models::{
     AcceptedOperation, TaskResult, TaskStatus, VIDEO_GENERATION_TASK_TYPE, VideoGenerationCommand,
-    VideoGenerationRequestData, VideoGenerationResultData, VideoGenerationTaskView,
+    VideoGenerationRequestData, VideoGenerationTaskView,
 };
 use crate::domain::ports::{RuntimeDiffusionVideoRequest, RuntimeRawImageInput};
 use crate::domain::services::ffmpeg::runtime::{
@@ -90,6 +90,7 @@ impl VideoService {
         let input_json = serialize_json_payload(&request_data)?;
 
         let fps = req.fps;
+        let runtime_fps = runtime_fps(req.fps)?;
         let runtime_request = RuntimeDiffusionVideoRequest {
             model: req.model.clone(),
             prompt: req.prompt.clone(),
@@ -103,7 +104,7 @@ impl VideoService {
                 channels: image.channels.clamp(1, u8::MAX as u32) as u8,
             }),
             video_frames: Some(req.video_frames),
-            fps: Some(req.fps),
+            fps: Some(runtime_fps),
             cfg_scale: req.cfg_scale,
             guidance: req.guidance,
             steps: req.steps,
@@ -281,10 +282,6 @@ impl VideoService {
                     Ok(output) if output.status.success() => {
                         let video_path = output_path.to_string_lossy().into_owned();
                         info!(task_id = %operation_id, video_path = %video_path, "video generation succeeded");
-                        let persisted_result = serde_json::to_string(&VideoGenerationResultData {
-                            video_path: Some(video_path.clone()),
-                        })
-                        .unwrap_or_default();
                         let task_result = TaskResult {
                             image: None,
                             images: None,
@@ -295,11 +292,7 @@ impl VideoService {
                         };
                         let task_payload = serde_json::to_string(&task_result).unwrap_or_default();
                         if let Err(db_error) = store
-                            .update_video_generation_result(
-                                &operation_id,
-                                Some(&video_path),
-                                Some(&persisted_result),
-                            )
+                            .update_video_generation_result(&operation_id, Some(&video_path))
                             .await
                         {
                             cleanup_dir(&task_output_dir).await;
@@ -415,4 +408,14 @@ fn map_video_view(row: VideoGenerationTaskViewRecord) -> VideoGenerationTaskView
 
 fn video_task_dir(output_root: &Path, task_id: &str) -> PathBuf {
     output_root.join("videos").join(task_id)
+}
+
+fn runtime_fps(value: f64) -> Result<f32, AppCoreError> {
+    if !value.is_finite() {
+        return Err(AppCoreError::BadRequest("fps must be a finite value".into()));
+    }
+    if value < f64::from(f32::MIN) || value > f64::from(f32::MAX) {
+        return Err(AppCoreError::BadRequest("fps is outside runtime f32 range".into()));
+    }
+    Ok(value as f32)
 }

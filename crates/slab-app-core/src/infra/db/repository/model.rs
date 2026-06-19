@@ -1,5 +1,6 @@
 use super::AnyStore;
-use crate::infra::db::entities::UnifiedModelRecord;
+use crate::domain::models::ModelSpec;
+use crate::infra::db::entities::{ModelConfigStateRecord, UnifiedModelRecord};
 use chrono::{DateTime, Utc};
 use std::future::Future;
 
@@ -16,6 +17,11 @@ pub trait ModelStore: Send + Sync + 'static {
         &self,
     ) -> impl Future<Output = Result<Vec<UnifiedModelRecord>, sqlx::Error>> + Send;
     fn delete_model(&self, id: &str) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
+    fn upsert_model_with_config_state(
+        &self,
+        record: UnifiedModelRecord,
+        config_state: Option<ModelConfigStateRecord>,
+    ) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
     /// Update a local model's downloaded local path and materialized artifact state.
     fn update_model_download_state(
         &self,
@@ -150,6 +156,82 @@ impl ModelStore for AnyStore {
         Ok(())
     }
 
+    async fn upsert_model_with_config_state(
+        &self,
+        record: UnifiedModelRecord,
+        config_state: Option<ModelConfigStateRecord>,
+    ) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        let created_at = record.created_at.to_rfc3339();
+        let updated_at = record.updated_at.to_rfc3339();
+        sqlx::query(
+            "INSERT INTO models \
+             (id, display_name, kind, backend_id, capabilities, status, spec, runtime_presets, materialized_artifacts, selected_download_source, config_schema_version, config_policy_version, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
+             ON CONFLICT(id) DO UPDATE SET \
+                  display_name = excluded.display_name, \
+                  kind = excluded.kind, \
+                  backend_id = excluded.backend_id, \
+                  capabilities = excluded.capabilities, \
+                  status = excluded.status, \
+                  spec = excluded.spec, \
+                  runtime_presets = excluded.runtime_presets, \
+                  materialized_artifacts = excluded.materialized_artifacts, \
+                  selected_download_source = excluded.selected_download_source, \
+                  config_schema_version = excluded.config_schema_version, \
+                  config_policy_version = excluded.config_policy_version, \
+                  created_at = excluded.created_at, \
+                  updated_at = excluded.updated_at",
+        )
+        .bind(&record.id)
+        .bind(&record.display_name)
+        .bind(&record.kind)
+        .bind(&record.backend_id)
+        .bind(&record.capabilities)
+        .bind(&record.status)
+        .bind(&record.spec)
+        .bind(&record.runtime_presets)
+        .bind(&record.materialized_artifacts)
+        .bind(&record.selected_download_source)
+        .bind(record.config_schema_version)
+        .bind(record.config_policy_version)
+        .bind(&created_at)
+        .bind(&updated_at)
+        .execute(&mut *tx)
+        .await?;
+
+        match config_state {
+            Some(config_state) => {
+                let updated_at = config_state.updated_at.to_rfc3339();
+                sqlx::query(
+                    "INSERT INTO model_config_state (model_id, selected_preset_id, selected_variant_id, selected_engine_id, updated_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5) \
+                     ON CONFLICT(model_id) DO UPDATE SET \
+                        selected_preset_id = excluded.selected_preset_id, \
+                        selected_variant_id = excluded.selected_variant_id, \
+                        selected_engine_id = excluded.selected_engine_id, \
+                        updated_at = excluded.updated_at",
+                )
+                .bind(&config_state.model_id)
+                .bind(&config_state.selected_preset_id)
+                .bind(&config_state.selected_variant_id)
+                .bind(&config_state.selected_engine_id)
+                .bind(&updated_at)
+                .execute(&mut *tx)
+                .await?;
+            }
+            None => {
+                sqlx::query("DELETE FROM model_config_state WHERE model_id = ?1")
+                    .bind(&record.id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
     async fn update_model_download_state(
         &self,
         id: &str,
@@ -159,17 +241,28 @@ impl ModelStore for AnyStore {
         selected_download_source: Option<&str>,
     ) -> Result<(), sqlx::Error> {
         let updated_at = Utc::now().to_rfc3339();
-        // Use SQLite's json_set to update the local_path field inside the spec JSON column.
+        let current_spec: Option<String> =
+            sqlx::query_scalar("SELECT spec FROM models WHERE id = ?1")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?;
+        let Some(current_spec) = current_spec else {
+            return Ok(());
+        };
+        let mut spec =
+            serde_json::from_str::<ModelSpec>(&current_spec).map_err(json_to_sqlx_error)?;
+        spec.local_path = Some(local_path.to_owned());
+        let spec = serde_json::to_string(&spec).map_err(json_to_sqlx_error)?;
         sqlx::query(
             "UPDATE models \
-             SET spec = json_set(spec, '$.local_path', ?1), \
+             SET spec = ?1, \
                  status = ?2, \
                  materialized_artifacts = ?3, \
                  selected_download_source = ?4, \
                  updated_at = ?5 \
              WHERE id = ?6",
         )
-        .bind(local_path)
+        .bind(spec)
         .bind(status)
         .bind(materialized_artifacts)
         .bind(selected_download_source)
@@ -181,9 +274,16 @@ impl ModelStore for AnyStore {
     }
 }
 
+fn json_to_sqlx_error(error: serde_json::Error) -> sqlx::Error {
+    sqlx::Error::Decode(Box::new(error))
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::test_support::migrated_test_pool;
+    use super::ModelStore;
+    use crate::infra::db::{ModelConfigStateRecord, UnifiedModelRecord};
+    use crate::test_support::{migrated_test_pool, migrated_test_store};
+    use chrono::Utc;
 
     #[tokio::test]
     async fn remove_provider_migration_keeps_canonical_model_columns() {
@@ -388,5 +488,41 @@ mod tests {
             .await
             .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn upsert_model_with_config_state_rolls_back_model_write_on_state_failure() {
+        let store = migrated_test_store().await;
+        let now = Utc::now();
+        let record = UnifiedModelRecord {
+            id: "model-tx".to_owned(),
+            display_name: "Transactional Model".to_owned(),
+            kind: "local".to_owned(),
+            backend_id: Some("ggml.llama".to_owned()),
+            capabilities: "[]".to_owned(),
+            status: "ready".to_owned(),
+            spec: "{}".to_owned(),
+            runtime_presets: None,
+            materialized_artifacts: "{}".to_owned(),
+            selected_download_source: None,
+            config_schema_version: 2,
+            config_policy_version: 1,
+            created_at: now,
+            updated_at: now,
+        };
+        let config_state = ModelConfigStateRecord {
+            model_id: "missing-model".to_owned(),
+            selected_preset_id: Some("preset-a".to_owned()),
+            selected_variant_id: Some("variant-a".to_owned()),
+            selected_engine_id: None,
+            updated_at: now,
+        };
+
+        store
+            .upsert_model_with_config_state(record, Some(config_state))
+            .await
+            .expect_err("foreign-key failure should abort transaction");
+
+        assert!(store.get_model("model-tx").await.expect("read model").is_none());
     }
 }

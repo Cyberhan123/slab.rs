@@ -216,6 +216,83 @@ pub struct RuntimePresets {
     pub repetition_penalty: Option<f32>,
 }
 
+impl RuntimePresets {
+    pub fn new(
+        max_tokens: Option<u32>,
+        temperature: Option<f32>,
+        top_p: Option<f32>,
+        top_k: Option<i32>,
+        min_p: Option<f32>,
+        presence_penalty: Option<f32>,
+        repetition_penalty: Option<f32>,
+    ) -> Self {
+        Self { max_tokens, temperature, top_p, top_k, min_p, presence_penalty, repetition_penalty }
+    }
+
+    pub fn from_optional_fields(
+        max_tokens: Option<u32>,
+        temperature: Option<f32>,
+        top_p: Option<f32>,
+        top_k: Option<i32>,
+        min_p: Option<f32>,
+        presence_penalty: Option<f32>,
+        repetition_penalty: Option<f32>,
+    ) -> Option<Self> {
+        Self::new(
+            max_tokens,
+            temperature,
+            top_p,
+            top_k,
+            min_p,
+            presence_penalty,
+            repetition_penalty,
+        )
+        .into_non_empty()
+    }
+
+    pub fn from_json_options(options: &BTreeMap<String, Value>) -> Option<Self> {
+        Self::from_optional_fields(
+            options.get("max_tokens").and_then(json_value_to_u32),
+            options.get("temperature").and_then(json_value_to_f32),
+            options.get("top_p").and_then(json_value_to_f32),
+            options.get("top_k").and_then(json_value_to_i32),
+            options.get("min_p").and_then(json_value_to_f32),
+            options.get("presence_penalty").and_then(json_value_to_f32),
+            options.get("repetition_penalty").and_then(json_value_to_f32),
+        )
+    }
+
+    pub fn into_non_empty(self) -> Option<Self> {
+        (!self.is_empty()).then_some(self)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.max_tokens.is_none()
+            && self.temperature.is_none()
+            && self.top_p.is_none()
+            && self.top_k.is_none()
+            && self.min_p.is_none()
+            && self.presence_penalty.is_none()
+            && self.repetition_penalty.is_none()
+    }
+}
+
+fn json_value_to_f32(value: &Value) -> Option<f32> {
+    let value = value.as_f64()?;
+    if !value.is_finite() || value < f64::from(f32::MIN) || value > f64::from(f32::MAX) {
+        return None;
+    }
+    Some(value as f32)
+}
+
+fn json_value_to_u32(value: &Value) -> Option<u32> {
+    value.as_u64().and_then(|value| u32::try_from(value).ok())
+}
+
+fn json_value_to_i32(value: &Value) -> Option<i32> {
+    value.as_i64().and_then(|value| i32::try_from(value).ok())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ModelPackSelection {
     #[serde(skip_serializing_if = "Option::is_none", default)]

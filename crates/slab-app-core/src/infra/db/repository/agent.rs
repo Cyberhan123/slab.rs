@@ -15,9 +15,9 @@ fn parse_status(s: &str) -> ThreadStatus {
         tracing::warn!(
             raw = s,
             error = %error,
-            "unknown agent thread status in database; defaulting to Pending"
+            "unknown agent thread status in database; defaulting to Errored"
         );
-        ThreadStatus::Pending
+        ThreadStatus::Errored
     })
 }
 
@@ -46,43 +46,72 @@ struct AgentThreadMessageRow {
     created_at: String,
 }
 
-impl From<AgentThreadRow> for ThreadSnapshot {
-    fn from(r: AgentThreadRow) -> Self {
-        ThreadSnapshot {
+impl TryFrom<AgentThreadRow> for ThreadSnapshot {
+    type Error = slab_agent::AgentError;
+
+    fn try_from(r: AgentThreadRow) -> Result<Self, Self::Error> {
+        let depth = u32::try_from(r.depth).map_err(|error| {
+            tracing::warn!(
+                thread_id = %r.id,
+                depth = r.depth,
+                error = %error,
+                "invalid agent thread depth in database"
+            );
+            slab_agent::AgentError::Store(format!(
+                "invalid agent thread depth for '{}': {} ({})",
+                r.id, r.depth, error
+            ))
+        })?;
+
+        Ok(ThreadSnapshot {
             id: r.id,
             session_id: r.session_id,
             parent_id: r.parent_id,
-            depth: r.depth as u32,
+            depth,
             status: parse_status(&r.status),
             role_name: r.role_name,
             config_json: r.config_json,
             completion_text: r.completion_text,
             created_at: r.created_at,
             updated_at: r.updated_at,
-        }
+        })
     }
 }
 
 impl AgentThreadMessageRow {
-    fn into_record(self) -> ThreadMessageRecord {
+    fn into_record(self) -> Result<ThreadMessageRecord, slab_agent::AgentError> {
+        let turn_index = u32::try_from(self.turn_index).map_err(|error| {
+            tracing::warn!(
+                message_id = %self.id,
+                thread_id = %self.thread_id,
+                turn_index = self.turn_index,
+                error = %error,
+                "invalid agent thread message turn index in database"
+            );
+            slab_agent::AgentError::Store(format!(
+                "invalid agent thread message turn_index for '{}': {} ({})",
+                self.id, self.turn_index, error
+            ))
+        })?;
+        let Self { id, thread_id, turn_index: _, role, content, created_at } = self;
         let message =
-            serde_json::from_str::<ConversationMessage>(&self.content).unwrap_or_else(|_| {
+            serde_json::from_str::<ConversationMessage>(&content).unwrap_or_else(|error| {
+                tracing::warn!(
+                    message_id = %id,
+                    thread_id = %thread_id,
+                    error = %error,
+                    "failed to decode stored agent thread message content; preserving raw text"
+                );
                 ConversationMessage {
-                    role: self.role,
-                    content: ConversationMessageContent::Text(self.content),
+                    role,
+                    content: ConversationMessageContent::Text(content),
                     name: None,
                     tool_call_id: None,
                     tool_calls: Vec::new(),
                 }
             });
 
-        ThreadMessageRecord {
-            id: self.id,
-            thread_id: self.thread_id,
-            turn_index: self.turn_index as u32,
-            message,
-            created_at: self.created_at,
-        }
+        Ok(ThreadMessageRecord { id, thread_id, turn_index, message, created_at })
     }
 }
 
@@ -108,7 +137,7 @@ impl AgentStorePort for SqlxStore {
         .bind(&snapshot.id)
         .bind(&snapshot.session_id)
         .bind(&snapshot.parent_id)
-        .bind(snapshot.depth as i64)
+        .bind(i64::from(snapshot.depth))
         .bind(snapshot.status.to_string())
         .bind(&snapshot.role_name)
         .bind(&snapshot.config_json)
@@ -132,7 +161,7 @@ impl AgentStorePort for SqlxStore {
         .await
         .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
 
-        Ok(row.map(Into::into))
+        row.map(ThreadSnapshot::try_from).transpose()
     }
 
     async fn list_session_threads(
@@ -150,7 +179,7 @@ impl AgentStorePort for SqlxStore {
         .await
         .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
 
-        Ok(rows.into_iter().map(Into::into).collect())
+        rows.into_iter().map(ThreadSnapshot::try_from).collect()
     }
 
     async fn update_thread_status(
@@ -244,7 +273,7 @@ impl AgentStorePort for SqlxStore {
         )
         .bind(&record.id)
         .bind(&record.thread_id)
-        .bind(record.turn_index as i64)
+        .bind(i64::from(record.turn_index))
         .bind(&record.message.role)
         .bind(content)
         .bind(&record.created_at)
@@ -268,7 +297,7 @@ impl AgentStorePort for SqlxStore {
         .await
         .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
 
-        Ok(rows.into_iter().map(AgentThreadMessageRow::into_record).collect())
+        rows.into_iter().map(AgentThreadMessageRow::into_record).collect()
     }
 
     async fn upsert_turn_state(
@@ -290,7 +319,7 @@ impl AgentStorePort for SqlxStore {
                completed_at=COALESCE(excluded.completed_at, agent_turn_states.completed_at)",
         )
         .bind(&record.thread_id)
-        .bind(record.turn_index as i64)
+        .bind(i64::from(record.turn_index))
         .bind(&record.status)
         .bind(&record.input_messages_json)
         .bind(&record.tool_specs_json)
@@ -379,5 +408,85 @@ mod tests {
         assert_eq!(row.2.as_deref(), Some("[]"));
         assert_eq!(row.3, now);
         assert_eq!(row.4.as_deref(), Some("2026-01-01T00:00:00Z"));
+    }
+
+    #[tokio::test]
+    async fn malformed_thread_message_fallback_preserves_raw_content() {
+        let store = seeded_store().await;
+        sqlx::query(
+            "INSERT INTO agent_thread_messages (id, thread_id, turn_index, role, content, created_at) \
+             VALUES ('message-raw', 'thread-1', 0, 'assistant', 'not-json', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&store.pool)
+        .await
+        .expect("insert raw message");
+
+        let messages = store.list_thread_messages("thread-1").await.expect("list messages");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].message.role, "assistant");
+        assert_eq!(messages[0].message.content.rendered_text(), "not-json");
+        assert!(messages[0].message.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn thread_depth_overflow_is_rejected_on_read() {
+        let error = ThreadSnapshot::try_from(AgentThreadRow {
+            id: "thread-1".to_owned(),
+            session_id: "session-1".to_owned(),
+            parent_id: None,
+            depth: i64::from(u32::MAX) + 1,
+            status: "running".to_owned(),
+            role_name: None,
+            config_json: "{}".to_owned(),
+            completion_text: None,
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-01T00:00:00Z".to_owned(),
+        })
+        .expect_err("invalid depth should fail");
+        assert!(error.to_string().contains("invalid agent thread depth"));
+    }
+
+    #[test]
+    fn thread_message_turn_index_overflow_is_rejected_on_read() {
+        let error = AgentThreadMessageRow {
+            id: "message-bad-index".to_owned(),
+            thread_id: "thread-1".to_owned(),
+            turn_index: i64::from(u32::MAX) + 1,
+            role: "assistant".to_owned(),
+            content: "{\"role\":\"assistant\",\"content\":\"ok\"}".to_owned(),
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+        }
+        .into_record()
+        .expect_err("invalid turn index should fail");
+        assert!(error.to_string().contains("invalid agent thread message turn_index"));
+    }
+
+    async fn seeded_store() -> SqlxStore {
+        let store = SqlxStore::connect("sqlite::memory:").await.expect("store");
+        let now = "2026-01-01T00:00:00Z".to_owned();
+        sqlx::query(
+            "INSERT INTO chat_sessions (id, name, created_at, updated_at) \
+             VALUES ('session-1', '', ?1, ?1)",
+        )
+        .bind(&now)
+        .execute(&store.pool)
+        .await
+        .expect("session");
+        store
+            .upsert_thread(&ThreadSnapshot {
+                id: "thread-1".to_owned(),
+                session_id: "session-1".to_owned(),
+                parent_id: None,
+                depth: 0,
+                status: ThreadStatus::Running,
+                role_name: None,
+                config_json: "{}".to_owned(),
+                completion_text: None,
+                created_at: now.clone(),
+                updated_at: now,
+            })
+            .await
+            .expect("thread");
+        store
     }
 }

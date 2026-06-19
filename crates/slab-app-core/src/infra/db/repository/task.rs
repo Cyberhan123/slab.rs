@@ -54,9 +54,8 @@ pub trait TaskStore: Send + Sync + 'static {
 
 impl TaskStore for AnyStore {
     async fn insert_task(&self, record: TaskRecord) -> Result<(), sqlx::Error> {
-        let result_data = encode_task_payload(record.result_data.as_deref());
         let mut tx = self.pool.begin().await?;
-        super::insert_task_row(&mut tx, &record, result_data.as_deref()).await?;
+        super::insert_task_row(&mut tx, &record, record.result_data.as_deref()).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -204,19 +203,27 @@ impl TaskStore for AnyStore {
     }
 }
 
-fn encode_task_payload(raw: Option<&str>) -> Option<String> {
+pub(super) fn encode_task_payload(raw: Option<&str>) -> Option<String> {
     let raw = raw?;
     let data = serde_json::from_str::<Value>(raw).unwrap_or_else(|_| Value::String(raw.to_owned()));
 
-    serde_json::to_string(&TaskPayloadEnvelope {
+    match serde_json::to_string(&TaskPayloadEnvelope {
         kind: TASK_PAYLOAD_KIND.to_owned(),
         version: TASK_PAYLOAD_VERSION,
         data,
-    })
-    .ok()
+    }) {
+        Ok(payload) => Some(payload),
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                "failed to serialize task payload envelope; dropping result_data"
+            );
+            None
+        }
+    }
 }
 
-fn decode_task_payload(raw: Option<String>) -> Option<String> {
+pub(super) fn decode_task_payload(raw: Option<String>) -> Option<String> {
     let raw = raw?;
     let Ok(envelope) = serde_json::from_str::<TaskPayloadEnvelope>(&raw) else {
         tracing::warn!("stored task payload is not an envelope; ignoring result_data");
@@ -234,7 +241,16 @@ fn decode_task_payload(raw: Option<String>) -> Option<String> {
 
     match envelope.data {
         Value::String(value) => Some(value),
-        value => serde_json::to_string(&value).ok(),
+        value => match serde_json::to_string(&value) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    "failed to serialize stored task payload data; ignoring result_data"
+                );
+                None
+            }
+        },
     }
 }
 

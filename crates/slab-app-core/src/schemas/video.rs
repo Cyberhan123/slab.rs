@@ -64,7 +64,7 @@ pub struct VideoGenerationRequest {
     /// Output frames per second (default `8`).
     #[serde(default = "default_fps")]
     #[validate(range(min = 1.0, max = 60.0, message = "fps must be between 1 and 60"))]
-    pub fps: f32,
+    pub fps: f64,
 
     /// Classifier-Free Guidance scale (default `7.0`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -127,7 +127,7 @@ fn default_frames() -> i32 {
     16
 }
 
-fn default_fps() -> f32 {
+fn default_fps() -> f64 {
     8.0
 }
 
@@ -199,7 +199,7 @@ pub struct VideoGenerationRequestData {
     pub width: u32,
     pub height: u32,
     pub video_frames: i32,
-    pub fps: f32,
+    pub fps: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cfg_scale: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -243,7 +243,7 @@ pub struct VideoGenerationTaskResponse {
     pub width: u32,
     pub height: u32,
     pub frames: i32,
-    pub fps: f32,
+    pub fps: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reference_image_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

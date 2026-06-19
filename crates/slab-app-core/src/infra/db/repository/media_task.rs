@@ -1,5 +1,8 @@
 use super::AnyStore;
-use crate::domain::models::{TaskStatus, task_progress_from_payload};
+use crate::domain::models::{
+    AudioTranscriptionResultData, ImageGenerationResultData, TaskResult, TaskStatus,
+    VideoGenerationResultData, task_progress_from_payload,
+};
 use crate::infra::db::entities::{
     AudioTranscriptionTaskRecord, AudioTranscriptionTaskViewRecord, ImageGenerationTaskRecord,
     ImageGenerationTaskViewRecord, MediaTaskState, NewAudioTranscriptionTaskRecord,
@@ -7,6 +10,7 @@ use crate::infra::db::entities::{
     VideoGenerationTaskRecord, VideoGenerationTaskViewRecord,
 };
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use std::future::Future;
 
 #[derive(Debug, sqlx::FromRow)]
@@ -25,7 +29,6 @@ struct ImageTaskViewRow {
     primary_image_path: Option<String>,
     artifact_paths: Option<String>,
     request_data: String,
-    result_data: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
     task_status: String,
@@ -50,7 +53,6 @@ struct VideoTaskViewRow {
     reference_image_path: Option<String>,
     video_path: Option<String>,
     request_data: String,
-    result_data: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
     task_status: String,
@@ -73,7 +75,6 @@ struct AudioTaskViewRow {
     decode_json: Option<String>,
     transcript_text: Option<String>,
     request_data: String,
-    result_data: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
     task_status: String,
@@ -107,21 +108,18 @@ pub trait MediaTaskStore: Send + Sync + 'static {
         task_id: &str,
         artifact_paths: &[String],
         primary_image_path: Option<&str>,
-        result_data: Option<&str>,
     ) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
 
     fn update_video_generation_result(
         &self,
         task_id: &str,
         video_path: Option<&str>,
-        result_data: Option<&str>,
     ) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
 
     fn update_audio_transcription_result(
         &self,
         task_id: &str,
         transcript_text: Option<&str>,
-        result_data: Option<&str>,
     ) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
 
     fn get_image_generation_task(
@@ -162,8 +160,8 @@ impl MediaTaskStore for AnyStore {
         super::insert_task_row(&mut tx, &task, task.result_data.as_deref()).await?;
         sqlx::query(
             "INSERT INTO image_generation_tasks \
-             (task_id, backend_id, model_id, model_path, prompt, negative_prompt, mode, width, height, requested_count, reference_image_path, primary_image_path, artifact_paths, request_data, result_data, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, NULL, ?12, NULL, ?13, ?14)",
+             (task_id, backend_id, model_id, model_path, prompt, negative_prompt, mode, width, height, requested_count, reference_image_path, primary_image_path, artifact_paths, request_data, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, NULL, ?12, ?13, ?14)",
         )
         .bind(&image_task.task_id)
         .bind(&image_task.backend_id)
@@ -194,8 +192,8 @@ impl MediaTaskStore for AnyStore {
         super::insert_task_row(&mut tx, &task, task.result_data.as_deref()).await?;
         sqlx::query(
             "INSERT INTO video_generation_tasks \
-             (task_id, backend_id, model_id, model_path, prompt, negative_prompt, width, height, frames, fps, reference_image_path, video_path, request_data, result_data, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, ?12, NULL, ?13, ?14)",
+             (task_id, backend_id, model_id, model_path, prompt, negative_prompt, width, height, frames, fps, reference_image_path, video_path, request_data, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, ?12, ?13, ?14)",
         )
         .bind(&video_task.task_id)
         .bind(&video_task.backend_id)
@@ -226,8 +224,8 @@ impl MediaTaskStore for AnyStore {
         super::insert_task_row(&mut tx, &task, task.result_data.as_deref()).await?;
         sqlx::query(
             "INSERT INTO audio_transcription_tasks \
-             (task_id, backend_id, model_id, source_path, language, prompt, detect_language, vad_json, decode_json, transcript_text, request_data, result_data, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, NULL, ?11, ?12)",
+             (task_id, backend_id, model_id, source_path, language, prompt, detect_language, vad_json, decode_json, transcript_text, request_data, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?11, ?12)",
         )
         .bind(&audio_task.task_id)
         .bind(&audio_task.backend_id)
@@ -252,19 +250,16 @@ impl MediaTaskStore for AnyStore {
         task_id: &str,
         artifact_paths: &[String],
         primary_image_path: Option<&str>,
-        result_data: Option<&str>,
     ) -> Result<(), sqlx::Error> {
-        let artifact_paths =
-            serde_json::to_string(artifact_paths).unwrap_or_else(|_| "[]".to_owned());
+        let artifact_paths = serde_json::to_string(artifact_paths).map_err(json_to_sqlx_error)?;
         let updated_at = Utc::now().to_rfc3339();
         sqlx::query(
             "UPDATE image_generation_tasks \
-             SET artifact_paths = ?1, primary_image_path = ?2, result_data = ?3, updated_at = ?4 \
-             WHERE task_id = ?5",
+             SET artifact_paths = ?1, primary_image_path = ?2, updated_at = ?3 \
+             WHERE task_id = ?4",
         )
         .bind(artifact_paths)
         .bind(primary_image_path)
-        .bind(result_data)
         .bind(updated_at)
         .bind(task_id)
         .execute(&self.pool)
@@ -276,16 +271,14 @@ impl MediaTaskStore for AnyStore {
         &self,
         task_id: &str,
         video_path: Option<&str>,
-        result_data: Option<&str>,
     ) -> Result<(), sqlx::Error> {
         let updated_at = Utc::now().to_rfc3339();
         sqlx::query(
             "UPDATE video_generation_tasks \
-             SET video_path = ?1, result_data = ?2, updated_at = ?3 \
-             WHERE task_id = ?4",
+             SET video_path = ?1, updated_at = ?2 \
+             WHERE task_id = ?3",
         )
         .bind(video_path)
-        .bind(result_data)
         .bind(updated_at)
         .bind(task_id)
         .execute(&self.pool)
@@ -297,16 +290,14 @@ impl MediaTaskStore for AnyStore {
         &self,
         task_id: &str,
         transcript_text: Option<&str>,
-        result_data: Option<&str>,
     ) -> Result<(), sqlx::Error> {
         let updated_at = Utc::now().to_rfc3339();
         sqlx::query(
             "UPDATE audio_transcription_tasks \
-             SET transcript_text = ?1, result_data = ?2, updated_at = ?3 \
-             WHERE task_id = ?4",
+             SET transcript_text = ?1, updated_at = ?2 \
+             WHERE task_id = ?3",
         )
         .bind(transcript_text)
-        .bind(result_data)
         .bind(updated_at)
         .bind(task_id)
         .execute(&self.pool)
@@ -322,7 +313,7 @@ impl MediaTaskStore for AnyStore {
             .bind(task_id)
             .fetch_optional(&self.pool)
             .await?;
-        Ok(row.map(image_view_from_row))
+        row.map(image_view_from_row).transpose()
     }
 
     async fn list_image_generation_tasks(
@@ -330,7 +321,7 @@ impl MediaTaskStore for AnyStore {
     ) -> Result<Vec<ImageGenerationTaskViewRecord>, sqlx::Error> {
         let rows: Vec<ImageTaskViewRow> =
             sqlx::query_as(IMAGE_TASK_VIEW_QUERY).fetch_all(&self.pool).await?;
-        Ok(rows.into_iter().map(image_view_from_row).collect())
+        rows.into_iter().map(image_view_from_row).collect()
     }
 
     async fn get_video_generation_task(
@@ -341,7 +332,7 @@ impl MediaTaskStore for AnyStore {
             .bind(task_id)
             .fetch_optional(&self.pool)
             .await?;
-        Ok(row.map(video_view_from_row))
+        row.map(video_view_from_row).transpose()
     }
 
     async fn list_video_generation_tasks(
@@ -349,7 +340,7 @@ impl MediaTaskStore for AnyStore {
     ) -> Result<Vec<VideoGenerationTaskViewRecord>, sqlx::Error> {
         let rows: Vec<VideoTaskViewRow> =
             sqlx::query_as(VIDEO_TASK_VIEW_QUERY).fetch_all(&self.pool).await?;
-        Ok(rows.into_iter().map(video_view_from_row).collect())
+        rows.into_iter().map(video_view_from_row).collect()
     }
 
     async fn get_audio_transcription_task(
@@ -360,7 +351,7 @@ impl MediaTaskStore for AnyStore {
             .bind(task_id)
             .fetch_optional(&self.pool)
             .await?;
-        Ok(row.map(audio_view_from_row))
+        row.map(audio_view_from_row).transpose()
     }
 
     async fn list_audio_transcription_tasks(
@@ -368,37 +359,43 @@ impl MediaTaskStore for AnyStore {
     ) -> Result<Vec<AudioTranscriptionTaskViewRecord>, sqlx::Error> {
         let rows: Vec<AudioTaskViewRow> =
             sqlx::query_as(AUDIO_TASK_VIEW_QUERY).fetch_all(&self.pool).await?;
-        Ok(rows.into_iter().map(audio_view_from_row).collect())
+        rows.into_iter().map(audio_view_from_row).collect()
     }
 }
 
-const IMAGE_TASK_VIEW_QUERY: &str = "SELECT i.task_id, i.backend_id, i.model_id, i.model_path, i.prompt, i.negative_prompt, i.mode, i.width, i.height, i.requested_count, i.reference_image_path, i.primary_image_path, i.artifact_paths, i.request_data, i.result_data, i.created_at, i.updated_at, t.status AS task_status, t.result_data AS task_result_data, t.error_msg, t.created_at AS task_created_at, t.updated_at AS task_updated_at FROM image_generation_tasks i JOIN tasks t ON t.id = i.task_id ORDER BY t.created_at DESC";
-const IMAGE_TASK_VIEW_QUERY_WITH_ID: &str = "SELECT i.task_id, i.backend_id, i.model_id, i.model_path, i.prompt, i.negative_prompt, i.mode, i.width, i.height, i.requested_count, i.reference_image_path, i.primary_image_path, i.artifact_paths, i.request_data, i.result_data, i.created_at, i.updated_at, t.status AS task_status, t.result_data AS task_result_data, t.error_msg, t.created_at AS task_created_at, t.updated_at AS task_updated_at FROM image_generation_tasks i JOIN tasks t ON t.id = i.task_id WHERE i.task_id = ?1";
+const IMAGE_TASK_VIEW_QUERY: &str = "SELECT i.task_id, i.backend_id, i.model_id, i.model_path, i.prompt, i.negative_prompt, i.mode, i.width, i.height, i.requested_count, i.reference_image_path, i.primary_image_path, i.artifact_paths, i.request_data, i.created_at, i.updated_at, t.status AS task_status, t.result_data AS task_result_data, t.error_msg, t.created_at AS task_created_at, t.updated_at AS task_updated_at FROM image_generation_tasks i JOIN tasks t ON t.id = i.task_id ORDER BY t.created_at DESC";
+const IMAGE_TASK_VIEW_QUERY_WITH_ID: &str = "SELECT i.task_id, i.backend_id, i.model_id, i.model_path, i.prompt, i.negative_prompt, i.mode, i.width, i.height, i.requested_count, i.reference_image_path, i.primary_image_path, i.artifact_paths, i.request_data, i.created_at, i.updated_at, t.status AS task_status, t.result_data AS task_result_data, t.error_msg, t.created_at AS task_created_at, t.updated_at AS task_updated_at FROM image_generation_tasks i JOIN tasks t ON t.id = i.task_id WHERE i.task_id = ?1";
 
-const VIDEO_TASK_VIEW_QUERY: &str = "SELECT v.task_id, v.backend_id, v.model_id, v.model_path, v.prompt, v.negative_prompt, v.width, v.height, v.frames, v.fps, v.reference_image_path, v.video_path, v.request_data, v.result_data, v.created_at, v.updated_at, t.status AS task_status, t.result_data AS task_result_data, t.error_msg, t.created_at AS task_created_at, t.updated_at AS task_updated_at FROM video_generation_tasks v JOIN tasks t ON t.id = v.task_id ORDER BY t.created_at DESC";
-const VIDEO_TASK_VIEW_QUERY_WITH_ID: &str = "SELECT v.task_id, v.backend_id, v.model_id, v.model_path, v.prompt, v.negative_prompt, v.width, v.height, v.frames, v.fps, v.reference_image_path, v.video_path, v.request_data, v.result_data, v.created_at, v.updated_at, t.status AS task_status, t.result_data AS task_result_data, t.error_msg, t.created_at AS task_created_at, t.updated_at AS task_updated_at FROM video_generation_tasks v JOIN tasks t ON t.id = v.task_id WHERE v.task_id = ?1";
+const VIDEO_TASK_VIEW_QUERY: &str = "SELECT v.task_id, v.backend_id, v.model_id, v.model_path, v.prompt, v.negative_prompt, v.width, v.height, v.frames, v.fps, v.reference_image_path, v.video_path, v.request_data, v.created_at, v.updated_at, t.status AS task_status, t.result_data AS task_result_data, t.error_msg, t.created_at AS task_created_at, t.updated_at AS task_updated_at FROM video_generation_tasks v JOIN tasks t ON t.id = v.task_id ORDER BY t.created_at DESC";
+const VIDEO_TASK_VIEW_QUERY_WITH_ID: &str = "SELECT v.task_id, v.backend_id, v.model_id, v.model_path, v.prompt, v.negative_prompt, v.width, v.height, v.frames, v.fps, v.reference_image_path, v.video_path, v.request_data, v.created_at, v.updated_at, t.status AS task_status, t.result_data AS task_result_data, t.error_msg, t.created_at AS task_created_at, t.updated_at AS task_updated_at FROM video_generation_tasks v JOIN tasks t ON t.id = v.task_id WHERE v.task_id = ?1";
 
-const AUDIO_TASK_VIEW_QUERY: &str = "SELECT a.task_id, a.backend_id, a.model_id, a.source_path, a.language, a.prompt, a.detect_language, a.vad_json, a.decode_json, a.transcript_text, a.request_data, a.result_data, a.created_at, a.updated_at, t.status AS task_status, t.result_data AS task_result_data, t.error_msg, t.created_at AS task_created_at, t.updated_at AS task_updated_at FROM audio_transcription_tasks a JOIN tasks t ON t.id = a.task_id ORDER BY t.created_at DESC";
-const AUDIO_TASK_VIEW_QUERY_WITH_ID: &str = "SELECT a.task_id, a.backend_id, a.model_id, a.source_path, a.language, a.prompt, a.detect_language, a.vad_json, a.decode_json, a.transcript_text, a.request_data, a.result_data, a.created_at, a.updated_at, t.status AS task_status, t.result_data AS task_result_data, t.error_msg, t.created_at AS task_created_at, t.updated_at AS task_updated_at FROM audio_transcription_tasks a JOIN tasks t ON t.id = a.task_id WHERE a.task_id = ?1";
+const AUDIO_TASK_VIEW_QUERY: &str = "SELECT a.task_id, a.backend_id, a.model_id, a.source_path, a.language, a.prompt, a.detect_language, a.vad_json, a.decode_json, a.transcript_text, a.request_data, a.created_at, a.updated_at, t.status AS task_status, t.result_data AS task_result_data, t.error_msg, t.created_at AS task_created_at, t.updated_at AS task_updated_at FROM audio_transcription_tasks a JOIN tasks t ON t.id = a.task_id ORDER BY t.created_at DESC";
+const AUDIO_TASK_VIEW_QUERY_WITH_ID: &str = "SELECT a.task_id, a.backend_id, a.model_id, a.source_path, a.language, a.prompt, a.detect_language, a.vad_json, a.decode_json, a.transcript_text, a.request_data, a.created_at, a.updated_at, t.status AS task_status, t.result_data AS task_result_data, t.error_msg, t.created_at AS task_created_at, t.updated_at AS task_updated_at FROM audio_transcription_tasks a JOIN tasks t ON t.id = a.task_id WHERE a.task_id = ?1";
 
-fn image_view_from_row(row: ImageTaskViewRow) -> ImageGenerationTaskViewRecord {
-    ImageGenerationTaskViewRecord {
+fn image_view_from_row(
+    row: ImageTaskViewRow,
+) -> Result<ImageGenerationTaskViewRecord, sqlx::Error> {
+    let artifact_paths =
+        decode_string_array(row.artifact_paths.as_deref(), &row.task_id, "artifact_paths")?;
+    let result_data =
+        image_result_data(&row.task_id, row.primary_image_path.clone(), artifact_paths.clone());
+    Ok(ImageGenerationTaskViewRecord {
         task: ImageGenerationTaskRecord {
-            task_id: row.task_id,
+            task_id: row.task_id.clone(),
             backend_id: row.backend_id,
             model_id: row.model_id,
             model_path: row.model_path,
             prompt: row.prompt,
             negative_prompt: row.negative_prompt,
             mode: row.mode,
-            width: to_u32(row.width),
-            height: to_u32(row.height),
-            requested_count: to_u32(row.requested_count),
+            width: checked_u32(row.width, &row.task_id, "width")?,
+            height: checked_u32(row.height, &row.task_id, "height")?,
+            requested_count: checked_u32(row.requested_count, &row.task_id, "requested_count")?,
             reference_image_path: row.reference_image_path,
             primary_image_path: row.primary_image_path,
-            artifact_paths: decode_string_array(row.artifact_paths.as_deref()),
+            artifact_paths,
             request_data: row.request_data,
-            result_data: row.result_data,
+            result_data,
             created_at: row.created_at,
             updated_at: row.updated_at,
         },
@@ -409,26 +406,29 @@ fn image_view_from_row(row: ImageTaskViewRow) -> ImageGenerationTaskViewRecord {
             row.task_created_at,
             row.task_updated_at,
         ),
-    }
+    })
 }
 
-fn video_view_from_row(row: VideoTaskViewRow) -> VideoGenerationTaskViewRecord {
-    VideoGenerationTaskViewRecord {
+fn video_view_from_row(
+    row: VideoTaskViewRow,
+) -> Result<VideoGenerationTaskViewRecord, sqlx::Error> {
+    let result_data = video_result_data(&row.task_id, row.video_path.clone());
+    Ok(VideoGenerationTaskViewRecord {
         task: VideoGenerationTaskRecord {
-            task_id: row.task_id,
+            task_id: row.task_id.clone(),
             backend_id: row.backend_id,
             model_id: row.model_id,
             model_path: row.model_path,
             prompt: row.prompt,
             negative_prompt: row.negative_prompt,
-            width: to_u32(row.width),
-            height: to_u32(row.height),
-            frames: row.frames.try_into().unwrap_or_default(),
-            fps: row.fps as f32,
+            width: checked_u32(row.width, &row.task_id, "width")?,
+            height: checked_u32(row.height, &row.task_id, "height")?,
+            frames: checked_i32(row.frames, &row.task_id, "frames")?,
+            fps: row.fps,
             reference_image_path: row.reference_image_path,
             video_path: row.video_path,
             request_data: row.request_data,
-            result_data: row.result_data,
+            result_data,
             created_at: row.created_at,
             updated_at: row.updated_at,
         },
@@ -439,35 +439,47 @@ fn video_view_from_row(row: VideoTaskViewRow) -> VideoGenerationTaskViewRecord {
             row.task_created_at,
             row.task_updated_at,
         ),
-    }
+    })
 }
 
-fn audio_view_from_row(row: AudioTaskViewRow) -> AudioTranscriptionTaskViewRecord {
-    AudioTranscriptionTaskViewRecord {
+fn audio_view_from_row(
+    row: AudioTaskViewRow,
+) -> Result<AudioTranscriptionTaskViewRecord, sqlx::Error> {
+    let task_result_data = row.task_result_data;
+    let decoded_task_payload = super::task::decode_task_payload(task_result_data.clone());
+    let result_data = audio_result_data(
+        &row.task_id,
+        row.transcript_text.clone(),
+        decoded_task_payload.as_deref(),
+    );
+    Ok(AudioTranscriptionTaskViewRecord {
         task: AudioTranscriptionTaskRecord {
-            task_id: row.task_id,
+            task_id: row.task_id.clone(),
             backend_id: row.backend_id,
             model_id: row.model_id,
             source_path: row.source_path,
             language: row.language,
             prompt: row.prompt,
-            detect_language: row.detect_language.map(|value| value != 0),
+            detect_language: row
+                .detect_language
+                .map(|value| checked_bool(value, &row.task_id, "detect_language"))
+                .transpose()?,
             vad_json: row.vad_json,
             decode_json: row.decode_json,
             transcript_text: row.transcript_text,
             request_data: row.request_data,
-            result_data: row.result_data,
+            result_data,
             created_at: row.created_at,
             updated_at: row.updated_at,
         },
         state: media_state_from_task(
             row.task_status,
-            row.task_result_data,
+            task_result_data,
             row.error_msg,
             row.task_created_at,
             row.task_updated_at,
         ),
-    }
+    })
 }
 
 fn media_state_from_task(
@@ -477,6 +489,7 @@ fn media_state_from_task(
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 ) -> MediaTaskState {
+    let result_data = super::task::decode_task_payload(result_data);
     MediaTaskState {
         status: TaskStatus::from_stored(&status, "media task repository"),
         progress: task_progress_from_payload(result_data.as_deref()),
@@ -486,12 +499,149 @@ fn media_state_from_task(
     }
 }
 
-fn decode_string_array(raw: Option<&str>) -> Vec<String> {
-    raw.and_then(|value| serde_json::from_str::<Vec<String>>(value).ok()).unwrap_or_default()
+fn image_result_data(
+    task_id: &str,
+    primary_image_path: Option<String>,
+    artifact_paths: Vec<String>,
+) -> Option<String> {
+    if primary_image_path.is_none() && artifact_paths.is_empty() {
+        return None;
+    }
+    serialize_media_result_data(
+        task_id,
+        "image result_data",
+        &ImageGenerationResultData { primary_image_path, artifact_paths },
+    )
 }
 
-fn to_u32(value: i64) -> u32 {
-    value.try_into().unwrap_or_default()
+fn video_result_data(task_id: &str, video_path: Option<String>) -> Option<String> {
+    video_path.as_ref()?;
+    serialize_media_result_data(
+        task_id,
+        "video result_data",
+        &VideoGenerationResultData { video_path },
+    )
+}
+
+fn audio_result_data(
+    task_id: &str,
+    transcript_text: Option<String>,
+    decoded_task_payload: Option<&str>,
+) -> Option<String> {
+    if let Some(payload) = decoded_task_payload {
+        match serde_json::from_str::<TaskResult>(payload) {
+            Ok(task_result) => {
+                if task_result.text.is_some() || task_result.segments.is_some() {
+                    return serialize_media_result_data(
+                        task_id,
+                        "audio result_data",
+                        &AudioTranscriptionResultData {
+                            text: task_result.text.unwrap_or_default(),
+                            segments: task_result.segments.unwrap_or_default(),
+                        },
+                    );
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    task_id,
+                    error = %error,
+                    "failed to derive audio result_data from task payload"
+                );
+            }
+        }
+    }
+    transcript_text.and_then(|text| {
+        serialize_media_result_data(
+            task_id,
+            "audio result_data",
+            &AudioTranscriptionResultData { text, segments: Vec::new() },
+        )
+    })
+}
+
+fn serialize_media_result_data<T: Serialize>(
+    task_id: &str,
+    field: &'static str,
+    value: &T,
+) -> Option<String> {
+    match serde_json::to_string(value) {
+        Ok(value) => Some(value),
+        Err(error) => {
+            tracing::warn!(
+                task_id,
+                field,
+                error = %error,
+                "failed to serialize media artifact payload"
+            );
+            None
+        }
+    }
+}
+
+fn decode_string_array(
+    raw: Option<&str>,
+    task_id: &str,
+    field: &'static str,
+) -> Result<Vec<String>, sqlx::Error> {
+    let Some(value) = raw else {
+        return Ok(Vec::new());
+    };
+    serde_json::from_str::<Vec<String>>(value).map_err(|error| {
+        tracing::warn!(
+            task_id,
+            field,
+            error = %error,
+            "failed to decode stored string array"
+        );
+        json_to_sqlx_error(error)
+    })
+}
+
+fn checked_u32(value: i64, task_id: &str, field: &'static str) -> Result<u32, sqlx::Error> {
+    u32::try_from(value).map_err(|error| {
+        tracing::warn!(
+            task_id,
+            field,
+            value,
+            error = %error,
+            "stored media numeric field is outside u32 range"
+        );
+        sqlx::Error::Decode(Box::new(error))
+    })
+}
+
+fn checked_i32(value: i64, task_id: &str, field: &'static str) -> Result<i32, sqlx::Error> {
+    i32::try_from(value).map_err(|error| {
+        tracing::warn!(
+            task_id,
+            field,
+            value,
+            error = %error,
+            "stored media numeric field is outside i32 range"
+        );
+        sqlx::Error::Decode(Box::new(error))
+    })
+}
+
+fn checked_bool(value: i64, task_id: &str, field: &'static str) -> Result<bool, sqlx::Error> {
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        value => {
+            tracing::warn!(
+                task_id,
+                field,
+                value,
+                "stored media boolean field is outside 0/1 range"
+            );
+            Err(sqlx::Error::Decode(format!("invalid {field} boolean value: {value}").into()))
+        }
+    }
+}
+
+fn json_to_sqlx_error(error: serde_json::Error) -> sqlx::Error {
+    sqlx::Error::Decode(Box::new(error))
 }
 
 #[cfg(test)]
@@ -536,7 +686,6 @@ mod tests {
                 "image-task",
                 &["first.png".to_owned(), "second.png".to_owned()],
                 Some("first.png"),
-                Some(r#"{"primary_image_path":"first.png"}"#),
             )
             .await
             .expect("update image result");
@@ -553,6 +702,12 @@ mod tests {
         assert_eq!(view.task.requested_count, 2);
         assert_eq!(view.task.primary_image_path.as_deref(), Some("first.png"));
         assert_eq!(view.task.artifact_paths, vec!["first.png", "second.png"]);
+        assert_eq!(
+            view.task.result_data.as_deref(),
+            Some(
+                r#"{"primary_image_path":"first.png","artifact_paths":["first.png","second.png"]}"#
+            )
+        );
         assert_eq!(view.state.status, TaskStatus::Pending);
 
         let list = store.list_image_generation_tasks().await.expect("list image tasks");
@@ -590,11 +745,7 @@ mod tests {
             .expect("insert video operation");
 
         store
-            .update_video_generation_result(
-                "video-task",
-                Some("video.mp4"),
-                Some(r#"{"video_path":"video.mp4"}"#),
-            )
+            .update_video_generation_result("video-task", Some("video.mp4"))
             .await
             .expect("update video result");
 
@@ -608,6 +759,7 @@ mod tests {
         assert_eq!(view.task.frames, 24);
         assert_eq!(view.task.fps, 12.5);
         assert_eq!(view.task.video_path.as_deref(), Some("video.mp4"));
+        assert_eq!(view.task.result_data.as_deref(), Some(r#"{"video_path":"video.mp4"}"#));
         assert_eq!(view.state.status, TaskStatus::Pending);
 
         let list = store.list_video_generation_tasks().await.expect("list video tasks");
@@ -643,11 +795,7 @@ mod tests {
             .expect("insert audio operation");
 
         store
-            .update_audio_transcription_result(
-                "audio-task",
-                Some("hello world"),
-                Some(r#"{"text":"hello world","segments":[]}"#),
-            )
+            .update_audio_transcription_result("audio-task", Some("hello world"))
             .await
             .expect("update audio result");
 
@@ -662,6 +810,10 @@ mod tests {
         assert_eq!(view.task.prompt.as_deref(), Some("domain words"));
         assert_eq!(view.task.detect_language, Some(true));
         assert_eq!(view.task.transcript_text.as_deref(), Some("hello world"));
+        assert_eq!(
+            view.task.result_data.as_deref(),
+            Some(r#"{"text":"hello world","segments":[]}"#)
+        );
         assert_eq!(view.state.status, TaskStatus::Pending);
 
         let list = store.list_audio_transcription_tasks().await.expect("list audio tasks");

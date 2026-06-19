@@ -5,8 +5,8 @@ use slab_model_pack::{
 };
 
 use crate::domain::models::{
-    CreateModelCommand, ManagedModelBackendId, ModelSpec, Pricing, RuntimePresets,
-    UnifiedModelKind, UnifiedModelStatus,
+    CreateModelCommand, ManagedModelBackendId, ModelSpec, Pricing, UnifiedModelKind,
+    UnifiedModelStatus,
 };
 use crate::error::AppCoreError;
 
@@ -30,45 +30,6 @@ fn default_status_for_runtime_bridge(bridge: &ModelPackRuntimeBridge) -> Unified
     }
 }
 
-fn build_runtime_presets(options: &slab_types::JsonOptions) -> Option<RuntimePresets> {
-    let max_tokens = options.get("max_tokens").and_then(value_to_u32);
-    let temperature = options.get("temperature").and_then(value_to_f32);
-    let top_p = options.get("top_p").and_then(value_to_f32);
-    let top_k = options.get("top_k").and_then(value_to_i32);
-    let min_p = options.get("min_p").and_then(value_to_f32);
-    let presence_penalty = options.get("presence_penalty").and_then(value_to_f32);
-    let repetition_penalty = options.get("repetition_penalty").and_then(value_to_f32);
-
-    (max_tokens.is_some()
-        || temperature.is_some()
-        || top_p.is_some()
-        || top_k.is_some()
-        || min_p.is_some()
-        || presence_penalty.is_some()
-        || repetition_penalty.is_some())
-    .then_some(RuntimePresets {
-        max_tokens,
-        temperature,
-        top_p,
-        top_k,
-        min_p,
-        presence_penalty,
-        repetition_penalty,
-    })
-}
-
-fn value_to_f32(value: &serde_json::Value) -> Option<f32> {
-    value.as_f64().map(|value| value as f32)
-}
-
-fn value_to_u32(value: &serde_json::Value) -> Option<u32> {
-    value.as_u64().and_then(|value| u32::try_from(value).ok())
-}
-
-fn value_to_i32(value: &serde_json::Value) -> Option<i32> {
-    value.as_i64().and_then(|value| i32::try_from(value).ok())
-}
-
 fn build_local_model_command(
     _path: &Path,
     manifest: &ModelPackManifest,
@@ -82,7 +43,8 @@ fn build_local_model_command(
         ))
     })?;
     let status = default_status_for_runtime_bridge(&bridge);
-    let runtime_presets = build_runtime_presets(&bridge.inference_defaults);
+    let runtime_presets =
+        crate::domain::models::RuntimePresets::from_json_options(&bridge.inference_defaults);
     let (repo_id, filename, local_path) = local_source_fields(resolved, &bridge);
     let allow_local_path_fallback = repo_id.is_none();
 

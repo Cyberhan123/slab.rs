@@ -1317,6 +1317,7 @@ export interface components {
         /** @description Persisted agent thread summary. */
         AgentThreadResponse: {
             completion_text?: string | null;
+            config_json: string;
             created_at: string;
             /** Format: int32 */
             depth: number;
@@ -2913,7 +2914,7 @@ export interface components {
              */
             cfg_scale?: number | null;
             /**
-             * Format: float
+             * Format: double
              * @description Output frames per second (default `8`).
              */
             fps?: number;
@@ -2970,7 +2971,7 @@ export interface components {
         VideoGenerationRequestData: {
             /** Format: float */
             cfg_scale?: number | null;
-            /** Format: float */
+            /** Format: double */
             fps: number;
             /** Format: float */
             guidance?: number | null;
@@ -3001,7 +3002,7 @@ export interface components {
             backend_id: string;
             created_at: string;
             error_msg?: string | null;
-            /** Format: float */
+            /** Format: double */
             fps: number;
             /** Format: int32 */
             frames: number;

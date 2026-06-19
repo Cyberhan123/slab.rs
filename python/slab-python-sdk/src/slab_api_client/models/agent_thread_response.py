@@ -17,6 +17,7 @@ class AgentThreadResponse:
     """Persisted agent thread summary.
 
     Attributes:
+        config_json (str):
         created_at (str):
         depth (int):
         id (str):
@@ -28,6 +29,7 @@ class AgentThreadResponse:
         role_name (None | str | Unset):
     """
 
+    config_json: str
     created_at: str
     depth: int
     id: str
@@ -40,6 +42,8 @@ class AgentThreadResponse:
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        config_json = self.config_json
+
         created_at = self.created_at
 
         depth = self.depth
@@ -74,6 +78,7 @@ class AgentThreadResponse:
         field_dict.update(self.additional_properties)
         field_dict.update(
             {
+                "config_json": config_json,
                 "created_at": created_at,
                 "depth": depth,
                 "id": id,
@@ -94,6 +99,8 @@ class AgentThreadResponse:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
+        config_json = d.pop("config_json")
+
         created_at = d.pop("created_at")
 
         depth = d.pop("depth")
@@ -134,6 +141,7 @@ class AgentThreadResponse:
         role_name = _parse_role_name(d.pop("role_name", UNSET))
 
         agent_thread_response = cls(
+            config_json=config_json,
             created_at=created_at,
             depth=depth,
             id=id,

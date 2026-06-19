@@ -50,6 +50,7 @@ async fn insert_task_row(
 ) -> Result<(), sqlx::Error> {
     let created_at = record.created_at.to_rfc3339();
     let updated_at = record.updated_at.to_rfc3339();
+    let result_data = task::encode_task_payload(result_data);
     sqlx::query(
         "INSERT INTO tasks (id, task_type, status, model_id, input_data, result_data, error_msg, core_task_id, created_at, updated_at) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
@@ -108,6 +109,7 @@ mod tests {
             ["image_generation_tasks", "video_generation_tasks", "audio_transcription_tasks"]
         {
             assert_foreign_key(&pool, table, "task_id", "tasks", "CASCADE").await;
+            assert!(!table_columns(&pool, table).await.contains("result_data"));
         }
         for table in ["agent_turn_states", "agent_memory_phase1_outputs"] {
             assert_foreign_key(&pool, table, "thread_id", "agent_threads", "CASCADE").await;
@@ -191,6 +193,45 @@ mod tests {
                 .expect("materialized artifacts default");
         assert_eq!(materialized_artifacts, "{}");
 
+        let invalid_model_spec = sqlx::query(
+            "INSERT INTO models (\
+                id, display_name, status, spec, created_at, updated_at, kind, \
+                config_schema_version, config_policy_version, capabilities\
+             ) VALUES (\
+                'bad-model-spec', 'Bad', 'ready', 'not-json', '2026-06-17T00:00:00Z', \
+                '2026-06-17T00:00:00Z', 'local', 2, 1, '[]'\
+             )",
+        )
+        .execute(&pool)
+        .await;
+        assert!(invalid_model_spec.is_err());
+
+        let invalid_task_result_data = sqlx::query(
+            "INSERT INTO tasks (id, task_type, status, result_data, created_at, updated_at) \
+             VALUES ('bad-result-data', 'test', 'pending', 'not-json', \
+                '2026-06-17T00:00:00Z', '2026-06-17T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await;
+        assert!(invalid_task_result_data.is_err());
+
+        let first_core_task = sqlx::query(
+            "INSERT INTO tasks (id, core_task_id, task_type, status, created_at, updated_at) \
+             VALUES ('core-task-a', 42, 'test', 'pending', '2026-06-17T00:00:00Z', \
+                '2026-06-17T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await;
+        assert!(first_core_task.is_ok());
+        let duplicate_core_task = sqlx::query(
+            "INSERT INTO tasks (id, core_task_id, task_type, status, created_at, updated_at) \
+             VALUES ('core-task-b', 42, 'test', 'pending', '2026-06-17T00:00:00Z', \
+                '2026-06-17T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await;
+        assert!(duplicate_core_task.is_err());
+
         let orphan_config_state = sqlx::query(
             "INSERT INTO model_config_state (model_id, updated_at) \
              VALUES ('missing-model', '2026-06-17T00:00:00Z')",
@@ -223,6 +264,67 @@ mod tests {
         assert_eq!(depth, 0);
         assert_eq!(status, "pending");
         assert_eq!(config_json, "{}");
+
+        let invalid_agent_status = sqlx::query(
+            "INSERT INTO agent_threads (id, session_id, status, created_at, updated_at) \
+             VALUES ('thread-bad-status', 'session-defaults', 'bogus', \
+                '2026-06-17T00:00:00Z', '2026-06-17T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await;
+        assert!(invalid_agent_status.is_err());
+        let invalid_agent_role = sqlx::query(
+            "INSERT INTO agent_thread_messages (id, thread_id, turn_index, role, content, created_at) \
+             VALUES ('message-bad-role', 'thread-defaults', 0, 'moderator', '{}', \
+                '2026-06-17T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await;
+        assert!(invalid_agent_role.is_err());
+
+        let invalid_plugin_enabled = sqlx::query(
+            "INSERT INTO plugin_states (plugin_id, source_kind, enabled, runtime_status, installed_at, updated_at) \
+             VALUES ('plugin-bad-enabled', 'dev', 2, 'stopped', '2026-06-17T00:00:00Z', \
+                '2026-06-17T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await;
+        assert!(invalid_plugin_enabled.is_err());
+
+        insert_task(&pool, "audio-bad-detect").await;
+        let invalid_audio_detect_language = sqlx::query(
+            "INSERT INTO audio_transcription_tasks (\
+                task_id, backend_id, source_path, detect_language, request_data, created_at, updated_at\
+             ) VALUES ('audio-bad-detect', 'ggml.whisper', 'audio.wav', 5, '{}', \
+                '2026-06-17T00:00:00Z', '2026-06-17T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await;
+        assert!(invalid_audio_detect_language.is_err());
+
+        insert_task(&pool, "image-bad-request").await;
+        let invalid_media_request_data = sqlx::query(
+            "INSERT INTO image_generation_tasks (\
+                task_id, backend_id, model_path, prompt, mode, width, height, requested_count, \
+                request_data, created_at, updated_at\
+             ) VALUES ('image-bad-request', 'ggml.diffusion', 'model.safetensors', 'prompt', \
+                'txt2img', 512, 512, 1, 'not-json', '2026-06-17T00:00:00Z', \
+                '2026-06-17T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await;
+        assert!(invalid_media_request_data.is_err());
+
+        insert_task(&pool, "download-null-source").await;
+        let null_source_key = sqlx::query(
+            "INSERT INTO model_downloads (\
+                task_id, model_id, repo_id, filename, status, created_at, updated_at\
+             ) VALUES ('download-null-source', 'model-1', 'repo', 'model.gguf', 'pending', \
+                '2026-06-17T00:00:00Z', '2026-06-17T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await;
+        assert!(null_source_key.is_err());
     }
 
     #[tokio::test]

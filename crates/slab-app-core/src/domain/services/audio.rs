@@ -146,13 +146,6 @@ impl AudioService {
                     Ok(response) => {
                         let text = response.text;
                         let segments = response.segments;
-                        let persisted_result = serde_json::to_string(
-                            &AudioTranscriptionResultData {
-                                text: text.clone(),
-                                segments: segments.clone(),
-                            },
-                        )
-                        .unwrap_or_default();
                         let task_payload = serde_json::to_string(&TaskResult {
                             image: None,
                             images: None,
@@ -163,11 +156,7 @@ impl AudioService {
                         })
                         .unwrap_or_default();
                         if let Err(error) = store
-                            .update_audio_transcription_result(
-                                &operation_id,
-                                Some(&text),
-                                Some(&persisted_result),
-                            )
+                            .update_audio_transcription_result(&operation_id, Some(&text))
                             .await
                         {
                             let message =

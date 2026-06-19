@@ -9,8 +9,7 @@ use crate::config::default_output_dir_for_settings_path;
 use crate::context::WorkerState;
 use crate::domain::models::{
     AcceptedOperation, IMAGE_GENERATION_TASK_TYPE, ImageGenerationCommand, ImageGenerationMode,
-    ImageGenerationRequestData, ImageGenerationResultData, ImageGenerationTaskView, TaskResult,
-    TaskStatus,
+    ImageGenerationRequestData, ImageGenerationTaskView, TaskResult, TaskStatus,
 };
 use crate::domain::ports::{RuntimeDiffusionImageRequest, RuntimeRawImageInput};
 use crate::domain::services::model;
@@ -229,11 +228,6 @@ impl ImageService {
                     }
 
                     let primary_image_path = artifact_paths.first().cloned();
-                    let persisted_result = serde_json::to_string(&ImageGenerationResultData {
-                        primary_image_path: primary_image_path.clone(),
-                        artifact_paths: artifact_paths.clone(),
-                    })
-                    .unwrap_or_default();
                     let task_result = TaskResult {
                         image: Some(format!("/v1/images/generations/{operation_id}/artifacts/0")),
                         images: Some(
@@ -253,7 +247,6 @@ impl ImageService {
                             &operation_id,
                             &artifact_paths,
                             primary_image_path.as_deref(),
-                            Some(&persisted_result),
                         )
                         .await
                     {
