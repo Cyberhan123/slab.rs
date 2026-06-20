@@ -139,6 +139,12 @@ impl TestServer {
         api::build(Arc::clone(&self.state))
     }
 
+    /// Path to the test server's plugin install directory. Tests can stage plugin
+    /// manifests here to exercise the registry/dispatch paths end-to-end.
+    pub(crate) fn plugins_dir(&self) -> std::path::PathBuf {
+        self._temp_dir.path().join("plugins")
+    }
+
     pub(crate) async fn get(&self, uri: &str) -> TestResponse {
         self.send_json(Method::GET, uri, None, None).await
     }

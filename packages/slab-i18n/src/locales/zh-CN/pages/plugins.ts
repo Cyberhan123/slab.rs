@@ -52,6 +52,43 @@ export const plugins = {
       submit: "导入插件",
     },
   },
+  permissions: {
+    reviewTitle: "申请的权限",
+    reviewDescription: "在安装前查看这个插件可以执行的操作。",
+    reviewedCheckbox: "我已查看该插件申请的权限。",
+    parseFailed: "无法读取该插件包中的权限。仍可导入，但请在导入后查看清单。",
+    none: "该插件未声明额外权限。",
+    unknownWarning: "未知权限——仅在信任插件作者时授予。",
+    group: {
+      slabApi: "Slab API",
+      files: "文件访问",
+      network: "网络",
+      agent: "Agent",
+      lsp: "语言服务器",
+    },
+    networkMode: {
+      allowlist: "白名单",
+      blocked: "已阻止",
+    },
+    severity: {
+      low: "低风险",
+      medium: "中风险",
+      high: "高风险",
+    },
+    prompt: {
+      title: "插件权限请求",
+      description: "{{name}} 请求调用 {{method}} {{path}}，需要 {{permission}} 权限。",
+      allow: "允许",
+      deny: "拒绝",
+    },
+    management: {
+      title: "已授权的插件权限",
+      description: "你在运行时弹窗中允许的 Slab API 权限。撤销某项后，下次调用会再次询问。",
+      empty: "尚未授权任何插件权限。",
+      revoke: "撤销",
+      revokeAll: "全部撤销",
+    },
+  },
   desktopOnly: {
     title: "插件功能需要 Tauri 桌面运行时",
     description:

@@ -7,6 +7,7 @@ class ServerI18NKey(str, Enum):
     SERVER_ERRORS_BADREQUEST = "server.errors.badRequest"
     SERVER_ERRORS_CONFLICT = "server.errors.conflict"
     SERVER_ERRORS_DATABASEERROR = "server.errors.databaseError"
+    SERVER_ERRORS_FORBIDDEN = "server.errors.forbidden"
     SERVER_ERRORS_INTERNALERROR = "server.errors.internalError"
     SERVER_ERRORS_NOTFOUND = "server.errors.notFound"
     SERVER_ERRORS_NOTIMPLEMENTED = "server.errors.notImplemented"

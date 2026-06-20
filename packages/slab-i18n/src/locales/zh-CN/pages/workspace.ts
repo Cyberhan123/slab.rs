@@ -138,6 +138,10 @@ export const workspace = {
     closeUnsaved: '此文件有未保存的更改，仍要关闭吗？',
     discardUnsaved: '此文件有未保存的更改，要丢弃并打开其他文件吗？',
     discardGitChange: '丢弃 {{path}} 中的更改？此操作无法撤销。',
+    title: '未保存的更改',
+    cancel: '取消',
+    discard: '放弃更改',
+    closeAnyway: '仍然关闭',
   },
   tabs: {
     close: '关闭 {{name}}',

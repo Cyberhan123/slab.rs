@@ -46,6 +46,7 @@ const EXPLORER_MAX_WIDTH = 640
 
 export function WorkspaceWorkbench({
   activeFilePath,
+  confirmDiscardDialog,
   consoleOpen,
   editorContent,
   editorSettings,
@@ -450,6 +451,7 @@ export function WorkspaceWorkbench({
         </div>
       </div>
       {commandPalette}
+      {confirmDiscardDialog}
     </div>
   )
 }

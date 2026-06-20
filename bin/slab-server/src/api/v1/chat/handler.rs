@@ -177,6 +177,14 @@ fn openai_error_response(error: ServerError) -> Response {
             None,
             Some(message_i18n_with_detail(ServerI18nKey::ErrorBadRequest, &message)),
         ),
+        ServerError::Forbidden(message) => (
+            StatusCode::FORBIDDEN,
+            message.clone(),
+            "invalid_request_error".to_owned(),
+            Some("forbidden".to_owned()),
+            None,
+            Some(message_i18n_with_detail(ServerI18nKey::ErrorForbidden, &message)),
+        ),
         ServerError::BadRequestData { message, data } => (
             StatusCode::BAD_REQUEST,
             message.clone(),

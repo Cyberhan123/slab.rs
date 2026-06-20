@@ -225,7 +225,9 @@ function WorkspaceModeSync() {
           if (disabledPluginIdSet.has(plugin.id) && isPluginRunning(plugin)) {
             await stopPluginMutation.mutateAsync({
               params: { path: { id: plugin.id } },
-              body: { lastError: null },
+              // Omit `lastError`: the backend preserves the prior diagnostic on a
+              // manual stop, and sending null here would otherwise erase it.
+              body: {},
             });
           }
         }));

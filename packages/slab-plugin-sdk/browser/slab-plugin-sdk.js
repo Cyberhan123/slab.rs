@@ -62,6 +62,48 @@
     tasksRead: "tasks:read",
     tasksCancel: "tasks:cancel"
   };
+  var SLAB_API_PERMISSION_LABELS = {
+    [SLAB_API_PERMISSIONS.modelsRead]: {
+      title: "Read models",
+      description: "List available models and read their metadata.",
+      severity: "low"
+    },
+    [SLAB_API_PERMISSIONS.modelsLoad]: {
+      title: "Load models",
+      description: "Load (and download) models into the local runtime, which uses disk, memory, and compute.",
+      severity: "high"
+    },
+    [SLAB_API_PERMISSIONS.ffmpegConvert]: {
+      title: "Run FFmpeg conversions",
+      description: "Convert and process media files through the FFmpeg tool runtime.",
+      severity: "medium"
+    },
+    [SLAB_API_PERMISSIONS.audioTranscribe]: {
+      title: "Transcribe audio",
+      description: "Run audio transcription, which can consume significant compute for long files.",
+      severity: "medium"
+    },
+    [SLAB_API_PERMISSIONS.subtitleRender]: {
+      title: "Render subtitles",
+      description: "Render and write subtitle assets to disk.",
+      severity: "medium"
+    },
+    [SLAB_API_PERMISSIONS.chatComplete]: {
+      title: "Run chat completions",
+      description: "Send prompts to the local model and read generated responses.",
+      severity: "high"
+    },
+    [SLAB_API_PERMISSIONS.tasksRead]: {
+      title: "Read tasks",
+      description: "Inspect background task status and results.",
+      severity: "low"
+    },
+    [SLAB_API_PERMISSIONS.tasksCancel]: {
+      title: "Cancel tasks",
+      description: "Cancel running background tasks, including model downloads.",
+      severity: "medium"
+    }
+  };
   function requiredSlabApiPermission(method, path) {
     const normalizedMethod = method.toUpperCase();
     const normalizedPath = path.split("?").at(0) ?? path;

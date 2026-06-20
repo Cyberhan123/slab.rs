@@ -12,6 +12,7 @@ import api, { getErrorMessage } from '@slab/api';
 
 import { SettingFieldCard } from './components/setting-field-card';
 import { SettingsNavigation } from './components/settings-navigation';
+import { PluginPermissionsCard } from '../plugins/components/plugin-permissions-card';
 import { useSettingsAutosave } from './hooks/use-settings-autosave';
 import type { SettingResponse } from './types';
 import {
@@ -164,6 +165,8 @@ export default function SettingsPage() {
               </AlertDescription>
             </Alert>
           ) : null}
+
+          <PluginPermissionsCard />
 
           {!activeSection ? (
             <StageEmptyState

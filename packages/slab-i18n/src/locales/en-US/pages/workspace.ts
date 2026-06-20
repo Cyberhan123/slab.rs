@@ -138,6 +138,10 @@ export const workspace = {
     closeUnsaved: 'This file has unsaved changes. Close it anyway?',
     discardUnsaved: 'This file has unsaved changes. Discard them and open another file?',
     discardGitChange: 'Discard changes in {{path}}? This cannot be undone.',
+    title: 'Unsaved changes',
+    cancel: 'Cancel',
+    discard: 'Discard changes',
+    closeAnyway: 'Close anyway',
   },
   tabs: {
     close: 'Close {{name}}',

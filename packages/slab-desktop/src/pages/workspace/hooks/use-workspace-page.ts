@@ -40,9 +40,12 @@ import { upsertFileTab } from "../lib/workspace-page-utils"
 import {
   openWorkspaceVscodeFile,
   runWorkspaceVscodeCommand,
+  watchWorkspaceVscodeEditorCloseRequests,
   watchWorkspaceVscodeEditorState,
   type WorkspaceLspOpenFileOptions,
 } from "../lib/workspace-lsp"
+import { useWorkspaceEditorDirty } from "./use-workspace-editor-dirty"
+import { useWorkspaceConfirmDialog } from "./use-workspace-confirm"
 
 type WorkspaceOpenFileOptions = WorkspaceLspOpenFileOptions & {
   revealInTree?: boolean
@@ -169,7 +172,12 @@ export function useWorkspacePage() {
     gitUnstageMutation.isPending ||
     gitDiscardMutation.isPending ||
     gitCommitMutation.isPending
-  const selectedFileDirty = Boolean(selectedFile && editorContent !== selectedFile.content)
+  const selectedFileDirty = useWorkspaceEditorDirty({
+    workspaceRoot: workspace?.rootPath ?? null,
+    selectedFile,
+    editorContent,
+  })
+  const { confirm: confirmDiscardUnsaved, dialog: confirmDiscardDialog } = useWorkspaceConfirmDialog()
 
   useEffect(() => {
     if (typeof document === "undefined") {
@@ -277,7 +285,14 @@ export function useWorkspacePage() {
     async (relativePath: string, options: WorkspaceOpenFileOptions = {}) => {
       const { revealInTree = false, ...editorOptions } = options
       setEditorRevealTarget(null)
-      if (selectedFileDirty && !window.confirm(t("pages.workspace.confirm.discardUnsaved"))) {
+      if (
+        selectedFileDirty &&
+        !(await confirmDiscardUnsaved({
+          messageKey: "pages.workspace.confirm.discardUnsaved",
+          confirmKey: "pages.workspace.confirm.discard",
+          tone: "danger",
+        }))
+      ) {
         return null
       }
 
@@ -318,6 +333,7 @@ export function useWorkspacePage() {
       return file
     },
     [
+      confirmDiscardUnsaved,
       openFileContent,
       openFileTabs,
       patchWorkspaceState,
@@ -486,6 +502,43 @@ export function useWorkspacePage() {
     }
   }, [patchWorkspaceState, workspace])
 
+  useEffect(() => {
+    const workspaceRoot = workspace?.rootPath
+    if (!workspaceRoot) {
+      return
+    }
+
+    let cancelled = false
+    let disposable: { dispose(): void } | null = null
+
+    void watchWorkspaceVscodeEditorCloseRequests(workspaceRoot, async () => {
+      if (cancelled) {
+        return false
+      }
+      return confirmDiscardUnsaved({
+        messageKey: "pages.workspace.confirm.closeUnsaved",
+        confirmKey: "pages.workspace.confirm.closeAnyway",
+        tone: "danger",
+      })
+    })
+      .then((nextDisposable) => {
+        if (cancelled) {
+          nextDisposable.dispose()
+          return
+        }
+
+        disposable = nextDisposable
+      })
+      .catch((error) => {
+        console.debug("workspace VS Code close guard unavailable", { workspaceRoot, error })
+      })
+
+    return () => {
+      cancelled = true
+      disposable?.dispose()
+    }
+  }, [confirmDiscardUnsaved, workspace?.rootPath])
+
   const handleSelectExplorerPanel = useCallback(
     (panel: WorkspaceExplorerPanel) => {
       if (!workspace || explorerPanel === panel) {
@@ -539,8 +592,15 @@ export function useWorkspacePage() {
   }, [refetchGitStatus])
 
   const handleSelectGitDiff = useCallback(
-    (entry: WorkspaceGitStatusEntry) => {
-      if (selectedFileDirty && !window.confirm(t("pages.workspace.confirm.discardUnsaved"))) {
+    async (entry: WorkspaceGitStatusEntry) => {
+      if (
+        selectedFileDirty &&
+        !(await confirmDiscardUnsaved({
+          messageKey: "pages.workspace.confirm.discardUnsaved",
+          confirmKey: "pages.workspace.confirm.discard",
+          tone: "danger",
+        }))
+      ) {
         return
       }
 
@@ -550,7 +610,7 @@ export function useWorkspacePage() {
       setEditorRevealTarget(null)
       setSelectedGitDiffEntry(entry)
     },
-    [selectedFileDirty, t],
+    [confirmDiscardUnsaved, selectedFileDirty],
   )
 
   const handleSaveFile = useCallback(async () => {
@@ -684,7 +744,11 @@ export function useWorkspacePage() {
       if (
         activeFilePath === relativePath &&
         selectedFileDirty &&
-        !window.confirm(t("pages.workspace.confirm.closeUnsaved"))
+        !(await confirmDiscardUnsaved({
+          messageKey: "pages.workspace.confirm.closeUnsaved",
+          confirmKey: "pages.workspace.confirm.closeAnyway",
+          tone: "danger",
+        }))
       ) {
         return
       }
@@ -719,7 +783,7 @@ export function useWorkspacePage() {
       setEditorContent("")
       setFileError(null)
     },
-    [activeFilePath, openFileContent, openFileTabs, patchWorkspaceState, selectedFileDirty, t, workspace],
+    [activeFilePath, confirmDiscardUnsaved, openFileContent, openFileTabs, patchWorkspaceState, selectedFileDirty, workspace],
   )
 
   const handleSelectFileTab = useCallback(
@@ -728,7 +792,14 @@ export function useWorkspacePage() {
         return
       }
 
-      if (selectedFileDirty && !window.confirm(t("pages.workspace.confirm.discardUnsaved"))) {
+      if (
+        selectedFileDirty &&
+        !(await confirmDiscardUnsaved({
+          messageKey: "pages.workspace.confirm.discardUnsaved",
+          confirmKey: "pages.workspace.confirm.discard",
+          tone: "danger",
+        }))
+      ) {
         return
       }
 
@@ -749,11 +820,12 @@ export function useWorkspacePage() {
         workspaceRoot: workspace.rootPath,
       })
     },
-    [activeFilePath, openFileContent, openFileTabs, patchWorkspaceState, selectedFileDirty, t, workspace],
+    [activeFilePath, confirmDiscardUnsaved, openFileContent, openFileTabs, patchWorkspaceState, selectedFileDirty, workspace],
   )
 
   return {
     activeFilePath,
+    confirmDiscardDialog,
     consoleOpen,
     editorContent,
     editorRevealTarget:

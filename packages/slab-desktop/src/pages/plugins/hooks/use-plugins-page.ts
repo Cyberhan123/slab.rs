@@ -11,6 +11,7 @@ import {
   pluginSearchText,
   type PluginRecord,
 } from '../utils';
+import { parsePluginPackManifest, type PluginManifestPreview } from '../lib/plugin-manifest-preview';
 import { RUNTIME_PLUGINS_QUERY_KEY } from './use-runtime-plugins';
 
 type ImportedPluginResponse = PluginRecord;
@@ -38,6 +39,9 @@ export function usePluginsPage() {
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importPluginPending, setImportPluginPending] = useState(false);
+  const [importPreview, setImportPreview] = useState<PluginManifestPreview | null>(null);
+  const [importPreviewFailed, setImportPreviewFailed] = useState(false);
+  const [hasReviewedPermissions, setHasReviewedPermissions] = useState(false);
 
   const headerSearch = useMemo(
     () => ({
@@ -70,7 +74,9 @@ export function usePluginsPage() {
   const loading = pluginsLoading;
   const refreshing = pluginsFetching;
   const dataError = pluginsError;
-  const canImport = Boolean(importFile && !importPluginPending);
+  // Require an explicit "I've reviewed the permissions" acknowledgement before
+  // installing, so users never import a pack without at least seeing its asks.
+  const canImport = Boolean(importFile && !importPluginPending && hasReviewedPermissions);
 
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const normalizedSearchQuery = deferredSearchQuery.trim().toLowerCase();
@@ -128,7 +134,10 @@ export function usePluginsPage() {
             params: {
               path: { id: plugin.id },
             },
-            body: { lastError: null },
+            // Intentionally omit `lastError`. The backend preserves the existing
+            // diagnostic; sending `null` here used to clear a prior start/runtime
+            // failure so the reason vanished after a manual stop.
+            body: {},
           });
           toast.success(t('pages.plugins.toast.stopped', { name: plugin.name }));
         } else if (!plugin.enabled) {
@@ -162,7 +171,8 @@ export function usePluginsPage() {
               params: {
                 path: { id: plugin.id },
               },
-              body: { lastError: null },
+              // Omit `lastError` so the backend keeps the prior failure diagnostic.
+              body: {},
             });
           }
 
@@ -189,6 +199,9 @@ export function usePluginsPage() {
 
   const resetImportState = useCallback(() => {
     setImportFile(null);
+    setImportPreview(null);
+    setImportPreviewFailed(false);
+    setHasReviewedPermissions(false);
   }, []);
 
   const handleImportOpenChange = useCallback(
@@ -203,6 +216,30 @@ export function usePluginsPage() {
 
   const handleImportFileChange = useCallback((file: File | null) => {
     setImportFile(file);
+    setHasReviewedPermissions(false);
+    setImportPreview(null);
+    setImportPreviewFailed(false);
+
+    if (!file) {
+      return;
+    }
+
+    // Parse plugin.json out of the pack client-side so the user can review the
+    // requested permissions before it is uploaded. Failure is non-fatal: we surface
+    // a notice and still allow the import once the user acknowledges.
+    void parsePluginPackManifest(file)
+      .then((preview) => {
+        if (!preview || preview.parseError) {
+          setImportPreviewFailed(true);
+          setImportPreview(null);
+        } else {
+          setImportPreview(preview);
+        }
+      })
+      .catch(() => {
+        setImportPreviewFailed(true);
+        setImportPreview(null);
+      });
   }, []);
 
   const handleImportPlugin = useCallback(async () => {
@@ -239,14 +276,18 @@ export function usePluginsPage() {
     handleImportPlugin,
     handlePrimaryAction,
     handleToggleEnabled,
+    hasReviewedPermissions,
     hasSearchQuery,
     importFileName: importFile?.name ?? null,
     importPluginPending,
+    importPreview,
+    importPreviewFailed,
     isImportOpen,
     loading,
     plugins,
     refreshData,
     refreshing,
+    setHasReviewedPermissions,
   };
 }
 

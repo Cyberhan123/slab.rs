@@ -9,6 +9,7 @@ import {
   type WorkspaceGitStatusEntry,
 } from "@/lib/workspace-bridge"
 import { cn } from "@/lib/utils"
+import { useWorkspaceConfirmDialog } from "../hooks/use-workspace-confirm"
 
 const statusClassName: Record<WorkspaceGitFileStatus, string> = {
   added: "bg-emerald-500/12 text-emerald-600 dark:text-emerald-300",
@@ -212,6 +213,7 @@ function GitEntryGroup({
   onUnstage: (path: string) => Promise<void>
 }) {
   const { t } = useTranslation()
+  const { confirm: confirmDiscardGitChange, dialog: confirmDiscardDialog } = useWorkspaceConfirmDialog()
 
   if (entries.length === 0) {
     return null
@@ -273,9 +275,16 @@ function GitEntryGroup({
               disabled={operationPending || !canDiscard}
               title={t("pages.workspace.git.discard")}
               onClick={() => {
-                if (window.confirm(t("pages.workspace.confirm.discardGitChange", { path: entry.path }))) {
-                  void onDiscard(entry.path)
-                }
+                void confirmDiscardGitChange({
+                  messageKey: "pages.workspace.confirm.discardGitChange",
+                  messageParams: { path: entry.path },
+                  confirmKey: "pages.workspace.confirm.discard",
+                  tone: "danger",
+                }).then((confirmed) => {
+                  if (confirmed) {
+                    void onDiscard(entry.path)
+                  }
+                })
               }}
             >
               <RotateCcw className="size-3.5" />
@@ -283,6 +292,7 @@ function GitEntryGroup({
           </div>
         )
       })}
+      {confirmDiscardDialog}
     </section>
   )
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  canRestartTaskType,
   extractTaskId,
   formatCompactDuration,
   formatPercent,
@@ -137,5 +138,13 @@ describe('task utils', () => {
     expect(isMediaTaskType('model_download')).toBe(false);
     expect(getTaskDeepLink('video_generation', 'task-1')).toBe('/video?task=task-1');
     expect(getTaskDeepLink('model_download', 'task-1')).toBeNull();
+  });
+
+  it('gates restart eligibility on the model_download task type', () => {
+    expect(canRestartTaskType('model_download')).toBe(true);
+    expect(canRestartTaskType('image_generation')).toBe(false);
+    expect(canRestartTaskType('video_generation')).toBe(false);
+    expect(canRestartTaskType('audio_transcription')).toBe(false);
+    expect(canRestartTaskType('')).toBe(false);
   });
 });

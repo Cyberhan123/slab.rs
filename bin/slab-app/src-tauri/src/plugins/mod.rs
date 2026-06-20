@@ -143,10 +143,10 @@ pub async fn plugin_pick_file(
     webview: Webview,
     registry: State<'_, PluginRegistryState>,
 ) -> Result<PluginPickFileResponse, String> {
-    if let Some(caller_plugin_id) = caller_plugin_id(&webview) {
-        let plugin = registry.get_plugin(&caller_plugin_id)?;
-        ensure_video_file_read_permission(&plugin.manifest.permissions.files.read)?;
-    }
+    let caller_plugin_id = caller_plugin_id(&webview)
+        .ok_or_else(|| "plugin file picker requires a plugin webview caller".to_string())?;
+    let plugin = registry.get_plugin(&caller_plugin_id)?;
+    ensure_video_file_read_permission(&plugin.manifest.permissions.files.read)?;
 
     let selected = app_handle
         .dialog()
@@ -214,10 +214,9 @@ fn authorize_plugin_call_request(
     caller_plugin_id: Option<&str>,
     request: &PluginCallRequest,
 ) -> Result<(), String> {
-    if let Some(caller_plugin_id) = caller_plugin_id {
-        ensure_same_plugin_call(caller_plugin_id, &request.plugin_id)?;
-    }
-    Ok(())
+    let caller_plugin_id = caller_plugin_id
+        .ok_or_else(|| "plugin call requires a plugin webview caller".to_string())?;
+    ensure_same_plugin_call(caller_plugin_id, &request.plugin_id)
 }
 
 fn authorize_plugin_api_request_from_caller(
@@ -225,9 +224,8 @@ fn authorize_plugin_api_request_from_caller(
     registry: &PluginRegistryState,
     request: &PluginApiRequest,
 ) -> Result<(), String> {
-    let Some(caller_plugin_id) = caller_plugin_id else {
-        return Ok(());
-    };
+    let caller_plugin_id = caller_plugin_id
+        .ok_or_else(|| "plugin api request requires a plugin webview caller".to_string())?;
 
     let plugin = registry.get_plugin(caller_plugin_id)?;
     authorize_slab_api_request(&plugin.manifest.permissions.slab_api, request)
@@ -394,7 +392,11 @@ mod tests {
             input: String::new(),
         };
 
-        assert!(authorize_plugin_call_request(None, &request).is_ok());
+        // `None` models a non-plugin webview (e.g. the main host window, whose
+        // label carries no plugin prefix) — it must NOT be able to invoke plugins.
+        let missing_caller = authorize_plugin_call_request(None, &request)
+            .expect_err("caller-less plugin call should be rejected");
+        assert!(missing_caller.contains("requires a plugin webview caller"));
         assert!(authorize_plugin_call_request(Some("video-subtitle-translator"), &request).is_ok());
         assert!(authorize_plugin_call_request(Some("other-plugin"), &request).is_err());
     }
@@ -450,7 +452,11 @@ mod tests {
         .expect_err("missing permission should fail");
 
         assert!(error.contains("requires permissions.slabApi `chat:complete`"));
-        assert!(authorize_plugin_api_request_from_caller(None, &registry, &request).is_ok());
+        // A non-plugin webview (main window) resolves to `None` and must be rejected
+        // rather than silently allowed to call the plugin Slab API surface.
+        let missing_caller = authorize_plugin_api_request_from_caller(None, &registry, &request)
+            .expect_err("caller-less plugin api request should be rejected");
+        assert!(missing_caller.contains("requires a plugin webview caller"));
     }
 
     #[test]

@@ -60,14 +60,29 @@ impl PluginService {
 
     pub async fn plugin_api_request(
         &self,
-        plugin_id: &str,
+        caller_plugin_id: Option<&str>,
+        target_plugin_id: &str,
         request: PluginApiRequest,
     ) -> Result<PluginApiResponse, AppCoreError> {
-        self.ensure_plugin_state(plugin_id).await?;
+        // Defense in depth: a Slab API request must be proxied on behalf of a
+        // concrete plugin, and that caller must be the same plugin targeted by the
+        // route. The HTTP handler enforces this with a 403; this check guards any
+        // other caller and keeps the core contract explicit so a plugin can never
+        // spend another plugin's declared permissions.
+        let caller_plugin_id = caller_plugin_id.ok_or_else(|| {
+            AppCoreError::BadRequest("plugin api request requires a caller plugin id".to_string())
+        })?;
+        if caller_plugin_id != target_plugin_id {
+            return Err(AppCoreError::BadRequest(format!(
+                "plugin api request caller `{caller_plugin_id}` does not match target plugin `{target_plugin_id}`"
+            )));
+        }
+
+        self.ensure_plugin_state(target_plugin_id).await?;
 
         let registry = self.plugin_registry()?;
         registry.refresh().map_err(AppCoreError::Internal)?;
-        let plugin = registry.get_plugin(plugin_id).map_err(AppCoreError::NotFound)?;
+        let plugin = registry.get_plugin(target_plugin_id).map_err(AppCoreError::NotFound)?;
         authorize_slab_api_request(&plugin.manifest.permissions.slab_api, &request)
             .map_err(AppCoreError::BadRequest)?;
         execute_plugin_api_request(&self.plugin_api_base_url(), &request)

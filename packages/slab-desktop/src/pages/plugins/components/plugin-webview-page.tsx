@@ -3,7 +3,6 @@ import { useResizeObserver, useWindowEvent } from '@mantine/hooks';
 import { clamp } from 'lodash-es';
 import { AlertCircle, Loader2 } from 'lucide-react';
 
-import api, { getErrorMessage } from '@slab/api';
 import type { SlabApiBridgeRequest, SlabApiBridgeResponse } from '@slab/api/plugin';
 import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
 
@@ -18,6 +17,8 @@ import type { PluginRecord } from '../utils';
 
 const PLUGIN_SDK_MESSAGE_SOURCE = 'slab-plugin-sdk';
 const PLUGIN_HOST_MESSAGE_SOURCE = 'slab-plugin-host';
+const PLUGIN_API_BRIDGE_UNAVAILABLE =
+  'Plugin API bridge is only available in the desktop plugin WebView host.';
 
 type PluginBridgeRequestMessage = {
   source: typeof PLUGIN_SDK_MESSAGE_SOURCE;
@@ -83,7 +84,6 @@ export function PluginWebviewPage({ plugin }: PluginWebviewPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const isDesktopTauri = isTauri();
-  const apiRequestMutation = api.useMutation('post', '/v1/plugins/{id}/api-request');
   const browserMissingUrlError =
     !isDesktopTauri && !plugin.uiUrl ? 'Plugin is missing a browser UI URL.' : null;
   const visibleError = error ?? browserMissingUrlError;
@@ -162,36 +162,18 @@ export function PluginWebviewPage({ plugin }: PluginWebviewPageProps) {
         pluginWindow.postMessage(response, '*');
       };
 
-      void apiRequestMutation
-        .mutateAsync({
-          params: {
-            path: { id: plugin.id },
-          },
-          body: message.request,
-        })
-        .then((response) => {
-          sendResponse({
-            source: PLUGIN_HOST_MESSAGE_SOURCE,
-            type: 'api.response',
-            id: message.id,
-            ok: true,
-            response,
-          });
-        })
-        .catch((cause) => {
-          sendResponse({
-            source: PLUGIN_HOST_MESSAGE_SOURCE,
-            type: 'api.response',
-            id: message.id,
-            ok: false,
-            error: getErrorMessage(cause),
-          });
-        });
+      sendResponse({
+        source: PLUGIN_HOST_MESSAGE_SOURCE,
+        type: 'api.response',
+        id: message.id,
+        ok: false,
+        error: PLUGIN_API_BRIDGE_UNAVAILABLE,
+      });
     };
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [apiRequestMutation, isDesktopTauri, plugin.id, plugin.uiUrl]);
+  }, [isDesktopTauri, plugin.uiUrl]);
 
   return (
     <div

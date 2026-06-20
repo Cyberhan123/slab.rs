@@ -71,6 +71,18 @@ const FAILED_TASK_STATUSES = ['failed', 'cancelled', 'interrupted'] as const;
 export const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000;
 export const MODEL_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1_000;
 
+/**
+ * Task type that owns a restartable lifecycle on the backend. The server rejects
+ * restart for any other task type with a 400 ("does not support restart"), so the
+ * UI must only offer Restart for this type — otherwise every failed media task
+ * surfaces a button that deterministically fails when clicked.
+ */
+export const MODEL_DOWNLOAD_TASK_TYPE = 'model_download';
+
+export function canRestartTaskType(taskType: string) {
+  return taskType === MODEL_DOWNLOAD_TASK_TYPE;
+}
+
 export function isSettledStatus(status: string) {
   return SETTLED_TASK_STATUSES.includes(status as (typeof SETTLED_TASK_STATUSES)[number]);
 }

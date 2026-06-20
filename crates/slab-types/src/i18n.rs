@@ -10,6 +10,8 @@ pub enum ServerI18nKey {
     ErrorNotFound,
     #[serde(rename = "server.errors.badRequest")]
     ErrorBadRequest,
+    #[serde(rename = "server.errors.forbidden")]
+    ErrorForbidden,
     #[serde(rename = "server.errors.conflict")]
     ErrorConflict,
     #[serde(rename = "server.errors.backendNotReady")]

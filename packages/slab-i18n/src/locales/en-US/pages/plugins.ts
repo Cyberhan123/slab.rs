@@ -54,6 +54,46 @@ export const plugins = {
       submit: "Import Plugin",
     },
   },
+  permissions: {
+    reviewTitle: "Permissions requested",
+    reviewDescription: "Review what this plugin can do before installing it.",
+    reviewedCheckbox: "I've reviewed the permissions requested by this plugin.",
+    parseFailed:
+      "Couldn't read the permissions from this pack. You can still import it, but review the manifest afterwards.",
+    none: "This plugin declares no additional permissions.",
+    unknownWarning: "Unknown permission — grant only if you trust the plugin author.",
+    group: {
+      slabApi: "Slab API",
+      files: "File access",
+      network: "Network",
+      agent: "Agent",
+      lsp: "Language servers",
+    },
+    networkMode: {
+      allowlist: "Allowlist",
+      blocked: "Blocked",
+    },
+    severity: {
+      low: "Low risk",
+      medium: "Medium risk",
+      high: "High risk",
+    },
+    prompt: {
+      title: "Plugin permission request",
+      description:
+        "{{name}} wants to call {{method}} {{path}}, which requires the {{permission}} permission.",
+      allow: "Allow",
+      deny: "Deny",
+    },
+    management: {
+      title: "Authorized plugin permissions",
+      description:
+        "Slab API permissions you've allowed at the runtime prompt. Revoke one to be asked again next time.",
+      empty: "No plugin permissions have been authorized yet.",
+      revoke: "Revoke",
+      revokeAll: "Revoke all",
+    },
+  },
   desktopOnly: {
     title: "Plugins require Tauri desktop runtime",
     description:

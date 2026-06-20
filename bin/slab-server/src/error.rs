@@ -35,6 +35,7 @@ struct ErrorResponse {
 mod error_codes {
     pub const NOT_FOUND: u16 = 4004;
     pub const BAD_REQUEST: u16 = 4000;
+    pub const FORBIDDEN: u16 = 4030;
     pub const CONFLICT: u16 = 4009;
     pub const BACKEND_NOT_READY: u16 = 5003;
     pub const RUNTIME_ERROR: u16 = 5000;
@@ -62,6 +63,10 @@ pub enum ServerError {
     /// The caller sent an invalid or malformed request.
     #[error("bad request: {0}")]
     BadRequest(String),
+
+    /// The caller is not allowed to perform the operation.
+    #[error("forbidden: {0}")]
+    Forbidden(String),
 
     /// The caller sent an invalid or malformed request with structured details.
     #[error("bad request: {message}")]
@@ -108,6 +113,11 @@ impl ServerError {
                 "bad_request".to_owned(),
                 message.clone(),
                 message_i18n_with_detail(ServerI18nKey::ErrorBadRequest, &message),
+            ),
+            ServerError::Forbidden(message) => (
+                "forbidden".to_owned(),
+                message.clone(),
+                message_i18n_with_detail(ServerI18nKey::ErrorForbidden, &message),
             ),
             ServerError::BadRequestData { message, .. } => (
                 "bad_request".to_owned(),
@@ -175,6 +185,13 @@ impl IntoResponse for ServerError {
                 None,
                 m.clone(),
                 message_i18n_with_detail(ServerI18nKey::ErrorBadRequest, m),
+            ),
+            ServerError::Forbidden(m) => (
+                StatusCode::FORBIDDEN,
+                error_codes::FORBIDDEN,
+                None,
+                m.clone(),
+                message_i18n_with_detail(ServerI18nKey::ErrorForbidden, m),
             ),
             ServerError::BadRequestData { message, data } => (
                 StatusCode::BAD_REQUEST,

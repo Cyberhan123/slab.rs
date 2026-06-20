@@ -50,7 +50,7 @@ describe.sequential("plugins e2e", () => {
     cleanupFullstackDevEnvironment(env)
   })
 
-  it("imports a browser plugin and enforces the plugin API bridge permissions", async () => {
+  it("imports a browser plugin and rejects the browser API bridge", async () => {
     const testEnv = requireEnv()
     const browserEvents: string[] = []
     page.on("console", (message) => {
@@ -74,6 +74,12 @@ describe.sequential("plugins e2e", () => {
     await page.getByTestId("plugin-import-open-button").waitFor({ state: "visible", timeout: 60_000 })
     await page.getByTestId("plugin-import-open-button").click()
     await page.getByTestId("plugin-import-file-input").setInputFiles(pluginPackPath)
+    // The import dialog now requires the user to acknowledge the requested
+    // permissions before the Import button is enabled.
+    await page
+      .getByTestId("plugin-permissions-reviewed-checkbox")
+      .waitFor({ state: "visible", timeout: 60_000 })
+    await page.getByTestId("plugin-permissions-reviewed-checkbox").check()
     await page.getByTestId("plugin-import-submit-button").click()
 
     await page.getByTestId(`plugin-card-${pluginId}`).waitFor({ state: "visible", timeout: 60_000 })
@@ -86,18 +92,17 @@ describe.sequential("plugins e2e", () => {
     await page.getByTestId(`plugin-view-${pluginId}`).waitFor({ state: "visible", timeout: 60_000 })
     const pluginFrame = await waitForPluginFrame(page, browserEvents)
 
-    await eventually("plugin bridge returns models", async () => {
+    const modelsStatus = await eventually("plugin bridge rejects browser API", async () => {
       const text = await pluginFrame.getByTestId("plugin-models-status").textContent()
-      return text?.startsWith("models ok") ? text : null
+      return text?.includes("desktop plugin WebView host") ? text : null
     })
-    const modelsStatus = await pluginFrame.getByTestId("plugin-models-status").textContent()
-    expect(modelsStatus).toMatch(/^models ok \d+$/)
+    expect(modelsStatus).toContain("desktop plugin WebView host")
 
     const deniedStatus = await eventually("plugin bridge rejects unauthorized API", async () => {
       const text = await pluginFrame.getByTestId("plugin-denied-status").textContent()
-      return text?.includes("audio:transcribe") ? text : null
+      return text?.includes("desktop plugin WebView host") ? text : null
     })
-    expect(deniedStatus).toContain("audio:transcribe")
+    expect(deniedStatus).toContain("desktop plugin WebView host")
   })
 })
 

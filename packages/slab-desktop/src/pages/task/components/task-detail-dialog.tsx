@@ -8,7 +8,13 @@ import { SoftPanel } from '@slab/components/workspace';
 import { toast } from 'sonner';
 import { translateServerField, useTranslation } from '@slab/i18n';
 import type { Task, TaskResult } from '../const';
-import { formatDateTime, getTaskDeepLink, getTaskTypeMeta, isMediaTaskType } from '../utils';
+import {
+  canRestartTaskType,
+  formatDateTime,
+  getTaskDeepLink,
+  getTaskTypeMeta,
+  isMediaTaskType,
+} from '../utils';
 import { renderStatusPill } from './task-status-pill';
 
 type TaskDetailDialogProps = {
@@ -38,6 +44,7 @@ export function TaskDetailDialog({
   const taskDetail = selectedTask ?? task;
   const taskMeta = getTaskTypeMeta(taskDetail.task_type, t);
   const mediaTask = isMediaTaskType(taskDetail.task_type);
+  const canRestart = canRestartTaskType(taskDetail.task_type);
   const deepLink = getTaskDeepLink(taskDetail.task_type, taskDetail.id);
   const resultText = taskResult?.text;
   const failureReason = translateServerField(
@@ -172,13 +179,24 @@ export function TaskDetailDialog({
                   </Button>
                 ) : null}
                 {!mediaTask &&
+                canRestart &&
                 (selectedTask.status === 'failed' ||
                 selectedTask.status === 'cancelled' ||
                 selectedTask.status === 'succeeded') ? (
                   <Button
                     variant="pill"
                     size="sm"
-                    onClick={() => void onRestart(selectedTask.id)}
+                    onClick={() => {
+                      // Defensive guard: the backend rejects restart for any task type
+                      // other than model_download (400 "does not support restart"). The
+                      // render condition already hides this button otherwise, but keep a
+                      // client-side check so a stale `selectedTask` can never fire a
+                      // request the server is guaranteed to reject.
+                      if (!canRestartTaskType(selectedTask.task_type)) {
+                        return;
+                      }
+                      void onRestart(selectedTask.id);
+                    }}
                     disabled={restartTaskMutation.isPending}
                     data-testid={`task-restart-${selectedTask.id}`}
                   >

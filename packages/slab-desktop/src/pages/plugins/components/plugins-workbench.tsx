@@ -28,14 +28,18 @@ export function PluginsWorkbench({
   handleImportPlugin,
   handlePrimaryAction,
   handleToggleEnabled,
+  hasReviewedPermissions,
   hasSearchQuery,
   importFileName,
   importPluginPending,
+  importPreview,
+  importPreviewFailed,
   isImportOpen,
   loading,
   plugins,
   refreshData,
   refreshing,
+  setHasReviewedPermissions,
 }: PluginsPageState) {
   const { t } = useTranslation();
 
@@ -130,6 +134,10 @@ export function PluginsWorkbench({
         canImport={canImport}
         importPending={importPluginPending}
         onImport={() => void handleImportPlugin()}
+        importPreview={importPreview}
+        importPreviewFailed={importPreviewFailed}
+        hasReviewedPermissions={hasReviewedPermissions}
+        onReviewedPermissionsChange={setHasReviewedPermissions}
       />
     </div>
   );

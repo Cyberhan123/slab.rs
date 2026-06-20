@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import type { WorkspaceFileEntry } from "@/lib/workspace-bridge"
 import {
+  workspaceVscodeDirtyCloseTarget,
   supportsWorkspaceLsp,
   workspaceLspDefinitionTargetFromResult,
   workspaceLspImportSpecifierPositionForTarget,
@@ -200,6 +201,31 @@ describe("workspace LSP helpers", () => {
       workspaceLspRelativePathFromUri(
         "C:\\Users\\demo\\repo",
         "file:///C:/Users/demo/other/src/index.ts",
+      ),
+    ).toBeNull()
+  })
+
+  it("returns a dirty VS Code close target only for workspace files", () => {
+    const input = { resource: { toString: () => "file:///C:/Users/demo/repo/src/index.ts" } }
+    expect(
+      workspaceVscodeDirtyCloseTarget(
+        "C:\\Users\\demo\\repo",
+        input,
+        () => true,
+      ),
+    ).toBe("src/index.ts")
+    expect(
+      workspaceVscodeDirtyCloseTarget(
+        "C:\\Users\\demo\\repo",
+        input,
+        () => false,
+      ),
+    ).toBeNull()
+    expect(
+      workspaceVscodeDirtyCloseTarget(
+        "C:\\Users\\demo\\repo",
+        { resource: { toString: () => "file:///C:/Users/demo/other/src/index.ts" } },
+        () => true,
       ),
     ).toBeNull()
   })

@@ -13,6 +13,9 @@ import {
 import { Input } from '@slab/components/input';
 import { Label } from '@slab/components/label';
 
+import type { PluginManifestPreview } from '../lib/plugin-manifest-preview';
+import { PermissionReviewList } from './permission-review-list';
+
 type ImportPluginPackDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -21,6 +24,10 @@ type ImportPluginPackDialogProps = {
   canImport: boolean;
   importPending: boolean;
   onImport: () => void;
+  importPreview: PluginManifestPreview | null;
+  importPreviewFailed: boolean;
+  hasReviewedPermissions: boolean;
+  onReviewedPermissionsChange: (reviewed: boolean) => void;
 };
 
 export function ImportPluginPackDialog({
@@ -31,8 +38,13 @@ export function ImportPluginPackDialog({
   canImport,
   importPending,
   onImport,
+  importPreview,
+  importPreviewFailed,
+  hasReviewedPermissions,
+  onReviewedPermissionsChange,
 }: ImportPluginPackDialogProps) {
   const { t } = useTranslation();
+  const showReview = Boolean(selectedFileName) && (importPreview || importPreviewFailed);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -73,6 +85,32 @@ export function ImportPluginPackDialog({
               </div>
             )}
           </div>
+
+          {showReview ? (
+            <div className="space-y-3 rounded-2xl border border-border/70 bg-muted/10 p-4">
+              {importPreviewFailed ? (
+                <p className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                  {t('pages.plugins.permissions.parseFailed')}
+                </p>
+              ) : null}
+              {importPreview ? <PermissionReviewList preview={importPreview} /> : null}
+
+              <label className="flex items-start gap-2 text-sm" data-testid="plugin-permissions-review">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 size-4 rounded border-border"
+                  checked={hasReviewedPermissions}
+                  onChange={(event) => onReviewedPermissionsChange(event.target.checked)}
+                  disabled={importPending}
+                  aria-label={t('pages.plugins.permissions.reviewedCheckbox')}
+                  data-testid="plugin-permissions-reviewed-checkbox"
+                />
+                <span className="text-muted-foreground">
+                  {t('pages.plugins.permissions.reviewedCheckbox')}
+                </span>
+              </label>
+            </div>
+          ) : null}
         </div>
 
         <DialogFooter showCloseButton className="border-t border-border/60 px-5 py-4">

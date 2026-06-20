@@ -3,6 +3,7 @@ import type { components } from '@slab/api/v1';
 export const SERVER_I18N_KEYS = [
   'server.errors.notFound',
   'server.errors.badRequest',
+  'server.errors.forbidden',
   'server.errors.conflict',
   'server.errors.backendNotReady',
   'server.errors.runtimeBusy',
@@ -356,6 +357,7 @@ type LocaleNode = {
 export const enUSServerMessages = {
   'server.errors.notFound': 'Not found: {{detail}}',
   'server.errors.badRequest': 'Bad request: {{detail}}',
+  'server.errors.forbidden': 'Forbidden: {{detail}}',
   'server.errors.conflict': 'Conflict: {{detail}}',
   'server.errors.backendNotReady': 'Backend is not ready: {{detail}}',
   'server.errors.runtimeBusy': 'Inference backend is busy.',
@@ -656,6 +658,7 @@ export const enUSServerMessages = {
 export const zhCNServerMessages = {
   'server.errors.notFound': '未找到：{{detail}}',
   'server.errors.badRequest': '请求无效：{{detail}}',
+  'server.errors.forbidden': '没有权限：{{detail}}',
   'server.errors.conflict': '状态冲突：{{detail}}',
   'server.errors.backendNotReady': '后端尚未就绪：{{detail}}',
   'server.errors.runtimeBusy': '推理后端正忙。',

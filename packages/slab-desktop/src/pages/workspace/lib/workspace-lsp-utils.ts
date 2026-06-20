@@ -114,6 +114,53 @@ export function workspaceLspImportSpecifierPositionForTarget(
   }
 }
 
+export function workspaceVscodeDirtyCloseTarget(
+  workspaceRoot: string,
+  input: unknown,
+  isDirty: (resource: string) => boolean,
+) {
+  const resource = workspaceVscodeResourceStringFromEditorInput(input)
+  if (!resource) {
+    return null
+  }
+
+  const relativePath = workspaceLspRelativePathFromUri(workspaceRoot, resource)
+  if (!relativePath) {
+    return null
+  }
+
+  return isDirty(resource) ? relativePath : null
+}
+
+export function workspaceVscodeResourceStringFromEditorInput(input: unknown) {
+  if (!input || typeof input !== "object") {
+    return null
+  }
+
+  const record = input as Record<string, unknown>
+  const resource = record.resource
+  if (resource && typeof resource === "object" && "toString" in resource) {
+    return resource.toString()
+  }
+
+  const toUntyped = record.toUntyped
+  if (typeof toUntyped !== "function") {
+    return null
+  }
+
+  const untyped = toUntyped.call(input)
+  if (!untyped || typeof untyped !== "object") {
+    return null
+  }
+
+  const untypedResource = (untyped as Record<string, unknown>).resource
+  if (untypedResource && typeof untypedResource === "object" && "toString" in untypedResource) {
+    return untypedResource.toString()
+  }
+
+  return null
+}
+
 function workspaceLspDefinitionTargetFromEntry(
   workspaceRoot: string,
   definition: unknown,

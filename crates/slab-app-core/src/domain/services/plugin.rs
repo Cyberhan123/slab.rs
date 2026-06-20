@@ -323,15 +323,29 @@ impl PluginService {
         last_error: Option<String>,
     ) -> Result<PluginView, AppCoreError> {
         self.ensure_plugin_state(plugin_id).await?;
+        // A user-initiated stop must not erase the prior diagnostic. Only an
+        // explicit `last_error` (a stop triggered by a freshly observed failure)
+        // overrides it; otherwise we carry forward whatever the start/runtime path
+        // already recorded, so a restart or refresh still surfaces the original
+        // failure reason instead of a silently cleared `null`.
         let runtime_status =
             if last_error.is_some() { RUNTIME_STATUS_ERROR } else { RUNTIME_STATUS_STOPPED };
+        let effective_last_error = match last_error {
+            Some(error) => Some(error),
+            None => self
+                .state
+                .store()
+                .get_plugin_state(plugin_id)
+                .await?
+                .and_then(|state| state.last_error),
+        };
         let now = Utc::now();
         self.state
             .store()
             .update_plugin_runtime_status(
                 plugin_id,
                 runtime_status,
-                last_error.as_deref(),
+                effective_last_error.as_deref(),
                 None,
                 Some(now),
                 now,

@@ -203,15 +203,18 @@ async fn plugin_ui_asset(
     tag = "plugins",
     params(PluginPath),
     request_body = PluginApiRequest,
-    responses((status = 200, description = "Proxied plugin Slab API response", body = PluginApiResponse))
+    responses(
+        (status = 403, description = "Plugin Slab API bridge is only available through the desktop plugin WebView host")
+    )
 )]
 async fn plugin_api_request(
-    State(service): State<PluginService>,
     Path(params): Path<PluginPath>,
-    Json(request): Json<PluginApiRequest>,
 ) -> Result<Json<PluginApiResponse>, ServerError> {
     let params = validate(params)?;
-    Ok(Json(service.plugin_api_request(&params.id, request).await?))
+    Err(ServerError::Forbidden(format!(
+        "plugin Slab API bridge for `{}` is only available through the desktop plugin WebView host",
+        params.id
+    )))
 }
 
 #[utoipa::path(
@@ -349,7 +352,14 @@ async fn delete_plugin(
 
 #[cfg(test)]
 mod tests {
+    use axum::body::Body;
+    use axum::http::{Method, Request, StatusCode, header};
+    use chrono::Utc;
+    use slab_app_core::infra::db::PluginStateStore;
+    use slab_app_core::infra::db::entities::PluginStateRecord;
+
     use super::PluginApi;
+    use crate::api::test_support::{TestResponse, TestServer, response_json};
     use utoipa::OpenApi;
 
     #[test]
@@ -359,5 +369,131 @@ mod tests {
         assert!(openapi["paths"]["/v1/plugins/import-pack"]["post"].is_object());
         assert!(openapi["paths"]["/v1/plugins/{id}/api-request"]["post"].is_object());
         assert!(openapi["paths"]["/v1/plugins/{id}/start"]["post"].is_object());
+    }
+
+    fn stage_dev_plugin(plugins_dir: &std::path::Path, plugin_id: &str) {
+        let plugin_root = plugins_dir.join(plugin_id);
+        std::fs::create_dir_all(plugin_root.join("ui")).expect("plugin ui dir");
+        std::fs::write(plugin_root.join("ui").join("index.html"), "<!doctype html>").expect("ui");
+        std::fs::write(
+            plugin_root.join("plugin.json"),
+            serde_json::json!({
+                "manifestVersion": 1,
+                "id": plugin_id,
+                "name": "Stage Plugin",
+                "version": "0.1.0",
+                "runtime": { "ui": { "entry": "ui/index.html" } },
+                "permissions": { "network": { "mode": "blocked", "allowHosts": [] } }
+            })
+            .to_string(),
+        )
+        .expect("plugin manifest");
+    }
+
+    #[tokio::test]
+    async fn stop_plugin_preserves_prior_failure_diagnostic() {
+        let server = TestServer::new().await;
+        stage_dev_plugin(&server.plugins_dir(), "stage-plugin");
+
+        // Simulate a plugin that previously failed (e.g. failed to start) and is
+        // still enabled. A user-initiated stop must not clear this diagnostic.
+        let now = Utc::now();
+        server
+            .store
+            .upsert_plugin_state(PluginStateRecord {
+                plugin_id: "stage-plugin".to_owned(),
+                source_kind: "dev".to_owned(),
+                source_ref: None,
+                install_root: Some(
+                    server.plugins_dir().join("stage-plugin").to_string_lossy().into_owned(),
+                ),
+                installed_version: Some("0.1.0".to_owned()),
+                manifest_hash: None,
+                enabled: true,
+                runtime_status: "error".to_owned(),
+                last_error: Some("missing runtime dependency".to_owned()),
+                installed_at: now,
+                updated_at: now,
+                last_seen_at: Some(now),
+                last_started_at: None,
+                last_stopped_at: None,
+            })
+            .await
+            .expect("seed plugin state");
+
+        // The frontend now sends an empty body (no `lastError`) on a manual stop.
+        let response =
+            server.post_json("/v1/plugins/stage-plugin/stop", serde_json::json!({})).await;
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(response.body["runtimeStatus"], "stopped");
+        assert_eq!(response.body["lastError"], "missing runtime dependency");
+    }
+
+    async fn send_plugin_api_request(
+        server: &TestServer,
+        target: &str,
+        caller_header: Option<&str>,
+    ) -> TestResponse {
+        let body = serde_json::json!({
+            "method": "POST",
+            "path": "/v1/chat/completions"
+        })
+        .to_string();
+        let uri = format!("/v1/plugins/{target}/api-request");
+        let mut builder = Request::builder()
+            .method(Method::POST)
+            .uri(&uri)
+            .header(header::CONTENT_TYPE, "application/json");
+        if let Some(caller) = caller_header {
+            builder = builder.header("x-slab-plugin-caller", caller);
+        }
+        let response = server.raw(builder.body(Body::from(body)).expect("test request")).await;
+        response_json(response).await
+    }
+
+    #[tokio::test]
+    async fn plugin_api_request_rejects_public_http_without_caller_header() {
+        let server = TestServer::new().await;
+
+        let response = send_plugin_api_request(&server, "stage-plugin", None).await;
+
+        assert_eq!(response.status, StatusCode::FORBIDDEN);
+        assert!(
+            response.body["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("only available through the desktop plugin WebView host")
+        );
+    }
+
+    #[tokio::test]
+    async fn plugin_api_request_rejects_public_http_with_mismatched_caller_header() {
+        let server = TestServer::new().await;
+
+        let response = send_plugin_api_request(&server, "stage-plugin", Some("other-plugin")).await;
+
+        assert_eq!(response.status, StatusCode::FORBIDDEN);
+        assert!(
+            response.body["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("only available through the desktop plugin WebView host")
+        );
+    }
+
+    #[tokio::test]
+    async fn plugin_api_request_rejects_public_http_with_matching_caller_header() {
+        let server = TestServer::new().await;
+
+        let response = send_plugin_api_request(&server, "stage-plugin", Some("stage-plugin")).await;
+
+        assert_eq!(response.status, StatusCode::FORBIDDEN);
+        assert!(
+            response.body["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("only available through the desktop plugin WebView host")
+        );
     }
 }
