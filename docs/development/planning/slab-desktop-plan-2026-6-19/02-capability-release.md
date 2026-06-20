@@ -184,10 +184,10 @@
 - **依赖**：**Plan C**（MutationCache 全局 onError 挂载点，本卡片仅提供 `getLocalizedErrorMessage` 函数）；被 T-B-1/3/4/5/6 共同依赖（错误翻译是基础）
 
 ## 3. 执行顺序 (Sequencing)
-- **M1（基础层，1 周）**：T-B-7（错误契约）。被其余 6 卡共同依赖，必须先行；产出 `getLocalizedErrorMessage` / `ErrorDataDetail` / 补全 `ErrorCodes`。
-- **M2（独立高价值，1 周，可并行）**：T-B-1（媒体进度，P0）、T-B-2（assistant 工具体系）。两者互不依赖，分两人并行；T-B-1 是审计"五大最高杠杆动作"第 1 项。
-- **M3（管理闭环，1.5 周，部分并行）**：T-B-3（hub 闭环，依赖 T-B-7）、T-B-4（音频，依赖 T-B-7，可与 T-B-1 共享 `GenerationProgress`）。两者可并行。
-- **M4（插件域，1.5 周，串行内部）**：T-B-6（rpc+events）→ T-B-5（生命周期 UI，依赖 T-B-6 的 events 做安装进度、依赖 Plan A Phase 0.1 越权止损前置）。
+- **M1（基础层）**：T-B-7（错误契约）。被其余 6 卡共同依赖，必须先行；产出 `getLocalizedErrorMessage` / `ErrorDataDetail` / 补全 `ErrorCodes`。
+- **M2（独立高价值，可并行）**：T-B-1（媒体进度，P0）、T-B-2（assistant 工具体系）。两者互不依赖，分两人并行；T-B-1 是审计"五大最高杠杆动作"第 1 项。
+- **M3（管理闭环，部分并行）**：T-B-3（hub 闭环，依赖 T-B-7）、T-B-4（音频，依赖 T-B-7，可与 T-B-1 共享 `GenerationProgress`）。两者可并行。
+- **M4（插件域，串行内部）**：T-B-6（rpc+events）→ T-B-5（生命周期 UI，依赖 T-B-6 的 events 做安装进度、依赖 Plan A Phase 0.1 越权止损前置）。
 - **关键路径**：T-B-7 → T-B-1/T-B-3 → 集成测试。T-B-7 是单点阻塞，须保证 M1 不 slip。
 - **可并行最大宽度**：M2、M3 各 2 人并行；T-B-5/T-B-6 与 M3 可重叠（不同域）。
 

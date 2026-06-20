@@ -204,12 +204,12 @@
 
 ## 3. 执行顺序 (Sequencing)
 
-- **M1（止损 · P0 · 1 周）**：T-C-1 + T-C-2 同 PR（同文件、状态机耦合）。**关键路径**。
-- **M2（基建 · P1 · 1 周，可与 M1 部分并行）**：
+- **M1（止损 · P0 ）**：T-C-1 + T-C-2 同 PR（同文件、状态机耦合）。**关键路径**。
+- **M2（基建 · P1 可与 M1 部分并行）**：
   - T-C-6（QueryClient/MutationCache 基建，mock `isServerError` 先行）—— 阻塞 T-C-4、T-C-7 的 toast 体验。
   - T-C-5（模型状态单源，独立可并行）。
   - T-C-8（shutdown，独立可并行，依赖 T-C-1 的 fetch 时合并）。
-- **M3（协议与体验闭环 · P1 · 1.5 周）**：
+- **M3（协议与体验闭环 · P1）**：
   - T-C-3（SSE resume，依赖 T-C-1 的 AbortController/fetch-stream）—— **关键路径**。
   - T-C-4（媒体轮询终态，依赖 T-C-6 toast 基建）。
   - T-C-7（BackendStatus/ui-state/toast 去重，依赖 T-C-6）。

@@ -293,13 +293,13 @@
 
 ## 3. 执行顺序 (Sequencing)
 
-- **M1（交互止损，1 周）**：T-D-1（审批 Map）+ T-D-2（Stop pendingAbort）+ T-D-4（代码块复制/think 净化）。
+- **M1（交互止损）**：T-D-1（审批 Map）+ T-D-2（Stop pendingAbort）+ T-D-4（代码块复制/think 净化）。
   - T-D-1 与 T-D-2 同文件（`use-assistant-agent.ts`），合并一个 PR；T-D-2 紧随 Plan C / T-C-1（AbortController 基础设施）。
-- **M2（媒体闭环 + 工作区 IDE 基座，1.5 周）**：T-D-5（媒体重跑/工作区/对比）+ T-D-9（Monaco 懒启动）+ T-D-6（AI 解释）。
+- **M2（媒体闭环 + 工作区 IDE 基座）**：T-D-5（媒体重跑/工作区/对比）+ T-D-9（Monaco 懒启动）+ T-D-6（AI 解释）。
   - T-D-9 → T-D-6（AI 解释依赖 Monaco 选区）；T-D-5 与工作区正交，可并行。
-- **M3（工作区文件体验 + Setup 门，1.5 周）**：T-D-8（文件监听 + 大文件守卫，**关键路径**）+ T-D-11（Setup 确认门）。
+- **M3（工作区文件体验 + Setup 门）**：T-D-8（文件监听 + 大文件守卫，**关键路径**）+ T-D-11（Setup 确认门）。
   - T-D-8 后端端点为关键路径，需尽早开工（后端 + `gen:api`）。
-- **M4（终端 + 设置 + 编辑器配置，1.5 周）**：T-D-7（终端多标签）+ T-D-10（editorSettings）+ T-D-12（设置搜索/守卫）+ T-D-3（Edit-and-resend）。
+- **M4（终端 + 设置 + 编辑器配置）**：T-D-7（终端多标签）+ T-D-10（editorSettings）+ T-D-12（设置搜索/守卫）+ T-D-3（Edit-and-resend）。
   - T-D-10 依赖 T-D-9；T-D-3 建议 M4（避免与 M1 的 abort/messages 改动冲突）。
 
 - **可并行**：
