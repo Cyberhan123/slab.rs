@@ -28,6 +28,9 @@ export const audio = {
     startPreparing: '正在准备模型...',
     startProcessing: '正在处理中...',
     startTranscription: '开始转录',
+    actions: {
+      cancel: '取消转录',
+    },
     submitDescription: '开始后，所选文件会按当前转录流程提交，并可在任务页中跟踪。',
     taskIdLabel: '任务 ID：{{id}}',
     busy: {
@@ -139,6 +142,9 @@ export const audio = {
     historyDetailFailed: '打开转录详情失败：{{message}}',
     transcriptionReady: '转录结果已就绪。',
     viewTasks: '查看任务',
+    cancelled: '转录已取消。',
+    cancelFailed: '取消转录失败。',
+    pollingError: '轮询出错：{{message}}',
     failedToCreateTask: '创建转录任务失败。',
     unknownError: '未知错误',
   },
@@ -150,11 +156,30 @@ export const audio = {
     empty: '暂无转录历史。已完成的转录结果会显示在这里。',
     detailTitle: '转录详情',
     pendingTranscript: '转录内容暂时还不可用。',
+    emptySegment: '暂无分段文本',
+    actions: {
+      copy: '复制',
+      copied: '已复制转录内容',
+      playbackAria: '音频播放',
+      exportTxt: 'TXT',
+      exportSrt: 'SRT',
+      exportVtt: 'VTT',
+      seekAria: '跳转到 {{time}}',
+    },
     fields: {
       source: '来源',
       model: '模型',
       language: '语言',
+      segments: '分段',
     },
+  },
+  progress: {
+    title: '转录进度',
+    queued: '已入队，等待运行时处理',
+    running: '运行时正在转录音频',
+    finalizing: '正在整理转录结果',
+    eta: '预计剩余',
+    step: '步骤',
   },
   error: {
     webUploadNotImplemented: '网页端暂未实现音频上传转录，请使用桌面应用。',
@@ -172,6 +197,7 @@ export const audio = {
     selectedVadMissing: '所选 VAD 模型已不在目录中。',
     selectedModelNotDedicatedVad: '所选模型不是专用 VAD 模型。',
     resolveVadPath: '无法解析转录所需的本地 VAD 模型路径。',
+    transcriptionFailed: '音频转录失败',
   },
   validation: {
     integer: '{{label}} 必须是整数。',

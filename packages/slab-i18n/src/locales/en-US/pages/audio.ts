@@ -29,6 +29,9 @@ export const audio = {
     startPreparing: 'Preparing Model...',
     startProcessing: 'Processing...',
     startTranscription: 'Start Transcription',
+    actions: {
+      cancel: 'Cancel transcription',
+    },
     submitDescription:
       'By starting, the selected file is sent through the current transcription flow and can be tracked in Tasks.',
     taskIdLabel: 'Task ID: {{id}}',
@@ -149,6 +152,9 @@ export const audio = {
     historyDetailFailed: 'Failed to open transcription detail: {{message}}',
     transcriptionReady: 'Transcription is ready.',
     viewTasks: 'View tasks',
+    cancelled: 'Transcription cancelled.',
+    cancelFailed: 'Failed to cancel transcription.',
+    pollingError: 'Polling error: {{message}}',
     failedToCreateTask: 'Failed to create transcription task.',
     unknownError: 'Unknown error',
   },
@@ -160,11 +166,30 @@ export const audio = {
     empty: 'No transcription history yet. Finished transcripts will appear here.',
     detailTitle: 'Transcription Detail',
     pendingTranscript: 'Transcript is not available yet.',
+    emptySegment: 'No segment text',
+    actions: {
+      copy: 'Copy',
+      copied: 'Transcript copied',
+      playbackAria: 'Audio playback',
+      exportTxt: 'TXT',
+      exportSrt: 'SRT',
+      exportVtt: 'VTT',
+      seekAria: 'Seek to {{time}}',
+    },
     fields: {
       source: 'Source',
       model: 'Model',
       language: 'Language',
+      segments: 'Segments',
     },
+  },
+  progress: {
+    title: 'Transcription progress',
+    queued: 'Queued and waiting for the runtime',
+    running: 'Runtime is transcribing audio',
+    finalizing: 'Finalizing transcript',
+    eta: 'ETA',
+    step: 'Step',
   },
   error: {
     webUploadNotImplemented: 'Web transcription upload is not implemented yet. Please use the desktop app.',
@@ -182,6 +207,7 @@ export const audio = {
     selectedVadMissing: 'Selected VAD model no longer exists in catalog.',
     selectedModelNotDedicatedVad: 'Selected model is not a dedicated VAD model.',
     resolveVadPath: 'Unable to resolve a local VAD model path for transcription.',
+    transcriptionFailed: 'Audio transcription failed',
   },
   validation: {
     integer: '{{label}} must be an integer.',

@@ -28,10 +28,13 @@ import {
   agentResponsesWebSocketUrl,
   isBusyStatus,
   nextId,
+  parseAssistantSlashCommand,
   serverMessageThreadId,
   toAgentConfig,
   updateLastAssistantMessage,
   withThoughts,
+  type AssistantReasoningEffort,
+  type AssistantToolChoice,
 } from '../lib/assistant-agent-state'
 import { withAssistantMessageReasoningContent } from '../lib/assistant-message-utils'
 import {
@@ -47,18 +50,26 @@ type PendingApproval = {
 
 type UseAssistantAgentOptions = {
   beforeRequest?: () => Promise<void> | void
-  deepThink?: boolean
   model: string
+  reasoningEffort?: AssistantReasoningEffort | null
+  reasoningSupported?: boolean
   runtimePresets?: AssistantRuntimePresets | null
   sessionId: string
+  systemPrompt?: string | null
+  toolConcurrency?: number | null
+  toolChoice?: AssistantToolChoice | null
 }
 
 export function useAssistantAgent({
   beforeRequest,
-  deepThink,
   model,
+  reasoningEffort,
+  reasoningSupported,
   runtimePresets,
   sessionId,
+  systemPrompt,
+  toolConcurrency,
+  toolChoice,
 }: UseAssistantAgentOptions) {
   const { t } = useTranslation()
   const locale = useAssistantLocale()
@@ -588,12 +599,14 @@ export function useAssistantAgent({
       if (!prompt || isRequesting || !canLoadSession) {
         return
       }
+      const slashCommand = parseAssistantSlashCommand(prompt)
+      const submittedPrompt = slashCommand?.content || prompt
 
       const userMessage: AssistantMessageRecord = {
         id: nextId('user'),
         message: {
           role: 'user',
-          content: prompt,
+          content: submittedPrompt,
         },
         status: 'success',
       }
@@ -632,7 +645,16 @@ export function useAssistantAgent({
             userMessage.message,
           ])
           await sendAgentCommand({
-            config: toAgentConfig(model, runtimePresets, deepThink),
+            config: toAgentConfig({
+              model,
+              reasoningEffort,
+              reasoningSupported,
+              runtimePresets,
+              slashCommand,
+              systemPrompt,
+              toolChoice,
+              toolConcurrency,
+            }),
             messages: requestMessages,
             request_id: nextId('request'),
             session_id: resolvedSessionId,
@@ -642,7 +664,7 @@ export function useAssistantAgent({
         }
 
         await sendAgentCommand({
-          content: prompt,
+          content: submittedPrompt,
           request_id: nextId('request'),
           thread_id: threadId,
           type: 'agent.input',
@@ -661,15 +683,19 @@ export function useAssistantAgent({
       appendAssistantError,
       beforeRequest,
       canLoadSession,
-      deepThink,
       isRequesting,
       locale.requestFailed,
       messages,
       model,
+      reasoningEffort,
+      reasoningSupported,
       resolvedSessionId,
       runtimePresets,
       sendAgentCommand,
+      systemPrompt,
       threadId,
+      toolChoice,
+      toolConcurrency,
     ]
   )
 

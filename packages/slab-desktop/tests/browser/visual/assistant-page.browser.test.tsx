@@ -58,13 +58,21 @@ vi.mock('@/store/useAssistantUiStore', () => ({
   useAssistantUiStore: vi.fn<(selector?: (state: Record<string, unknown>) => unknown) => unknown>((selector) => {
     const state = {
       currentSessionId: 'session-1',
-      deepThink: false,
+      advancedPanelOpen: false,
       hasHydrated: true,
       removeSessionLabel: vi.fn<() => void>(),
+      reasoningEffort: 'medium',
       sessionLabels: {},
+      setAdvancedPanelOpen: vi.fn<() => void>(),
       setCurrentSessionId: vi.fn<() => void>(),
-      setDeepThink: vi.fn<() => void>(),
+      setReasoningEffort: vi.fn<() => void>(),
       setSessionLabel: vi.fn<() => void>(),
+      setSystemPrompt: vi.fn<() => void>(),
+      setToolChoice: vi.fn<() => void>(),
+      setToolConcurrency: vi.fn<() => void>(),
+      systemPrompt: '',
+      toolChoice: { type: 'auto' },
+      toolConcurrency: 1,
     };
     return selector ? selector(state) : state;
   }),

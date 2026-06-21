@@ -40,7 +40,6 @@ const SOURCE_KIND_PACKAGE_URL: &str = "package_url";
 const RUNTIME_STATUS_RUNNING: &str = "running";
 const RUNTIME_STATUS_STOPPED: &str = "stopped";
 const RUNTIME_STATUS_ERROR: &str = "error";
-const DEFAULT_PACKAGE_SOURCE_ID: &str = "direct";
 
 #[derive(Clone)]
 pub struct PluginService {
@@ -170,7 +169,7 @@ impl PluginService {
             &package_bytes,
             Some(command.plugin_id.as_str()),
             SOURCE_KIND_PACKAGE_URL,
-            Some(source.source_id.as_str()),
+            Some(source.package_url.as_str()),
         )
         .await
     }
@@ -603,10 +602,6 @@ impl PluginService {
     ) -> Result<ResolvedInstallSource, AppCoreError> {
         if let Some(package_url) = command.package_url.clone() {
             return Ok(ResolvedInstallSource {
-                source_id: command
-                    .source_id
-                    .clone()
-                    .unwrap_or_else(|| DEFAULT_PACKAGE_SOURCE_ID.to_owned()),
                 package_url,
                 package_sha256: command.package_sha256.clone(),
             });
@@ -644,7 +639,6 @@ fn plugin_api_base_url_from_bind_address(bind_address: &str) -> String {
 
 #[derive(Debug, Clone)]
 struct ResolvedInstallSource {
-    source_id: String,
     package_url: String,
     package_sha256: Option<String>,
 }

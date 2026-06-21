@@ -34,7 +34,8 @@ import {
   CollapsibleTrigger,
 } from '@slab/components/collapsible';
 import { SplitWorkbench } from '@slab/components/workspace';
-import type { ImageGenerationTask } from '@/lib/media-task-api';
+import { GenerationProgressView } from '@/components/generation-progress';
+import type { GenerationProgress, ImageGenerationTask } from '@/lib/media-task-api';
 import { cn } from '@/lib/utils';
 import {
   DIMENSION_PRESETS,
@@ -55,6 +56,7 @@ type ImageWorkbenchProps = {
   clipSkip: number;
   eta: number;
   guidance: number;
+  generationProgress: GenerationProgress | null;
   handleCancel: () => void;
   handleDimensionPreset: (width: number, height: number) => void;
   handleDownload: (src: string, index: number) => void;
@@ -117,6 +119,7 @@ export function ImageWorkbench({
   clipSkip,
   eta,
   guidance,
+  generationProgress,
   handleCancel,
   handleDimensionPreset,
   handleDownload,
@@ -585,6 +588,20 @@ export function ImageWorkbench({
                       >
                         {t('pages.image.workbench.actions.cancel')}
                       </Button>
+                    ) : null}
+                    {isGenerating ? (
+                      <GenerationProgressView
+                        progress={generationProgress}
+                        labels={{
+                          eta: t('pages.image.progress.eta'),
+                          finalizing: t('pages.image.progress.finalizing'),
+                          queued: t('pages.image.progress.queued'),
+                          running: t('pages.image.progress.running'),
+                          step: t('pages.image.progress.step'),
+                          title: t('pages.image.progress.title'),
+                        }}
+                        className="mt-3"
+                      />
                     ) : null}
                   </div>
                 </div>

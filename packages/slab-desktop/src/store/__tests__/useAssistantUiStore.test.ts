@@ -6,7 +6,11 @@ describe('useAssistantUiStore', () => {
   beforeEach(() => {
     useAssistantUiStore.setState({
       currentSessionId: '',
-      deepThink: true,
+      reasoningEffort: 'medium',
+      systemPrompt: '',
+      toolConcurrency: 1,
+      toolChoice: { type: 'auto' },
+      advancedPanelOpen: false,
       sessionLabels: {},
       hasHydrated: false,
     });
@@ -15,7 +19,11 @@ describe('useAssistantUiStore', () => {
   it('should have initial state', () => {
     const state = useAssistantUiStore.getState();
     expect(state.currentSessionId).toBe('');
-    expect(state.deepThink).toBe(true);
+    expect(state.reasoningEffort).toBe('medium');
+    expect(state.systemPrompt).toBe('');
+    expect(state.toolConcurrency).toBe(1);
+    expect(state.toolChoice).toEqual({ type: 'auto' });
+    expect(state.advancedPanelOpen).toBe(false);
     expect(state.sessionLabels).toEqual({});
     expect(state.hasHydrated).toBe(false);
   });
@@ -30,9 +38,19 @@ describe('useAssistantUiStore', () => {
     expect(useAssistantUiStore.getState().currentSessionId).toBe('session-123');
   });
 
-  it('should set deep think state', () => {
-    useAssistantUiStore.getState().setDeepThink(false);
-    expect(useAssistantUiStore.getState().deepThink).toBe(false);
+  it('should set assistant config state', () => {
+    const state = useAssistantUiStore.getState();
+    state.setReasoningEffort('high');
+    state.setSystemPrompt('  follow project rules  ');
+    state.setToolConcurrency(6);
+    state.setToolChoice({ type: 'required' });
+    state.setAdvancedPanelOpen(true);
+
+    expect(useAssistantUiStore.getState().reasoningEffort).toBe('high');
+    expect(useAssistantUiStore.getState().systemPrompt).toBe('  follow project rules  ');
+    expect(useAssistantUiStore.getState().toolConcurrency).toBe(4);
+    expect(useAssistantUiStore.getState().toolChoice).toEqual({ type: 'required' });
+    expect(useAssistantUiStore.getState().advancedPanelOpen).toBe(true);
   });
 
   it('should set session label', () => {

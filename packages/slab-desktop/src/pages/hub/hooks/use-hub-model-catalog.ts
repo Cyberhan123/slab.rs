@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useInterval } from '@mantine/hooks';
+import { useQueryClient } from '@tanstack/react-query';
 import { clamp, countBy } from 'lodash-es';
 import { toast } from 'sonner';
 import { translateServerField, useTranslation } from '@slab/i18n';
 
-import api, { getErrorMessage, postFormData } from '@slab/api';
+import api, { getErrorMessage, getLocalizedErrorMessage, postFormData } from '@slab/api';
 import type { components } from '@slab/api/v1';
 import {
   modelSupportsCapability,
@@ -41,10 +42,12 @@ export const STATUS_OPTIONS = ['all', 'ready', 'downloading', 'not_downloaded', 
 export type ModelCategory = (typeof CATEGORY_OPTIONS)[number];
 export type ModelFilterStatus = (typeof STATUS_OPTIONS)[number];
 export type ModelStatus = CatalogModelStatus;
+export type ModelVramRisk = 'unknown' | 'ok' | 'high';
 export type ModelItem = {
   id: string;
   display_name: string;
   kind: 'local' | 'cloud';
+  category: ModelCategory;
   repo_id: string;
   filename: string;
   capabilities: ModelCapability[];
@@ -56,6 +59,8 @@ export type ModelItem = {
   runtime_state: CatalogModelRuntimeState | null;
   download_task_id: string | null;
   download_progress: ModelDownloadProgress | null;
+  size_bytes: number | null;
+  vram_risk: ModelVramRisk;
   updated_at: string;
 };
 
@@ -71,6 +76,7 @@ async function importModelPack(file: File, invalidFileMessage: string): Promise<
 
 export function useHubModelCatalog() {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const [category, setCategory] = useState<ModelCategory>('all');
   const [status, setStatus] = useState<ModelFilterStatus>('all');
   const [visibleCount, setVisibleCount] = useState(DEFAULT_VISIBLE_COUNT);
@@ -79,6 +85,8 @@ export function useHubModelCatalog() {
   const [createModelPending, setCreateModelPending] = useState(false);
   const [modelToDelete, setModelToDelete] = useState<ModelItem | null>(null);
   const [modelToEnhance, setModelToEnhance] = useState<ModelItem | null>(null);
+  const [modelActionPendingId, setModelActionPendingId] = useState<string | null>(null);
+  const [modelActionErrors, setModelActionErrors] = useState<Record<string, string>>({});
   const downloadTracking = useHubModelDownloadStore((state) => state.downloadTracking);
   const setModelDownloadTracking = useHubModelDownloadStore((state) => state.setDownloadTracking);
 
@@ -89,19 +97,36 @@ export function useHubModelCatalog() {
     isRefetching,
     refetch,
   } = api.useQuery('get', '/v1/models');
+  const { data: gpuStatus } = api.useQuery('get', '/v1/system/gpu');
   const deleteModelMutation = api.useMutation('delete', '/v1/models/{id}');
+  const loadModelMutation = api.useMutation('post', '/v1/models/load');
+  const unloadModelMutation = api.useMutation('post', '/v1/models/unload');
+  const switchModelMutation = api.useMutation('post', '/v1/models/switch');
+
+  const maxFreeGpuMemoryBytes = useMemo(() => {
+    const devices = gpuStatus?.devices ?? [];
+    if (devices.length === 0) {
+      return null;
+    }
+
+    return Math.max(
+      ...devices.map((device) =>
+        Math.max(0, device.total_memory_bytes - device.used_memory_bytes),
+      ),
+    );
+  }, [gpuStatus]);
 
   const models = useMemo<ModelItem[]>(
     () =>
       toCatalogModelList(data).map((model) =>
-        toModelItem(model, downloadTracking[model.id]),
+        toModelItem(model, downloadTracking[model.id], maxFreeGpuMemoryBytes),
       ),
-    [data, downloadTracking],
+    [data, downloadTracking, maxFreeGpuMemoryBytes],
   );
   const filteredModels = useMemo(
     () =>
       models.filter((model) => {
-        if (category !== 'all' && inferModelCategory(model) !== category) {
+        if (category !== 'all' && model.category !== category) {
           return false;
         }
 
@@ -126,6 +151,10 @@ export function useHubModelCatalog() {
   );
   const hasMore = visibleModels.length < filteredModels.length;
   const canCreate = Boolean(createFile && !createModelPending);
+  const modelActionPending =
+    loadModelMutation.isPending ||
+    unloadModelMutation.isPending ||
+    switchModelMutation.isPending;
 
   useEffect(() => {
     setVisibleCount(DEFAULT_VISIBLE_COUNT);
@@ -236,6 +265,18 @@ export function useHubModelCatalog() {
     return refreshedModels.find((model) => model.id === modelId);
   };
 
+  const refreshRuntimeState = useCallback(async () => {
+    await Promise.all([
+      refetch(),
+      queryClient.invalidateQueries({
+        predicate: (query) => {
+          const key = JSON.stringify(query.queryKey);
+          return key.includes('/v1/models') || key.includes('/v1/backends/status');
+        },
+      }),
+    ]);
+  }, [queryClient, refetch]);
+
   async function trackModelDownload(model: ModelItem, taskId: string) {
     try {
       await waitForTaskToFinish(model.id, taskId);
@@ -250,7 +291,7 @@ export function useHubModelCatalog() {
       });
     } catch (downloadError) {
       toast.error(t('pages.hub.toast.downloadFailed'), {
-        description: getErrorMessage(downloadError),
+        description: getLocalizedErrorMessage(downloadError, t),
       });
     } finally {
       setModelDownloadTracking(model.id, null);
@@ -282,7 +323,7 @@ export function useHubModelCatalog() {
       void trackModelDownload(model, taskId);
     } catch (downloadError) {
       toast.error(t('pages.hub.toast.downloadFailed'), {
-        description: getErrorMessage(downloadError),
+        description: getLocalizedErrorMessage(downloadError, t),
       });
     }
   }
@@ -301,13 +342,87 @@ export function useHubModelCatalog() {
         description: modelToDelete.display_name,
       });
       setModelToDelete(null);
-      void refetch();
+      void refreshRuntimeState();
     } catch (deleteError) {
       toast.error(t('pages.hub.toast.deleteFailed'), {
-        description: getErrorMessage(deleteError),
+        description: getLocalizedErrorMessage(deleteError, t),
       });
     }
   }
+
+  const runModelAction = useCallback(
+    async (
+      model: ModelItem,
+      successTitle: string,
+      action: () => Promise<unknown>,
+    ) => {
+      if (!canRunModelLifecycleAction(model) || modelActionPending) {
+        return;
+      }
+
+      setModelActionPendingId(model.id);
+      setModelActionErrors((current) => {
+        const next = { ...current };
+        delete next[model.id];
+        return next;
+      });
+      try {
+        await action();
+        toast.success(successTitle, {
+          description: model.display_name,
+        });
+        await refreshRuntimeState();
+      } catch (actionError) {
+        const message = getLocalizedErrorMessage(actionError, t);
+        setModelActionErrors((current) => ({
+          ...current,
+          [model.id]: message,
+        }));
+        toast.error(t('pages.hub.toast.actionFailed'), {
+          description: message,
+        });
+      } finally {
+        setModelActionPendingId(null);
+      }
+    },
+    [modelActionPending, refreshRuntimeState, t],
+  );
+
+  const loadModel = useCallback(
+    (model: ModelItem) =>
+      runModelAction(model, t('pages.hub.toast.loaded'), () =>
+        loadModelMutation.mutateAsync({
+          body: {
+            model_id: model.id,
+          },
+        }),
+      ),
+    [loadModelMutation, runModelAction, t],
+  );
+
+  const unloadModel = useCallback(
+    (model: ModelItem) =>
+      runModelAction(model, t('pages.hub.toast.unloaded'), () =>
+        unloadModelMutation.mutateAsync({
+          body: {
+            model_id: model.id,
+          },
+        }),
+      ),
+    [runModelAction, t, unloadModelMutation],
+  );
+
+  const switchModel = useCallback(
+    (model: ModelItem) =>
+      runModelAction(model, t('pages.hub.toast.switched'), () =>
+        switchModelMutation.mutateAsync({
+          body: {
+            model_id: model.id,
+          },
+        }),
+      ),
+    [runModelAction, switchModelMutation, t],
+  );
 
   return {
     category,
@@ -332,13 +447,20 @@ export function useHubModelCatalog() {
     isLoading,
     isRefetching,
     error,
+    dataErrorMessage: error ? getLocalizedErrorMessage(error, t) : null,
     refetch,
     canCreate,
     createModel,
     downloadModel,
     deleteModel,
+    loadModel,
+    unloadModel,
+    switchModel,
     createModelPending,
     deleteModelPending: deleteModelMutation.isPending,
+    modelActionPendingId,
+    modelActionErrors,
+    modelActionPending,
   };
 }
 
@@ -354,18 +476,64 @@ export function canDownloadModel(
   );
 }
 
-function inferModelCategory(model: ModelItem): ModelCategory {
+export function canRunModelLifecycleAction(
+  model: Pick<ModelItem, 'kind' | 'local_path' | 'pending'>,
+) {
+  return model.kind === 'local' && Boolean(model.local_path) && !model.pending;
+}
+
+export function getModelUseRoute(model: Pick<ModelItem, 'category'>): string | null {
+  switch (model.category) {
+    case 'language':
+    case 'coding':
+      return '/assistant';
+    case 'vision':
+      return '/image';
+    case 'audio':
+      return '/audio';
+    case 'embedding':
+    case 'all':
+      return null;
+  }
+}
+
+export function classifyByCapabilities(
+  model: Pick<ModelItem, 'display_name' | 'kind' | 'backend_ids' | 'repo_id' | 'filename' | 'capabilities'>,
+): ModelCategory {
   const haystack = `${model.display_name} ${model.kind} ${model.backend_ids.join(' ')} ${model.repo_id} ${model.filename}`
     .toLowerCase()
     .trim();
 
-  if (model.capabilities.includes('image_embedding') || haystack.includes('embed')) {
+  if (model.capabilities.includes('image_embedding')) {
     return 'embedding';
   }
 
   if (
     model.capabilities.includes('image_generation') ||
-    model.capabilities.includes('video_generation') ||
+    model.capabilities.includes('video_generation')
+  ) {
+    return 'vision';
+  }
+
+  if (
+    model.capabilities.includes('audio_transcription') ||
+    model.capabilities.includes('audio_vad')
+  ) {
+    return 'audio';
+  }
+
+  if (
+    model.capabilities.includes('chat_generation') ||
+    model.capabilities.includes('text_generation')
+  ) {
+    return 'language';
+  }
+
+  if (haystack.includes('embed')) {
+    return 'embedding';
+  }
+
+  if (
     haystack.includes('stable diffusion') ||
     haystack.includes('sdxl') ||
     haystack.includes('vision') ||
@@ -375,8 +543,6 @@ function inferModelCategory(model: ModelItem): ModelCategory {
   }
 
   if (
-    model.capabilities.includes('audio_transcription') ||
-    model.capabilities.includes('audio_vad') ||
     haystack.includes('whisper') ||
     haystack.includes('audio') ||
     haystack.includes('speech') ||
@@ -410,6 +576,7 @@ function isModelPackFile(file: File): boolean {
 function toModelItem(
   model: ReturnType<typeof toCatalogModelList>[number],
   tracking: DownloadTrackingState | undefined,
+  maxFreeGpuMemoryBytes: number | null,
 ): ModelItem {
   const hasLocalPath = Boolean(model.local_path);
   const pending = !hasLocalPath && (model.pending || Boolean(tracking));
@@ -424,6 +591,7 @@ function toModelItem(
     id: model.id,
     display_name: model.display_name,
     kind: model.kind,
+    category: classifyByCapabilities(model),
     repo_id: model.repo_id,
     filename: model.filename,
     capabilities: model.capabilities,
@@ -435,6 +603,16 @@ function toModelItem(
     runtime_state: model.runtime_state,
     download_task_id: tracking?.taskId ?? null,
     download_progress: tracking?.progress ?? null,
+    size_bytes: model.size_bytes,
+    vram_risk: getVramRisk(model.size_bytes, maxFreeGpuMemoryBytes),
     updated_at: model.updated_at,
   };
+}
+
+function getVramRisk(sizeBytes: number | null, maxFreeGpuMemoryBytes: number | null): ModelVramRisk {
+  if (!sizeBytes || !maxFreeGpuMemoryBytes) {
+    return 'unknown';
+  }
+
+  return sizeBytes * 1.2 > maxFreeGpuMemoryBytes ? 'high' : 'ok';
 }

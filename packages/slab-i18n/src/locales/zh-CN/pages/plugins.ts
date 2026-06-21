@@ -16,9 +16,12 @@ export const plugins = {
   actions: {
     refresh: "刷新",
     import: "导入包",
+    installFromUrl: "从 URL 安装",
     stop: "停止",
     enable: "启用",
     launch: "启动",
+    update: "更新",
+    uninstallAria: "卸载 {{name}}",
     disableAria: "禁用 {{name}}",
     enableAria: "启用 {{name}}",
   },
@@ -50,6 +53,17 @@ export const plugins = {
       selectedDescription: "这个 .plugin.slab 包会解压到受管理的 plugins 目录。",
       emptyDescription: "选择一个 .plugin.slab 文件即可安装并激活这个工作区的插件。",
       submit: "导入插件",
+      uploading: "正在上传插件包",
+      cancelUpload: "取消上传",
+    },
+    urlInstall: {
+      title: "从 URL 安装插件",
+      description: "直接从包地址安装插件包。",
+      pluginId: "插件 ID",
+      packageUrl: "包地址",
+      packageSha256: "包 SHA256",
+      version: "版本",
+      submit: "安装插件",
     },
   },
   permissions: {
@@ -112,6 +126,7 @@ export const plugins = {
   toast: {
     loadFailed: "加载插件数据失败",
     importFailed: "导入插件包失败",
+    installFailed: "安装插件失败",
     invalidPlugin: "所选插件无效",
     unknownValidationError: "未知的插件校验错误",
     actionFailed: "无法更新 {{name}}",
@@ -120,5 +135,9 @@ export const plugins = {
     launched: "已启动 {{name}}",
     disabled: "已禁用 {{name}}",
     imported: "已导入 {{name}}",
+    installed: "已安装 {{name}}",
+    updated: "已更新 {{name}}",
+    uninstalled: "已卸载 {{name}}",
+    importCancelled: "插件包上传已取消",
   },
 } as const;

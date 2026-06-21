@@ -10,6 +10,7 @@ import {
   agentEventKey,
   agentResponsesSseUrl,
   agentResponsesWebSocketUrl,
+  parseAssistantSlashCommand,
   serverMessageThreadId,
   toAgentConfig,
   updateLastAssistantMessage,
@@ -34,9 +35,10 @@ function assistantMessage(
 describe('assistant agent state helpers', () => {
   it('projects runtime presets and reasoning controls into the agent config', () => {
     expect(
-      toAgentConfig(
-        'qwen',
-        {
+      toAgentConfig({
+        model: 'qwen',
+        reasoningEffort: 'high',
+        runtimePresets: {
           max_tokens: 2048,
           min_p: 0.2,
           presence_penalty: 0.4,
@@ -45,23 +47,54 @@ describe('assistant agent state helpers', () => {
           top_k: 40,
           top_p: 0.9,
         },
-        true
-      )
+        systemPrompt: '  follow the workspace rules  ',
+        toolChoice: { type: 'required' },
+        toolConcurrency: 3,
+      })
     ).toEqual({
       max_tokens: 2048,
       max_turns: 8,
       min_p: 0.2,
       model: 'qwen',
       presence_penalty: 0.4,
-      reasoning_effort: 'medium',
+      reasoning_effort: 'high',
       repetition_penalty: 1.1,
+      system_prompt: 'follow the workspace rules',
       temperature: 0.6,
+      tool_choice: { type: 'required' },
+      tool_concurrency: 3,
       top_k: 40,
       top_p: 0.9,
     })
-    expect(toAgentConfig('qwen', { temperature: null }, false)).toEqual({
+    expect(toAgentConfig({ model: 'qwen', runtimePresets: { temperature: null } })).toEqual({
       max_turns: 8,
       model: 'qwen',
+    })
+  })
+
+  it('maps slash commands into tool allow-lists and specific tool choices', () => {
+    expect(parseAssistantSlashCommand('/web_search release notes')).toEqual({
+      allowedTools: ['web_search'],
+      command: 'web_search',
+      content: 'release notes',
+      toolChoice: { name: 'web_search', type: 'tool' },
+    })
+    expect(parseAssistantSlashCommand('/mcp list tools')).toEqual({
+      allowedTools: ['mcp_list_tools', 'mcp_call'],
+      command: 'mcp',
+      content: 'list tools',
+      toolChoice: { type: 'required' },
+    })
+    expect(parseAssistantSlashCommand('plain prompt')).toBeNull()
+
+    expect(
+      toAgentConfig({
+        model: 'qwen',
+        slashCommand: parseAssistantSlashCommand('/plan build a task list'),
+      })
+    ).toMatchObject({
+      allowed_tools: ['plan_update'],
+      tool_choice: { name: 'plan_update', type: 'tool' },
     })
   })
 

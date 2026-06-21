@@ -37,6 +37,7 @@ class UnifiedModelResponse:
         chat_capabilities (ChatModelCapabilities | None | Unset):
         runtime_presets (None | RuntimePresetsResponse | Unset):
         runtime_state (ModelRuntimeStateResponse | None | Unset):
+        size_bytes (int | None | Unset): Total bytes for locally materialized model artifacts, when known.
     """
 
     capabilities: list[ModelCapability]
@@ -51,6 +52,7 @@ class UnifiedModelResponse:
     chat_capabilities: ChatModelCapabilities | None | Unset = UNSET
     runtime_presets: None | RuntimePresetsResponse | Unset = UNSET
     runtime_state: ModelRuntimeStateResponse | None | Unset = UNSET
+    size_bytes: int | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -107,6 +109,12 @@ class UnifiedModelResponse:
         else:
             runtime_state = self.runtime_state
 
+        size_bytes: int | None | Unset
+        if isinstance(self.size_bytes, Unset):
+            size_bytes = UNSET
+        else:
+            size_bytes = self.size_bytes
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update(
@@ -129,6 +137,8 @@ class UnifiedModelResponse:
             field_dict["runtime_presets"] = runtime_presets
         if runtime_state is not UNSET:
             field_dict["runtime_state"] = runtime_state
+        if size_bytes is not UNSET:
+            field_dict["size_bytes"] = size_bytes
 
         return field_dict
 
@@ -227,6 +237,15 @@ class UnifiedModelResponse:
 
         runtime_state = _parse_runtime_state(d.pop("runtime_state", UNSET))
 
+        def _parse_size_bytes(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        size_bytes = _parse_size_bytes(d.pop("size_bytes", UNSET))
+
         unified_model_response = cls(
             capabilities=capabilities,
             created_at=created_at,
@@ -240,6 +259,7 @@ class UnifiedModelResponse:
             chat_capabilities=chat_capabilities,
             runtime_presets=runtime_presets,
             runtime_state=runtime_state,
+            size_bytes=size_bytes,
         )
 
         unified_model_response.additional_properties = d

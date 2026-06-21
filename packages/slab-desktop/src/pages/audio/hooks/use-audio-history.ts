@@ -60,6 +60,7 @@ export function useAudioHistory() {
     historyError,
     historyLoading,
     openHistoryDetail,
+    refreshHistory,
     selectedHistoryTask,
     setHistoryDialogOpen,
     setSelectedHistoryTask,

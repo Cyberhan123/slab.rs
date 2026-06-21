@@ -19,6 +19,7 @@ export type CatalogModel = Omit<UnifiedModelResponse, 'status'> & {
   local_path: string | null;
   pending: boolean;
   runtime_state: CatalogModelRuntimeState | null;
+  size_bytes: number | null;
 };
 
 export function normalizeModelStatus(status: string): CatalogModelStatus {
@@ -44,6 +45,10 @@ export function normalizeCatalogModel(model: UnifiedModelResponse): CatalogModel
   const runtimeState = isCatalogModelRuntimeState(model.runtime_state)
     ? model.runtime_state
     : null;
+  const sizeBytes =
+    typeof (model as UnknownRecord).size_bytes === 'number'
+      ? ((model as UnknownRecord).size_bytes as number)
+      : null;
 
   return {
     ...model,
@@ -57,6 +62,7 @@ export function normalizeCatalogModel(model: UnifiedModelResponse): CatalogModel
     local_path: localPath,
     pending: status === 'downloading',
     runtime_state: runtimeState,
+    size_bytes: sizeBytes,
   };
 }
 
@@ -104,12 +110,17 @@ function isUnifiedModelResponse(value: unknown): value is UnifiedModelResponse {
     isCapabilityList(model.capabilities) &&
     isOptionalChatModelCapabilities(model.chat_capabilities) &&
     isOptionalCatalogModelRuntimeState(model.runtime_state) &&
+    isOptionalNumber(model.size_bytes) &&
     isOptionalString(spec.provider_id) &&
     isOptionalString(spec.remote_model_id) &&
     isOptionalString(spec.repo_id) &&
     isOptionalString(spec.filename) &&
     isOptionalString(spec.local_path)
   );
+}
+
+function isOptionalNumber(value: unknown): boolean {
+  return value === undefined || value === null || typeof value === 'number';
 }
 
 function isOptionalCatalogModelRuntimeState(

@@ -118,6 +118,14 @@ export const image = {
       model: '模型',
     },
   },
+  progress: {
+    title: '生成进度',
+    queued: '已入队，等待运行时处理',
+    running: '运行时正在采样生成',
+    finalizing: '正在整理生成产物',
+    eta: '预计剩余',
+    step: '步骤',
+  },
   toast: {
     downloaded: '已下载 {{model}}',
     modelLoadRetry: '模型加载失败，正在重新下载并再试一次...',

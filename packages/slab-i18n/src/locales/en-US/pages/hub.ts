@@ -58,6 +58,13 @@ export const hub = {
     download: 'Download',
     downloading: 'Downloading...',
     source: 'Source',
+    size: 'Size {{value}}',
+    unknownSize: 'Unknown',
+    vramRisk: {
+      unknown: 'VRAM unknown',
+      ok: 'VRAM OK',
+      high: 'VRAM risk',
+    },
     updatedAt: 'Updated {{value}}',
     downloadRunning: 'Download task is running',
     runtimeState: {
@@ -80,6 +87,11 @@ export const hub = {
     actions: {
       enhanceAria: 'Enhance {{model}} config',
       deleteAria: 'Delete {{model}}',
+      load: 'Load',
+      unload: 'Unload',
+      switch: 'Switch',
+      use: 'Use',
+      useDisabled: 'Use unavailable',
     },
     kind: {
       local: 'Local',
@@ -151,6 +163,10 @@ export const hub = {
     downloadStarted: 'Download started.',
     removed: 'Model removed from catalog.',
     deleteFailed: 'Failed to delete model.',
+    loaded: 'Model loaded.',
+    unloaded: 'Model unloaded.',
+    switched: 'Model switched.',
+    actionFailed: 'Model action failed.',
     selectionUpdated: 'Model selection updated.',
     selectionUpdateFailed: 'Failed to update model selection.',
   },

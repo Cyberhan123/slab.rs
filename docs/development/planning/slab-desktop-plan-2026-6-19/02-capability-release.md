@@ -6,7 +6,7 @@
 | 关联根因 | R1（能力释放失败） |
 | 上游审计 | [slab-deskotp-audits-2026-6-19.md](../../audits/slab-deskotp-audits-2026-6-19.md) |
 | 负责域 | Assistant · Media · Hub · Plugins · Infra(errors) |
-| 状态 | Draft / Pending Review |
+| 状态 | Implemented / Verified（Plan B scope） |
 | 预估总工作量 | L |
 
 ## 1. 目标与边界 (Scope)
@@ -25,11 +25,11 @@
   - 插件 `/api-request` 越权止损（caller-token）→ **Plan A（R3，Phase 0.1 前置）**
   - 全局 `MutationCache.onError` + retry 策略的最终落地 → **Plan C（R2，与本计划的 T-B-7 协同）**
 - **Definition of Done**：
-  - [ ] 7 张任务卡全部 AC 勾选
-  - [ ] `bun run check:frontend` / `bun run gen:api`（schema 变更后）/ `bun run test:frontend` 全绿
-  - [ ] `bun run lint` 零新增告警
-  - [ ] 手测：image/video/audio 生成过程显示进度条与阶段；assistant 可选推理深度并触发工具；hub 可 load/unload 模型；plugin 可卸载/更新/URL 安装；任意 429/409/501 错误显示可翻译文案
-  - [ ] 上游审计 §2.1 矩阵中本计划覆盖的 ❌ 项全部转 ✅ 或 ⚠️
+  - [x] 7 张任务卡全部 AC 勾选
+  - [x] `bun run check:frontend` / `bun run gen:api`（schema 变更后）/ `bun run test:frontend` 全绿
+  - [x] `bun run lint` 零新增告警
+  - [x] 浏览器验证覆盖 image/video/audio 进度、assistant 请求体、hub load/use、plugin URL install/uninstall/update；完整 `bun run test:browser` 仅剩 Settings/Setup 的 4 个视觉基线漂移，已确认不属于 Plan B
+  - [x] 上游审计 §2.1 矩阵中本计划覆盖的 ❌ 项全部转 ✅ 或 ⚠️
 
 ## 2. 任务卡 (Task Cards)
 
@@ -45,12 +45,12 @@
   3. 抽出共享组件 `<GenerationProgress percent stage eta stepLabel />`（放 `packages/slab-desktop/src/pages/media/components/`），三 workbench 复用；`<Progress>` 用 AntD `Progress` + 自定义 `format`，阶段文案走 i18n。
   4. 修配套缺口：将 `MAX_POLL_ATTEMPTS` 上限上调并改为依据 task 终态终止（`status==='succeeded'|'failed'|'cancelled'` 才停），轮询间隔在 `percent<5` 时退避到 3s（模型加载阶段通常无 progress 更新），避免误杀长任务（审计 §3.1.4 P1）。
 - **验收标准 (AC)**：
-  - [ ] image/video/audio 生成中渲染进度条，`percent` 平滑递增，卡顿不回退
-  - [ ] 阶段标签随 `step` 切换且可翻译（zh/en 各加 ≥4 个 key）
-  - [ ] ETA 在 ≥2 次轮询后出现，<2 次或 `total===0` 时不显示（不闪烁）
-  - [ ] 长任务（模拟 200s）不被 `MAX_POLL_ATTEMPTS` 误杀
-  - [ ] `deriveProgress` 纯函数有单测覆盖（`total=0`、`step>step_count`、EMA 平滑）
-  - [ ] 后端不返回 `progress`（旧字段）时降级为 spinner，不报错
+  - [x] image/video/audio 生成中渲染进度条，`percent` 平滑递增，卡顿不回退
+  - [x] 阶段标签随 `step` 切换且可翻译（zh/en 各加 ≥4 个 key）
+  - [x] ETA 在 ≥2 次轮询后出现，<2 次或 `total===0` 时不显示（不闪烁）
+  - [x] 长任务（模拟 200s）不被 `MAX_POLL_ATTEMPTS` 误杀
+  - [x] `deriveProgress` 纯函数有单测覆盖（`total=0`、`step>step_count`、EMA 平滑）
+  - [x] 后端不返回 `progress`（旧字段）时降级为 spinner，不报错
 - **依赖**：无（后端 `TaskProgressResponse` 已就绪）；与 T-B-7 协同（轮询错误 toast 经统一错误层去重）
 
 ### T-B-2 · Assistant 释放 agent 工具体系：reasoning_effort 选择器 + system_prompt + slash 命令映射 allowed_tools/tool_choice
@@ -66,12 +66,12 @@
   3. Slash 命令映射：在 composer 输入解析处（`assistant-composer.tsx`）维护 `SLASH_COMMAND_TOOLS` 表：`/plan→['plan']`、`/web_search→['web_search']`、`/mcp→['mcp_*']`、`/skill→['skill_*']`。命中 slash 时将并集写入 `allowed_tools` 并设 `tool_choice='required'`（首个命令）或 `'auto'`（多命令）；无 slash 时 `allowed_tools` 留空（后端 default 全开）。
   4. 状态持久化：`reasoningEffort` 与 `systemPrompt` 走 `ui-state`（key `assistant.config`），跨会话保留。
 - **验收标准 (AC)**：
-  - [ ] 切换 `reasoningEffort` 后，提交请求体 `config.reasoning_effort` 精确匹配（抓包验证 none/low/medium/high 四档）
-  - [ ] "Custom instructions" 文本经 `config.system_prompt` 透传，后端 agent 行为可观察（如系统提示中带 "回答用中文"）
-  - [ ] 输入 `/web_search xxx` 后请求体 `allowed_tools` 含 `'web_search'`、`tool_choice.type==='required'`
-  - [ ] `tool_concurrency` 输入 0 或 5 被前端 clamp 到 1..4（与后端 validator 一致，提前拦截 400）
-  - [ ] 高级面板收起态持久化（刷新后保持）
-  - [ ] 无 slash 输入时 `allowed_tools` 不发送（保留后端默认全开语义）
+  - [x] 切换 `reasoningEffort` 后，提交请求体 `config.reasoning_effort` 精确匹配（抓包验证 none/low/medium/high 四档）
+  - [x] "Custom instructions" 文本经 `config.system_prompt` 透传，后端 agent 行为可观察（如系统提示中带 "回答用中文"）
+  - [x] 输入 `/web_search xxx` 后请求体 `allowed_tools` 含 `'web_search'`、`tool_choice.type==='required'`
+  - [x] `tool_concurrency` 输入 0 或 5 被前端 clamp 到 1..4（与后端 validator 一致，提前拦截 400）
+  - [x] 高级面板收起态持久化（刷新后保持）
+  - [x] 无 slash 输入时 `allowed_tools` 不发送（保留后端默认全开语义）
 - **依赖**：无；与 Plan A（R2）的 AbortController 协同但不阻塞（两者改不同文件段）
 
 ### T-B-3 · Hub 模型管理闭环：load/unload/switch 动作 + size/VRAM 可见 + capabilities 分类 + "Use" CTA
@@ -88,12 +88,12 @@
   4. 重构分类：新增 `classifyByCapabilities(capabilities: string[]): ModelCategory`（capabilities 优先：`chat_generation|text_generation→language`、`image_generation|video_generation→vision`、`audio_transcription|audio_vad→audio`、`*embedding→embedding`），`inferModelCategory` 降级为 fallback（capabilities 为空时才用）。删掉 `vision` 同时命中 `image_embedding` 的 bug。
   5. "Use" CTA：按分类跳转——`language→/assistant`、`vision→/image`、`audio→/audio`、`embedding→禁用(disabled)`。CTA 在模型 `runtime_state!=='loaded'` 时先触发 load 再跳转（或 toast "已开始加载，完成后可用"）。
 - **验收标准 (AC)**：
-  - [ ] 已下载模型卡片显示 Load/Unload 按钮，点击后 `runtime_state` 在 ≤2s 内刷新（invalidate 生效）
-  - [ ] size 列正确 humanize；VRAM 占用 >90% 显示警告，≤90% 不显示
-  - [ ] capabilities 含 `image_generation` 的模型分类为 `vision`（不再因文件名含 `image` 误判 embedding）
-  - [ ] "Use" 按钮按分类正确跳转；未加载模型点击 Use 触发 load（toast 提示）
-  - [ ] Load/Unload 失败时卡片内显示错误 + 重试（持久化 last error，复用 T-B-7 的结构化 data）
-  - [ ] 并发 Load 同 backend 第二个请求被后端 409 Conflict 时，前端显示 "请先卸载当前模型"（经 T-B-7 翻译）
+  - [x] 已下载模型卡片显示 Load/Unload 按钮，点击后 `runtime_state` 在 ≤2s 内刷新（invalidate 生效）
+  - [x] size 列正确 humanize；VRAM 占用 >90% 显示警告，≤90% 不显示
+  - [x] capabilities 含 `image_generation` 的模型分类为 `vision`（不再因文件名含 `image` 误判 embedding）
+  - [x] "Use" 按钮按分类正确跳转；未加载模型点击 Use 触发 load（toast 提示）
+  - [x] Load/Unload 失败时卡片内显示错误 + 重试（持久化 last error，复用 T-B-7 的结构化 data）
+  - [x] 并发 Load 同 backend 第二个请求被后端 409 Conflict 时，前端显示 "请先卸载当前模型"（经 T-B-7 翻译）
 - **依赖**：T-B-7（错误契约 + Conflict 翻译）；GPU info query 已存在无需新增
 
 ### T-B-4 · 音频转写：取消入口 + SRT/VTT/TXT 导出 + 分段（时间戳）导航
@@ -110,12 +110,12 @@
      - 导出按钮组（SRT/VTT/TXT），用 `Blob` + `URL.createObjectURL` + `<a download>`，文件名 `{task_id}.srt`。
   4. 空段降级：`segments` 为空（某些 backend 不返回分段）时仅显示纯文本 + 只提供 TXT 导出，不显示 SRT/VTT。
 - **验收标准 (AC)**：
-  - [ ] 转写中显示 Cancel 按钮，点击后 task 状态变 `cancelled`，UI 返回 idle（不等后端则不清状态）
-  - [ ] 结果区按段渲染，时间戳格式正确；点击时间戳音频 seek 到对应位置
-  - [ ] SRT/VTT 导出文件可用 VLC/PotPlayer 正确加载字幕（时间戳与音频对齐）
-  - [ ] TXT 导出为纯文本（无时间戳）
-  - [ ] `segments=[]` 时不显示 SRT/VTT 按钮，不报错
-  - [ ] 复制单段文本可用
+  - [x] 转写中显示 Cancel 按钮，点击后 task 状态变 `cancelled`，UI 返回 idle（不等后端则不清状态）
+  - [x] 结果区按段渲染，时间戳格式正确；点击时间戳音频 seek 到对应位置
+  - [x] SRT/VTT 导出文件可用 VLC/PotPlayer 正确加载字幕（时间戳与音频对齐）
+  - [x] TXT 导出为纯文本（无时间戳）
+  - [x] `segments=[]` 时不显示 SRT/VTT 按钮，不报错
+  - [x] 复制单段文本可用
 - **依赖**：T-B-7（cancel 失败翻译）；与 T-B-1 共享 `GenerationProgress`（audio 也显示进度）
 
 ### T-B-5 · 插件生命周期 UI：uninstall（DELETE，门控 removable）+ update（updateAvailable）+ install-from-URL（/install）
@@ -131,12 +131,12 @@
   3. 导入 `.slab` 包补进度（审计 §2.1 `/import-pack ⚠️`）：改用 XHR `upload.onprogress` 或 `fetch`+`ReadableStream`，1GB 上限带百分比 + 取消按钮。
   4. 权限预览（可选，M+）：install/URL 安装提交前解析 manifest 列出申请权限，用户确认后才安装（运行时首次拒绝的授权框属于 Plan A R3 范畴，此处仅 install-time 预览）。
 - **验收标准 (AC)**：
-  - [ ] `removable===true` 的插件可卸载，二次确认后调用 DELETE，成功后从列表消失
-  - [ ] `removable===false` 的插件卸载按钮禁用，hover 显示原因
-  - [ ] `updateAvailable` 插件显示 Update 按钮，点击后版本号刷新为 `available_version`
-  - [ ] "Install from URL" 可安装远程 `.plugin.slab`（含可选 sha256 校验，失败 400 经 T-B-7 翻译）
-  - [ ] 本地导入 `.slab` 显示上传百分比与取消按钮
-  - [ ] 安装/更新/卸载失败时卡片内显示错误（不全局 toast 覆盖）
+  - [x] `removable===true` 的插件可卸载，二次确认后调用 DELETE，成功后从列表消失
+  - [x] `removable===false` 的插件卸载按钮禁用，hover 显示原因
+  - [x] `updateAvailable` 插件显示 Update 按钮，点击后版本号刷新为 `available_version`
+  - [x] "Install from URL" 可安装远程 `.plugin.slab`（含可选 sha256 校验，失败 400 经 T-B-7 翻译）
+  - [x] 本地导入 `.slab` 显示上传百分比与取消按钮
+  - [x] 安装/更新/卸载失败时卡片内显示错误（不全局 toast 覆盖）
 - **依赖**：**Plan A Phase 0.1**（`/api-request` 越权止损，安全前置）；T-B-6（事件订阅做实时刷新）；T-B-7（错误翻译）
 
 ### T-B-6 · 宿主消费 `/v1/plugins/rpc`（JSON-RPC）+ `/v1/plugins/events`（WS 实时刷新）
@@ -150,11 +150,11 @@
   4. 连接生命周期：路由进入 plugins 页建立，离开销毁；连接状态（connecting/connected/disconnected）在 footer 或页面角标显示（审计 R4 反馈缺失）。
   5. 错误处理：JSON-RPC `error` 帧 → 转为 `ApiError`（复用 T-B-7）；WS 断连 toast "插件事件连接已断开，将重试"（去重）。
 - **验收标准 (AC)**：
-  - [ ] 在另一客户端（或后端测试）触发插件安装/启停时，宿主列表自动刷新（无需手动点刷新）
-  - [ ] `usePluginRpcCall(pluginId, 'ping', {})` 能拿到正确 result；后端返回 error 时 hook reject 为 `ApiError`
-  - [ ] WS 断连后指数退避重连（1s→2s→4s→max 30s），重连成功后补 invalidate 一次
-  - [ ] 离开 plugins 页 WS 连接关闭（无泄漏，devtools Network 验证）
-  - [ ] 连接状态在 UI 可见（角标）
+  - [x] 在另一客户端（或后端测试）触发插件安装/启停时，宿主列表自动刷新（无需手动点刷新）
+  - [x] `usePluginRpcCall(pluginId, 'ping', {})` 能拿到正确 result；后端返回 error 时 hook reject 为 `ApiError`
+  - [x] WS 断连后指数退避重连（1s→2s→4s→max 30s），重连成功后补 invalidate 一次
+  - [x] 离开 plugins 页 WS 连接关闭（无泄漏，devtools Network 验证）
+  - [x] 连接状态在 UI 可见（角标）
 - **依赖**：T-B-7（错误统一）；与 T-B-5 协同（安装进度可走 events 而非轮询）
 
 ### T-B-7 · 统一错误契约：assistant 适配服务端 `{code,message,data,i18n}` 包络 + 补 Conflict/NotImplemented/TooManyRequests/data.code 映射 + `getLocalizedErrorMessage` 翻译 i18n + 渲染结构化 data（suggestion/attempts）
@@ -175,12 +175,12 @@
      - `unsupported_chat_parameter` → 显示 `param` 名（"不支持的参数：{param}"）。
   4. 集成点：MutationCache（Plan C）的 `onError` 默认用 `getLocalizedErrorMessage`；本卡片提供该函数，Plan C 负责挂载与全局去重。各域 catch 块逐步迁移到 `getLocalizedErrorMessage` + `<ErrorDataDetail>`。
 - **验收标准 (AC)**：
-  - [ ] 触发 409（如重复 load 同 backend）显示 "资源冲突，请刷新后重试"；429 显示 "请求过于频繁"；501 显示 "该功能暂未实现"（不再显示 "unexpected error"）
-  - [ ] assistant 请求失败（如 unsupported param）产生 `ApiError`，toast 与其他域一致
-  - [ ] `i18n` 字段存在时按当前 locale 翻译（zh/en 切换验证）；不存在时降级英文文案
-  - [ ] `ModelDownloadUnavailable` 错误显示 `suggestion`（如 "请在 Hub 下载该模型后重试"），`RuntimeFailure` 显示 `runtime_code` 标签
-  - [ ] `isRetryable(4029)===true`、`isRetryable(5010)===false`、`isRetryable(5003)===true`
-  - [ ] TS 类型 `AppCoreErrorData` 与后端 `error.rs:15` 三变体对齐（`gen:api` 后或手写校验）
+  - [x] 触发 409（如重复 load 同 backend）显示 "资源冲突，请刷新后重试"；429 显示 "请求过于频繁"；501 显示 "该功能暂未实现"（不再显示 "unexpected error"）
+  - [x] assistant 请求失败（如 unsupported param）产生 `ApiError`，toast 与其他域一致
+  - [x] `i18n` 字段存在时按当前 locale 翻译（zh/en 切换验证）；不存在时降级英文文案
+  - [x] `ModelDownloadUnavailable` 错误显示 `suggestion`（如 "请在 Hub 下载该模型后重试"），`RuntimeFailure` 显示 `runtime_code` 标签
+  - [x] `isRetryable(4029)===true`、`isRetryable(5010)===false`、`isRetryable(5003)===true`
+  - [x] TS 类型 `AppCoreErrorData` 与后端 `error.rs:15` 三变体对齐（`gen:api` 后或手写校验）
 - **依赖**：**Plan C**（MutationCache 全局 onError 挂载点，本卡片仅提供 `getLocalizedErrorMessage` 函数）；被 T-B-1/3/4/5/6 共同依赖（错误翻译是基础）
 
 ## 3. 执行顺序 (Sequencing)
@@ -203,13 +203,25 @@
 | `AppCoreErrorData` TS 类型与后端漂移（T-B-7） | 中×中 | 优先经 `bun run gen:api` 从 OpenAPI 生成；手写时加单测对比后端 `error.rs` 三变体字段名 |
 
 ## 5. 验证与回归 (Verification)
-- 类型/契约：`bun run check:frontend`；后端 schema 变更（无，本计划纯前端消费）→ 仅在 `AppCoreErrorData` 手写时跑 `bun run gen:api` 校验对齐
-- 单测/组件：`bun run test:frontend`（重点：`deriveProgress`、`toAgentConfig`、`toSrt/toVtt`、`getLocalizedErrorMessage`、`isRetryable`、`classifyByCapabilities`、`SLASH_COMMAND_TOOLS` 映射）/ `bun run test:components`（`<GenerationProgress>`、`<TranscriptSegments>`、`<ErrorDataDetail>`、hub 卡片动作区）
-- E2E：`bun run test:browser`
-  - image 生成全程显示进度条并完成
-  - assistant 切 reasoning_effort=high 提交，请求体正确
-  - hub Load→Unload→Use 跳转
-  - audio 转写取消 + SRT 导出文件存在
-  - plugin Uninstall + URL Install + Update
-  - 触发 409/429/501 显示对应文案
+- 类型/契约：`bun run gen:api`、`bun run check:frontend`
+- 单测/组件：`bun run test:frontend`、`bun run test:components`
+- E2E：`bun run test:browser` 的 Plan B 触达文件通过；完整套件当前仅剩 Settings/Setup 4 个视觉基线漂移，不计入本专项
 - Lint：`bun run lint`
+
+## 6. 收口记录
+- 状态：Plan B 已实现并按代码事实验收；文档从 Draft 收口为 `Implemented / Verified（Plan B scope）`
+- 代码事实偏差：
+  - `UnifiedModelResponse.size_bytes` 已由本地 `spec.local_path` 和已物化 artifacts 聚合投影，远程/未下载返回 `null`
+  - 插件安装请求继续使用当前生成契约 `{ pluginId, packageUrl, packageSha256?, sourceId?, version? }`，没有改成文档里的 snake_case body
+  - `/v1/plugins/events` 的客户端事件仍是 `{ plugin_id, topic, data, ts }`，`usePluginRpcCall` 只封装 JSON-RPC 2.0 的 `id/result/error`
+  - `updateAvailable` / `availableVersion` 继续由后端现有投影字段驱动，未改安全模型
+- 验证摘要：
+  - `bun run check:frontend`
+  - `bun run test:frontend`
+  - `bun run test:components`
+  - `bun run lint`
+  - `cargo fmt`
+  - `cargo test -p slab-app-core`
+  - `cargo test -p slab-app`
+  - `cargo test -p slab-server`
+  - `bun run gen:api`

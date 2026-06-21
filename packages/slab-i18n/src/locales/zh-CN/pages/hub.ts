@@ -56,6 +56,13 @@ export const hub = {
     download: '下载',
     downloading: '下载中...',
     source: '来源',
+    size: '大小 {{value}}',
+    unknownSize: '未知',
+    vramRisk: {
+      unknown: 'VRAM 未知',
+      ok: 'VRAM 可用',
+      high: 'VRAM 风险',
+    },
     updatedAt: '更新于 {{value}}',
     downloadRunning: '下载任务正在运行',
     runtimeState: {
@@ -76,6 +83,11 @@ export const hub = {
     actions: {
       enhanceAria: '调整 {{model}} 配置',
       deleteAria: '删除 {{model}}',
+      load: '加载',
+      unload: '卸载',
+      switch: '切换',
+      use: '使用',
+      useDisabled: '不可使用',
     },
     kind: {
       local: '本地',
@@ -145,6 +157,10 @@ export const hub = {
     downloadStarted: '已开始下载。',
     removed: '模型已从目录中移除。',
     deleteFailed: '删除模型失败。',
+    loaded: '模型已加载。',
+    unloaded: '模型已卸载。',
+    switched: '模型已切换。',
+    actionFailed: '模型操作失败。',
     selectionUpdated: '模型选择已更新。',
     selectionUpdateFailed: '更新模型选择失败。',
   },

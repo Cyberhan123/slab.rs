@@ -176,6 +176,7 @@ describe("PluginsPage browser visual regression", () => {
 
     await expectDesktopSceneAccessible();
     await expect.element(page.getByRole("heading", { name: "Image Enhancer" })).toBeVisible();
+    await page.getByRole("heading", { name: "Installed Plugins" }).hover();
     await expect(page.getByTestId("desktop-browser-scene")).toMatchScreenshot(
       "plugins-page-with-plugins.png",
     );

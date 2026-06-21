@@ -2,11 +2,14 @@ use serde_json::json;
 use slab_utils::hash::sha256_hex_bytes as hash_bytes_hex;
 use std::fs;
 
-use super::SOURCE_KIND_IMPORT_PACK;
 use super::package::{ensure_path_within, locate_plugin_root};
 use super::plugin_api_base_url_from_bind_address;
 use super::scan::{scan_plugin_dir, scan_plugins};
 use super::validation::normalize_relative_path;
+use super::view::build_plugin_view;
+use super::{RUNTIME_STATUS_STOPPED, SOURCE_KIND_IMPORT_PACK, SOURCE_KIND_PACKAGE_URL};
+use crate::infra::db::PluginStateRecord;
+use chrono::Utc;
 
 fn temp_dir(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("slab-plugin-service-{name}-{}", uuid::Uuid::new_v4()))
@@ -67,6 +70,52 @@ fn scan_plugin_dir_validates_integrity() {
     let scanned = scan_plugin_dir(&plugin_root, "dev").expect("scan plugin");
     assert!(scanned.valid);
     assert_eq!(scanned.id, "example-plugin");
+}
+
+#[test]
+fn package_url_plugins_expose_update_from_source() {
+    let root = temp_dir("package-url-update-source");
+    let plugin_root = root.join("example-plugin");
+    write(&plugin_root.join("ui/index.html"), "<html></html>");
+    let html_hash = hash_bytes_hex(b"<html></html>");
+    write(
+        &plugin_root.join("plugin.json"),
+        &serde_json::to_string_pretty(&json!({
+            "manifestVersion": 1,
+            "id": "example-plugin",
+            "name": "Example Plugin",
+            "version": "0.1.0",
+            "runtime": { "ui": { "entry": "ui/index.html" } },
+            "integrity": { "filesSha256": { "ui/index.html": html_hash } },
+            "permissions": { "network": { "mode": "blocked", "allowHosts": [] } }
+        }))
+        .expect("manifest json"),
+    );
+
+    let scanned = scan_plugin_dir(&plugin_root, SOURCE_KIND_PACKAGE_URL).expect("scan plugin");
+    let now = Utc::now();
+    let state = PluginStateRecord {
+        plugin_id: "example-plugin".to_owned(),
+        source_kind: SOURCE_KIND_PACKAGE_URL.to_owned(),
+        source_ref: Some("https://plugins.example.com/example.plugin.slab".to_owned()),
+        install_root: Some(plugin_root.to_string_lossy().into_owned()),
+        installed_version: Some("0.1.0".to_owned()),
+        manifest_hash: scanned.manifest_hash.clone(),
+        enabled: true,
+        runtime_status: RUNTIME_STATUS_STOPPED.to_owned(),
+        last_error: None,
+        installed_at: now,
+        updated_at: now,
+        last_seen_at: Some(now),
+        last_started_at: None,
+        last_stopped_at: None,
+    };
+
+    let view = build_plugin_view(&scanned, Some(&state), "http://127.0.0.1:1420/");
+
+    assert!(view.removable);
+    assert!(view.update_available);
+    assert_eq!(view.source_ref.as_deref(), Some("https://plugins.example.com/example.plugin.slab"));
 }
 
 #[test]

@@ -14,6 +14,9 @@ pub(super) fn build_plugin_view(
     api_base_url: &str,
 ) -> PluginView {
     let manifest = scan.manifest.as_ref();
+    let source_kind =
+        state.map(|record| record.source_kind.clone()).unwrap_or_else(|| scan.source_kind.clone());
+    let source_ref = state.and_then(|record| record.source_ref.clone());
     let installed_version = manifest
         .map(|value| value.version.clone())
         .or_else(|| state.and_then(|record| record.installed_version.clone()));
@@ -42,10 +45,8 @@ pub(super) fn build_plugin_view(
             .unwrap_or_default(),
         contributions: manifest.map(|value| value.contributes.clone()),
         permissions: manifest.map(|value| value.permissions.clone()),
-        source_kind: state
-            .map(|record| record.source_kind.clone())
-            .unwrap_or_else(|| scan.source_kind.clone()),
-        source_ref: state.and_then(|record| record.source_ref.clone()),
+        source_kind: source_kind.clone(),
+        source_ref: source_ref.clone(),
         install_root: state
             .and_then(|record| record.install_root.clone())
             .or_else(|| Some(scan.root_dir.to_string_lossy().into_owned())),
@@ -69,7 +70,7 @@ pub(super) fn build_plugin_view(
         last_stopped_at: state
             .and_then(|record| record.last_stopped_at.map(|value| value.to_rfc3339())),
         available_version: None,
-        update_available: false,
+        update_available: has_reinstall_source(&source_kind, source_ref.as_deref()),
         removable: state
             .is_some_and(|record| is_pack_managed_source_kind(record.source_kind.as_str())),
     }
@@ -105,7 +106,7 @@ pub(super) fn build_missing_plugin_view(state: &PluginStateRecord) -> PluginView
         last_started_at: state.last_started_at.map(|value| value.to_rfc3339()),
         last_stopped_at: state.last_stopped_at.map(|value| value.to_rfc3339()),
         available_version: None,
-        update_available: false,
+        update_available: has_reinstall_source(&state.source_kind, state.source_ref.as_deref()),
         removable: is_pack_managed_source_kind(&state.source_kind),
     }
 }
@@ -125,6 +126,11 @@ pub(super) fn plugin_ui_url(api_base_url: &str, plugin_id: &str, ui_entry: &str)
 
 pub(super) fn is_pack_managed_source_kind(source_kind: &str) -> bool {
     matches!(source_kind, SOURCE_KIND_IMPORT_PACK | SOURCE_KIND_PACKAGE_URL)
+}
+
+fn has_reinstall_source(source_kind: &str, source_ref: Option<&str>) -> bool {
+    source_kind == SOURCE_KIND_PACKAGE_URL
+        && source_ref.is_some_and(|value| !value.trim().is_empty())
 }
 
 fn network_mode_label(mode: &PluginNetworkMode) -> &'static str {

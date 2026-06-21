@@ -12,6 +12,7 @@ export type AgentResponsesClientMessage = components['schemas']['AgentResponsesC
 export type AgentResponsesServerMessage = components['schemas']['AgentResponsesServerMessage']
 
 export type AssistantRequestErrorType = AssistantApiError['type']
+export type AssistantErrorCode = AssistantApiError['code'] | number
 
 export type AssistantThoughtStatus = 'abort' | 'error' | 'loading' | 'success'
 
@@ -31,7 +32,7 @@ export type AssistantThought = {
 }
 
 export type AssistantUiMessage = XModelMessage & {
-  errorCode?: AssistantApiError['code']
+  errorCode?: AssistantErrorCode
   errorParam?: AssistantApiError['param']
   errorStatus?: number
   errorType?: AssistantRequestErrorType

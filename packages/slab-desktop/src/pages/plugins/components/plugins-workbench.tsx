@@ -1,6 +1,7 @@
 import {
   Loader2,
   PackagePlus,
+  Link,
   PlugZap,
   RefreshCw,
   Search,
@@ -14,6 +15,7 @@ import type { PluginsPageState } from '../hooks/use-plugins-page';
 import { PLUGIN_ICONS, PLUGIN_TONES } from '../utils';
 import { EmptyPanel } from './empty-panel';
 import { ImportPluginPackDialog } from './import-plugin-pack-dialog';
+import { InstallPluginUrlDialog } from './install-plugin-url-dialog';
 import { InstalledPluginCard } from './installed-plugin-card';
 import { InstalledSkeletonGrid } from './plugin-skeletons';
 import { SectionHeading } from './section-heading';
@@ -21,25 +23,43 @@ import { SectionHeading } from './section-heading';
 export function PluginsWorkbench({
   busyPluginId,
   canImport,
+  canInstallFromUrl,
   dataErrorMessage,
   filteredPlugins,
+  handleCancelImport,
+  handleDeletePlugin,
   handleImportFileChange,
   handleImportOpenChange,
   handleImportPlugin,
+  handleInstallFromUrl,
   handlePrimaryAction,
   handleToggleEnabled,
+  handleUpdatePlugin,
+  handleUrlInstallOpenChange,
   hasReviewedPermissions,
   hasSearchQuery,
   importFileName,
   importPluginPending,
+  importUploadProgress,
   importPreview,
   importPreviewFailed,
+  installPluginPending,
+  isUrlInstallOpen,
   isImportOpen,
   loading,
+  pluginActionErrors,
   plugins,
   refreshData,
   refreshing,
   setHasReviewedPermissions,
+  setUrlInstallPackageSha256,
+  setUrlInstallPackageUrl,
+  setUrlInstallPluginId,
+  setUrlInstallVersion,
+  urlInstallPackageSha256,
+  urlInstallPackageUrl,
+  urlInstallPluginId,
+  urlInstallVersion,
 }: PluginsPageState) {
   const { t } = useTranslation();
 
@@ -74,6 +94,21 @@ export function PluginsWorkbench({
                     <PackagePlus className="size-4" />
                   )}
                   {t('pages.plugins.actions.import')}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => handleUrlInstallOpenChange(true)}
+                  disabled={installPluginPending}
+                  className="rounded-[12px] bg-[var(--shell-card)]/80"
+                  data-testid="plugin-url-install-open-button"
+                >
+                  {installPluginPending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Link className="size-4" />
+                  )}
+                  {t('pages.plugins.actions.installFromUrl')}
                 </Button>
                 <Button
                   variant="pill"
@@ -117,8 +152,11 @@ export function PluginsWorkbench({
                   icon={PLUGIN_ICONS[index % PLUGIN_ICONS.length]}
                   tone={PLUGIN_TONES[index % PLUGIN_TONES.length]}
                   busy={busyPluginId === plugin.id}
+                  actionError={pluginActionErrors[plugin.id] ?? null}
                   onPrimaryAction={() => void handlePrimaryAction(plugin)}
                   onToggleEnabled={() => void handleToggleEnabled(plugin)}
+                  onUpdate={() => void handleUpdatePlugin(plugin)}
+                  onDelete={() => void handleDeletePlugin(plugin)}
                 />
               ))}
             </div>
@@ -133,11 +171,29 @@ export function PluginsWorkbench({
         setImportFile={handleImportFileChange}
         canImport={canImport}
         importPending={importPluginPending}
+        importUploadProgress={importUploadProgress}
+        onCancelImport={handleCancelImport}
         onImport={() => void handleImportPlugin()}
         importPreview={importPreview}
         importPreviewFailed={importPreviewFailed}
         hasReviewedPermissions={hasReviewedPermissions}
         onReviewedPermissionsChange={setHasReviewedPermissions}
+      />
+
+      <InstallPluginUrlDialog
+        open={isUrlInstallOpen}
+        onOpenChange={handleUrlInstallOpenChange}
+        pluginId={urlInstallPluginId}
+        packageUrl={urlInstallPackageUrl}
+        packageSha256={urlInstallPackageSha256}
+        version={urlInstallVersion}
+        pending={installPluginPending}
+        canInstall={canInstallFromUrl}
+        onPluginIdChange={setUrlInstallPluginId}
+        onPackageUrlChange={setUrlInstallPackageUrl}
+        onPackageSha256Change={setUrlInstallPackageSha256}
+        onVersionChange={setUrlInstallVersion}
+        onInstall={() => void handleInstallFromUrl()}
       />
     </div>
   );

@@ -16,9 +16,12 @@ export const plugins = {
   actions: {
     refresh: "Refresh",
     import: "Import Pack",
+    installFromUrl: "Install from URL",
     stop: "Stop",
     enable: "Enable",
     launch: "Launch",
+    update: "Update",
+    uninstallAria: "Uninstall {{name}}",
     disableAria: "Disable {{name}}",
     enableAria: "Enable {{name}}",
   },
@@ -52,6 +55,17 @@ export const plugins = {
       emptyDescription:
         "Choose a .plugin.slab file to install and activate the plugin in this workspace.",
       submit: "Import Plugin",
+      uploading: "Uploading plugin pack",
+      cancelUpload: "Cancel upload",
+    },
+    urlInstall: {
+      title: "Install plugin from URL",
+      description: "Install a plugin pack directly from a package URL.",
+      pluginId: "Plugin ID",
+      packageUrl: "Package URL",
+      packageSha256: "Package SHA256",
+      version: "Version",
+      submit: "Install plugin",
     },
   },
   permissions: {
@@ -115,6 +129,7 @@ export const plugins = {
   toast: {
     loadFailed: "Failed to load plugin data",
     importFailed: "Failed to import plugin pack",
+    installFailed: "Failed to install plugin",
     invalidPlugin: "Selected plugin is invalid",
     unknownValidationError: "Unknown plugin validation error",
     actionFailed: "Could not update {{name}}",
@@ -123,5 +138,9 @@ export const plugins = {
     launched: "Launched {{name}}",
     disabled: "Disabled {{name}}",
     imported: "Imported {{name}}",
+    installed: "Installed {{name}}",
+    updated: "Updated {{name}}",
+    uninstalled: "Uninstalled {{name}}",
+    importCancelled: "Plugin pack upload cancelled",
   },
 } as const;

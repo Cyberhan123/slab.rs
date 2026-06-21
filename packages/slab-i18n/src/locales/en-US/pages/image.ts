@@ -119,6 +119,14 @@ export const image = {
       model: 'Model',
     },
   },
+  progress: {
+    title: 'Generation progress',
+    queued: 'Queued and waiting for the runtime',
+    running: 'Runtime is producing samples',
+    finalizing: 'Finalizing generated assets',
+    eta: 'ETA',
+    step: 'Step',
+  },
   toast: {
     downloaded: 'Downloaded {{model}}',
     modelLoadRetry: 'Model load failed, re-downloading and retrying once...',

@@ -2,6 +2,7 @@ import { Loader2, PackagePlus, Upload } from 'lucide-react';
 import { useTranslation } from '@slab/i18n';
 
 import { Button } from '@slab/components/button';
+import { Progress } from '@slab/components/progress';
 import {
   Dialog,
   DialogContent,
@@ -23,6 +24,8 @@ type ImportPluginPackDialogProps = {
   setImportFile: (file: File | null) => void;
   canImport: boolean;
   importPending: boolean;
+  importUploadProgress: number | null;
+  onCancelImport: () => void;
   onImport: () => void;
   importPreview: PluginManifestPreview | null;
   importPreviewFailed: boolean;
@@ -37,6 +40,8 @@ export function ImportPluginPackDialog({
   setImportFile,
   canImport,
   importPending,
+  importUploadProgress,
+  onCancelImport,
   onImport,
   importPreview,
   importPreviewFailed,
@@ -111,9 +116,24 @@ export function ImportPluginPackDialog({
               </label>
             </div>
           ) : null}
+
+          {importPending && importUploadProgress !== null ? (
+            <div className="space-y-2 rounded-2xl border border-border/70 bg-muted/10 p-4">
+              <div className="flex items-center justify-between gap-3 text-xs font-medium text-muted-foreground">
+                <span>{t('pages.plugins.dialogs.import.uploading')}</span>
+                <span>{Math.round(importUploadProgress)}%</span>
+              </div>
+              <Progress value={importUploadProgress} className="h-2" />
+            </div>
+          ) : null}
         </div>
 
         <DialogFooter showCloseButton className="border-t border-border/60 px-5 py-4">
+          {importPending ? (
+            <Button variant="secondary" onClick={onCancelImport} data-testid="plugin-import-cancel-button">
+              {t('pages.plugins.dialogs.import.cancelUpload')}
+            </Button>
+          ) : null}
           <Button onClick={onImport} disabled={!canImport} data-testid="plugin-import-submit-button">
             {importPending ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />

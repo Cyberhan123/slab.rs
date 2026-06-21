@@ -30,8 +30,10 @@ import { Slider } from '@slab/components/slider';
 import { Textarea } from '@slab/components/textarea';
 import {
   resolveMediaUrl,
+  type GenerationProgress,
   type VideoGenerationTask,
 } from '@/lib/media-task-api';
+import { GenerationProgressView } from '@/components/generation-progress';
 import { cn } from '@/lib/utils';
 import { FRAME_OPTIONS, FPS_OPTIONS, SAMPLE_METHODS, SCHEDULERS } from '../const';
 import { FieldLabel } from './field-label';
@@ -47,6 +49,7 @@ export type VideoWorkbenchProps = {
   fps: number;
   frames: number;
   guidance: number;
+  generationProgress: GenerationProgress | null;
   handleCancel: () => void | Promise<void>;
   handleDownload: () => void;
   handleInitImageChange: (event: React.ChangeEvent<HTMLInputElement>) => void | Promise<void>;
@@ -114,6 +117,7 @@ export function VideoWorkbench({
   fps,
   frames,
   guidance,
+  generationProgress,
   handleCancel,
   handleDownload,
   handleInitImageChange,
@@ -543,6 +547,20 @@ export function VideoWorkbench({
                     </h2>
                     <p className="text-sm leading-7 text-muted-foreground">{stageDescription}</p>
                   </div>
+                  {isGenerating ? (
+                    <GenerationProgressView
+                      progress={generationProgress}
+                      labels={{
+                        eta: t('pages.video.progress.eta'),
+                        finalizing: t('pages.video.progress.finalizing'),
+                        queued: t('pages.video.progress.queued'),
+                        running: t('pages.video.progress.running'),
+                        step: t('pages.video.progress.step'),
+                        title: t('pages.video.progress.title'),
+                      }}
+                      className="w-full max-w-[360px]"
+                    />
+                  ) : null}
                 </div>
               )}
 

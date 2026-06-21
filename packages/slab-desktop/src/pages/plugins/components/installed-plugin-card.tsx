@@ -2,7 +2,9 @@ import {
   AlertCircle,
   Loader2,
   PlugZap,
+  RefreshCw,
   Power,
+  Trash2,
   Square,
   type LucideIcon,
 } from 'lucide-react';
@@ -10,6 +12,7 @@ import { useTranslation } from '@slab/i18n';
 
 import { Button } from '@slab/components/button';
 import { cn } from '@/lib/utils';
+import { ErrorDataDetail } from '@/components/error-data-detail';
 import {
   isPluginRunning,
   pluginSummaryMessage,
@@ -26,15 +29,21 @@ export function InstalledPluginCard({
   icon: Icon,
   tone,
   busy,
+  actionError,
   onPrimaryAction,
   onToggleEnabled,
+  onUpdate,
+  onDelete,
 }: {
   plugin: PluginRecord;
   icon: LucideIcon;
   tone: PluginTone;
   busy: boolean;
+  actionError: { message: string; error: unknown } | null;
   onPrimaryAction: () => void;
   onToggleEnabled: () => void;
+  onUpdate: () => void;
+  onDelete: () => void;
 }) {
   const { t } = useTranslation();
   const running = isPluginRunning(plugin);
@@ -90,17 +99,31 @@ export function InstalledPluginCard({
         </p>
       </div>
 
-      {plugin.lastError ? (
+      {plugin.lastError || actionError ? (
         <div className="rounded-[10px] bg-[var(--status-danger-bg)] px-2.5 py-2 text-[11px] leading-4 text-destructive">
           <div className="flex items-center gap-1.5 font-semibold">
             <AlertCircle className="size-3.5" />
             {t('pages.plugins.card.runtimeIssue')}
           </div>
-          <p className="mt-1 line-clamp-2">{plugin.lastError}</p>
+          <p className="mt-1 line-clamp-2">{actionError?.message ?? plugin.lastError}</p>
+          <ErrorDataDetail error={actionError?.error} />
         </div>
       ) : null}
 
-      <div className="mt-auto flex items-center gap-2 pt-2">
+      <div className="mt-auto flex flex-wrap items-center gap-2 pt-2">
+        {plugin.updateAvailable ? (
+          <Button
+            variant="pill"
+            size="sm"
+            disabled={busy}
+            className="h-8 rounded-[8px] text-xs font-bold"
+            onClick={onUpdate}
+            data-testid={`plugin-update-${plugin.id}`}
+          >
+            <RefreshCw className="size-3.5" />
+            {t('pages.plugins.actions.update')}
+          </Button>
+        ) : null}
         <Button
           variant={primaryVariant}
           size="sm"
@@ -130,6 +153,19 @@ export function InstalledPluginCard({
         >
           <Power className="size-3.5" />
         </Button>
+        {plugin.removable ? (
+          <Button
+            variant="secondary"
+            size="icon-xs"
+            className="size-8 rounded-[8px] text-destructive"
+            onClick={onDelete}
+            disabled={busy}
+            aria-label={t('pages.plugins.actions.uninstallAria', { name: plugin.name })}
+            data-testid={`plugin-delete-${plugin.id}`}
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
+        ) : null}
       </div>
     </article>
   );

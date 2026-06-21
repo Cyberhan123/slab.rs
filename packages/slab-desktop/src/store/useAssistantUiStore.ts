@@ -1,13 +1,21 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
+import type { components } from '@slab/api';
+
 import { createUiStateStorage } from './ui-state-storage';
 
 type SessionLabelMap = Record<string, string>;
+export type AssistantReasoningEffort = components['schemas']['ChatReasoningEffort'];
+export type AssistantToolChoice = components['schemas']['AgentToolChoiceInput'];
 
 type PersistedAssistantUiState = {
   currentSessionId: string;
-  deepThink: boolean;
+  reasoningEffort: AssistantReasoningEffort;
+  systemPrompt: string;
+  toolConcurrency: number;
+  toolChoice: AssistantToolChoice;
+  advancedPanelOpen: boolean;
   sessionLabels: SessionLabelMap;
 };
 
@@ -15,16 +23,64 @@ type AssistantUiState = PersistedAssistantUiState & {
   hasHydrated: boolean;
   setHasHydrated: (hasHydrated: boolean) => void;
   setCurrentSessionId: (sessionId: string) => void;
-  setDeepThink: (deepThink: boolean) => void;
+  setReasoningEffort: (reasoningEffort: AssistantReasoningEffort) => void;
+  setSystemPrompt: (systemPrompt: string) => void;
+  setToolConcurrency: (toolConcurrency: number) => void;
+  setToolChoice: (toolChoice: AssistantToolChoice) => void;
+  setAdvancedPanelOpen: (advancedPanelOpen: boolean) => void;
   setSessionLabel: (sessionId: string, label: string) => void;
   removeSessionLabel: (sessionId: string) => void;
 };
 
 const initialPersistedState: PersistedAssistantUiState = {
   currentSessionId: '',
-  deepThink: true,
+  reasoningEffort: 'medium',
+  systemPrompt: '',
+  toolConcurrency: 1,
+  toolChoice: { type: 'auto' },
+  advancedPanelOpen: false,
   sessionLabels: {},
 };
+
+function normalizeToolConcurrency(value: number) {
+  if (!Number.isFinite(value)) {
+    return initialPersistedState.toolConcurrency;
+  }
+
+  return Math.min(4, Math.max(1, Math.trunc(value)));
+}
+
+function migrateAssistantUiState(value: unknown): PersistedAssistantUiState {
+  if (typeof value !== 'object' || value === null) {
+    return initialPersistedState;
+  }
+
+  const state = value as Partial<PersistedAssistantUiState> & { deepThink?: boolean };
+  const reasoningEffort =
+    state.reasoningEffort ??
+    (typeof state.deepThink === 'boolean' ? (state.deepThink ? 'medium' : 'none') : 'medium');
+
+  return {
+    currentSessionId:
+      typeof state.currentSessionId === 'string' ? state.currentSessionId.trim() : '',
+    reasoningEffort,
+    systemPrompt: typeof state.systemPrompt === 'string' ? state.systemPrompt : '',
+    toolConcurrency: normalizeToolConcurrency(
+      typeof state.toolConcurrency === 'number'
+        ? state.toolConcurrency
+        : initialPersistedState.toolConcurrency
+    ),
+    toolChoice: state.toolChoice ?? initialPersistedState.toolChoice,
+    advancedPanelOpen:
+      typeof state.advancedPanelOpen === 'boolean'
+        ? state.advancedPanelOpen
+        : initialPersistedState.advancedPanelOpen,
+    sessionLabels:
+      typeof state.sessionLabels === 'object' && state.sessionLabels !== null
+        ? state.sessionLabels
+        : {},
+  };
+}
 
 function createAssistantUiStorage() {
   const storage = createUiStateStorage();
@@ -52,7 +108,14 @@ export const useAssistantUiStore = create<AssistantUiState>()(
         set({
           currentSessionId: sessionId.trim(),
         }),
-      setDeepThink: (deepThink) => set({ deepThink }),
+      setReasoningEffort: (reasoningEffort) => set({ reasoningEffort }),
+      setSystemPrompt: (systemPrompt) => set({ systemPrompt }),
+      setToolConcurrency: (toolConcurrency) =>
+        set({
+          toolConcurrency: normalizeToolConcurrency(toolConcurrency),
+        }),
+      setToolChoice: (toolChoice) => set({ toolChoice }),
+      setAdvancedPanelOpen: (advancedPanelOpen) => set({ advancedPanelOpen }),
       setSessionLabel: (sessionId, label) => {
         const trimmedSessionId = sessionId.trim();
         const trimmedLabel = label.trim();
@@ -89,9 +152,23 @@ export const useAssistantUiStore = create<AssistantUiState>()(
     {
       name: 'assistant-ui',
       storage: createJSONStorage(() => createAssistantUiStorage()),
-      partialize: ({ currentSessionId, deepThink, sessionLabels }) => ({
+      version: 1,
+      migrate: (value) => migrateAssistantUiState(value),
+      partialize: ({
         currentSessionId,
-        deepThink,
+        reasoningEffort,
+        systemPrompt,
+        toolConcurrency,
+        toolChoice,
+        advancedPanelOpen,
+        sessionLabels,
+      }) => ({
+        currentSessionId,
+        reasoningEffort,
+        systemPrompt,
+        toolConcurrency,
+        toolChoice,
+        advancedPanelOpen,
         sessionLabels,
       }),
       onRehydrateStorage: () => (state, error) => {

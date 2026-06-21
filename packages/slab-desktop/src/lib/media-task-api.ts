@@ -7,6 +7,17 @@ export type MediaTaskProgress = components['schemas']['TaskProgressResponse'] | 
 export type ImageGenerationTask = components['schemas']['ImageGenerationTaskResponse'];
 export type VideoGenerationTask = components['schemas']['VideoGenerationTaskResponse'];
 export type AudioTranscriptionTask = components['schemas']['AudioTranscriptionTaskResponse'];
+export type GenerationProgressStage = 'queued' | 'running' | 'finalizing';
+export type GenerationProgress = {
+  percent: number | null;
+  stage: GenerationProgressStage;
+  etaMs: number | null;
+  stepLabel: string | null;
+  message: string | null;
+  current: number;
+  total: number | null;
+  updatedAt: number;
+};
 
 function buildApiUrl(path: string): string {
   return new URL(path.replace(/^\//, ''), `${SERVER_BASE_URL}/`).toString();
@@ -22,6 +33,44 @@ export function resolveMediaUrl(path?: string | null): string | null {
   }
 
   return buildApiUrl(path);
+}
+
+export function deriveProgress(
+  progress: MediaTaskProgress,
+  previous?: GenerationProgress | null,
+  now = Date.now(),
+): GenerationProgress {
+  if (!progress) {
+    return {
+      current: 0,
+      etaMs: null,
+      message: null,
+      percent: null,
+      stage: 'queued',
+      stepLabel: null,
+      total: null,
+      updatedAt: now,
+    };
+  }
+
+  const current = finiteNumber(progress.current) ?? 0;
+  const total = finiteNumber(progress.total);
+  const percent = total && total > 0 ? clampPercent((current / total) * 100) : null;
+  const label = progress.label?.trim() || null;
+  const message = progress.message?.trim() || null;
+  const step = finiteNumber(progress.step);
+  const stepCount = finiteNumber(progress.step_count);
+
+  return {
+    current,
+    etaMs: estimateEtaMs(current, total, previous, now),
+    message,
+    percent,
+    stage: percent !== null && percent >= 99 ? 'finalizing' : 'running',
+    stepLabel: buildStepLabel(label, step, stepCount),
+    total,
+    updatedAt: now,
+  };
 }
 
 function requireApiData<T>(
@@ -85,4 +134,55 @@ export async function getAudioTranscription(taskId: string): Promise<AudioTransc
     }),
     `Audio transcription '${taskId}' returned an empty response.`,
   );
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.min(Math.max(value, 0), 100);
+}
+
+function estimateEtaMs(
+  current: number,
+  total: number | null,
+  previous: GenerationProgress | null | undefined,
+  now: number,
+): number | null {
+  if (!total || total <= current || !previous || previous.current >= current) {
+    return null;
+  }
+
+  const elapsedMs = now - previous.updatedAt;
+  const delta = current - previous.current;
+  if (elapsedMs <= 0 || delta <= 0) {
+    return null;
+  }
+
+  return Math.max(Math.round(((total - current) / delta) * elapsedMs), 0);
+}
+
+function buildStepLabel(
+  label: string | null,
+  step: number | null,
+  stepCount: number | null,
+): string | null {
+  if (label && step && stepCount) {
+    return `${label} (${step}/${stepCount})`;
+  }
+
+  if (label) {
+    return label;
+  }
+
+  if (step && stepCount) {
+    return `Step ${step}/${stepCount}`;
+  }
+
+  return null;
 }

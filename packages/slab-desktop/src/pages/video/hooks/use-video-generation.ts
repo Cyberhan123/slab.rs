@@ -7,9 +7,11 @@ import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
 import api, { getErrorMessage } from '@slab/api';
 import type { components } from '@slab/api/v1';
 import {
+  deriveProgress,
   getVideoGeneration,
   listVideoGenerations,
   resolveMediaUrl,
+  type GenerationProgress,
   type VideoGenerationTask,
 } from '@/lib/media-task-api';
 import { isFailedTaskStatus } from '@/pages/task/utils';
@@ -20,7 +22,6 @@ import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import {
   DEFAULT_GENERATION_SIZE,
   MAX_RANDOM_SEED,
-  MAX_POLL_ATTEMPTS,
   POLL_INTERVAL_MS,
   type ModelOption,
 } from '../const';
@@ -66,9 +67,10 @@ export function useVideoGeneration() {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [selectedHistoryTask, setSelectedHistoryTask] = useState<VideoGenerationTask | null>(null);
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState<GenerationProgress | null>(null);
 
   const initImageInputRef = useRef<HTMLInputElement>(null);
-  const pollAttempts = useRef(0);
+  const generationProgressRef = useRef<GenerationProgress | null>(null);
 
   usePageHeader({
     icon: PAGE_HEADER_META.video.icon,
@@ -167,7 +169,8 @@ export function useVideoGeneration() {
   usePageHeaderControl(headerModelPicker);
 
   const clearGenerationTask = useCallback(() => {
-    pollAttempts.current = 0;
+    generationProgressRef.current = null;
+    setGenerationProgress(null);
     setGenerationPhase('idle');
     setTaskId(null);
   }, []);
@@ -286,7 +289,6 @@ export function useVideoGeneration() {
       });
       setTaskId(operation_id);
       setGenerationPhase('polling');
-      pollAttempts.current = 0;
       toast.info(t('pages.video.toast.started', { frames, fps }));
     } catch (error) {
       const message = getErrorMessage(error);
@@ -320,12 +322,13 @@ export function useVideoGeneration() {
       return;
     }
 
-    pollAttempts.current += 1;
-    if (pollAttempts.current > MAX_POLL_ATTEMPTS) {
-      toast.error(t('pages.video.toast.timedOut'));
-      clearGenerationTask();
-      return;
-    }
+    const nextProgress = deriveProgress(
+      taskStatus?.progress ?? null,
+      generationProgressRef.current,
+      taskStatusUpdatedAt,
+    );
+    generationProgressRef.current = nextProgress;
+    setGenerationProgress(nextProgress);
 
     if (!taskStatus) {
       return;
@@ -488,6 +491,7 @@ export function useVideoGeneration() {
     scheduler,
     seed,
     selectedHistoryTask,
+    generationProgress,
     setAdvancedOpen,
     setCfgScale,
     setFps,

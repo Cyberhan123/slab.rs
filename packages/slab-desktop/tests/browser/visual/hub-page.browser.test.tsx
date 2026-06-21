@@ -14,6 +14,8 @@ vi.mock('@/pages/hub/hooks/use-hub-model-catalog', () => ({
   CATEGORY_OPTIONS: ['all', 'language', 'vision', 'audio', 'coding', 'embedding'] as const,
   STATUS_OPTIONS: ['all', 'ready', 'downloading', 'not_downloaded', 'error'] as const,
   canDownloadModel: vi.fn<() => boolean>(() => true),
+  canRunModelLifecycleAction: vi.fn<() => boolean>(() => true),
+  getModelUseRoute: vi.fn<() => string>(() => '/assistant'),
 }));
 
 vi.mock('@/hooks/use-global-header-meta', () => ({
@@ -38,6 +40,7 @@ function createMockModel(overrides: Partial<ModelItem> = {}): ModelItem {
     kind: 'local',
     repo_id: 'meta-llama/Llama-3.2-3B',
     filename: 'llama-3.2-3b.gguf',
+    category: 'language',
     capabilities: ['chat_generation', 'text_generation'],
     backend_ids: ['llama'],
     is_vad_model: false,
@@ -47,6 +50,8 @@ function createMockModel(overrides: Partial<ModelItem> = {}): ModelItem {
     runtime_state: null,
     download_task_id: null,
     download_progress: null,
+    size_bytes: null,
+    vram_risk: 'unknown',
     updated_at: '2024-01-15T10:30:00Z',
     ...overrides,
   };
@@ -81,6 +86,9 @@ function createHubViewModel(overrides = {}) {
     createModel: createAsyncVoidMock(),
     downloadModel: createAsyncVoidMock(),
     deleteModel: createAsyncVoidMock(),
+    modelActionPendingId: null,
+    modelActionErrors: {},
+    modelActionPending: false,
     createModelPending: false,
     deleteModelPending: false,
     ...overrides,

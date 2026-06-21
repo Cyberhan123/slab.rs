@@ -8,10 +8,12 @@ import { useTranslation } from '@slab/i18n';
 import { FileAudio2, History, Loader2 } from 'lucide-react';
 import type { SelectedFile } from '@/hooks/use-file';
 import type { CatalogModel } from '@slab/api/models';
-import type { AudioTranscriptionTask } from '@/lib/media-task-api';
+import type { AudioTranscriptionTask, GenerationProgress } from '@/lib/media-task-api';
+import { GenerationProgressView } from '@/components/generation-progress';
 import type { PreparingStage } from '../const';
 import { VadSettings } from './vad-settings';
 import { DecodeOptions } from './decode-options';
+import { AudioTranscriptDetail } from './audio-transcript-detail';
 
 export type AudioWorkbenchProps = {
   bundledVadLabel: string;
@@ -36,6 +38,8 @@ export type AudioWorkbenchProps = {
   decodeWordThold: string;
   enableVad: boolean;
   file: SelectedFile | null;
+  generationProgress: GenerationProgress | null;
+  handleCancelTranscription: () => void | Promise<void>;
   handleFileChange: (e: ChangeEvent<HTMLInputElement>) => void | Promise<void>;
   handleTauriFileSelect: () => void | Promise<void>;
   handleTranscribe: () => void | Promise<void>;
@@ -45,7 +49,9 @@ export type AudioWorkbenchProps = {
   historyError: string | null;
   historyLoading: boolean;
   isBusy: boolean;
+  isCancellingTranscription: boolean;
   isTauri: boolean;
+  isTranscriptionRunning: boolean;
   isUsingBundledVad: boolean;
   openHistoryDetail: (taskId: string) => void | Promise<void>;
   preparingStage: PreparingStage;
@@ -125,6 +131,8 @@ export function AudioWorkbench({
   decodeWordThold,
   enableVad,
   file,
+  generationProgress,
+  handleCancelTranscription,
   handleFileChange,
   handleTauriFileSelect,
   handleTranscribe,
@@ -134,7 +142,9 @@ export function AudioWorkbench({
   historyError,
   historyLoading,
   isBusy,
+  isCancellingTranscription,
   isTauri,
+  isTranscriptionRunning,
   isUsingBundledVad,
   openHistoryDetail,
   preparingStage,
@@ -391,7 +401,7 @@ export function AudioWorkbench({
             {isBusy ? <Loader2 className="size-4 animate-spin" /> : null}
             {preparingStage === 'prepare'
               ? t('pages.audio.workbench.startPreparing')
-              : preparingStage === 'transcribe' || transcribe?.isPending
+              : preparingStage === 'transcribe' || transcribe?.isPending || isTranscriptionRunning
                 ? t('pages.audio.workbench.startProcessing')
                 : t('pages.audio.workbench.startTranscription')}
           </Button>
@@ -402,7 +412,31 @@ export function AudioWorkbench({
 
           {isBusy || taskId || file ? (
             <div className="mt-6 rounded-[22px] bg-[var(--surface-soft)] p-4">
-              {isBusy ? (
+              {isTranscriptionRunning ? (
+                <div className="space-y-3">
+                  <GenerationProgressView
+                    progress={generationProgress}
+                    labels={{
+                      eta: t('pages.audio.progress.eta'),
+                      finalizing: t('pages.audio.progress.finalizing'),
+                      queued: t('pages.audio.progress.queued'),
+                      running: t('pages.audio.progress.running'),
+                      step: t('pages.audio.progress.step'),
+                      title: t('pages.audio.progress.title'),
+                    }}
+                  />
+                  <Button
+                    variant="pill"
+                    size="pill"
+                    className="h-10 w-full rounded-[14px]"
+                    onClick={() => void handleCancelTranscription()}
+                    disabled={isCancellingTranscription}
+                  >
+                    {isCancellingTranscription ? <Loader2 className="size-4 animate-spin" /> : null}
+                    {t('pages.audio.workbench.actions.cancel')}
+                  </Button>
+                </div>
+              ) : isBusy ? (
                 <div className="flex items-start gap-3">
                   <div className="mt-0.5 flex size-10 items-center justify-center rounded-full bg-[var(--shell-card)] text-[var(--brand-teal)]">
                     <Loader2 className="size-5 animate-spin" />
@@ -532,38 +566,7 @@ export function AudioWorkbench({
                   {selectedHistoryTask.status} | {formatHistoryTime(selectedHistoryTask.created_at)}
                 </DialogDescription>
               </DialogHeader>
-              <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
-                <div className="max-h-[68vh] overflow-y-auto rounded-[22px] bg-[var(--surface-soft)] p-4">
-                  <pre className="whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
-                    {selectedHistoryTask.transcript_text ?? t('pages.audio.history.pendingTranscript')}
-                  </pre>
-                </div>
-                <div className="space-y-4 rounded-[22px] bg-[var(--surface-soft)] p-4">
-                  <div>
-                    <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
-                      {t('pages.audio.history.fields.source')}
-                    </p>
-                    <p className="mt-2 break-all text-sm text-foreground">
-                      {selectedHistoryTask.source_path}
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-1 gap-3 text-sm">
-                    <div>
-                      <p className="text-xs text-muted-foreground">{t('pages.audio.history.fields.model')}</p>
-                      <p className="font-semibold">{selectedHistoryTask.model_id ?? selectedHistoryTask.backend_id}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">{t('pages.audio.history.fields.language')}</p>
-                      <p className="font-semibold">{selectedHistoryTask.language ?? '-'}</p>
-                    </div>
-                  </div>
-                  {selectedHistoryTask.error_msg ? (
-                    <p className="rounded-xl bg-destructive/10 p-3 text-xs leading-5 text-destructive">
-                      {selectedHistoryTask.error_msg}
-                    </p>
-                  ) : null}
-                </div>
-              </div>
+              <AudioTranscriptDetail task={selectedHistoryTask} isTauri={isTauri} />
             </>
           ) : null}
         </DialogContent>

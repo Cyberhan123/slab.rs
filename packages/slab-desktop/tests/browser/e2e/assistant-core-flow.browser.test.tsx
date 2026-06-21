@@ -71,8 +71,16 @@ vi.mock('@/hooks/use-persisted-header-select', () => ({
 vi.mock('@/store/useAssistantUiStore', () => ({
   useAssistantUiStore: vi.fn<(selector?: (state: Record<string, unknown>) => unknown) => unknown>((selector) => {
     const state = {
-      deepThink: false,
-      setDeepThink: mockSetDeepThink,
+      advancedPanelOpen: false,
+      reasoningEffort: 'medium',
+      setAdvancedPanelOpen: vi.fn<() => void>(),
+      setReasoningEffort: mockSetDeepThink,
+      setSystemPrompt: vi.fn<() => void>(),
+      setToolChoice: vi.fn<() => void>(),
+      setToolConcurrency: vi.fn<() => void>(),
+      systemPrompt: '',
+      toolChoice: { type: 'auto' },
+      toolConcurrency: 1,
     };
     return selector ? selector(state) : state;
   }),

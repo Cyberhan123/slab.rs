@@ -86,6 +86,14 @@ export const video = {
       model: '模型',
     },
   },
+  progress: {
+    title: '渲染进度',
+    queued: '已入队，等待运行时处理',
+    running: '运行时正在渲染帧',
+    finalizing: '正在整理视频产物',
+    eta: '预计剩余',
+    step: '步骤',
+  },
   stage: {
     title: {
       ready: '渲染已完成',

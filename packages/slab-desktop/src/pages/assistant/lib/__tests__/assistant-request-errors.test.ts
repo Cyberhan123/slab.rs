@@ -209,6 +209,47 @@ describe('assistant request errors', () => {
     })
   })
 
+  it('prefers direct server error envelopes over OpenAI-compatible fallbacks', async () => {
+    const response = new Response(
+      JSON.stringify({
+        code: 4000,
+        message: 'cloud chat completions do not support local top_k sampling controls',
+        data: {
+          code: 'unsupported_chat_parameter',
+          error_type: 'invalid_request_error',
+          param: 'top_k',
+        },
+        i18n: {
+          message: {
+            key: 'server.errors.badRequest',
+            params: { detail: 'top_k is unsupported' },
+          },
+        },
+      }),
+      {
+        status: 400,
+        statusText: 'Bad Request',
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+          'x-request-id': ' req-400 ',
+        },
+      }
+    )
+
+    await expect(adaptAssistantTransportResponse(response)).rejects.toMatchObject({
+      code: 4000,
+      data: {
+        code: 'unsupported_chat_parameter',
+        param: 'top_k',
+      },
+      error_type: 'invalid_request_error',
+      message: 'cloud chat completions do not support local top_k sampling controls',
+      param: 'top_k',
+      request_id: 'req-400',
+      transport_status: 400,
+    })
+  })
+
   it('falls back to text, status text, or HTTP status for unstructured transport failures', async () => {
     await expect(
       adaptAssistantTransportResponse(

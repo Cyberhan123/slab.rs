@@ -31,12 +31,17 @@ vi.mock("@slab/api", () => ({
       refetch: vi.fn<() => Promise<void>>(),
     }),
   },
-  getErrorMessage: (error: unknown) => (error instanceof Error ? error.message : String(error)),
+  getLocalizedErrorMessage: (error: unknown) =>
+    error instanceof Error ? error.message : String(error),
   postFormData: vi.fn<(path: string, file: File) => Promise<unknown>>(),
 }));
 
 vi.mock("../../lib/plugin-manifest-preview", () => ({
   parsePluginPackManifest: parsePluginPackManifestMock,
+}));
+
+vi.mock("../../lib/plugin-runtime-client", () => ({
+  connectPluginEvents: vi.fn<() => () => void>(() => () => {}),
 }));
 
 import { usePluginsPage } from "../use-plugins-page";

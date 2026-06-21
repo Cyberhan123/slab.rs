@@ -86,6 +86,14 @@ export const video = {
       model: 'Model',
     },
   },
+  progress: {
+    title: 'Render progress',
+    queued: 'Queued and waiting for the runtime',
+    running: 'Runtime is rendering frames',
+    finalizing: 'Finalizing video artifact',
+    eta: 'ETA',
+    step: 'Step',
+  },
   stage: {
     title: {
       ready: 'Render Ready',

@@ -9,16 +9,17 @@ import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import api, { getErrorMessage } from '@slab/api';
 import type { components } from '@slab/api/v1';
 import {
+  deriveProgress,
   getImageGeneration,
   listImageGenerations,
   resolveMediaUrl,
+  type GenerationProgress,
   type ImageGenerationTask,
 } from '@/lib/media-task-api';
 import { isFailedTaskStatus } from '@/pages/task/utils';
 import {
   DEFAULT_GENERATION_SIZE,
   MAX_RANDOM_SEED,
-  MAX_POLL_ATTEMPTS,
   POLL_INTERVAL_MS,
   type GeneratedImage,
   type ImageRouteState,
@@ -55,9 +56,10 @@ export function useImageGeneration() {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [selectedHistoryTask, setSelectedHistoryTask] = useState<ImageGenerationTask | null>(null);
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState<GenerationProgress | null>(null);
 
   const initImageInputRef = useRef<HTMLInputElement>(null);
-  const pollAttempts = useRef(0);
+  const generationProgressRef = useRef<GenerationProgress | null>(null);
 
   const {
     catalogLoading,
@@ -196,7 +198,8 @@ export function useImageGeneration() {
   usePageHeaderControl(headerModelPicker);
 
   const clearGenerationTask = useCallback(() => {
-    pollAttempts.current = 0;
+    generationProgressRef.current = null;
+    setGenerationProgress(null);
     setGenerationPhase('idle');
     setTaskId(null);
   }, []);
@@ -326,7 +329,6 @@ export function useImageGeneration() {
 
       setTaskId(operation_id);
       setGenerationPhase('polling');
-      pollAttempts.current = 0;
     } catch (error) {
       const message = getErrorMessage(error);
       toast.error(message);
@@ -363,12 +365,13 @@ export function useImageGeneration() {
       return;
     }
 
-    pollAttempts.current += 1;
-    if (pollAttempts.current > MAX_POLL_ATTEMPTS) {
-      toast.error(t('pages.image.toast.generationTimedOut'));
-      clearGenerationTask();
-      return;
-    }
+    const nextProgress = deriveProgress(
+      taskStatus?.progress ?? null,
+      generationProgressRef.current,
+      taskStatusUpdatedAt,
+    );
+    generationProgressRef.current = nextProgress;
+    setGenerationProgress(nextProgress);
 
     if (!taskStatus) {
       return;
@@ -494,6 +497,7 @@ export function useImageGeneration() {
     scheduler,
     seed,
     selectedHistoryTask,
+    generationProgress,
     selectedModelId,
     setHistoryDialogOpen,
     setAdvancedOpen,

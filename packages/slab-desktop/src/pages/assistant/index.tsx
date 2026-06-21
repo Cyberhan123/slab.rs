@@ -67,8 +67,16 @@ function Assistant() {
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null)
   const [loadedModelStatus, setLoadedModelStatus] = useState<ModelRuntimeStatus | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
-  const deepThink = useAssistantUiStore((state) => state.deepThink)
-  const setDeepThink = useAssistantUiStore((state) => state.setDeepThink)
+  const reasoningEffort = useAssistantUiStore((state) => state.reasoningEffort)
+  const setReasoningEffort = useAssistantUiStore((state) => state.setReasoningEffort)
+  const systemPrompt = useAssistantUiStore((state) => state.systemPrompt)
+  const setSystemPrompt = useAssistantUiStore((state) => state.setSystemPrompt)
+  const toolConcurrency = useAssistantUiStore((state) => state.toolConcurrency)
+  const setToolConcurrency = useAssistantUiStore((state) => state.setToolConcurrency)
+  const toolChoice = useAssistantUiStore((state) => state.toolChoice)
+  const setToolChoice = useAssistantUiStore((state) => state.setToolChoice)
+  const advancedPanelOpen = useAssistantUiStore((state) => state.advancedPanelOpen)
+  const setAdvancedPanelOpen = useAssistantUiStore((state) => state.setAdvancedPanelOpen)
   const { t } = useTranslation()
   const locale = useAssistantLocale()
   const resolvedLanguage = getResolvedAppLanguage()
@@ -316,10 +324,14 @@ function Assistant() {
     submitApproval,
   } = useAssistantAgent({
     beforeRequest: ensureAssistantModelReady,
-    deepThink,
     model: selectedModelId || "slab-llama",
+    reasoningEffort,
+    reasoningSupported: selectedModel?.capabilities.reasoning_controls ?? false,
     runtimePresets: selectedModel?.runtimePresets ?? null,
     sessionId: curConversation,
+    systemPrompt,
+    toolChoice,
+    toolConcurrency,
   })
 
   const modelLoading = catalogModelsLoading
@@ -332,10 +344,14 @@ function Assistant() {
   const safeMessages = useMemo<AssistantMessageRecord[]>(() => messages ?? [], [messages])
 
   useEffect(() => {
-    if (selectedModel && !selectedModel.capabilities.reasoning_controls && deepThink) {
-      setDeepThink(false)
+    if (
+      selectedModel &&
+      !selectedModel.capabilities.reasoning_controls &&
+      reasoningEffort !== "none"
+    ) {
+      setReasoningEffort("none")
     }
-  }, [deepThink, selectedModel, setDeepThink])
+  }, [reasoningEffort, selectedModel, setReasoningEffort])
 
   const latestUserMessage = safeMessages
     .slice()
@@ -759,9 +775,17 @@ function Assistant() {
               onCancel={abort}
               isRequesting={isRequesting || isPreparingModel}
               disabled={isSessionBootstrapping || isHistoryLoading || isSessionMutating || !curConversation}
-              deepThink={deepThink}
+              reasoningEffort={reasoningEffort}
               reasoningSupported={selectedModel?.capabilities.reasoning_controls ?? false}
-              setDeepThink={setDeepThink}
+              setReasoningEffort={setReasoningEffort}
+              systemPrompt={systemPrompt}
+              setSystemPrompt={setSystemPrompt}
+              toolConcurrency={toolConcurrency}
+              setToolConcurrency={setToolConcurrency}
+              toolChoice={toolChoice}
+              setToolChoice={setToolChoice}
+              advancedPanelOpen={advancedPanelOpen}
+              setAdvancedPanelOpen={setAdvancedPanelOpen}
               onGenerateImage={handleGenerateImage}
               statusLabel={selectedModelStatusLabel}
             />

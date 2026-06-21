@@ -1,4 +1,5 @@
 import { SERVER_BASE_URL } from '@slab/api/config'
+import type { components } from '@slab/api'
 
 import type {
   AgentResponsesServerMessage,
@@ -7,6 +8,52 @@ import type {
   AssistantRuntimePresets,
   AssistantThought,
 } from '../assistant-context'
+
+type AgentConfigInput = components['schemas']['AgentConfigInput']
+export type AssistantReasoningEffort = components['schemas']['ChatReasoningEffort']
+export type AssistantToolChoice = components['schemas']['AgentToolChoiceInput']
+
+export type AssistantSlashCommandName = 'plan' | 'skill' | 'mcp' | 'web_search'
+
+export type AssistantSlashCommandConfig = {
+  command: AssistantSlashCommandName
+  content: string
+  allowedTools: string[]
+  toolChoice: AssistantToolChoice
+}
+
+type ToAgentConfigOptions = {
+  model: string
+  runtimePresets?: AssistantRuntimePresets | null
+  reasoningEffort?: AssistantReasoningEffort | null
+  reasoningSupported?: boolean
+  systemPrompt?: string | null
+  toolConcurrency?: number | null
+  toolChoice?: AssistantToolChoice | null
+  slashCommand?: AssistantSlashCommandConfig | null
+}
+
+const SLASH_COMMAND_TOOL_CONFIG: Record<
+  AssistantSlashCommandName,
+  Omit<AssistantSlashCommandConfig, 'command' | 'content'>
+> = {
+  mcp: {
+    allowedTools: ['mcp_list_tools', 'mcp_call'],
+    toolChoice: { type: 'required' },
+  },
+  plan: {
+    allowedTools: ['plan_update'],
+    toolChoice: { name: 'plan_update', type: 'tool' },
+  },
+  skill: {
+    allowedTools: ['delegate_subagent'],
+    toolChoice: { name: 'delegate_subagent', type: 'tool' },
+  },
+  web_search: {
+    allowedTools: ['web_search'],
+    toolChoice: { name: 'web_search', type: 'tool' },
+  },
+}
 
 export function nextId(prefix: string) {
   const random =
@@ -21,11 +68,37 @@ export function isBusyStatus(status: AgentStatus | null) {
   return status === 'pending' || status === 'running' || status === 'interrupting'
 }
 
-export function toAgentConfig(
-  model: string,
-  runtimePresets?: AssistantRuntimePresets | null,
-  deepThink?: boolean
-) {
+export function parseAssistantSlashCommand(value: string): AssistantSlashCommandConfig | null {
+  const match = value.trim().match(/^\/(plan|skill|mcp|web_search)(?:\s+([\s\S]*))?$/i)
+  if (!match) {
+    return null
+  }
+
+  const command = match[1].toLowerCase() as AssistantSlashCommandName
+  const config = SLASH_COMMAND_TOOL_CONFIG[command]
+
+  return {
+    command,
+    content: match[2]?.trim() ?? '',
+    allowedTools: config.allowedTools,
+    toolChoice: config.toolChoice,
+  }
+}
+
+export function toAgentConfig({
+  model,
+  runtimePresets,
+  reasoningEffort,
+  reasoningSupported = true,
+  systemPrompt,
+  toolConcurrency,
+  toolChoice,
+  slashCommand,
+}: ToAgentConfigOptions): AgentConfigInput {
+  const trimmedSystemPrompt = systemPrompt?.trim()
+  const selectedToolChoice = slashCommand?.toolChoice ?? toolChoice
+  const allowedTools = slashCommand?.allowedTools ?? []
+
   return {
     max_turns: 8,
     model,
@@ -44,7 +117,15 @@ export function toAgentConfig(
     ...(typeof runtimePresets?.repetition_penalty === 'number'
       ? { repetition_penalty: runtimePresets.repetition_penalty }
       : {}),
-    ...(deepThink ? { reasoning_effort: 'medium' as const } : {}),
+    ...(reasoningSupported && reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+    ...(trimmedSystemPrompt ? { system_prompt: trimmedSystemPrompt } : {}),
+    ...(toolConcurrency && toolConcurrency > 1
+      ? { tool_concurrency: Math.min(4, Math.max(1, Math.trunc(toolConcurrency))) }
+      : {}),
+    ...(selectedToolChoice && selectedToolChoice.type !== 'auto'
+      ? { tool_choice: selectedToolChoice }
+      : {}),
+    ...(allowedTools.length > 0 ? { allowed_tools: allowedTools } : {}),
   }
 }
 

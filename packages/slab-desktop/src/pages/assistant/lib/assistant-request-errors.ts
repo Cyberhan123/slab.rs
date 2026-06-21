@@ -1,4 +1,9 @@
 import type { SSEFields, XModelResponse } from '@ant-design/x-sdk'
+import {
+  getErrorData,
+  isApiErrorResponse,
+  type AppCoreErrorData,
+} from '@slab/api'
 import { translateServerField, type ServerI18nPayload } from '@slab/i18n'
 
 import { getErrorDescription } from '@/lib/error-description'
@@ -8,8 +13,8 @@ import {
   isRecord,
   type AssistantApiError,
   type AssistantApiErrorResponse,
+  type AssistantErrorCode,
   type AssistantRequestErrorInfo,
-  type AssistantRequestErrorType,
   type AssistantUiMessage,
 } from './assistant-types'
 
@@ -17,25 +22,28 @@ type Translate = (key: string, options?: Record<string, unknown>) => string
 
 export class AssistantTransportError extends Error {
   readonly transport_status: number
-  readonly code?: AssistantApiError['code']
+  readonly code?: AssistantErrorCode
+  readonly data?: AppCoreErrorData
   readonly param?: AssistantApiError['param']
   readonly request_id?: string | null
-  readonly error_type?: AssistantRequestErrorType
+  readonly error_type?: string
   readonly i18n?: ServerI18nPayload
 
   constructor(options: {
     message: string
     transport_status: number
-    code?: AssistantApiError['code']
+    code?: AssistantErrorCode
+    data?: AppCoreErrorData
     param?: AssistantApiError['param']
     request_id?: string | null
-    error_type?: AssistantRequestErrorType
+    error_type?: string
     i18n?: ServerI18nPayload
   }) {
     super(options.message)
     this.name = 'AssistantTransportError'
     this.transport_status = options.transport_status
     this.code = options.code
+    this.data = options.data
     this.param = options.param
     this.request_id = options.request_id
     this.error_type = options.error_type
@@ -82,6 +90,10 @@ export const getAssistantRequestErrorMessage = (
   value: unknown,
   t?: Translate
 ): string | undefined => {
+  if (isApiErrorResponse(value)) {
+    return t ? translateServerField(value.i18n as ServerI18nPayload, 'message', value.message, t) : value.message
+  }
+
   if (isAssistantTransportError(value)) {
     return t ? translateServerField(value.i18n, 'message', value.message, t) : value.message
   }
@@ -111,6 +123,16 @@ export const getAssistantErrorDescription = (
 export const getAssistantRequestErrorMeta = (
   value: unknown
 ): Pick<AssistantUiMessage, 'errorCode' | 'errorParam' | 'errorStatus' | 'errorType'> => {
+  if (isApiErrorResponse(value)) {
+    const data = getErrorData<AppCoreErrorData>(value)
+    return {
+      errorCode: value.code,
+      errorParam: data && 'param' in data && typeof data.param === 'string' ? data.param : undefined,
+      errorStatus: value.status,
+      errorType: data && 'error_type' in data && typeof data.error_type === 'string' ? data.error_type : undefined,
+    }
+  }
+
   if (isAssistantTransportError(value)) {
     return {
       errorCode: value.code ?? undefined,
@@ -153,6 +175,20 @@ const buildAssistantTransportError = async (response: Response): Promise<Assista
 
   if (contentType.includes('application/json')) {
     const payload = await response.clone().json().catch(() => null)
+    if (isApiErrorResponse(payload)) {
+      const data = getErrorData<AppCoreErrorData>(payload)
+      return new AssistantTransportError({
+        message: payload.message,
+        transport_status: response.status,
+        code: payload.code,
+        data,
+        param: data && 'param' in data && typeof data.param === 'string' ? data.param : undefined,
+        request_id,
+        error_type: data && 'error_type' in data && typeof data.error_type === 'string' ? data.error_type : undefined,
+        i18n: payload.i18n as ServerI18nPayload,
+      })
+    }
+
     if (isAssistantApiErrorResponse(payload)) {
       return new AssistantTransportError({
         message: payload.error.message,

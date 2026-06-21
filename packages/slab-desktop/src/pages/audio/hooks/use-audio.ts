@@ -7,8 +7,13 @@ import useFile, { type SelectedFile } from '@/hooks/use-file';
 import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
 import useIsTauri from '@/hooks/use-tauri';
 import api from '@slab/api';
+import type { components } from '@slab/api/v1';
 import { modelSupportsCapability, toCatalogModelList } from '@slab/api/models';
-import { getAudioTranscription } from '@/lib/media-task-api';
+import {
+  deriveProgress,
+  getAudioTranscription,
+  type GenerationProgress,
+} from '@/lib/media-task-api';
 import { getErrorDescription } from '@/lib/error-description';
 import {
   useModelConfigDocumentQuery,
@@ -52,12 +57,16 @@ export function useAudio() {
   const [file, setFile] = useState<SelectedFile | null>(null);
   const [preparingStage, setPreparingStage] = useState<PreparingStage>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [transcriptionPhase, setTranscriptionPhase] = useState<'idle' | 'polling' | 'fetchingResult'>('idle');
+  const [generationProgress, setGenerationProgress] = useState<GenerationProgress | null>(null);
+  const generationProgressRef = useRef<GenerationProgress | null>(null);
   const {
     history,
     historyDialogOpen,
     historyError,
     historyLoading,
     openHistoryDetail,
+    refreshHistory,
     selectedHistoryTask,
     setHistoryDialogOpen,
     setSelectedHistoryTask,
@@ -85,6 +94,34 @@ export function useAudio() {
   const downloadModelMutation = api.useMutation('post', '/v1/models/download');
   const loadModelMutation = api.useMutation('post', '/v1/models/load');
   const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
+  const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel');
+  const isTranscriptionPolling = transcriptionPhase === 'polling';
+  const isTranscriptionFetchingResult = transcriptionPhase === 'fetchingResult';
+  const {
+    data: taskStatus,
+    error: taskStatusError,
+    dataUpdatedAt: taskStatusUpdatedAt,
+  } = api.useQuery(
+    'get',
+    '/v1/tasks/{id}',
+    {
+      params: {
+        path: {
+          id: taskId ?? '',
+        },
+      },
+    },
+    {
+      enabled: isTranscriptionPolling && Boolean(taskId),
+      refetchInterval: isTranscriptionPolling && taskId ? MODEL_DOWNLOAD_POLL_INTERVAL_MS : false,
+      refetchIntervalInBackground: true,
+      retry: false,
+    },
+  ) as {
+    data: components['schemas']['TaskResponse'] | undefined;
+    error: unknown;
+    dataUpdatedAt: number;
+  };
 
   const {
     data: selectedModelConfigDocument,
@@ -184,9 +221,11 @@ export function useAudio() {
 
   const isBusy =
     Boolean(preparingStage) ||
+    transcriptionPhase !== 'idle' ||
     transcribe.isPending ||
     loadModelMutation.isPending ||
-    downloadModelMutation.isPending;
+    downloadModelMutation.isPending ||
+    cancelTaskMutation.isPending;
   const headerModelPicker = useMemo(
     () => ({
       type: 'select' as const,
@@ -371,6 +410,97 @@ export function useAudio() {
 
     return model.display_name;
   };
+
+  const clearTranscriptionTask = useCallback(() => {
+    generationProgressRef.current = null;
+    setGenerationProgress(null);
+    setTranscriptionPhase('idle');
+    setTaskId(null);
+  }, []);
+
+  useEffect(() => {
+    if (!isTranscriptionPolling || !taskId || taskStatusUpdatedAt === 0) {
+      return;
+    }
+
+    const nextProgress = deriveProgress(
+      taskStatus?.progress ?? null,
+      generationProgressRef.current,
+      taskStatusUpdatedAt,
+    );
+    generationProgressRef.current = nextProgress;
+    setGenerationProgress(nextProgress);
+
+    if (!taskStatus) {
+      return;
+    }
+
+    if (taskStatus.status === 'succeeded') {
+      setTranscriptionPhase('fetchingResult');
+      return;
+    }
+
+    if (isFailedTaskStatus(taskStatus.status)) {
+      toast.error(taskStatus.error_msg ?? t('pages.audio.error.transcriptionFailed'));
+      clearTranscriptionTask();
+    }
+  }, [clearTranscriptionTask, isTranscriptionPolling, taskId, taskStatus, taskStatusUpdatedAt, t]);
+
+  useEffect(() => {
+    if (!isTranscriptionPolling || !taskId || !taskStatusError) {
+      return;
+    }
+
+    const message = getErrorDescription(taskStatusError, t('pages.audio.toast.unknownError'));
+    toast.error(t('pages.audio.toast.pollingError', { message }));
+    clearTranscriptionTask();
+  }, [clearTranscriptionTask, isTranscriptionPolling, taskId, taskStatusError, t]);
+
+  useEffect(() => {
+    if (!isTranscriptionFetchingResult || !taskId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadResult = async () => {
+      try {
+        const detail = await getAudioTranscription(taskId);
+        if (cancelled) {
+          return;
+        }
+
+        showHistoryTask(detail);
+        toast.success(t('pages.audio.toast.transcriptionReady'));
+        await refreshHistory();
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        toast.error(t('pages.audio.toast.failedToCreateTask'), {
+          description: getErrorDescription(error, t('pages.audio.toast.unknownError')),
+        });
+      } finally {
+        if (!cancelled) {
+          clearTranscriptionTask();
+        }
+      }
+    };
+
+    void loadResult();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    clearTranscriptionTask,
+    isTranscriptionFetchingResult,
+    refreshHistory,
+    showHistoryTask,
+    t,
+    taskId,
+  ]);
 
   const prepareVadSettings = async (
     modelConfigDocument: ModelConfigDocumentResponse | undefined,
@@ -604,7 +734,7 @@ export function useAudio() {
     }
 
     try {
-      setTaskId(null);
+      clearTranscriptionTask();
       setPreparingStage('prepare');
       const modelName = await prepareSelectedModel();
       const refreshedModelConfigDocument = selectedModelId
@@ -636,6 +766,10 @@ export function useAudio() {
       setPreparingStage('transcribe');
       const result = await transcribe.handleTranscribe(file.file, transcribeOptions);
       setTaskId(result.operation_id);
+      const initialProgress = deriveProgress(null, null, Date.now());
+      generationProgressRef.current = initialProgress;
+      setGenerationProgress(initialProgress);
+      setTranscriptionPhase('polling');
 
       toast.success(t('pages.audio.toast.taskCreated'), {
         description: t('pages.audio.toast.taskCreatedDescription', {
@@ -645,11 +779,6 @@ export function useAudio() {
           decode: decodeDescription,
         }),
       });
-
-      await waitForTaskToFinish(result.operation_id);
-      const detail = await getAudioTranscription(result.operation_id);
-      showHistoryTask(detail);
-      toast.success(t('pages.audio.toast.transcriptionReady'));
     } catch (err: unknown) {
       toast.error(t('pages.audio.toast.failedToCreateTask'), {
         description: getErrorDescription(err, t('pages.audio.toast.unknownError')),
@@ -658,6 +787,28 @@ export function useAudio() {
       setPreparingStage(null);
     }
   };
+
+  const handleCancelTranscription = useCallback(async () => {
+    if (!taskId) {
+      clearTranscriptionTask();
+      return;
+    }
+
+    try {
+      await cancelTaskMutation.mutateAsync({
+        params: {
+          path: { id: taskId },
+        },
+      });
+      toast.success(t('pages.audio.toast.cancelled'));
+    } catch (error) {
+      toast.error(t('pages.audio.toast.cancelFailed'), {
+        description: getErrorDescription(error, t('pages.audio.toast.unknownError')),
+      });
+    } finally {
+      clearTranscriptionTask();
+    }
+  }, [cancelTaskMutation, clearTranscriptionTask, t, taskId]);
 
   const canStartTranscription =
     isTauri &&
@@ -726,7 +877,9 @@ export function useAudio() {
     decodeWordThold,
     enableVad,
     file,
+    generationProgress,
     handleFileChange,
+    handleCancelTranscription,
     handleTauriFileSelect,
     handleTranscribe,
     hasBundledVad,
@@ -735,7 +888,9 @@ export function useAudio() {
     historyError,
     historyLoading,
     isBusy,
+    isCancellingTranscription: cancelTaskMutation.isPending,
     isTauri,
+    isTranscriptionRunning: transcriptionPhase !== 'idle',
     isUsingBundledVad,
     openHistoryDetail,
     preparingStage,

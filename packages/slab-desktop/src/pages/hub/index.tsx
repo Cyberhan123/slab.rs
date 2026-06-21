@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useIntersection } from '@mantine/hooks';
 import { uniq } from 'lodash-es';
 import { useTranslation } from '@slab/i18n';
+import { useNavigate } from 'react-router-dom';
 import {
   Boxes,
   HardDriveDownload,
@@ -38,6 +39,7 @@ import {
 
 export default function Hub() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const hub = useHubModelCatalog();
   const { hasMore, isLoading, loadMore } = hub;
   const [scrollRoot, setScrollRoot] = useState<HTMLDivElement | null>(null);
@@ -175,13 +177,11 @@ export default function Hub() {
           </div>
         </section>
 
-        {hub.error ? (
+        {hub.dataErrorMessage ? (
           <Alert variant="destructive">
             <TriangleAlert className="h-4 w-4" />
             <AlertTitle>{t('pages.hub.alerts.loadFailedTitle')}</AlertTitle>
-            <AlertDescription>
-              {String((hub.error as Error)?.message ?? hub.error)}
-            </AlertDescription>
+            <AlertDescription>{hub.dataErrorMessage}</AlertDescription>
           </Alert>
         ) : null}
 
@@ -209,9 +209,16 @@ export default function Hub() {
             <HubCatalogTable
               models={hub.visibleModels}
               deletePending={hub.deleteModelPending}
+              modelActionPending={hub.modelActionPending}
+              modelActionPendingId={hub.modelActionPendingId}
+              modelActionErrors={hub.modelActionErrors}
               onDownloadClick={(model) => void hub.downloadModel(model)}
               onEnhanceClick={hub.setModelToEnhance}
               onDeleteClick={hub.setModelToDelete}
+              onLoadClick={(model) => void hub.loadModel(model)}
+              onSwitchClick={(model) => void hub.switchModel(model)}
+              onUnloadClick={(model) => void hub.unloadModel(model)}
+              onUseClick={(_model, route) => navigate(route)}
             />
             {hub.hasMore ? <div ref={loadMoreRef} className="h-8 w-full" aria-hidden="true" /> : null}
           </div>

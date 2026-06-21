@@ -5,10 +5,22 @@ import {
   NetworkError,
   TimeoutError,
   errorMiddleware,
+  getErrorData,
   getErrorCode,
   getErrorMessage,
+  getLocalizedErrorMessage,
+  isApiErrorResponse,
   isApiError,
+  isRetryable,
 } from '../errors';
+
+const translate = (key: string, options?: Record<string, unknown>) => {
+  if (key === 'server.errors.badRequest') {
+    return `translated ${options?.detail}`;
+  }
+
+  return typeof options?.defaultValue === 'string' ? options.defaultValue : key;
+};
 
 describe('ApiError', () => {
   describe('constructor', () => {
@@ -120,10 +132,13 @@ describe('ApiError', () => {
     it.each([
       [4000, 'Invalid request. Please check your input and try again.'],
       [4010, 'Admin API authorization failed. Configure server.admin.token or provide the matching bearer token.'],
+      [4009, 'The request conflicts with the current state. Refresh and try again.'],
+      [4029, 'Too many requests. Wait a moment and try again.'],
       [5000, 'An error occurred while processing your request.'],
       [5001, 'A database error occurred. Please try again later.'],
       [5002, 'An internal server error occurred. Please try again later.'],
       [5003, 'Backend service is not ready. Please ensure all backends are properly configured.'],
+      [5010, 'This operation is not implemented yet.'],
       [9999, 'An unexpected error occurred. Please try again.'],
     ])('should return fallback message for code %s', (code, message) => {
       expect(new ApiError(code, 'error: backend detail').getUserMessage()).toBe(message);
@@ -213,10 +228,42 @@ describe('ErrorCodes', () => {
     expect(ErrorCodes.NOT_FOUND).toBe(4004);
     expect(ErrorCodes.UNAUTHORIZED).toBe(4010);
     expect(ErrorCodes.BAD_REQUEST).toBe(4000);
+    expect(ErrorCodes.CONFLICT).toBe(4009);
+    expect(ErrorCodes.TOO_MANY_REQUESTS).toBe(4029);
     expect(ErrorCodes.BACKEND_NOT_READY).toBe(5003);
     expect(ErrorCodes.RUNTIME_ERROR).toBe(5000);
     expect(ErrorCodes.DATABASE_ERROR).toBe(5001);
     expect(ErrorCodes.INTERNAL_ERROR).toBe(5002);
+    expect(ErrorCodes.NOT_IMPLEMENTED).toBe(5010);
+  });
+});
+
+describe('localized and structured error helpers', () => {
+  it('recognizes backend error envelopes and translates message fields', () => {
+    const payload = {
+      code: ErrorCodes.BAD_REQUEST,
+      data: { code: 'unsupported_chat_parameter', error_type: 'invalid_request_error', param: 'top_k' },
+      i18n: {
+        message: {
+          key: 'server.errors.badRequest',
+          params: { detail: 'top_k is unsupported' },
+        },
+      },
+      message: 'top_k is unsupported',
+    };
+
+    expect(isApiErrorResponse(payload)).toBe(true);
+    expect(getLocalizedErrorMessage(payload, translate)).toBe('translated top_k is unsupported');
+    expect(getErrorData(payload)).toEqual(payload.data);
+  });
+
+  it('returns retryability for transient server-side codes only', () => {
+    expect(isRetryable(new ApiError(ErrorCodes.TOO_MANY_REQUESTS, 'busy', null, 429))).toBe(true);
+    expect(isRetryable(new ApiError(ErrorCodes.BACKEND_NOT_READY, 'warming', null, 503))).toBe(true);
+    expect(isRetryable(new ApiError(ErrorCodes.CONFLICT, 'conflict', null, 409))).toBe(false);
+    expect(isRetryable(new ApiError(ErrorCodes.NOT_IMPLEMENTED, 'missing', null, 501))).toBe(false);
+    expect(isRetryable(new NetworkError())).toBe(true);
+    expect(isRetryable(new TimeoutError())).toBe(true);
   });
 });
 

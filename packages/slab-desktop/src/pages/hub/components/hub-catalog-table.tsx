@@ -1,4 +1,18 @@
-import { Bot, Boxes, Code2, HardDriveDownload, ImageIcon, Loader2, Mic, Settings2, Trash2 } from 'lucide-react';
+import {
+  Bot,
+  Boxes,
+  Code2,
+  HardDriveDownload,
+  ImageIcon,
+  Loader2,
+  Mic,
+  Play,
+  Power,
+  PowerOff,
+  Repeat2,
+  Settings2,
+  Trash2,
+} from 'lucide-react';
 import { clamp } from 'lodash-es';
 import { useTranslation } from '@slab/i18n';
 
@@ -6,24 +20,44 @@ import { Badge } from '@slab/components/badge';
 import { Button } from '@slab/components/button';
 import { Progress } from '@slab/components/progress';
 import { StageEmptyState } from '@slab/components/workspace';
+import { cn } from '@/lib/utils';
 
-import { canDownloadModel, type ModelItem } from '../hooks/use-hub-model-catalog';
+import {
+  canDownloadModel,
+  canRunModelLifecycleAction,
+  getModelUseRoute,
+  type ModelItem,
+} from '../hooks/use-hub-model-catalog';
 import { StatusBadge } from './status-badge';
 
 type HubCatalogTableProps = {
   models: ModelItem[];
   deletePending: boolean;
+  modelActionPending: boolean;
+  modelActionPendingId: string | null;
+  modelActionErrors: Record<string, string>;
   onDownloadClick: (model: ModelItem) => void;
   onEnhanceClick: (model: ModelItem) => void;
   onDeleteClick: (model: ModelItem) => void;
+  onLoadClick: (model: ModelItem) => void;
+  onSwitchClick: (model: ModelItem) => void;
+  onUnloadClick: (model: ModelItem) => void;
+  onUseClick: (model: ModelItem, route: string) => void;
 };
 
 export function HubCatalogTable({
   models,
   deletePending,
+  modelActionPending,
+  modelActionPendingId,
+  modelActionErrors,
   onDownloadClick,
   onEnhanceClick,
   onDeleteClick,
+  onLoadClick,
+  onSwitchClick,
+  onUnloadClick,
+  onUseClick,
 }: HubCatalogTableProps) {
   const { t } = useTranslation();
   if (models.length === 0) {
@@ -44,9 +78,16 @@ export function HubCatalogTable({
           key={model.id}
           model={model}
           deletePending={deletePending}
+          modelActionPending={modelActionPending}
+          modelActionPendingId={modelActionPendingId}
+          modelActionError={modelActionErrors[model.id] ?? null}
           onDownloadClick={onDownloadClick}
           onEnhanceClick={onEnhanceClick}
           onDeleteClick={onDeleteClick}
+          onLoadClick={onLoadClick}
+          onSwitchClick={onSwitchClick}
+          onUnloadClick={onUnloadClick}
+          onUseClick={onUseClick}
         />
       ))}
     </div>
@@ -56,15 +97,29 @@ export function HubCatalogTable({
 function HubModelCard({
   model,
   deletePending,
+  modelActionPending,
+  modelActionPendingId,
+  modelActionError,
   onDownloadClick,
   onEnhanceClick,
   onDeleteClick,
+  onLoadClick,
+  onSwitchClick,
+  onUnloadClick,
+  onUseClick,
 }: {
   model: ModelItem;
   deletePending: boolean;
+  modelActionPending: boolean;
+  modelActionPendingId: string | null;
+  modelActionError: string | null;
   onDownloadClick: (model: ModelItem) => void;
   onEnhanceClick: (model: ModelItem) => void;
   onDeleteClick: (model: ModelItem) => void;
+  onLoadClick: (model: ModelItem) => void;
+  onSwitchClick: (model: ModelItem) => void;
+  onUnloadClick: (model: ModelItem) => void;
+  onUseClick: (model: ModelItem, route: string) => void;
 }) {
   const { t, i18n } = useTranslation();
   const Icon = getModelIcon(model);
@@ -78,6 +133,11 @@ function HubModelCard({
   const downloadProgressLabel = getDownloadProgressLabel(downloadProgress);
   const downloadProgressSummary = getDownloadProgressSummary(downloadProgress);
   const runtimeStateLabel = getRuntimeStateLabel(model, t);
+  const useRoute = getModelUseRoute(model);
+  const lifecycleAvailable = canRunModelLifecycleAction(model);
+  const lifecycleBusy = modelActionPendingId === model.id;
+  const actionDisabled = modelActionPending || model.pending;
+  const isLoaded = Boolean(model.runtime_state?.loaded);
 
   return (
     <article
@@ -162,9 +222,100 @@ function HubModelCard({
                 {shortFileName(model.filename)}
               </Badge>
             ) : null}
+            <Badge variant="chip" className="bg-[var(--surface-1)] px-3 py-1 text-muted-foreground">
+              {t('pages.hub.catalog.size', {
+                value: formatBytesOrUnknown(model.size_bytes, t('pages.hub.catalog.unknownSize')),
+              })}
+            </Badge>
+            <Badge
+              variant="chip"
+              className={cn(
+                'bg-[var(--surface-1)] px-3 py-1 text-muted-foreground',
+                model.vram_risk === 'high' && 'text-destructive',
+              )}
+            >
+              {t(`pages.hub.catalog.vramRisk.${model.vram_risk}`)}
+            </Badge>
           </div>
 
           <div className="mt-auto flex flex-col gap-2 pt-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant={useRoute ? 'cta' : 'pill'}
+                size="sm"
+                disabled={!useRoute || model.pending}
+                onClick={() => {
+                  if (useRoute) {
+                    onUseClick(model, useRoute);
+                  }
+                }}
+                data-testid={`hub-model-use-${model.id}`}
+              >
+                <Play className="size-4" />
+                {useRoute ? t('pages.hub.catalog.actions.use') : t('pages.hub.catalog.actions.useDisabled')}
+              </Button>
+
+              {lifecycleAvailable ? (
+                <>
+                  {isLoaded ? (
+                    <Button
+                      variant="pill"
+                      size="sm"
+                      disabled={actionDisabled}
+                      onClick={() => onUnloadClick(model)}
+                      data-testid={`hub-model-unload-${model.id}`}
+                    >
+                      {lifecycleBusy ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <PowerOff className="size-4" />
+                      )}
+                      {t('pages.hub.catalog.actions.unload')}
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="pill"
+                      size="sm"
+                      disabled={actionDisabled}
+                      onClick={() => onLoadClick(model)}
+                      data-testid={`hub-model-load-${model.id}`}
+                    >
+                      {lifecycleBusy ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Power className="size-4" />
+                      )}
+                      {t('pages.hub.catalog.actions.load')}
+                    </Button>
+                  )}
+
+                  <Button
+                    variant="pill"
+                    size="sm"
+                    disabled={actionDisabled || Boolean(model.runtime_state?.active)}
+                    onClick={() => onSwitchClick(model)}
+                    data-testid={`hub-model-switch-${model.id}`}
+                  >
+                    {lifecycleBusy ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Repeat2 className="size-4" />
+                    )}
+                    {t('pages.hub.catalog.actions.switch')}
+                  </Button>
+                </>
+              ) : null}
+            </div>
+
+            {modelActionError ? (
+              <p
+                className="rounded-2xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs leading-5 text-destructive"
+                data-testid={`hub-model-action-error-${model.id}`}
+              >
+                {modelActionError}
+              </p>
+            ) : null}
+
             {showDownloadAction ? (
               <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-border/60 bg-[var(--shell-card)]/65 px-3 py-3">
                 <Button
@@ -408,4 +559,8 @@ function formatBytes(value: number) {
     fractionDigits = 1;
   }
   return `${size.toFixed(fractionDigits)} ${units[exponent]}`;
+}
+
+function formatBytesOrUnknown(value: number | null, fallback: string) {
+  return value && value > 0 ? formatBytes(value) : fallback;
 }

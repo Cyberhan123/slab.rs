@@ -2865,6 +2865,11 @@ export interface components {
             kind: components["schemas"]["ModelKind"];
             runtime_presets?: null | components["schemas"]["RuntimePresetsResponse"];
             runtime_state?: null | components["schemas"]["ModelRuntimeStateResponse"];
+            /**
+             * Format: int64
+             * @description Total bytes for locally materialized model artifacts, when known.
+             */
+            size_bytes?: number | null;
             spec: components["schemas"]["ModelSpecResponse"];
             /** @description Status: `"ready"`, `"not_downloaded"`, `"downloading"`, `"error"`. */
             status: string;

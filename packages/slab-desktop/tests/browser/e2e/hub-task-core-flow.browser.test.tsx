@@ -37,7 +37,11 @@ vi.mock('@/pages/hub/hooks/use-hub-model-catalog', async () => {
     local_path: 'C:/models/llama-3.2-3b.gguf',
     pending: false,
     repo_id: 'meta-llama/Llama-3.2-3B',
+    category: 'language',
+    runtime_state: null,
+    size_bytes: null,
     status: 'ready',
+    vram_risk: 'unknown',
     updated_at: '2026-06-01T10:00:00Z',
   };
   const downloadableModel = {
@@ -55,6 +59,8 @@ vi.mock('@/pages/hub/hooks/use-hub-model-catalog', async () => {
     CATEGORY_OPTIONS: ['all', 'language', 'vision', 'audio', 'coding', 'embedding'],
     STATUS_OPTIONS: ['all', 'ready', 'downloading', 'not_downloaded', 'error'],
     canDownloadModel: vi.fn<(model: { id?: string }) => boolean>((model) => model.id === 'sdxl'),
+    canRunModelLifecycleAction: vi.fn<() => boolean>(() => true),
+    getModelUseRoute: vi.fn<() => string>(() => '/assistant'),
     useHubModelCatalog: vi.fn<() => unknown>(() => {
       const [modelToDelete, setModelToDelete] = React.useState<unknown>(null);
       const models = [readyModel, downloadableModel];
@@ -76,6 +82,10 @@ vi.mock('@/pages/hub/hooks/use-hub-model-catalog', async () => {
         isLoading: false,
         isRefetching: false,
         loadMore: vi.fn<() => void>(),
+        loadModel: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+        modelActionErrors: {},
+        modelActionPending: false,
+        modelActionPendingId: null,
         modelToDelete,
         modelToEnhance: null,
         models,
@@ -88,6 +98,8 @@ vi.mock('@/pages/hub/hooks/use-hub-model-catalog', async () => {
         setModelToEnhance: vi.fn<() => void>(),
         setStatus: vi.fn<() => void>(),
         status: 'all',
+        switchModel: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+        unloadModel: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
         visibleModels: models,
       };
     }),

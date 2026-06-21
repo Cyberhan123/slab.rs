@@ -1,5 +1,8 @@
 //! Request / response types for the model-management API (`/v1/models/...`).
 
+use std::collections::BTreeSet;
+use std::fs;
+
 use serde::{Deserialize, Serialize};
 use slab_types::{Capability as DomainCapability, I18nPayload};
 use utoipa::{IntoParams, ToSchema};
@@ -593,6 +596,9 @@ pub struct UnifiedModelResponse {
     /// Status: `"ready"`, `"not_downloaded"`, `"downloading"`, `"error"`.
     pub status: String,
     pub spec: ModelSpecResponse,
+    /// Total bytes for locally materialized model artifacts, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_presets: Option<RuntimePresetsResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -908,6 +914,7 @@ impl UnifiedModelResponse {
         model: DomainUnifiedModel,
         runtime_state: Option<DomainModelRuntimeState>,
     ) -> Self {
+        let size_bytes = local_model_size_bytes(&model);
         let chat_capabilities = model
             .capabilities
             .contains(&DomainCapability::ChatGeneration)
@@ -928,12 +935,35 @@ impl UnifiedModelResponse {
             chat_capabilities,
             status: model.status.as_str().to_owned(),
             spec: model.spec.into(),
+            size_bytes,
             runtime_presets: model.runtime_presets.map(Into::into),
             runtime_state: runtime_state.map(Into::into),
             created_at: model.created_at.to_rfc3339(),
             updated_at: model.updated_at.to_rfc3339(),
         }
     }
+}
+
+fn local_model_size_bytes(model: &DomainUnifiedModel) -> Option<u64> {
+    let mut paths = BTreeSet::new();
+    if let Some(local_path) = model.spec.local_path.as_deref() {
+        paths.insert(local_path.to_owned());
+    }
+    paths.extend(model.materialized_artifacts.values().cloned());
+
+    let mut total = 0_u64;
+    let mut found = false;
+    for path in paths {
+        let Ok(metadata) = fs::metadata(path) else {
+            continue;
+        };
+        if metadata.is_file() {
+            total = total.saturating_add(metadata.len());
+            found = true;
+        }
+    }
+
+    found.then_some(total)
 }
 
 impl From<ModelSpecRequest> for DomainModelSpec {
@@ -1154,14 +1184,19 @@ fn validation_error(code: &'static str, message: &'static str) -> ValidationErro
 #[cfg(test)]
 mod tests {
     use super::{
-        CreateModelRequest, LoadModelRequest, ModelKind, SwitchModelRequest, UnloadModelRequest,
-        UpdateModelRequest,
+        CreateModelRequest, LoadModelRequest, ModelKind, SwitchModelRequest, UnifiedModelResponse,
+        UnloadModelRequest, UpdateModelRequest,
     };
     use crate::domain::models::{
-        CreateModelCommand as DomainCreateModelCommand, UnifiedModelStatus,
+        CreateModelCommand as DomainCreateModelCommand, ManagedModelBackendId, ModelSpec,
+        UnifiedModel as DomainUnifiedModel, UnifiedModelKind, UnifiedModelStatus,
         UpdateModelCommand as DomainUpdateModelCommand,
     };
+    use chrono::Utc;
     use serde_json::json;
+    use slab_types::Capability;
+    use std::collections::BTreeMap;
+    use std::fs;
     use validator::Validate;
 
     #[test]
@@ -1305,6 +1340,41 @@ mod tests {
         };
 
         assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn unified_model_response_projects_local_artifact_size_once() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let model_path = root.path().join("model.gguf");
+        let tokenizer_path = root.path().join("tokenizer.json");
+        fs::write(&model_path, [1_u8; 7]).expect("write model");
+        fs::write(&tokenizer_path, [2_u8; 5]).expect("write tokenizer");
+
+        let response = UnifiedModelResponse::from_model(
+            DomainUnifiedModel {
+                id: "local-qwen".to_owned(),
+                display_name: "Local Qwen".to_owned(),
+                kind: UnifiedModelKind::Local,
+                backend_id: Some(ManagedModelBackendId::GgmlLlama),
+                capabilities: vec![Capability::TextGeneration, Capability::ChatGeneration],
+                status: UnifiedModelStatus::Ready,
+                spec: ModelSpec {
+                    local_path: Some(model_path.to_string_lossy().into_owned()),
+                    ..ModelSpec::default()
+                },
+                runtime_presets: None,
+                materialized_artifacts: BTreeMap::from([
+                    ("model".to_owned(), model_path.to_string_lossy().into_owned()),
+                    ("tokenizer".to_owned(), tokenizer_path.to_string_lossy().into_owned()),
+                ]),
+                selected_download_source: None,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            },
+            None,
+        );
+
+        assert_eq!(response.size_bytes, Some(12));
     }
 
     fn absolute_model_path() -> String {

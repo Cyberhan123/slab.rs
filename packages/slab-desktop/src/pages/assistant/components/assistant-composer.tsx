@@ -1,10 +1,12 @@
 import {
+  ChevronDown,
   FileText,
   ImagePlus,
   Mic,
   Network,
   Plus,
   Search,
+  SlidersHorizontal,
   WandSparkles,
   Wrench,
 } from "lucide-react"
@@ -19,8 +21,25 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@slab/components/dropdown-menu"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@slab/components/select"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@slab/components/collapsible"
+import { Textarea } from "@slab/components/textarea"
 import { useTranslation } from "@slab/i18n"
 import { cn } from "@/lib/utils"
+import type {
+  AssistantReasoningEffort,
+  AssistantToolChoice,
+} from "@/store/useAssistantUiStore"
 
 type AssistantComposerProps = {
   value: string
@@ -29,9 +48,17 @@ type AssistantComposerProps = {
   onCancel: () => void
   isRequesting: boolean
   disabled?: boolean
-  deepThink: boolean
+  reasoningEffort: AssistantReasoningEffort
   reasoningSupported: boolean
-  setDeepThink: (value: boolean) => void
+  setReasoningEffort: (value: AssistantReasoningEffort) => void
+  systemPrompt: string
+  setSystemPrompt: (value: string) => void
+  toolConcurrency: number
+  setToolConcurrency: (value: number) => void
+  toolChoice: AssistantToolChoice
+  setToolChoice: (value: AssistantToolChoice) => void
+  advancedPanelOpen: boolean
+  setAdvancedPanelOpen: (value: boolean) => void
   onGenerateImage: () => void
   statusLabel: string
 }
@@ -72,9 +99,17 @@ export function AssistantComposer({
   onCancel,
   isRequesting,
   disabled = false,
-  deepThink,
+  reasoningEffort,
   reasoningSupported,
-  setDeepThink,
+  setReasoningEffort,
+  systemPrompt,
+  setSystemPrompt,
+  toolConcurrency,
+  setToolConcurrency,
+  toolChoice,
+  setToolChoice,
+  advancedPanelOpen,
+  setAdvancedPanelOpen,
   onGenerateImage,
   statusLabel,
 }: AssistantComposerProps) {
@@ -145,9 +180,15 @@ export function AssistantComposer({
     [matchCommandItems]
   )
   const webSearchActive = value.trimStart().startsWith("/web_search")
+  const reasoningActive = reasoningSupported && reasoningEffort !== "none"
+  const resolvedToolChoice = toolChoice ?? { type: "auto" }
 
   const insertCommand = (command: string) => {
     onValueChange(`${command} `)
+  }
+
+  const setToolChoiceType = (nextType: "auto" | "none" | "required") => {
+    setToolChoice({ type: nextType })
   }
 
   const handleSubmit = (nextValue: string) => {
@@ -259,7 +300,8 @@ export function AssistantComposer({
         )}
       </Suggestion>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 px-2">
+      <Collapsible open={advancedPanelOpen} onOpenChange={setAdvancedPanelOpen}>
+        <div className="flex flex-wrap items-center justify-between gap-3 px-2">
         <div className="flex flex-wrap items-center gap-4">
           <button
             type="button"
@@ -282,12 +324,12 @@ export function AssistantComposer({
           <button
             type="button"
             disabled={disabled || !reasoningSupported}
-            aria-pressed={deepThink}
-            data-testid="assistant-deep-think-toggle"
-            onClick={() => setDeepThink(!deepThink)}
+            aria-pressed={reasoningActive}
+            data-testid="assistant-reasoning-toggle"
+            onClick={() => setReasoningEffort(reasoningActive ? "none" : "medium")}
             className={cn(
               "inline-flex items-center gap-1.5 text-[11px] font-bold transition",
-              reasoningSupported && deepThink
+              reasoningActive
                 ? "text-foreground"
                 : "text-muted-foreground hover:text-foreground",
               disabled && "cursor-not-allowed opacity-60"
@@ -296,14 +338,16 @@ export function AssistantComposer({
             <WandSparkles
               className={cn(
                 "size-3",
-                reasoningSupported && deepThink && "text-[var(--brand-teal)]"
+                reasoningActive && "text-[var(--brand-teal)]"
               )}
             />
             {!reasoningSupported
               ? t("pages.assistant.composer.deepThinkUnavailable")
-              : deepThink
-                ? t("pages.assistant.composer.deepThinkOn")
-                : t("pages.assistant.composer.deepThink")}
+              : reasoningActive
+                ? t("pages.assistant.composer.reasoningActive", {
+                  effort: t(`pages.assistant.composer.reasoning.${reasoningEffort}`),
+                })
+                : t("pages.assistant.composer.reasoningOff")}
           </button>
 
           <button
@@ -319,10 +363,115 @@ export function AssistantComposer({
             <ImagePlus className="size-3" />
             {t("pages.assistant.composer.generateImage")}
           </button>
+
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              disabled={disabled}
+              data-testid="assistant-advanced-toggle"
+              className={cn(
+                "inline-flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground transition hover:text-foreground",
+                advancedPanelOpen && "text-foreground",
+                disabled && "cursor-not-allowed opacity-60"
+              )}
+            >
+              <SlidersHorizontal className="size-3" />
+              {t("pages.assistant.composer.advanced")}
+              <ChevronDown
+                className={cn(
+                  "size-3 transition-transform",
+                  advancedPanelOpen && "rotate-180"
+                )}
+              />
+            </button>
+          </CollapsibleTrigger>
         </div>
 
         <p className="max-w-full text-[10px] font-medium text-muted-foreground/70">{statusLabel}</p>
       </div>
+
+        <CollapsibleContent className="px-2 pt-3">
+          <div
+            className="grid gap-3 rounded-[20px] border border-border/60 bg-[var(--surface-soft)] p-3 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)] md:grid-cols-3"
+            data-testid="assistant-advanced-panel"
+          >
+            <label className="grid gap-1.5 text-[11px] font-semibold text-muted-foreground">
+              <span>{t("pages.assistant.composer.reasoningEffort")}</span>
+              <Select
+                value={reasoningEffort}
+                disabled={disabled || !reasoningSupported}
+                onValueChange={(nextValue) =>
+                  setReasoningEffort(nextValue as AssistantReasoningEffort)
+                }
+              >
+                <SelectTrigger variant="soft" className="h-9 w-full text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent variant="soft">
+                  {(["none", "minimal", "low", "medium", "high"] as const).map((item) => (
+                    <SelectItem key={item} value={item}>
+                      {t(`pages.assistant.composer.reasoning.${item}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+
+            <label className="grid gap-1.5 text-[11px] font-semibold text-muted-foreground">
+              <span>{t("pages.assistant.composer.toolChoice")}</span>
+              <Select
+                value={resolvedToolChoice.type}
+                disabled={disabled}
+                onValueChange={(nextValue) =>
+                  setToolChoiceType(nextValue as "auto" | "none" | "required")
+                }
+              >
+                <SelectTrigger variant="soft" className="h-9 w-full text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent variant="soft">
+                  {(["auto", "none", "required"] as const).map((item) => (
+                    <SelectItem key={item} value={item}>
+                      {t(`pages.assistant.composer.toolChoiceOptions.${item}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+
+            <label className="grid gap-1.5 text-[11px] font-semibold text-muted-foreground">
+              <span>{t("pages.assistant.composer.toolConcurrency")}</span>
+              <Select
+                value={String(toolConcurrency)}
+                disabled={disabled}
+                onValueChange={(nextValue) => setToolConcurrency(Number(nextValue))}
+              >
+                <SelectTrigger variant="soft" className="h-9 w-full text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent variant="soft">
+                  {[1, 2, 3, 4].map((item) => (
+                    <SelectItem key={item} value={String(item)}>
+                      {item}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+
+            <label className="grid gap-1.5 text-[11px] font-semibold text-muted-foreground md:col-span-3">
+              <span>{t("pages.assistant.composer.systemPrompt")}</span>
+              <Textarea
+                value={systemPrompt}
+                disabled={disabled}
+                onChange={(event) => setSystemPrompt(event.currentTarget.value)}
+                className="min-h-20 resize-y text-xs leading-5"
+                placeholder={t("pages.assistant.composer.systemPromptPlaceholder")}
+              />
+            </label>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
     </div>
   )
 }
