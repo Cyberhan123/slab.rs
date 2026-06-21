@@ -58,6 +58,8 @@ function SetupGuard() {
       refetchOnMount: "always",
       refetchOnReconnect: true,
       refetchOnWindowFocus: true,
+      // The setup guard is a redirect gate; boot-time transport failures should
+      // be observed on the next explicit probe instead of retried into navigation.
       retry: false,
     }
   );
@@ -100,7 +102,6 @@ function AppLanguageSync() {
       refetchOnMount: false,
       refetchOnReconnect: true,
       refetchOnWindowFocus: true,
-      retry: false,
     }
   );
 
@@ -157,6 +158,8 @@ function WorkspaceModeSync() {
     queryKey: WORKSPACE_STATE_QUERY_KEY,
     queryFn: workspaceState,
     enabled: isDesktopTauri,
+    // This probes the Tauri workspace bridge, not the HTTP API; failures are
+    // resolved by the bridge's own reconnect path and should not be retried here.
     retry: false,
   });
   const workspace = workspaceQuery.data?.current ?? null;
@@ -170,7 +173,11 @@ function WorkspaceModeSync() {
     enabled: isDesktopTauri && Boolean(workspace),
     retry: 1,
   });
-  const stopPluginMutation = api.useMutation("post", "/v1/plugins/{id}/stop");
+  const stopPluginMutation = api.useMutation("post", "/v1/plugins/{id}/stop", {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
 
   useEffect(() => {
     if (

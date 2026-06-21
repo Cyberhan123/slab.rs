@@ -8,6 +8,7 @@ import { StageEmptyState, StatusPill } from '@slab/components/workspace';
 import { translateServerField, useTranslation } from '@slab/i18n';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
+import { useUiStatePersistenceStatus } from '@/store/ui-state-storage';
 import api, { getErrorMessage } from '@slab/api';
 
 import { SettingFieldCard } from './components/setting-field-card';
@@ -26,6 +27,7 @@ export default function SettingsPage() {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
   const { t } = useTranslation();
+  const uiStateFailure = useUiStatePersistenceStatus((state) => state.lastFailure);
 
   const { data, error, isLoading, refetch } = api.useQuery('get', '/v1/settings');
 
@@ -162,6 +164,20 @@ export default function SettingsPage() {
               <AlertTitle>{t('pages.settings.page.adminTokenWarningTitle')}</AlertTitle>
               <AlertDescription>
                 {t('pages.settings.page.adminTokenWarningDescription')}
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
+          {uiStateFailure ? (
+            <Alert variant="destructive">
+              <TriangleAlert className="h-4 w-4" />
+              <AlertTitle>{t('pages.settings.persistence.warningTitle')}</AlertTitle>
+              <AlertDescription>
+                {t('pages.settings.persistence.warningDescription', {
+                  key: uiStateFailure.key,
+                  message: uiStateFailure.message,
+                  operation: t(`pages.settings.persistence.operations.${uiStateFailure.operation}`),
+                })}
               </AlertDescription>
             </Alert>
           ) : null}

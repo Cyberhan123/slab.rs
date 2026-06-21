@@ -98,10 +98,26 @@ export function useHubModelCatalog() {
     refetch,
   } = api.useQuery('get', '/v1/models');
   const { data: gpuStatus } = api.useQuery('get', '/v1/system/gpu');
-  const deleteModelMutation = api.useMutation('delete', '/v1/models/{id}');
-  const loadModelMutation = api.useMutation('post', '/v1/models/load');
-  const unloadModelMutation = api.useMutation('post', '/v1/models/unload');
-  const switchModelMutation = api.useMutation('post', '/v1/models/switch');
+  const deleteModelMutation = api.useMutation('delete', '/v1/models/{id}', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const loadModelMutation = api.useMutation('post', '/v1/models/load', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const unloadModelMutation = api.useMutation('post', '/v1/models/unload', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const switchModelMutation = api.useMutation('post', '/v1/models/switch', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
 
   const maxFreeGpuMemoryBytes = useMemo(() => {
     const devices = gpuStatus?.devices ?? [];
@@ -573,19 +589,13 @@ function isModelPackFile(file: File): boolean {
   return file.name.trim().toLowerCase().endsWith('.slab');
 }
 
-function toModelItem(
+export function toModelItem(
   model: ReturnType<typeof toCatalogModelList>[number],
   tracking: DownloadTrackingState | undefined,
   maxFreeGpuMemoryBytes: number | null,
 ): ModelItem {
-  const hasLocalPath = Boolean(model.local_path);
-  const pending = !hasLocalPath && (model.pending || Boolean(tracking));
-  let status = model.status;
-  if (hasLocalPath) {
-    status = 'ready';
-  } else if (pending) {
-    status = 'downloading';
-  }
+  const status = model.status;
+  const pending = status === 'downloading';
 
   return {
     id: model.id,

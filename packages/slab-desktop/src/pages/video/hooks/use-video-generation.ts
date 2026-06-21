@@ -14,7 +14,7 @@ import {
   type GenerationProgress,
   type VideoGenerationTask,
 } from '@/lib/media-task-api';
-import { isFailedTaskStatus } from '@/pages/task/utils';
+import { useMediaTaskPolling } from '@/pages/task/hooks/use-media-task-polling';
 import { toCatalogModelList } from '@slab/api/models';
 import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
 import { HEADER_SELECT_KEYS } from '@/layouts/header-controls';
@@ -27,7 +27,6 @@ import {
 } from '../const';
 
 type GenerationPhase = 'idle' | 'polling' | 'fetchingResult';
-type TaskResponse = components['schemas']['TaskResponse'];
 type VideoGenerationRequest = components['schemas']['VideoGenerationRequest'];
 
 async function fileToDataUri(file: File): Promise<string> {
@@ -115,35 +114,32 @@ export function useVideoGeneration() {
     () => modelOptions.find((model) => model.id === selectedModelId),
     [modelOptions, selectedModelId],
   );
-  const generateVideoMutation = api.useMutation('post', '/v1/video/generations');
-  const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel');
+  const generateVideoMutation = api.useMutation('post', '/v1/video/generations', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
   const isPolling = generationPhase === 'polling';
   const isFetchingResult = generationPhase === 'fetchingResult';
+  const toPollingErrorMessage = useCallback(
+    (message: string) => t('pages.video.toast.pollingError', { message }),
+    [t],
+  );
   const {
-    data: taskStatus,
-    error: taskStatusError,
-    dataUpdatedAt: taskStatusUpdatedAt,
-  } = api.useQuery(
-    'get',
-    '/v1/tasks/{id}',
-    {
-      params: {
-        path: {
-          id: taskId ?? '',
-        },
-      },
-    },
-    {
-      enabled: isPolling && Boolean(taskId),
-      refetchInterval: isPolling && taskId ? POLL_INTERVAL_MS : false,
-      refetchIntervalInBackground: true,
-      retry: false,
-    },
-  ) as {
-    data: TaskResponse | undefined;
-    error: unknown;
-    dataUpdatedAt: number;
-  };
+    taskStatus,
+    taskStatusUpdatedAt,
+  } = useMediaTaskPolling({
+    enabled: isPolling,
+    intervalMs: POLL_INTERVAL_MS,
+    pollingErrorToastId: 'video-generation-polling-error',
+    taskId,
+    toPollingErrorMessage,
+  });
   const isGenerating = isSubmitting || generationPhase !== 'idle';
   const headerModelPicker = useMemo(
     () => ({
@@ -334,7 +330,7 @@ export function useVideoGeneration() {
       return;
     }
 
-    if (isFailedTaskStatus(taskStatus.status)) {
+    if (taskStatus.status === 'failed') {
       toast.error(taskStatus.error_msg ?? t('pages.video.error.generationFailed'));
       clearGenerationTask();
       return;
@@ -342,18 +338,14 @@ export function useVideoGeneration() {
 
     if (taskStatus.status === 'succeeded') {
       setGenerationPhase('fetchingResult');
-    }
-  }, [clearGenerationTask, isPolling, taskId, taskStatus, taskStatusUpdatedAt, t]);
-
-  useEffect(() => {
-    if (!isPolling || !taskId || !taskStatusError) {
       return;
     }
 
-    const message = getErrorMessage(taskStatusError);
-    toast.error(t('pages.video.toast.pollingError', { message }));
-    clearGenerationTask();
-  }, [clearGenerationTask, isPolling, taskId, taskStatusError, t]);
+    if (taskStatus.status === 'cancelled' || taskStatus.status === 'interrupted') {
+      clearGenerationTask();
+      void refreshHistory();
+    }
+  }, [clearGenerationTask, isPolling, refreshHistory, taskId, taskStatus, taskStatusUpdatedAt, t]);
 
   useEffect(() => {
     if (!isFetchingResult || !taskId) {
@@ -403,20 +395,23 @@ export function useVideoGeneration() {
   }, [clearGenerationTask, isFetchingResult, mergeHistoryTask, refreshHistory, t, taskId]);
 
   const handleCancel = useCallback(async () => {
-    if (taskId) {
-      try {
-        await cancelTaskMutation.mutateAsync({
-          params: {
-            path: { id: taskId },
-          },
-        });
-      } catch (error) {
-        console.error('Failed to cancel task', error);
-      }
+    if (!taskId) {
+      clearGenerationTask();
+      return;
     }
 
-    clearGenerationTask();
-  }, [cancelTaskMutation, clearGenerationTask, taskId]);
+    try {
+      await cancelTaskMutation.mutateAsync({
+        params: {
+          path: { id: taskId },
+        },
+      });
+    } catch (error) {
+      toast.error(t('pages.task.toast.cancelTaskFailed', { message: getErrorMessage(error) }), {
+        id: `video-cancel-${taskId}`,
+      });
+    }
+  }, [cancelTaskMutation, clearGenerationTask, t, taskId]);
 
   const handleDownload = useCallback(() => {
     if (!videoPath) {

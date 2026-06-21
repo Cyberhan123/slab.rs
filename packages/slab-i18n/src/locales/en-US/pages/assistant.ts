@@ -111,6 +111,7 @@ export const assistant = {
     loadingModel: 'Loading model...',
     copy: 'Copy',
     continue: 'Continue',
+    cancelled: 'Generation was cancelled. Partial content was preserved.',
     retry: 'Retry',
   },
   thinking: {
@@ -155,6 +156,7 @@ export const assistant = {
     failedToUpdateSession: 'Failed to update assistant session.',
     failedToDeleteSession: 'Failed to delete assistant session.',
     interruptFailed: 'Failed to interrupt assistant thread',
+    eventStreamInterrupted: 'Assistant connection was interrupted. Retry the response when you are ready.',
     unknownError: 'Unknown error',
   },
   connection: {

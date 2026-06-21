@@ -45,7 +45,11 @@ export type TranscribeOptions = {
 const useTranscribe = () => {
     const { t } = useTranslation();
     const isTauri = useIsTauri();
-    const { isPending, isError, error, mutateAsync } = api.useMutation('post', '/v1/audio/transcriptions');
+    const { isPending, isError, error, mutateAsync } = api.useMutation('post', '/v1/audio/transcriptions', {
+        meta: {
+            skipGlobalErrorToast: true,
+        },
+    });
 
     const handleTranscribe = async (
         value: File | string,

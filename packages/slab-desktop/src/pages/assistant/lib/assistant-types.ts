@@ -31,12 +31,18 @@ export type AssistantThought = {
   }
 }
 
+export type AssistantTerminalNotice = {
+  type: 'cancelled' | 'error'
+  message: string
+}
+
 export type AssistantUiMessage = XModelMessage & {
   errorCode?: AssistantErrorCode
   errorParam?: AssistantApiError['param']
   errorStatus?: number
   errorType?: AssistantRequestErrorType
   reasoningContent?: string
+  terminalNotice?: AssistantTerminalNotice
   thoughts?: AssistantThought[]
 }
 

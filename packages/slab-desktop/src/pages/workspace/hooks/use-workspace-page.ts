@@ -83,6 +83,8 @@ export function useWorkspacePage() {
   const workspaceQuery = useQuery({
     queryKey: WORKSPACE_STATE_QUERY_KEY,
     queryFn: workspaceState,
+    // Workspace state comes from the Tauri bridge, not /v1 HTTP. The bridge has
+    // its own recovery path, so React Query retry would duplicate local probes.
     retry: false,
   })
   const workspace = workspaceQuery.data?.current ?? null
@@ -109,6 +111,7 @@ export function useWorkspacePage() {
     queryFn: workspaceGitStatus,
     enabled: Boolean(workspace),
     refetchInterval: 30_000,
+    // Git status already polls on an interval while a workspace is open.
     retry: false,
   })
   const {
@@ -118,6 +121,8 @@ export function useWorkspacePage() {
     queryKey: ["workspace-file-search", workspace?.rootPath, trimmedTextSearchQuery],
     queryFn: () => workspaceSearchFiles(trimmedTextSearchQuery),
     enabled: Boolean(workspace && trimmedTextSearchQuery),
+    // User search input changes quickly; failed bridge searches should wait for
+    // the next typed query instead of retrying stale text.
     retry: false,
   })
   const {
@@ -127,6 +132,8 @@ export function useWorkspacePage() {
     queryKey: ["workspace-text-search", workspace?.rootPath, trimmedTextSearchQuery],
     queryFn: () => workspaceSearchText(trimmedTextSearchQuery),
     enabled: Boolean(workspace && trimmedTextSearchQuery),
+    // User search input changes quickly; failed bridge searches should wait for
+    // the next typed query instead of retrying stale text.
     retry: false,
   })
   const visibleGitDiffEntry = useMemo(
@@ -149,21 +156,38 @@ export function useWorkspacePage() {
         staged: visibleGitDiffEntry?.staged ?? false,
       }),
     enabled: Boolean(gitStatus?.available && gitStatus.isRepository && visibleGitDiffEntry),
+    // Diff requests are tied to the selected row; a new selection should drive
+    // the next fetch rather than retrying an obsolete local bridge request.
     retry: false,
   })
   const saveFileMutation = useMutation({
+    meta: {
+      skipGlobalErrorToast: true,
+    },
     mutationFn: workspaceWriteFile,
   })
   const gitStageMutation = useMutation({
+    meta: {
+      skipGlobalErrorToast: true,
+    },
     mutationFn: workspaceGitStage,
   })
   const gitUnstageMutation = useMutation({
+    meta: {
+      skipGlobalErrorToast: true,
+    },
     mutationFn: workspaceGitUnstage,
   })
   const gitDiscardMutation = useMutation({
+    meta: {
+      skipGlobalErrorToast: true,
+    },
     mutationFn: workspaceGitDiscard,
   })
   const gitCommitMutation = useMutation({
+    meta: {
+      skipGlobalErrorToast: true,
+    },
     mutationFn: workspaceGitCommit,
   })
   const savingFile = saveFileMutation.isPending

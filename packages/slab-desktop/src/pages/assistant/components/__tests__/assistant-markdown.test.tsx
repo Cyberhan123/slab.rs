@@ -12,6 +12,8 @@ const bubbleLabels = {
   assistant: 'Assistant',
   copy: 'Copy',
   reject: 'Reject',
+  retry: 'Retry',
+  terminalCancelled: 'Generation was cancelled. Partial content was preserved.',
   thinkingLoading: 'Thinking...',
   thinkingReady: 'Reasoning trace',
   user: 'User',
@@ -211,6 +213,44 @@ describe('AssistantMarkdown', () => {
 
     expect(screen.getByText('streaming-thinking')).toBeInTheDocument()
     expect(screen.queryByText('<think>streaming-thinking')).not.toBeInTheDocument()
+  })
+
+  it('renders terminal error footer without replacing streamed content', () => {
+    render(
+      <StrictMode>
+        <XProvider>
+          <Bubble.List
+            role={ASSISTANT_BUBBLE_ROLES}
+            items={[
+              {
+                content: {
+                  ...createAssistantBubbleContent('Partial answer', 'error'),
+                  item: {
+                    id: 'assistant-message',
+                    message: {
+                      content: 'Partial answer',
+                      role: 'assistant',
+                      terminalNotice: {
+                        message: 'Network failed',
+                        type: 'error',
+                      },
+                    },
+                    status: 'error',
+                  },
+                  onRetry: () => {},
+                },
+                key: 'assistant-message',
+                role: 'assistant',
+              },
+            ]}
+          />
+        </XProvider>
+      </StrictMode>
+    )
+
+    expect(screen.getByText('Partial answer')).toBeInTheDocument()
+    expect(screen.getByText('Network failed')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Retry/i })).toBeInTheDocument()
   })
 
   it('formats one-line JSON thought details into multiline content', () => {

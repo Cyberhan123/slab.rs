@@ -58,7 +58,6 @@ describe('model config helpers', () => {
       },
       {
         enabled: false,
-        retry: false,
       },
     );
   });
@@ -87,7 +86,6 @@ describe('model config helpers', () => {
       },
       {
         enabled: false,
-        retry: false,
       },
     );
     expect(mockedApi.useQuery).toHaveBeenNthCalledWith(
@@ -103,7 +101,6 @@ describe('model config helpers', () => {
       },
       {
         enabled: true,
-        retry: false,
       },
     );
   });
@@ -119,6 +116,11 @@ describe('model config helpers', () => {
     expect(mockedApi.useMutation).toHaveBeenCalledWith(
       'put',
       '/v1/models/{id}/config-selection',
+      {
+        meta: {
+          skipGlobalErrorToast: true,
+        },
+      },
     );
   });
 });

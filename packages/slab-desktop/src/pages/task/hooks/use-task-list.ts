@@ -23,10 +23,26 @@ export function useTaskList() {
     refetch: refetchTasks,
   } = api.useQuery('get', '/v1/tasks');
 
-  const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
-  const getTaskResultMutation = api.useMutation('get', '/v1/tasks/{id}/result');
-  const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel');
-  const restartTaskMutation = api.useMutation('post', '/v1/tasks/{id}/restart');
+  const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const getTaskResultMutation = api.useMutation('get', '/v1/tasks/{id}/result', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const restartTaskMutation = api.useMutation('post', '/v1/tasks/{id}/restart', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
 
   const allTasks = useMemo<Task[]>(() => (Array.isArray(tasks) ? tasks : []), [tasks]);
 

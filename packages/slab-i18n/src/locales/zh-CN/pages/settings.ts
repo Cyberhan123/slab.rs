@@ -136,4 +136,16 @@ export const settings = {
     restoredToDefault: '已恢复默认值。',
     resetToast: '已将 {{label}} 恢复为默认值。',
   },
+  persistence: {
+    loadFailed: '无法加载界面偏好',
+    saveFailed: '无法保存界面偏好',
+    removeFailed: '无法移除界面偏好',
+    warningTitle: '界面偏好未能持久化',
+    warningDescription: '最近一次 {{operation}} {{key}} 失败：{{message}}',
+    operations: {
+      load: '加载',
+      save: '保存',
+      remove: '移除',
+    },
+  },
 } as const;

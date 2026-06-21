@@ -7,7 +7,6 @@ import useFile, { type SelectedFile } from '@/hooks/use-file';
 import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
 import useIsTauri from '@/hooks/use-tauri';
 import api from '@slab/api';
-import type { components } from '@slab/api/v1';
 import { modelSupportsCapability, toCatalogModelList } from '@slab/api/models';
 import {
   deriveProgress,
@@ -21,6 +20,7 @@ import {
 } from '@/lib/model-config';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import { useAudioUiStore } from '@/store/useAudioUiStore';
+import { useMediaTaskPolling } from '@/pages/task/hooks/use-media-task-polling';
 import {
   extractTaskId,
   isFailedTaskStatus,
@@ -91,37 +91,42 @@ export function useAudio() {
     whisperTranscribeModels,
     whisperVadModels,
   } = useAudioModelCatalog();
-  const downloadModelMutation = api.useMutation('post', '/v1/models/download');
-  const loadModelMutation = api.useMutation('post', '/v1/models/load');
-  const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
-  const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel');
+  const downloadModelMutation = api.useMutation('post', '/v1/models/download', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const loadModelMutation = api.useMutation('post', '/v1/models/load', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
   const isTranscriptionPolling = transcriptionPhase === 'polling';
   const isTranscriptionFetchingResult = transcriptionPhase === 'fetchingResult';
+  const toPollingErrorMessage = useCallback(
+    (message: string) => t('pages.audio.toast.pollingError', { message }),
+    [t],
+  );
   const {
-    data: taskStatus,
-    error: taskStatusError,
-    dataUpdatedAt: taskStatusUpdatedAt,
-  } = api.useQuery(
-    'get',
-    '/v1/tasks/{id}',
-    {
-      params: {
-        path: {
-          id: taskId ?? '',
-        },
-      },
-    },
-    {
-      enabled: isTranscriptionPolling && Boolean(taskId),
-      refetchInterval: isTranscriptionPolling && taskId ? MODEL_DOWNLOAD_POLL_INTERVAL_MS : false,
-      refetchIntervalInBackground: true,
-      retry: false,
-    },
-  ) as {
-    data: components['schemas']['TaskResponse'] | undefined;
-    error: unknown;
-    dataUpdatedAt: number;
-  };
+    taskStatus,
+    taskStatusUpdatedAt,
+  } = useMediaTaskPolling({
+    enabled: isTranscriptionPolling,
+    intervalMs: MODEL_DOWNLOAD_POLL_INTERVAL_MS,
+    pollingErrorToastId: 'audio-transcription-polling-error',
+    taskId,
+    toPollingErrorMessage,
+  });
 
   const {
     data: selectedModelConfigDocument,
@@ -440,21 +445,26 @@ export function useAudio() {
       return;
     }
 
-    if (isFailedTaskStatus(taskStatus.status)) {
+    if (taskStatus.status === 'failed') {
       toast.error(taskStatus.error_msg ?? t('pages.audio.error.transcriptionFailed'));
       clearTranscriptionTask();
-    }
-  }, [clearTranscriptionTask, isTranscriptionPolling, taskId, taskStatus, taskStatusUpdatedAt, t]);
-
-  useEffect(() => {
-    if (!isTranscriptionPolling || !taskId || !taskStatusError) {
       return;
     }
 
-    const message = getErrorDescription(taskStatusError, t('pages.audio.toast.unknownError'));
-    toast.error(t('pages.audio.toast.pollingError', { message }));
-    clearTranscriptionTask();
-  }, [clearTranscriptionTask, isTranscriptionPolling, taskId, taskStatusError, t]);
+    if (taskStatus.status === 'cancelled' || taskStatus.status === 'interrupted') {
+      toast.success(t('pages.audio.toast.cancelled'));
+      clearTranscriptionTask();
+      void refreshHistory();
+    }
+  }, [
+    clearTranscriptionTask,
+    isTranscriptionPolling,
+    refreshHistory,
+    taskId,
+    taskStatus,
+    taskStatusUpdatedAt,
+    t,
+  ]);
 
   useEffect(() => {
     if (!isTranscriptionFetchingResult || !taskId) {
@@ -800,13 +810,10 @@ export function useAudio() {
           path: { id: taskId },
         },
       });
-      toast.success(t('pages.audio.toast.cancelled'));
     } catch (error) {
       toast.error(t('pages.audio.toast.cancelFailed'), {
         description: getErrorDescription(error, t('pages.audio.toast.unknownError')),
       });
-    } finally {
-      clearTranscriptionTask();
     }
   }, [cancelTaskMutation, clearTranscriptionTask, t, taskId]);
 

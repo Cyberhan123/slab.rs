@@ -9,6 +9,7 @@ import { getResolvedAppLanguage, useTranslation } from '@slab/i18n';
 type AssistantRuntimeLocale = {
   approvalFailed: string;
   approvalNotDelivered: string;
+  eventStreamInterrupted: string;
   eventStreamLagged: string;
   interruptFailed: string;
   noData: string;
@@ -29,6 +30,7 @@ export function useAssistantLocale() {
       ...frameworkLocale,
       approvalFailed: t('pages.assistant.toast.approvalFailed'),
       approvalNotDelivered: t('pages.assistant.toast.approvalNotDelivered'),
+      eventStreamInterrupted: t('pages.assistant.toast.eventStreamInterrupted'),
       eventStreamLagged: t('pages.assistant.timeline.lagged'),
       interruptFailed: t('pages.assistant.toast.interruptFailed'),
       noData: t('pages.assistant.runtime.noData'),

@@ -57,9 +57,21 @@ export function useAssistantSessions() {
     "get",
     "/v1/sessions"
   )
-  const createSessionMutation = api.useMutation("post", "/v1/sessions")
-  const updateSessionMutation = api.useMutation("put", "/v1/sessions/{id}")
-  const deleteSessionMutation = api.useMutation("delete", "/v1/sessions/{id}")
+  const createSessionMutation = api.useMutation("post", "/v1/sessions", {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  })
+  const updateSessionMutation = api.useMutation("put", "/v1/sessions/{id}", {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  })
+  const deleteSessionMutation = api.useMutation("delete", "/v1/sessions/{id}", {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  })
 
   const sessionRecords = useMemo(() => toSessionRecords(sessionData), [sessionData])
   const localizedDefaults = useMemo(

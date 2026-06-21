@@ -105,10 +105,26 @@ function Assistant() {
     },
   })
 
-  const downloadModelMutation = api.useMutation("post", "/v1/models/download")
-  const loadModelMutation = api.useMutation("post", "/v1/models/load")
-  const switchModelMutation = api.useMutation("post", "/v1/models/switch")
-  const getTaskMutation = api.useMutation("get", "/v1/tasks/{id}")
+  const downloadModelMutation = api.useMutation("post", "/v1/models/download", {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  })
+  const loadModelMutation = api.useMutation("post", "/v1/models/load", {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  })
+  const switchModelMutation = api.useMutation("post", "/v1/models/switch", {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  })
+  const getTaskMutation = api.useMutation("get", "/v1/tasks/{id}", {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  })
 
   const parsedCatalogModels = useMemo(
     () => toCatalogModelList(catalogModels),
@@ -321,6 +337,7 @@ function Assistant() {
     isHistoryLoading,
     isRequesting,
     messages,
+    retryLastResponse,
     submitApproval,
   } = useAssistantAgent({
     beforeRequest: ensureAssistantModelReady,
@@ -642,6 +659,8 @@ function Assistant() {
         assistant: t("pages.assistant.message.assistant"),
         copy: t("pages.assistant.message.copy"),
         reject: t("pages.assistant.actions.reject"),
+        retry: t("pages.assistant.message.retry"),
+        terminalCancelled: t("pages.assistant.message.cancelled"),
         thinkingLoading: t("pages.assistant.thinking.loading"),
         thinkingReady: t("pages.assistant.thinking.ready"),
         user: t("pages.assistant.message.user"),
@@ -654,6 +673,7 @@ function Assistant() {
           labels,
           markdownClassName: markdownThemeClassName,
           onApprove: submitApproval,
+          onRetry: retryLastResponse,
         },
         key: item.id,
         role: item.message.role === "assistant" ? "assistant" : "user",
@@ -681,6 +701,7 @@ function Assistant() {
       markdownThemeClassName,
       modelLoading,
       safeMessages,
+      retryLastResponse,
       submitApproval,
       t,
     ]

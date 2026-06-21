@@ -5,7 +5,15 @@ import {
   type ThoughtChainItemType,
 } from "@ant-design/x"
 import { useClipboard } from "@mantine/hooks"
-import { BotMessageSquare, CheckCircle2, Copy, UserRound, XCircle } from "lucide-react"
+import {
+  AlertCircle,
+  BotMessageSquare,
+  CheckCircle2,
+  Copy,
+  RotateCcw,
+  UserRound,
+  XCircle,
+} from "lucide-react"
 import { memo, useMemo } from "react"
 
 import { Button } from "@slab/components/button"
@@ -27,6 +35,8 @@ export type AssistantBubbleContent = {
     assistant: string
     copy: string
     reject: string
+    retry: string
+    terminalCancelled: string
     thinkingLoading: string
     thinkingReady: string
     user: string
@@ -34,6 +44,7 @@ export type AssistantBubbleContent = {
   }
   markdownClassName?: string
   onApprove?: (approved: boolean) => void
+  onRetry?: () => void
 }
 
 type ParsedThinkingContent = {
@@ -328,20 +339,58 @@ function renderAssistantBubbleContent(content: AssistantBubbleContent) {
   return <AssistantBubbleContentView content={content} />
 }
 
-function AssistantCopyButton({ content }: { content: AssistantBubbleContent }) {
+function AssistantBubbleFooter({ content }: { content: AssistantBubbleContent }) {
   const clipboard = useClipboard()
+  const textContent = getAssistantMessageTextContent(content.item.message)
+  const terminalNotice = content.item.message.role === "assistant"
+    ? content.item.message.terminalNotice
+    : undefined
 
   return (
-    <Button
-      type="button"
-      variant="quiet"
-      size="sm"
-      className="h-7 rounded-full px-3 text-[11px] text-muted-foreground hover:text-foreground"
-      onClick={() => clipboard.copy(getAssistantMessageTextContent(content.item.message))}
-    >
-      <Copy className="size-3.5" />
-      {content.labels.copy}
-    </Button>
+    <div className="flex max-w-[min(100%,42rem)] flex-col gap-2">
+      {terminalNotice ? (
+        <div
+          className={cn(
+            "flex items-start gap-2 rounded-xl border px-3 py-2 text-xs leading-5",
+            terminalNotice.type === "error"
+              ? "border-destructive/30 bg-destructive/10 text-destructive"
+              : "border-border/60 bg-[var(--surface-soft)] text-muted-foreground"
+          )}
+          data-testid={`assistant-terminal-notice-${content.item.id}`}
+        >
+          <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+          <span className="min-w-0 break-words">
+            {terminalNotice.type === "cancelled"
+              ? content.labels.terminalCancelled
+              : terminalNotice.message}
+          </span>
+        </div>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          variant="quiet"
+          size="sm"
+          className="h-7 rounded-full px-3 text-[11px] text-muted-foreground hover:text-foreground"
+          onClick={() => clipboard.copy(textContent)}
+        >
+          <Copy className="size-3.5" />
+          {content.labels.copy}
+        </Button>
+        {terminalNotice?.type === "error" ? (
+          <Button
+            type="button"
+            variant="quiet"
+            size="sm"
+            className="h-7 rounded-full px-3 text-[11px] text-muted-foreground hover:text-foreground"
+            onClick={content.onRetry}
+          >
+            <RotateCcw className="size-3.5" />
+            {content.labels.retry}
+          </Button>
+        ) : null}
+      </div>
+    </div>
   )
 }
 
@@ -353,7 +402,7 @@ export const ASSISTANT_BUBBLE_ROLES = {
       </span>
     ),
     contentRender: renderAssistantBubbleContent,
-    footer: (content: AssistantBubbleContent) => <AssistantCopyButton content={content} />,
+    footer: (content: AssistantBubbleContent) => <AssistantBubbleFooter content={content} />,
     header: (content: AssistantBubbleContent) => content.labels.assistant,
     placement: "start",
     shape: "corner",
@@ -375,7 +424,7 @@ export const ASSISTANT_BUBBLE_ROLES = {
       </span>
     ),
     contentRender: renderAssistantBubbleContent,
-    footer: (content: AssistantBubbleContent) => <AssistantCopyButton content={content} />,
+    footer: (content: AssistantBubbleContent) => <AssistantBubbleFooter content={content} />,
     header: (content: AssistantBubbleContent) => content.labels.user,
     placement: "end",
     shape: "corner",

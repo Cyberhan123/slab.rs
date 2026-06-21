@@ -28,7 +28,6 @@ export function useModelConfigDocumentQuery(id: string | null, options?: { enabl
     },
     {
       enabled: Boolean(id) && (options?.enabled ?? true),
-      retry: false,
     },
   ) as {
     data: ModelConfigDocumentResponse | undefined;
@@ -39,7 +38,11 @@ export function useModelConfigDocumentQuery(id: string | null, options?: { enabl
 }
 
 export function useUpdateModelConfigSelectionMutation() {
-  return api.useMutation('put', '/v1/models/{id}/config-selection') as {
+  return api.useMutation('put', '/v1/models/{id}/config-selection', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  }) as {
     isPending: boolean;
     mutateAsync: (options: {
       body: UpdateModelConfigSelectionRequest;

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { translateServerField, useTranslation } from '@slab/i18n'
 
-import api, { getErrorMessage } from '@slab/api'
+import api, { createSlabApiFetchClient, getErrorMessage } from '@slab/api'
 
 import {
   DEFAULT_CONVERSATION_KEY,
@@ -21,7 +21,13 @@ import { useAssistantLocale } from '../assistant-locale'
 import {
   parseAssistantAgentServerMessage,
   parseAssistantAgentStreamEvent,
+  type AssistantAgentStreamEvent,
 } from '../lib/assistant-agent-events'
+import {
+  isAbortError,
+  nextReconnectDelayMs,
+  readAssistantSseStream,
+} from '../lib/assistant-sse'
 import {
   agentEventKey,
   agentResponsesSseUrl,
@@ -47,6 +53,30 @@ type PendingApproval = {
   toolName: string
   command: string
 }
+
+const MAX_SSE_RECONNECT_ATTEMPTS = 6
+
+function shouldIgnoreAfterAbort(event: AssistantAgentStreamEvent) {
+  switch (event.type) {
+    case 'approval_required':
+    case 'assistant_delta':
+    case 'assistant_reasoning_delta':
+    case 'assistant_reasoning_done':
+    case 'tool_call_output':
+    case 'tool_call_started':
+      return true
+    default:
+      return false
+  }
+}
+
+const keepaliveApiClient = createSlabApiFetchClient({
+  fetch: (input, init) =>
+    fetch(input, {
+      ...init,
+      keepalive: true,
+    }),
+})
 
 type UseAssistantAgentOptions = {
   beforeRequest?: () => Promise<void> | void
@@ -83,19 +113,34 @@ export function useAssistantAgent({
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
   const [eventsConnected, setEventsConnected] = useState(false)
   const [restoreComplete, setRestoreComplete] = useState(!canLoadSession)
-  const eventSourceRef = useRef<EventSource | null>(null)
   const socketRef = useRef<WebSocket | null>(null)
+  const sseAbortControllerRef = useRef<AbortController | null>(null)
+  const sseReconnectTimerRef = useRef<number | null>(null)
+  const sseRunIdRef = useRef(0)
   const threadIdRef = useRef<string | null>(null)
   const transportRef = useRef<'none' | 'sse' | 'websocket'>('none')
+  const intentionalSocketCloseRef = useRef(false)
   const seenEventIdsRef = useRef<Set<string>>(new Set())
+  const lastSeenEventIdRef = useRef<number | null>(null)
+  const terminalTurnRef = useRef(false)
+  const abortRequestedRef = useRef(false)
+  const pendingAbortRef = useRef(false)
+  const lastSubmittedPromptRef = useRef<string | null>(null)
   const sessionRef = useRef(resolvedSessionId)
-  const handleTransportPayloadRef = useRef<(data: string) => void>(() => {})
-  const openSseRef = useRef<(threadId: string) => void>(() => {})
+  const handleTransportPayloadRef = useRef<(data: string, eventId?: string | null) => void>(
+    () => {}
+  )
+  const openSseRef = useRef<(threadId: string, attempt?: number) => void>(() => {})
   const postAgentCommandRef = useRef<(command: AgentResponsesClientMessage) => Promise<void>>(
     async () => {}
   )
+  const interruptThreadRef = useRef<(threadId: string) => Promise<void>>(async () => {})
 
-  const responsesMutation = api.useMutation('post', '/v1/agents/responses')
+  const responsesMutation = api.useMutation('post', '/v1/agents/responses', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  })
 
   const isRequesting = isBusyStatus(status) || responsesMutation.isPending
   const isHistoryLoading = !restoreComplete
@@ -103,6 +148,52 @@ export function useAssistantAgent({
   useEffect(() => {
     threadIdRef.current = threadId
   }, [threadId])
+
+  const clearSseReconnectTimer = useCallback(() => {
+    const timer = sseReconnectTimerRef.current
+    if (timer) {
+      window.clearTimeout(timer)
+      sseReconnectTimerRef.current = null
+    }
+  }, [])
+
+  const closeSse = useCallback(() => {
+    clearSseReconnectTimer()
+    sseAbortControllerRef.current?.abort()
+    sseAbortControllerRef.current = null
+    if (transportRef.current === 'sse') {
+      transportRef.current = 'none'
+    }
+  }, [clearSseReconnectTimer])
+
+  const closeSocket = useCallback(() => {
+    const socket = socketRef.current
+    if (!socket) {
+      return
+    }
+
+    intentionalSocketCloseRef.current = true
+    socket.close()
+    socketRef.current = null
+    if (transportRef.current === 'websocket') {
+      transportRef.current = 'none'
+    }
+  }, [])
+
+  const closeTransports = useCallback(() => {
+    closeSse()
+    closeSocket()
+    setEventsConnected(false)
+  }, [closeSocket, closeSse])
+
+  const markInterrupting = useCallback(() => {
+    setStatus('interrupting')
+    setThoughts((current) =>
+      current.map((thought) =>
+        thought.status === 'loading' ? { ...thought, status: 'abort' } : thought
+      )
+    )
+  }, [])
 
   const replaceThought = useCallback((nextThought: AssistantThought) => {
     setThoughts((current) => {
@@ -283,10 +374,77 @@ export function useAssistantAgent({
     })
   }, [])
 
+  const markAssistantTurnFailed = useCallback((message: string) => {
+    setMessages((current) => {
+      const updated = updateLastAssistantMessage(current, (record) => ({
+        ...record,
+        message: {
+          ...record.message,
+          terminalNotice: {
+            message,
+            type: 'error',
+          },
+        },
+        status: 'error',
+      }))
+
+      return updated ?? [
+        ...current,
+        {
+          id: nextId('assistant'),
+          message: {
+            role: 'assistant',
+            content: '',
+            terminalNotice: {
+              message,
+              type: 'error',
+            },
+          },
+          status: 'error',
+        },
+      ]
+    })
+  }, [])
+
+  const markAssistantTurnCancelled = useCallback((message: string) => {
+    setMessages((current) => {
+      const updated = updateLastAssistantMessage(current, (record) => ({
+        ...record,
+        message: {
+          ...record.message,
+          terminalNotice: {
+            message,
+            type: 'cancelled',
+          },
+        },
+        status: 'abort',
+      }))
+
+      return updated ?? [
+        ...current,
+        {
+          id: nextId('assistant'),
+          message: {
+            role: 'assistant',
+            content: '',
+            terminalNotice: {
+              message,
+              type: 'cancelled',
+            },
+          },
+          status: 'abort',
+        },
+      ]
+    })
+  }, [])
+
   const handleAgentEvent = useCallback(
     (data: string) => {
       const event = parseAssistantAgentStreamEvent(data)
       if (!event) {
+        return
+      }
+      if (abortRequestedRef.current && shouldIgnoreAfterAbort(event)) {
         return
       }
 
@@ -325,8 +483,12 @@ export function useAssistantAgent({
           completeAssistantReasoning(event.text)
           break
         case 'turn_cancelled':
+          terminalTurnRef.current = true
+          pendingAbortRef.current = false
+          abortRequestedRef.current = false
           setStatus('interrupted')
           setPendingApproval(null)
+          markAssistantTurnCancelled(event.reason)
           setThoughts((current) =>
             current.map((thought) =>
               thought.status === 'loading' ? { ...thought, status: 'abort' } : thought
@@ -356,6 +518,9 @@ export function useAssistantAgent({
           break
         case 'turn_completed':
         case 'turn_finished':
+          terminalTurnRef.current = true
+          pendingAbortRef.current = false
+          abortRequestedRef.current = false
           setStatus('completed')
           setPendingApproval(null)
           setThoughts((current) =>
@@ -368,6 +533,9 @@ export function useAssistantAgent({
           }
           break
         case 'turn_failed':
+          terminalTurnRef.current = true
+          pendingAbortRef.current = false
+          abortRequestedRef.current = false
           setStatus('errored')
           setPendingApproval(null)
           setThoughts((current) =>
@@ -375,17 +543,18 @@ export function useAssistantAgent({
               thought.status === 'loading' ? { ...thought, status: 'error' } : thought
             )
           )
-          appendAssistantError(event.error)
+          markAssistantTurnFailed(event.error)
           break
       }
     },
     [
       appendAssistantDelta,
-      appendAssistantError,
       appendAssistantReasoningDelta,
       completeAssistantReasoning,
       completeAssistantTurn,
       locale.eventStreamLagged,
+      markAssistantTurnCancelled,
+      markAssistantTurnFailed,
       replaceThought,
       updateThoughtStatus,
     ]
@@ -397,6 +566,11 @@ export function useAssistantAgent({
         case 'agent.ack':
           if (message.thread_id) {
             setThreadId(message.thread_id)
+            if (pendingAbortRef.current) {
+              pendingAbortRef.current = false
+              closeTransports()
+              void interruptThreadRef.current(message.thread_id)
+            }
           }
           if (message.status) {
             setStatus(message.status)
@@ -426,11 +600,21 @@ export function useAssistantAgent({
         }
       }
     },
-    [appendAssistantError, locale.approvalNotDelivered, locale.requestFailed, t]
+    [appendAssistantError, closeTransports, locale.approvalNotDelivered, locale.requestFailed, t]
   )
 
   const handleTransportPayload = useCallback(
-    (data: string) => {
+    (data: string, eventId?: string | null) => {
+      if (eventId) {
+        const sequenceNumber = Number(eventId)
+        if (Number.isFinite(sequenceNumber)) {
+          lastSeenEventIdRef.current = Math.max(
+            lastSeenEventIdRef.current ?? 0,
+            sequenceNumber
+          )
+        }
+      }
+
       const serverMessage = parseAssistantAgentServerMessage(data)
       if (serverMessage) {
         handleServerMessage(serverMessage)
@@ -443,6 +627,13 @@ export function useAssistantAgent({
           return
         }
         seenEventIdsRef.current.add(key)
+        const sequenceNumber = Number(key.split(':').at(-1))
+        if (Number.isFinite(sequenceNumber)) {
+          lastSeenEventIdRef.current = Math.max(
+            lastSeenEventIdRef.current ?? 0,
+            sequenceNumber
+          )
+        }
       }
       handleAgentEvent(data)
     },
@@ -450,18 +641,48 @@ export function useAssistantAgent({
   )
 
   const openSse = useCallback(
-    (nextThreadId: string) => {
-      eventSourceRef.current?.close()
-      const source = new EventSource(agentResponsesSseUrl(nextThreadId))
-      eventSourceRef.current = source
+    (nextThreadId: string, attempt = 0) => {
+      closeSse()
+      const controller = new AbortController()
+      const runId = sseRunIdRef.current + 1
+      sseRunIdRef.current = runId
+      sseAbortControllerRef.current = controller
       transportRef.current = 'sse'
-      source.addEventListener('open', () => setEventsConnected(true))
-      source.addEventListener('error', () => setEventsConnected(false))
-      source.addEventListener('message', (message: MessageEvent<string>) => {
-        handleTransportPayload(message.data)
+      void readAssistantSseStream(agentResponsesSseUrl(nextThreadId), {
+        lastEventId: lastSeenEventIdRef.current,
+        onMessage: (message) => {
+          handleTransportPayload(message.data, message.id)
+        },
+        onOpen: () => {
+          if (sseRunIdRef.current === runId) {
+            setEventsConnected(true)
+          }
+        },
+        signal: controller.signal,
+      }).catch((error) => {
+        if (
+          sseRunIdRef.current !== runId ||
+          controller.signal.aborted ||
+          isAbortError(error) ||
+          terminalTurnRef.current
+        ) {
+          return
+        }
+
+        setEventsConnected(false)
+        if (attempt >= MAX_SSE_RECONNECT_ATTEMPTS) {
+          toast.error(locale.eventStreamInterrupted, {
+            id: `assistant-sse-disconnected:${nextThreadId}`,
+          })
+          return
+        }
+
+        sseReconnectTimerRef.current = window.setTimeout(() => {
+          openSseRef.current(nextThreadId, attempt + 1)
+        }, nextReconnectDelayMs(attempt))
       })
     },
-    [handleTransportPayload]
+    [closeSse, handleTransportPayload, locale.eventStreamInterrupted]
   )
 
   const postAgentCommand = useCallback(
@@ -502,12 +723,14 @@ export function useAssistantAgent({
 
   useEffect(() => {
     sessionRef.current = resolvedSessionId
-    socketRef.current?.close()
-    eventSourceRef.current?.close()
-    socketRef.current = null
-    eventSourceRef.current = null
+    closeTransports()
+    sseRunIdRef.current += 1
     transportRef.current = 'none'
     seenEventIdsRef.current.clear()
+    lastSeenEventIdRef.current = null
+    terminalTurnRef.current = false
+    abortRequestedRef.current = false
+    pendingAbortRef.current = false
     setActiveConversation(undefined)
     setMessages([])
     setThreadId(null)
@@ -569,6 +792,13 @@ export function useAssistantAgent({
         transportRef.current = 'none'
       }
       setEventsConnected(false)
+      if (intentionalSocketCloseRef.current) {
+        intentionalSocketCloseRef.current = false
+        return
+      }
+      if (disposed) {
+        return
+      }
       if (!opened) {
         fallbackRestore()
         return
@@ -582,16 +812,26 @@ export function useAssistantAgent({
 
     return () => {
       disposed = true
+      const activeThreadId = threadIdRef.current
+      intentionalSocketCloseRef.current = true
       socket.close()
-      eventSourceRef.current?.close()
+      closeSse()
       if (socketRef.current === socket) {
         socketRef.current = null
       }
-      eventSourceRef.current = null
       transportRef.current = 'none'
       setEventsConnected(false)
+      if (activeThreadId) {
+        void keepaliveApiClient.POST('/v1/agents/responses', {
+          body: {
+            request_id: nextId('request'),
+            thread_id: activeThreadId,
+            type: 'agent.shutdown',
+          },
+        }).catch(() => {})
+      }
     }
-  }, [canLoadSession, resolvedSessionId])
+  }, [canLoadSession, closeSse, closeTransports, resolvedSessionId])
 
   const handleSubmit = useCallback(
     async (value: string) => {
@@ -601,6 +841,10 @@ export function useAssistantAgent({
       }
       const slashCommand = parseAssistantSlashCommand(prompt)
       const submittedPrompt = slashCommand?.content || prompt
+      lastSubmittedPromptRef.current = submittedPrompt
+      terminalTurnRef.current = false
+      abortRequestedRef.current = false
+      pendingAbortRef.current = false
 
       const userMessage: AssistantMessageRecord = {
         id: nextId('user'),
@@ -732,30 +976,56 @@ export function useAssistantAgent({
     ]
   )
 
-  const abort = useCallback(() => {
-    if (!threadId || !isRequesting) {
-      return
-    }
-
-    void sendAgentCommand({
-      request_id: nextId('request'),
-      thread_id: threadId,
-      type: 'agent.interrupt',
-    })
-      .then(() => {
-        setStatus('interrupting')
-        setThoughts((current) =>
-          current.map((thought) =>
-            thought.status === 'loading' ? { ...thought, status: 'abort' } : thought
-          )
-        )
-      })
-      .catch((error) => {
+  const interruptThread = useCallback(
+    async (activeThreadId: string) => {
+      markInterrupting()
+      try {
+        await postAgentCommandRef.current({
+          request_id: nextId('request'),
+          thread_id: activeThreadId,
+          type: 'agent.interrupt',
+        })
+      } catch (error) {
         toast.error(locale.interruptFailed, {
           description: getErrorMessage(error),
         })
-      })
-  }, [isRequesting, locale.interruptFailed, sendAgentCommand, threadId])
+      }
+    },
+    [locale.interruptFailed, markInterrupting]
+  )
+
+  useEffect(() => {
+    interruptThreadRef.current = interruptThread
+  }, [interruptThread])
+
+  const abort = useCallback(() => {
+    if (!isRequesting) {
+      return
+    }
+
+    abortRequestedRef.current = true
+    terminalTurnRef.current = false
+    markInterrupting()
+
+    const activeThreadId = threadIdRef.current
+    if (!activeThreadId) {
+      pendingAbortRef.current = true
+      closeSse()
+      return
+    }
+
+    closeTransports()
+    void interruptThread(activeThreadId)
+  }, [closeSse, closeTransports, interruptThread, isRequesting, markInterrupting])
+
+  const retryLastResponse = useCallback(() => {
+    const prompt = lastSubmittedPromptRef.current
+    if (!prompt || isRequesting) {
+      return
+    }
+
+    void handleSubmit(prompt)
+  }, [handleSubmit, isRequesting])
 
   const messagesWithThoughts = useMemo(
     () => withThoughts(messages, thoughts),
@@ -771,6 +1041,7 @@ export function useAssistantAgent({
     isRequesting,
     messages: messagesWithThoughts,
     pendingApproval,
+    retryLastResponse,
     status,
     submitApproval,
     threadId,

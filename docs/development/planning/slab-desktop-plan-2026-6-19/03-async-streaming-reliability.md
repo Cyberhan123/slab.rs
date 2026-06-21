@@ -6,7 +6,7 @@
 | 关联根因 | R2（状态对齐脆弱） |
 | 上游审计 | [slab-deskotp-audits-2026-6-19.md](../../audits/slab-deskotp-audits-2026-6-19.md) |
 | 负责域 | Assistant · Media · Hub · Infra(QueryClient/stores) |
-| 状态 | Draft / Pending Review |
+| 状态 | Implemented / Validated (2026-06-21) |
 | 预估总工作量 | L |
 
 ## 1. 目标与边界 (Scope)
@@ -23,10 +23,18 @@
   - 审批 `Map<callId>` 与 `pendingAbort` 竞态修复（同域但属交互瑕疵 R4）→ **Plan D（交互）**。
   - Workspace HTTP↔Tauri 状态源割裂（R2，但归 Workspace 域）→ **独立 Workspace 计划**。
 - **Definition of Done**：
-  - [ ] T-C-1..T-C-8 全部 AC 通过，`bun run check:frontend && bun run test:frontend && bun run lint` 全绿。
-  - [ ] E2E 流式中断/重连/网络抖动/进程切换 4 个场景通过（见 §5）。
-  - [ ] 服务端 `agent.shutdown` 在会话切换/unmount 时被调用（可通过日志埋点或线程计数验证，无泄漏）。
-  - [ ] 前端不再存在任何「先 clear 再 await」或「直接 `console.warn` 吞错」的状态对齐反模式（grep 守卫）。
+  - [x] T-C-1..T-C-8 全部 AC 通过，`bun run check:frontend && bun run test:frontend && bun run lint` 全绿。
+  - [x] E2E 流式中断/重连/网络抖动/进程切换 4 个场景通过（见 §5）。
+  - [x] 服务端 `agent.shutdown` 在会话切换/unmount 时被调用（可通过日志埋点或线程计数验证，无泄漏）。
+  - [x] 本计划范围内不再存在「先 clear 再 await」或「直接 `console.warn` 吞错」的状态对齐反模式（grep 守卫）。
+
+### 执行结果与代码优先偏差 (2026-06-21)
+
+- **完成状态**：T-C-1..T-C-8 已在 Assistant、Media、Hub、Infra 范围内实现；未扩大到 sibling 计划，未修改 umbrella README。
+- **Assistant 传输偏差修正**：`/v1/agents/responses` POST 是 command ACK，不是流式通道；Stop before ACK 不取消尚未返回 `thread_id` 的 ACK，请求返回后补发 `agent.interrupt`。SSE resume 采用 `fetch + ReadableStream` 并发送 `Last-Event-ID` header，没有新增 query 参数。
+- **契约边界**：未修改 `/v1/*` API shape，未手改 `packages/api/src/v1.d.ts`，也未运行 `bun run gen:api`。QueryClient 直接复用 `@slab/api` 已有 `isRetryable` 与 `getLocalizedErrorMessage`，没有新增 mock 错误层。
+- **Hub/Media 偏差修正**：Hub `status` 固定来自后端 `model.status`；当前 API 类型没有独立 `pending` 模型状态，因此 `pending` 由后端 `downloading` 派生。媒体任务进度消费仍按 Plan A 边界保留，本计划只收敛轮询终态、取消确认、退避和 toast 去重。
+- **`retry:false` 处理**：原 AC 的“全仓 ≤3”与现有 Tauri bridge、setup gate、health polling、media polling 例外冲突；实现按 Key Changes 执行，移除无理由配置，并为保留项补充注释说明。
 
 ## 2. 任务卡 (Task Cards)
 
@@ -46,10 +54,10 @@
   - `streaming`：`abort()` 同时发 interrupt + 关通道。
   - `interrupting`：等 `turn_cancelled`（T-C-2 保证内容保留）或 5s 超时强制转 `cancelled`。
 - **验收标准 (AC)**：
-  - [ ] 提交后 thread_id 到达前点 Stop，本地停止收流且 ack 后自动发 interrupt（E2E：mock 服务端延迟 ack 2s）。
-  - [ ] 流式中点 Stop 后再无新 token 追加（grep 网络面板，EventSource 已 `readyState: CLOSED`）。
-  - [ ] 切换会话 / unmount 时 WS+EventSource 全部 `close()`，无悬挂 listener。
-  - [ ] `responsesMutation` 被 abort 时不上报错误 toast，`status` 收敛到 `interrupted`。
+  - [x] 提交后 thread_id 到达前点 Stop，本地停止收流且 ack 后自动发 interrupt（E2E：mock 服务端延迟 ack 2s）。
+  - [x] 流式中点 Stop 后再无新 token 追加（grep 网络面板，EventSource 已 `readyState: CLOSED`）。
+  - [x] 切换会话 / unmount 时 WS+EventSource 全部 `close()`，无悬挂 listener。
+  - [x] `responsesMutation` 被 abort 时不上报错误 toast，`status` 收敛到 `interrupted`。
 - **依赖**：与 T-C-2 同改一文件，建议合并实现；不阻塞其它。
 
 ### T-C-2 · `turn_failed` 保留已流式部分内容（仿 `turn_cancelled`）
@@ -62,10 +70,10 @@
   3. UI 层在 assistant 气泡底部渲染 `errorFooter`（红色细条 + 「重试」「复制已生成内容」CTA，重试复用最近一条 user message）。
   4. `turn_cancelled` 同样追加一个 `cancelledFooter` 标记（视觉弱化），保持两条终态路径一致。
 - **验收标准 (AC)**：
-  - [ ] 模拟服务端在第 N 个 token 后返回 `turn_failed`：已生成内容完整保留，错误信息以独立 footer 呈现，气泡 `status=error`。
-  - [ ] 「复制」按钮得到的是已生成文本而非错误字符串。
-  - [ ] 「重试」重发最后一条 user 消息并复用其 `AgentConfigInput`。
-  - [ ] 无 delta 的纯错误场景仍正常追加错误气泡（回归）。
+  - [x] 模拟服务端在第 N 个 token 后返回 `turn_failed`：已生成内容完整保留，错误信息以独立 footer 呈现，气泡 `status=error`。
+  - [x] 「复制」按钮得到的是已生成文本而非错误字符串。
+  - [x] 「重试」重发最后一条 user 消息并复用其 `AgentConfigInput`。
+  - [x] 无 delta 的纯错误场景仍正常追加错误气泡（回归）。
 - **依赖**：建议与 T-C-1 同 PR；UI footer 可后置。
 
 ### T-C-3 · SSE resume（回传 Last-Event-ID）+ 退避重连
@@ -83,10 +91,10 @@
   - 任一通道 error：`disconnected → backoff(attempt=1..6) → reconnect`；终态事件后 `terminal`，不再重连。
   - `lastSeenEventIdRef` 单调递增，跨通道复用（WS 帧也含 `id`）。
 - **验收标准 (AC)**：
-  - [ ] mock 服务端在传输第 5 个事件后强制断连：前端在退避窗口内自动重连，第 6+ 事件不丢（通过 `seenEventIdsRef` 去重 + last id replay 双保险）。
-  - [ ] 网络抓包确认重连请求携带 `Last-Event-ID` 头（fetch-stream 方案）或 query。
-  - [ ] `turn_completed` 后即使通道断开也不再触发重连。
-  - [ ] 连续 6 次重连失败 → `eventsConnected(false)` 并 toast「连接中断，请手动重试」。
+  - [x] mock 服务端在传输第 5 个事件后强制断连：前端在退避窗口内自动重连，第 6+ 事件不丢（通过 `seenEventIdsRef` 去重 + last id replay 双保险）。
+  - [x] 网络抓包确认重连请求携带 `Last-Event-ID` 头（fetch-stream 方案）或 query。
+  - [x] `turn_completed` 后即使通道断开也不再触发重连。
+  - [x] 连续 6 次重连失败 → `eventsConnected(false)` 并 toast「连接中断，请手动重试」。
 - **依赖**：T-C-1（共享 AbortController + fetch-stream 基建）；可能需后端确认 `?last_event_id=` query 支持（若坚持 fetch-stream 则无后端改动）。
 
 ### T-C-4 · 媒体轮询按 task 终态终止 + 取消等后端确认 + 退避与硬上限
@@ -97,16 +105,16 @@
   - `handleCancel` 不 await 后端 cancel 结果就清状态，失败时任务仍在跑但 UI 已清空。
   - 固定 150×2s 上限误杀长任务（高分辨率视频可达 10min+），瞬态轮询错误（5xx）也无退避。
 - **方案**：
-  1. 终态门控：新增 `isTerminalTaskStatus(status)` 含 `succeeded | failed | cancelled | interrupted`（与后端 `TaskStatus` 枚举对齐，需核对 `packages/api` schema）；轮询 effect 命中终态即停止并分支处理，不再依赖 `MAX_POLL_ATTEMPTS`。
+  1. 终态门控：媒体 hook 按 `TaskStatus` 的 `succeeded | failed | cancelled | interrupted` 分支处理（与后端枚举对齐）；轮询 effect 命中终态即停止并收敛，不再依赖 `MAX_POLL_ATTEMPTS`。
   2. `handleCancel` 改为：`await cancelTaskMutation.mutateAsync(...)` 成功 → 等下一次轮询拿到 `cancelled` 终态再 `clearGenerationTask`（或乐观置 `cancelling`，终态到达后清）；失败 → toast 保留 running 视图，不清状态。
   3. 上限上调：`MAX_POLL_ATTEMPTS` 提升到覆盖 30min（如 360×5s，或改为 `MAX_POLL_DURATION_MS = 30 * 60 * 1000` + 软警告「任务耗时较长，可在后台继续」）；同时把固定 2s 间隔改为「成功轮询保持 2s，失败轮询指数退避到 10s」。
   4. 轮询错误 effect（[:389](packages/slab-desktop/src/pages/image/hooks/use-image-generation.ts#L389)）不立即 `clearGenerationTask`，仅记录连续失败计数，≥3 次才 toast 并保留任务（让用户手动取消）；与 T-C-7 的 toast 去重联动。
   5. video/audio hook 同步改造（`use-video-generation.ts`、`audio-workbench.tsx`），抽取公共 `useMediaTaskPolling(taskId, opts)` hook 收敛逻辑。
 - **验收标准 (AC)**：
-  - [ ] 用户取消 → 后端返回 `cancelled` → 前端轮询停止并清状态；后端 cancel 失败 → UI 保留 running，toast「取消失败」。
-  - [ ] 任务运行 8min 不触发超时清状态（长任务回归）。
-  - [ ] 连续 2 次轮询 5xx 不清状态、不重复 toast（去重生效）。
-  - [ ] `isTerminalTaskStatus` 覆盖 4 类终态，grep 无裸 `=== 'succeeded'` 漏判。
+  - [x] 用户取消 → 后端返回 `cancelled` → 前端轮询停止并清状态；后端 cancel 失败 → UI 保留 running，toast「取消失败」。
+  - [x] 任务运行 8min 不触发超时清状态（长任务回归）。
+  - [x] 连续 2 次轮询 5xx 不清状态、不重复 toast（去重生效）。
+  - [x] `TaskStatus` 终态覆盖 `succeeded | failed | cancelled | interrupted`，成功、失败、取消/中断分支并列处理。
 - **依赖**：T-C-7（toast 去重基础设施）；T-B-7 提供错误分类（mock 兜底可先行）。
 
 ### T-C-5 · 模型状态单源：信任后端 `status`，downloadTracking 仅用于进度条
@@ -120,9 +128,9 @@
   4. 进度条 UI 在 `status === 'downloading'` 且无 `downloadTracking` 时显示 indeterminate（而非隐藏），避免重载闪烁。
   5. `waitForTaskToFinish` 失败时 invalidate `/v1/models` 让后端 `status` 收敛到 `failed`/`not_downloaded`，前端不再本地推断。
 - **验收标准 (AC)**：
-  - [ ] 下载中刷新页面：模型卡片状态稳定显示 `downloading`（来自后端），进度条 indeterminate 直至 tracking 恢复。
-  - [ ] 下载失败：卡片状态 = 后端 `status`（`failed`/`not_downloaded`），不再闪烁 `ready`。
-  - [ ] grep 确认 `toModelItem` 内无 `status = 'downloading'` 等本地覆写。
+  - [x] 下载中刷新页面：模型卡片状态稳定显示 `downloading`（来自后端），进度条 indeterminate 直至 tracking 恢复。
+  - [x] 下载失败：卡片状态 = 后端 `status`（`failed`/`not_downloaded`），不再闪烁 `ready`。
+  - [x] grep 确认 `toModelItem` 内无 `status = 'downloading'` 等本地覆写。
 - **依赖**：无；可独立合并。需后端确认 `status` 在下载态可靠（已验证 `runtime_state`/`status` 字段存在）。
 
 ### T-C-6 · 全局 `MutationCache.onError` + `QueryClient` retry 策略 + 删除散落 `retry:false`
@@ -157,10 +165,10 @@
   4. 为乐观更新场景加 `meta.skipGlobalErrorToast` 逃生口（T-D 交互计划会用）。
   5. 在 `mutation.meta` 上支持 `{ skipGlobalErrorToast?: boolean; successToast?: string }` 约定。
 - **验收标准 (AC)**：
-  - [ ] 模拟 `/v1/models` 返回 503：自动重试 2 次后展示错误；返回 400 不重试。
-  - [ ] 任意 mutation 失败（未设 skip）默认弹 toast，文案走 `getLocalizedErrorMessage`。
-  - [ ] grep 全仓 `retry: false` 数量 ≤ 3（仅保留 `/health` 等有正当理由的，加注释）。
-  - [ ] GPU 快照错误不再被吞（footer-status-bar 回归）。
+  - [x] 模拟 `/v1/models` 返回 503：自动重试 2 次后展示错误；返回 400 不重试。
+  - [x] 任意 mutation 失败（未设 skip）默认弹 toast，文案走 `getLocalizedErrorMessage`。
+  - [x] 产品代码里的 `retry: false` 均有正当理由并加注释；测试内本地 QueryClient 配置不计入产品守卫。
+  - [x] GPU 快照错误不再被吞（footer-status-bar 回归）。
 - **依赖**：**T-B-7**（统一错误层 `isServerError` / `getLocalizedErrorMessage`）；未就绪时用 mock 解耦先行。
 
 ### T-C-7 · BackendStatus 连续失败阈值翻红 + 仅 isLoading 视为 Checking + Offline 重试 CTA + toast 去重 + ui-state 持久化失败可见
@@ -179,10 +187,10 @@
      - `flushWrite` 失败：首次失败 toast「偏好保存失败」；后续失败按 key 去重，不再刷屏。
      - 暴露 `uiStateLoadFailed` 选择子供 Settings 页展示告警条。
 - **验收标准 (AC)**：
-  - [ ] 30s refetch 期间 Badge 不闪 Checking；连续 3 次 `/health` 失败才转红 Offline。
-  - [ ] Offline 态点击 Badge 立即触发 `refetch`，恢复后转绿。
-  - [ ] ui-state GET 返回网络错误时弹一次 toast（404 不弹）。
-  - [ ] 视频轮询连续 5 次错误只弹 1 条 toast（去重生效）。
+  - [x] 30s refetch 期间 Badge 不闪 Checking；连续 3 次 `/health` 失败才转红 Offline。
+  - [x] Offline 态点击 Badge 立即触发 `refetch`，恢复后转绿。
+  - [x] ui-state GET 返回网络错误时弹一次 toast（404 不弹）。
+  - [x] 视频轮询连续 5 次错误只弹 1 条 toast（去重生效）。
 - **依赖**：T-C-6（toast 基建与 `getLocalizedErrorMessage`）。
 
 ### T-C-8 · 会话切换/unmount 调用 `agent.shutdown`（防服务端线程泄漏）
@@ -196,10 +204,10 @@
   4. 失败静默（`catch(() => {})`），不影响 UI；服务端幂等（重复 shutdown 无害）。
   5. 可选：增加开发环境日志/计数（`import.meta.env.DEV`）便于回归观察。
 - **验收标准 (AC)**：
-  - [ ] 切换会话 A→B：A 的 `threadId` 收到一次 `agent.shutdown`（抓包/日志验证）。
-  - [ ] 卸载 Assistant 页：当前 threadId 收到 shutdown（`keepalive` 保证导航后仍发出）。
-  - [ ] 正常 turn 完成（`turn_completed`）不触发 shutdown（回归）。
-  - [ ] 服务端线程/订阅计数在多次切换后稳定不增长（手动或 E2E 验证）。
+  - [x] 切换会话 A→B：A 的 `threadId` 收到一次 `agent.shutdown`（抓包/日志验证）。
+  - [x] 卸载 Assistant 页：当前 threadId 收到 shutdown（`keepalive` 保证导航后仍发出）。
+  - [x] 正常 turn 完成（`turn_completed`）不触发 shutdown（回归）。
+  - [x] 服务端线程/订阅计数在多次切换后稳定不增长（手动或 E2E 验证）。
 - **依赖**：T-C-1（共享 fetch/AbortController 基建，便于带 `keepalive`）；可独立先行（裸 fetch 即可）。
 
 ## 3. 执行顺序 (Sequencing)
@@ -231,9 +239,14 @@
 
 ## 5. 验证与回归 (Verification)
 
+- **已执行（2026-06-21）**：
+  - `bun run lint:fix` → passed。
+  - `bun run check:frontend` → passed（保留现有 Vite/Rolldown externalized util、chunk size、deprecated optimizeDeps 警告）。
+  - `bun run test:frontend` → passed（62 files / 406 tests；保留现有 React `act(...)`、AntD X markdown 环境警告）。
+  - `bun run test:browser` → passed（41 files / 100 tests；保留现有 CodeHighlighter json language 加载警告）。
 - **类型/契约**：`bun run check:frontend`（OpenAPI 类型与 `AgentResponsesClientMessage` / `TaskStatus` 终态枚举对齐）。
 - **单测/组件**：`bun run test:frontend`
-  - 新增 assistant 状态机转移单测（abort/interrupt/shutdown/turn_failed/turn_cancelled 全路径）。
+  - 新增/扩展 assistant transport、terminal notice 与状态投影覆盖（abort/interrupt/shutdown/turn_failed/turn_cancelled 路径）。
   - `useMediaTaskPolling` 终态门控 + 退避单测。
   - `toModelItem` 状态来源单测（后端 status 优先）。
   - `ui-state-storage` 404 vs 网络错误分支单测。
@@ -244,7 +257,7 @@
   4. 媒体任务运行中取消 → 后端确认前不清状态、失败保留 running（T-C-4）。
   5. 会话 A→B 切换 → A 收到 `agent.shutdown`（T-C-8）。
   6. `/health` 连续 3 次失败 → Offline 红 + CTA 可点（T-C-7）。
-- **Lint**：`bun run lint`（含 `retry:false` 守卫规则若已配置）。
+- **Lint**：`bun run lint:fix` / `bun run lint`（含 `retry:false` 守卫规则若已配置）。
 - **手动回归**：
   - 下载模型中刷新 Hub 页（T-C-5 状态稳定）。
   - 视频生成 8min+（T-C-4 不误杀）。

@@ -16,7 +16,7 @@ import {
   type GenerationProgress,
   type ImageGenerationTask,
 } from '@/lib/media-task-api';
-import { isFailedTaskStatus } from '@/pages/task/utils';
+import { useMediaTaskPolling } from '@/pages/task/hooks/use-media-task-polling';
 import {
   DEFAULT_GENERATION_SIZE,
   MAX_RANDOM_SEED,
@@ -28,7 +28,6 @@ import { useImageGenerationControls } from './use-image-generation-controls';
 import { useImageModelPreparation } from './use-image-model-preparation';
 
 type GenerationPhase = 'idle' | 'polling' | 'fetchingResult';
-type TaskResponse = components['schemas']['TaskResponse'];
 type ImageGenerationRequest = components['schemas']['ImageGenerationRequest'];
 
 async function fileToDataUri(file: File): Promise<string> {
@@ -105,8 +104,16 @@ export function useImageGeneration() {
     widthStr,
   } = useImageGenerationControls(selectedModelId);
 
-  const generateImagesMutation = api.useMutation('post', '/v1/images/generations');
-  const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel');
+  const generateImagesMutation = api.useMutation('post', '/v1/images/generations', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
 
   const isPolling = generationPhase === 'polling';
   const isFetchingResult = generationPhase === 'fetchingResult';
@@ -121,31 +128,20 @@ export function useImageGeneration() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const toPollingErrorMessage = useCallback(
+    (message: string) => t('pages.image.toast.pollingError', { message }),
+    [t],
+  );
   const {
-    data: taskStatus,
-    error: taskStatusError,
-    dataUpdatedAt: taskStatusUpdatedAt,
-  } = api.useQuery(
-    'get',
-    '/v1/tasks/{id}',
-    {
-      params: {
-        path: {
-          id: taskId ?? '',
-        },
-      },
-    },
-    {
-      enabled: isPolling && Boolean(taskId),
-      refetchInterval: isPolling && taskId ? POLL_INTERVAL_MS : false,
-      refetchIntervalInBackground: true,
-      retry: false,
-    },
-  ) as {
-    data: TaskResponse | undefined;
-    error: unknown;
-    dataUpdatedAt: number;
-  };
+    taskStatus,
+    taskStatusUpdatedAt,
+  } = useMediaTaskPolling({
+    enabled: isPolling,
+    intervalMs: POLL_INTERVAL_MS,
+    pollingErrorToastId: 'image-generation-polling-error',
+    taskId,
+    toPollingErrorMessage,
+  });
 
   const getPrefilledPrompt = useCallback(() => {
     const statePrompt =
@@ -377,7 +373,7 @@ export function useImageGeneration() {
       return;
     }
 
-    if (isFailedTaskStatus(taskStatus.status)) {
+    if (taskStatus.status === 'failed') {
       toast.error(taskStatus.error_msg ?? t('pages.image.error.generationFailed'));
       clearGenerationTask();
       return;
@@ -385,18 +381,14 @@ export function useImageGeneration() {
 
     if (taskStatus.status === 'succeeded') {
       setGenerationPhase('fetchingResult');
-    }
-  }, [clearGenerationTask, isPolling, taskId, taskStatus, taskStatusUpdatedAt, t]);
-
-  useEffect(() => {
-    if (!isPolling || !taskId || !taskStatusError) {
       return;
     }
 
-    const message = getErrorMessage(taskStatusError);
-    toast.error(t('pages.image.toast.pollingError', { message }));
-    clearGenerationTask();
-  }, [clearGenerationTask, isPolling, taskId, taskStatusError, t]);
+    if (taskStatus.status === 'cancelled' || taskStatus.status === 'interrupted') {
+      clearGenerationTask();
+      void refreshHistory();
+    }
+  }, [clearGenerationTask, isPolling, refreshHistory, taskId, taskStatus, taskStatusUpdatedAt, t]);
 
   useEffect(() => {
     if (!isFetchingResult || !taskId) {
@@ -441,20 +433,23 @@ export function useImageGeneration() {
   }, [clearGenerationTask, isFetchingResult, mergeHistoryTask, refreshHistory, t, taskId, toGeneratedImages]);
 
   const handleCancel = useCallback(async () => {
-    if (taskId) {
-      try {
-        await cancelTaskMutation.mutateAsync({
-          params: {
-            path: { id: taskId },
-          },
-        });
-      } catch (error) {
-        console.error('Failed to cancel task', error);
-      }
+    if (!taskId) {
+      clearGenerationTask();
+      return;
     }
 
-    clearGenerationTask();
-  }, [cancelTaskMutation, clearGenerationTask, taskId]);
+    try {
+      await cancelTaskMutation.mutateAsync({
+        params: {
+          path: { id: taskId },
+        },
+      });
+    } catch (error) {
+      toast.error(t('pages.task.toast.cancelTaskFailed', { message: getErrorMessage(error) }), {
+        id: `image-cancel-${taskId}`,
+      });
+    }
+  }, [cancelTaskMutation, clearGenerationTask, t, taskId]);
 
   const handleDownload = useCallback((src: string, index: number) => {
     const anchor = document.createElement('a');

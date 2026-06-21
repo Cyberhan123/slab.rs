@@ -110,6 +110,7 @@ export const assistant = {
     loadingModel: '正在加载模型...',
     copy: '复制',
     continue: '继续',
+    cancelled: '生成已取消，已保留部分内容。',
     retry: '重试',
   },
   thinking: {
@@ -149,6 +150,7 @@ export const assistant = {
     failedToUpdateSession: '更新助手会话失败。',
     failedToDeleteSession: '删除助手会话失败。',
     interruptFailed: '中断助手线程失败',
+    eventStreamInterrupted: '助手连接已中断，请准备好后重试本次回复。',
     unknownError: '未知错误',
   },
   connection: {

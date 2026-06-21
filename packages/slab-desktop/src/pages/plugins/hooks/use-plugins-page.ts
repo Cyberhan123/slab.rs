@@ -80,15 +80,37 @@ export function usePluginsPage() {
     isLoading: pluginsLoading,
     isFetching: pluginsFetching,
     refetch: refetchPlugins,
-  } = api.useQuery('get', '/v1/plugins', undefined, {
-    retry: false,
+  } = api.useQuery('get', '/v1/plugins');
+  const enablePluginMutation = api.useMutation('post', '/v1/plugins/{id}/enable', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
   });
-  const enablePluginMutation = api.useMutation('post', '/v1/plugins/{id}/enable');
-  const disablePluginMutation = api.useMutation('post', '/v1/plugins/{id}/disable');
-  const startPluginMutation = api.useMutation('post', '/v1/plugins/{id}/start');
-  const stopPluginMutation = api.useMutation('post', '/v1/plugins/{id}/stop');
-  const installPluginMutation = api.useMutation('post', '/v1/plugins/install');
-  const deletePluginMutation = api.useMutation('delete', '/v1/plugins/{id}');
+  const disablePluginMutation = api.useMutation('post', '/v1/plugins/{id}/disable', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const startPluginMutation = api.useMutation('post', '/v1/plugins/{id}/start', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const stopPluginMutation = api.useMutation('post', '/v1/plugins/{id}/stop', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const installPluginMutation = api.useMutation('post', '/v1/plugins/install', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const deletePluginMutation = api.useMutation('delete', '/v1/plugins/{id}', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
 
   const plugins = useMemo(() => pluginRows ?? [], [pluginRows]);
   const loading = pluginsLoading;

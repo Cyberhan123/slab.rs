@@ -37,10 +37,26 @@ export function useImageModelPreparation() {
       },
     },
   });
-  const downloadModelMutation = api.useMutation('post', '/v1/models/download');
-  const loadModelMutation = api.useMutation('post', '/v1/models/load');
-  const switchModelMutation = api.useMutation('post', '/v1/models/switch');
-  const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
+  const downloadModelMutation = api.useMutation('post', '/v1/models/download', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const loadModelMutation = api.useMutation('post', '/v1/models/load', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const switchModelMutation = api.useMutation('post', '/v1/models/switch', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
 
   const normalizedCatalogModels = useMemo(
     () => toCatalogModelList(catalogModels),

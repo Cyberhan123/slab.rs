@@ -104,6 +104,8 @@ export function WorkspaceCommandPalette({
     queryKey: ["workspace-command-palette-search", workspaceRoot, trimmedQuery],
     queryFn: () => workspaceSearchFiles(trimmedQuery),
     enabled: open && Boolean(workspaceRoot && trimmedQuery),
+    // Command palette search is bound to transient user input; a changed query
+    // should own the next probe instead of retrying a stale bridge request.
     retry: false,
   })
 

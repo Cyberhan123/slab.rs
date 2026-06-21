@@ -130,8 +130,10 @@ function HubModelCard({
   const sourceLabel = model.local_path ?? model.repo_id ?? model.id;
   const downloadProgress = model.download_progress;
   const downloadProgressValue = getDownloadProgressValue(downloadProgress);
-  const downloadProgressLabel = getDownloadProgressLabel(downloadProgress);
-  const downloadProgressSummary = getDownloadProgressSummary(downloadProgress);
+  const downloadProgressLabel =
+    getDownloadProgressLabel(downloadProgress) || t('pages.hub.catalog.downloadRunning');
+  const downloadProgressSummary =
+    getDownloadProgressSummary(downloadProgress) || t('pages.hub.catalog.downloading');
   const runtimeStateLabel = getRuntimeStateLabel(model, t);
   const useRoute = getModelUseRoute(model);
   const lifecycleAvailable = canRunModelLifecycleAction(model);
@@ -339,7 +341,7 @@ function HubModelCard({
                     ? t('pages.hub.catalog.downloadPendingDescription')
                     : t('pages.hub.catalog.downloadIdleDescription')}
                 </p>
-                {downloadProgress ? (
+                {model.pending ? (
                   <div className="w-full space-y-2">
                     <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-medium text-muted-foreground">
                       <span className="truncate" title={downloadProgressLabel}>
@@ -349,7 +351,10 @@ function HubModelCard({
                     </div>
                     <Progress
                       value={downloadProgressValue ?? 0}
-                      className="h-2 bg-[var(--surface-soft)]"
+                      className={cn(
+                        'h-2 bg-[var(--surface-soft)]',
+                        downloadProgressValue === null && 'animate-pulse'
+                      )}
                     />
                   </div>
                 ) : null}

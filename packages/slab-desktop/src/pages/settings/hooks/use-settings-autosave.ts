@@ -33,7 +33,11 @@ export function useSettingsAutosave({
   const [fieldStatuses, setFieldStatuses] = useState<Record<string, FieldStatusState>>({});
   const [resettingPmid, setResettingPmid] = useState<string | null>(null);
   const autosaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  const updateSettingMutation = api.useMutation('put', '/v1/settings/{pmid}');
+  const updateSettingMutation = api.useMutation('put', '/v1/settings/{pmid}', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
 
   useEffect(() => {
     return () => {

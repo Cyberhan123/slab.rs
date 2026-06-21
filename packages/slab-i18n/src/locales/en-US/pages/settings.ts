@@ -138,4 +138,16 @@ export const settings = {
     restoredToDefault: 'Restored to default.',
     resetToast: 'Reset {{label}} to default.',
   },
+  persistence: {
+    loadFailed: 'Unable to load UI preferences',
+    saveFailed: 'Unable to save UI preferences',
+    removeFailed: 'Unable to remove UI preferences',
+    warningTitle: 'UI preferences were not persisted',
+    warningDescription: 'Latest {{operation}} failure for {{key}}: {{message}}',
+    operations: {
+      load: 'load',
+      save: 'save',
+      remove: 'remove',
+    },
+  },
 } as const;

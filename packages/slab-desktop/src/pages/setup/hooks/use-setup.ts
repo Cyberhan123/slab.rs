@@ -67,10 +67,20 @@ export function useSetup(): SetupViewModel {
     refetchOnMount: 'always',
     refetchOnReconnect: true,
     refetchOnWindowFocus: true,
+    // Setup status drives navigation; failed probes should settle into the page
+    // error state instead of stacking global retries while the server is booting.
     retry: false,
   });
-  const provisionMutation = api.useMutation('post', '/v1/setup/provision');
-  const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
+  const provisionMutation = api.useMutation('post', '/v1/setup/provision', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
 
   const status: SetupStatus | null = setupStatus ?? null;
   const runtimePayloadUsesBundledResources =

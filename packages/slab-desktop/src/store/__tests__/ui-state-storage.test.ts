@@ -6,18 +6,28 @@ const apiClientMock = vi.hoisted(() => ({
   PUT: vi.fn<() => Promise<unknown>>(),
 }));
 
-vi.mock('@slab/api', () => ({
-  apiClient: apiClientMock,
+const toastMock = vi.hoisted(() => ({
+  error: vi.fn<(message: string, options?: unknown) => void>(),
 }));
 
-import { createUiStateStorage } from '../ui-state-storage';
+vi.mock('@slab/api', () => ({
+  getErrorMessage: (error: unknown) => error instanceof Error ? error.message : String(error),
+  getLocalizedErrorMessage: (error: unknown) => error instanceof Error ? error.message : String(error),
+  apiClient: apiClientMock,
+}));
+vi.mock('sonner', () => ({
+  toast: toastMock,
+}));
+
+import { createUiStateStorage, useUiStatePersistenceStatus } from '../ui-state-storage';
 
 describe('createUiStateStorage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    apiClientMock.DELETE.mockResolvedValue({});
+    useUiStatePersistenceStatus.getState().clearFailure();
+    apiClientMock.DELETE.mockResolvedValue({ response: { ok: true, status: 204 } });
     apiClientMock.GET.mockResolvedValue({ data: null, response: { status: 404 } });
-    apiClientMock.PUT.mockResolvedValue({});
+    apiClientMock.PUT.mockResolvedValue({ response: { ok: true, status: 204 } });
     vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
@@ -41,6 +51,7 @@ describe('createUiStateStorage', () => {
 
     apiClientMock.GET.mockResolvedValueOnce({ data: null, response: { status: 404 } });
     await expect(storage.getItem('workspace')).resolves.toBeNull();
+    expect(toastMock.error).not.toHaveBeenCalled();
   });
 
   it('coalesces pending writes and persists only the latest value', async () => {
@@ -86,6 +97,31 @@ describe('createUiStateStorage', () => {
     });
   });
 
+  it('records load failures while treating 404 as empty state', async () => {
+    const storage = createUiStateStorage({ namespace: 'test' });
+
+    apiClientMock.GET.mockResolvedValueOnce({
+      data: null,
+      response: { ok: false, status: 500, statusText: 'Server Error' },
+    });
+    await expect(storage.getItem('workspace')).resolves.toBeNull();
+
+    expect(toastMock.error).toHaveBeenCalledWith('Unable to load UI preferences', {
+      description: '500 Server Error',
+      id: 'ui-state:load:failed',
+    });
+    expect(useUiStatePersistenceStatus.getState().lastFailure).toMatchObject({
+      key: 'test:workspace',
+      message: '500 Server Error',
+      operation: 'load',
+    });
+
+    toastMock.error.mockClear();
+    apiClientMock.GET.mockResolvedValueOnce({ data: null, response: { status: 404 } });
+    await expect(storage.getItem('workspace')).resolves.toBeNull();
+    expect(toastMock.error).not.toHaveBeenCalled();
+  });
+
   it('swallows persistence failures and resolves storage operations', async () => {
     vi.useFakeTimers();
     const storage = createUiStateStorage({ namespace: 'test', writeDelayMs: 50 });
@@ -98,5 +134,18 @@ describe('createUiStateStorage', () => {
     apiClientMock.DELETE.mockRejectedValueOnce(new Error('delete failed'));
     await expect(storage.removeItem('workspace')).resolves.toBeUndefined();
     expect(console.warn).toHaveBeenCalled();
+    expect(toastMock.error).toHaveBeenCalledWith('Unable to save UI preferences', {
+      description: 'write failed',
+      id: 'ui-state:save:failed',
+    });
+    expect(toastMock.error).toHaveBeenCalledWith('Unable to remove UI preferences', {
+      description: 'delete failed',
+      id: 'ui-state:remove:failed',
+    });
+    expect(useUiStatePersistenceStatus.getState().lastFailure).toMatchObject({
+      key: 'test:workspace',
+      message: 'delete failed',
+      operation: 'remove',
+    });
   });
 });
