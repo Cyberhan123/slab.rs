@@ -28,11 +28,15 @@ struct TerminalServerInner {
 }
 
 impl TerminalServerInner {
-    fn insert_session(&self, root_path: PathBuf) -> Result<String, String> {
+    fn insert_session(
+        &self,
+        root_path: PathBuf,
+        shell: WorkspaceTerminalShell,
+    ) -> Result<String, String> {
         let id = Uuid::new_v4().to_string();
         let mut sessions =
             self.sessions.lock().map_err(|_| "failed to lock terminal sessions".to_string())?;
-        sessions.insert(id.clone(), TerminalSessionRequest { root_path });
+        sessions.insert(id.clone(), TerminalSessionRequest { root_path, shell });
         Ok(id)
     }
 
@@ -44,6 +48,7 @@ impl TerminalServerInner {
 #[derive(Clone)]
 struct TerminalSessionRequest {
     root_path: PathBuf,
+    shell: WorkspaceTerminalShell,
 }
 
 pub struct WorkspaceTerminalState {
@@ -52,8 +57,12 @@ pub struct WorkspaceTerminalState {
 }
 
 impl WorkspaceTerminalState {
-    fn create_session(&self, root_path: PathBuf) -> Result<WorkspaceTerminalSession, String> {
-        let session_id = self.inner.insert_session(root_path)?;
+    fn create_session(
+        &self,
+        root_path: PathBuf,
+        shell: WorkspaceTerminalShell,
+    ) -> Result<WorkspaceTerminalSession, String> {
+        let session_id = self.inner.insert_session(root_path, shell)?;
         Ok(WorkspaceTerminalSession {
             url: format!("{}{}/{}", self.endpoint_origin, WORKSPACE_TERMINAL_ROUTE, session_id),
         })
@@ -66,6 +75,26 @@ pub struct WorkspaceTerminalSession {
     pub url: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspaceTerminalShell {
+    Powershell,
+    Cmd,
+    Bash,
+    Zsh,
+}
+
+impl WorkspaceTerminalShell {
+    fn parse(value: Option<String>) -> Result<Self, String> {
+        match value.as_deref().unwrap_or(default_shell_name()) {
+            "powershell" => Ok(Self::Powershell),
+            "cmd" => Ok(Self::Cmd),
+            "bash" => Ok(Self::Bash),
+            "zsh" => Ok(Self::Zsh),
+            shell => Err(format!("unsupported workspace terminal shell: {shell}")),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum TerminalClientMessage {
@@ -75,18 +104,21 @@ enum TerminalClientMessage {
 
 #[tauri::command]
 pub fn workspace_terminal_session(
+    shell: Option<String>,
     workspace_state: TauriState<'_, WorkspaceState>,
     terminal_state: TauriState<'_, WorkspaceTerminalState>,
 ) -> Result<WorkspaceTerminalSession, String> {
-    workspace_terminal_session_for_state(&workspace_state, &terminal_state)
+    workspace_terminal_session_for_state(shell, &workspace_state, &terminal_state)
 }
 
 fn workspace_terminal_session_for_state(
+    shell: Option<String>,
     workspace_state: &WorkspaceState,
     terminal_state: &WorkspaceTerminalState,
 ) -> Result<WorkspaceTerminalSession, String> {
     let workspace = active_workspace(workspace_state)?;
-    terminal_state.create_session(PathBuf::from(workspace.root_path))
+    terminal_state
+        .create_session(PathBuf::from(workspace.root_path), WorkspaceTerminalShell::parse(shell)?)
 }
 
 pub fn init<R: tauri::Runtime>(app: &mut tauri::App<R>) -> Result<(), String> {
@@ -138,13 +170,17 @@ async fn handle_terminal_socket(state: TerminalServerInner, session_id: String, 
         return;
     };
 
-    if let Err(error) = run_terminal_session(session.root_path, socket).await {
+    if let Err(error) = run_terminal_session(session.root_path, session.shell, socket).await {
         log::warn!("workspace terminal session ended: {error}");
     }
 }
 
-async fn run_terminal_session(root_path: PathBuf, socket: WebSocket) -> Result<(), String> {
-    let (program, args) = shell_command();
+async fn run_terminal_session(
+    root_path: PathBuf,
+    shell: WorkspaceTerminalShell,
+    socket: WebSocket,
+) -> Result<(), String> {
+    let (program, args) = shell_command(shell)?;
     let mut env: HashMap<String, String> = std::env::vars().collect();
     configure_prompt(&mut env);
     let spawned = spawn_pty_process(
@@ -230,14 +266,41 @@ async fn write_process(writer: &mpsc::Sender<Vec<u8>>, data: Vec<u8>) {
 }
 
 #[cfg(windows)]
-fn shell_command() -> (String, Vec<String>) {
-    ("powershell.exe".to_owned(), vec!["-NoLogo".to_owned()])
+fn default_shell_name() -> &'static str {
+    "powershell"
 }
 
 #[cfg(not(windows))]
-fn shell_command() -> (String, Vec<String>) {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
-    (shell, Vec::new())
+fn default_shell_name() -> &'static str {
+    let shell = std::env::var("SHELL").unwrap_or_default();
+    if shell.ends_with("/zsh") { "zsh" } else { "bash" }
+}
+
+fn shell_command(shell: WorkspaceTerminalShell) -> Result<(String, Vec<String>), String> {
+    match shell {
+        WorkspaceTerminalShell::Powershell => {
+            #[cfg(windows)]
+            {
+                Ok(("powershell.exe".to_owned(), vec!["-NoLogo".to_owned()]))
+            }
+            #[cfg(not(windows))]
+            {
+                Ok(("pwsh".to_owned(), vec!["-NoLogo".to_owned()]))
+            }
+        }
+        WorkspaceTerminalShell::Cmd => {
+            #[cfg(windows)]
+            {
+                Ok(("cmd.exe".to_owned(), Vec::new()))
+            }
+            #[cfg(not(windows))]
+            {
+                Err("cmd shell is only available on Windows".to_owned())
+            }
+        }
+        WorkspaceTerminalShell::Bash => Ok(("bash".to_owned(), Vec::new())),
+        WorkspaceTerminalShell::Zsh => Ok(("zsh".to_owned(), Vec::new())),
+    }
 }
 
 #[cfg(windows)]
@@ -260,7 +323,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        WORKSPACE_TERMINAL_ROUTE, WorkspaceTerminalState, terminal_cwd,
+        WORKSPACE_TERMINAL_ROUTE, WorkspaceTerminalShell, WorkspaceTerminalState, terminal_cwd,
         workspace_terminal_session_for_state,
     };
     use crate::workspace::{workspace_info_for_test, workspace_state_for_test};
@@ -271,7 +334,7 @@ mod tests {
         let workspace_state = workspace_state_for_test(temp.path().join("recent.json"), None);
         let terminal_state = terminal_state_for_test();
 
-        let error = workspace_terminal_session_for_state(&workspace_state, &terminal_state)
+        let error = workspace_terminal_session_for_state(None, &workspace_state, &terminal_state)
             .expect_err("workspace should be required");
 
         assert_eq!(error, "no workspace is currently open");
@@ -286,8 +349,12 @@ mod tests {
         );
         let terminal_state = terminal_state_for_test();
 
-        let session = workspace_terminal_session_for_state(&workspace_state, &terminal_state)
-            .expect("terminal session");
+        let session = workspace_terminal_session_for_state(
+            Some("bash".to_owned()),
+            &workspace_state,
+            &terminal_state,
+        )
+        .expect("terminal session");
 
         let prefix = format!("ws://127.0.0.1:3210{WORKSPACE_TERMINAL_ROUTE}/");
         assert!(session.url.starts_with(&prefix));
@@ -295,7 +362,27 @@ mod tests {
         assert!(!session_id.is_empty());
         let request = terminal_state.inner.take_session(session_id).expect("queued session");
         assert_eq!(request.root_path, PathBuf::from(temp.path()));
+        assert_eq!(request.shell, WorkspaceTerminalShell::Bash);
         assert!(terminal_state.inner.take_session(session_id).is_none());
+    }
+
+    #[test]
+    fn workspace_terminal_rejects_unknown_shell() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workspace_state = workspace_state_for_test(
+            temp.path().join("recent.json"),
+            Some(workspace_info_for_test(temp.path())),
+        );
+        let terminal_state = terminal_state_for_test();
+
+        let error = workspace_terminal_session_for_state(
+            Some("fish".to_owned()),
+            &workspace_state,
+            &terminal_state,
+        )
+        .expect_err("unsupported shell rejected");
+
+        assert!(error.contains("unsupported workspace terminal shell"));
     }
 
     #[test]

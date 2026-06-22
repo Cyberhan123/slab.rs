@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clamp, orderBy } from 'lodash-es';
 import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
+import { useNavigate } from 'react-router-dom';
 
 import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
+import useIsTauri from '@/hooks/use-tauri';
 import api, { getErrorMessage } from '@slab/api';
 import type { components } from '@slab/api/v1';
 import {
@@ -40,6 +42,8 @@ async function fileToDataUri(file: File): Promise<string> {
 
 export function useVideoGeneration() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const isDesktopTauri = useIsTauri();
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [prompt, setPrompt] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
@@ -67,6 +71,7 @@ export function useVideoGeneration() {
   const [selectedHistoryTask, setSelectedHistoryTask] = useState<VideoGenerationTask | null>(null);
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [generationProgress, setGenerationProgress] = useState<GenerationProgress | null>(null);
+  const [comparisonTasks, setComparisonTasks] = useState<VideoGenerationTask[]>([]);
 
   const initImageInputRef = useRef<HTMLInputElement>(null);
   const generationProgressRef = useRef<GenerationProgress | null>(null);
@@ -423,6 +428,56 @@ export function useVideoGeneration() {
     anchor.click();
   }, [videoPath]);
 
+  const refillFromHistory = useCallback((task: VideoGenerationTask) => {
+    const request = task.request_data;
+    setPrompt(request.prompt ?? task.prompt ?? '');
+    setNegativePrompt(request.negative_prompt ?? '');
+    setWidthStr(String(request.width ?? task.width ?? DEFAULT_GENERATION_SIZE));
+    setHeightStr(String(request.height ?? task.height ?? DEFAULT_GENERATION_SIZE));
+    setFrames(request.video_frames ?? task.frames);
+    setFps(request.fps ?? task.fps);
+    setCfgScale(request.cfg_scale ?? cfgScale);
+    setGuidance(request.guidance ?? guidance);
+    setSteps(request.steps ?? steps);
+    setSeed(request.seed ?? seed);
+    setSampleMethod(request.sample_method ?? 'auto');
+    setScheduler(request.scheduler ?? 'auto');
+    setStrength(request.strength ?? strength);
+    setInitImageDataUri(null);
+    setHistoryDialogOpen(false);
+    toast.success(t('pages.video.history.refilled'));
+  }, [cfgScale, guidance, seed, steps, strength, t]);
+
+  const toggleHistoryComparison = useCallback((task: VideoGenerationTask) => {
+    setComparisonTasks((current) => {
+      if (current.some((item) => item.task_id === task.task_id)) {
+        return current.filter((item) => item.task_id !== task.task_id);
+      }
+
+      return [...current, task].slice(-2);
+    });
+  }, []);
+
+  const openHistoryVideoInWorkspace = useCallback((task: VideoGenerationTask) => {
+    const localPath = task.result_data?.video_path?.trim();
+    if (isDesktopTauri && localPath) {
+      navigate('/workspace', {
+        state: {
+          workspaceRevealPath: localPath,
+        },
+      });
+      return;
+    }
+
+    const artifactUrl = resolveMediaUrl(task.video_url);
+    if (artifactUrl) {
+      window.open(artifactUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    toast.error(t('pages.video.history.noArtifact'));
+  }, [isDesktopTauri, navigate, t]);
+
   const widthValue = Number.parseInt(widthStr, 10) || DEFAULT_GENERATION_SIZE;
   const heightValue = Number.parseInt(heightStr, 10) || DEFAULT_GENERATION_SIZE;
   const clipDurationSeconds = frames / clamp(fps, 1, Number.POSITIVE_INFINITY);
@@ -460,6 +515,7 @@ export function useVideoGeneration() {
   return {
     advancedOpen,
     cfgScale,
+    comparisonTasks,
     footerHint,
     fps,
     frames,
@@ -514,5 +570,8 @@ export function useVideoGeneration() {
     widthStr,
     widthValue,
     openHistoryDetail,
+    openHistoryVideoInWorkspace,
+    refillFromHistory,
+    toggleHistoryComparison,
   };
 }

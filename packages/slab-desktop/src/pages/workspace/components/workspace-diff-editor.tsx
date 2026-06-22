@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import * as Monaco from "monaco-editor"
 
-import { ensureWorkspaceLspServices } from "../lib/workspace-lsp"
 import { languageForFile } from "../lib/workspace-page-utils"
 
 type WorkspaceDiffEditorProps = {
@@ -92,6 +91,7 @@ export function WorkspaceDiffEditor({
     let cancelled = false
 
     void (async () => {
+      const { ensureWorkspaceLspServices } = await import("../lib/workspace-lsp")
       await ensureWorkspaceLspServices()
       if (cancelled) {
         return

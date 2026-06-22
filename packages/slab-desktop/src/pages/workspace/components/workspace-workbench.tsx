@@ -31,10 +31,10 @@ import {
 } from "@/lib/workspace-bridge"
 import { cn } from "@/lib/utils"
 import type { WorkspacePageState } from "../hooks/use-workspace-page"
-import { runWorkspaceVscodeCommand } from "../lib/workspace-lsp"
-import { SLAB_DIR_NAME } from "../lib/workspace-page-utils"
+import { languageForFile, SLAB_DIR_NAME } from "../lib/workspace-page-utils"
 import { RecentWorkspaceList } from "./recent-workspace-list"
 import { WorkspaceCommandPalette } from "./workspace-command-palette"
+import { WorkspaceCodeEditor } from "./workspace-code-editor"
 import { WorkspaceConsolePanel } from "./workspace-console-panel"
 import { WorkspaceDiffEditor } from "./workspace-diff-editor"
 import { WorkspaceGitPanel } from "./workspace-git-panel"
@@ -55,6 +55,7 @@ export function WorkspaceWorkbench({
   fileSearchFetching,
   fileSearchResults,
   fileSearchTruncated,
+  fileError,
   gitDiffFetching,
   gitStatus,
   gitStatusFetching,
@@ -64,6 +65,7 @@ export function WorkspaceWorkbench({
   handleGitDiscard,
   handleGitStage,
   handleGitUnstage,
+  handleExplainWithAssistant,
   handleOpenFile,
   handleOpenFolder,
   handleOpenTextSearchMatch,
@@ -85,6 +87,7 @@ export function WorkspaceWorkbench({
   selectedGitDiffEntry,
   selectedFileDirty,
   savingFile,
+  setBrowserEditorSelection,
   setEditorContent,
   setTextSearchQuery,
   textSearchFetching,
@@ -158,15 +161,16 @@ export function WorkspaceWorkbench({
 
   const runEditorAction = useCallback(
     async (actionId: string) => {
-      if (!workspace) {
+      if (!workspace || !isDesktopTauri) {
         return
       }
 
+      const { runWorkspaceVscodeCommand } = await import("../lib/workspace-lsp")
       await runWorkspaceVscodeCommand(actionId, workspace.rootPath).catch((error) => {
         console.debug("workspace VS Code command failed", { actionId, error })
       })
     },
-    [workspace],
+    [isDesktopTauri, workspace],
   )
 
   const commandPaletteButton = (
@@ -211,6 +215,7 @@ export function WorkspaceWorkbench({
       onSetMarkdownMode={handleSetMarkdownMode}
       onOpenWorkspacePath={openWorkspacePath}
       onEditorAction={runEditorAction}
+      onExplainWithAssistant={handleExplainWithAssistant}
     />
   )
 
@@ -401,7 +406,15 @@ export function WorkspaceWorkbench({
 
         <div className="flex h-full min-h-0 flex-col gap-4">
           <SoftPanel className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[18px] p-0">
-            {selectedGitDiffEntry ? (
+            {fileError ? (
+              <StageEmptyState
+                icon={FileCode2}
+                title={t("pages.workspace.editor.tooLarge")}
+                description={fileError}
+                className="min-h-[420px]"
+                data-testid="file-too-large"
+              />
+            ) : selectedGitDiffEntry ? (
               <>
                 <div className="flex h-9 shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-background/80 px-3">
                   <div
@@ -427,12 +440,15 @@ export function WorkspaceWorkbench({
                 <WorkspaceVscodePart
                   part="editor"
                   workspaceRoot={workspace.rootPath}
+                  editorSettings={editorSettings}
                   className="min-h-[420px] flex-1"
                 />
               ) : (
                 <WorkspaceBrowserEditor
+                  editorSettings={editorSettings}
                   editorContent={editorContent}
                   onChange={setEditorContent}
+                  onSelectionChange={setBrowserEditorSelection}
                   onSave={handleSaveFile}
                   savingFile={savingFile}
                   selectedFile={selectedFile}
@@ -487,10 +503,15 @@ function WorkspacePathOpenForm({
         data-testid="workspace-path-input"
       />
       <Button
-        type="submit"
+        type="button"
         variant="cta"
         size="pill"
         disabled={!trimmedPath}
+        onClick={() => {
+          if (trimmedPath) {
+            void onOpenWorkspacePath(trimmedPath)
+          }
+        }}
         data-testid="workspace-open-path-button"
       >
         <FolderOpen className="size-4" />
@@ -609,14 +630,18 @@ function WorkspaceServerFileTree({
 
 function WorkspaceBrowserEditor({
   editorContent,
+  editorSettings,
   onChange,
+  onSelectionChange,
   onSave,
   savingFile,
   selectedFile,
   selectedFileDirty,
 }: {
   editorContent: string
+  editorSettings: WorkspacePageState["editorSettings"]
   onChange: (value: string) => void
+  onSelectionChange: WorkspacePageState["setBrowserEditorSelection"]
   onSave: () => Promise<void>
   savingFile: boolean
   selectedFile: WorkspacePageState["selectedFile"]
@@ -655,14 +680,32 @@ function WorkspaceBrowserEditor({
           {t("pages.workspace.editor.save")}
         </Button>
       </div>
-      <textarea
-        value={editorContent}
-        onChange={(event) => onChange(event.target.value)}
-        className="min-h-0 flex-1 resize-none bg-[var(--surface-1)] p-3 font-mono text-sm leading-6 outline-none"
-        spellCheck={false}
-        aria-label={selectedFile.relativePath}
-        data-testid="workspace-editor-textarea"
-      />
+      <div className="min-h-0 flex-1 bg-[var(--surface-1)]" data-testid="workspace-editor-monaco">
+        <WorkspaceCodeEditor
+          filePath={`memory://workspace/${encodeURIComponent(selectedFile.relativePath)}`}
+          language={languageForFile(selectedFile.relativePath)}
+          memoryModel
+          onChange={onChange}
+          onSelectionChange={(selection) => {
+            onSelectionChange(selection
+              ? {
+                  ...selection,
+                  relativePath: selectedFile.relativePath,
+                }
+              : null)
+          }}
+          options={{
+            automaticLayout: true,
+            fontSize: editorSettings.fontSize,
+            minimap: { enabled: editorSettings.minimapEnabled },
+            readOnly: false,
+            tabSize: editorSettings.tabSize,
+            wordWrap: editorSettings.wordWrap,
+          }}
+          theme="vs"
+          value={editorContent}
+        />
+      </div>
     </div>
   )
 }

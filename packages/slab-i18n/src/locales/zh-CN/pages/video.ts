@@ -79,6 +79,14 @@ export const video = {
     empty: '暂无视频历史。已完成的渲染结果会显示在这里。',
     detailTitle: '视频任务详情',
     noArtifact: '这个任务暂时还没有可持久化查看的视频产物。',
+    refilled: '已回填历史参数。再次生成前请先确认。',
+    compareArtifact: '对比产物 {{index}}',
+    actions: {
+      compare: '加入对比',
+      openWorkspace: '在工作区打开',
+      refill: '复用参数',
+      removeCompare: '移出对比',
+    },
     fields: {
       size: '尺寸',
       clip: '片段',

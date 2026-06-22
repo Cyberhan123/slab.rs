@@ -12,7 +12,10 @@ import { toast } from "sonner"
 import { Button } from "@slab/components/button"
 import { useTranslation } from "@slab/i18n"
 import { getErrorMessage } from "@slab/api"
-import { workspaceTerminalSession } from "@/lib/workspace-bridge"
+import {
+  workspaceTerminalSession,
+  type WorkspaceTerminalShell,
+} from "@/lib/workspace-bridge"
 import { cn } from "@/lib/utils"
 
 type WorkspaceConsolePanelProps = {
@@ -22,6 +25,7 @@ type WorkspaceConsolePanelProps = {
 
 type TerminalSession = {
   id: string
+  shell: WorkspaceTerminalShell
 }
 
 type TerminalControlMessage =
@@ -81,9 +85,14 @@ const darkTheme: ITheme = {
   brightWhite: "#ffffff",
 }
 
-function createTerminalSession(): TerminalSession {
+function defaultTerminalShell(): WorkspaceTerminalShell {
+  return navigator.userAgent.includes("Windows") ? "powershell" : "bash"
+}
+
+function createTerminalSession(shell: WorkspaceTerminalShell = defaultTerminalShell()): TerminalSession {
   return {
     id: `terminal-${Date.now()}-${crypto.randomUUID()}`,
+    shell,
   }
 }
 
@@ -93,6 +102,7 @@ export function WorkspaceConsolePanel({ themeMode, workspaceRoot }: WorkspaceCon
   const workspaceRootRef = useRef(workspaceRoot)
   const [sessions, setSessions] = useState<TerminalSession[]>(() => [createTerminalSession()])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(() => sessions[0].id)
+  const [selectedShell, setSelectedShell] = useState<WorkspaceTerminalShell>(() => defaultTerminalShell())
   const theme = useMemo(() => (themeMode === "dark" ? darkTheme : lightTheme), [themeMode])
 
   useEffect(() => {
@@ -115,10 +125,10 @@ export function WorkspaceConsolePanel({ themeMode, workspaceRoot }: WorkspaceCon
   }, [])
 
   const handleNewTerminal = useCallback(() => {
-    const session = createTerminalSession()
+    const session = createTerminalSession(selectedShell)
     setSessions((current) => [...current, session])
     setActiveSessionId(session.id)
-  }, [])
+  }, [selectedShell])
 
   const handleCloseTerminal = useCallback(
     (sessionId: string) => {
@@ -184,6 +194,17 @@ export function WorkspaceConsolePanel({ themeMode, workspaceRoot }: WorkspaceCon
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          <select
+            value={selectedShell}
+            onChange={(event) => setSelectedShell(event.target.value as WorkspaceTerminalShell)}
+            className="h-7 rounded-md border border-border/60 bg-background px-2 text-[11px] text-muted-foreground outline-none"
+            aria-label={t("pages.workspace.console.shell")}
+          >
+            <option value="powershell">{t("pages.workspace.console.shells.powershell")}</option>
+            <option value="cmd">{t("pages.workspace.console.shells.cmd")}</option>
+            <option value="bash">{t("pages.workspace.console.shells.bash")}</option>
+            <option value="zsh">{t("pages.workspace.console.shells.zsh")}</option>
+          </select>
           <Button
             type="button"
             variant="quiet"
@@ -217,6 +238,7 @@ export function WorkspaceConsolePanel({ themeMode, workspaceRoot }: WorkspaceCon
               key={session.id}
               active={session.id === activeSessionId}
               sessionId={session.id}
+              shell={session.shell}
               theme={theme}
               themeMode={themeMode}
               workspaceRoot={workspaceRoot}
@@ -240,6 +262,7 @@ function TerminalSessionPane({
   active,
   onTerminalReady,
   sessionId,
+  shell,
   theme,
   themeMode,
   workspaceRoot,
@@ -247,6 +270,7 @@ function TerminalSessionPane({
   active: boolean
   onTerminalReady: (sessionId: string, terminal: XtermTerminal | null) => void
   sessionId: string
+  shell: WorkspaceTerminalShell
   theme: ITheme
   themeMode: "light" | "dark"
   workspaceRoot: string
@@ -316,7 +340,7 @@ function TerminalSessionPane({
     )
     disposables.push(terminal.onResize(({ cols, rows }) => sendControl({ type: "resize", cols, rows })))
 
-    void workspaceTerminalSession()
+    void workspaceTerminalSession(shell)
       .then(({ url }) => {
         if (disposed) {
           return
@@ -363,7 +387,7 @@ function TerminalSessionPane({
       fitAddonRef.current = null
       onTerminalReady(sessionId, null)
     }
-  }, [onTerminalReady, sendControl, sendResize, sessionId, t, workspaceRoot])
+  }, [onTerminalReady, sendControl, sendResize, sessionId, shell, t, workspaceRoot])
 
   useEffect(() => {
     if (hostRect.width > 0 || hostRect.height > 0) {

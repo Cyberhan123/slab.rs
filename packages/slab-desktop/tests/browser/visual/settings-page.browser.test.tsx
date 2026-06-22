@@ -16,6 +16,7 @@ vi.mock('@/pages/settings/hooks/use-settings-autosave', () => ({
 vi.mock('@/hooks/use-global-header-meta', () => ({
   usePageHeader: vi.fn<() => void>(),
   usePageHeaderControl: vi.fn<() => void>(),
+  usePageHeaderSearch: vi.fn<() => void>(),
 }));
 
 const { mockApiUseQuery } = vi.hoisted(() => ({

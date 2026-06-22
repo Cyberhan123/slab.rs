@@ -11,6 +11,7 @@ import { modelSupportsCapability, toCatalogModelList } from '@slab/api/models';
 import {
   deriveProgress,
   getAudioTranscription,
+  type AudioTranscriptionTask,
   type GenerationProgress,
 } from '@/lib/media-task-api';
 import { getErrorDescription } from '@/lib/error-description';
@@ -824,6 +825,63 @@ export function useAudio() {
     !isBusy &&
     (!enableVad || hasBundledVad || Boolean(selectedVadModelId));
 
+  const refillFromHistory = useCallback((task: AudioTranscriptionTask) => {
+    const request = task.request_data;
+    const nextModelId = request.model_id ?? selectedModelId;
+    setFile({
+      file: request.source_path,
+      name: fileNameFromPath(request.source_path),
+    });
+    if (request.model_id) {
+      setSelectedModelId(request.model_id);
+    }
+
+    if (nextModelId) {
+      const vad = request.vad;
+      const decode = request.decode;
+      setModelControlOverrides(nextModelId, normalizeAudioTranscriptionControls({
+        decodeDurationMs: numericString(decode?.duration_ms),
+        decodeEntropyThold: numericString(decode?.entropy_thold),
+        decodeLogprobThold: numericString(decode?.logprob_thold),
+        decodeMaxLen: numericString(decode?.max_len),
+        decodeMaxTokens: numericString(decode?.max_tokens),
+        decodeNoContext: Boolean(decode?.no_context),
+        decodeNoSpeechThold: numericString(decode?.no_speech_thold),
+        decodeNoTimestamps: Boolean(decode?.no_timestamps),
+        decodeOffsetMs: numericString(decode?.offset_ms),
+        decodeSplitOnWord: Boolean(decode?.split_on_word),
+        decodeSuppressNst: Boolean(decode?.suppress_nst),
+        decodeTdrzEnable: Boolean(decode?.tdrz_enable),
+        decodeTemperature: numericString(decode?.temperature),
+        decodeTemperatureInc: numericString(decode?.temperature_inc),
+        decodeTokenTimestamps: Boolean(decode?.token_timestamps),
+        decodeWordThold: numericString(decode?.word_thold),
+        detectLanguage: Boolean(request.detect_language) || request.language === 'auto',
+        enableVad: Boolean(vad?.enabled),
+        language: request.language === 'auto' ? '' : request.language ?? '',
+        prompt: request.prompt ?? '',
+        selectedVadModelId,
+        showDecodeOptions: Boolean(decode),
+        vadMaxSpeechDurationS: numericString(vad?.max_speech_duration_s),
+        vadMinSilenceDurationMs: numericString(vad?.min_silence_duration_ms),
+        vadMinSpeechDurationMs: numericString(vad?.min_speech_duration_ms),
+        vadSamplesOverlap: numericString(vad?.samples_overlap),
+        vadSpeechPadMs: numericString(vad?.speech_pad_ms),
+        vadThreshold: numericString(vad?.threshold),
+      }));
+    }
+
+    setHistoryDialogOpen(false);
+    toast.success(t('pages.audio.history.refilled'));
+  }, [
+    selectedModelId,
+    selectedVadModelId,
+    setHistoryDialogOpen,
+    setModelControlOverrides,
+    setSelectedModelId,
+    t,
+  ]);
+
   const previewRows = [
     {
       label: t('pages.audio.preview.rows.model'),
@@ -902,6 +960,7 @@ export function useAudio() {
     openHistoryDetail,
     preparingStage,
     previewRows,
+    refillFromHistory,
     selectedHistoryTask,
     selectedVadModel,
     selectedVadModelId,
@@ -946,4 +1005,12 @@ export function useAudio() {
     webFileInputRef,
     whisperVadModels,
   };
+}
+
+function numericString(value: number | null | undefined) {
+  return typeof value === 'number' && Number.isFinite(value) ? String(value) : '';
+}
+
+function fileNameFromPath(path: string) {
+  return path.match(/[^/\\]+$/)?.[0] ?? path;
 }

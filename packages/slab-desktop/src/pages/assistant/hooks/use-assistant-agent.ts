@@ -110,7 +110,9 @@ export function useAssistantAgent({
   const [threadId, setThreadId] = useState<string | null>(null)
   const [status, setStatus] = useState<AgentStatus | null>(null)
   const [thoughts, setThoughts] = useState<AssistantThought[]>([])
-  const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
+  const [pendingApprovals, setPendingApprovals] = useState<Map<string, PendingApproval>>(
+    () => new Map()
+  )
   const [eventsConnected, setEventsConnected] = useState(false)
   const [restoreComplete, setRestoreComplete] = useState(!canLoadSession)
   const socketRef = useRef<WebSocket | null>(null)
@@ -195,6 +197,18 @@ export function useAssistantAgent({
     )
   }, [])
 
+  const clearPendingApproval = useCallback((callId: string) => {
+    setPendingApprovals((current) => {
+      if (!current.has(callId)) {
+        return current
+      }
+
+      const next = new Map(current)
+      next.delete(callId)
+      return next
+    })
+  }, [])
+
   const replaceThought = useCallback((nextThought: AssistantThought) => {
     setThoughts((current) => {
       const existingIndex = current.findIndex((thought) => thought.id === nextThought.id)
@@ -210,6 +224,7 @@ export function useAssistantAgent({
 
   const updateThoughtStatus = useCallback(
     (callId: string, statusValue: AssistantThought['status'], detail?: string) => {
+      clearPendingApproval(callId)
       setThoughts((current) =>
         current.map((thought) =>
               thought.callId === callId
@@ -226,7 +241,7 @@ export function useAssistantAgent({
         )
       )
     },
-    []
+    [clearPendingApproval]
   )
 
   const appendAssistantDelta = useCallback((text: string) => {
@@ -453,10 +468,14 @@ export function useAssistantAgent({
           setStatus(event.status)
           break
         case 'approval_required':
-          setPendingApproval({
-            callId: event.call_id,
-            toolName: event.tool_name,
-            command: event.command,
+          setPendingApprovals((current) => {
+            const next = new Map(current)
+            next.set(event.call_id, {
+              callId: event.call_id,
+              toolName: event.tool_name,
+              command: event.command,
+            })
+            return next
           })
           replaceThought({
             id: event.call_id,
@@ -487,7 +506,7 @@ export function useAssistantAgent({
           pendingAbortRef.current = false
           abortRequestedRef.current = false
           setStatus('interrupted')
-          setPendingApproval(null)
+          setPendingApprovals(new Map())
           markAssistantTurnCancelled(event.reason)
           setThoughts((current) =>
             current.map((thought) =>
@@ -522,7 +541,7 @@ export function useAssistantAgent({
           pendingAbortRef.current = false
           abortRequestedRef.current = false
           setStatus('completed')
-          setPendingApproval(null)
+          setPendingApprovals(new Map())
           setThoughts((current) =>
             current.map((thought) =>
               thought.status === 'loading' ? { ...thought, status: 'success' } : thought
@@ -537,7 +556,7 @@ export function useAssistantAgent({
           pendingAbortRef.current = false
           abortRequestedRef.current = false
           setStatus('errored')
-          setPendingApproval(null)
+          setPendingApprovals(new Map())
           setThoughts((current) =>
             current.map((thought) =>
               thought.status === 'loading' ? { ...thought, status: 'error' } : thought
@@ -736,7 +755,7 @@ export function useAssistantAgent({
     setThreadId(null)
     setStatus(null)
     setThoughts([])
-    setPendingApproval(null)
+    setPendingApprovals(new Map())
     setEventsConnected(false)
     setRestoreComplete(!canLoadSession)
 
@@ -857,7 +876,7 @@ export function useAssistantAgent({
 
       setMessages((current) => [...current, userMessage])
       setStatus('pending')
-      setPendingApproval(null)
+      setPendingApprovals(new Map())
       setThoughts([])
       setActiveConversation(resolvedSessionId)
 
@@ -943,14 +962,157 @@ export function useAssistantAgent({
     ]
   )
 
-  const submitApproval = useCallback(
-    async (approved: boolean) => {
-      if (!threadId || !pendingApproval) {
+  const startBranchedResponse = useCallback(
+    async (nextMessages: AssistantMessageRecord[], prompt: string) => {
+      const submittedPrompt = prompt.trim()
+      if (!submittedPrompt || isRequesting || !canLoadSession) {
         return
       }
 
-      const decision = pendingApproval
-      setPendingApproval(null)
+      const slashCommand = parseAssistantSlashCommand(submittedPrompt)
+      const requestMessages = toAssistantRequestMessages(nextMessages.map((message) => message.message))
+      if (requestMessages.length === 0) {
+        return
+      }
+
+      lastSubmittedPromptRef.current = slashCommand?.content || submittedPrompt
+      terminalTurnRef.current = false
+      abortRequestedRef.current = false
+      pendingAbortRef.current = false
+      closeTransports()
+      setThreadId(null)
+      setMessages(nextMessages)
+      setStatus('pending')
+      setPendingApprovals(new Map())
+      setThoughts([])
+      setActiveConversation(resolvedSessionId)
+
+      try {
+        await beforeRequest?.()
+      } catch (error) {
+        const message = getErrorMessage(error)
+        setStatus('errored')
+        appendAssistantError(message || locale.requestFailed)
+        return
+      }
+
+      setMessages([
+        ...nextMessages,
+        {
+          id: nextId('assistant'),
+          message: {
+            role: 'assistant',
+            content: '',
+          },
+          status: 'loading',
+        },
+      ])
+
+      try {
+        await sendAgentCommand({
+          config: toAgentConfig({
+            model,
+            reasoningEffort,
+            reasoningSupported,
+            runtimePresets,
+            slashCommand,
+            systemPrompt,
+            toolChoice,
+            toolConcurrency,
+          }),
+          messages: requestMessages,
+          request_id: nextId('request'),
+          session_id: resolvedSessionId,
+          type: 'agent.response.create',
+        })
+      } catch (error) {
+        const message = getErrorMessage(error)
+        setStatus('errored')
+        appendAssistantError(message || locale.requestFailed)
+        toast.error(locale.requestFailed, {
+          description: message,
+        })
+      }
+    },
+    [
+      appendAssistantError,
+      beforeRequest,
+      canLoadSession,
+      closeTransports,
+      isRequesting,
+      locale.requestFailed,
+      model,
+      reasoningEffort,
+      reasoningSupported,
+      resolvedSessionId,
+      runtimePresets,
+      sendAgentCommand,
+      systemPrompt,
+      toolChoice,
+      toolConcurrency,
+    ]
+  )
+
+  const editAndResend = useCallback(
+    async (messageId: string, nextContent: string) => {
+      const trimmed = nextContent.trim()
+      if (!trimmed) {
+        return
+      }
+
+      const targetIndex = messages.findIndex((message) => message.id === messageId)
+      const target = messages[targetIndex]
+      if (!target || target.message.role !== 'user') {
+        return
+      }
+
+      const nextMessages = messages.slice(0, targetIndex + 1)
+      nextMessages[targetIndex] = {
+        ...target,
+        message: {
+          ...target.message,
+          content: trimmed,
+        },
+        status: 'success',
+      }
+      await startBranchedResponse(nextMessages, trimmed)
+    },
+    [messages, startBranchedResponse]
+  )
+
+  const regenerateResponse = useCallback(
+    async (messageId?: string) => {
+      const assistantIndex =
+        typeof messageId === 'string'
+          ? messages.findIndex((message) => message.id === messageId)
+          : messages.findLastIndex((message) => message.message.role === 'assistant')
+      const assistantMessage = messages[assistantIndex]
+      if (!assistantMessage || assistantMessage.message.role !== 'assistant') {
+        return
+      }
+
+      const userIndex = messages
+        .slice(0, assistantIndex)
+        .findLastIndex((message) => message.message.role === 'user')
+      const userMessage = messages[userIndex]
+      if (!userMessage) {
+        return
+      }
+
+      const prompt = getAssistantMessageTextContent(userMessage.message)
+      await startBranchedResponse(messages.slice(0, assistantIndex), prompt)
+    },
+    [messages, startBranchedResponse]
+  )
+
+  const submitApproval = useCallback(
+    async (callId: string, approved: boolean) => {
+      const decision = pendingApprovals.get(callId)
+      if (!threadId || !decision) {
+        return
+      }
+
+      clearPendingApproval(callId)
       updateThoughtStatus(decision.callId, approved ? 'loading' : 'abort')
 
       try {
@@ -968,8 +1130,9 @@ export function useAssistantAgent({
       }
     },
     [
+      clearPendingApproval,
       locale.approvalFailed,
-      pendingApproval,
+      pendingApprovals,
       sendAgentCommand,
       threadId,
       updateThoughtStatus,
@@ -1031,16 +1194,22 @@ export function useAssistantAgent({
     () => withThoughts(messages, thoughts),
     [messages, thoughts]
   )
+  const pendingApprovalList = useMemo(
+    () => Array.from(pendingApprovals.values()),
+    [pendingApprovals]
+  )
 
   return {
     abort,
     activeConversation,
+    editAndResend,
     eventsConnected,
     handleSubmit,
     isHistoryLoading,
     isRequesting,
     messages: messagesWithThoughts,
-    pendingApproval,
+    pendingApprovals: pendingApprovalList,
+    regenerateResponse,
     retryLastResponse,
     status,
     submitApproval,

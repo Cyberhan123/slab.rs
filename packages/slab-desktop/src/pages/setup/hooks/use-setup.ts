@@ -33,6 +33,9 @@ export interface SetupViewModel {
   progressPercent: number;
   progressSummary: string;
   canRetry: boolean;
+  canStart: boolean;
+  handleSkip: () => Promise<void>;
+  handleStart: () => Promise<void>;
   handleRetry: () => Promise<void>;
 }
 
@@ -41,7 +44,6 @@ export function useSetup(): SetupViewModel {
   const navigate = useNavigate();
   const platform = useDesktopPlatform();
   const runtimePayloadMode: RuntimePayloadMode = platform === 'macos' ? 'bundled' : 'packaged';
-  const autoStartedRef = useRef(false);
   const setupMountedRef = useRef(true);
   const provisionTaskIdRef = useRef<string | null>(null);
 
@@ -77,6 +79,11 @@ export function useSetup(): SetupViewModel {
     },
   });
   const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  });
+  const completeSetupMutation = api.useMutation('post', '/v1/setup/complete', {
     meta: {
       skipGlobalErrorToast: true,
     },
@@ -154,15 +161,21 @@ export function useSetup(): SetupViewModel {
       }
 
       if (task.status === 'succeeded') {
-        setProvisionState('succeeded');
-        setProvisionError(null);
-        setProvisionTaskId(null);
-        markSetupInitialized();
-
         try {
+          await completeSetupMutation.mutateAsync({
+            body: {
+              initialized: true,
+            },
+          });
+          setProvisionState('succeeded');
+          setProvisionError(null);
+          setProvisionTaskId(null);
+          markSetupInitialized();
           await refetchSetupStatus();
-        } catch {
-          // Keep going; the cache has already been marked initialized.
+        } catch (error) {
+          setProvisionState('failed');
+          setProvisionError(getErrorMessage(error) || t('pages.setup.errors.completeFailed'));
+          return;
         }
 
         navigate('/', { replace: true });
@@ -176,31 +189,12 @@ export function useSetup(): SetupViewModel {
           t('pages.setup.errors.failedBeforeFinish'),
       );
     },
-    [markSetupInitialized, navigate, refetchSetupStatus, t],
+    [completeSetupMutation, markSetupInitialized, navigate, refetchSetupStatus, t],
   );
 
   useEffect(() => {
     provisionTaskIdRef.current = provisionTaskId;
   }, [provisionTaskId]);
-
-  useEffect(() => {
-    if (autoStartedRef.current) {
-      return;
-    }
-
-    if (
-      setupStatusLoading
-      || setupStatusFetching
-      || setupStatusError
-      || !status
-      || status.initialized
-    ) {
-      return;
-    }
-
-    autoStartedRef.current = true;
-    void startProvision();
-  }, [setupStatusError, setupStatusFetching, setupStatusLoading, startProvision, status]);
 
   const pollProvisionTask = useCallback(async () => {
     const activeTaskId = provisionTaskId;
@@ -240,9 +234,23 @@ export function useSetup(): SetupViewModel {
   }, [pollProvisionTask, provisionTaskId, startProvisionPoll, stopProvisionPoll]);
 
   const handleRetry = useCallback(async () => {
-    autoStartedRef.current = true;
     await startProvision();
   }, [startProvision]);
+  const handleSkip = useCallback(async () => {
+    try {
+      await completeSetupMutation.mutateAsync({
+        body: {
+          initialized: true,
+        },
+      });
+      markSetupInitialized();
+      await refetchSetupStatus();
+      navigate('/', { replace: true });
+    } catch (error) {
+      setProvisionState('failed');
+      setProvisionError(getErrorMessage(error));
+    }
+  }, [completeSetupMutation, markSetupInitialized, navigate, refetchSetupStatus]);
   const isCheckingSetupStatus =
     setupStatusLoading || (setupStatusFetching && provisionState === 'idle');
 
@@ -273,6 +281,9 @@ export function useSetup(): SetupViewModel {
       t,
     ),
     canRetry: provisionState === 'failed',
+    canStart: provisionState === 'idle' || provisionState === 'failed',
+    handleSkip,
+    handleStart: startProvision,
     handleRetry,
   };
 }

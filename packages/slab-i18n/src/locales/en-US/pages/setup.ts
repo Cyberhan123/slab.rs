@@ -14,6 +14,7 @@ export const setup = {
     reload: 'Reload',
   },
   errors: {
+    completeFailed: 'Setup finished, but Slab could not save the completion state.',
     failedBeforeFinish: 'Setup failed before provisioning could finish.',
   },
   badge: {
@@ -57,10 +58,19 @@ export const setup = {
     succeeded: 'Setup has completed. Slab will enter the application automatically.',
   },
   actions: {
+    later: 'Later',
     retry: 'Retry setup',
+    start: 'Start setup',
     launching: 'Launching Slab...',
     checkingPrerequisites: 'Checking desktop prerequisites',
     provisioning: 'Provisioning in progress',
+  },
+  checklist: {
+    checking: 'Checking',
+    installed: 'Ready',
+    pending: 'Pending',
+    runtimePayload: 'Runtime payload',
+    title: 'Checklist',
   },
   stages: {
     failed: 'Setup failed',

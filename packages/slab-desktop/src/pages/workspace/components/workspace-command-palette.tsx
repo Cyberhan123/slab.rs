@@ -64,6 +64,7 @@ type WorkspaceCommandPaletteProps = {
   onSetMarkdownMode: (mode: WorkspaceMarkdownMode) => void
   onOpenWorkspacePath: (rootPath: string) => Promise<void>
   onEditorAction: (actionId: string) => Promise<void>
+  onExplainWithAssistant: () => void | Promise<void>
 }
 
 export function WorkspaceCommandPalette({
@@ -91,6 +92,7 @@ export function WorkspaceCommandPalette({
   onSetMarkdownMode,
   onOpenWorkspacePath,
   onEditorAction,
+  onExplainWithAssistant,
 }: WorkspaceCommandPaletteProps) {
   const { t } = useTranslation()
   const [query, setQuery] = useState("")
@@ -228,6 +230,16 @@ export function WorkspaceCommandPalette({
               </CommandItem>
               {selectedFile && (!isMarkdownFile || markdownMode === "source") ? (
                 <>
+                  <CommandItem
+                    value={t("pages.workspace.commandPalette.explainWithAssistant")}
+                    onSelect={() => {
+                      onOpenChange(false)
+                      void onExplainWithAssistant()
+                    }}
+                  >
+                    <WandSparkles className="size-4" />
+                    <span>{t("pages.workspace.commandPalette.explainWithAssistant")}</span>
+                  </CommandItem>
                   <CommandItem
                     value={t("pages.workspace.editor.find")}
                     onSelect={() => {

@@ -10,9 +10,13 @@ import { AssistantMarkdown } from '../assistant-markdown'
 const bubbleLabels = {
   approve: 'Approve',
   assistant: 'Assistant',
+  cancelEdit: 'Cancel edit',
   copy: 'Copy',
+  edit: 'Edit',
+  regenerate: 'Regenerate',
   reject: 'Reject',
   retry: 'Retry',
+  saveEdit: 'Send edit',
   terminalCancelled: 'Generation was cancelled. Partial content was preserved.',
   thinkingLoading: 'Thinking...',
   thinkingReady: 'Reasoning trace',
@@ -25,7 +29,7 @@ function createAssistantBubbleContent(
   status: AssistantBubbleContent['item']['status'] = 'success'
 ): AssistantBubbleContent {
   return {
-    approving: false,
+    approvingCallIds: [],
     item: {
       id: 'assistant-message',
       message: {

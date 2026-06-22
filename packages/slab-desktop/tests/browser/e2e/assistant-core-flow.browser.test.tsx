@@ -175,6 +175,10 @@ function useMockAssistantAgent({
     isHistoryLoading: false,
     isRequesting,
     messages: visibleMessages,
+    editAndResend: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    pendingApprovals: [],
+    regenerateResponse: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    retryLastResponse: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     submitApproval: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
   };
 }

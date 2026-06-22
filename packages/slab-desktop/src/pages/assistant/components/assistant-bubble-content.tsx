@@ -8,19 +8,22 @@ import { useClipboard } from "@mantine/hooks"
 import {
   AlertCircle,
   BotMessageSquare,
+  Check,
   CheckCircle2,
   Copy,
+  Pencil,
   RotateCcw,
   UserRound,
   XCircle,
 } from "lucide-react"
-import { memo, useMemo } from "react"
+import { memo, useMemo, useState } from "react"
 
 import { Button } from "@slab/components/button"
 import { cn } from "@/lib/utils"
 
 import {
   getAssistantMessageTextContent,
+  stripThinkTags,
   stripTrailingAssistantTurnArtifacts,
   type AssistantMessageRecord,
   type AssistantThought,
@@ -28,14 +31,18 @@ import {
 import { AssistantMarkdown } from "./assistant-markdown"
 
 export type AssistantBubbleContent = {
-  approving: boolean
+  approvingCallIds: string[]
   item: AssistantMessageRecord
   labels: {
     approve: string
     assistant: string
+    cancelEdit: string
     copy: string
+    edit: string
+    regenerate: string
     reject: string
     retry: string
+    saveEdit: string
     terminalCancelled: string
     thinkingLoading: string
     thinkingReady: string
@@ -43,7 +50,9 @@ export type AssistantBubbleContent = {
     waitingForResponse: string
   }
   markdownClassName?: string
-  onApprove?: (approved: boolean) => void
+  onApprove?: (callId: string, approved: boolean) => void
+  onEdit?: (messageId: string, nextContent: string) => void | Promise<void>
+  onRegenerate?: (messageId: string) => void | Promise<void>
   onRetry?: () => void
 }
 
@@ -123,13 +132,14 @@ function formatJsonCode(value: string) {
 function renderThoughtContent(
   thought: AssistantThought,
   approving: boolean,
-  onApprove: ((approved: boolean) => void) | undefined,
+  onApprove: ((callId: string, approved: boolean) => void) | undefined,
   labels: {
     approve: string
     reject: string
   }
 ) {
   if (thought.pendingApproval) {
+    const callId = thought.pendingApproval.callId
     return (
       <div
         className="min-w-0 max-w-full space-y-3 overflow-hidden"
@@ -148,7 +158,8 @@ function renderThoughtContent(
           <Button
             variant="quiet"
             size="sm"
-            onClick={() => onApprove?.(false)}
+            data-testid={`thought-reject-${callId}`}
+            onClick={() => onApprove?.(callId, false)}
             disabled={approving}
           >
             <XCircle className="size-4" />
@@ -157,7 +168,8 @@ function renderThoughtContent(
           <Button
             variant="pill"
             size="sm"
-            onClick={() => onApprove?.(true)}
+            data-testid={`thought-approve-${callId}`}
+            onClick={() => onApprove?.(callId, true)}
             disabled={approving}
           >
             <CheckCircle2 className="size-4" />
@@ -189,8 +201,8 @@ function renderThoughtContent(
 
 function toThoughtChainItems(
   thoughts: AssistantThought[] | undefined,
-  approving: boolean,
-  onApprove: ((approved: boolean) => void) | undefined,
+  approvingCallIds: string[],
+  onApprove: ((callId: string, approved: boolean) => void) | undefined,
   labels: {
     approve: string
     reject: string
@@ -205,7 +217,12 @@ function toThoughtChainItems(
   const items = (thoughts ?? []).map((thought) => ({
     blink: thought.status === "loading",
     collapsible: true,
-    content: renderThoughtContent(thought, approving, onApprove, labels),
+    content: renderThoughtContent(
+      thought,
+      Boolean(thought.callId && approvingCallIds.includes(thought.callId)),
+      onApprove,
+      labels
+    ),
     description: thought.summary ?? thought.toolName ?? thought.callId,
     icon: false,
     key: thought.id,
@@ -268,7 +285,7 @@ const AssistantBubbleContentView = memo(function AssistantBubbleContentView({
     () =>
       toThoughtChainItems(
         content.item.message.thoughts,
-        content.approving,
+        content.approvingCallIds,
         content.onApprove,
         {
           approve: content.labels.approve,
@@ -287,7 +304,7 @@ const AssistantBubbleContentView = memo(function AssistantBubbleContentView({
           : undefined
       ),
     [
-      content.approving,
+      content.approvingCallIds,
       content.item.id,
       content.item.message.thoughts,
       content.labels.approve,
@@ -341,7 +358,11 @@ function renderAssistantBubbleContent(content: AssistantBubbleContent) {
 
 function AssistantBubbleFooter({ content }: { content: AssistantBubbleContent }) {
   const clipboard = useClipboard()
-  const textContent = getAssistantMessageTextContent(content.item.message)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(() => getAssistantMessageTextContent(content.item.message))
+  const isAssistant = content.item.message.role === "assistant"
+  const isBusy = content.item.status === "loading" || content.item.status === "updating"
+  const textContent = stripThinkTags(getAssistantMessageTextContent(content.item.message))
   const terminalNotice = content.item.message.role === "assistant"
     ? content.item.message.terminalNotice
     : undefined
@@ -366,6 +387,54 @@ function AssistantBubbleFooter({ content }: { content: AssistantBubbleContent })
           </span>
         </div>
       ) : null}
+      {editing ? (
+        <form
+          className="flex flex-col gap-2 rounded-xl border border-border/60 bg-background/70 p-2"
+          onSubmit={(event) => {
+            event.preventDefault()
+            const nextContent = draft.trim()
+            if (!nextContent) {
+              return
+            }
+            setEditing(false)
+            void content.onEdit?.(String(content.item.id), nextContent)
+          }}
+        >
+          <textarea
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            className="min-h-24 resize-y rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none focus:border-[var(--brand-teal)]"
+            data-testid={`assistant-edit-${content.item.id}`}
+            aria-label={content.labels.edit}
+          />
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="quiet"
+              size="sm"
+              className="h-7 rounded-full px-3 text-[11px]"
+              onClick={() => {
+                setDraft(getAssistantMessageTextContent(content.item.message))
+                setEditing(false)
+              }}
+            >
+              <XCircle className="size-3.5" />
+              {content.labels.cancelEdit}
+            </Button>
+            <Button
+              type="submit"
+              variant="pill"
+              size="sm"
+              className="h-7 rounded-full px-3 text-[11px]"
+              disabled={!draft.trim()}
+              data-testid={`assistant-save-edit-${content.item.id}`}
+            >
+              <Check className="size-3.5" />
+              {content.labels.saveEdit}
+            </Button>
+          </div>
+        </form>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
@@ -377,6 +446,38 @@ function AssistantBubbleFooter({ content }: { content: AssistantBubbleContent })
           <Copy className="size-3.5" />
           {content.labels.copy}
         </Button>
+        {!isAssistant && content.onEdit ? (
+          <Button
+            type="button"
+            variant="quiet"
+            size="sm"
+            className="h-7 rounded-full px-3 text-[11px] text-muted-foreground hover:text-foreground"
+            disabled={isBusy}
+            onClick={() => {
+              setDraft(getAssistantMessageTextContent(content.item.message))
+              setEditing(true)
+            }}
+            data-testid={`assistant-edit-button-${content.item.id}`}
+          >
+            <Pencil className="size-3.5" />
+            {content.labels.edit}
+          </Button>
+        ) : null}
+        {isAssistant && !isBusy && content.onRegenerate ? (
+          <Button
+            type="button"
+            variant="quiet"
+            size="sm"
+            className="h-7 rounded-full px-3 text-[11px] text-muted-foreground hover:text-foreground"
+            onClick={() => {
+              void content.onRegenerate?.(String(content.item.id))
+            }}
+            data-testid={`assistant-regenerate-${content.item.id}`}
+          >
+            <RotateCcw className="size-3.5" />
+            {content.labels.regenerate}
+          </Button>
+        ) : null}
         {terminalNotice?.type === "error" ? (
           <Button
             type="button"

@@ -155,11 +155,13 @@ export const audio = {
     description: '在这里查看转录结果，并重新打开最近的转录详情。',
     empty: '暂无转录历史。已完成的转录结果会显示在这里。',
     detailTitle: '转录详情',
+    refilled: '已回填历史转录设置。再次开始前请先确认。',
     pendingTranscript: '转录内容暂时还不可用。',
     emptySegment: '暂无分段文本',
     actions: {
       copy: '复制',
       copied: '已复制转录内容',
+      refill: '复用设置',
       playbackAria: '音频播放',
       exportTxt: 'TXT',
       exportSrt: 'SRT',

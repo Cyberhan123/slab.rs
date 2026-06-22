@@ -3,8 +3,13 @@ import XMarkdown from "@ant-design/x-markdown"
 import Latex from "@ant-design/x-markdown/plugins/latex"
 import "@ant-design/x-markdown/dist/plugins/latex.css"
 import { CodeHighlighter } from "@ant-design/x"
+import { useClipboard } from "@mantine/hooks"
+import { Copy } from "lucide-react"
 import { isValidElement, memo, type ReactNode } from "react"
+import { toast } from "sonner"
 
+import { Button } from "@slab/components/button"
+import { useTranslation } from "@slab/i18n"
 import { cn } from "@/lib/utils"
 
 type AssistantMarkdownProps = {
@@ -44,6 +49,8 @@ function SupComponent({ children, ...props }: ComponentProps) {
 }
 
 function CodeBlockComponent({ block, children, lang, ...props }: ComponentProps) {
+  const clipboard = useClipboard()
+  const { t } = useTranslation()
   const code = childrenToText(children)
   if (!block) {
     return (
@@ -59,7 +66,25 @@ function CodeBlockComponent({ block, children, lang, ...props }: ComponentProps)
     <CodeHighlighter
       lang={language}
       className="my-3 max-w-full overflow-x-auto rounded-[14px] border border-border/60 text-xs"
-      header={language}
+      header={
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <span className="min-w-0 truncate">{language}</span>
+          <Button
+            type="button"
+            variant="quiet"
+            size="icon-xs"
+            className="size-6"
+            data-testid="code-copy"
+            aria-label="Copy code"
+            onClick={() => {
+              clipboard.copy(code)
+              toast.success(t("pages.assistant.message.copied"))
+            }}
+          >
+            <Copy className="size-3.5" />
+          </Button>
+        </div>
+      }
     >
       {code}
     </CodeHighlighter>

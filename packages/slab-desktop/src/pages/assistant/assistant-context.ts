@@ -21,6 +21,7 @@ export {
 export {
   getAssistantMessageTextContent,
   getContinueGenerationPrefix,
+  stripThinkTags,
   stripTrailingAssistantTurnArtifacts,
   toAssistantRequestMessages,
 } from './lib/assistant-message-utils'

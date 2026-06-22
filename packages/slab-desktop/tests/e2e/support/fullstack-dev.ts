@@ -181,7 +181,8 @@ export async function startFullstackDev(
     SLAB_SETTINGS_OVERLAY_PATH: testEnv.settingsOverlayPath,
     SLAB_SETTINGS_PATH: testEnv.settingsPath,
     SLAB_WORKSPACE_ROOT: testEnv.workspaceRoot,
-    VITE_API_BASE_URL: testEnv.serverBaseUrl,
+    VITE_API_BASE_URL: testEnv.uiBaseUrl,
+    VITE_API_PROXY_TARGET: testEnv.serverBaseUrl,
   }
   prependToPath(commonEnv, dirname(cargoShimPath))
   delete commonEnv.RUSTC_WRAPPER

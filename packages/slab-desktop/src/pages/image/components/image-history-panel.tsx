@@ -1,4 +1,4 @@
-import { Download, ImageIcon } from 'lucide-react';
+import { Download, ImageIcon, RotateCcw } from 'lucide-react';
 import { useTranslation } from '@slab/i18n';
 
 import { Badge } from '@slab/components/badge';
@@ -19,6 +19,7 @@ type ImageHistoryPanelProps = {
   historyError: string | null;
   historyLoading: boolean;
   openHistoryDetail: (taskId: string) => void | Promise<void>;
+  refillFromHistory: (task: ImageGenerationTask) => void;
   selectedHistoryTask: ImageGenerationTask | null;
   setHistoryDialogOpen: (open: boolean) => void;
   setSelectedHistoryTask: (task: ImageGenerationTask | null) => void;
@@ -40,6 +41,7 @@ export function ImageHistoryPanel({
   historyError,
   historyLoading,
   openHistoryDetail,
+  refillFromHistory,
   selectedHistoryTask,
   setHistoryDialogOpen,
   setSelectedHistoryTask,
@@ -127,6 +129,18 @@ export function ImageHistoryPanel({
                   {selectedHistoryTask.status} | {formatHistoryTime(selectedHistoryTask.created_at)}
                 </DialogDescription>
               </DialogHeader>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="pill"
+                  size="sm"
+                  data-testid="image-history-refill"
+                  onClick={() => refillFromHistory(selectedHistoryTask)}
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  {t('pages.image.history.actions.refill')}
+                </Button>
+              </div>
               <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
                 <div className="grid max-h-[70vh] gap-3 overflow-y-auto sm:grid-cols-2">
                   {selectedHistoryImages.map((src, index) => (

@@ -1,13 +1,20 @@
+use std::convert::Infallible;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::{Query, State};
+use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router, middleware};
+use notify::event::{ModifyKind, RenameMode};
+use notify::{Event as NotifyEvent, EventKind as NotifyEventKind, RecursiveMode, Watcher};
 use serde::Deserialize;
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::WorkspaceService;
+use tokio_stream::StreamExt;
+use tokio_stream::wrappers::ReceiverStream;
 use utoipa::OpenApi;
 
 use crate::api::middleware::auth;
@@ -21,6 +28,7 @@ use crate::api::v1::workspace::schema::{
     WorkspaceGitStatusView, WorkspaceInfoResponse, WorkspaceOpenCommand, WorkspacePathMetadata,
     WorkspacePathView, WorkspaceRenamePathCommand, WorkspaceStateResponse,
     WorkspaceTextSearchFileMatch, WorkspaceTextSearchLineMatch, WorkspaceTextSearchView,
+    WorkspaceWatchEntryKind, WorkspaceWatchEvent, WorkspaceWatchEventType,
     WorkspaceWriteFileCommand, WorkspaceWriteFileView,
 };
 use crate::api::validation::ValidatedJson;
@@ -54,6 +62,7 @@ struct WorkspaceSearchQuery {
         read_directory,
         read_file,
         stat_path,
+        watch_workspace,
         search_files,
         search_text,
         write_file,
@@ -83,6 +92,9 @@ struct WorkspaceSearchQuery {
         WorkspaceTextSearchFileMatch,
         WorkspaceTextSearchLineMatch,
         WorkspacePathMetadata,
+        WorkspaceWatchEvent,
+        WorkspaceWatchEventType,
+        WorkspaceWatchEntryKind,
         WorkspaceOpenCommand,
         WorkspaceWriteFileCommand,
         WorkspaceWriteFileView,
@@ -116,6 +128,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/workspace/directories", post(create_directory))
         .route("/workspace/path", delete(delete_path).patch(rename_path))
         .route("/workspace/path/stat", get(stat_path))
+        .route("/workspace/watch", get(watch_workspace))
         .route("/workspace/search", get(search_files))
         .route("/workspace/search/text", get(search_text))
         .route("/workspace/git/status", get(git_status))
@@ -248,6 +261,31 @@ async fn stat_path(
 ) -> Result<Json<WorkspacePathMetadata>, ServerError> {
     let root = active_workspace_root(state.as_ref())?;
     Ok(Json(WorkspaceService::stat_path(root, &query.relative_path)?))
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/workspace/watch",
+    tag = "workspace",
+    responses(
+        (status = 200, description = "Workspace file-system watch stream", body = WorkspaceWatchEvent),
+        (status = 400, description = "Bad request"),
+    )
+)]
+async fn watch_workspace(
+    State(state): State<Arc<AppState>>,
+) -> Result<Sse<impl futures::Stream<Item = Result<SseEvent, Infallible>>>, ServerError> {
+    let root = active_workspace_root(state.as_ref())?;
+    let (tx, rx) = tokio::sync::mpsc::channel::<WorkspaceWatchEvent>(128);
+    spawn_workspace_watcher(root, tx)?;
+
+    let stream = ReceiverStream::new(rx).map(|event| {
+        let data = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_owned());
+        Ok(SseEvent::default().event("workspace.watch").data(data))
+    });
+
+    Ok(Sse::new(stream)
+        .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)).text("workspace-watch")))
 }
 
 #[utoipa::path(
@@ -504,6 +542,142 @@ async fn console_run(
     Ok(Json(WorkspaceService::run_console_command(root, &command.command).await?))
 }
 
+fn spawn_workspace_watcher(
+    root: PathBuf,
+    tx: tokio::sync::mpsc::Sender<WorkspaceWatchEvent>,
+) -> Result<(), ServerError> {
+    let (notify_tx, notify_rx) = std::sync::mpsc::channel();
+    let mut watcher = notify::recommended_watcher(move |event| {
+        let _ = notify_tx.send(event);
+    })
+    .map_err(|error| {
+        ServerError::Internal(format!("failed to create workspace watcher: {error}"))
+    })?;
+
+    watcher
+        .watch(&root, RecursiveMode::Recursive)
+        .map_err(|error| ServerError::Internal(format!("failed to watch workspace: {error}")))?;
+
+    tokio::task::spawn_blocking(move || {
+        let _watcher = watcher;
+        let mut sequence_number = 0_u64;
+
+        while let Ok(event) = notify_rx.recv() {
+            if tx.is_closed() {
+                break;
+            }
+
+            match event {
+                Ok(event) => {
+                    for event in workspace_watch_events(&root, event, &mut sequence_number) {
+                        if tx.blocking_send(event).is_err() {
+                            return;
+                        }
+                    }
+                }
+                Err(error) => {
+                    tracing::debug!(%error, "workspace watcher event failed");
+                }
+            }
+        }
+    });
+
+    Ok(())
+}
+
+fn workspace_watch_events(
+    root: &Path,
+    event: NotifyEvent,
+    sequence_number: &mut u64,
+) -> Vec<WorkspaceWatchEvent> {
+    match event.kind {
+        NotifyEventKind::Create(_) => workspace_watch_events_for_paths(
+            root,
+            event.paths,
+            WorkspaceWatchEventType::Created,
+            sequence_number,
+        ),
+        NotifyEventKind::Remove(_) => workspace_watch_events_for_paths(
+            root,
+            event.paths,
+            WorkspaceWatchEventType::Deleted,
+            sequence_number,
+        ),
+        NotifyEventKind::Modify(ModifyKind::Name(RenameMode::Both)) if event.paths.len() >= 2 => {
+            let mut events = Vec::new();
+            if let Some(old_path) = event.paths.first() {
+                if let Some(event) = workspace_watch_event(
+                    root,
+                    old_path,
+                    WorkspaceWatchEventType::Deleted,
+                    sequence_number,
+                ) {
+                    events.push(event);
+                }
+            }
+            if let Some(new_path) = event.paths.get(1) {
+                if let Some(event) = workspace_watch_event(
+                    root,
+                    new_path,
+                    WorkspaceWatchEventType::Created,
+                    sequence_number,
+                ) {
+                    events.push(event);
+                }
+            }
+            events
+        }
+        NotifyEventKind::Modify(_) => workspace_watch_events_for_paths(
+            root,
+            event.paths,
+            WorkspaceWatchEventType::Changed,
+            sequence_number,
+        ),
+        _ => Vec::new(),
+    }
+}
+
+fn workspace_watch_events_for_paths(
+    root: &Path,
+    paths: Vec<PathBuf>,
+    event_type: WorkspaceWatchEventType,
+    sequence_number: &mut u64,
+) -> Vec<WorkspaceWatchEvent> {
+    paths
+        .iter()
+        .filter_map(|path| workspace_watch_event(root, path, event_type, sequence_number))
+        .collect()
+}
+
+fn workspace_watch_event(
+    root: &Path,
+    path: &Path,
+    event_type: WorkspaceWatchEventType,
+    sequence_number: &mut u64,
+) -> Option<WorkspaceWatchEvent> {
+    let relative_path = path.strip_prefix(root).ok()?;
+    let relative_path = relative_path.to_string_lossy().replace('\\', "/");
+    if relative_path.is_empty() {
+        return None;
+    }
+
+    *sequence_number += 1;
+    Some(WorkspaceWatchEvent {
+        sequence_number: *sequence_number,
+        event_type,
+        relative_path,
+        kind: workspace_watch_entry_kind(path),
+    })
+}
+
+fn workspace_watch_entry_kind(path: &Path) -> WorkspaceWatchEntryKind {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_dir() => WorkspaceWatchEntryKind::Directory,
+        Ok(metadata) if metadata.is_file() => WorkspaceWatchEntryKind::File,
+        Ok(_) | Err(_) => WorkspaceWatchEntryKind::Unknown,
+    }
+}
+
 fn active_workspace_root(state: &AppState) -> Result<PathBuf, ServerError> {
     let root = state
         .workspace_root()
@@ -592,6 +766,7 @@ mod tests {
             ("/v1/workspace/files", "post"),
             ("/v1/workspace/path", "patch"),
             ("/v1/workspace/path", "delete"),
+            ("/v1/workspace/watch", "get"),
             ("/v1/workspace/search/text", "get"),
             ("/v1/workspace/git/status", "get"),
             ("/v1/workspace/git/stage", "post"),

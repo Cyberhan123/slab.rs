@@ -45,6 +45,32 @@ pub struct WorkspaceConfigResponse {
     pub schema_version: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceWatchEvent {
+    pub sequence_number: u64,
+    #[serde(rename = "type")]
+    pub event_type: WorkspaceWatchEventType,
+    pub relative_path: String,
+    pub kind: WorkspaceWatchEntryKind,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceWatchEventType {
+    Created,
+    Changed,
+    Deleted,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceWatchEntryKind {
+    File,
+    Directory,
+    Unknown,
+}
+
 #[derive(Debug, Clone, Deserialize, ToSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceOpenCommand {

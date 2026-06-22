@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react"
-import { createEditor, createModelReference } from "@codingame/monaco-editor-wrapper"
 import * as Monaco from "monaco-editor"
 import { clamp } from "lodash-es"
 
-import { ensureWorkspaceLspServices } from "../lib/workspace-lsp"
+import { getStandaloneMonacoEditorOverrides } from "../lib/workspace-standalone-monaco"
 
 type WorkspaceCodeEditorProps = {
   filePath: string
@@ -16,6 +15,7 @@ type WorkspaceCodeEditorProps = {
     monaco: typeof Monaco,
   ) => void
   onProblemsChange?: (problems: WorkspaceEditorProblem[]) => void
+  onSelectionChange?: (selection: WorkspaceEditorSelection | null) => void
   options: Monaco.editor.IStandaloneEditorConstructionOptions
   revealTarget?: WorkspaceEditorRevealTarget | null
   theme: string
@@ -28,6 +28,14 @@ export type WorkspaceEditorCursor = {
 }
 
 export type WorkspaceEditorProblem = Monaco.editor.IMarker
+
+export type WorkspaceEditorSelection = {
+  endColumn: number
+  endLineNumber: number
+  startColumn: number
+  startLineNumber: number
+  text: string
+}
 
 export type WorkspaceEditorRevealTarget = {
   lineNumber: number
@@ -63,6 +71,7 @@ export function WorkspaceCodeEditor({
   onCursorChange,
   onMount,
   onProblemsChange,
+  onSelectionChange,
   options,
   revealTarget,
   theme,
@@ -77,9 +86,11 @@ export function WorkspaceCodeEditor({
   const onCursorChangeRef = useRef(onCursorChange)
   const onMountRef = useRef(onMount)
   const onProblemsChangeRef = useRef(onProblemsChange)
+  const onSelectionChangeRef = useRef(onSelectionChange)
   const optionsRef = useRef(options)
   const revealTargetRef = useRef(revealTarget)
   const valueRef = useRef(value)
+  const [editorReady, setEditorReady] = useState(false)
   const [servicesReady, setServicesReady] = useState(false)
 
   useEffect(() => {
@@ -99,6 +110,10 @@ export function WorkspaceCodeEditor({
   }, [onProblemsChange])
 
   useEffect(() => {
+    onSelectionChangeRef.current = onSelectionChange
+  }, [onSelectionChange])
+
+  useEffect(() => {
     optionsRef.current = options
     editorRef.current?.updateOptions(options)
   }, [options])
@@ -114,7 +129,15 @@ export function WorkspaceCodeEditor({
   useEffect(() => {
     let cancelled = false
 
+    if (memoryModel) {
+      setServicesReady(true)
+      return () => {
+        cancelled = true
+      }
+    }
+
     void (async () => {
+      const { ensureWorkspaceLspServices } = await import("../lib/workspace-lsp")
       await ensureWorkspaceLspServices()
       if (cancelled) {
         return
@@ -127,10 +150,10 @@ export function WorkspaceCodeEditor({
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [memoryModel])
 
   useEffect(() => {
-    if (!servicesReady) {
+    if (!servicesReady || (memoryModel && !editorReady)) {
       return
     }
 
@@ -144,47 +167,104 @@ export function WorkspaceCodeEditor({
         console.warn("failed to apply fallback workspace editor theme", fallbackError)
       }
     }
-  }, [servicesReady, theme])
+  }, [editorReady, memoryModel, servicesReady, theme])
 
   useEffect(() => {
     if (!servicesReady || !containerRef.current || editorRef.current) {
       return
     }
 
-    const initialOptions = optionsRef.current
-    const editor = createEditor(containerRef.current, {
-      ...initialOptions,
-      automaticLayout: initialOptions.automaticLayout ?? true,
-      language: undefined,
-      model: null,
-      theme: undefined,
-      value: undefined,
-    })
-    const contentDisposable = editor.onDidChangeModelContent(() => {
-      if (applyingExternalValueRef.current) {
+    let disposed = false
+    let editor: Monaco.editor.IStandaloneCodeEditor | null = null
+    const disposables: Array<{ dispose(): void }> = []
+
+    void (async () => {
+      const container = containerRef.current
+      if (!container) {
         return
       }
 
-      onChangeRef.current(editor.getValue())
-    })
-    const cursorDisposable = editor.onDidChangeCursorPosition(({ position }) => {
-      onCursorChangeRef.current?.(position)
-    })
+      const initialOptions = optionsRef.current
+      const nextEditor = memoryModel
+        ? (await import("@codingame/monaco-vscode-api/monaco")).createConfiguredEditor(
+            container,
+            {
+              ...initialOptions,
+              automaticLayout: initialOptions.automaticLayout ?? true,
+              language: undefined,
+              model: null,
+              theme,
+              value: undefined,
+            },
+            await getStandaloneMonacoEditorOverrides(),
+          )
+        : (await import("@codingame/monaco-editor-wrapper")).createEditor(container, {
+            ...initialOptions,
+            automaticLayout: initialOptions.automaticLayout ?? true,
+            language: undefined,
+            model: null,
+            theme: undefined,
+            value: undefined,
+          })
 
-    editorRef.current = editor
+      if (disposed) {
+        nextEditor.dispose()
+        return
+      }
+
+      editor = nextEditor
+      disposables.push(
+        nextEditor.onDidChangeModelContent(() => {
+          if (applyingExternalValueRef.current) {
+            return
+          }
+
+          onChangeRef.current(nextEditor.getValue())
+        }),
+        nextEditor.onDidChangeCursorPosition(({ position }: Monaco.editor.ICursorPositionChangedEvent) => {
+          onCursorChangeRef.current?.(position)
+        }),
+        nextEditor.onDidChangeCursorSelection(({ selection }: Monaco.editor.ICursorSelectionChangedEvent) => {
+          const model = nextEditor.getModel()
+          if (!model || selection.isEmpty()) {
+            onSelectionChangeRef.current?.(null)
+            return
+          }
+
+          onSelectionChangeRef.current?.({
+            endColumn: selection.endColumn,
+            endLineNumber: selection.endLineNumber,
+            startColumn: selection.startColumn,
+            startLineNumber: selection.startLineNumber,
+            text: model.getValueInRange(selection),
+          })
+        }),
+      )
+
+      editorRef.current = nextEditor
+      setEditorReady(true)
+    })().catch((error) => {
+      console.error("failed to create workspace editor", {
+        error,
+        memoryModel,
+      })
+    })
 
     return () => {
-      contentDisposable.dispose()
-      cursorDisposable.dispose()
-      editor.dispose()
-      editorRef.current = null
+      disposed = true
+      disposables.forEach((disposable) => disposable.dispose())
+      editor?.dispose()
+      if (editorRef.current === editor) {
+        editorRef.current = null
+      }
       onCursorChangeRef.current?.(null)
       onProblemsChangeRef.current?.([])
+      onSelectionChangeRef.current?.(null)
     }
-  }, [servicesReady])
+  }, [memoryModel, servicesReady, theme])
 
   useEffect(() => {
-    if (!servicesReady) {
+    if (!servicesReady || !editorReady) {
       return
     }
 
@@ -200,11 +280,11 @@ export function WorkspaceCodeEditor({
     return () => {
       disposable.dispose()
     }
-  }, [servicesReady])
+  }, [editorReady, servicesReady])
 
   useEffect(() => {
     const editor = editorRef.current
-    if (!servicesReady || !editor) {
+    if (!servicesReady || !editorReady || !editor) {
       return
     }
 
@@ -240,6 +320,7 @@ export function WorkspaceCodeEditor({
         return
       }
 
+      const { createModelReference } = await import("@codingame/monaco-editor-wrapper")
       const nextModelReference = await createModelReference(uri)
       modelReference = nextModelReference
       if (cancelled) {
@@ -288,7 +369,7 @@ export function WorkspaceCodeEditor({
         Monaco.editor.getModel(uri)?.dispose()
       }
     }
-  }, [filePath, language, memoryModel, servicesReady])
+  }, [editorReady, filePath, language, memoryModel, servicesReady])
 
   useEffect(() => {
     const model = modelRef.current

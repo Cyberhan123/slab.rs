@@ -2,7 +2,9 @@ import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
   CheckCircle2,
+  Circle,
   Loader2,
+  Play,
   RefreshCw,
   TriangleAlert,
 } from 'lucide-react';
@@ -107,6 +109,9 @@ export function SetupWorkbench({
   progressPercent,
   progressSummary,
   canRetry,
+  canStart,
+  handleSkip,
+  handleStart,
   handleRetry,
 }: SetupViewModel) {
   const { t } = useTranslation();
@@ -214,6 +219,26 @@ export function SetupWorkbench({
           total: totalBackends,
         })
       : t('pages.setup.metrics.backendWorkers.notReported');
+  const checklist = [
+    {
+      installed: runtimePayloadInstalled || usesBundledRuntimePayload,
+      key: 'runtime-payload',
+      label: t('pages.setup.checklist.runtimePayload'),
+      name: 'runtime-payload',
+    },
+    {
+      installed: ffmpegInstalled,
+      key: 'ffmpeg',
+      label: t('pages.setup.metrics.ffmpeg.label'),
+      name: setupStatus?.ffmpeg.name ?? 'ffmpeg',
+    },
+    ...(setupStatus?.backends ?? []).map((backend) => ({
+      installed: backend.installed,
+      key: `backend-${backend.name}`,
+      label: backend.name,
+      name: backend.name,
+    })),
+  ];
 
   return (
     <SetupScaffold>
@@ -272,6 +297,56 @@ export function SetupWorkbench({
                     </p>
                   </div>
                 </div>
+
+                <div className="rounded-2xl border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-1)_88%,white)] p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                    {t('pages.setup.checklist.title')}
+                  </p>
+                  <div className="mt-3 grid gap-2">
+                    {checklist.map((component) => (
+                      <div
+                        key={component.key}
+                        className="flex items-center justify-between gap-3 rounded-xl bg-surface-soft px-3 py-2"
+                      >
+                        <div className="flex min-w-0 items-center gap-2">
+                          {component.installed ? (
+                            <CheckCircle2 className="size-4 shrink-0 text-[var(--brand-teal)]" />
+                          ) : isActive ? (
+                            <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
+                          ) : (
+                            <Circle className="size-4 shrink-0 text-muted-foreground" />
+                          )}
+                          <span className="truncate text-sm font-medium text-foreground">
+                            {component.label}
+                          </span>
+                        </div>
+                        {component.installed ? (
+                          <span className="text-xs font-medium text-[var(--brand-teal)]">
+                            {t('pages.setup.checklist.installed')}
+                          </span>
+                        ) : canRetry ? (
+                          <Button
+                            type="button"
+                            variant="quiet"
+                            size="xs"
+                            data-testid={`component-retry-${component.name}`}
+                            onClick={() => {
+                              void handleRetry();
+                            }}
+                          >
+                            {t('pages.setup.actions.retry')}
+                          </Button>
+                        ) : (
+                          <span className="text-xs font-medium text-muted-foreground">
+                            {isActive
+                              ? t('pages.setup.checklist.checking')
+                              : t('pages.setup.checklist.pending')}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -316,7 +391,39 @@ export function SetupWorkbench({
               </div>
 
               <div className="mt-6 flex flex-wrap items-center gap-3">
-                {canRetry ? (
+                {provisionState === 'idle' ? (
+                  <>
+                    <Button
+                      type="button"
+                      size="lg"
+                      className="rounded-xl px-6 text-white hover:brightness-[1.03]"
+                      style={{
+                        backgroundColor: SETUP_ACTIVE_TONE,
+                        backgroundImage: SETUP_CTA_GRADIENT,
+                      }}
+                      disabled={!canStart}
+                      onClick={() => {
+                        void handleStart();
+                      }}
+                      data-testid="setup-start"
+                    >
+                      <Play className="size-4" />
+                      {t('pages.setup.actions.start')}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="quiet"
+                      size="lg"
+                      className="rounded-xl px-6"
+                      onClick={() => {
+                        void handleSkip();
+                      }}
+                      data-testid="setup-skip"
+                    >
+                      {t('pages.setup.actions.later')}
+                    </Button>
+                  </>
+                ) : canRetry ? (
                   <Button
                     type="button"
                     size="lg"
@@ -325,6 +432,7 @@ export function SetupWorkbench({
                       backgroundColor: SETUP_ACTIVE_TONE,
                       backgroundImage: SETUP_CTA_GRADIENT,
                     }}
+                    data-testid="setup-retry"
                     onClick={() => {
                       void handleRetry();
                     }}

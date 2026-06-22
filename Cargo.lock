@@ -15454,6 +15454,7 @@ dependencies = [
  "futures",
  "http 1.4.0",
  "http-body-util",
+ "notify 8.2.0",
  "serde",
  "serde_json",
  "slab-agent",

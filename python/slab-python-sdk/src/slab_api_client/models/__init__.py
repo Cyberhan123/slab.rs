@@ -269,6 +269,9 @@ from .workspace_state_response import WorkspaceStateResponse
 from .workspace_text_search_file_match import WorkspaceTextSearchFileMatch
 from .workspace_text_search_line_match import WorkspaceTextSearchLineMatch
 from .workspace_text_search_view import WorkspaceTextSearchView
+from .workspace_watch_entry_kind import WorkspaceWatchEntryKind
+from .workspace_watch_event import WorkspaceWatchEvent
+from .workspace_watch_event_type import WorkspaceWatchEventType
 from .workspace_write_file_command import WorkspaceWriteFileCommand
 from .workspace_write_file_view import WorkspaceWriteFileView
 
@@ -514,6 +517,9 @@ __all__ = (
     "WorkspaceTextSearchFileMatch",
     "WorkspaceTextSearchLineMatch",
     "WorkspaceTextSearchView",
+    "WorkspaceWatchEntryKind",
+    "WorkspaceWatchEvent",
+    "WorkspaceWatchEventType",
     "WorkspaceWriteFileCommand",
     "WorkspaceWriteFileView",
 )

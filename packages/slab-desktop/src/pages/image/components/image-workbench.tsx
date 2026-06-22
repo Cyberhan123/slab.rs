@@ -110,6 +110,7 @@ type ImageWorkbenchProps = {
   widthStr: string;
   zoomedImage: string | null;
   openHistoryDetail: (taskId: string) => void | Promise<void>;
+  refillFromHistory: (task: ImageGenerationTask) => void;
 };
 
 export function ImageWorkbench({
@@ -173,6 +174,7 @@ export function ImageWorkbench({
   widthStr,
   zoomedImage,
   openHistoryDetail,
+  refillFromHistory,
 }: ImageWorkbenchProps) {
   const { t } = useTranslation();
   const sampleMethodOptions = SAMPLE_METHODS.map((method) =>
@@ -748,10 +750,11 @@ export function ImageWorkbench({
                 historyDialogOpen={historyDialogOpen}
                 historyError={historyError}
                 historyLoading={historyLoading}
-                openHistoryDetail={openHistoryDetail}
-                selectedHistoryTask={selectedHistoryTask}
-                setHistoryDialogOpen={setHistoryDialogOpen}
-                setSelectedHistoryTask={setSelectedHistoryTask}
+            openHistoryDetail={openHistoryDetail}
+            refillFromHistory={refillFromHistory}
+            selectedHistoryTask={selectedHistoryTask}
+            setHistoryDialogOpen={setHistoryDialogOpen}
+            setSelectedHistoryTask={setSelectedHistoryTask}
               />
             </section>
           }

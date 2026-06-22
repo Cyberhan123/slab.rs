@@ -111,6 +111,10 @@ export const image = {
     description: '重新查看最近图像任务的提示词、预览图和已保存输出。',
     empty: '暂无图像历史。已完成的图像任务会显示在这里。',
     detailTitle: '图像任务详情',
+    refilled: '已回填历史参数。再次生成前请先确认。',
+    actions: {
+      refill: '复用参数',
+    },
     fields: {
       mode: '模式',
       size: '尺寸',

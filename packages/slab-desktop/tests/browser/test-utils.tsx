@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
+import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { page, userEvent } from 'vitest/browser';
 import { expect } from 'vitest';
 import { render } from 'vitest-browser-react';
@@ -27,30 +27,32 @@ export async function renderDesktopScene(
       },
     },
   });
-
-  return render(
-    <main
-      aria-label="Slab desktop scene"
-      data-testid="desktop-browser-scene"
-      className="min-h-screen bg-app-canvas px-6 py-8 text-foreground"
-    >
-      {ui}
-    </main>,
-    {
-      wrapper: ({ children }) => (
-        <MemoryRouter initialEntries={[route]}>
-          <QueryClientProvider client={queryClient}>
-            <TooltipProvider>
-              <GlobalHeaderProvider>
-                {children}
-                <Toaster />
-              </GlobalHeaderProvider>
-            </TooltipProvider>
-          </QueryClientProvider>
-        </MemoryRouter>
-      ),
-    },
+  const router = createMemoryRouter(
+    [
+      {
+        path: '*',
+        element: (
+          <main
+            aria-label="Slab desktop scene"
+            data-testid="desktop-browser-scene"
+            className="min-h-screen bg-app-canvas px-6 py-8 text-foreground"
+          >
+            <QueryClientProvider client={queryClient}>
+              <TooltipProvider>
+                <GlobalHeaderProvider>
+                  {ui}
+                  <Toaster />
+                </GlobalHeaderProvider>
+              </TooltipProvider>
+            </QueryClientProvider>
+          </main>
+        ),
+      },
+    ],
+    { initialEntries: [route] },
   );
+
+  return render(<RouterProvider router={router} />);
 }
 
 export async function expectDesktopSceneAccessible() {

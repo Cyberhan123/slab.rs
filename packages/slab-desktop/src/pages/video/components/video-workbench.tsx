@@ -3,10 +3,13 @@ import {
   ChevronUp,
   Download,
   Film,
+  FolderOpen,
+  GitCompare,
   History,
   ImagePlus,
   Loader2,
   Maximize2,
+  RotateCcw,
   X,
 } from 'lucide-react';
 import { useTranslation } from '@slab/i18n';
@@ -45,6 +48,7 @@ import { ToolbarIconButton } from './toolbar-icon-button';
 export type VideoWorkbenchProps = {
   advancedOpen: boolean;
   cfgScale: number;
+  comparisonTasks: VideoGenerationTask[];
   footerHint: string;
   fps: number;
   frames: number;
@@ -99,6 +103,9 @@ export type VideoWorkbenchProps = {
   widthStr: string;
   widthValue: number;
   openHistoryDetail: (taskId: string) => void | Promise<void>;
+  openHistoryVideoInWorkspace: (task: VideoGenerationTask) => void;
+  refillFromHistory: (task: VideoGenerationTask) => void;
+  toggleHistoryComparison: (task: VideoGenerationTask) => void;
 };
 
 function formatHistoryTime(value: string) {
@@ -113,6 +120,7 @@ function formatHistoryTime(value: string) {
 export function VideoWorkbench({
   advancedOpen,
   cfgScale,
+  comparisonTasks,
   footerHint,
   fps,
   frames,
@@ -167,6 +175,9 @@ export function VideoWorkbench({
   widthStr,
   widthValue,
   openHistoryDetail,
+  openHistoryVideoInWorkspace,
+  refillFromHistory,
+  toggleHistoryComparison,
 }: VideoWorkbenchProps) {
   const { t } = useTranslation();
   const sampleMethodOptions = SAMPLE_METHODS.map((method) =>
@@ -668,6 +679,40 @@ export function VideoWorkbench({
                   {selectedHistoryTask.status} | {selectedHistoryTask.frames} frames at {selectedHistoryTask.fps} fps
                 </DialogDescription>
               </DialogHeader>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="pill"
+                  size="sm"
+                  data-testid="video-history-refill"
+                  onClick={() => refillFromHistory(selectedHistoryTask)}
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  {t('pages.video.history.actions.refill')}
+                </Button>
+                <Button
+                  type="button"
+                  variant="pill"
+                  size="sm"
+                  data-testid="video-history-open-workspace"
+                  onClick={() => openHistoryVideoInWorkspace(selectedHistoryTask)}
+                >
+                  <FolderOpen className="h-3.5 w-3.5" />
+                  {t('pages.video.history.actions.openWorkspace')}
+                </Button>
+                <Button
+                  type="button"
+                  variant="pill"
+                  size="sm"
+                  data-testid="video-history-compare-toggle"
+                  onClick={() => toggleHistoryComparison(selectedHistoryTask)}
+                >
+                  <GitCompare className="h-3.5 w-3.5" />
+                  {comparisonTasks.some((task) => task.task_id === selectedHistoryTask.task_id)
+                    ? t('pages.video.history.actions.removeCompare')
+                    : t('pages.video.history.actions.compare')}
+                </Button>
+              </div>
               <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
                 <div className="overflow-hidden rounded-[24px] border border-border/60 bg-[var(--media-canvas)]">
                   {resolveMediaUrl(selectedHistoryTask.video_url) ? (
@@ -718,10 +763,94 @@ export function VideoWorkbench({
                   ) : null}
                 </div>
               </div>
+              {comparisonTasks.length > 0 ? (
+                <VideoComparisonPanel tasks={comparisonTasks} />
+              ) : null}
             </>
           ) : null}
         </DialogContent>
       </Dialog>
     </div>
   );
+}
+
+const VIDEO_COMPARE_FIELDS = [
+  'prompt',
+  'negative_prompt',
+  'width',
+  'height',
+  'video_frames',
+  'fps',
+  'cfg_scale',
+  'guidance',
+  'steps',
+  'seed',
+  'sample_method',
+  'scheduler',
+  'strength',
+] as const;
+
+function VideoComparisonPanel({ tasks }: { tasks: VideoGenerationTask[] }) {
+  const { t } = useTranslation();
+  const [firstTask, secondTask] = tasks;
+
+  return (
+    <div
+      className="mt-5 grid gap-4 rounded-[22px] border border-border/60 bg-[var(--surface-soft)] p-4 lg:grid-cols-2"
+      data-testid="video-history-compare"
+    >
+      {tasks.map((task, index) => (
+        <div key={task.task_id} className="space-y-3">
+          <div className="overflow-hidden rounded-[18px] border border-border/60 bg-[var(--media-canvas)]">
+            {resolveMediaUrl(task.video_url) ? (
+              // eslint-disable-next-line jsx-a11y/media-has-caption
+              <video
+                src={resolveMediaUrl(task.video_url) ?? undefined}
+                controls
+                aria-label={t('pages.video.history.compareArtifact', { index: index + 1 })}
+                className="max-h-56 w-full object-contain"
+              />
+            ) : (
+              <div className="flex h-36 items-center justify-center text-sm text-muted-foreground">
+                {t('pages.video.history.noArtifact')}
+              </div>
+            )}
+          </div>
+          <div className="space-y-1 text-xs">
+            {VIDEO_COMPARE_FIELDS.map((field) => {
+              const value = compareFieldValue(task, field);
+              const differs =
+                firstTask && secondTask &&
+                compareFieldValue(firstTask, field) !== compareFieldValue(secondTask, field);
+              return (
+                <div
+                  key={field}
+                  className="grid grid-cols-[108px_minmax(0,1fr)] gap-2 rounded-lg px-2 py-1"
+                  data-testid={differs ? 'param-diff' : undefined}
+                >
+                  <span className="font-medium text-muted-foreground">{field}</span>
+                  <span
+                    className={cn(
+                      'min-w-0 break-words font-mono text-foreground',
+                      differs && 'rounded-md bg-[var(--brand-gold)]/18 px-1 text-[color:color-mix(in_oklab,var(--brand-gold)_78%,var(--foreground))]',
+                    )}
+                  >
+                    {value || '-'}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function compareFieldValue(
+  task: VideoGenerationTask,
+  field: (typeof VIDEO_COMPARE_FIELDS)[number],
+) {
+  const value = field === 'video_frames' ? task.request_data.video_frames : task.request_data[field];
+  return value === null || value === undefined ? '' : String(value);
 }

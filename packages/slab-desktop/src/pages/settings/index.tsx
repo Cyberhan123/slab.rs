@@ -1,12 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useBlocker } from 'react-router-dom';
 import { Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
 import { Badge } from '@slab/components/badge';
 import { Button } from '@slab/components/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@slab/components/dialog';
 import { StageEmptyState, StatusPill } from '@slab/components/workspace';
 import { translateServerField, useTranslation } from '@slab/i18n';
-import { usePageHeader } from '@/hooks/use-global-header-meta';
+import { usePageHeader, usePageHeaderSearch } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import { useUiStatePersistenceStatus } from '@/store/ui-state-storage';
 import api, { getErrorMessage } from '@slab/api';
@@ -18,6 +27,7 @@ import { useSettingsAutosave } from './hooks/use-settings-autosave';
 import type { SettingResponse } from './types';
 import {
   countSectionProperties,
+  matchesSearch,
   sectionAnchorId,
   subsectionAnchorId,
   shouldCollapseSubsectionHeading,
@@ -26,6 +36,7 @@ import {
 export default function SettingsPage() {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const { t } = useTranslation();
   const uiStateFailure = useUiStatePersistenceStatus((state) => state.lastFailure);
 
@@ -46,13 +57,33 @@ export default function SettingsPage() {
   }, [data]);
 
   const sections = useMemo(() => data?.sections ?? [], [data?.sections]);
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const visibleSections = useMemo(() => {
+    if (!normalizedSearchQuery) {
+      return sections;
+    }
+
+    return sections
+      .map((section) => ({
+        ...section,
+        subsections: section.subsections
+          .map((subsection) => ({
+            ...subsection,
+            properties: subsection.properties.filter((property) =>
+              matchesSearch(section, subsection, property, normalizedSearchQuery),
+            ),
+          }))
+          .filter((subsection) => subsection.properties.length > 0),
+      }))
+      .filter((section) => section.subsections.length > 0);
+  }, [normalizedSearchQuery, sections]);
   const shouldShowAdminTokenWarning = useMemo(
     () => shouldWarnForMissingAdminToken(propertyMap),
     [propertyMap],
   );
   const activeSection = useMemo(
-    () => sections.find((section) => section.id === activeSectionId) ?? sections[0] ?? null,
-    [activeSectionId, sections],
+    () => visibleSections.find((section) => section.id === activeSectionId) ?? visibleSections[0] ?? null,
+    [activeSectionId, visibleSections],
   );
   const activeSectionTitle = activeSection
     ? translateServerField(activeSection.i18n, 'title', activeSection.title, t)
@@ -62,23 +93,30 @@ export default function SettingsPage() {
     : '';
 
   useEffect(() => {
-    if (sections.length === 0) {
+    if (visibleSections.length === 0) {
       setActiveSectionId(null);
       return;
     }
 
-    if (activeSectionId && sections.some((section) => section.id === activeSectionId)) {
+    if (activeSectionId && visibleSections.some((section) => section.id === activeSectionId)) {
       return;
     }
 
-    const nextSectionId = sections[0].id;
+    const nextSectionId = visibleSections[0].id;
     setActiveSectionId(nextSectionId);
-  }, [activeSectionId, sections]);
+  }, [activeSectionId, visibleSections]);
 
   usePageHeader({
     ...PAGE_HEADER_META.settings,
     title: t('pages.settings.header.title'),
     subtitle: t('pages.settings.header.subtitle'),
+  });
+  usePageHeaderSearch({
+    type: 'search',
+    value: searchQuery,
+    onValueChange: setSearchQuery,
+    placeholder: t('pages.settings.search.placeholder'),
+    ariaLabel: t('pages.settings.search.ariaLabel'),
   });
 
   const {
@@ -93,6 +131,27 @@ export default function SettingsPage() {
     propertyMap,
     refetch,
   });
+  const unsavedSettingsCount = statusSummary.dirty + statusSummary.saving + statusSummary.error;
+  const hasUnsavedSettings = unsavedSettingsCount > 0;
+  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
+    hasUnsavedSettings && currentLocation.pathname !== nextLocation.pathname,
+  );
+
+  useEffect(() => {
+    if (!hasUnsavedSettings) {
+      return undefined;
+    }
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [hasUnsavedSettings]);
 
   function selectSection(sectionId: string) {
     const targetId = sectionAnchorId(sectionId);
@@ -135,9 +194,9 @@ export default function SettingsPage() {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden rounded-[24px] border border-border/50 bg-[var(--shell-card)] shadow-[var(--shell-elevation)] lg:flex-row">
       <aside className="w-full shrink-0 border-b border-border/50 bg-[var(--surface-soft)]/80 lg:w-[256px] lg:border-r lg:border-b-0">
-        <SettingsNavigation
-          activeSectionId={activeSection?.id ?? null}
-          sections={sections}
+          <SettingsNavigation
+            activeSectionId={activeSection?.id ?? null}
+          sections={visibleSections}
           onSelectSection={selectSection}
         />
       </aside>
@@ -186,8 +245,16 @@ export default function SettingsPage() {
 
           {!activeSection ? (
             <StageEmptyState
-              title={t('pages.settings.page.noSettingsTitle')}
-              description={t('pages.settings.page.noSettingsDescription')}
+              title={
+                normalizedSearchQuery
+                  ? t('pages.settings.search.noResultsTitle')
+                  : t('pages.settings.page.noSettingsTitle')
+              }
+              description={
+                normalizedSearchQuery
+                  ? t('pages.settings.search.noResultsDescription', { query: searchQuery.trim() })
+                  : t('pages.settings.page.noSettingsDescription')
+              }
             />
           ) : (
             <>
@@ -311,6 +378,47 @@ export default function SettingsPage() {
           )}
         </div>
       </div>
+      <Dialog
+        open={blocker.state === 'blocked'}
+        onOpenChange={(open) => {
+          if (!open && blocker.state === 'blocked') {
+            blocker.reset();
+          }
+        }}
+      >
+        <DialogContent className="max-w-md" data-testid="settings-unsaved-dialog">
+          <DialogHeader>
+            <DialogTitle>{t('pages.settings.guard.title')}</DialogTitle>
+            <DialogDescription>
+              {t('pages.settings.guard.description', { count: unsavedSettingsCount })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="quiet"
+              onClick={() => {
+                if (blocker.state === 'blocked') {
+                  blocker.reset();
+                }
+              }}
+              data-testid="settings-unsaved-cancel"
+            >
+              {t('pages.settings.guard.stay')}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (blocker.state === 'blocked') {
+                  blocker.proceed();
+                }
+              }}
+              data-testid="settings-unsaved-leave"
+            >
+              {t('pages.settings.guard.leave')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -63,7 +63,10 @@ function createViewModel(overrides: Partial<SetupViewModel> = {}): SetupViewMode
     progressPercent: 48,
     progressSummary: '48% complete',
     canRetry: false,
+    canStart: false,
     handleRetry: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    handleSkip: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    handleStart: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -106,7 +109,7 @@ describe('SetupPage browser visual regression', () => {
 
     await renderDesktopScene(<SetupPage />);
 
-    const retryButton = page.getByRole('button', { name: 'Retry setup' });
+    const retryButton = page.getByTestId('setup-retry');
     await expect.element(page.getByText('FFmpeg download failed.')).toBeVisible();
     await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot(
       'setup-page-failed.png',

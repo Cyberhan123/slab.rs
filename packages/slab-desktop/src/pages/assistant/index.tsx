@@ -24,6 +24,7 @@ import { usePersistedHeaderSelect } from "@/hooks/use-persisted-header-select"
 import { PAGE_HEADER_META } from "@/layouts/header-meta"
 import { HEADER_SELECT_KEYS } from "@/layouts/header-controls"
 import { useAssistantUiStore } from "@/store/useAssistantUiStore"
+import { useAssistantDraftStore } from "@/store/useAssistantDraftStore"
 import {
   extractTaskId,
   isFailedTaskStatus,
@@ -77,6 +78,8 @@ function Assistant() {
   const setToolChoice = useAssistantUiStore((state) => state.setToolChoice)
   const advancedPanelOpen = useAssistantUiStore((state) => state.advancedPanelOpen)
   const setAdvancedPanelOpen = useAssistantUiStore((state) => state.setAdvancedPanelOpen)
+  const assistantDraft = useAssistantDraftStore((state) => state.draft)
+  const clearAssistantDraft = useAssistantDraftStore((state) => state.clearDraft)
   const { t } = useTranslation()
   const locale = useAssistantLocale()
   const resolvedLanguage = getResolvedAppLanguage()
@@ -337,6 +340,9 @@ function Assistant() {
     isHistoryLoading,
     isRequesting,
     messages,
+    editAndResend,
+    pendingApprovals,
+    regenerateResponse,
     retryLastResponse,
     submitApproval,
   } = useAssistantAgent({
@@ -652,14 +658,36 @@ function Assistant() {
     ]
   )
 
+  useEffect(() => {
+    if (!assistantDraft) {
+      return
+    }
+
+    const draftRequest = assistantDraft
+    const prompt = draftRequest.prompt.trim()
+    if (!prompt) {
+      return
+    }
+
+    clearAssistantDraft()
+    setDraft(prompt)
+    if (draftRequest.autoSubmit) {
+      void submitAssistantMessage(prompt)
+    }
+  }, [assistantDraft, clearAssistantDraft, submitAssistantMessage])
+
   const bubbleItems = useMemo(
     () => {
       const labels = {
         approve: t("pages.assistant.actions.approve"),
         assistant: t("pages.assistant.message.assistant"),
+        cancelEdit: t("pages.assistant.message.cancelEdit"),
         copy: t("pages.assistant.message.copy"),
+        edit: t("pages.assistant.message.edit"),
+        regenerate: t("pages.assistant.message.regenerate"),
         reject: t("pages.assistant.actions.reject"),
         retry: t("pages.assistant.message.retry"),
+        saveEdit: t("pages.assistant.message.saveEdit"),
         terminalCancelled: t("pages.assistant.message.cancelled"),
         thinkingLoading: t("pages.assistant.thinking.loading"),
         thinkingReady: t("pages.assistant.thinking.ready"),
@@ -668,11 +696,13 @@ function Assistant() {
       }
       const items: BubbleListProps["items"] = safeMessages.map((item) => ({
         content: {
-          approving: isRequesting,
+          approvingCallIds: pendingApprovals.map((approval) => approval.callId),
           item,
           labels,
           markdownClassName: markdownThemeClassName,
           onApprove: submitApproval,
+          onEdit: editAndResend,
+          onRegenerate: regenerateResponse,
           onRetry: retryLastResponse,
         },
         key: item.id,
@@ -697,9 +727,11 @@ function Assistant() {
     },
     [
       isPreparingModel,
-      isRequesting,
+      editAndResend,
       markdownThemeClassName,
       modelLoading,
+      pendingApprovals,
+      regenerateResponse,
       safeMessages,
       retryLastResponse,
       submitApproval,

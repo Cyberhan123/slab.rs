@@ -17,9 +17,23 @@ type ImportMetaWithEnv = ImportMeta & {
   };
 };
 
+type GlobalWithApiBaseUrl = typeof globalThis & {
+  __SLAB_API_BASE_URL__?: string;
+};
+
 function resolveViteApiBaseUrl(): string | undefined {
   return (import.meta as ImportMetaWithEnv).env?.VITE_API_BASE_URL;
 }
 
+function resolveRuntimeApiBaseUrl(): string | undefined {
+  if (typeof globalThis === 'undefined') {
+    return undefined;
+  }
+
+  return (globalThis as GlobalWithApiBaseUrl).__SLAB_API_BASE_URL__;
+}
+
 /** Base URL of the slab-server HTTP API. */
-export const SERVER_BASE_URL = normalizeApiBaseUrl(resolveViteApiBaseUrl());
+export const SERVER_BASE_URL = normalizeApiBaseUrl(
+  resolveRuntimeApiBaseUrl() ?? resolveViteApiBaseUrl(),
+);

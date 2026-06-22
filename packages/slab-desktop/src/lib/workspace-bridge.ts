@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core"
 import { ApiError, apiClient } from "@slab/api"
+import { SERVER_BASE_URL } from "@slab/api/config"
 
 import { isTauri } from "@/hooks/use-tauri"
 
@@ -110,6 +111,13 @@ export type WorkspaceGitStatusEntry = {
   staged: boolean
 }
 
+export type WorkspaceWatchEvent = {
+  sequenceNumber: number
+  type: "created" | "changed" | "deleted"
+  relativePath: string
+  kind: "file" | "directory" | "unknown"
+}
+
 export type WorkspaceGitStatusSummary = {
   added: number
   modified: number
@@ -141,6 +149,8 @@ export type WorkspaceConsoleOutput = {
 export type WorkspaceTerminalSession = {
   url: string
 }
+
+export type WorkspaceTerminalShell = "powershell" | "cmd" | "bash" | "zsh"
 
 export type WorkspaceWriteFileCommand = {
   relativePath: string
@@ -393,12 +403,48 @@ export async function workspaceConsoleRun(command: string): Promise<WorkspaceCon
   )
 }
 
-export async function workspaceTerminalSession(): Promise<WorkspaceTerminalSession> {
+export async function workspaceTerminalSession(
+  shell?: WorkspaceTerminalShell,
+): Promise<WorkspaceTerminalSession> {
   if (!isTauri()) {
     throw new Error("workspace terminal is only available in the desktop app")
   }
 
-  return invoke<WorkspaceTerminalSession>("workspace_terminal_session")
+  return invoke<WorkspaceTerminalSession>("workspace_terminal_session", { shell })
+}
+
+export function workspaceWatch({
+  onError,
+  onEvent,
+}: {
+  onError?: (error: Event) => void
+  onEvent: (event: WorkspaceWatchEvent) => void
+}): { dispose(): void } {
+  const endpoint = new URL(SERVER_BASE_URL)
+  endpoint.pathname = "/v1/workspace/watch"
+  endpoint.search = ""
+  endpoint.hash = ""
+
+  const source = new EventSource(endpoint.toString())
+  const handleMessage = (event: MessageEvent<string>) => {
+    try {
+      onEvent(JSON.parse(event.data) as WorkspaceWatchEvent)
+    } catch (error) {
+      console.debug("workspace watch event parse failed", { error })
+    }
+  }
+
+  source.addEventListener("workspace.watch", handleMessage)
+  source.addEventListener("error", (event) => {
+    onError?.(event)
+  })
+
+  return {
+    dispose() {
+      source.removeEventListener("workspace.watch", handleMessage)
+      source.close()
+    },
+  }
 }
 
 export async function workspaceUpdatePluginPreference(

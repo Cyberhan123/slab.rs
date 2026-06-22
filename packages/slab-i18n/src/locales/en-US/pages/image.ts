@@ -112,6 +112,10 @@ export const image = {
     description: 'Reopen prompts, previews, and saved outputs from recent image tasks.',
     empty: 'No image history yet. Your completed image tasks will appear here.',
     detailTitle: 'Image Task Detail',
+    refilled: 'History parameters loaded. Review them before generating again.',
+    actions: {
+      refill: 'Reuse parameters',
+    },
     fields: {
       mode: 'Mode',
       size: 'Size',

@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '@slab/components/input';
 import { SoftPanel } from '@slab/components/workspace';
 import { useTranslation } from '@slab/i18n';
-import { FileAudio2, History, Loader2 } from 'lucide-react';
+import { FileAudio2, History, Loader2, RotateCcw } from 'lucide-react';
 import type { SelectedFile } from '@/hooks/use-file';
 import type { CatalogModel } from '@slab/api/models';
 import type { AudioTranscriptionTask, GenerationProgress } from '@/lib/media-task-api';
@@ -56,6 +56,7 @@ export type AudioWorkbenchProps = {
   openHistoryDetail: (taskId: string) => void | Promise<void>;
   preparingStage: PreparingStage;
   previewRows: Array<{ label: string; value: string; accent: boolean; chip: boolean }>;
+  refillFromHistory: (task: AudioTranscriptionTask) => void;
   selectedHistoryTask: AudioTranscriptionTask | null;
   selectedVadModel: CatalogModel | undefined;
   selectedVadModelId: string;
@@ -149,6 +150,7 @@ export function AudioWorkbench({
   openHistoryDetail,
   preparingStage,
   previewRows,
+  refillFromHistory,
   selectedHistoryTask,
   selectedVadModel,
   selectedVadModelId,
@@ -566,6 +568,18 @@ export function AudioWorkbench({
                   {selectedHistoryTask.status} | {formatHistoryTime(selectedHistoryTask.created_at)}
                 </DialogDescription>
               </DialogHeader>
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  variant="pill"
+                  size="sm"
+                  data-testid="audio-history-refill"
+                  onClick={() => refillFromHistory(selectedHistoryTask)}
+                >
+                  <RotateCcw className="size-3.5" />
+                  {t('pages.audio.history.actions.refill')}
+                </Button>
+              </div>
               <AudioTranscriptDetail task={selectedHistoryTask} isTauri={isTauri} />
             </>
           ) : null}

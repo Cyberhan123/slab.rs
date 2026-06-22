@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "path";
 
 const host = process.env.TAURI_DEV_HOST;
+const apiProxyTarget = process.env.VITE_API_PROXY_TARGET;
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
@@ -117,6 +118,14 @@ export default defineConfig(async () => ({
     port: 1420,
     strictPort: true,
     host: host || false,
+    proxy: apiProxyTarget
+      ? {
+          "/v1": {
+            target: apiProxyTarget,
+            changeOrigin: true,
+          },
+        }
+      : undefined,
     hmr: host
       ? {
           protocol: "ws",

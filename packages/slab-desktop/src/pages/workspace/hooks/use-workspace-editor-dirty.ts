@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react"
 
 import type { WorkspaceFileContent } from "@/lib/workspace-bridge"
-import { watchWorkspaceVscodeEditorDirty } from "../lib/workspace-lsp"
 
 type UseWorkspaceEditorDirtyOptions = {
   workspaceRoot: string | null
@@ -36,11 +35,14 @@ export function useWorkspaceEditorDirty({
     let disposed = false
     let disposable: { dispose(): void } | null = null
 
-    void watchWorkspaceVscodeEditorDirty(workspaceRoot, (dirty) => {
-      if (!disposed) {
-        setMonacoDirty(dirty)
-      }
-    })
+    void import("../lib/workspace-lsp")
+      .then(({ watchWorkspaceVscodeEditorDirty }) =>
+        watchWorkspaceVscodeEditorDirty(workspaceRoot, (dirty) => {
+          if (!disposed) {
+            setMonacoDirty(dirty)
+          }
+        }),
+      )
       .then((next) => {
         if (disposed) {
           next.dispose()

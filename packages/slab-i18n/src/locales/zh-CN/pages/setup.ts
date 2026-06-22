@@ -14,6 +14,7 @@ export const setup = {
     reload: '重新加载',
   },
   errors: {
+    completeFailed: '初始化已完成，但未能保存完成状态。',
     failedBeforeFinish: '初始化未能完成。',
   },
   badge: {
@@ -57,10 +58,19 @@ export const setup = {
     succeeded: '初始化已完成。Slab 会自动进入应用。',
   },
   actions: {
+    later: '稍后',
     retry: '重试初始化',
+    start: '开始初始化',
     launching: '正在启动 Slab...',
     checkingPrerequisites: '正在检查桌面前置条件',
     provisioning: '正在初始化',
+  },
+  checklist: {
+    checking: '正在检查',
+    installed: '已就绪',
+    pending: '待处理',
+    runtimePayload: '运行时载荷',
+    title: '检查清单',
   },
   stages: {
     failed: '初始化失败',

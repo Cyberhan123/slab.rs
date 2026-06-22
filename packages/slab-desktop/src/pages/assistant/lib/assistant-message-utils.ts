@@ -157,6 +157,9 @@ export const extractChunkPayload = (chunk: Partial<Record<SSEFields, unknown>> |
   return parseSsePayload(chunkData) ?? chunkData ?? parseSsePayload(chunk) ?? chunk
 }
 
+export const stripThinkTags = (value: string): string =>
+  value.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '').trim()
+
 export const extractSseDeltaTextField = (
   chunk: Partial<Record<SSEFields, unknown>> | undefined,
   field: string

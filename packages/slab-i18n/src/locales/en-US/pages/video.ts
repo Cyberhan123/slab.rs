@@ -79,6 +79,14 @@ export const video = {
     empty: 'No video history yet. Completed renders will show up here.',
     detailTitle: 'Video Task Detail',
     noArtifact: 'This task has not produced a persisted video artifact yet.',
+    refilled: 'History parameters loaded. Review them before generating again.',
+    compareArtifact: 'Comparison artifact {{index}}',
+    actions: {
+      compare: 'Compare',
+      openWorkspace: 'Open in Workspace',
+      refill: 'Reuse parameters',
+      removeCompare: 'Remove compare',
+    },
     fields: {
       size: 'Size',
       clip: 'Clip',

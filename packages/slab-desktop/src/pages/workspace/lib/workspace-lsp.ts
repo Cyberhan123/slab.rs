@@ -1,5 +1,6 @@
 import type * as Monaco from "monaco-editor"
 import type { IFileChange } from "@codingame/monaco-vscode-files-service-override"
+import type { WorkspaceEditorSettings } from "@/store/useWorkspaceUiStore"
 import { URI } from "@codingame/monaco-vscode-api/vscode/vs/base/common/uri"
 import {
   initialize as initializeMonacoWrapper,
@@ -51,6 +52,7 @@ import {
   workspaceReadDirectory,
   workspaceReadFile,
   workspaceStatPath,
+  workspaceWatch,
   workspaceWriteFile,
 } from "@/lib/workspace-bridge"
 import type {
@@ -107,6 +109,15 @@ export type WorkspaceVscodeEditorState = {
   openFiles: WorkspaceVscodeEditorFile[]
 }
 
+export type WorkspaceEditorSelection = {
+  endColumn: number
+  endLineNumber: number
+  relativePath: string
+  startColumn: number
+  startLineNumber: number
+  text: string
+}
+
 type WorkspaceVscodeEditorGroup = {
   activeEditor: unknown | null
   closeEditor: (editor?: unknown, options?: unknown) => Promise<boolean>
@@ -126,6 +137,7 @@ type WorkspaceVscodeWorkingCopyService = {
 
 const WORKSPACE_LSP_RECONNECT_INITIAL_DELAY_MS = 250
 const WORKSPACE_LSP_RECONNECT_MAX_DELAY_MS = 5_000
+const MAX_WORKSPACE_PREVIEW_BYTES = 1024 * 1024
 
 type WorkspaceFileService = {
   root: string | null
@@ -458,6 +470,58 @@ export async function runWorkspaceVscodeCommand(commandId: string, workspaceRoot
   await ensureWorkspaceLspServices(workspaceRoot)
   const { commands } = await import("vscode")
   await commands.executeCommand(commandId)
+}
+
+export async function getWorkspaceVscodeSelection(
+  workspaceRoot?: string | null,
+): Promise<WorkspaceEditorSelection | null> {
+  if (!workspaceRoot) {
+    return null
+  }
+
+  await ensureWorkspaceLspServices(workspaceRoot)
+  const { window } = await import("vscode")
+  const editor = window.activeTextEditor
+  if (!editor || editor.selection.isEmpty) {
+    return null
+  }
+
+  const relativePath = workspaceLspRelativePathFromUri(
+    workspaceRoot,
+    editor.document.uri.toString(),
+  )
+  if (!relativePath) {
+    return null
+  }
+
+  return {
+    endColumn: editor.selection.end.character + 1,
+    endLineNumber: editor.selection.end.line + 1,
+    relativePath,
+    startColumn: editor.selection.start.character + 1,
+    startLineNumber: editor.selection.start.line + 1,
+    text: editor.document.getText(editor.selection),
+  }
+}
+
+export async function applyWorkspaceEditorSettings(
+  settings: WorkspaceEditorSettings,
+  workspaceRoot?: string | null,
+) {
+  if (!workspaceMonacoIsInitialized()) {
+    return
+  }
+  if (workspaceRoot) {
+    await syncWorkspaceVscodeRoot(workspaceRoot)
+  }
+  const { ConfigurationTarget, workspace } = await import("vscode")
+  const editorConfig = workspace.getConfiguration("editor")
+  await Promise.all([
+    editorConfig.update("fontSize", settings.fontSize, ConfigurationTarget.Global),
+    editorConfig.update("tabSize", settings.tabSize, ConfigurationTarget.Global),
+    editorConfig.update("wordWrap", settings.wordWrap, ConfigurationTarget.Global),
+    editorConfig.update("minimap.enabled", settings.minimapEnabled, ConfigurationTarget.Global),
+  ])
 }
 
 function workspaceWorkbenchOptions(workspaceRoot: string | null) {
@@ -926,6 +990,13 @@ async function registerWorkspaceFileSystemOverlay() {
       const filePromise =
         pendingFile ??
         (async () => {
+          const metadata = await workspaceStatPath(relativePath)
+          if (metadata.sizeBytes > MAX_WORKSPACE_PREVIEW_BYTES) {
+            throw FileSystemProviderError.create(
+              `workspace file is too large to preview (${metadata.sizeBytes} bytes; maximum is ${MAX_WORKSPACE_PREVIEW_BYTES} bytes)`,
+              FileSystemProviderErrorCode.Unavailable,
+            )
+          }
           const nextFile = await workspaceReadFile(relativePath)
           return nextFile
         })().finally(() => {
@@ -1016,7 +1087,41 @@ async function registerWorkspaceFileSystemOverlay() {
       }
     },
     watch() {
-      return noopDisposable
+      const activeWorkspaceRoot = currentWorkspaceFileService.root
+      if (!activeWorkspaceRoot) {
+        return noopDisposable
+      }
+
+      const invalidateWorkspace = () => {
+        clearWorkspaceFileSystemCache()
+        changesEmitter.fire([{
+          resource: URI.file(activeWorkspaceRoot),
+          type: FileChangeType.UPDATED,
+        }])
+      }
+      const watchDisposable = workspaceWatch({
+        onError: invalidateWorkspace,
+        onEvent: (event) => {
+          clearWorkspaceFileSystemCache()
+          const resource = URI.parse(workspaceLspModelPath(activeWorkspaceRoot, event.relativePath))
+          const type = event.type === "created"
+            ? FileChangeType.ADDED
+            : event.type === "deleted"
+              ? FileChangeType.DELETED
+              : FileChangeType.UPDATED
+          changesEmitter.fire([{ resource, type }])
+        },
+      })
+      window.addEventListener("focus", invalidateWorkspace)
+      const interval = window.setInterval(invalidateWorkspace, 30_000)
+
+      return {
+        dispose() {
+          watchDisposable.dispose()
+          window.removeEventListener("focus", invalidateWorkspace)
+          window.clearInterval(interval)
+        },
+      }
     },
     async writeFile(resource, content) {
       await workspaceWriteFile({

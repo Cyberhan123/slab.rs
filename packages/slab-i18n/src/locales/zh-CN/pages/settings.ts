@@ -23,6 +23,18 @@ export const settings = {
     pending_one: '{{count}} 项待保存',
     pending_other: '{{count}} 项待保存',
   },
+  search: {
+    ariaLabel: '搜索设置',
+    noResultsDescription: '没有设置项匹配“{{query}}”。',
+    noResultsTitle: '没有匹配的设置',
+    placeholder: '搜索设置',
+  },
+  guard: {
+    description: '还有 {{count}} 项设置处于待保存、保存中或失败状态。仍要离开吗？',
+    leave: '仍然离开',
+    stay: '留下',
+    title: '设置尚未保存',
+  },
   language: {
     title: '界面语言',
     description: '选择桌面端前端界面应如何决定使用哪套翻译资源。',

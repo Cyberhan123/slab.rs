@@ -137,6 +137,7 @@ export const executableSmokeOperations = [
   { method: "delete", path: "/v1/workspace/path" },
   { method: "patch", path: "/v1/workspace/path" },
   { method: "get", path: "/v1/workspace/path/stat" },
+  { method: "get", path: "/v1/workspace/watch" },
   { method: "get", path: "/v1/workspace/search" },
   { method: "get", path: "/v1/workspace/search/text" }
 ] as const satisfies readonly SmokeOperation[];

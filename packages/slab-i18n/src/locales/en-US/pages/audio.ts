@@ -165,11 +165,13 @@ export const audio = {
     description: 'Review transcript output and reopen recent transcription details here.',
     empty: 'No transcription history yet. Finished transcripts will appear here.',
     detailTitle: 'Transcription Detail',
+    refilled: 'History transcription settings loaded. Review them before starting again.',
     pendingTranscript: 'Transcript is not available yet.',
     emptySegment: 'No segment text',
     actions: {
       copy: 'Copy',
       copied: 'Transcript copied',
+      refill: 'Reuse settings',
       playbackAria: 'Audio playback',
       exportTxt: 'TXT',
       exportSrt: 'SRT',

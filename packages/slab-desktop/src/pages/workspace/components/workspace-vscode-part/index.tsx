@@ -2,19 +2,25 @@ import { useEffect, useRef, useState } from "react"
 import { Loader2 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { ensureWorkspaceLspServices, setWorkspaceLspFileServiceRoot } from "../../lib/workspace-lsp"
+import type { WorkspaceEditorSettings } from "@/store/useWorkspaceUiStore"
 
 import "./index.css"
 
 type WorkspaceVscodePartProps = {
   className?: string
+  editorSettings?: WorkspaceEditorSettings
   part: "editor" | "explorer"
   workspaceRoot: string
 }
 
 type MountState = "failed" | "pending" | "ready"
 
-export function WorkspaceVscodePart({ className, part, workspaceRoot }: WorkspaceVscodePartProps) {
+export function WorkspaceVscodePart({
+  className,
+  editorSettings,
+  part,
+  workspaceRoot,
+}: WorkspaceVscodePartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const [mountState, setMountState] = useState<MountState>("pending")
@@ -25,10 +31,18 @@ export function WorkspaceVscodePart({ className, part, workspaceRoot }: Workspac
     let stage = "initialize"
 
     setMountState("pending")
-    setWorkspaceLspFileServiceRoot(workspaceRoot)
 
     void (async () => {
+      const {
+        applyWorkspaceEditorSettings,
+        ensureWorkspaceLspServices,
+        setWorkspaceLspFileServiceRoot,
+      } = await import("../../lib/workspace-lsp")
+      setWorkspaceLspFileServiceRoot(workspaceRoot)
       await ensureWorkspaceLspServices(workspaceRoot)
+      if (editorSettings) {
+        await applyWorkspaceEditorSettings(editorSettings, workspaceRoot)
+      }
       stage = "load-views"
       const views = await import("@codingame/monaco-vscode-views-service-override")
       if (cancelled || !containerRef.current) {
@@ -62,7 +76,7 @@ export function WorkspaceVscodePart({ className, part, workspaceRoot }: Workspac
       cancelled = true
       disposable?.dispose()
     }
-  }, [part, workspaceRoot])
+  }, [editorSettings, part, workspaceRoot])
 
   return (
     <div ref={wrapperRef} className={cn("slab-vscode-part relative h-full min-h-0 w-full overflow-hidden", className)}>

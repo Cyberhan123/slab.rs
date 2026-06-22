@@ -121,6 +121,10 @@ function createAssistantAgentViewModel(overrides = {}) {
     isHistoryLoading: false,
     isRequesting: false,
     messages: [] as AssistantMessageRecord[],
+    editAndResend: createAsyncVoidMock(),
+    pendingApprovals: [],
+    regenerateResponse: createAsyncVoidMock(),
+    retryLastResponse: createAsyncVoidMock(),
     submitApproval: createAsyncVoidMock(),
     ...overrides,
   };

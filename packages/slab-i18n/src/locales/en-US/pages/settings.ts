@@ -23,6 +23,18 @@ export const settings = {
     pending_one: '{{count}} pending',
     pending_other: '{{count}} pending',
   },
+  search: {
+    ariaLabel: 'Search settings',
+    noResultsDescription: 'No settings match "{{query}}".',
+    noResultsTitle: 'No matching settings',
+    placeholder: 'Search settings',
+  },
+  guard: {
+    description: '{{count}} setting updates are still dirty, saving, or failed. Leave anyway?',
+    leave: 'Leave anyway',
+    stay: 'Stay',
+    title: 'Unsaved settings',
+  },
   language: {
     title: 'Interface language',
     description: 'Choose how the desktop frontend decides which translation resources to use.',

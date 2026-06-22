@@ -255,6 +255,48 @@ export function useImageGeneration() {
     }
   }, [mergeHistoryTask, t]);
 
+  const refillFromHistory = useCallback((task: ImageGenerationTask) => {
+    const request = task.request_data;
+    setPrompt(request.prompt ?? task.prompt ?? '');
+    setNegativePrompt(request.negative_prompt ?? '');
+    setMode(request.mode === 'img2img' || task.mode === 'img2img' ? 'img2img' : 'txt2img');
+    setWidthStr(String(request.width ?? task.width ?? DEFAULT_GENERATION_SIZE));
+    setHeightStr(String(request.height ?? task.height ?? DEFAULT_GENERATION_SIZE));
+    setNumImages(request.n ?? task.image_urls.length ?? 1);
+    setCfgScale(request.cfg_scale ?? cfgScale);
+    setGuidance(request.guidance ?? guidance);
+    setSteps(request.steps ?? steps);
+    setSeed(request.seed ?? seed);
+    setSampleMethod(request.sample_method ?? 'auto');
+    setScheduler(request.scheduler ?? 'auto');
+    setClipSkip(request.clip_skip ?? 0);
+    setEta(request.eta ?? 0);
+    setStrength(request.strength ?? strength);
+    setInitImageDataUri(null);
+    setHistoryDialogOpen(false);
+    toast.success(t('pages.image.history.refilled'));
+  }, [
+    cfgScale,
+    guidance,
+    seed,
+    setCfgScale,
+    setClipSkip,
+    setEta,
+    setGuidance,
+    setHeightStr,
+    setMode,
+    setNumImages,
+    setSampleMethod,
+    setScheduler,
+    setSeed,
+    setSteps,
+    setStrength,
+    setWidthStr,
+    steps,
+    strength,
+    t,
+  ]);
+
   useEffect(() => {
     void refreshHistory();
   }, [refreshHistory]);
@@ -519,5 +561,6 @@ export function useImageGeneration() {
     widthStr,
     zoomedImage,
     openHistoryDetail,
+    refillFromHistory,
   };
 }

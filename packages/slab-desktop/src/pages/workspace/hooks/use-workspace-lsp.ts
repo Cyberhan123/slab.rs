@@ -28,7 +28,7 @@ export function useWorkspaceLsp({
   relativePath,
   workspaceRoot,
 }: WorkspaceLspOptions) {
-  const shouldInitializeServices = Boolean(workspaceRoot)
+  const shouldInitializeServices = Boolean(workspaceRoot && (relativePath || workspaceLspServicesReady()))
   const shouldUseLsp = Boolean(workspaceRoot && supportsWorkspaceLsp(language))
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<typeof Monaco | null>(null)
