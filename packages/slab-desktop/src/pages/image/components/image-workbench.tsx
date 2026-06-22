@@ -192,7 +192,7 @@ export function ImageWorkbench({
           sidebarClassName="space-y-0"
           mainClassName="min-h-full lg:min-h-0"
           sidebar={
-            <aside className="flex h-full min-h-[520px] flex-col rounded-3xl border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_96%,transparent),color-mix(in_oklab,var(--surface-1)_96%,transparent))] p-6 shadow-elevation-3 lg:min-h-0 lg:overflow-hidden">
+            <aside className="flex h-full min-h-[520px] flex-col rounded-3xl border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_96%,transparent),color-mix(in_oklab,var(--surface-1)_96%,transparent))] p-6 lg:min-h-0 lg:overflow-hidden">
               <div className="flex h-full min-h-0 flex-col">
                 <div className="space-y-6 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-2">
                   <div className="space-y-4">
@@ -210,13 +210,13 @@ export function ImageWorkbench({
                       <TabsList className="grid h-auto w-full grid-cols-2 rounded-[16px] bg-transparent p-1">
                         <TabsTrigger
                           value="txt2img"
-                          className="h-11 rounded-[16px] border border-transparent text-sm font-medium text-muted-foreground shadow-none data-[state=active]:border-border/70 data-[state=active]:bg-[var(--shell-card)] data-[state=active]:text-foreground data-[state=active]:shadow-[var(--shell-elevation)]"
+                          className="h-11 rounded-[16px] border border-transparent text-sm font-medium text-muted-foreground shadow-none data-[state=active]:border-border/70 data-[state=active]:bg-[var(--shell-card)] data-[state=active]:text-foreground"
                         >
                           {t('pages.image.options.mode.txt2img')}
                         </TabsTrigger>
                         <TabsTrigger
                           value="img2img"
-                          className="h-11 rounded-[16px] border border-transparent text-sm font-medium text-muted-foreground shadow-none data-[state=active]:border-border/70 data-[state=active]:bg-[var(--shell-card)] data-[state=active]:text-foreground data-[state=active]:shadow-[var(--shell-elevation)]"
+                          className="h-11 rounded-[16px] border border-transparent text-sm font-medium text-muted-foreground shadow-none data-[state=active]:border-border/70 data-[state=active]:bg-[var(--shell-card)] data-[state=active]:text-foreground"
                         >
                           {t('pages.image.options.mode.img2img')}
                         </TabsTrigger>
@@ -257,7 +257,7 @@ export function ImageWorkbench({
                               </div>
                             ) : (
                               <>
-                                <div className="flex size-12 items-center justify-center rounded-[14px] bg-[var(--surface-soft)] text-muted-foreground transition group-hover:bg-[color:color-mix(in_oklab,var(--brand-teal)_10%,transparent)] group-hover:text-[var(--brand-teal)]">
+                                <div className="flex size-12 items-center justify-center rounded-[14px] bg-[var(--surface-soft)] text-muted-foreground transition group-hover:bg-[color:color-mix(in_oklab,var(--brand-teal)_10%,transparent)] group-hover:text-[color:var(--brand-teal)]">
                                   <ImageIcon className="size-5" />
                                 </div>
                                 <div className="space-y-1">
@@ -318,7 +318,7 @@ export function ImageWorkbench({
                       <Label className={SIDEBAR_LABEL_CLASSNAME}>
                         {t('pages.image.workbench.dimensions.label')}
                       </Label>
-                      <span className="rounded-full bg-[color:color-mix(in_oklab,var(--brand-teal)_15%,transparent)] px-2 py-1 font-mono text-micro leading-none text-[var(--brand-teal)]">
+                      <span className="rounded-full bg-[color:color-mix(in_oklab,var(--brand-teal)_15%,transparent)] px-2 py-1 font-mono text-micro leading-none text-[color:var(--brand-teal)]">
                         {parsedWidth} x {parsedHeight}
                       </span>
                     </div>
@@ -334,7 +334,7 @@ export function ImageWorkbench({
                             className={cn(
                               'flex h-10 items-center justify-center rounded-xl border bg-[var(--shell-card)] px-3 text-caption font-medium text-foreground transition',
                               isActive
-                                ? 'border-[var(--brand-teal)]/60 shadow-[var(--shell-elevation)]'
+                                ? 'border-[var(--brand-teal)]/60'
                                 : 'border-border/60 hover:border-border/50',
                             )}
                             onClick={() => handleDimensionPreset(preset.width, preset.height)}
@@ -555,7 +555,7 @@ export function ImageWorkbench({
 
                   <div className="mt-auto shrink-0 pt-8 lg:pt-6">
                     <Button
-                      className="h-14 w-full rounded-xl bg-[linear-gradient(135deg,var(--brand-teal)_0%,color-mix(in_oklab,var(--brand-teal)_85%,var(--shell-card))_100%)] text-base font-semibold text-[var(--brand-teal-foreground)] shadow-elevation-1 hover:brightness-[1.03]"
+                      className="h-14 w-full rounded-xl bg-[linear-gradient(135deg,var(--brand-teal)_0%,color-mix(in_oklab,var(--brand-teal)_85%,var(--shell-card))_100%)] text-base font-semibold text-[color:var(--brand-teal-foreground)] shadow-elevation-1 hover:brightness-[1.03]"
                       onClick={handleSubmit}
                       disabled={isBusy || !prompt.trim() || !selectedModelId}
                       data-testid="image-generate-button"
@@ -622,7 +622,7 @@ export function ImageWorkbench({
                       <div className="flex size-32 items-center justify-center rounded-full bg-[var(--surface-soft)] text-muted-foreground/60">
                         <ImageIcon className="size-14 stroke-[1.5]" />
                       </div>
-                      <div className="absolute -right-2 -bottom-2 flex size-12 items-center justify-center rounded-[14px] bg-[linear-gradient(135deg,var(--brand-teal)_0%,color-mix(in_oklab,var(--brand-teal)_85%,var(--shell-card))_100%)] text-[var(--brand-teal-foreground)] shadow-elevation-1">
+                      <div className="absolute -right-2 -bottom-2 flex size-12 items-center justify-center rounded-[14px] bg-[linear-gradient(135deg,var(--brand-teal)_0%,color-mix(in_oklab,var(--brand-teal)_85%,var(--shell-card))_100%)] text-[color:var(--brand-teal-foreground)] shadow-elevation-1">
                         {isGenerating ? (
                           <Loader2 className="size-5 animate-spin" />
                         ) : (
@@ -685,7 +685,7 @@ export function ImageWorkbench({
                           {t('pages.image.workbench.gallery.description')}
                         </p>
                       </div>
-                      <span className="rounded-full bg-[color:color-mix(in_oklab,var(--brand-teal)_15%,transparent)] px-3 py-1 text-sm font-medium text-[var(--brand-teal)]">
+                      <span className="rounded-full bg-[color:color-mix(in_oklab,var(--brand-teal)_15%,transparent)] px-3 py-1 text-sm font-medium text-[color:var(--brand-teal)]">
                         {t('pages.image.workbench.gallery.count', { count: images.length })}
                       </span>
                     </div>
@@ -695,7 +695,7 @@ export function ImageWorkbench({
                       {images.map((image, index) => (
                         <figure
                           key={image.id}
-                          className="group overflow-hidden rounded-2xl border border-border/60 bg-[var(--surface-soft)] shadow-elevation-2"
+                          className="group overflow-hidden rounded-2xl border border-border/60 bg-[var(--surface-soft)]"
                         >
                           <div className="relative overflow-hidden bg-[var(--shell-card)]">
                             <img

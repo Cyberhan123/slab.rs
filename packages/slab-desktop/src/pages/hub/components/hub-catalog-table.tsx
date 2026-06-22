@@ -144,13 +144,13 @@ function HubModelCard({
   return (
     <article
       data-testid={`hub-model-card-${model.id}`}
-      className="group relative overflow-hidden rounded-3xl border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-1)_92%,var(--background))] p-6 shadow-elevation-3"
+      className="group relative overflow-hidden rounded-3xl border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-1)_92%,var(--background))] p-6"
     >
       <div className="absolute inset-0 opacity-70 [background:radial-gradient(circle_at_top_right,color-mix(in_oklab,var(--brand-teal)_9%,transparent),transparent_34%),radial-gradient(circle_at_bottom_left,color-mix(in_oklab,var(--brand-gold)_12%,transparent),transparent_30%)]" />
 
       <div className="relative flex h-full flex-col gap-6">
         <div className="flex items-start justify-between gap-4">
-          <div className="flex size-14 items-center justify-center rounded-[18px] bg-[var(--surface-soft)] text-[var(--brand-teal)]">
+          <div className="flex size-14 items-center justify-center rounded-[18px] bg-[var(--surface-soft)] text-[color:var(--brand-teal)]">
             <Icon className="size-6" />
           </div>
 
@@ -380,7 +380,7 @@ function HubModelCard({
                 })}
               </span>
               {model.pending ? (
-                <span className="font-semibold text-[var(--brand-teal)]">
+                <span className="font-semibold text-[color:var(--brand-teal)]">
                   {t('pages.hub.catalog.downloadRunning')}
                 </span>
               ) : null}

@@ -80,7 +80,7 @@ export function InstalledPluginCard({
 
   return (
     <article
-      className="relative flex min-h-[194px] flex-col gap-4 rounded-[12px] border border-[color-mix(in_oklab,var(--border)_54%,transparent)] bg-[var(--shell-card)] p-4 shadow-[var(--shell-elevation)] transition hover:-translate-y-0.5 hover:border-[color-mix(in_oklab,var(--brand-teal)_28%,var(--border))] hover:shadow-elevation-3"
+      className="relative flex min-h-[194px] flex-col gap-4 rounded-[12px] border border-[color-mix(in_oklab,var(--border)_54%,transparent)] bg-[var(--shell-card)] p-4 transition hover:-translate-y-0.5 hover:border-[color-mix(in_oklab,var(--brand-teal)_28%,var(--border))]"
       data-testid={`plugin-card-${plugin.id}`}
     >
       <div className="flex items-start justify-between gap-3">
@@ -130,7 +130,7 @@ export function InstalledPluginCard({
           disabled={busy || (!plugin.valid && !plugin.enabled)}
           className={cn(
             'h-8 flex-1 rounded-[8px] text-xs font-bold',
-            !running && plugin.enabled && 'bg-[linear-gradient(135deg,var(--brand-teal)_0%,color-mix(in_oklab,var(--brand-teal)_88%,var(--surface-1))_100%)] text-[var(--brand-teal-foreground)]',
+            !running && plugin.enabled && 'bg-[linear-gradient(135deg,var(--brand-teal)_0%,color-mix(in_oklab,var(--brand-teal)_88%,var(--surface-1))_100%)] text-[color:var(--brand-teal-foreground)]',
           )}
           onClick={onPrimaryAction}
           data-testid={`plugin-primary-action-${plugin.id}`}
@@ -141,7 +141,7 @@ export function InstalledPluginCard({
         <Button
           variant="secondary"
           size="icon-xs"
-          className="size-8 rounded-[8px] text-[var(--brand-teal)]"
+          className="size-8 rounded-[8px] text-[color:var(--brand-teal)]"
           onClick={onToggleEnabled}
           disabled={busy}
           aria-label={

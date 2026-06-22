@@ -65,14 +65,6 @@ pub fn run_server_sidecar(
     Ok(())
 }
 
-pub fn restart_server_sidecar<R: tauri::Runtime>(
-    app_handle: &tauri::AppHandle<R>,
-    config: ServerSidecarConfig,
-) -> Result<(), String> {
-    stop_server_sidecar_now(app_handle);
-    start_server_sidecar(app_handle, config)
-}
-
 fn start_server_sidecar<R: tauri::Runtime>(
     app_handle: &tauri::AppHandle<R>,
     config: ServerSidecarConfig,
@@ -142,17 +134,6 @@ fn start_server_sidecar<R: tauri::Runtime>(
     info!("slab-server sidecar spawned (log_file={}, args={args:?})", log_file.display());
 
     Ok(())
-}
-
-fn stop_server_sidecar_now<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) {
-    if let Some(state) = app_handle.try_state::<ServerSidecarState>()
-        && let Some(mut child) = state.take_child()
-    {
-        if let Err(error) = child.write(b"shutdown\n") {
-            warn!("failed to request slab-server shutdown before restart: {error}");
-        }
-        let _ = child.kill();
-    }
 }
 
 fn spawn_server_log_task(mut rx: tauri::async_runtime::Receiver<CommandEvent>) {

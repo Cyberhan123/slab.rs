@@ -6,7 +6,7 @@ export default defineConfig({
   root: fileURLToPath(new URL(".", import.meta.url)),
   test: {
     name: "desktop-e2e",
-    include: ["tests/e2e/**/*.test.ts"],
+    include: ["tests/e2e/*.test.ts"],
     environment: "node",
     fileParallelism: false,
     hookTimeout: 900_000,

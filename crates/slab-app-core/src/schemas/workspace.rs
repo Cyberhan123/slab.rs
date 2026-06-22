@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
@@ -43,6 +45,20 @@ pub struct RecentWorkspaceResponse {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceConfigResponse {
     pub schema_version: u32,
+    #[serde(default)]
+    pub plugins: BTreeMap<String, WorkspacePluginConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePluginConfig {
+    pub enabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePluginPreferenceUpdate {
+    pub enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

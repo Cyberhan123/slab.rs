@@ -80,7 +80,7 @@ export function WorkspaceSearchPanel({
                       type="button"
                       className={cn(
                         "flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left text-sm transition hover:bg-[var(--surface-selected)]",
-                        activeFilePath === entry.relativePath && "bg-[var(--surface-selected)] text-[var(--brand-teal)]",
+                        activeFilePath === entry.relativePath && "bg-[var(--surface-selected)] text-[color:var(--brand-teal)]",
                       )}
                       title={entry.relativePath}
                       onClick={() => {
@@ -111,7 +111,7 @@ export function WorkspaceSearchPanel({
                       <div
                         className={cn(
                           "flex min-w-0 items-center gap-2 px-3 py-1 text-xs font-medium",
-                          activeFilePath === result.relativePath && "text-[var(--brand-teal)]",
+                          activeFilePath === result.relativePath && "text-[color:var(--brand-teal)]",
                         )}
                         title={result.relativePath}
                       >
@@ -170,7 +170,7 @@ function HighlightedLine({ match }: { match: WorkspaceTextSearchLineMatch }) {
   return (
     <>
       {before}
-      <mark className="rounded-[3px] bg-[color:color-mix(in_oklab,var(--brand-teal)_20%,transparent)] px-0.5 text-[var(--brand-teal)]">
+      <mark className="rounded-[3px] bg-[color:color-mix(in_oklab,var(--brand-teal)_20%,transparent)] px-0.5 text-[color:var(--brand-teal)]">
         {selected}
       </mark>
       {after}

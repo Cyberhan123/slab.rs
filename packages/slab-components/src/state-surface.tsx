@@ -57,7 +57,7 @@ function StateSurface({
       className={cn(stateSurfaceVariants({ size }), className)}
       {...props}
     >
-      <div className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-glass-bg-strong text-muted-foreground shadow-elevation-1">
+      <div className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-glass-bg-strong text-muted-foreground">
         <Icon className={cn("size-7", isLoading && "animate-spin")} />
       </div>
       <div className="space-y-2">

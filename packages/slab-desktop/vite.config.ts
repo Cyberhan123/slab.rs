@@ -5,6 +5,8 @@ import importMetaUrlPlugin from "@codingame/esbuild-import-meta-url-plugin";
 import fs from "node:fs";
 import path from "path";
 
+import { allowTauriIpcLocalhostInVscodeExtensionHostCsp } from "./src/lib/vscode-extension-host-csp";
+
 const host = process.env.TAURI_DEV_HOST;
 const apiProxyTarget = process.env.VITE_API_PROXY_TARGET;
 
@@ -44,6 +46,16 @@ export default defineConfig(async () => ({
       }
     },
     {
+      name: 'patch-vscode-extension-host-csp',
+      generateBundle(_options, bundle) {
+        for (const asset of Object.values(bundle)) {
+          if (asset.type === 'asset' && asset.fileName.endsWith('.html') && typeof asset.source === 'string') {
+            asset.source = allowTauriIpcLocalhostInVscodeExtensionHostCsp(asset.source)
+          }
+        }
+      },
+    },
+    {
       name: 'force-prevent-transform-assets',
       apply: 'serve',
       configureServer(server) {
@@ -54,7 +66,9 @@ export default defineConfig(async () => ({
               if (pathname.endsWith('.html')) {
                 res.setHeader('Content-Type', 'text/html')
                 res.writeHead(200)
-                res.write(fs.readFileSync(path.join(__dirname, pathname)))
+                res.write(allowTauriIpcLocalhostInVscodeExtensionHostCsp(
+                  fs.readFileSync(path.join(__dirname, pathname), "utf8")
+                ))
                 res.end()
                 return
               }
@@ -123,6 +137,7 @@ export default defineConfig(async () => ({
           "/v1": {
             target: apiProxyTarget,
             changeOrigin: true,
+            ws: true,
           },
         }
       : undefined,

@@ -83,7 +83,7 @@ export function AudioTranscriptDetail({ isTauri, task }: AudioTranscriptDetailPr
                 >
                   <button
                     type="button"
-                    className="text-left font-mono text-xs font-semibold text-[var(--brand-teal)] transition hover:text-foreground"
+                    className="text-left font-mono text-xs font-semibold text-[color:var(--brand-teal)] transition hover:text-foreground"
                     onClick={() => seekToSegment(segment)}
                     aria-label={t('pages.audio.history.actions.seekAria', {
                       time: formatSegmentRange(segment),

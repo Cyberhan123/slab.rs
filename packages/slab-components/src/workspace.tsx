@@ -149,7 +149,7 @@ export function UploadDropzone({
       {preview ? (
         <div className="w-full overflow-hidden rounded-xl">{preview}</div>
       ) : (
-        <div className="flex size-14 items-center justify-center rounded-2xl bg-[var(--surface-1)] text-muted-foreground shadow-elevation-1">
+        <div className="flex size-14 items-center justify-center rounded-2xl bg-[var(--surface-1)] text-muted-foreground">
           <UploadCloud className="size-6" />
         </div>
       )}

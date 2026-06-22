@@ -160,10 +160,25 @@ describe("workspace LSP helpers", () => {
     )
   })
 
+  it("builds file uri model paths from Windows verbatim workspace roots", () => {
+    expect(workspaceLspModelPath("\\\\?\\C:\\Users\\demo\\repo", "src/index.ts")).toBe(
+      "file:///c:/Users/demo/repo/src/index.ts",
+    )
+  })
+
   it("maps workspace file uris back to relative paths", () => {
     expect(
       workspaceLspRelativePathFromUri(
         "C:\\Users\\demo\\repo",
+        "file:///C:/Users/demo/repo/src/index.ts",
+      ),
+    ).toBe("src/index.ts")
+  })
+
+  it("maps workspace file uris under Windows verbatim workspace roots", () => {
+    expect(
+      workspaceLspRelativePathFromUri(
+        "\\\\?\\C:\\Users\\demo\\repo",
         "file:///C:/Users/demo/repo/src/index.ts",
       ),
     ).toBe("src/index.ts")

@@ -786,7 +786,6 @@
   .workspace-surface {
     background: var(--surface-1);
     border: 1px solid color-mix(in oklab, var(--border) 90%, var(--background) 10%);
-    box-shadow: var(--elevation-2);
   }
 
   .workspace-soft-panel {

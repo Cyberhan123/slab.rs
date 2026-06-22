@@ -302,7 +302,7 @@ export function AudioWorkbench({
             </div>
 
             <div className="rounded-2xl border border-dashed border-border/50 bg-glass-bg px-6 py-8 text-center">
-              <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-glass-bg-strong text-[var(--brand-teal)] shadow-elevation-2">
+              <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-glass-bg-strong text-[color:var(--brand-teal)]">
                 <FileAudio2 className="size-6" />
               </div>
               <h3 className="mt-5 text-lg font-semibold tracking-tight text-foreground">
@@ -363,7 +363,7 @@ export function AudioWorkbench({
             ) : null}
           </SoftPanel>
         </div>
-        <div className="workspace-surface h-fit rounded-3xl px-7 py-8 shadow-elevation-3">
+        <div className="workspace-surface h-fit rounded-3xl px-7 py-8">
           <p className="text-label font-semibold uppercase tracking-eyebrow text-muted-foreground">
             {t('pages.audio.workbench.previewTitle')}
           </p>
@@ -376,13 +376,13 @@ export function AudioWorkbench({
               >
                 <p className="pt-1 text-sm text-muted-foreground">{item.label}</p>
                 {item.chip ? (
-                  <span className="max-w-[220px] rounded-md bg-[color:color-mix(in_oklab,var(--brand-teal)_10%,var(--background))] px-2.5 py-1 text-right text-xs font-semibold text-[var(--brand-teal)]">
+                  <span className="max-w-[220px] rounded-md bg-[color:color-mix(in_oklab,var(--brand-teal)_10%,var(--background))] px-2.5 py-1 text-right text-xs font-semibold text-[color:var(--brand-teal)]">
                     {item.value}
                   </span>
                 ) : (
                   <p
                     className={`max-w-[220px] text-right text-sm font-semibold leading-6 ${
-                      item.accent ? 'text-[var(--brand-teal)]' : 'text-foreground'
+                      item.accent ? 'text-[color:var(--brand-teal)]' : 'text-foreground'
                     }`}
                   >
                     {item.value}
@@ -442,7 +442,7 @@ export function AudioWorkbench({
                 </div>
               ) : isBusy ? (
                 <div className="flex items-start gap-3">
-                  <div className="mt-0.5 flex size-10 items-center justify-center rounded-full bg-[var(--shell-card)] text-[var(--brand-teal)]">
+                  <div className="mt-0.5 flex size-10 items-center justify-center rounded-full bg-[var(--shell-card)] text-[color:var(--brand-teal)]">
                     <Loader2 className="size-5 animate-spin" />
                   </div>
                   <div className="space-y-1">
@@ -457,7 +457,7 @@ export function AudioWorkbench({
                         : t('pages.audio.workbench.busy.creatingDescription')}
                     </p>
                     {taskId ? (
-                      <p className="text-xs font-medium text-[var(--brand-teal)]">
+                      <p className="text-xs font-medium text-[color:var(--brand-teal)]">
                         {t('pages.audio.workbench.taskIdLabel', { id: taskId })}
                       </p>
                     ) : null}

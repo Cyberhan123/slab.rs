@@ -136,7 +136,7 @@ export function HubModelEnhancementSheet({
       >
         <SheetHeader className="shrink-0 border-b border-border/60 px-6 py-5 pr-14">
           <div className="flex items-start gap-3">
-            <div className="flex size-11 items-center justify-center rounded-2xl bg-[var(--surface-soft)] text-[var(--brand-teal)]">
+            <div className="flex size-11 items-center justify-center rounded-2xl bg-[var(--surface-soft)] text-[color:var(--brand-teal)]">
               <Settings2 className="size-5" />
             </div>
             <div className="space-y-1">
@@ -299,7 +299,7 @@ function ReadonlyFieldCard({ field }: { field: ModelConfigFieldResponse }) {
     t,
   );
   return (
-    <div className="rounded-[20px] border border-border/60 bg-background/70 p-4 shadow-elevation-1">
+    <div className="rounded-[20px] border border-border/60 bg-background/70 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex flex-wrap items-center gap-2">

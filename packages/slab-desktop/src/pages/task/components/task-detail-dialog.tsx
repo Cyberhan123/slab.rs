@@ -60,7 +60,7 @@ export function TaskDetailDialog({
         <Button
           variant="quiet"
           size="sm"
-          className="h-auto rounded-xl px-2 py-1 text-sm font-semibold text-[var(--brand-teal)] hover:bg-[color:color-mix(in_oklab,var(--brand-teal)_6%,transparent)] hover:text-[var(--brand-teal)]"
+          className="h-auto rounded-xl px-2 py-1 text-sm font-semibold text-[color:var(--brand-teal)] hover:bg-[color:color-mix(in_oklab,var(--brand-teal)_6%,transparent)] hover:text-[color:var(--brand-teal)]"
           onClick={() => {
             onOpen(task.id);
           }}

@@ -26,6 +26,8 @@ describe.sequential("workspace e2e", () => {
   let context: BrowserContext | undefined
   let dev: ManagedDevProcess | undefined
   let page: Page
+  let browserErrors: string[] = []
+  let consoleFailures: string[] = []
   let workspaceRoot: string
   let notePath: string
 
@@ -47,6 +49,23 @@ describe.sequential("workspace e2e", () => {
       window.localStorage.setItem("slab.ui.language", "en-US")
     }, env.uiBaseUrl)
     page = await context.newPage()
+    page.on("console", (message) => {
+      if (message.type() !== "error") {
+        return
+      }
+      const text = message.text()
+      browserErrors.push(text)
+      if (isWorkspaceConsoleFailure(text)) {
+        consoleFailures.push(text)
+      }
+    })
+    page.on("pageerror", (error) => {
+      const message = error.message
+      browserErrors.push(message)
+      if (isWorkspaceConsoleFailure(message)) {
+        consoleFailures.push(message)
+      }
+    })
   })
 
   afterAll(async () => {
@@ -58,6 +77,8 @@ describe.sequential("workspace e2e", () => {
 
   it("opens a browser workspace path, edits a file, and reflects Git changes through the server", async () => {
     const testEnv = requireEnv()
+    browserErrors = []
+    consoleFailures = []
     const runId = `workspace-${Date.now()}`
     const updatedContent = `Initial workspace note\n\nEdited by ${runId}\n`
 
@@ -103,12 +124,17 @@ describe.sequential("workspace e2e", () => {
     await page.getByTestId("workspace-browser-editor").waitFor({ state: "visible", timeout: 60_000 })
     const editor = page.getByTestId("workspace-editor-monaco")
     const monacoEditor = editor.locator(".monaco-editor")
-    await monacoEditor.waitFor({ state: "visible", timeout: 60_000 })
+    await monacoEditor.waitFor({ state: "visible", timeout: 60_000 }).catch(async (error: unknown) => {
+      const editorHtml = await editor.evaluate((element) => element.outerHTML).catch(() => "<unavailable>")
+      throw new Error(
+        `workspace Monaco editor did not render. Browser errors: ${browserErrors.join(" | ") || "none"}. Editor HTML: ${editorHtml}. Cause: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    })
     await eventually("workspace Monaco editor renders selected file", async () =>
       (await readMonacoEditorText(editor)).includes("Initial workspace note") ? true : null
     )
 
-    await monacoEditor.locator('[role="textbox"]').click()
+    await focusMonacoEditor(monacoEditor)
     await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A")
     await page.keyboard.type(updatedContent)
     await eventually("workspace Monaco editor accepts edits", async () =>
@@ -133,7 +159,7 @@ describe.sequential("workspace e2e", () => {
     await eventually("workspace note reopens after dirty guard discard", async () =>
       (await readMonacoEditorText(editor)).includes("Initial workspace note") ? true : null
     )
-    await monacoEditor.locator('[role="textbox"]').click()
+    await focusMonacoEditor(monacoEditor)
     await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A")
     await page.keyboard.type(updatedContent)
     await eventually("workspace Monaco editor accepts final persisted edits", async () =>
@@ -173,6 +199,33 @@ describe.sequential("workspace e2e", () => {
       }
     )
     expect(diff.diff).toContain(runId)
+
+    await page.getByTestId("workspace-console-toggle").click()
+    await page.getByTestId("workspace-console-panel").waitFor({ state: "visible", timeout: 60_000 })
+    const terminal = page.getByTestId("workspace-terminal")
+    await terminal.locator(".xterm").waitFor({ state: "visible", timeout: 60_000 })
+    await terminal.locator(".xterm-helper-textarea").waitFor({ state: "attached", timeout: 60_000 })
+    await eventually(
+      "workspace terminal websocket opens",
+      async () => ((await terminal.getAttribute("data-connection-state")) === "open" ? true : null),
+      60_000,
+      500,
+    )
+    await terminal.locator(".xterm").click()
+    await terminal.locator(".xterm-helper-textarea").evaluate((element) => {
+      ;(element as HTMLElement).focus()
+    })
+    const marker = `workspace-terminal-${Date.now()}`
+    const command = process.platform === "win32"
+      ? `Write-Output ${marker}`
+      : `printf '${marker}\\n'`
+    await page.keyboard.type(command)
+    await page.keyboard.press("Enter")
+    await eventually("workspace terminal prints command output", async () => {
+      const terminalText = await terminal.locator(".xterm-rows").textContent()
+      return terminalText?.includes(marker) ? true : null
+    }, 60_000, 500)
+    expect(consoleFailures).toEqual([])
   })
 })
 
@@ -206,4 +259,12 @@ async function readMonacoEditorText(editor: Locator): Promise<string> {
     .locator(".view-line")
     .evaluateAll((lines) => lines.map((line) => line.textContent ?? "").join("\n"))
   return text.replace(/\u00a0/g, " ")
+}
+
+async function focusMonacoEditor(editor: Locator): Promise<void> {
+  await editor.locator(".view-lines").click({ position: { x: 8, y: 8 } })
+}
+
+function isWorkspaceConsoleFailure(message: string): boolean {
+  return /ipc\.localhost|workspace terminal|failed to start workspace terminal|FileOperationError|Unable to resolve nonexistent file/i.test(message)
 }

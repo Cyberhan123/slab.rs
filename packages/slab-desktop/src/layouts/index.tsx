@@ -1,6 +1,7 @@
 import { Outlet, useLocation } from "react-router-dom"
 
 import { WorkspaceStage } from "@slab/components/workspace"
+import { ErrorBoundary } from "@/components/error-boundary"
 import FooterStatusBar from "@/layouts/footer-status-bar"
 import { GlobalHeaderProvider } from "@/layouts/global-header-provider"
 import Header from "@/layouts/header"
@@ -8,7 +9,8 @@ import { AppSidebar } from "@/layouts/sidebar"
 import { cn } from "@/lib/utils"
 
 export default function Layout() {
-  const { pathname } = useLocation()
+  const location = useLocation()
+  const { pathname } = location
   const isChatShell = pathname === "/"
 
   return (
@@ -29,7 +31,9 @@ export default function Layout() {
                     : "px-[var(--shell-content-gutter)] pb-[var(--shell-content-gutter)] pt-4"
                 )}
               >
-                <Outlet />
+                <ErrorBoundary key={location.key} variant="page">
+                  <Outlet />
+                </ErrorBoundary>
               </main>
             </WorkspaceStage>
           </div>

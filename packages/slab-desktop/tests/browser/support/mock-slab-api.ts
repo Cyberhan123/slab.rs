@@ -15,6 +15,24 @@ type SlabApiMockOptions = {
   queryClient?: unknown;
 };
 
+class MockApiError extends Error {
+  code: number;
+  data?: unknown;
+  status?: number;
+
+  constructor(code: number, message: string, data?: unknown, status?: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.code = code;
+    this.data = data;
+    this.status = status;
+  }
+
+  static fromResponse(response: Response, errorData?: unknown) {
+    return new MockApiError(response.status * 10, response.statusText, errorData, response.status);
+  }
+}
+
 export function createSlabApiMock({
   apiClient,
   defaultExport,
@@ -27,32 +45,42 @@ export function createSlabApiMock({
   isRetryable = () => false,
   queryClient = {},
 }: SlabApiMockOptions = {}) {
+  const fetchClient = {
+    DELETE: vi.fn<ApiClientMethod>(),
+    GET: vi.fn<ApiClientMethod>(),
+    POST: vi.fn<ApiClientMethod>(),
+    PUT: vi.fn<ApiClientMethod>(),
+    ...apiClient,
+  };
+  const queryHooks = {
+    useMutation: vi.fn<ApiClientMethod>(() => ({
+      isPending: false,
+      mutateAsync: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    })),
+    useQuery: vi.fn<ApiClientMethod>(() => ({
+      data: null,
+      isLoading: false,
+      refetch: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    })),
+    ...defaultExport,
+  };
+
   return {
-    apiClient: {
-      DELETE: vi.fn<ApiClientMethod>(),
-      GET: vi.fn<ApiClientMethod>(),
-      POST: vi.fn<ApiClientMethod>(),
-      PUT: vi.fn<ApiClientMethod>(),
-      ...apiClient,
-    },
-    default: {
-      useMutation: vi.fn<ApiClientMethod>(() => ({
-        isPending: false,
-        mutateAsync: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
-      })),
-      useQuery: vi.fn<ApiClientMethod>(() => ({
-        data: null,
-        isLoading: false,
-        refetch: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
-      })),
-      ...defaultExport,
-    },
+    ApiError: MockApiError,
+    ErrorCodes: {},
+    NetworkError: MockApiError,
+    TimeoutError: MockApiError,
+    apiClient: fetchClient,
+    createSlabApiFetchClient: vi.fn<() => unknown>(() => fetchClient),
+    createSlabApiQueryHooks: vi.fn<() => unknown>(() => queryHooks),
+    default: queryHooks,
     getErrorData: vi.fn<(error: unknown) => unknown | undefined>(getErrorData),
     getLocalizedErrorMessage: vi.fn<(error: unknown) => string>(getLocalizedErrorMessage),
     getErrorMessage,
     isApiError: vi.fn<(error: unknown) => boolean>(isApiError),
     isApiErrorResponse: vi.fn<(error: unknown) => boolean>(isApiErrorResponse),
     isRetryable: vi.fn<(error: unknown) => boolean>(isRetryable),
+    postFormData: vi.fn<() => Promise<unknown>>().mockResolvedValue({}),
     queryClient,
     ...extra,
   };

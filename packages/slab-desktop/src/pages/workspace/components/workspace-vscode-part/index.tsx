@@ -98,7 +98,11 @@ export function WorkspaceVscodePart({
   }, [mountState, themeMode])
 
   return (
-    <div ref={wrapperRef} className={cn("slab-vscode-part relative h-full min-h-0 w-full overflow-hidden", className)}>
+    <div
+      ref={wrapperRef}
+      className={cn("slab-vscode-part relative h-full min-h-0 w-full overflow-hidden", className)}
+      data-testid={part === "explorer" ? "workspace-vscode-explorer" : "workspace-vscode-editor"}
+    >
       <div ref={containerRef} className="h-full min-h-0 w-full overflow-hidden" />
       {mountState === "pending" ? (
         <div className="absolute inset-0 flex items-center justify-center bg-background/40">

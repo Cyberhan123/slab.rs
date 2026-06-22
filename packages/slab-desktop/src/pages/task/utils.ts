@@ -171,7 +171,7 @@ export function getStatusTone(status: string, t: Translate) {
     case 'succeeded':
       return {
         label: t('pages.task.status.succeeded'),
-        className: 'bg-[var(--status-success-bg)] text-[var(--success)]',
+        className: 'bg-[var(--status-success-bg)] text-[color:var(--success)]',
         dotClassName: 'bg-[var(--success)]',
       };
     case 'running':
@@ -230,7 +230,7 @@ export function getTaskTypeMeta(taskType: string, t: Translate) {
       label: t('pages.task.taskType.imageGeneration'),
       icon: Image,
       iconBg: 'bg-[var(--surface-soft)]',
-      iconColor: 'text-[var(--accent-foreground)]',
+      iconColor: 'text-[color:var(--accent-foreground)]',
     };
   }
 
@@ -239,7 +239,7 @@ export function getTaskTypeMeta(taskType: string, t: Translate) {
       label: t('pages.task.taskType.videoGeneration'),
       icon: Film,
       iconBg: 'bg-[var(--surface-soft)]',
-      iconColor: 'text-[var(--brand-teal)]',
+      iconColor: 'text-[color:var(--brand-teal)]',
     };
   }
 

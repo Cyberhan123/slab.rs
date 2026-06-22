@@ -94,7 +94,7 @@ export function WorkspaceGitPanel({
       >
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
-            <GitBranch className="size-4 shrink-0 text-[var(--brand-teal)]" />
+            <GitBranch className="size-4 shrink-0 text-[color:var(--brand-teal)]" />
             <span className="truncate text-sm font-semibold">
               {gitStatus.branch ?? t("pages.workspace.git.detached")}
             </span>

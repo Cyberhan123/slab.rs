@@ -94,7 +94,7 @@ export function SettingFieldCard({
       id={`setting-${property.pmid}`}
       data-testid={`settings-field-${property.pmid}`}
       className={cn(
-        'rounded-[16px] border border-border/60 bg-[var(--shell-card)] p-5 shadow-elevation-1',
+        'rounded-[16px] border border-border/60 bg-[var(--shell-card)] p-5',
         errorState && 'border-destructive/70 bg-destructive/5',
       )}
     >

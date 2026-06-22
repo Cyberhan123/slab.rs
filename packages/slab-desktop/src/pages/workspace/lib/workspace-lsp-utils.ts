@@ -236,6 +236,11 @@ function uriStringFromValue(value: unknown) {
 
 function normalizeWorkspacePath(path: string) {
   let normalized = path.replace(/\\/g, "/")
+  if (normalized.startsWith("//?/UNC/")) {
+    normalized = `//${normalized.slice("//?/UNC/".length)}`
+  } else if (normalized.startsWith("//?/")) {
+    normalized = normalized.slice("//?/".length)
+  }
   if (/^\/[A-Za-z]:/.test(normalized)) {
     normalized = normalized.slice(1)
   }

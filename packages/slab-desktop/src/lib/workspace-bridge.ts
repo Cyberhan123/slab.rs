@@ -1,8 +1,5 @@
-import { invoke } from "@tauri-apps/api/core"
 import { ApiError, apiClient } from "@slab/api"
 import { SERVER_BASE_URL } from "@slab/api/config"
-
-import { isTauri } from "@/hooks/use-tauri"
 
 export const WORKSPACE_STATE_QUERY_KEY = ["workspace-state"] as const
 
@@ -406,11 +403,16 @@ export async function workspaceConsoleRun(command: string): Promise<WorkspaceCon
 export async function workspaceTerminalSession(
   shell?: WorkspaceTerminalShell,
 ): Promise<WorkspaceTerminalSession> {
-  if (!isTauri()) {
-    throw new Error("workspace terminal is only available in the desktop app")
+  const endpoint = new URL(SERVER_BASE_URL)
+  endpoint.protocol = endpoint.protocol === "https:" ? "wss:" : "ws:"
+  endpoint.pathname = "/v1/workspace/terminal"
+  endpoint.search = ""
+  endpoint.hash = ""
+  if (shell) {
+    endpoint.searchParams.set("shell", shell)
   }
 
-  return invoke<WorkspaceTerminalSession>("workspace_terminal_session", { shell })
+  return { url: endpoint.toString() }
 }
 
 export function workspaceWatch({
@@ -450,9 +452,11 @@ export function workspaceWatch({
 export async function workspaceUpdatePluginPreference(
   update: WorkspacePluginPreferenceUpdate,
 ): Promise<WorkspaceStateResponse> {
-  if (!isTauri()) {
-    throw new Error("workspace plugin preferences are only available in the desktop app")
-  }
-
-  return invoke<WorkspaceStateResponse>("workspace_update_plugin_preference", { update })
+  return requireWorkspaceData(
+    await apiClient.PUT("/v1/workspace/plugins/{plugin_id}/preference", {
+      params: { path: { plugin_id: update.pluginId } },
+      body: { enabled: update.enabled },
+    }),
+    `Workspace plugin preference '${update.pluginId}' returned an empty response.`,
+  )
 }

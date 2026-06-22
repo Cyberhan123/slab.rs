@@ -71,6 +71,7 @@ import {
   type WorkspaceLspOpenFileOptions,
 } from "./workspace-lsp-utils"
 import { slabTerminalBackend } from "./workspace-terminal-service"
+import { getStandaloneMonacoEditorOverrides } from "./workspace-standalone-monaco"
 
 export {
   supportsWorkspaceLsp,
@@ -614,6 +615,7 @@ function registerWorkspaceVscodeServiceOverrides() {
   }
 
   registerServices({
+    ...getStandaloneMonacoEditorOverrides(),
     ...getAccessibilityServiceOverride(),
     ...getConfigurationServiceOverride(),
     ...getDialogsServiceOverride(),

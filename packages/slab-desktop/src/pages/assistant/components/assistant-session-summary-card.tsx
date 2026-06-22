@@ -31,7 +31,7 @@ export function AssistantSessionSummaryCard({
   const { t } = useTranslation()
 
   return (
-    <aside className="w-full max-w-[288px] rounded-2xl border border-border/50 bg-[var(--shell-card)] p-6 shadow-[var(--shell-elevation)]">
+    <aside className="w-full max-w-[288px] rounded-2xl border border-border/50 bg-[var(--shell-card)] p-6">
       <div className="flex items-center justify-between gap-3">
         <p className="text-label font-bold uppercase tracking-eyebrow text-muted-foreground">
           {t("pages.assistant.summaryCard.latestSession")}
@@ -66,8 +66,8 @@ export function AssistantSessionSummaryCard({
                 className={cn(
                   "flex size-8 shrink-0 items-center justify-center rounded-[8px]",
                   item.tone === "warm"
-                    ? "bg-[color:color-mix(in_oklab,var(--brand-gold)_20%,transparent)] text-[var(--brand-gold)]"
-                    : "bg-[color:color-mix(in_oklab,var(--brand-teal)_20%,transparent)] text-[var(--brand-teal)]"
+                    ? "bg-[color:color-mix(in_oklab,var(--brand-gold)_20%,transparent)] text-[color:var(--brand-gold)]"
+                    : "bg-[color:color-mix(in_oklab,var(--brand-teal)_20%,transparent)] text-[color:var(--brand-teal)]"
                 )}
               >
                 <Icon className="size-4" />

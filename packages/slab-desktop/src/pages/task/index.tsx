@@ -118,7 +118,7 @@ export default function Task() {
             <div className="mt-5">
               <div className="h-1.5 overflow-hidden rounded-full bg-border/50">
                 <div
-                  className="h-full rounded-full bg-[var(--brand-gold)] shadow-elevation-1"
+                  className="h-full rounded-full bg-[var(--brand-gold)]"
                   style={{ width: `${clamp(activeShare, activeTaskCount > 0 ? 8 : 0, Number.POSITIVE_INFINITY)}%` }}
                 />
               </div>
@@ -180,7 +180,7 @@ export default function Task() {
             description={t('pages.task.states.emptyDescription')}
           />
         ) : (
-          <section className="overflow-hidden rounded-[20px] border border-border/40 bg-[var(--surface-1)] shadow-elevation-2">
+          <section className="overflow-hidden rounded-[20px] border border-border/40 bg-[var(--surface-1)]">
             <Table className="min-w-[820px] xl:min-w-[980px]" variant="roomy">
               <TableHeader className="[&_tr]:border-b-0 [&_tr]:bg-[var(--surface-soft)]">
                 <TableRow className="hover:bg-[var(--surface-soft)]">
@@ -214,7 +214,7 @@ export default function Task() {
                       className="border-b border-border/50 hover:bg-[var(--surface-soft)]"
                     >
                       <TableCell
-                        className="px-6 py-6 font-mono text-sm font-medium text-[var(--brand-teal)]"
+                        className="px-6 py-6 font-mono text-sm font-medium text-[color:var(--brand-teal)]"
                         title={task.id}
                       >
                         {formatTaskId(task.id)}

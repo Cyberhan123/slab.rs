@@ -13,7 +13,7 @@ export function SectionHeading({
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex items-center gap-2">
-        <Icon className="size-5 text-[var(--brand-teal)]" />
+        <Icon className="size-5 text-[color:var(--brand-teal)]" />
         <h2 className="text-xl font-semibold leading-7 tracking-tight text-foreground">{title}</h2>
       </div>
       {action}

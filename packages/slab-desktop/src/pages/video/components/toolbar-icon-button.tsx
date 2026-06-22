@@ -25,7 +25,7 @@ export function ToolbarIconButton({
       onClick={onClick}
       className={cn(
         'flex size-10 items-center justify-center rounded-2xl text-muted-foreground transition',
-        active && 'bg-[var(--shell-card)] text-[var(--brand-teal)] shadow-elevation-2',
+        active && 'bg-[var(--shell-card)] text-[color:var(--brand-teal)] shadow-elevation-2',
         !active && 'hover:bg-glass-bg-strong hover:text-foreground',
         disabled && 'cursor-not-allowed opacity-35 hover:bg-transparent hover:text-muted-foreground',
       )}

@@ -6,7 +6,7 @@ export function InstalledSkeletonGrid() {
       {INSTALLED_SKELETON_KEYS.map((key) => (
         <div
           key={key}
-          className="min-h-[194px] animate-pulse rounded-[12px] bg-[var(--shell-card)] p-[17px] shadow-[var(--shell-elevation)]"
+          className="min-h-[194px] animate-pulse rounded-[12px] bg-[var(--shell-card)] p-[17px]"
         >
           <div className="flex items-start justify-between">
             <div className="size-10 rounded-[8px] bg-[var(--surface-soft)]" />

@@ -26,9 +26,10 @@ export function WorkspaceTreeRow({
     <button
       type="button"
       style={style}
+      data-testid={`workspace-tree-row-${node.data.relativePath.replaceAll("/", "-").replaceAll(".", "-") || "root"}`}
       className={cn(
         "flex w-full min-w-0 items-center gap-1.5 px-2 text-left text-sm outline-none transition hover:bg-[var(--surface-selected)]",
-        selected && "bg-[var(--surface-selected)] text-[var(--brand-teal)]",
+        selected && "bg-[var(--surface-selected)] text-[color:var(--brand-teal)]",
       )}
       onClick={() => {
         node.select()
@@ -53,7 +54,7 @@ export function WorkspaceTreeRow({
           )
         ) : null}
       </span>
-      <Icon className={cn("size-4 shrink-0", isDirectory ? "text-[var(--brand-teal)]" : "text-muted-foreground")} />
+      <Icon className={cn("size-4 shrink-0", isDirectory ? "text-[color:var(--brand-teal)]" : "text-muted-foreground")} />
       <span className="truncate">{node.data.name}</span>
     </button>
   )

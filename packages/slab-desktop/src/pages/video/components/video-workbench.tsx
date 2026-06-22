@@ -191,7 +191,7 @@ export function VideoWorkbench({
     <div className="h-full w-full overflow-y-auto bg-[var(--shell-card)] lg:overflow-hidden">
       <div className="mx-auto flex min-h-full w-full max-w-[1200px] flex-col px-4 py-4 sm:px-6 lg:h-full lg:min-h-0 lg:py-5 xl:py-6">
         <div className="grid min-h-0 flex-1 gap-6 lg:grid-cols-[340px_minmax(0,1fr)] xl:grid-cols-[378px_minmax(0,1fr)]">
-          <aside className="flex h-full min-h-[520px] flex-col rounded-3xl border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_96%,transparent),color-mix(in_oklab,var(--surface-1)_96%,transparent))] p-6 shadow-elevation-3 lg:min-h-0 lg:overflow-hidden">
+          <aside className="flex h-full min-h-[520px] flex-col rounded-3xl border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_96%,transparent),color-mix(in_oklab,var(--surface-1)_96%,transparent))] p-6 lg:min-h-0 lg:overflow-hidden">
             <div className="pb-6">
               <p className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
                 {t('pages.video.workbench.configTitle')}
@@ -301,7 +301,7 @@ export function VideoWorkbench({
                   className="group flex w-full flex-col items-center justify-center gap-4 rounded-[22px] border-2 border-dashed border-border/60 bg-glass-bg px-5 py-7 text-center transition hover:border-[var(--brand-teal)]/45 hover:bg-glass-bg-strong"
                 >
                   {initImageDataUri ? (
-                    <div className="relative w-full overflow-hidden rounded-[18px] border border-[var(--shell-card)]/70 bg-glass-bg-strong shadow-elevation-2">
+                    <div className="relative w-full overflow-hidden rounded-[18px] border border-[var(--shell-card)]/70 bg-glass-bg-strong">
                       <img
                         src={initImageDataUri}
                         alt={t('pages.video.workbench.referenceImage.previewAlt')}
@@ -333,7 +333,7 @@ export function VideoWorkbench({
                     </div>
                   ) : (
                     <>
-                      <div className="flex size-14 items-center justify-center rounded-full bg-[var(--shell-card)] text-muted-foreground shadow-elevation-2">
+                      <div className="flex size-14 items-center justify-center rounded-full bg-[var(--shell-card)] text-muted-foreground">
                         <ImagePlus className="h-6 w-6" />
                       </div>
                       <div className="space-y-1">
@@ -518,7 +518,7 @@ export function VideoWorkbench({
           <section className="flex min-h-[520px] flex-col gap-6 lg:min-h-0">
             <div
               className={cn(
-                'relative flex min-h-[420px] flex-1 items-center justify-center overflow-hidden rounded-3xl border border-border/50 bg-[var(--surface-soft)] p-6 shadow-elevation-3 lg:min-h-0',
+                'relative flex min-h-[420px] flex-1 items-center justify-center overflow-hidden rounded-3xl border border-border/50 bg-[var(--surface-soft)] p-6 lg:min-h-0',
               )}
               style={{
                 backgroundImage:
@@ -529,7 +529,7 @@ export function VideoWorkbench({
 
               {videoPath ? (
                 <div className="relative z-10 w-full max-w-[640px] space-y-4">
-                  <div className="overflow-hidden rounded-3xl border border-[var(--shell-card)]/50 bg-[color:color-mix(in_oklab,var(--media-canvas)_88%,transparent)] shadow-elevation-3">
+                  <div className="overflow-hidden rounded-3xl border border-[var(--shell-card)]/50 bg-[color:color-mix(in_oklab,var(--media-canvas)_88%,transparent)]">
                     {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
                     <video
                       src={videoPath}
@@ -548,7 +548,7 @@ export function VideoWorkbench({
                 <div className="relative z-10 flex max-w-[340px] flex-col items-center gap-6 text-center">
                   <div className="relative">
                     <div className="absolute inset-[-26px] rounded-full bg-[color:color-mix(in_oklab,var(--brand-teal)_18%,transparent)] blur-3xl" />
-                    <div className="relative flex size-24 items-center justify-center rounded-3xl bg-[var(--shell-card)] text-[var(--brand-teal)] shadow-elevation-3">
+                    <div className="relative flex size-24 items-center justify-center rounded-3xl bg-[var(--shell-card)] text-[color:var(--brand-teal)]">
                       {isGenerating ? <Loader2 className="h-10 w-10 animate-spin" /> : <Film className="h-10 w-10" />}
                     </div>
                   </div>
@@ -578,7 +578,7 @@ export function VideoWorkbench({
               )}
 
               <div className="absolute bottom-8 left-1/2 z-20 -translate-x-1/2">
-                <div className="flex items-center gap-2 rounded-[20px] border border-[var(--shell-card)]/45 bg-glass-bg-strong px-4 py-3 backdrop-blur-xl shadow-elevation-3">
+                <div className="flex items-center gap-2 rounded-[20px] border border-[var(--shell-card)]/45 bg-glass-bg-strong px-4 py-3 backdrop-blur-xl">
                   <ToolbarIconButton
                     icon={Maximize2}
                     label={t('pages.video.workbench.stage.toggleScale')}
@@ -595,7 +595,7 @@ export function VideoWorkbench({
               </div>
             </div>
 
-            <div className="rounded-[22px] border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_95%,transparent),color-mix(in_oklab,var(--surface-1)_92%,transparent))] px-5 py-4 shadow-elevation-3">
+            <div className="rounded-[22px] border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_95%,transparent),color-mix(in_oklab,var(--surface-1)_92%,transparent))] px-5 py-4">
               <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                 <div className="grid gap-4 sm:grid-cols-3">
                   <StatusMetric
@@ -615,7 +615,7 @@ export function VideoWorkbench({
               </div>
             </div>
 
-            <div className="rounded-[22px] border border-border/50 bg-[var(--surface-soft)] px-5 py-4 shadow-elevation-3">
+            <div className="rounded-[22px] border border-border/50 bg-[var(--surface-soft)] px-5 py-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
@@ -637,7 +637,7 @@ export function VideoWorkbench({
                     key={task.task_id}
                     type="button"
                     data-testid={`video-history-item-${task.task_id}`}
-                    className="rounded-[18px] border border-border/50 bg-[var(--shell-card)] px-4 py-3 text-left transition hover:border-[var(--brand-teal)]/50 hover:shadow-elevation-2"
+                    className="rounded-[18px] border border-border/50 bg-[var(--shell-card)] px-4 py-3 text-left transition hover:border-[var(--brand-teal)]/50"
                     onClick={() => void openHistoryDetail(task.task_id)}
                   >
                     <p className="line-clamp-2 text-sm font-semibold leading-5 text-foreground">

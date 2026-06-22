@@ -80,9 +80,24 @@ export function registerSlabMonacoTheme(monaco: typeof Monaco, mode: WorkspaceTh
 }
 
 export function applySlabMonacoTheme(monaco: typeof Monaco, mode: WorkspaceThemeMode) {
-  registerSlabMonacoTheme(monaco, mode)
-  const themeId = slabMonacoThemeId(mode)
-  monaco.editor.setTheme(themeId)
+  const fallbackThemeId = mode === "dark" ? "vs-dark" : "vs"
+  let themeId = slabMonacoThemeId(mode)
+
+  try {
+    registerSlabMonacoTheme(monaco, mode)
+  } catch {
+    themeId = fallbackThemeId
+  }
+
+  try {
+    monaco.editor.setTheme(themeId)
+  } catch {
+    if (themeId !== fallbackThemeId) {
+      monaco.editor.setTheme(fallbackThemeId)
+      return fallbackThemeId
+    }
+  }
+
   return themeId
 }
 

@@ -93,15 +93,15 @@ export function AppSidebar({ variant = "default" }: AppSidebarProps) {
         className={cn(
           "focus-ring flex flex-col items-center justify-center rounded-xl transition-[background-color,color,box-shadow,opacity,transform] duration-[var(--dur-180)] ease-out-expo",
           active
-            ? "size-[52px] bg-[var(--shell-card)] text-[var(--shell-rail-active)] opacity-100 shadow-[var(--shell-elevation)]"
-            : "size-12 text-[var(--shell-rail-label)] opacity-70 hover:-translate-y-px hover:bg-glass-bg-strong hover:text-[var(--shell-title)] hover:opacity-100"
+            ? "size-[52px] bg-[var(--shell-card)] text-[color:var(--shell-rail-active)] opacity-100"
+            : "size-12 text-[color:var(--shell-rail-label)] opacity-70 hover:-translate-y-px hover:bg-glass-bg-strong hover:text-[color:var(--shell-title)] hover:opacity-100"
         )}
       >
         <Icon className="size-[18px]" />
         <span
           className={cn(
             "pt-1 text-micro font-medium leading-[15px] tracking-tight",
-            active && "text-[var(--shell-rail-active)]"
+            active && "text-[color:var(--shell-rail-active)]"
           )}
         >
           {item.labelKey ? t(item.labelKey) : item.label}
@@ -120,8 +120,8 @@ export function AppSidebar({ variant = "default" }: AppSidebarProps) {
       <div className="flex flex-1 flex-col items-center justify-between">
         <div className="flex flex-col items-center gap-6">
           <WindowControls placement="sidebar" />
-          <div className="flex h-[54px] w-[59px] items-center justify-center rounded-[16px] bg-[var(--shell-card)] shadow-[var(--shell-elevation)]">
-            <span className="text-xl font-bold tracking-display text-[var(--brand-teal)]">
+          <div className="flex h-[54px] w-[59px] items-center justify-center rounded-[16px] bg-[var(--shell-card)]">
+            <span className="text-xl font-bold tracking-display text-[color:var(--brand-teal)]">
               Slab
             </span>
           </div>

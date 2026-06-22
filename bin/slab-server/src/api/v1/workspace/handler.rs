@@ -4,19 +4,21 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::{Query, State};
+use axum::extract::{Path as AxumPath, Query, State};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router, middleware};
 use notify::event::{ModifyKind, RenameMode};
 use notify::{Event as NotifyEvent, EventKind as NotifyEventKind, RecursiveMode, Watcher};
 use serde::Deserialize;
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::WorkspaceService;
+use slab_utils::path::absolute::canonicalize_existing_preserving_symlinks;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 use utoipa::OpenApi;
 
+use super::terminal::upgrade_workspace_terminal;
 use crate::api::middleware::auth;
 use crate::api::v1::workspace::schema::{
     RecentWorkspaceResponse, WorkspaceConfigResponse, WorkspaceConsoleOutput,
@@ -26,10 +28,11 @@ use crate::api::v1::workspace::schema::{
     WorkspaceGitDiffView, WorkspaceGitFileStatus, WorkspaceGitOperationView,
     WorkspaceGitPathCommand, WorkspaceGitStatusEntry, WorkspaceGitStatusSummary,
     WorkspaceGitStatusView, WorkspaceInfoResponse, WorkspaceOpenCommand, WorkspacePathMetadata,
-    WorkspacePathView, WorkspaceRenamePathCommand, WorkspaceStateResponse,
-    WorkspaceTextSearchFileMatch, WorkspaceTextSearchLineMatch, WorkspaceTextSearchView,
-    WorkspaceWatchEntryKind, WorkspaceWatchEvent, WorkspaceWatchEventType,
-    WorkspaceWriteFileCommand, WorkspaceWriteFileView,
+    WorkspacePathView, WorkspacePluginConfig, WorkspacePluginPreferenceUpdate,
+    WorkspaceRenamePathCommand, WorkspaceStateResponse, WorkspaceTextSearchFileMatch,
+    WorkspaceTextSearchLineMatch, WorkspaceTextSearchView, WorkspaceWatchEntryKind,
+    WorkspaceWatchEvent, WorkspaceWatchEventType, WorkspaceWriteFileCommand,
+    WorkspaceWriteFileView,
 };
 use crate::api::validation::ValidatedJson;
 use crate::error::ServerError;
@@ -76,13 +79,15 @@ struct WorkspaceSearchQuery {
         git_discard,
         git_commit,
         git_diff,
-        console_run
+        console_run,
+        update_plugin_preference
     ),
     components(schemas(
         WorkspaceStateResponse,
         WorkspaceInfoResponse,
         RecentWorkspaceResponse,
         WorkspaceConfigResponse,
+        WorkspacePluginConfig,
         WorkspaceDirectoryView,
         WorkspaceFileEntry,
         WorkspaceFileKind,
@@ -112,6 +117,7 @@ struct WorkspaceSearchQuery {
         WorkspaceGitFileStatus,
         WorkspaceGitOperationView,
         WorkspaceGitDiffView,
+        WorkspacePluginPreferenceUpdate,
         WorkspaceConsoleRunCommand,
         WorkspaceConsoleOutput
     ))
@@ -129,6 +135,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/workspace/path", delete(delete_path).patch(rename_path))
         .route("/workspace/path/stat", get(stat_path))
         .route("/workspace/watch", get(watch_workspace))
+        .route("/workspace/terminal", get(upgrade_workspace_terminal))
         .route("/workspace/search", get(search_files))
         .route("/workspace/search/text", get(search_text))
         .route("/workspace/git/status", get(git_status))
@@ -138,6 +145,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/workspace/git/commit", post(git_commit))
         .route("/workspace/git/diff", post(git_diff))
         .route("/workspace/console/run", post(console_run))
+        .route("/workspace/plugins/{plugin_id}/preference", put(update_plugin_preference))
         .route_layer(middleware::from_fn_with_state(state.clone(), auth::auth_middleware))
         .with_state(state)
 }
@@ -155,10 +163,10 @@ async fn workspace_state(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<WorkspaceStateResponse>, ServerError> {
     let Some(root) = state.workspace_root() else {
-        return Ok(Json(workspace_state_response(None)));
+        return Ok(Json(workspace_state_response(None, None)));
     };
     let root = canonical_workspace_root(root)?;
-    Ok(Json(workspace_state_response(Some(workspace_info(state.as_ref(), &root)))))
+    Ok(Json(workspace_state_response_for_root(state.as_ref(), &root)?))
 }
 
 #[utoipa::path(
@@ -176,11 +184,9 @@ async fn open_workspace(
     ValidatedJson(command): ValidatedJson<WorkspaceOpenCommand>,
 ) -> Result<Json<WorkspaceStateResponse>, ServerError> {
     let root = canonical_workspace_root(PathBuf::from(command.root_path))?;
-    fs::create_dir_all(root.join(".slab")).map_err(|error| {
-        ServerError::Internal(format!("failed to create workspace settings directory: {error}"))
-    })?;
+    WorkspaceService::ensure_workspace_settings(&root)?;
     state.set_workspace_root(Some(root.clone())).map_err(ServerError::Internal)?;
-    Ok(Json(workspace_state_response(Some(workspace_info(state.as_ref(), &root)))))
+    Ok(Json(workspace_state_response_for_root(state.as_ref(), &root)?))
 }
 
 #[utoipa::path(
@@ -195,7 +201,7 @@ async fn close_workspace(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<WorkspaceStateResponse>, ServerError> {
     state.set_workspace_root(None).map_err(ServerError::Internal)?;
-    Ok(Json(workspace_state_response(None)))
+    Ok(Json(workspace_state_response(None, None)))
 }
 
 #[utoipa::path(
@@ -542,6 +548,29 @@ async fn console_run(
     Ok(Json(WorkspaceService::run_console_command(root, &command.command).await?))
 }
 
+#[utoipa::path(
+    put,
+    path = "/v1/workspace/plugins/{plugin_id}/preference",
+    tag = "workspace",
+    params(
+        ("plugin_id" = String, Path, description = "Plugin manifest id.")
+    ),
+    request_body = WorkspacePluginPreferenceUpdate,
+    responses(
+        (status = 200, description = "Workspace plugin preference updated", body = WorkspaceStateResponse),
+        (status = 400, description = "Bad request"),
+    )
+)]
+async fn update_plugin_preference(
+    State(state): State<Arc<AppState>>,
+    AxumPath(plugin_id): AxumPath<String>,
+    Json(update): Json<WorkspacePluginPreferenceUpdate>,
+) -> Result<Json<WorkspaceStateResponse>, ServerError> {
+    let root = active_workspace_root(state.as_ref())?;
+    let config = WorkspaceService::update_workspace_plugin_preference(&root, &plugin_id, update)?;
+    Ok(Json(workspace_state_response(Some(workspace_info(state.as_ref(), &root)), Some(config))))
+}
+
 fn spawn_workspace_watcher(
     root: PathBuf,
     tx: tokio::sync::mpsc::Sender<WorkspaceWatchEvent>,
@@ -678,7 +707,7 @@ fn workspace_watch_entry_kind(path: &Path) -> WorkspaceWatchEntryKind {
     }
 }
 
-fn active_workspace_root(state: &AppState) -> Result<PathBuf, ServerError> {
+pub(super) fn active_workspace_root(state: &AppState) -> Result<PathBuf, ServerError> {
     let root = state
         .workspace_root()
         .or_else(|| WorkspaceService::workspace_root_from_config(&state.context.config))
@@ -687,7 +716,7 @@ fn active_workspace_root(state: &AppState) -> Result<PathBuf, ServerError> {
 }
 
 fn canonical_workspace_root(root: PathBuf) -> Result<PathBuf, ServerError> {
-    let canonical = root.canonicalize().map_err(|error| {
+    let canonical = canonicalize_existing_preserving_symlinks(&root).map_err(|error| {
         ServerError::BadRequest(format!(
             "failed to resolve workspace root {}: {error}",
             root.display()
@@ -706,7 +735,7 @@ fn workspace_info(state: &AppState, root: &Path) -> WorkspaceInfoResponse {
     let config = &state.context.config;
     let workspace_settings_path = root.join(".slab").join("settings.json");
     let configured_root = config.workspace_root.as_ref().and_then(|root| {
-        root.canonicalize()
+        canonicalize_existing_preserving_symlinks(root)
             .inspect_err(|error| {
                 tracing::warn!(
                     workspace_root = %root.display(),
@@ -733,12 +762,30 @@ fn workspace_info(state: &AppState, root: &Path) -> WorkspaceInfoResponse {
     }
 }
 
-fn workspace_state_response(current: Option<WorkspaceInfoResponse>) -> WorkspaceStateResponse {
-    WorkspaceStateResponse { current, recent: Vec::new(), config: None }
+fn workspace_state_response_for_root(
+    state: &AppState,
+    root: &Path,
+) -> Result<WorkspaceStateResponse, ServerError> {
+    let config = WorkspaceService::workspace_config(root)?;
+    Ok(workspace_state_response(Some(workspace_info(state, root)), Some(config)))
+}
+
+fn workspace_state_response(
+    current: Option<WorkspaceInfoResponse>,
+    config: Option<WorkspaceConfigResponse>,
+) -> WorkspaceStateResponse {
+    WorkspaceStateResponse { current, recent: Vec::new(), config }
 }
 
 fn path_string(path: &Path) -> String {
-    path.to_string_lossy().into_owned()
+    let raw = path.to_string_lossy();
+    if let Some(path) = raw.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{path}");
+    }
+    if let Some(path) = raw.strip_prefix(r"\\?\") {
+        return path.to_owned();
+    }
+    raw.into_owned()
 }
 
 #[cfg(test)]
@@ -748,7 +795,9 @@ mod tests {
     use serde_json::Value;
     use utoipa::OpenApi;
 
-    use super::{WorkspaceApi, canonical_workspace_root};
+    use slab_utils::path::absolute::canonicalize_existing_preserving_symlinks;
+
+    use super::{WorkspaceApi, canonical_workspace_root, path_string};
     use crate::error::ServerError;
 
     #[test]
@@ -775,6 +824,7 @@ mod tests {
             ("/v1/workspace/git/commit", "post"),
             ("/v1/workspace/git/diff", "post"),
             ("/v1/workspace/console/run", "post"),
+            ("/v1/workspace/plugins/{plugin_id}/preference", "put"),
         ] {
             assert!(openapi["paths"][path][method].is_object(), "missing {method} {path}");
         }
@@ -802,7 +852,10 @@ mod tests {
 
         let canonical = canonical_workspace_root(nested.clone()).expect("canonical workspace");
 
-        assert_eq!(canonical, nested.canonicalize().expect("expected canonical path"));
+        assert_eq!(
+            canonical,
+            canonicalize_existing_preserving_symlinks(&nested).expect("expected canonical path")
+        );
     }
 
     #[test]
@@ -817,6 +870,18 @@ mod tests {
         let file_error = canonical_workspace_root(file).expect_err("file path rejected");
         assert!(matches!(file_error, ServerError::BadRequest(_)));
     }
+
+    #[test]
+    fn path_string_removes_windows_verbatim_prefixes() {
+        assert_eq!(
+            path_string(std::path::Path::new(r"\\?\C:\Users\example\repo")),
+            r"C:\Users\example\repo"
+        );
+        assert_eq!(
+            path_string(std::path::Path::new(r"\\?\UNC\server\share\repo")),
+            r"\\server\share\repo"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -825,6 +890,9 @@ mod route_tests {
 
     use axum::http::StatusCode;
 
+    use slab_utils::path::absolute::canonicalize_existing_preserving_symlinks;
+
+    use super::path_string;
     use crate::api::test_support::{TestServer, TestServerOptions};
 
     #[tokio::test]
@@ -841,13 +909,12 @@ mod route_tests {
         assert_eq!(response.status, StatusCode::OK);
         assert_eq!(
             response.body["current"]["rootPath"],
-            workspace_root
-                .path()
-                .canonicalize()
-                .expect("canonical root")
-                .to_string_lossy()
-                .into_owned()
+            path_string(
+                &canonicalize_existing_preserving_symlinks(workspace_root.path())
+                    .expect("canonical root")
+            )
         );
+        assert_eq!(response.body["config"]["plugins"], serde_json::json!({}));
     }
 
     #[tokio::test]
@@ -892,5 +959,42 @@ mod route_tests {
 
         assert_eq!(response.status, StatusCode::OK);
         assert_eq!(response.body["content"], "fn main() {}");
+    }
+
+    #[tokio::test]
+    async fn workspace_plugin_preference_route_updates_workspace_settings() {
+        let workspace_root = tempfile::tempdir().expect("workspace root");
+        let server = TestServer::new_with(TestServerOptions {
+            workspace_root: Some(workspace_root.path().to_path_buf()),
+            ..Default::default()
+        })
+        .await;
+
+        let response = server
+            .put_json(
+                "/v1/workspace/plugins/video-subtitle_translator/preference",
+                serde_json::json!({ "enabled": false }),
+            )
+            .await;
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(
+            response.body["config"]["plugins"]["video-subtitle_translator"]["enabled"],
+            false
+        );
+        let settings =
+            fs::read_to_string(workspace_root.path().join(".slab").join("settings.json"))
+                .expect("settings");
+        assert!(settings.contains("video-subtitle_translator"));
+
+        let response = server
+            .put_json(
+                "/v1/workspace/plugins/video-subtitle_translator/preference",
+                serde_json::json!({ "enabled": true }),
+            )
+            .await;
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(response.body["config"]["plugins"], serde_json::json!({}));
     }
 }

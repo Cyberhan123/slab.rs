@@ -150,11 +150,14 @@ export function WorkspaceConsolePanel({ themeMode, workspaceRoot }: WorkspaceCon
   )
 
   return (
-    <section className="workspace-soft-panel flex h-[260px] shrink-0 flex-col overflow-hidden rounded-[18px]">
+    <section
+      className="workspace-soft-panel flex h-[260px] shrink-0 flex-col overflow-hidden rounded-[18px]"
+      data-testid="workspace-console-panel"
+    >
       <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-b border-border/60 px-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className="flex shrink-0 items-center gap-2 text-sm font-semibold">
-            <Terminal className="size-4 text-[var(--brand-teal)]" />
+            <Terminal className="size-4 text-[color:var(--brand-teal)]" />
             {t("pages.workspace.console.title")}
           </div>
           <div className="flex min-w-0 items-center gap-1 overflow-x-auto" role="tablist">
@@ -281,6 +284,7 @@ function TerminalSessionPane({
   const socketRef = useRef<WebSocket | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const initialThemeModeRef = useRef(themeMode)
+  const [connectionState, setConnectionState] = useState<"closed" | "connecting" | "error" | "open">("connecting")
   const [observeHostResize, hostRect] = useResizeObserver<HTMLDivElement>()
   const setHostNode = useCallback(
     (node: HTMLDivElement | null) => {
@@ -311,6 +315,7 @@ function TerminalSessionPane({
     }
 
     let disposed = false
+    setConnectionState("connecting")
     const disposables: IDisposable[] = []
     const terminal = new XtermTerminal({
       allowProposedApi: true,
@@ -349,6 +354,7 @@ function TerminalSessionPane({
         socket.binaryType = "arraybuffer"
         socketRef.current = socket
         socket.addEventListener("open", () => {
+          setConnectionState("open")
           sendResize()
         })
         socket.addEventListener("message", (event) => {
@@ -363,15 +369,18 @@ function TerminalSessionPane({
           terminal.write(String(event.data))
         })
         socket.addEventListener("error", () => {
+          setConnectionState("error")
           toast.error(t("pages.workspace.toast.consoleFailed"))
         })
         socket.addEventListener("close", () => {
+          setConnectionState("closed")
           if (!disposed) {
             terminal.write("\r\n\x1b[90m[terminal disconnected]\x1b[0m\r\n")
           }
         })
       })
       .catch((error) => {
+        setConnectionState("error")
         toast.error(t("pages.workspace.toast.consoleFailed"), {
           description: getErrorMessage(error),
         })
@@ -416,6 +425,8 @@ function TerminalSessionPane({
       ref={setHostNode}
       className={cn("absolute inset-0 min-h-0 px-2 py-2", !active && "pointer-events-none opacity-0")}
       aria-hidden={!active}
+      data-testid={active ? "workspace-terminal" : undefined}
+      data-connection-state={connectionState}
     />
   )
 }

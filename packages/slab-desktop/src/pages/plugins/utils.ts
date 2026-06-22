@@ -90,11 +90,11 @@ export function toneSurfaceClassName(tone: PluginTone) {
 export function toneTextClassName(tone: PluginTone) {
   switch (tone) {
     case 'teal':
-      return 'text-[var(--brand-teal)]';
+      return 'text-[color:var(--brand-teal)]';
     case 'gold':
-      return 'text-[var(--brand-gold)]';
+      return 'text-[color:var(--brand-gold)]';
     case 'blue':
-      return 'text-[var(--chart-2)]';
+      return 'text-[color:var(--chart-2)]';
     case 'slate':
     default:
       return 'text-muted-foreground';

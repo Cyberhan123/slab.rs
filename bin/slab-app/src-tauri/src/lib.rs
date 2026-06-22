@@ -2,10 +2,7 @@
 mod paths;
 mod plugins;
 mod setup;
-mod terminal;
 mod workspace;
-mod workspace_file_ops;
-mod workspace_search;
 
 use setup::ApiEndpointConfig;
 use tracing_subscriber::layer::SubscriberExt;
@@ -41,37 +38,11 @@ pub fn run() {
             plugins::plugin_pick_file,
             plugins::plugin_set_theme_snapshot,
             plugins::plugin_theme_snapshot,
-            workspace::workspace_state,
-            workspace::workspace_open,
-            workspace::workspace_close,
-            workspace::workspace_read_directory,
-            workspace::workspace_read_file,
-            workspace::workspace_stat_path,
-            workspace::workspace_search_files,
-            workspace_search::workspace_search_text,
-            workspace_file_ops::workspace_create_file,
-            workspace_file_ops::workspace_create_directory,
-            workspace_file_ops::workspace_rename_path,
-            workspace_file_ops::workspace_delete_path,
-            workspace::workspace_write_file,
-            workspace::workspace_git_status,
-            workspace::workspace_git_stage,
-            workspace::workspace_git_unstage,
-            workspace::workspace_git_discard,
-            workspace::workspace_git_commit,
-            workspace::workspace_git_diff,
-            workspace::workspace_console_run,
-            workspace::workspace_update_plugin_preference,
-            terminal::workspace_terminal_session,
         ])
         .setup(move |app| {
             setup::setup_windows(app)?;
             let workspace_bootstrap = workspace::init(app).map_err(|error| {
                 log::error!("failed to initialize workspace state: {error}");
-                std::io::Error::other(error)
-            })?;
-            terminal::init(app).map_err(|error| {
-                log::error!("failed to initialize workspace terminal server: {error}");
                 std::io::Error::other(error)
             })?;
             let plugins_root = plugins::resolve_plugins_root_for_app(app).map_err(|error| {

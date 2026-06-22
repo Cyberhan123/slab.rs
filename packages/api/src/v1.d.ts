@@ -1147,6 +1147,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspace/plugins/{plugin_id}/preference": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["update_plugin_preference"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspace/search": {
         parameters: {
             query?: never;
@@ -3046,6 +3062,9 @@ export interface components {
             width: number;
         };
         WorkspaceConfigResponse: {
+            plugins?: {
+                [key: string]: components["schemas"]["WorkspacePluginConfig"];
+            };
             /** Format: int32 */
             schemaVersion: number;
         };
@@ -3171,6 +3190,12 @@ export interface components {
         };
         WorkspacePathView: {
             relativePath: string;
+        };
+        WorkspacePluginConfig: {
+            enabled?: boolean | null;
+        };
+        WorkspacePluginPreferenceUpdate: {
+            enabled?: boolean | null;
         };
         WorkspaceRenamePathCommand: {
             fromRelativePath: string;
@@ -6094,6 +6119,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspacePathMetadata"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_plugin_preference: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Plugin manifest id. */
+                plugin_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspacePluginPreferenceUpdate"];
+            };
+        };
+        responses: {
+            /** @description Workspace plugin preference updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceStateResponse"];
                 };
             };
             /** @description Bad request */

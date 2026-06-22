@@ -23,7 +23,7 @@ const buttonVariants = cva(
         pill:
           "rounded-full border border-border/70 bg-[var(--surface-1)] text-foreground shadow-elevation-1 hover:bg-[var(--surface-selected)] hover:text-foreground",
         cta:
-          "rounded-full bg-[var(--brand-teal)] text-[var(--brand-teal-foreground)] shadow-elevation-2 hover:brightness-[1.04]",
+          "rounded-full bg-[var(--brand-teal)] text-[color:var(--brand-teal-foreground)] shadow-elevation-2 hover:brightness-[1.04]",
         quiet:
           "rounded-full bg-transparent text-muted-foreground hover:bg-[var(--surface-soft)] hover:text-foreground",
         rail:

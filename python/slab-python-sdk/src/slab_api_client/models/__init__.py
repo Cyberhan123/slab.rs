@@ -241,6 +241,7 @@ from .video_generation_request_data import VideoGenerationRequestData
 from .video_generation_result_data import VideoGenerationResultData
 from .video_generation_task_response import VideoGenerationTaskResponse
 from .workspace_config_response import WorkspaceConfigResponse
+from .workspace_config_response_plugins import WorkspaceConfigResponsePlugins
 from .workspace_console_output import WorkspaceConsoleOutput
 from .workspace_console_run_command import WorkspaceConsoleRunCommand
 from .workspace_create_directory_command import WorkspaceCreateDirectoryCommand
@@ -264,6 +265,8 @@ from .workspace_info_response import WorkspaceInfoResponse
 from .workspace_open_command import WorkspaceOpenCommand
 from .workspace_path_metadata import WorkspacePathMetadata
 from .workspace_path_view import WorkspacePathView
+from .workspace_plugin_config import WorkspacePluginConfig
+from .workspace_plugin_preference_update import WorkspacePluginPreferenceUpdate
 from .workspace_rename_path_command import WorkspaceRenamePathCommand
 from .workspace_state_response import WorkspaceStateResponse
 from .workspace_text_search_file_match import WorkspaceTextSearchFileMatch
@@ -489,6 +492,7 @@ __all__ = (
     "VideoGenerationResultData",
     "VideoGenerationTaskResponse",
     "WorkspaceConfigResponse",
+    "WorkspaceConfigResponsePlugins",
     "WorkspaceConsoleOutput",
     "WorkspaceConsoleRunCommand",
     "WorkspaceCreateDirectoryCommand",
@@ -512,6 +516,8 @@ __all__ = (
     "WorkspaceOpenCommand",
     "WorkspacePathMetadata",
     "WorkspacePathView",
+    "WorkspacePluginConfig",
+    "WorkspacePluginPreferenceUpdate",
     "WorkspaceRenamePathCommand",
     "WorkspaceStateResponse",
     "WorkspaceTextSearchFileMatch",

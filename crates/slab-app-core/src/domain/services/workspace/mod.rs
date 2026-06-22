@@ -4,12 +4,15 @@ mod lsp;
 pub use lsp::WorkspaceLspService;
 pub(crate) use lsp::workspace_root_from_config;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use serde::Serialize;
+use serde_json::{Map, Value};
+use slab_config::SettingsDocument;
 use slab_file::FileSystemError;
 use slab_git::{GitCommitOptions, GitError, GitRepository};
 use slab_utils::hash::{sha256_hex_bytes, verify_sha256_hex_expected};
@@ -27,6 +30,9 @@ use crate::domain::models::{
     WorkspaceWriteFileCommand, WorkspaceWriteFileView,
 };
 use crate::error::AppCoreError;
+use crate::schemas::workspace::{
+    WorkspaceConfigResponse, WorkspacePluginConfig, WorkspacePluginPreferenceUpdate,
+};
 
 use self::file_system::LocalExecutorFileSystem;
 
@@ -39,6 +45,8 @@ const MAX_LINE_MATCHES_PER_FILE: usize = 20;
 const MAX_SEARCH_RESULTS: usize = 100;
 const MAX_WRITE_FILE_BYTES: usize = 2 * 1024 * 1024;
 const SLAB_DIR_NAME: &str = ".slab";
+const SETTINGS_FILE: &str = "settings.json";
+const LEGACY_SETTINGS_FILE: &str = "workspace.json";
 const IGNORED_DIR_NAMES: &[&str] = &[
     SLAB_DIR_NAME,
     ".git",
@@ -60,6 +68,38 @@ pub struct WorkspaceService;
 impl WorkspaceService {
     pub fn workspace_root_from_config(config: &AppConfig) -> Option<PathBuf> {
         lsp::workspace_root_from_config(config)
+    }
+
+    pub fn ensure_workspace_settings(root: impl AsRef<Path>) -> Result<PathBuf, AppCoreError> {
+        let root = root.as_ref();
+        let slab_dir = root.join(SLAB_DIR_NAME);
+        fs::create_dir_all(&slab_dir).map_err(|error| {
+            AppCoreError::Internal(format!(
+                "failed to create workspace settings directory {}: {error}",
+                slab_dir.display()
+            ))
+        })?;
+        let settings_path = slab_dir.join(SETTINGS_FILE);
+        migrate_legacy_workspace_config(&slab_dir.join(LEGACY_SETTINGS_FILE), &settings_path)?;
+        ensure_workspace_settings_file(&settings_path)?;
+        Ok(settings_path)
+    }
+
+    pub fn workspace_config(
+        root: impl AsRef<Path>,
+    ) -> Result<WorkspaceConfigResponse, AppCoreError> {
+        load_workspace_config(&workspace_settings_path(root.as_ref()))
+    }
+
+    pub fn update_workspace_plugin_preference(
+        root: impl AsRef<Path>,
+        plugin_id: &str,
+        update: WorkspacePluginPreferenceUpdate,
+    ) -> Result<WorkspaceConfigResponse, AppCoreError> {
+        validate_plugin_id(plugin_id)?;
+        let settings_path = workspace_settings_path(root.as_ref());
+        write_workspace_plugin_preference(&settings_path, plugin_id, &update)?;
+        load_workspace_config(&settings_path)
     }
 
     pub fn read_directory(
@@ -591,6 +631,216 @@ fn map_git_error(error: GitError) -> AppCoreError {
     }
 }
 
+fn workspace_settings_path(root: &Path) -> PathBuf {
+    root.join(SLAB_DIR_NAME).join(SETTINGS_FILE)
+}
+
+fn load_workspace_config(path: &Path) -> Result<WorkspaceConfigResponse, AppCoreError> {
+    let settings = load_settings_overlay(path)?;
+    workspace_config_from_settings_overlay(&settings)
+}
+
+fn load_settings_overlay(path: &Path) -> Result<Value, AppCoreError> {
+    if !path.exists() {
+        return Ok(Value::Object(Map::new()));
+    }
+    let raw = fs::read_to_string(path).map_err(|error| {
+        AppCoreError::Internal(format!(
+            "failed to read workspace settings {}: {error}",
+            path.display()
+        ))
+    })?;
+    let value: Value = serde_json::from_str(&raw).map_err(|error| {
+        AppCoreError::BadRequest(format!(
+            "failed to parse workspace settings {}: {error}",
+            path.display()
+        ))
+    })?;
+    if !value.is_object() {
+        return Err(AppCoreError::BadRequest(format!(
+            "workspace settings {} must contain a JSON object",
+            path.display()
+        )));
+    }
+    Ok(value)
+}
+
+fn workspace_config_from_settings_overlay(
+    settings: &Value,
+) -> Result<WorkspaceConfigResponse, AppCoreError> {
+    let schema_version = settings
+        .get("schema_version")
+        .and_then(Value::as_u64)
+        .and_then(|version| u32::try_from(version).ok())
+        .unwrap_or_else(|| SettingsDocument::default().schema_version);
+    let mut plugins = BTreeMap::new();
+
+    if let Some(plugin_map) = settings
+        .get("workspace")
+        .and_then(|workspace| workspace.get("plugins"))
+        .and_then(Value::as_object)
+    {
+        for (plugin_id, value) in plugin_map {
+            let config: WorkspacePluginConfig =
+                serde_json::from_value(value.clone()).map_err(|error| {
+                    AppCoreError::BadRequest(format!(
+                        "workspace plugin preference `{plugin_id}` has invalid shape: {error}"
+                    ))
+                })?;
+            if config.enabled.is_some() {
+                plugins.insert(plugin_id.clone(), config);
+            }
+        }
+    }
+
+    Ok(WorkspaceConfigResponse { schema_version, plugins })
+}
+
+fn write_workspace_plugin_preference(
+    settings_path: &Path,
+    plugin_id: &str,
+    update: &WorkspacePluginPreferenceUpdate,
+) -> Result<(), AppCoreError> {
+    let mut settings = load_settings_overlay(settings_path)?;
+    if update.enabled == Some(false) {
+        set_workspace_plugin_enabled(&mut settings, plugin_id, false);
+    } else {
+        remove_workspace_plugin_preference(&mut settings, plugin_id);
+    }
+    prune_empty_objects(&mut settings);
+    write_json_file(settings_path, &settings)
+}
+
+fn ensure_workspace_settings_file(path: &Path) -> Result<(), AppCoreError> {
+    if !path.exists() {
+        write_json_file(path, &Value::Object(Map::new()))?;
+    }
+    Ok(())
+}
+
+fn migrate_legacy_workspace_config(
+    legacy_path: &Path,
+    settings_path: &Path,
+) -> Result<(), AppCoreError> {
+    if !legacy_path.exists() {
+        return Ok(());
+    }
+
+    let raw = fs::read_to_string(legacy_path).map_err(|error| {
+        AppCoreError::Internal(format!(
+            "failed to read legacy workspace config {}: {error}",
+            legacy_path.display()
+        ))
+    })?;
+    let legacy: WorkspaceConfigResponse = serde_json::from_str(&raw).map_err(|error| {
+        AppCoreError::BadRequest(format!(
+            "failed to parse legacy workspace config {}: {error}",
+            legacy_path.display()
+        ))
+    })?;
+    if legacy.plugins.is_empty() {
+        return Ok(());
+    }
+
+    let mut settings = load_settings_overlay(settings_path)?;
+    let mut changed = false;
+    for (plugin_id, plugin_config) in legacy.plugins {
+        let Some(enabled) = plugin_config.enabled else {
+            continue;
+        };
+        if !workspace_plugin_enabled_exists(&settings, &plugin_id) {
+            set_workspace_plugin_enabled(&mut settings, &plugin_id, enabled);
+            changed = true;
+        }
+    }
+
+    if changed {
+        prune_empty_objects(&mut settings);
+        write_json_file(settings_path, &settings)?;
+    }
+
+    Ok(())
+}
+
+fn workspace_plugin_enabled_exists(settings: &Value, plugin_id: &str) -> bool {
+    settings
+        .get("workspace")
+        .and_then(|workspace| workspace.get("plugins"))
+        .and_then(|plugins| plugins.get(plugin_id))
+        .and_then(|plugin| plugin.get("enabled"))
+        .is_some()
+}
+
+fn set_workspace_plugin_enabled(settings: &mut Value, plugin_id: &str, enabled: bool) {
+    let root = settings.as_object_mut().expect("settings overlay object checked");
+    let workspace = child_object(root, "workspace");
+    let plugins = child_object(workspace, "plugins");
+    let plugin = child_object(plugins, plugin_id);
+    plugin.insert("enabled".to_owned(), Value::Bool(enabled));
+}
+
+fn remove_workspace_plugin_preference(settings: &mut Value, plugin_id: &str) {
+    let Some(plugins) = settings
+        .get_mut("workspace")
+        .and_then(|workspace| workspace.get_mut("plugins"))
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    plugins.remove(plugin_id);
+}
+
+fn child_object<'a>(parent: &'a mut Map<String, Value>, key: &str) -> &'a mut Map<String, Value> {
+    let value = parent.entry(key.to_owned()).or_insert_with(|| Value::Object(Map::new()));
+    if !value.is_object() {
+        *value = Value::Object(Map::new());
+    }
+    value.as_object_mut().expect("object inserted")
+}
+
+fn prune_empty_objects(value: &mut Value) {
+    let Value::Object(object) = value else {
+        return;
+    };
+
+    let keys = object.keys().cloned().collect::<Vec<_>>();
+    for key in keys {
+        if let Some(child) = object.get_mut(&key) {
+            prune_empty_objects(child);
+            if child.as_object().is_some_and(Map::is_empty) {
+                object.remove(&key);
+            }
+        }
+    }
+}
+
+fn write_json_file<T: Serialize>(path: &Path, value: &T) -> Result<(), AppCoreError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            AppCoreError::Internal(format!(
+                "failed to create directory {}: {error}",
+                parent.display()
+            ))
+        })?;
+    }
+    let content = serde_json::to_string_pretty(value).map_err(|error| {
+        AppCoreError::Internal(format!("failed to serialize JSON for {}: {error}", path.display()))
+    })?;
+    fs::write(path, format!("{content}\n")).map_err(|error| {
+        AppCoreError::Internal(format!("failed to write JSON file {}: {error}", path.display()))
+    })
+}
+
+fn validate_plugin_id(plugin_id: &str) -> Result<(), AppCoreError> {
+    let valid = (2..=64).contains(&plugin_id.len())
+        && plugin_id.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'_'
+        });
+    valid
+        .then_some(())
+        .ok_or_else(|| AppCoreError::BadRequest(format!("invalid plugin id `{plugin_id}`")))
+}
+
 #[cfg(windows)]
 fn shell_command(command: &str) -> (String, Vec<String>) {
     (
@@ -905,6 +1155,88 @@ mod tests {
         assert_eq!(response.matches[0].line_matches[0].line_number, 2);
         assert_eq!(response.matches[0].line_matches[0].match_start, 6);
         assert_eq!(response.matches[0].line_matches[0].match_end, 11);
+    }
+
+    #[test]
+    fn ensure_workspace_settings_creates_settings_file() {
+        let root = tempfile::tempdir().expect("tempdir");
+
+        let settings_path =
+            WorkspaceService::ensure_workspace_settings(root.path()).expect("workspace settings");
+
+        assert_eq!(settings_path, root.path().join(".slab").join("settings.json"));
+        assert!(settings_path.exists());
+    }
+
+    #[test]
+    fn workspace_config_reads_plugin_preferences_from_settings_overlay() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let settings_path =
+            WorkspaceService::ensure_workspace_settings(root.path()).expect("workspace settings");
+        fs::write(
+            &settings_path,
+            r#"{
+  "workspace": {
+    "plugins": {
+      "video-subtitle_translator": { "enabled": false },
+      "empty": {}
+    }
+  }
+}
+"#,
+        )
+        .expect("write settings");
+
+        let config = WorkspaceService::workspace_config(root.path()).expect("workspace config");
+
+        assert_eq!(config.plugins.len(), 1);
+        assert_eq!(
+            config.plugins.get("video-subtitle_translator").and_then(|config| config.enabled),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn update_workspace_plugin_preference_writes_and_removes_disabled_override() {
+        let root = tempfile::tempdir().expect("tempdir");
+        WorkspaceService::ensure_workspace_settings(root.path()).expect("workspace settings");
+
+        let disabled = WorkspaceService::update_workspace_plugin_preference(
+            root.path(),
+            "video-subtitle_translator",
+            crate::schemas::workspace::WorkspacePluginPreferenceUpdate { enabled: Some(false) },
+        )
+        .expect("disable plugin");
+        assert_eq!(
+            disabled.plugins.get("video-subtitle_translator").and_then(|config| config.enabled),
+            Some(false)
+        );
+
+        let restored = WorkspaceService::update_workspace_plugin_preference(
+            root.path(),
+            "video-subtitle_translator",
+            crate::schemas::workspace::WorkspacePluginPreferenceUpdate { enabled: Some(true) },
+        )
+        .expect("restore plugin");
+        assert!(!restored.plugins.contains_key("video-subtitle_translator"));
+        let raw =
+            fs::read_to_string(root.path().join(".slab").join("settings.json")).expect("settings");
+        assert!(!raw.contains("video-subtitle_translator"));
+    }
+
+    #[test]
+    fn update_workspace_plugin_preference_rejects_invalid_plugin_ids() {
+        let root = tempfile::tempdir().expect("tempdir");
+        WorkspaceService::ensure_workspace_settings(root.path()).expect("workspace settings");
+
+        let error = WorkspaceService::update_workspace_plugin_preference(
+            root.path(),
+            "Plugin",
+            crate::schemas::workspace::WorkspacePluginPreferenceUpdate { enabled: Some(false) },
+        )
+        .expect_err("invalid plugin id");
+
+        assert!(error.to_string().contains("invalid plugin id"));
     }
 
     #[tokio::test]

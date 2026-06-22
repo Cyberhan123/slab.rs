@@ -41,6 +41,7 @@
     "test:sandbox": "bun ./scripts/cargo/validate.ts sandbox",
     "test:browser": "vitest run --project desktop-browser --project components-browser",
     "test:e2e": "vitest run --config packages/slab-desktop/vitest.e2e.config.ts",
+    "test:e2e:desktop": "vitest run --config packages/slab-desktop/vitest.desktop-e2e.config.ts",
     "test:components": "vitest run --project components-browser",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -242,6 +243,7 @@
   "devDependencies": {
     "@tailwindcss/vite": "catalog:",
     "@tauri-apps/api": "catalog:",
+    "@types/lodash-es": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitest/browser": "catalog:",
@@ -260,7 +262,7 @@
     "vitepress": "catalog:",
     "vitest": "catalog:",
     "vitest-browser-react": "catalog:",
-    "@types/lodash-es": "catalog:"
+    "webdriverio": "^9.29.0"
   },
   "license": "AGPL-3.0-only"
 }

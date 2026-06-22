@@ -192,7 +192,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-[var(--shell-card)] shadow-[var(--shell-elevation)] lg:flex-row">
+    <div className="flex h-full w-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-[var(--shell-card)] lg:flex-row">
       <aside className="w-full shrink-0 border-b border-border/50 bg-[color:color-mix(in_oklab,var(--surface-soft)_80%,transparent)] lg:w-[256px] lg:border-r lg:border-b-0">
           <SettingsNavigation
             activeSectionId={activeSection?.id ?? null}

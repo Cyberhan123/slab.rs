@@ -498,7 +498,7 @@ function AssistantBubbleFooter({ content }: { content: AssistantBubbleContent })
 export const ASSISTANT_BUBBLE_ROLES = {
   assistant: {
     avatar: (
-      <span className="flex size-6 shrink-0 items-center justify-center rounded-[8px] bg-[var(--brand-teal)] text-[var(--brand-teal-foreground)]">
+      <span className="flex size-6 shrink-0 items-center justify-center rounded-[8px] bg-[var(--brand-teal)] text-[color:var(--brand-teal-foreground)]">
         <BotMessageSquare className="size-3.5" />
       </span>
     ),

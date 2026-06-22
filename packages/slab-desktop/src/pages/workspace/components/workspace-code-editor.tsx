@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react"
 import * as Monaco from "monaco-editor"
 import { clamp } from "lodash-es"
 
-import { getStandaloneMonacoEditorOverrides } from "../lib/workspace-standalone-monaco"
 import {
   applySlabMonacoTheme,
   slabMonacoThemeId,
@@ -139,13 +138,6 @@ export function WorkspaceCodeEditor({
   useEffect(() => {
     let cancelled = false
 
-    if (memoryModel) {
-      setServicesReady(true)
-      return () => {
-        cancelled = true
-      }
-    }
-
     void (async () => {
       const { ensureWorkspaceLspServices } = await import("../lib/workspace-lsp")
       await ensureWorkspaceLspServices()
@@ -198,27 +190,15 @@ export function WorkspaceCodeEditor({
       const currentThemeMode = themeModeRef.current
       const themeId = slabMonacoThemeId(currentThemeMode)
       applySlabMonacoTheme(Monaco, currentThemeMode)
-      const nextEditor = memoryModel
-        ? (await import("@codingame/monaco-vscode-api/monaco")).createConfiguredEditor(
-            container,
-            {
-              ...initialOptions,
-              automaticLayout: initialOptions.automaticLayout ?? true,
-              language: undefined,
-              model: null,
-              theme: themeId,
-              value: undefined,
-            },
-            await getStandaloneMonacoEditorOverrides(),
-          )
-        : (await import("@codingame/monaco-editor-wrapper")).createEditor(container, {
-            ...initialOptions,
-            automaticLayout: initialOptions.automaticLayout ?? true,
-            language: undefined,
-            model: null,
-            theme: undefined,
-            value: undefined,
-          })
+      const { createEditor } = await import("@codingame/monaco-editor-wrapper")
+      const nextEditor = createEditor(container, {
+        ...initialOptions,
+        automaticLayout: initialOptions.automaticLayout ?? true,
+        language: undefined,
+        model: null,
+        theme: memoryModel ? themeId : undefined,
+        value: undefined,
+      })
 
       if (disposed) {
         nextEditor.dispose()

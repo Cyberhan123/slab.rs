@@ -29,7 +29,7 @@ export function TaskMetricCard({
 
   return (
     <article
-      className={`rounded-2xl border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-1)_68%,var(--surface-soft))_0%,var(--surface-soft)_100%)] px-6 py-6 shadow-elevation-2 ${className ?? ''}`}
+      className={`rounded-2xl border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-1)_68%,var(--surface-soft))_0%,var(--surface-soft)_100%)] px-6 py-6 ${className ?? ''}`}
     >
       <div className="flex items-start justify-between gap-4">
         <p className="text-label font-bold uppercase tracking-eyebrow text-muted-foreground">

@@ -60,14 +60,14 @@ export function SettingsNavigation({
               className={cn(
                 'flex w-full items-center gap-3 rounded-[16px] px-3 py-2.5 text-left transition-colors',
                 isActiveSection
-                  ? 'bg-[var(--shell-card)] text-[var(--brand-teal)] shadow-[var(--shell-elevation)]'
+                  ? 'bg-[var(--shell-card)] text-[color:var(--brand-teal)]'
                   : 'text-muted-foreground hover:bg-glass-bg-strong hover:text-foreground',
               )}
             >
               <span
                 className={cn(
                   'flex size-8 shrink-0 items-center justify-center rounded-[12px]',
-                  isActiveSection ? 'bg-[color:color-mix(in_oklab,var(--brand-teal)_10%,transparent)] text-[var(--brand-teal)]' : 'bg-transparent text-muted-foreground/70',
+                  isActiveSection ? 'bg-[color:color-mix(in_oklab,var(--brand-teal)_10%,transparent)] text-[color:var(--brand-teal)]' : 'bg-transparent text-muted-foreground/70',
                 )}
               >
                 <SectionIcon className="size-4" />
@@ -77,7 +77,7 @@ export function SettingsNavigation({
                 <span
                   className={cn(
                     'block truncate text-sm',
-                    isActiveSection ? 'font-semibold text-[var(--brand-teal)]' : 'font-medium',
+                    isActiveSection ? 'font-semibold text-[color:var(--brand-teal)]' : 'font-medium',
                   )}
                 >
                   {translateServerField(section.i18n, 'title', section.title, t)}

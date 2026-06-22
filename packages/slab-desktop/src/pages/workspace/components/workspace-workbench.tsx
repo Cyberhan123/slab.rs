@@ -290,7 +290,12 @@ export function WorkspaceWorkbench({
             {t("pages.workspace.actions.closeWorkspace")}
           </Button>
           {commandPaletteButton}
-          <Button variant={consoleOpen ? "pill" : "quiet"} size="sm" onClick={handleToggleConsole}>
+          <Button
+            variant={consoleOpen ? "pill" : "quiet"}
+            size="sm"
+            onClick={handleToggleConsole}
+            data-testid="workspace-console-toggle"
+          >
             <Terminal className="size-4" />
             {consoleOpen ? t("pages.workspace.console.hide") : t("pages.workspace.console.show")}
           </Button>
@@ -305,7 +310,7 @@ export function WorkspaceWorkbench({
           <SoftPanel className="flex h-full min-h-0 flex-col gap-3 overflow-hidden rounded-2xl px-3 py-3">
             <div className="flex items-center justify-between gap-3 px-1">
               <div className="flex items-center gap-2 text-sm font-semibold">
-                <FolderKanban className="size-4 text-[var(--brand-teal)]" />
+                <FolderKanban className="size-4 text-[color:var(--brand-teal)]" />
                 {t("pages.workspace.explorer.title")}
               </div>
               {(explorerPanel === "search" && textSearchFetching) ||
@@ -610,7 +615,7 @@ function WorkspaceServerFileTree({
                 type="button"
                 className={cn(
                   "focus-ring flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left text-sm transition duration-[var(--dur-180)] ease-out-expo hover:bg-[var(--surface-selected)]",
-                  active && "bg-[var(--surface-selected)] text-[var(--brand-teal)]",
+                  active && "bg-[var(--surface-selected)] text-[color:var(--brand-teal)]",
                 )}
                 title={entry.relativePath}
                 data-testid={`workspace-${isDirectory ? "directory" : "file"}-${testIdPath(entry.relativePath)}`}
@@ -622,7 +627,7 @@ function WorkspaceServerFileTree({
                   void onOpenFile(entry.relativePath)
                 }}
               >
-                <Icon className={cn("size-4 shrink-0", isDirectory ? "text-[var(--brand-teal)]" : "text-muted-foreground")} />
+                <Icon className={cn("size-4 shrink-0", isDirectory ? "text-[color:var(--brand-teal)]" : "text-muted-foreground")} />
                 <span className="min-w-0 flex-1 truncate">{entry.name}</span>
               </button>
             )

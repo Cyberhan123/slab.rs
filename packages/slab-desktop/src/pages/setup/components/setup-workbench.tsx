@@ -61,7 +61,7 @@ function SetupStateCard({
   return (
     <SetupScaffold>
       <div className="flex min-h-full items-center justify-center px-6 py-10">
-        <div className="w-full max-w-lg rounded-2xl border border-border/40 bg-surface-1 p-8 shadow-elevation-2">
+        <div className="w-full max-w-lg rounded-2xl border border-border/40 bg-surface-1 p-8">
           <div className="flex size-12 items-center justify-center rounded-xl bg-surface-soft text-foreground">
             <Icon className="size-5" />
           </div>
@@ -87,8 +87,8 @@ function SetupBadge({
     <div
       className={cn(
         'inline-flex items-center rounded-full px-3 py-1 text-caption font-bold uppercase tracking-eyebrow',
-        tone === 'active' && 'bg-[color:color-mix(in_oklab,var(--brand-teal)_12%,transparent)] text-[var(--brand-teal)]',
-        tone === 'success' && 'bg-[color:color-mix(in_oklab,var(--brand-teal)_12%,transparent)] text-[var(--brand-teal)]',
+        tone === 'active' && 'bg-[color:color-mix(in_oklab,var(--brand-teal)_12%,transparent)] text-[color:var(--brand-teal)]',
+        tone === 'success' && 'bg-[color:color-mix(in_oklab,var(--brand-teal)_12%,transparent)] text-[color:var(--brand-teal)]',
         tone === 'error' && 'bg-destructive/10 text-destructive',
       )}
     >
@@ -243,12 +243,12 @@ export function SetupWorkbench({
   return (
     <SetupScaffold>
       <main className="mx-auto flex min-h-full w-full max-w-6xl items-center px-6 py-8">
-        <section className="relative w-full overflow-hidden rounded-3xl border border-border/40 bg-surface-1 shadow-elevation-2">
+        <section className="relative w-full overflow-hidden rounded-3xl border border-border/40 bg-surface-1">
           <div className="absolute inset-0 opacity-80 [background:radial-gradient(circle_at_top_left,color-mix(in_oklab,var(--brand-teal)_14%,transparent),transparent_34%),radial-gradient(circle_at_bottom_right,color-mix(in_oklab,var(--brand-gold)_12%,transparent),transparent_28%)]" />
 
           <div className="relative grid gap-8 p-8 md:p-10 lg:grid-cols-[1.2fr,0.9fr]">
             <div className="space-y-6">
-              <div className="inline-flex size-14 items-center justify-center rounded-2xl bg-[color:color-mix(in_oklab,var(--surface-soft)_84%,white)] text-[var(--brand-teal)]">
+              <div className="inline-flex size-14 items-center justify-center rounded-2xl bg-[color:color-mix(in_oklab,var(--surface-soft)_84%,white)] text-[color:var(--brand-teal)]">
                 <Icon className={cn('size-6', isActive && 'animate-spin')} />
               </div>
 
@@ -310,7 +310,7 @@ export function SetupWorkbench({
                       >
                         <div className="flex min-w-0 items-center gap-2">
                           {component.installed ? (
-                            <CheckCircle2 className="size-4 shrink-0 text-[var(--brand-teal)]" />
+                            <CheckCircle2 className="size-4 shrink-0 text-[color:var(--brand-teal)]" />
                           ) : isActive ? (
                             <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
                           ) : (
@@ -321,7 +321,7 @@ export function SetupWorkbench({
                           </span>
                         </div>
                         {component.installed ? (
-                          <span className="text-xs font-medium text-[var(--brand-teal)]">
+                          <span className="text-xs font-medium text-[color:var(--brand-teal)]">
                             {t('pages.setup.checklist.installed')}
                           </span>
                         ) : canRetry ? (
@@ -350,7 +350,7 @@ export function SetupWorkbench({
               </div>
             </div>
 
-            <div className="rounded-3xl border border-border/50 bg-[color:color-mix(in_oklab,var(--surface-1)_88%,white)] p-6 shadow-elevation-1">
+            <div className="rounded-3xl border border-border/50 bg-[color:color-mix(in_oklab,var(--surface-1)_88%,white)] p-6">
               <div className="flex items-start justify-between gap-4">
                 <div className="space-y-2">
                   <p className="text-label font-semibold uppercase tracking-eyebrow text-muted-foreground">

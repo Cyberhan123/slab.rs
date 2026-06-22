@@ -162,7 +162,7 @@ function ObjectEditor({
             className={cn(
               'space-y-3 rounded-2xl border border-border/70 bg-background/80 p-4',
               fieldHasError && 'border-destructive/60 bg-destructive/5',
-              depth > 0 && 'shadow-elevation-2',
+              depth > 0 && 'border-border/60',
             )}
           >
             <div className="space-y-1">
@@ -439,7 +439,7 @@ function ArrayEditor({
             className={cn(
               'space-y-4 rounded-2xl border border-border/70 bg-background/80 p-4',
               itemHasError && 'border-destructive/60 bg-destructive/5',
-              depth > 0 && 'shadow-elevation-2',
+              depth > 0 && 'border-border/60',
             )}
           >
             <div className="flex flex-wrap items-center justify-between gap-3">

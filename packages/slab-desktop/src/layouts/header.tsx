@@ -34,7 +34,7 @@ function HeaderSelect({ control }: { control: HeaderSelectControl }) {
         size="sm"
         variant="pill"
         title={selectedOption?.label ?? placeholder}
-        className="shell-context hidden h-8 max-w-[18rem] shrink-0 border-border/30 bg-glass-bg-strong pl-3 pr-2.5 text-label font-semibold text-foreground/70 shadow-[var(--shell-elevation)] lg:flex"
+        className="shell-context hidden h-8 max-w-[18rem] shrink-0 border-border/30 bg-glass-bg-strong pl-3 pr-2.5 text-label font-semibold text-foreground/70 lg:flex"
       >
         <span className="size-2 shrink-0 rounded-full bg-[var(--brand-gold)]" />
         <SelectValue placeholder={placeholder} className="max-w-[11rem] truncate" />
@@ -89,18 +89,18 @@ export default function Header({
       data-tauri-drag-region="true"
     >
       <div className="flex min-w-0 items-center gap-3 md:gap-4">
-        <h2 className="shrink-0 text-lg font-extrabold tracking-display text-[var(--shell-title)]">
+        <h2 className="shrink-0 text-lg font-extrabold tracking-display text-[color:var(--shell-title)]">
           {title}
         </h2>
         <span aria-hidden="true" className="hairline-v hidden h-4 w-px shrink-0 sm:block" />
-        <p className="hidden max-w-[28rem] min-w-0 truncate text-body font-medium leading-5 text-[var(--shell-subtitle)] xl:max-w-[34rem] sm:block">
+        <p className="hidden max-w-[28rem] min-w-0 truncate text-body font-medium leading-5 text-[color:var(--shell-subtitle)] xl:max-w-[34rem] sm:block">
           {displaySubtitle}
         </p>
         {!isMinimalVariant ? (
           control?.type === "select" ? (
             <HeaderSelect control={control} />
           ) : (
-            <div className="shell-context hidden h-8 shrink-0 items-center gap-2 rounded-full border border-border/30 bg-glass-bg-strong pl-3 pr-2.5 text-label font-semibold text-foreground/70 shadow-[var(--shell-elevation)] lg:inline-flex">
+            <div className="shell-context hidden h-8 shrink-0 items-center gap-2 rounded-full border border-border/30 bg-glass-bg-strong pl-3 pr-2.5 text-label font-semibold text-foreground/70 lg:inline-flex">
               <span className="size-2 rounded-full bg-[var(--brand-gold)]" />
               <span className="max-w-[11rem] truncate">{shellContextLabel}</span>
             </div>
@@ -111,7 +111,7 @@ export default function Header({
       <div className="ml-auto flex min-w-0 items-center gap-3 md:gap-4">
         {!isMinimalVariant ? (
           <>
-            <div className="shell-search hidden h-8 min-w-[12rem] flex-1 items-center gap-2.5 rounded-full px-3.5 text-label text-[var(--shell-search-foreground)] md:flex lg:w-64">
+            <div className="shell-search hidden h-8 min-w-[12rem] flex-1 items-center gap-2.5 rounded-full px-3.5 text-label text-[color:var(--shell-search-foreground)] md:flex lg:w-64">
               <Search className="size-3.5 shrink-0" />
               {search ? (
                 <Input
@@ -121,7 +121,7 @@ export default function Header({
                   placeholder={searchPlaceholder}
                   aria-label={searchAriaLabel}
                   disabled={search.disabled}
-                  className="h-full border-0 bg-transparent p-0 text-label text-[var(--shell-search-foreground)] shadow-none outline-none placeholder:text-[var(--shell-search-foreground)]/70 focus-visible:border-transparent focus-visible:ring-0"
+                  className="h-full border-0 bg-transparent p-0 text-label text-[color:var(--shell-search-foreground)] shadow-none outline-none placeholder:text-[color:var(--shell-search-foreground)]/70 focus-visible:border-transparent focus-visible:ring-0"
                 />
               ) : (
                 <span className="truncate">{searchPlaceholder}</span>
@@ -130,7 +130,8 @@ export default function Header({
             <span aria-hidden="true" className="hairline-v hidden h-4 w-px shrink-0 md:block" />
             <div
               aria-hidden="true"
-              className="flex size-8 shrink-0 items-center justify-center rounded-full text-[var(--shell-rail-label)] transition duration-[var(--dur-180)] ease-out-expo hover:bg-glass-bg-strong hover:text-[var(--shell-title)]"
+              data-testid="header-history-control"
+              className="flex size-8 shrink-0 items-center justify-center rounded-full text-[color:var(--shell-rail-label)] transition duration-[var(--dur-180)] ease-out-expo hover:bg-glass-bg-strong hover:text-[color:var(--shell-title)]"
             >
               <History className="size-4" />
             </div>

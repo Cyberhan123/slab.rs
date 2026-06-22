@@ -317,7 +317,7 @@ export function AssistantComposer({
               disabled && "cursor-not-allowed opacity-60"
             )}
           >
-            <Search className={cn("size-3", webSearchActive && "text-[var(--brand-teal)]")} />
+            <Search className={cn("size-3", webSearchActive && "text-[color:var(--brand-teal)]")} />
             {t("pages.assistant.composer.webSearch")}
           </button>
 
@@ -338,7 +338,7 @@ export function AssistantComposer({
             <WandSparkles
               className={cn(
                 "size-3",
-                reasoningActive && "text-[var(--brand-teal)]"
+                reasoningActive && "text-[color:var(--brand-teal)]"
               )}
             />
             {!reasoningSupported

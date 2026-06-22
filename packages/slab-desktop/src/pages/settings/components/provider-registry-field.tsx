@@ -130,7 +130,7 @@ export function ProviderRegistryField({
             <section
               key={entry.id}
               className={cn(
-                'space-y-5 rounded-2xl border border-border/70 bg-background/85 p-5 shadow-elevation-2',
+                'space-y-5 rounded-2xl border border-border/70 bg-background/85 p-5',
                 entryHasError && 'border-destructive/60 bg-destructive/5',
               )}
             >

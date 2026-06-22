@@ -39,7 +39,7 @@ function SupComponent({ children, ...props }: ComponentProps) {
     <sup
       {...props}
       className={cn(
-        "mx-0.5 inline-flex min-w-4 items-center justify-center rounded-full border border-current/20 px-1 text-[0.7em] font-semibold leading-4 text-[var(--brand-teal)]",
+        "mx-0.5 inline-flex min-w-4 items-center justify-center rounded-full border border-current/20 px-1 text-[0.7em] font-semibold leading-4 text-[color:var(--brand-teal)]",
         props.className
       )}
     >

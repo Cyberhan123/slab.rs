@@ -76,14 +76,14 @@ export default function Hub() {
               <div className="space-y-4">
                 <Badge
                   variant="chip"
-                  className="border-transparent bg-glass-bg-strong px-3 py-1 text-micro font-bold uppercase tracking-eyebrow text-[var(--brand-gold)]"
+                  className="border-transparent bg-glass-bg-strong px-3 py-1 text-micro font-bold uppercase tracking-eyebrow text-[color:var(--brand-gold)]"
                 >
                   {t('pages.hub.hero.badge')}
                 </Badge>
                 <div className="space-y-4">
                   <h1 className="max-w-3xl text-4xl font-semibold tracking-display text-foreground md:text-6xl">
                     {t('pages.hub.hero.titleLead')}{' '}
-                    <span className="text-[var(--brand-teal)]">{t('pages.hub.hero.titleAccent')}</span>
+                    <span className="text-[color:var(--brand-teal)]">{t('pages.hub.hero.titleAccent')}</span>
                   </h1>
                   <p className="max-w-2xl text-sm leading-7 text-muted-foreground md:text-lg">
                     {t('pages.hub.hero.description')}
@@ -141,7 +141,7 @@ export default function Hub() {
           </div>
         </section>
 
-        <section className="space-y-4 rounded-3xl border border-[var(--shell-card)]/70 bg-glass-bg px-4 py-4 shadow-elevation-3 backdrop-blur">
+        <section className="space-y-4 rounded-3xl border border-[var(--shell-card)]/70 bg-glass-bg px-4 py-4 backdrop-blur">
           <div className="flex flex-wrap items-center gap-2">
             {CATEGORY_OPTIONS.map((option) => {
               const isActive = hub.category === option;
@@ -278,11 +278,11 @@ function HubSummaryCard({
     tone === 'gold'
       ? 'bg-[linear-gradient(180deg,color-mix(in_oklab,var(--brand-gold)_12%,var(--surface-1))_0%,var(--surface-1)_100%)]'
       : 'bg-[linear-gradient(180deg,color-mix(in_oklab,var(--primary)_12%,var(--surface-1))_0%,var(--surface-1)_100%)]';
-  const iconClassName = tone === 'gold' ? 'text-[var(--brand-gold)]' : 'text-primary';
+  const iconClassName = tone === 'gold' ? 'text-[color:var(--brand-gold)]' : 'text-primary';
 
   return (
     <div
-      className={`relative overflow-hidden rounded-3xl border border-border/40 ${backgroundClassName} p-6 shadow-elevation-3`}
+      className={`relative overflow-hidden rounded-3xl border border-border/40 ${backgroundClassName} p-6`}
     >
       <div className="absolute -top-5 -right-6 size-24 rounded-full bg-glass-bg blur-2xl" />
       <div className="relative flex h-full flex-col gap-6">

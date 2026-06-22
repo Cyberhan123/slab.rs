@@ -1472,7 +1472,7 @@ function sleep(ms: number): Promise<void> {
 
 function logClassName(kind: LogEntry["kind"]): string {
   if (kind === "ok") {
-    return "text-[var(--brand-teal)]";
+    return "text-[color:var(--brand-teal)]";
   }
   if (kind === "error") {
     return "text-destructive";

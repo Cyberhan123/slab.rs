@@ -8,14 +8,14 @@ const cardVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-card shadow-sm",
-        soft: "bg-[var(--surface-1)] shadow-elevation-2",
+        default: "bg-card",
+        soft: "bg-[var(--surface-1)]",
         elevated:
-          "bg-[var(--surface-1)] shadow-elevation-3",
+          "bg-[var(--surface-1)]",
         metric:
-          "bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-1)_85%,var(--background))_0%,var(--surface-1)_100%)] shadow-elevation-2",
+          "bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-1)_85%,var(--background))_0%,var(--surface-1)_100%)]",
         hero:
-          "bg-[linear-gradient(180deg,color-mix(in_oklab,var(--brand-teal)_9%,var(--surface-1))_0%,var(--surface-1)_56%,color-mix(in_oklab,var(--brand-gold)_10%,var(--surface-1))_100%)] shadow-elevation-3",
+          "bg-[linear-gradient(180deg,color-mix(in_oklab,var(--brand-teal)_9%,var(--surface-1))_0%,var(--surface-1)_56%,color-mix(in_oklab,var(--brand-gold)_10%,var(--surface-1))_100%)]",
       },
     },
     defaultVariants: {

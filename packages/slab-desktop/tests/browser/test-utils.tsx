@@ -11,11 +11,12 @@ import { GlobalHeaderProvider } from '@/layouts/global-header-provider';
 
 type DesktopSceneOptions = {
   route?: string;
+  router?: Parameters<typeof RouterProvider>[0]['router'];
 };
 
 export async function renderDesktopScene(
   ui: ReactNode,
-  { route = '/setup' }: DesktopSceneOptions = {},
+  { route = '/setup', router }: DesktopSceneOptions = {},
 ) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -27,7 +28,26 @@ export async function renderDesktopScene(
       },
     },
   });
-  const router = createMemoryRouter(
+  if (router) {
+    return render(
+      <main
+        aria-label="Slab desktop scene"
+        data-testid="desktop-browser-scene"
+        className="min-h-screen bg-app-canvas px-6 py-8 text-foreground"
+      >
+        <QueryClientProvider client={queryClient}>
+          <TooltipProvider>
+            <GlobalHeaderProvider>
+              <RouterProvider router={router} />
+              <Toaster />
+            </GlobalHeaderProvider>
+          </TooltipProvider>
+        </QueryClientProvider>
+      </main>,
+    );
+  }
+
+  const memoryRouter = createMemoryRouter(
     [
       {
         path: '*',
@@ -52,7 +72,7 @@ export async function renderDesktopScene(
     { initialEntries: [route] },
   );
 
-  return render(<RouterProvider router={router} />);
+  return render(<RouterProvider router={memoryRouter} />);
 }
 
 export async function expectDesktopSceneAccessible() {

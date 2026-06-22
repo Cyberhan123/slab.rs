@@ -10,6 +10,7 @@ use slab_app_core::context::AppState;
 use slab_app_core::domain::services::WorkspaceLspService;
 use slab_types::plugin::PluginLanguageServerTransport;
 use slab_utils::lsp::{read_lsp_stdio_message, write_lsp_stdio_message};
+use slab_utils::path::absolute::canonicalize_existing_preserving_symlinks;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
@@ -43,8 +44,7 @@ async fn run_workspace_lsp_socket(
     socket: WebSocket,
 ) -> Result<(), String> {
     let workspace_root = service.workspace_root().map_err(|error| error.to_string())?;
-    let workspace_root = workspace_root
-        .canonicalize()
+    let workspace_root = canonicalize_existing_preserving_symlinks(&workspace_root)
         .map_err(|error| format!("failed to resolve workspace root: {error}"))?;
     if !workspace_root.is_dir() {
         return Err(format!("workspace root {} is not a directory", workspace_root.display()));

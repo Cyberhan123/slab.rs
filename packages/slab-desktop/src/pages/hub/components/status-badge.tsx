@@ -17,7 +17,7 @@ export function StatusBadge({
 
   if (status === 'ready') {
     return (
-      <StatusPill status="success" className={cn(sharedClassName, 'text-[var(--success)]', className)}>
+      <StatusPill status="success" className={cn(sharedClassName, 'text-[color:var(--success)]', className)}>
         {t('pages.hub.filters.statuses.ready')}
       </StatusPill>
     );
@@ -25,7 +25,7 @@ export function StatusBadge({
 
   if (status === 'downloading') {
     return (
-      <StatusPill status="info" className={cn(sharedClassName, 'text-[var(--primary)]', className)}>
+      <StatusPill status="info" className={cn(sharedClassName, 'text-[color:var(--primary)]', className)}>
         {t('pages.hub.filters.statuses.downloading')}
       </StatusPill>
     );
