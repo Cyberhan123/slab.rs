@@ -25,6 +25,7 @@ import { PAGE_HEADER_META } from "@/layouts/header-meta"
 import { HEADER_SELECT_KEYS } from "@/layouts/header-controls"
 import { useAssistantUiStore } from "@/store/useAssistantUiStore"
 import { useAssistantDraftStore } from "@/store/useAssistantDraftStore"
+import { GUARDRAIL_PMIDS, useGuardrailFlag } from "@/lib/guardrail-flags"
 import {
   extractTaskId,
   isFailedTaskStatus,
@@ -83,6 +84,9 @@ function Assistant() {
   const { t } = useTranslation()
   const locale = useAssistantLocale()
   const resolvedLanguage = getResolvedAppLanguage()
+  const assistantErrorEnvelopeRenderingEnabled = useGuardrailFlag(
+    GUARDRAIL_PMIDS.assistantErrorEnvelopeRendering
+  )
   const {
     conversationList,
     createSession: createEmptySession,
@@ -326,7 +330,9 @@ function Assistant() {
       await prepareSelectedModel()
     } catch (error) {
       toast.error(t("pages.assistant.toast.failedToPrepareModel"), {
-        description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError"), t),
+        description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError"), t, {
+          preferServerEnvelope: assistantErrorEnvelopeRenderingEnabled,
+        }),
       })
       throw error
     }

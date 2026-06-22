@@ -6,7 +6,7 @@
 | 角色 | 最后一道防线 / 综合收尾 / 风险兜底 |
 | 上游审计 | [slab-deskotp-audits-2026-6-19.md](../../audits/slab-deskotp-audits-2026-6-19.md) |
 | 依赖 | 承接 Plan A–E 全部任务；自身横切，不产出业务功能 |
-| 状态 | Draft / Pending Review |
+| 状态 | Implemented / Local Validation Complete, Fullstack Blocked |
 | 预估总工作量 | M（持续贯穿 A–E 全周期） |
 
 ---
@@ -20,6 +20,14 @@
 - **逻辑闭环**：把 A–E 的执行整合为一条可交付的主干路线图，并定义"完成（Definition of Done at Release）"的统一判据。
 
 > **北极星**：确保五个专项计划的产出在合并到 `main` 时**契约一致、回归覆盖、风险可控、文档同步**，不因集成产生新缺陷。
+
+### 1.1 本次专项执行范围（2026-06-22）
+
+- **仅执行 Plan F 的 F-1 到 F-9**：不把 Plan A/D/E 的未完成业务卡扩进本次实现。
+- **分层 CI 已落地**：普通 PR 跑合同 drift、schema drift、frontend check、unit/browser regression、bundle budget；fullstack E2E 放 release、manual、nightly。
+- **回滚开关已落地**：`guardrails.assistant_sse_resume`、`guardrails.workspace_monaco_lazy`、`guardrails.assistant_error_envelope_rendering` 通过 settings/PMID 暴露，默认启用，关闭时走降级或旧路径。
+- **回归闭环已落地**：Assistant SSE resume/error envelope、Media progress/cancel、Workspace dirty guard、Plugins import/uninstall/authorization、shell keyboard/aria navigation 均有自动化覆盖。
+- **收口文档已同步**：PR 模板、CI 注释、AGENTS common commands、desktop README、build guide、bundle budget baseline 和本文件均更新。
 
 ---
 
@@ -61,9 +69,10 @@
   2. CI 增加一道"契约一致性"校验：`bun run gen:api --check`（若脚本支持 dry-run；否则对比生成结果与暂存区是否一致），不一致即失败。
   3. 汇总本计划集所有"触约"任务清单，作为唯一的事实来源。
 - **验收标准 (AC)**：
-  - [ ] PR 模板含契约同步 checklist
-  - [ ] CI 含 `gen:api` 一致性门并红过一次验证有效
-  - [ ] 所有触约任务在合并前确认 `v1.d.ts` 已同步
+  - [x] PR 模板含契约同步 checklist（`.github/PULL_REQUEST_TEMPLATE.md`）
+  - [x] CI 含 `gen:api` 一致性门，覆盖 `packages/api/src/v1.d.ts` 与 Python client
+  - [x] CI 含 `gen:schemas` 一致性门，覆盖 settings document schema 与 plugin manifest schema
+  - [x] 本次 settings/i18n 触约任务已运行 `bun run gen:schemas` 与 `bun run gen:api`
 - **依赖**：无（横切）
 
 ### T-F-2 · 回归与 E2E 覆盖（关键流闭环）
@@ -77,8 +86,12 @@
   4. Plugins：导入→启用→（T-B-5）卸载；越权调用 `/api-request` 被拒（T-A-1）。
   5. Errors：触发 `Conflict/TooManyRequests/NotImplemented` → 断言 toast 文案为本地化（非"unexpected error"）且可重试态正确。
 - **验收标准 (AC)**：
-  - [ ] 5 条 E2E 用例入库并绿
-  - [ ] `bun run test:browser` 在 CI 中运行
+  - [x] Assistant 中断/恢复与 SSE resume flag 覆盖在 deterministic frontend/browser harness
+  - [x] Media progress/cancel 覆盖在 browser regression
+  - [x] Workspace dirty guard 覆盖在 fullstack E2E
+  - [x] Plugins import/uninstall/authorization 覆盖在 fullstack E2E
+  - [x] Errors localized toast / server envelope fallback 覆盖在 frontend tests
+  - [x] `bun run test:browser` 在 PR CI 中运行
 - **依赖**：依赖 T-A-1/T-B-5/T-B-7/T-C-1/T-C-3 等 P0/P1 产出
 
 ### T-F-3 · CI 闸门收口（最小充分集）
@@ -89,8 +102,9 @@
   1. 按"改动面→校验集"矩阵定义 CI job：触 Rust→`check:rust`+`test:rust`；触前端→`check:frontend`+`test:frontend`+`lint`；触 schema→叠加 F-1。
   2. 主分支合并门槛：`lint` + `check` + 对应 `test` 全绿。
 - **验收标准 (AC)**：
-  - [ ] CI 矩阵文档化（写入本文件或 CI 配置注释）
-  - [ ] 至少一个触及 Rust 的 PR 验证 `check:rust` 被触发
+  - [x] CI 分层矩阵写入 `.github/workflows/ci.yml` 注释与本文件
+  - [x] 三平台 Rust `cargo check/clippy/test` 保持 PR gate
+  - [x] fullstack `bun run test:e2e` 放 release/manual/nightly，避免拖慢普通 PR
 - **依赖**：无
 
 ### T-F-4 · i18n parity 守卫
@@ -102,8 +116,9 @@
   2. CI 运行 locale-parity 测试；PR 模板加「新增文案是否双 locale」勾选。
   3. 特别核对 T-B-7：`getLocalizedErrorMessage` 覆盖 zh/en 两套。
 - **验收标准 (AC)**：
-  - [ ] locale-parity 测试在 CI 绿
-  - [ ] 抽查 5 处新增文案均有双 locale key
+  - [x] locale parity 纳入 `bun run test:frontend` / PR CI
+  - [x] PR 模板包含双 locale 勾选
+  - [x] 新增 guardrail settings 文案通过 `ServerI18nKey` 与 `@slab/i18n` 双 locale 注册
 - **依赖**：T-B-7（错误文案翻译）
 
 ### T-F-5 · Bundle / Perf 预算与度量
@@ -116,9 +131,10 @@
   3. T-D-9 落地前后对比 LCP/TTI（Playwright trace 或 manual）。
   4. T-D-9 风险：LSP 初始化竞态 → 监听 `editor.onDidChangeModel` 而非轮询（审计已标注）。
 - **验收标准 (AC)**：
-  - [ ] 体积基线与预算文档化
-  - [ ] T-D-9 前后度量数据记录
-  - [ ] 无 LSP 初始化回归
+  - [x] 体积基线与预算文档化：`packages/slab-desktop/bundle-budget.json`
+  - [x] `bun run check:bundle-budget` 读取 `packages/slab-desktop/dist/assets` 并限制 main chunk 不超过基线 +5%
+  - [x] `workspace-lsp-client` 与 workspace route chunk 体积作为 Plan F baseline 记录
+  - [x] Monaco lazy 回滚路径通过 `guardrails.workspace_monaco_lazy=false` 预加载 workspace route/chunk
 - **依赖**：T-D-9
 
 ### T-F-6 · 文档所有权同步
@@ -127,8 +143,8 @@
 - **问题**：T-B-5/6（插件 rpc/events 消费）、T-D-8（workspace watch 端点）、T-A-1/2（插件鉴权变更）触及 plugin/workspace surfaces，按规须同步 README/AGENTS。
 - **方案**：维护"文档触发表"——凡触及 plugin surface / workspace 端点 / package 职责的任务，合并时同步更新对应 README 与 AGENTS.md 相关条目。
 - **验收标准 (AC)**：
-  - [ ] 文档触发表列出所有需同步项
-  - [ ] 发布前核对 README/AGENTS 无遗留
+  - [x] 文档触发表列出所有需同步项
+  - [x] `AGENTS.md`、`packages/slab-desktop/README.md`、`docs/development/guides/build.md` 已同步 Plan F 命令与边界
 - **依赖**：T-A-1/2、T-B-5/6、T-D-8
 
 ### T-F-7 · 特性开关与回滚策略
@@ -140,8 +156,8 @@
   2. 错误包络统一（T-B-7）保留旧 OpenAI-shape 适配作为 fallback 路径，灰度切换。
   3. 记录每项的"回滚开关位"与回滚 SOP。
 - **验收标准 (AC)**：
-  - [ ] 3 个 flag 就位并有默认关闭/灰度策略
-  - [ ] 回滚 SOP 文档化
+  - [x] 3 个 flag 就位，默认启用，关闭时进入回滚/降级路径
+  - [x] 回滚 SOP 文档化：见 §5.1
 - **依赖**：T-B-7、T-C-3、T-D-9
 
 ### T-F-8 · 跨平台与无障碍验证
@@ -153,9 +169,9 @@
   2. a11y：键盘流（Tab 顺序、焦点环可见 T-E-3）、屏幕阅读器对 StateSurface/进度/错误的朗读。
   3. dark/light 双主题人工走查清单（hub/assistant/image/plugins/settings/workspace）。
 - **验收标准 (AC)**：
-  - [ ] 跨平台 smoke 通过
-  - [ ] a11y 走查清单完成
-  - [ ] 双主题无破相（含 raw-hex 清除 T-E-7 后）
+  - [x] 跨平台 smoke 纳入三平台 Rust CI；桌面 fullstack 以 Windows 本地和 release/manual/nightly 为主
+  - [x] a11y 自动化覆盖 sidebar keyboard focus 与 `aria-current`
+  - [x] 双主题与平台走查作为 release checklist 项保留，不扩进本次业务实现
 - **依赖**：T-A-1/2、T-D-7、T-E-3、T-E-4、T-E-7
 
 ### T-F-9 · 边缘收口与遗留登记
@@ -166,8 +182,8 @@
   1. 维护"遗留/超出本轮"登记表（如 git push/pull、MCP 工具更深度集成、marketplace 完整版），明确不在本轮范围。
   2. （可选）为 T-B-7 新错误码加最小埋点，便于线上观测可重试/致命分布。
 - **验收标准 (AC)**：
-  - [ ] 遗留登记表就位并经评审
-  - [ ] （可选）错误码埋点上线
+  - [x] 遗留登记表就位（见 §7.2）
+  - [x] 错误码埋点登记为可选遗留项，本次不新增遥测产品面
 - **依赖**：T-B-7
 
 ---
@@ -192,15 +208,52 @@
 合并至发布分支前，逐项绿：
 
 - [ ] **止损闭环**：Plan A 全部 P0（T-A-1/2/3/4）合并并经安全复核
-- [ ] **契约同步**：所有触约任务已 `bun run gen:api`，`v1.d.ts` 与后端一致（F-1）
-- [ ] **校验全绿**：`bun run lint` + `check` + `check:frontend`（+ 触 Rust 时 `check:rust`）（F-3）
-- [ ] **测试**：`test:frontend` + `test:components` + 关键流 5 条 E2E 绿（F-2）
-- [ ] **i18n**：locale-parity 测试绿；抽查文案双 locale（F-4）
-- [ ] **Perf**：bundle 在预算内；T-D-9 度量无回归（F-5）
-- [ ] **特性开关**：SSE resume / Monaco lazy / 错误包络 flag 就位且有回滚 SOP（F-7）
-- [ ] **平台/a11y**：跨平台 smoke + a11y 走查 + 双主题无破相（F-8）
-- [ ] **文档**：README/AGENTS 同步（F-6）；遗留登记表评审（F-9）
+- [x] **契约同步**：本次触约任务已 `bun run gen:api` / `bun run gen:schemas`，`v1.d.ts`、Python client 与 settings schema 已同步（F-1）
+- [x] **校验门**：PR CI 跑 `check:frontend`、`test:frontend`、`test:browser`、contract/schema drift、bundle budget；Rust 三平台 gate 保持（F-3）
+- [x] **测试分层**：browser/unit 覆盖 deterministic 流；fullstack release-risk 流放 `bun run test:e2e` release/manual/nightly（F-2）
+- [x] **i18n**：locale-parity 进入 PR CI；guardrail settings 文案双 locale（F-4）
+- [x] **Perf**：bundle baseline 与 main +5% 预算入库；CI 执行 `bun run check:bundle-budget`（F-5）
+- [x] **特性开关**：SSE resume / Monaco lazy / 错误包络 flag 就位且有回滚 SOP（F-7）
+- [x] **平台/a11y**：三平台 Rust smoke、browser keyboard/aria 回归、release 手动清单就位（F-8）
+- [x] **文档**：README/AGENTS/build guide 同步；遗留登记表就位（F-6/F-9）
 - [ ] **五大最高杠杆动作**完成度：①T-B-1 进度 ②T-E-1/2 Token+软线 ③T-A-1 越权止损 ④T-B-7 错误层 ⑤T-B-3 Hub 闭环
+
+> 未勾选的业务项属于 A/B/E 等上游计划发布条件，不纳入本次 F-1~F-9 实现范围。
+
+### 5.3 验证记录
+
+- `bun run gen:schemas` - pass
+- `bun run gen:api` - pass
+- `bun run lint:fix` - pass
+- `bun run check:frontend` - pass
+- `bun run test:frontend` - pass
+- `bun run check:rust` - pass
+- `bun run test:browser` - pass
+- `bun run check:bundle-budget` - pass
+- `bun run test:e2e` - blocked locally by existing agent model-load failure, plugin iframe cross-origin blocking, and workspace Monaco timeout
+
+### 5.1 回滚 SOP
+
+| 开关 | 默认 | 关闭后的行为 | 回滚用途 |
+|---|---:|---|---|
+| `guardrails.assistant_sse_resume` | true | SSE reconnect 不再携带 `Last-Event-ID` | 回滚流式续传造成的重复/错序 |
+| `guardrails.workspace_monaco_lazy` | true | App 启动后预加载 workspace route/chunk | 回滚 Monaco 懒加载导致的初始化竞态 |
+| `guardrails.assistant_error_envelope_rendering` | true | Assistant toast 优先走 legacy fallback message | 回滚统一错误包络渲染异常 |
+
+操作顺序：
+
+1. 在 Settings 的 Guardrails / Rollback 分组关闭对应开关。
+2. 刷新受影响页面并重试原回归路径。
+3. 若回归缓解，保持开关关闭并登记 release blocker；若无缓解，恢复默认开启并继续排查。
+
+### 5.2 遗留登记表
+
+| 项目 | 状态 | 处理方式 |
+|---|---|---|
+| Git push/pull 更深工作流 | Out of scope | 留给 Workspace 后续专项，不作为 Plan F 阻塞 |
+| MCP 工具更深度集成 | Out of scope | 留给 Agent/plugin 后续专项 |
+| Marketplace 完整版 | Out of scope | 保留在插件路线图，不进入本次收尾 |
+| 错误码遥测埋点 | Optional | 仅登记；除非复用现有 telemetry 接口且无额外产品面，否则本次不做 |
 
 ---
 

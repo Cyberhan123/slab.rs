@@ -43,6 +43,7 @@ pub struct SettingsPmidCatalog {
     pub providers: ProvidersPmids,
     pub models: ModelsPmids,
     pub plugin: PluginPmids,
+    pub guardrails: GuardrailPmids,
     pub server: ServerPmids,
 }
 
@@ -59,6 +60,7 @@ impl SettingsPmidCatalog {
             providers: ProvidersPmids,
             models: ModelsPmids::new(),
             plugin: PluginPmids,
+            guardrails: GuardrailPmids,
             server: ServerPmids::new(),
         }
     }
@@ -195,6 +197,9 @@ impl SettingsPmidCatalog {
             self.plugin.install_dir(),
             self.plugin.js_runtime_transport(),
             self.plugin.python_runtime_transport(),
+            self.guardrails.assistant_sse_resume(),
+            self.guardrails.workspace_monaco_lazy(),
+            self.guardrails.assistant_error_envelope_rendering(),
             self.server.address(),
             self.server.logging.level(),
             self.server.logging.json(),
@@ -906,6 +911,23 @@ impl PluginPmids {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GuardrailPmids;
+
+impl GuardrailPmids {
+    pub fn assistant_sse_resume(self) -> SettingPmid {
+        SettingPmid::from_path("guardrails.assistant_sse_resume")
+    }
+
+    pub fn workspace_monaco_lazy(self) -> SettingPmid {
+        SettingPmid::from_path("guardrails.workspace_monaco_lazy")
+    }
+
+    pub fn assistant_error_envelope_rendering(self) -> SettingPmid {
+        SettingPmid::from_path("guardrails.assistant_error_envelope_rendering")
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ServerPmids {
     pub logging: LoggingPmids,
@@ -1000,6 +1022,9 @@ mod tests {
         assert!(unique.contains("providers.registry"));
         assert!(unique.contains("telemetry.enabled"));
         assert!(unique.contains("telemetry.capture_content"));
+        assert!(unique.contains("guardrails.assistant_sse_resume"));
+        assert!(unique.contains("guardrails.workspace_monaco_lazy"));
+        assert!(unique.contains("guardrails.assistant_error_envelope_rendering"));
         assert!(unique.contains("server.cloud_http_trace"));
     }
 }

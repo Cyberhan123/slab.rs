@@ -7,17 +7,29 @@ import VideoPage from '@/pages/video';
 import { renderDesktopScene } from '../test-utils';
 
 const {
+  mediaHarnessState,
+  mockImageCancel,
   mockImageHistoryDetail,
   mockImageSubmit,
+  mockAudioCancel,
   mockAudioHistoryDetail,
   mockAudioTranscribe,
+  mockVideoCancel,
   mockVideoHistoryDetail,
   mockVideoSubmit,
 } = vi.hoisted(() => ({
+  mediaHarnessState: {
+    audioRunning: false,
+    imageGenerating: false,
+    videoGenerating: false,
+  },
+  mockAudioCancel: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
   mockAudioHistoryDetail: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
   mockAudioTranscribe: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+  mockImageCancel: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
   mockImageHistoryDetail: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
   mockImageSubmit: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+  mockVideoCancel: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
   mockVideoHistoryDetail: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
   mockVideoSubmit: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
 }));
@@ -35,8 +47,16 @@ vi.mock('@/pages/image/hooks/use-image-generation', async () => {
         cfgScale: 7,
         clipSkip: 0,
         eta: 0,
+        generationProgress: mediaHarnessState.imageGenerating
+          ? {
+              etaMs: 12_000,
+              percent: 42,
+              stage: 'running',
+              stepLabel: 'sampling',
+            }
+          : null,
         guidance: 3.5,
-        handleCancel: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+        handleCancel: mockImageCancel,
         handleDimensionPreset: vi.fn<() => void>(),
         handleDownload: vi.fn<() => void>(),
         handleInitImageChange: vi.fn<() => void>(),
@@ -66,7 +86,7 @@ vi.mock('@/pages/image/hooks/use-image-generation', async () => {
         initImageDataUri: null,
         initImageInputRef: { current: null },
         isBusy: false,
-        isGenerating: false,
+        isGenerating: mediaHarnessState.imageGenerating,
         isPreparingModel: false,
         isResolvingModelState: false,
         mode: 'txt2img',
@@ -123,8 +143,16 @@ vi.mock('@/pages/video/hooks/use-video-generation', async () => {
         footerHint: 'Clip duration: 2.0s',
         fps: 8,
         frames: 16,
+        generationProgress: mediaHarnessState.videoGenerating
+          ? {
+              etaMs: 18_000,
+              percent: 64,
+              stage: 'running',
+              stepLabel: 'frames',
+            }
+          : null,
         guidance: 3.5,
-        handleCancel: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+        handleCancel: mockVideoCancel,
         handleDownload: vi.fn<() => void>(),
         handleInitImageChange: vi.fn<() => void>(),
         handleInitImageDrop: vi.fn<() => void>(),
@@ -155,7 +183,7 @@ vi.mock('@/pages/video/hooks/use-video-generation', async () => {
         immersivePreview: false,
         initImageDataUri: null,
         initImageInputRef: { current: null },
-        isGenerating: false,
+        isGenerating: mediaHarnessState.videoGenerating,
         negativePrompt: '',
         openHistoryDetail: mockVideoHistoryDetail,
         prompt,
@@ -181,9 +209,11 @@ vi.mock('@/pages/video/hooks/use-video-generation', async () => {
         setSteps: vi.fn<() => void>(),
         setStrength: vi.fn<() => void>(),
         setWidthStr: vi.fn<() => void>(),
-        stageDescription: 'Enter a prompt to generate video',
-        stageStatus: 'Awaiting prompt',
-        stageTitle: 'Ready',
+        stageDescription: mediaHarnessState.videoGenerating
+          ? 'Rendering frames'
+          : 'Enter a prompt to generate video',
+        stageStatus: mediaHarnessState.videoGenerating ? 'Running' : 'Awaiting prompt',
+        stageTitle: mediaHarnessState.videoGenerating ? 'Generating' : 'Ready',
         steps: 20,
         strength: 0.75,
         videoPath: null,
@@ -223,6 +253,15 @@ vi.mock('@/pages/audio/hooks/use-audio', () => ({
       size: 512,
       type: 'audio/mpeg',
     },
+    generationProgress: mediaHarnessState.audioRunning
+      ? {
+          etaMs: 9_000,
+          percent: 35,
+          stage: 'running',
+          stepLabel: 'decode',
+        }
+      : null,
+    handleCancelTranscription: mockAudioCancel,
     handleFileChange: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     handleTauriFileSelect: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     handleTranscribe: mockAudioTranscribe,
@@ -244,8 +283,10 @@ vi.mock('@/pages/audio/hooks/use-audio', () => ({
     historyDialogOpen: false,
     historyError: null,
     historyLoading: false,
-    isBusy: false,
+    isBusy: mediaHarnessState.audioRunning,
+    isCancellingTranscription: false,
     isTauri: true,
+    isTranscriptionRunning: mediaHarnessState.audioRunning,
     isUsingBundledVad: false,
     openHistoryDetail: mockAudioHistoryDetail,
     preparingStage: null,
@@ -314,6 +355,9 @@ vi.mock('@/pages/audio/hooks/use-audio', () => ({
 describe('media core flows e2e', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mediaHarnessState.audioRunning = false;
+    mediaHarnessState.imageGenerating = false;
+    mediaHarnessState.videoGenerating = false;
   });
 
   it('submits an image prompt and opens image history detail', async () => {
@@ -346,5 +390,38 @@ describe('media core flows e2e', () => {
 
     await page.getByTestId('audio-history-item-audio-history-1').click();
     expect(mockAudioHistoryDetail).toHaveBeenCalledWith('audio-history-1');
+  });
+
+  it('renders image progress and cancel controls while generating', async () => {
+    mediaHarnessState.imageGenerating = true;
+    await renderDesktopScene(<ImagePage />, { route: '/image' });
+
+    await expect.element(page.getByTestId('image-generation-progress')).toBeVisible();
+    await expect.element(page.getByTestId('image-generation-progress')).toHaveTextContent('42%');
+
+    await page.getByTestId('image-cancel-button').click();
+    expect(mockImageCancel).toHaveBeenCalled();
+  });
+
+  it('renders video progress and cancel controls while generating', async () => {
+    mediaHarnessState.videoGenerating = true;
+    await renderDesktopScene(<VideoPage />, { route: '/video' });
+
+    await expect.element(page.getByTestId('video-generation-progress')).toBeVisible();
+    await expect.element(page.getByTestId('video-generation-progress')).toHaveTextContent('64%');
+
+    await page.getByTestId('video-cancel-button').click();
+    expect(mockVideoCancel).toHaveBeenCalled();
+  });
+
+  it('renders audio progress and cancel controls while transcribing', async () => {
+    mediaHarnessState.audioRunning = true;
+    await renderDesktopScene(<AudioPage />, { route: '/audio' });
+
+    await expect.element(page.getByTestId('audio-generation-progress')).toBeVisible();
+    await expect.element(page.getByTestId('audio-generation-progress')).toHaveTextContent('35%');
+
+    await page.getByTestId('audio-cancel-button').click();
+    expect(mockAudioCancel).toHaveBeenCalled();
   });
 });

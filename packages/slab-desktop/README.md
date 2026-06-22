@@ -40,6 +40,16 @@ Bun-managed frontend package.
 - Refresh desktop screenshot baselines with `bun run test:browser:update`.
 - Run fullstack E2E tests with root `bun run test:e2e`.
 
+## Plan F Guardrails
+
+- PR CI keeps the fast desktop gate in `bun run check:frontend`, `bun run test:frontend`, `bun run test:browser`, contract drift checks, schema drift checks, and `bun run check:bundle-budget`.
+- Fullstack release-risk flows stay in `bun run test:e2e` and are run from release, manual, or nightly CI paths.
+- Desktop bundle budgets are tracked in `bundle-budget.json`; run `bun run build:desktop` before `bun run check:bundle-budget`.
+- Runtime rollback flags are exposed through settings PMIDs:
+  - `guardrails.assistant_sse_resume`
+  - `guardrails.workspace_monaco_lazy`
+  - `guardrails.assistant_error_envelope_rendering`
+
 ## License
 
 AGPL-3.0-only. See the root [LICENSE](../../LICENSE).

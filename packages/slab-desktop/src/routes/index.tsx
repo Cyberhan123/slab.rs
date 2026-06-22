@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Navigate, useRoutes } from "react-router-dom";
 import Assistant from "@/pages/assistant";
 import About from "@/pages/about";
@@ -15,10 +15,25 @@ import { PluginWebviewPage } from "@/pages/plugins/components/plugin-webview-pag
 import { useRuntimePlugins } from "@/pages/plugins/hooks/use-runtime-plugins";
 import { Spinner } from "@slab/components/spinner";
 import { GlobalHeaderProvider } from "@/layouts/global-header-provider";
+import { GUARDRAIL_PMIDS, useGuardrailFlag } from "@/lib/guardrail-flags";
 
 // Lazy-load the setup page so it doesn't bloat the main bundle.
 const SetupPage = lazy(() => import("@/pages/setup"));
 const WorkspacePage = lazy(() => import("@/pages/workspace"));
+
+function WorkspaceLazyRollbackPreload() {
+  const workspaceMonacoLazyEnabled = useGuardrailFlag(GUARDRAIL_PMIDS.workspaceMonacoLazy);
+
+  useEffect(() => {
+    if (workspaceMonacoLazyEnabled) {
+      return;
+    }
+
+    void import("@/pages/workspace");
+  }, [workspaceMonacoLazyEnabled]);
+
+  return null;
+}
 
 function AppRoutes() {
   const { data: runtimePlugins = [] } = useRuntimePlugins();
@@ -84,7 +99,12 @@ function AppRoutes() {
     { path: "/theme-preview", element: <ThemePreview /> },
   ]);
 
-  return routes;
+  return (
+    <>
+      <WorkspaceLazyRollbackPreload />
+      {routes}
+    </>
+  );
 }
 
 export default AppRoutes;

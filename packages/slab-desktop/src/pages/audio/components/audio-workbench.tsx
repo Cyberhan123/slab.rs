@@ -426,6 +426,7 @@ export function AudioWorkbench({
                       step: t('pages.audio.progress.step'),
                       title: t('pages.audio.progress.title'),
                     }}
+                    testId="audio-generation-progress"
                   />
                   <Button
                     variant="pill"
@@ -433,6 +434,7 @@ export function AudioWorkbench({
                     className="h-10 w-full rounded-[14px]"
                     onClick={() => void handleCancelTranscription()}
                     disabled={isCancellingTranscription}
+                    data-testid="audio-cancel-button"
                   >
                     {isCancellingTranscription ? <Loader2 className="size-4 animate-spin" /> : null}
                     {t('pages.audio.workbench.actions.cancel')}

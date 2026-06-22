@@ -5,6 +5,7 @@ import type { components } from "@slab/api/v1"
 import { useTranslation } from "@slab/i18n"
 import api from "@slab/api"
 import { useAssistantUiStore } from "@/store/useAssistantUiStore"
+import { GUARDRAIL_PMIDS, useGuardrailFlag } from "@/lib/guardrail-flags"
 
 import { getAssistantErrorDescription } from "../assistant-context"
 
@@ -45,6 +46,9 @@ function toSessionRecords(data: SessionRecord[] | undefined): SessionRecord[] {
 
 export function useAssistantSessions() {
   const { t } = useTranslation()
+  const assistantErrorEnvelopeRenderingEnabled = useGuardrailFlag(
+    GUARDRAIL_PMIDS.assistantErrorEnvelopeRendering
+  )
   const hasHydrated = useAssistantUiStore((state) => state.hasHydrated)
   const currentSessionId = useAssistantUiStore((state) => state.currentSessionId)
   const setCurrentSessionId = useAssistantUiStore((state) => state.setCurrentSessionId)
@@ -103,14 +107,22 @@ export function useAssistantSessions() {
       } catch (error) {
         if (!options?.quiet) {
           toast.error(t("pages.assistant.toast.failedToCreateSession"), {
-            description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError"), t),
+            description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError"), t, {
+              preferServerEnvelope: assistantErrorEnvelopeRenderingEnabled,
+            }),
           })
         }
 
         return null
       }
     },
-    [createSessionMutation, refetchSessions, setCurrentSessionId, t]
+    [
+      assistantErrorEnvelopeRenderingEnabled,
+      createSessionMutation,
+      refetchSessions,
+      setCurrentSessionId,
+      t,
+    ]
   )
 
   const deleteSession = useCallback(
@@ -123,7 +135,9 @@ export function useAssistantSessions() {
         })
       } catch (error) {
         toast.error(t("pages.assistant.toast.failedToDeleteSession"), {
-          description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError"), t),
+          description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError"), t, {
+            preferServerEnvelope: assistantErrorEnvelopeRenderingEnabled,
+          }),
         })
         return false
       }
@@ -144,6 +158,7 @@ export function useAssistantSessions() {
       return true
     },
     [
+      assistantErrorEnvelopeRenderingEnabled,
       createSession,
       currentSessionId,
       deleteSessionMutation,
@@ -178,12 +193,20 @@ export function useAssistantSessions() {
         return true
       } catch (error) {
         toast.error(t("pages.assistant.toast.failedToUpdateSession"), {
-          description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError"), t),
+          description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError"), t, {
+            preferServerEnvelope: assistantErrorEnvelopeRenderingEnabled,
+          }),
         })
         return false
       }
     },
-    [refetchSessions, setSessionLabel, t, updateSessionMutation]
+    [
+      assistantErrorEnvelopeRenderingEnabled,
+      refetchSessions,
+      setSessionLabel,
+      t,
+      updateSessionMutation,
+    ]
   )
 
   useEffect(() => {

@@ -201,6 +201,7 @@ fn load_config(settings: &SettingsDocument) -> PmidConfig {
             },
         },
         server: settings.server.clone(),
+        guardrails: settings.guardrails.clone(),
         chat: ChatConfig {
             providers: settings
                 .providers
@@ -556,6 +557,22 @@ fn empty_sections() -> Vec<SettingsSectionView> {
             ],
         },
         SettingsSectionView {
+            id: "guardrails".to_owned(),
+            title: "Guardrails".to_owned(),
+            description_md:
+                "Release rollback controls for high-risk desktop integration paths.".to_owned(),
+            i18n: None,
+            subsections: vec![SettingsSubsectionView {
+                id: "rollback".to_owned(),
+                title: "Rollback".to_owned(),
+                description_md:
+                    "Disable individual Plan F guardrails only while rolling back a regression."
+                        .to_owned(),
+                i18n: None,
+                properties: Vec::new(),
+            }],
+        },
+        SettingsSectionView {
             id: "server".to_owned(),
             title: "Server".to_owned(),
             description_md: "HTTP gateway configuration, access control, and API tooling."
@@ -650,6 +667,10 @@ fn section_i18n(section_id: &str) -> Option<I18nPayload> {
             Some(ServerI18nKey::SettingsSectionAgentTitle),
             Some(ServerI18nKey::SettingsSectionAgentDescription),
         )),
+        "guardrails" => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSectionGuardrailsTitle),
+            Some(ServerI18nKey::SettingsSectionGuardrailsDescription),
+        )),
         "server" => Some(metadata_i18n(
             Some(ServerI18nKey::SettingsSectionServerTitle),
             Some(ServerI18nKey::SettingsSectionServerDescription),
@@ -743,6 +764,10 @@ fn subsection_i18n(section_id: &str, subsection_id: &str) -> Option<I18nPayload>
         ("agent", "memories") => Some(metadata_i18n(
             Some(ServerI18nKey::SettingsSubsectionAgentMemoriesTitle),
             Some(ServerI18nKey::SettingsSubsectionAgentMemoriesDescription),
+        )),
+        ("guardrails", "rollback") => Some(metadata_i18n(
+            Some(ServerI18nKey::SettingsSubsectionGuardrailsRollbackTitle),
+            Some(ServerI18nKey::SettingsSubsectionGuardrailsRollbackDescription),
         )),
         ("server", "general") => Some(metadata_i18n(
             Some(ServerI18nKey::SettingsSubsectionGeneralGeneralTitle),
@@ -839,6 +864,7 @@ fn section_location(path: &str) -> (&'static str, &'static str) {
         _ if path.starts_with("models.auto_unload.") => ("models", "auto_unload"),
         _ if path.starts_with("models.") => ("models", "general"),
         _ if path.starts_with("plugin.") => ("plugin", "general"),
+        _ if path.starts_with("guardrails.") => ("guardrails", "rollback"),
         _ if path.starts_with("server.cors.") => ("server", "cors"),
         _ if path.starts_with("server.admin.") => ("server", "admin"),
         _ if path.starts_with("server.swagger.") => ("server", "swagger"),
@@ -875,6 +901,7 @@ fn value_type(path: &str, effective: &SettingValue, default: &SettingValue) -> S
         || path.ends_with(".auto_download")
         || path.ends_with(".flash_attn")
         || path == "telemetry.capture_content"
+        || path.starts_with("guardrails.")
         || path == "server.cloud_http_trace"
     {
         return SettingValueType::Boolean;
@@ -1011,6 +1038,10 @@ fn string_map_json_schema(title: &str, title_key: ServerI18nKey) -> Value {
 
 pub fn change_effect_for(path: &str) -> SettingChangeEffect {
     if path.starts_with("agent.hooks.") || path.starts_with("agent.memories.") {
+        return SettingChangeEffect::Live;
+    }
+
+    if path.starts_with("guardrails.") {
         return SettingChangeEffect::Live;
     }
 
@@ -1412,6 +1443,11 @@ fn property_label(path: &str) -> String {
         "plugin.install_dir" => "Plugin Install Directory".to_owned(),
         "plugin.js_runtime_transport" => "JS Runtime Transport".to_owned(),
         "plugin.python_runtime_transport" => "Python Runtime Transport".to_owned(),
+        "guardrails.assistant_sse_resume" => "Assistant SSE Resume".to_owned(),
+        "guardrails.workspace_monaco_lazy" => "Workspace Monaco Lazy Loading".to_owned(),
+        "guardrails.assistant_error_envelope_rendering" => {
+            "Assistant Error Envelope Rendering".to_owned()
+        }
         "server.address" => "Bind Address".to_owned(),
         "server.admin.token" => "Admin Token".to_owned(),
         "server.cors.allowed_origins" => "Allowed Origins".to_owned(),
@@ -1540,6 +1576,15 @@ fn property_description(path: &str) -> String {
         "plugin.python_runtime_transport" => {
             "Transport used by slab-app-core when communicating with the Python plugin sidecar runtime.".to_owned()
         }
+        "guardrails.assistant_sse_resume" => {
+            "Resume assistant SSE reconnects from the latest observed event id. Disable to reconnect without Last-Event-ID while rolling back stream resume behavior.".to_owned()
+        }
+        "guardrails.workspace_monaco_lazy" => {
+            "Keep workspace Monaco and LSP code behind lazy route and chunk loading. Disable to preload the workspace editor path during rollback diagnostics.".to_owned()
+        }
+        "guardrails.assistant_error_envelope_rendering" => {
+            "Render assistant failures from structured server error envelopes before legacy OpenAI-compatible fallback messages. Disable to prefer the legacy fallback path.".to_owned()
+        }
         "models.auto_unload.enabled" => "Unload idle models automatically to reclaim memory.".to_owned(),
         "models.auto_unload.idle_minutes" => "Idle timeout in minutes before auto-unload triggers.".to_owned(),
         "models.auto_unload.min_free_system_memory_bytes" => {
@@ -1653,6 +1698,15 @@ fn property_label_key(path: &str) -> Option<ServerI18nKey> {
         }
         "plugin.python_runtime_transport" => {
             Some(ServerI18nKey::SettingsPropertyLabelPythonRuntimeTransport)
+        }
+        "guardrails.assistant_sse_resume" => {
+            Some(ServerI18nKey::SettingsPropertyLabelAssistantSseResume)
+        }
+        "guardrails.workspace_monaco_lazy" => {
+            Some(ServerI18nKey::SettingsPropertyLabelWorkspaceMonacoLazy)
+        }
+        "guardrails.assistant_error_envelope_rendering" => {
+            Some(ServerI18nKey::SettingsPropertyLabelAssistantErrorEnvelopeRendering)
         }
         "server.address" => Some(ServerI18nKey::SettingsPropertyLabelBindAddress),
         "server.admin.token" => Some(ServerI18nKey::SettingsPropertyLabelAdminToken),
@@ -1790,6 +1844,15 @@ fn property_description_key(path: &str) -> Option<ServerI18nKey> {
         }
         "plugin.python_runtime_transport" => {
             Some(ServerI18nKey::SettingsPropertyDescriptionPythonRuntimeTransport)
+        }
+        "guardrails.assistant_sse_resume" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionAssistantSseResume)
+        }
+        "guardrails.workspace_monaco_lazy" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionWorkspaceMonacoLazy)
+        }
+        "guardrails.assistant_error_envelope_rendering" => {
+            Some(ServerI18nKey::SettingsPropertyDescriptionAssistantErrorEnvelopeRendering)
         }
         "models.auto_unload.enabled" => {
             Some(ServerI18nKey::SettingsPropertyDescriptionAutoUnloadEnabled)
@@ -2315,6 +2378,9 @@ mod tests {
             "models.auto_unload.enabled",
             "server.admin.token",
             "server.cloud_http_trace",
+            "guardrails.assistant_sse_resume",
+            "guardrails.workspace_monaco_lazy",
+            "guardrails.assistant_error_envelope_rendering",
         ] {
             assert_eq!(
                 service.property(pmid).await.expect(pmid).change_effect,
@@ -2537,6 +2603,47 @@ mod tests {
         assert_eq!(providers.schema.value_type, SettingValueType::Object);
         assert!(providers.schema.multiline);
         assert_eq!(schema["$defs"]["webSearchAuth"]["properties"]["api_key"]["writeOnly"], true);
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn document_view_includes_guardrail_rollback_flags() {
+        let path = temp_settings_path();
+        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&SettingsDocument::default()).expect("serialize"),
+        )
+        .expect("write");
+
+        let service = PmidService::load_from_path(path.clone()).await.expect("pmid service");
+        let document = service.document().await;
+        let guardrails_section = document
+            .sections
+            .iter()
+            .find(|section| section.id == "guardrails")
+            .expect("guardrails section");
+        let rollback = guardrails_section
+            .subsections
+            .iter()
+            .find(|subsection| subsection.id == "rollback")
+            .expect("rollback subsection");
+
+        for pmid in [
+            "guardrails.assistant_sse_resume",
+            "guardrails.workspace_monaco_lazy",
+            "guardrails.assistant_error_envelope_rendering",
+        ] {
+            let property =
+                rollback.properties.iter().find(|property| property.pmid == pmid).expect(pmid);
+            assert_eq!(property.schema.value_type, SettingValueType::Boolean);
+            assert_eq!(property.effective_value, SettingValue::Boolean(true));
+            assert_eq!(property.change_effect, SettingChangeEffect::Live);
+            assert!(property.i18n.is_some());
+        }
+
+        assert_eq!(service.config().guardrails, SettingsDocument::default().guardrails);
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }

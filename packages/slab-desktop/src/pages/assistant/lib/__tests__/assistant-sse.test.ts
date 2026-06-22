@@ -75,6 +75,22 @@ describe('assistant SSE fetch stream', () => {
     expect(new Headers(firstRequestInit?.headers).has('Last-Event-ID')).toBe(false);
   });
 
+  it('does not attach Last-Event-ID when resume is disabled', async () => {
+    const fetchMock = vi
+      .fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
+      .mockResolvedValue(responseFromText('data: ok\n\n'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await readAssistantSseStream('http://localhost/events', {
+      lastEventId: null,
+      onMessage: () => {},
+    });
+
+    const firstRequestInit = fetchMock.mock.calls[0]?.[1];
+    expect(firstRequestInit).toBeDefined();
+    expect(new Headers(firstRequestInit?.headers).has('Last-Event-ID')).toBe(false);
+  });
+
   it('caps reconnect delay at thirty seconds plus jitter', () => {
     const delay = nextReconnectDelayMs(10);
     expect(delay).toBeGreaterThanOrEqual(30_000);

@@ -116,6 +116,10 @@ pub enum ServerI18nKey {
     SettingsSectionAgentTitle,
     #[serde(rename = "server.settings.sections.agent.description")]
     SettingsSectionAgentDescription,
+    #[serde(rename = "server.settings.sections.guardrails.title")]
+    SettingsSectionGuardrailsTitle,
+    #[serde(rename = "server.settings.sections.guardrails.description")]
+    SettingsSectionGuardrailsDescription,
     #[serde(rename = "server.settings.sections.server.title")]
     SettingsSectionServerTitle,
     #[serde(rename = "server.settings.sections.server.description")]
@@ -190,6 +194,10 @@ pub enum ServerI18nKey {
     SettingsSubsectionAgentMemoriesTitle,
     #[serde(rename = "server.settings.subsections.agent.memories.description")]
     SettingsSubsectionAgentMemoriesDescription,
+    #[serde(rename = "server.settings.subsections.guardrails.rollback.title")]
+    SettingsSubsectionGuardrailsRollbackTitle,
+    #[serde(rename = "server.settings.subsections.guardrails.rollback.description")]
+    SettingsSubsectionGuardrailsRollbackDescription,
     #[serde(rename = "server.settings.subsections.server.general.description")]
     SettingsSubsectionServerGeneralDescription,
     #[serde(rename = "server.settings.subsections.server.cors.title")]
@@ -288,6 +296,12 @@ pub enum ServerI18nKey {
     SettingsPropertyLabelJsRuntimeTransport,
     #[serde(rename = "server.settings.properties.label.pythonRuntimeTransport")]
     SettingsPropertyLabelPythonRuntimeTransport,
+    #[serde(rename = "server.settings.properties.label.assistantSseResume")]
+    SettingsPropertyLabelAssistantSseResume,
+    #[serde(rename = "server.settings.properties.label.workspaceMonacoLazy")]
+    SettingsPropertyLabelWorkspaceMonacoLazy,
+    #[serde(rename = "server.settings.properties.label.assistantErrorEnvelopeRendering")]
+    SettingsPropertyLabelAssistantErrorEnvelopeRendering,
     #[serde(rename = "server.settings.properties.label.bindAddress")]
     SettingsPropertyLabelBindAddress,
     #[serde(rename = "server.settings.properties.label.adminToken")]
@@ -426,6 +440,12 @@ pub enum ServerI18nKey {
     SettingsPropertyDescriptionJsRuntimeTransport,
     #[serde(rename = "server.settings.properties.description.pythonRuntimeTransport")]
     SettingsPropertyDescriptionPythonRuntimeTransport,
+    #[serde(rename = "server.settings.properties.description.assistantSseResume")]
+    SettingsPropertyDescriptionAssistantSseResume,
+    #[serde(rename = "server.settings.properties.description.workspaceMonacoLazy")]
+    SettingsPropertyDescriptionWorkspaceMonacoLazy,
+    #[serde(rename = "server.settings.properties.description.assistantErrorEnvelopeRendering")]
+    SettingsPropertyDescriptionAssistantErrorEnvelopeRendering,
     #[serde(rename = "server.settings.properties.description.autoUnloadEnabled")]
     SettingsPropertyDescriptionAutoUnloadEnabled,
     #[serde(rename = "server.settings.properties.description.autoUnloadIdleMinutes")]

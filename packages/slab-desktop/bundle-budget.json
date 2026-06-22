@@ -1,0 +1,15 @@
+{
+  "distDir": "packages/slab-desktop/dist",
+  "budgets": {
+    "main": {
+      "baselineBytes": 2909988,
+      "maxIncreasePercent": 5
+    },
+    "workspaceLspClient": {
+      "baselineBytes": 14189557
+    },
+    "workspaceRoute": {
+      "baselineBytes": 467016
+    }
+  }
+}

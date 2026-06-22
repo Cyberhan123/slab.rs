@@ -507,6 +507,7 @@ export function VideoWorkbench({
                   size="pill"
                   className="h-11 w-full rounded-[16px]"
                   onClick={handleCancel}
+                  data-testid="video-cancel-button"
                 >
                   {t('pages.video.workbench.actions.cancel')}
                 </Button>
@@ -570,6 +571,7 @@ export function VideoWorkbench({
                         title: t('pages.video.progress.title'),
                       }}
                       className="w-full max-w-[360px]"
+                      testId="video-generation-progress"
                     />
                   ) : null}
                 </div>

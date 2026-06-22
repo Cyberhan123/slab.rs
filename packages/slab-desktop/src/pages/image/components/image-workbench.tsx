@@ -587,6 +587,7 @@ export function ImageWorkbench({
                         variant="ghost"
                         className="mt-3 h-10 w-full rounded-xl text-muted-foreground hover:bg-glass-bg hover:text-foreground"
                         onClick={handleCancel}
+                        data-testid="image-cancel-button"
                       >
                         {t('pages.image.workbench.actions.cancel')}
                       </Button>
@@ -603,6 +604,7 @@ export function ImageWorkbench({
                           title: t('pages.image.progress.title'),
                         }}
                         className="mt-3"
+                        testId="image-generation-progress"
                       />
                     ) : null}
                   </div>

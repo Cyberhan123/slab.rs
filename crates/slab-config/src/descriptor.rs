@@ -404,6 +404,16 @@ pub(crate) fn setting_descriptor(pmid: &str) -> Option<SettingDescriptor> {
         "plugin.python_runtime_transport" => {
             descriptor!("plugin.python_runtime_transport", plugin.python_runtime_transport)
         }
+        "guardrails.assistant_sse_resume" => {
+            descriptor!("guardrails.assistant_sse_resume", guardrails.assistant_sse_resume)
+        }
+        "guardrails.workspace_monaco_lazy" => {
+            descriptor!("guardrails.workspace_monaco_lazy", guardrails.workspace_monaco_lazy)
+        }
+        "guardrails.assistant_error_envelope_rendering" => descriptor!(
+            "guardrails.assistant_error_envelope_rendering",
+            guardrails.assistant_error_envelope_rendering
+        ),
         "server.address" => descriptor!("server.address", server.address),
         "server.logging.level" => descriptor!("server.logging.level", server.logging.level),
         "server.logging.json" => descriptor!("server.logging.json", server.logging.json),

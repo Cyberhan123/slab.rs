@@ -10,6 +10,7 @@ import {
   completeSetup,
   createFullstackDevEnvironment,
   eventually,
+  requestJson,
   startFullstackDev,
   type FullstackDevEnvironment,
   type ManagedDevProcess,
@@ -103,6 +104,18 @@ describe.sequential("plugins e2e", () => {
       return text?.includes("desktop plugin WebView host") ? text : null
     })
     expect(deniedStatus).toContain("desktop plugin WebView host")
+
+    await page.goto(`${testEnv.uiBaseUrl}/plugins`, {
+      waitUntil: "domcontentloaded",
+      timeout: 60_000,
+    })
+    await page.getByTestId(`plugin-card-${pluginId}`).waitFor({ state: "visible", timeout: 60_000 })
+    await page.getByTestId(`plugin-delete-${pluginId}`).click()
+
+    await eventually("imported plugin is uninstalled", async () => {
+      const plugins = await requestJson<Array<{ id: string }>>(testEnv.serverBaseUrl, "/v1/plugins")
+      return plugins.some((plugin) => plugin.id === pluginId) ? null : true
+    })
   })
 })
 

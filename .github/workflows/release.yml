@@ -39,6 +39,12 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
+      - name: Install Playwright browser
+        run: bunx playwright install chromium
+
+      - name: Run release fullstack E2E
+        run: bun run test:e2e
+
       - name: Validate release tag matches project versions
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh

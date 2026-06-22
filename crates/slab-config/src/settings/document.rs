@@ -108,6 +108,8 @@ pub struct SettingsDocument {
     pub models: ModelSettingsConfig,
     #[serde(default)]
     pub plugin: PluginSettingsConfig,
+    #[serde(default)]
+    pub guardrails: GuardrailSettingsConfig,
     #[serde(default, skip_serializing_if = "WorkspaceSettingsConfig::is_empty")]
     pub workspace: WorkspaceSettingsConfig,
     #[serde(default)]
@@ -129,6 +131,7 @@ impl Default for SettingsDocument {
             providers: ProvidersConfig::default(),
             models: ModelSettingsConfig::default(),
             plugin: PluginSettingsConfig::default(),
+            guardrails: GuardrailSettingsConfig::default(),
             workspace: WorkspaceSettingsConfig::default(),
             server: ServerSettingsConfig::default(),
         }
@@ -1059,6 +1062,30 @@ pub struct PluginSettingsConfig {
     pub python_runtime_transport: PluginPythonRuntimeTransport,
 }
 
+/// Runtime guardrails used for Plan F rollback controls.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct GuardrailSettingsConfig {
+    /// Whether assistant SSE reconnects resume from the latest observed event id.
+    #[serde(default = "default_enabled")]
+    pub assistant_sse_resume: bool,
+    /// Whether workspace Monaco and LSP code stays behind lazy route/chunk loading.
+    #[serde(default = "default_enabled")]
+    pub workspace_monaco_lazy: bool,
+    /// Whether assistant toasts prefer structured server error envelopes.
+    #[serde(default = "default_enabled")]
+    pub assistant_error_envelope_rendering: bool,
+}
+
+impl Default for GuardrailSettingsConfig {
+    fn default() -> Self {
+        Self {
+            assistant_sse_resume: true,
+            workspace_monaco_lazy: true,
+            assistant_error_envelope_rendering: true,
+        }
+    }
+}
+
 /// Runtime transport used for JS plugin sidecar communication.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -1649,6 +1676,9 @@ mod tests {
         assert_eq!(settings.runtime.launch.desktop.bind_host, "127.0.0.1");
         assert_eq!(settings.runtime.launch.desktop.base_port, 50051);
         assert_eq!(settings.server.address, DESKTOP_API_BIND);
+        assert!(settings.guardrails.assistant_sse_resume);
+        assert!(settings.guardrails.workspace_monaco_lazy);
+        assert!(settings.guardrails.assistant_error_envelope_rendering);
         assert!(settings.runtime.logging.level.is_none());
         assert!(settings.telemetry.enabled);
         assert!(!settings.telemetry.capture_content);

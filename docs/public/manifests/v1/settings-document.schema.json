@@ -635,6 +635,27 @@
       },
       "type": "object"
     },
+    "GuardrailSettingsConfig": {
+      "description": "Runtime guardrails used for Plan F rollback controls.",
+      "properties": {
+        "assistant_error_envelope_rendering": {
+          "default": true,
+          "description": "Whether assistant toasts prefer structured server error envelopes.",
+          "type": "boolean"
+        },
+        "assistant_sse_resume": {
+          "default": true,
+          "description": "Whether assistant SSE reconnects resume from the latest observed event id.",
+          "type": "boolean"
+        },
+        "workspace_monaco_lazy": {
+          "default": true,
+          "description": "Whether workspace Monaco and LSP code stays behind lazy route/chunk loading.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "HttpEndpointConfig": {
       "description": "HTTP endpoint configuration.",
       "properties": {
@@ -1735,6 +1756,14 @@
       "$ref": "#/$defs/GeneralSettingsConfig",
       "default": {
         "language": "auto"
+      }
+    },
+    "guardrails": {
+      "$ref": "#/$defs/GuardrailSettingsConfig",
+      "default": {
+        "assistant_error_envelope_rendering": true,
+        "assistant_sse_resume": true,
+        "workspace_monaco_lazy": true
       }
     },
     "logging": {

@@ -12,6 +12,7 @@
     "dev": "bun run dev:app",
     "dev:app": "bun run build:language-servers && bun run build:sidecars && bun ./scripts/cargo/with-env.ts bun run --cwd bin/slab-app tauri dev",
     "check:frontend": "bun run lint && bun run --cwd packages/api build && bun run --cwd packages/slab-plugin-sdk build && bun run --cwd packages/slab-plugin-cli build && bun run --cwd packages/slab-plugin-ui build && bun run --cwd packages/slab-desktop build",
+    "check:bundle-budget": "bun ./scripts/build/check-desktop-bundle-budget.ts",
     "check:rust": "bun ./scripts/cargo/validate.ts check",
     "lint:rustc": "bun ./scripts/cargo/validate.ts lint-rustc",
     "lint:rust": "bun ./scripts/cargo/validate.ts lint",

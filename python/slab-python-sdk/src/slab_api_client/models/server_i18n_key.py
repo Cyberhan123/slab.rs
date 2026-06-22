@@ -206,6 +206,12 @@ class ServerI18NKey(str, Enum):
     SERVER_SETTINGS_PROPERTIES_DESCRIPTION_ALLOWEDORIGINS = (
         "server.settings.properties.description.allowedOrigins"
     )
+    SERVER_SETTINGS_PROPERTIES_DESCRIPTION_ASSISTANTERRORENVELOPERENDERING = (
+        "server.settings.properties.description.assistantErrorEnvelopeRendering"
+    )
+    SERVER_SETTINGS_PROPERTIES_DESCRIPTION_ASSISTANTSSERESUME = (
+        "server.settings.properties.description.assistantSseResume"
+    )
     SERVER_SETTINGS_PROPERTIES_DESCRIPTION_AUTOUNLOADENABLED = (
         "server.settings.properties.description.autoUnloadEnabled"
     )
@@ -398,6 +404,9 @@ class ServerI18NKey(str, Enum):
     SERVER_SETTINGS_PROPERTIES_DESCRIPTION_WEBSEARCHPROVIDERS = (
         "server.settings.properties.description.webSearchProviders"
     )
+    SERVER_SETTINGS_PROPERTIES_DESCRIPTION_WORKSPACEMONACOLAZY = (
+        "server.settings.properties.description.workspaceMonacoLazy"
+    )
     SERVER_SETTINGS_PROPERTIES_LABEL_ADMINTOKEN = (
         "server.settings.properties.label.adminToken"
     )
@@ -412,6 +421,12 @@ class ServerI18NKey(str, Enum):
     )
     SERVER_SETTINGS_PROPERTIES_LABEL_ALLOWEDORIGINS = (
         "server.settings.properties.label.allowedOrigins"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_ASSISTANTERRORENVELOPERENDERING = (
+        "server.settings.properties.label.assistantErrorEnvelopeRendering"
+    )
+    SERVER_SETTINGS_PROPERTIES_LABEL_ASSISTANTSSERESUME = (
+        "server.settings.properties.label.assistantSseResume"
     )
     SERVER_SETTINGS_PROPERTIES_LABEL_AUTOUNLOADIDLEMINUTES = (
         "server.settings.properties.label.autoUnloadIdleMinutes"
@@ -593,6 +608,9 @@ class ServerI18NKey(str, Enum):
     SERVER_SETTINGS_PROPERTIES_LABEL_WEBSEARCHPROVIDERS = (
         "server.settings.properties.label.webSearchProviders"
     )
+    SERVER_SETTINGS_PROPERTIES_LABEL_WORKSPACEMONACOLAZY = (
+        "server.settings.properties.label.workspaceMonacoLazy"
+    )
     SERVER_SETTINGS_SCHEMAS_MCP_ARGS_TITLE = "server.settings.schemas.mcp.args.title"
     SERVER_SETTINGS_SCHEMAS_MCP_COMMAND_DESCRIPTION = (
         "server.settings.schemas.mcp.command.description"
@@ -705,6 +723,12 @@ class ServerI18NKey(str, Enum):
         "server.settings.sections.general.description"
     )
     SERVER_SETTINGS_SECTIONS_GENERAL_TITLE = "server.settings.sections.general.title"
+    SERVER_SETTINGS_SECTIONS_GUARDRAILS_DESCRIPTION = (
+        "server.settings.sections.guardrails.description"
+    )
+    SERVER_SETTINGS_SECTIONS_GUARDRAILS_TITLE = (
+        "server.settings.sections.guardrails.title"
+    )
     SERVER_SETTINGS_SECTIONS_LOGGING_DESCRIPTION = (
         "server.settings.sections.logging.description"
     )
@@ -776,6 +800,12 @@ class ServerI18NKey(str, Enum):
     )
     SERVER_SETTINGS_SUBSECTIONS_GENERAL_GENERAL_TITLE = (
         "server.settings.subsections.general.general.title"
+    )
+    SERVER_SETTINGS_SUBSECTIONS_GUARDRAILS_ROLLBACK_DESCRIPTION = (
+        "server.settings.subsections.guardrails.rollback.description"
+    )
+    SERVER_SETTINGS_SUBSECTIONS_GUARDRAILS_ROLLBACK_TITLE = (
+        "server.settings.subsections.guardrails.rollback.title"
     )
     SERVER_SETTINGS_SUBSECTIONS_LOGGING_GENERAL_DESCRIPTION = (
         "server.settings.subsections.logging.general.description"

@@ -19,6 +19,9 @@ import {
 } from './assistant-types'
 
 type Translate = (key: string, options?: Record<string, unknown>) => string
+type AssistantRequestErrorOptions = {
+  preferServerEnvelope?: boolean
+}
 
 export class AssistantTransportError extends Error {
   readonly transport_status: number
@@ -28,6 +31,7 @@ export class AssistantTransportError extends Error {
   readonly request_id?: string | null
   readonly error_type?: string
   readonly i18n?: ServerI18nPayload
+  readonly serverEnvelope: boolean
 
   constructor(options: {
     message: string
@@ -38,6 +42,7 @@ export class AssistantTransportError extends Error {
     request_id?: string | null
     error_type?: string
     i18n?: ServerI18nPayload
+    serverEnvelope?: boolean
   }) {
     super(options.message)
     this.name = 'AssistantTransportError'
@@ -48,6 +53,7 @@ export class AssistantTransportError extends Error {
     this.request_id = options.request_id
     this.error_type = options.error_type
     this.i18n = options.i18n
+    this.serverEnvelope = options.serverEnvelope ?? false
   }
 }
 
@@ -88,13 +94,24 @@ export const isAssistantTransportError = (value: unknown): value is AssistantTra
 
 export const getAssistantRequestErrorMessage = (
   value: unknown,
-  t?: Translate
+  t?: Translate,
+  options?: AssistantRequestErrorOptions
 ): string | undefined => {
+  const preferServerEnvelope = options?.preferServerEnvelope ?? true
+
   if (isApiErrorResponse(value)) {
+    if (!preferServerEnvelope) {
+      return undefined
+    }
+
     return t ? translateServerField(value.i18n as ServerI18nPayload, 'message', value.message, t) : value.message
   }
 
   if (isAssistantTransportError(value)) {
+    if (!preferServerEnvelope && value.serverEnvelope) {
+      return undefined
+    }
+
     return t ? translateServerField(value.i18n, 'message', value.message, t) : value.message
   }
 
@@ -110,9 +127,10 @@ export const getAssistantRequestErrorMessage = (
 export const getAssistantErrorDescription = (
   value: unknown,
   fallback: string,
-  t?: Translate
+  t?: Translate,
+  options?: AssistantRequestErrorOptions
 ): string => {
-  const requestErrorMessage = getAssistantRequestErrorMessage(value, t)
+  const requestErrorMessage = getAssistantRequestErrorMessage(value, t, options)
   if (requestErrorMessage?.trim()) {
     return requestErrorMessage
   }
@@ -186,6 +204,7 @@ const buildAssistantTransportError = async (response: Response): Promise<Assista
         request_id,
         error_type: data && 'error_type' in data && typeof data.error_type === 'string' ? data.error_type : undefined,
         i18n: payload.i18n as ServerI18nPayload,
+        serverEnvelope: true,
       })
     }
 

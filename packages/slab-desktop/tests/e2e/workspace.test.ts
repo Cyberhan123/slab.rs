@@ -114,6 +114,31 @@ describe.sequential("workspace e2e", () => {
     await eventually("workspace Monaco editor accepts edits", async () =>
       (await readMonacoEditorText(editor)).includes(runId) ? true : null
     )
+
+    await page.getByTestId("workspace-file-src-second-txt").click()
+    await page.getByTestId("workspace-confirm-dialog").waitFor({ state: "visible", timeout: 60_000 })
+    await page.getByTestId("workspace-confirm-cancel").click()
+    await eventually("workspace dirty guard keeps unsaved editor content", async () =>
+      (await readMonacoEditorText(editor)).includes(runId) ? true : null
+    )
+
+    await page.getByTestId("workspace-file-src-second-txt").click()
+    await page.getByTestId("workspace-confirm-dialog").waitFor({ state: "visible", timeout: 60_000 })
+    await page.getByTestId("workspace-confirm-accept").click()
+    await eventually("workspace dirty guard can discard and switch files", async () =>
+      (await readMonacoEditorText(editor)).includes("Second workspace note") ? true : null
+    )
+
+    await page.getByTestId("workspace-file-src-note-txt").click()
+    await eventually("workspace note reopens after dirty guard discard", async () =>
+      (await readMonacoEditorText(editor)).includes("Initial workspace note") ? true : null
+    )
+    await monacoEditor.locator('[role="textbox"]').click()
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A")
+    await page.keyboard.type(updatedContent)
+    await eventually("workspace Monaco editor accepts final persisted edits", async () =>
+      (await readMonacoEditorText(editor)).includes(runId) ? true : null
+    )
     await page.getByTestId("workspace-save-button").click()
 
     await eventually("workspace file persisted to disk", () =>
@@ -156,6 +181,7 @@ function prepareGitWorkspace(root: string): void {
   writeFileSync(join(root, ".gitignore"), ".slab/\n", "utf8")
   writeFileSync(join(root, "README.md"), "# Browser Workspace\n", "utf8")
   writeFileSync(join(root, "src", "note.txt"), "Initial workspace note\n", "utf8")
+  writeFileSync(join(root, "src", "second.txt"), "Second workspace note\n", "utf8")
 
   execFileSync("git", ["init"], { cwd: root, stdio: "pipe" })
   execFileSync("git", ["config", "user.email", "slab-e2e@example.local"], {

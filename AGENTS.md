@@ -68,6 +68,7 @@ bun run lint:rust
 bun run check
 bun run check:frontend
 bun run check:rust
+bun run check:bundle-budget
 
 bun run test
 bun run test:frontend

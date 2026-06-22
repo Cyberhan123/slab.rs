@@ -73,6 +73,35 @@ describe('assistant request errors', () => {
     expect(getAssistantErrorDescription(fallbackError, 'fallback', translate)).toBe('legacy message')
   })
 
+  it('can bypass structured server envelope rendering for rollback', () => {
+    const error = new AssistantTransportError({
+      message: 'server envelope message',
+      transport_status: 400,
+      error_type: 'invalid_request_error',
+      i18n: {
+        message: {
+          key: 'server.errors.badRequest',
+          params: { detail: 'translated detail' },
+        },
+      },
+      serverEnvelope: true,
+    })
+
+    expect(getAssistantErrorDescription(error, 'fallback', translate)).toBe(
+      'translated translated detail',
+    )
+    expect(
+      getAssistantErrorDescription(error, 'fallback', translate, {
+        preferServerEnvelope: false,
+      }),
+    ).toBe('server envelope message')
+    expect(
+      getAssistantRequestErrorMessage(error, translate, {
+        preferServerEnvelope: false,
+      }),
+    ).toBeUndefined()
+  })
+
   it('uses generic error messages before fallback text', () => {
     expect(getAssistantErrorDescription(new Error('network failed'), 'fallback')).toBe('network failed')
     expect(getAssistantErrorDescription({ message: 'bad request' }, 'fallback')).toBe('bad request')

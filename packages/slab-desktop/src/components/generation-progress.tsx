@@ -15,12 +15,14 @@ type GenerationProgressProps = {
     title: string;
   };
   className?: string;
+  testId?: string;
 };
 
 export function GenerationProgressView({
   progress,
   labels,
   className,
+  testId,
 }: GenerationProgressProps) {
   if (!progress) {
     return null;
@@ -40,6 +42,7 @@ export function GenerationProgressView({
         'space-y-3 rounded-[18px] border border-border/60 bg-glass-bg-strong px-4 py-4',
         className,
       )}
+      data-testid={testId}
     >
       <div className="flex items-start gap-3">
         <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-[color:color-mix(in_oklab,var(--brand-teal)_12%,transparent)] text-[var(--brand-teal)]">

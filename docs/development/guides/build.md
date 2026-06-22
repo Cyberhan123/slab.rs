@@ -23,6 +23,7 @@ bun run dev:desktop
 bun run check
 bun run check:frontend
 bun run check:rust
+bun run check:bundle-budget
 bun run lint:rust
 
 # Tests
@@ -51,6 +52,9 @@ bundle.
 dev stack, waiting for the desktop UI and server `/health`, running
 `packages/slab-desktop/tests/e2e`, and cleaning up the spawned process tree.
 Browser-mode component and visual tests remain under `bun run test:browser`.
+Run `bun run build:desktop` before `bun run check:bundle-budget`; the budget
+script reads `packages/slab-desktop/dist` and enforces the Plan F desktop main
+chunk budget while reporting workspace chunk baselines.
 
 ## Generated Assets
 

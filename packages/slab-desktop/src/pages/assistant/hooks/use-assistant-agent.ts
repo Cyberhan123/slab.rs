@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { translateServerField, useTranslation } from '@slab/i18n'
 
 import api, { createSlabApiFetchClient, getErrorMessage } from '@slab/api'
+import { GUARDRAIL_PMIDS, useGuardrailFlag } from '@/lib/guardrail-flags'
 
 import {
   DEFAULT_CONVERSATION_KEY,
@@ -143,6 +144,7 @@ export function useAssistantAgent({
       skipGlobalErrorToast: true,
     },
   })
+  const assistantSseResumeEnabled = useGuardrailFlag(GUARDRAIL_PMIDS.assistantSseResume)
 
   const isRequesting = isBusyStatus(status) || responsesMutation.isPending
   const isHistoryLoading = !restoreComplete
@@ -668,7 +670,7 @@ export function useAssistantAgent({
       sseAbortControllerRef.current = controller
       transportRef.current = 'sse'
       void readAssistantSseStream(agentResponsesSseUrl(nextThreadId), {
-        lastEventId: lastSeenEventIdRef.current,
+        lastEventId: assistantSseResumeEnabled ? lastSeenEventIdRef.current : null,
         onMessage: (message) => {
           handleTransportPayload(message.data, message.id)
         },
@@ -701,7 +703,7 @@ export function useAssistantAgent({
         }, nextReconnectDelayMs(attempt))
       })
     },
-    [closeSse, handleTransportPayload, locale.eventStreamInterrupted]
+    [assistantSseResumeEnabled, closeSse, handleTransportPayload, locale.eventStreamInterrupted]
   )
 
   const postAgentCommand = useCallback(

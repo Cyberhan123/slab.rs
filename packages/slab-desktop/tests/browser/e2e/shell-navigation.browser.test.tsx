@@ -1,4 +1,4 @@
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 
@@ -48,5 +48,30 @@ describe('desktop shell navigation e2e', () => {
       'aria-current',
       'page',
     );
+  });
+
+  it('keeps sidebar navigation keyboard focusable and aria-current accurate', async () => {
+    await renderDesktopScene(
+      <Routes>
+        <Route element={<Layout />} path="/">
+          <Route index element={<RouteMarker id="assistant" label="Assistant route" />} />
+          <Route path="workspace" element={<RouteMarker id="workspace" label="Workspace route" />} />
+        </Route>
+      </Routes>,
+      { route: '/' },
+    );
+
+    const workspaceLinkElement = document.querySelector<HTMLElement>(
+      '[data-testid="sidebar-link-workspace"]',
+    );
+    expect(workspaceLinkElement).not.toBeNull();
+
+    workspaceLinkElement?.focus();
+    expect(document.activeElement).toBe(workspaceLinkElement);
+
+    await userEvent.keyboard('{Enter}');
+
+    await expect.element(page.getByTestId('route-marker-workspace')).toBeVisible();
+    await expect.element(page.getByTestId('sidebar-link-workspace')).toHaveAttribute('aria-current', 'page');
   });
 });
