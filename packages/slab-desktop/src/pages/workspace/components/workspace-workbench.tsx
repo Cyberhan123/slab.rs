@@ -50,7 +50,7 @@ export function WorkspaceWorkbench({
   consoleOpen,
   editorContent,
   editorSettings,
-  editorTheme,
+  editorThemeMode,
   explorerPanel,
   fileSearchFetching,
   fileSearchResults,
@@ -103,7 +103,7 @@ export function WorkspaceWorkbench({
   const explorerResizeStartWidthRef = useRef(explorerWidth)
   const previousResizeCursorRef = useRef("")
   const previousResizeUserSelectRef = useRef("")
-  const terminalThemeMode = editorTheme === "vs-dark" ? "dark" : "light"
+  const terminalThemeMode = editorThemeMode
   const workspaceGridStyle = {
     "--workspace-explorer-width": `${explorerWidth}px`,
   } as CSSProperties
@@ -302,7 +302,7 @@ export function WorkspaceWorkbench({
         style={workspaceGridStyle}
       >
         <div className="relative min-h-0">
-          <SoftPanel className="flex h-full min-h-0 flex-col gap-3 overflow-hidden rounded-[18px] px-3 py-3">
+          <SoftPanel className="flex h-full min-h-0 flex-col gap-3 overflow-hidden rounded-2xl px-3 py-3">
             <div className="flex items-center justify-between gap-3 px-1">
               <div className="flex items-center gap-2 text-sm font-semibold">
                 <FolderKanban className="size-4 text-[var(--brand-teal)]" />
@@ -319,6 +319,7 @@ export function WorkspaceWorkbench({
                 type="button"
                 className={cn(
                   "flex h-8 items-center justify-center gap-1.5 rounded-full text-xs font-medium text-muted-foreground transition hover:text-foreground",
+                  "focus-ring duration-[var(--dur-180)] ease-out-expo",
                   explorerPanel === "files" && "bg-background text-foreground shadow-sm",
                 )}
                 onClick={() => handleSelectExplorerPanel("files")}
@@ -330,6 +331,7 @@ export function WorkspaceWorkbench({
                 type="button"
                 className={cn(
                   "flex h-8 items-center justify-center gap-1.5 rounded-full text-xs font-medium text-muted-foreground transition hover:text-foreground",
+                  "focus-ring duration-[var(--dur-180)] ease-out-expo",
                   explorerPanel === "search" && "bg-background text-foreground shadow-sm",
                 )}
                 onClick={() => handleSelectExplorerPanel("search")}
@@ -341,6 +343,7 @@ export function WorkspaceWorkbench({
                 type="button"
                 className={cn(
                   "flex h-8 items-center justify-center gap-1.5 rounded-full text-xs font-medium text-muted-foreground transition hover:text-foreground",
+                  "focus-ring duration-[var(--dur-180)] ease-out-expo",
                   explorerPanel === "git" && "bg-background text-foreground shadow-sm",
                 )}
                 onClick={() => handleSelectExplorerPanel("git")}
@@ -353,7 +356,11 @@ export function WorkspaceWorkbench({
             {explorerPanel === "files" ? (
               <div className="h-full min-h-0 flex-1 overflow-hidden rounded-[12px] bg-[var(--surface-1)]">
                 {isDesktopTauri ? (
-                  <WorkspaceVscodePart part="explorer" workspaceRoot={workspace.rootPath} />
+                  <WorkspaceVscodePart
+                    part="explorer"
+                    themeMode={editorThemeMode}
+                    workspaceRoot={workspace.rootPath}
+                  />
                 ) : (
                   <WorkspaceServerFileTree
                     activeFilePath={activeFilePath}
@@ -397,7 +404,7 @@ export function WorkspaceWorkbench({
           <button
             type="button"
             aria-label="Resize file explorer"
-            className="absolute bottom-3 right-[-10px] top-3 z-10 hidden w-5 cursor-col-resize items-center justify-center rounded-full text-muted-foreground/70 transition hover:bg-muted/70 hover:text-foreground lg:flex"
+            className="focus-ring absolute bottom-3 right-[-10px] top-3 z-10 hidden w-5 cursor-col-resize items-center justify-center rounded-full text-muted-foreground/70 transition duration-[var(--dur-180)] ease-out-expo hover:bg-muted/70 hover:text-foreground lg:flex"
             ref={explorerResize.ref}
           >
             <span className="h-12 w-1 rounded-full bg-current" />
@@ -405,7 +412,7 @@ export function WorkspaceWorkbench({
         </div>
 
         <div className="flex h-full min-h-0 flex-col gap-4">
-          <SoftPanel className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[18px] p-0">
+          <SoftPanel className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl p-0">
             {fileError ? (
               <StageEmptyState
                 icon={FileCode2}
@@ -425,7 +432,7 @@ export function WorkspaceWorkbench({
                   </div>
                   {gitDiffFetching ? <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" /> : null}
                 </div>
-                <div className="min-h-0 flex-1">
+                <div className="min-h-0 flex-1 overflow-hidden rounded-[6px]">
                   <WorkspaceDiffEditor
                     diffText={selectedGitDiff?.diff.trim() ?? ""}
                     filePath={selectedGitDiffEntry.path}
@@ -441,7 +448,8 @@ export function WorkspaceWorkbench({
                   part="editor"
                   workspaceRoot={workspace.rootPath}
                   editorSettings={editorSettings}
-                  className="min-h-[420px] flex-1"
+                  themeMode={editorThemeMode}
+                  className="min-h-[420px] flex-1 rounded-[6px]"
                 />
               ) : (
                 <WorkspaceBrowserEditor
@@ -453,6 +461,7 @@ export function WorkspaceWorkbench({
                   savingFile={savingFile}
                   selectedFile={selectedFile}
                   selectedFileDirty={selectedFileDirty}
+                  themeMode={editorThemeMode}
                 />
               )
             )}
@@ -497,7 +506,7 @@ function WorkspacePathOpenForm({
       <input
         value={pathInput}
         onChange={(event) => setPathInput(event.target.value)}
-        className="h-10 min-w-0 flex-1 rounded-[8px] border border-border/60 bg-background px-3 text-sm outline-none transition focus:border-[var(--brand-teal)]"
+        className="focus-ring h-10 min-w-0 flex-1 rounded-lg border border-border/60 bg-background px-3 text-sm transition duration-[var(--dur-180)] ease-out-expo focus:border-[var(--brand-teal)]"
         placeholder={t("pages.workspace.actions.pathPlaceholder")}
         aria-label={t("pages.workspace.actions.pathPlaceholder")}
         data-testid="workspace-path-input"
@@ -576,7 +585,7 @@ function WorkspaceServerFileTree({
           {t("pages.workspace.actions.upDirectory")}
         </Button>
         <span
-          className="min-w-0 truncate font-mono text-[11px] text-muted-foreground"
+          className="min-w-0 truncate font-mono text-caption text-muted-foreground"
           data-testid="workspace-current-directory"
         >
           {directoryPath || t("pages.workspace.tree.root")}
@@ -600,7 +609,7 @@ function WorkspaceServerFileTree({
                 key={entry.relativePath}
                 type="button"
                 className={cn(
-                  "flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left text-sm transition hover:bg-[var(--surface-selected)]",
+                  "focus-ring flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left text-sm transition duration-[var(--dur-180)] ease-out-expo hover:bg-[var(--surface-selected)]",
                   active && "bg-[var(--surface-selected)] text-[var(--brand-teal)]",
                 )}
                 title={entry.relativePath}
@@ -637,6 +646,7 @@ function WorkspaceBrowserEditor({
   savingFile,
   selectedFile,
   selectedFileDirty,
+  themeMode,
 }: {
   editorContent: string
   editorSettings: WorkspacePageState["editorSettings"]
@@ -646,6 +656,7 @@ function WorkspaceBrowserEditor({
   savingFile: boolean
   selectedFile: WorkspacePageState["selectedFile"]
   selectedFileDirty: boolean
+  themeMode: WorkspacePageState["editorThemeMode"]
 }) {
   const { t } = useTranslation()
 
@@ -662,8 +673,8 @@ function WorkspaceBrowserEditor({
 
   return (
     <div className="flex h-full min-h-[420px] flex-col" data-testid="workspace-browser-editor">
-      <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-background/80 px-3">
-        <div className="min-w-0 truncate font-mono text-xs text-muted-foreground" title={selectedFile.relativePath}>
+          <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-background/80 px-3">
+        <div className="min-w-0 truncate font-mono text-caption text-muted-foreground" title={selectedFile.relativePath}>
           {selectedFile.relativePath}
         </div>
         <Button
@@ -680,7 +691,7 @@ function WorkspaceBrowserEditor({
           {t("pages.workspace.editor.save")}
         </Button>
       </div>
-      <div className="min-h-0 flex-1 bg-[var(--surface-1)]" data-testid="workspace-editor-monaco">
+      <div className="min-h-0 flex-1 overflow-hidden rounded-[6px] bg-[var(--surface-1)]" data-testid="workspace-editor-monaco">
         <WorkspaceCodeEditor
           filePath={`memory://workspace/${encodeURIComponent(selectedFile.relativePath)}`}
           language={languageForFile(selectedFile.relativePath)}
@@ -702,7 +713,7 @@ function WorkspaceBrowserEditor({
             tabSize: editorSettings.tabSize,
             wordWrap: editorSettings.wordWrap,
           }}
-          theme="vs"
+          themeMode={themeMode}
           value={editorContent}
         />
       </div>

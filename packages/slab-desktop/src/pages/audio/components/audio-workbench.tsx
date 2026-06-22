@@ -198,9 +198,9 @@ export function AudioWorkbench({
     <div className="h-full w-full overflow-y-auto">
       <div className="mx-auto grid w-full max-w-[1120px] gap-8 pb-8 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_392px]">
         <div className="space-y-6">
-          <SoftPanel className="space-y-5 rounded-[28px] border border-border/60 bg-[var(--surface-soft)] px-7 py-6">
+          <SoftPanel className="space-y-5 rounded-3xl border border-border/60 bg-[var(--surface-soft)] px-7 py-6">
             <div>
-              <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+              <p className="text-label font-semibold uppercase tracking-eyebrow text-muted-foreground">
                 {t('pages.audio.workbench.setupTitle')}
               </p>
               <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -294,18 +294,18 @@ export function AudioWorkbench({
               setDecodeTdrzEnable={setDecodeTdrzEnable}
             />
           </SoftPanel>
-          <SoftPanel className="space-y-5 rounded-[28px] border border-border/60 bg-[var(--surface-soft)] px-7 py-6">
+          <SoftPanel className="space-y-5 rounded-3xl border border-border/60 bg-[var(--surface-soft)] px-7 py-6">
             <div>
-              <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+              <p className="text-label font-semibold uppercase tracking-eyebrow text-muted-foreground">
                 {t('pages.audio.workbench.sourceTitle')}
               </p>
             </div>
 
-            <div className="rounded-[24px] border border-dashed border-border/50 bg-[var(--shell-card)]/40 px-6 py-8 text-center">
-              <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-[var(--shell-card)]/85 text-[var(--brand-teal)] shadow-[0_18px_34px_-24px_color-mix(in_oklab,var(--brand-teal)_38%,transparent)]">
+            <div className="rounded-2xl border border-dashed border-border/50 bg-glass-bg px-6 py-8 text-center">
+              <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-glass-bg-strong text-[var(--brand-teal)] shadow-elevation-2">
                 <FileAudio2 className="size-6" />
               </div>
-              <h3 className="mt-5 text-[18px] font-semibold tracking-[-0.02em] text-foreground">
+              <h3 className="mt-5 text-lg font-semibold tracking-tight text-foreground">
                 {t('pages.audio.workbench.sourceDropTitle')}
               </h3>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
@@ -332,7 +332,7 @@ export function AudioWorkbench({
                     : t('pages.audio.workbench.browseFiles')}
                 </Button>
                 {file ? (
-                  <span className="max-w-full rounded-full border border-[var(--shell-card)]/70 bg-[var(--shell-card)]/80 px-4 py-2 text-xs font-medium text-muted-foreground">
+                  <span className="max-w-full rounded-full border border-[var(--shell-card)]/70 bg-glass-bg-strong px-4 py-2 text-xs font-medium text-muted-foreground">
                     {file.name}
                   </span>
                 ) : null}
@@ -351,8 +351,8 @@ export function AudioWorkbench({
             </div>
 
             {file ? (
-              <div className="rounded-[20px] border border-[var(--shell-card)]/70 bg-[var(--shell-card)]/60 px-4 py-4 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_70%,transparent)]">
-                <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              <div className="rounded-[20px] border border-[var(--shell-card)]/70 bg-glass-bg px-4 py-4 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_70%,transparent)]">
+                <p className="text-label font-semibold uppercase tracking-eyebrow text-muted-foreground">
                   {t('pages.audio.workbench.selectedFileTitle')}
                 </p>
                 <p className="mt-2 truncate text-sm font-semibold text-foreground">{file.name}</p>
@@ -363,8 +363,8 @@ export function AudioWorkbench({
             ) : null}
           </SoftPanel>
         </div>
-        <div className="workspace-surface h-fit rounded-[30px] px-7 py-8 shadow-[0_28px_72px_-44px_color-mix(in_oklab,var(--foreground)_34%,transparent)]">
-          <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+        <div className="workspace-surface h-fit rounded-3xl px-7 py-8 shadow-elevation-3">
+          <p className="text-label font-semibold uppercase tracking-eyebrow text-muted-foreground">
             {t('pages.audio.workbench.previewTitle')}
           </p>
 
@@ -505,7 +505,7 @@ export function AudioWorkbench({
           <div className="mt-6 rounded-[22px] bg-[var(--surface-soft)] p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                <p className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
                   {t('pages.audio.history.title')}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
@@ -532,7 +532,7 @@ export function AudioWorkbench({
                       task.prompt ||
                       task.source_path}
                   </p>
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-caption text-muted-foreground">
                     <span className="rounded-full bg-[var(--surface-soft)] px-2 py-0.5">
                       {task.status}
                     </span>

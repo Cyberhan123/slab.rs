@@ -76,7 +76,7 @@ function renderSenderSuffix(
         aria-label={labels.voice}
         variant="quiet"
         size="icon"
-        className="size-10 rounded-full text-muted-foreground hover:bg-[var(--shell-card)]/45 hover:text-foreground"
+        className="size-10 rounded-full text-muted-foreground hover:bg-glass-bg hover:text-foreground"
         disabled
       >
         <Mic className="size-4" />
@@ -168,10 +168,10 @@ export function AssistantComposer({
           label: (
             <span className="min-w-0">
               <span className="flex items-center gap-2 text-sm font-semibold">
-                <span className="font-mono text-[13px]">{item.command}</span>
+                <span className="font-mono text-body">{item.command}</span>
                 <span>{item.label}</span>
               </span>
-              <span className="block truncate text-[11px] opacity-70">{item.description}</span>
+              <span className="block truncate text-caption opacity-70">{item.description}</span>
             </span>
           ),
           value: item.command,
@@ -238,7 +238,7 @@ export function AssistantComposer({
               }}
               placeholder={t("pages.assistant.composer.placeholder")}
               autoSize={{ minRows: 2, maxRows: 6 }}
-              className="rounded-[24px] border-0 bg-[var(--surface-input)] p-[5px] shadow-[var(--shell-elevation)]"
+              className="rounded-2xl border-0 bg-[var(--surface-input)] p-[5px] shadow-[var(--shell-elevation)]"
               classNames={{
                 content: "flex items-end gap-2 px-4 py-2",
                 input:
@@ -253,7 +253,7 @@ export function AssistantComposer({
                       variant="quiet"
                       size="icon"
                       disabled={disabled}
-                      className="size-10 rounded-full border border-transparent bg-transparent text-muted-foreground hover:bg-[var(--shell-card)]/45 hover:text-foreground"
+                      className="size-10 rounded-full border border-transparent bg-transparent text-muted-foreground hover:bg-glass-bg hover:text-foreground"
                     >
                       <Plus className="size-4" />
                     </Button>
@@ -310,7 +310,7 @@ export function AssistantComposer({
             data-testid="assistant-web-search-toggle"
             onClick={() => insertCommand("/web_search")}
             className={cn(
-              "inline-flex items-center gap-1.5 text-[11px] font-bold transition",
+              "inline-flex items-center gap-1.5 text-caption font-bold transition",
               webSearchActive
                 ? "text-foreground"
                 : "text-muted-foreground hover:text-foreground",
@@ -328,7 +328,7 @@ export function AssistantComposer({
             data-testid="assistant-reasoning-toggle"
             onClick={() => setReasoningEffort(reasoningActive ? "none" : "medium")}
             className={cn(
-              "inline-flex items-center gap-1.5 text-[11px] font-bold transition",
+              "inline-flex items-center gap-1.5 text-caption font-bold transition",
               reasoningActive
                 ? "text-foreground"
                 : "text-muted-foreground hover:text-foreground",
@@ -356,7 +356,7 @@ export function AssistantComposer({
             data-testid="assistant-generate-image-button"
             onClick={onGenerateImage}
             className={cn(
-              "inline-flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground transition hover:text-foreground",
+              "inline-flex items-center gap-1.5 text-caption font-bold text-muted-foreground transition hover:text-foreground",
               disabled && "cursor-not-allowed opacity-60"
             )}
           >
@@ -370,7 +370,7 @@ export function AssistantComposer({
               disabled={disabled}
               data-testid="assistant-advanced-toggle"
               className={cn(
-                "inline-flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground transition hover:text-foreground",
+                "inline-flex items-center gap-1.5 text-caption font-bold text-muted-foreground transition hover:text-foreground",
                 advancedPanelOpen && "text-foreground",
                 disabled && "cursor-not-allowed opacity-60"
               )}
@@ -387,7 +387,7 @@ export function AssistantComposer({
           </CollapsibleTrigger>
         </div>
 
-        <p className="max-w-full text-[10px] font-medium text-muted-foreground/70">{statusLabel}</p>
+        <p className="max-w-full text-micro font-medium text-muted-foreground/70">{statusLabel}</p>
       </div>
 
         <CollapsibleContent className="px-2 pt-3">
@@ -395,7 +395,7 @@ export function AssistantComposer({
             className="grid gap-3 rounded-[20px] border border-border/60 bg-[var(--surface-soft)] p-3 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)] md:grid-cols-3"
             data-testid="assistant-advanced-panel"
           >
-            <label className="grid gap-1.5 text-[11px] font-semibold text-muted-foreground">
+            <label className="grid gap-1.5 text-caption font-semibold text-muted-foreground">
               <span>{t("pages.assistant.composer.reasoningEffort")}</span>
               <Select
                 value={reasoningEffort}
@@ -417,7 +417,7 @@ export function AssistantComposer({
               </Select>
             </label>
 
-            <label className="grid gap-1.5 text-[11px] font-semibold text-muted-foreground">
+            <label className="grid gap-1.5 text-caption font-semibold text-muted-foreground">
               <span>{t("pages.assistant.composer.toolChoice")}</span>
               <Select
                 value={resolvedToolChoice.type}
@@ -439,7 +439,7 @@ export function AssistantComposer({
               </Select>
             </label>
 
-            <label className="grid gap-1.5 text-[11px] font-semibold text-muted-foreground">
+            <label className="grid gap-1.5 text-caption font-semibold text-muted-foreground">
               <span>{t("pages.assistant.composer.toolConcurrency")}</span>
               <Select
                 value={String(toolConcurrency)}
@@ -459,7 +459,7 @@ export function AssistantComposer({
               </Select>
             </label>
 
-            <label className="grid gap-1.5 text-[11px] font-semibold text-muted-foreground md:col-span-3">
+            <label className="grid gap-1.5 text-caption font-semibold text-muted-foreground md:col-span-3">
               <span>{t("pages.assistant.composer.systemPrompt")}</span>
               <Textarea
                 value={systemPrompt}

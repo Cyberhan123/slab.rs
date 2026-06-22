@@ -9,7 +9,7 @@ const tableVariants = cva("w-full caption-bottom text-sm", {
   variants: {
     variant: {
       default: "",
-      roomy: "[&_td]:py-4 [&_th]:h-12 [&_th]:text-xs [&_th]:uppercase [&_th]:tracking-[0.14em]",
+      roomy: "[&_td]:py-4 [&_th]:h-12 [&_th]:text-xs [&_th]:uppercase [&_th]:tracking-eyebrow",
     },
   },
   defaultVariants: {
@@ -108,7 +108,7 @@ function TableHead({
       data-variant={variant}
       className={cn(
         "text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
-        variant === "soft-header" && "px-4 text-[11px] font-semibold tracking-[0.14em] text-muted-foreground",
+        variant === "soft-header" && "px-4 text-caption font-semibold tracking-eyebrow text-muted-foreground",
         className
       )}
       {...props}

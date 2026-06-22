@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from "react"
 import { Loader2 } from "lucide-react"
+import * as Monaco from "monaco-editor"
 
 import { cn } from "@/lib/utils"
 import type { WorkspaceEditorSettings } from "@/store/useWorkspaceUiStore"
+import {
+  applySlabMonacoTheme,
+  type WorkspaceThemeMode,
+} from "../../lib/monaco-theme"
 
 import "./index.css"
 
@@ -10,6 +15,7 @@ type WorkspaceVscodePartProps = {
   className?: string
   editorSettings?: WorkspaceEditorSettings
   part: "editor" | "explorer"
+  themeMode?: WorkspaceThemeMode
   workspaceRoot: string
 }
 
@@ -19,11 +25,17 @@ export function WorkspaceVscodePart({
   className,
   editorSettings,
   part,
+  themeMode = "light",
   workspaceRoot,
 }: WorkspaceVscodePartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const themeModeRef = useRef(themeMode)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const [mountState, setMountState] = useState<MountState>("pending")
+
+  useEffect(() => {
+    themeModeRef.current = themeMode
+  }, [themeMode])
 
   useEffect(() => {
     let cancelled = false
@@ -40,6 +52,7 @@ export function WorkspaceVscodePart({
       } = await import("../../lib/workspace-lsp")
       setWorkspaceLspFileServiceRoot(workspaceRoot)
       await ensureWorkspaceLspServices(workspaceRoot)
+      applySlabMonacoTheme(Monaco, themeModeRef.current)
       if (editorSettings) {
         await applyWorkspaceEditorSettings(editorSettings, workspaceRoot)
       }
@@ -77,6 +90,12 @@ export function WorkspaceVscodePart({
       disposable?.dispose()
     }
   }, [editorSettings, part, workspaceRoot])
+
+  useEffect(() => {
+    if (mountState === "ready") {
+      applySlabMonacoTheme(Monaco, themeMode)
+    }
+  }, [mountState, themeMode])
 
   return (
     <div ref={wrapperRef} className={cn("slab-vscode-part relative h-full min-h-0 w-full overflow-hidden", className)}>

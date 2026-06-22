@@ -32,10 +32,10 @@ type FooterMetricProps = {
 function FooterMetric({ label, value, title, className }: FooterMetricProps) {
   return (
     <div className={cn("flex min-w-0 items-center gap-2", className)} title={title ?? value}>
-      <span className="shrink-0 text-[10px] font-bold uppercase tracking-[-0.04em] text-[var(--shell-footer-label)]">
+      <span className="shrink-0 text-micro font-bold uppercase tracking-tight text-[var(--shell-footer-label)]">
         {label}
       </span>
-      <span className="truncate text-[10px] font-bold uppercase tracking-[-0.025em] text-[var(--shell-footer-value)]">
+      <span className="truncate text-micro font-bold uppercase tracking-tight text-[var(--shell-footer-value)]">
         {value}
       </span>
     </div>
@@ -129,7 +129,7 @@ export default function FooterStatusBar({ variant = "default" }: FooterStatusBar
       </div>
 
       <div className="ml-4 flex shrink-0 items-center gap-3">
-        {/* <span className="hidden text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--shell-footer-label)] lg:block">
+        {/* <span className="hidden text-micro font-bold uppercase tracking-eyebrow text-[var(--shell-footer-label)] lg:block">
           {telemetryLabel}
         </span> */}
         <div

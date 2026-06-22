@@ -80,7 +80,7 @@ export function InstalledPluginCard({
 
   return (
     <article
-      className="relative flex min-h-[194px] flex-col gap-4 rounded-[12px] border border-[color-mix(in_oklab,var(--border)_54%,transparent)] bg-[var(--shell-card)] p-[17px] shadow-[var(--shell-elevation)] transition hover:-translate-y-0.5 hover:border-[color-mix(in_oklab,var(--brand-teal)_28%,var(--border))] hover:shadow-[0_24px_50px_-40px_color-mix(in_oklab,var(--foreground)_38%,transparent)]"
+      className="relative flex min-h-[194px] flex-col gap-4 rounded-[12px] border border-[color-mix(in_oklab,var(--border)_54%,transparent)] bg-[var(--shell-card)] p-4 shadow-[var(--shell-elevation)] transition hover:-translate-y-0.5 hover:border-[color-mix(in_oklab,var(--brand-teal)_28%,var(--border))] hover:shadow-elevation-3"
       data-testid={`plugin-card-${plugin.id}`}
     >
       <div className="flex items-start justify-between gap-3">
@@ -91,7 +91,7 @@ export function InstalledPluginCard({
       </div>
 
       <div className="min-w-0">
-        <h3 className="truncate text-base font-bold leading-6 tracking-[-0.02em] text-foreground">
+        <h3 className="truncate text-base font-bold leading-6 tracking-tight text-foreground">
           {plugin.name}
         </h3>
         <p className="mt-1 line-clamp-2 text-xs leading-4 text-muted-foreground">
@@ -100,7 +100,7 @@ export function InstalledPluginCard({
       </div>
 
       {plugin.lastError || actionError ? (
-        <div className="rounded-[10px] bg-[var(--status-danger-bg)] px-2.5 py-2 text-[11px] leading-4 text-destructive">
+        <div className="rounded-[10px] bg-[var(--status-danger-bg)] px-2.5 py-2 text-caption leading-4 text-destructive">
           <div className="flex items-center gap-1.5 font-semibold">
             <AlertCircle className="size-3.5" />
             {t('pages.plugins.card.runtimeIssue')}
@@ -130,7 +130,7 @@ export function InstalledPluginCard({
           disabled={busy || (!plugin.valid && !plugin.enabled)}
           className={cn(
             'h-8 flex-1 rounded-[8px] text-xs font-bold',
-            !running && plugin.enabled && 'bg-[linear-gradient(135deg,#00685f_0%,#008378_100%)] text-white',
+            !running && plugin.enabled && 'bg-[linear-gradient(135deg,var(--brand-teal)_0%,color-mix(in_oklab,var(--brand-teal)_88%,var(--surface-1))_100%)] text-[var(--brand-teal-foreground)]',
           )}
           onClick={onPrimaryAction}
           data-testid={`plugin-primary-action-${plugin.id}`}

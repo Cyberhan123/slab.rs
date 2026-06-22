@@ -191,9 +191,9 @@ export function VideoWorkbench({
     <div className="h-full w-full overflow-y-auto bg-[var(--shell-card)] lg:overflow-hidden">
       <div className="mx-auto flex min-h-full w-full max-w-[1200px] flex-col px-4 py-4 sm:px-6 lg:h-full lg:min-h-0 lg:py-5 xl:py-6">
         <div className="grid min-h-0 flex-1 gap-6 lg:grid-cols-[340px_minmax(0,1fr)] xl:grid-cols-[378px_minmax(0,1fr)]">
-          <aside className="flex h-full min-h-[520px] flex-col rounded-[28px] border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_96%,transparent),color-mix(in_oklab,var(--surface-1)_96%,transparent))] p-6 shadow-[0_20px_50px_-38px_color-mix(in_oklab,var(--foreground)_35%,transparent)] lg:min-h-0 lg:overflow-hidden">
+          <aside className="flex h-full min-h-[520px] flex-col rounded-3xl border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_96%,transparent),color-mix(in_oklab,var(--surface-1)_96%,transparent))] p-6 shadow-elevation-3 lg:min-h-0 lg:overflow-hidden">
             <div className="pb-6">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+              <p className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
                 {t('pages.video.workbench.configTitle')}
               </p>
               <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -214,7 +214,7 @@ export function VideoWorkbench({
                   rows={4}
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}
-                  className="min-h-[112px] rounded-[22px] border-border/50 bg-[var(--shell-card)]/78 px-4 py-4 text-[15px] leading-6 text-foreground shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)] placeholder:text-muted-foreground/70"
+                  className="min-h-[112px] rounded-[22px] border-border/50 bg-glass-bg-strong px-4 py-4 text-sm leading-6 text-foreground shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)] placeholder:text-muted-foreground/70"
                 />
               </div>
 
@@ -228,7 +228,7 @@ export function VideoWorkbench({
                   placeholder={t('pages.video.workbench.negativePrompt.placeholder')}
                   value={negativePrompt}
                   onChange={(event) => setNegativePrompt(event.target.value)}
-                  className="h-14 rounded-[18px] border-border/50 bg-[var(--shell-card)]/78 px-4 text-[15px] text-foreground shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)] placeholder:text-muted-foreground/70"
+                  className="h-14 rounded-[18px] border-border/50 bg-glass-bg-strong px-4 text-sm text-foreground shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)] placeholder:text-muted-foreground/70"
                 />
               </div>
 
@@ -257,7 +257,7 @@ export function VideoWorkbench({
                   <Select value={String(frames)} onValueChange={(value) => setFrames(Number(value))}>
                     <SelectTrigger
                       variant="soft"
-                      className="h-14 w-full rounded-[18px] border-border/50 bg-[var(--shell-card)]/78 px-4 text-base font-semibold text-foreground shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)]"
+                      className="h-14 w-full rounded-[18px] border-border/50 bg-glass-bg-strong px-4 text-base font-semibold text-foreground shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)]"
                     >
                       <SelectValue />
                     </SelectTrigger>
@@ -276,7 +276,7 @@ export function VideoWorkbench({
                   <Select value={String(fps)} onValueChange={(value) => setFps(Number(value))}>
                     <SelectTrigger
                       variant="soft"
-                      className="h-14 w-full rounded-[18px] border-border/50 bg-[var(--shell-card)]/78 px-4 text-base font-semibold text-foreground shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)]"
+                      className="h-14 w-full rounded-[18px] border-border/50 bg-glass-bg-strong px-4 text-base font-semibold text-foreground shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)]"
                     >
                       <SelectValue />
                     </SelectTrigger>
@@ -298,10 +298,10 @@ export function VideoWorkbench({
                   onClick={() => initImageInputRef.current?.click()}
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={handleInitImageDrop}
-                  className="group flex w-full flex-col items-center justify-center gap-4 rounded-[22px] border-2 border-dashed border-border/60 bg-[var(--shell-card)]/52 px-5 py-7 text-center transition hover:border-[var(--brand-teal)]/45 hover:bg-[var(--shell-card)]/72"
+                  className="group flex w-full flex-col items-center justify-center gap-4 rounded-[22px] border-2 border-dashed border-border/60 bg-glass-bg px-5 py-7 text-center transition hover:border-[var(--brand-teal)]/45 hover:bg-glass-bg-strong"
                 >
                   {initImageDataUri ? (
-                    <div className="relative w-full overflow-hidden rounded-[18px] border border-[var(--shell-card)]/70 bg-[var(--shell-card)]/80 shadow-[0_18px_30px_-24px_color-mix(in_oklab,var(--foreground)_35%,transparent)]">
+                    <div className="relative w-full overflow-hidden rounded-[18px] border border-[var(--shell-card)]/70 bg-glass-bg-strong shadow-elevation-2">
                       <img
                         src={initImageDataUri}
                         alt={t('pages.video.workbench.referenceImage.previewAlt')}
@@ -333,7 +333,7 @@ export function VideoWorkbench({
                     </div>
                   ) : (
                     <>
-                      <div className="flex size-14 items-center justify-center rounded-full bg-[var(--shell-card)] text-muted-foreground shadow-[0_18px_30px_-24px_color-mix(in_oklab,var(--foreground)_35%,transparent)]">
+                      <div className="flex size-14 items-center justify-center rounded-full bg-[var(--shell-card)] text-muted-foreground shadow-elevation-2">
                         <ImagePlus className="h-6 w-6" />
                       </div>
                       <div className="space-y-1">
@@ -361,7 +361,7 @@ export function VideoWorkbench({
                 <CollapsibleTrigger asChild>
                   <button
                     type="button"
-                    className="flex w-full items-center justify-between rounded-[18px] border border-border/50 bg-[var(--shell-card)]/72 px-4 py-3 text-sm font-semibold text-foreground/80 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_85%,transparent)] transition hover:border-border/70 hover:text-foreground"
+                    className="flex w-full items-center justify-between rounded-[18px] border border-border/50 bg-glass-bg-strong px-4 py-3 text-sm font-semibold text-foreground/80 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_85%,transparent)] transition hover:border-border/70 hover:text-foreground"
                   >
                     {t('pages.video.workbench.fields.advanced')}
                     {advancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -434,7 +434,7 @@ export function VideoWorkbench({
                         type="number"
                         value={seed}
                         onChange={(event) => setSeed(Number.parseInt(event.target.value, 10))}
-                        className="h-12 rounded-[18px] border-border/50 bg-[var(--shell-card)]/78 px-4 text-sm font-medium shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)]"
+                        className="h-12 rounded-[18px] border-border/50 bg-glass-bg-strong px-4 text-sm font-medium shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)]"
                       />
                     </div>
 
@@ -443,7 +443,7 @@ export function VideoWorkbench({
                       <Select value={sampleMethod} onValueChange={setSampleMethod}>
                         <SelectTrigger
                           variant="soft"
-                          className="h-12 w-full rounded-[18px] border-border/50 bg-[var(--shell-card)]/78 px-4 text-sm font-medium shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)]"
+                          className="h-12 w-full rounded-[18px] border-border/50 bg-glass-bg-strong px-4 text-sm font-medium shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)]"
                         >
                           <SelectValue />
                         </SelectTrigger>
@@ -462,7 +462,7 @@ export function VideoWorkbench({
                       <Select value={scheduler} onValueChange={setScheduler}>
                         <SelectTrigger
                           variant="soft"
-                          className="h-12 w-full rounded-[18px] border-border/50 bg-[var(--shell-card)]/78 px-4 text-sm font-medium shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)]"
+                          className="h-12 w-full rounded-[18px] border-border/50 bg-glass-bg-strong px-4 text-sm font-medium shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)]"
                         >
                           <SelectValue />
                         </SelectTrigger>
@@ -484,7 +484,7 @@ export function VideoWorkbench({
               <Button
                 variant="cta"
                 size="pill"
-                className="h-[68px] w-full rounded-[18px] text-base font-semibold shadow-[0_24px_40px_-18px_color-mix(in_oklab,var(--brand-teal)_58%,transparent)]"
+                className="h-[68px] w-full rounded-[18px] text-base font-semibold shadow-elevation-2"
                 onClick={handleSubmit}
                 disabled={isGenerating || !prompt.trim() || !hasSelectedModel}
                 data-testid="video-generate-button"
@@ -517,7 +517,7 @@ export function VideoWorkbench({
           <section className="flex min-h-[520px] flex-col gap-6 lg:min-h-0">
             <div
               className={cn(
-                'relative flex min-h-[420px] flex-1 items-center justify-center overflow-hidden rounded-[32px] border border-border/50 bg-[var(--surface-soft)] p-6 shadow-[0_32px_80px_-56px_color-mix(in_oklab,var(--foreground)_45%,transparent)] lg:min-h-0',
+                'relative flex min-h-[420px] flex-1 items-center justify-center overflow-hidden rounded-3xl border border-border/50 bg-[var(--surface-soft)] p-6 shadow-elevation-3 lg:min-h-0',
               )}
               style={{
                 backgroundImage:
@@ -528,7 +528,7 @@ export function VideoWorkbench({
 
               {videoPath ? (
                 <div className="relative z-10 w-full max-w-[640px] space-y-4">
-                  <div className="overflow-hidden rounded-[28px] border border-[var(--shell-card)]/50 bg-[var(--media-canvas)]/88 shadow-[0_32px_80px_-42px_color-mix(in_oklab,var(--foreground)_60%,transparent)]">
+                  <div className="overflow-hidden rounded-3xl border border-[var(--shell-card)]/50 bg-[color:color-mix(in_oklab,var(--media-canvas)_88%,transparent)] shadow-elevation-3">
                     {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
                     <video
                       src={videoPath}
@@ -546,14 +546,14 @@ export function VideoWorkbench({
               ) : (
                 <div className="relative z-10 flex max-w-[340px] flex-col items-center gap-6 text-center">
                   <div className="relative">
-                    <div className="absolute inset-[-26px] rounded-full bg-[var(--brand-teal)]/18 blur-3xl" />
-                    <div className="relative flex size-24 items-center justify-center rounded-[32px] bg-[var(--shell-card)] text-[var(--brand-teal)] shadow-[0_28px_60px_-36px_color-mix(in_oklab,var(--foreground)_45%,transparent)]">
+                    <div className="absolute inset-[-26px] rounded-full bg-[color:color-mix(in_oklab,var(--brand-teal)_18%,transparent)] blur-3xl" />
+                    <div className="relative flex size-24 items-center justify-center rounded-3xl bg-[var(--shell-card)] text-[var(--brand-teal)] shadow-elevation-3">
                       {isGenerating ? <Loader2 className="h-10 w-10 animate-spin" /> : <Film className="h-10 w-10" />}
                     </div>
                   </div>
 
                   <div className="space-y-3">
-                    <h2 className="text-[32px] font-semibold tracking-[-0.035em] text-foreground">
+                    <h2 className="text-3xl font-semibold tracking-display text-foreground">
                       {stageTitle}
                     </h2>
                     <p className="text-sm leading-7 text-muted-foreground">{stageDescription}</p>
@@ -576,7 +576,7 @@ export function VideoWorkbench({
               )}
 
               <div className="absolute bottom-8 left-1/2 z-20 -translate-x-1/2">
-                <div className="flex items-center gap-2 rounded-[20px] border border-[var(--shell-card)]/45 bg-[var(--shell-card)]/72 px-4 py-3 backdrop-blur-xl shadow-[0_24px_50px_-34px_color-mix(in_oklab,var(--foreground)_42%,transparent)]">
+                <div className="flex items-center gap-2 rounded-[20px] border border-[var(--shell-card)]/45 bg-glass-bg-strong px-4 py-3 backdrop-blur-xl shadow-elevation-3">
                   <ToolbarIconButton
                     icon={Maximize2}
                     label={t('pages.video.workbench.stage.toggleScale')}
@@ -593,7 +593,7 @@ export function VideoWorkbench({
               </div>
             </div>
 
-            <div className="rounded-[22px] border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_95%,transparent),color-mix(in_oklab,var(--surface-1)_92%,transparent))] px-5 py-4 shadow-[0_18px_42px_-34px_color-mix(in_oklab,var(--foreground)_28%,transparent)]">
+            <div className="rounded-[22px] border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_95%,transparent),color-mix(in_oklab,var(--surface-1)_92%,transparent))] px-5 py-4 shadow-elevation-3">
               <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                 <div className="grid gap-4 sm:grid-cols-3">
                   <StatusMetric
@@ -613,10 +613,10 @@ export function VideoWorkbench({
               </div>
             </div>
 
-            <div className="rounded-[22px] border border-border/50 bg-[var(--surface-soft)] px-5 py-4 shadow-[0_18px_42px_-34px_color-mix(in_oklab,var(--foreground)_28%,transparent)]">
+            <div className="rounded-[22px] border border-border/50 bg-[var(--surface-soft)] px-5 py-4 shadow-elevation-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                  <p className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
                     {t('pages.video.history.title')}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
@@ -635,13 +635,13 @@ export function VideoWorkbench({
                     key={task.task_id}
                     type="button"
                     data-testid={`video-history-item-${task.task_id}`}
-                    className="rounded-[18px] border border-border/50 bg-[var(--shell-card)] px-4 py-3 text-left transition hover:border-[var(--brand-teal)]/50 hover:shadow-[0_18px_36px_-30px_color-mix(in_oklab,var(--foreground)_38%,transparent)]"
+                    className="rounded-[18px] border border-border/50 bg-[var(--shell-card)] px-4 py-3 text-left transition hover:border-[var(--brand-teal)]/50 hover:shadow-elevation-2"
                     onClick={() => void openHistoryDetail(task.task_id)}
                   >
                     <p className="line-clamp-2 text-sm font-semibold leading-5 text-foreground">
                       {task.prompt}
                     </p>
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-caption text-muted-foreground">
                       <span className="rounded-full bg-[var(--surface-soft)] px-2 py-0.5">
                         {task.status}
                       </span>
@@ -714,7 +714,7 @@ export function VideoWorkbench({
                 </Button>
               </div>
               <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
-                <div className="overflow-hidden rounded-[24px] border border-border/60 bg-[var(--media-canvas)]">
+                <div className="overflow-hidden rounded-2xl border border-border/60 bg-[var(--media-canvas)]">
                   {resolveMediaUrl(selectedHistoryTask.video_url) ? (
                     // eslint-disable-next-line jsx-a11y/media-has-caption
                     <video
@@ -731,7 +731,7 @@ export function VideoWorkbench({
                 </div>
                 <div className="space-y-4 rounded-[22px] bg-[var(--surface-soft)] p-4">
                   <div>
-                    <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                    <p className="text-caption font-bold uppercase tracking-eyebrow text-muted-foreground">
                       {t('pages.video.workbench.prompt.label')}
                     </p>
                     <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground">
@@ -832,7 +832,7 @@ function VideoComparisonPanel({ tasks }: { tasks: VideoGenerationTask[] }) {
                   <span
                     className={cn(
                       'min-w-0 break-words font-mono text-foreground',
-                      differs && 'rounded-md bg-[var(--brand-gold)]/18 px-1 text-[color:color-mix(in_oklab,var(--brand-gold)_78%,var(--foreground))]',
+                      differs && 'rounded-md bg-[color:color-mix(in_oklab,var(--brand-gold)_18%,transparent)] px-1 text-[color:color-mix(in_oklab,var(--brand-gold)_78%,var(--foreground))]',
                     )}
                   >
                     {value || '-'}

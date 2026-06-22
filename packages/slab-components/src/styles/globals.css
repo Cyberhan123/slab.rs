@@ -259,6 +259,32 @@
    Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
   */
   --media-canvas: oklch(0% 0 0);
+
+  --elevation-1: 0 1px 2px oklch(0% 0 0 / 0.04);
+  --elevation-2: 0 18px 44px -30px color-mix(in oklab, var(--foreground) 28%, transparent);
+  --elevation-3: 0 32px 80px -48px color-mix(in oklab, var(--foreground) 40%, transparent);
+  --glass-bg: color-mix(in oklab, var(--shell-card) 62%, transparent);
+  --glass-bg-strong: color-mix(in oklab, var(--shell-card) 80%, transparent);
+  --glass-border: color-mix(in oklab, var(--shell-card) 32%, transparent);
+  --glass-blur: 14px;
+  --glass-highlight: inset 0 1px 0 color-mix(in oklab, var(--shell-card) 55%, transparent);
+  --hairline-soft: linear-gradient(var(--shell-line), transparent);
+  --focus-ring: 0 0 0 2px var(--background), 0 0 0 4px color-mix(in oklab, var(--brand-teal) 55%, transparent);
+  --radius-2xl: 1.5rem;
+  --radius-3xl: 2rem;
+  --text-micro: 10px;
+  --text-caption: 11px;
+  --text-label: 12px;
+  --text-body: 13px;
+  --text-display: 1.65rem;
+  --tracking-display: -0.05em;
+  --tracking-eyebrow: 0.16em;
+  --dur-120: 120ms;
+  --dur-180: 180ms;
+  --dur-240: 240ms;
+  --dur-1800: 1.6s;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
   }
 
   :root {
@@ -503,7 +529,7 @@
   /* Figma ref: rgb(243 247 247 / 0.08)
    Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
   */
-  --shell-line: oklch(97.31% 0.0043 197.09 / 0.08);
+  --shell-line: oklch(97.31% 0.0043 197.09 / 0.12);
   }
 
   .dark {
@@ -588,6 +614,29 @@
   --color-shell-footer-label: var(--shell-footer-label);
   --color-shell-footer-value: var(--shell-footer-value);
   --color-shell-line: var(--shell-line);
+  --color-glass-bg: var(--glass-bg);
+  --color-glass-bg-strong: var(--glass-bg-strong);
+  --color-glass-border: var(--glass-border);
+  --color-hairline: var(--shell-line);
+  --radius-2xl: 1.5rem;
+  --radius-3xl: 2rem;
+  --text-micro: 10px;
+  --text-caption: 11px;
+  --text-label: 12px;
+  --text-body: 13px;
+  --text-display: 1.65rem;
+  --tracking-display: -0.05em;
+  --tracking-eyebrow: 0.16em;
+  --shadow-elevation-1: var(--elevation-1);
+  --shadow-elevation-2: var(--elevation-2);
+  --shadow-elevation-3: var(--elevation-3);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --duration-120: var(--dur-120);
+  --duration-180: var(--dur-180);
+  --duration-240: var(--dur-240);
+  --default-transition-duration: var(--dur-180);
+  --default-transition-timing-function: var(--ease-out-expo);
 }
 
 @layer base {
@@ -606,9 +655,124 @@
       radial-gradient(circle at bottom right, color-mix(in oklab, var(--brand-gold) 14%, transparent), transparent 32%),
       var(--app-canvas);
   }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+    }
+
+    .animate-pulse,
+    .animate-spin,
+    .animate-bounce,
+    .animate-ping {
+      animation: none !important;
+    }
+
+    .hover\:scale-105:hover,
+    .hover\:-translate-y-px:hover,
+    .hover\:scale-110:hover,
+    .group-hover\:scale-\[1\.015\]:is(:where(.group):hover *) {
+      transform: none !important;
+    }
+  }
 }
 
 @layer components {
+  @keyframes slab-shimmer {
+    0% {
+      background-position: -200% 0;
+    }
+
+    100% {
+      background-position: 200% 0;
+    }
+  }
+
+  @keyframes slab-soft-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .glass-surface {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-highlight), var(--elevation-2);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+  }
+
+  .glass-surface-strong {
+    background: var(--glass-bg-strong);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-highlight), var(--elevation-2);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+  }
+
+  .hairline-v {
+    background: linear-gradient(to bottom, transparent, var(--shell-divider) 25%, var(--shell-divider) 75%, transparent);
+  }
+
+  .hairline-inset-right {
+    background-image: linear-gradient(to right, transparent, var(--shell-line) 20%, var(--shell-line) 80%, transparent);
+    background-position: right;
+    background-repeat: no-repeat;
+    background-size: 6px 100%;
+  }
+
+  .hairline-h-top {
+    border-top: 1px solid transparent;
+    box-shadow: inset 0 6px 6px -6px var(--shell-line);
+  }
+
+  .hairline-h-bottom {
+    border-bottom: 1px solid transparent;
+    box-shadow: inset 0 -6px 6px -6px var(--shell-line);
+  }
+
+  .focus-ring {
+    outline: none;
+  }
+
+  .focus-ring:focus-visible {
+    border-color: transparent;
+    box-shadow: var(--focus-ring);
+  }
+
+  .skeleton-shimmer {
+    animation: slab-shimmer var(--dur-1800) var(--ease-soft) infinite;
+    background-image: linear-gradient(
+      90deg,
+      var(--accent) 0%,
+      color-mix(in oklab, var(--accent) 60%, var(--surface-1)) 50%,
+      var(--accent) 100%
+    );
+    background-size: 200% 100%;
+  }
+
+  .soft-in {
+    animation: slab-soft-in var(--dur-180) var(--ease-out-expo) both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton-shimmer,
+    .soft-in {
+      animation: none !important;
+    }
+  }
+
   .workspace-shell {
     display: flex;
     min-height: 100%;
@@ -622,7 +786,7 @@
   .workspace-surface {
     background: var(--surface-1);
     border: 1px solid color-mix(in oklab, var(--border) 90%, var(--background) 10%);
-    box-shadow: 0 20px 56px -42px color-mix(in oklab, var(--foreground) 32%, transparent);
+    box-shadow: var(--elevation-2);
   }
 
   .workspace-soft-panel {
@@ -659,7 +823,8 @@
     background:
       linear-gradient(180deg, color-mix(in oklab, var(--shell-card) 30%, transparent) 0%, transparent 100%),
       var(--shell-topbar-bg);
-    border-bottom: 1px solid var(--shell-line);
+    border-bottom: 1px solid transparent;
+    box-shadow: inset 0 -6px 6px -6px var(--shell-line);
     backdrop-filter: blur(10px);
    
   }
@@ -681,7 +846,8 @@
 
   .shell-footer-bar {
     background: var(--shell-footer-bg);
-    border-top: 1px solid var(--shell-line);
+    border-top: 1px solid transparent;
+    box-shadow: inset 0 6px 6px -6px var(--shell-line);
   }
 
   .assistant-markdown {
@@ -767,7 +933,7 @@
   }
 
   .workspace-markdown h1 {
-    font-size: 1.65rem;
+    font-size: var(--text-display);
   }
 
   .workspace-markdown h2 {

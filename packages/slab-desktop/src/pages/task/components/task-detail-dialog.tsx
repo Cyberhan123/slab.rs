@@ -60,7 +60,7 @@ export function TaskDetailDialog({
         <Button
           variant="quiet"
           size="sm"
-          className="h-auto rounded-xl px-2 py-1 text-sm font-semibold text-[var(--brand-teal)] hover:bg-[var(--brand-teal)]/6 hover:text-[var(--brand-teal)]"
+          className="h-auto rounded-xl px-2 py-1 text-sm font-semibold text-[var(--brand-teal)] hover:bg-[color:color-mix(in_oklab,var(--brand-teal)_6%,transparent)] hover:text-[var(--brand-teal)]"
           onClick={() => {
             onOpen(task.id);
           }}
@@ -82,19 +82,19 @@ export function TaskDetailDialog({
               <SoftPanel className="space-y-3 rounded-[20px]">
                 <div className="grid gap-3 md:grid-cols-2">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                    <p className="text-xs uppercase tracking-eyebrow text-muted-foreground">
                       {t('pages.task.dialog.fields.type')}
                     </p>
                     <p className="mt-1 text-sm font-medium">{taskMeta.label}</p>
                   </div>
                   <div>
-                    <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                    <p className="text-xs uppercase tracking-eyebrow text-muted-foreground">
                       {t('pages.task.dialog.fields.status')}
                     </p>
                     <div className="mt-1">{renderStatusPill(selectedTask.status, t)}</div>
                   </div>
                   <div>
-                    <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                    <p className="text-xs uppercase tracking-eyebrow text-muted-foreground">
                       {t('pages.task.dialog.fields.created')}
                     </p>
                     <p className="mt-1 text-sm font-medium">
@@ -102,7 +102,7 @@ export function TaskDetailDialog({
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                    <p className="text-xs uppercase tracking-eyebrow text-muted-foreground">
                       {t('pages.task.dialog.fields.updated')}
                     </p>
                     <p className="mt-1 text-sm font-medium">
@@ -123,7 +123,7 @@ export function TaskDetailDialog({
 
               {mediaTask && deepLink ? (
                 <SoftPanel className="space-y-3 rounded-[20px]">
-                  <h4 className="text-sm font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                  <h4 className="text-sm font-semibold uppercase tracking-eyebrow text-muted-foreground">
                     {t('pages.task.dialog.domainDetail')}
                   </h4>
                   <p className="text-sm leading-6 text-muted-foreground">
@@ -139,7 +139,7 @@ export function TaskDetailDialog({
 
               {!mediaTask && selectedTask.status === 'succeeded' && taskResult ? (
                 <SoftPanel className="space-y-3 rounded-[20px]">
-                  <h4 className="text-sm font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                  <h4 className="text-sm font-semibold uppercase tracking-eyebrow text-muted-foreground">
                     {t('pages.task.dialog.taskResult')}
                   </h4>
                   {resultText ? (

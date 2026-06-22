@@ -25,7 +25,7 @@ export function ResolutionSliderField({
     <div className="space-y-2.5">
       <div className="flex items-center justify-between">
         <FieldLabel>{label}</FieldLabel>
-        <span className="font-mono text-[12px] font-semibold text-primary">
+        <span className="font-mono text-label font-semibold text-primary">
           {resolvedValue}
         </span>
       </div>

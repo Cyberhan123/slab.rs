@@ -40,11 +40,11 @@ function SelectTrigger({
       data-size={size}
       data-variant={variant}
       className={cn(
-        "data-[placeholder]:text-muted-foreground [&_svg:not([class*='text-'])]:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive flex w-fit items-center justify-between gap-2 whitespace-nowrap transition-[color,box-shadow,background-color,border-color] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "focus-ring data-[placeholder]:text-muted-foreground [&_svg:not([class*='text-'])]:text-muted-foreground aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive flex w-fit items-center justify-between gap-2 whitespace-nowrap transition-[color,box-shadow,background-color,border-color] duration-[var(--dur-180)] ease-out-expo outline-none disabled:cursor-not-allowed disabled:opacity-50 *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         "data-[size=default]:h-9 data-[size=sm]:h-8 data-[size=pill]:h-10",
         "data-[variant=default]:border-input data-[variant=default]:rounded-md data-[variant=default]:border data-[variant=default]:bg-transparent data-[variant=default]:px-3 data-[variant=default]:py-2 data-[variant=default]:shadow-xs dark:data-[variant=default]:bg-input/30 dark:data-[variant=default]:hover:bg-input/50",
         "data-[variant=soft]:rounded-2xl data-[variant=soft]:border data-[variant=soft]:border-border/70 data-[variant=soft]:bg-[var(--surface-soft)] data-[variant=soft]:px-3 data-[variant=soft]:py-2 data-[variant=soft]:shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]",
-        "data-[variant=pill]:rounded-full data-[variant=pill]:border data-[variant=pill]:border-border/60 data-[variant=pill]:bg-[var(--surface-input)] data-[variant=pill]:px-4 data-[variant=pill]:py-2 data-[variant=pill]:shadow-[0_16px_32px_-28px_color-mix(in_oklab,var(--foreground)_35%,transparent)]",
+        "data-[variant=pill]:rounded-full data-[variant=pill]:border data-[variant=pill]:border-border/60 data-[variant=pill]:bg-[var(--surface-input)] data-[variant=pill]:px-4 data-[variant=pill]:py-2 data-[variant=pill]:shadow-elevation-2",
         className
       )}
       {...props}
@@ -75,8 +75,8 @@ function SelectContent({
         className={cn(
           "text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 relative z-50 max-h-(--radix-select-content-available-height) min-w-[8rem] origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto border",
           "data-[variant=default]:bg-popover data-[variant=default]:rounded-md data-[variant=default]:shadow-md",
-          "data-[variant=soft]:bg-[var(--surface-1)] data-[variant=soft]:rounded-[20px] data-[variant=soft]:border-border/70 data-[variant=soft]:shadow-[0_24px_48px_-34px_color-mix(in_oklab,var(--foreground)_36%,transparent)]",
-          "data-[variant=pill]:bg-[var(--surface-1)] data-[variant=pill]:rounded-[24px] data-[variant=pill]:border-border/70 data-[variant=pill]:p-1 data-[variant=pill]:shadow-[0_24px_48px_-34px_color-mix(in_oklab,var(--foreground)_36%,transparent)]",
+          "data-[variant=soft]:bg-[var(--surface-1)] data-[variant=soft]:rounded-2xl data-[variant=soft]:border-border/70 data-[variant=soft]:shadow-elevation-2",
+          "data-[variant=pill]:bg-[var(--surface-1)] data-[variant=pill]:rounded-2xl data-[variant=pill]:border-border/70 data-[variant=pill]:p-1 data-[variant=pill]:shadow-elevation-2",
           position === "popper" &&
             "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
           className

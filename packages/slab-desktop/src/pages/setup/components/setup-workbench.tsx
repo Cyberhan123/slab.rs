@@ -30,7 +30,7 @@ function SetupScaffold({ children }: { children: ReactNode }) {
       <div className="mx-auto flex h-full w-full bg-surface-1">
         {showMacSidebar ? (
           <aside
-            className="flex min-h-0 w-[var(--shell-rail-width)] shrink-0 flex-col items-center bg-[var(--shell-rail-bg)] py-6 shadow-[inset_-1px_0_0_var(--shell-line)]"
+            className="hairline-inset-right flex min-h-0 w-[var(--shell-rail-width)] shrink-0 flex-col items-center bg-[var(--shell-rail-bg)] py-6"
             data-testid="setup-sidebar"
           >
             <WindowControls placement="sidebar" />
@@ -61,7 +61,7 @@ function SetupStateCard({
   return (
     <SetupScaffold>
       <div className="flex min-h-full items-center justify-center px-6 py-10">
-        <div className="w-full max-w-lg rounded-2xl border border-border/40 bg-surface-1 p-8 shadow-[0px_12px_40px_-12px_rgba(25,28,30,0.08)]">
+        <div className="w-full max-w-lg rounded-2xl border border-border/40 bg-surface-1 p-8 shadow-elevation-2">
           <div className="flex size-12 items-center justify-center rounded-xl bg-surface-soft text-foreground">
             <Icon className="size-5" />
           </div>
@@ -86,9 +86,9 @@ function SetupBadge({
   return (
     <div
       className={cn(
-        'inline-flex items-center rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em]',
-        tone === 'active' && 'bg-[#00685f]/10 text-[#00685f]',
-        tone === 'success' && 'bg-[#00685f]/10 text-[#00685f]',
+        'inline-flex items-center rounded-full px-3 py-1 text-caption font-bold uppercase tracking-eyebrow',
+        tone === 'active' && 'bg-[color:color-mix(in_oklab,var(--brand-teal)_12%,transparent)] text-[var(--brand-teal)]',
+        tone === 'success' && 'bg-[color:color-mix(in_oklab,var(--brand-teal)_12%,transparent)] text-[var(--brand-teal)]',
         tone === 'error' && 'bg-destructive/10 text-destructive',
       )}
     >
@@ -243,7 +243,7 @@ export function SetupWorkbench({
   return (
     <SetupScaffold>
       <main className="mx-auto flex min-h-full w-full max-w-6xl items-center px-6 py-8">
-        <section className="relative w-full overflow-hidden rounded-[32px] border border-border/40 bg-surface-1 shadow-[0px_18px_60px_-30px_rgba(25,28,30,0.18)]">
+        <section className="relative w-full overflow-hidden rounded-3xl border border-border/40 bg-surface-1 shadow-elevation-2">
           <div className="absolute inset-0 opacity-80 [background:radial-gradient(circle_at_top_left,color-mix(in_oklab,var(--brand-teal)_14%,transparent),transparent_34%),radial-gradient(circle_at_bottom_right,color-mix(in_oklab,var(--brand-gold)_12%,transparent),transparent_28%)]" />
 
           <div className="relative grid gap-8 p-8 md:p-10 lg:grid-cols-[1.2fr,0.9fr]">
@@ -254,7 +254,7 @@ export function SetupWorkbench({
 
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                  <p className="text-label font-semibold uppercase tracking-eyebrow text-muted-foreground">
                     {t('pages.setup.hero.eyebrow')}
                   </p>
                   <h1 className="max-w-2xl text-4xl font-semibold tracking-tight text-foreground md:text-[2.8rem]">
@@ -271,7 +271,7 @@ export function SetupWorkbench({
 
                 <div className="grid gap-3 pt-2 sm:grid-cols-3">
                   <div className="rounded-2xl border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-1)_88%,white)] p-4">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                    <p className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
                       {t('pages.setup.metrics.runtimePayload.label')}
                     </p>
                     <p className="mt-2 text-sm font-medium text-foreground">
@@ -279,7 +279,7 @@ export function SetupWorkbench({
                     </p>
                   </div>
                   <div className="rounded-2xl border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-1)_88%,white)] p-4">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                    <p className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
                       {t('pages.setup.metrics.ffmpeg.label')}
                     </p>
                     <p className="mt-2 text-sm font-medium text-foreground">
@@ -289,7 +289,7 @@ export function SetupWorkbench({
                     </p>
                   </div>
                   <div className="rounded-2xl border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-1)_88%,white)] p-4">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                    <p className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
                       {t('pages.setup.metrics.backendWorkers.label')}
                     </p>
                     <p className="mt-2 text-sm font-medium text-foreground">
@@ -299,7 +299,7 @@ export function SetupWorkbench({
                 </div>
 
                 <div className="rounded-2xl border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-1)_88%,white)] p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  <p className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
                     {t('pages.setup.checklist.title')}
                   </p>
                   <div className="mt-3 grid gap-2">
@@ -350,10 +350,10 @@ export function SetupWorkbench({
               </div>
             </div>
 
-            <div className="rounded-[28px] border border-border/50 bg-[color:color-mix(in_oklab,var(--surface-1)_88%,white)] p-6 shadow-[0_12px_32px_-24px_rgba(25,28,30,0.18)]">
+            <div className="rounded-3xl border border-border/50 bg-[color:color-mix(in_oklab,var(--surface-1)_88%,white)] p-6 shadow-elevation-1">
               <div className="flex items-start justify-between gap-4">
                 <div className="space-y-2">
-                  <p className="text-[12px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  <p className="text-label font-semibold uppercase tracking-eyebrow text-muted-foreground">
                     {t('pages.setup.currentStage')}
                   </p>
                   <h2 className="text-xl font-semibold text-foreground">{stageLabel}</h2>
@@ -374,7 +374,7 @@ export function SetupWorkbench({
                 <div className="h-2.5 overflow-hidden rounded-full bg-[color:color-mix(in_oklab,var(--surface-soft)_78%,transparent)]">
                   <div
                     className={cn(
-                      'h-full rounded-full transition-[width] duration-300 ease-out',
+                      'h-full rounded-full transition-[width] duration-[var(--dur-240)] ease-out-expo',
                       isFailed ? 'bg-destructive' : 'bg-[var(--brand-teal)]',
                     )}
                     style={{ width: `${progressPercent}%` }}

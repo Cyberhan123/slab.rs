@@ -14,7 +14,7 @@ export function ErrorDataDetail({ data, error }: ErrorDataDetailProps) {
   }
 
   return (
-    <div className="rounded-[10px] border border-border/60 bg-[var(--surface-soft)] px-3 py-2 text-[11px] leading-4 text-muted-foreground">
+    <div className="rounded-[10px] border border-border/60 bg-[var(--surface-soft)] px-3 py-2 text-caption leading-4 text-muted-foreground">
       <div className="flex items-center gap-1.5 font-semibold text-foreground">
         <AlertCircle className="size-3.5" />
         {detail.code}

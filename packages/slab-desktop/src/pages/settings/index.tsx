@@ -192,8 +192,8 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden rounded-[24px] border border-border/50 bg-[var(--shell-card)] shadow-[var(--shell-elevation)] lg:flex-row">
-      <aside className="w-full shrink-0 border-b border-border/50 bg-[var(--surface-soft)]/80 lg:w-[256px] lg:border-r lg:border-b-0">
+    <div className="flex h-full w-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-[var(--shell-card)] shadow-[var(--shell-elevation)] lg:flex-row">
+      <aside className="w-full shrink-0 border-b border-border/50 bg-[color:color-mix(in_oklab,var(--surface-soft)_80%,transparent)] lg:w-[256px] lg:border-r lg:border-b-0">
           <SettingsNavigation
             activeSectionId={activeSection?.id ?? null}
           sections={visibleSections}
@@ -265,12 +265,12 @@ export default function SettingsPage() {
                 <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-center gap-3">
-                      <h1 className="text-3xl font-bold tracking-[-0.045em] text-foreground">
+                      <h1 className="text-3xl font-bold tracking-display text-foreground">
                         {activeSectionTitle}
                       </h1>
                       <Badge
                         variant="chip"
-                        className="rounded-full border-border/60 bg-border/30 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-muted-foreground"
+                        className="rounded-full border-border/60 bg-border/30 px-3 py-1 text-micro font-bold uppercase tracking-eyebrow text-muted-foreground"
                       >
                         {t('pages.settings.page.settingsCount', {
                           count: countSectionProperties(activeSection),
@@ -282,7 +282,7 @@ export default function SettingsPage() {
                         {activeSectionDescription}
                       </p>
                     ) : null}
-                    <p className="max-w-3xl truncate font-mono text-[11px] text-muted-foreground/80">
+                    <p className="max-w-3xl truncate font-mono text-caption text-muted-foreground/80">
                       {data.settings_path}
                     </p>
                   </div>
@@ -329,7 +329,7 @@ export default function SettingsPage() {
                     <section
                       key={subsection.id}
                       id={subsectionAnchorId(activeSection.id, subsection.id)}
-                      className="scroll-mt-8 rounded-[20px] border border-border/40 bg-[var(--surface-soft)]/70 p-6 md:p-8"
+                      className="scroll-mt-8 rounded-[20px] border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-soft)_70%,transparent)] p-6 md:p-8"
                     >
                       {shouldCollapseSubsectionHeading(activeSection, subsection) ? (
                         subsectionDescription ? (
@@ -340,7 +340,7 @@ export default function SettingsPage() {
                       ) : (
                         <div className="space-y-2">
                           <div className="flex flex-wrap items-center gap-3">
-                            <h2 className="text-[18px] font-bold tracking-[-0.03em] text-foreground">
+                            <h2 className="text-lg font-bold tracking-tight text-foreground">
                               {subsectionTitle}
                             </h2>
                           </div>

@@ -5,6 +5,7 @@ import { Badge } from "./badge"
 import { Button } from "./button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./card"
 import { cn } from "./lib/utils"
+import { StateSurface } from "./state-surface"
 
 export function SoftPanel({
   className,
@@ -13,7 +14,7 @@ export function SoftPanel({
   return (
     <section
       className={cn(
-        "workspace-soft-panel rounded-[24px] px-5 py-4",
+        "workspace-soft-panel rounded-2xl px-5 py-4",
         className
       )}
       {...props}
@@ -40,7 +41,7 @@ export function MetricCard({
     <Card variant="metric" className={cn("gap-4", className)} {...props}>
       <CardHeader className="flex flex-row items-start justify-between gap-4">
         <div className="space-y-1">
-          <CardDescription className="text-[11px] font-semibold uppercase tracking-[0.16em]">
+          <CardDescription className="text-caption font-semibold uppercase tracking-eyebrow">
             {label}
           </CardDescription>
           <CardTitle className="text-3xl font-semibold tracking-tight">
@@ -140,15 +141,15 @@ export function UploadDropzone({
     <button
       type={type}
       className={cn(
-        "workspace-soft-panel flex w-full flex-col items-center justify-center gap-3 rounded-[28px] border border-dashed border-border/70 px-5 py-8 text-center transition hover:border-[color:var(--brand-teal)] hover:bg-[color:color-mix(in_oklab,var(--brand-teal)_5%,var(--surface-soft))] disabled:pointer-events-none disabled:opacity-60",
+        "focus-ring workspace-soft-panel flex w-full flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-border/70 px-5 py-8 text-center transition duration-[var(--dur-180)] ease-out-expo hover:border-[color:var(--brand-teal)] hover:bg-[color:color-mix(in_oklab,var(--brand-teal)_5%,var(--surface-soft))] disabled:pointer-events-none disabled:opacity-60",
         className
       )}
       {...props}
     >
       {preview ? (
-        <div className="w-full overflow-hidden rounded-[20px]">{preview}</div>
+        <div className="w-full overflow-hidden rounded-xl">{preview}</div>
       ) : (
-        <div className="flex size-14 items-center justify-center rounded-2xl bg-[var(--surface-1)] text-muted-foreground shadow-[0_18px_30px_-24px_color-mix(in_oklab,var(--foreground)_35%,transparent)]">
+        <div className="flex size-14 items-center justify-center rounded-2xl bg-[var(--surface-1)] text-muted-foreground shadow-elevation-1">
           <UploadCloud className="size-6" />
         </div>
       )}
@@ -182,22 +183,16 @@ export function StageEmptyState({
   ...props
 }: StageEmptyStateProps) {
   return (
-    <div
-      className={cn(
-        "workspace-surface workspace-halo flex min-h-[360px] flex-col items-center justify-center rounded-[32px] px-6 py-12 text-center",
-        className
-      )}
+    <StateSurface
+      action={action}
+      className={className}
+      description={description}
+      icon={Icon}
+      size="stage"
+      title={title}
+      variant="empty"
       {...props}
-    >
-      {Icon ? (
-        <div className="mb-5 flex size-16 items-center justify-center rounded-[24px] bg-[var(--surface-soft)] text-muted-foreground">
-          <Icon className="size-7" />
-        </div>
-      ) : null}
-      <h3 className="text-xl font-semibold tracking-tight">{title}</h3>
-      <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">{description}</p>
-      {action ? <div className="mt-5">{action}</div> : null}
-    </div>
+    />
   )
 }
 
@@ -218,7 +213,7 @@ export function CompactConfigSummary({
   return (
     <SoftPanel className={cn("space-y-4", className)} {...props}>
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+        <p className="text-xs font-semibold uppercase tracking-eyebrow text-muted-foreground">
           {title}
         </p>
         <Badge variant="chip">{items.length} items</Badge>
@@ -226,7 +221,7 @@ export function CompactConfigSummary({
       <div className="grid gap-3 sm:grid-cols-2">
         {items.map((item) => (
           <div key={item.label} className="space-y-1 rounded-2xl bg-[var(--surface-1)] px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            <p className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
               {item.label}
             </p>
             <p className="text-sm font-medium text-foreground">{item.value}</p>
@@ -244,7 +239,7 @@ export function WorkspaceStage({
   return (
     <section
       className={cn(
-        "workspace-surface flex min-h-0 flex-1 flex-col overflow-hidden rounded-[32px]",
+        "workspace-surface flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl",
         className
       )}
       {...props}

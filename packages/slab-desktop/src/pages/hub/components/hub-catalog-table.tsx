@@ -144,7 +144,7 @@ function HubModelCard({
   return (
     <article
       data-testid={`hub-model-card-${model.id}`}
-      className="group relative overflow-hidden rounded-[30px] border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-1)_92%,var(--background))] p-6 shadow-[0_24px_56px_-40px_color-mix(in_oklab,var(--foreground)_40%,transparent)]"
+      className="group relative overflow-hidden rounded-3xl border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-1)_92%,var(--background))] p-6 shadow-elevation-3"
     >
       <div className="absolute inset-0 opacity-70 [background:radial-gradient(circle_at_top_right,color-mix(in_oklab,var(--brand-teal)_9%,transparent),transparent_34%),radial-gradient(circle_at_bottom_left,color-mix(in_oklab,var(--brand-gold)_12%,transparent),transparent_30%)]" />
 
@@ -159,7 +159,7 @@ function HubModelCard({
             {runtimeStateLabel ? (
               <Badge
                 variant="chip"
-                className="bg-[var(--surface-1)] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground"
+                className="bg-[var(--surface-1)] px-3 py-1 text-micro font-bold uppercase tracking-eyebrow text-muted-foreground"
               >
                 {runtimeStateLabel}
               </Badge>
@@ -182,7 +182,7 @@ function HubModelCard({
               <Button
                 variant="quiet"
                 size="icon-sm"
-                className="size-10 rounded-full border border-border/70 bg-[var(--shell-card)]/80"
+                className="size-10 rounded-full border border-border/70 bg-glass-bg-strong"
                 onClick={() => onEnhanceClick(model)}
                 disabled={model.pending}
                 aria-label={t('pages.hub.catalog.actions.enhanceAria', { model: model.display_name })}
@@ -193,7 +193,7 @@ function HubModelCard({
               <Button
                 variant="quiet"
                 size="icon-sm"
-                className="size-10 rounded-full border border-border/70 bg-[var(--shell-card)]/80 text-destructive hover:bg-[var(--shell-card)] hover:text-destructive"
+                className="size-10 rounded-full border border-border/70 bg-glass-bg-strong text-destructive hover:bg-[var(--shell-card)] hover:text-destructive"
                 onClick={() => onDeleteClick(model)}
                 disabled={deletePending || model.pending}
                 aria-label={t('pages.hub.catalog.actions.deleteAria', { model: model.display_name })}
@@ -319,7 +319,7 @@ function HubModelCard({
             ) : null}
 
             {showDownloadAction ? (
-              <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-border/60 bg-[var(--shell-card)]/65 px-3 py-3">
+              <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-border/60 bg-glass-bg px-3 py-3">
                 <Button
                   variant={model.pending ? 'pill' : 'cta'}
                   size="sm"
@@ -343,7 +343,7 @@ function HubModelCard({
                 </p>
                 {model.pending ? (
                   <div className="w-full space-y-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-medium text-muted-foreground">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-caption font-medium text-muted-foreground">
                       <span className="truncate" title={downloadProgressLabel}>
                         {downloadProgressLabel}
                       </span>
@@ -362,7 +362,7 @@ function HubModelCard({
             ) : null}
 
             <div className="space-y-1">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              <p className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
                 {t('pages.hub.catalog.source')}
               </p>
               <p className="truncate font-mono text-xs text-muted-foreground" title={sourceLabel}>

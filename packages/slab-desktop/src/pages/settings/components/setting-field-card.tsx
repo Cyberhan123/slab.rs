@@ -94,16 +94,16 @@ export function SettingFieldCard({
       id={`setting-${property.pmid}`}
       data-testid={`settings-field-${property.pmid}`}
       className={cn(
-        'rounded-[16px] border border-border/60 bg-[var(--shell-card)] p-5 shadow-[0_1px_2px_color-mix(in_oklab,var(--foreground)_8%,transparent)]',
+        'rounded-[16px] border border-border/60 bg-[var(--shell-card)] p-5 shadow-elevation-1',
         errorState && 'border-destructive/70 bg-destructive/5',
       )}
     >
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0 flex-1 space-y-1.5">
-          <h3 className="text-sm font-bold tracking-[-0.02em] text-foreground">{displayLabel}</h3>
+          <h3 className="text-sm font-bold tracking-tight text-foreground">{displayLabel}</h3>
 
           {displayDescription ? (
-            <p className="max-w-2xl text-[11px] leading-[16.5px] text-muted-foreground">
+            <p className="max-w-2xl text-caption leading-[16.5px] text-muted-foreground">
               {displayDescription}
             </p>
           ) : null}
@@ -119,7 +119,7 @@ export function SettingFieldCard({
             onClick={() => onReset(property)}
             disabled={isResetting || !canReset}
             data-testid={`settings-reset-${property.pmid}`}
-            className="h-8 rounded-[12px] border-border/60 bg-transparent px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground shadow-none hover:bg-accent hover:text-accent-foreground"
+            className="h-8 rounded-[12px] border-border/60 bg-transparent px-3 text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground shadow-none hover:bg-accent hover:text-accent-foreground"
           >
             {isResetting ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -247,7 +247,7 @@ function ChangeEffectBadge({ effect }: { effect?: SettingResponse['change_effect
 
   if (effect === 'live') {
     return (
-      <StatusPill status="success" className="h-8 gap-2 rounded-full px-3 text-[11px] font-semibold">
+      <StatusPill status="success" className="h-8 gap-2 rounded-full px-3 text-caption font-semibold">
         <Zap className="h-3.5 w-3.5" />
         {t('pages.settings.effect.live')}
       </StatusPill>
@@ -256,7 +256,7 @@ function ChangeEffectBadge({ effect }: { effect?: SettingResponse['change_effect
 
   if (effect === 'needs_model_reload') {
     return (
-      <StatusPill status="info" className="h-8 gap-2 rounded-full px-3 text-[11px] font-semibold">
+      <StatusPill status="info" className="h-8 gap-2 rounded-full px-3 text-caption font-semibold">
         <RefreshCw className="h-3.5 w-3.5" />
         {t('pages.settings.effect.needsModelReload')}
       </StatusPill>
@@ -264,7 +264,7 @@ function ChangeEffectBadge({ effect }: { effect?: SettingResponse['change_effect
   }
 
   return (
-    <StatusPill status="neutral" className="h-8 gap-2 rounded-full px-3 text-[11px] font-semibold">
+    <StatusPill status="neutral" className="h-8 gap-2 rounded-full px-3 text-caption font-semibold">
       <RefreshCw className="h-3.5 w-3.5" />
       {t('pages.settings.effect.needsRestart')}
     </StatusPill>
@@ -280,7 +280,7 @@ function OverrideSourceBadge({ source }: { source?: SettingResponse['overridden_
 
   if (source.type === 'parent') {
     return (
-      <StatusPill status="info" className="h-8 gap-2 rounded-full px-3 text-[11px] font-semibold">
+      <StatusPill status="info" className="h-8 gap-2 rounded-full px-3 text-caption font-semibold">
         <Layers3 className="h-3.5 w-3.5" />
         {t('pages.settings.effect.inheritedFrom', { pmid: source.pmid })}
       </StatusPill>
@@ -288,7 +288,7 @@ function OverrideSourceBadge({ source }: { source?: SettingResponse['overridden_
   }
 
   return (
-    <StatusPill status="neutral" className="h-8 gap-2 rounded-full px-3 text-[11px] font-semibold">
+    <StatusPill status="neutral" className="h-8 gap-2 rounded-full px-3 text-caption font-semibold">
       <Layers3 className="h-3.5 w-3.5" />
       {t(
         source.var_value_present
@@ -307,7 +307,7 @@ function FieldStatusBadge({ status }: { status?: FieldStatusState }) {
 
   if (status.tone === 'saving') {
     return (
-      <StatusPill status="info" className="h-8 gap-2 rounded-full px-3 text-[11px] font-semibold">
+      <StatusPill status="info" className="h-8 gap-2 rounded-full px-3 text-caption font-semibold">
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
         {status.message}
       </StatusPill>
@@ -316,7 +316,7 @@ function FieldStatusBadge({ status }: { status?: FieldStatusState }) {
 
   if (status.tone === 'saved') {
     return (
-      <StatusPill status="success" className="h-8 gap-2 rounded-full px-3 text-[11px] font-semibold">
+      <StatusPill status="success" className="h-8 gap-2 rounded-full px-3 text-caption font-semibold">
         <CheckCircle2 className="h-3.5 w-3.5" />
         {status.message}
       </StatusPill>
@@ -325,7 +325,7 @@ function FieldStatusBadge({ status }: { status?: FieldStatusState }) {
 
   if (status.tone === 'error') {
     return (
-      <StatusPill status="danger" className="h-8 gap-2 rounded-full px-3 text-[11px] font-semibold">
+      <StatusPill status="danger" className="h-8 gap-2 rounded-full px-3 text-caption font-semibold">
         <TriangleAlert className="h-3.5 w-3.5" />
         {status.message}
       </StatusPill>
@@ -333,7 +333,7 @@ function FieldStatusBadge({ status }: { status?: FieldStatusState }) {
   }
 
   return (
-    <StatusPill status="neutral" className="h-8 gap-2 rounded-full px-3 text-[11px] font-semibold">
+    <StatusPill status="neutral" className="h-8 gap-2 rounded-full px-3 text-caption font-semibold">
       <Clock3 className="h-3.5 w-3.5" />
       {status.message}
     </StatusPill>

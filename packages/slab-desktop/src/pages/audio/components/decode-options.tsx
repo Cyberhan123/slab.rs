@@ -82,7 +82,7 @@ export function DecodeOptions({
 }: DecodeOptionsProps) {
   const { t } = useTranslation();
   return (
-    <div className="rounded-[22px] border border-[var(--shell-card)]/70 bg-[var(--shell-card)]/60 p-4 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_70%,transparent)]">
+    <div className="rounded-[22px] border border-[var(--shell-card)]/70 bg-glass-bg p-4 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_70%,transparent)]">
       <div className="flex items-start justify-between gap-5">
         <div className="space-y-1">
           <Label htmlFor="show-decode-options" className="text-base font-semibold text-foreground">

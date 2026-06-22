@@ -3,6 +3,11 @@ import * as Monaco from "monaco-editor"
 import { clamp } from "lodash-es"
 
 import { getStandaloneMonacoEditorOverrides } from "../lib/workspace-standalone-monaco"
+import {
+  applySlabMonacoTheme,
+  slabMonacoThemeId,
+  type WorkspaceThemeMode,
+} from "../lib/monaco-theme"
 
 type WorkspaceCodeEditorProps = {
   filePath: string
@@ -18,7 +23,7 @@ type WorkspaceCodeEditorProps = {
   onSelectionChange?: (selection: WorkspaceEditorSelection | null) => void
   options: Monaco.editor.IStandaloneEditorConstructionOptions
   revealTarget?: WorkspaceEditorRevealTarget | null
-  theme: string
+  themeMode: WorkspaceThemeMode
   value: string
 }
 
@@ -74,7 +79,7 @@ export function WorkspaceCodeEditor({
   onSelectionChange,
   options,
   revealTarget,
-  theme,
+  themeMode,
   value,
 }: WorkspaceCodeEditorProps) {
   const applyingExternalValueRef = useRef(false)
@@ -89,6 +94,7 @@ export function WorkspaceCodeEditor({
   const onSelectionChangeRef = useRef(onSelectionChange)
   const optionsRef = useRef(options)
   const revealTargetRef = useRef(revealTarget)
+  const themeModeRef = useRef(themeMode)
   const valueRef = useRef(value)
   const [editorReady, setEditorReady] = useState(false)
   const [servicesReady, setServicesReady] = useState(false)
@@ -121,6 +127,10 @@ export function WorkspaceCodeEditor({
   useEffect(() => {
     revealTargetRef.current = revealTarget
   }, [revealTarget])
+
+  useEffect(() => {
+    themeModeRef.current = themeMode
+  }, [themeMode])
 
   useEffect(() => {
     valueRef.current = value
@@ -158,16 +168,16 @@ export function WorkspaceCodeEditor({
     }
 
     try {
-      Monaco.editor.setTheme(theme)
+      applySlabMonacoTheme(Monaco, themeMode)
     } catch (error) {
       console.warn("failed to apply workspace editor theme", error)
       try {
-        Monaco.editor.setTheme(theme.toLowerCase().includes("dark") ? "vs-dark" : "vs")
+        Monaco.editor.setTheme(themeMode === "dark" ? "vs-dark" : "vs")
       } catch (fallbackError) {
         console.warn("failed to apply fallback workspace editor theme", fallbackError)
       }
     }
-  }, [editorReady, memoryModel, servicesReady, theme])
+  }, [editorReady, memoryModel, servicesReady, themeMode])
 
   useEffect(() => {
     if (!servicesReady || !containerRef.current || editorRef.current) {
@@ -185,6 +195,9 @@ export function WorkspaceCodeEditor({
       }
 
       const initialOptions = optionsRef.current
+      const currentThemeMode = themeModeRef.current
+      const themeId = slabMonacoThemeId(currentThemeMode)
+      applySlabMonacoTheme(Monaco, currentThemeMode)
       const nextEditor = memoryModel
         ? (await import("@codingame/monaco-vscode-api/monaco")).createConfiguredEditor(
             container,
@@ -193,7 +206,7 @@ export function WorkspaceCodeEditor({
               automaticLayout: initialOptions.automaticLayout ?? true,
               language: undefined,
               model: null,
-              theme,
+              theme: themeId,
               value: undefined,
             },
             await getStandaloneMonacoEditorOverrides(),
@@ -261,7 +274,7 @@ export function WorkspaceCodeEditor({
       onProblemsChangeRef.current?.([])
       onSelectionChangeRef.current?.(null)
     }
-  }, [memoryModel, servicesReady, theme])
+  }, [memoryModel, servicesReady])
 
   useEffect(() => {
     if (!servicesReady || !editorReady) {

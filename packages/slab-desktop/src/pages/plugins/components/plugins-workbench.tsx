@@ -85,7 +85,7 @@ export function PluginsWorkbench({
                   size="sm"
                   onClick={() => handleImportOpenChange(true)}
                   disabled={importPluginPending}
-                  className="rounded-[12px] bg-[var(--shell-card)]/80"
+                  className="rounded-[12px] bg-glass-bg-strong"
                   data-testid="plugin-import-open-button"
                 >
                   {importPluginPending ? (
@@ -100,7 +100,7 @@ export function PluginsWorkbench({
                   size="sm"
                   onClick={() => handleUrlInstallOpenChange(true)}
                   disabled={installPluginPending}
-                  className="rounded-[12px] bg-[var(--shell-card)]/80"
+                  className="rounded-[12px] bg-glass-bg-strong"
                   data-testid="plugin-url-install-open-button"
                 >
                   {installPluginPending ? (
@@ -115,7 +115,7 @@ export function PluginsWorkbench({
                   size="sm"
                   onClick={() => void refreshData()}
                   disabled={refreshing}
-                  className="rounded-[12px] bg-[var(--shell-card)]/80"
+                  className="rounded-[12px] bg-glass-bg-strong"
                   data-testid="plugin-refresh-button"
                 >
                   {refreshing ? (

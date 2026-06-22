@@ -757,7 +757,7 @@ function Assistant() {
 
         <div className="mx-auto w-full max-w-[768px] px-6 pb-6 pt-12 md:px-8 lg:px-0">
           <div className="space-y-2">
-            <h1 className="text-[clamp(2.75rem,6vw,4rem)] font-semibold tracking-[-0.055em] text-foreground">
+            <h1 className="text-[clamp(2.75rem,6vw,4rem)] font-semibold tracking-display text-foreground">
               {greeting}
             </h1>
             <p className="text-lg leading-7 text-muted-foreground/80">
@@ -781,7 +781,7 @@ function Assistant() {
           <div className="mx-auto flex w-full max-w-[682px] flex-col gap-8 px-6 pb-24 pt-2 md:px-8 md:pb-28 lg:px-0">
             {isSessionBootstrapping || (isHistoryLoading && safeMessages.length === 0) ? (
               <div
-                className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center"
+                className="flex min-h-[260px] items-center justify-center rounded-3xl border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center"
                 data-testid="assistant-loading-state"
               >
                 <div className="max-w-md space-y-3">
@@ -795,7 +795,7 @@ function Assistant() {
               </div>
             ) : safeMessages.length === 0 ? (
               <div
-                className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center"
+                className="flex min-h-[260px] items-center justify-center rounded-3xl border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center"
                 data-testid="assistant-empty-state"
               >
                 <div className="max-w-md space-y-3">

@@ -42,7 +42,7 @@ function ColorSwatch({ name, className }: { name: string; className: string }) {
   return (
     <div className="flex flex-col items-center gap-1.5">
       <div className={`h-14 w-14 rounded-xl border border-border/50 shadow-sm ${className}`} />
-      <span className="text-[10px] text-muted-foreground font-mono leading-tight text-center">{name}</span>
+      <span className="text-micro text-muted-foreground font-mono leading-tight text-center">{name}</span>
     </div>
   )
 }
@@ -102,7 +102,7 @@ function ToolCallCard() {
           <div className="flex items-center gap-2">
             <Code className="h-4 w-4 text-ai-tool" />
             <CardTitle className="text-sm font-medium text-foreground">{"代码生成工具"}</CardTitle>
-            <Badge variant="outline" className="text-[10px] border-success/40 text-success bg-success/10">
+            <Badge variant="outline" className="text-micro border-success/40 text-success bg-success/10">
               <CheckCircle className="h-3 w-3 mr-1" />
               {"已完成"}
             </Badge>
@@ -539,7 +539,7 @@ export function ThemePreview() {
                     <AvatarFallback className="bg-muted text-muted-foreground text-xs">{"小"}</AvatarFallback>
                   </Avatar>
                   <Avatar className="h-8 w-8">
-                    <AvatarFallback className="bg-primary/20 text-primary text-[10px]">XS</AvatarFallback>
+                    <AvatarFallback className="bg-primary/20 text-primary text-micro">XS</AvatarFallback>
                   </Avatar>
                 </div>
               </CardContent>

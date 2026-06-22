@@ -62,7 +62,7 @@ export function VadSettings({
 }: VadSettingsProps) {
   const { t } = useTranslation();
   return (
-    <div className="rounded-[22px] border border-[var(--shell-card)]/70 bg-[var(--shell-card)]/60 p-4 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_70%,transparent)]">
+    <div className="rounded-[22px] border border-[var(--shell-card)]/70 bg-glass-bg p-4 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_70%,transparent)]">
       <div className="flex items-start justify-between gap-5">
         <div className="space-y-1">
           <Label htmlFor="enable-vad" className="text-base font-semibold text-foreground">
@@ -83,7 +83,7 @@ export function VadSettings({
       {enableVad && (
         <div className="mt-4 space-y-4 border-t border-border/60 pt-4">
           <div className="space-y-2">
-            <Label className="text-[12px] font-semibold text-foreground">
+            <Label className="text-label font-semibold text-foreground">
               {t('pages.audio.vad.modelLabel')}
             </Label>
             <Select

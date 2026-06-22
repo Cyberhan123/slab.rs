@@ -40,7 +40,7 @@ export const DIMENSION_PRESETS = [
 ] as const;
 
 export const SIDEBAR_LABEL_CLASSNAME =
-  'text-[12px] font-semibold leading-4 text-foreground';
+  'text-label font-semibold leading-4 text-foreground';
 export const SIDEBAR_INPUT_CLASSNAME =
   'h-10 w-full rounded-xl border-border/70 bg-[var(--shell-card)] px-3 text-sm text-foreground shadow-none focus-visible:border-[var(--brand-teal)]/60 focus-visible:ring-[3px] focus-visible:ring-[var(--brand-teal)]/12';
 export const SIDEBAR_TEXTAREA_CLASSNAME =

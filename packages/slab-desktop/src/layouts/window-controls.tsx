@@ -166,7 +166,7 @@ function DesktopWindowControls() {
         size="icon-sm"
         aria-label={minimizeLabel}
         title={minimizeLabel}
-        className="size-7 rounded-[10px] text-[var(--shell-rail-label)] hover:bg-[var(--shell-card)]/80 hover:text-[var(--shell-title)]"
+        className="size-7 rounded-[10px] text-[var(--shell-rail-label)] hover:bg-glass-bg-strong hover:text-[var(--shell-title)]"
         onClick={() => {
           void runWindowAction("minimize", t)
         }}
@@ -180,7 +180,7 @@ function DesktopWindowControls() {
         size="icon-sm"
         aria-label={toggleMaximizeLabel}
         title={toggleMaximizeLabel}
-        className="size-7 rounded-[10px] text-[var(--shell-rail-label)] hover:bg-[var(--shell-card)]/80 hover:text-[var(--shell-title)]"
+        className="size-7 rounded-[10px] text-[var(--shell-rail-label)] hover:bg-glass-bg-strong hover:text-[var(--shell-title)]"
         onClick={() => {
           void runWindowAction("toggleMaximize", t)
         }}

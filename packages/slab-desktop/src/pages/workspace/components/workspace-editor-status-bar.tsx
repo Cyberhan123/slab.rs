@@ -32,7 +32,7 @@ export function WorkspaceEditorStatusBar({
   const infoCount = problems.length - errorCount - warningCount
 
   return (
-    <div className="flex h-7 shrink-0 items-center justify-between gap-3 border-t border-border/60 bg-[var(--surface-1)] px-3 text-[11px] text-muted-foreground">
+    <div className="flex h-7 shrink-0 items-center justify-between gap-3 border-t border-border/60 bg-[var(--surface-1)] px-3 text-caption text-muted-foreground">
       <div className="flex min-w-0 items-center gap-2">
         <Popover>
           <PopoverTrigger asChild>
@@ -68,7 +68,7 @@ export function WorkspaceEditorStatusBar({
                     <ProblemIcon problem={problem} />
                     <span className="min-w-0">
                       <span className="block break-words text-foreground">{problem.message}</span>
-                      <span className="mt-1 block text-[11px] text-muted-foreground">
+                      <span className="mt-1 block text-caption text-muted-foreground">
                         {t("pages.workspace.editor.problemLineColumn", {
                           column: problem.startColumn,
                           line: problem.startLineNumber,

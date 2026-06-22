@@ -61,7 +61,7 @@ export function PermissionReviewList({ preview }: PermissionReviewListProps) {
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium">{label.title}</span>
                 <span
-                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${SEVERITY_BADGE_CLASS[label.severity]}`}
+                  className={`rounded-full px-2 py-0.5 text-micro font-semibold uppercase ${SEVERITY_BADGE_CLASS[label.severity]}`}
                 >
                   {t(`pages.plugins.permissions.severity.${label.severity}`)}
                 </span>
@@ -118,7 +118,7 @@ export function PermissionReviewList({ preview }: PermissionReviewListProps) {
 function PermissionGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+      <p className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
         {title}
       </p>
       <div className="space-y-1.5">{children}</div>
@@ -132,7 +132,7 @@ function PermissionChips({ items }: { items: string[] }) {
       {items.map((item) => (
         <span
           key={item}
-          className="rounded-full bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
+          className="rounded-full bg-muted px-2 py-0.5 font-mono text-caption text-muted-foreground"
         >
           {item}
         </span>

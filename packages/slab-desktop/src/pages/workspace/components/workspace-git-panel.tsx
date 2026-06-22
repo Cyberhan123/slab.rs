@@ -122,7 +122,7 @@ export function WorkspaceGitPanel({
               <span
                 key={status}
                 className={cn(
-                  "rounded-full px-2 py-0.5 text-[11px] font-medium",
+                  "rounded-full px-2 py-0.5 text-caption font-medium",
                   statusClassName[status],
                 )}
               >
@@ -131,7 +131,7 @@ export function WorkspaceGitPanel({
             ) : null,
           )}
           {gitStatus.entries.length === 0 ? (
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+            <span className="rounded-full bg-muted px-2 py-0.5 text-caption text-muted-foreground">
               {t("pages.workspace.git.clean")}
             </span>
           ) : null}
@@ -221,7 +221,7 @@ function GitEntryGroup({
 
   return (
     <section className="space-y-1">
-      <div className="px-2 pt-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+      <div className="px-2 pt-2 text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
         {title}
       </div>
       {entries.map((entry) => {
@@ -249,7 +249,7 @@ function GitEntryGroup({
               </span>
               <span
                 className={cn(
-                  "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase",
+                  "shrink-0 rounded-full px-2 py-0.5 text-micro font-semibold uppercase",
                   statusClassName[entry.status],
                 )}
               >

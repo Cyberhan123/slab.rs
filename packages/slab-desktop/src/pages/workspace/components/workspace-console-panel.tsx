@@ -166,7 +166,7 @@ export function WorkspaceConsolePanel({ themeMode, workspaceRoot }: WorkspaceCon
                 <div
                   key={session.id}
                   className={cn(
-                    "flex h-6 shrink-0 items-center gap-1 rounded-full pl-2 pr-1 text-[11px] font-medium text-muted-foreground transition hover:bg-[var(--surface-selected)] hover:text-foreground",
+                    "flex h-6 shrink-0 items-center gap-1 rounded-full pl-2 pr-1 text-caption font-medium text-muted-foreground transition hover:bg-[var(--surface-selected)] hover:text-foreground",
                     active && "bg-[var(--surface-selected)] text-foreground",
                   )}
                 >
@@ -197,7 +197,7 @@ export function WorkspaceConsolePanel({ themeMode, workspaceRoot }: WorkspaceCon
           <select
             value={selectedShell}
             onChange={(event) => setSelectedShell(event.target.value as WorkspaceTerminalShell)}
-            className="h-7 rounded-md border border-border/60 bg-background px-2 text-[11px] text-muted-foreground outline-none"
+            className="h-7 rounded-md border border-border/60 bg-background px-2 text-caption text-muted-foreground outline-none"
             aria-label={t("pages.workspace.console.shell")}
           >
             <option value="powershell">{t("pages.workspace.console.shells.powershell")}</option>

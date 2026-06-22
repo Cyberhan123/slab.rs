@@ -75,7 +75,7 @@ export function AssistantSessionSheet({
                   key={conversation.key}
                   data-testid={`assistant-session-row-${conversation.key}`}
                   className={cn(
-                    "workspace-soft-panel flex items-center gap-3 rounded-[24px] px-4 py-3",
+                    "workspace-soft-panel flex items-center gap-3 rounded-2xl px-4 py-3",
                     isCurrent && "border-[color:var(--brand-teal)] bg-[color:color-mix(in_oklab,var(--brand-teal)_8%,var(--surface-soft))]"
                   )}
                 >

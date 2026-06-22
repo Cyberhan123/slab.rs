@@ -96,7 +96,7 @@ export default function Task() {
                 <div
                   // eslint-disable-next-line react/no-array-index-key
                   key={`${index}-${barHeight}`}
-                  className="flex-1 rounded-t-[2px] bg-[var(--brand-teal)]/10"
+                  className="flex-1 rounded-t-[2px] bg-[color:color-mix(in_oklab,var(--brand-teal)_10%,transparent)]"
                   style={{ height: `${clamp(barHeight * 48, 10, Number.POSITIVE_INFINITY)}px` }}
                 />
               ))}
@@ -118,11 +118,11 @@ export default function Task() {
             <div className="mt-5">
               <div className="h-1.5 overflow-hidden rounded-full bg-border/50">
                 <div
-                  className="h-full rounded-full bg-[var(--brand-gold)] shadow-[0_0_12px_color-mix(in_oklab,var(--brand-gold)_30%,transparent)]"
+                  className="h-full rounded-full bg-[var(--brand-gold)] shadow-elevation-1"
                   style={{ width: `${clamp(activeShare, activeTaskCount > 0 ? 8 : 0, Number.POSITIVE_INFINITY)}%` }}
                 />
               </div>
-              <div className="mt-3 flex items-center justify-between font-mono text-[10px] text-muted-foreground">
+              <div className="mt-3 flex items-center justify-between font-mono text-micro text-muted-foreground">
                 <span>0%</span>
                 <span>
                   {activeTaskCount > 0
@@ -180,23 +180,23 @@ export default function Task() {
             description={t('pages.task.states.emptyDescription')}
           />
         ) : (
-          <section className="overflow-hidden rounded-[20px] border border-border/40 bg-[var(--surface-1)] shadow-[0_12px_40px_-12px_color-mix(in_oklab,var(--foreground)_5%,transparent)]">
+          <section className="overflow-hidden rounded-[20px] border border-border/40 bg-[var(--surface-1)] shadow-elevation-2">
             <Table className="min-w-[820px] xl:min-w-[980px]" variant="roomy">
               <TableHeader className="[&_tr]:border-b-0 [&_tr]:bg-[var(--surface-soft)]">
                 <TableRow className="hover:bg-[var(--surface-soft)]">
-                  <TableHead className="h-[45px] px-6 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                  <TableHead className="h-[45px] px-6 text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
                     {t('pages.task.table.headers.taskId')}
                   </TableHead>
-                  <TableHead className="h-[45px] px-6 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                  <TableHead className="h-[45px] px-6 text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
                     {t('pages.task.table.headers.type')}
                   </TableHead>
-                  <TableHead className="h-[45px] px-6 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                  <TableHead className="h-[45px] px-6 text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
                     {t('pages.task.table.headers.status')}
                   </TableHead>
-                  <TableHead className="h-[45px] px-6 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                  <TableHead className="h-[45px] px-6 text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
                     {t('pages.task.table.headers.createdAt')}
                   </TableHead>
-                  <TableHead className="h-[45px] px-6 text-right text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                  <TableHead className="h-[45px] px-6 text-right text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
                     {t('pages.task.table.headers.actions')}
                   </TableHead>
                 </TableRow>
@@ -264,7 +264,7 @@ export default function Task() {
             </Table>
 
             <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border/10 bg-[var(--surface-soft)] px-6 py-4">
-              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+              <p className="text-caption font-medium uppercase tracking-eyebrow text-muted-foreground">
                 {paginationLabel}
               </p>
 

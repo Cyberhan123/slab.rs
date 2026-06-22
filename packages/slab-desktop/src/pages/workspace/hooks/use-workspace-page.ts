@@ -39,6 +39,10 @@ import {
 } from "@/store/useWorkspaceUiStore"
 import { useAssistantDraftStore } from "@/store/useAssistantDraftStore"
 import { getErrorMessage } from "@slab/api"
+import {
+  getWorkspaceThemeMode,
+  type WorkspaceThemeMode,
+} from "../lib/monaco-theme"
 import { upsertFileTab } from "../lib/workspace-page-utils"
 import type { WorkspaceLspOpenFileOptions } from "../lib/workspace-lsp-utils"
 import { useWorkspaceEditorDirty } from "./use-workspace-editor-dirty"
@@ -77,11 +81,7 @@ export function useWorkspacePage() {
     matchStart: number
     matchEnd: number
   } | null>(null)
-  const [editorTheme, setEditorTheme] = useState(() =>
-    typeof document !== "undefined" && document.documentElement.classList.contains("dark")
-      ? "vs-dark"
-      : "vs",
-  )
+  const [editorThemeMode, setEditorThemeMode] = useState<WorkspaceThemeMode>(getWorkspaceThemeMode)
   const restoredWorkspaceRootRef = useRef<string | null>(null)
   const activeVscodeFileGenerationRef = useRef(0)
   const consumedRevealPathRef = useRef<string | null>(null)
@@ -221,7 +221,7 @@ export function useWorkspacePage() {
     }
 
     const updateEditorTheme = () => {
-      setEditorTheme(document.documentElement.classList.contains("dark") ? "vs-dark" : "vs")
+      setEditorThemeMode(getWorkspaceThemeMode())
     }
 
     updateEditorTheme()
@@ -993,7 +993,7 @@ export function useWorkspacePage() {
     editorRevealTarget:
       selectedFile?.relativePath === editorRevealTarget?.relativePath ? editorRevealTarget : null,
     editorSettings,
-    editorTheme,
+    editorThemeMode,
     explorerPanel,
     fileError,
     fileSearchFetching,

@@ -130,7 +130,7 @@ export function AudioTranscriptDetail({ isTauri, task }: AudioTranscriptDetailPr
         </div>
 
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+          <p className="text-caption font-bold uppercase tracking-eyebrow text-muted-foreground">
             {t('pages.audio.history.fields.source')}
           </p>
           <p className="mt-2 break-all text-sm text-foreground">{task.source_path}</p>

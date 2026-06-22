@@ -7,9 +7,9 @@ import {
 
 export const TASK_POLL_INTERVAL_MS = 1_000;
 export const MIN_ACTIVE_PROGRESS = 6;
-export const SETUP_ACTIVE_TONE = '#00685f';
+export const SETUP_ACTIVE_TONE = 'var(--brand-teal)';
 export const SETUP_CTA_GRADIENT =
-  'linear-gradient(166.52deg, #00685f 0%, #008378 100%)';
+  'linear-gradient(166.52deg, var(--brand-teal) 0%, color-mix(in oklab, var(--brand-teal) 88%, var(--surface-1)) 100%)';
 
 export type SetupStatus = components['schemas']['SetupStatusResponse'];
 export type OperationAccepted = components['schemas']['OperationAcceptedResponse'];

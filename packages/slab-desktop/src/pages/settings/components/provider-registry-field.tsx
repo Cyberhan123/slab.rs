@@ -130,17 +130,17 @@ export function ProviderRegistryField({
             <section
               key={entry.id}
               className={cn(
-                'space-y-5 rounded-[24px] border border-border/70 bg-background/85 p-5 shadow-[0_16px_40px_-34px_color-mix(in_oklab,var(--foreground)_28%,transparent)]',
+                'space-y-5 rounded-2xl border border-border/70 bg-background/85 p-5 shadow-elevation-2',
                 entryHasError && 'border-destructive/60 bg-destructive/5',
               )}
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h4 className="text-base font-semibold tracking-[-0.02em] text-foreground">
+                    <h4 className="text-base font-semibold tracking-tight text-foreground">
                       {title}
                     </h4>
-                    <Badge variant="outline" className="font-mono text-[10px] uppercase">
+                    <Badge variant="outline" className="font-mono text-micro uppercase">
                       {entry.family}
                     </Badge>
                   </div>

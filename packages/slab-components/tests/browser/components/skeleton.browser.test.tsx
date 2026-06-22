@@ -39,6 +39,6 @@ describe("Skeleton browser coverage", () => {
     )
     const skeleton = page.getByTestId("custom-skeleton")
     await expect.element(skeleton).toBeVisible()
-    await expect.element(skeleton).toHaveClass(/animate-pulse/)
+    await expect.element(skeleton).toHaveClass(/skeleton-shimmer/)
   })
 })

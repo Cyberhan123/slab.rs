@@ -28,6 +28,7 @@
     "gen:plugin-packs": "bun ./scripts/plugins/generate-plugin-packs.ts",
     "gen:model-packs": "bun ./scripts/models/pack-models.ts",
     "color:oklch": "bun ./scripts/design/figma-color-to-oklch.ts",
+    "check:design-system": "bun ./scripts/design/check-design-system.ts",
     "lint": "oxlint packages/api packages/slab-desktop packages/slab-components packages/slab-i18n packages/slab-plugin-sdk packages/slab-plugin-cli packages/slab-plugin-ui packages/vitest-rust-reporter plugins/video-subtitle-translator/src scripts",
     "lint:fix": "oxlint --fix packages/api packages/slab-desktop packages/slab-components packages/slab-i18n packages/slab-plugin-sdk packages/slab-plugin-cli packages/slab-plugin-ui packages/vitest-rust-reporter plugins/video-subtitle-translator/src scripts",
     "lint-staged": "lint-staged",

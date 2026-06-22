@@ -31,9 +31,9 @@ export function AssistantSessionSummaryCard({
   const { t } = useTranslation()
 
   return (
-    <aside className="w-full max-w-[288px] rounded-[24px] border border-border/50 bg-[var(--shell-card)] p-6 shadow-[var(--shell-elevation)]">
+    <aside className="w-full max-w-[288px] rounded-2xl border border-border/50 bg-[var(--shell-card)] p-6 shadow-[var(--shell-elevation)]">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
+        <p className="text-label font-bold uppercase tracking-eyebrow text-muted-foreground">
           {t("pages.assistant.summaryCard.latestSession")}
         </p>
         <Button
@@ -66,8 +66,8 @@ export function AssistantSessionSummaryCard({
                 className={cn(
                   "flex size-8 shrink-0 items-center justify-center rounded-[8px]",
                   item.tone === "warm"
-                    ? "bg-[var(--brand-gold)]/20 text-[var(--brand-gold)]"
-                    : "bg-[var(--brand-teal)]/20 text-[var(--brand-teal)]"
+                    ? "bg-[color:color-mix(in_oklab,var(--brand-gold)_20%,transparent)] text-[var(--brand-gold)]"
+                    : "bg-[color:color-mix(in_oklab,var(--brand-teal)_20%,transparent)] text-[var(--brand-teal)]"
                 )}
               >
                 <Icon className="size-4" />
@@ -77,7 +77,7 @@ export function AssistantSessionSummaryCard({
                 <span className="block truncate text-sm font-semibold text-foreground">
                   {item.label}
                 </span>
-                <span className="block text-[11px] text-muted-foreground">{item.hint}</span>
+                <span className="block text-caption text-muted-foreground">{item.hint}</span>
               </span>
             </button>
           )

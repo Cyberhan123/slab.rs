@@ -170,7 +170,7 @@ export function HubModelEnhancementSheet({
                 </Alert>
               ) : null}
 
-              <section className="grid gap-4 rounded-[28px] border border-border/60 bg-[var(--shell-card)]/55 p-5 md:grid-cols-2">
+              <section className="grid gap-4 rounded-3xl border border-border/60 bg-glass-bg p-5 md:grid-cols-2">
                 <ReadOnlyBlock
                   label={t('pages.hub.sheet.blocks.displayName')}
                   value={data.model_summary.display_name}
@@ -220,10 +220,10 @@ export function HubModelEnhancementSheet({
                 return (
                   <section
                     key={section.id}
-                    className="space-y-4 rounded-[28px] border border-border/60 bg-[var(--shell-card)]/55 p-5"
+                    className="space-y-4 rounded-3xl border border-border/60 bg-glass-bg p-5"
                   >
                     <div className="space-y-1">
-                      <h3 className="text-base font-semibold tracking-[-0.02em] text-foreground">
+                      <h3 className="text-base font-semibold tracking-tight text-foreground">
                         {sectionLabel}
                       </h3>
                       {sectionDescription ? (
@@ -262,7 +262,7 @@ export function HubModelEnhancementSheet({
 function ReadOnlyBlock({ label, value }: { label: string; value: string }) {
   return (
     <div className="space-y-2">
-      <Label className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+      <Label className="text-xs font-semibold uppercase tracking-eyebrow text-muted-foreground">
         {label}
       </Label>
       <div className="rounded-[14px] border border-border/60 bg-[var(--surface-soft)] px-4 py-3 text-sm font-medium text-foreground">
@@ -281,7 +281,7 @@ function FieldBlock({
 }) {
   return (
     <div className="space-y-2">
-      <Label className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+      <Label className="text-xs font-semibold uppercase tracking-eyebrow text-muted-foreground">
         {label}
       </Label>
       {children}
@@ -299,11 +299,11 @@ function ReadonlyFieldCard({ field }: { field: ModelConfigFieldResponse }) {
     t,
   );
   return (
-    <div className="rounded-[20px] border border-border/60 bg-background/70 p-4 shadow-[0_1px_2px_color-mix(in_oklab,var(--foreground)_8%,transparent)]">
+    <div className="rounded-[20px] border border-border/60 bg-background/70 p-4 shadow-elevation-1">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h4 className="text-sm font-semibold tracking-[-0.02em] text-foreground">
+            <h4 className="text-sm font-semibold tracking-tight text-foreground">
               {fieldLabel}
             </h4>
               <Badge variant="secondary" className="rounded-full">
@@ -319,7 +319,7 @@ function ReadonlyFieldCard({ field }: { field: ModelConfigFieldResponse }) {
           {fieldDescription ? (
             <p className="text-xs leading-5 text-muted-foreground">{fieldDescription}</p>
           ) : null}
-          <p className="text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
+          <p className="text-caption uppercase tracking-eyebrow text-muted-foreground">
             {field.path}
           </p>
         </div>

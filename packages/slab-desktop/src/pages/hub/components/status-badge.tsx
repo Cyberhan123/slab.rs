@@ -13,7 +13,7 @@ export function StatusBadge({
 }) {
   const { t } = useTranslation();
   const sharedClassName =
-    'px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] shadow-none';
+    'px-3 py-1 text-micro font-bold uppercase tracking-eyebrow shadow-none';
 
   if (status === 'ready') {
     return (

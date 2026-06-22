@@ -7,7 +7,7 @@ export function renderStatusPill(status: string, t: Translate) {
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-[0.04em] ${tone.className}`}
+      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-caption font-bold uppercase tracking-eyebrow ${tone.className}`}
     >
       <span className={`size-1.5 rounded-full ${tone.dotClassName}`} />
       {tone.label}

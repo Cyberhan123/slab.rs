@@ -4,18 +4,18 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "./lib/utils"
 
 const cardVariants = cva(
-  "text-card-foreground flex flex-col gap-6 rounded-[24px] border border-border/70 py-6",
+  "text-card-foreground flex flex-col gap-6 rounded-2xl border border-border/70 py-6",
   {
     variants: {
       variant: {
         default: "bg-card shadow-sm",
-        soft: "bg-[var(--surface-1)] shadow-[0_16px_40px_-30px_color-mix(in_oklab,var(--foreground)_32%,transparent)]",
+        soft: "bg-[var(--surface-1)] shadow-elevation-2",
         elevated:
-          "bg-[var(--surface-1)] shadow-[0_24px_60px_-38px_color-mix(in_oklab,var(--foreground)_40%,transparent)]",
+          "bg-[var(--surface-1)] shadow-elevation-3",
         metric:
-          "bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-1)_85%,var(--background))_0%,var(--surface-1)_100%)] shadow-[0_18px_44px_-30px_color-mix(in_oklab,var(--foreground)_32%,transparent)]",
+          "bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-1)_85%,var(--background))_0%,var(--surface-1)_100%)] shadow-elevation-2",
         hero:
-          "bg-[linear-gradient(180deg,color-mix(in_oklab,var(--brand-teal)_9%,var(--surface-1))_0%,var(--surface-1)_56%,color-mix(in_oklab,var(--brand-gold)_10%,var(--surface-1))_100%)] shadow-[0_28px_80px_-48px_color-mix(in_oklab,var(--brand-teal)_28%,transparent)]",
+          "bg-[linear-gradient(180deg,color-mix(in_oklab,var(--brand-teal)_9%,var(--surface-1))_0%,var(--surface-1)_56%,color-mix(in_oklab,var(--brand-gold)_10%,var(--surface-1))_100%)] shadow-elevation-3",
       },
     },
     defaultVariants: {
@@ -34,6 +34,7 @@ function Card({
       data-slot="card"
       data-variant={variant}
       className={cn(
+        "focus-ring",
         cardVariants({ variant }),
         className
       )}

@@ -57,7 +57,7 @@ export function ImageHistoryPanel({
       <div className="border-t border-border/60 bg-[var(--surface-soft)] px-5 py-4 xl:px-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+            <p className="text-caption font-bold uppercase tracking-eyebrow text-muted-foreground">
               {t('pages.image.history.title')}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
@@ -79,7 +79,7 @@ export function ImageHistoryPanel({
                 key={task.task_id}
                 type="button"
                 data-testid={`image-history-item-${task.task_id}`}
-                className="group flex gap-3 rounded-[18px] border border-border/50 bg-[var(--shell-card)] p-3 text-left transition hover:border-[var(--brand-teal)]/50 hover:shadow-[0_18px_36px_-28px_color-mix(in_oklab,var(--foreground)_35%,transparent)]"
+                className="group flex gap-3 rounded-[18px] border border-border/50 bg-[var(--shell-card)] p-3 text-left transition hover:border-[var(--brand-teal)]/50 hover:shadow-elevation-2"
                 onClick={() => void openHistoryDetail(task.task_id)}
               >
                 <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-[14px] bg-[var(--surface-soft)] text-muted-foreground">
@@ -93,7 +93,7 @@ export function ImageHistoryPanel({
                   <p className="line-clamp-2 text-sm font-semibold leading-5 text-foreground">
                     {task.prompt}
                   </p>
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-caption text-muted-foreground">
                     <span className="rounded-full bg-[var(--surface-soft)] px-2 py-0.5">
                       {task.status}
                     </span>
@@ -160,7 +160,7 @@ export function ImageHistoryPanel({
                 </div>
                 <div className="space-y-4 rounded-[22px] bg-[var(--surface-soft)] p-4">
                   <div>
-                    <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                    <p className="text-caption font-bold uppercase tracking-eyebrow text-muted-foreground">
                       {t('pages.image.workbench.prompt.label')}
                     </p>
                     <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground">

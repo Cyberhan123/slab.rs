@@ -177,7 +177,7 @@ export function PluginWebviewPage({ plugin }: PluginWebviewPageProps) {
 
   return (
     <div
-      className="relative h-full w-full overflow-hidden rounded-[24px] border border-border/70 bg-background"
+      className="relative h-full w-full overflow-hidden rounded-2xl border border-border/70 bg-background"
       data-testid={`plugin-view-${plugin.id}`}
     >
       {isDesktopTauri ? (

@@ -412,7 +412,7 @@ function AssistantBubbleFooter({ content }: { content: AssistantBubbleContent })
               type="button"
               variant="quiet"
               size="sm"
-              className="h-7 rounded-full px-3 text-[11px]"
+              className="h-7 rounded-full px-3 text-caption"
               onClick={() => {
                 setDraft(getAssistantMessageTextContent(content.item.message))
                 setEditing(false)
@@ -425,7 +425,7 @@ function AssistantBubbleFooter({ content }: { content: AssistantBubbleContent })
               type="submit"
               variant="pill"
               size="sm"
-              className="h-7 rounded-full px-3 text-[11px]"
+              className="h-7 rounded-full px-3 text-caption"
               disabled={!draft.trim()}
               data-testid={`assistant-save-edit-${content.item.id}`}
             >
@@ -440,7 +440,7 @@ function AssistantBubbleFooter({ content }: { content: AssistantBubbleContent })
           type="button"
           variant="quiet"
           size="sm"
-          className="h-7 rounded-full px-3 text-[11px] text-muted-foreground hover:text-foreground"
+          className="h-7 rounded-full px-3 text-caption text-muted-foreground hover:text-foreground"
           onClick={() => clipboard.copy(textContent)}
         >
           <Copy className="size-3.5" />
@@ -451,7 +451,7 @@ function AssistantBubbleFooter({ content }: { content: AssistantBubbleContent })
             type="button"
             variant="quiet"
             size="sm"
-            className="h-7 rounded-full px-3 text-[11px] text-muted-foreground hover:text-foreground"
+            className="h-7 rounded-full px-3 text-caption text-muted-foreground hover:text-foreground"
             disabled={isBusy}
             onClick={() => {
               setDraft(getAssistantMessageTextContent(content.item.message))
@@ -468,7 +468,7 @@ function AssistantBubbleFooter({ content }: { content: AssistantBubbleContent })
             type="button"
             variant="quiet"
             size="sm"
-            className="h-7 rounded-full px-3 text-[11px] text-muted-foreground hover:text-foreground"
+            className="h-7 rounded-full px-3 text-caption text-muted-foreground hover:text-foreground"
             onClick={() => {
               void content.onRegenerate?.(String(content.item.id))
             }}
@@ -483,7 +483,7 @@ function AssistantBubbleFooter({ content }: { content: AssistantBubbleContent })
             type="button"
             variant="quiet"
             size="sm"
-            className="h-7 rounded-full px-3 text-[11px] text-muted-foreground hover:text-foreground"
+            className="h-7 rounded-full px-3 text-caption text-muted-foreground hover:text-foreground"
             onClick={content.onRetry}
           >
             <RotateCcw className="size-3.5" />

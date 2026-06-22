@@ -71,7 +71,7 @@ export function WorkspaceSearchPanel({
             <>
               {fileResults.length > 0 ? (
                 <section className="border-b border-border/40 py-1">
-                  <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  <div className="px-3 py-1 text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
                     {t("pages.workspace.commandPalette.files")}
                   </div>
                   {fileResults.map((entry) => (
@@ -89,7 +89,7 @@ export function WorkspaceSearchPanel({
                     >
                       <FileCode2 className="size-4 shrink-0 text-muted-foreground" />
                       <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-                      <span className="min-w-0 max-w-[54%] truncate font-mono text-[11px] text-muted-foreground">
+                      <span className="min-w-0 max-w-[54%] truncate font-mono text-caption text-muted-foreground">
                         {entry.relativePath}
                       </span>
                     </button>
@@ -103,7 +103,7 @@ export function WorkspaceSearchPanel({
               ) : null}
               {textResults.length > 0 ? (
                 <section className="py-1">
-                  <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  <div className="px-3 py-1 text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
                     {t("pages.workspace.textSearch.results")}
                   </div>
                   {textResults.map((result) => (
@@ -117,7 +117,7 @@ export function WorkspaceSearchPanel({
                       >
                         <FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />
                         <span className="min-w-0 flex-1 truncate">{result.name}</span>
-                        <span className="min-w-0 max-w-[58%] truncate font-mono text-[11px] text-muted-foreground">
+                        <span className="min-w-0 max-w-[58%] truncate font-mono text-caption text-muted-foreground">
                           {result.relativePath}
                         </span>
                       </div>
@@ -131,7 +131,7 @@ export function WorkspaceSearchPanel({
                               void onOpenMatch(result.relativePath, match)
                             }}
                           >
-                            <span className="text-right font-mono text-[11px] text-muted-foreground">
+                            <span className="text-right font-mono text-caption text-muted-foreground">
                               {match.lineNumber}
                             </span>
                             <span className="min-w-0 truncate font-mono text-foreground">
@@ -170,7 +170,7 @@ function HighlightedLine({ match }: { match: WorkspaceTextSearchLineMatch }) {
   return (
     <>
       {before}
-      <mark className="rounded-[3px] bg-[var(--brand-teal)]/20 px-0.5 text-[var(--brand-teal)]">
+      <mark className="rounded-[3px] bg-[color:color-mix(in_oklab,var(--brand-teal)_20%,transparent)] px-0.5 text-[var(--brand-teal)]">
         {selected}
       </mark>
       {after}

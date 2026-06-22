@@ -12,12 +12,12 @@ export function PluginStatusBadge({ status, busy }: { status: PluginStatusKey; b
   return (
     <span
       className={cn(
-        'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase leading-[15px] tracking-[0.05em]',
+        'rounded-full px-2 py-0.5 text-micro font-bold uppercase leading-[15px] tracking-eyebrow',
         running
           ? 'bg-[color-mix(in_oklab,var(--brand-teal)_20%,var(--shell-card))] text-[var(--brand-teal)]'
           : invalid
             ? 'bg-[var(--status-danger-bg)] text-destructive'
-            : 'bg-[#e6e8ea] text-[#3d4947] dark:bg-[var(--surface-soft)] dark:text-muted-foreground',
+            : 'bg-[var(--surface-soft)] text-muted-foreground',
       )}
     >
       {t(`pages.plugins.status.${normalizedStatus}`)}

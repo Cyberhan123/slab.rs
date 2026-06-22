@@ -67,7 +67,7 @@ export default function Hub() {
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1.9fr)_minmax(280px,0.92fr)]">
           <Card
             variant="hero"
-            className="workspace-halo relative overflow-hidden rounded-[34px] border-none px-7 py-8 md:px-10 md:py-10"
+            className="workspace-halo relative overflow-hidden rounded-3xl border-none px-7 py-8 md:px-10 md:py-10"
           >
             <div className="absolute top-10 right-14 size-28 rounded-full bg-[color:color-mix(in_oklab,var(--brand-gold)_18%,var(--surface-1))] blur-3xl" />
             <div className="absolute right-[-5%] bottom-[-12%] size-56 rounded-full bg-[color:color-mix(in_oklab,var(--brand-teal)_16%,var(--surface-1))] blur-3xl" />
@@ -76,12 +76,12 @@ export default function Hub() {
               <div className="space-y-4">
                 <Badge
                   variant="chip"
-                  className="border-transparent bg-[var(--shell-card)]/75 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--brand-gold)]"
+                  className="border-transparent bg-glass-bg-strong px-3 py-1 text-micro font-bold uppercase tracking-eyebrow text-[var(--brand-gold)]"
                 >
                   {t('pages.hub.hero.badge')}
                 </Badge>
                 <div className="space-y-4">
-                  <h1 className="max-w-3xl text-4xl font-semibold tracking-[-0.05em] text-foreground md:text-6xl">
+                  <h1 className="max-w-3xl text-4xl font-semibold tracking-display text-foreground md:text-6xl">
                     {t('pages.hub.hero.titleLead')}{' '}
                     <span className="text-[var(--brand-teal)]">{t('pages.hub.hero.titleAccent')}</span>
                   </h1>
@@ -104,7 +104,7 @@ export default function Hub() {
                 <Button
                   variant="pill"
                   size="pill"
-                  className="bg-[var(--shell-card)]/85 px-5"
+                  className="bg-glass-bg-strong px-5"
                   onClick={() => void hub.refetch()}
                   disabled={hub.isRefetching}
                 >
@@ -141,7 +141,7 @@ export default function Hub() {
           </div>
         </section>
 
-        <section className="space-y-4 rounded-[32px] border border-[var(--shell-card)]/70 bg-[var(--shell-card)]/45 px-4 py-4 shadow-[0_20px_48px_-42px_color-mix(in_oklab,var(--foreground)_30%,transparent)] backdrop-blur">
+        <section className="space-y-4 rounded-3xl border border-[var(--shell-card)]/70 bg-glass-bg px-4 py-4 shadow-elevation-3 backdrop-blur">
           <div className="flex flex-wrap items-center gap-2">
             {CATEGORY_OPTIONS.map((option) => {
               const isActive = hub.category === option;
@@ -163,7 +163,7 @@ export default function Hub() {
               value={hub.status}
               onValueChange={(value) => hub.setStatus(value as typeof hub.status)}
             >
-              <SelectTrigger variant="pill" size="pill" className="h-9 min-w-[190px] bg-[var(--shell-card)]/85">
+              <SelectTrigger variant="pill" size="pill" className="h-9 min-w-[190px] bg-glass-bg-strong">
                 <SelectValue placeholder={t('pages.hub.filters.statusPlaceholder')} />
               </SelectTrigger>
               <SelectContent variant="pill">
@@ -282,12 +282,12 @@ function HubSummaryCard({
 
   return (
     <div
-      className={`relative overflow-hidden rounded-[30px] border border-border/40 ${backgroundClassName} p-6 shadow-[0_24px_56px_-42px_color-mix(in_oklab,var(--foreground)_28%,transparent)]`}
+      className={`relative overflow-hidden rounded-3xl border border-border/40 ${backgroundClassName} p-6 shadow-elevation-3`}
     >
-      <div className="absolute -top-5 -right-6 size-24 rounded-full bg-[var(--shell-card)]/45 blur-2xl" />
+      <div className="absolute -top-5 -right-6 size-24 rounded-full bg-glass-bg blur-2xl" />
       <div className="relative flex h-full flex-col gap-6">
         <div
-          className={`flex size-12 items-center justify-center rounded-[18px] bg-[var(--shell-card)]/75 ${iconClassName}`}
+          className={`flex size-12 items-center justify-center rounded-[18px] bg-glass-bg-strong ${iconClassName}`}
         >
           <Icon className="size-5" />
         </div>
