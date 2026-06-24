@@ -1,8 +1,7 @@
-import { execFileSync } from "node:child_process"
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright"
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import type { components } from "@slab/api/v1"
 
@@ -16,6 +15,16 @@ import {
   type FullstackDevEnvironment,
   type ManagedDevProcess,
 } from "./support/fullstack-dev"
+import {
+  clickExplorerPath,
+  expandWorkspaceExplorerRoot,
+  focusMonacoEditor,
+  isWorkspaceRuntimeFailure,
+  prepareWorkspaceProject,
+  readMonacoEditorText,
+  workspaceTerminalReadSentinelCommand,
+  type WorkspaceProjectFixture,
+} from "./support/workspace-project"
 
 type Schema = components["schemas"]
 
@@ -27,18 +36,20 @@ describe.sequential("workspace e2e", () => {
   let dev: ManagedDevProcess | undefined
   let page: Page
   let browserErrors: string[] = []
-  let consoleFailures: string[] = []
+  let workspaceFailures: string[] = []
   let workspaceRoot: string
-  let notePath: string
+  let project: WorkspaceProjectFixture
 
   beforeAll(async () => {
     env = await createFullstackDevEnvironment()
     workspaceRoot = join(env.rootDir, "browser-workspace")
-    notePath = join(workspaceRoot, "src", "note.txt")
-    prepareGitWorkspace(workspaceRoot)
+    project = prepareWorkspaceProject(workspaceRoot, "Browser Workspace")
 
     dev = await startFullstackDev(env)
     await completeSetup(env.serverBaseUrl)
+    await requestJson<Schema["WorkspaceStateResponse"]>(env.serverBaseUrl, "/v1/workspace/close", {
+      method: "POST",
+    })
 
     browser = await chromium.launch({ headless: true })
     context = await browser.newContext({
@@ -56,15 +67,15 @@ describe.sequential("workspace e2e", () => {
       }
       const text = message.text()
       browserErrors.push(text)
-      if (isWorkspaceConsoleFailure(text)) {
-        consoleFailures.push(text)
+      if (isWorkspaceRuntimeFailure(text)) {
+        workspaceFailures.push(text)
       }
     })
     page.on("pageerror", (error) => {
       const message = error.message
       browserErrors.push(message)
-      if (isWorkspaceConsoleFailure(message)) {
-        consoleFailures.push(message)
+      if (isWorkspaceRuntimeFailure(message)) {
+        workspaceFailures.push(message)
       }
     })
   })
@@ -76,54 +87,37 @@ describe.sequential("workspace e2e", () => {
     cleanupFullstackDevEnvironment(env)
   })
 
-  it("opens a browser workspace path, edits a file, and reflects Git changes through the server", async () => {
+  it("opens a workspace from the UI, expands deep files, edits, saves, runs terminal, and reopens from recents", async () => {
     const testEnv = requireEnv()
     browserErrors = []
-    consoleFailures = []
+    workspaceFailures = []
     const runId = `workspace-${Date.now()}`
-    const updatedContent = `Initial workspace note\n\nEdited by ${runId}\n`
+    const updatedContent = `Deep workspace sentinel\nEdited by ${runId}\n`
 
-    const workspaceStateRequest = page.waitForRequest(
-      (request) =>
-        request.method() === "GET" &&
-        new URL(request.url()).pathname === "/v1/workspace",
-      { timeout: 60_000 },
-    )
     await page.goto(`${testEnv.uiBaseUrl}/workspace`, {
       waitUntil: "domcontentloaded",
       timeout: 60_000,
     })
-    const workspaceApiBaseUrl = new URL((await workspaceStateRequest).url()).origin
+    await page.getByTestId("workspace-open-screen").waitFor({ state: "visible", timeout: 60_000 })
+    expect(await page.getByRole("button", { name: "Open folder" }).count()).toBe(1)
 
-    const openedWorkspace = await requestJson<Schema["WorkspaceStateResponse"]>(
-      workspaceApiBaseUrl,
-      "/v1/workspace/open",
-      {
-        json: { rootPath: workspaceRoot } satisfies Schema["WorkspaceOpenCommand"],
-        method: "POST",
-      },
+    await page.getByTestId("workspace-path-input").fill(workspaceRoot)
+    await page.getByTestId("workspace-open-path-button").click()
+    await page.getByTestId("workspace-active-screen").waitFor({ state: "visible", timeout: 60_000 })
+    await eventually("workspace active screen shows opened root", async () =>
+      (await page.getByTestId("workspace-active-screen").textContent())?.includes(workspaceRoot) ? true : null
     )
-    expect(openedWorkspace.current?.rootPath.endsWith(workspaceRoot)).toBe(true)
+
     const workspaceStateAfterOpen = await requestJson<Schema["WorkspaceStateResponse"]>(
-      workspaceApiBaseUrl,
+      testEnv.serverBaseUrl,
       "/v1/workspace",
     )
     expect(workspaceStateAfterOpen.current?.rootPath.endsWith(workspaceRoot)).toBe(true)
-    await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 })
-    const workspaceStateAfterReload = await requestJson<Schema["WorkspaceStateResponse"]>(
-      workspaceApiBaseUrl,
-      "/v1/workspace",
-    )
-    expect(workspaceStateAfterReload.current?.rootPath.endsWith(workspaceRoot)).toBe(true)
 
-    // The workspace now runs the unified VS Code-web surface in the browser too
-    // (the isTauri business gate was removed). The explorer and editor are the
-    // embedded VS Code parts; the editor itself is Monaco, so the Monaco
-    // selectors still drive it.
     const explorer = page.getByTestId("workspace-vscode-explorer")
     await explorer.waitFor({ state: "visible", timeout: 60_000 })
-    await explorer.getByText("src", { exact: true }).click()
-    await explorer.getByText("note.txt", { exact: true }).click()
+    await expandWorkspaceExplorerRoot(explorer, workspaceRoot.split(/[\\/]/).findLast(Boolean) ?? "Workspace", "src")
+    await clickExplorerPath(explorer, project.deepPathSegments)
 
     const editor = page.getByTestId("workspace-vscode-editor")
     const monacoEditor = editor.locator(".monaco-editor")
@@ -133,8 +127,8 @@ describe.sequential("workspace e2e", () => {
         `workspace Monaco editor did not render. Browser errors: ${browserErrors.join(" | ") || "none"}. Editor HTML: ${editorHtml}. Cause: ${error instanceof Error ? error.message : String(error)}`,
       )
     })
-    await eventually("workspace Monaco editor renders selected file", async () =>
-      (await readMonacoEditorText(editor)).includes("Initial workspace note") ? true : null
+    await eventually("workspace Monaco editor renders deep selected file", async () =>
+      (await readMonacoEditorText(editor)).includes(project.deepFileContent) ? true : null
     )
 
     await focusMonacoEditor(monacoEditor)
@@ -144,29 +138,26 @@ describe.sequential("workspace e2e", () => {
       (await readMonacoEditorText(editor)).includes(runId) ? true : null
     )
 
-    // The embedded VS Code editor owns save (its working-copy service is wired to
-    // the HTTP bridge), so Ctrl+S persists directly — there is no separate save
-    // button as in the old browser-only editor.
     await focusMonacoEditor(monacoEditor)
     await page.keyboard.press(process.platform === "darwin" ? "Meta+S" : "Control+S")
 
     await eventually("workspace file persisted to disk", () =>
-      readFileSync(notePath, "utf8") === updatedContent
+      readFileSync(project.deepFilePath, "utf8") === updatedContent
     )
 
     const serverFile = await requestJson<Schema["WorkspaceFileContent"]>(
-      workspaceApiBaseUrl,
-      `/v1/workspace/files?relativePath=${encodeURIComponent("src/note.txt")}`
+      testEnv.serverBaseUrl,
+      `/v1/workspace/files?relativePath=${encodeURIComponent(project.deepFileRelativePath)}`,
     )
     expect(serverFile.content).toBe(updatedContent)
 
-    const status = await eventually("workspace Git status reports modified note", async () => {
+    const status = await eventually("workspace Git status reports modified deep file", async () => {
       const nextStatus = await requestJson<Schema["WorkspaceGitStatusView"]>(
-        workspaceApiBaseUrl,
-        "/v1/workspace/git/status"
+        testEnv.serverBaseUrl,
+        "/v1/workspace/git/status",
       )
       return nextStatus.entries.some(
-        (entry) => entry.path === "src/note.txt" && entry.status === "modified" && !entry.staged
+        (entry) => entry.path === project.deepFileRelativePath && entry.status === "modified" && !entry.staged,
       )
         ? nextStatus
         : null
@@ -174,12 +165,12 @@ describe.sequential("workspace e2e", () => {
     expect(status.isRepository).toBe(true)
 
     const diff = await requestJson<Schema["WorkspaceGitDiffView"]>(
-      workspaceApiBaseUrl,
+      testEnv.serverBaseUrl,
       "/v1/workspace/git/diff",
       {
-        json: { path: "src/note.txt", staged: false } satisfies Schema["WorkspaceGitDiffCommand"],
+        json: { path: project.deepFileRelativePath, staged: false } satisfies Schema["WorkspaceGitDiffCommand"],
         method: "POST",
-      }
+      },
     )
     expect(diff.diff).toContain(runId)
 
@@ -199,35 +190,32 @@ describe.sequential("workspace e2e", () => {
       ;(element as HTMLElement).focus()
     })
     const marker = `workspace-terminal-${Date.now()}`
-    const command = process.platform === "win32"
-      ? `Write-Output ${marker}`
-      : `printf '${marker}\\n'`
-    await page.keyboard.type(command)
+    await page.keyboard.type(workspaceTerminalReadSentinelCommand(marker, project.terminalSentinelFileName))
     await page.keyboard.press("Enter")
-    await eventually("workspace terminal prints command output", async () => {
+    await eventually("workspace terminal prints sentinel file output", async () => {
       const terminalText = await terminal.locator(".xterm-rows").textContent()
-      return terminalText?.includes(marker) ? true : null
+      return terminalText?.includes(marker) && terminalText.includes(project.terminalSentinelContent)
+        ? true
+        : null
     }, 60_000, 500)
-    expect(consoleFailures).toEqual([])
+
+    await page.getByTestId("workspace-console-close-button").click()
+    await page.getByTestId("workspace-console-panel").waitFor({ state: "hidden", timeout: 60_000 })
+
+    await page.getByTestId("workspace-back-button").click()
+    await page.getByTestId("workspace-open-screen").waitFor({ state: "visible", timeout: 60_000 })
+    expect(await page.getByRole("button", { name: "Open folder" }).count()).toBe(1)
+    const recentRow = page.getByTestId("recent-workspace-row").filter({ hasText: workspaceRoot })
+    await recentRow.waitFor({ state: "visible", timeout: 60_000 })
+    await recentRow.getByTestId("recent-workspace-open-button").click()
+    await page.getByTestId("workspace-active-screen").waitFor({ state: "visible", timeout: 60_000 })
+    await eventually("workspace active screen shows reopened root", async () =>
+      (await page.getByTestId("workspace-active-screen").textContent())?.includes(workspaceRoot) ? true : null
+    )
+
+    expect(workspaceFailures).toEqual([])
   })
 })
-
-function prepareGitWorkspace(root: string): void {
-  mkdirSync(join(root, "src"), { recursive: true })
-  writeFileSync(join(root, ".gitignore"), ".slab/\n", "utf8")
-  writeFileSync(join(root, "README.md"), "# Browser Workspace\n", "utf8")
-  writeFileSync(join(root, "src", "note.txt"), "Initial workspace note\n", "utf8")
-  writeFileSync(join(root, "src", "second.txt"), "Second workspace note\n", "utf8")
-
-  execFileSync("git", ["init"], { cwd: root, stdio: "pipe" })
-  execFileSync("git", ["config", "user.email", "slab-e2e@example.local"], {
-    cwd: root,
-    stdio: "pipe",
-  })
-  execFileSync("git", ["config", "user.name", "Slab E2E"], { cwd: root, stdio: "pipe" })
-  execFileSync("git", ["add", "."], { cwd: root, stdio: "pipe" })
-  execFileSync("git", ["commit", "-m", "Initial workspace"], { cwd: root, stdio: "pipe" })
-}
 
 function requireEnv(): FullstackDevEnvironment {
   if (!env) {
@@ -235,19 +223,4 @@ function requireEnv(): FullstackDevEnvironment {
   }
 
   return env
-}
-
-async function readMonacoEditorText(editor: Locator): Promise<string> {
-  const text = await editor
-    .locator(".view-line")
-    .evaluateAll((lines) => lines.map((line) => line.textContent ?? "").join("\n"))
-  return text.replace(/\u00a0/g, " ")
-}
-
-async function focusMonacoEditor(editor: Locator): Promise<void> {
-  await editor.locator(".view-lines").click({ position: { x: 8, y: 8 } })
-}
-
-function isWorkspaceConsoleFailure(message: string): boolean {
-  return /ipc\.localhost|workspace terminal|failed to start workspace terminal|FileOperationError|Unable to resolve nonexistent file/i.test(message)
 }

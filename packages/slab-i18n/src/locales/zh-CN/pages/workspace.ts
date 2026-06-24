@@ -4,7 +4,9 @@ export const workspace = {
     subtitle: '文件夹模式',
   },
   actions: {
+    backToOpen: '返回打开页面',
     openFolder: '打开文件夹',
+    openPath: '打开路径',
     closeWorkspace: '关闭',
     reopen: '打开',
     pathPlaceholder: '工作区文件夹路径',
@@ -128,6 +130,7 @@ export const workspace = {
     terminal: '终端',
     show: '控制台',
     hide: '隐藏控制台',
+    close: '关闭控制台',
     newTerminal: '新建终端',
     shell: '终端 Shell',
     shells: {

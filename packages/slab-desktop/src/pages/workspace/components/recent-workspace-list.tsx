@@ -1,5 +1,6 @@
 import { Button } from "@slab/components/button"
 import { SoftPanel } from "@slab/components/workspace"
+import type { RecentWorkspace } from "@/store/useWorkspaceUiStore"
 
 export function RecentWorkspaceList({
   recentWorkspaces,
@@ -8,7 +9,7 @@ export function RecentWorkspaceList({
   emptyLabel,
   openLabel,
 }: {
-  recentWorkspaces: Array<{ rootPath: string; name: string }>
+  recentWorkspaces: RecentWorkspace[]
   onOpen: (rootPath: string) => Promise<void>
   title: string
   emptyLabel: string
@@ -24,13 +25,20 @@ export function RecentWorkspaceList({
           recentWorkspaces.map((workspace) => (
             <div
               key={workspace.rootPath}
+              data-root-path={workspace.rootPath}
+              data-testid="recent-workspace-row"
               className="flex min-w-0 items-center justify-between gap-3 rounded-[12px] bg-[var(--surface-1)] px-3 py-3"
             >
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">{workspace.name}</p>
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">{workspace.rootPath}</p>
               </div>
-              <Button variant="pill" size="xs" onClick={() => void onOpen(workspace.rootPath)}>
+              <Button
+                variant="pill"
+                size="xs"
+                onClick={() => void onOpen(workspace.rootPath)}
+                data-testid="recent-workspace-open-button"
+              >
                 {openLabel}
               </Button>
             </div>

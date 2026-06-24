@@ -9,6 +9,7 @@ import {
   stopDesktopWebDriver,
   type DesktopWebDriverEnvironment,
 } from "../support/tauri-webdriver"
+import { workspaceTerminalReadSentinelCommand } from "../support/workspace-project"
 
 describe.sequential("workspace desktop e2e", () => {
   let env: DesktopWebDriverEnvironment | undefined
@@ -24,6 +25,8 @@ describe.sequential("workspace desktop e2e", () => {
   })
 
   it("renders the VS Code explorer and connects the server terminal without CSP or file-service errors", async () => {
+    const testEnv = requireEnv()
+
     await waitForSelector('[data-testid="sidebar-link-workspace"]')
     await (await browser.$('[data-testid="sidebar-link-workspace"]')).click()
 
@@ -31,6 +34,16 @@ describe.sequential("workspace desktop e2e", () => {
     await eventually("VS Code explorer renders seeded files", async () => {
       const explorerText = await (await browser.$('[data-testid="workspace-vscode-explorer"]')).getText()
       return explorerText.includes("README.md") && explorerText.includes("src") ? true : null
+    }, 120_000)
+    /* eslint-disable no-await-in-loop -- each directory must expand before its child exists in the VS Code tree. */
+    for (const segment of testEnv.workspaceProject.deepPathSegments) {
+      await clickExplorerText(segment)
+    }
+    /* eslint-enable no-await-in-loop */
+    await waitForSelector('[data-testid="workspace-vscode-editor"] .monaco-editor')
+    await eventually("desktop workspace editor renders deep file content", async () => {
+      const editorText = await (await browser.$('[data-testid="workspace-vscode-editor"]')).getText()
+      return editorText.includes(testEnv.workspaceProject.deepFileContent) ? true : null
     }, 120_000)
 
     await waitForSelector('[data-testid="workspace-console-toggle"]')
@@ -49,15 +62,15 @@ describe.sequential("workspace desktop e2e", () => {
     })
 
     const marker = `desktop-terminal-${Date.now()}`
-    const command = process.platform === "win32"
-      ? `Write-Output ${marker}`
-      : `printf '${marker}\\n'`
+    const command = workspaceTerminalReadSentinelCommand(marker, testEnv.workspaceProject.terminalSentinelFileName)
     await browser.keys(command)
     await browser.keys("Enter")
 
-    await eventually("desktop workspace terminal prints sentinel", async () => {
+    await eventually("desktop workspace terminal prints sentinel file output", async () => {
       const rowsText = await (await browser.$('[data-testid="workspace-terminal"] .xterm-rows')).getText()
-      return rowsText.includes(marker) ? true : null
+      return rowsText.includes(marker) && rowsText.includes(testEnv.workspaceProject.terminalSentinelContent)
+        ? true
+        : null
     }, 120_000)
 
     const failures = (await collectBrowserFailureMessages(browser)).filter(isWorkspaceDesktopFailure)
@@ -69,5 +82,25 @@ describe.sequential("workspace desktop e2e", () => {
     await element.waitForExist({ timeout: 120_000 })
     await element.waitForDisplayed({ timeout: 120_000 })
     return element
+  }
+
+  async function clickExplorerText(text: string) {
+    await eventually(`desktop explorer entry ${text}`, async () =>
+      browser.execute((entryText) => {
+        const explorer = document.querySelector('[data-testid="workspace-vscode-explorer"]')
+        const element = Array.from(explorer?.querySelectorAll<HTMLElement>("*") ?? [])
+          .find((item) => item.textContent?.trim() === entryText && item.offsetParent !== null)
+        element?.click()
+        return Boolean(element)
+      }, text),
+    120_000)
+  }
+
+  function requireEnv(): DesktopWebDriverEnvironment {
+    if (!env) {
+      throw new Error("Desktop WebDriver environment was not initialized.")
+    }
+
+    return env
   }
 })

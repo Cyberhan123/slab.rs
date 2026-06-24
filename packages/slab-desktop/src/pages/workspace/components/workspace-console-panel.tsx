@@ -19,6 +19,7 @@ import {
 import { cn } from "@/lib/utils"
 
 type WorkspaceConsolePanelProps = {
+  onClose: () => void
   themeMode: "light" | "dark"
   workspaceRoot: string
 }
@@ -96,7 +97,7 @@ function createTerminalSession(shell: WorkspaceTerminalShell = defaultTerminalSh
   }
 }
 
-export function WorkspaceConsolePanel({ themeMode, workspaceRoot }: WorkspaceConsolePanelProps) {
+export function WorkspaceConsolePanel({ onClose, themeMode, workspaceRoot }: WorkspaceConsolePanelProps) {
   const { t } = useTranslation()
   const terminalRefs = useRef(new Map<string, XtermTerminal>())
   const workspaceRootRef = useRef(workspaceRoot)
@@ -230,6 +231,16 @@ export function WorkspaceConsolePanel({ themeMode, workspaceRoot }: WorkspaceCon
             aria-label={t("pages.workspace.console.clear")}
           >
             <Trash2 className="size-3.5" />
+          </Button>
+          <Button
+            type="button"
+            variant="quiet"
+            size="icon-xs"
+            onClick={onClose}
+            aria-label={t("pages.workspace.console.close")}
+            data-testid="workspace-console-close-button"
+          >
+            <X className="size-3.5" />
           </Button>
         </div>
       </div>

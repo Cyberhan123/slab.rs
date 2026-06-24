@@ -12,6 +12,7 @@ import { Button } from "@slab/components/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@slab/components/tooltip"
 import { SoftPanel, StageEmptyState, StatusPill } from "@slab/components/workspace"
 import {
+  ArrowLeft,
   Command as CommandPaletteIcon,
   FileCode2,
   Files,
@@ -21,7 +22,6 @@ import {
   Loader2,
   Search,
   Terminal,
-  X,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -61,7 +61,9 @@ export function WorkspaceWorkbench({
   handleExplainWithAssistant,
   handleOpenFile,
   handleOpenFolder,
+  handleOpenConsole,
   handleOpenTextSearchMatch,
+  handleCloseConsole,
   handleRefreshGitStatus,
   handleRevealDirectoryInTree,
   handleSaveFile,
@@ -206,7 +208,7 @@ export function WorkspaceWorkbench({
 
   if (!workspace) {
     return (
-      <div className="h-full w-full overflow-y-auto px-1 pb-10">
+      <div className="h-full w-full overflow-y-auto px-1 pb-10" data-testid="workspace-open-screen">
         <div className="mx-auto grid w-full max-w-5xl gap-5">
           <StageEmptyState
             icon={FolderKanban}
@@ -242,38 +244,47 @@ export function WorkspaceWorkbench({
   }
 
   return (
-    <div className="vs flex h-full min-h-0 w-full flex-col gap-4 overflow-hidden">
+    <div className="vs flex h-full min-h-0 w-full flex-col gap-4 overflow-hidden" data-testid="workspace-active-screen">
       <div className="flex flex-wrap items-center justify-between gap-3 px-1">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h2 className="truncate text-xl font-semibold tracking-tight">{workspace.name}</h2>
-            <StatusPill status="success">{SLAB_DIR_NAME}</StatusPill>
+        <div className="flex min-w-0 items-start gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="quiet"
+                size="icon-sm"
+                aria-label={t("pages.workspace.actions.backToOpen")}
+                onClick={handleCloseWorkspace}
+                data-testid="workspace-back-button"
+              >
+                <ArrowLeft className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("pages.workspace.actions.backToOpen")}</TooltipContent>
+          </Tooltip>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h2 className="truncate text-xl font-semibold tracking-tight">{workspace.name}</h2>
+              <StatusPill status="success">{SLAB_DIR_NAME}</StatusPill>
+            </div>
+            <p className="mt-1 truncate text-xs text-muted-foreground">{workspace.rootPath}</p>
           </div>
-          <p className="mt-1 truncate text-xs text-muted-foreground">{workspace.rootPath}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="pill" size="sm" onClick={handleOpenFolder}>
             <FolderOpen className="size-4" />
             {t("pages.workspace.actions.openFolder")}
           </Button>
-          <Button
-            variant="quiet"
-            size="sm"
-            onClick={handleCloseWorkspace}
-            data-testid="workspace-close-button"
-          >
-            <X className="size-4" />
-            {t("pages.workspace.actions.closeWorkspace")}
-          </Button>
           {commandPaletteButton}
           <Button
             variant={consoleOpen ? "pill" : "quiet"}
             size="sm"
-            onClick={handleToggleConsole}
+            disabled={consoleOpen}
+            onClick={handleOpenConsole}
             data-testid="workspace-console-toggle"
           >
             <Terminal className="size-4" />
-            {consoleOpen ? t("pages.workspace.console.hide") : t("pages.workspace.console.show")}
+            {t("pages.workspace.console.show")}
           </Button>
         </div>
       </div>
@@ -431,6 +442,7 @@ export function WorkspaceWorkbench({
             <WorkspaceConsolePanel
               themeMode={terminalThemeMode}
               workspaceRoot={workspace.rootPath}
+              onClose={handleCloseConsole}
             />
           ) : null}
         </div>
@@ -484,7 +496,7 @@ function WorkspacePathOpenForm({
         data-testid="workspace-open-path-button"
       >
         <FolderOpen className="size-4" />
-        {t("pages.workspace.actions.openFolder")}
+        {t("pages.workspace.actions.openPath")}
       </Button>
     </form>
   )

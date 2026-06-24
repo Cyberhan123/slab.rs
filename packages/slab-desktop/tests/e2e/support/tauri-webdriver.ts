@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url"
 import { setTimeout as delay } from "node:timers/promises"
 
 import { remote } from "webdriverio"
+import { prepareWorkspaceProject, type WorkspaceProjectFixture } from "./workspace-project"
 
 const setupSchemaUrl = "https://slab.reorgix.com/manifests/v1/settings-document.schema.json"
 const supportDir = dirname(fileURLToPath(import.meta.url))
@@ -45,6 +46,7 @@ export type DesktopWebDriverEnvironment = {
   serverBaseUrl: string
   sessionStateDir: string
   settingsPath: string
+  workspaceProject: WorkspaceProjectFixture
   workspaceRoot: string
 }
 
@@ -63,9 +65,7 @@ export async function createDesktopWebDriverEnvironment(): Promise<DesktopWebDri
     mkdirSync(dir, { recursive: true })
   }
 
-  mkdirSync(join(workspaceRoot, "src"), { recursive: true })
-  writeFileSync(join(workspaceRoot, "README.md"), "# Desktop Workspace\n", "utf8")
-  writeFileSync(join(workspaceRoot, "src", "main.rs"), "fn main() {}\n", "utf8")
+  const workspaceProject = prepareWorkspaceProject(workspaceRoot, "Desktop Workspace")
   writeSettingsDocument(settingsPath, {
     databaseUrl: sqliteUrlForPath(databasePath),
     modelConfigDir,
@@ -83,6 +83,7 @@ export async function createDesktopWebDriverEnvironment(): Promise<DesktopWebDri
     serverBaseUrl: desktopApiBaseUrl,
     sessionStateDir,
     settingsPath,
+    workspaceProject,
     workspaceRoot,
   }
 }
@@ -179,7 +180,7 @@ export async function collectBrowserFailureMessages(browser: WebdriverIO.Browser
 }
 
 export function isWorkspaceDesktopFailure(message: string): boolean {
-  return /ipc\.localhost|request_script_injection|failed to start workspace terminal|FileOperationError|Unable to resolve nonexistent file/i.test(message)
+  return /extensionHost\.worker|Failed to fetch dynamically imported module|LocalWebWorker|ipc\.localhost|request_script_injection|failed to start workspace terminal|FileOperationError|Unable to resolve nonexistent file/i.test(message)
 }
 
 export async function eventually<T>(

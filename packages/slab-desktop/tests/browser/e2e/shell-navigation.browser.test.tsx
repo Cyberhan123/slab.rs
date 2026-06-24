@@ -38,6 +38,11 @@ describe('desktop shell navigation e2e', () => {
       'aria-current',
       'page',
     );
+    expect(
+      Array.from(document.querySelectorAll('nav [data-testid^="sidebar-link-"]'))
+        .map((element) => element.getAttribute('data-testid'))
+        .slice(0, 2),
+    ).toEqual(['sidebar-link-assistant', 'sidebar-link-workspace']);
 
     await page.getByTestId('sidebar-link-image').click();
     await expect.element(page.getByTestId('route-marker-image')).toBeVisible();

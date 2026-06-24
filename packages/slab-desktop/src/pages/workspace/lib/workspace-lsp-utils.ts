@@ -36,9 +36,13 @@ export function supportsWorkspaceLsp(language: string) {
 }
 
 export function workspaceLspModelPath(workspaceRoot: string, relativePath: string) {
+  return workspaceLspFileUri(workspaceRoot, relativePath)
+}
+
+export function workspaceLspFileUri(workspaceRoot: string, relativePath = "") {
   const path = relativePath.replace(/\\/g, "/").replace(/^\/+/, "")
   const root = normalizeWorkspacePath(workspaceRoot)
-  const absolutePath = `${root}/${path}`
+  const absolutePath = path ? `${root}/${path}` : root
   const prefixedPath = absolutePath.startsWith("/") ? absolutePath : `/${absolutePath}`
 
   return `file://${encodeURI(prefixedPath)}`

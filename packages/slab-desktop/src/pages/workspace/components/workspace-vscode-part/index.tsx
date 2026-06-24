@@ -32,6 +32,8 @@ export function WorkspaceVscodePart({
   const themeModeRef = useRef(themeMode)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const [mountState, setMountState] = useState<MountState>("pending")
+  const [mountStage, setMountStage] = useState("initialize")
+  const [mountError, setMountError] = useState<string | null>(null)
 
   useEffect(() => {
     themeModeRef.current = themeMode
@@ -43,6 +45,8 @@ export function WorkspaceVscodePart({
     let stage = "initialize"
 
     setMountState("pending")
+    setMountStage(stage)
+    setMountError(null)
 
     void (async () => {
       const {
@@ -50,30 +54,42 @@ export function WorkspaceVscodePart({
         ensureWorkspaceLspServices,
         setWorkspaceLspFileServiceRoot,
       } = await import("../../lib/workspace-lsp")
+      stage = "set-root"
+      setMountStage(stage)
       setWorkspaceLspFileServiceRoot(workspaceRoot)
+      stage = "ensure-services"
+      setMountStage(stage)
       await ensureWorkspaceLspServices(workspaceRoot)
+      stage = "theme"
+      setMountStage(stage)
       applySlabMonacoTheme(Monaco, themeModeRef.current)
       if (editorSettings) {
+        stage = "editor-settings"
+        setMountStage(stage)
         await applyWorkspaceEditorSettings(editorSettings, workspaceRoot)
       }
       stage = "load-views"
+      setMountStage(stage)
       const views = await import("@codingame/monaco-vscode-views-service-override")
       if (cancelled || !containerRef.current) {
         return
       }
 
-
       stage = part === "explorer" ? "render-explorer" : "render-editor"
+      setMountStage(stage)
       if (part === "explorer") {
         disposable = views.renderSidebarPart(containerRef.current)
       } else {
         disposable = views.renderEditorPart(containerRef.current)
       }
 
+      stage = "ready"
+      setMountStage(stage)
       setMountState("ready")
     })().catch((error) => {
       if (!cancelled) {
         setMountState("failed")
+        setMountError(error instanceof Error ? `${error.name}: ${error.message}` : String(error))
       }
       console.debug("workspace VS Code part unavailable", {
         error: error instanceof Error
@@ -101,6 +117,10 @@ export function WorkspaceVscodePart({
     <div
       ref={wrapperRef}
       className={cn("slab-vscode-part relative h-full min-h-0 w-full overflow-hidden", className)}
+      data-mount-stage={mountStage}
+      data-mount-state={mountState}
+      data-mount-error={mountError ?? undefined}
+      data-part={part}
       data-testid={part === "explorer" ? "workspace-vscode-explorer" : "workspace-vscode-editor"}
     >
       <div ref={containerRef} className="h-full min-h-0 w-full overflow-hidden" />

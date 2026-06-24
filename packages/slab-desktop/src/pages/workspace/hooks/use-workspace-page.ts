@@ -80,10 +80,14 @@ export function useWorkspacePage() {
     retry: false,
   })
   const workspace = workspaceQuery.data?.current ?? null
-  const recentWorkspaces = workspaceQuery.data?.recent ?? []
+  const persistedRecentWorkspaces = useWorkspaceUiStore((state) => state.recentWorkspaces)
+  const recentWorkspaces = persistedRecentWorkspaces.length > 0
+    ? persistedRecentWorkspaces
+    : workspaceQuery.data?.recent ?? []
   const workspaceUiHasHydrated = useWorkspaceUiStore((state) => state.hasHydrated)
   const workspaceUiByRoot = useWorkspaceUiStore((state) => state.workspaces)
   const patchWorkspaceState = useWorkspaceUiStore((state) => state.patchWorkspaceState)
+  const rememberRecentWorkspace = useWorkspaceUiStore((state) => state.rememberRecentWorkspace)
   const workspaceUi = workspace
     ? workspaceUiByRoot[workspace.rootPath] ?? emptyWorkspaceUiSnapshot
     : emptyWorkspaceUiSnapshot
@@ -212,6 +216,12 @@ export function useWorkspacePage() {
     async (rootPath: string) => {
       try {
         const nextState = await workspaceOpen(rootPath)
+        if (nextState.current) {
+          rememberRecentWorkspace({
+            name: nextState.current.name,
+            rootPath: nextState.current.rootPath,
+          })
+        }
         queryClient.setQueryData(WORKSPACE_STATE_QUERY_KEY, nextState)
         await queryClient.invalidateQueries()
       } catch (error) {
@@ -220,7 +230,7 @@ export function useWorkspacePage() {
         })
       }
     },
-    [queryClient, t],
+    [queryClient, rememberRecentWorkspace, t],
   )
 
   const handleOpenFolder = useCallback(async () => {
@@ -569,6 +579,26 @@ export function useWorkspacePage() {
     })
   }, [consoleOpen, patchWorkspaceState, workspace])
 
+  const handleOpenConsole = useCallback(() => {
+    if (!workspace || consoleOpen) {
+      return
+    }
+
+    patchWorkspaceState(workspace.rootPath, {
+      consoleOpen: true,
+    })
+  }, [consoleOpen, patchWorkspaceState, workspace])
+
+  const handleCloseConsole = useCallback(() => {
+    if (!workspace || !consoleOpen) {
+      return
+    }
+
+    patchWorkspaceState(workspace.rootPath, {
+      consoleOpen: false,
+    })
+  }, [consoleOpen, patchWorkspaceState, workspace])
+
   const handleUpdateEditorSettings = useCallback(
     (patch: Partial<WorkspaceEditorSettings>) => {
       if (!workspace) {
@@ -897,6 +927,8 @@ export function useWorkspacePage() {
     handleOpenFile,
     handleOpenFolder,
     handleOpenTextSearchMatch,
+    handleOpenConsole,
+    handleCloseConsole,
     handleRefreshGitStatus,
     handleRevealDirectoryInTree: revealActiveFileInExplorer,
     handleSaveFile,

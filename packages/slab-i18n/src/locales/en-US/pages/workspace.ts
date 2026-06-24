@@ -4,7 +4,9 @@ export const workspace = {
     subtitle: 'Folder mode',
   },
   actions: {
+    backToOpen: 'Back to open screen',
     openFolder: 'Open folder',
+    openPath: 'Open path',
     closeWorkspace: 'Close',
     reopen: 'Open',
     pathPlaceholder: 'Workspace folder path',
@@ -128,6 +130,7 @@ export const workspace = {
     terminal: 'Terminal',
     show: 'Console',
     hide: 'Hide console',
+    close: 'Close console',
     newTerminal: 'New terminal',
     shell: 'Terminal shell',
     shells: {

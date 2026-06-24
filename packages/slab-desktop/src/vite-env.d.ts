@@ -1,5 +1,10 @@
 /// <reference types="vite/client" />
 
+declare module '*?worker&url' {
+  const url: string;
+  export default url;
+}
+
 declare module 'markdown-it-katex' {
   import type MarkdownIt from 'markdown-it';
 

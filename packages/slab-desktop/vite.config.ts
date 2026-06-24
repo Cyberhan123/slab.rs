@@ -30,7 +30,10 @@ export default defineConfig(async () => ({
     },
   ],
   optimizeDeps: {
-      include: [
+    include: [
+      'vscode-textmate',
+      'vscode-oniguruma',
+      '@vscode/vscode-languagedetection',
       '@codingame/monaco-vscode-api/extensions',
       '@codingame/monaco-vscode-api',
       '@codingame/monaco-vscode-api/monaco',
@@ -42,7 +45,7 @@ export default defineConfig(async () => ({
       // 'marked'
     ],
     rolldownOptions: {
-       tsconfig: './tsconfig.json',
+      tsconfig: './tsconfig.json',
       // plugins: [importMetaUrlPlugin],
     },
   },
@@ -82,19 +85,19 @@ export default defineConfig(async () => ({
     host: host || false,
     proxy: apiProxyTarget
       ? {
-          "/v1": {
-            target: apiProxyTarget,
-            changeOrigin: true,
-            ws: true,
-          },
-        }
+        "/v1": {
+          target: apiProxyTarget,
+          changeOrigin: true,
+          ws: true,
+        },
+      }
       : undefined,
     hmr: host
       ? {
-          protocol: "ws",
-          host,
-          port: 1421,
-        }
+        protocol: "ws",
+        host,
+        port: 1421,
+      }
       : undefined,
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`

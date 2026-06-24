@@ -5,6 +5,7 @@ import {
   workspaceVscodeDirtyCloseTarget,
   supportsWorkspaceLsp,
   workspaceLspDefinitionTargetFromResult,
+  workspaceLspFileUri,
   workspaceLspImportSpecifierPositionForTarget,
   workspaceLspModelPath,
   workspaceLspRelativePathFromUri,
@@ -163,6 +164,15 @@ describe("workspace LSP helpers", () => {
   it("builds file uri model paths from Windows verbatim workspace roots", () => {
     expect(workspaceLspModelPath("\\\\?\\C:\\Users\\demo\\repo", "src/index.ts")).toBe(
       "file:///c:/Users/demo/repo/src/index.ts",
+    )
+  })
+
+  it("builds normalized file uri roots for VS Code workspace folders", () => {
+    expect(workspaceLspFileUri("C:\\Users\\demo\\repo")).toBe(
+      "file:///c:/Users/demo/repo",
+    )
+    expect(workspaceLspFileUri("\\\\?\\C:\\Users\\demo\\repo")).toBe(
+      "file:///c:/Users/demo/repo",
     )
   })
 

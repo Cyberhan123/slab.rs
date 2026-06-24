@@ -27,8 +27,8 @@ type SidebarItem = {
 }
 
 const primaryItems: SidebarItem[] = [
-  { to: "/workspace", labelKey: "layouts.sidebar.items.workspace", icon: FolderKanban },
   { to: "/", labelKey: "layouts.sidebar.items.assistant", icon: BotMessageSquare, end: true },
+  { to: "/workspace", labelKey: "layouts.sidebar.items.workspace", icon: FolderKanban },
   { to: "/image", labelKey: "layouts.sidebar.items.image", icon: ImageIcon },
   { to: "/video", labelKey: "layouts.sidebar.items.video", icon: Film },
   { to: "/audio", labelKey: "layouts.sidebar.items.audio", icon: Mic },

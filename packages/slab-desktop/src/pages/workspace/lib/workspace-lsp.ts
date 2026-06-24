@@ -1,20 +1,23 @@
 import type * as Monaco from "monaco-editor"
-import type { IFileChange } from "@codingame/monaco-vscode-files-service-override"
 import type { WorkspaceEditorSettings } from "@/store/useWorkspaceUiStore"
 import { URI } from "@codingame/monaco-vscode-api/vscode/vs/base/common/uri"
+import { IWorkspaceContextService } from "@codingame/monaco-vscode-api/vscode/vs/platform/workspace/common/workspace.service"
 import {
   initialize as initializeMonacoWrapper,
   isInitialized as workspaceMonacoIsInitialized,
   registerEditorOpenHandler,
   registerServices,
+  registerWorker,
+  Worker as MonacoWorker,
 } from "@codingame/monaco-editor-wrapper"
-import "@codingame/monaco-editor-wrapper/features/extensionHostWorker"
 import "@codingame/monaco-editor-wrapper/features/search"
+import extensionHostWorkerUrl from "@codingame/monaco-vscode-api/workers/extensionHost.worker?worker&url"
 import getAccessibilityServiceOverride from "@codingame/monaco-vscode-accessibility-service-override"
-import getConfigurationServiceOverride from "@codingame/monaco-vscode-configuration-service-override"
+import getConfigurationServiceOverride, { reinitializeWorkspace } from "@codingame/monaco-vscode-configuration-service-override"
 import { whenReady as cppExtensionReady } from "@codingame/monaco-vscode-cpp-default-extension"
 import getDialogsServiceOverride from "@codingame/monaco-vscode-dialogs-service-override"
 import getExplorerServiceOverride from "@codingame/monaco-vscode-explorer-service-override"
+import getExtensionServiceOverride from "@codingame/monaco-vscode-extensions-service-override"
 import getLifecycleServiceOverride from "@codingame/monaco-vscode-lifecycle-service-override"
 import { whenReady as goExtensionReady } from "@codingame/monaco-vscode-go-default-extension"
 import getKeybindingsServiceOverride from "@codingame/monaco-vscode-keybindings-service-override"
@@ -46,22 +49,8 @@ import {
 } from "vscode-languageclient/browser.js"
 import { SERVER_BASE_URL } from "@slab/api/config"
 import {
-  workspaceCreateDirectory,
-  workspaceDeletePath,
-  workspaceRenamePath,
-  workspaceReadDirectory,
-  workspaceReadFile,
-  workspaceStatPath,
-  workspaceWatch,
-  workspaceWriteFile,
-} from "@/lib/workspace-bridge"
-import type {
-  WorkspaceDirectoryResponse,
-  WorkspaceFileContent,
-  WorkspaceWatchEvent,
-} from "@/lib/workspace-bridge"
-import {
   workspaceLspDefinitionTargetFromResult,
+  workspaceLspFileUri,
   workspaceLspImportSpecifierPositionForTarget,
   supportsWorkspaceLsp,
   workspaceLspModelPath,
@@ -73,6 +62,12 @@ import {
 } from "./workspace-lsp-utils"
 import { slabTerminalBackend } from "./workspace-terminal-service"
 import { getStandaloneMonacoEditorOverrides } from "./workspace-standalone-monaco"
+import {
+  clearSlabWorkspaceFileSystemCache,
+  ensureSlabWorkspaceFileSystem,
+  preloadSlabWorkspaceFileSystem,
+  setSlabWorkspaceFileSystemRoot,
+} from "./workspace-file-system-provider"
 
 export {
   supportsWorkspaceLsp,
@@ -139,14 +134,6 @@ type WorkspaceVscodeWorkingCopyService = {
 
 const WORKSPACE_LSP_RECONNECT_INITIAL_DELAY_MS = 250
 const WORKSPACE_LSP_RECONNECT_MAX_DELAY_MS = 5_000
-const MAX_WORKSPACE_PREVIEW_BYTES = 1024 * 1024
-// Number of directory levels fetched in a single request when a workspace
-// opens, so the file tree renders without one request per folder. Deeper
-// folders still lazy-load on expand.
-const WORKSPACE_PRELOAD_DEPTH = 2
-// Watch events arrive in bursts (a single save can emit several); coalesce them
-// into one targeted cache invalidation pass.
-const WORKSPACE_INVALIDATE_DEBOUNCE_MS = 100
 
 type WorkspaceFileService = {
   root: string | null
@@ -182,10 +169,47 @@ let currentOpenFile: WorkspaceLspOpenFile | null = null
 let currentWorkspaceFileService: WorkspaceFileService = { root: null }
 let workspaceFileSystemOverlayRegistered = false
 let workspaceEditorOpenHandlerRegistered = false
+let workspaceExtensionHostWorkerRegistered = false
 let workspaceVscodeServiceOverridesRegistered = false
 let workspaceVscodeRoot: string | null = null
-let clearWorkspaceFileSystemCache = () => {}
-let preloadWorkspaceFileSystem = async (_root: string) => {}
+
+function setWorkspaceLspDebugStage(stage: string) {
+  if (typeof window === "undefined") {
+    return
+  }
+
+  ;(window as typeof window & { __SLAB_WORKSPACE_LSP_STAGE__?: string }).__SLAB_WORKSPACE_LSP_STAGE__ = stage
+}
+
+function setWorkspaceLspDebugContext(context: unknown) {
+  if (typeof window === "undefined") {
+    return
+  }
+
+  ;(window as typeof window & { __SLAB_WORKSPACE_LSP_CONTEXT__?: unknown }).__SLAB_WORKSPACE_LSP_CONTEXT__ = context
+}
+
+function pushWorkspaceLspDebugDirectory(entry: unknown) {
+  if (typeof window === "undefined") {
+    return
+  }
+
+  const target = window as typeof window & { __SLAB_WORKSPACE_LSP_DIRECTORIES__?: unknown[] }
+  target.__SLAB_WORKSPACE_LSP_DIRECTORIES__ = [...(target.__SLAB_WORKSPACE_LSP_DIRECTORIES__ ?? []).slice(-20), entry]
+}
+
+function pushWorkspaceLspDebugStat(entry: unknown) {
+  if (typeof window === "undefined") {
+    return
+  }
+
+  const target = window as typeof window & { __SLAB_WORKSPACE_LSP_STATS__?: unknown[] }
+  target.__SLAB_WORKSPACE_LSP_STATS__ = [...(target.__SLAB_WORKSPACE_LSP_STATS__ ?? []).slice(-30), entry]
+}
+
+function workspaceRootUri(workspaceRoot: string) {
+  return URI.parse(workspaceLspFileUri(workspaceRoot))
+}
 
 export function workspaceLspModelUri(
   monaco: typeof Monaco,
@@ -203,11 +227,14 @@ export function setWorkspaceLspFileServiceRoot(workspaceRoot: string | null) {
   const previousWorkspaceRoot = currentWorkspaceFileService.root
   currentWorkspaceFileService = { root: workspaceRoot }
   if (previousWorkspaceRoot !== workspaceRoot) {
-    clearWorkspaceFileSystemCache()
+    // Tell the backend delegate its new root before clearing/preloading so its
+    // preload race-guard sees the updated root.
+    setSlabWorkspaceFileSystemRoot(workspaceRoot)
+    clearSlabWorkspaceFileSystemCache()
     if (workspaceRoot) {
       // Pre-load the first few directory levels in one request so the explorer
       // can render without re-fetching each folder as it expands.
-      void preloadWorkspaceFileSystem(workspaceRoot).catch((error) => {
+      void preloadSlabWorkspaceFileSystem(workspaceRoot).catch((error) => {
         console.debug("workspace preload failed", { workspaceRoot, error })
       })
     }
@@ -230,25 +257,50 @@ export function ensureWorkspaceLspServices(workspaceRoot?: string | null) {
 
   monacoVscodeApiReady ??= (async () => {
     if (!workspaceMonacoIsInitialized()) {
+      setWorkspaceLspDebugStage("register-service-overrides")
       registerWorkspaceVscodeServiceOverrides()
       if (!workspaceFileSystemOverlayRegistered) {
-        await registerWorkspaceFileSystemOverlay()
+        setWorkspaceLspDebugStage("register-file-system-overlay")
+        ensureSlabWorkspaceFileSystem({
+          backend: {
+            debug: {
+              pushDirectory: pushWorkspaceLspDebugDirectory,
+              pushStat: pushWorkspaceLspDebugStat,
+            },
+          },
+        })
+        setSlabWorkspaceFileSystemRoot(currentWorkspaceFileService.root)
         workspaceFileSystemOverlayRegistered = true
-        // The overlay caches now exist. setWorkspaceLspFileServiceRoot ran
-        // before this registration, so its preload was a no-op on first init;
-        // fire it now so the explorer renders without one request per folder.
+        // setWorkspaceLspFileServiceRoot ran before this registration, so its
+        // preload was a no-op on first init; fire it now so the explorer renders
+        // without one request per folder.
         if (currentWorkspaceFileService.root) {
-          void preloadWorkspaceFileSystem(currentWorkspaceFileService.root).catch((error) => {
+          void preloadSlabWorkspaceFileSystem(currentWorkspaceFileService.root).catch((error) => {
             console.debug("workspace preload failed", { error })
           })
         }
       }
+      setWorkspaceLspDebugStage("initialize-monaco-wrapper")
       await initializeMonacoWrapper(workspaceWorkbenchOptions(currentWorkspaceFileService.root), {
         registerAdditionalExtensions: true,
-        waitForDefaultExtensions: true,
+        waitForDefaultExtensions: false,
       })
+      const { ConfigurationTarget, commands, workspace } = await import("vscode")
+      await workspace.getConfiguration("explorer").update(
+        "compactFolders",
+        false,
+        ConfigurationTarget.Global,
+      )
+      // executeCommand returns a VS Code Thenable (no .catch); wrap it so the
+      // refresh is best-effort and never fails service init.
+      await Promise.resolve(commands.executeCommand("workbench.files.action.refreshFilesExplorer")).catch(
+        (error) => {
+          console.debug("workspace explorer refresh failed", { error })
+        },
+      )
+      setWorkspaceLspDebugStage("load-workspace-extensions")
       // Load additional extensions not included in the default set
-      await Promise.allSettled([
+      void Promise.allSettled([
         setiThemeExtensionReady(),
         emmetExtensionReady(),
         dockerExtensionReady(),
@@ -261,10 +313,17 @@ export function ensureWorkspaceLspServices(workspaceRoot?: string | null) {
     }
 
     if (currentWorkspaceFileService.root) {
-      await syncWorkspaceVscodeRoot(currentWorkspaceFileService.root)
+      setWorkspaceLspDebugStage("sync-workspace-root")
+      void syncWorkspaceVscodeRoot(currentWorkspaceFileService.root).catch((error) => {
+        console.debug("workspace VS Code root sync failed", {
+          error,
+          workspaceRoot: currentWorkspaceFileService.root,
+        })
+      })
     }
 
     if (!workspaceEditorOpenHandlerRegistered) {
+      setWorkspaceLspDebugStage("register-editor-open-handler")
       registerEditorOpenHandler(async (modelRef, options) => {
         const activeWorkspaceRoot = currentWorkspaceFileService.root
         const selection = editorSelection(options)
@@ -286,6 +345,7 @@ export function ensureWorkspaceLspServices(workspaceRoot?: string | null) {
       })
       workspaceEditorOpenHandlerRegistered = true
     }
+    setWorkspaceLspDebugStage("ready")
   })().catch((error) => {
     monacoVscodeApiReady = null
     throw error
@@ -293,7 +353,9 @@ export function ensureWorkspaceLspServices(workspaceRoot?: string | null) {
 
   return monacoVscodeApiReady.then(async () => {
     if (workspaceRoot) {
-      await syncWorkspaceVscodeRoot(workspaceRoot)
+      void syncWorkspaceVscodeRoot(workspaceRoot).catch((error) => {
+        console.debug("workspace VS Code root sync failed", { error, workspaceRoot })
+      })
     }
   })
 }
@@ -537,7 +599,9 @@ export async function applyWorkspaceEditorSettings(
     return
   }
   if (workspaceRoot) {
-    await syncWorkspaceVscodeRoot(workspaceRoot)
+    void syncWorkspaceVscodeRoot(workspaceRoot).catch((error) => {
+      console.debug("workspace VS Code root sync failed", { error, workspaceRoot })
+    })
   }
   const { ConfigurationTarget, workspace } = await import("vscode")
   const editorConfig = workspace.getConfiguration("editor")
@@ -553,13 +617,17 @@ function workspaceWorkbenchOptions(workspaceRoot: string | null) {
   if (!workspaceRoot) {
     return undefined
   }
+  const rootUri = workspaceRootUri(workspaceRoot)
 
   return {
+    configurationDefaults: {
+      "explorer.compactFolders": false,
+    },
     workspaceProvider: {
       open: async () => false,
       trusted: true,
       workspace: {
-        folderUri: URI.file(workspaceRoot),
+        folderUri: rootUri,
         id: workspaceRoot,
       },
     },
@@ -575,20 +643,27 @@ async function syncWorkspaceVscodeRoot(workspaceRoot: string) {
     return
   }
 
-  const { getService, IWorkspaceContextService, IWorkspaceEditingService } = await import("@codingame/monaco-vscode-api")
+  const { getService } = await import("@codingame/monaco-vscode-api")
   const contextService = await getService(IWorkspaceContextService)
   const folders = contextService.getWorkspace().folders
-  const rootUri = URI.file(workspaceRoot)
+  const rootUri = workspaceRootUri(workspaceRoot)
+  setWorkspaceLspDebugContext({
+    actual: folders.map((folder) => folder.uri.toString()),
+    expected: rootUri.toString(),
+  })
   if (folders.length === 1 && folders[0]?.uri.toString() === rootUri.toString()) {
     workspaceVscodeRoot = workspaceRoot
     return
   }
 
-  const workspaceEditingService = await getService(IWorkspaceEditingService)
-  await workspaceEditingService.updateFolders(0, folders.length, [{
-    name: workspaceRoot.split(/[\\/]/).findLast(Boolean) ?? "Workspace",
+  console.debug("workspace VS Code context root mismatch", {
+    actual: folders.map((folder) => folder.uri.toString()),
+    expected: rootUri.toString(),
+  })
+  await reinitializeWorkspace({
+    id: workspaceRoot,
     uri: rootUri,
-  }], true)
+  })
   workspaceVscodeRoot = workspaceRoot
 }
 
@@ -638,12 +713,25 @@ function registerWorkspaceVscodeServiceOverrides() {
     return
   }
 
+  if (!workspaceExtensionHostWorkerRegistered) {
+    registerWorker(
+      "extensionHostWorkerMain",
+      new MonacoWorker(new URL(extensionHostWorkerUrl, import.meta.url), {
+        type: "module",
+      }),
+    )
+    workspaceExtensionHostWorkerRegistered = true
+  }
+
   registerServices({
     ...getStandaloneMonacoEditorOverrides(),
     ...getAccessibilityServiceOverride(),
     ...getConfigurationServiceOverride(),
     ...getDialogsServiceOverride(),
     ...getExplorerServiceOverride(),
+    ...getExtensionServiceOverride({
+      enableWorkerExtensionHost: true,
+    }),
     ...getKeybindingsServiceOverride(),
     ...getLanguageDetectionWorkerServiceOverride(),
     ...getLanguagesServiceOverride(),
@@ -739,7 +827,7 @@ export async function startWorkspaceLspSession({
           workspaceFolder: {
             index: 0,
             name: "workspace",
-            uri: monaco.Uri.file(workspaceRoot),
+            uri: monaco.Uri.parse(workspaceLspFileUri(workspaceRoot)),
           },
           initializationOptions: {
             workspaceRoot,
@@ -889,375 +977,6 @@ function editorSelection(options: unknown): WorkspaceLspOpenFileOptions | undefi
   }
 
   return options.selection as WorkspaceLspOpenFileOptions | undefined
-}
-
-async function registerWorkspaceFileSystemOverlay() {
-  const {
-    FileChangeType,
-    FileSystemProviderCapabilities,
-    FileSystemProviderError,
-    FileSystemProviderErrorCode,
-    FileType,
-    registerFileSystemOverlay,
-  } = await import("@codingame/monaco-vscode-files-service-override")
-  const { Emitter } = await import("@codingame/monaco-vscode-api/vscode/vs/base/common/event")
-  const textEncoder = new TextEncoder()
-  const textDecoder = new TextDecoder()
-  const noopDisposable = { dispose() {} }
-  const changesEmitter = new Emitter<readonly IFileChange[]>()
-  type WorkspaceFileStat = {
-    ctime: number
-    mtime: number
-    size: number
-    type: number
-  }
-  const directoryCache = new Map<string, WorkspaceDirectoryResponse>()
-  const pendingDirectoryReads = new Map<string, { generation: number; promise: Promise<WorkspaceDirectoryResponse> }>()
-  const pendingFileReads = new Map<string, Promise<WorkspaceFileContent>>()
-  const pathStatCache = new Map<string, WorkspaceFileStat>()
-  const pendingPathStats = new Map<string, { generation: number; promise: Promise<WorkspaceFileStat> }>()
-  let cacheGeneration = 0
-  clearWorkspaceFileSystemCache = () => {
-    cacheGeneration += 1
-    directoryCache.clear()
-    pendingDirectoryReads.clear()
-    pendingFileReads.clear()
-    pathStatCache.clear()
-    pendingPathStats.clear()
-  }
-  preloadWorkspaceFileSystem = async (root: string) => {
-    if (!root) {
-      return
-    }
-    let flat: WorkspaceDirectoryResponse
-    try {
-      flat = await workspaceReadDirectory("", { depth: WORKSPACE_PRELOAD_DEPTH })
-    } catch {
-      return
-    }
-    // A rapid workspace switch could change the root while the fetch was in flight.
-    if (currentWorkspaceFileService.root !== root) {
-      return
-    }
-
-    // Group every entry under its parent directory so readdir()/stat() for any
-    // pre-loaded level resolve from cache. Directories at the depth boundary are
-    // listed as entries but their own children were not fetched, so they have no
-    // directoryCache entry and still lazy-load on expand.
-    const entriesByParent = new Map<string, WorkspaceDirectoryResponse["entries"]>()
-    const now = Date.now()
-    for (const entry of flat.entries) {
-      const separatorIndex = entry.relativePath.lastIndexOf("/")
-      const parent = separatorIndex === -1 ? "" : entry.relativePath.slice(0, separatorIndex)
-      let siblings = entriesByParent.get(parent)
-      if (!siblings) {
-        siblings = []
-        entriesByParent.set(parent, siblings)
-      }
-      siblings.push(entry)
-      pathStatCache.set(entry.relativePath, {
-        ctime: entry.createdAt ?? now,
-        mtime: entry.modifiedAt ?? now,
-        size: entry.kind === "file" ? entry.sizeBytes ?? 0 : 0,
-        type: entry.kind === "directory" ? FileType.Directory : FileType.File,
-      })
-    }
-    for (const [parent, entries] of entriesByParent) {
-      // Never clobber a fresher in-flight readdir for this directory.
-      if (!directoryCache.has(parent)) {
-        directoryCache.set(parent, {
-          relativePath: parent,
-          entries,
-          truncated: parent === "" ? flat.truncated : false,
-        })
-      }
-    }
-    pathStatCache.set("", { ctime: now, mtime: now, size: 0, type: FileType.Directory })
-  }
-  const invalidateWorkspacePaths = (relativePaths: string[]) => {
-    if (relativePaths.length === 0) {
-      return
-    }
-    const touched = new Set<string>()
-    for (const relativePath of relativePaths) {
-      const separatorIndex = relativePath.lastIndexOf("/")
-      const parent = separatorIndex === -1 ? "" : relativePath.slice(0, separatorIndex)
-      for (const key of [relativePath, parent]) {
-        touched.add(key)
-        directoryCache.delete(key)
-        pendingDirectoryReads.delete(key)
-        pathStatCache.delete(key)
-        pendingPathStats.delete(key)
-      }
-    }
-    const activeWorkspaceRoot = currentWorkspaceFileService.root
-    if (activeWorkspaceRoot) {
-      changesEmitter.fire(
-        [...touched].map((relativePath) => ({
-          resource: URI.parse(workspaceLspModelPath(activeWorkspaceRoot, relativePath)),
-          type: FileChangeType.UPDATED,
-        })),
-      )
-    }
-  }
-  const loadWorkspaceDirectory = async (relativePath: string) => {
-    const cachedDirectory = directoryCache.get(relativePath)
-    if (cachedDirectory) {
-      return cachedDirectory
-    }
-
-    const generation = cacheGeneration
-    const pendingDirectory = pendingDirectoryReads.get(relativePath)
-    if (pendingDirectory?.generation === generation) {
-      return pendingDirectory.promise
-    }
-
-    const directoryPromise = workspaceReadDirectory(relativePath)
-      .then((nextDirectory) => {
-        if (generation === cacheGeneration) {
-          directoryCache.set(relativePath, nextDirectory)
-          const now = Date.now()
-          for (const entry of nextDirectory.entries) {
-            pathStatCache.set(entry.relativePath, {
-              ctime: entry.createdAt ?? now,
-              mtime: entry.modifiedAt ?? now,
-              size: entry.kind === "file" ? entry.sizeBytes ?? 0 : 0,
-              type: entry.kind === "directory" ? FileType.Directory : FileType.File,
-            })
-          }
-        }
-
-        return nextDirectory
-      })
-      .finally(() => {
-        const currentPendingDirectory = pendingDirectoryReads.get(relativePath)
-        if (
-          currentPendingDirectory?.generation === generation &&
-          currentPendingDirectory.promise === directoryPromise
-        ) {
-          pendingDirectoryReads.delete(relativePath)
-        }
-      })
-
-    pendingDirectoryReads.set(relativePath, { generation, promise: directoryPromise })
-    return directoryPromise
-  }
-  const relativePathForResource = (resource: string) => {
-    const workspaceRoot = currentWorkspaceFileService.root
-    const relativePath = workspaceRoot
-      ? workspaceLspRelativePathFromUri(workspaceRoot, resource)
-      : null
-    if (relativePath === null) {
-      throw FileSystemProviderError.create(
-        "workspace LSP file is outside the active workspace",
-        FileSystemProviderErrorCode.NoPermissions,
-      )
-    }
-
-    return relativePath
-  }
-
-  registerFileSystemOverlay(100, {
-    capabilities: FileSystemProviderCapabilities.FileReadWrite,
-    onDidChangeCapabilities: () => noopDisposable,
-    onDidChangeFile: changesEmitter.event,
-    async delete(resource, options) {
-      const relativePath = relativePathForResource(resource.toString())
-      await workspaceDeletePath({
-        recursive: Boolean(options.recursive),
-        relativePath,
-      })
-      invalidateWorkspacePaths([relativePath])
-      changesEmitter.fire([{ resource, type: FileChangeType.DELETED }])
-    },
-    async mkdir(resource) {
-      const relativePath = relativePathForResource(resource.toString())
-      await workspaceCreateDirectory({ relativePath })
-      invalidateWorkspacePaths([relativePath])
-      changesEmitter.fire([{ resource, type: FileChangeType.ADDED }])
-    },
-    async readdir(resource) {
-      const relativePath = relativePathForResource(resource.toString())
-      const directory = await loadWorkspaceDirectory(relativePath)
-
-      return directory.entries.map((entry) => [
-        entry.name,
-        entry.kind === "directory" ? FileType.Directory : FileType.File,
-      ])
-    },
-    async readFile(resource) {
-      const relativePath = relativePathForResource(resource.toString())
-      const pendingFile = pendingFileReads.get(relativePath)
-      const filePromise =
-        pendingFile ??
-        (async () => {
-          const metadata = await workspaceStatPath(relativePath)
-          if (metadata.sizeBytes > MAX_WORKSPACE_PREVIEW_BYTES) {
-            throw FileSystemProviderError.create(
-              `workspace file is too large to preview (${metadata.sizeBytes} bytes; maximum is ${MAX_WORKSPACE_PREVIEW_BYTES} bytes)`,
-              FileSystemProviderErrorCode.Unavailable,
-            )
-          }
-          const nextFile = await workspaceReadFile(relativePath)
-          return nextFile
-        })().finally(() => {
-          pendingFileReads.delete(relativePath)
-        })
-
-      if (!pendingFile) {
-        pendingFileReads.set(relativePath, filePromise)
-      }
-      const file = await filePromise
-
-      return textEncoder.encode(file.content)
-    },
-    async rename(from, to) {
-      const fromRelativePath = relativePathForResource(from.toString())
-      const toRelativePath = relativePathForResource(to.toString())
-      await workspaceRenamePath({ fromRelativePath, toRelativePath })
-      invalidateWorkspacePaths([fromRelativePath, toRelativePath])
-      changesEmitter.fire([
-        { resource: from, type: FileChangeType.DELETED },
-        { resource: to, type: FileChangeType.ADDED },
-      ])
-    },
-    async stat(resource) {
-      const relativePath = relativePathForResource(resource.toString())
-      if (!relativePath) {
-        return {
-          ctime: Date.now(),
-          mtime: Date.now(),
-          size: 0,
-          type: FileType.Directory,
-        }
-      }
-
-      try {
-        const cachedStat = pathStatCache.get(relativePath)
-        if (cachedStat) {
-          return cachedStat
-        }
-
-        const separatorIndex = relativePath.lastIndexOf("/")
-        const parentRelativePath = separatorIndex === -1 ? "" : relativePath.slice(0, separatorIndex)
-        await loadWorkspaceDirectory(parentRelativePath).catch(() => null)
-        const directoryBackedStat = pathStatCache.get(relativePath)
-        if (directoryBackedStat) {
-          return directoryBackedStat
-        }
-
-        const generation = cacheGeneration
-        const pendingStat = pendingPathStats.get(relativePath)
-        if (pendingStat?.generation === generation) {
-          return await pendingStat.promise
-        }
-
-        const metadataPromise = workspaceStatPath(relativePath)
-          .then((metadata) => {
-            const nextStat = {
-              ctime: metadata.createdAt || Date.now(),
-              mtime: metadata.modifiedAt || Date.now(),
-              size: metadata.sizeBytes,
-              type: metadata.kind === "directory" ? FileType.Directory : FileType.File,
-            }
-
-            if (generation === cacheGeneration) {
-              pathStatCache.set(relativePath, nextStat)
-            }
-
-            return nextStat
-          })
-          .finally(() => {
-            const currentPendingStat = pendingPathStats.get(relativePath)
-            if (
-              currentPendingStat?.generation === generation &&
-              currentPendingStat.promise === metadataPromise
-            ) {
-              pendingPathStats.delete(relativePath)
-            }
-          })
-
-        pendingPathStats.set(relativePath, { generation, promise: metadataPromise })
-        return await metadataPromise
-      } catch {
-        throw FileSystemProviderError.create(
-          "workspace LSP file was not found",
-          FileSystemProviderErrorCode.FileNotFound,
-        )
-      }
-    },
-    watch() {
-      const activeWorkspaceRoot = currentWorkspaceFileService.root
-      if (!activeWorkspaceRoot) {
-        return noopDisposable
-      }
-
-      let pendingEvents: WorkspaceWatchEvent[] = []
-      let flushTimer: ReturnType<typeof setTimeout> | null = null
-      const flushPendingEvents = () => {
-        flushTimer = null
-        if (pendingEvents.length === 0) {
-          return
-        }
-        const events = pendingEvents
-        pendingEvents = []
-        // Drop the cached listings/stats for the affected paths (and their
-        // parents, since directory membership changed) so the next access
-        // re-fetches just those, instead of nuking the whole cache.
-        invalidateWorkspacePaths(events.map((event) => event.relativePath))
-        changesEmitter.fire(
-          events.map((event) => ({
-            resource: URI.parse(workspaceLspModelPath(activeWorkspaceRoot, event.relativePath)),
-            type:
-              event.type === "created"
-                ? FileChangeType.ADDED
-                : event.type === "deleted"
-                  ? FileChangeType.DELETED
-                  : FileChangeType.UPDATED,
-          })),
-        )
-      }
-
-      const watchDisposable = workspaceWatch({
-        onError: () => {
-          // The SSE stream was lost, so we cannot trust the cache to reflect
-          // out-of-band changes. Conservatively reset everything and signal a
-          // root update so the explorer re-reads on next access.
-          clearWorkspaceFileSystemCache()
-          changesEmitter.fire([{
-            resource: URI.file(activeWorkspaceRoot),
-            type: FileChangeType.UPDATED,
-          }])
-        },
-        onEvent: (event) => {
-          pendingEvents.push(event)
-          if (flushTimer === null) {
-            flushTimer = setTimeout(flushPendingEvents, WORKSPACE_INVALIDATE_DEBOUNCE_MS)
-          }
-        },
-      })
-
-      return {
-        dispose() {
-          if (flushTimer !== null) {
-            clearTimeout(flushTimer)
-            flushTimer = null
-          }
-          pendingEvents = []
-          watchDisposable.dispose()
-        },
-      }
-    },
-    async writeFile(resource, content) {
-      const relativePath = relativePathForResource(resource.toString())
-      await workspaceWriteFile({
-        content: textDecoder.decode(content),
-        relativePath,
-      })
-      invalidateWorkspacePaths([relativePath])
-      changesEmitter.fire([{ resource, type: FileChangeType.UPDATED }])
-    },
-  })
 }
 
 function workspaceLspUrl(language: string) {
