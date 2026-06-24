@@ -30,6 +30,7 @@ function resolveRuntimeApiBaseUrl(): string | undefined {
     return undefined;
   }
 
+  // eslint-disable-next-line no-underscore-dangle
   return (globalThis as GlobalWithApiBaseUrl).__SLAB_API_BASE_URL__;
 }
 

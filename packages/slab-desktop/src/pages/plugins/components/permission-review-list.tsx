@@ -3,7 +3,7 @@ import {
   describeSlabApiPermission,
   isKnownSlabApiPermission,
   type SlabApiPermissionSeverity,
-} from "@slab/api/permissions";
+} from "@slab/plugin-sdk";
 import { AlertTriangle } from "lucide-react";
 
 import type { PluginManifestPreview } from "../lib/plugin-manifest-preview";

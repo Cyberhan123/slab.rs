@@ -13,7 +13,6 @@ pub fn run() {
     let _otel_provider = init_telemetry();
     let api_endpoint = ApiEndpointConfig::desktop();
     let mut builder = tauri::Builder::default()
-        .plugin(tauri_plugin_decorum::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -34,13 +33,11 @@ pub fn run() {
             plugins::plugin_update_view_bounds,
             plugins::plugin_unmount_view,
             plugins::plugin_call,
-            plugins::plugin_api_request,
             plugins::plugin_pick_file,
             plugins::plugin_set_theme_snapshot,
             plugins::plugin_theme_snapshot,
         ])
         .setup(move |app| {
-            setup::setup_windows(app)?;
             let workspace_bootstrap = workspace::init(app).map_err(|error| {
                 log::error!("failed to initialize workspace state: {error}");
                 std::io::Error::other(error)

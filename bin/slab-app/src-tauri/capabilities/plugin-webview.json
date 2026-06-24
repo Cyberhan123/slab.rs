@@ -8,7 +8,6 @@
   "permissions": [
     "core:event:default",
     "allow-plugin-call",
-    "allow-plugin-api-request",
     "allow-plugin-pick-file",
     "allow-plugin-theme-snapshot"
   ]

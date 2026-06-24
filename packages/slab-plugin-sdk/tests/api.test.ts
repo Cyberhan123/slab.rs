@@ -1,7 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  createSlabPluginApiFetch,
   createSlabPluginSdk,
   getSlabPluginSdk,
   mountPluginUI,
@@ -14,52 +13,55 @@ type UnlistenMock = () => void;
 type PluginEventHandler = (event: { payload: unknown }) => void;
 type ListenMock = (eventName: string, handler: PluginEventHandler) => Promise<UnlistenMock>;
 
-describe("plugin API bridge", () => {
-  it("exposes low-level API fetch helpers from the SDK package", async () => {
-    const pluginFetch = createSlabPluginApiFetch(async (request) => ({
-      status: 200,
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: request.path }),
-    }));
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
-    const response = await pluginFetch("/v1/models?capability=chat_generation");
+function jsonResponse(body: unknown, status = 200): Response {
+  const text =
+    body === null || body === undefined
+      ? null
+      : typeof body === "string"
+        ? body
+        : JSON.stringify(body);
+  return new Response(text, {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
 
-    await expect(response.json()).resolves.toEqual({
-      path: "/v1/models?capability=chat_generation",
-    });
+describe("plugin API client", () => {
+  it("routes on-surface requestJson to slab-server over fetch", async () => {
+    const fetchMock = vi.fn<() => Promise<Response>>(() => Promise.resolve(jsonResponse([])));
+    vi.stubGlobal("fetch", fetchMock);
+    const sdk = createSlabPluginSdk();
+
+    const result = await sdk.api.requestJson<unknown[]>({ method: "GET", path: "/v1/models" });
+
+    expect(result).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:3000/v1/models",
+      expect.objectContaining({ method: "GET" }),
+    );
   });
 
-  it("exposes an OpenAPI client that routes through plugin_api_request", async () => {
-    const invoke = vi.fn<InvokeMock>(async () => ({
-      status: 200,
-      headers: { "content-type": "application/json" },
-      body: "[]",
-    }));
-    const sdk = createSlabPluginSdk(pluginWindow(invoke));
+  it("rejects off-surface requestJson before invoking fetch", async () => {
+    const fetchMock = vi.fn<() => Promise<Response>>(() => Promise.reject(new Error("fetch must not be called")));
+    vi.stubGlobal("fetch", fetchMock);
+    const sdk = createSlabPluginSdk();
 
-    const result = await sdk.api.client.GET("/v1/models", {
-      params: { query: { capability: "chat_generation" } },
-    });
-
-    expect(result.data).toEqual([]);
-    expect(invoke).toHaveBeenCalledWith("plugin_api_request", {
-      request: {
-        method: "GET",
-        path: "/v1/models?capability=chat_generation",
-        headers: {},
-        body: null,
-        timeoutMs: undefined,
-      },
-    });
+    await expect(
+      sdk.api.requestJson({ method: "GET", path: "/v1/settings" }),
+    ).rejects.toThrow("not part of the allowed plugin API surface");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("keeps requestJson errors on the SDK error type", async () => {
-    const invoke = vi.fn<InvokeMock>(async () => ({
-      status: 403,
-      headers: { "content-type": "application/json" },
-      body: "{\"message\":\"missing permission\"}",
-    }));
-    const sdk = createSlabPluginSdk(pluginWindow(invoke));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<() => Promise<Response>>(() => Promise.resolve(jsonResponse({ message: "missing permission" }, 403))),
+    );
+    const sdk = createSlabPluginSdk();
 
     await expect(sdk.api.requestJson({ method: "GET", path: "/v1/models" })).rejects.toThrow(
       SlabPluginApiError,
@@ -67,12 +69,9 @@ describe("plugin API bridge", () => {
   });
 
   it("serializes JSON request bodies and preserves explicit content type headers", async () => {
-    const invoke = vi.fn<InvokeMock>(async () => ({
-      status: 200,
-      headers: { "content-type": "application/json" },
-      body: "{\"ok\":true}",
-    }));
-    const sdk = createSlabPluginSdk(pluginWindow(invoke));
+    const fetchMock = vi.fn<() => Promise<Response>>(() => Promise.resolve(jsonResponse({ ok: true })));
+    vi.stubGlobal("fetch", fetchMock);
+    const sdk = createSlabPluginSdk();
 
     await expect(
       sdk.api.requestJson({
@@ -84,69 +83,79 @@ describe("plugin API bridge", () => {
       }),
     ).resolves.toEqual({ ok: true });
 
-    expect(invoke).toHaveBeenCalledWith("plugin_api_request", {
-      request: {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:3000/v1/models/load",
+      expect.objectContaining({
         method: "POST",
-        path: "/v1/models/load",
         headers: { "Content-Type": "application/vnd.slab+json" },
-        body: "{\"type\":\"model.download\"}",
-        timeoutMs: 500,
-      },
-    });
+        body: JSON.stringify({ type: "model.download" }),
+      }),
+    );
   });
 
   it("uses nested API error messages and keeps parsed error data", async () => {
-    const invoke = vi.fn<InvokeMock>(async () => ({
-      status: 500,
-      headers: { "content-type": "application/json" },
-      body: "{\"error\":{\"message\":\"runtime offline\"}}",
-    }));
-    const sdk = createSlabPluginSdk(pluginWindow(invoke));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(jsonResponse({ error: { message: "runtime offline" } }, 500)),
+      ),
+    );
+    const sdk = createSlabPluginSdk();
 
     await expect(sdk.api.requestJson({ method: "GET", path: "/v1/models" })).rejects.toMatchObject({
       data: { error: { message: "runtime offline" } },
       message: "runtime offline",
       name: "SlabPluginApiError",
-      response: {
-        status: 500,
-      },
+      response: { status: 500 },
     });
   });
 
   it("falls back to raw response bodies and HTTP status for requestJson errors", async () => {
-    const sdkWithTextError = createSlabPluginSdk(
-      pluginWindow(async () => ({
-        status: 502,
-        headers: {},
-        body: "bad gateway",
-      })),
-    );
-    const sdkWithEmptyError = createSlabPluginSdk(
-      pluginWindow(async () => ({
-        status: 418,
-        headers: {},
-        body: "",
-      })),
-    );
+    vi.stubGlobal("fetch", vi.fn<() => Promise<Response>>(() => Promise.resolve(jsonResponse("bad gateway", 502))));
+    const sdkWithTextError = createSlabPluginSdk();
 
     await expect(
       sdkWithTextError.api.requestJson({ method: "GET", path: "/v1/models" }),
     ).rejects.toThrow("bad gateway");
+
+    vi.stubGlobal("fetch", vi.fn<() => Promise<Response>>(() => Promise.resolve(jsonResponse(null, 418))));
+    const sdkWithEmptyError = createSlabPluginSdk();
+
     await expect(
       sdkWithEmptyError.api.requestJson({ method: "GET", path: "/v1/models" }),
     ).rejects.toThrow("Plugin API request failed with HTTP 418");
   });
 
-  it("rejects requests outside the plugin API permission surface before IPC", async () => {
-    const invoke = vi.fn<InvokeMock>();
-    const sdk = createSlabPluginSdk(pluginWindow(invoke));
+  it("routes the OpenAPI client through fetch and parses the response", async () => {
+    const fetchMock = vi.fn<() => Promise<Response>>(() => Promise.resolve(jsonResponse([])));
+    vi.stubGlobal("fetch", fetchMock);
+    const sdk = createSlabPluginSdk();
 
-    await expect(sdk.api.requestJson({ method: "GET", path: "/v1/settings" })).rejects.toThrow(
-      "not part of the allowed plugin API surface",
-    );
-    expect(invoke).not.toHaveBeenCalled();
+    const result = await sdk.api.client.GET("/v1/models", {
+      params: { query: { capability: "chat_generation" } },
+    });
+
+    expect(result.data).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // openapi-fetch issues a Request object, not a (url, init) pair.
+    const request = fetchMock.mock.calls[0][0] as Request;
+    expect(request.method).toBe("GET");
+    expect(request.url).toBe("http://127.0.0.1:3000/v1/models?capability=chat_generation");
   });
 
+  it("rejects off-surface OpenAPI client requests before invoking fetch", async () => {
+    const fetchMock = vi.fn<() => Promise<Response>>(() => Promise.reject(new Error("fetch must not be called")));
+    vi.stubGlobal("fetch", fetchMock);
+    const sdk = createSlabPluginSdk();
+
+    await expect(sdk.api.client.GET("/v1/workspace")).rejects.toThrow(
+      "not part of the allowed plugin API surface",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("plugin host bridge", () => {
   it("reports host availability and proxies host commands", async () => {
     const invoke = vi.fn<InvokeMock>(async () => "ok");
     const sdk = getSlabPluginSdk(pluginWindow(invoke));
@@ -196,9 +205,7 @@ describe("plugin API bridge", () => {
   });
 
   it("uses noop event unsubscribers when the event bridge is unavailable", async () => {
-    const sdk = createSlabPluginSdk(
-      pluginWindow(async () => ({ status: 200, headers: {}, body: null })),
-    );
+    const sdk = createSlabPluginSdk(pluginWindow(vi.fn()));
 
     expect(await sdk.events.listen("demo", vi.fn<(payload: unknown) => void>())).toEqual(
       expect.any(Function),

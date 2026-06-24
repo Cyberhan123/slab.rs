@@ -161,6 +161,7 @@ export async function collectBrowserFailureMessages(browser: WebdriverIO.Browser
     const global = window as typeof window & {
       __SLAB_DESKTOP_E2E_ERRORS__?: string[]
     }
+    // eslint-disable-next-line no-underscore-dangle -- shared browser-global capture contract
     return global.__SLAB_DESKTOP_E2E_ERRORS__ ?? []
   })
 
@@ -190,6 +191,8 @@ export async function eventually<T>(
   const deadline = Date.now() + timeoutMs
   let lastError: unknown
 
+  /* eslint-disable no-await-in-loop -- intentional sequential polling with
+     backoff: each attempt must observe the previous result before retrying. */
   while (Date.now() < deadline) {
     try {
       const result = await assertion()
@@ -202,6 +205,7 @@ export async function eventually<T>(
 
     await delay(intervalMs)
   }
+  /* eslint-enable no-await-in-loop */
 
   const suffix = lastError instanceof Error ? ` Last error: ${lastError.message}` : ""
   throw new Error(`${label} timed out after ${timeoutMs}ms.${suffix}`)
@@ -353,6 +357,8 @@ async function installBrowserErrorCapture(browser: WebdriverIO.Browser): Promise
       __SLAB_DESKTOP_E2E_ERRORS__?: string[]
       __SLAB_DESKTOP_E2E_CAPTURE_INSTALLED__?: boolean
     }
+    /* eslint-disable no-underscore-dangle -- these __delimited__ names are a
+       documented browser-global contract shared with the page under test. */
     if (global.__SLAB_DESKTOP_E2E_CAPTURE_INSTALLED__) {
       return
     }
@@ -361,6 +367,7 @@ async function installBrowserErrorCapture(browser: WebdriverIO.Browser): Promise
     const push = (message: unknown) => {
       global.__SLAB_DESKTOP_E2E_ERRORS__?.push(String(message))
     }
+    /* eslint-enable no-underscore-dangle */
     window.addEventListener("error", (event) => push(event.message))
     window.addEventListener("unhandledrejection", (event) => push(event.reason))
     document.addEventListener("securitypolicyviolation", (event) => {
@@ -382,6 +389,7 @@ async function stopProcess(child: ChildProcessWithoutNullStreams | undefined): P
   child.kill()
   const deadline = Date.now() + processStopTimeoutMs
   while (child.exitCode === null && Date.now() < deadline) {
+    // eslint-disable-next-line no-await-in-loop -- poll until the child process exits
     await delay(100)
   }
   if (child.exitCode === null) {

@@ -1,11 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import importMetaUrlPlugin from "@codingame/esbuild-import-meta-url-plugin";
-import fs from "node:fs";
 import path from "path";
-
-import { allowTauriIpcLocalhostInVscodeExtensionHostCsp } from "./src/lib/vscode-extension-host-csp";
 
 const host = process.env.TAURI_DEV_HOST;
 const apiProxyTarget = process.env.VITE_API_PROXY_TARGET;
@@ -17,7 +13,7 @@ export default defineConfig(async () => ({
     {
       name: 'load-vscode-css-as-string',
       enforce: 'pre',
-      async resolveId(source, importer, options) {
+      async resolveId(this, source, importer, options) {
         const resolved = (await this.resolve(source, importer, options))!
         if (
           resolved.id.match(
@@ -32,57 +28,9 @@ export default defineConfig(async () => ({
         return undefined
       }
     },
-    {
-      // For the *-language-features extensions which use SharedArrayBuffer
-      name: 'configure-response-headers',
-      apply: 'serve',
-      configureServer: (server) => {
-        server.middlewares.use((_req, res, next) => {
-          res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless')
-          res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
-          res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
-          next()
-        })
-      }
-    },
-    {
-      name: 'patch-vscode-extension-host-csp',
-      generateBundle(_options, bundle) {
-        for (const asset of Object.values(bundle)) {
-          if (asset.type === 'asset' && asset.fileName.endsWith('.html') && typeof asset.source === 'string') {
-            asset.source = allowTauriIpcLocalhostInVscodeExtensionHostCsp(asset.source)
-          }
-        }
-      },
-    },
-    {
-      name: 'force-prevent-transform-assets',
-      apply: 'serve',
-      configureServer(server) {
-        return () => {
-          server.middlewares.use((req, res, next) => {
-            if (req.originalUrl != null) {
-              const pathname = new URL(req.originalUrl, import.meta.url).pathname
-              if (pathname.endsWith('.html')) {
-                res.setHeader('Content-Type', 'text/html')
-                res.writeHead(200)
-                res.write(allowTauriIpcLocalhostInVscodeExtensionHostCsp(
-                  fs.readFileSync(path.join(__dirname, pathname), "utf8")
-                ))
-                res.end()
-                return
-              }
-            }
-
-            next()
-          })
-        }
-      }
-    }
   ],
   optimizeDeps: {
       include: [
-
       '@codingame/monaco-vscode-api/extensions',
       '@codingame/monaco-vscode-api',
       '@codingame/monaco-vscode-api/monaco',
@@ -93,9 +41,9 @@ export default defineConfig(async () => ({
       // '@vscode/vscode-languagedetection',
       // 'marked'
     ],
-    esbuildOptions: {
+    rolldownOptions: {
        tsconfig: './tsconfig.json',
-      plugins: [importMetaUrlPlugin],
+      // plugins: [importMetaUrlPlugin],
     },
   },
 
@@ -115,7 +63,7 @@ export default defineConfig(async () => ({
             id.includes("@codingame/monaco-vscode") ||
             id.includes("/node_modules/vscode/")
           ) {
-            return "workspace-lsp-client";
+            return "vscode-services";
           }
           return undefined;
         },
@@ -161,8 +109,6 @@ export default defineConfig(async () => ({
       "@slab/api/config": path.resolve(__dirname, "../api/src/config.ts"),
       "@slab/api/errors": path.resolve(__dirname, "../api/src/errors.ts"),
       "@slab/api/models": path.resolve(__dirname, "../api/src/models.ts"),
-      "@slab/api/permissions": path.resolve(__dirname, "../api/src/permissions.ts"),
-      "@slab/api/plugin": path.resolve(__dirname, "../api/src/plugin.ts"),
       "@slab/api/v1": path.resolve(__dirname, "../api/src/v1.d.ts"),
       "@slab/api": path.resolve(__dirname, "../api/src/index.ts"),
       vscode: path.resolve(__dirname, "./node_modules/vscode"),

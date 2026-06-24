@@ -53,8 +53,6 @@ vi.mock("@/lib/plugin-host-bridge", () => ({
     outputText: "{}",
     outputBase64: "",
   }),
-  pluginApiRequest: vi.fn<() => Promise<{ status: number; headers: Record<string, string>; body: string }>>()
-    .mockResolvedValue({ status: 200, headers: {}, body: "{}" }),
   pluginMountView: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
   pluginUnmountView: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
   pluginUpdateViewBounds: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),

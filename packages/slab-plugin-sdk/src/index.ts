@@ -1,32 +1,37 @@
-import { assertSlabPluginApiSurface } from "@slab/api/permissions";
-import {
-  createSlabPluginApiClient,
-  createSlabPluginApiFetch,
-  type SlabApiBridgeRequest,
-  type SlabApiBridgeResponse,
-  type SlabApiBridgeTransport,
-  type SlabApiFetch,
-  type SlabPluginApiClient,
-} from "@slab/api/plugin";
+import { createSlabApiFetchClient } from "@slab/api";
+import { SERVER_BASE_URL, normalizeApiBaseUrl } from "@slab/api/config";
+
+import { assertSlabPluginApiSurface } from "./permissions";
 
 export type {
   components as SlabApiComponents,
   operations as SlabApiOperations,
   paths as SlabApiPaths,
 } from "@slab/api/v1";
-export type { SlabApiPermission } from "@slab/api/permissions";
+export type {
+  SlabApiPermission,
+  SlabApiPermissionLabel,
+  SlabApiPermissionSeverity,
+} from "./permissions";
+export {
+  SLAB_API_PERMISSIONS,
+  SLAB_API_PERMISSION_LABELS,
+  describeSlabApiPermission,
+  isKnownSlabApiPermission,
+  requiredSlabApiPermission,
+} from "./permissions";
 
-export type SlabPluginApiRequest = SlabApiBridgeRequest;
-export type SlabPluginApiResponse = SlabApiBridgeResponse;
-export type SlabPluginApiTransport = SlabApiBridgeTransport;
-export type SlabPluginApiFetch = SlabApiFetch;
-export type SlabPluginOpenApiClient = SlabPluginApiClient;
-
-export { createSlabPluginApiClient, createSlabPluginApiFetch };
-
-export type SlabPluginJsonRequest = Omit<SlabPluginApiRequest, "body" | "headers"> & {
+/**
+ * A plugin Slab API request expressed in transport-neutral terms. The SDK
+ * serializes `body` to JSON (defaulting the content type) and resolves the
+ * response as parsed JSON, throwing {@link SlabPluginApiError} on non-2xx.
+ */
+export type SlabPluginJsonRequest = {
+  method: string;
+  path: string;
   headers?: Record<string, string>;
   body?: unknown;
+  timeoutMs?: number | null;
 };
 
 export type SlabPluginPickFileResponse = {
@@ -120,46 +125,25 @@ type TauriPluginWindow = Window & {
 
 const JSON_HEADERS = { "content-type": "application/json" };
 const THEME_EVENT_NAME = "plugin://host/theme";
-const PLUGIN_SDK_MESSAGE_SOURCE = "slab-plugin-sdk";
-const PLUGIN_HOST_MESSAGE_SOURCE = "slab-plugin-host";
 
-type BrowserBridgeRequestMessage = {
-  source: typeof PLUGIN_SDK_MESSAGE_SOURCE;
-  type: "api.request";
-  id: string;
-  request: SlabPluginApiRequest;
+type SerializedApiRequest = {
+  method: string;
+  path: string;
+  headers: Record<string, string>;
+  body: string | null;
+  timeoutMs?: number | null;
 };
 
-type BrowserBridgeResponseMessage =
-  | {
-      source: typeof PLUGIN_HOST_MESSAGE_SOURCE;
-      type: "api.response";
-      id: string;
-      ok: true;
-      response: SlabPluginApiResponse;
-    }
-  | {
-      source: typeof PLUGIN_HOST_MESSAGE_SOURCE;
-      type: "api.response";
-      id: string;
-      ok: false;
-      error: string;
-    };
-
-type PendingBrowserBridgeRequest = {
-  resolve: (response: SlabPluginApiResponse) => void;
-  reject: (error: Error) => void;
-};
-
-let browserBridgeSequence = 0;
-let browserBridgeListenerWindow: Window | null = null;
-const pendingBrowserBridgeRequests = new Map<string, PendingBrowserBridgeRequest>();
-
+/**
+ * Error thrown by {@link createSlabPluginSdk} API helpers when a plugin Slab API
+ * request fails. `response` is the raw fetch `Response` and `data` is the parsed
+ * body (JSON when parseable, otherwise the raw text).
+ */
 export class SlabPluginApiError extends Error {
-  readonly response: SlabPluginApiResponse;
+  readonly response: Response;
   readonly data: unknown;
 
-  constructor(message: string, response: SlabPluginApiResponse, data: unknown) {
+  constructor(message: string, response: Response, data: unknown) {
     super(message);
     this.name = "SlabPluginApiError";
     this.response = response;
@@ -189,98 +173,7 @@ function resolveEventApi(target?: Window): TauriEventApi | null {
   return eventApi && typeof eventApi.listen === "function" ? eventApi : null;
 }
 
-function hasBrowserBridge(target?: Window): boolean {
-  const resolvedWindow = resolveWindow(target);
-  const parentWindow = resolvedWindow.parent;
-  return Boolean(
-    parentWindow &&
-      parentWindow !== resolvedWindow &&
-      typeof parentWindow.postMessage === "function",
-  );
-}
-
-function ensureBrowserBridgeListener(targetWindow: Window): void {
-  if (browserBridgeListenerWindow === targetWindow) {
-    return;
-  }
-
-  browserBridgeListenerWindow?.removeEventListener("message", handleBrowserBridgeMessage);
-  browserBridgeListenerWindow = targetWindow;
-  browserBridgeListenerWindow.addEventListener("message", handleBrowserBridgeMessage);
-}
-
-function handleBrowserBridgeMessage(event: MessageEvent): void {
-  if (browserBridgeListenerWindow && event.source !== browserBridgeListenerWindow.parent) {
-    return;
-  }
-
-  const message = readBrowserBridgeResponse(event.data);
-  if (!message) {
-    return;
-  }
-
-  const pending = pendingBrowserBridgeRequests.get(message.id);
-  if (!pending) {
-    return;
-  }
-
-  pendingBrowserBridgeRequests.delete(message.id);
-  if (message.ok) {
-    pending.resolve(message.response);
-  } else {
-    pending.reject(new Error(message.error));
-  }
-}
-
-function readBrowserBridgeResponse(data: unknown): BrowserBridgeResponseMessage | null {
-  if (!data || typeof data !== "object") {
-    return null;
-  }
-
-  const record = data as Record<string, unknown>;
-  if (
-    record.source !== PLUGIN_HOST_MESSAGE_SOURCE ||
-    record.type !== "api.response" ||
-    typeof record.id !== "string" ||
-    typeof record.ok !== "boolean"
-  ) {
-    return null;
-  }
-
-  if (record.ok === true) {
-    return record.response && typeof record.response === "object"
-      ? (record as BrowserBridgeResponseMessage)
-      : null;
-  }
-
-  return typeof record.error === "string" ? (record as BrowserBridgeResponseMessage) : null;
-}
-
-function requestViaBrowserBridge(
-  request: SlabPluginApiRequest,
-  target?: Window,
-): Promise<SlabPluginApiResponse> {
-  const targetWindow = resolveWindow(target);
-  if (targetWindow.parent === targetWindow) {
-    throw new Error("Slab plugin browser bridge is not available outside an iframe.");
-  }
-
-  ensureBrowserBridgeListener(targetWindow);
-  const id = `${Date.now()}:${++browserBridgeSequence}`;
-  const message: BrowserBridgeRequestMessage = {
-    source: PLUGIN_SDK_MESSAGE_SOURCE,
-    type: "api.request",
-    id,
-    request,
-  };
-
-  return new Promise((resolve, reject) => {
-    pendingBrowserBridgeRequests.set(id, { resolve, reject });
-    targetWindow.parent.postMessage(message, "*");
-  });
-}
-
-function serializeJsonRequest(request: SlabPluginJsonRequest): SlabPluginApiRequest {
+function serializeJsonRequest(request: SlabPluginJsonRequest): SerializedApiRequest {
   const headers = { ...request.headers };
   let body: string | null = null;
 
@@ -303,15 +196,27 @@ function serializeJsonRequest(request: SlabPluginJsonRequest): SlabPluginApiRequ
   };
 }
 
-function parseResponseBody(response: SlabPluginApiResponse): unknown {
-  if (!response.body) {
+function fetchPluginApi(request: SerializedApiRequest): Promise<Response> {
+  const endpoint = `${normalizeApiBaseUrl(SERVER_BASE_URL)}${request.path}`;
+  const signal = request.timeoutMs ? AbortSignal.timeout(request.timeoutMs) : undefined;
+  return fetch(endpoint, {
+    method: request.method,
+    headers: request.headers,
+    body: request.body ?? undefined,
+    signal,
+  });
+}
+
+async function parseResponseBody(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) {
     return null;
   }
 
   try {
-    return JSON.parse(response.body);
+    return JSON.parse(text);
   } catch {
-    return response.body;
+    return text;
   }
 }
 
@@ -352,34 +257,31 @@ export function applySlabThemeToDocument(
 }
 
 export type SlabPluginSdk = ReturnType<typeof createSlabPluginSdk>;
+export type SlabPluginApiClient = ReturnType<typeof createSlabApiFetchClient>;
 
 export function createSlabPluginSdk(target?: Window) {
-  const invokeApiRequest = (request: SlabPluginApiRequest) => {
-    assertSlabPluginApiSurface(request.method, request.path);
-    const core = resolveCore(target);
-    if (core) {
-      return core.invoke<SlabPluginApiResponse>("plugin_api_request", { request });
-    }
-    return requestViaBrowserBridge(request, target);
-  };
-  const apiFetch = createSlabPluginApiFetch(invokeApiRequest);
-  const apiClient = createSlabPluginApiClient(invokeApiRequest);
+  const apiClient = createSlabApiFetchClient({ baseUrl: SERVER_BASE_URL });
+  // Enforce the plugin Slab API surface before any request leaves the webview.
+  apiClient.use({
+    async onRequest({ request }) {
+      const url = new URL(request.url);
+      assertSlabPluginApiSurface(request.method, `${url.pathname}${url.search}`);
+      return request;
+    },
+  });
 
   return {
     host: {
-      isAvailable: () => {
-        return Boolean(resolveCore(target)) || hasBrowserBridge(target);
-      },
+      isAvailable: () => Boolean(resolveCore(target)),
       invoke: <T>(command: string, args?: unknown) => requireCore(target).invoke<T>(command, args),
     },
     api: {
       client: apiClient,
-      fetch: apiFetch,
-      request: invokeApiRequest,
       requestJson: async <T>(request: SlabPluginJsonRequest): Promise<T> => {
-        const response = await invokeApiRequest(serializeJsonRequest(request));
-        const data = parseResponseBody(response);
-        if (response.status < 200 || response.status >= 300) {
+        assertSlabPluginApiSurface(request.method, request.path);
+        const response = await fetchPluginApi(serializeJsonRequest(request));
+        const data = await parseResponseBody(response);
+        if (!response.ok) {
           throw new SlabPluginApiError(
             extractErrorMessage(data) ?? `Plugin API request failed with HTTP ${response.status}`,
             response,

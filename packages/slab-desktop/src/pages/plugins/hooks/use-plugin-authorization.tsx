@@ -9,7 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@slab/components/dialog";
-import { describeSlabApiPermission } from "@slab/api/permissions";
+import { describeSlabApiPermission } from "@slab/plugin-sdk";
 
 import { usePluginAuthorizationStore } from "@/store/usePluginAuthorizationStore";
 

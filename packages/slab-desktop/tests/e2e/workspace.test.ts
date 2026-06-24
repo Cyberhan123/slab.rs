@@ -45,6 +45,7 @@ describe.sequential("workspace e2e", () => {
       viewport: { width: 1440, height: 960 },
     })
     await context.addInitScript((apiBaseUrl) => {
+      // eslint-disable-next-line no-underscore-dangle -- runtime contract read by @slab/api (config.ts) and slab-plugin-sdk
       ;(window as typeof window & { __SLAB_API_BASE_URL__?: string }).__SLAB_API_BASE_URL__ = apiBaseUrl
       window.localStorage.setItem("slab.ui.language", "en-US")
     }, env.uiBaseUrl)

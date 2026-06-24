@@ -3,7 +3,6 @@ import { useResizeObserver, useWindowEvent } from '@mantine/hooks';
 import { clamp } from 'lodash-es';
 import { AlertCircle, Loader2 } from 'lucide-react';
 
-import type { SlabApiBridgeRequest, SlabApiBridgeResponse } from '@slab/api/plugin';
 import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
 
 import { isTauri } from '@/hooks/use-tauri';
@@ -14,34 +13,6 @@ import {
   type PluginViewBounds,
 } from '@/lib/plugin-host-bridge';
 import type { PluginRecord } from '../utils';
-
-const PLUGIN_SDK_MESSAGE_SOURCE = 'slab-plugin-sdk';
-const PLUGIN_HOST_MESSAGE_SOURCE = 'slab-plugin-host';
-const PLUGIN_API_BRIDGE_UNAVAILABLE =
-  'Plugin API bridge is only available in the desktop plugin WebView host.';
-
-type PluginBridgeRequestMessage = {
-  source: typeof PLUGIN_SDK_MESSAGE_SOURCE;
-  type: 'api.request';
-  id: string;
-  request: SlabApiBridgeRequest;
-};
-
-type PluginBridgeResponseMessage =
-  | {
-      source: typeof PLUGIN_HOST_MESSAGE_SOURCE;
-      type: 'api.response';
-      id: string;
-      ok: true;
-      response: SlabApiBridgeResponse;
-    }
-  | {
-      source: typeof PLUGIN_HOST_MESSAGE_SOURCE;
-      type: 'api.response';
-      id: string;
-      ok: false;
-      error: string;
-    };
 
 type PluginWebviewPageProps = {
   plugin: PluginRecord;
@@ -54,27 +25,6 @@ function rectToBounds(rect: DOMRect): PluginViewBounds {
     width: clamp(rect.width, 1, Number.POSITIVE_INFINITY),
     height: clamp(rect.height, 1, Number.POSITIVE_INFINITY),
   };
-}
-
-function readBridgeRequestMessage(data: unknown): PluginBridgeRequestMessage | null {
-  if (!data || typeof data !== 'object') return null;
-  const record = data as Record<string, unknown>;
-  if (
-    record.source !== PLUGIN_SDK_MESSAGE_SOURCE ||
-    record.type !== 'api.request' ||
-    typeof record.id !== 'string' ||
-    !record.request ||
-    typeof record.request !== 'object'
-  ) {
-    return null;
-  }
-
-  const request = record.request as Record<string, unknown>;
-  if (typeof request.method !== 'string' || typeof request.path !== 'string') {
-    return null;
-  }
-
-  return record as PluginBridgeRequestMessage;
 }
 
 export function PluginWebviewPage({ plugin }: PluginWebviewPageProps) {
@@ -147,33 +97,6 @@ export function PluginWebviewPage({ plugin }: PluginWebviewPageProps) {
       void syncBounds();
     }
   }, [hostRect.height, hostRect.width, mounted, syncBounds]);
-
-  useEffect(() => {
-    if (isDesktopTauri || !plugin.uiUrl) return undefined;
-    const pluginWindow = iframeRef.current?.contentWindow;
-    if (!pluginWindow) return undefined;
-
-    const handleMessage = (event: MessageEvent) => {
-      if (event.source !== pluginWindow) return;
-      const message = readBridgeRequestMessage(event.data);
-      if (!message) return;
-
-      const sendResponse = (response: PluginBridgeResponseMessage) => {
-        pluginWindow.postMessage(response, '*');
-      };
-
-      sendResponse({
-        source: PLUGIN_HOST_MESSAGE_SOURCE,
-        type: 'api.response',
-        id: message.id,
-        ok: false,
-        error: PLUGIN_API_BRIDGE_UNAVAILABLE,
-      });
-    };
-
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [isDesktopTauri, plugin.uiUrl]);
 
   return (
     <div

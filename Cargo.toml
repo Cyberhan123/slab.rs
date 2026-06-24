@@ -272,7 +272,6 @@ tauri-plugin-mcp-bridge = "0.11"
 tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-window-state = "2"
-tauri-plugin-decorum = { git = "https://github.com/clearlysid/tauri-plugin-decorum.git", rev = "9f1f73636821c3cb8b940524214b940b7999ef6e" }
 
 # Platform-specific dependencies
 windows = "0.62.2"

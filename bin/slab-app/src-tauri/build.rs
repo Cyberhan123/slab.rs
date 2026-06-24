@@ -6,7 +6,6 @@ fn main() {
             "plugin_update_view_bounds",
             "plugin_unmount_view",
             "plugin_call",
-            "plugin_api_request",
             "plugin_pick_file",
             "plugin_set_theme_snapshot",
             "plugin_theme_snapshot",

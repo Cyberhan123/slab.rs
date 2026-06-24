@@ -15,8 +15,6 @@
     "./config": "./src/config.ts",
     "./errors": "./src/errors.ts",
     "./models": "./src/models.ts",
-    "./permissions": "./src/permissions.ts",
-    "./plugin": "./src/plugin.ts",
     "./v1": "./src/v1.d.ts"
   },
   "dependencies": {

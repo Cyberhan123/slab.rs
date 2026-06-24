@@ -84,7 +84,7 @@ export default function Header({
   return (
     <header
       className={cn(
-        "shell-topbar flex h-[var(--shell-topbar-height)] items-center justify-between gap-4 pl-5 md:pl-8"
+        "shell-topbar text-body flex h-[var(--shell-topbar-height)] items-center justify-between gap-4 pl-5 md:pl-8"
       )}
       data-tauri-drag-region="true"
     >

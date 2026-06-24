@@ -17,6 +17,7 @@ impl ApiEndpointConfig {
         }
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn api_base_url(&self) -> String {
         format!("{}/", self.api_origin.trim_end_matches('/'))
     }

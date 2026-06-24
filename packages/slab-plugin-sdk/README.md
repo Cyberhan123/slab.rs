@@ -7,7 +7,8 @@ Stable plugin-author SDK for Slab plugin webviews.
 `@slab/plugin-sdk` is the browser-facing SDK for third-party and local plugin UIs. It provides:
 
 - A typed host bridge for plugin webviews running inside the Tauri child WebView sandbox.
-- Plugin-safe `@slab/api` clients and fetch helpers for allowed `permissions.slabApi` calls.
+- A direct-HTTP Slab API client built on `@slab/api`, guarded client-side by the plugin Slab API surface. Plugins call slab-server directly (`slab-plugin-sdk → @slab/api → slab-server`); the desktop host no longer forwards plugin HTTP.
+- The plugin Slab API surface definition (`SLAB_API_PERMISSIONS`, labels, `requiredSlabApiPermission`) — this lives here, not in `@slab/api`.
 - Theme snapshot types and document helpers so plugin UIs can mirror host tokens.
 - Integrity-related exports used by plugin packaging and verification flows.
 - A browser bundle export for non-workspace consumers.

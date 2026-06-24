@@ -174,20 +174,6 @@ export type PluginCallResponse = {
   outputBase64: string;
 };
 
-export type PluginApiRequest = {
-  method: string;
-  path: string;
-  headers?: Record<string, string>;
-  body?: string | null;
-  timeoutMs?: number | null;
-};
-
-export type PluginApiResponse = {
-  status: number;
-  headers: Record<string, string>;
-  body: string;
-};
-
 export type PluginPickFileResponse = {
   path: string | null;
 };
@@ -240,15 +226,6 @@ export async function pluginPickFile(): Promise<PluginPickFileResponse> {
     throw new Error("plugin file picker is only available in Tauri mode");
   }
   return invoke<PluginPickFileResponse>("plugin_pick_file");
-}
-
-export async function pluginApiRequest(
-  request: PluginApiRequest,
-): Promise<PluginApiResponse> {
-  if (!isTauri()) {
-    throw new Error("plugin api request is only available in Tauri mode");
-  }
-  return invoke<PluginApiResponse>("plugin_api_request", { request });
 }
 
 export function readPluginThemeSnapshot(

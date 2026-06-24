@@ -5,7 +5,7 @@ import {
   describeSlabApiPermission,
   isKnownSlabApiPermission,
   requiredSlabApiPermission,
-} from "../permissions";
+} from "../src/permissions";
 
 describe("requiredSlabApiPermission", () => {
   it("matches the plugin API permission surface enforced by the Tauri host", () => {

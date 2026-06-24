@@ -1,6 +1,5 @@
 mod protocol;
 mod registry;
-mod runtime;
 mod types;
 mod view;
 mod ws_client;
@@ -14,15 +13,14 @@ use tauri_plugin_dialog::{DialogExt, PickerMode};
 use crate::setup::ApiEndpointConfig;
 
 pub use types::{
-    PluginApiRequest, PluginApiResponse, PluginCallRequest, PluginCallResponse, PluginInfo,
-    PluginMountViewRequest, PluginMountViewResponse, PluginPickFileResponse, PluginThemeSnapshot,
-    PluginUnmountViewRequest, PluginUpdateViewBoundsRequest,
+    PluginCallRequest, PluginCallResponse, PluginInfo, PluginMountViewRequest,
+    PluginMountViewResponse, PluginPickFileResponse, PluginThemeSnapshot, PluginUnmountViewRequest,
+    PluginUpdateViewBoundsRequest,
 };
 pub use view::PluginViewManager;
 
 pub use registry::PluginRegistryState;
 use registry::resolve_plugins_root;
-use runtime::execute_plugin_api_request_async;
 use ws_client::PluginRpcWsClient;
 
 const HOST_THEME_EVENT_NAME: &str = "plugin://host/theme";
@@ -121,23 +119,6 @@ pub async fn plugin_call(
 }
 
 #[tauri::command]
-pub async fn plugin_api_request(
-    webview: Webview,
-    api_endpoint: State<'_, ApiEndpointConfig>,
-    registry: State<'_, PluginRegistryState>,
-    request: PluginApiRequest,
-) -> Result<PluginApiResponse, String> {
-    let caller_plugin_id = caller_plugin_id(&webview);
-    authorize_plugin_api_request_from_caller(
-        caller_plugin_id.as_deref(),
-        registry.inner(),
-        &request,
-    )?;
-
-    execute_plugin_api_request_async(api_endpoint.inner(), &request).await
-}
-
-#[tauri::command]
 pub async fn plugin_pick_file(
     app_handle: AppHandle,
     webview: Webview,
@@ -219,18 +200,6 @@ fn authorize_plugin_call_request(
     ensure_same_plugin_call(caller_plugin_id, &request.plugin_id)
 }
 
-fn authorize_plugin_api_request_from_caller(
-    caller_plugin_id: Option<&str>,
-    registry: &PluginRegistryState,
-    request: &PluginApiRequest,
-) -> Result<(), String> {
-    let caller_plugin_id = caller_plugin_id
-        .ok_or_else(|| "plugin api request requires a plugin webview caller".to_string())?;
-
-    let plugin = registry.get_plugin(caller_plugin_id)?;
-    authorize_slab_api_request(&plugin.manifest.permissions.slab_api, request)
-}
-
 fn ensure_same_plugin_call(
     caller_plugin_id: &str,
     requested_plugin_id: &str,
@@ -252,59 +221,12 @@ fn ensure_video_file_read_permission(read_permissions: &[String]) -> Result<(), 
     ))
 }
 
-pub(super) fn authorize_slab_api_request(
-    slab_api_permissions: &[String],
-    request: &PluginApiRequest,
-) -> Result<(), String> {
-    let Some(required_permission) = required_slab_api_permission(&request.method, &request.path)
-    else {
-        return Err(format!(
-            "plugin API request {} {} is not part of the allowed plugin API surface",
-            request.method, request.path
-        ));
-    };
-
-    if slab_api_permissions.iter().any(|permission| permission == required_permission) {
-        return Ok(());
-    }
-
-    Err(format!(
-        "plugin API request {} {} requires permissions.slabApi `{required_permission}`",
-        request.method, request.path
-    ))
-}
-
-fn required_slab_api_permission(method: &str, path: &str) -> Option<&'static str> {
-    let method = method.to_ascii_uppercase();
-    let path = path.split('?').next().unwrap_or(path);
-
-    match method.as_str() {
-        "GET" if path_matches(path, "/v1/models") => Some("models:read"),
-        "POST" if path == "/v1/models/load" => Some("models:load"),
-        "POST" if path == "/v1/ffmpeg/convert" => Some("ffmpeg:convert"),
-        "POST" if path == "/v1/audio/transcriptions" => Some("audio:transcribe"),
-        "POST" if path == "/v1/subtitles/render" => Some("subtitle:render"),
-        "POST" if path == "/v1/chat/completions" => Some("chat:complete"),
-        "GET" if path_matches(path, "/v1/tasks") => Some("tasks:read"),
-        "POST" if path.starts_with("/v1/tasks/") && path.ends_with("/cancel") => {
-            Some("tasks:cancel")
-        }
-        _ => None,
-    }
-}
-
-fn path_matches(path: &str, base: &str) -> bool {
-    path == base || path.starts_with(&format!("{base}/"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        PluginThemeSnapshot, PluginThemeState, authorize_plugin_api_request_from_caller,
-        authorize_plugin_call_request, authorize_slab_api_request, ensure_same_plugin_call,
-        ensure_video_file_read_permission, is_allowed_video_path,
+        PluginThemeSnapshot, PluginThemeState, authorize_plugin_call_request,
+        ensure_same_plugin_call, ensure_video_file_read_permission, is_allowed_video_path,
     };
-    use std::fs;
     use std::path::Path;
 
     #[test]
@@ -312,61 +234,6 @@ mod tests {
         assert!(is_allowed_video_path(Path::new("C:/media/movie.mp4")));
         assert!(is_allowed_video_path(Path::new("C:/media/MOVIE.MKV")));
         assert!(!is_allowed_video_path(Path::new("C:/media/audio.wav")));
-    }
-
-    #[test]
-    fn slab_api_permissions_allow_declared_plugin_surface() {
-        let permissions = vec![
-            "models:read".to_string(),
-            "models:load".to_string(),
-            "ffmpeg:convert".to_string(),
-            "audio:transcribe".to_string(),
-            "subtitle:render".to_string(),
-            "chat:complete".to_string(),
-            "tasks:read".to_string(),
-            "tasks:cancel".to_string(),
-        ];
-
-        for (method, path) in [
-            ("GET", "/v1/models?capability=audio_transcription"),
-            ("POST", "/v1/models/load"),
-            ("POST", "/v1/ffmpeg/convert"),
-            ("POST", "/v1/audio/transcriptions"),
-            ("POST", "/v1/subtitles/render"),
-            ("POST", "/v1/chat/completions"),
-            ("GET", "/v1/tasks/task-1/result"),
-            ("POST", "/v1/tasks/task-1/cancel"),
-        ] {
-            let request = super::PluginApiRequest {
-                method: method.to_string(),
-                path: path.to_string(),
-                headers: Default::default(),
-                body: None,
-                timeout_ms: None,
-            };
-            assert!(authorize_slab_api_request(&permissions, &request).is_ok());
-        }
-    }
-
-    #[test]
-    fn slab_api_permissions_reject_missing_or_unknown_surface() {
-        let request = super::PluginApiRequest {
-            method: "POST".to_string(),
-            path: "/v1/chat/completions".to_string(),
-            headers: Default::default(),
-            body: None,
-            timeout_ms: None,
-        };
-        assert!(authorize_slab_api_request(&["models:read".to_string()], &request).is_err());
-
-        let unknown = super::PluginApiRequest {
-            method: "DELETE".to_string(),
-            path: "/v1/models/model-1".to_string(),
-            headers: Default::default(),
-            body: None,
-            timeout_ms: None,
-        };
-        assert!(authorize_slab_api_request(&["models:read".to_string()], &unknown).is_err());
     }
 
     #[test]
@@ -402,64 +269,6 @@ mod tests {
     }
 
     #[test]
-    fn plugin_api_authorization_uses_registered_caller_permissions() {
-        let root = tempfile::tempdir().expect("tempdir");
-        let registry = registry_with_plugin(
-            root.path(),
-            "video-subtitle-translator",
-            &["models:read", "chat:complete"],
-        );
-        let request = super::PluginApiRequest {
-            method: "GET".to_string(),
-            path: "/v1/models".to_string(),
-            headers: Default::default(),
-            body: None,
-            timeout_ms: None,
-        };
-
-        assert!(
-            authorize_plugin_api_request_from_caller(
-                Some("video-subtitle-translator"),
-                &registry,
-                &request
-            )
-            .is_ok()
-        );
-        assert!(
-            authorize_plugin_api_request_from_caller(Some("missing-plugin"), &registry, &request)
-                .expect_err("missing plugin should fail")
-                .contains("not available")
-        );
-    }
-
-    #[test]
-    fn plugin_api_authorization_rejects_missing_caller_permission() {
-        let root = tempfile::tempdir().expect("tempdir");
-        let registry = registry_with_plugin(root.path(), "video-subtitle-translator", &[]);
-        let request = super::PluginApiRequest {
-            method: "POST".to_string(),
-            path: "/v1/chat/completions".to_string(),
-            headers: Default::default(),
-            body: None,
-            timeout_ms: None,
-        };
-
-        let error = authorize_plugin_api_request_from_caller(
-            Some("video-subtitle-translator"),
-            &registry,
-            &request,
-        )
-        .expect_err("missing permission should fail");
-
-        assert!(error.contains("requires permissions.slabApi `chat:complete`"));
-        // A non-plugin webview (main window) resolves to `None` and must be rejected
-        // rather than silently allowed to call the plugin Slab API surface.
-        let missing_caller = authorize_plugin_api_request_from_caller(None, &registry, &request)
-            .expect_err("caller-less plugin api request should be rejected");
-        assert!(missing_caller.contains("requires a plugin webview caller"));
-    }
-
-    #[test]
     fn theme_state_roundtrips_snapshot() {
         let state = PluginThemeState::default();
         let mut snapshot = PluginThemeSnapshot::default();
@@ -470,33 +279,46 @@ mod tests {
         assert_eq!(state.snapshot().unwrap(), snapshot);
     }
 
-    fn registry_with_plugin(
-        root: &Path,
-        plugin_id: &str,
-        slab_api_permissions: &[&str],
-    ) -> super::PluginRegistryState {
-        let plugin_dir = root.join(plugin_id);
-        fs::create_dir_all(plugin_dir.join("ui")).expect("plugin ui dir");
-        fs::write(plugin_dir.join("ui").join("index.html"), "<!doctype html>").expect("plugin ui");
-        fs::write(
-            plugin_dir.join("plugin.json"),
-            serde_json::json!({
-                "manifestVersion": 1,
-                "id": plugin_id,
-                "name": "Video Subtitle Translator",
-                "version": "0.1.0",
-                "runtime": {
-                    "ui": { "entry": "ui/index.html" }
-                },
-                "permissions": {
-                    "network": { "mode": "blocked", "allowHosts": [] },
-                    "slabApi": slab_api_permissions
-                }
-            })
-            .to_string(),
-        )
-        .expect("plugin manifest");
+    /// Boundary guard: the desktop host must not re-introduce the
+    /// `plugin_api_request` HTTP forward. Plugins reach slab-server directly
+    /// over HTTP via `@slab/plugin-sdk` → `@slab/api` → slab-server; Tauri only
+    /// owns the desktop plugin host surface (views, theme, file pick, events).
+    /// These checks scan sibling files (never this one) to avoid self-match.
+    #[test]
+    fn plugin_api_request_http_forward_stays_removed() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
 
-        super::PluginRegistryState::new(root.to_path_buf()).expect("plugin registry")
+        for capability in ["capabilities/plugin-webview.json", "capabilities/default.json"] {
+            let path = format!("{manifest_dir}/{capability}");
+            let content =
+                std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("missing {path}"));
+            assert!(
+                !content.contains("allow-plugin-api-request"),
+                "{capability} must not whitelist the removed plugin_api_request command"
+            );
+        }
+
+        let runtime_path = format!("{manifest_dir}/src/plugins/runtime.rs");
+        assert!(
+            !Path::new(&runtime_path).exists(),
+            "src/plugins/runtime.rs (the reqwest HTTP forward) must stay removed"
+        );
+
+        let permission_path =
+            format!("{manifest_dir}/permissions/autogenerated/plugin_api_request.toml");
+        assert!(
+            !Path::new(&permission_path).exists(),
+            "the plugin_api_request autogenerated permission must stay removed"
+        );
+
+        for source in ["build.rs", "src/lib.rs"] {
+            let path = format!("{manifest_dir}/{source}");
+            let content =
+                std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("missing {path}"));
+            assert!(
+                !content.contains("plugin_api_request"),
+                "{source} must not register the removed plugin_api_request command"
+            );
+        }
     }
 }

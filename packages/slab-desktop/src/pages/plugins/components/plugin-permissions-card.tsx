@@ -1,5 +1,5 @@
 import { useTranslation } from "@slab/i18n";
-import { describeSlabApiPermission } from "@slab/api/permissions";
+import { describeSlabApiPermission } from "@slab/plugin-sdk";
 import { ShieldCheck, X } from "lucide-react";
 
 import { Button } from "@slab/components/button";
