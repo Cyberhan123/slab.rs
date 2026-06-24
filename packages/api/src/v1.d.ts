@@ -827,6 +827,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ui-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_ui_state_batch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/ui-state/{key}": {
         parameters: {
             query?: never;
@@ -2871,6 +2887,18 @@ export interface components {
              * @description Probability threshold used to classify speech.
              */
             threshold?: number | null;
+        };
+        /**
+         * @description One entry in a batched UI-state read. `value`/`updatedAt` are `null` when
+         *     the requested key is absent.
+         */
+        UiStateBatchEntryResponse: {
+            key: string;
+            updated_at?: string | null;
+            value?: string | null;
+        };
+        UiStateBatchResponse: {
+            entries: components["schemas"]["UiStateBatchEntryResponse"][];
         };
         UiStateDeleteResponse: {
             deleted: boolean;
@@ -5329,6 +5357,36 @@ export interface operations {
             };
         };
     };
+    get_ui_state_batch: {
+        parameters: {
+            query: {
+                /** @description Comma-separated UI state keys (max 32). Keys must not contain commas. */
+                keys: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Batched UI state values; absent keys have null value/updatedAt */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UiStateBatchResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     get_ui_state: {
         parameters: {
             query?: never;
@@ -5708,6 +5766,8 @@ export interface operations {
                 relativePath?: string;
                 /** @description Whether to include ignored and hidden workspace directories. */
                 includeIgnored?: boolean;
+                /** @description Directory levels to flatten into the response (default 1, capped at 5). Flat listing is capped at 500 entries with truncated=true. */
+                depth?: number;
             };
             header?: never;
             path?: never;
@@ -5726,6 +5786,13 @@ export interface operations {
             };
             /** @description Bad request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Workspace path not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -13,7 +13,7 @@ use std::time::Duration;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use slab_config::SettingsDocument;
-use slab_file::FileSystemError;
+use slab_file::{DirectoryEntry, FileSystemError};
 use slab_git::{GitCommitOptions, GitError, GitRepository};
 use slab_utils::hash::{sha256_hex_bytes, verify_sha256_hex_expected};
 use slab_utils::pty::spawn_pipe_process_no_stdin;
@@ -40,6 +40,7 @@ const CONSOLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_CONSOLE_COMMAND_BYTES: usize = 2_000;
 const MAX_CONSOLE_OUTPUT_BYTES: usize = 64 * 1024;
 const MAX_DIRECTORY_ENTRIES: usize = 500;
+const MAX_DIRECTORY_DEPTH: u8 = 5;
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
 const MAX_LINE_MATCHES_PER_FILE: usize = 20;
 const MAX_SEARCH_RESULTS: usize = 100;
@@ -106,6 +107,7 @@ impl WorkspaceService {
         root: impl AsRef<Path>,
         relative_path: Option<&str>,
         include_ignored: bool,
+        depth: u8,
     ) -> Result<WorkspaceDirectoryView, AppCoreError> {
         let relative_path = normalize_relative_path(relative_path.unwrap_or(""))?;
         let fs = LocalExecutorFileSystem::new(root.as_ref()).map_err(map_fs_error)?;
@@ -117,36 +119,22 @@ impl WorkspaceService {
         }
 
         let max_entries = if include_ignored { usize::MAX } else { MAX_DIRECTORY_ENTRIES };
+        // `depth` is the number of directory levels to expand below the requested
+        // directory: 1 (the default) lists only its direct children (legacy
+        // behavior); higher values flatten nested entries into a single response
+        // so the file-tree overlay can pre-load without one request per folder.
+        let depth = depth.clamp(1, MAX_DIRECTORY_DEPTH);
         let mut entries = Vec::new();
         let mut truncated = false;
-        for entry in fs.read_directory_sync(&relative_path).map_err(map_fs_error)? {
-            if should_hide_entry(&entry.name, entry.metadata.is_directory, include_ignored) {
-                continue;
-            }
-            if entries.len() >= max_entries {
-                truncated = true;
-                break;
-            }
-
-            entries.push(WorkspaceFileEntry {
-                id: entry.path.clone(),
-                name: entry.name,
-                relative_path: entry.path,
-                kind: if entry.metadata.is_directory {
-                    WorkspaceFileKind::Directory
-                } else {
-                    WorkspaceFileKind::File
-                },
-                has_children: entry.metadata.is_directory,
-                size_bytes: Some(if entry.metadata.is_file {
-                    entry.metadata.size_bytes
-                } else {
-                    0
-                }),
-                modified_at: Some(entry.metadata.modified_at),
-                created_at: Some(entry.metadata.created_at),
-            });
-        }
+        read_directory_recursive(
+            &fs,
+            &relative_path,
+            depth,
+            include_ignored,
+            max_entries,
+            &mut entries,
+            &mut truncated,
+        )?;
 
         entries.sort_by(|left, right| match (&left.kind, &right.kind) {
             (WorkspaceFileKind::Directory, WorkspaceFileKind::File) => std::cmp::Ordering::Less,
@@ -600,6 +588,73 @@ impl WorkspaceService {
     }
 }
 
+/// Recursively flattens directory entries up to `remaining_depth` levels below
+/// the requested directory. Directories are descended into while the depth
+/// budget remains; symlinked directories are listed but not traversed (bounding
+/// cost and avoiding cycles). The same ignore filter and entry cap apply at
+/// every level, so the result is consistent with a single-level listing.
+fn read_directory_recursive(
+    fs: &LocalExecutorFileSystem,
+    relative_path: &str,
+    remaining_depth: u8,
+    include_ignored: bool,
+    max_entries: usize,
+    entries: &mut Vec<WorkspaceFileEntry>,
+    truncated: &mut bool,
+) -> Result<(), AppCoreError> {
+    if *truncated {
+        return Ok(());
+    }
+    for entry in fs.read_directory_sync(relative_path).map_err(map_fs_error)? {
+        if should_hide_entry(&entry.name, entry.metadata.is_directory, include_ignored) {
+            continue;
+        }
+        if entries.len() >= max_entries {
+            *truncated = true;
+            break;
+        }
+
+        let descend = entry.metadata.is_directory
+            && !entry.metadata.is_symlink
+            && remaining_depth > 1
+            && !*truncated;
+        entries.push(directory_entry_to_file_entry(&entry));
+
+        if descend {
+            read_directory_recursive(
+                fs,
+                &entry.path,
+                remaining_depth - 1,
+                include_ignored,
+                max_entries,
+                entries,
+                truncated,
+            )?;
+        }
+        if *truncated {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn directory_entry_to_file_entry(entry: &DirectoryEntry) -> WorkspaceFileEntry {
+    WorkspaceFileEntry {
+        id: entry.path.clone(),
+        name: entry.name.clone(),
+        relative_path: entry.path.clone(),
+        kind: if entry.metadata.is_directory {
+            WorkspaceFileKind::Directory
+        } else {
+            WorkspaceFileKind::File
+        },
+        has_children: entry.metadata.is_directory,
+        size_bytes: Some(if entry.metadata.is_file { entry.metadata.size_bytes } else { 0 }),
+        modified_at: Some(entry.metadata.modified_at),
+        created_at: Some(entry.metadata.created_at),
+    }
+}
+
 fn map_fs_error(error: FileSystemError) -> AppCoreError {
     match error {
         FileSystemError::AbsolutePath(message)
@@ -607,7 +662,13 @@ fn map_fs_error(error: FileSystemError) -> AppCoreError {
         | FileSystemError::InvalidPath(message)
         | FileSystemError::PermissionDenied(message) => AppCoreError::BadRequest(message),
         FileSystemError::Root(error) | FileSystemError::Io(error) => {
-            AppCoreError::Internal(error.to_string())
+            // A missing path (e.g. an optional `.vscode/settings.json` probe, or a
+            // directory that was removed) is a client error, not a server fault.
+            if error.kind() == std::io::ErrorKind::NotFound {
+                AppCoreError::NotFound(error.to_string())
+            } else {
+                AppCoreError::Internal(error.to_string())
+            }
         }
         FileSystemError::InvalidPatch(message) => AppCoreError::BadRequest(message),
         FileSystemError::PatchMismatch { path, line } => {
@@ -1098,7 +1159,9 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use super::{MAX_CONSOLE_OUTPUT_BYTES, WorkspaceService, normalize_relative_path};
+    use super::{
+        AppCoreError, MAX_CONSOLE_OUTPUT_BYTES, WorkspaceService, normalize_relative_path,
+    };
 
     #[test]
     fn normalize_relative_path_rejects_parent_segments() {
@@ -1116,10 +1179,62 @@ mod tests {
         fs::create_dir_all(root.path().join("src")).expect("src");
         fs::create_dir_all(root.path().join("node_modules")).expect("node modules");
 
-        let view = WorkspaceService::read_directory(root.path(), None, false).expect("directory");
+        let view =
+            WorkspaceService::read_directory(root.path(), None, false, 1).expect("directory");
 
         assert_eq!(view.entries.len(), 1);
         assert_eq!(view.entries[0].relative_path, "src");
+    }
+
+    #[test]
+    fn read_directory_maps_missing_directory_to_not_found() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let error = WorkspaceService::read_directory(root.path(), Some("does/not/exist"), false, 1)
+            .expect_err("missing directory");
+        assert!(matches!(error, AppCoreError::NotFound(_)));
+    }
+
+    #[test]
+    fn stat_path_maps_missing_file_to_not_found() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let error = WorkspaceService::stat_path(root.path(), ".vscode/settings.json")
+            .expect_err("missing file");
+        assert!(matches!(error, AppCoreError::NotFound(_)));
+    }
+
+    #[test]
+    fn read_directory_depth_flattens_nested_entries() {
+        let root = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(root.path().join("src/components")).expect("nested dirs");
+        fs::write(root.path().join("src/main.rs"), "fn main() {}").expect("seed file");
+        fs::write(root.path().join("src/components/Button.tsx"), "x").expect("seed nested");
+
+        let shallow =
+            WorkspaceService::read_directory(root.path(), None, false, 1).expect("shallow");
+        let shallow_paths: Vec<String> =
+            shallow.entries.iter().map(|entry| entry.relative_path.clone()).collect();
+        assert!(shallow_paths.contains(&"src".to_owned()));
+        assert!(!shallow_paths.contains(&"src/main.rs".to_owned()));
+
+        // depth=2 flattens levels 1 and 2 (src, plus src's direct children), but
+        // does not descend into level-2 directories (src/components/...).
+        let deep = WorkspaceService::read_directory(root.path(), None, false, 2).expect("deep");
+        let deep_paths: Vec<String> =
+            deep.entries.iter().map(|entry| entry.relative_path.clone()).collect();
+        assert!(deep_paths.contains(&"src/main.rs".to_owned()));
+        assert!(deep_paths.contains(&"src/components".to_owned()));
+        assert!(!deep_paths.contains(&"src/components/Button.tsx".to_owned()));
+
+        let deeper = WorkspaceService::read_directory(root.path(), None, false, 3).expect("deeper");
+        let deeper_paths: Vec<String> =
+            deeper.entries.iter().map(|entry| entry.relative_path.clone()).collect();
+        assert!(deeper_paths.contains(&"src/components/Button.tsx".to_owned()));
+        // Ignored directories are still hidden at nested levels.
+        assert!(
+            !deeper_paths
+                .iter()
+                .any(|path| path.split('/').any(|segment| segment == "node_modules"))
+        );
     }
 
     #[test]

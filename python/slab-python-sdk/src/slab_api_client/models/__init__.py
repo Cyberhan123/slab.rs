@@ -225,6 +225,8 @@ from .transcribe_decode_options_response import TranscribeDecodeOptionsResponse
 from .transcribe_decode_request import TranscribeDecodeRequest
 from .transcribe_vad_options_response import TranscribeVadOptionsResponse
 from .transcribe_vad_request import TranscribeVadRequest
+from .ui_state_batch_entry_response import UiStateBatchEntryResponse
+from .ui_state_batch_response import UiStateBatchResponse
 from .ui_state_delete_response import UiStateDeleteResponse
 from .ui_state_key_path import UiStateKeyPath
 from .ui_state_value_response import UiStateValueResponse
@@ -476,6 +478,8 @@ __all__ = (
     "TranscribeDecodeRequest",
     "TranscribeVadOptionsResponse",
     "TranscribeVadRequest",
+    "UiStateBatchEntryResponse",
+    "UiStateBatchResponse",
     "UiStateDeleteResponse",
     "UiStateKeyPath",
     "UiStateValueResponse",

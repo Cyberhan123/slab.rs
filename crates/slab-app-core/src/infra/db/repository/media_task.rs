@@ -204,7 +204,7 @@ impl MediaTaskStore for AnyStore {
         .bind(i64::from(video_task.width))
         .bind(i64::from(video_task.height))
         .bind(i64::from(video_task.frames))
-        .bind(f64::from(video_task.fps))
+        .bind(video_task.fps)
         .bind(&video_task.reference_image_path)
         .bind(&video_task.request_data)
         .bind(video_task.created_at.to_rfc3339())

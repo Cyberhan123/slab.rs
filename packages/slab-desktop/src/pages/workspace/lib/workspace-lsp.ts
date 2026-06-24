@@ -58,6 +58,7 @@ import {
 import type {
   WorkspaceDirectoryResponse,
   WorkspaceFileContent,
+  WorkspaceWatchEvent,
 } from "@/lib/workspace-bridge"
 import {
   workspaceLspDefinitionTargetFromResult,
@@ -139,6 +140,13 @@ type WorkspaceVscodeWorkingCopyService = {
 const WORKSPACE_LSP_RECONNECT_INITIAL_DELAY_MS = 250
 const WORKSPACE_LSP_RECONNECT_MAX_DELAY_MS = 5_000
 const MAX_WORKSPACE_PREVIEW_BYTES = 1024 * 1024
+// Number of directory levels fetched in a single request when a workspace
+// opens, so the file tree renders without one request per folder. Deeper
+// folders still lazy-load on expand.
+const WORKSPACE_PRELOAD_DEPTH = 2
+// Watch events arrive in bursts (a single save can emit several); coalesce them
+// into one targeted cache invalidation pass.
+const WORKSPACE_INVALIDATE_DEBOUNCE_MS = 100
 
 type WorkspaceFileService = {
   root: string | null
@@ -177,6 +185,7 @@ let workspaceEditorOpenHandlerRegistered = false
 let workspaceVscodeServiceOverridesRegistered = false
 let workspaceVscodeRoot: string | null = null
 let clearWorkspaceFileSystemCache = () => {}
+let preloadWorkspaceFileSystem = async (_root: string) => {}
 
 export function workspaceLspModelUri(
   monaco: typeof Monaco,
@@ -195,6 +204,13 @@ export function setWorkspaceLspFileServiceRoot(workspaceRoot: string | null) {
   currentWorkspaceFileService = { root: workspaceRoot }
   if (previousWorkspaceRoot !== workspaceRoot) {
     clearWorkspaceFileSystemCache()
+    if (workspaceRoot) {
+      // Pre-load the first few directory levels in one request so the explorer
+      // can render without re-fetching each folder as it expands.
+      void preloadWorkspaceFileSystem(workspaceRoot).catch((error) => {
+        console.debug("workspace preload failed", { workspaceRoot, error })
+      })
+    }
   }
   if (workspaceRoot && workspaceMonacoIsInitialized()) {
     void syncWorkspaceVscodeRoot(workspaceRoot).catch((error) => {
@@ -218,6 +234,14 @@ export function ensureWorkspaceLspServices(workspaceRoot?: string | null) {
       if (!workspaceFileSystemOverlayRegistered) {
         await registerWorkspaceFileSystemOverlay()
         workspaceFileSystemOverlayRegistered = true
+        // The overlay caches now exist. setWorkspaceLspFileServiceRoot ran
+        // before this registration, so its preload was a no-op on first init;
+        // fire it now so the explorer renders without one request per folder.
+        if (currentWorkspaceFileService.root) {
+          void preloadWorkspaceFileSystem(currentWorkspaceFileService.root).catch((error) => {
+            console.debug("workspace preload failed", { error })
+          })
+        }
       }
       await initializeMonacoWrapper(workspaceWorkbenchOptions(currentWorkspaceFileService.root), {
         registerAdditionalExtensions: true,
@@ -901,6 +925,81 @@ async function registerWorkspaceFileSystemOverlay() {
     pathStatCache.clear()
     pendingPathStats.clear()
   }
+  preloadWorkspaceFileSystem = async (root: string) => {
+    if (!root) {
+      return
+    }
+    let flat: WorkspaceDirectoryResponse
+    try {
+      flat = await workspaceReadDirectory("", { depth: WORKSPACE_PRELOAD_DEPTH })
+    } catch {
+      return
+    }
+    // A rapid workspace switch could change the root while the fetch was in flight.
+    if (currentWorkspaceFileService.root !== root) {
+      return
+    }
+
+    // Group every entry under its parent directory so readdir()/stat() for any
+    // pre-loaded level resolve from cache. Directories at the depth boundary are
+    // listed as entries but their own children were not fetched, so they have no
+    // directoryCache entry and still lazy-load on expand.
+    const entriesByParent = new Map<string, WorkspaceDirectoryResponse["entries"]>()
+    const now = Date.now()
+    for (const entry of flat.entries) {
+      const separatorIndex = entry.relativePath.lastIndexOf("/")
+      const parent = separatorIndex === -1 ? "" : entry.relativePath.slice(0, separatorIndex)
+      let siblings = entriesByParent.get(parent)
+      if (!siblings) {
+        siblings = []
+        entriesByParent.set(parent, siblings)
+      }
+      siblings.push(entry)
+      pathStatCache.set(entry.relativePath, {
+        ctime: entry.createdAt ?? now,
+        mtime: entry.modifiedAt ?? now,
+        size: entry.kind === "file" ? entry.sizeBytes ?? 0 : 0,
+        type: entry.kind === "directory" ? FileType.Directory : FileType.File,
+      })
+    }
+    for (const [parent, entries] of entriesByParent) {
+      // Never clobber a fresher in-flight readdir for this directory.
+      if (!directoryCache.has(parent)) {
+        directoryCache.set(parent, {
+          relativePath: parent,
+          entries,
+          truncated: parent === "" ? flat.truncated : false,
+        })
+      }
+    }
+    pathStatCache.set("", { ctime: now, mtime: now, size: 0, type: FileType.Directory })
+  }
+  const invalidateWorkspacePaths = (relativePaths: string[]) => {
+    if (relativePaths.length === 0) {
+      return
+    }
+    const touched = new Set<string>()
+    for (const relativePath of relativePaths) {
+      const separatorIndex = relativePath.lastIndexOf("/")
+      const parent = separatorIndex === -1 ? "" : relativePath.slice(0, separatorIndex)
+      for (const key of [relativePath, parent]) {
+        touched.add(key)
+        directoryCache.delete(key)
+        pendingDirectoryReads.delete(key)
+        pathStatCache.delete(key)
+        pendingPathStats.delete(key)
+      }
+    }
+    const activeWorkspaceRoot = currentWorkspaceFileService.root
+    if (activeWorkspaceRoot) {
+      changesEmitter.fire(
+        [...touched].map((relativePath) => ({
+          resource: URI.parse(workspaceLspModelPath(activeWorkspaceRoot, relativePath)),
+          type: FileChangeType.UPDATED,
+        })),
+      )
+    }
+  }
   const loadWorkspaceDirectory = async (relativePath: string) => {
     const cachedDirectory = directoryCache.get(relativePath)
     if (cachedDirectory) {
@@ -963,18 +1062,18 @@ async function registerWorkspaceFileSystemOverlay() {
     onDidChangeCapabilities: () => noopDisposable,
     onDidChangeFile: changesEmitter.event,
     async delete(resource, options) {
+      const relativePath = relativePathForResource(resource.toString())
       await workspaceDeletePath({
         recursive: Boolean(options.recursive),
-        relativePath: relativePathForResource(resource.toString()),
+        relativePath,
       })
-      clearWorkspaceFileSystemCache()
+      invalidateWorkspacePaths([relativePath])
       changesEmitter.fire([{ resource, type: FileChangeType.DELETED }])
     },
     async mkdir(resource) {
-      await workspaceCreateDirectory({
-        relativePath: relativePathForResource(resource.toString()),
-      })
-      clearWorkspaceFileSystemCache()
+      const relativePath = relativePathForResource(resource.toString())
+      await workspaceCreateDirectory({ relativePath })
+      invalidateWorkspacePaths([relativePath])
       changesEmitter.fire([{ resource, type: FileChangeType.ADDED }])
     },
     async readdir(resource) {
@@ -1013,11 +1112,10 @@ async function registerWorkspaceFileSystemOverlay() {
       return textEncoder.encode(file.content)
     },
     async rename(from, to) {
-      await workspaceRenamePath({
-        fromRelativePath: relativePathForResource(from.toString()),
-        toRelativePath: relativePathForResource(to.toString()),
-      })
-      clearWorkspaceFileSystemCache()
+      const fromRelativePath = relativePathForResource(from.toString())
+      const toRelativePath = relativePathForResource(to.toString())
+      await workspaceRenamePath({ fromRelativePath, toRelativePath })
+      invalidateWorkspacePaths([fromRelativePath, toRelativePath])
       changesEmitter.fire([
         { resource: from, type: FileChangeType.DELETED },
         { resource: to, type: FileChangeType.ADDED },
@@ -1094,43 +1192,69 @@ async function registerWorkspaceFileSystemOverlay() {
         return noopDisposable
       }
 
-      const invalidateWorkspace = () => {
-        clearWorkspaceFileSystemCache()
-        changesEmitter.fire([{
-          resource: URI.file(activeWorkspaceRoot),
-          type: FileChangeType.UPDATED,
-        }])
+      let pendingEvents: WorkspaceWatchEvent[] = []
+      let flushTimer: ReturnType<typeof setTimeout> | null = null
+      const flushPendingEvents = () => {
+        flushTimer = null
+        if (pendingEvents.length === 0) {
+          return
+        }
+        const events = pendingEvents
+        pendingEvents = []
+        // Drop the cached listings/stats for the affected paths (and their
+        // parents, since directory membership changed) so the next access
+        // re-fetches just those, instead of nuking the whole cache.
+        invalidateWorkspacePaths(events.map((event) => event.relativePath))
+        changesEmitter.fire(
+          events.map((event) => ({
+            resource: URI.parse(workspaceLspModelPath(activeWorkspaceRoot, event.relativePath)),
+            type:
+              event.type === "created"
+                ? FileChangeType.ADDED
+                : event.type === "deleted"
+                  ? FileChangeType.DELETED
+                  : FileChangeType.UPDATED,
+          })),
+        )
       }
+
       const watchDisposable = workspaceWatch({
-        onError: invalidateWorkspace,
-        onEvent: (event) => {
+        onError: () => {
+          // The SSE stream was lost, so we cannot trust the cache to reflect
+          // out-of-band changes. Conservatively reset everything and signal a
+          // root update so the explorer re-reads on next access.
           clearWorkspaceFileSystemCache()
-          const resource = URI.parse(workspaceLspModelPath(activeWorkspaceRoot, event.relativePath))
-          const type = event.type === "created"
-            ? FileChangeType.ADDED
-            : event.type === "deleted"
-              ? FileChangeType.DELETED
-              : FileChangeType.UPDATED
-          changesEmitter.fire([{ resource, type }])
+          changesEmitter.fire([{
+            resource: URI.file(activeWorkspaceRoot),
+            type: FileChangeType.UPDATED,
+          }])
+        },
+        onEvent: (event) => {
+          pendingEvents.push(event)
+          if (flushTimer === null) {
+            flushTimer = setTimeout(flushPendingEvents, WORKSPACE_INVALIDATE_DEBOUNCE_MS)
+          }
         },
       })
-      window.addEventListener("focus", invalidateWorkspace)
-      const interval = window.setInterval(invalidateWorkspace, 30_000)
 
       return {
         dispose() {
+          if (flushTimer !== null) {
+            clearTimeout(flushTimer)
+            flushTimer = null
+          }
+          pendingEvents = []
           watchDisposable.dispose()
-          window.removeEventListener("focus", invalidateWorkspace)
-          window.clearInterval(interval)
         },
       }
     },
     async writeFile(resource, content) {
+      const relativePath = relativePathForResource(resource.toString())
       await workspaceWriteFile({
         content: textDecoder.decode(content),
-        relativePath: relativePathForResource(resource.toString()),
+        relativePath,
       })
-      clearWorkspaceFileSystemCache()
+      invalidateWorkspacePaths([relativePath])
       changesEmitter.fire([{ resource, type: FileChangeType.UPDATED }])
     },
   })

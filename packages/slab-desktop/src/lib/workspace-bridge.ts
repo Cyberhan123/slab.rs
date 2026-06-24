@@ -243,7 +243,7 @@ export async function workspaceClose(): Promise<WorkspaceStateResponse> {
 
 export async function workspaceReadDirectory(
   relativePath?: string,
-  options?: { includeIgnored?: boolean },
+  options?: { includeIgnored?: boolean; depth?: number },
 ): Promise<WorkspaceDirectoryResponse> {
   return requireWorkspaceData(
     await apiClient.GET("/v1/workspace/directory", {
@@ -251,6 +251,7 @@ export async function workspaceReadDirectory(
         query: {
           includeIgnored: options?.includeIgnored,
           relativePath,
+          depth: options?.depth,
         },
       },
     }),

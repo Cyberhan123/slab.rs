@@ -5,30 +5,24 @@ import httpx
 
 from ... import errors
 from ...client import AuthenticatedClient, Client
-from ...models.workspace_directory_view import WorkspaceDirectoryView
-from ...types import UNSET, Response, Unset
+from ...models.ui_state_batch_response import UiStateBatchResponse
+from ...types import UNSET, Response
 
 
 def _get_kwargs(
     *,
-    relative_path: str | Unset = UNSET,
-    include_ignored: bool | Unset = UNSET,
-    depth: int | Unset = UNSET,
+    keys: str,
 ) -> dict[str, Any]:
 
     params: dict[str, Any] = {}
 
-    params["relativePath"] = relative_path
-
-    params["includeIgnored"] = include_ignored
-
-    params["depth"] = depth
+    params["keys"] = keys
 
     params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/v1/workspace/directory",
+        "url": "/v1/ui-state",
         "params": params,
     }
 
@@ -37,19 +31,15 @@ def _get_kwargs(
 
 def _parse_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Any | WorkspaceDirectoryView | None:
+) -> Any | UiStateBatchResponse | None:
     if response.status_code == 200:
-        response_200 = WorkspaceDirectoryView.from_dict(response.json())
+        response_200 = UiStateBatchResponse.from_dict(response.json())
 
         return response_200
 
     if response.status_code == 400:
         response_400 = cast(Any, None)
         return response_400
-
-    if response.status_code == 404:
-        response_404 = cast(Any, None)
-        return response_404
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -59,7 +49,7 @@ def _parse_response(
 
 def _build_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[Any | WorkspaceDirectoryView]:
+) -> Response[Any | UiStateBatchResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -71,28 +61,22 @@ def _build_response(
 def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
-    relative_path: str | Unset = UNSET,
-    include_ignored: bool | Unset = UNSET,
-    depth: int | Unset = UNSET,
-) -> Response[Any | WorkspaceDirectoryView]:
+    keys: str,
+) -> Response[Any | UiStateBatchResponse]:
     """
     Args:
-        relative_path (str | Unset):
-        include_ignored (bool | Unset):
-        depth (int | Unset):
+        keys (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | WorkspaceDirectoryView]
+        Response[Any | UiStateBatchResponse]
     """
 
     kwargs = _get_kwargs(
-        relative_path=relative_path,
-        include_ignored=include_ignored,
-        depth=depth,
+        keys=keys,
     )
 
     response = client.get_httpx_client().request(
@@ -105,57 +89,45 @@ def sync_detailed(
 def sync(
     *,
     client: AuthenticatedClient | Client,
-    relative_path: str | Unset = UNSET,
-    include_ignored: bool | Unset = UNSET,
-    depth: int | Unset = UNSET,
-) -> Any | WorkspaceDirectoryView | None:
+    keys: str,
+) -> Any | UiStateBatchResponse | None:
     """
     Args:
-        relative_path (str | Unset):
-        include_ignored (bool | Unset):
-        depth (int | Unset):
+        keys (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | WorkspaceDirectoryView
+        Any | UiStateBatchResponse
     """
 
     return sync_detailed(
         client=client,
-        relative_path=relative_path,
-        include_ignored=include_ignored,
-        depth=depth,
+        keys=keys,
     ).parsed
 
 
 async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
-    relative_path: str | Unset = UNSET,
-    include_ignored: bool | Unset = UNSET,
-    depth: int | Unset = UNSET,
-) -> Response[Any | WorkspaceDirectoryView]:
+    keys: str,
+) -> Response[Any | UiStateBatchResponse]:
     """
     Args:
-        relative_path (str | Unset):
-        include_ignored (bool | Unset):
-        depth (int | Unset):
+        keys (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | WorkspaceDirectoryView]
+        Response[Any | UiStateBatchResponse]
     """
 
     kwargs = _get_kwargs(
-        relative_path=relative_path,
-        include_ignored=include_ignored,
-        depth=depth,
+        keys=keys,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -166,29 +138,23 @@ async def asyncio_detailed(
 async def asyncio(
     *,
     client: AuthenticatedClient | Client,
-    relative_path: str | Unset = UNSET,
-    include_ignored: bool | Unset = UNSET,
-    depth: int | Unset = UNSET,
-) -> Any | WorkspaceDirectoryView | None:
+    keys: str,
+) -> Any | UiStateBatchResponse | None:
     """
     Args:
-        relative_path (str | Unset):
-        include_ignored (bool | Unset):
-        depth (int | Unset):
+        keys (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | WorkspaceDirectoryView
+        Any | UiStateBatchResponse
     """
 
     return (
         await asyncio_detailed(
             client=client,
-            relative_path=relative_path,
-            include_ignored=include_ignored,
-            depth=depth,
+            keys=keys,
         )
     ).parsed

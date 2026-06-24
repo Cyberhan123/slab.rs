@@ -142,6 +142,7 @@ mod tests {
         ("/v1/tasks/{id}/cancel", "post"),
         ("/v1/tasks/{id}/restart", "post"),
         ("/v1/tasks/{id}/result", "get"),
+        ("/v1/ui-state", "get"),
         ("/v1/ui-state/{key}", "delete"),
         ("/v1/ui-state/{key}", "get"),
         ("/v1/ui-state/{key}", "put"),

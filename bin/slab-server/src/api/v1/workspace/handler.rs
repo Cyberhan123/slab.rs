@@ -42,6 +42,7 @@ use crate::error::ServerError;
 struct WorkspaceDirectoryQuery {
     relative_path: Option<String>,
     include_ignored: Option<bool>,
+    depth: Option<u8>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -210,11 +211,13 @@ async fn close_workspace(
     tag = "workspace",
     params(
         ("relativePath" = Option<String>, Query, description = "Workspace-relative directory path. Empty or omitted reads the root."),
-        ("includeIgnored" = Option<bool>, Query, description = "Whether to include ignored and hidden workspace directories.")
+        ("includeIgnored" = Option<bool>, Query, description = "Whether to include ignored and hidden workspace directories."),
+        ("depth" = Option<u8>, Query, description = "Directory levels to flatten into the response (default 1, capped at 5). Flat listing is capped at 500 entries with truncated=true.")
     ),
     responses(
         (status = 200, description = "Workspace directory listing", body = WorkspaceDirectoryView),
         (status = 400, description = "Bad request"),
+        (status = 404, description = "Workspace path not found"),
     )
 )]
 async fn read_directory(
@@ -226,6 +229,7 @@ async fn read_directory(
         root,
         query.relative_path.as_deref(),
         query.include_ignored.unwrap_or(false),
+        query.depth.unwrap_or(1),
     )?))
 }
 
@@ -634,25 +638,15 @@ fn workspace_watch_events(
         ),
         NotifyEventKind::Modify(ModifyKind::Name(RenameMode::Both)) if event.paths.len() >= 2 => {
             let mut events = Vec::new();
-            if let Some(old_path) = event.paths.first() {
-                if let Some(event) = workspace_watch_event(
-                    root,
-                    old_path,
-                    WorkspaceWatchEventType::Deleted,
-                    sequence_number,
-                ) {
-                    events.push(event);
-                }
+            if let Some(event) = event.paths.first().and_then(|path| {
+                workspace_watch_event(root, path, WorkspaceWatchEventType::Deleted, sequence_number)
+            }) {
+                events.push(event);
             }
-            if let Some(new_path) = event.paths.get(1) {
-                if let Some(event) = workspace_watch_event(
-                    root,
-                    new_path,
-                    WorkspaceWatchEventType::Created,
-                    sequence_number,
-                ) {
-                    events.push(event);
-                }
+            if let Some(event) = event.paths.get(1).and_then(|path| {
+                workspace_watch_event(root, path, WorkspaceWatchEventType::Created, sequence_number)
+            }) {
+                events.push(event);
             }
             events
         }
@@ -959,6 +953,58 @@ mod route_tests {
 
         assert_eq!(response.status, StatusCode::OK);
         assert_eq!(response.body["content"], "fn main() {}");
+    }
+
+    #[tokio::test]
+    async fn workspace_directory_returns_not_found_for_missing_path() {
+        let workspace_root = tempfile::tempdir().expect("workspace root");
+        let server = TestServer::new_with(TestServerOptions {
+            workspace_root: Some(workspace_root.path().to_path_buf()),
+            ..Default::default()
+        })
+        .await;
+
+        let response = server.get("/v1/workspace/directory?relativePath=.vscode").await;
+
+        assert_eq!(response.status, StatusCode::NOT_FOUND);
+        assert_eq!(response.body["code"], 4004);
+    }
+
+    #[tokio::test]
+    async fn workspace_directory_depth_flattens_nested_entries() {
+        let workspace_root = tempfile::tempdir().expect("workspace root");
+        fs::create_dir_all(workspace_root.path().join("src/components")).expect("nested dirs");
+        fs::write(workspace_root.path().join("src/main.rs"), "fn main() {}").expect("seed file");
+        fs::write(workspace_root.path().join("src/components/Button.tsx"), "x")
+            .expect("seed nested");
+
+        let server = TestServer::new_with(TestServerOptions {
+            workspace_root: Some(workspace_root.path().to_path_buf()),
+            ..Default::default()
+        })
+        .await;
+
+        let shallow = server.get("/v1/workspace/directory").await;
+        assert_eq!(shallow.status, StatusCode::OK);
+        assert!(
+            shallow.body["entries"]
+                .as_array()
+                .map(|entries| entries.iter().all(|entry| entry["relativePath"] != "src/main.rs"))
+                .unwrap_or(false)
+        );
+
+        let deep = server.get("/v1/workspace/directory?depth=2").await;
+        assert_eq!(deep.status, StatusCode::OK);
+        let relative_paths: Vec<&str> = deep.body["entries"]
+            .as_array()
+            .expect("entries array")
+            .iter()
+            .map(|entry| entry["relativePath"].as_str().unwrap_or(""))
+            .collect();
+        // depth=2 flattens levels 1 and 2 but does not descend into level-2 dirs.
+        assert!(relative_paths.contains(&"src/main.rs"));
+        assert!(relative_paths.contains(&"src/components"));
+        assert!(!relative_paths.contains(&"src/components/Button.tsx"));
     }
 
     #[tokio::test]

@@ -127,7 +127,11 @@ describe("plugin API client", () => {
   });
 
   it("routes the OpenAPI client through fetch and parses the response", async () => {
-    const fetchMock = vi.fn<() => Promise<Response>>(() => Promise.resolve(jsonResponse([])));
+    // Type the mock with the fetch call signature so the recorded call args are
+    // reachable; openapi-fetch issues a Request object as the single argument.
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      jsonResponse([]),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const sdk = createSlabPluginSdk();
 

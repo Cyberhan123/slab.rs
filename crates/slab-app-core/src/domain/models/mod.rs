@@ -74,7 +74,10 @@ pub use task::{
     AcceptedOperation, TaskPayloadEnvelope, TaskProgress, TaskResult, TaskStatus, TaskView,
     TimedTextSegment,
 };
-pub use ui_state::{DeleteUiStateView, UiStateValueView, UpdateUiStateCommand};
+pub use ui_state::{
+    DeleteUiStateView, UiStateBatchEntryView, UiStateBatchView, UiStateValueView,
+    UpdateUiStateCommand,
+};
 pub use video::{DecodedVideoInitImage, VideoGenerationCommand};
 pub use workspace::{
     WorkspaceConsoleOutput, WorkspaceCreateDirectoryCommand, WorkspaceCreateFileCommand,

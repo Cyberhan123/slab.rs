@@ -90,6 +90,92 @@ function clearPersistenceFailure() {
   useUiStatePersistenceStatus.getState().clearFailure();
 }
 
+// --- Batched reads ---------------------------------------------------------
+// zustand's `persist` middleware calls `getItem` once per store during app
+// boot. Issuing one network request per store produces a burst of identical
+// GETs, so reads are coalesced: every `getItem` in the same macrotask joins a
+// single batched GET `/v1/ui-state?keys=...`, and each waiter is resolved with
+// its own key's value (or null when the key has no saved state).
+type PendingUiStateBatch = {
+  keys: Set<string>;
+  promise: Promise<Map<string, string | null>>;
+  resolve: (results: Map<string, string | null>) => void;
+};
+
+let pendingUiStateBatch: PendingUiStateBatch | null = null;
+let uiStateBatchFlushScheduled = false;
+
+function ensurePendingUiStateBatch(): PendingUiStateBatch {
+  if (pendingUiStateBatch) {
+    return pendingUiStateBatch;
+  }
+  let resolve!: (results: Map<string, string | null>) => void;
+  const promise = new Promise<Map<string, string | null>>((res) => {
+    resolve = res;
+  });
+  pendingUiStateBatch = { keys: new Set(), promise, resolve };
+  return pendingUiStateBatch;
+}
+
+function scheduleUiStateBatchFlush() {
+  if (uiStateBatchFlushScheduled) {
+    return;
+  }
+  uiStateBatchFlushScheduled = true;
+  // A macrotask (not a microtask) so reads issued across awaited continuations
+  // in the same turn still land in one batch.
+  setTimeout(flushUiStateBatch, 0);
+}
+
+function flushUiStateBatch() {
+  const batch = pendingUiStateBatch;
+  pendingUiStateBatch = null;
+  uiStateBatchFlushScheduled = false;
+  if (!batch || batch.keys.size === 0) {
+    return;
+  }
+
+  const keys = [...batch.keys];
+  apiClient
+    .GET('/v1/ui-state', { params: { query: { keys: keys.join(',') } } })
+    .then((result) => {
+      if (!result) {
+        batch.resolve(new Map(keys.map((key) => [key, null])));
+        return;
+      }
+      const { data, response } = result;
+      if (!responseOk(response)) {
+        throw toHttpError(response);
+      }
+
+      const found = new Map<string, string | null>();
+      for (const entry of data?.entries ?? []) {
+        found.set(entry.key, typeof entry.value === 'string' ? entry.value : null);
+      }
+      const results = new Map<string, string | null>(
+        keys.map((key) => [key, found.get(key) ?? null]),
+      );
+      clearPersistenceFailure();
+      batch.resolve(results);
+    })
+    .catch((error: unknown) => {
+      // Batch failed (e.g. server error). Resolve every waiter with null so
+      // hydration still completes with defaults. The fixed toast id dedupes a
+      // single "Unable to load UI preferences" notification across keys.
+      for (const key of keys) {
+        recordPersistenceFailure('load', key, error);
+      }
+      batch.resolve(new Map(keys.map((key) => [key, null])));
+    });
+}
+
+function readUiStateBatched(key: string): Promise<string | null> {
+  const batch = ensurePendingUiStateBatch();
+  batch.keys.add(key);
+  scheduleUiStateBatchFlush();
+  return batch.promise.then((results) => results.get(key) ?? null);
+}
+
 export function createUiStateStorage(options?: { namespace?: string; writeDelayMs?: number }): StateStorage {
   const namespace = options?.namespace?.trim() || 'zustand';
   const writeDelayMs = options?.writeDelayMs ?? 250;
@@ -154,27 +240,7 @@ export function createUiStateStorage(options?: { namespace?: string; writeDelayM
       const key = toUiStateKey(name, namespace);
 
       try {
-        const result = await apiClient.GET('/v1/ui-state/{key}', {
-          params: {
-            path: { key },
-          },
-        });
-        if (!result) {
-          return null;
-        }
-
-        const { data, response } = result;
-
-        if (response.status === 404) {
-          return null;
-        }
-
-        if (!responseOk(response)) {
-          throw toHttpError(response);
-        }
-
-        clearPersistenceFailure();
-        return typeof data?.value === 'string' ? data.value : null;
+        return await readUiStateBatched(key);
       } catch (error) {
         console.warn(`Failed to load UI state '${key}'.`, error);
         recordPersistenceFailure('load', key, error);
