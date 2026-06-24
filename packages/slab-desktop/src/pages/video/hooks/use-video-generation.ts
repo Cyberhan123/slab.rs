@@ -5,7 +5,7 @@ import { useTranslation } from '@slab/i18n';
 import { useNavigate } from 'react-router-dom';
 
 import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
-import useIsTauri from '@/hooks/use-tauri';
+
 import api, { getErrorMessage } from '@slab/api';
 import type { components } from '@slab/api/v1';
 import {
@@ -43,7 +43,6 @@ async function fileToDataUri(file: File): Promise<string> {
 export function useVideoGeneration() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const isDesktopTauri = useIsTauri();
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [prompt, setPrompt] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
@@ -460,7 +459,7 @@ export function useVideoGeneration() {
 
   const openHistoryVideoInWorkspace = useCallback((task: VideoGenerationTask) => {
     const localPath = task.result_data?.video_path?.trim();
-    if (isDesktopTauri && localPath) {
+    if (localPath) {
       navigate('/workspace', {
         state: {
           workspaceRevealPath: localPath,
@@ -476,7 +475,7 @@ export function useVideoGeneration() {
     }
 
     toast.error(t('pages.video.history.noArtifact'));
-  }, [isDesktopTauri, navigate, t]);
+  }, [navigate, t]);
 
   const widthValue = Number.parseInt(widthStr, 10) || DEFAULT_GENERATION_SIZE;
   const heightValue = Number.parseInt(heightStr, 10) || DEFAULT_GENERATION_SIZE;

@@ -13,7 +13,6 @@ import { Toaster } from "@slab/components/sonner";
 import { TooltipProvider } from "@slab/components/tooltip";
 import api from "@slab/api";
 import { queryClient } from "@/lib/query-client";
-import { isTauri } from "@/hooks/use-tauri";
 import {
   pluginSetThemeSnapshot,
   readPluginThemeSnapshot,
@@ -152,14 +151,12 @@ function WorkspaceModeSync() {
   const initialPathRef = useRef(location.pathname);
   const redirectedWorkspaceRootRef = useRef<string | null>(null);
   const appliedPluginConfigSignatureRef = useRef<string | null>(null);
-  const isDesktopTauri = isTauri();
 
   const workspaceQuery = useQuery({
     queryKey: WORKSPACE_STATE_QUERY_KEY,
     queryFn: workspaceState,
-    enabled: isDesktopTauri,
-    // This probes the Tauri workspace bridge, not the HTTP API; failures are
-    // resolved by the bridge's own reconnect path and should not be retried here.
+    // Workspace state is fetched over the /v1/workspace HTTP API. The bridge has
+    // its own recovery path, so React Query retry would duplicate local probes.
     retry: false,
   });
   const workspace = workspaceQuery.data?.current ?? null;
@@ -170,7 +167,7 @@ function WorkspaceModeSync() {
     refetch: refetchPlugins,
     isFetching: pluginsFetching,
   } = api.useQuery("get", "/v1/plugins", undefined, {
-    enabled: isDesktopTauri && Boolean(workspace),
+    enabled: Boolean(workspace),
     retry: 1,
   });
   const stopPluginMutation = api.useMutation("post", "/v1/plugins/{id}/stop", {

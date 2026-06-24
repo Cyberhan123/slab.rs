@@ -116,14 +116,16 @@ describe.sequential("workspace e2e", () => {
     )
     expect(workspaceStateAfterReload.current?.rootPath.endsWith(workspaceRoot)).toBe(true)
 
-    await page.getByTestId("workspace-file-tree").waitFor({ state: "visible", timeout: 60_000 })
-    await page.getByTestId("workspace-directory-src").waitFor({ state: "visible", timeout: 60_000 })
-    await page.getByTestId("workspace-directory-src").click()
-    await page.getByTestId("workspace-file-src-note-txt").waitFor({ state: "visible", timeout: 60_000 })
-    await page.getByTestId("workspace-file-src-note-txt").click()
+    // The workspace now runs the unified VS Code-web surface in the browser too
+    // (the isTauri business gate was removed). The explorer and editor are the
+    // embedded VS Code parts; the editor itself is Monaco, so the Monaco
+    // selectors still drive it.
+    const explorer = page.getByTestId("workspace-vscode-explorer")
+    await explorer.waitFor({ state: "visible", timeout: 60_000 })
+    await explorer.getByText("src", { exact: true }).click()
+    await explorer.getByText("note.txt", { exact: true }).click()
 
-    await page.getByTestId("workspace-browser-editor").waitFor({ state: "visible", timeout: 60_000 })
-    const editor = page.getByTestId("workspace-editor-monaco")
+    const editor = page.getByTestId("workspace-vscode-editor")
     const monacoEditor = editor.locator(".monaco-editor")
     await monacoEditor.waitFor({ state: "visible", timeout: 60_000 }).catch(async (error: unknown) => {
       const editorHtml = await editor.evaluate((element) => element.outerHTML).catch(() => "<unavailable>")
@@ -142,31 +144,11 @@ describe.sequential("workspace e2e", () => {
       (await readMonacoEditorText(editor)).includes(runId) ? true : null
     )
 
-    await page.getByTestId("workspace-file-src-second-txt").click()
-    await page.getByTestId("workspace-confirm-dialog").waitFor({ state: "visible", timeout: 60_000 })
-    await page.getByTestId("workspace-confirm-cancel").click()
-    await eventually("workspace dirty guard keeps unsaved editor content", async () =>
-      (await readMonacoEditorText(editor)).includes(runId) ? true : null
-    )
-
-    await page.getByTestId("workspace-file-src-second-txt").click()
-    await page.getByTestId("workspace-confirm-dialog").waitFor({ state: "visible", timeout: 60_000 })
-    await page.getByTestId("workspace-confirm-accept").click()
-    await eventually("workspace dirty guard can discard and switch files", async () =>
-      (await readMonacoEditorText(editor)).includes("Second workspace note") ? true : null
-    )
-
-    await page.getByTestId("workspace-file-src-note-txt").click()
-    await eventually("workspace note reopens after dirty guard discard", async () =>
-      (await readMonacoEditorText(editor)).includes("Initial workspace note") ? true : null
-    )
+    // The embedded VS Code editor owns save (its working-copy service is wired to
+    // the HTTP bridge), so Ctrl+S persists directly — there is no separate save
+    // button as in the old browser-only editor.
     await focusMonacoEditor(monacoEditor)
-    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A")
-    await page.keyboard.type(updatedContent)
-    await eventually("workspace Monaco editor accepts final persisted edits", async () =>
-      (await readMonacoEditorText(editor)).includes(runId) ? true : null
-    )
-    await page.getByTestId("workspace-save-button").click()
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+S" : "Control+S")
 
     await eventually("workspace file persisted to disk", () =>
       readFileSync(notePath, "utf8") === updatedContent

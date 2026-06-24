@@ -2,9 +2,16 @@ import { useTranslation } from "@slab/i18n"
 import { Popover, PopoverContent, PopoverTrigger } from "@slab/components/popover"
 import { AlertCircle, AlertTriangle, CircleCheck, Info } from "lucide-react"
 import { countBy } from "lodash-es"
+import type * as Monaco from "monaco-editor"
 
 import { cn } from "@/lib/utils"
-import type { WorkspaceEditorCursor, WorkspaceEditorProblem } from "./workspace-code-editor"
+
+export type WorkspaceEditorCursor = {
+  column: number
+  lineNumber: number
+}
+
+export type WorkspaceEditorProblem = Monaco.editor.IMarker
 
 type WorkspaceEditorStatusBarProps = {
   cursor: WorkspaceEditorCursor | null

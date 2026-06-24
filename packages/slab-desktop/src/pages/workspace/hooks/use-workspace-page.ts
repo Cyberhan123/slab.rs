@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { open } from "@tauri-apps/plugin-dialog"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useLocation, useNavigate } from "react-router-dom"
 import { useTranslation } from "@slab/i18n"
@@ -7,7 +6,7 @@ import { FolderKanban } from "lucide-react"
 import { toast } from "sonner"
 
 import { usePageHeader } from "@/hooks/use-global-header-meta"
-import { isTauri } from "@/hooks/use-tauri"
+import { pickFolder } from "@/lib/pick-folder"
 import {
   workspaceClose,
   workspaceGitCommit,
@@ -22,7 +21,6 @@ import {
   workspaceSearchText,
   workspaceState,
   workspaceStatPath,
-  workspaceWriteFile,
   WORKSPACE_STATE_QUERY_KEY,
   type WorkspaceFileContent,
   type WorkspaceGitDiff,
@@ -52,15 +50,6 @@ type WorkspaceOpenFileOptions = WorkspaceLspOpenFileOptions & {
   revealInTree?: boolean
 }
 
-type WorkspaceEditorSelection = {
-  endColumn: number
-  endLineNumber: number
-  relativePath: string
-  startColumn: number
-  startLineNumber: number
-  text: string
-}
-
 const MAX_WORKSPACE_PREVIEW_BYTES = 1024 * 1024
 
 export function useWorkspacePage() {
@@ -68,19 +57,10 @@ export function useWorkspacePage() {
   const navigate = useNavigate()
   const location = useLocation()
   const queryClient = useQueryClient()
-  const isDesktopTauri = isTauri()
   const [selectedFile, setSelectedFile] = useState<WorkspaceFileContent | null>(null)
-  const [editorContent, setEditorContent] = useState("")
   const [fileError, setFileError] = useState<string | null>(null)
-  const [browserEditorSelection, setBrowserEditorSelection] = useState<WorkspaceEditorSelection | null>(null)
   const [textSearchQuery, setTextSearchQuery] = useState("")
   const [selectedGitDiffEntry, setSelectedGitDiffEntry] = useState<WorkspaceGitStatusEntry | null>(null)
-  const [editorRevealTarget, setEditorRevealTarget] = useState<{
-    relativePath: string
-    lineNumber: number
-    matchStart: number
-    matchEnd: number
-  } | null>(null)
   const [editorThemeMode, setEditorThemeMode] = useState<WorkspaceThemeMode>(getWorkspaceThemeMode)
   const restoredWorkspaceRootRef = useRef<string | null>(null)
   const activeVscodeFileGenerationRef = useRef(0)
@@ -95,7 +75,7 @@ export function useWorkspacePage() {
   const workspaceQuery = useQuery({
     queryKey: WORKSPACE_STATE_QUERY_KEY,
     queryFn: workspaceState,
-    // Workspace state comes from the Tauri bridge, not /v1 HTTP. The bridge has
+    // Workspace state is fetched over the /v1/workspace HTTP API. The bridge has
     // its own recovery path, so React Query retry would duplicate local probes.
     retry: false,
   })
@@ -153,7 +133,7 @@ export function useWorkspacePage() {
       gitStatus?.entries.find(
         (entry) =>
           entry.path === selectedGitDiffEntry?.path &&
-          entry.staged === selectedGitDiffEntry.staged,
+          entry.staged === selectedGitDiffEntry?.staged,
       ) ?? null,
     [gitStatus, selectedGitDiffEntry],
   )
@@ -171,12 +151,6 @@ export function useWorkspacePage() {
     // Diff requests are tied to the selected row; a new selection should drive
     // the next fetch rather than retrying an obsolete local bridge request.
     retry: false,
-  })
-  const saveFileMutation = useMutation({
-    meta: {
-      skipGlobalErrorToast: true,
-    },
-    mutationFn: workspaceWriteFile,
   })
   const gitStageMutation = useMutation({
     meta: {
@@ -202,16 +176,14 @@ export function useWorkspacePage() {
     },
     mutationFn: workspaceGitCommit,
   })
-  const savingFile = saveFileMutation.isPending
   const gitOperationPending =
     gitStageMutation.isPending ||
     gitUnstageMutation.isPending ||
     gitDiscardMutation.isPending ||
     gitCommitMutation.isPending
   const selectedFileDirty = useWorkspaceEditorDirty({
-    workspaceRoot: isDesktopTauri ? workspace?.rootPath ?? null : null,
+    workspaceRoot: workspace?.rootPath ?? null,
     selectedFile,
-    editorContent,
   })
   const { confirm: confirmDiscardUnsaved, dialog: confirmDiscardDialog } = useWorkspaceConfirmDialog()
 
@@ -252,21 +224,16 @@ export function useWorkspacePage() {
   )
 
   const handleOpenFolder = useCallback(async () => {
-    if (!isDesktopTauri) {
-      return
-    }
-
-    const selected = await open({ directory: true, multiple: false })
+    const selected = await pickFolder()
     if (typeof selected === "string") {
       await openWorkspacePath(selected)
     }
-  }, [isDesktopTauri, openWorkspacePath])
+  }, [openWorkspacePath])
 
   const handleCloseWorkspace = useCallback(async () => {
     try {
       const nextState = await workspaceClose()
       setSelectedFile(null)
-      setEditorContent("")
       setFileError(null)
       queryClient.setQueryData(WORKSPACE_STATE_QUERY_KEY, nextState)
       await queryClient.invalidateQueries()
@@ -288,7 +255,6 @@ export function useWorkspacePage() {
             size: `${Math.ceil(metadata.sizeBytes / 1024)} KiB`,
           })
           setSelectedFile(null)
-          setEditorContent("")
           setFileError(message)
           toast.error(t("pages.workspace.toast.fileFailed"), {
             description: message,
@@ -298,11 +264,9 @@ export function useWorkspacePage() {
         const file = await workspaceReadFile(relativePath)
         setSelectedGitDiffEntry(null)
         setSelectedFile(file)
-        setEditorContent(file.content)
         return file
       } catch (error) {
         setSelectedFile(null)
-        setEditorContent("")
         setFileError(getErrorMessage(error))
         toast.error(t("pages.workspace.toast.fileFailed"), {
           description: getErrorMessage(error),
@@ -322,9 +286,6 @@ export function useWorkspacePage() {
       patchWorkspaceState(workspace.rootPath, {
         explorerPanel: "files",
       })
-      if (!isDesktopTauri) {
-        return
-      }
       const { runWorkspaceVscodeCommand } = await import("../lib/workspace-lsp")
       await runWorkspaceVscodeCommand("workbench.files.action.showActiveFileInExplorer", workspace.rootPath).catch(
         (error) => {
@@ -332,13 +293,12 @@ export function useWorkspacePage() {
         },
       )
     },
-    [isDesktopTauri, patchWorkspaceState, workspace],
+    [patchWorkspaceState, workspace],
   )
 
   const handleOpenFile = useCallback(
     async (relativePath: string, options: WorkspaceOpenFileOptions = {}) => {
       const { revealInTree = false, ...editorOptions } = options
-      setEditorRevealTarget(null)
       if (
         selectedFileDirty &&
         !(await confirmDiscardUnsaved({
@@ -362,26 +322,16 @@ export function useWorkspacePage() {
           name: file.name,
         }),
       })
-      if (isDesktopTauri) {
-        try {
-          const { openWorkspaceVscodeFile } = await import("../lib/workspace-lsp")
-          await openWorkspaceVscodeFile({
-            options: editorOptions,
-            relativePath: file.relativePath,
-            workspaceRoot: workspace.rootPath,
-          })
-        } catch (error) {
-          toast.error(t("pages.workspace.toast.fileFailed"), {
-            description: getErrorMessage(error),
-          })
-        }
-      }
-      if (editorOptions.startLineNumber && editorOptions.startColumn) {
-        setEditorRevealTarget({
+      try {
+        const { openWorkspaceVscodeFile } = await import("../lib/workspace-lsp")
+        await openWorkspaceVscodeFile({
+          options: editorOptions,
           relativePath: file.relativePath,
-          lineNumber: editorOptions.startLineNumber,
-          matchStart: editorOptions.startColumn - 1,
-          matchEnd: editorOptions.endColumn ? editorOptions.endColumn - 1 : editorOptions.startColumn - 1,
+          workspaceRoot: workspace.rootPath,
+        })
+      } catch (error) {
+        toast.error(t("pages.workspace.toast.fileFailed"), {
+          description: getErrorMessage(error),
         })
       }
       if (revealInTree) {
@@ -393,7 +343,6 @@ export function useWorkspacePage() {
       confirmDiscardUnsaved,
       openFileContent,
       openFileTabs,
-      isDesktopTauri,
       patchWorkspaceState,
       revealActiveFileInExplorer,
       selectedFileDirty,
@@ -404,21 +353,11 @@ export function useWorkspacePage() {
 
   const handleOpenTextSearchMatch = useCallback(
     async (relativePath: string, match: WorkspaceTextSearchLineMatch) => {
-      const file = await handleOpenFile(relativePath, {
+      await handleOpenFile(relativePath, {
         endColumn: match.matchEnd + 1,
         endLineNumber: match.lineNumber,
         startColumn: match.matchStart + 1,
         startLineNumber: match.lineNumber,
-      })
-      if (!file) {
-        return
-      }
-
-      setEditorRevealTarget({
-        relativePath,
-        lineNumber: match.lineNumber,
-        matchStart: match.matchStart,
-        matchEnd: match.matchEnd,
       })
     },
     [handleOpenFile],
@@ -427,11 +366,9 @@ export function useWorkspacePage() {
   useEffect(() => {
     if (!workspace) {
       setSelectedFile(null)
-      setEditorContent("")
       setFileError(null)
       setTextSearchQuery("")
       setSelectedGitDiffEntry(null)
-      setEditorRevealTarget(null)
       restoredWorkspaceRootRef.current = null
       return
     }
@@ -442,11 +379,9 @@ export function useWorkspacePage() {
 
     restoredWorkspaceRootRef.current = workspace.rootPath
     setSelectedFile(null)
-    setEditorContent("")
     setFileError(null)
     setTextSearchQuery("")
     setSelectedGitDiffEntry(null)
-    setEditorRevealTarget(null)
 
     const savedActiveFilePath = activeFilePath
     const savedFileTabs = openFileTabs
@@ -458,7 +393,7 @@ export function useWorkspacePage() {
       }
 
       const file = await openFileContent(savedActiveFilePath)
-      if (file && isDesktopTauri) {
+      if (file) {
         const { openWorkspaceVscodeFile } = await import("../lib/workspace-lsp")
         await openWorkspaceVscodeFile({
           relativePath: savedActiveFilePath,
@@ -474,7 +409,6 @@ export function useWorkspacePage() {
     })
   }, [
     activeFilePath,
-    isDesktopTauri,
     openFileContent,
     openFileTabs,
     t,
@@ -483,7 +417,7 @@ export function useWorkspacePage() {
   ])
 
   useEffect(() => {
-    if (!workspace || !isDesktopTauri) {
+    if (!workspace) {
       return
     }
 
@@ -493,57 +427,53 @@ export function useWorkspacePage() {
 
     void import("../lib/workspace-lsp").then(({ watchWorkspaceVscodeEditorState }) =>
       watchWorkspaceVscodeEditorState(workspaceRoot, ({ activeRelativePath, openFiles }) => {
-      if (cancelled) {
-        return
-      }
+        if (cancelled) {
+          return
+        }
 
-      activeVscodeFileGenerationRef.current += 1
-      const generation = activeVscodeFileGenerationRef.current
+        activeVscodeFileGenerationRef.current += 1
+        const generation = activeVscodeFileGenerationRef.current
 
-      const snapshot = useWorkspaceUiStore.getState().workspaces[workspaceRoot] ?? emptyWorkspaceUiSnapshot
-      const openFilesChanged =
-        snapshot.openFiles.length !== openFiles.length ||
-        snapshot.openFiles.some((tab, index) => {
-          const nextTab = openFiles[index]
-          return !nextTab || tab.relativePath !== nextTab.relativePath || tab.name !== nextTab.name
-        })
+        const snapshot = useWorkspaceUiStore.getState().workspaces[workspaceRoot] ?? emptyWorkspaceUiSnapshot
+        const openFilesChanged =
+          snapshot.openFiles.length !== openFiles.length ||
+          snapshot.openFiles.some((tab, index) => {
+            const nextTab = openFiles[index]
+            return !nextTab || tab.relativePath !== nextTab.relativePath || tab.name !== nextTab.name
+          })
 
-      if (snapshot.activeFilePath !== activeRelativePath || openFilesChanged) {
-        patchWorkspaceState(workspaceRoot, {
-          activeFilePath: activeRelativePath,
-          openFiles,
-        })
-      }
+        if (snapshot.activeFilePath !== activeRelativePath || openFilesChanged) {
+          patchWorkspaceState(workspaceRoot, {
+            activeFilePath: activeRelativePath,
+            openFiles,
+          })
+        }
 
-      if (!activeRelativePath) {
-        setSelectedFile(null)
-        setEditorContent("")
-        return
-      }
-
-      setSelectedGitDiffEntry(null)
-      setEditorRevealTarget(null)
-      setFileError(null)
-
-      void workspaceReadFile(activeRelativePath)
-        .then((file) => {
-          if (cancelled || generation !== activeVscodeFileGenerationRef.current) {
-            return
-          }
-
-          setSelectedFile(file)
-          setEditorContent(file.content)
-        })
-        .catch((error) => {
-          if (cancelled || generation !== activeVscodeFileGenerationRef.current) {
-            return
-          }
-
+        if (!activeRelativePath) {
           setSelectedFile(null)
-          setEditorContent("")
-          setFileError(getErrorMessage(error))
-        })
-    })
+          return
+        }
+
+        setSelectedGitDiffEntry(null)
+        setFileError(null)
+
+        void workspaceReadFile(activeRelativePath)
+          .then((file) => {
+            if (cancelled || generation !== activeVscodeFileGenerationRef.current) {
+              return
+            }
+
+            setSelectedFile(file)
+          })
+          .catch((error) => {
+            if (cancelled || generation !== activeVscodeFileGenerationRef.current) {
+              return
+            }
+
+            setSelectedFile(null)
+            setFileError(getErrorMessage(error))
+          })
+      })
     )
       .then((nextDisposable) => {
         if (cancelled) {
@@ -562,11 +492,11 @@ export function useWorkspacePage() {
       activeVscodeFileGenerationRef.current += 1
       disposable?.dispose()
     }
-  }, [isDesktopTauri, patchWorkspaceState, workspace])
+  }, [patchWorkspaceState, workspace])
 
   useEffect(() => {
     const workspaceRoot = workspace?.rootPath
-    if (!workspaceRoot || !isDesktopTauri) {
+    if (!workspaceRoot) {
       return
     }
 
@@ -575,15 +505,15 @@ export function useWorkspacePage() {
 
     void import("../lib/workspace-lsp").then(({ watchWorkspaceVscodeEditorCloseRequests }) =>
       watchWorkspaceVscodeEditorCloseRequests(workspaceRoot, async () => {
-      if (cancelled) {
-        return false
-      }
-      return confirmDiscardUnsaved({
-        messageKey: "pages.workspace.confirm.closeUnsaved",
-        confirmKey: "pages.workspace.confirm.closeAnyway",
-        tone: "danger",
+        if (cancelled) {
+          return false
+        }
+        return confirmDiscardUnsaved({
+          messageKey: "pages.workspace.confirm.closeUnsaved",
+          confirmKey: "pages.workspace.confirm.closeAnyway",
+          tone: "danger",
+        })
       })
-    })
     )
       .then((nextDisposable) => {
         if (cancelled) {
@@ -601,7 +531,7 @@ export function useWorkspacePage() {
       cancelled = true
       disposable?.dispose()
     }
-  }, [confirmDiscardUnsaved, isDesktopTauri, workspace?.rootPath])
+  }, [confirmDiscardUnsaved, workspace?.rootPath])
 
   const handleSelectExplorerPanel = useCallback(
     (panel: WorkspaceExplorerPanel) => {
@@ -688,26 +618,20 @@ export function useWorkspacePage() {
   }, [location.state, openWorkspacePath, patchWorkspaceState, revealActiveFileInExplorer, workspace])
 
   const handleExplainWithAssistant = useCallback(async () => {
-    if (!selectedFile) {
+    if (!selectedFile || !workspace) {
       return
     }
 
-    const vscodeSelection = isDesktopTauri && workspace
-      ? await import("../lib/workspace-lsp").then(({ getWorkspaceVscodeSelection }) =>
-          getWorkspaceVscodeSelection(workspace.rootPath),
-        ).catch((error) => {
-          console.debug("workspace VS Code selection lookup failed", { error })
-          return null
-        })
-      : null
-    const selectedText = vscodeSelection?.text.trim()
-      ? vscodeSelection
-      : browserEditorSelection?.text.trim()
-        ? browserEditorSelection
-        : null
+    const vscodeSelection = await import("../lib/workspace-lsp").then(({ getWorkspaceVscodeSelection }) =>
+      getWorkspaceVscodeSelection(workspace.rootPath),
+    ).catch((error) => {
+      console.debug("workspace VS Code selection lookup failed", { error })
+      return null
+    })
+    const selectedText = vscodeSelection?.text.trim() ? vscodeSelection : null
     const relativePath = selectedText?.relativePath ?? selectedFile.relativePath
     const language = relativePath.split(".").pop() ?? "text"
-    const content = selectedText?.text ?? (editorContent || selectedFile.content)
+    const content = selectedText?.text ?? selectedFile.content
     const excerpt = content.length > 12_000 ? `${content.slice(0, 12_000)}\n\n...` : content
     const locationLabel = selectedText
       ? `${relativePath}:${selectedText.startLineNumber}-${selectedText.endLineNumber}`
@@ -727,14 +651,10 @@ export function useWorkspacePage() {
       },
     })
     navigate("/assistant")
-  }, [browserEditorSelection, editorContent, isDesktopTauri, navigate, selectedFile, workspace])
+  }, [navigate, selectedFile, workspace])
 
   useEffect(() => {
     if (!workspace) {
-      return
-    }
-
-    if (!isDesktopTauri) {
       return
     }
 
@@ -743,7 +663,7 @@ export function useWorkspacePage() {
     ).catch((error) => {
       console.debug("workspace editor settings sync failed", { error })
     })
-  }, [editorSettings, isDesktopTauri, workspace])
+  }, [editorSettings, workspace])
 
   const handleRefreshGitStatus = useCallback(async () => {
     await refetchGitStatus()
@@ -763,53 +683,24 @@ export function useWorkspacePage() {
       }
 
       setSelectedFile(null)
-      setEditorContent("")
       setFileError(null)
-      setEditorRevealTarget(null)
       setSelectedGitDiffEntry(entry)
     },
     [confirmDiscardUnsaved, selectedFileDirty],
   )
 
+  // The embedded VS Code editor persists files through its own working-copy
+  // service (wired to the HTTP bridge), so "save" delegates to the editor's
+  // save command rather than writing React-held content.
   const handleSaveFile = useCallback(async () => {
-    if (!selectedFile) {
+    if (!workspace) {
       return
     }
-
-    try {
-      const result = await saveFileMutation.mutateAsync({
-        relativePath: selectedFile.relativePath,
-        content: editorContent,
-        expectedHash: selectedFile.contentHash,
-      })
-      setSelectedFile({
-        ...selectedFile,
-        content: editorContent,
-        contentHash: result.contentHash,
-        sizeBytes: result.sizeBytes,
-      })
-      toast.success(t("pages.workspace.toast.fileSaved"))
-      await refetchGitStatus()
-    } catch (error) {
-      toast.error(t("pages.workspace.toast.saveFailed"), {
-        description: getErrorMessage(error),
-      })
-    }
-  }, [editorContent, refetchGitStatus, saveFileMutation, selectedFile, t])
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
-        event.preventDefault()
-        void handleSaveFile()
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown)
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown)
-    }
-  }, [handleSaveFile])
+    const { runWorkspaceVscodeCommand } = await import("../lib/workspace-lsp")
+    await runWorkspaceVscodeCommand("workbench.action.files.save", workspace.rootPath).catch((error) => {
+      console.debug("workspace VS Code save command failed", { error })
+    })
+  }, [workspace])
 
   const applyGitStatus = useCallback(
     (status: WorkspaceGitStatus) => {
@@ -928,7 +819,7 @@ export function useWorkspacePage() {
 
       if (nextActiveFilePath) {
         const file = await openFileContent(nextActiveFilePath)
-        if (file && isDesktopTauri) {
+        if (file) {
           const { openWorkspaceVscodeFile } = await import("../lib/workspace-lsp")
           await openWorkspaceVscodeFile({
             relativePath: nextActiveFilePath,
@@ -939,10 +830,9 @@ export function useWorkspacePage() {
       }
 
       setSelectedFile(null)
-      setEditorContent("")
       setFileError(null)
     },
-    [activeFilePath, confirmDiscardUnsaved, isDesktopTauri, openFileContent, openFileTabs, patchWorkspaceState, selectedFileDirty, workspace],
+    [activeFilePath, confirmDiscardUnsaved, openFileContent, openFileTabs, patchWorkspaceState, selectedFileDirty, workspace],
   )
 
   const handleSelectFileTab = useCallback(
@@ -974,24 +864,19 @@ export function useWorkspacePage() {
           name: file.name,
         }),
       })
-      if (isDesktopTauri) {
-        const { openWorkspaceVscodeFile } = await import("../lib/workspace-lsp")
-        await openWorkspaceVscodeFile({
-          relativePath: file.relativePath,
-          workspaceRoot: workspace.rootPath,
-        })
-      }
+      const { openWorkspaceVscodeFile } = await import("../lib/workspace-lsp")
+      await openWorkspaceVscodeFile({
+        relativePath: file.relativePath,
+        workspaceRoot: workspace.rootPath,
+      })
     },
-    [activeFilePath, confirmDiscardUnsaved, isDesktopTauri, openFileContent, openFileTabs, patchWorkspaceState, selectedFileDirty, workspace],
+    [activeFilePath, confirmDiscardUnsaved, openFileContent, openFileTabs, patchWorkspaceState, selectedFileDirty, workspace],
   )
 
   return {
     activeFilePath,
     confirmDiscardDialog,
     consoleOpen,
-    editorContent,
-    editorRevealTarget:
-      selectedFile?.relativePath === editorRevealTarget?.relativePath ? editorRevealTarget : null,
     editorSettings,
     editorThemeMode,
     explorerPanel,
@@ -1022,7 +907,6 @@ export function useWorkspacePage() {
     handleToggleConsole,
     handleUpdateEditorSettings,
     handleExplainWithAssistant,
-    isDesktopTauri,
     markdownMode,
     openFileTabs,
     openWorkspacePath,
@@ -1037,9 +921,6 @@ export function useWorkspacePage() {
     selectedGitDiffEntry: visibleGitDiffEntry,
     selectedFile,
     selectedFileDirty,
-    setEditorContent,
-    setBrowserEditorSelection,
-    savingFile,
     setTextSearchQuery,
     textSearchFetching,
     textSearchQuery,
