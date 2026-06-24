@@ -138,7 +138,8 @@
     "jsdom": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:",
-    "@types/lodash-es": "catalog:"
+    "@types/lodash-es": "catalog:",
+    "import-meta-resolve": "catalog:"
   },
   "browserslist": {
     "production": [

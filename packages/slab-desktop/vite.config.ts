@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
+import importMetaUrlPlugin from "./src/lib/vite-plugin-dev-url-meta-for-vscode"
 
 const host = process.env.TAURI_DEV_HOST;
 const apiProxyTarget = process.env.VITE_API_PROXY_TARGET;
@@ -9,7 +10,8 @@ const apiProxyTarget = process.env.VITE_API_PROXY_TARGET;
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [
-    react(), tailwindcss(),
+    react(), 
+    tailwindcss(),
     {
       name: 'load-vscode-css-as-string',
       enforce: 'pre',
@@ -46,7 +48,7 @@ export default defineConfig(async () => ({
     ],
     rolldownOptions: {
       tsconfig: './tsconfig.json',
-      // plugins: [importMetaUrlPlugin],
+      plugins: [importMetaUrlPlugin],
     },
   },
 
