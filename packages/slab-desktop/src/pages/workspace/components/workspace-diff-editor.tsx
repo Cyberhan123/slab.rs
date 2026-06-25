@@ -91,7 +91,7 @@ export function WorkspaceDiffEditor({
     let cancelled = false
 
     void (async () => {
-      const { ensureWorkspaceLspServices } = await import("../lib/workspace-lsp")
+      const { ensureWorkspaceLspServices } = await import("../lib/workspace-services")
       await ensureWorkspaceLspServices()
       if (cancelled) {
         return

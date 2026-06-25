@@ -42,7 +42,7 @@ import {
   type WorkspaceThemeMode,
 } from "../lib/monaco-theme"
 import { upsertFileTab } from "../lib/workspace-page-utils"
-import type { WorkspaceLspOpenFileOptions } from "../lib/workspace-lsp-utils"
+import type { WorkspaceLspOpenFileOptions } from "../lib/workspace-uri"
 import { useWorkspaceEditorDirty } from "./use-workspace-editor-dirty"
 import { useWorkspaceConfirmDialog } from "./use-workspace-confirm"
 
@@ -296,7 +296,7 @@ export function useWorkspacePage() {
       patchWorkspaceState(workspace.rootPath, {
         explorerPanel: "files",
       })
-      const { runWorkspaceVscodeCommand } = await import("../lib/workspace-lsp")
+      const { runWorkspaceVscodeCommand } = await import("../lib/workspace-editor")
       await runWorkspaceVscodeCommand("workbench.files.action.showActiveFileInExplorer", workspace.rootPath).catch(
         (error) => {
           console.debug("workspace VS Code reveal command failed", { relativePath, error })
@@ -333,7 +333,7 @@ export function useWorkspacePage() {
         }),
       })
       try {
-        const { openWorkspaceVscodeFile } = await import("../lib/workspace-lsp")
+        const { openWorkspaceVscodeFile } = await import("../lib/workspace-editor")
         await openWorkspaceVscodeFile({
           options: editorOptions,
           relativePath: file.relativePath,
@@ -404,7 +404,7 @@ export function useWorkspacePage() {
 
       const file = await openFileContent(savedActiveFilePath)
       if (file) {
-        const { openWorkspaceVscodeFile } = await import("../lib/workspace-lsp")
+        const { openWorkspaceVscodeFile } = await import("../lib/workspace-editor")
         await openWorkspaceVscodeFile({
           relativePath: savedActiveFilePath,
           workspaceRoot,
@@ -435,7 +435,7 @@ export function useWorkspacePage() {
     let disposable: { dispose(): void } | null = null
     const workspaceRoot = workspace.rootPath
 
-    void import("../lib/workspace-lsp").then(({ watchWorkspaceVscodeEditorState }) =>
+    void import("../lib/workspace-editor").then(({ watchWorkspaceVscodeEditorState }) =>
       watchWorkspaceVscodeEditorState(workspaceRoot, ({ activeRelativePath, openFiles }) => {
         if (cancelled) {
           return
@@ -513,7 +513,7 @@ export function useWorkspacePage() {
     let cancelled = false
     let disposable: { dispose(): void } | null = null
 
-    void import("../lib/workspace-lsp").then(({ watchWorkspaceVscodeEditorCloseRequests }) =>
+    void import("../lib/workspace-editor").then(({ watchWorkspaceVscodeEditorCloseRequests }) =>
       watchWorkspaceVscodeEditorCloseRequests(workspaceRoot, async () => {
         if (cancelled) {
           return false
@@ -652,7 +652,7 @@ export function useWorkspacePage() {
       return
     }
 
-    const vscodeSelection = await import("../lib/workspace-lsp").then(({ getWorkspaceVscodeSelection }) =>
+    const vscodeSelection = await import("../lib/workspace-editor").then(({ getWorkspaceVscodeSelection }) =>
       getWorkspaceVscodeSelection(workspace.rootPath),
     ).catch((error) => {
       console.debug("workspace VS Code selection lookup failed", { error })
@@ -688,7 +688,7 @@ export function useWorkspacePage() {
       return
     }
 
-    void import("../lib/workspace-lsp").then(({ applyWorkspaceEditorSettings }) =>
+    void import("../lib/workspace-editor").then(({ applyWorkspaceEditorSettings }) =>
       applyWorkspaceEditorSettings(editorSettings, workspace.rootPath),
     ).catch((error) => {
       console.debug("workspace editor settings sync failed", { error })
@@ -726,7 +726,7 @@ export function useWorkspacePage() {
     if (!workspace) {
       return
     }
-    const { runWorkspaceVscodeCommand } = await import("../lib/workspace-lsp")
+    const { runWorkspaceVscodeCommand } = await import("../lib/workspace-editor")
     await runWorkspaceVscodeCommand("workbench.action.files.save", workspace.rootPath).catch((error) => {
       console.debug("workspace VS Code save command failed", { error })
     })
@@ -850,7 +850,7 @@ export function useWorkspacePage() {
       if (nextActiveFilePath) {
         const file = await openFileContent(nextActiveFilePath)
         if (file) {
-          const { openWorkspaceVscodeFile } = await import("../lib/workspace-lsp")
+          const { openWorkspaceVscodeFile } = await import("../lib/workspace-editor")
           await openWorkspaceVscodeFile({
             relativePath: nextActiveFilePath,
             workspaceRoot: workspace.rootPath,
@@ -894,7 +894,7 @@ export function useWorkspacePage() {
           name: file.name,
         }),
       })
-      const { openWorkspaceVscodeFile } = await import("../lib/workspace-lsp")
+      const { openWorkspaceVscodeFile } = await import("../lib/workspace-editor")
       await openWorkspaceVscodeFile({
         relativePath: file.relativePath,
         workspaceRoot: workspace.rootPath,

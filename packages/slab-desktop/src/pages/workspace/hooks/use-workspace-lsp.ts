@@ -5,13 +5,17 @@ import {
   ensureWorkspaceLspServices,
   setWorkspaceLspFileServiceRoot,
   setWorkspaceLspOpenFile,
-  startWorkspaceLspSession,
-  supportsWorkspaceLsp,
   workspaceLspServicesReady,
-  workspaceLspModelUri,
+} from "../lib/workspace-services"
+import {
+  startWorkspaceLspSession,
   type WorkspaceLspSession,
+} from "../lib/workspace-language-client"
+import {
+  supportsWorkspaceLsp,
+  workspaceLspModelUri,
   type WorkspaceLspOpenFileOptions,
-} from "../lib/workspace-lsp"
+} from "../lib/workspace-uri"
 
 type WorkspaceLspOptions = {
   language: string

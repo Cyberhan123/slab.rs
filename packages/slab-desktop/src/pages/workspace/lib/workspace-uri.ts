@@ -1,3 +1,19 @@
+import type * as Monaco from "monaco-editor"
+import { URI } from "@codingame/monaco-vscode-api/vscode/vs/base/common/uri"
+
+/**
+ * Pure URI / path / LSP-result helpers for the workspace editor layer.
+ *
+ * No runtime side effects and no Monaco service dependencies: everything here is
+ * string and URI math. Keeping this isolated keeps it unit-testable without
+ * booting the VS Code service container (see {@link "./__tests__/workspace-uri.test.ts"}).
+ *
+ * The workspace root is a host path (e.g. `C:\proj` or `/home/me/proj`); files are
+ * addressed by `file://` URIs built from that root plus a forward-slash relative
+ * path. These helpers own the bidirectional mapping between the two and between
+ * LSP `Location`/`Range` results and editor selection coordinates.
+ */
+
 const SUPPORTED_WORKSPACE_LSP_LANGUAGES = new Set([
   "typescript",
   "javascript",
@@ -30,6 +46,16 @@ export type WorkspaceLspPosition = {
   column: number
   lineNumber: number
 }
+
+/**
+ * Opens a workspace-relative file in the React editor surface and returns the
+ * embedded standalone code editor (or undefined if it could not be opened).
+ * Used by the editor-open routing in {@link "./workspace-services.ts"}.
+ */
+export type WorkspaceLspOpenFile = (
+  relativePath: string,
+  options?: WorkspaceLspOpenFileOptions,
+) => Promise<Monaco.editor.IStandaloneCodeEditor | undefined>
 
 export function supportsWorkspaceLsp(language: string) {
   return SUPPORTED_WORKSPACE_LSP_LANGUAGES.has(language)
@@ -163,6 +189,18 @@ export function workspaceVscodeResourceStringFromEditorInput(input: unknown) {
   }
 
   return null
+}
+
+export function workspaceRootUri(workspaceRoot: string) {
+  return URI.parse(workspaceLspFileUri(workspaceRoot))
+}
+
+export function workspaceLspModelUri(
+  monaco: typeof Monaco,
+  workspaceRoot: string,
+  relativePath: string,
+) {
+  return monaco.Uri.parse(workspaceLspModelPath(workspaceRoot, relativePath))
 }
 
 function workspaceLspDefinitionTargetFromEntry(

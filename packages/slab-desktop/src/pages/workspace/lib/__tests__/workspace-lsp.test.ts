@@ -9,7 +9,7 @@ import {
   workspaceLspImportSpecifierPositionForTarget,
   workspaceLspModelPath,
   workspaceLspRelativePathFromUri,
-} from "../workspace-lsp-utils"
+} from "../workspace-uri"
 import {
   directoryAncestors,
   entryToTreeNode,

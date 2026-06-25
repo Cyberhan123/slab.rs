@@ -33,7 +33,7 @@ import {
   workspaceLspFileUri,
   workspaceLspModelPath,
   workspaceLspRelativePathFromUri,
-} from "./workspace-lsp-utils"
+} from "./workspace-uri"
 
 const noopDisposable: IDisposable = { dispose() {} }
 

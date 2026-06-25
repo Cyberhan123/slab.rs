@@ -152,7 +152,7 @@ export function WorkspaceWorkbench({
         return
       }
 
-      const { runWorkspaceVscodeCommand } = await import("../lib/workspace-lsp")
+      const { runWorkspaceVscodeCommand } = await import("../lib/workspace-editor")
       await runWorkspaceVscodeCommand(actionId, workspace.rootPath).catch((error) => {
         console.debug("workspace VS Code command failed", { actionId, error })
       })

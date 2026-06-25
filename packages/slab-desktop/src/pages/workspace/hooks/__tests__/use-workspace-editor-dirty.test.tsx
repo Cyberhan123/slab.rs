@@ -13,7 +13,7 @@ type DirtyProps = {
 
 const emitRef: { current: ((dirty: boolean) => void) | null } = { current: null }
 
-vi.mock("../../lib/workspace-lsp", () => ({
+vi.mock("../../lib/workspace-editor", () => ({
   watchWorkspaceVscodeEditorDirty: (
     _root: string,
     onChange: (dirty: boolean) => void,

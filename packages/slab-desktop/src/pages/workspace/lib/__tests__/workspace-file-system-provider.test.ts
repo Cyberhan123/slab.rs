@@ -56,7 +56,7 @@ import {
   SlabWorkspaceBackendFileSystemProvider,
   type SlabWorkspaceBackendBridge,
 } from "../workspace-file-system-provider"
-import { workspaceLspModelPath } from "../workspace-lsp-utils"
+import { workspaceLspModelPath } from "../workspace-uri"
 import type {
   WorkspaceFileEntry,
   WorkspacePathMetadata,

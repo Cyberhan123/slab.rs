@@ -49,11 +49,8 @@ export function WorkspaceVscodePart({
     setMountError(null)
 
     void (async () => {
-      const {
-        applyWorkspaceEditorSettings,
-        ensureWorkspaceLspServices,
-        setWorkspaceLspFileServiceRoot,
-      } = await import("../../lib/workspace-lsp")
+      const { ensureWorkspaceLspServices, setWorkspaceLspFileServiceRoot } = await import("../../lib/workspace-services")
+      const { applyWorkspaceEditorSettings } = await import("../../lib/workspace-editor")
       stage = "set-root"
       setMountStage(stage)
       setWorkspaceLspFileServiceRoot(workspaceRoot)

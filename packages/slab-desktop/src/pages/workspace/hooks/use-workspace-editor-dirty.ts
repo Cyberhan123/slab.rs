@@ -29,7 +29,7 @@ export function useWorkspaceEditorDirty({
     let disposed = false
     let disposable: { dispose(): void } | null = null
 
-    void import("../lib/workspace-lsp")
+    void import("../lib/workspace-editor")
       .then(({ watchWorkspaceVscodeEditorDirty }) =>
         watchWorkspaceVscodeEditorDirty(workspaceRoot, (dirty) => {
           if (!disposed) {
