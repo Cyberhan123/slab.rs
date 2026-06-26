@@ -20,6 +20,7 @@ type WorkspaceVscodePartProps = {
 }
 
 type MountState = "failed" | "pending" | "ready"
+const WORKSPACE_VSCODE_PART_MOUNT_TIMEOUT_MS = 45_000
 
 export function WorkspaceVscodePart({
   className,
@@ -43,20 +44,49 @@ export function WorkspaceVscodePart({
     let cancelled = false
     let disposable: { dispose(): void } | null = null
     let stage = "initialize"
+    let timedOut = false
+    let timeoutId: number | null = null
 
     setMountState("pending")
     setMountStage(stage)
     setMountError(null)
 
+    const markFailed = (error: unknown) => {
+      if (cancelled) {
+        return
+      }
+      setMountState("failed")
+      setMountError(error instanceof Error ? `${error.name}: ${error.message}` : String(error))
+      console.debug("workspace VS Code part unavailable", {
+        error: error instanceof Error
+          ? { message: error.message, name: error.name, stack: error.stack }
+          : String(error),
+        part,
+        stage,
+        workspaceRoot,
+      })
+    }
+
+    timeoutId = window.setTimeout(() => {
+      timedOut = true
+      markFailed(new Error(`workspace VS Code part timed out during ${stage}`))
+    }, WORKSPACE_VSCODE_PART_MOUNT_TIMEOUT_MS)
+
     void (async () => {
       const { ensureWorkspaceLspServices, setWorkspaceLspFileServiceRoot } = await import("../../lib/workspace-services")
       const { applyWorkspaceEditorSettings } = await import("../../lib/workspace-editor")
+      if (cancelled || timedOut) {
+        return
+      }
       stage = "set-root"
       setMountStage(stage)
       setWorkspaceLspFileServiceRoot(workspaceRoot)
       stage = "ensure-services"
       setMountStage(stage)
       await ensureWorkspaceLspServices(workspaceRoot)
+      if (cancelled || timedOut) {
+        return
+      }
       stage = "theme"
       setMountStage(stage)
       applySlabMonacoTheme(Monaco, themeModeRef.current)
@@ -64,11 +94,14 @@ export function WorkspaceVscodePart({
         stage = "editor-settings"
         setMountStage(stage)
         await applyWorkspaceEditorSettings(editorSettings, workspaceRoot)
+        if (cancelled || timedOut) {
+          return
+        }
       }
       stage = "load-views"
       setMountStage(stage)
       const views = await import("@codingame/monaco-vscode-views-service-override")
-      if (cancelled || !containerRef.current) {
+      if (cancelled || timedOut || !containerRef.current) {
         return
       }
 
@@ -82,24 +115,18 @@ export function WorkspaceVscodePart({
 
       stage = "ready"
       setMountStage(stage)
-      setMountState("ready")
-    })().catch((error) => {
-      if (!cancelled) {
-        setMountState("failed")
-        setMountError(error instanceof Error ? `${error.name}: ${error.message}` : String(error))
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId)
+        timeoutId = null
       }
-      console.debug("workspace VS Code part unavailable", {
-        error: error instanceof Error
-          ? { message: error.message, name: error.name, stack: error.stack }
-          : String(error),
-        part,
-        stage,
-        workspaceRoot,
-      })
-    })
+      setMountState("ready")
+    })().catch(markFailed)
 
     return () => {
       cancelled = true
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId)
+      }
       disposable?.dispose()
     }
   }, [editorSettings, part, workspaceRoot])

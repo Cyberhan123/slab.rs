@@ -93,13 +93,7 @@ export async function clickExplorerPath(explorer: Locator, pathSegments: string[
     })
     if (index < pathSegments.length - 1) {
       const treeItem = entry.locator('xpath=ancestor-or-self::*[@role="treeitem"][1]').first()
-      const twistie = treeItem.locator(".monaco-tl-twistie").first()
-      if (await twistie.isVisible().catch(() => false)) {
-        await twistie.click()
-      } else {
-        await entry.click()
-        await entry.press("ArrowRight").catch(() => {})
-      }
+      await expandExplorerTreeItem(treeItem, entry)
     } else {
       await entry.click()
     }
@@ -120,13 +114,7 @@ export async function expandWorkspaceExplorerRoot(
   const root = explorer.getByText(rootName, { exact: true }).first()
   if (await root.isVisible().catch(() => false)) {
     const rootItem = root.locator('xpath=ancestor-or-self::*[@role="treeitem"][1]').first()
-    const twistie = rootItem.locator(".monaco-tl-twistie").first()
-    if (await twistie.isVisible().catch(() => false)) {
-      await twistie.click()
-    } else {
-      await root.click()
-      await root.press("ArrowRight").catch(() => {})
-    }
+    await expandExplorerTreeItem(rootItem, root)
     if (await expectedChild.isVisible().catch(() => false)) {
       return
     }
@@ -135,13 +123,7 @@ export async function expandWorkspaceExplorerRoot(
   const dotRoot = explorer.getByText(".", { exact: true }).first()
   if (await dotRoot.isVisible().catch(() => false)) {
     const dotRootItem = dotRoot.locator('xpath=ancestor-or-self::*[@role="treeitem"][1]').first()
-    const twistie = dotRootItem.locator(".monaco-tl-twistie").first()
-    if (await twistie.isVisible().catch(() => false)) {
-      await twistie.click()
-    } else {
-      await dotRoot.click()
-      await dotRoot.press("ArrowRight").catch(() => {})
-    }
+    await expandExplorerTreeItem(dotRootItem, dotRoot)
     if (await expectedChild.isVisible().catch(() => false)) {
       return
     }
@@ -149,14 +131,29 @@ export async function expandWorkspaceExplorerRoot(
 
   const firstTreeItem = explorer.locator('[role="treeitem"]').first()
   if (await firstTreeItem.isVisible().catch(() => false)) {
-    const twistie = firstTreeItem.locator(".monaco-tl-twistie").first()
-    if (await twistie.isVisible().catch(() => false)) {
-      await twistie.click()
-    } else {
-      await firstTreeItem.click()
-      await firstTreeItem.press("ArrowRight").catch(() => {})
-    }
+    await expandExplorerTreeItem(firstTreeItem, firstTreeItem)
   }
+}
+
+async function expandExplorerTreeItem(treeItem: Locator, entry: Locator): Promise<void> {
+  if ((await treeItem.getAttribute("aria-expanded").catch(() => null)) === "true") {
+    return
+  }
+
+  const twistie = treeItem.locator(".monaco-tl-twistie").first()
+  if (await twistie.isVisible().catch(() => false)) {
+    await twistie.click()
+  } else {
+    await entry.click()
+    await entry.press("ArrowRight").catch(() => {})
+  }
+
+  if ((await treeItem.getAttribute("aria-expanded").catch(() => null)) === "true") {
+    return
+  }
+
+  await entry.click()
+  await entry.press("ArrowRight").catch(() => {})
 }
 
 export async function readMonacoEditorText(editor: Locator): Promise<string> {

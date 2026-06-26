@@ -39,8 +39,14 @@ use self::file_system::LocalExecutorFileSystem;
 const CONSOLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_CONSOLE_COMMAND_BYTES: usize = 2_000;
 const MAX_CONSOLE_OUTPUT_BYTES: usize = 64 * 1024;
-const MAX_DIRECTORY_ENTRIES: usize = 500;
-const MAX_DIRECTORY_DEPTH: u8 = 5;
+// The file tree is fetched in one deep recursive request (see WORKSPACE_PRELOAD_DEPTH in
+// packages/slab-desktop/.../workspace-file-system-provider.ts) and then served from the
+// in-memory cache, so the explorer's per-folder `readdir`/`stat` calls never hit the network.
+// These caps size that single bulk response: depth is effectively unbounded for real trees,
+// and the entry cap bounds the worst-case payload. Per-call shallow listings (depth=1) rarely
+// approach the entry cap because large generated/dependency directories are ignored.
+const MAX_DIRECTORY_ENTRIES: usize = 20_000;
+const MAX_DIRECTORY_DEPTH: u8 = 128;
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
 const MAX_LINE_MATCHES_PER_FILE: usize = 20;
 const MAX_SEARCH_RESULTS: usize = 100;

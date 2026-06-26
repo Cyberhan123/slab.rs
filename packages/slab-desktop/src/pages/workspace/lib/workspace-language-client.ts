@@ -7,7 +7,10 @@ import {
   type MessageTransports,
 } from "vscode-languageclient/browser.js"
 import { SERVER_BASE_URL } from "@slab/api/config"
-import { ensureWorkspaceLspServices } from "./workspace-services"
+import {
+  ensureWorkspaceLspServices,
+  getWorkspaceVscodeApi,
+} from "./workspace-services"
 import {
   supportsWorkspaceLsp,
   workspaceLspDefinitionTargetFromResult,
@@ -93,7 +96,7 @@ export async function startWorkspaceLspSession({
     // the bridge never intercepts the model-creation event and the model is absent from
     // vscode.workspace.textDocuments. Without this registration, MonacoLanguageClient
     // never sends textDocument/didOpen and the server returns nothing for hover/definition.
-    const { workspace: vscodeWorkspace, Uri: VscodeUri } = await import("vscode")
+    const { workspace: vscodeWorkspace, Uri: VscodeUri } = await getWorkspaceVscodeApi()
     const registeredModelUris = new Set<string>()
     const registeredModels = new Map<string, Monaco.editor.ITextModel>()
     const registerModel = async (modelToRegister: Monaco.editor.ITextModel) => {

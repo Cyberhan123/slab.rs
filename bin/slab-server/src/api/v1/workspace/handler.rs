@@ -212,7 +212,7 @@ async fn close_workspace(
     params(
         ("relativePath" = Option<String>, Query, description = "Workspace-relative directory path. Empty or omitted reads the root."),
         ("includeIgnored" = Option<bool>, Query, description = "Whether to include ignored and hidden workspace directories."),
-        ("depth" = Option<u8>, Query, description = "Directory levels to flatten into the response (default 1, capped at 5). Flat listing is capped at 500 entries with truncated=true.")
+        ("depth" = Option<u8>, Query, description = "Directory levels to flatten into the response (default 1, capped at 128). Use a large depth (e.g. 128) to fetch the whole tree in one bulk request; flat listing is capped at 20000 entries with truncated=true.")
     ),
     responses(
         (status = 200, description = "Workspace directory listing", body = WorkspaceDirectoryView),

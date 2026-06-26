@@ -39,9 +39,13 @@ const noopDisposable: IDisposable = { dispose() {} }
 
 // Files larger than this are rejected by readFile to avoid loading huge blobs into the editor.
 const MAX_WORKSPACE_PREVIEW_BYTES = 1024 * 1024
-// Number of directory levels fetched in a single request when a workspace opens, so the
-// file tree renders without one request per folder. Deeper folders still lazy-load on expand.
-const WORKSPACE_PRELOAD_DEPTH = 2
+// Fetch the whole workspace tree in ONE deep request when a workspace opens, then serve the
+// explorer's per-folder `readdir`/`stat` calls entirely from the in-memory cache. The monaco
+// explorer is chatty (a `readdir` per folder plus single-child-chain resolution and re-resolves),
+// so lazy-loading folder-by-folder meant hundreds of `/v1/workspace/directory` round trips and
+// frontend timeouts. Keep this in lockstep with the backend MAX_DIRECTORY_DEPTH cap
+// (crates/slab-app-core/.../workspace/mod.rs); 128 is effectively unbounded for real trees.
+const WORKSPACE_PRELOAD_DEPTH = 128
 // Watch events arrive in bursts (a single save can emit several); coalesce them into one
 // targeted cache invalidation pass.
 const WORKSPACE_INVALIDATE_DEBOUNCE_MS = 100
@@ -83,6 +87,14 @@ export type SlabWorkspaceBackendFileSystemProviderOptions = {
   debug?: SlabWorkspaceBackendDebugHooks
 }
 
+type SharedWorkspaceWatch = {
+  dispose: () => void
+  flushTimer: ReturnType<typeof setTimeout> | null
+  pendingEvents: WorkspaceWatchEvent[]
+  refCount: number
+  root: string
+}
+
 /**
  * Backs the workspace `file:` scheme by reading/writing the remote workspace API. Holds the
  * multi-layer cache (directory listings, path stats, in-flight deduplication), the depth-2
@@ -116,7 +128,13 @@ export class SlabWorkspaceBackendFileSystemProvider
     string,
     { generation: number; promise: Promise<IStat> }
   >()
+  private sharedWatch: SharedWorkspaceWatch | null = null
   private cacheGeneration = 0
+  // The workspace root is a synthetic directory: pin a stable ctime/mtime so repeated
+  // stat() calls return identical values. A drifting mtime (Date.now()) makes the file
+  // service treat the root as perpetually changed, which re-resolves the explorer tree
+  // mid-expansion and drops lazy-loaded children.
+  private rootStatTimestamp = 0
 
   constructor(options: SlabWorkspaceBackendFileSystemProviderOptions = {}) {
     this.bridge = options.bridge ?? defaultSlabWorkspaceBackendBridge
@@ -136,6 +154,8 @@ export class SlabWorkspaceBackendFileSystemProvider
     this.pendingFileReads.clear()
     this.pathStatCache.clear()
     this.pendingPathStats.clear()
+    this.rootStatTimestamp = 0
+    this.stopSharedWatch()
   }
 
   /** Pre-loads the first directory levels in one request so the explorer renders without
@@ -193,10 +213,11 @@ export class SlabWorkspaceBackendFileSystemProvider
   async stat(resource: URI): Promise<IStat> {
     const relativePath = this.relativePathForResource(resource.toString())
     if (!relativePath) {
+      this.rootStatTimestamp ||= Date.now()
       this.debug.pushStat?.({ relativePath, result: "root" })
       return {
-        ctime: Date.now(),
-        mtime: Date.now(),
+        ctime: this.rootStatTimestamp,
+        mtime: this.rootStatTimestamp,
         size: 0,
         type: FileType.Directory,
       }
@@ -269,6 +290,7 @@ export class SlabWorkspaceBackendFileSystemProvider
 
   async readFile(resource: URI): Promise<Uint8Array> {
     const relativePath = this.relativePathForResource(resource.toString())
+    this.debug.pushStat?.({ relativePath, result: "read-file-start" })
     const pendingFile = this.pendingFileReads.get(relativePath)
     const filePromise =
       pendingFile ??
@@ -289,7 +311,22 @@ export class SlabWorkspaceBackendFileSystemProvider
     if (!pendingFile) {
       this.pendingFileReads.set(relativePath, filePromise)
     }
-    const file = await filePromise
+    let file: WorkspaceFileContent
+    try {
+      file = await filePromise
+      this.debug.pushStat?.({
+        bytes: file.content.length,
+        relativePath,
+        result: pendingFile ? "read-file-pending" : "read-file-fetch",
+      })
+    } catch (error) {
+      this.debug.pushStat?.({
+        error: error instanceof Error ? error.message : String(error),
+        relativePath,
+        result: "read-file-error",
+      })
+      throw error
+    }
 
     return this.textEncoder.encode(file.content)
   }
@@ -350,15 +387,43 @@ export class SlabWorkspaceBackendFileSystemProvider
       return noopDisposable
     }
 
-    let pendingEvents: WorkspaceWatchEvent[] = []
-    let flushTimer: ReturnType<typeof setTimeout> | null = null
+    if (this.sharedWatch?.root === activeWorkspaceRoot) {
+      const watch = this.sharedWatch
+      watch.refCount += 1
+      this.debug.pushStat?.({
+        refCount: watch.refCount,
+        relativePath: "",
+        result: "watch-reuse",
+      })
+      let disposed = false
+      return {
+        dispose: () => {
+          if (disposed) {
+            return
+          }
+          disposed = true
+          this.releaseSharedWatch(watch)
+        },
+      }
+    }
+
+    this.stopSharedWatch()
+    const watch: SharedWorkspaceWatch = {
+      dispose: () => {},
+      flushTimer: null,
+      pendingEvents: [],
+      refCount: 1,
+      root: activeWorkspaceRoot,
+    }
+    this.sharedWatch = watch
+    this.debug.pushStat?.({ relativePath: "", result: "watch-start" })
     const flushPendingEvents = () => {
-      flushTimer = null
-      if (pendingEvents.length === 0) {
+      watch.flushTimer = null
+      if (watch.pendingEvents.length === 0) {
         return
       }
-      const events = pendingEvents
-      pendingEvents = []
+      const events = watch.pendingEvents
+      watch.pendingEvents = []
       // Drop the cached listings/stats for the affected paths (and their parents, since
       // directory membership changed) so the next access re-fetches just those, instead of
       // nuking the whole cache.
@@ -390,23 +455,56 @@ export class SlabWorkspaceBackendFileSystemProvider
         ])
       },
       onEvent: (event) => {
-        pendingEvents.push(event)
-        if (flushTimer === null) {
-          flushTimer = setTimeout(flushPendingEvents, WORKSPACE_INVALIDATE_DEBOUNCE_MS)
+        watch.pendingEvents.push(event)
+        if (watch.flushTimer === null) {
+          watch.flushTimer = setTimeout(flushPendingEvents, WORKSPACE_INVALIDATE_DEBOUNCE_MS)
         }
       },
     })
+    watch.dispose = () => {
+      if (watch.flushTimer !== null) {
+        clearTimeout(watch.flushTimer)
+        watch.flushTimer = null
+      }
+      watch.pendingEvents = []
+      watchDisposable.dispose()
+    }
 
+    let disposed = false
     return {
-      dispose() {
-        if (flushTimer !== null) {
-          clearTimeout(flushTimer)
-          flushTimer = null
+      dispose: () => {
+        if (disposed) {
+          return
         }
-        pendingEvents = []
-        watchDisposable.dispose()
+        disposed = true
+        this.releaseSharedWatch(watch)
       },
     }
+  }
+
+  private releaseSharedWatch(watch: SharedWorkspaceWatch): void {
+    if (this.sharedWatch !== watch) {
+      return
+    }
+    watch.refCount -= 1
+    this.debug.pushStat?.({
+      refCount: watch.refCount,
+      relativePath: "",
+      result: "watch-release",
+    })
+    if (watch.refCount <= 0) {
+      this.stopSharedWatch()
+    }
+  }
+
+  private stopSharedWatch(): void {
+    if (!this.sharedWatch) {
+      return
+    }
+    const watch = this.sharedWatch
+    this.sharedWatch = null
+    this.debug.pushStat?.({ relativePath: "", result: "watch-stop" })
+    watch.dispose()
   }
 
   private invalidateWorkspacePaths(relativePaths: string[]): void {
@@ -472,15 +570,11 @@ export class SlabWorkspaceBackendFileSystemProvider
               type: entry.kind === "directory" ? FileType.Directory : FileType.File,
             })
           }
-          const activeWorkspaceRoot = this.workspaceRoot
-          if (activeWorkspaceRoot) {
-            this.changesEmitter.fire([
-              {
-                resource: URI.parse(workspaceLspModelPath(activeWorkspaceRoot, relativePath)),
-                type: FileChangeType.UPDATED,
-              },
-            ])
-          }
+          // Deliberately do NOT fire onDidChangeFile here: a directory read is not a
+          // change. Firing UPDATED on every readdir makes the explorer refresh the
+          // folder mid-expansion, which drops its just-loaded children (deep trees
+          // never stabilize). The explorer renders readdir results directly; real
+          // mutations are surfaced via writeFile/mkdir/delete/rename and the watcher.
         }
 
         return nextDirectory

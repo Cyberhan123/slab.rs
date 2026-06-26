@@ -2,6 +2,7 @@ import { URI } from "@codingame/monaco-vscode-api/vscode/vs/base/common/uri"
 import type { WorkspaceEditorSettings } from "@/store/useWorkspaceUiStore"
 import {
   ensureWorkspaceLspServices,
+  getWorkspaceVscodeApi,
   isWorkspaceServicesInitialized,
   syncWorkspaceVscodeRoot,
 } from "./workspace-services"
@@ -66,9 +67,10 @@ export async function openWorkspaceVscodeFile({
 }) {
   await ensureWorkspaceLspServices(workspaceRoot)
   const { getService, IEditorService } = await import("@codingame/monaco-vscode-api")
+  const resource = URI.parse(workspaceLspModelPath(workspaceRoot, relativePath))
   const editorService = await getService(IEditorService)
   await editorService.openEditor({
-    resource: URI.parse(workspaceLspModelPath(workspaceRoot, relativePath)),
+    resource,
     options: {
       pinned: true,
       revealIfOpened: true,
@@ -249,8 +251,7 @@ export async function watchWorkspaceVscodeEditorState(
 }
 
 export async function runWorkspaceVscodeCommand(commandId: string, workspaceRoot?: string | null) {
-  await ensureWorkspaceLspServices(workspaceRoot)
-  const { commands } = await import("vscode")
+  const { commands } = await getWorkspaceVscodeApi(workspaceRoot)
   await commands.executeCommand(commandId)
 }
 
@@ -261,8 +262,7 @@ export async function getWorkspaceVscodeSelection(
     return null
   }
 
-  await ensureWorkspaceLspServices(workspaceRoot)
-  const { window } = await import("vscode")
+  const { window } = await getWorkspaceVscodeApi(workspaceRoot)
   const editor = window.activeTextEditor
   if (!editor || editor.selection.isEmpty) {
     return null
@@ -298,7 +298,7 @@ export async function applyWorkspaceEditorSettings(
       console.debug("workspace VS Code root sync failed", { error, workspaceRoot })
     })
   }
-  const { ConfigurationTarget, workspace } = await import("vscode")
+  const { ConfigurationTarget, workspace } = await getWorkspaceVscodeApi(workspaceRoot)
   const editorConfig = workspace.getConfiguration("editor")
   await Promise.all([
     editorConfig.update("fontSize", settings.fontSize, ConfigurationTarget.Global),

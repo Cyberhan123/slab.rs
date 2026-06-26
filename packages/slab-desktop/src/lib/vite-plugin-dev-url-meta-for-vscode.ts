@@ -3,11 +3,22 @@ import * as fs from 'fs'
 import url from 'url'
 import { resolve } from 'import-meta-resolve'
 
+type RolldownOnLoadArgs = {
+  path: string
+}
+
+type RolldownPluginSetupApi = {
+  onLoad: (
+    options: { filter: RegExp; namespace: string },
+    callback: (args: RolldownOnLoadArgs) => Promise<{ contents: string }>,
+  ) => void
+}
+
 export default <Plugin>{
   name: 'import.meta.url',
-  setup ({ onLoad }) {
+  setup ({ onLoad }: RolldownPluginSetupApi) {
     // Help vite that bundles/move files in dev mode without touching `import.meta.url` which breaks asset urls
-    onLoad({ filter: /.*\.js$/, namespace: 'file' }, async args => {
+    onLoad({ filter: /.*\.js$/, namespace: 'file' }, async (args) => {
       const code = fs.readFileSync(args.path, 'utf8')
 
       const assetImportMetaUrlRE = /\bnew\s+URL\s*\(\s*('[^']+'|"[^"]+"|`[^`]+`)\s*,\s*import\.meta\.url\s*(?:,\s*)?\)/g

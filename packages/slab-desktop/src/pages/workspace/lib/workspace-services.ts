@@ -2,14 +2,19 @@ import * as monaco from "monaco-editor"
 import { URI } from "@codingame/monaco-vscode-api/vscode/vs/base/common/uri"
 import { IWorkspaceContextService } from "@codingame/monaco-vscode-api/vscode/vs/platform/workspace/common/workspace.service"
 import { initialize as initializeServices } from "@codingame/monaco-vscode-api"
-import extensionHostWorkerUrl from "@codingame/monaco-vscode-api/workers/extensionHost.worker?worker&url"
+import {
+  ExtensionHostKind,
+  registerExtension,
+  type RegisterLocalProcessExtensionResult,
+} from "@codingame/monaco-vscode-api/extensions"
+import type * as Vscode from "vscode"
 import "vscode/localExtensionHost"
 import getAccessibilityServiceOverride from "@codingame/monaco-vscode-accessibility-service-override"
 import getConfigurationServiceOverride, {
   reinitializeWorkspace,
 } from "@codingame/monaco-vscode-configuration-service-override"
 import getDialogsServiceOverride from "@codingame/monaco-vscode-dialogs-service-override"
-import getEditorServiceOverride, { type OpenEditor } from "@codingame/monaco-vscode-editor-service-override"
+import type { OpenEditor } from "@codingame/monaco-vscode-editor-service-override"
 import getEmmetServiceOverride from "@codingame/monaco-vscode-emmet-service-override"
 import getExplorerServiceOverride from "@codingame/monaco-vscode-explorer-service-override"
 import getExtensionServiceOverride from "@codingame/monaco-vscode-extensions-service-override"
@@ -32,6 +37,7 @@ import getTextmateServiceOverride from "@codingame/monaco-vscode-textmate-servic
 import getThemeServiceOverride from "@codingame/monaco-vscode-theme-service-override"
 import getViewsServiceOverride from "@codingame/monaco-vscode-views-service-override"
 import getWorkingCopyServiceOverride from "@codingame/monaco-vscode-working-copy-service-override"
+import "@codingame/monaco-vscode-api/vscode/vs/workbench/contrib/files/browser/files.contribution._editorPane"
 import { slabTerminalBackend } from "./workspace-terminal-service"
 import { getStandaloneMonacoEditorOverrides } from "./workspace-standalone-monaco"
 import { whenWorkspaceExtensionsReady } from "./workspace-extensions"
@@ -75,6 +81,8 @@ let workspaceServicesPrepared = false
 let workspaceServicesInitialized = false
 let workspaceVscodeRoot: string | null = null
 let workspaceServices: monaco.editor.IEditorOverrideServices | null = null
+let workspaceLocalExtension: RegisterLocalProcessExtensionResult | null = null
+let workspaceVscodeApi: Promise<typeof Vscode> | null = null
 
 function setWorkspaceLspDebugStage(stage: string) {
   if (typeof window === "undefined") {
@@ -143,6 +151,11 @@ export function workspaceLspServicesReady() {
 
 export function isWorkspaceServicesInitialized() {
   return workspaceServicesInitialized
+}
+
+export async function getWorkspaceVscodeApi(workspaceRoot?: string | null) {
+  await ensureWorkspaceLspServices(workspaceRoot)
+  return getWorkspaceVscodeApiAfterServicesReady()
 }
 
 /**
@@ -235,6 +248,7 @@ function workspaceWorkbenchOptions(workspaceRoot: string | null) {
 
 async function initializeWorkspaceServices(workspaceRoot: string | null) {
   prepareWorkspaceServices()
+  ensureWorkspaceLocalExtension()
   await initializeServices(
     workspaceServices!,
     undefined,
@@ -243,7 +257,8 @@ async function initializeWorkspaceServices(workspaceRoot: string | null) {
   )
   workspaceServicesInitialized = true
 
-  const { ConfigurationTarget, commands, workspace } = await import("vscode")
+  setWorkspaceLspDebugStage("activate-local-extension")
+  const { ConfigurationTarget, commands, workspace } = await getWorkspaceVscodeApiAfterServicesReady()
   await workspace.getConfiguration("explorer").update("compactFolders", false, ConfigurationTarget.Global)
   // executeCommand returns a VS Code Thenable (no .catch); wrap it so the
   // refresh is best-effort and never fails service init.
@@ -263,6 +278,7 @@ function prepareWorkspaceServices() {
   }
 
   registerWorkspaceMonacoWorkers()
+  ensureWorkspaceLocalExtension()
 
   workspaceServices = {
     ...getStandaloneMonacoEditorOverrides(),
@@ -273,10 +289,15 @@ function prepareWorkspaceServices() {
     ...getSnippetServiceOverride(),
     ...getDialogsServiceOverride(),
     ...getExplorerServiceOverride(),
+    // Custom-UI setup: we render VSCode *parts*, not the workbench, and run LSP
+    // over our own WebSocket. The default theme/grammar extensions run on the
+    // local (main-thread) extension host (see `import "vscode/localExtensionHost"`).
+    // The worker extension host spawns an iframe + worker whose handshake hangs
+    // here (60s timeout) and blocks service startup — it is not needed, so leave
+    // it disabled.
     ...getExtensionServiceOverride({
-      enableWorkerExtensionHost: true,
+      enableWorkerExtensionHost: false,
     }),
-    ...getEditorServiceOverride(slabOpenCodeEditor),
     ...getKeybindingsServiceOverride(),
     ...getQuickAccessServiceOverride(),
     ...getLanguageDetectionWorkerServiceOverride(),
@@ -293,7 +314,7 @@ function prepareWorkspaceServices() {
     ...getTextmateServiceOverride(),
     ...getThemeServiceOverride(),
     ...getWorkingCopyServiceOverride(),
-    ...getViewsServiceOverride(undefined, undefined, (state) => ({
+    ...getViewsServiceOverride(slabOpenCodeEditor, undefined, (state) => ({
       ...state,
       editor: {
         ...state.editor,
@@ -306,6 +327,27 @@ function prepareWorkspaceServices() {
     })),
   }
   workspaceServicesPrepared = true
+}
+
+function ensureWorkspaceLocalExtension() {
+  workspaceLocalExtension ??= registerExtension(
+    {
+      name: "workspace-api",
+      publisher: "slab",
+      version: "1.0.0",
+      engines: {
+        vscode: "*",
+      },
+    },
+    ExtensionHostKind.LocalProcess,
+    { system: true },
+  )
+  return workspaceLocalExtension
+}
+
+function getWorkspaceVscodeApiAfterServicesReady() {
+  workspaceVscodeApi ??= ensureWorkspaceLocalExtension().getApi()
+  return workspaceVscodeApi
 }
 
 /**
@@ -332,11 +374,6 @@ const workspaceMonacoWorkers: Record<string, SlabMonacoWorkerEntry> = {
 }
 
 function registerWorkspaceMonacoWorkers() {
-  workspaceMonacoWorkers.extensionHostWorkerMain = {
-    url: new URL(extensionHostWorkerUrl, import.meta.url),
-    options: { type: "module" },
-  }
-
   if (typeof window === "undefined") {
     return
   }

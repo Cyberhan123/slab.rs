@@ -271,6 +271,32 @@ describe("SlabWorkspaceBackendFileSystemProvider", () => {
     vi.useRealTimers()
   })
 
+  it("shares a single backend watch across concurrent file-service watchers", () => {
+    let disposeCount = 0
+    const { backend, bridge } = createBackend({
+      watch: vi.fn(() => ({
+        dispose() {
+          disposeCount += 1
+        },
+      })),
+    })
+
+    const first = backend.watch()
+    const second = backend.watch()
+    expect(vi.mocked(bridge.watch)).toHaveBeenCalledTimes(1)
+
+    first.dispose()
+    expect(disposeCount).toBe(0)
+
+    second.dispose()
+    expect(disposeCount).toBe(1)
+
+    const third = backend.watch()
+    expect(vi.mocked(bridge.watch)).toHaveBeenCalledTimes(2)
+    third.dispose()
+    expect(disposeCount).toBe(2)
+  })
+
   it("clears the whole cache and signals a root update when the watch stream errors", async () => {
     let watcher: { onEvent: (e: unknown) => void; onError: (e: unknown) => void } | null = null
     const { backend } = createBackend({

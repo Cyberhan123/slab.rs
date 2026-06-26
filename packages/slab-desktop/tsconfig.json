@@ -8,7 +8,10 @@
       "@slab/components": ["../slab-components/src/index.ts"],
       "@slab/components/*": ["../slab-components/src/*"],
       "@slab/i18n": ["../slab-i18n/src/index.ts"],
-      "@slab/plugin-sdk": ["../slab-plugin-sdk/src/index.ts"]
+      "@slab/plugin-sdk": ["../slab-plugin-sdk/src/index.ts"],
+      "@codingame/monaco-vscode-extensions-service-override": [
+        "./src/types/monaco-vscode-extensions-service-override.d.ts"
+      ]
     },
     "types": ["node"],
     "noUnusedLocals": true,

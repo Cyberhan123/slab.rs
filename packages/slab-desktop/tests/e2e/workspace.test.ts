@@ -37,6 +37,13 @@ describe.sequential("workspace e2e", () => {
   let page: Page
   let browserErrors: string[] = []
   let workspaceFailures: string[] = []
+  let directoryRequests: string[] = []
+  let fileRequests: string[] = []
+  let lspRequests: string[] = []
+  let statRequests: string[] = []
+  let failedRequests: string[] = []
+  let fileResponses: string[] = []
+  let notFoundResponses: string[] = []
   let workspaceRoot: string
   let project: WorkspaceProjectFixture
 
@@ -61,6 +68,31 @@ describe.sequential("workspace e2e", () => {
       window.localStorage.setItem("slab.ui.language", "en-US")
     }, env.uiBaseUrl)
     page = await context.newPage()
+    page.on("request", (request) => {
+      if (request.url().includes("/v1/workspace/directory")) {
+        directoryRequests.push(request.url())
+      }
+      if (request.url().includes("/v1/workspace/files")) {
+        fileRequests.push(request.url())
+      }
+      if (request.url().includes("/v1/workspace/lsp/")) {
+        lspRequests.push(request.url())
+      }
+      if (request.url().includes("/v1/workspace/path/stat")) {
+        statRequests.push(request.url())
+      }
+    })
+    page.on("requestfailed", (request) => {
+      failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText ?? ""}`)
+    })
+    page.on("response", (response) => {
+      if (response.url().includes("/v1/workspace/files")) {
+        fileResponses.push(`${response.status()} ${response.url()}`)
+      }
+      if (response.status() === 404) {
+        notFoundResponses.push(`${response.request().method()} ${response.url()}`)
+      }
+    })
     page.on("console", (message) => {
       if (message.type() !== "error") {
         return
@@ -91,6 +123,13 @@ describe.sequential("workspace e2e", () => {
     const testEnv = requireEnv()
     browserErrors = []
     workspaceFailures = []
+    directoryRequests = []
+    fileRequests = []
+    lspRequests = []
+    statRequests = []
+    failedRequests = []
+    fileResponses = []
+    notFoundResponses = []
     const runId = `workspace-${Date.now()}`
     const updatedContent = `Deep workspace sentinel\nEdited by ${runId}\n`
 
@@ -123,8 +162,9 @@ describe.sequential("workspace e2e", () => {
     const monacoEditor = editor.locator(".monaco-editor")
     await monacoEditor.waitFor({ state: "visible", timeout: 60_000 }).catch(async (error: unknown) => {
       const editorHtml = await editor.evaluate((element) => element.outerHTML).catch(() => "<unavailable>")
+      const diagnostics = await workspaceRuntimeDiagnostics(editor)
       throw new Error(
-        `workspace Monaco editor did not render. Browser errors: ${browserErrors.join(" | ") || "none"}. Editor HTML: ${editorHtml}. Cause: ${error instanceof Error ? error.message : String(error)}`,
+        `workspace Monaco editor did not render. Browser errors: ${browserErrors.join(" | ") || "none"}. 404s: ${notFoundResponses.join(" | ") || "none"}. Failed requests: ${failedRequests.join(" | ") || "none"}. File requests: ${fileRequests.join(" | ") || "none"}. File responses: ${fileResponses.join(" | ") || "none"}. Stat requests: ${statRequests.join(" | ") || "none"}. LSP requests: ${lspRequests.join(" | ") || "none"}. Diagnostics: ${diagnostics}. Editor HTML: ${editorHtml}. Cause: ${error instanceof Error ? error.message : String(error)}`,
       )
     })
     await eventually("workspace Monaco editor renders deep selected file", async () =>
@@ -213,6 +253,9 @@ describe.sequential("workspace e2e", () => {
       (await page.getByTestId("workspace-active-screen").textContent())?.includes(workspaceRoot) ? true : null
     )
 
+    // The file tree is bulk-fetched in one deep request and served from cache, so the chatty
+    // per-folder `readdir` pattern must NOT generate hundreds of /v1/workspace/directory calls.
+    expect(directoryRequests.length).toBeLessThan(30)
     expect(workspaceFailures).toEqual([])
   })
 })
@@ -223,4 +266,34 @@ function requireEnv(): FullstackDevEnvironment {
   }
 
   return env
+}
+
+async function workspaceRuntimeDiagnostics(editor: ReturnType<Page["getByTestId"]>) {
+  const mountState = await editor.getAttribute("data-mount-state").catch(() => "<unavailable>")
+  const mountStage = await editor.getAttribute("data-mount-stage").catch(() => "<unavailable>")
+  const mountError = await editor.getAttribute("data-mount-error").catch(() => "<unavailable>")
+  const editorSummary = await editor.evaluate((element) => ({
+    editorInstances: element.querySelectorAll(".editor-instance").length,
+    monacoEditors: element.querySelectorAll(".monaco-editor").length,
+    progressBars: element.querySelectorAll('[role="progressbar"]').length,
+    tabs: Array.from(element.querySelectorAll("[data-resource-name]")).map((tab) =>
+      tab.getAttribute("data-resource-name"),
+    ),
+  })).catch(() => "<unavailable>")
+  const lspState = await editor.page().evaluate(() => ({
+    context: (window as typeof window & { __SLAB_WORKSPACE_LSP_CONTEXT__?: unknown })
+      .__SLAB_WORKSPACE_LSP_CONTEXT__ ?? null,
+    directories: (window as typeof window & { __SLAB_WORKSPACE_LSP_DIRECTORIES__?: unknown[] })
+      .__SLAB_WORKSPACE_LSP_DIRECTORIES__ ?? [],
+    stage: (window as typeof window & { __SLAB_WORKSPACE_LSP_STAGE__?: string }).__SLAB_WORKSPACE_LSP_STAGE__ ?? null,
+    stats: (window as typeof window & { __SLAB_WORKSPACE_LSP_STATS__?: unknown[] }).__SLAB_WORKSPACE_LSP_STATS__ ?? [],
+  })).catch(() => "<unavailable>")
+
+  return JSON.stringify({
+    editorSummary,
+    lspState,
+    mountError,
+    mountStage,
+    mountState,
+  })
 }
