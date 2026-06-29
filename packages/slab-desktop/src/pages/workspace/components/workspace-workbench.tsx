@@ -30,7 +30,6 @@ import { SLAB_DIR_NAME } from "../lib/workspace-page-utils"
 import { RecentWorkspaceList } from "./recent-workspace-list"
 import { WorkspaceCommandPalette } from "./workspace-command-palette"
 import { WorkspaceConsolePanel } from "./workspace-console-panel"
-import { WorkspaceDiffEditor } from "./workspace-diff-editor"
 import { WorkspaceGitPanel } from "./workspace-git-panel"
 import { WorkspaceSearchPanel } from "./workspace-search-panel"
 import { WorkspaceVscodePart } from "./workspace-vscode-part/index"
@@ -49,7 +48,6 @@ export function WorkspaceWorkbench({
   fileSearchResults,
   fileSearchTruncated,
   fileError,
-  gitDiffFetching,
   gitStatus,
   gitStatusFetching,
   gitOperationPending,
@@ -77,7 +75,6 @@ export function WorkspaceWorkbench({
   openWorkspacePath,
   recentWorkspaces,
   selectedFile,
-  selectedGitDiff,
   selectedGitDiffEntry,
   selectedFileDirty,
   setTextSearchQuery,
@@ -406,27 +403,6 @@ export function WorkspaceWorkbench({
                 className="min-h-[420px]"
                 data-testid="file-too-large"
               />
-            ) : selectedGitDiffEntry ? (
-              <>
-                <div className="flex h-9 shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-background/80 px-3">
-                  <div
-                    className="min-w-0 truncate font-mono text-xs text-muted-foreground"
-                    title={selectedGitDiffEntry.path}
-                  >
-                    {selectedGitDiffEntry.path}
-                  </div>
-                  {gitDiffFetching ? <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" /> : null}
-                </div>
-                <div className="min-h-0 flex-1 overflow-hidden rounded-[6px]">
-                  <WorkspaceDiffEditor
-                    diffText={selectedGitDiff?.diff.trim() ?? ""}
-                    filePath={selectedGitDiffEntry.path}
-                    fontSize={editorSettings.fontSize}
-                    minimapEnabled={editorSettings.minimapEnabled}
-                    wordWrap={editorSettings.wordWrap}
-                  />
-                </div>
-              </>
             ) : (
               <WorkspaceVscodePart
                 part="editor"

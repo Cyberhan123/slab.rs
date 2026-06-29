@@ -196,6 +196,8 @@ export type WorkspaceGitDiff = {
   path: string
   staged: boolean
   diff: string
+  originalContent: string
+  modifiedContent: string
 }
 
 export type WorkspacePluginPreferenceUpdate = {

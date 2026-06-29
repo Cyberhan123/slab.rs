@@ -715,8 +715,31 @@ export function useWorkspacePage() {
       setSelectedFile(null)
       setFileError(null)
       setSelectedGitDiffEntry(entry)
+      if (!workspace) {
+        return
+      }
+
+      try {
+        const diff = await workspaceGitDiff({
+          path: entry.path,
+          staged: entry.staged,
+        })
+        queryClient.setQueryData(
+          ["workspace-git-diff", workspace.rootPath, entry.path, entry.staged],
+          diff,
+        )
+        const { openWorkspaceVscodeDiff } = await import("../lib/workspace-editor")
+        await openWorkspaceVscodeDiff({
+          diff,
+          workspaceRoot: workspace.rootPath,
+        })
+      } catch (error) {
+        toast.error(t("pages.workspace.toast.gitFailed"), {
+          description: getErrorMessage(error),
+        })
+      }
     },
-    [confirmDiscardUnsaved, selectedFileDirty],
+    [confirmDiscardUnsaved, queryClient, selectedFileDirty, t, workspace],
   )
 
   // The embedded VS Code editor persists files through its own working-copy
@@ -948,6 +971,8 @@ export function useWorkspacePage() {
           path: visibleGitDiffEntry.path,
           staged: visibleGitDiffEntry.staged,
           diff: "",
+          originalContent: "",
+          modifiedContent: "",
         } satisfies WorkspaceGitDiff)
       : null,
     selectedGitDiffEntry: visibleGitDiffEntry,

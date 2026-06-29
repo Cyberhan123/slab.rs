@@ -153,10 +153,14 @@ impl GitRepository {
 
     pub fn path_diff(&self, path: &str, staged: bool) -> Result<GitPathDiff, GitError> {
         let diff = self.diff(Some(path), staged)?;
+        let path = diff.path.unwrap_or_default();
+        let (original_content, modified_content) = path_diff_contents(&self.root, &path, staged)?;
         Ok(GitPathDiff {
-            path: diff.path.unwrap_or_default(),
+            path,
             staged: diff.staged,
             diff: diff.diff,
+            original_content,
+            modified_content,
         })
     }
 
@@ -304,6 +308,51 @@ fn untracked_path_diff(root: &Path, relative_path: &str) -> Result<String, GitEr
 
     let content = std::fs::read_to_string(&path).unwrap_or_else(|_| String::new());
     Ok(render_added_file_diff(relative_path, &content))
+}
+
+fn path_diff_contents(
+    root: &Path,
+    relative_path: &str,
+    staged: bool,
+) -> Result<(String, String), GitError> {
+    if !staged && is_untracked_git_path(root, relative_path)? {
+        return Ok(("".to_string(), read_worktree_text(root, relative_path)?));
+    }
+
+    let original_revision =
+        if staged { format!("HEAD:{relative_path}") } else { format!(":{relative_path}") };
+    let original_content = read_git_blob(root, &original_revision)?;
+    let modified_content = if staged {
+        read_git_blob(root, &format!(":{relative_path}"))?
+    } else {
+        read_worktree_text(root, relative_path)?
+    };
+
+    Ok((original_content, modified_content))
+}
+
+fn read_git_blob(root: &Path, revision: &str) -> Result<String, GitError> {
+    let output = git_output(root, &["cat-file", "-e", revision])?;
+    if !output.status.success() {
+        return Ok(String::new());
+    }
+
+    let output = git_output(root, &["show", "--textconv", revision])?;
+    if output.status.success() {
+        return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+    }
+    Err(GitError::CommandFailed(output_message(&output)))
+}
+
+fn read_worktree_text(root: &Path, relative_path: &str) -> Result<String, GitError> {
+    let path = root.join(relative_path);
+    if !path.exists() {
+        return Ok(String::new());
+    }
+    if path.is_dir() {
+        return Ok(String::new());
+    }
+    Ok(std::fs::read_to_string(path).unwrap_or_default())
 }
 
 fn untracked_directory_diff(root: &Path, relative_path: &str) -> Result<String, GitError> {
@@ -601,6 +650,89 @@ mod tests {
 
         let result = repo.commit_all("initial commit").expect("commit should work");
         assert!(result.status.entries.is_empty());
+    }
+
+    #[test]
+    fn path_diff_contents_for_unstaged_tracked_file_use_index_and_worktree() {
+        let root = tempfile::tempdir().expect("temp repo");
+        if run_git(root.path(), &["init"]).is_none() {
+            return;
+        }
+        run_git(root.path(), &["config", "user.email", "agent@example.test"])
+            .expect("config email");
+        run_git(root.path(), &["config", "user.name", "Slab Agent"]).expect("config name");
+        fs::write(root.path().join("hello.txt"), "head\n").expect("write file");
+        run_git(root.path(), &["add", "hello.txt"]).expect("stage file");
+        run_git(root.path(), &["commit", "-m", "initial"]).expect("commit file");
+
+        fs::write(root.path().join("hello.txt"), "index\n").expect("write index version");
+        run_git(root.path(), &["add", "hello.txt"]).expect("stage index version");
+        fs::write(root.path().join("hello.txt"), "worktree\n").expect("write worktree version");
+
+        let diff = GitRepository::new(root.path())
+            .path_diff("hello.txt", false)
+            .expect("diff should work");
+        assert_eq!(diff.original_content, "index\n");
+        assert_eq!(diff.modified_content, "worktree\n");
+    }
+
+    #[test]
+    fn path_diff_contents_for_staged_file_use_head_and_index() {
+        let root = tempfile::tempdir().expect("temp repo");
+        if run_git(root.path(), &["init"]).is_none() {
+            return;
+        }
+        run_git(root.path(), &["config", "user.email", "agent@example.test"])
+            .expect("config email");
+        run_git(root.path(), &["config", "user.name", "Slab Agent"]).expect("config name");
+        fs::write(root.path().join("hello.txt"), "head\n").expect("write file");
+        run_git(root.path(), &["add", "hello.txt"]).expect("stage file");
+        run_git(root.path(), &["commit", "-m", "initial"]).expect("commit file");
+
+        fs::write(root.path().join("hello.txt"), "index\n").expect("write index version");
+        run_git(root.path(), &["add", "hello.txt"]).expect("stage index version");
+        fs::write(root.path().join("hello.txt"), "worktree\n").expect("write worktree version");
+
+        let diff =
+            GitRepository::new(root.path()).path_diff("hello.txt", true).expect("diff should work");
+        assert_eq!(diff.original_content, "head\n");
+        assert_eq!(diff.modified_content, "index\n");
+    }
+
+    #[test]
+    fn path_diff_contents_for_untracked_file_use_empty_original() {
+        let root = tempfile::tempdir().expect("temp repo");
+        if run_git(root.path(), &["init"]).is_none() {
+            return;
+        }
+        fs::write(root.path().join("scratch.txt"), "scratch\n").expect("write file");
+
+        let diff = GitRepository::new(root.path())
+            .path_diff("scratch.txt", false)
+            .expect("diff should work");
+        assert_eq!(diff.original_content, "");
+        assert_eq!(diff.modified_content, "scratch\n");
+    }
+
+    #[test]
+    fn path_diff_contents_for_deleted_file_use_empty_modified() {
+        let root = tempfile::tempdir().expect("temp repo");
+        if run_git(root.path(), &["init"]).is_none() {
+            return;
+        }
+        run_git(root.path(), &["config", "user.email", "agent@example.test"])
+            .expect("config email");
+        run_git(root.path(), &["config", "user.name", "Slab Agent"]).expect("config name");
+        fs::write(root.path().join("hello.txt"), "head\n").expect("write file");
+        run_git(root.path(), &["add", "hello.txt"]).expect("stage file");
+        run_git(root.path(), &["commit", "-m", "initial"]).expect("commit file");
+        fs::remove_file(root.path().join("hello.txt")).expect("delete file");
+
+        let diff = GitRepository::new(root.path())
+            .path_diff("hello.txt", false)
+            .expect("diff should work");
+        assert_eq!(diff.original_content, "head\n");
+        assert_eq!(diff.modified_content, "");
     }
 
     #[test]

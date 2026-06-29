@@ -9,8 +9,17 @@ export type WorkspaceProjectFixture = {
   deepFilePath: string
   deepFileRelativePath: string
   deepPathSegments: string[]
+  diffModifiedNewContent: string
+  diffModifiedOldContent: string
+  diffModifiedPath: string
+  diffUntrackedContent: string
+  diffUntrackedPath: string
+  mathFileRelativePath: string
+  noteFileRelativePath: string
   terminalSentinelContent: string
   terminalSentinelFileName: string
+  tsMainFileContent: string
+  tsMainFileRelativePath: string
 }
 
 const deepPathSegments = ["src", "features", "deep", "level-four", "level-five"]
@@ -22,13 +31,41 @@ export function prepareWorkspaceProject(root: string, title = "Workspace E2E"): 
   const deepFilePath = join(root, ...deepPathSegments, deepFileName)
   const deepFileContent = "Deep workspace sentinel\nNested file content\n"
   const terminalSentinelContent = "terminal workspace cwd sentinel"
+  const mathFileRelativePath = "src/lib/math.ts"
+  const noteFileRelativePath = "src/note.txt"
+  const tsMainFileRelativePath = "src/main.ts"
+  const tsMainFileContent = [
+    "import { addNumbers, answer } from './lib/math';",
+    "",
+    "export const total = addNumbers(answer, 8);",
+    "",
+  ].join("\n")
+  const diffModifiedPath = "src/diff-target.txt"
+  const diffModifiedOldContent = "Original tracked diff line\nShared line\n"
+  const diffModifiedNewContent = "Modified tracked diff line\nShared line\n"
+  const diffUntrackedPath = "src/untracked-diff.txt"
+  const diffUntrackedContent = "Untracked workspace diff line\n"
 
   mkdirSync(dirname(deepFilePath), { recursive: true })
-  mkdirSync(join(root, "src"), { recursive: true })
+  mkdirSync(join(root, "src", "lib"), { recursive: true })
   writeFileSync(join(root, ".gitignore"), ".slab/\n", "utf8")
   writeFileSync(join(root, "README.md"), `# ${title}\n`, "utf8")
-  writeFileSync(join(root, "src", "note.txt"), "Initial workspace note\n", "utf8")
+  writeFileSync(join(root, noteFileRelativePath), "Initial workspace note\n", "utf8")
   writeFileSync(join(root, "src", "second.txt"), "Second workspace note\n", "utf8")
+  writeFileSync(join(root, tsMainFileRelativePath), tsMainFileContent, "utf8")
+  writeFileSync(
+    join(root, mathFileRelativePath),
+    [
+      "export const answer = 34;",
+      "",
+      "export function addNumbers(left: number, right: number) {",
+      "  return left + right;",
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  )
+  writeFileSync(join(root, diffModifiedPath), diffModifiedOldContent, "utf8")
   writeFileSync(deepFilePath, deepFileContent, "utf8")
   writeFileSync(join(root, terminalSentinelFileName), `${terminalSentinelContent}\n`, "utf8")
 
@@ -40,14 +77,25 @@ export function prepareWorkspaceProject(root: string, title = "Workspace E2E"): 
   execFileSync("git", ["config", "user.name", "Slab E2E"], { cwd: root, stdio: "pipe" })
   execFileSync("git", ["add", "."], { cwd: root, stdio: "pipe" })
   execFileSync("git", ["commit", "-m", "Initial workspace"], { cwd: root, stdio: "pipe" })
+  writeFileSync(join(root, diffModifiedPath), diffModifiedNewContent, "utf8")
+  writeFileSync(join(root, diffUntrackedPath), diffUntrackedContent, "utf8")
 
   return {
     deepFileContent,
     deepFilePath,
     deepFileRelativePath,
     deepPathSegments: [...deepPathSegments, deepFileName],
+    diffModifiedNewContent,
+    diffModifiedOldContent,
+    diffModifiedPath,
+    diffUntrackedContent,
+    diffUntrackedPath,
+    mathFileRelativePath,
+    noteFileRelativePath,
     terminalSentinelContent,
     terminalSentinelFileName,
+    tsMainFileContent,
+    tsMainFileRelativePath,
   }
 }
 
@@ -60,25 +108,22 @@ export async function clickExplorerPath(explorer: Locator, pathSegments: string[
       const mountState = await explorer.getAttribute("data-mount-state").catch(() => "<unavailable>")
       const mountStage = await explorer.getAttribute("data-mount-stage").catch(() => "<unavailable>")
       const mountError = await explorer.getAttribute("data-mount-error").catch(() => "<unavailable>")
-      const lspStage = await explorer.page().evaluate(() =>
-        (window as typeof window & { __SLAB_WORKSPACE_LSP_STAGE__?: string }).__SLAB_WORKSPACE_LSP_STAGE__ ?? null,
-      ).catch(() => "<unavailable>")
-      const lspContext = await explorer.page().evaluate(() =>
-        JSON.stringify(
-          (window as typeof window & { __SLAB_WORKSPACE_LSP_CONTEXT__?: unknown }).__SLAB_WORKSPACE_LSP_CONTEXT__ ?? null,
-        ),
-      ).catch(() => "<unavailable>")
-      const lspDirectories = await explorer.page().evaluate(() =>
-        JSON.stringify(
-          (window as typeof window & { __SLAB_WORKSPACE_LSP_DIRECTORIES__?: unknown[] })
-            .__SLAB_WORKSPACE_LSP_DIRECTORIES__ ?? [],
-        ),
-      ).catch(() => "<unavailable>")
-      const lspStats = await explorer.page().evaluate(() =>
-        JSON.stringify(
-          (window as typeof window & { __SLAB_WORKSPACE_LSP_STATS__?: unknown[] }).__SLAB_WORKSPACE_LSP_STATS__ ?? [],
-        ),
-      ).catch(() => "<unavailable>")
+      const lspStage = await explorer.page().evaluate(() => {
+        const target = window as typeof window & { __SLAB_WORKSPACE_LSP_STAGE__?: string }
+        return target["__SLAB_WORKSPACE_LSP_STAGE__"] ?? null
+      }).catch(() => "<unavailable>")
+      const lspContext = await explorer.page().evaluate(() => {
+        const target = window as typeof window & { __SLAB_WORKSPACE_LSP_CONTEXT__?: unknown }
+        return JSON.stringify(target["__SLAB_WORKSPACE_LSP_CONTEXT__"] ?? null)
+      }).catch(() => "<unavailable>")
+      const lspDirectories = await explorer.page().evaluate(() => {
+        const target = window as typeof window & { __SLAB_WORKSPACE_LSP_DIRECTORIES__?: unknown[] }
+        return JSON.stringify(target["__SLAB_WORKSPACE_LSP_DIRECTORIES__"] ?? [])
+      }).catch(() => "<unavailable>")
+      const lspStats = await explorer.page().evaluate(() => {
+        const target = window as typeof window & { __SLAB_WORKSPACE_LSP_STATS__?: unknown[] }
+        return JSON.stringify(target["__SLAB_WORKSPACE_LSP_STATS__"] ?? [])
+      }).catch(() => "<unavailable>")
       const rows = await explorer.locator('[role="treeitem"]').evaluateAll((elements) =>
         elements.slice(0, 30).map((element) => ({
           ariaExpanded: element.getAttribute("aria-expanded"),

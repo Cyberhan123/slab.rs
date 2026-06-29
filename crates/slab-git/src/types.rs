@@ -89,6 +89,8 @@ pub struct GitPathDiff {
     pub path: String,
     pub staged: bool,
     pub diff: String,
+    pub original_content: String,
+    pub modified_content: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]

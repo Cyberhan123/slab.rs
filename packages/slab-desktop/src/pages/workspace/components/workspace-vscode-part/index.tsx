@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 import type { WorkspaceEditorSettings } from "@/store/useWorkspaceUiStore"
 import {
   applySlabMonacoTheme,
+  applySlabVscodeTheme,
   type WorkspaceThemeMode,
 } from "../../lib/monaco-theme"
 
@@ -90,6 +91,7 @@ export function WorkspaceVscodePart({
       stage = "theme"
       setMountStage(stage)
       applySlabMonacoTheme(Monaco, themeModeRef.current)
+      await applySlabVscodeTheme(themeModeRef.current, workspaceRoot)
       if (editorSettings) {
         stage = "editor-settings"
         setMountStage(stage)
@@ -134,8 +136,11 @@ export function WorkspaceVscodePart({
   useEffect(() => {
     if (mountState === "ready") {
       applySlabMonacoTheme(Monaco, themeMode)
+      void applySlabVscodeTheme(themeMode, workspaceRoot).catch((error) => {
+        console.debug("workspace VS Code theme sync failed", { error, themeMode, workspaceRoot })
+      })
     }
-  }, [mountState, themeMode])
+  }, [mountState, themeMode, workspaceRoot])
 
   return (
     <div

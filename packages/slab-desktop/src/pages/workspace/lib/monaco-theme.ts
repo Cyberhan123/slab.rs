@@ -101,6 +101,14 @@ export function applySlabMonacoTheme(monaco: typeof Monaco, mode: WorkspaceTheme
   return themeId
 }
 
+export async function applySlabVscodeTheme(mode: WorkspaceThemeMode, workspaceRoot?: string | null) {
+  const { getWorkspaceVscodeApi } = await import("./workspace-services")
+  const { ConfigurationTarget, workspace } = await getWorkspaceVscodeApi(workspaceRoot)
+  await workspace
+    .getConfiguration("workbench")
+    .update("colorTheme", mode === "dark" ? "Default Dark Modern" : "Default Light Modern", ConfigurationTarget.Global)
+}
+
 function readCssColor(name: string, fallback: string) {
   if (typeof document === "undefined") {
     return fallback

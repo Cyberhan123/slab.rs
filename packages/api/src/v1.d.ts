@@ -3159,6 +3159,8 @@ export interface components {
         };
         WorkspaceGitDiffView: {
             diff: string;
+            modifiedContent: string;
+            originalContent: string;
             path: string;
             staged: boolean;
         };
@@ -5766,7 +5768,7 @@ export interface operations {
                 relativePath?: string;
                 /** @description Whether to include ignored and hidden workspace directories. */
                 includeIgnored?: boolean;
-                /** @description Directory levels to flatten into the response (default 1, capped at 5). Flat listing is capped at 500 entries with truncated=true. */
+                /** @description Directory levels to flatten into the response (default 1, capped at 128). Use a large depth (e.g. 128) to fetch the whole tree in one bulk request; flat listing is capped at 20000 entries with truncated=true. */
                 depth?: number;
             };
             header?: never;

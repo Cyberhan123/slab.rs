@@ -14,17 +14,25 @@ class WorkspaceGitDiffView:
     """
     Attributes:
         diff (str):
+        modified_content (str):
+        original_content (str):
         path (str):
         staged (bool):
     """
 
     diff: str
+    modified_content: str
+    original_content: str
     path: str
     staged: bool
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         diff = self.diff
+
+        modified_content = self.modified_content
+
+        original_content = self.original_content
 
         path = self.path
 
@@ -35,6 +43,8 @@ class WorkspaceGitDiffView:
         field_dict.update(
             {
                 "diff": diff,
+                "modifiedContent": modified_content,
+                "originalContent": original_content,
                 "path": path,
                 "staged": staged,
             }
@@ -47,12 +57,18 @@ class WorkspaceGitDiffView:
         d = dict(src_dict)
         diff = d.pop("diff")
 
+        modified_content = d.pop("modifiedContent")
+
+        original_content = d.pop("originalContent")
+
         path = d.pop("path")
 
         staged = d.pop("staged")
 
         workspace_git_diff_view = cls(
             diff=diff,
+            modified_content=modified_content,
+            original_content=original_content,
             path=path,
             staged=staged,
         )

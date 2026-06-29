@@ -37,6 +37,7 @@ import getTextmateServiceOverride from "@codingame/monaco-vscode-textmate-servic
 import getThemeServiceOverride from "@codingame/monaco-vscode-theme-service-override"
 import getViewsServiceOverride from "@codingame/monaco-vscode-views-service-override"
 import getWorkingCopyServiceOverride from "@codingame/monaco-vscode-working-copy-service-override"
+import type { IUntypedEditorInput } from "@codingame/monaco-vscode-api/vscode/vs/workbench/common/editor"
 import "@codingame/monaco-vscode-api/vscode/vs/workbench/contrib/files/browser/files.contribution._editorPane"
 import { slabTerminalBackend } from "./workspace-terminal-service"
 import { getStandaloneMonacoEditorOverrides } from "./workspace-standalone-monaco"
@@ -49,6 +50,7 @@ import {
 } from "./workspace-file-system-provider"
 import {
   workspaceLspRelativePathFromUri,
+  workspaceLspModelPath,
   workspaceRootUri,
   type WorkspaceLspOpenFile,
   type WorkspaceLspOpenFileOptions,
@@ -89,7 +91,7 @@ function setWorkspaceLspDebugStage(stage: string) {
     return
   }
 
-  ;(window as typeof window & { __SLAB_WORKSPACE_LSP_STAGE__?: string }).__SLAB_WORKSPACE_LSP_STAGE__ = stage
+  ;(window as typeof window & { __SLAB_WORKSPACE_LSP_STAGE__?: string })["__SLAB_WORKSPACE_LSP_STAGE__"] = stage
 }
 
 function setWorkspaceLspDebugContext(context: unknown) {
@@ -97,7 +99,9 @@ function setWorkspaceLspDebugContext(context: unknown) {
     return
   }
 
-  ;(window as typeof window & { __SLAB_WORKSPACE_LSP_CONTEXT__?: unknown }).__SLAB_WORKSPACE_LSP_CONTEXT__ = context
+  ;(window as typeof window & { __SLAB_WORKSPACE_LSP_CONTEXT__?: unknown })[
+    "__SLAB_WORKSPACE_LSP_CONTEXT__"
+  ] = context
 }
 
 function pushWorkspaceLspDebugDirectory(entry: unknown) {
@@ -106,7 +110,10 @@ function pushWorkspaceLspDebugDirectory(entry: unknown) {
   }
 
   const target = window as typeof window & { __SLAB_WORKSPACE_LSP_DIRECTORIES__?: unknown[] }
-  target.__SLAB_WORKSPACE_LSP_DIRECTORIES__ = [...(target.__SLAB_WORKSPACE_LSP_DIRECTORIES__ ?? []).slice(-20), entry]
+  target["__SLAB_WORKSPACE_LSP_DIRECTORIES__"] = [
+    ...(target["__SLAB_WORKSPACE_LSP_DIRECTORIES__"] ?? []).slice(-20),
+    entry,
+  ]
 }
 
 function pushWorkspaceLspDebugStat(entry: unknown) {
@@ -115,7 +122,10 @@ function pushWorkspaceLspDebugStat(entry: unknown) {
   }
 
   const target = window as typeof window & { __SLAB_WORKSPACE_LSP_STATS__?: unknown[] }
-  target.__SLAB_WORKSPACE_LSP_STATS__ = [...(target.__SLAB_WORKSPACE_LSP_STATS__ ?? []).slice(-30), entry]
+  target["__SLAB_WORKSPACE_LSP_STATS__"] = [
+    ...(target["__SLAB_WORKSPACE_LSP_STATS__"] ?? []).slice(-30),
+    entry,
+  ]
 }
 
 export function setWorkspaceLspOpenFile(openFile: WorkspaceLspOpenFile | null) {
@@ -234,6 +244,9 @@ function workspaceWorkbenchOptions(workspaceRoot: string | null) {
   return {
     configurationDefaults: {
       "explorer.compactFolders": false,
+      "workbench.editor.enablePreview": false,
+      "workbench.editor.enablePreviewFromCodeNavigation": false,
+      "workbench.editor.enablePreviewFromQuickOpen": false,
     },
     workspaceProvider: {
       open: async () => false,
@@ -260,6 +273,12 @@ async function initializeWorkspaceServices(workspaceRoot: string | null) {
   setWorkspaceLspDebugStage("activate-local-extension")
   const { ConfigurationTarget, commands, workspace } = await getWorkspaceVscodeApiAfterServicesReady()
   await workspace.getConfiguration("explorer").update("compactFolders", false, ConfigurationTarget.Global)
+  const workbenchEditorConfig = workspace.getConfiguration("workbench.editor")
+  await Promise.all([
+    workbenchEditorConfig.update("enablePreview", false, ConfigurationTarget.Global),
+    workbenchEditorConfig.update("enablePreviewFromCodeNavigation", false, ConfigurationTarget.Global),
+    workbenchEditorConfig.update("enablePreviewFromQuickOpen", false, ConfigurationTarget.Global),
+  ])
   // executeCommand returns a VS Code Thenable (no .catch); wrap it so the
   // refresh is best-effort and never fails service init.
   await Promise.resolve(commands.executeCommand("workbench.files.action.refreshFilesExplorer")).catch((error) => {
@@ -318,7 +337,7 @@ function prepareWorkspaceServices() {
       ...state,
       editor: {
         ...state.editor,
-        restoreEditors: false,
+        restoreEditors: state.editor.restoreEditors,
       },
       views: {
         ...state.views,
@@ -389,29 +408,54 @@ function registerWorkspaceMonacoWorkers() {
 
 /**
  * Editor-open routing, wired into the editor service override. Definition navigation
- * and other "open this model" requests first delegate to slab's React surface
- * (`currentOpenFile`); if that declines, we fall back to the legacy read-only peek
- * popup so the target is still visible.
+ * and other "open this model" requests route workspace files back through the VS Code
+ * editor service so the active tab, editor history, and React workspace state stay in sync.
+ * The legacy read-only peek popup is reserved for files outside the active workspace.
  */
 const slabOpenCodeEditor: OpenEditor = async (modelRef, options) => {
   let modelEditor: monaco.editor.ICodeEditor | undefined
+  const activeWorkspaceRoot = currentWorkspaceFileService.root
+  const selection = editorSelection(options)
+  const relativePath = activeWorkspaceRoot
+    ? workspaceLspRelativePathFromUri(activeWorkspaceRoot, modelRef.object.textEditorModel.uri.toString())
+    : null
 
-  if (currentOpenFile) {
-    const activeWorkspaceRoot = currentWorkspaceFileService.root
-    const selection = editorSelection(options)
-    const relativePath = activeWorkspaceRoot
-      ? workspaceLspRelativePathFromUri(activeWorkspaceRoot, modelRef.object.textEditorModel.uri.toString())
-      : null
-    if (relativePath !== null) {
-      const handlerEditor = await currentOpenFile(relativePath, {
-        endColumn: selection?.endColumn,
-        endLineNumber: selection?.endLineNumber,
-        startColumn: selection?.startColumn,
-        startLineNumber: selection?.startLineNumber,
-      })
+  if (activeWorkspaceRoot && relativePath !== null) {
+    if (currentOpenFile) {
+      const handlerEditor = await currentOpenFile(relativePath, selection)
       if (handlerEditor) {
         modelEditor = handlerEditor
       }
+    }
+
+    if (!modelEditor) {
+      const { getService, IEditorGroupsService, IEditorService } = await import("@codingame/monaco-vscode-api")
+      const editorService = await getService(IEditorService)
+      const editorGroupsService = await getService(IEditorGroupsService)
+      const targetGroup = editorGroupsService.groups.find((group: { id: number; label?: unknown }) =>
+        !String(group.label ?? "").startsWith("standalone editor"),
+      )?.id
+      const textSelection = selection?.startLineNumber && selection.startColumn
+        ? {
+          endColumn: selection.endColumn ?? selection.startColumn,
+          endLineNumber: selection.endLineNumber ?? selection.startLineNumber,
+          startColumn: selection.startColumn,
+          startLineNumber: selection.startLineNumber,
+        }
+        : undefined
+      const editorPane = await editorService.openEditor(
+        {
+          resource: URI.parse(workspaceLspModelPath(activeWorkspaceRoot, relativePath)),
+          options: {
+            active: true,
+            pinned: true,
+            revealIfOpened: true,
+            selection: textSelection,
+          },
+        } as IUntypedEditorInput,
+        targetGroup,
+      )
+      modelEditor = editorPane?.getControl() as monaco.editor.ICodeEditor | undefined
     }
   }
 

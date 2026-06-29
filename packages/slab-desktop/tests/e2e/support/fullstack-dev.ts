@@ -78,6 +78,7 @@ const supportDir = dirname(fileURLToPath(import.meta.url))
 const packageRoot = resolve(supportDir, "../../..")
 const repoRoot = resolve(packageRoot, "../..")
 const persistentE2eRootDir = join(repoRoot, ".slab", "e2e")
+const runtimeLibDir = join(repoRoot, "bin/slab-app/src-tauri/resources/libs")
 const modelPackDir = join(repoRoot, "models", "dist")
 const processStartSkewMs = 1_000
 const serverReadinessTimeoutMs = 600_000
@@ -713,6 +714,8 @@ function spawnSlabServer(
     testEnv.sessionStateDir,
     "--plugins-dir",
     testEnv.pluginsDir,
+    "--lib-dir",
+    runtimeLibDir,
     "--log",
     "info",
     "--shutdown-on-stdin-close",
@@ -905,7 +908,7 @@ Get-Process -ErrorAction SilentlyContinue |
     ($protected -notcontains $_.Id) -and
     $_.StartTime -ge $started -and
     (
-      ($_.ProcessName -in @('slab-server', 'slab-runtime', 'vite')) -and $_.Path -like "$repo*"
+      ($_.ProcessName -in @('slab-server', 'slab-js-runtime', 'slab-runtime', 'vite')) -and $_.Path -like "$repo*"
     )
   } |
   Stop-Process -Force -ErrorAction SilentlyContinue

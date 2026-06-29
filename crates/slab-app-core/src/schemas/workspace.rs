@@ -195,6 +195,8 @@ pub struct WorkspaceGitDiffView {
     pub path: String,
     pub staged: bool,
     pub diff: String,
+    pub original_content: String,
+    pub modified_content: String,
 }
 
 impl From<slab_git::GitStatus> for WorkspaceGitStatusView {
@@ -258,6 +260,12 @@ impl From<slab_git::GitOperationResult> for WorkspaceGitOperationView {
 
 impl From<slab_git::GitPathDiff> for WorkspaceGitDiffView {
     fn from(value: slab_git::GitPathDiff) -> Self {
-        Self { path: value.path, staged: value.staged, diff: value.diff }
+        Self {
+            path: value.path,
+            staged: value.staged,
+            diff: value.diff,
+            original_content: value.original_content,
+            modified_content: value.modified_content,
+        }
     }
 }

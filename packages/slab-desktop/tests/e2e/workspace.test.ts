@@ -26,6 +26,12 @@ import {
   type WorkspaceProjectFixture,
 } from "./support/workspace-project"
 
+type WorkspaceEditorDebugState = {
+  activeRelativePath: string | null
+  openFiles: Array<{ name: string; relativePath: string }>
+  tabCount: number
+}
+
 type Schema = components["schemas"]
 
 let env: FullstackDevEnvironment | undefined
@@ -82,6 +88,11 @@ describe.sequential("workspace e2e", () => {
         statRequests.push(request.url())
       }
     })
+    page.on("websocket", (socket) => {
+      if (socket.url().includes("/v1/workspace/lsp/")) {
+        lspRequests.push(socket.url())
+      }
+    })
     page.on("requestfailed", (request) => {
       failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText ?? ""}`)
     })
@@ -133,19 +144,7 @@ describe.sequential("workspace e2e", () => {
     const runId = `workspace-${Date.now()}`
     const updatedContent = `Deep workspace sentinel\nEdited by ${runId}\n`
 
-    await page.goto(`${testEnv.uiBaseUrl}/workspace`, {
-      waitUntil: "domcontentloaded",
-      timeout: 60_000,
-    })
-    await page.getByTestId("workspace-open-screen").waitFor({ state: "visible", timeout: 60_000 })
-    expect(await page.getByRole("button", { name: "Open folder" }).count()).toBe(1)
-
-    await page.getByTestId("workspace-path-input").fill(workspaceRoot)
-    await page.getByTestId("workspace-open-path-button").click()
-    await page.getByTestId("workspace-active-screen").waitFor({ state: "visible", timeout: 60_000 })
-    await eventually("workspace active screen shows opened root", async () =>
-      (await page.getByTestId("workspace-active-screen").textContent())?.includes(workspaceRoot) ? true : null
-    )
+    await openWorkspaceFromUi(testEnv, page, workspaceRoot)
 
     const workspaceStateAfterOpen = await requestJson<Schema["WorkspaceStateResponse"]>(
       testEnv.serverBaseUrl,
@@ -258,6 +257,154 @@ describe.sequential("workspace e2e", () => {
     expect(directoryRequests.length).toBeLessThan(30)
     expect(workspaceFailures).toEqual([])
   })
+
+  it("keeps VS Code syntax, LSP navigation, multiple tabs, and diff rendering working", async () => {
+    const testEnv = requireEnv()
+    browserErrors = []
+    workspaceFailures = []
+    directoryRequests = []
+    fileRequests = []
+    lspRequests = []
+    statRequests = []
+    failedRequests = []
+    fileResponses = []
+    notFoundResponses = []
+
+    await requestJson<Schema["WorkspaceStateResponse"]>(testEnv.serverBaseUrl, "/v1/workspace/close", {
+      method: "POST",
+    })
+    await page.goto(`${testEnv.uiBaseUrl}/workspace`, {
+      waitUntil: "domcontentloaded",
+      timeout: 60_000,
+    })
+    await openWorkspaceFromUi(testEnv, page, workspaceRoot)
+
+    const explorer = page.getByTestId("workspace-vscode-explorer")
+    await explorer.waitFor({ state: "visible", timeout: 60_000 })
+    await expandWorkspaceExplorerRoot(explorer, workspaceRoot.split(/[\\/]/).findLast(Boolean) ?? "Workspace", "src")
+
+    const editor = page.getByTestId("workspace-vscode-editor")
+    const monacoEditor = editor.locator(".monaco-editor")
+    await openExplorerFile(explorer, project.tsMainFileRelativePath)
+    await monacoEditor.waitFor({ state: "visible", timeout: 60_000 })
+    await eventually("workspace Monaco editor renders TypeScript file", async () =>
+      (await readMonacoEditorText(editor)).includes("import { addNumbers, answer }") ? true : null
+    )
+    await expectTypeScriptTokenization(editor)
+    await waitForWorkspaceLspSession(page, project.tsMainFileRelativePath, "typescript", 20_000).catch(async (error: unknown) => {
+      const lspClient = await readWorkspaceLspClientDebug(page)
+      const lspSession = await readWorkspaceLspSessionDebug(page)
+      const runtime = await workspaceRuntimeDiagnostics(editor)
+      throw new Error(
+        `workspace TypeScript LSP session did not start. LSP session: ${JSON.stringify(lspSession)}. LSP client: ${JSON.stringify(lspClient)}. Runtime: ${runtime}. Dev logs: ${JSON.stringify(dev?.logs.slice(-80) ?? [])}. Cause: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    })
+
+    await focusMonacoEditor(monacoEditor)
+    await placeCursorAfterText(page, editor, "addNumbers", 1)
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+Space" : "Control+Space")
+    await eventually("workspace TypeScript suggestions render", async () =>
+      (await page.locator(".suggest-widget").count()) > 0 ? true : null,
+      20_000,
+      500,
+    ).catch(async (error: unknown) => {
+      const lspClient = await readWorkspaceLspClientDebug(page)
+      const lspSession = await readWorkspaceLspSessionDebug(page)
+      throw new Error(
+        `workspace TypeScript suggestions did not render. LSP session: ${JSON.stringify(lspSession)}. LSP client: ${JSON.stringify(lspClient)}. Dev logs: ${JSON.stringify(dev?.logs.slice(-80) ?? [])}. Cause: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    })
+    await page.keyboard.press("Escape")
+    await hoverText(editor, "addNumbers", 1)
+    await eventually("workspace TypeScript hover renders", async () =>
+      (await page.locator(".monaco-hover").count()) > 0 ? true : null,
+      20_000,
+      500,
+    ).catch(async (error: unknown) => {
+      const lspClient = await readWorkspaceLspClientDebug(page)
+      const lspSession = await readWorkspaceLspSessionDebug(page)
+      throw new Error(
+        `workspace TypeScript hover did not render. LSP session: ${JSON.stringify(lspSession)}. LSP client: ${JSON.stringify(lspClient)}. Dev logs: ${JSON.stringify(dev?.logs.slice(-80) ?? [])}. Cause: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    })
+
+    await focusMonacoEditor(monacoEditor)
+    await placeCursorOnText(page, editor, "addNumbers", 1)
+    await runWorkspaceVscodeCommand(page, "editor.action.revealDefinition")
+    await eventually("workspace go-to-definition opens math.ts", async () => {
+      const state = await readWorkspaceEditorDebugState(page)
+      return state?.activeRelativePath === project.mathFileRelativePath ? state : null
+    }, 60_000, 500).catch(async (error: unknown) => {
+      const definitionTarget = await readWorkspaceDefinitionTarget(page)
+      const debugState = await readWorkspaceEditorDebugState(page)
+      const lspClient = await readWorkspaceLspClientDebug(page)
+      throw new Error(
+        `workspace go-to-definition did not open math.ts. Definition target: ${JSON.stringify(definitionTarget)}. Editor state: ${JSON.stringify(debugState)}. LSP client: ${JSON.stringify(lspClient)}. Dev logs: ${JSON.stringify(dev?.logs.slice(-80) ?? [])}. Cause: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    })
+    await eventually("workspace definition target is rendered", async () =>
+      (await readMonacoEditorText(editor)).includes("export function addNumbers") ? true : null
+    )
+
+    await openExplorerFile(explorer, project.tsMainFileRelativePath)
+    await openExplorerFile(explorer, project.mathFileRelativePath)
+    await openExplorerFile(explorer, project.noteFileRelativePath)
+    await eventually("workspace VS Code keeps three tabs", async () => {
+      const state = await readWorkspaceEditorDebugState(page)
+      return state && state.openFiles.length >= 3 ? state : null
+    }).catch(async (error: unknown) => {
+      const debugState = await readWorkspaceEditorDebugState(page)
+      const tabs = await editor.locator("[data-resource-name]").evaluateAll((elements) =>
+        elements.map((element) => ({
+          text: element.textContent,
+          resourceName: element.getAttribute("data-resource-name"),
+        })),
+      )
+      throw new Error(
+        `workspace VS Code did not keep three tabs. Editor state: ${JSON.stringify(debugState)}. DOM tabs: ${JSON.stringify(tabs)}. Cause: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    })
+    await clickWorkspaceTab(editor, "main.ts")
+    const tabsAfterSwitch = await eventually("workspace tab switch preserves all tabs", async () => {
+      const state = await readWorkspaceEditorDebugState(page)
+      return state?.activeRelativePath === project.tsMainFileRelativePath && state.openFiles.length >= 3
+        ? state
+        : null
+    })
+    expect(tabsAfterSwitch.openFiles.map((file) => file.relativePath)).toContain(project.mathFileRelativePath)
+    expect(tabsAfterSwitch.openFiles.map((file) => file.relativePath)).toContain(project.noteFileRelativePath)
+
+    await page.getByRole("button", { name: /git/i }).click()
+    const gitPanel = page.getByTestId("workspace-active-screen")
+    await eventually("workspace Git status shows modified fixture", async () =>
+      (await gitPanel.textContent())?.includes(project.diffModifiedPath) ? true : null
+    )
+    await page
+      .getByTestId("workspace-git-diff-entry")
+      .filter({ hasText: project.diffModifiedPath })
+      .click()
+    await editor.locator(".monaco-diff-editor").waitFor({ state: "visible", timeout: 60_000 })
+    await eventually("workspace VS Code diff renders original and modified text", async () => {
+      const text = await readMonacoEditorText(editor)
+      return text.includes(project.diffModifiedOldContent.trim())
+        && text.includes(project.diffModifiedNewContent.trim())
+        ? true
+        : null
+    }, 60_000, 500)
+
+    const diff = await requestJson<Schema["WorkspaceGitDiffView"]>(
+      testEnv.serverBaseUrl,
+      "/v1/workspace/git/diff",
+      {
+        json: { path: project.diffUntrackedPath, staged: false } satisfies Schema["WorkspaceGitDiffCommand"],
+        method: "POST",
+      },
+    )
+    expect(diff.originalContent).toBe("")
+    expect(diff.modifiedContent).toBe(project.diffUntrackedContent)
+    expect(lspRequests.some((request) => request.includes("/v1/workspace/lsp/typescript"))).toBe(true)
+    expect(workspaceFailures).toEqual([])
+  })
 })
 
 function requireEnv(): FullstackDevEnvironment {
@@ -266,6 +413,225 @@ function requireEnv(): FullstackDevEnvironment {
   }
 
   return env
+}
+
+async function openWorkspaceFromUi(
+  testEnv: FullstackDevEnvironment,
+  page: Page,
+  root: string,
+) {
+  await page.goto(`${testEnv.uiBaseUrl}/workspace`, {
+    waitUntil: "domcontentloaded",
+    timeout: 60_000,
+  })
+  await page.getByTestId("workspace-open-screen").waitFor({ state: "visible", timeout: 60_000 })
+  expect(await page.getByRole("button", { name: "Open folder" }).count()).toBe(1)
+
+  await page.getByTestId("workspace-path-input").fill(root)
+  await page.getByTestId("workspace-open-path-button").click()
+  await page.getByTestId("workspace-active-screen").waitFor({ state: "visible", timeout: 60_000 })
+  await eventually("workspace active screen shows opened root", async () =>
+    (await page.getByTestId("workspace-active-screen").textContent())?.includes(root) ? true : null
+  )
+}
+
+async function openExplorerFile(explorer: ReturnType<Page["getByTestId"]>, relativePath: string) {
+  await clickExplorerPath(explorer, relativePath.split("/"))
+}
+
+async function expectTypeScriptTokenization(editor: ReturnType<Page["getByTestId"]>) {
+  await eventually("workspace TypeScript syntax tokens are colored", async () => {
+    const tokenSummary = await editor.locator(".view-line").evaluateAll((lines) =>
+      lines.flatMap((line) =>
+        Array.from(line.querySelectorAll("span")).map((span) => ({
+          className: span.className,
+          color: getComputedStyle(span).color,
+          text: span.textContent ?? "",
+        })),
+      ),
+    )
+    const importToken = tokenSummary.find((token) => token.text.includes("import"))
+    const distinctColors = new Set(tokenSummary.map((token) => token.color).filter(Boolean))
+    return importToken && distinctColors.size > 1 ? true : null
+  }, 60_000, 500)
+}
+
+async function placeCursorAfterText(
+  page: Page,
+  editor: ReturnType<Page["getByTestId"]>,
+  text: string,
+  occurrence = 0,
+) {
+  const position = await textPositionInEditor(editor, text, occurrence, true)
+
+  if (!position) {
+    throw new Error(`Unable to find text '${text}' in Monaco editor.`)
+  }
+
+  await page.mouse.click(position.x, position.y)
+}
+
+async function placeCursorOnText(
+  page: Page,
+  editor: ReturnType<Page["getByTestId"]>,
+  text: string,
+  occurrence = 0,
+) {
+  const position = await textPositionInEditor(editor, text, occurrence, false)
+
+  if (!position) {
+    throw new Error(`Unable to find text '${text}' in Monaco editor.`)
+  }
+
+  await page.mouse.click(position.x, position.y)
+}
+
+async function hoverText(
+  editor: ReturnType<Page["getByTestId"]>,
+  text: string,
+  occurrence = 0,
+) {
+  const position = await textPositionInEditor(editor, text, occurrence, false)
+  if (!position) {
+    throw new Error(`Unable to find text '${text}' in Monaco editor.`)
+  }
+  await editor.page().mouse.move(position.x, position.y)
+}
+
+async function textPositionInEditor(
+  editor: ReturnType<Page["getByTestId"]>,
+  text: string,
+  occurrence: number,
+  afterText: boolean,
+) {
+  return editor.locator(".view-lines").evaluate(
+    (viewLines, payload) => {
+      // eslint-disable-next-line unicorn/consistent-function-scoping -- Runs inside the browser context.
+      const rangeRectForTextOffset = (element: Element, offset: number) => {
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+        let remaining = offset
+        let textNode = walker.nextNode()
+        while (textNode) {
+          const length = textNode.textContent?.length ?? 0
+          if (remaining <= length) {
+            const range = document.createRange()
+            range.setStart(textNode, Math.max(0, remaining))
+            range.setEnd(textNode, Math.max(0, remaining))
+            const rect = range.getBoundingClientRect()
+            range.detach()
+            return rect
+          }
+          remaining -= length
+          textNode = walker.nextNode()
+        }
+        return null
+      }
+
+      let seen = 0
+      for (const line of Array.from(viewLines.querySelectorAll(".view-line"))) {
+        const content = line.textContent ?? ""
+        const index = content.indexOf(payload.text)
+        if (index < 0) {
+          continue
+        }
+        if (seen < payload.occurrence) {
+          seen += 1
+          continue
+        }
+
+        const lineBox = line.getBoundingClientRect()
+        for (const span of Array.from(line.querySelectorAll("span"))) {
+          const spanText = span.textContent ?? ""
+          const spanIndex = spanText.indexOf(payload.text)
+          if (spanIndex < 0) {
+            continue
+          }
+
+          const targetOffset = spanIndex
+            + (payload.afterText ? payload.text.length : Math.max(1, Math.floor(payload.text.length / 2)))
+          const rect = rangeRectForTextOffset(span, targetOffset)
+          const fallbackBox = span.getBoundingClientRect()
+          const x = rect?.left || fallbackBox.left + fallbackBox.width / 2
+          return { x, y: lineBox.top + lineBox.height / 2 }
+        }
+
+        return { x: lineBox.left + 8, y: lineBox.top + lineBox.height / 2 }
+      }
+      return null
+    },
+    { afterText, occurrence, text },
+  )
+}
+
+async function readWorkspaceEditorDebugState(page: Page): Promise<WorkspaceEditorDebugState | null> {
+  return page.evaluate(() => {
+    const target = window as typeof window & { __SLAB_WORKSPACE_EDITOR_STATE__?: WorkspaceEditorDebugState }
+    return target["__SLAB_WORKSPACE_EDITOR_STATE__"] ?? null
+  })
+}
+
+async function readWorkspaceDefinitionTarget(page: Page): Promise<unknown> {
+  return page.evaluate(() => {
+    const target = window as typeof window & { __SLAB_WORKSPACE_DEFINITION_TARGET__?: unknown }
+    return target["__SLAB_WORKSPACE_DEFINITION_TARGET__"] ?? null
+  })
+}
+
+async function readWorkspaceLspClientDebug(page: Page): Promise<unknown> {
+  return page.evaluate(() => {
+    const target = window as typeof window & { __SLAB_WORKSPACE_LSP_CLIENT__?: unknown }
+    return target["__SLAB_WORKSPACE_LSP_CLIENT__"] ?? null
+  })
+}
+
+async function readWorkspaceLspSessionDebug(page: Page): Promise<unknown> {
+  return page.evaluate(() => {
+    const target = window as typeof window & { __SLAB_WORKSPACE_LSP_SESSION__?: unknown }
+    return target["__SLAB_WORKSPACE_LSP_SESSION__"] ?? null
+  })
+}
+
+async function runWorkspaceVscodeCommand(page: Page, commandId: string) {
+  await page.evaluate(async (nextCommandId) => {
+    const workspaceEditor = await (0, eval)(
+      'import("/src/pages/workspace/lib/workspace-editor.ts")',
+    ) as typeof import("../../src/pages/workspace/lib/workspace-editor")
+    const lspState = (window as typeof window & {
+      __SLAB_WORKSPACE_LSP_SESSION__?: { workspaceRoot?: string }
+    })["__SLAB_WORKSPACE_LSP_SESSION__"]
+    await workspaceEditor.runWorkspaceVscodeCommand(nextCommandId, lspState?.workspaceRoot)
+  }, commandId)
+}
+
+async function clickWorkspaceTab(editor: ReturnType<Page["getByTestId"]>, label: string) {
+  const tab = editor.locator("[data-resource-name]").filter({ hasText: label }).first()
+  if (await tab.isVisible().catch(() => false)) {
+    await tab.click()
+    return
+  }
+  await editor.getByText(label, { exact: true }).first().click()
+}
+
+async function waitForWorkspaceLspSession(
+  page: Page,
+  relativePath: string,
+  language: string,
+  timeoutMs = 60_000,
+) {
+  await eventually(`workspace ${language} LSP session starts`, async () => {
+    const session = await page.evaluate(() =>
+      (window as typeof window & {
+        __SLAB_WORKSPACE_LSP_SESSION__?: {
+          activeRelativePath?: string
+          language?: string
+          ready?: boolean
+        }
+      })["__SLAB_WORKSPACE_LSP_SESSION__"] ?? null,
+    )
+    return session?.ready && session.activeRelativePath === relativePath && session.language === language
+      ? session
+      : null
+  }, timeoutMs, 500)
 }
 
 async function workspaceRuntimeDiagnostics(editor: ReturnType<Page["getByTestId"]>) {
@@ -280,14 +646,22 @@ async function workspaceRuntimeDiagnostics(editor: ReturnType<Page["getByTestId"
       tab.getAttribute("data-resource-name"),
     ),
   })).catch(() => "<unavailable>")
-  const lspState = await editor.page().evaluate(() => ({
-    context: (window as typeof window & { __SLAB_WORKSPACE_LSP_CONTEXT__?: unknown })
-      .__SLAB_WORKSPACE_LSP_CONTEXT__ ?? null,
-    directories: (window as typeof window & { __SLAB_WORKSPACE_LSP_DIRECTORIES__?: unknown[] })
-      .__SLAB_WORKSPACE_LSP_DIRECTORIES__ ?? [],
-    stage: (window as typeof window & { __SLAB_WORKSPACE_LSP_STAGE__?: string }).__SLAB_WORKSPACE_LSP_STAGE__ ?? null,
-    stats: (window as typeof window & { __SLAB_WORKSPACE_LSP_STATS__?: unknown[] }).__SLAB_WORKSPACE_LSP_STATS__ ?? [],
-  })).catch(() => "<unavailable>")
+  const lspState = await editor.page().evaluate(() => {
+    const target = window as typeof window & {
+      __SLAB_WORKSPACE_LSP_CONTEXT__?: unknown
+      __SLAB_WORKSPACE_LSP_DIRECTORIES__?: unknown[]
+      __SLAB_WORKSPACE_LSP_SESSION__?: unknown
+      __SLAB_WORKSPACE_LSP_STAGE__?: string
+      __SLAB_WORKSPACE_LSP_STATS__?: unknown[]
+    }
+    return {
+      context: target["__SLAB_WORKSPACE_LSP_CONTEXT__"] ?? null,
+      directories: target["__SLAB_WORKSPACE_LSP_DIRECTORIES__"] ?? [],
+      stage: target["__SLAB_WORKSPACE_LSP_STAGE__"] ?? null,
+      stats: target["__SLAB_WORKSPACE_LSP_STATS__"] ?? [],
+      session: target["__SLAB_WORKSPACE_LSP_SESSION__"] ?? null,
+    }
+  }).catch(() => "<unavailable>")
 
   return JSON.stringify({
     editorSummary,

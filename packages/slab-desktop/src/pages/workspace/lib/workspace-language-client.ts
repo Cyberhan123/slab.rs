@@ -48,6 +48,13 @@ type WorkspaceLanguageClientOptions = {
   name: string
 }
 
+type WorkspaceLspDebugState = {
+  connections?: unknown[]
+  definitionRequests?: unknown[]
+  didOpen?: unknown[]
+  initializeResult?: unknown
+}
+
 class WorkspaceLanguageClient extends BaseLanguageClient {
   private readonly messageTransports: MessageTransports
 
@@ -68,12 +75,10 @@ class WorkspaceLanguageClient extends BaseLanguageClient {
 
 export async function startWorkspaceLspSession({
   language,
-  monaco,
   model,
   workspaceRoot,
 }: {
   language: string
-  monaco: typeof Monaco
   model: Monaco.editor.ITextModel
   workspaceRoot: string
 }): Promise<WorkspaceLspSession | null> {
@@ -84,6 +89,7 @@ export async function startWorkspaceLspSession({
   let socket: WebSocket | null = null
   let languageClient: WorkspaceLanguageClient | null = null
   let disposed = false
+  let connectPromise: Promise<void> | null = null
   let reconnectTimer: number | null = null
   let reconnectDelayMs = WORKSPACE_LSP_RECONNECT_INITIAL_DELAY_MS
 
@@ -107,6 +113,12 @@ export async function startWorkspaceLspSession({
       }
 
       await vscodeWorkspace.openTextDocument(VscodeUri.parse(uri))
+      pushWorkspaceLspClientDebug("didOpen", {
+        languageId: modelToRegister.getLanguageId(),
+        textLength: modelToRegister.getValueLength(),
+        uri,
+        version: modelToRegister.getVersionId(),
+      })
       registeredModelUris.add(uri)
     }
     await registerModel(model)
@@ -122,6 +134,7 @@ export async function startWorkspaceLspSession({
 
     const connect = async () => {
       clearReconnectTimer()
+      pushWorkspaceLspClientDebug("connections", { event: "connecting", language })
       const nextSocket = new WebSocket(workspaceLspUrl(language))
       const rpcSocket = jsonrpc.toSocket(nextSocket)
       const nextLanguageClient = new WorkspaceLanguageClient({
@@ -129,10 +142,14 @@ export async function startWorkspaceLspSession({
         name: `Workspace ${language} Language Server`,
         clientOptions: {
           documentSelector: [{ scheme: "file", language }],
+          uriConverters: {
+            code2Protocol: (uri) => workspaceLspProtocolUri(uri.toString()),
+            protocol2Code: (uri) => VscodeUri.parse(uri),
+          },
           workspaceFolder: {
             index: 0,
             name: "workspace",
-            uri: monaco.Uri.parse(workspaceLspFileUri(workspaceRoot)),
+            uri: VscodeUri.parse(workspaceLspFileUri(workspaceRoot)),
           },
           initializationOptions: {
             workspaceRoot,
@@ -151,7 +168,14 @@ export async function startWorkspaceLspSession({
       socket = nextSocket
       languageClient = nextLanguageClient
 
-      nextSocket.addEventListener("close", () => {
+      nextSocket.addEventListener("close", (event) => {
+        pushWorkspaceLspClientDebug("connections", {
+          code: event.code,
+          event: "closed",
+          language,
+          reason: event.reason,
+          wasClean: event.wasClean,
+        })
         if (disposed || socket !== nextSocket) {
           return
         }
@@ -172,10 +196,21 @@ export async function startWorkspaceLspSession({
         }
 
         await nextLanguageClient.start()
+        if (disposed || socket !== nextSocket || languageClient !== nextLanguageClient) {
+          await nextLanguageClient.stop().catch(() => {})
+          return
+        }
+        setWorkspaceLspClientInitializeDebug(nextLanguageClient.initializeResult)
         registeredModelUris.clear()
         await Promise.all([...registeredModels.values()].map(registerModel))
         reconnectDelayMs = WORKSPACE_LSP_RECONNECT_INITIAL_DELAY_MS
+        pushWorkspaceLspClientDebug("connections", { event: "ready", language })
       } catch (error) {
+        pushWorkspaceLspClientDebug("connections", {
+          error: error instanceof Error ? error.message : String(error),
+          event: "failed",
+          language,
+        })
         if (socket === nextSocket) {
           socket = null
         }
@@ -186,6 +221,20 @@ export async function startWorkspaceLspSession({
         await nextLanguageClient.stop().catch(() => {})
         throw error
       }
+    }
+
+    const connectOnce = () => {
+      if (connectPromise) {
+        return connectPromise
+      }
+
+      const nextConnectPromise = connect().finally(() => {
+        if (connectPromise === nextConnectPromise) {
+          connectPromise = null
+        }
+      })
+      connectPromise = nextConnectPromise
+      return nextConnectPromise
     }
 
     const scheduleReconnect = () => {
@@ -199,7 +248,7 @@ export async function startWorkspaceLspSession({
       )
       reconnectTimer = window.setTimeout(() => {
         reconnectTimer = null
-        void connect().catch((error) => {
+        void connectOnce().catch((error) => {
           console.debug("workspace LSP reconnect failed", {
             language,
             uri: model.uri.toString(),
@@ -210,14 +259,56 @@ export async function startWorkspaceLspSession({
       }, delayMs)
     }
 
-    await connect()
+    const languageClientForRequest = async () => {
+      if (languageClient) {
+        return languageClient
+      }
+
+      clearReconnectTimer()
+      await connectOnce().catch((error) => {
+        console.debug("workspace LSP request reconnect failed", {
+          language,
+          uri: model.uri.toString(),
+          error,
+        })
+      })
+      return languageClient
+    }
+
+    const requestDefinition = async (
+      definitionModel: Monaco.editor.ITextModel,
+      position: Monaco.IPosition,
+    ) => {
+      const protocolUri = workspaceLspProtocolUri(definitionModel.uri.toString())
+      const client = await languageClientForRequest()
+      let definitions: unknown = null
+      let errorMessage: string | null = null
+      try {
+        definitions = client
+          ? await client.sendRequest<unknown>(
+            "textDocument/definition",
+            textDocumentPositionParams(definitionModel, position),
+          )
+          : null
+      } catch (error) {
+        errorMessage = error instanceof Error ? error.message : String(error)
+      }
+      pushWorkspaceLspClientDebug("definitionRequests", {
+        clientReady: Boolean(client),
+        definitions: definitions ?? null,
+        error: errorMessage,
+        position,
+        protocolUri,
+        rawUri: definitionModel.uri.toString(),
+      })
+      return definitions
+    }
+
+    await connectOnce()
     return {
       definitionTarget: async (definitionModel, position) => {
         const currentRelativePath = workspaceLspRelativePathFromUri(workspaceRoot, definitionModel.uri.toString())
-        const definitions = await languageClient?.sendRequest<unknown>(
-          "textDocument/definition",
-          textDocumentPositionParams(definitionModel, position),
-        )
+        const definitions = await requestDefinition(definitionModel, position)
         const target = workspaceLspDefinitionTargetFromResult(workspaceRoot, definitions)
         if (!target || target.relativePath !== currentRelativePath || !target.startLineNumber) {
           return target
@@ -231,10 +322,7 @@ export async function startWorkspaceLspSession({
           return target
         }
 
-        const moduleDefinitions = await languageClient?.sendRequest<unknown>(
-          "textDocument/definition",
-          textDocumentPositionParams(definitionModel, importSpecifierPosition),
-        )
+        const moduleDefinitions = await requestDefinition(definitionModel, importSpecifierPosition)
         return workspaceLspDefinitionTargetFromResult(workspaceRoot, moduleDefinitions) ?? target
       },
       registerModel,
@@ -250,6 +338,32 @@ export async function startWorkspaceLspSession({
     closeWorkspaceLspSocket(socket, 1000, "workspace LSP session unavailable")
     await stopWorkspaceLspClient(languageClient)
     return null
+  }
+}
+
+function pushWorkspaceLspClientDebug(key: keyof WorkspaceLspDebugState, value: unknown) {
+  if (typeof window === "undefined") {
+    return
+  }
+
+  const target = window as typeof window & { __SLAB_WORKSPACE_LSP_CLIENT__?: WorkspaceLspDebugState }
+  const state = target["__SLAB_WORKSPACE_LSP_CLIENT__"] ?? {}
+  const current = state[key]
+  target["__SLAB_WORKSPACE_LSP_CLIENT__"] = {
+    ...state,
+    [key]: [...(Array.isArray(current) ? current : []), value].slice(-20),
+  }
+}
+
+function setWorkspaceLspClientInitializeDebug(value: unknown) {
+  if (typeof window === "undefined") {
+    return
+  }
+
+  const target = window as typeof window & { __SLAB_WORKSPACE_LSP_CLIENT__?: WorkspaceLspDebugState }
+  target["__SLAB_WORKSPACE_LSP_CLIENT__"] = {
+    ...target["__SLAB_WORKSPACE_LSP_CLIENT__"],
+    initializeResult: value,
   }
 }
 
@@ -271,7 +385,7 @@ function textDocumentPositionParams(
       line: position.lineNumber - 1,
     },
     textDocument: {
-      uri: model.uri.toString(),
+      uri: workspaceLspProtocolUri(model.uri.toString()),
     },
   }
 }
@@ -283,6 +397,10 @@ function workspaceLspUrl(language: string) {
   endpoint.search = ""
   endpoint.hash = ""
   return endpoint.toString()
+}
+
+function workspaceLspProtocolUri(uri: string) {
+  return uri.replace(/^file:\/\/\/([A-Za-z])%3A\//i, "file:///$1:/")
 }
 
 function waitForSocketOpen(socket: WebSocket) {

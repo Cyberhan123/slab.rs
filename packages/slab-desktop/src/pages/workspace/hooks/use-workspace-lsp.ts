@@ -200,7 +200,6 @@ export function useWorkspaceLsp({
 
         const session = await startWorkspaceLspSession({
           language,
-          monaco,
           model: currentModel,
           workspaceRoot: sessionWorkspaceRoot,
         })

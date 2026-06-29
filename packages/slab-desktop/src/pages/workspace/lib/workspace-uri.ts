@@ -71,7 +71,7 @@ export function workspaceLspFileUri(workspaceRoot: string, relativePath = "") {
   const absolutePath = path ? `${root}/${path}` : root
   const prefixedPath = absolutePath.startsWith("/") ? absolutePath : `/${absolutePath}`
 
-  return `file://${encodeURI(prefixedPath)}`
+  return `file://${encodeFileUriPath(prefixedPath)}`
 }
 
 export function workspaceLspRelativePathFromUri(
@@ -288,4 +288,8 @@ function normalizeWorkspacePath(path: string) {
   }
   normalized = normalized.replace(/^([A-Za-z]):/, (_, driveLetter: string) => `${driveLetter.toLowerCase()}:`)
   return normalized.replace(/\/+$/, "")
+}
+
+function encodeFileUriPath(path: string) {
+  return encodeURI(path).replace(/^\/([A-Za-z])%3A/i, "/$1:")
 }
