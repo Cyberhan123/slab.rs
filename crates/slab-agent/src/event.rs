@@ -37,7 +37,16 @@ pub enum AgentEventKind {
         delta: String,
     },
     #[serde(rename = "response.output_text.done")]
-    ResponseOutputTextDone { item_id: String, output_index: i32, content_index: i32, text: String },
+    ResponseOutputTextDone {
+        item_id: String,
+        output_index: i32,
+        content_index: i32,
+        text: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        artifact_refs: Vec<AgentArtifactRef>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
     #[serde(rename = "response.reasoning_text.delta")]
     ResponseReasoningTextDelta {
         item_id: String,
@@ -120,6 +129,21 @@ pub enum AgentEventKind {
 pub struct AgentResponseRef {
     pub id: String,
     pub status: ThreadStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentArtifactRef {
+    pub path: String,
+    pub kind: AgentArtifactKind,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentArtifactKind {
+    Diff,
+    File,
+    Image,
+    Other,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

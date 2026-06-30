@@ -1,6 +1,6 @@
 import type { ComponentProps, ComponentType, ReactNode } from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-import { Inbox, Loader2, TriangleAlert } from "lucide-react"
+import { Ban, CheckCircle2, Inbox, Loader2, TriangleAlert } from "lucide-react"
 
 import { cn } from "./lib/utils"
 
@@ -21,9 +21,12 @@ const stateSurfaceVariants = cva(
 )
 
 const defaultIcons = {
+  aborted: Ban,
   empty: Inbox,
   error: TriangleAlert,
+  interrupted: Ban,
   loading: Loader2,
+  success: CheckCircle2,
 } as const
 
 type StateSurfaceProps = ComponentProps<"div"> &
@@ -32,7 +35,7 @@ type StateSurfaceProps = ComponentProps<"div"> &
     description?: ReactNode
     icon?: ComponentType<{ className?: string }>
     title: ReactNode
-    variant: "empty" | "error" | "loading"
+    variant: keyof typeof defaultIcons
   }
 
 function StateSurface({
@@ -63,7 +66,7 @@ function StateSurface({
       <div className="space-y-2">
         <h3 className="text-lg font-semibold tracking-tight text-foreground">{title}</h3>
         {description ? (
-          <p className="mx-auto max-w-md text-sm leading-6 text-muted-foreground">{description}</p>
+          <div className="mx-auto max-w-md text-sm leading-6 text-muted-foreground">{description}</div>
         ) : null}
       </div>
       {action ? <div className="mt-1">{action}</div> : null}

@@ -27,7 +27,7 @@ export type ToolExecutionResult = {
 const approveButtonName = /^(Approve|\u6279\u51c6)$/u
 
 export async function openAssistant(page: Page, uiBaseUrl: string): Promise<void> {
-  await page.goto(`${uiBaseUrl}/assistant`, { waitUntil: "domcontentloaded", timeout: 60_000 })
+  await page.goto(`${uiBaseUrl}/`, { waitUntil: "domcontentloaded", timeout: 60_000 })
   await waitForComposerReady(page)
 }
 

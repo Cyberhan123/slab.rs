@@ -22,7 +22,6 @@ import {
   MAX_RANDOM_SEED,
   POLL_INTERVAL_MS,
   type GeneratedImage,
-  type ImageRouteState,
 } from '../const';
 import { useImageGenerationControls } from './use-image-generation-controls';
 import { useImageModelPreparation } from './use-image-model-preparation';
@@ -144,16 +143,11 @@ export function useImageGeneration() {
   });
 
   const getPrefilledPrompt = useCallback(() => {
-    const statePrompt =
-      typeof (location.state as ImageRouteState | null)?.prompt === 'string'
-        ? (location.state as ImageRouteState).prompt
-        : null;
-
     const search = new URLSearchParams(location.search);
     const queryPrompt = search.get('prompt') ?? search.get('q');
 
-    return (statePrompt ?? queryPrompt ?? '').trim();
-  }, [location.search, location.state]);
+    return (queryPrompt ?? '').trim();
+  }, [location.search]);
 
   useEffect(() => {
     const prefilled = getPrefilledPrompt();

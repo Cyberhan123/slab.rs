@@ -36,7 +36,13 @@ export type AssistantTerminalNotice = {
   message: string
 }
 
+export type AssistantArtifactRef = {
+  kind: 'diff' | 'file' | 'image' | 'other'
+  path: string
+}
+
 export type AssistantUiMessage = XModelMessage & {
+  artifactRefs?: AssistantArtifactRef[]
   errorCode?: AssistantErrorCode
   errorParam?: AssistantApiError['param']
   errorStatus?: number

@@ -180,6 +180,16 @@ impl WorkspaceService {
         })
     }
 
+    pub fn validate_path(
+        root: impl AsRef<Path>,
+        relative_path: &str,
+    ) -> Result<WorkspacePathView, AppCoreError> {
+        let relative_path = normalize_relative_path(relative_path)?;
+        resolve_workspace_path_for_write(root.as_ref(), &relative_path)?;
+
+        Ok(WorkspacePathView { relative_path })
+    }
+
     pub fn read_file(
         root: impl AsRef<Path>,
         relative_path: &str,
@@ -1206,6 +1216,27 @@ mod tests {
         let error = WorkspaceService::stat_path(root.path(), ".vscode/settings.json")
             .expect_err("missing file");
         assert!(matches!(error, AppCoreError::NotFound(_)));
+    }
+
+    #[test]
+    fn validate_path_allows_missing_workspace_relative_file() {
+        let root = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(root.path().join("src")).expect("src");
+
+        let view = WorkspaceService::validate_path(root.path(), "src\\new.rs")
+            .expect("workspace path should validate");
+
+        assert_eq!(view.relative_path, "src/new.rs");
+    }
+
+    #[test]
+    fn validate_path_rejects_workspace_escape() {
+        let root = tempfile::tempdir().expect("tempdir");
+
+        let error =
+            WorkspaceService::validate_path(root.path(), "../outside.rs").expect_err("escape");
+
+        assert!(matches!(error, AppCoreError::BadRequest(_)));
     }
 
     #[test]

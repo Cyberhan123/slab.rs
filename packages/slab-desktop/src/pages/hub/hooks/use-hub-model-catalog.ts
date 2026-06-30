@@ -502,7 +502,7 @@ export function getModelUseRoute(model: Pick<ModelItem, 'category'>): string | n
   switch (model.category) {
     case 'language':
     case 'coding':
-      return '/assistant';
+      return '/';
     case 'vision':
       return '/image';
     case 'audio':

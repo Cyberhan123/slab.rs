@@ -542,6 +542,11 @@ mod tests {
                     output_index: 0,
                     content_index: 0,
                     text: "done".to_owned(),
+                    artifact_refs: vec![slab_agent::AgentArtifactRef {
+                        path: "src/main.rs".to_owned(),
+                        kind: slab_agent::AgentArtifactKind::File,
+                    }],
+                    reason: Some("completed".to_owned()),
                 },
             },
         );
@@ -552,6 +557,9 @@ mod tests {
         assert_eq!(value["sequence_number"], 7);
         assert_eq!(value["type"], "response.output_text.done");
         assert_eq!(value["text"], "done");
+        assert_eq!(value["artifact_refs"][0]["kind"], "file");
+        assert_eq!(value["artifact_refs"][0]["path"], "src/main.rs");
+        assert_eq!(value["reason"], "completed");
     }
 
     #[test]

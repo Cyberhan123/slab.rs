@@ -66,6 +66,7 @@ struct WorkspaceSearchQuery {
         read_directory,
         read_file,
         stat_path,
+        validate_path,
         watch_workspace,
         search_files,
         search_text,
@@ -135,6 +136,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/workspace/directories", post(create_directory))
         .route("/workspace/path", delete(delete_path).patch(rename_path))
         .route("/workspace/path/stat", get(stat_path))
+        .route("/workspace/path/validate", get(validate_path))
         .route("/workspace/watch", get(watch_workspace))
         .route("/workspace/terminal", get(upgrade_workspace_terminal))
         .route("/workspace/search", get(search_files))
@@ -271,6 +273,26 @@ async fn stat_path(
 ) -> Result<Json<WorkspacePathMetadata>, ServerError> {
     let root = active_workspace_root(state.as_ref())?;
     Ok(Json(WorkspaceService::stat_path(root, &query.relative_path)?))
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/workspace/path/validate",
+    tag = "workspace",
+    params(
+        ("relativePath" = String, Query, description = "Workspace-relative path to validate without requiring it to exist.")
+    ),
+    responses(
+        (status = 200, description = "Validated workspace-relative path", body = WorkspacePathView),
+        (status = 400, description = "Bad request"),
+    )
+)]
+async fn validate_path(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<WorkspaceRelativePathQuery>,
+) -> Result<Json<WorkspacePathView>, ServerError> {
+    let root = active_workspace_root(state.as_ref())?;
+    Ok(Json(WorkspaceService::validate_path(root, &query.relative_path)?))
 }
 
 #[utoipa::path(
@@ -809,6 +831,7 @@ mod tests {
             ("/v1/workspace/files", "post"),
             ("/v1/workspace/path", "patch"),
             ("/v1/workspace/path", "delete"),
+            ("/v1/workspace/path/validate", "get"),
             ("/v1/workspace/watch", "get"),
             ("/v1/workspace/search/text", "get"),
             ("/v1/workspace/git/status", "get"),
@@ -953,6 +976,36 @@ mod route_tests {
 
         assert_eq!(response.status, StatusCode::OK);
         assert_eq!(response.body["content"], "fn main() {}");
+    }
+
+    #[tokio::test]
+    async fn workspace_validate_path_normalizes_missing_workspace_file() {
+        let workspace_root = tempfile::tempdir().expect("workspace root");
+        fs::create_dir_all(workspace_root.path().join("src")).expect("create workspace dir");
+        let server = TestServer::new_with(TestServerOptions {
+            workspace_root: Some(workspace_root.path().to_path_buf()),
+            ..Default::default()
+        })
+        .await;
+
+        let response = server.get("/v1/workspace/path/validate?relativePath=src%5Cnew.rs").await;
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(response.body["relativePath"], "src/new.rs");
+    }
+
+    #[tokio::test]
+    async fn workspace_validate_path_rejects_escape() {
+        let workspace_root = tempfile::tempdir().expect("workspace root");
+        let server = TestServer::new_with(TestServerOptions {
+            workspace_root: Some(workspace_root.path().to_path_buf()),
+            ..Default::default()
+        })
+        .await;
+
+        let response = server.get("/v1/workspace/path/validate?relativePath=..%2Foutside.rs").await;
+
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

@@ -49,8 +49,8 @@ pub use config::{AgentConfig, AgentToolChoice};
 pub use control::{AgentControl, AgentControlLimits};
 pub use error::AgentError;
 pub use event::{
-    AgentEventKind, AgentMetrics, AgentResponseRef, AgentStreamEvent, ToolExecutionStatus,
-    ToolRiskAssessment, ToolRiskLevel,
+    AgentArtifactKind, AgentArtifactRef, AgentEventKind, AgentMetrics, AgentResponseRef,
+    AgentStreamEvent, ToolExecutionStatus, ToolRiskAssessment, ToolRiskLevel,
 };
 pub use hook::{AgentHook, AgentHookRegistry, HookEffects, HookEvent, HookOutcome, HookToolAction};
 pub use llm_output::{

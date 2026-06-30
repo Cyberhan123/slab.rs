@@ -169,6 +169,7 @@ mod tests {
         ("/v1/workspace/path", "delete"),
         ("/v1/workspace/path", "patch"),
         ("/v1/workspace/path/stat", "get"),
+        ("/v1/workspace/path/validate", "get"),
         ("/v1/workspace/plugins/{plugin_id}/preference", "put"),
         ("/v1/workspace/watch", "get"),
         ("/v1/workspace/search", "get"),

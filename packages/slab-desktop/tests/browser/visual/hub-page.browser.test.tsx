@@ -15,7 +15,7 @@ vi.mock('@/pages/hub/hooks/use-hub-model-catalog', () => ({
   STATUS_OPTIONS: ['all', 'ready', 'downloading', 'not_downloaded', 'error'] as const,
   canDownloadModel: vi.fn<() => boolean>(() => true),
   canRunModelLifecycleAction: vi.fn<() => boolean>(() => true),
-  getModelUseRoute: vi.fn<() => string>(() => '/assistant'),
+  getModelUseRoute: vi.fn<() => string>(() => '/'),
 }));
 
 vi.mock('@/hooks/use-global-header-meta', () => ({

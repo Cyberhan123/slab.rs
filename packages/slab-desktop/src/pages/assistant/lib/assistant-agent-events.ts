@@ -1,4 +1,9 @@
-import type { AgentResponsesServerMessage, AgentStatus } from './assistant-types'
+import type {
+  AgentResponsesServerMessage,
+  AgentStatus,
+  AssistantArtifactRef,
+} from './assistant-types'
+import { normalizeWorkspaceArtifactPath } from '@/lib/workspace-artifact-path'
 
 export type AssistantAgentStreamEvent =
   | { type: 'agent_status'; status: AgentStatus }
@@ -10,7 +15,12 @@ export type AssistantAgentStreamEvent =
   | { type: 'tool_call_output'; call_id: string; output: string }
   | { type: 'tool_call_started'; tool_name: string; call_id: string; arguments: string }
   | { type: 'turn_cancelled'; reason: string }
-  | { type: 'turn_completed'; text: string }
+  | {
+      type: 'turn_completed'
+      artifact_refs: AssistantArtifactRef[]
+      reason?: string
+      text: string
+    }
   | { type: 'turn_finished' }
   | { type: 'turn_failed'; error: string }
 
@@ -77,7 +87,14 @@ export function parseAssistantAgentStreamEvent(data: string): AssistantAgentStre
         ? { type: 'turn_cancelled', reason: value.reason }
         : null
     case 'response.output_text.done':
-      return typeof value.text === 'string' ? { type: 'turn_completed', text: value.text } : null
+      return typeof value.text === 'string'
+        ? {
+            type: 'turn_completed',
+            artifact_refs: parseArtifactRefs(value.artifact_refs),
+            reason: typeof value.reason === 'string' ? value.reason : undefined,
+            text: value.text,
+          }
+        : null
     case 'response.completed':
       return { type: 'turn_finished' }
     case 'response.failed':
@@ -91,6 +108,33 @@ export function parseAssistantAgentStreamEvent(data: string): AssistantAgentStre
     default:
       return null
   }
+}
+
+function parseArtifactRefs(value: unknown): AssistantArtifactRef[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.flatMap((item): AssistantArtifactRef[] => {
+    if (!isRecord(item) || typeof item.path !== 'string') {
+      return []
+    }
+
+    const path = normalizeWorkspaceArtifactPath(item.path)
+    if (!path) {
+      return []
+    }
+
+    switch (item.kind) {
+      case 'diff':
+      case 'file':
+      case 'image':
+      case 'other':
+        return [{ kind: item.kind, path }]
+      default:
+        return [{ kind: 'other', path }]
+    }
+  })
 }
 
 export function parseAssistantAgentServerMessage(

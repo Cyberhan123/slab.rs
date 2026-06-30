@@ -279,6 +279,15 @@ export async function workspaceStatPath(relativePath: string): Promise<Workspace
   )
 }
 
+export async function workspaceValidatePath(relativePath: string): Promise<WorkspacePathResult> {
+  return requireWorkspaceData(
+    await apiClient.GET("/v1/workspace/path/validate", {
+      params: { query: { relativePath } },
+    }),
+    `Workspace path '${relativePath}' validation returned an empty response.`,
+  )
+}
+
 export async function workspaceSearchFiles(query: string): Promise<WorkspaceFileSearchResponse> {
   return requireWorkspaceData(
     await apiClient.GET("/v1/workspace/search", {

@@ -44,8 +44,16 @@ describe('assistant agent SSE parser', () => {
     ],
     [
       'turn_completed',
-      '{"thread_id":"thread-1","sequence_number":8,"type":"response.output_text.done","text":"done"}',
-      { type: 'turn_completed', text: 'done' },
+      '{"thread_id":"thread-1","sequence_number":8,"type":"response.output_text.done","text":"done","artifact_refs":[{"kind":"file","path":"src/main.rs"},{"kind":"unknown","path":"notes.txt"},{"kind":"file","path":"C:/Users/example/.ssh/id_rsa"},{"kind":"file","path":"../outside.rs"},{"kind":"file","path":" "}],"reason":"completed"}',
+      {
+        type: 'turn_completed',
+        artifact_refs: [
+          { kind: 'file', path: 'src/main.rs' },
+          { kind: 'other', path: 'notes.txt' },
+        ],
+        reason: 'completed',
+        text: 'done',
+      },
     ],
     [
       'turn_finished',

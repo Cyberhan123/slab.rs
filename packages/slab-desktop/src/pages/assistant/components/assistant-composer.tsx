@@ -10,7 +10,7 @@ import {
   WandSparkles,
   Wrench,
 } from "lucide-react"
-import { useCallback, useMemo } from "react"
+import { useCallback, useEffect, useMemo, useRef } from "react"
 import { Sender, Suggestion, type SuggestionProps } from "@ant-design/x"
 import type { ActionsComponents } from "@ant-design/x/es/sender"
 
@@ -59,6 +59,7 @@ type AssistantComposerProps = {
   setToolChoice: (value: AssistantToolChoice) => void
   advancedPanelOpen: boolean
   setAdvancedPanelOpen: (value: boolean) => void
+  focusSignal?: number
   onGenerateImage: () => void
   statusLabel: string
 }
@@ -110,10 +111,12 @@ export function AssistantComposer({
   setToolChoice,
   advancedPanelOpen,
   setAdvancedPanelOpen,
+  focusSignal = 0,
   onGenerateImage,
   statusLabel,
 }: AssistantComposerProps) {
   const { t } = useTranslation()
+  const composerRef = useRef<HTMLDivElement | null>(null)
   const commandItems = useMemo(
     () => [
       {
@@ -200,8 +203,22 @@ export function AssistantComposer({
     void onSubmit(prompt)
   }
 
+  useEffect(() => {
+    if (!focusSignal || disabled) {
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      composerRef.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus()
+    })
+
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [disabled, focusSignal])
+
   return (
-    <div className="relative space-y-3" data-testid="assistant-composer">
+    <div ref={composerRef} className="relative space-y-3" data-testid="assistant-composer">
       <Suggestion<{ query: string }>
         block
         items={commandSuggestions}

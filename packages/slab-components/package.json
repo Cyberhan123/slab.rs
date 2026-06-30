@@ -13,6 +13,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./a2u": "./src/a2u/index.ts",
     "./globals.css": "./src/styles/globals.css",
     "./*": "./src/*.tsx",
     "./lib/utils": "./src/lib/utils.ts"

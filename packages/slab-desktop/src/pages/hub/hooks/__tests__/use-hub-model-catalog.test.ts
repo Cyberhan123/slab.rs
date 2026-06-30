@@ -37,7 +37,7 @@ describe('hub model catalog helpers', () => {
   });
 
   it('maps usable categories to product routes and disables embedding', () => {
-    expect(getModelUseRoute({ category: 'language' })).toBe('/assistant');
+    expect(getModelUseRoute({ category: 'language' })).toBe('/');
     expect(getModelUseRoute({ category: 'vision' })).toBe('/image');
     expect(getModelUseRoute({ category: 'audio' })).toBe('/audio');
     expect(getModelUseRoute({ category: 'embedding' })).toBeNull();

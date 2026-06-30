@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useLocation, useNavigate } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
 import { useTranslation } from "@slab/i18n"
 import { FolderKanban } from "lucide-react"
 import { toast } from "sonner"
@@ -35,7 +35,7 @@ import {
   type WorkspaceExplorerPanel,
   type WorkspaceMarkdownMode,
 } from "@/store/useWorkspaceUiStore"
-import { useAssistantDraftStore } from "@/store/useAssistantDraftStore"
+import { useAgentSurfaceStore } from "@/store/useAgentSurfaceStore"
 import { getErrorMessage } from "@slab/api"
 import {
   getWorkspaceThemeMode,
@@ -55,7 +55,6 @@ const MAX_WORKSPACE_PREVIEW_BYTES = 1024 * 1024
 export function useWorkspacePage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const location = useLocation()
   const queryClient = useQueryClient()
   const [selectedFile, setSelectedFile] = useState<WorkspaceFileContent | null>(null)
   const [fileError, setFileError] = useState<string | null>(null)
@@ -64,7 +63,6 @@ export function useWorkspacePage() {
   const [editorThemeMode, setEditorThemeMode] = useState<WorkspaceThemeMode>(getWorkspaceThemeMode)
   const restoredWorkspaceRootRef = useRef<string | null>(null)
   const activeVscodeFileGenerationRef = useRef(0)
-  const consumedRevealPathRef = useRef<string | null>(null)
 
   usePageHeader({
     icon: FolderKanban,
@@ -91,6 +89,10 @@ export function useWorkspacePage() {
   const workspaceUi = workspace
     ? workspaceUiByRoot[workspace.rootPath] ?? emptyWorkspaceUiSnapshot
     : emptyWorkspaceUiSnapshot
+  const pendingWorkspaceSurface = useAgentSurfaceStore((state) =>
+    state.pendingSurface?.type === "workspace" ? state.pendingSurface : null
+  )
+  const consumePendingSurface = useAgentSurfaceStore((state) => state.consumePendingSurface)
   const openFileTabs = workspaceUi.openFiles
   const activeFilePath = workspaceUi.activeFilePath
   const explorerPanel = workspaceUi.explorerPanel
@@ -612,23 +614,41 @@ export function useWorkspacePage() {
   )
 
   useEffect(() => {
-    const revealPath = (location.state as { workspaceRevealPath?: unknown } | null)?.workspaceRevealPath
-    if (typeof revealPath !== "string" || !revealPath.trim() || consumedRevealPathRef.current === revealPath) {
+    if (!pendingWorkspaceSurface) {
       return
     }
 
-    consumedRevealPathRef.current = revealPath
+    const revealPath = pendingWorkspaceSurface.payload?.revealPath
+    if (typeof revealPath !== "string" || !revealPath.trim()) {
+      consumePendingSurface(pendingWorkspaceSurface.id)
+      return
+    }
+
     const trimmedRevealPath = revealPath.trim()
     const currentRelativePath = workspace?.rootPath
       ? relativePathFromRoot(trimmedRevealPath, workspace.rootPath)
       : null
+    const workspaceRelativePath = workspace && !isAbsoluteFsPath(trimmedRevealPath)
+      ? trimmedRevealPath.replaceAll("\\", "/").replace(/^\/+/, "")
+      : null
 
     if (currentRelativePath && workspace) {
+      consumePendingSurface(pendingWorkspaceSurface.id)
       patchWorkspaceState(workspace.rootPath, {
         activeFilePath: currentRelativePath,
         explorerPanel: "files",
       })
       void revealActiveFileInExplorer(currentRelativePath)
+      return
+    }
+
+    if (workspaceRelativePath && workspace) {
+      consumePendingSurface(pendingWorkspaceSurface.id)
+      patchWorkspaceState(workspace.rootPath, {
+        activeFilePath: workspaceRelativePath,
+        explorerPanel: "files",
+      })
+      void revealActiveFileInExplorer(workspaceRelativePath)
       return
     }
 
@@ -638,6 +658,7 @@ export function useWorkspacePage() {
       return
     }
 
+    consumePendingSurface(pendingWorkspaceSurface.id)
     void (async () => {
       await openWorkspacePath(parentDirectory)
       patchWorkspaceState(parentDirectory, {
@@ -645,7 +666,14 @@ export function useWorkspacePage() {
         explorerPanel: "files",
       })
     })()
-  }, [location.state, openWorkspacePath, patchWorkspaceState, revealActiveFileInExplorer, workspace])
+  }, [
+    consumePendingSurface,
+    openWorkspacePath,
+    patchWorkspaceState,
+    pendingWorkspaceSurface,
+    revealActiveFileInExplorer,
+    workspace,
+  ])
 
   const handleExplainWithAssistant = useCallback(async () => {
     if (!selectedFile || !workspace) {
@@ -666,7 +694,7 @@ export function useWorkspacePage() {
     const locationLabel = selectedText
       ? `${relativePath}:${selectedText.startLineNumber}-${selectedText.endLineNumber}`
       : relativePath
-    useAssistantDraftStore.getState().setDraft({
+    useAgentSurfaceStore.getState().setDraft({
       autoSubmit: false,
       prompt: [
         `Explain this code from ${locationLabel}.`,
@@ -680,7 +708,7 @@ export function useWorkspacePage() {
         path: relativePath,
       },
     })
-    navigate("/assistant")
+    navigate("/")
   }, [navigate, selectedFile, workspace])
 
   useEffect(() => {
@@ -1012,4 +1040,8 @@ function relativePathFromRoot(path: string, rootPath: string) {
 
 function normalizeFsPathForCompare(path: string) {
   return path.replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase()
+}
+
+function isAbsoluteFsPath(path: string) {
+  return /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith("/") || path.startsWith("\\\\")
 }

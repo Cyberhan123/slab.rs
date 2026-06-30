@@ -14,7 +14,7 @@ use slab_types::{
 use crate::{
     config::{AgentConfig, AgentToolChoice},
     error::AgentError,
-    event::{AgentEventKind, AgentMetrics},
+    event::{AgentArtifactKind, AgentArtifactRef, AgentEventKind, AgentMetrics},
     hook::{AgentHookRegistry, HookEvent, dispatch_registered_hooks},
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, LlmStreamObserver, ParsedToolCall,
@@ -422,6 +422,7 @@ async fn persist_final_answer(
     messages: &mut Vec<ConversationMessage>,
     content: String,
 ) {
+    let artifact_refs = collect_turn_artifact_refs(messages);
     context
         .notify
         .on_turn_event(
@@ -433,6 +434,8 @@ async fn persist_final_answer(
                     output_index: 0,
                     content_index: 0,
                     text: content.clone(),
+                    artifact_refs,
+                    reason: None,
                 },
             },
         )
@@ -457,6 +460,68 @@ async fn persist_final_answer(
         }),
     );
     messages.push(message);
+}
+
+fn collect_turn_artifact_refs(messages: &[ConversationMessage]) -> Vec<AgentArtifactRef> {
+    let mut refs = messages
+        .iter()
+        .rev()
+        .take_while(|message| message.role == "tool")
+        .filter_map(tool_message_artifact_ref)
+        .collect::<Vec<_>>();
+    refs.reverse();
+    refs
+}
+
+fn tool_message_artifact_ref(message: &ConversationMessage) -> Option<AgentArtifactRef> {
+    let raw = message.content.rendered_text();
+    let value = serde_json::from_str::<serde_json::Value>(raw.trim()).ok()?;
+    let surface = value.get("surface").and_then(serde_json::Value::as_str)?;
+    match surface {
+        "workspace" => string_field(&value, "revealPath")
+            .or_else(|| string_field(&value, "path"))
+            .and_then(|path| normalize_workspace_artifact_path(&path))
+            .map(|path| AgentArtifactRef { path, kind: AgentArtifactKind::File }),
+        "review" => string_field(&value, "path")
+            .and_then(|path| normalize_workspace_artifact_path(&path))
+            .map(|path| AgentArtifactRef { path, kind: AgentArtifactKind::Diff }),
+        "image" => string_field(&value, "path")
+            .and_then(|path| normalize_workspace_artifact_path(&path))
+            .map(|path| AgentArtifactRef { path, kind: AgentArtifactKind::Image }),
+        _ => None,
+    }
+}
+
+fn string_field(value: &serde_json::Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+fn normalize_workspace_artifact_path(path: &str) -> Option<String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || is_absolute_or_drive_path(trimmed) {
+        return None;
+    }
+
+    let normalized = trimmed.replace('\\', "/");
+    let parts =
+        normalized.split('/').filter(|part| !part.is_empty() && *part != ".").collect::<Vec<_>>();
+    if parts.is_empty() || parts.iter().any(|part| *part == "..") {
+        return None;
+    }
+
+    Some(parts.join("/"))
+}
+
+fn is_absolute_or_drive_path(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    path.starts_with('/')
+        || path.starts_with('\\')
+        || (bytes.first().is_some_and(u8::is_ascii_alphabetic) && bytes.get(1) == Some(&b':'))
 }
 
 async fn emit_unstreamed_tool_text(
@@ -738,5 +803,65 @@ impl LlmStreamObserver for TurnTextDeltaObserver<'_> {
             )
             .await;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use slab_types::{ConversationMessage, ConversationMessageContent};
+
+    use crate::event::AgentArtifactKind;
+
+    use super::collect_turn_artifact_refs;
+
+    fn message(role: &str, content: &str) -> ConversationMessage {
+        ConversationMessage {
+            role: role.to_owned(),
+            content: ConversationMessageContent::Text(content.to_owned()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn collect_turn_artifact_refs_uses_only_latest_tool_block() {
+        let messages = vec![
+            message("tool", r#"{"surface":"workspace","revealPath":"old.rs","opened":true}"#),
+            message("assistant", "older answer"),
+            message("tool", r#"{"surface":"workspace","revealPath":"src\\main.rs","opened":true}"#),
+            message("tool", r#"{"surface":"review","path":"src/lib.rs","opened":true}"#),
+        ];
+
+        let refs = collect_turn_artifact_refs(&messages);
+
+        assert_eq!(refs.len(), 2);
+        assert_eq!(refs[0].path, "src/main.rs");
+        assert_eq!(refs[0].kind, AgentArtifactKind::File);
+        assert_eq!(refs[1].path, "src/lib.rs");
+        assert_eq!(refs[1].kind, AgentArtifactKind::Diff);
+    }
+
+    #[test]
+    fn collect_turn_artifact_refs_drops_unsafe_and_non_path_payloads() {
+        let messages = vec![
+            message(
+                "tool",
+                r#"{"surface":"workspace","revealPath":"C:/Users/example/.ssh/id_rsa","opened":true}"#,
+            ),
+            message(
+                "tool",
+                r#"{"surface":"review","diff":"diff --git a/src/lib.rs b/src/lib.rs","opened":true}"#,
+            ),
+            message("tool", r#"{"surface":"image","prompt":"draw a logo","opened":true}"#),
+            message(
+                "tool",
+                r#"{"surface":"workspace","revealPath":"../outside.rs","opened":true}"#,
+            ),
+        ];
+
+        let refs = collect_turn_artifact_refs(&messages);
+
+        assert!(refs.is_empty());
     }
 }

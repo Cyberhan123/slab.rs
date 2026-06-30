@@ -17,6 +17,7 @@ import {
   type VideoGenerationTask,
 } from '@/lib/media-task-api';
 import { useMediaTaskPolling } from '@/pages/task/hooks/use-media-task-polling';
+import { useAgentSurfaceStore } from '@/store/useAgentSurfaceStore';
 import { toCatalogModelList } from '@slab/api/models';
 import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
 import { HEADER_SELECT_KEYS } from '@/layouts/header-controls';
@@ -460,11 +461,13 @@ export function useVideoGeneration() {
   const openHistoryVideoInWorkspace = useCallback((task: VideoGenerationTask) => {
     const localPath = task.result_data?.video_path?.trim();
     if (localPath) {
-      navigate('/workspace', {
-        state: {
-          workspaceRevealPath: localPath,
+      useAgentSurfaceStore.getState().setPendingSurface({
+        type: 'workspace',
+        payload: {
+          revealPath: localPath,
         },
       });
+      navigate('/workspace');
       return;
     }
 

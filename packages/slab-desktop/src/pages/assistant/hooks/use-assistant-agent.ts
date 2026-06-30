@@ -4,6 +4,7 @@ import { translateServerField, useTranslation } from '@slab/i18n'
 
 import api, { createSlabApiFetchClient, getErrorMessage } from '@slab/api'
 import { GUARDRAIL_PMIDS, useGuardrailFlag } from '@/lib/guardrail-flags'
+import { useAgentSurfaceStore } from '@/store/useAgentSurfaceStore'
 
 import {
   DEFAULT_CONVERSATION_KEY,
@@ -11,6 +12,7 @@ import {
   isEphemeralConversationKey,
   stripTrailingAssistantTurnArtifacts,
   toAssistantRequestMessages,
+  type AssistantArtifactRef,
   type AgentResponsesClientMessage,
   type AgentResponsesServerMessage,
   type AgentStatus,
@@ -48,6 +50,7 @@ import {
   formatKnownToolResult,
   projectAgentThreadMessages,
 } from '../lib/assistant-message-projection'
+import { dispatchA2uToolCall } from '../lib/a2u-dispatcher'
 
 type PendingApproval = {
   callId: string
@@ -332,13 +335,14 @@ export function useAssistantAgent({
     })
   }, [])
 
-  const completeAssistantTurn = useCallback((text: string) => {
+  const completeAssistantTurn = useCallback((text: string, artifactRefs: AssistantArtifactRef[] = []) => {
     setMessages((current) => {
       const cleanedText = stripTrailingAssistantTurnArtifacts(text)
       const updated = updateLastAssistantMessage(current, (message) => ({
         ...message,
         message: {
           ...message.message,
+          artifactRefs: artifactRefs.length > 0 ? artifactRefs : message.message.artifactRefs,
           content: cleanedText || getAssistantMessageTextContent(message.message),
         },
         status: 'success',
@@ -357,6 +361,7 @@ export function useAssistantAgent({
         {
           id: nextId('assistant'),
           message: {
+            artifactRefs: artifactRefs.length > 0 ? artifactRefs : undefined,
             role: 'assistant',
             content: cleanedText,
           },
@@ -526,7 +531,13 @@ export function useAssistantAgent({
         case 'tool_call_output':
           updateThoughtStatus(event.call_id, 'success', event.output)
           break
-        case 'tool_call_started':
+        case 'tool_call_started': {
+          const dispatch = dispatchA2uToolCall(event.tool_name, event.arguments)
+          if (dispatch) {
+            useAgentSurfaceStore.getState().setPendingSurface(dispatch.surface)
+            break
+          }
+
           replaceThought({
             id: event.call_id,
             callId: event.call_id,
@@ -537,6 +548,7 @@ export function useAssistantAgent({
             toolName: event.tool_name,
           })
           break
+        }
         case 'turn_completed':
         case 'turn_finished':
           terminalTurnRef.current = true
@@ -550,7 +562,7 @@ export function useAssistantAgent({
             )
           )
           if (event.type === 'turn_completed') {
-            completeAssistantTurn(event.text)
+            completeAssistantTurn(event.text, event.artifact_refs)
           }
           break
         case 'turn_failed':

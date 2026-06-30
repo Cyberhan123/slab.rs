@@ -24,7 +24,7 @@ import { usePersistedHeaderSelect } from "@/hooks/use-persisted-header-select"
 import { PAGE_HEADER_META } from "@/layouts/header-meta"
 import { HEADER_SELECT_KEYS } from "@/layouts/header-controls"
 import { useAssistantUiStore } from "@/store/useAssistantUiStore"
-import { useAssistantDraftStore } from "@/store/useAssistantDraftStore"
+import { useAgentSurfaceStore } from "@/store/useAgentSurfaceStore"
 import { GUARDRAIL_PMIDS, useGuardrailFlag } from "@/lib/guardrail-flags"
 import {
   extractTaskId,
@@ -43,6 +43,7 @@ import { ASSISTANT_BUBBLE_ROLES } from "./components/assistant-bubble-content"
 import { AssistantComposer } from "./components/assistant-composer"
 import { AssistantModelSwitchDialog } from "./components/assistant-model-switch-dialog"
 import { AssistantSessionSheet } from "./components/assistant-session-sheet"
+import { AgentSurfaceLayer } from "./components/agent-surface-layer"
 import {
   AssistantSessionSummaryCard,
   type AssistantSessionSummaryItem,
@@ -65,6 +66,7 @@ function Assistant() {
   const [markdownThemeClassName] = useMarkdownTheme()
   const [draft, setDraft] = useState("")
   const [isSessionSheetOpen, setIsSessionSheetOpen] = useState(false)
+  const [composerFocusSignal, setComposerFocusSignal] = useState(0)
   const [pendingModelSwitchId, setPendingModelSwitchId] = useState<string | null>(null)
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null)
   const [loadedModelStatus, setLoadedModelStatus] = useState<ModelRuntimeStatus | null>(null)
@@ -79,8 +81,8 @@ function Assistant() {
   const setToolChoice = useAssistantUiStore((state) => state.setToolChoice)
   const advancedPanelOpen = useAssistantUiStore((state) => state.advancedPanelOpen)
   const setAdvancedPanelOpen = useAssistantUiStore((state) => state.setAdvancedPanelOpen)
-  const assistantDraft = useAssistantDraftStore((state) => state.draft)
-  const clearAssistantDraft = useAssistantDraftStore((state) => state.clearDraft)
+  const assistantDraft = useAgentSurfaceStore((state) => state.draft)
+  const consumeAssistantDraft = useAgentSurfaceStore((state) => state.consumeDraft)
   const { t } = useTranslation()
   const locale = useAssistantLocale()
   const resolvedLanguage = getResolvedAppLanguage()
@@ -635,9 +637,6 @@ function Assistant() {
       {
         pathname: "/image",
         search,
-      },
-      {
-        state: prompt ? { prompt } : undefined,
       }
     )
   }, [draft, latestUserPrompt, navigate])
@@ -664,23 +663,36 @@ function Assistant() {
     ]
   )
 
+  const handleActionFeedback = useCallback((prompt: string) => {
+    setDraft(prompt)
+    setComposerFocusSignal((value) => value + 1)
+  }, [])
+
+  const handleSurfaceClosed = useCallback(() => {
+    setComposerFocusSignal((value) => value + 1)
+  }, [])
+
   useEffect(() => {
     if (!assistantDraft) {
       return
     }
 
-    const draftRequest = assistantDraft
+    const draftRequest = consumeAssistantDraft()
+    if (!draftRequest) {
+      return
+    }
+
     const prompt = draftRequest.prompt.trim()
     if (!prompt) {
       return
     }
 
-    clearAssistantDraft()
     setDraft(prompt)
+    setComposerFocusSignal((value) => value + 1)
     if (draftRequest.autoSubmit) {
       void submitAssistantMessage(prompt)
     }
-  }, [assistantDraft, clearAssistantDraft, submitAssistantMessage])
+  }, [assistantDraft, consumeAssistantDraft, submitAssistantMessage])
 
   const bubbleItems = useMemo(
     () => {
@@ -694,6 +706,11 @@ function Assistant() {
         reject: t("pages.assistant.actions.reject"),
         retry: t("pages.assistant.message.retry"),
         saveEdit: t("pages.assistant.message.saveEdit"),
+        taskActionBlockedPath: t("pages.assistant.taskAction.blockedPath"),
+        taskActionFeedback: t("pages.assistant.taskAction.feedback"),
+        taskActionOpen: t("pages.assistant.taskAction.open"),
+        taskActionReview: t("pages.assistant.taskAction.review"),
+        taskActionTitle: t("pages.assistant.taskAction.title"),
         terminalCancelled: t("pages.assistant.message.cancelled"),
         thinkingLoading: t("pages.assistant.thinking.loading"),
         thinkingReady: t("pages.assistant.thinking.ready"),
@@ -708,6 +725,7 @@ function Assistant() {
           markdownClassName: markdownThemeClassName,
           onApprove: submitApproval,
           onEdit: editAndResend,
+          onFeedback: handleActionFeedback,
           onRegenerate: regenerateResponse,
           onRetry: retryLastResponse,
         },
@@ -738,6 +756,7 @@ function Assistant() {
       modelLoading,
       pendingApprovals,
       regenerateResponse,
+      handleActionFeedback,
       safeMessages,
       retryLastResponse,
       submitApproval,
@@ -826,6 +845,7 @@ function Assistant() {
         </ScrollArea>
 
         <div className="relative shrink-0 bg-[var(--shell-card)]">
+          <AgentSurfaceLayer onSurfaceClosed={handleSurfaceClosed} />
           <div className="relative mx-auto w-full max-w-[768px] px-6 pb-6 pt-4 md:px-8 lg:px-0">
             <AssistantComposer
               value={draft}
@@ -845,6 +865,7 @@ function Assistant() {
               setToolChoice={setToolChoice}
               advancedPanelOpen={advancedPanelOpen}
               setAdvancedPanelOpen={setAdvancedPanelOpen}
+              focusSignal={composerFocusSignal}
               onGenerateImage={handleGenerateImage}
               statusLabel={selectedModelStatusLabel}
             />

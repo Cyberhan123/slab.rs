@@ -1,9 +1,10 @@
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 
 import AssistantPage from '@/pages/assistant';
 import type { AssistantMessageRecord } from '@/pages/assistant/assistant-context';
+import { useAgentSurfaceStore } from '@/store/useAgentSurfaceStore';
 import { renderDesktopScene } from '../test-utils';
 
 const {
@@ -194,6 +195,10 @@ describe('assistant core flow e2e', () => {
     vi.clearAllMocks();
     mockCatalogState.isLoading = false;
     mockMutationState.isPending = false;
+    useAgentSurfaceStore.setState({
+      draft: null,
+      pendingSurface: null,
+    });
     installAssistantAgentMock();
   });
 
@@ -238,6 +243,224 @@ describe('assistant core flow e2e', () => {
     await page.getByTestId('assistant-web-search-toggle').click();
 
     await expect.element(composer).toHaveValue('/web_search ');
+  });
+
+  it('consumes a cross-surface assistant draft and focuses the composer', async () => {
+    useAgentSurfaceStore.getState().setDraft({
+      autoSubmit: false,
+      prompt: 'Explain this code from src/main.rs.',
+      source: {
+        label: 'main.rs',
+        path: 'src/main.rs',
+      },
+    });
+
+    await renderDesktopScene(<AssistantPage />, { route: '/' });
+
+    const composer = page.getByTestId('assistant-composer-input').getByRole('textbox');
+
+    await expect.element(composer).toHaveValue('Explain this code from src/main.rs.');
+    await vi.waitFor(() => {
+      const textarea = document.querySelector('[data-testid="assistant-composer-input"] textarea');
+      expect(document.activeElement).toBe(textarea);
+    });
+    expect(useAgentSurfaceStore.getState().draft).toBeNull();
+  });
+
+  it('opens an a2u workspace surface inside the assistant stage', async () => {
+    useAgentSurfaceStore.getState().setPendingSurface({
+      type: 'workspace',
+      payload: {
+        revealPath: 'src/main.rs',
+      },
+    });
+
+    await renderDesktopScene(<AssistantPage />, { route: '/' });
+
+    await expect.element(page.getByTestId('agent-surface-layer')).toBeVisible();
+    await expect.element(page.getByTestId('agent-surface-live-region')).toHaveTextContent(
+      'Agent surface opened.',
+    );
+    await expect.element(page.getByTestId('a2u-workspace-surface')).toHaveTextContent(
+      'src/main.rs',
+    );
+    expect(useAgentSurfaceStore.getState().pendingSurface).toBeNull();
+  });
+
+  it('closes an a2u surface with Escape and returns focus to the composer', async () => {
+    useAgentSurfaceStore.getState().setPendingSurface({
+      type: 'workspace',
+      payload: {
+        revealPath: 'src/main.rs',
+      },
+    });
+
+    await renderDesktopScene(<AssistantPage />, { route: '/' });
+
+    await expect.element(page.getByTestId('agent-surface-layer')).toBeVisible();
+    await userEvent.keyboard('{Escape}');
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="agent-surface-layer"]')).toBeNull();
+    });
+    await expect.element(page.getByTestId('agent-surface-live-region')).toHaveTextContent(
+      'Agent surface closed.',
+    );
+    await vi.waitFor(() => {
+      const textarea = document.querySelector('[data-testid="assistant-composer-input"] textarea');
+      expect(document.activeElement).toBe(textarea);
+    });
+  });
+
+  it('closes an a2u surface with the close button and returns focus to the composer', async () => {
+    useAgentSurfaceStore.getState().setPendingSurface({
+      type: 'workspace',
+      payload: {
+        revealPath: 'src/main.rs',
+      },
+    });
+
+    await renderDesktopScene(<AssistantPage />, { route: '/' });
+
+    await page.getByTestId('agent-surface-close').click();
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="agent-surface-layer"]')).toBeNull();
+    });
+    await expect.element(page.getByTestId('agent-surface-live-region')).toHaveTextContent(
+      'Agent surface closed.',
+    );
+    await vi.waitFor(() => {
+      const textarea = document.querySelector('[data-testid="assistant-composer-input"] textarea');
+      expect(document.activeElement).toBe(textarea);
+    });
+  });
+
+  it('collapses and expands an a2u surface without closing it', async () => {
+    useAgentSurfaceStore.getState().setPendingSurface({
+      type: 'workspace',
+      payload: {
+        revealPath: 'src/main.rs',
+      },
+    });
+
+    await renderDesktopScene(<AssistantPage />, { route: '/' });
+
+    await page.getByTestId('agent-surface-collapse').click();
+
+    await expect.element(page.getByTestId('agent-surface-layer')).toBeVisible();
+    await expect.element(page.getByTestId('agent-surface-collapsed')).toHaveTextContent(
+      'Agent surface collapsed.',
+    );
+    expect(document.querySelector('[data-testid="a2u-workspace-surface"]')).toBeNull();
+    await expect.element(page.getByTestId('agent-surface-collapse')).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+
+    await page.getByTestId('agent-surface-collapse').click();
+
+    await expect.element(page.getByTestId('a2u-workspace-surface')).toHaveTextContent(
+      'src/main.rs',
+    );
+    await expect.element(page.getByTestId('agent-surface-collapse')).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+  });
+
+  it('pins the active a2u surface until the user unpins it', async () => {
+    useAgentSurfaceStore.getState().setPendingSurface({
+      type: 'workspace',
+      payload: {
+        revealPath: 'src/main.rs',
+      },
+    });
+
+    await renderDesktopScene(<AssistantPage />, { route: '/' });
+
+    await page.getByTestId('agent-surface-pin').click();
+    await expect.element(page.getByTestId('agent-surface-pinned-indicator')).toHaveTextContent(
+      'Pinned',
+    );
+    await expect.element(page.getByTestId('agent-surface-pin')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    useAgentSurfaceStore.getState().setPendingSurface({
+      type: 'image',
+      payload: {
+        prompt: 'Generate a compact app icon',
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(useAgentSurfaceStore.getState().pendingSurface).toMatchObject({
+        type: 'image',
+        payload: {
+          prompt: 'Generate a compact app icon',
+        },
+      });
+    });
+    await expect.element(page.getByTestId('a2u-workspace-surface')).toHaveTextContent(
+      'src/main.rs',
+    );
+    expect(document.querySelector('[data-testid="a2u-image-surface"]')).toBeNull();
+
+    await page.getByTestId('agent-surface-pin').click();
+
+    await vi.waitFor(() => {
+      expect(useAgentSurfaceStore.getState().pendingSurface).toBeNull();
+    });
+    await expect.element(page.getByTestId('a2u-image-surface')).toHaveTextContent(
+      'Generate a compact app icon',
+    );
+  });
+
+  it('keeps workspace-targeted surfaces pending for the workspace page', async () => {
+    useAgentSurfaceStore.getState().setPendingSurface(
+      {
+        type: 'workspace',
+        payload: {
+          revealPath: 'src/lib.rs',
+        },
+      },
+      { targetRoute: 'workspace' },
+    );
+
+    await renderDesktopScene(<AssistantPage />, { route: '/' });
+
+    expect(document.querySelector('[data-testid="agent-surface-layer"]')).toBeNull();
+    expect(useAgentSurfaceStore.getState().pendingSurface).toMatchObject({
+      type: 'workspace',
+      targetRoute: 'workspace',
+      payload: {
+        revealPath: 'src/lib.rs',
+      },
+    });
+  });
+
+  it('re-queues the workspace surface for the full workspace route', async () => {
+    useAgentSurfaceStore.getState().setPendingSurface({
+      type: 'workspace',
+      payload: {
+        revealPath: 'src/main.rs',
+      },
+    });
+
+    await renderDesktopScene(<AssistantPage />, { route: '/' });
+    await page.getByTestId('agent-surface-open-workspace').click();
+
+    await vi.waitFor(() => {
+      expect(useAgentSurfaceStore.getState().pendingSurface).toMatchObject({
+        type: 'workspace',
+        targetRoute: 'workspace',
+        payload: {
+          revealPath: 'src/main.rs',
+        },
+      });
+    });
   });
 
   it('shows the model loading system bubble after the user message', async () => {

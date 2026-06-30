@@ -68,6 +68,7 @@ impl AgentRuntimeReloader {
             workspace_root,
             extra_roots,
         )));
+        super::a2u_tools::register_builtin_a2u_tools(&self.tool_router);
     }
 
     fn internal_memory_hooks(

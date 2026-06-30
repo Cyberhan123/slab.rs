@@ -60,7 +60,7 @@ vi.mock('@/pages/hub/hooks/use-hub-model-catalog', async () => {
     STATUS_OPTIONS: ['all', 'ready', 'downloading', 'not_downloaded', 'error'],
     canDownloadModel: vi.fn<(model: { id?: string }) => boolean>((model) => model.id === 'sdxl'),
     canRunModelLifecycleAction: vi.fn<() => boolean>(() => true),
-    getModelUseRoute: vi.fn<() => string>(() => '/assistant'),
+    getModelUseRoute: vi.fn<() => string>(() => '/'),
     useHubModelCatalog: vi.fn<() => unknown>(() => {
       const [modelToDelete, setModelToDelete] = React.useState<unknown>(null);
       const models = [readyModel, downloadableModel];

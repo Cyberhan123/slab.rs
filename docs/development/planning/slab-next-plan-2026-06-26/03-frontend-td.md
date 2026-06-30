@@ -192,6 +192,8 @@ graph TB
 
 ### TC-FE-01｜修复失效跨页路径 + 统一 AgentSurfaceStore
 
+**状态（2026-06-30）**：已落地核心前端切片。`packages/slab-desktop/src/store/useAgentSurfaceStore.ts` 取代 `useAssistantDraftStore`，Workspace/Video → Workspace reveal 与 Workspace → Assistant 草稿入口已收敛到 store；Hub language/coding 入口与 E2E helper 已改回首页 `/`；Image prompt 只保留 query string 入口。已用单测与 browser flow 覆盖 draft consume、pending surface consume、composer 聚焦。
+
 - **证据**：[use-workspace-page.ts#L683](packages/slab-desktop/src/pages/workspace/hooks/use-workspace-page.ts#L683) `navigate("/assistant")` 死路径；[useAssistantDraftStore.ts](packages/slab-desktop/src/store/useAssistantDraftStore.ts) 双步模式；[use-workspace-page.ts#L615](packages/slab-desktop/src/pages/workspace/hooks/use-workspace-page.ts#L615) `location.state.workspaceRevealPath` 散用；[assistant/index.tsx#L634](packages/slab-desktop/src/pages/assistant/index.tsx#L634) image prompt state。
 - **问题**：跨页契约 3 套并存（死路径 navigate / draft store / location.state），类型不安全，navigate 死路径证明契约已漂移。多 surface 并存焦点/键盘管理无前提。
 - **方案步骤**：
@@ -201,14 +203,16 @@ graph TB
   4. [use-workspace-page.ts#L615](packages/slab-desktop/src/pages/workspace/hooks/use-workspace-page.ts#L615) `workspaceRevealPath` 改读 `useAgentSurfaceStore.pendingSurface.payload.revealPath`。
   5. AgentShell 监听 `pendingSurface`，命中 `{type:'assistant'}` 时自动聚焦 composer + 注入 draft。
 - **验收 checklist**：
-  - [ ] `navigate("/assistant")` 全仓 grep 为 0（含 workspace/image 页）
-  - [ ] workspace "用助手解释代码" 仍能注入 prompt 到 composer
-  - [ ] `location.state.workspaceRevealPath` 散用收敛到 store
-  - [ ] vitest：useAgentSurfaceStore 单测覆盖 set/clear/consume
+  - [x] `navigate("/assistant")` 产品入口归零（源码与测试 helper 改为 `/`；文档历史引用仍保留）
+  - [x] workspace "用助手解释代码" 仍能注入 prompt 到 composer，并主动聚焦 composer
+  - [x] `location.state.workspaceRevealPath` 散用收敛到 store
+  - [x] vitest：useAgentSurfaceStore 单测覆盖 set/clear/consume
 - **依赖**：无（Phase 0 第一卡）
 - **effort**：2 人天｜**priority**：P0（Phase 0 阻塞所有后续 surface 工作）
 
 ### TC-FE-02｜AgentShell 常驻主区 + surface 状态机（单 surface 切换）
+
+**状态（2026-06-30）**：已落地 assistant 内部可用切片。`AgentSurfaceLayer` 挂在 Assistant 主区内，消费 `AgentSurfaceStore.pendingSurface` 并渲染单一 a2u surface；关闭按钮与 Escape 可收敛 surface、恢复 composer 焦点，并通过持久 `aria-live` 节点公告打开/关闭状态，主对话流不卸载。用户可钉住当前 surface 阻止后续 pending surface 替换，取消钉住后再消费最新 pending；也可折叠/展开 surface 内容但保留上下文与控制条。browser harness 已覆盖 draft 聚焦、workspace surface 展示、workspace-targeted pending 保留、requeue 到 `/workspace`、surface 打开/关闭公告、关闭后 composer 聚焦、钉住与折叠覆盖。未完成项：按原 TD 把 layout `<Outlet/>` 提升为完整 AgentShell/surface-router、真实服务/真实 agent 全链路 E2E。
 
 - **证据**：[layouts/index.tsx#L14](packages/slab-desktop/src/layouts/index.tsx#L14) `isChatShell` 二态散落 [:L20/:L22/:L29/:L41](packages/slab-desktop/src/layouts/index.tsx#L20)；[routes/index.tsx#L72](packages/slab-desktop/src/routes/index.tsx#L72) Assistant index route；[layouts/index.tsx#L35](packages/slab-desktop/src/layouts/index.tsx#L35) `<Outlet/>` 单挂载点。
 - **问题**：Assistant 与其它页面平级，非编排者；isChatShell 二态会随 surface 裂变。
@@ -219,15 +223,17 @@ graph TB
   4. 上提 `isChatShell` 为 `surfaceState.active === 'assistant'`，消除 [:L20/:L22/:L29/:L41](packages/slab-desktop/src/layouts/index.tsx#L20) 四处布尔散落。
   5. sidebar rail 52px 视觉契约**不推翻**（[sidebar.tsx#L116](packages/slab-desktop/src/layouts/sidebar.tsx#L116) `--shell-rail-width` 保留），手动切页仍可用。
 - **验收 checklist**：
-  - [ ] 路由表 [routes/index.tsx](packages/slab-desktop/src/routes/index.tsx) 零破坏（Assistant 仍是 index）
-  - [ ] sidebar rail 52px 视觉契约不变
-  - [ ] surface 切换时主对话流**不卸载**（Zustand/TanStack 状态不丢）
-  - [ ] Escape 键收敛回 assistant，焦点回到 composer
-  - [ ] a11y：surface 切换有 aria-live 公告，无 focus trap（单 surface 不需要）
+  - [x] 路由表 [routes/index.tsx](packages/slab-desktop/src/routes/index.tsx) 零破坏（Assistant 仍是 index）
+  - [x] sidebar rail 52px 视觉契约不变
+  - [x] assistant 内部 surface 切换时主对话流**不卸载**（Zustand/TanStack 状态不丢）
+  - [x] Escape 键/关闭按钮收敛回 assistant，焦点回到 composer
+  - [x] a11y：surface 切换有 aria-live 公告，无 focus trap（单 surface 不需要）
 - **依赖**：TC-FE-01
 - **effort**：4 人天｜**priority**：P0（Phase 1 核心）
 
 ### TC-FE-03｜a2u 派发表（host 固定 tool 名→React 组件映射）
+
+**状态（2026-06-30）**：已落地派发表、surface 组件、hook 接入与后端内置 a2u tool 注册。`a2u-dispatcher.ts` 固定映射 `workspace.open` / `review.show` / `image.edit` / `plugin.launch` / `hub.browse` 到 `AgentSurfaceStore` payload；`use-assistant-agent.ts` 在 `tool_call_started` 命中 a2u 工具时写 pending surface，未知工具继续 ThoughtChain 兜底；`packages/slab-components/src/a2u/` 已提供 workspace/image/review/plugin/hub 受信组件；`crates/slab-app-core/src/infra/agent/a2u_tools.rs` 注册内置 a2u 工具。用户 pin/collapse 覆盖已在 `AgentSurfaceLayer` 落地并有 browser 覆盖。未完成项：完整 layout-level surface-router、真实服务/真实 agent 全链路 E2E。
 
 - **证据**：[use-assistant-agent.ts#L529-L539](packages/slab-desktop/src/pages/assistant/hooks/use-assistant-agent.ts#L529) `tool_call_started`→`replaceThought` 折叠，无派发；无派发表文件。
 - **问题**：tool_call 全部折叠进 ThoughtChain，host 无"tool 名→受信 React 组件"映射——a2u 派发缺失的代码级根因。
@@ -244,14 +250,18 @@ graph TB
   3. surface 组件落 `packages/slab-components/src/a2u/`（与 layouts 解耦）。
   4. **副作用域红线**：a2u 工具只允许"打开受信 host 面 / 读写 sandbox 文件 / 调 /v1 API"，绝不操控任意像素（非目标：不做完整 Computer Use）。
 - **验收 checklist**：
-  - [ ] 派发表是纯前端 Record，无后端依赖
-  - [ ] 未知 tool_name 走 ThoughtChain 兜底，不崩溃
-  - [ ] E2E：agent 调 workspace.open → WorkspaceSurface 在主窗替换 Outlet 打开
-  - [ ] 用户可显式覆盖（Canvas 范式：钉住/折叠 surface）
+  - [x] 派发表是纯前端 Record，无后端依赖
+  - [x] 未知 tool_name 走 ThoughtChain 兜底，不崩溃
+  - [x] 受信 a2u surface 组件落 `packages/slab-components/src/a2u/` 并有 browser component 覆盖
+  - [x] 后端内置 a2u tool 注册到 app-core agent router
+  - [ ] 真实服务/真实 agent E2E：agent 调 workspace.open → WorkspaceSurface 在主窗打开
+  - [x] 用户可显式覆盖（Canvas 范式：钉住/折叠 surface）
 - **依赖**：TC-FE-02、后端内置 a2u 工具注册（[runtime.rs#L48](crates/slab-app-core/src/infra/agent/runtime.rs#L48) 模式）
 - **effort**：5 人天｜**priority**：P0（Phase 1 核心）
 
 ### TC-FE-04｜agent-action-card 三动作按钮 + artifact_refs
+
+**状态（2026-06-30）**：已落地可用闭环。`response.output_text.done` 已携带 `artifact_refs` 与 `reason`，server serialization、frontend SSE parser、`useAssistantAgent` 消息状态与 `AgentActionCard` 渲染均已覆盖；open/review 先经 `/v1/workspace/path/validate` 做 root-aware workspace 前缀校验，再写入 `AgentSurfaceStore`；feedback 注入 composer 并复用当前 assistant 会话；unsafe path 在 frontend parser/dispatcher/action-card 与 app-core a2u tool、slab-agent artifact 提取层过滤。`bun run gen:api` 已刷新 `packages/api/src/v1.d.ts` 与 Python SDK。剩余项：SSE event 当前不是 `packages/api/src/v1.d.ts` 生成类型，若后续把 SSE schema 纳入 OpenAPI，再补对应 CI 契约门。
 
 - **证据**：[use-assistant-agent.ts#L540-L555](packages/slab-desktop/src/pages/assistant/hooks/use-assistant-agent.ts#L540) `turn_completed` 只 `completeAssistantTurn(event.text)`；[assistant-agent-events.ts#L13](packages/slab-desktop/src/pages/assistant/lib/assistant-agent-events.ts#L13) `{ type: 'turn_completed'; text: string }` 无 artifact_refs。
 - **问题**：任务总结无动作按钮，无法 open/review/feedback 闭环（北极星核心）。
@@ -264,11 +274,13 @@ graph TB
      - **feedback** → composer 注入草稿续跑，**不重启线程**（复用 threadId）
   4. **红队 must_add 安全门**：open/review 按钮在 host 层（[bin/slab-app/src-tauri](bin/slab-app/src-tauri)）校验 `artifact_refs[].path` 必须在 workspace 根下，跨目录/绝对路径拒绝。前端按钮 disabled + tooltip 提示"路径越界"。
 - **验收 checklist**：
-  - [ ] gen:api 跑通，[v1.d.ts](packages/api/src/v1.d.ts) 含 artifact_refs 字段
-  - [ ] turn_completed 带 artifact_refs 时渲染三按钮
-  - [ ] open 按钮 host 层路径前缀校验（workspace 根外拒绝）
-  - [ ] feedback 续跑复用 threadId，不新建线程
-  - [ ] vitest：agent-action-card 三按钮回调 + 路径越界 disabled
+  - [x] 服务端 `response.output_text.done` wire payload 含 artifact_refs/reason，并有序列化测试
+  - [x] turn_completed 带 artifact_refs 时渲染三按钮
+  - [x] open/review 按钮 root-aware workspace 前缀校验（workspace 根外拒绝）
+  - [x] feedback 续跑复用当前 assistant 会话，不新建线程
+  - [x] vitest：agent-action-card 三按钮回调 + 路径越界 disabled
+  - [x] REST 契约门：`/v1/workspace/path/validate` 已纳入 OpenAPI 并跑 `bun run gen:api`
+  - [ ] SSE 契约门：若 SSE schema 后续进入 OpenAPI，再补 `gen:api` 强制检查
 - **依赖**：TC-FE-01、TC-FE-02、后端 gen:api
 - **effort**：4 人天｜**priority**：P0（Phase 1 核心，北极星闭环）
 
@@ -325,15 +337,17 @@ graph TB
 
 ### TC-FE-08｜StateSurface 扩 success/aborted 变体（设计系统收敛）
 
+**状态（2026-06-30）**：已落地。`@slab/components` 的 `StateSurface` 支持 `success`、`aborted` 与 `interrupted`，并用 browser component test 覆盖新状态和 loading role。
+
 - **证据**：[state-surface.tsx#L35](packages/slab-components/src/state-surface.tsx#L35) `variant: "empty" | "error" | "loading"` 仅三态；[:L23-L27](packages/slab-components/src/state-surface.tsx#L23) defaultIcons 仅 Inbox/TriangleAlert/Loader2。
 - **问题**：a2u surface 新增内联卡片/浮窗会让设计系统变体继续裂变（设计系统变体裂变痛点）。
 - **方案步骤**：
   1. [state-surface.tsx#L35](packages/slab-components/src/state-surface.tsx#L35) `variant` 扩 `"success" | "aborted"`，defaultIcons 加 CheckCircle2 / Ban。
   2. 所有 a2u surface 组件统一用 StateSurface 渲染空/加载/错误/成功/中断，禁止各 surface 自造变体。
 - **验收 checklist**：
-  - [ ] variant 扩 success/aborted，向后兼容（旧 empty/error/loading 不变）
+  - [x] variant 扩 success/aborted，向后兼容（旧 empty/error/loading 不变）
   - [ ] a2u surface 组件 100% 用 StateSurface
-  - [ ] vitest：StateSurface 新变体渲染快照
+  - [x] vitest/browser：StateSurface 新变体渲染覆盖
 - **依赖**：无
 - **effort**：1 人天｜**priority**：P1（Phase 1，与 TC-FE-03 并行）
 
@@ -401,8 +415,8 @@ gantt
 
 | Wave | 任务卡 | 里程碑 | 退出标准 |
 |---|---|---|---|
-| **Wave 0（Phase 0）** | TC-FE-01, TC-FE-08, CI 门禁 | 契约收敛 | `navigate("/assistant")` 归零；AgentSurfaceStore 上线；gen:api/gen:schemas 进 CI 强制 |
-| **Wave 1（Phase 1）** | TC-FE-02, TC-FE-03, TC-FE-04 | AgentShell + a2u 最小可用 | E2E：用户说"打开 slab.rs"→agent 调 workspace.open→surface 主窗打开，无手动切页；action-card 三按钮闭环；artifact_refs 路径校验门 |
+| **Wave 0（Phase 0）** | TC-FE-01, TC-FE-08, CI 门禁 | 契约收敛 | **已完成前端切片**：`navigate("/assistant")` 产品入口归零；AgentSurfaceStore 上线；StateSurface 状态扩展；`bun run check:frontend` 通过。gen:api/gen:schemas CI 门禁仍属独立 CI 工作 |
+| **Wave 1（Phase 1）** | TC-FE-02, TC-FE-03, TC-FE-04 | AgentShell + a2u 最小可用 | **可用切片已落地，仍进行中**：assistant 内部 AgentSurfaceLayer、a2u 派发表/组件、后端内置 a2u tools、artifact_refs/action-card 闭环、relative-path 过滤与 root-aware workspace 校验、用户 pin/collapse 覆盖已完成。剩余：layout-level surface-router、真实服务/真实 agent E2E |
 | **Wave 2（Phase 2）** | TC-FE-05 | 编排增强前端 | 中断续跑入口；进度条 X/N；MaxTurns 显示"可续跑" |
 | **Wave 3（Phase 3）** | TC-FE-07 | 插件 + workspace 智能化 | 项目切换器（含 session project 绑定）；settings 合并 UI；context 选择器 |
 | **Wave 4（Phase 4）** | TC-FE-06 | 多窗口离窗化（按需） | windows.ts；caller-id 独立 label；内存熔断；inline↔popout |
@@ -414,8 +428,8 @@ gantt
 | 风险 | 缓解 | 回滚 |
 |---|---|---|
 | **surface 状态机 a11y 退化**（焦点/键盘/aria） | Phase 1 只做单 surface 切换（红队 must_cut），无 focus trap 需求；Escape 收敛；aria-live 公告 | 回滚到 [layouts/index.tsx](packages/slab-desktop/src/layouts/index.tsx) `<Outlet/>` 单挂载，AgentShell 退化为 Assistant 包装 |
-| **artifact_refs 路径越界泄漏**（agent 产出指向 workspace 外） | host 层路径前缀校验门（红队 must_add，Phase 1 exit criteria 硬门）；前端按钮 disabled + tooltip | 关闭 action-card open/review 按钮，仅保留 feedback |
-| **gen:api 漂移**（turn_completed 字段前后端不同步） | CI 门禁强制；[assistant-agent-events.ts](packages/slab-desktop/src/pages/assistant/lib/assistant-agent-events.ts) 与 [handler.rs#L553](bin/slab-server/src/api/v1/agent/handler.rs#L553) 同 PR 改 | 回滚 artifact_refs 字段，action-card 不渲染 |
+| **artifact_refs 路径越界泄漏**（agent 产出指向 workspace 外） | 已加 relative-path 过滤：frontend parser/dispatcher/action-card + app-core a2u tool + slab-agent artifact 提取；open/review 再经 `/v1/workspace/path/validate` 做 root-aware workspace 前缀校验 | 关闭 action-card open/review 按钮，仅保留 feedback |
+| **gen:api 漂移**（turn_completed 字段前后端不同步） | [assistant-agent-events.ts](packages/slab-desktop/src/pages/assistant/lib/assistant-agent-events.ts) 与 [handler.rs#L553](bin/slab-server/src/api/v1/agent/handler.rs#L553) 同 PR 改；SSE event 当前非 `v1.d.ts` 生成类型，后续若纳入 OpenAPI 再加 gen:api CI 门禁 | 回滚 artifact_refs 字段，action-card 不渲染 |
 | **caller-id-from-label 红线**（离窗化通配 label） | 每 surface 独立 label `surface-window-<surfaceId>`，禁通配（红队边界违规警告）；安全评审签字 | 推迟 TC-FE-06 到下个 Phase |
 | **session 跨 workspace 泄漏**（ADR-012） | session 与 project 一对一绑定（红队要求钉死，不放开放问题）；切换前 interrupt + 快照 | 切换器禁用，仅允许单 workspace |
 | **surface 切换主对话流状态丢失** | AgentShell 常驻不卸载，surface-router 替换内容而非卸载主区 | surface 切换改为新路由（牺牲状态保留） |
@@ -430,7 +444,7 @@ gantt
 
 | must_add | 落点 | 状态 |
 |---|---|---|
-| artifact_refs workspace 路径前缀校验 | TC-FE-04（host 层 + 前端 disabled）+ Phase 1 exit criteria | ✅ 已吸收 |
+| artifact_refs workspace 路径前缀校验 | TC-FE-04（relative-path 过滤 + `/v1/workspace/path/validate` root-aware 校验） | ✅ 已落地 |
 | 敏感路径审批黑名单（read 类命中 ~/.ssh/.env 强制 ask） | 前端审批卡（[assistant-bubble-content.tsx](packages/slab-desktop/src/pages/assistant/components/assistant-bubble-content.tsx) approval 卡）显示"敏感路径"标记，后端 ADR-008 黑名单 | ✅ 已标注（后端主导，前端展示） |
 | effects 由 host 静态推断（堵 ADR-009 插件自报） | 前端不渲染插件自报 effects，只显示 host 推断的 js→sandbox/python→isolate/wasm→extism | ✅ 已标注（plugin-surface 不信任自报） |
 

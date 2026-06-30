@@ -28,6 +28,7 @@ import {
   type AssistantMessageRecord,
   type AssistantThought,
 } from "../assistant-context"
+import { AgentActionCard } from "./agent-action-card"
 import { AssistantMarkdown } from "./assistant-markdown"
 
 export type AssistantBubbleContent = {
@@ -43,6 +44,11 @@ export type AssistantBubbleContent = {
     reject: string
     retry: string
     saveEdit: string
+    taskActionBlockedPath: string
+    taskActionFeedback: string
+    taskActionOpen: string
+    taskActionReview: string
+    taskActionTitle: string
     terminalCancelled: string
     thinkingLoading: string
     thinkingReady: string
@@ -52,6 +58,7 @@ export type AssistantBubbleContent = {
   markdownClassName?: string
   onApprove?: (callId: string, approved: boolean) => void
   onEdit?: (messageId: string, nextContent: string) => void | Promise<void>
+  onFeedback?: (prompt: string) => void
   onRegenerate?: (messageId: string) => void | Promise<void>
   onRetry?: () => void
 }
@@ -366,9 +373,23 @@ function AssistantBubbleFooter({ content }: { content: AssistantBubbleContent })
   const terminalNotice = content.item.message.role === "assistant"
     ? content.item.message.terminalNotice
     : undefined
+  const artifactRefs = isAssistant ? content.item.message.artifactRefs ?? [] : []
 
   return (
     <div className="flex max-w-[min(100%,42rem)] flex-col gap-2">
+      {artifactRefs.length > 0 ? (
+        <AgentActionCard
+          artifactRefs={artifactRefs}
+          labels={{
+            blockedPath: content.labels.taskActionBlockedPath,
+            feedback: content.labels.taskActionFeedback,
+            open: content.labels.taskActionOpen,
+            review: content.labels.taskActionReview,
+            title: content.labels.taskActionTitle,
+          }}
+          onFeedback={(prompt) => content.onFeedback?.(prompt)}
+        />
+      ) : null}
       {terminalNotice ? (
         <div
           className={cn(

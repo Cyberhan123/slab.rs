@@ -1163,6 +1163,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspace/path/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["validate_path"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspace/plugins/{plugin_id}/preference": {
         parameters: {
             query?: never;
@@ -6190,6 +6206,36 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspacePathMetadata"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    validate_path: {
+        parameters: {
+            query: {
+                /** @description Workspace-relative path to validate without requiring it to exist. */
+                relativePath: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Validated workspace-relative path */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePathView"];
                 };
             };
             /** @description Bad request */

@@ -92,6 +92,7 @@ fn build_agent_control(
         web_search_config,
         shell_rules,
     );
+    super::a2u_tools::register_builtin_a2u_tools(&tool_router);
     tool_router.register(Box::new(super::code_tools::CodeLspStatusTool::new(
         WorkspaceLspService::new(
             Arc::clone(&ctx.config),

@@ -1,5 +1,6 @@
 // Auto-generated barrel export - re-exports all UI components
 export * from "./accordion"
+export * from "./a2u"
 export * from "./alert-dialog"
 export * from "./alert"
 export * from "./aspect-ratio"

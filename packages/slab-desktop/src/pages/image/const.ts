@@ -54,7 +54,3 @@ export type GeneratedImage = {
   height: number;
   mode: 'txt2img' | 'img2img';
 };
-
-export type ImageRouteState = {
-  prompt?: string;
-};

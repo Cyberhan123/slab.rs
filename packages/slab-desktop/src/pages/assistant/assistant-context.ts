@@ -7,6 +7,7 @@ export {
   type AgentResponsesClientMessage,
   type AgentResponsesServerMessage,
   type AgentStatus,
+  type AssistantArtifactRef,
   type AgentThreadMessageResponse,
   type AgentThreadResponse,
   type AssistantMessageRecord,

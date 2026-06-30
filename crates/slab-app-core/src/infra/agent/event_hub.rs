@@ -222,6 +222,8 @@ mod tests {
                     output_index: 0,
                     content_index: 0,
                     text: "done".into(),
+                    artifact_refs: Vec::new(),
+                    reason: None,
                 },
             },
         );
