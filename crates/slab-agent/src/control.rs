@@ -146,7 +146,7 @@ impl AgentControl {
             tool_router,
             hooks: AgentHookRegistry::new(hooks),
             compact: Arc::new(SlidingWindowCompactPort::default()),
-            risk: Arc::new(BasicToolRiskAnalyzer),
+            risk: Arc::new(BasicToolRiskAnalyzer::default()),
             trace,
             trace_dir,
             thread_context: AgentThreadContext::default(),

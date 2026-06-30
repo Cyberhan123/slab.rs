@@ -220,6 +220,37 @@
       },
       "type": "object"
     },
+    "AgentRuntimeConfig": {
+      "description": "Agent runtime budget / concurrency settings (ADR-013).",
+      "properties": {
+        "limits": {
+          "$ref": "#/$defs/AgentRuntimeLimitsConfig",
+          "default": {
+            "max_depth": 4,
+            "max_threads": 32
+          }
+        }
+      },
+      "type": "object"
+    },
+    "AgentRuntimeLimitsConfig": {
+      "description": "Configurable agent concurrency limits (ADR-013). Defaults preserve the\nhistorical hardcoded ceiling (`max_threads: 32`, `max_depth: 4`).",
+      "properties": {
+        "max_depth": {
+          "default": 4,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_threads": {
+          "default": 32,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "AgentSettingsConfig": {
       "description": "Agent-specific settings.",
       "properties": {
@@ -247,6 +278,15 @@
             "phase1_scan_limit": 8,
             "phase2_lease_seconds": 1800,
             "phase2_limit": 64
+          }
+        },
+        "runtime": {
+          "$ref": "#/$defs/AgentRuntimeConfig",
+          "default": {
+            "limits": {
+              "max_depth": 4,
+              "max_threads": 32
+            }
           }
         },
         "tools": {
@@ -1715,6 +1755,12 @@
           "phase1_scan_limit": 8,
           "phase2_lease_seconds": 1800,
           "phase2_limit": 64
+        },
+        "runtime": {
+          "limits": {
+            "max_depth": 4,
+            "max_threads": 32
+          }
         },
         "tools": {
           "mcp": {

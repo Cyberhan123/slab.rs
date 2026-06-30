@@ -187,6 +187,12 @@ export const assistant = {
     ready: 'Reasoning trace',
     empty: 'Waiting for reasoning content...',
   },
+  progress: {
+    label: 'Plan progress',
+  },
+  resume: {
+    action: 'Resume',
+  },
   dialog: {
     title: 'Switch model for this conversation?',
     description:

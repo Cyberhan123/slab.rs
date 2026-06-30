@@ -106,6 +106,12 @@ jobs:
           bun run gen:schemas
           git diff --exit-code docs/public/manifests/v1/settings-document.schema.json docs/public/manifests/v3/slab-manifest.schema.json
 
+      # Plugin packs are build artifacts (plugins/dist is gitignored), so this
+      # is a build-sanity gate: it fails the PR if a plugin manifest/shape change
+      # breaks packing. There is no diff to check against tracked source.
+      - name: Check plugin packs build
+        run: bun run gen:plugin-packs
+
       # Plan F PR gate: contract/schema drift, frontend build, deterministic
       # unit tests, browser-mode regressions, and bundle budget. Fullstack E2E
       # stays in the release/manual workflow to keep ordinary PR feedback tight.

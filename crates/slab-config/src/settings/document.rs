@@ -308,6 +308,8 @@ pub struct AgentSettingsConfig {
     pub hooks: AgentHooksConfig,
     #[serde(default)]
     pub memories: AgentMemoriesConfig,
+    #[serde(default)]
+    pub runtime: AgentRuntimeConfig,
 }
 
 impl Default for AgentSettingsConfig {
@@ -317,8 +319,48 @@ impl Default for AgentSettingsConfig {
             tools: AgentToolsConfig::default(),
             hooks: AgentHooksConfig::default(),
             memories: AgentMemoriesConfig::default(),
+            runtime: AgentRuntimeConfig::default(),
         }
     }
+}
+
+/// Agent runtime budget / concurrency settings (ADR-013).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct AgentRuntimeConfig {
+    #[serde(default)]
+    pub limits: AgentRuntimeLimitsConfig,
+}
+
+/// Configurable agent concurrency limits (ADR-013). Defaults preserve the
+/// historical hardcoded ceiling (`max_threads: 32`, `max_depth: 4`).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct AgentRuntimeLimitsConfig {
+    #[serde(default = "default_max_threads")]
+    pub max_threads: u32,
+    #[serde(default = "default_max_depth")]
+    pub max_depth: u32,
+}
+
+impl Default for AgentRuntimeLimitsConfig {
+    fn default() -> Self {
+        Self { max_threads: 32, max_depth: 4 }
+    }
+}
+
+impl AgentRuntimeLimitsConfig {
+    /// Clamp limits to sane non-zero minimums so a misconfiguration cannot
+    /// disable agent spawning entirely.
+    pub fn clamped(&self) -> Self {
+        Self { max_threads: self.max_threads.max(1), max_depth: self.max_depth.max(1) }
+    }
+}
+
+fn default_max_threads() -> u32 {
+    32
+}
+
+fn default_max_depth() -> u32 {
+    4
 }
 
 /// Agent lifecycle hook settings.
@@ -1653,6 +1695,42 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+
+    #[test]
+    fn agent_runtime_limits_default_to_historical_ceiling() {
+        let default = AgentSettingsConfig::default();
+        assert_eq!(default.runtime.limits.max_threads, 32);
+        assert_eq!(default.runtime.limits.max_depth, 4);
+    }
+
+    #[test]
+    fn agent_runtime_limits_deserialize_from_overrides() {
+        let json = r#"{
+            "debug": false,
+            "runtime": { "limits": { "max_threads": 8, "max_depth": 2 } }
+        }"#;
+        let parsed: AgentSettingsConfig = serde_json::from_str(json).expect("parse");
+        assert_eq!(parsed.runtime.limits.max_threads, 8);
+        assert_eq!(parsed.runtime.limits.max_depth, 2);
+        assert!(!parsed.debug);
+    }
+
+    #[test]
+    fn agent_runtime_limits_clamp_to_minimums() {
+        let limits = AgentRuntimeLimitsConfig { max_threads: 0, max_depth: 0 };
+        let clamped = limits.clamped();
+        assert_eq!(clamped.max_threads, 1);
+        assert_eq!(clamped.max_depth, 1);
+    }
+
+    #[test]
+    fn agent_settings_parse_when_runtime_omitted() {
+        // Old configs without `runtime` must still parse (backward compat).
+        let json = r#"{ "debug": true }"#;
+        let parsed: AgentSettingsConfig = serde_json::from_str(json).expect("parse");
+        assert_eq!(parsed.runtime.limits.max_threads, 32);
+        assert_eq!(parsed.runtime.limits.max_depth, 4);
+    }
 
     #[test]
     fn document_defaults_to_current_schema() {

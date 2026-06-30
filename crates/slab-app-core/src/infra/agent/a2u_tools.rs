@@ -289,7 +289,7 @@ fn normalize_workspace_relative_path(path: &str) -> Option<String> {
     let normalized = trimmed.replace('\\', "/");
     let parts =
         normalized.split('/').filter(|part| !part.is_empty() && *part != ".").collect::<Vec<_>>();
-    if parts.is_empty() || parts.iter().any(|part| *part == "..") {
+    if parts.is_empty() || parts.contains(&"..") {
         return None;
     }
 

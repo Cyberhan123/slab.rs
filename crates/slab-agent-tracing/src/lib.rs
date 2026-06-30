@@ -15,6 +15,11 @@ pub struct AgentTraceContext {
     pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_id: Option<String>,
+    /// Span id of the parent thread (the delegating parent's thread id), so
+    /// subagent trace events can be correlated back to the parent that spawned
+    /// them (INFRA-09). `None` for root threads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_span_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_index: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -23,11 +28,24 @@ pub struct AgentTraceContext {
 
 impl AgentTraceContext {
     pub fn new(session_id: impl Into<String>) -> Self {
-        Self { session_id: session_id.into(), thread_id: None, turn_index: None, trace_dir: None }
+        Self {
+            session_id: session_id.into(),
+            thread_id: None,
+            parent_span_id: None,
+            turn_index: None,
+            trace_dir: None,
+        }
     }
 
     pub fn with_thread(mut self, thread_id: impl Into<String>) -> Self {
         self.thread_id = Some(thread_id.into());
+        self
+    }
+
+    /// Attach the parent thread's span id (INFRA-09 subagent linkage).
+    pub fn with_parent_span_id(mut self, parent_span_id: impl Into<String>) -> Self {
+        let parent_span_id = parent_span_id.into();
+        self.parent_span_id = if parent_span_id.is_empty() { None } else { Some(parent_span_id) };
         self
     }
 
@@ -62,6 +80,8 @@ struct AgentTraceRecord<'a> {
     session_id: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     thread_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent_span_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     turn_index: Option<u32>,
     sequence: u64,
@@ -120,6 +140,7 @@ impl FileAgentTraceSink {
             timestamp: Utc::now().to_rfc3339(),
             session_id: &context.session_id,
             thread_id: context.thread_id.as_deref(),
+            parent_span_id: context.parent_span_id.as_deref(),
             turn_index: context.turn_index,
             sequence: self.sequence.fetch_add(1, Ordering::SeqCst),
             source: &event.source,
@@ -266,6 +287,32 @@ mod tests {
         assert_eq!(first["session_id"], "session");
         assert_eq!(first["thread_id"], "thread");
         assert_eq!(first["turn_index"], 3);
+    }
+
+    #[test]
+    fn parent_span_id_is_propagated_to_records() {
+        let temp = tempfile::tempdir().expect("temp dir should be created");
+        let context = AgentTraceContext::new("session")
+            .with_thread("child-thread")
+            .with_parent_span_id("parent-thread")
+            .with_trace_dir(temp.path());
+        let sink = FileAgentTraceSink::new(temp.path());
+
+        let record = sink.record_payload(
+            &context,
+            &AgentTraceEvent::new("test", "child_event", serde_json::json!({})),
+        );
+
+        assert_eq!(record["thread_id"], "child-thread");
+        assert_eq!(record["parent_span_id"], "parent-thread");
+    }
+
+    #[test]
+    fn root_thread_omits_parent_span_id() {
+        let context = AgentTraceContext::new("session").with_thread("root");
+        assert!(context.parent_span_id.is_none());
+        // Empty parent span id is normalized away (treated as a root thread).
+        assert!(context.with_parent_span_id("").parent_span_id.is_none());
     }
 
     #[test]

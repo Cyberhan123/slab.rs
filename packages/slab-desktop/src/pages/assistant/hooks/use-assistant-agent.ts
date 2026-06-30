@@ -51,6 +51,7 @@ import {
   projectAgentThreadMessages,
 } from '../lib/assistant-message-projection'
 import { dispatchA2uToolCall } from '../lib/a2u-dispatcher'
+import { parsePlanProgress, type PlanProgress } from '../lib/plan-progress'
 
 type PendingApproval = {
   callId: string
@@ -1204,6 +1205,15 @@ export function useAssistantAgent({
     void handleSubmit(prompt)
   }, [handleSubmit, isRequesting])
 
+  const resume = useCallback(() => {
+    if (isRequesting) {
+      return
+    }
+    // TC-FE-05: resume the active (interrupted) thread with a fresh continue
+    // cue instead of re-sending the original prompt.
+    void handleSubmit('Continue from where you left off.')
+  }, [handleSubmit, isRequesting])
+
   const messagesWithThoughts = useMemo(
     () => withThoughts(messages, thoughts),
     [messages, thoughts]
@@ -1212,6 +1222,30 @@ export function useAssistantAgent({
     () => Array.from(pendingApprovals.values()),
     [pendingApprovals]
   )
+  // TC-FE-05: latest plan_update progress (X/N) for the progress bar.
+  const planProgress = useMemo<PlanProgress | null>(() => {
+    for (let i = thoughts.length - 1; i >= 0; i -= 1) {
+      const thought = thoughts[i]
+      if (thought.toolName === 'plan_update' && thought.detail) {
+        const progress = parsePlanProgress(thought.detail)
+        if (progress) {
+          return progress
+        }
+      }
+    }
+    return null
+  }, [thoughts])
+  // TC-FE-05: structured termination reason from the last cancelled turn, for
+  // the resume affordance.
+  const terminalReason = useMemo<string | null>(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const notice = messages[i]?.message?.terminalNotice
+      if (notice?.type === 'cancelled' && notice.message) {
+        return notice.message
+      }
+    }
+    return null
+  }, [messages])
 
   return {
     abort,
@@ -1223,9 +1257,12 @@ export function useAssistantAgent({
     isRequesting,
     messages: messagesWithThoughts,
     pendingApprovals: pendingApprovalList,
+    planProgress,
     regenerateResponse,
+    resume,
     retryLastResponse,
     status,
+    terminalReason,
     submitApproval,
     threadId,
   }

@@ -61,7 +61,7 @@ pub use port::{
     AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
     ThreadStatus, TurnEvent, TurnStateRecord,
 };
-pub use risk::{BasicToolRiskAnalyzer, ToolRiskAnalyzer};
+pub use risk::{BasicToolRiskAnalyzer, ToolApprovalDecision, ToolApprovalPolicy, ToolRiskAnalyzer};
 pub use tool::{
     AgentThreadContext, PlanRef, ToolApprovalRequest, ToolContext, ToolContextBuilder, ToolHandler,
     ToolOutput, ToolRouter, WorkspaceRef,

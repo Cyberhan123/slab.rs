@@ -1,6 +1,7 @@
 pub mod app_home;
 pub mod cab;
 pub mod cargo_bin;
+pub mod diagnostics;
 pub mod fs;
 pub mod fuzzy_match;
 pub mod hash;
@@ -9,6 +10,7 @@ pub mod loader;
 pub mod lsp;
 pub mod path;
 pub mod pty;
+pub mod session_snapshot;
 pub mod sleep_inhibitor;
 pub mod string;
 pub mod time;

@@ -186,6 +186,12 @@ export const assistant = {
     ready: '推理轨迹',
     empty: '等待推理内容...',
   },
+  progress: {
+    label: '计划进度',
+  },
+  resume: {
+    action: '继续',
+  },
   dialog: {
     title: '为此会话切换模型？',
     description: '请选择新模型是继续使用当前会话历史，还是创建一个干净的新会话。',

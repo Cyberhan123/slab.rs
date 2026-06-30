@@ -346,11 +346,13 @@ await import({entry_json});
     let module = Module::load(&bootstrap_path).with_context(|| {
         format!("failed to load LSP bootstrap module {}", bootstrap_path.display())
     })?;
-    let mut extension_options = ExtensionOptions::default();
-    extension_options.node_resolver = std::sync::Arc::new(RustyResolver::new(
-        Some(entry_dir.to_path_buf()),
-        std::sync::Arc::new(deno_fs::RealFs),
-    ));
+    let extension_options = ExtensionOptions {
+        node_resolver: std::sync::Arc::new(RustyResolver::new(
+            Some(entry_dir.to_path_buf()),
+            std::sync::Arc::new(deno_fs::RealFs),
+        )),
+        ..Default::default()
+    };
     let mut runtime = Runtime::with_tokio_runtime_handle(
         RuntimeOptions { timeout: Duration::MAX, extension_options, ..Default::default() },
         tokio::runtime::Handle::current(),

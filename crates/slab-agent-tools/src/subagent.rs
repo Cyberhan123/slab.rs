@@ -515,17 +515,18 @@ mod tests {
         assert_eq!(artifact["completion_text"], "child result");
 
         let child_id = value["child_thread_id"].as_str().expect("child id");
-        let messages = store.messages.lock().unwrap();
-        let child_prompt = messages
-            .iter()
-            .find(|record| record.thread_id == child_id && record.message.role == "user")
-            .expect("child prompt")
-            .message
-            .rendered_text();
+        let child_prompt = {
+            let messages = store.messages.lock().unwrap();
+            messages
+                .iter()
+                .find(|record| record.thread_id == child_id && record.message.role == "user")
+                .expect("child prompt")
+                .message
+                .rendered_text()
+        };
         assert!(child_prompt.contains("Objective:\nsummarize"));
         assert!(child_prompt.contains("workspace-relative scope: src"));
         assert!(child_prompt.contains("Required output format:"));
-        drop(messages);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

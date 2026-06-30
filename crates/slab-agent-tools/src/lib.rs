@@ -22,6 +22,8 @@ pub mod plan;
 mod sensitive_path;
 pub mod shell;
 pub mod subagent;
+pub mod task_complete;
+pub mod verify;
 pub mod web_search;
 
 pub use apply_patch::ApplyPatchTool;
@@ -37,6 +39,8 @@ pub use slab_shell_command::{
     ShellRule, ShellRuleAction, ShellRuleError, ShellRuleMatcher, ShellRuleSet,
 };
 pub use subagent::DelegateSubagentTool;
+pub use task_complete::{TASK_COMPLETE_METADATA_KEY, TASK_COMPLETE_TOOL_NAME, TaskCompleteTool};
+pub use verify::{CommandWorkspaceVerifier, VerifyTarget, VerifyTool, WorkspaceVerifier};
 pub use web_search::WebSearchTool;
 
 /// Register the full production tool suite.
@@ -85,6 +89,8 @@ pub fn register_all_tools_with_shell_rules(
     router.register(Box::new(FileGlobTool::new(workspace_root.clone())));
     router.register(Box::new(GrepTool::new(workspace_root.clone())));
     router.register(Box::new(PlanUpdateTool::new()));
+    router.register(Box::new(TaskCompleteTool::new()));
+    router.register(Box::new(VerifyTool::new()));
     router.register(Box::new(WebSearchTool::new(web_search_config)));
     if let Some(watcher) = FsWatchTool::new() {
         router.register(Box::new(watcher));
@@ -130,6 +136,8 @@ mod tests {
         assert!(router.get("shell").is_some());
         assert!(router.get("file_glob").is_some());
         assert!(router.get("plan_update").is_some());
+        assert!(router.get("task.complete").is_some());
+        assert!(router.get("verify").is_some());
         assert!(router.get("web_search").is_some());
         assert!(router.get("apply_patch").is_none());
         assert!(router.get("git_status").is_none());

@@ -2394,6 +2394,180 @@ async fn tool_context_includes_thread_workspace_and_plan_scope() {
     );
 }
 
+// ── task.complete default-deny / structured completion (B-3, 双轨 2) ─────────────
+
+/// Test double for the `task.complete` tool contract. On success it returns the
+/// `task_complete` metadata marker that `turn_tool_call` recognizes to finalize
+/// the run. With `fail_first_call` it errors on the first invocation, simulating
+/// a denied completion that is fed back to the LLM as a tool result.
+struct TaskCompleteMarkerTool {
+    fail_first_call: bool,
+    calls: Mutex<u32>,
+}
+
+impl TaskCompleteMarkerTool {
+    fn always_succeeds() -> Self {
+        Self { fail_first_call: false, calls: Mutex::new(0) }
+    }
+    fn failing_once() -> Self {
+        Self { fail_first_call: true, calls: Mutex::new(0) }
+    }
+}
+
+#[async_trait]
+impl ToolHandler for TaskCompleteMarkerTool {
+    fn name(&self) -> &str {
+        "task.complete"
+    }
+    fn description(&self) -> &str {
+        "Test double for the task.complete structured-completion tool."
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object"})
+    }
+    async fn execute(
+        &self,
+        _ctx: &ToolContext,
+        _arguments: &serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        let mut calls = self.calls.lock().unwrap();
+        *calls += 1;
+        if self.fail_first_call && *calls == 1 {
+            return Err(AgentError::ToolExecution(
+                "task.complete denied: 1 plan item(s) are not completed".to_owned(),
+            ));
+        }
+        let metadata = serde_json::json!({
+            "task_complete": {
+                "summary": "shipped it",
+                "artifact_refs": [{ "path": "src/main.rs", "kind": "file" }],
+            }
+        });
+        Ok(ToolOutput { content: "task complete: shipped it".to_owned(), metadata: Some(metadata) })
+    }
+}
+
+/// Mock LLM that always asks the agent to call `task.complete`.
+struct TaskCompleteLlm {
+    call_count: Mutex<u32>,
+}
+
+impl TaskCompleteLlm {
+    fn new() -> Self {
+        Self { call_count: Mutex::new(0) }
+    }
+}
+
+#[async_trait]
+impl LlmPort for TaskCompleteLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+        _trace_context: &AgentTraceContext,
+    ) -> Result<LlmResponse, AgentError> {
+        let mut count = self.call_count.lock().unwrap();
+        *count += 1;
+        Ok(LlmResponse {
+            content: None,
+            content_already_streamed: false,
+            tool_calls: vec![ParsedToolCall {
+                id: format!("call-task-{count}"),
+                name: "task.complete".into(),
+                arguments: r#"{"summary":"shipped it","plan":[{"step":"x","status":"completed"}]}"#
+                    .into(),
+            }],
+            finish_reason: Some("tool_calls".into()),
+            usage: None,
+        })
+    }
+}
+
+#[tokio::test]
+async fn task_complete_finalizes_run_on_success() {
+    let llm = Arc::new(TaskCompleteLlm::new());
+    let llm_handle = Arc::clone(&llm);
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(TaskCompleteMarkerTool::always_succeeds()));
+    let approval = Arc::clone(&notify);
+    let control =
+        Arc::new(AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4));
+    let config = AgentConfig { model: "mock".into(), max_turns: 3, ..AgentConfig::default() };
+    let thread_id = control
+        .spawn(
+            "session-task-complete".into(),
+            config,
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("finish the task".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+
+    // task.complete must short-circuit to Final after exactly one LLM call.
+    let calls = *llm_handle.call_count.lock().unwrap();
+    assert_eq!(calls, 1, "task.complete should finalize without a second LLM turn");
+
+    let final_text = store
+        .messages
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|record| record.thread_id == thread_id && record.message.role == "assistant")
+        .and_then(|record| match &record.message.content {
+            ConversationMessageContent::Text(text) => Some(text.clone()),
+            _ => None,
+        });
+    assert_eq!(final_text.as_deref(), Some("shipped it"));
+}
+
+#[tokio::test]
+async fn task_complete_denial_does_not_finalize() {
+    let llm = Arc::new(TaskCompleteLlm::new());
+    let llm_handle = Arc::clone(&llm);
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(TaskCompleteMarkerTool::failing_once()));
+    let approval = Arc::clone(&notify);
+    let control =
+        Arc::new(AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4));
+    let config = AgentConfig { model: "mock".into(), max_turns: 3, ..AgentConfig::default() };
+    let thread_id = control
+        .spawn(
+            "session-task-denied".into(),
+            config,
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("finish the task".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
+
+    // First call is denied (error fed back), second call succeeds → Final.
+    let calls = *llm_handle.call_count.lock().unwrap();
+    assert_eq!(calls, 2, "denied task.complete must not finalize on the first turn");
+}
+
 #[tokio::test]
 async fn echo_tool_returns_input() {
     use crate::tool::{ToolContext, ToolHandler};

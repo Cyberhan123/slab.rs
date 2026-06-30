@@ -25,6 +25,7 @@ pub mod error;
 pub mod i18n;
 pub mod load_config;
 pub mod plugin;
+pub mod plugin_capability;
 pub mod plugin_runtime;
 pub mod runtime;
 pub mod sqlite;

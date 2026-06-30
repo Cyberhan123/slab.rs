@@ -165,6 +165,9 @@ fn build_agent_control(
         .map(|root| WorkspaceRef { root, session_id: None })
         .map(|workspace| AgentThreadContext::new().with_workspace(workspace))
         .unwrap_or_default();
+    // ADR-013: concurrency limits are configurable via settings
+    // (agent.runtime.limits), defaulting to the historical 32/4 ceiling.
+    let runtime_limits = ctx.pmid.config().agent.runtime.limits.clamped();
     let control = Arc::new(
         AgentControl::new_with_hooks_and_tracing(
             llm,
@@ -172,7 +175,10 @@ fn build_agent_control(
             notify_port,
             approval_port,
             Arc::clone(&tool_router),
-            slab_agent::AgentControlLimits { max_threads: 32, max_depth: 4 },
+            slab_agent::AgentControlLimits {
+                max_threads: runtime_limits.max_threads as usize,
+                max_depth: runtime_limits.max_depth,
+            },
             hooks,
             trace,
             trace_dir,

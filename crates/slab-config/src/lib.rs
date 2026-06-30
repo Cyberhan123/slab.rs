@@ -6,6 +6,7 @@ mod error;
 pub mod launch;
 mod pmid_service;
 mod provider;
+pub mod secret_port;
 mod settings;
 mod view;
 

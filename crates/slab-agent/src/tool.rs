@@ -48,6 +48,11 @@ pub struct AgentThreadContext {
     pub workspace: Option<WorkspaceRef>,
     /// Optional durable plan identifier. The concrete [`PlanRef`] is resolved per thread.
     pub plan_id: Option<String>,
+    /// Offline degradation flag (INFRA-07): when true the agent's tool list is
+    /// narrowed to drop tools that need external network/provider reachability
+    /// (`web_search`, `mcp_call`, `mcp_list_tools`, `mcp__*`). Set by the host
+    /// after probing provider reachability.
+    pub offline: bool,
 }
 
 impl AgentThreadContext {
@@ -68,6 +73,12 @@ impl AgentThreadContext {
         if !plan_id.trim().is_empty() {
             self.plan_id = Some(plan_id);
         }
+        self
+    }
+
+    /// Mark the thread as running in offline mode (INFRA-07).
+    pub fn with_offline(mut self, offline: bool) -> Self {
+        self.offline = offline;
         self
     }
 }

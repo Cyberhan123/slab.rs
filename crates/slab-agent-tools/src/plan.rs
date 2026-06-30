@@ -25,6 +25,9 @@ struct PlanUpdateArgs {
 struct PlanItemInput {
     step: String,
     status: PlanStatus,
+    /// Optional reference to a deterministic verify result (e.g. from `verify`).
+    #[serde(default)]
+    result_ref: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -139,6 +142,11 @@ fn normalize_plan(args: PlanUpdateArgs) -> Result<Value, AgentError> {
         items.push(serde_json::json!({
             "step": step,
             "status": item.status.as_str(),
+            "result_ref": item
+                .result_ref
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty()),
         }));
     }
 
@@ -192,7 +200,10 @@ mod tests {
         let value: Value = serde_json::from_str(&output.content).expect("json output");
 
         assert_eq!(value["summary"], "code change");
-        assert_eq!(value["items"][0], json!({"step": "inspect", "status": "completed"}));
+        assert_eq!(
+            value["items"][0],
+            json!({"step": "inspect", "status": "completed", "result_ref": null})
+        );
         assert_eq!(value["counts"]["pending"], 1);
         assert_eq!(value["counts"]["in_progress"], 1);
         assert_eq!(value["current_step"], "implement");
@@ -226,6 +237,28 @@ mod tests {
             .expect_err("blank step rejected");
 
         assert!(error.to_string().contains("step must not be blank"));
+    }
+
+    #[tokio::test]
+    async fn plan_update_preserves_trimmed_result_ref() {
+        let tool = PlanUpdateTool::new();
+        let output = tool
+            .execute(
+                &ctx(),
+                &json!({
+                    "items": [
+                        { "step": "verify", "status": "completed", "result_ref": "  verify:lint:passed  " },
+                        { "step": "ship", "status": "in_progress", "result_ref": "" }
+                    ]
+                }),
+            )
+            .await
+            .expect("plan output");
+        let value: Value = serde_json::from_str(&output.content).expect("json output");
+
+        assert_eq!(value["items"][0]["result_ref"], "verify:lint:passed");
+        // Blank result_ref normalizes to null (not an empty string).
+        assert_eq!(value["items"][1]["result_ref"], Value::Null);
     }
 
     #[test]

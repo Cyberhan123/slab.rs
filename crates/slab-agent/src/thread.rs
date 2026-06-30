@@ -139,6 +139,11 @@ impl AgentThread {
         let thread_id = self.id.clone();
         let mut trace_context =
             AgentTraceContext::new(self.session_id.clone()).with_thread(thread_id.clone());
+        // INFRA-09: tag subagent events with the delegating parent's span id so
+        // the parent→child tree can be reconstructed from the trace JSONL.
+        if let Some(parent) = self.parent_id.clone() {
+            trace_context = trace_context.with_parent_span_id(parent);
+        }
         if let Some(trace_dir) = trace_dir {
             trace_context = trace_context.with_trace_dir(trace_dir);
         }
@@ -534,6 +539,10 @@ impl AgentThread {
             serde_json::json!({
                 "status": ThreadStatus::Completed,
                 "completion_text": completion_text,
+                "consumed_tokens": consumed_tokens,
+                "max_turns": self.config.max_turns,
+                "token_budget": self.config.token_budget,
+                "parent_span_id": trace_context.parent_span_id,
             }),
         );
         store

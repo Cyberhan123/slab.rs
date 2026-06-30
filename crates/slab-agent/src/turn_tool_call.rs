@@ -13,11 +13,12 @@ use slab_types::{ConversationMessage, agent::ToolCallStatus};
 
 use crate::{
     error::AgentError,
-    event::{AgentEventKind, ToolRiskAssessment, ToolRiskLevel},
+    event::{AgentArtifactKind, AgentArtifactRef, AgentEventKind, ToolRiskAssessment},
     hook::{HookEvent, HookToolAction, dispatch_registered_hooks},
     port::{ApprovalDecision, ParsedToolCall, TurnEvent},
+    risk::ToolApprovalDecision,
     state::ToolCallStateMachine,
-    tool::{PlanRef, ToolApprovalRequest, ToolContext, ToolHandler},
+    tool::{PlanRef, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput},
     turn::TurnExecutionContext,
     turn_tool_record::{
         insert_tool_call_record, persist_tool_message_record,
@@ -26,16 +27,69 @@ use crate::{
     },
 };
 
+/// Tool name that signals structured task completion. Mirrors
+/// `slab_agent_tools::TASK_COMPLETE_TOOL_NAME`; duplicated here because
+/// `slab-agent` cannot depend on `slab-agent-tools` (dependency direction is
+/// reversed). The producer owns the metadata shape; see
+/// `crates/slab-agent-tools/src/task_complete.rs`.
+const TASK_COMPLETE_TOOL_NAME: &str = "task.complete";
+/// Metadata key the `task.complete` tool places its completion marker under.
+/// Mirrors `slab_agent_tools::TASK_COMPLETE_METADATA_KEY`.
+const TASK_COMPLETE_METADATA_KEY: &str = "task_complete";
+
+/// Structured completion payload extracted from a successful `task.complete`
+/// tool call. Consumed by the turn loop to emit the final answer (双轨 2).
+#[derive(Debug, Clone)]
+pub(crate) struct TaskCompletion {
+    pub summary: String,
+    pub artifact_refs: Vec<AgentArtifactRef>,
+}
+
+/// Parse a [`TaskCompletion`] out of a tool's metadata marker, when the tool
+/// that just ran is `task.complete` and it succeeded.
+fn parse_task_completion(metadata: Option<&serde_json::Value>) -> Option<TaskCompletion> {
+    let marker = metadata?.get(TASK_COMPLETE_METADATA_KEY)?;
+    let summary = marker.get("summary")?.as_str()?.trim().to_owned();
+    if summary.is_empty() {
+        return None;
+    }
+    let artifact_refs = marker
+        .get("artifact_refs")
+        .and_then(|refs| refs.as_array())
+        .map(|refs| refs.iter().filter_map(parse_artifact_ref).collect())
+        .unwrap_or_default();
+    Some(TaskCompletion { summary, artifact_refs })
+}
+
+fn parse_artifact_ref(value: &serde_json::Value) -> Option<AgentArtifactRef> {
+    let path = value.get("path")?.as_str()?.trim();
+    if path.is_empty() {
+        return None;
+    }
+    let kind = match value.get("kind").and_then(|kind| kind.as_str()).map(str::to_ascii_lowercase) {
+        Some(ref kind) if kind == "diff" => AgentArtifactKind::Diff,
+        Some(ref kind) if kind == "image" => AgentArtifactKind::Image,
+        _ => AgentArtifactKind::File,
+    };
+    Some(AgentArtifactRef { path: path.to_owned(), kind })
+}
+
 struct ToolCallRunResult {
     message: ConversationMessage,
     status: ToolCallStatus,
+    task_completion: Option<TaskCompletion>,
 }
 
+/// Execute the given tool calls and persist their results.
+///
+/// Returns `Some(TaskCompletion)` when a `task.complete` tool call succeeded,
+/// signalling the turn loop to emit the final answer (双轨 2). Returns `None`
+/// for a normal tool-call turn that should continue to the next LLM turn.
 pub(crate) async fn handle_tool_calls(
     context: &TurnExecutionContext<'_>,
     tool_calls: &[ParsedToolCall],
     messages: &mut Vec<ConversationMessage>,
-) -> Result<(), AgentError> {
+) -> Result<Option<TaskCompletion>, AgentError> {
     let mut tool_context_builder = ToolContext::for_thread(context.thread_id)
         .turn_index(context.turn_index)
         .depth(context.depth);
@@ -58,7 +112,7 @@ pub(crate) async fn handle_tool_calls(
     let now = Utc::now().to_rfc3339();
     let total = tool_calls.len();
     if total == 0 {
-        return Ok(());
+        return Ok(None);
     }
 
     let concurrency = context.config.effective_tool_concurrency().min(total);
@@ -90,6 +144,7 @@ pub(crate) async fn handle_tool_calls(
     let mut completed = 0usize;
     let mut failed = 0usize;
     let mut first_error = None;
+    let mut task_completion = None;
     for result in results {
         match result {
             Ok(result) => {
@@ -98,6 +153,10 @@ pub(crate) async fn handle_tool_calls(
                     ToolCallStatus::Pending | ToolCallStatus::Running | ToolCallStatus::Failed => {
                         failed += 1;
                     }
+                }
+                // A successful `task.complete` wins; last one wins if multiple.
+                if result.task_completion.is_some() {
+                    task_completion = result.task_completion;
                 }
                 persist_tool_message_record(context, result.message, messages).await;
             }
@@ -114,7 +173,7 @@ pub(crate) async fn handle_tool_calls(
     if let Some(error) = first_error {
         return Err(error);
     }
-    Ok(())
+    Ok(task_completion)
 }
 
 async fn emit_tool_concurrency_started(
@@ -239,7 +298,11 @@ async fn handle_tool_call(
                 context, &call_id, tool_call, output, created_at,
             )
             .await?;
-            return Ok(ToolCallRunResult { message, status: ToolCallStatus::Failed });
+            return Ok(ToolCallRunResult {
+                message,
+                status: ToolCallStatus::Failed,
+                task_completion: None,
+            });
         }
     };
     record_json(
@@ -292,7 +355,11 @@ async fn handle_tool_call(
                 context, &call_id, tool_call, output, created_at,
             )
             .await?;
-            return Ok(ToolCallRunResult { message, status: ToolCallStatus::Failed });
+            return Ok(ToolCallRunResult {
+                message,
+                status: ToolCallStatus::Failed,
+                task_completion: None,
+            });
         }
         HookToolAction::ModifyArgs { arguments } => arguments,
         HookToolAction::Continue => parsed_args,
@@ -333,13 +400,23 @@ async fn handle_tool_call(
     let approval_request = handler
         .as_ref()
         .and_then(|handler| handler.approval_request(&effective_args))
-        .or_else(|| risk_based_approval_request(&tool_call.name, &effective_arguments, &risk));
+        .or_else(|| {
+            // ADR-008: when the tool has no own approval metadata, the
+            // configured risk policy decides (default asks for Medium+ tools).
+            if context.risk.approval_decision(&risk) == ToolApprovalDecision::Ask {
+                Some(ToolApprovalRequest {
+                    command: format!("{} {effective_arguments}", tool_call.name),
+                })
+            } else {
+                None
+            }
+        });
     let initial_status =
         if approval_request.is_some() { ToolCallStatus::Pending } else { ToolCallStatus::Running };
     let mut tool_state = ToolCallStateMachine::new(initial_status);
     insert_tool_call_record(context, &call_id, tool_call, tool_state.status(), created_at).await;
 
-    let (mut output, call_status) = run_tool_with_optional_approval(ToolRunContext {
+    let (tool_output, call_status) = run_tool_with_optional_approval(ToolRunContext {
         context,
         call_id: &call_id,
         tool_call,
@@ -357,6 +434,16 @@ async fn handle_tool_call(
         return Err(AgentError::Interrupted);
     }
 
+    // A successful `task.complete` carries the structured completion payload in
+    // its metadata; surface it so the turn loop can emit the final answer.
+    let task_completion =
+        if tool_call.name == TASK_COMPLETE_TOOL_NAME && call_status == ToolCallStatus::Completed {
+            parse_task_completion(tool_output.metadata.as_ref())
+        } else {
+            None
+        };
+
+    let mut content = tool_output.content;
     info!(
         thread_id = context.thread_id,
         turn_index = context.turn_index,
@@ -364,7 +451,7 @@ async fn handle_tool_call(
         call_id = %call_id,
         tool_name = %tool_call.name,
         status = ?call_status,
-        output_len = output.len(),
+        output_len = content.len(),
         "agent tool call output"
     );
     record_json(
@@ -377,10 +464,10 @@ async fn handle_tool_call(
             "call_id": call_id,
             "tool_name": tool_call.name,
             "status": call_status,
-            "output": output,
+            "output": content,
         }),
     );
-    append_hook_observations(&mut output, pre_observations);
+    append_hook_observations(&mut content, pre_observations);
 
     let post_event = HookEvent::OnToolEnd {
         thread_id: context.thread_id.to_owned(),
@@ -390,11 +477,11 @@ async fn handle_tool_call(
         call_id: call_id.clone(),
         tool_name: tool_call.name.clone(),
         arguments: effective_args,
-        output: output.clone(),
+        output: content.clone(),
         status: call_status,
     };
     let post_effects = dispatch_registered_hooks(context.hooks, &post_event).await;
-    append_hook_observations(&mut output, post_effects.observations);
+    append_hook_observations(&mut content, post_effects.observations);
 
     context
         .notify
@@ -405,28 +492,17 @@ async fn handle_tool_call(
                 event: AgentEventKind::ResponseToolCallOutput {
                     item_id: tool_call.id.clone(),
                     call_id: call_id.clone(),
-                    output: output.clone(),
+                    output: content.clone(),
                     status: tool_execution_status(call_status),
                 },
             },
         )
         .await;
 
-    update_tool_call_record(context, &call_id, Some(&output), call_status).await;
-    let message = crate::turn_tool_record::tool_message(tool_call, output);
+    update_tool_call_record(context, &call_id, Some(&content), call_status).await;
+    let message = crate::turn_tool_record::tool_message(tool_call, content);
 
-    Ok(ToolCallRunResult { message, status: call_status })
-}
-
-fn risk_based_approval_request(
-    tool_name: &str,
-    effective_arguments: &str,
-    risk: &ToolRiskAssessment,
-) -> Option<ToolApprovalRequest> {
-    if risk.level != ToolRiskLevel::High {
-        return None;
-    }
-    Some(ToolApprovalRequest { command: format!("{tool_name} {effective_arguments}") })
+    Ok(ToolCallRunResult { message, status: call_status, task_completion })
 }
 
 struct ToolRunContext<'a, 'ctx> {
@@ -444,7 +520,7 @@ struct ToolRunContext<'a, 'ctx> {
 
 async fn run_tool_with_optional_approval(
     run: ToolRunContext<'_, '_>,
-) -> Result<(String, ToolCallStatus), AgentError> {
+) -> Result<(ToolOutput, ToolCallStatus), AgentError> {
     let Some(ref request) = run.approval_request else {
         return run_tool_without_approval(&run).await;
     };
@@ -504,14 +580,20 @@ async fn run_tool_with_optional_approval(
         }
         ApprovalDecision::Rejected => {
             emit_approval_resolved(&run, false).await;
-            Ok(("tool call rejected by approval policy".to_string(), ToolCallStatus::Failed))
+            Ok((
+                ToolOutput {
+                    content: "tool call rejected by approval policy".to_string(),
+                    metadata: None,
+                },
+                ToolCallStatus::Failed,
+            ))
         }
     }
 }
 
 async fn run_tool_without_approval(
     run: &ToolRunContext<'_, '_>,
-) -> Result<(String, ToolCallStatus), AgentError> {
+) -> Result<(ToolOutput, ToolCallStatus), AgentError> {
     if run.context.cancellation.is_cancelled() {
         return Err(AgentError::Interrupted);
     }
@@ -597,20 +679,23 @@ async fn execute_tool_call(
     handler: Option<Arc<dyn ToolHandler>>,
     ctx: &ToolContext,
     arguments: &serde_json::Value,
-) -> (String, ToolCallStatus) {
+) -> (ToolOutput, ToolCallStatus) {
     let started_at = Instant::now();
     let result = if let Some(handler) = handler {
         match handler.execute(ctx, arguments).await {
-            Ok(output) => (output.content, ToolCallStatus::Completed),
+            Ok(output) => (output, ToolCallStatus::Completed),
             Err(error) => {
                 warn!(tool = handler.name(), error = %error, "tool execution failed");
-                (error.to_string(), ToolCallStatus::Failed)
+                (ToolOutput { content: error.to_string(), metadata: None }, ToolCallStatus::Failed)
             }
         }
     } else {
         info!(tool_name = %tool_name, "agent tool call handler not found");
         warn!(tool = tool_name, "tool not found");
-        (format!("tool not found: {tool_name}"), ToolCallStatus::Failed)
+        (
+            ToolOutput { content: format!("tool not found: {tool_name}"), metadata: None },
+            ToolCallStatus::Failed,
+        )
     };
     let duration = started_at.elapsed();
     let success = result.1 == ToolCallStatus::Completed;

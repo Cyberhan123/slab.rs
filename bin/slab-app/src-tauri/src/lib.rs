@@ -1,4 +1,5 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+mod diagnostics;
 mod paths;
 mod plugins;
 mod setup;
@@ -36,6 +37,7 @@ pub fn run() {
             plugins::plugin_pick_file,
             plugins::plugin_set_theme_snapshot,
             plugins::plugin_theme_snapshot,
+            diagnostics::export_diagnostics,
         ])
         .setup(move |app| {
             let workspace_bootstrap = workspace::init(app).map_err(|error| {

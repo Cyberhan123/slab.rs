@@ -44,6 +44,8 @@ import { AssistantComposer } from "./components/assistant-composer"
 import { AssistantModelSwitchDialog } from "./components/assistant-model-switch-dialog"
 import { AssistantSessionSheet } from "./components/assistant-session-sheet"
 import { AgentSurfaceLayer } from "./components/agent-surface-layer"
+import { AgentProgress } from "./components/agent-progress"
+import { AgentResumeControl } from "./components/agent-resume-control"
 import {
   AssistantSessionSummaryCard,
   type AssistantSessionSummaryItem,
@@ -350,9 +352,12 @@ function Assistant() {
     messages,
     editAndResend,
     pendingApprovals,
+    planProgress,
     regenerateResponse,
+    resume,
     retryLastResponse,
     submitApproval,
+    terminalReason,
   } = useAssistantAgent({
     beforeRequest: ensureAssistantModelReady,
     model: selectedModelId || "slab-llama",
@@ -847,6 +852,16 @@ function Assistant() {
         <div className="relative shrink-0 bg-[var(--shell-card)]">
           <AgentSurfaceLayer onSurfaceClosed={handleSurfaceClosed} />
           <div className="relative mx-auto w-full max-w-[768px] px-6 pb-6 pt-4 md:px-8 lg:px-0">
+            <AgentProgress
+              progress={planProgress}
+              labels={{ progress: t("pages.assistant.progress.label") }}
+            />
+            <AgentResumeControl
+              reason={terminalReason}
+              onResume={resume}
+              disabled={isRequesting || isPreparingModel}
+              labels={{ resume: t("pages.assistant.resume.action") }}
+            />
             <AssistantComposer
               value={draft}
               onValueChange={setDraft}

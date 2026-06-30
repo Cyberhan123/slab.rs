@@ -245,7 +245,14 @@ pub(crate) async fn execute_turn(
             .await;
             return Err(error);
         }
-        persist_final_answer(&context, messages, response.content.unwrap_or_default()).await;
+        persist_final_answer(
+            &context,
+            messages,
+            response.content.unwrap_or_default(),
+            collect_turn_artifact_refs(messages),
+            None,
+        )
+        .await;
         emit_turn_metrics(&context, turn_started_at, true).await;
         persist_turn_state(
             &context,
@@ -284,7 +291,39 @@ pub(crate) async fn execute_turn(
         record_invalid_tool_calls(&context, &validation.invalid, messages).await?;
     }
     if !validation.valid.is_empty() {
-        handle_tool_calls(&context, &validation.valid, messages).await?;
+        let task_completion = handle_tool_calls(&context, &validation.valid, messages).await?;
+        if let Some(completion) = task_completion {
+            // 双轨 2: the deterministic `task.complete` gate passed; emit the
+            // summary as the final answer and end the run (alongside the
+            // existing `tool_calls.is_empty()` Final path).
+            persist_final_answer(
+                &context,
+                messages,
+                completion.summary,
+                completion.artifact_refs,
+                Some("completed".to_owned()),
+            )
+            .await;
+            emit_turn_metrics(&context, turn_started_at, true).await;
+            persist_turn_state(
+                &context,
+                "completed",
+                Some(messages.as_slice()),
+                Some(&tool_specs),
+                None,
+                None,
+                Some(Utc::now().to_rfc3339()),
+            )
+            .await;
+            record_json(
+                context.trace,
+                &context.trace_context,
+                "slab-agent",
+                "turn_completed",
+                serde_json::json!({ "more_turns": false, "task_complete": true }),
+            );
+            return Ok(TurnOutcome::Final { token_usage });
+        }
     }
 
     emit_turn_metrics(&context, turn_started_at, true).await;
@@ -321,10 +360,22 @@ fn token_budget_would_be_exhausted(
         .is_some_and(|budget| budget > 0 && consumed_tokens.saturating_add(token_usage) >= budget)
 }
 
+/// External tools that require provider/network reachability and are removed
+/// from the agent's tool list in offline mode (INFRA-07). Local filesystem,
+/// shell, plan, verify, and a2u surface tools remain available offline.
+fn is_external_tool_name(name: &str) -> bool {
+    matches!(name, "web_search" | "mcp_call" | "mcp_list_tools") || name.starts_with("mcp__")
+}
+
 fn allowed_tool_specs(context: &TurnExecutionContext<'_>) -> Result<Vec<ToolSpec>, AgentError> {
     let mut specs = context.tools.tool_specs();
     if !context.config.allowed_tools.is_empty() {
         specs.retain(|tool| context.config.allowed_tools.contains(&tool.name));
+    }
+    if context.thread_context.offline {
+        // INFRA-07: offline mode narrows the toolset to local-only tools,
+        // dropping anything that needs external network/provider reachability.
+        specs.retain(|tool| !is_external_tool_name(&tool.name));
     }
 
     match &context.config.tool_choice {
@@ -421,8 +472,9 @@ async fn persist_final_answer(
     context: &TurnExecutionContext<'_>,
     messages: &mut Vec<ConversationMessage>,
     content: String,
+    artifact_refs: Vec<AgentArtifactRef>,
+    reason: Option<String>,
 ) {
-    let artifact_refs = collect_turn_artifact_refs(messages);
     context
         .notify
         .on_turn_event(
@@ -435,7 +487,7 @@ async fn persist_final_answer(
                     content_index: 0,
                     text: content.clone(),
                     artifact_refs,
-                    reason: None,
+                    reason,
                 },
             },
         )
@@ -510,7 +562,7 @@ fn normalize_workspace_artifact_path(path: &str) -> Option<String> {
     let normalized = trimmed.replace('\\', "/");
     let parts =
         normalized.split('/').filter(|part| !part.is_empty() && *part != ".").collect::<Vec<_>>();
-    if parts.is_empty() || parts.iter().any(|part| *part == "..") {
+    if parts.is_empty() || parts.contains(&"..") {
         return None;
     }
 
@@ -812,7 +864,26 @@ mod tests {
 
     use crate::event::AgentArtifactKind;
 
-    use super::collect_turn_artifact_refs;
+    use super::{collect_turn_artifact_refs, is_external_tool_name};
+
+    #[test]
+    fn is_external_tool_name_classifies_offline_droppable_tools() {
+        for external in ["web_search", "mcp_call", "mcp_list_tools", "mcp__server__tool"] {
+            assert!(is_external_tool_name(external), "{external} should be external");
+        }
+        for local in [
+            "read_file",
+            "write_file",
+            "shell",
+            "grep",
+            "plan_update",
+            "task.complete",
+            "verify",
+            "workspace.open",
+        ] {
+            assert!(!is_external_tool_name(local), "{local} should stay available offline");
+        }
+    }
 
     fn message(role: &str, content: &str) -> ConversationMessage {
         ConversationMessage {
