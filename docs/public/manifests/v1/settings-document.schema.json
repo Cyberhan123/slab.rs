@@ -280,6 +280,11 @@
             "phase2_limit": 64
           }
         },
+        "offline": {
+          "default": false,
+          "description": "Force offline degradation (INFRA-07): when true the agent's tool list is\nnarrowed to drop tools that need external network/provider reachability\n(`web_search`, `mcp_call`, `mcp_list_tools`, `mcp__*`). Set this when the\nenvironment is known to be offline. Defaults to `false`; a host-side\nprovider reachability probe can set this automatically in a follow-up.",
+          "type": "boolean"
+        },
         "runtime": {
           "$ref": "#/$defs/AgentRuntimeConfig",
           "default": {
@@ -1756,6 +1761,7 @@
           "phase2_lease_seconds": 1800,
           "phase2_limit": 64
         },
+        "offline": false,
         "runtime": {
           "limits": {
             "max_depth": 4,

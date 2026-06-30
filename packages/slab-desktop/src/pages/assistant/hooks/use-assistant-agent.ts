@@ -118,6 +118,10 @@ export function useAssistantAgent({
   const [pendingApprovals, setPendingApprovals] = useState<Map<string, PendingApproval>>(
     () => new Map()
   )
+  // CallIds whose approval decision is currently being submitted (in-flight).
+  // The Approve/Reject buttons are disabled only for these — NOT for every
+  // pending approval (which would make them permanently un-clickable).
+  const [submittingApprovals, setSubmittingApprovals] = useState<Set<string>>(() => new Set())
   const [eventsConnected, setEventsConnected] = useState(false)
   const [restoreComplete, setRestoreComplete] = useState(!canLoadSession)
   const socketRef = useRef<WebSocket | null>(null)
@@ -1128,6 +1132,11 @@ export function useAssistantAgent({
       }
 
       clearPendingApproval(callId)
+      setSubmittingApprovals((current) => {
+        const next = new Set(current)
+        next.add(callId)
+        return next
+      })
       updateThoughtStatus(decision.callId, approved ? 'loading' : 'abort')
 
       try {
@@ -1141,6 +1150,15 @@ export function useAssistantAgent({
       } catch (error) {
         toast.error(locale.approvalFailed, {
           description: getErrorMessage(error),
+        })
+      } finally {
+        setSubmittingApprovals((current) => {
+          if (!current.has(callId)) {
+            return current
+          }
+          const next = new Set(current)
+          next.delete(callId)
+          return next
         })
       }
     },
@@ -1222,6 +1240,10 @@ export function useAssistantAgent({
     () => Array.from(pendingApprovals.values()),
     [pendingApprovals]
   )
+  const submittingApprovalCallIds = useMemo(
+    () => Array.from(submittingApprovals),
+    [submittingApprovals]
+  )
   // TC-FE-05: latest plan_update progress (X/N) for the progress bar.
   const planProgress = useMemo<PlanProgress | null>(() => {
     for (let i = thoughts.length - 1; i >= 0; i -= 1) {
@@ -1264,6 +1286,7 @@ export function useAssistantAgent({
     status,
     terminalReason,
     submitApproval,
+    submittingApprovalCallIds,
     threadId,
   }
 }

@@ -269,11 +269,103 @@ impl ToolHandler for HubBrowseTool {
     }
 }
 
+pub(crate) struct PluginLaunchTool;
+
+impl PluginLaunchTool {
+    pub(crate) fn new() -> Self {
+        Self
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct PluginLaunchArgs {
+    #[serde(default, alias = "pluginId")]
+    plugin_id: Option<String>,
+    #[serde(default)]
+    surface: Option<String>,
+    #[serde(default, alias = "view")]
+    view: Option<String>,
+    #[serde(default)]
+    payload: Option<Value>,
+}
+
+#[async_trait]
+impl ToolHandler for PluginLaunchTool {
+    fn name(&self) -> &str {
+        "plugin.launch"
+    }
+
+    fn description(&self) -> &str {
+        "Open a plugin a2u surface for an installed plugin. The host re-validates the plugin is \
+         installed and the user consents (frontend risk level `ask`) before the surface opens."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "plugin_id": {
+                    "type": "string",
+                    "description": "Identifier of the installed plugin whose surface should open."
+                },
+                "pluginId": {
+                    "type": "string",
+                    "description": "Alias for plugin_id, accepted for frontend a2u compatibility."
+                },
+                "surface": {
+                    "type": "string",
+                    "description": "Optional plugin view or surface name to reveal."
+                },
+                "view": {
+                    "type": "string",
+                    "description": "Alias for surface."
+                },
+                "payload": {
+                    "description": "Optional opaque plugin input forwarded to the plugin surface."
+                }
+            },
+            "required": ["plugin_id"]
+        })
+    }
+
+    async fn execute(
+        &self,
+        _ctx: &ToolContext,
+        arguments: &Value,
+    ) -> Result<ToolOutput, AgentError> {
+        let args: PluginLaunchArgs =
+            serde_json::from_value(arguments.clone()).map_err(|error| {
+                AgentError::ToolExecution(format!("invalid plugin.launch args: {error}"))
+            })?;
+        // The plugin id is a lookup key for an installed plugin, so it is passed
+        // through verbatim — plugin ids may contain hyphens (e.g.
+        // `video-subtitle-translator`) and sanitizing them would break host lookup.
+        // The host confirms the plugin is actually installed and the user consents
+        // (frontend risk level `ask`) before the surface opens.
+        let plugin_id = first_trimmed([args.plugin_id.as_deref()])
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| {
+                AgentError::ToolExecution("plugin.launch requires a non-empty plugin_id".to_owned())
+            })?;
+        let view = first_trimmed([args.surface.as_deref(), args.view.as_deref()]);
+        let content = json!({
+            "surface": "plugin",
+            "pluginId": plugin_id,
+            "view": view,
+            "payload": args.payload,
+            "opened": true
+        });
+
+        Ok(ToolOutput { content: content.to_string(), metadata: Some(content) })
+    }
+}
+
 pub(crate) fn register_builtin_a2u_tools(router: &slab_agent::ToolRouter) {
     router.register(Box::new(WorkspaceOpenTool::new()));
     router.register(Box::new(ReviewShowTool::new()));
     router.register(Box::new(ImageEditTool::new()));
     router.register(Box::new(HubBrowseTool::new()));
+    router.register(Box::new(PluginLaunchTool::new()));
 }
 
 fn first_trimmed<const N: usize>(values: [Option<&str>; N]) -> Option<String> {
@@ -310,7 +402,8 @@ mod tests {
     use slab_agent::{ToolContext, ToolHandler};
 
     use super::{
-        HubBrowseTool, ImageEditTool, ReviewShowTool, WorkspaceOpenTool, register_builtin_a2u_tools,
+        HubBrowseTool, ImageEditTool, PluginLaunchTool, ReviewShowTool, WorkspaceOpenTool,
+        register_builtin_a2u_tools,
     };
 
     fn ctx() -> ToolContext {
@@ -405,6 +498,67 @@ mod tests {
         assert_eq!(value["opened"], true);
     }
 
+    #[tokio::test]
+    async fn plugin_launch_emits_plugin_surface_metadata() {
+        let tool = PluginLaunchTool::new();
+        let output = tool
+            .execute(
+                &ctx(),
+                &json!({
+                    "plugin_id": "video-subtitle-translator",
+                    "surface": "editor",
+                    "payload": { "taskId": "task-1" }
+                }),
+            )
+            .await
+            .expect("plugin.launch should execute");
+        let value: Value = serde_json::from_str(&output.content).unwrap();
+
+        assert_eq!(value["surface"], "plugin");
+        assert_eq!(value["pluginId"], "video-subtitle-translator");
+        assert_eq!(value["view"], "editor");
+        assert_eq!(value["payload"]["taskId"], "task-1");
+        assert_eq!(value["opened"], true);
+    }
+
+    #[tokio::test]
+    async fn plugin_launch_accepts_frontend_aliases_and_preserves_id() {
+        let tool = PluginLaunchTool::new();
+        let output = tool
+            .execute(&ctx(), &json!({ "pluginId": "  team-plugin  ", "view": "search.v1" }))
+            .await
+            .expect("plugin.launch should accept aliases");
+        let value: Value = serde_json::from_str(&output.content).unwrap();
+
+        // pluginId alias is accepted; the id is trimmed but preserved verbatim
+        // (hyphens kept) so host plugin lookup still matches.
+        assert_eq!(value["surface"], "plugin");
+        assert_eq!(value["pluginId"], "team-plugin");
+        assert_eq!(value["view"], "search.v1");
+    }
+
+    #[tokio::test]
+    async fn plugin_launch_rejects_missing_plugin_id() {
+        let tool = PluginLaunchTool::new();
+        let error = tool
+            .execute(&ctx(), &json!({ "surface": "editor" }))
+            .await
+            .expect_err("plugin.launch without plugin_id should fail");
+
+        assert!(error.to_string().contains("plugin_id"));
+    }
+
+    #[tokio::test]
+    async fn plugin_launch_rejects_blank_plugin_id() {
+        let tool = PluginLaunchTool::new();
+        let error = tool
+            .execute(&ctx(), &json!({ "plugin_id": "   " }))
+            .await
+            .expect_err("blank plugin_id should fail");
+
+        assert!(error.to_string().contains("plugin_id"));
+    }
+
     #[test]
     fn registers_builtin_a2u_tools_in_agent_router() {
         let router = ToolRouter::new();
@@ -415,5 +569,6 @@ mod tests {
         assert!(router.get("review.show").is_some());
         assert!(router.get("image.edit").is_some());
         assert!(router.get("hub.browse").is_some());
+        assert!(router.get("plugin.launch").is_some());
     }
 }

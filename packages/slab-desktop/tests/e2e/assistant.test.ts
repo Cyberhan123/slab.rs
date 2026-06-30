@@ -85,6 +85,10 @@ describe.sequential("assistant e2e", () => {
     await page.getByTestId("assistant-empty-state").waitFor({ state: "visible", timeout: 90_000 })
 
     await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 })
+    // A full reload re-mounts the app, which re-fires the WorkspaceModeSync
+    // `/`→`/workspace` redirect. Re-enter the Assistant route via the sidebar
+    // link (client-side nav) so the composer renders. See openAssistant().
+    await page.getByTestId("sidebar-link-assistant").click()
     await waitForComposerReady(page)
     await waitForCurrentAssistantSession(
       testEnv.serverBaseUrl,

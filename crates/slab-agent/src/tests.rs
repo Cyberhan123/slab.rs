@@ -1698,6 +1698,57 @@ async fn tool_choice_specific_filters_tools_sent_to_llm() {
 }
 
 #[tokio::test]
+async fn offline_mode_drops_external_tools_from_llm_tool_list() {
+    // INFRA-07: with thread_context.offline = true, the tool list sent to the
+    // LLM must drop external tools (web_search / mcp_call / mcp__*) while
+    // keeping local tools (echo). This is the offline-degradation key node.
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let llm = Arc::new(CapturingToolsLlm { calls: calls.clone() });
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(TestEchoTool));
+    router.register(Box::new(JsonNoopTool { name: "web_search" }));
+    router.register(Box::new(JsonNoopTool { name: "mcp_call" }));
+    router.register(Box::new(JsonNoopTool { name: "mcp__weather__forecast" }));
+
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(
+        AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4)
+            .with_thread_context(AgentThreadContext::new().with_offline(true)),
+    );
+    let config = AgentConfig { model: "mock".into(), max_turns: 1, ..AgentConfig::default() };
+    let thread_id = control
+        .spawn(
+            "session-offline".into(),
+            config,
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("finish".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Interrupted).await;
+    let calls = calls.lock().unwrap().clone();
+    assert!(!calls.is_empty(), "LLM should have been called at least once");
+    for tools in &calls {
+        assert!(tools.contains(&"echo".to_owned()), "local tool `echo` must remain: {tools:?}");
+        assert!(!tools.contains(&"web_search".to_owned()), "web_search must be dropped: {tools:?}");
+        assert!(!tools.contains(&"mcp_call".to_owned()), "mcp_call must be dropped: {tools:?}");
+        assert!(
+            !tools.iter().any(|name| name.starts_with("mcp__")),
+            "mcp__* must be dropped: {tools:?}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn disallowed_registered_tool_is_not_executed_and_feedback_is_persisted() {
     let executions = Arc::new(Mutex::new(0));
     let llm = Arc::new(SecretToolCallLlm::new());

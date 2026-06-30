@@ -27,7 +27,17 @@ export type ToolExecutionResult = {
 const approveButtonName = /^(Approve|\u6279\u51c6)$/u
 
 export async function openAssistant(page: Page, uiBaseUrl: string): Promise<void> {
-  await page.goto(`${uiBaseUrl}/`, { waitUntil: "domcontentloaded", timeout: 60_000 })
+  // WorkspaceModeSync (App.tsx) redirects a *fresh full load* at `/` to
+  // `/workspace` once when a workspace is active (intended workspace-mode
+  // behavior). The e2e stack always configures a workspace, and `page.goto`
+  // is a full reload (which remounts the app and re-triggers that redirect), so
+  // a full load at `/` always lands on `/workspace` and the assistant composer
+  // never renders. Reach the Assistant page with a client-side SPA navigation
+  // instead: full-load at `/workspace` (no `/`-redirect), then click the sidebar
+  // Assistant link (a react-router <Link/>) which navigates to `/` without
+  // remounting, so the one-time redirect guard does not re-fire.
+  await page.goto(`${uiBaseUrl}/workspace`, { waitUntil: "domcontentloaded", timeout: 60_000 })
+  await page.getByTestId("sidebar-link-assistant").click()
   await waitForComposerReady(page)
 }
 
@@ -138,10 +148,29 @@ export async function approvePendingToolCall(page: Page): Promise<void> {
 }
 
 export async function expectAssistantPageText(page: Page, text: string): Promise<void> {
-  await assistantMessageByText(page, visibleNeedle(text)).waitFor({
-    state: "visible",
-    timeout: 180_000,
-  })
+  const needle = visibleNeedle(text)
+  // Message bubbles are markdown-rendered (AssistantMarkdown), so the DOM text
+  // can differ from the raw prompt by markdown formatting chars — e.g. a marker
+  // like `SLAB_AGENT_E2E_…` renders with its underscores intact, but
+  // `visibleNeedle` strips `_`. Matching the stripped needle against raw DOM
+  // text therefore misses prompts that contain `_`/`*`/`#`/`>`/`[`/`]`. Normalize
+  // the DOM text the same way before comparing.
+  await eventually(
+    `assistant page text '${needle}'`,
+    async () => {
+      const messages = page.locator('[data-testid^="assistant-message-"]')
+      const count = await messages.count()
+      for (let index = 0; index < count; index += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        const raw = await messages.nth(index).textContent()
+        if (raw && normalizeVisibleText(raw).includes(needle)) {
+          return true
+        }
+      }
+      return null
+    },
+    180_000
+  )
 }
 
 export function latestAssistantTextAfter(
@@ -174,10 +203,6 @@ export function parseToolJson(content: string): Record<string, unknown> {
 
 export function visibleNeedle(text: string): string {
   return normalizeVisibleText(text).slice(0, 120)
-}
-
-function assistantMessageByText(page: Page, text: string): Locator {
-  return page.locator('[data-testid^="assistant-message-"]').filter({ hasText: text }).first()
 }
 
 function latestFinalAssistantTextAfterTool(

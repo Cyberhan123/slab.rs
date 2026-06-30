@@ -310,6 +310,13 @@ pub struct AgentSettingsConfig {
     pub memories: AgentMemoriesConfig,
     #[serde(default)]
     pub runtime: AgentRuntimeConfig,
+    /// Force offline degradation (INFRA-07): when true the agent's tool list is
+    /// narrowed to drop tools that need external network/provider reachability
+    /// (`web_search`, `mcp_call`, `mcp_list_tools`, `mcp__*`). Set this when the
+    /// environment is known to be offline. Defaults to `false`; a host-side
+    /// provider reachability probe can set this automatically in a follow-up.
+    #[serde(default)]
+    pub offline: bool,
 }
 
 impl Default for AgentSettingsConfig {
@@ -320,6 +327,7 @@ impl Default for AgentSettingsConfig {
             hooks: AgentHooksConfig::default(),
             memories: AgentMemoriesConfig::default(),
             runtime: AgentRuntimeConfig::default(),
+            offline: false,
         }
     }
 }
@@ -1730,6 +1738,27 @@ mod tests {
         let parsed: AgentSettingsConfig = serde_json::from_str(json).expect("parse");
         assert_eq!(parsed.runtime.limits.max_threads, 32);
         assert_eq!(parsed.runtime.limits.max_depth, 4);
+    }
+
+    #[test]
+    fn agent_offline_defaults_to_false() {
+        let default = AgentSettingsConfig::default();
+        assert!(!default.offline);
+    }
+
+    #[test]
+    fn agent_offline_deserializes_from_override() {
+        let json = r#"{ "offline": true }"#;
+        let parsed: AgentSettingsConfig = serde_json::from_str(json).expect("parse");
+        assert!(parsed.offline);
+    }
+
+    #[test]
+    fn agent_offline_absent_parses_as_false() {
+        // Old configs without `offline` must still parse (backward compat).
+        let json = r#"{ "debug": false }"#;
+        let parsed: AgentSettingsConfig = serde_json::from_str(json).expect("parse");
+        assert!(!parsed.offline);
     }
 
     #[test]

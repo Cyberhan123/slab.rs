@@ -351,12 +351,12 @@ function Assistant() {
     isRequesting,
     messages,
     editAndResend,
-    pendingApprovals,
     planProgress,
     regenerateResponse,
     resume,
     retryLastResponse,
     submitApproval,
+    submittingApprovalCallIds,
     terminalReason,
   } = useAssistantAgent({
     beforeRequest: ensureAssistantModelReady,
@@ -724,7 +724,7 @@ function Assistant() {
       }
       const items: BubbleListProps["items"] = safeMessages.map((item) => ({
         content: {
-          approvingCallIds: pendingApprovals.map((approval) => approval.callId),
+          approvingCallIds: submittingApprovalCallIds,
           item,
           labels,
           markdownClassName: markdownThemeClassName,
@@ -759,12 +759,12 @@ function Assistant() {
       editAndResend,
       markdownThemeClassName,
       modelLoading,
-      pendingApprovals,
       regenerateResponse,
       handleActionFeedback,
       safeMessages,
       retryLastResponse,
       submitApproval,
+      submittingApprovalCallIds,
       t,
     ]
   )

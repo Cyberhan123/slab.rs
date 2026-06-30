@@ -163,8 +163,10 @@ fn build_agent_control(
     let thread_context = workspace_root
         .clone()
         .map(|root| WorkspaceRef { root, session_id: None })
-        .map(|workspace| AgentThreadContext::new().with_workspace(workspace))
-        .unwrap_or_default();
+        .map(|workspace| {
+            AgentThreadContext::new().with_workspace(workspace).with_offline(settings.agent.offline)
+        })
+        .unwrap_or_else(|| AgentThreadContext::new().with_offline(settings.agent.offline));
     // ADR-013: concurrency limits are configurable via settings
     // (agent.runtime.limits), defaulting to the historical 32/4 ceiling.
     let runtime_limits = ctx.pmid.config().agent.runtime.limits.clamped();
