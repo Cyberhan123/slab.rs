@@ -43,6 +43,7 @@ class AgentConfigInput:
         structured_output (AgentStructuredOutputInputType0 | AgentStructuredOutputInputType1 | None | Unset):
         system_prompt (None | str | Unset):
         temperature (float | None | Unset):
+        token_budget (int | None | Unset):
         tool_choice (AgentToolChoiceInputType0 | AgentToolChoiceInputType1 | AgentToolChoiceInputType2 |
             AgentToolChoiceInputType3 | None | Unset):
         tool_concurrency (int | None | Unset):
@@ -66,6 +67,7 @@ class AgentConfigInput:
     ) = UNSET
     system_prompt: None | str | Unset = UNSET
     temperature: float | None | Unset = UNSET
+    token_budget: int | None | Unset = UNSET
     tool_choice: (
         AgentToolChoiceInputType0
         | AgentToolChoiceInputType1
@@ -174,6 +176,12 @@ class AgentConfigInput:
         else:
             temperature = self.temperature
 
+        token_budget: int | None | Unset
+        if isinstance(self.token_budget, Unset):
+            token_budget = UNSET
+        else:
+            token_budget = self.token_budget
+
         tool_choice: dict[str, Any] | None | Unset
         if isinstance(self.tool_choice, Unset):
             tool_choice = UNSET
@@ -247,6 +255,8 @@ class AgentConfigInput:
             field_dict["system_prompt"] = system_prompt
         if temperature is not UNSET:
             field_dict["temperature"] = temperature
+        if token_budget is not UNSET:
+            field_dict["token_budget"] = token_budget
         if tool_choice is not UNSET:
             field_dict["tool_choice"] = tool_choice
         if tool_concurrency is not UNSET:
@@ -438,6 +448,15 @@ class AgentConfigInput:
 
         temperature = _parse_temperature(d.pop("temperature", UNSET))
 
+        def _parse_token_budget(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        token_budget = _parse_token_budget(d.pop("token_budget", UNSET))
+
         def _parse_tool_choice(
             data: object,
         ) -> (
@@ -570,6 +589,7 @@ class AgentConfigInput:
             structured_output=structured_output,
             system_prompt=system_prompt,
             temperature=temperature,
+            token_budget=token_budget,
             tool_choice=tool_choice,
             tool_concurrency=tool_concurrency,
             top_k=top_k,

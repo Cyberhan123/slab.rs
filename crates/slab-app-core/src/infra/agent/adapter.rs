@@ -12,7 +12,7 @@ use slab_agent::config::AgentConfig;
 use slab_agent::error::AgentError;
 use slab_agent::{
     AgentStreamAssembler, AgentStreamDelta, parse_rendered_tool_call_output,
-    port::{LlmPort, LlmResponse, LlmStreamObserver, ParsedToolCall, ToolSpec},
+    port::{LlmPort, LlmResponse, LlmStreamObserver, LlmUsage, ParsedToolCall, ToolSpec},
 };
 use slab_agent_tracing::{AgentTraceContext, record_json_from_context};
 use slab_proto::openai::{FunctionTool, FunctionToolType};
@@ -201,6 +201,7 @@ fn e2e_llm_response(messages: &[ConversationMessage], tools: &[ToolSpec]) -> Llm
                 .to_string(),
             }],
             finish_reason: Some("tool_calls".to_owned()),
+            usage: None,
         };
     }
 
@@ -217,6 +218,7 @@ fn e2e_llm_response(messages: &[ConversationMessage], tools: &[ToolSpec]) -> Llm
         content_already_streamed: false,
         tool_calls: Vec::new(),
         finish_reason: Some("stop".to_owned()),
+        usage: None,
     }
 }
 
@@ -332,6 +334,7 @@ fn llm_response_from_chat_result(result: ChatCompletionResult) -> Result<LlmResp
                     content_already_streamed: false,
                     tool_calls,
                     finish_reason: choice.finish_reason,
+                    usage: result.usage.map(Into::into),
                 });
             }
         }
@@ -345,6 +348,7 @@ fn llm_response_from_chat_result(result: ChatCompletionResult) -> Result<LlmResp
         content_already_streamed: false,
         tool_calls,
         finish_reason: choice.finish_reason,
+        usage: result.usage.map(Into::into),
     })
 }
 
@@ -383,6 +387,7 @@ async fn llm_response_from_chat_stream(
             "content_already_streamed": completion.content_already_streamed,
             "tool_calls": parsed_tool_calls_payload(&completion.tool_calls),
             "finish_reason": completion.finish_reason,
+            "usage": completion.usage,
         }),
     );
     if let Some(delta) = completion.unstreamed_text_delta.as_deref() {
@@ -396,7 +401,19 @@ async fn llm_response_from_chat_stream(
         content_already_streamed: completion.content_already_streamed,
         tool_calls: completion.tool_calls,
         finish_reason: completion.finish_reason,
+        usage: completion.usage,
     })
+}
+
+impl From<crate::domain::models::TextGenerationUsage> for LlmUsage {
+    fn from(value: crate::domain::models::TextGenerationUsage) -> Self {
+        Self {
+            prompt_tokens: value.prompt_tokens,
+            completion_tokens: value.completion_tokens,
+            total_tokens: value.total_tokens,
+            estimated: value.estimated,
+        }
+    }
 }
 
 fn response_content_from_stream_parts(content: &str, reasoning: &str) -> Option<String> {
@@ -466,6 +483,7 @@ fn record_llm_response(
             "content": response.content,
             "content_already_streamed": response.content_already_streamed,
             "finish_reason": response.finish_reason,
+            "usage": response.usage,
             "tool_calls": parsed_tool_calls_payload(&response.tool_calls),
         }),
     );
@@ -487,6 +505,7 @@ fn parsed_tool_calls_payload(tool_calls: &[ParsedToolCall]) -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::models::ChatResultChoice;
 
     fn text_message(role: &str, content: &str) -> ConversationMessage {
         ConversationMessage {
@@ -582,6 +601,37 @@ mod tests {
         assert_eq!(response.finish_reason.as_deref(), Some("stop"));
     }
 
+    #[test]
+    fn chat_result_usage_is_forwarded_to_agent_response() {
+        let result = ChatCompletionResult {
+            id: "chatcmpl-test".to_owned(),
+            object: "chat.completion".to_owned(),
+            created: 0,
+            model: "mock".to_owned(),
+            system_fingerprint: "test".to_owned(),
+            choices: vec![ChatResultChoice {
+                index: 0,
+                message: text_message("assistant", "done"),
+                finish_reason: Some("stop".to_owned()),
+            }],
+            usage: Some(crate::domain::models::TextGenerationUsage {
+                prompt_tokens: 11,
+                completion_tokens: 7,
+                total_tokens: 18,
+                prompt_tokens_details: Default::default(),
+                estimated: false,
+            }),
+        };
+
+        let response = llm_response_from_chat_result(result).expect("response");
+        let usage = response.usage.expect("usage should be forwarded");
+
+        assert_eq!(usage.prompt_tokens, 11);
+        assert_eq!(usage.completion_tokens, 7);
+        assert_eq!(usage.total_tokens, 18);
+        assert!(!usage.estimated);
+    }
+
     #[tokio::test]
     async fn forwards_chat_stream_reasoning_events() {
         use futures::StreamExt as _;
@@ -614,6 +664,7 @@ mod tests {
             r#"{"choices":[{"delta":{"reasoning_content":"plan "}}]}"#.to_owned(),
             r#"{"choices":[{"delta":{"reasoning_content":"done","content":"answer"}}]}"#.to_owned(),
             r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#.to_owned(),
+            r#"{"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5,"estimated":true}}"#.to_owned(),
         ])
         .boxed();
         let mut observer = RecordingObserver {
@@ -634,5 +685,6 @@ mod tests {
             response.content.as_deref(),
             Some("<think status=\"done\">\n\nplan done\n\n</think>\n\nanswer")
         );
+        assert_eq!(response.usage.expect("usage").total_tokens, 5);
     }
 }

@@ -47,10 +47,10 @@
 | 主循环是 `for turn_offset in 0..self.config.max_turns` | [thread.rs:248](crates/slab-agent/src/thread.rs#L248) | 单 turn 在 [turn.rs:57](crates/slab-agent/src/turn.rs#L57) `execute_turn` |
 | 终止已是结构化的：`response.tool_calls.is_empty()` → `TurnOutcome::Final` | [turn.rs:198](crates/slab-agent/src/turn.rs#L198)、[turn.rs:52](crates/slab-agent/src/turn.rs#L52) | 用户担心的"文本判停"代码里不存在——保持并强化 |
 | `reject_missing_required_tool_call` 仅在 `tool_choice=Required/Tool` 时生效，`Auto/None` 放行 | [turn.rs:310-320](crates/slab-agent/src/turn.rs#L310) | default-deny 不完全，需 `task.complete` 强化 |
-| **假完成隐患**：`'turns` for 循环**正常退出（非 break、非 interrupted、非 last_error）会落到 L424-451 的 `ResponseCompleted` + `set_status(Completed)`** | [thread.rs:424-451](crates/slab-agent/src/thread.rs#L424) | max_turns 耗尽本质是未完成却被持久化成完成态，是 resume 无据可依的根因 |
+| **假完成隐患（已修复）**：`'turns` for 循环耗尽曾会落到 `ResponseCompleted` + `set_status(Completed)`；当前代码已区分真 Final 与轮次耗尽，轮次耗尽写 `ResponseCancelled` + `Interrupted` + `max_turns_reached` | [thread.rs](crates/slab-agent/src/thread.rs)、[tests.rs](crates/slab-agent/src/tests.rs) | max_turns 耗尽不再伪装成真完成；线程保持可续跑。后续仍需把 `completion_text`/reason 语义拆分成显式字段 |
 | `update_thread_status` 已支持 `Option<&str> reason` | [thread.rs:449](crates/slab-agent/src/thread.rs#L449)、[thread.rs:363](crates/slab-agent/src/thread.rs#L363) | 复用此字段承载 `TerminationReason`，**零 migration** |
 | interrupt 与 shutdown 已解耦：interrupt 取消当前 turn 保留线程可续跑 | [control.rs:381](crates/slab-agent/src/control.rs#L381)、[control.rs:357](crates/slab-agent/src/control.rs#L357) | 但 thread.rs break 'turns 路径绕过了 interrupt 的 soft-stop（[thread.rs:331](crates/slab-agent/src/thread.rs#L331)） |
-| 兜底只有 `max_turns`（默认 10）+ `invalid_tool_call_retries` 预算 + 并发 32/深度 4 | [config.rs:86](crates/slab-agent/src/config.rs#L86)、[bootstrap.rs:168](crates/slab-app-core/src/infra/agent/bootstrap.rs#L168) | 无循环/重复检测；无 per-thread token 预算 |
+| 兜底原本只有 `max_turns`（默认 10）+ `invalid_tool_call_retries` 预算 + 并发 32/深度 4；当前已补循环 guard 与显式 `token_budget` soft-stop | [config.rs](crates/slab-agent/src/config.rs)、[turn.rs](crates/slab-agent/src/turn.rs)、[thread.rs](crates/slab-agent/src/thread.rs)、[bootstrap.rs:168](crates/slab-app-core/src/infra/agent/bootstrap.rs#L168) | 并发 32/深度 4 仍硬编码；token 预算当前是每次 run/resume 内的 response usage 兜底，不是跨恢复持久 token ledger |
 
 ### 2.2 plan / subagent
 
@@ -65,11 +65,11 @@
 
 | 事实 | 证据 | 影响 |
 |---|---|---|
-| `ToolContext` 仅 `thread_id`/`turn_index`/`depth` 三字段 | [tool.rs:17-24](crates/slab-agent/src/tool.rs#L17) | workspace/plan/循环签名共同卡点 |
-| 唯一构造点在 `handle_tool_calls` | [turn_tool_call.rs:39-43](crates/slab-agent/src/turn_tool_call.rs#L39) | Option + builder 扩容可单点注入 |
+| `ToolContext` 已含 `thread_id`/`turn_index`/`depth` + `workspace: Option<WorkspaceRef>` + `plan: Option<PlanRef>`；`AgentThreadContext` 承载 host/app-core 注入的 workspace/plan scope | [tool.rs](crates/slab-agent/src/tool.rs)、[control.rs](crates/slab-agent/src/control.rs)、[thread.rs](crates/slab-agent/src/thread.rs) | workspace-scoped 工具已有真实上下文入口；`PlanRef` 只是可选句柄，不代表 durable plan 已实现 |
+| 唯一构造点在 `handle_tool_calls`，当前会把 `AgentThreadContext` 注入到每个 `ToolContext`，并在 `WorkspaceRef.session_id` 缺省时补当前 session | [turn_tool_call.rs](crates/slab-agent/src/turn_tool_call.rs) | workspace/plan scope 可在工具执行链路里稳定读取 |
 | `ToolRouter` 是 `Arc<RwLock<HashMap>>`，`register`/`unregister`/`tool_specs` | [tool.rs:72-114](crates/slab-agent/src/tool.rs#L72) | turn 内工具表快照语义需显式定义（防热更新漂移） |
 | 审批门：每个 tool 按需阻塞等 `ApprovalPort` 决策；`approval_request` 返回 None 则无审批直跑 | [turn_tool_call.rs:418](crates/slab-agent/src/turn_tool_call.rs#L418)、[turn_tool_call.rs:319](crates/slab-agent/src/turn_tool_call.rs#L319) | read_file 与 write_file 走同一审批流（一刀切） |
-| `ToolRiskAnalyzer` trait + `BasicToolRiskAnalyzer` **仅识别 shell** | [risk.rs:7-45](crates/slab-agent/src/risk.rs#L7) | 分级基建已部分就绪，是 P1 强化而非从零 |
+| `ToolRiskAnalyzer` trait + `BasicToolRiskAnalyzer` 已按工具名静态分级，并对 `High` 风险提供通用审批兜底 | [risk.rs](crates/slab-agent/src/risk.rs)、[turn_tool_call.rs](crates/slab-agent/src/turn_tool_call.rs) | 完整 sandbox/配置化 allow-sandbox-ask 策略仍是后续切片 |
 | `ToolRiskAssessment`/`ToolRiskLevel`（High/Medium/Low） | [risk.rs:5](crates/slab-agent/src/risk.rs#L5) | 已有三态雏形，需映射到 allow/sandbox/ask |
 
 ### 2.4 插件 capability / 工具注册
@@ -106,7 +106,7 @@
 | `verify.rs`（`VerifyTool`，确定性校验：`workspace_build`/`lint`/`diff`） | `crates/slab-agent-tools/src/`（**新增**） | 确定性工具，作 plan 节点 `result_ref` |
 | `plan.rs` 扩 `result_ref` 字段 + `mark_done(task_id)` | `crates/slab-agent-tools/src/plan.rs`（**改动**） | 标准化逻辑本就在此 crate；**砍掉 DAG + `replan(plan_patch)` + 独立 namespace 持久化**（红队 must_cut：YAGNI，max_turns=10 撑不起 DAG） |
 | `TerminationReason`（普通枚举 + reason 字符串编码，**不进 ThreadStatus enum**） | `crates/slab-agent/src/thread.rs`（**改动**）+ 复用 `update_thread_status` 的 `Option<&str> reason` | 编排核心只加 reason 解析/写入，零状态机迁移、零 SQLx migration（红队可行性风险吸收） |
-| 循环/重复检测 `repetition_guard`（内联 thread.rs） | `crates/slab-agent/src/thread.rs`（**改动**） | 读 `TurnOutcome` 属编排内置状态；**需架构签字**（开放问题 4）；命中直接 `break 'turns` + 设 stuck flag，**不依赖 interrupt 异步 cancellation**（红队可行性风险吸收） |
+| 循环/重复检测 `repetition_guard`（私有模块） | `crates/slab-agent/src/repetition_guard.rs` + `thread.rs`（**已落地**） | 读 `TurnOutcome` 属编排内置状态；命中直接 `break 'turns` 并写 `Interrupted` + `repetition_detected`，**不依赖 interrupt 异步 cancellation**（红队可行性风险吸收） |
 | `ToolContext` 扩容（`Option<WorkspaceRef>` + builder） | `crates/slab-agent/src/tool.rs`（**改动**） | 公共类型 shape 变，只加 Option 字段；**不上 trait object 注入一套句柄**（红队过度工程风险吸收） |
 
 #### 边界论证（红队边界违规警告吸收）
@@ -119,7 +119,7 @@
 
 | 新增/改动 | 归属 | 边界论证 |
 |---|---|---|
-| `PluginCapabilityKind::a2u_surface` 变体 | `crates/slab-types/src/plugin.rs`（**改动**） | 确定性数据结构，跨 crate 契约；`gen:plugin-packs`+`gen:schemas`；向后兼容 serde default |
+| `PluginCapabilityKind::a2u_surface` 变体 | `crates/slab-types/src/plugin.rs`（**已落地**） | 确定性数据结构，跨 crate 契约；`bun run gen:api` 已同步 OpenAPI/SDK 类型；当前 public `slab-manifest.schema.json` 是 model-pack schema，不覆盖 plugin manifest |
 | `plugin.open` ToolHandler（`plugin_id`/`surface`/`payload`） | `bin/slab-app/src-tauri/src/`（**新增 host 层实现**） | **红队边界违规警告吸收**：plugin.open 涉插件 sandbox 生命周期/capabilities，属 host 职责（AGENTS.md Tauri child WebViews 默认）；若落 app-core 会把 slab-plugin 运行时依赖反向引入 HTTP-free 业务核心，破坏分层。host 通过 port trait 把"打开 surface"能力注入 app-core |
 | `pluginCall` capability 注册成 agent 可见工具（`plugin__{id}__{capability}` 命名空间，与 mcp sanitize 一致） | `bin/slab-app/src-tauri/src/`（host 注册）+ port trait 经 `runtime.rs` 注入 | host 调用 `slab-plugin` registry/integrity/permission，不让 app-core 直接依赖 |
 | effects 静态推断（runtime 类型决定信任等级） | `bin/slab-app/src-tauri/src/`（host 推断） | **红队 must_add 吸收**：js→Tauri sandbox、python→PyO3 isolate、wasm→extism，插件自报 effects 只作 hint |
@@ -133,7 +133,7 @@
 |---|---|---|
 | per-thread token 硬预算（`BudgetExhausted` reason） | `crates/slab-agent/src/thread.rs`（编排内联）+ `config.rs`（配置） | **红队 must_add 吸收**：LLM 调用累计 token 超 thread 预算触发终止；比循环检测更现实的成本失控兜底 |
 | 离线降级（探测 provider 可达性，收窄工具集） | `bin/slab-app/src-tauri/src/`（host 探测）+ port trait 注入 | **红队 must_add 吸收**：北极星"离线可用"硬要求；host 探测后经 port 通知 app-core 收窄 |
-| 敏感路径审批黑名单（`~/.ssh`/`.env`/`*credentials*`/`*.pem` 强制 ask） | `crates/slab-agent/src/risk.rs`（强化 `BasicToolRiskAnalyzer`） | **红队 must_add 吸收**：覆盖 read 类默认 allow，守隐私优先红线 |
+| 敏感路径审批黑名单（`~/.ssh`/`.env`/`*credentials*`/`*token*`/`*.pem`/`.slab/slab.db` 强制 ask） | `crates/slab-agent-tools/src/sensitive_path.rs` + read/search 工具 `approval_request`（**已落地**） | **红队 must_add 吸收**：覆盖 read/search 类默认 allow，守隐私优先红线；`BasicToolRiskAnalyzer` 静态分级和 `High` 风险通用审批兜底已落地，sandbox/配置化策略仍后续 |
 | `agent.runtime.limits` 可配置域 + FIFO 背压 | `crates/slab-config`（PMID 配置）+ `crates/slab-app-core/src/infra/agent/bootstrap.rs` | **红队可行性风险吸收**：bootstrap.rs:168 硬编码 32/4 提为可配置；FIFO 排队语义暴露给前端；冷却窗口防振荡 |
 | workspace 切换 = sidecar 优雅重启 + task 受控迁移 | `bin/slab-app/src-tauri/src/`（host 编排）+ 复用 `control.interrupt` | **红队边界违规警告吸收**：切换前枚举 active thread → 逐个 interrupt（带 grace period 等 watch channel 确认 Interrupted）→ session 快照（原子性）→ shutdown；session 与 project 一对一绑定，**不放开放问题** |
 | 统一 secret store（`SecretPort` trait） | `crates/slab-config`（**新增 `SecretPort` port trait**）+ `bin/slab-app/src-tauri`/`bin/slab-runtime`（keyring adapter 实现） | **红队边界违规警告吸收**：keyring 跨平台 OS 集成是运行时副作用，不能放 `crates/` 纯库 crate（会被 slab-agent-tools/slab-plugin 反向引入）；port trait 在 crates/，实现落 composition root |
@@ -189,7 +189,8 @@ flowchart TB
 | plan `result_ref` 回填 | `slab-agent-tools`（plan.rs） | 标准化逻辑本在此 crate |
 | 循环/重复检测 | `slab-agent`（thread.rs 内联，架构签字） | 读 `TurnOutcome` 属编排内置状态 |
 | `TerminationReason` reason 编码 | `slab-agent`（thread.rs） | 编排核心，仅 reason 解析/写入，零 migration |
-| 工具审批三态分级（allow/sandbox/ask）+ 敏感路径黑名单 | `slab-agent`（risk.rs 强化） | risk analyzer 是编排内置 port（[risk.rs:7](crates/slab-agent/src/risk.rs#L7)） |
+| 工具审批三态分级（allow/sandbox/ask） | `slab-agent`（risk.rs，**静态分级已落地**） | risk analyzer 是编排内置 port；`High` 风险在无工具自带审批时触发通用审批兜底，完整 sandbox 策略仍后续 |
+| 敏感路径审批黑名单 | `slab-agent-tools`（`sensitive_path.rs` + read/search 工具 `approval_request`，**已落地**） | 当前执行路径只有 `approval_request` 会真正暂停工具调用；因此先在 `read_file`/`list_dir`/`grep`/`file_glob` 落强制 ask |
 | `plugin.open` / action tool / capability 注册 | **host**（`bin/slab-app/src-tauri`） | 涉插件 sandbox 生命周期/capabilities，属 host 职责 |
 | `ToolContext` 扩容 | `slab-agent`（tool.rs） | 公共类型 shape |
 | secret store / 离线降级 / workspace 切换 | host 编排 + app-core port trait | 运行时副作用在 host/composition root |
@@ -248,7 +249,7 @@ sequenceDiagram
 |---|---|
 | [turn.rs:198](crates/slab-agent/src/turn.rs#L198) | `tool_calls.is_empty()` 分支保持（双轨 1）；新增对 `task.complete` 工具输出的特殊识别（双轨 2，开放问题 1 倾向特殊控制工具——调即 Final 短路） |
 | [turn.rs:199-211](crates/slab-agent/src/turn.rs#L199) | `reject_missing_required_tool_call` 保持，但 `task.complete` 调用即满足"required tool call"语义 |
-| [thread.rs:424-451](crates/slab-agent/src/thread.rs#L424) | **假完成修复**：for 循环正常退出（非 Final、非 break）时写 `TerminationReason::MaxTurns` reason，状态仍 `Completed`（**不新增 enum 变体**），但 reason 字段区分"真完成"与"turn 耗尽" |
+| [thread.rs](crates/slab-agent/src/thread.rs) | **假完成修复（已落地）**：for 循环正常耗尽（非 Final、非 interrupt、非 error）时发 `ResponseCancelled`，状态写 `Interrupted`，并持久化 `max_turns_reached`；真 Final 才写 `Completed` |
 | [thread.rs:363](crates/slab-agent/src/thread.rs#L363) | interrupt 路径已有 reason="interrupted"；循环 guard 命中走独立 stuck flag 路径写 reason="repetition_detected" |
 
 ### 5.3 task.complete 强制策略 checklist
@@ -305,11 +306,11 @@ impl TerminationReason {
 
 | 要素 | 现状 | To-Be |
 |---|---|---|
-| objective（明确目标） | `task` 字段已有（[subagent.rs:22](crates/slab-agent-tools/src/subagent.rs#L22)） | prompt 模板强化"只做委派任务" |
-| output_format（输出格式） | 缺 | `DelegateSubagentArgs` 加 `output_format: Option<String>` |
+| objective（明确目标） | `task` 字段已有（[subagent.rs](crates/slab-agent-tools/src/subagent.rs)） | 已将 child prompt 渲染为 `Objective` + `Constraints` |
+| output_format（输出格式） | 已支持 `output_format: Option<String>` | 写入 child prompt 的 `Required output format` 段 |
 | 来源（继承 vs 隔离） | 继承 parent config（[subagent.rs:93](crates/slab-agent-tools/src/subagent.rs#L93)） | 显式 `allowed_tools` 隔离已支持 |
-| 边界（scope 限制） | 部分（depth/transient） | 加 `workspace_scope: Option<WorkspaceRef>` 限制子 agent 文件访问范围 |
-| artifact 落盘 | 缺 | 子 agent 产物落 `.slab/artifacts/<thread_id>/`，`completion_text` 只回路径引用 |
+| 边界（scope 限制） | 已支持 `workspace_scope: Option<String>` 的 workspace-relative 校验，并写入 child prompt | 动态收窄文件工具 sandbox/root 仍未落地，不能把 prompt scope 视为硬执行边界 |
+| artifact 落盘 | 已在有 workspace context 时写 `.slab/artifacts/<child_thread_id>/result.json` | tool output 只回 `artifact_refs`，无 workspace context 时保持旧的 inline `completion_text` 兼容 |
 
 ### 6.3 边界
 
@@ -340,8 +341,8 @@ impl TerminationReason {
 
 | 落点 | 改动 |
 |---|---|
-| `crates/slab-agent/src/thread.rs`（内联，**需架构签字**——开放问题 4） | for-turn 循环开头维护 `VecDeque<(String, String)>`（近 N 轮签名）；副作用类工具命中后 `break 'turns` |
-| `crates/slab-agent/src/config.rs` | 加 `repetition: RepetitionConfig { window: u8=3, threshold: u8=3, exempt_readonly: bool=true }` |
+| `crates/slab-agent/src/repetition_guard.rs`（私有模块）+ `thread.rs` | 规范化有效工具调用签名；副作用类工具连续 3 次同签名后 `break 'turns`，写 `Interrupted` + `repetition_detected` |
+| `crates/slab-agent/src/turn.rs` | `TurnOutcome::ToolCalls` 携带规范化签名和本轮 provider/runtime usage |
 
 ### 7.3 误报缓解
 
@@ -359,27 +360,36 @@ impl TerminationReason {
 |---|---|
 | ThreadStatus 枚举 | **不新增变体**（复用 `Completed`/`Interrupted`/`Errored`/`Shutdown`） |
 | 区分手段 | 复用 `update_thread_status` 的 `Option<&str> reason` 字段（[thread.rs:449](crates/slab-agent/src/thread.rs#L449)） |
-| MaxTurns 走 interrupt 语义 | thread.rs:424 for 循环正常退出时，**不直接 set Completed**，而是按是否曾命中 cancellation/intent 分支：真 Final → `Completed`+reason="completed"；turn 耗尽 → `Completed`+reason="max_turns_reached"（保留线程可续跑） |
-| state.rs 迁移表 | 零改动（不新增枚举值） |
+| MaxTurns 走 interrupt 语义 | **已落地**：thread.rs for 循环正常耗尽时不再 set Completed，而是 `Interrupted` + `max_turns_reached`；真 Final 才 `Completed` 并保留现有 `completion_text` 最终文本语义 |
+| state.rs 迁移表 | **已落地**：不新增枚举值，仅允许 `Running -> Interrupted`，用于 max_turns soft-stop |
 | SQLx migration | **零 migration**（红队可行性风险吸收） |
 | 前端 | 通过 reason 字段区分展示，`gen:api` 同步 reason 字段（已有） |
 
 ### 8.2 per-thread token 硬预算（红队 must_add）
 
 ```rust
-// crates/slab-agent/src/config.rs（新增）
-pub struct TokenBudget {
-    pub prompt_tokens_limit: Option<u64>,
-    pub completion_tokens_limit: Option<u64>,
-    pub total_tokens_limit: Option<u64>,  // 累计，超限触发 BudgetExhausted
+// crates/slab-agent/src/config.rs
+pub struct AgentConfig {
+    pub token_budget: Option<u32>, // total_tokens budget for this run; None/0 disables
+
+    // ...
 }
 
-// crates/slab-agent/src/thread.rs（编排内联）
-// 每次 LlmResponse 返回后累加 usage（需 LlmPort 暴露 usage），超限 break 'turns + reason="budget_exhausted"
+// crates/slab-agent/src/port.rs
+pub struct LlmResponse {
+    pub usage: Option<LlmUsage>,
+
+    // ...
+}
+
+// crates/slab-agent/src/thread.rs
+// 每个 LLM response 后累加 response.usage.total_tokens；本次 run/resume 内累计值达到
+// token_budget 时在工具执行/Final 持久化前 soft-stop + reason="budget_exhausted"。
 ```
 
 - 防 runaway agent 烧光 provider 配额（比循环检测更现实的成本失控兜底）。
 - 与循环检测正交，可叠加。
+- 当前语义刻意偏 soft-stop：预算累计保存在本次 run/resume 进程内，尚未做跨恢复持久 token ledger；若 provider/runtime 不返回 usage，则该响应按 0 处理。
 
 ### 8.3 兜底层次总览
 
@@ -494,18 +504,21 @@ impl ToolContext {
 #[derive(Debug, Clone)]
 pub struct WorkspaceRef {
     pub root: std::path::PathBuf,
-    pub session_id: String,
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct PlanRef {
     pub thread_id: String,
-    // plan 持久化句柄（slab-agent-memories 文件存储，不碰 DB migration）
+    pub plan_id: Option<String>,
 }
 ```
 
-- 唯一构造点 [turn_tool_call.rs:39-43](crates/slab-agent/src/turn_tool_call.rs#L39) 统一注入。
+- `AgentControl::with_thread_context(...)` 接收 host/app-core 注入的 `AgentThreadContext`；`bin/slab-server`/`slab-app-core` 不需要把 HTTP 或插件运行时细节塞进 `slab-agent`。
+- `crates/slab-app-core/src/infra/agent/bootstrap.rs` 从 `workspace_root_from_config` 得到 workspace root 后注入 `WorkspaceRef`；没有 workspace root 时保持 `None`。
+- 唯一构造点 [turn_tool_call.rs](crates/slab-agent/src/turn_tool_call.rs) 统一注入，并在 session 缺省时补当前 `session_id`。
 - tests.rs/subagent.rs 测试构造用 `ToolContext::for_thread(...).build()`，Option 默认 None 不破坏。
+- **当前状态（已落地）**：`ToolContext` 已新增 `workspace: Option<WorkspaceRef>`、`plan: Option<PlanRef>` 和 `ToolContext::for_thread(...).build()`；`AgentThreadContext` 已从 `AgentControl` 传到 `AgentThreadRuntime`、`TurnExecutionContext` 和 `handle_tool_calls`；app-core bootstrap 已注入当前 workspace root；`tool_context_includes_thread_workspace_and_plan_scope` 覆盖真实 tool-call 路径。durable plan 状态仍未实现，`PlanRef` 只提供后续 plan-aware 工具的作用域入口。
 
 ---
 
@@ -514,7 +527,7 @@ pub struct PlanRef {
 | 扩展点 | 改动 | gen 命令 |
 |---|---|---|
 | `/v1/agents/responses` `turn_completed` 事件扩 `artifact_refs`+`reason` | `bin/slab-server` 扩 fields | `bun run gen:api` |
-| `PluginCapabilityKind::a2u_surface` | `crates/slab-types/src/plugin.rs` 加变体 | `bun run gen:plugin-packs`+`bun run gen:schemas` |
+| `PluginCapabilityKind::a2u_surface` | `crates/slab-types/src/plugin.rs` 加变体，`packages/slab-plugin-cli` manifest type 接受新字面量 | `bun run gen:api`；`bun run gen:schemas` 已验证但当前只覆盖 model/settings schema |
 | `agent.runtime.limits` 配置域 | `crates/slab-config`（PMID） | `bun run gen:schemas` |
 | `repetition`/`token_budget` 配置域 | `crates/slab-agent/src/config.rs` | （agent config 不走 PMID gen，但若暴露 /v1 需 gen:api） |
 | ThreadStatus reason 字段 | 已存在 `Option<&str> reason`（[thread.rs:449](crates/slab-agent/src/thread.rs#L449)） | 无需 gen（不新增 enum 变体） |
@@ -527,15 +540,18 @@ pub struct PlanRef {
 
 ```
 crates/slab-agent/src/
-├── thread.rs            # 改动：for-turn 假完成修复 + repetition_guard 内联 + TerminationReason
+├── thread.rs            # 改动：for-turn 假完成修复 + TerminationReason + token budget soft-stop
 ├── turn.rs              # 改动：task.complete 识别（双轨 2）
 ├── turn_tool_call.rs    # 改动：ToolContext 扩容唯一构造点
 ├── tool.rs              # 改动：ToolContext 加 Option<WorkspaceRef>/Option<PlanRef> + builder
-├── risk.rs              # 改动：BasicToolRiskAnalyzer 强化 allow/sandbox/ask + 敏感路径黑名单
-├── state.rs             # 零改动（不新增 ThreadStatus 变体）
-└── config.rs            # 改动：repetition/token_budget 配置
+├── repetition_guard.rs  # 新增：规范化工具调用签名 + 副作用重复检测（已落地）
+├── risk.rs              # 改动：BasicToolRiskAnalyzer 静态分级 + High 风险审批兜底
+├── state.rs             # 改动：允许 Running -> Interrupted soft-stop
+├── llm_output.rs        # 改动：stream usage chunk 汇总到 LlmResponse
+└── config.rs            # 改动：token_budget 配置
 
 crates/slab-agent-tools/src/
+├── sensitive_path.rs    # 新增：敏感路径/模式识别 + approval_request helper（已落地）
 ├── task_complete.rs     # 新增：TaskCompleteTool（default-deny）
 ├── verify.rs            # 新增：VerifyTool（workspace_build/lint/diff）
 ├── plan.rs              # 改动：加 result_ref 字段（砍 DAG/replan）
@@ -566,21 +582,25 @@ crates/slab-config/src/
 
 > 每卡：证据 / 方案 / 验收 / 依赖 / effort / priority。effort 单位人日（d）。
 
-### 卡 B-1：ToolContext 扩容（Phase 0）
+### 卡 B-1：ToolContext 扩容（Phase 0） — 已落地
 
-- **证据**：[tool.rs:17-24](crates/slab-agent/src/tool.rs#L17) 三字段；[turn_tool_call.rs:39-43](crates/slab-agent/src/turn_tool_call.rs#L39) 唯一构造点。
-- **方案**：加 `Option<WorkspaceRef>`+`Option<PlanRef>` + `for_thread()` builder；不上 trait object。
-- **验收**：`cargo test -p slab-agent -p slab-agent-tools` 全绿；tests.rs/subagent.rs 构造处改 builder 编译通过。
+- **证据**：`crates/slab-agent/src/tool.rs` 定义 `ToolContext`、`WorkspaceRef`、`PlanRef`、`AgentThreadContext`；`control.rs`/`thread.rs`/`turn.rs` 传递 thread context；`turn_tool_call.rs` 在唯一工具调用构造点注入 workspace/plan；`crates/slab-app-core/src/infra/agent/bootstrap.rs` 从 workspace config 注入 `WorkspaceRef`。
+- **方案**：加 `Option<WorkspaceRef>`+`Option<PlanRef>` + `for_thread()` builder；不上 trait object；通过 `AgentControl::with_thread_context(...)` 接入 host/app-core 提供的 workspace scope，不引入 app-core/plugin 依赖到 `slab-agent`。
+- **验收**：tests.rs/subagent.rs 和各工具测试构造处已改 builder；`tool_context_includes_thread_workspace_and_plan_scope` 覆盖真实 LLM tool-call 执行路径能收到 workspace root、session id 和 plan id。
+- **验证**：`cargo test -p slab-agent`、`cargo check -p slab-app-core`。
+- **剩余**：durable plan 存储/完成判定仍未落地；`PlanRef` 只是作用域入口。B-7 plugin.open/action tool 与 B-10 artifact 落盘仍需各自 host/tool 切片继续实现。
 - **依赖**：无。
-- **effort**：2d。**priority**：P0。
+- **effort**：已完成。**priority**：P0。
 
-### 卡 B-2：max_turns 假完成修复（Phase 2）
+### 卡 B-2：max_turns 假完成修复（Phase 2） — 已落地
 
 - **证据**：[thread.rs:424-451](crates/slab-agent/src/thread.rs#L424) for 循环正常退出落 Completed。
-- **方案**：新增 `TerminationReason` 枚举（不进 slab-types）；thread.rs:424 for 退出按 Final/MaxTurns 分支写 reason；复用 `update_thread_status` reason 字段。
-- **验收**：单测覆盖 for 退出 → reason="max_turns_reached"；前端通过 reason 区分展示；零 SQLx migration。
-- **依赖**：卡 B-1（reason 字段需经 ToolContext 透传给 verify——可选）。
-- **effort**：3d。**priority**：P0。
+- **方案**：新增本地 `TerminationReason`（不进 slab-types）；thread.rs for 退出按 Final/MaxTurns 分支处理；MaxTurns 写 `Interrupted` + `max_turns_reached`，真 Final 才写 `Completed`。
+- **验收**：`max_turns_exhaustion_is_interrupted_with_reason_not_completed` 覆盖 for 退出 → `Interrupted` + `max_turns_reached` + 可续跑；零 SQLx migration。
+- **验证**：`cargo test -p slab-agent`、`cargo test -p slab-app-core agent`、`cargo check -p slab-server`。
+- **剩余**：前端需基于恢复响应中的终止理由显示"已达轮次上限，可续跑"；后续合同清理应拆出显式 `finish_reason`/`termination_reason` 字段，不再复用 `completion_text`。
+- **依赖**：无。
+- **effort**：已完成。**priority**：P0。
 
 ### 卡 B-3：task.complete default-deny（Phase 2）
 
@@ -590,37 +610,45 @@ crates/slab-config/src/
 - **依赖**：卡 B-1、卡 B-2。
 - **effort**：5d。**priority**：P0。
 
-### 卡 B-4：循环/重复检测（Phase 2）
+### 卡 B-4：循环/重复检测（Phase 2） — 已落地
 
-- **证据**：[thread.rs:248](crates/slab-agent/src/thread.rs#L248) 无重复检测；[control.rs:381](crates/slab-agent/src/control.rs#L381) interrupt 已解耦。
-- **方案**：thread.rs 内联 `repetition_guard`（架构签字）；近 N=3 签名去重，阈值=3，只读豁免；命中 `break 'turns`+stuck flag+reason="repetition_detected"。
-- **验收**：单测覆盖副作用类连续 3 次同签名 → RepetitionDetected；只读豁免不误报。
+- **证据**：`crates/slab-agent/src/repetition_guard.rs` 私有编排 guard；`TurnOutcome::ToolCalls` 携带规范化后的有效工具调用签名；thread loop 命中后写 `Interrupted` + `repetition_detected`。
+- **方案**：签名为 `(tool_name, canonical_json_args)`；阈值 3；`read_file`/`list_dir`/`file_glob`/`grep`/`web_search`/`mcp_list_tools`/`git_status`/`git_diff`/`fs_watch` 只读豁免；未知工具与 `write_file`/`apply_patch`/`shell`/`git_commit`/`mcp_call`/`delegate_subagent` 保守按副作用处理。
+- **验收**：`repeated_side_effect_tool_call_interrupts_with_reason_and_trace_event` 覆盖副作用类连续 3 次同签名 → `Interrupted` + `repetition_detected` + 可续跑 + `loop_detected` trace；`repeated_read_only_tool_call_is_exempt_from_repetition_guard` 覆盖只读豁免最终落 `max_turns_reached`。
+- **验证**：`cargo fmt --check -p slab-agent`、`cargo test -p slab-agent`、`cargo test -p slab-agent-tools`、`cargo test -p slab-app-core agent`、`cargo test -p slab-server`、`cargo check -p slab-server`。
+- **剩余**：前端仍需展示 `repetition_detected` 的人工介入/续跑文案；长期合同清理仍应拆出显式 `termination_reason` 字段，不再复用 `completion_text`。
 - **依赖**：卡 B-2（reason 编码）。
-- **effort**：4d。**priority**：P1。
+- **effort**：已完成。**priority**：P1。
 
-### 卡 B-5：per-thread token 预算（Phase 2）
+### 卡 B-5：per-thread token 预算（Phase 2） — 已落地
 
-- **证据**：[config.rs](crates/slab-agent/src/config.rs) 无 token 预算。
-- **方案**：config.rs 加 `TokenBudget`；thread.rs 每次 LlmResponse 累加 usage（需 LlmPort 暴露 usage），超限 break+reason="budget_exhausted"。
-- **验收**：单测覆盖超限终止；防 runaway。
+- **证据**：`crates/slab-agent/src/config.rs` 暴露 `AgentConfig.token_budget: Option<u32>`；`port.rs` 暴露 `LlmResponse.usage`/`LlmUsage`；`llm_output.rs` 汇总 OpenAI-style stream `usage` chunk；`crates/slab-app-core/src/infra/agent/adapter.rs` 将 chat result 与 stream completion usage 转为 agent usage；`crates/slab-app-core/src/schemas/agent.rs` 将 `/v1` `AgentConfigInput.token_budget` 映射进 agent config。
+- **方案**：turn loop 在 LLM response 归一化后累加 `usage.total_tokens`，当本次 run/resume 内累计值达到显式 `token_budget` 时，在工具执行或 Final 持久化前返回 `BudgetExceeded`；thread 写 `Interrupted` + `budget_exhausted`，并发 `thread_token_budget_exhausted` trace。
+- **验收**：`token_budget_exhaustion_interrupts_with_reason_and_keeps_thread_resumable` 覆盖超限终止、reason 写入和可续跑；`token_budget_exhaustion_interrupts_before_executing_tool_calls` 覆盖超预算 tool-call response 不执行工具；app-core adapter 测试覆盖非流式 usage 转发与流式 usage chunk 转发；`bun run gen:api` 已同步 `packages/api/src/v1.d.ts` 和 Python SDK。
+- **验证**：`cargo test -p slab-agent`、`cargo test -p slab-app-core agent`、`bun run gen:api`。
+- **剩余**：当前预算是本次 run/resume 内的 runaway/tool-loop guard，未持久化跨恢复累计 token ledger；前端预算看板、配置化 runtime limits 与全局/工作区策略仍属后续 B-9/INFRA-05。
 - **依赖**：卡 B-2。
-- **effort**：3d。**priority**：P1。
+- **effort**：已完成。**priority**：P1。
 
-### 卡 B-6：ToolRiskAnalyzer 强化 + 敏感路径黑名单（Phase 1）
+### 卡 B-6：ToolRiskAnalyzer 强化 + 敏感路径黑名单（Phase 1） — 大部分落地
 
-- **证据**：[risk.rs:7-45](crates/slab-agent/src/risk.rs#L7) 仅识别 shell。
-- **方案**：`BasicToolRiskAnalyzer` 按工具名静态分级（allow/sandbox/ask）+ 敏感路径黑名单（`~/.ssh`/`.env`/`*credentials*`/`*.pem` 强制 ask）；分级由 app-core 静态配置，插件不可自报。
-- **验收**：`cargo test -p slab-agent` 覆盖 read_file 命中 .env → ask；write_file → ask；read_file 普通 → allow。
+- **证据**：`crates/slab-agent/src/risk.rs` 已按工具名静态分级；`turn_tool_call.rs` 在工具未自带审批时对 `High` 风险加通用审批兜底。
+- **方案**：`BasicToolRiskAnalyzer` 按工具名静态分级（allow/sandbox/ask）；敏感路径黑名单先落在 read/search 工具 `approval_request`（`~/.ssh`/`.env`/`*credentials*`/`*token*`/`*.pem`/`.slab/slab.db` 强制 ask），分级由 app-core 静态配置，插件不可自报。
+- **已落地**：`crates/slab-agent-tools/src/sensitive_path.rs`；`read_file`/`list_dir`/`grep`/`file_glob` 对敏感 path/glob/pattern 返回 `ToolApprovalRequest`；`BasicToolRiskAnalyzer` 将只读工具标 Low、workspace 写/MCP/subagent/未知工具标 Medium、`git_commit` 和破坏性 shell 标 High；`High` 风险工具无自带审批元数据时也会进入审批门。
+- **验收**：`cargo test -p slab-agent-tools` 覆盖 read/search 敏感路径 → ask、普通路径 → allow；`cargo test -p slab-agent risk` 覆盖静态分级和高风险兜底审批。
+- **剩余**：完整 sandbox 策略/配置化 allow-sandbox-ask 策略未落地；write 类目前有 Medium 风险标注但仍按既有工具策略执行，不做通用强制 ask。
 - **依赖**：无。
-- **effort**：3d。**priority**：P0（红队 must_add）。
+- **effort**：敏感路径 read/search + 静态风险分级已完成；sandbox/配置化策略剩余。**priority**：P0（红队 must_add）。
 
-### 卡 B-7：plugin.open / action tool / capability 注册（Phase 3）
+### 卡 B-7：plugin.open / action tool / capability 注册（Phase 3） — 契约枚举已部分落地
 
-- **证据**：[plugin.rs:392](crates/slab-types/src/plugin.rs#L392) 无 a2u_surface；[registry.rs:498](crates/slab-plugin/src/registry.rs#L498) 未注册 agent 工具。
+- **证据**：`crates/slab-types/src/plugin.rs` 已支持 `PluginCapabilityKind::A2uSurface` 并按 `a2u_surface` 反序列化/序列化；`packages/api/src/v1.d.ts` 与 Python SDK 已包含新枚举值；`packages/slab-plugin-cli/src/pack.ts` 的 manifest type 已接受新字面量。`registry.rs` 仍只校验 capability 权限，尚未注册 agent 工具。
 - **方案**：slab-types 加 `a2u_surface`；host 实现 `plugin.open`/`open_project`/`request_review`/`feedback` ToolHandler + pluginCall capability 注册；artifact_refs 路径前缀校验；effects 静态推断。
-- **验收**：plugin.open 四段闭环可测（声明→调用→渲染→回灌）；artifact_refs 跨目录路径被拒；caller id 从 label 推导。
+- **验收**：`agent_capability_accepts_a2u_surface_kind` 覆盖 manifest 反序列化；`bun run gen:api` 已同步 OpenAPI/SDK。完整 plugin.open 四段闭环、artifact_refs 跨目录拒绝、caller id 从 label 推导仍未验收。
+- **验证**：`cargo test -p slab-types plugin`、`bun run gen:api`、`bun run gen:schemas`。
+- **剩余**：host 层 `plugin.open`/action tool、pluginCall capability -> agent tool 注册、effects host 静态推断、artifact_refs host 前缀校验、前端 surface payload/回灌均未落地。
 - **依赖**：卡 B-1、卡 B-6。
-- **effort**：8d。**priority**：P1。
+- **effort**：契约枚举已部分完成；host/frontend 闭环剩余。**priority**：P1。
 
 ### 卡 B-8：workspace 切换优雅重启（Phase 3）
 
@@ -638,13 +666,15 @@ crates/slab-config/src/
 - **依赖**：卡 B-5。
 - **effort**：5d。**priority**：P2。
 
-### 卡 B-10：subagent 补四要素 + artifact 落盘（Phase 3）
+### 卡 B-10：subagent 补四要素 + artifact 落盘（Phase 3） — 大部分落地
 
-- **证据**：[subagent.rs:22](crates/slab-agent-tools/src/subagent.rs#L22) 仅 task。
-- **方案**：加 `output_format`/`workspace_scope`；产物落 `.slab/artifacts/<thread_id>/`，completion_text 只回路径引用。
-- **验收**：`cargo test -p slab-agent-tools` 覆盖新参数；artifact 路径回灌。
+- **证据**：`crates/slab-agent-tools/src/subagent.rs` 已支持 `task`、`model`、`system_prompt`、`allowed_tools`、`max_turns`、`output_format`、`workspace_scope`；B-1 已让工具拿到 `WorkspaceRef`。
+- **方案**：`output_format` 写入 child prompt；`workspace_scope` 必须是 workspace-relative 且不能含 root/prefix/`..`；有 workspace context 时将 child completion 写入 `.slab/artifacts/<child_thread_id>/result.json`，父 agent 只收到 `artifact_refs`，无 workspace context 时保留旧 inline `completion_text` 兼容。
+- **验收**：`delegate_subagent_writes_workspace_artifact_and_returns_reference` 覆盖新参数、prompt 渲染、artifact 写入和只回路径引用；`delegate_subagent_rejects_workspace_scope_escape` 覆盖 scope 越界拒绝。
+- **验证**：`cargo test -p slab-agent-tools`、`cargo test -p slab-agent`。
+- **剩余**：`workspace_scope` 目前是 prompt 约束 + 路径参数校验，尚未动态收窄 child agent 的文件工具 root/sandbox；artifact host 层打开/校验仍归 B-7 action tool/plugin.open 切片。
 - **依赖**：卡 B-1。
-- **effort**：3d。**priority**：P2。
+- **effort**：大部分完成；硬 sandbox scope 剩余。**priority**：P2。
 
 ---
 
@@ -691,7 +721,8 @@ gantt
 ```sh
 # Phase 0
 cargo test -p slab-agent -p slab-agent-tools          # ToolContext 扩容不破坏测试矩阵
-cargo test -p slab-agent risk::                        # 风险分级 + 敏感路径黑名单
+cargo test -p slab-agent risk::                        # 风险分级
+cargo test -p slab-agent-tools sensitive_path          # 敏感路径黑名单 helper
 
 # Phase 2
 cargo test -p slab-agent thread::                      # 假完成修复 + 循环检测 + TerminationReason
@@ -728,9 +759,9 @@ bun run gen:api && bun run gen:schemas && bun run gen:plugin-packs   # CI 门禁
 |---|---|---|
 | DAG/规划被塞进 slab-agent 编排核心（违反纯编排红线） | 代码评审强校验：task.complete/verify/result_ref 全落 slab-agent-tools；循环 guard 是唯一可例外（架构签字） | task_complete.rs/verify.rs 是新增文件，可直接 unregister 回滚 |
 | task.complete 被模型过早调用绕过校验 | 内部校验 plan 全节点 completed + verify 通过才 Final，否则错误回灌；保留 turn.rs:198 兜底双轨 | 关闭 task.complete 注册（runtime.rs 注释一行），回退到纯 tool_calls.is_empty() 判停 |
-| 循环检测误报（合法迭代式工作流） | 阈值提到 3、只读豁免、命中先 soft-stop 给人工介入 | repetition_guard 是 thread.rs 内联，加 feature flag `agent_repetition_guard` 默认关闭可回滚 |
-| MaxTurnsReached 误判（for 循环正常退出但实际 Final） | 区分手段用 reason 字段而非 enum 变体，Final 路径 reason="completed"，for 退出 reason="max_turns_reached" | reason 字段是附加信息，前端忽略 reason 即回退到原行为 |
-| per-thread token 预算误杀（usage 统计不准） | 预算默认 None（不限），需显式配置；超限走 reason 不改 status | config TokenBudget 默认 None |
+| 循环检测误报（合法迭代式工作流） | 阈值提到 3、只读豁免、命中先 soft-stop 给人工介入 | `repetition_guard.rs` 是私有模块，可在后续策略化阈值/开关时整体收窄或关闭 |
+| MaxTurnsReached 误判（for 循环正常退出但实际 Final） | 当前代码用 `reached_final_turn` 显式区分，Final 路径仍写 `Completed` + 最终文本；for 耗尽写 `Interrupted` + `max_turns_reached` | 前端若暂未展示 reason，至少不会再把耗尽线程当成 Completed 真完成 |
+| per-thread token 预算误杀（usage 统计不准） | 预算默认 None（不限），需显式配置；工具执行和 Final 持久化前 soft-stop | `AgentConfig.token_budget` 默认 None；移除该字段、不传或传 0 即可回退 |
 | plugin.open ToolHandler 滑向 slab-agent-tools（边界违规） | 实现强制落 bin/slab-app/src-tauri；CI lint 禁止 app-core 依赖 slab-plugin 运行时 | port trait 抽象，host 实现可整体移除 |
 | 循环 guard 与 interrupt 异步 cancellation 时序（guard 命中是最后一轮） | guard 直接 break 'turns + stuck flag，不依赖 interrupt（红队可行性风险吸收） | guard feature flag 关闭 |
 | workspace 切换 data loss race（interrupt 未确认就 kill） | interrupt grace period 等 watch channel 确认 Interrupted 才写快照；超时中止切换不强 kill | 切换失败报错，保留原 workspace 不切换 |

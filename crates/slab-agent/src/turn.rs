@@ -20,8 +20,9 @@ use crate::{
         AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, LlmStreamObserver, ParsedToolCall,
         ThreadMessageRecord, ToolSpec, TurnEvent, TurnStateRecord,
     },
+    repetition_guard::ToolCallSignature,
     risk::ToolRiskAnalyzer,
-    tool::ToolRouter,
+    tool::{AgentThreadContext, ToolRouter},
     tool_validation::{InvalidToolCall, validate_tool_calls},
     turn_tool_call::handle_tool_calls,
     turn_tool_record::record_failed_tool_call,
@@ -47,11 +48,14 @@ pub(crate) struct TurnExecutionContext<'a> {
     pub trace: &'a dyn AgentTraceSink,
     pub trace_context: AgentTraceContext,
     pub cancellation: &'a CancellationToken,
+    pub thread_context: &'a AgentThreadContext,
+    pub consumed_tokens: u32,
 }
 
 pub(crate) enum TurnOutcome {
-    Final,
-    ToolCalls { invalid_tool_calls: usize },
+    Final { token_usage: u32 },
+    BudgetExceeded { token_usage: u32 },
+    ToolCalls { invalid_tool_calls: usize, signatures: Vec<ToolCallSignature>, token_usage: u32 },
 }
 
 pub(crate) async fn execute_turn(
@@ -169,6 +173,7 @@ pub(crate) async fn execute_turn(
             "content_already_streamed": response.content_already_streamed,
             "finish_reason": &response.finish_reason,
             "tool_calls": parsed_tool_calls_trace_payload(&response.tool_calls),
+            "usage": response.usage,
         }),
     );
     persist_turn_state(
@@ -194,6 +199,37 @@ pub(crate) async fn execute_turn(
     .await;
     insert_injected_messages(messages, llm_end_effects.injected_messages);
     append_observations(messages, llm_end_effects.observations);
+
+    let token_usage = response.usage.as_ref().map(|usage| usage.total_tokens).unwrap_or_default();
+    if token_budget_would_be_exhausted(
+        context.config.token_budget,
+        context.consumed_tokens,
+        token_usage,
+    ) {
+        persist_turn_state(
+            &context,
+            "budget_exhausted",
+            Some(messages.as_slice()),
+            Some(&tool_specs),
+            Some(&response),
+            None,
+            Some(Utc::now().to_rfc3339()),
+        )
+        .await;
+        record_json(
+            context.trace,
+            &context.trace_context,
+            "slab-agent",
+            "turn_token_budget_exhausted",
+            serde_json::json!({
+                "token_usage": token_usage,
+                "consumed_tokens": context.consumed_tokens,
+                "token_budget": context.config.token_budget,
+                "has_tool_calls": !response.tool_calls.is_empty(),
+            }),
+        );
+        return Ok(TurnOutcome::BudgetExceeded { token_usage });
+    }
 
     if response.tool_calls.is_empty() {
         if let Err(error) = reject_missing_required_tool_call(&context) {
@@ -228,7 +264,7 @@ pub(crate) async fn execute_turn(
             "turn_completed",
             serde_json::json!({ "more_turns": false }),
         );
-        return Ok(TurnOutcome::Final);
+        return Ok(TurnOutcome::Final { token_usage });
     }
 
     let validation = validate_tool_calls(
@@ -269,7 +305,20 @@ pub(crate) async fn execute_turn(
         "turn_completed",
         serde_json::json!({ "more_turns": true }),
     );
-    Ok(TurnOutcome::ToolCalls { invalid_tool_calls: validation.invalid.len() })
+    Ok(TurnOutcome::ToolCalls {
+        invalid_tool_calls: validation.invalid.len(),
+        signatures: validation.valid.iter().map(ToolCallSignature::new).collect(),
+        token_usage,
+    })
+}
+
+fn token_budget_would_be_exhausted(
+    token_budget: Option<u32>,
+    consumed_tokens: u32,
+    token_usage: u32,
+) -> bool {
+    token_budget
+        .is_some_and(|budget| budget > 0 && consumed_tokens.saturating_add(token_usage) >= budget)
 }
 
 fn allowed_tool_specs(context: &TurnExecutionContext<'_>) -> Result<Vec<ToolSpec>, AgentError> {

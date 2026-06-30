@@ -3,6 +3,8 @@
 
 mod api;
 mod error;
+mod log_redaction;
+mod size_rotating_log;
 
 use std::io::ErrorKind;
 use std::net::SocketAddr;
@@ -14,9 +16,15 @@ use anyhow::anyhow;
 use clap::Parser;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::{error, info, warn};
+use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{Layer, fmt};
 
+use size_rotating_log::{
+    DEFAULT_MAX_LOG_BYTES, DEFAULT_MAX_LOG_FILES, RedactingSizeRotatingWriter,
+};
 use slab_app_core::config::{
     Config, default_model_config_dir_for_settings_path, seed_settings_document_from_env_if_missing,
 };
@@ -26,6 +34,7 @@ use slab_app_core::infra::db::{AnyStore, TaskStore};
 use slab_app_core::infra::rpc::gateway::GrpcGateway;
 use slab_app_core::infra::runtime::{ManagedRuntimeHost, ManagedRuntimeHostStartOptions};
 use slab_app_core::runtime_supervisor::RuntimeSupervisorStatus;
+use slab_otel::config::OtelExporter;
 
 #[derive(Parser, Debug, Clone, Default)]
 #[command(name = "slab-server", version, about = "Slab supervisor and HTTP gateway")]
@@ -216,15 +225,28 @@ async fn main() -> anyhow::Result<()> {
         eprintln!("WARN: failed to load telemetry settings ({error}); using defaults");
         telemetry_settings_from_config(&cfg, slab_otel::config::OtelSettings::default())
     });
-    let _otel_provider = init_tracing(&cfg.log_level, cfg.log_json, &telemetry_settings)?;
+    let _tracing_runtime =
+        init_tracing(&cfg.log_level, cfg.log_json, cfg.log_file.as_deref(), &telemetry_settings)?;
     run_supervisor(args, cfg).await
+}
+
+#[derive(Debug)]
+struct TracingRuntime {
+    _otel_provider: Option<slab_otel::OtelProvider>,
+    _file_guard: Option<WorkerGuard>,
+}
+
+struct FileLogging {
+    writer: NonBlocking,
+    guard: WorkerGuard,
 }
 
 fn init_tracing(
     log_level: &str,
     log_json: bool,
+    log_file: Option<&Path>,
     settings: &slab_otel::config::OtelSettings,
-) -> anyhow::Result<Option<slab_otel::OtelProvider>> {
+) -> anyhow::Result<TracingRuntime> {
     let env_filter = match tracing_subscriber::EnvFilter::try_from_default_env() {
         Ok(f) => f,
         Err(_) => match log_level.parse::<tracing_subscriber::EnvFilter>() {
@@ -236,17 +258,37 @@ fn init_tracing(
         },
     };
 
-    let Some(provider) = slab_otel::OtelProvider::from(settings)? else {
-        init_console_tracing(env_filter, log_json);
-        return Ok(None);
-    };
+    let mut settings = settings.clone();
+    let file_log_path = effective_file_log_path(log_file, &settings);
+    if file_log_path.is_some() {
+        settings.exporter = OtelExporter::None;
+    }
+    let file_logging = file_log_path.map(init_file_logging).transpose()?;
+    let provider = slab_otel::OtelProvider::from(&settings)?;
 
-    tracing_subscriber::registry()
-        .with(env_filter)
-        .with(provider.logger_layer())
-        .with(provider.tracing_layer())
-        .init();
-    Ok(Some(provider))
+    match (provider.as_ref(), file_logging.as_ref()) {
+        (Some(provider), Some(file_logging)) => tracing_subscriber::registry()
+            .with(env_filter)
+            .with(provider.tracing_layer())
+            .with(redacted_fmt_layer(file_logging.writer.clone(), log_json))
+            .init(),
+        (Some(provider), None) => tracing_subscriber::registry()
+            .with(env_filter)
+            .with(provider.logger_layer())
+            .with(provider.tracing_layer())
+            .init(),
+        (None, Some(file_logging)) => tracing_subscriber::registry()
+            .with(env_filter)
+            .with(console_fmt_layer(log_json))
+            .with(redacted_fmt_layer(file_logging.writer.clone(), log_json))
+            .init(),
+        (None, None) => init_console_tracing(env_filter, log_json),
+    }
+
+    Ok(TracingRuntime {
+        _otel_provider: provider,
+        _file_guard: file_logging.map(|file_logging| file_logging.guard),
+    })
 }
 
 fn init_console_tracing(env_filter: tracing_subscriber::EnvFilter, log_json: bool) {
@@ -260,6 +302,60 @@ fn init_console_tracing(env_filter: tracing_subscriber::EnvFilter, log_json: boo
             .with(env_filter)
             .with(tracing_subscriber::fmt::layer().with_target(true).with_thread_ids(true))
             .init();
+    }
+}
+
+fn init_file_logging(path: PathBuf) -> anyhow::Result<FileLogging> {
+    let writer =
+        RedactingSizeRotatingWriter::new(path, DEFAULT_MAX_LOG_BYTES, DEFAULT_MAX_LOG_FILES)?;
+    let (writer, guard) = tracing_appender::non_blocking(writer);
+    Ok(FileLogging { writer, guard })
+}
+
+fn effective_file_log_path(
+    log_file: Option<&Path>,
+    settings: &slab_otel::config::OtelSettings,
+) -> Option<PathBuf> {
+    log_file.map(Path::to_path_buf).or_else(|| {
+        settings.exporter.local_directory().map(|directory| directory.join("slab-server.log"))
+    })
+}
+
+fn console_fmt_layer<S>(log_json: bool) -> Box<dyn Layer<S> + Send + Sync + 'static>
+where
+    S: tracing::Subscriber + for<'span> LookupSpan<'span> + Send + Sync + 'static,
+{
+    if log_json {
+        Box::new(fmt::layer().json().with_target(true).with_thread_ids(true))
+    } else {
+        Box::new(fmt::layer().with_target(true).with_thread_ids(true))
+    }
+}
+
+fn redacted_fmt_layer<S>(
+    writer: NonBlocking,
+    log_json: bool,
+) -> Box<dyn Layer<S> + Send + Sync + 'static>
+where
+    S: tracing::Subscriber + for<'span> LookupSpan<'span> + Send + Sync + 'static,
+{
+    if log_json {
+        Box::new(
+            fmt::layer()
+                .json()
+                .with_ansi(false)
+                .with_target(true)
+                .with_thread_ids(true)
+                .with_writer(writer),
+        )
+    } else {
+        Box::new(
+            fmt::layer()
+                .with_ansi(false)
+                .with_target(true)
+                .with_thread_ids(true)
+                .with_writer(writer),
+        )
     }
 }
 

@@ -34,6 +34,7 @@ pub mod thread;
 pub mod tool;
 
 mod llm_output;
+mod repetition_guard;
 mod state;
 mod tool_validation;
 mod turn;
@@ -61,4 +62,7 @@ pub use port::{
     ThreadStatus, TurnEvent, TurnStateRecord,
 };
 pub use risk::{BasicToolRiskAnalyzer, ToolRiskAnalyzer};
-pub use tool::{ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput, ToolRouter};
+pub use tool::{
+    AgentThreadContext, PlanRef, ToolApprovalRequest, ToolContext, ToolContextBuilder, ToolHandler,
+    ToolOutput, ToolRouter, WorkspaceRef,
+};

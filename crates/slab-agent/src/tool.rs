@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashMap,
+    path::PathBuf,
     sync::{Arc, RwLock},
 };
 
@@ -21,6 +22,114 @@ pub struct ToolContext {
     pub turn_index: u32,
     /// Nesting depth of the agent thread (0 = root).
     pub depth: u32,
+    /// Workspace scope associated with the thread, when the host provided one.
+    pub workspace: Option<WorkspaceRef>,
+    /// Durable plan scope associated with the thread, when plan-aware tools need it.
+    pub plan: Option<PlanRef>,
+}
+
+impl ToolContext {
+    /// Start building a tool context for the given thread.
+    pub fn for_thread(thread_id: impl Into<String>) -> ToolContextBuilder {
+        ToolContextBuilder {
+            thread_id: thread_id.into(),
+            turn_index: 0,
+            depth: 0,
+            workspace: None,
+            plan: None,
+        }
+    }
+}
+
+/// Host-provided scope applied to tools executed by an agent thread.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentThreadContext {
+    /// Workspace scope inherited by tools, when the host has a workspace root.
+    pub workspace: Option<WorkspaceRef>,
+    /// Optional durable plan identifier. The concrete [`PlanRef`] is resolved per thread.
+    pub plan_id: Option<String>,
+}
+
+impl AgentThreadContext {
+    /// Create an empty thread context.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Attach workspace scope to the context.
+    pub fn with_workspace(mut self, workspace: WorkspaceRef) -> Self {
+        self.workspace = Some(workspace);
+        self
+    }
+
+    /// Attach a durable plan identifier to the context.
+    pub fn with_plan_id(mut self, plan_id: impl Into<String>) -> Self {
+        let plan_id = plan_id.into();
+        if !plan_id.trim().is_empty() {
+            self.plan_id = Some(plan_id);
+        }
+        self
+    }
+}
+
+/// Workspace identity made available to workspace-scoped tools.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceRef {
+    /// Canonical or host-resolved workspace root.
+    pub root: PathBuf,
+    /// Optional session scope associated with this workspace.
+    pub session_id: Option<String>,
+}
+
+/// Reference to durable plan state for plan-aware tools.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanRef {
+    /// Thread that owns the current plan.
+    pub thread_id: String,
+    /// Optional host-defined plan identifier.
+    pub plan_id: Option<String>,
+}
+
+/// Builder for [`ToolContext`].
+#[derive(Debug, Clone)]
+pub struct ToolContextBuilder {
+    thread_id: String,
+    turn_index: u32,
+    depth: u32,
+    workspace: Option<WorkspaceRef>,
+    plan: Option<PlanRef>,
+}
+
+impl ToolContextBuilder {
+    pub fn turn_index(mut self, turn_index: u32) -> Self {
+        self.turn_index = turn_index;
+        self
+    }
+
+    pub fn depth(mut self, depth: u32) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    pub fn workspace(mut self, workspace: WorkspaceRef) -> Self {
+        self.workspace = Some(workspace);
+        self
+    }
+
+    pub fn plan(mut self, plan: PlanRef) -> Self {
+        self.plan = Some(plan);
+        self
+    }
+
+    pub fn build(self) -> ToolContext {
+        ToolContext {
+            thread_id: self.thread_id,
+            turn_index: self.turn_index,
+            depth: self.depth,
+            workspace: self.workspace,
+            plan: self.plan,
+        }
+    }
 }
 
 /// The result produced by a tool handler.

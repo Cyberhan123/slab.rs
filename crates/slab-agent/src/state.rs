@@ -58,6 +58,7 @@ fn is_valid_thread_transition(current: AgentThreadStatus, next: AgentThreadStatu
         AgentThreadStatus::Running => matches!(
             next,
             AgentThreadStatus::Interrupting
+                | AgentThreadStatus::Interrupted
                 | AgentThreadStatus::Completed
                 | AgentThreadStatus::Errored
                 | AgentThreadStatus::Shutdown
@@ -130,6 +131,14 @@ mod tests {
             .transition(AgentThreadStatus::Interrupted)
             .expect_err("completed thread should not become interrupted");
         assert!(matches!(err, AgentError::InvalidStateTransition { entity: "thread", .. }));
+    }
+
+    #[test]
+    fn thread_state_allows_running_to_interrupted() {
+        let (state, _status_rx) = ThreadStateMachine::new();
+
+        state.transition(AgentThreadStatus::Running).expect("running");
+        state.transition(AgentThreadStatus::Interrupted).expect("interrupted");
     }
 
     #[test]

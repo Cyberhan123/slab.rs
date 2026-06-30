@@ -22,7 +22,7 @@ use crate::{
     risk::{BasicToolRiskAnalyzer, ToolRiskAnalyzer},
     state::ThreadStateMachine,
     thread::{AgentThread, AgentThreadRuntime},
-    tool::ToolRouter,
+    tool::{AgentThreadContext, ToolRouter},
 };
 
 // ── Internal handle stored per active thread ─────────────────────────────────
@@ -70,6 +70,7 @@ pub struct AgentControl {
     risk: Arc<dyn ToolRiskAnalyzer>,
     trace: Arc<dyn AgentTraceSink>,
     trace_dir: Option<std::path::PathBuf>,
+    thread_context: AgentThreadContext,
     max_threads: usize,
     max_depth: u32,
 }
@@ -148,6 +149,7 @@ impl AgentControl {
             risk: Arc::new(BasicToolRiskAnalyzer),
             trace,
             trace_dir,
+            thread_context: AgentThreadContext::default(),
             max_threads: limits.max_threads,
             max_depth: limits.max_depth,
         }
@@ -177,9 +179,16 @@ impl AgentControl {
             risk,
             trace: Arc::new(NoopAgentTraceSink),
             trace_dir: None,
+            thread_context: AgentThreadContext::default(),
             max_threads: limits.max_threads,
             max_depth: limits.max_depth,
         }
+    }
+
+    /// Attach host-provided thread context used when building tool contexts.
+    pub fn with_thread_context(mut self, thread_context: AgentThreadContext) -> Self {
+        self.thread_context = thread_context;
+        self
     }
 
     /// Spawn a root agent thread (depth 0).
@@ -465,6 +474,7 @@ impl AgentControl {
         let risk = Arc::clone(&self.risk);
         let trace = Arc::clone(&self.trace);
         let trace_dir = self.trace_dir.clone();
+        let thread_context = self.thread_context.clone();
         let cancellation = CancellationToken::new();
         let threads_cleanup = Arc::clone(&self.threads);
         let id_cleanup = thread_id.clone();
@@ -479,6 +489,7 @@ impl AgentControl {
             risk,
             trace,
             trace_dir,
+            thread_context,
             cancellation: cancellation.clone(),
         };
 

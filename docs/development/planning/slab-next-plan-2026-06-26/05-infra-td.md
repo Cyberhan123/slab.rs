@@ -87,7 +87,7 @@ graph TD
 | 维度 | 现状 | 缺口 |
 |---|---|---|
 | 并发上限 | [bootstrap.rs:168](crates/slab-app-core/src/infra/agent/bootstrap.rs#L168) `max_threads:32/max_depth:4` 硬编码 | 无降级、无 FIFO 排队、无内存熔断；16GB 机 32 并发易 OOM |
-| token 预算 | 无 per-thread 硬预算 | runaway agent 可烧光 provider 配额（GLM 本机 ~10-14 并发即 429） |
+| token 预算 | 已有显式 `AgentConfig.token_budget` soft-stop；缺跨恢复持久 token ledger 和预算看板 | runaway/tool-loop 已可在本次 run/resume 内按 usage 中断，且超预算工具调用会在执行前停止；完整治理仍需 INFRA-05/预算看板 |
 | 内存监控 | `process_supervisor` 已存在（[runtime/process.rs](crates/slab-app-core/src/infra/runtime/process.rs)、[plugin_runtime/process.rs](crates/slab-app-core/src/infra/plugin_runtime/process.rs)） | 未暴露 per-process 内存给 agent runtime 做熔断决策 |
 
 ---
@@ -153,7 +153,7 @@ sequenceDiagram
 
 **决策 I-04（假完成修复走 reason 字段，零 migration）**：吸收 ADR-005 但采纳红队可行性修正——**复用现有 `update_thread_status` 的 `Option<&str> reason` 字段（[port.rs:232](crates/slab-agent/src/port.rs#L232)），不新增 `ThreadStatus` enum 变体，零 SQLx migration**。
 
-> 红队判定：`ThreadStatus` 是跨层枚举（slab-types→state.rs→store→前端→WS），新增 `MaxTurnsReached` 变体会让所有 `match ThreadStatus` 分支漏一处即 panic。复用 `status + reason` 字符串字段（`Completed` + `reason="max_turns_reached"`）零迁移、零分支爆炸。
+> 红队判定：`ThreadStatus` 是跨层枚举（slab-types→state.rs→store→前端→WS），新增 `MaxTurnsReached` 变体会让所有 `match ThreadStatus` 分支漏一处即 panic。当前已按零迁移路线落地：`max_turns` 耗尽写 `Interrupted` + `max_turns_reached`，真 Final 才写 `Completed`。
 
 **结构化终止理由字典**（写 tracing + session，前端据 reason 展示）：
 
@@ -216,11 +216,11 @@ graph LR
 | 维度 | To-Be | 归属 |
 |---|---|---|
 | subagent span 关联 | spawn_child 时透传 `parent_span_id`，trace JSONL 落 `trace_dir` | `crates/slab-agent`（spawn_inner）+ `crates/slab-agent-tracing` |
-| 循环检测埋点 | guard 命中 emit `LoopDetected { thread_id, signature_hash, hit_count }` event | `crates/slab-agent`（循环 guard，内联 thread.rs 需架构签字） |
+| 循环检测埋点 | guard 命中 emit `loop_detected { thread_id, signature_hash, hit_count }`，并写 `thread_repetition_detected` termination trace | `crates/slab-agent`（已落地，私有 repetition_guard + thread loop） |
 | metrics event | `MetricsEvent { thread_id, turn_index, tokens_in, tokens_out, tool_calls }` 写 session + tracing | `crates/slab-agent-tracing` |
 | 预算看板（三重） | token / turn / 工具调用次数，超阈值触发 `BudgetExhausted`（红队 must_add per-thread token 硬预算） | `crates/slab-agent`（thread.rs 预算检查） |
-| log rotation | `tracing-appender` rolling 50MB×5 份 | `bin/slab-server`（启动初始化）+ `crates/slab-utils`（路径） |
-| secret redaction filter | tracing layer 匹配 secret 模式掩码 | `crates/slab-agent-tracing` / 新 redaction layer |
+| log rotation | size-based rolling 50MB×5 份（当前文件 + 4 个历史文件） | `bin/slab-server`（启动初始化）+ `crates/slab-utils`（路径） |
+| secret redaction filter | tracing writer 匹配 secret 模式掩码 | `bin/slab-server/src/log_redaction.rs`（已落地）；诊断包/trace redaction 仍需独立白名单 |
 
 ### 2.6 资源治理（并发/预算/限流/OOM）
 
@@ -232,12 +232,12 @@ graph LR
 | 软阈值 FIFO | 超 16（可配）新 spawn 进 FIFO 队列，队列语义暴露前端 | 无排队，超限直接拒 |
 | 内存熔断 | `process_supervisor`（已存在）暴露 per-process RSS，超 70% 物理内存停止新 spawn subagent，通知主 agent replan | 未接入 agent runtime |
 | 冷却窗口 | 降级→升级带冷却窗口防振荡（建议 30s） | 无 |
-| per-thread token 硬预算 | LLM 调用累计 token 超 thread 预算触发 `BudgetExhausted`（红队 must_add） | 无 |
+| per-thread token 硬预算 | 显式 `AgentConfig.token_budget`，每个 LLM response 后累计 `usage.total_tokens`，超本次 run/resume 预算触发 `BudgetExhausted`（红队 must_add） | `crates/slab-agent` + `crates/slab-app-core` usage 转发（已落地）；跨恢复持久 ledger 未落地 |
 | GLM workflow 限流 | 本机 ~10-14 并发 429（MEMORY 索引），并发上限默认对齐此约束，非云端 32 | 无 |
 
 > **红队可行性修正**：会议结论 Phase 4 列"并行 delegate_subagent(tasks: Vec) + 按复杂度缩放（事实 1/对比 2-4/研究 8-10）"，红队判定与 non_goals"不默认就上多 agent"+ GLM ~10-14 并发 429 直接冲突。**本 TD 移除并行 subagent（must_cut）**，Phase 4 仅保留"单 subagent 同步委派 + 预算看板 + 限流"，并发预算子系统单独成 Phase 4 主线。
 
-**敏感路径审批黑名单（红队 must_add I-08）**：覆盖 ADR-008 的 read 类默认 allow——`read_file`/`grep`/`list_dir` 命中 `~/.ssh`、`.env`、`*credentials*`、`*token*`、`*.pem`、`.slab/slab.db` 时强制 `ask`，守隐私优先红线。
+**敏感路径审批黑名单（红队 must_add I-08，read/search 已落地）**：覆盖 ADR-008 的 read 类默认 allow——`read_file`/`grep`/`list_dir`/`file_glob` 命中 `~/.ssh`、`.env`、`*credentials*`、`*token*`、`*.pem`、`.slab/slab.db` 时强制 `ask`，守隐私优先红线。当前实现位于 `crates/slab-agent-tools/src/sensitive_path.rs` 和各工具 `approval_request`；`BasicToolRiskAnalyzer` 静态分级和 `High` 风险通用审批兜底已落地，sandbox/配置化策略仍留后续切片。
 
 **离线降级模式（红队 must_add I-09）**：agent 启动探测 provider 可达性，离线时自动收窄工具集（禁 `web_search`/外部 MCP/云端模型），UI 标注"离线模式"。这是北极星"离线可用"的硬要求。
 
@@ -308,19 +308,23 @@ graph LR
 - **依赖**：无（但迁移需向后兼容旧明文配置一次性 import）
 - **effort/priority**：L / P4（Phase 0 先冻结 schema 字段定义）
 
-### INFRA-03 slab-server.log rotation + secret redaction
+### INFRA-03 slab-server.log rotation + secret redaction — 已落地
 - **证据**：[app_home.rs:27](crates/slab-utils/src/app_home.rs#L27)、[assistant-markdown.test.tsx:262](packages/slab-desktop/src/pages/assistant/components/__tests__/assistant-markdown.test.tsx#L262)
-- **方案**：`bin/slab-server` 启动改 `tracing-appender` rolling 50MB×5 份；新增 redaction layer 匹配 `sk-`/`Bearer`/`token`/`api_key`/`secret://` 掩码。
-- **验收**：日志单文件不超 50MB；secret 模式不出现在日志；旧 919MB 文件可清理。
+- **方案**：`bin/slab-server` 启动对 `--log-file`/默认本地日志 exporter 接入 `RedactingSizeRotatingWriter`，经 `tracing-appender::non_blocking` 写入；单文件 50MB 上限，最多保留 5 份（当前文件 + 4 个历史文件），超大单条日志也会分块跨文件；writer 层 redaction 匹配 `sk-`/`Bearer`/`token`/`api_key`/`secret://`/`password` 等模式。
+- **验收**：日志单文件不超 50MB；secret 模式不出现在 server file log；旧 919MB 文件可清理。
+- **验证**：`cargo test -p slab-server`、`cargo test -p slab-server size_rotating_log`、`cargo check -p slab-server`。
+- **剩余**：诊断包导出、agent trace JSONL、旧超大日志自动清理不在本切片内。
 - **依赖**：无
-- **effort/priority**：M / P0
+- **effort/priority**：已完成 / P0
 
-### INFRA-04 结构化终止 reason（零 migration）
+### INFRA-04 结构化终止 reason（零 migration） — 已落地
 - **证据**：[port.rs:232](crates/slab-agent/src/port.rs#L232) `update_thread_status(.., Option<&str> reason)`、[thread.rs:248-451](crates/slab-agent/src/thread.rs#L248)
-- **方案**：max_turns 循环正常退出路径写 `reason="max_turns_reached"` + status=Interrupted（可续跑）；前端据 reason 文案区分。
-- **验收**：长任务跑到 max_turns 显示"已达轮次上限，可续跑"+ 终止理由；store 不再标 Completed；零 migration。
+- **方案**：max_turns 循环正常耗尽路径写 `max_turns_reached` + status=Interrupted（可续跑）；真 Final 才写 Completed。
+- **验收**：store 不再把 max_turns 耗尽标 Completed；`max_turns_exhaustion_is_interrupted_with_reason_not_completed` 覆盖状态、reason 和可续跑；零 migration。
+- **验证**：`cargo test -p slab-agent`、`cargo test -p slab-app-core agent`、`cargo check -p slab-server`。
+- **剩余**：前端还需基于恢复响应中的终止理由显示"已达轮次上限，可续跑"；后续合同清理应拆出显式 `finish_reason`/`termination_reason` 字段。
 - **依赖**：无
-- **effort/priority**：M / P2
+- **effort/priority**：已完成 / P0
 
 ### INFRA-05 并发预算可配置 + FIFO + 内存熔断
 - **证据**：[bootstrap.rs:168](crates/slab-app-core/src/infra/agent/bootstrap.rs#L168)、`process_supervisor`（[runtime/process.rs](crates/slab-app-core/src/infra/runtime/process.rs)）
@@ -329,19 +333,23 @@ graph LR
 - **依赖**：INFRA-06
 - **effort/priority**：L / P4
 
-### INFRA-06 per-thread token 硬预算
-- **证据**：无现成实现；[port.rs:32](crates/slab-agent/src/port.rs#L32) `finish_reason`
-- **方案**：thread.rs 累计 LLM token，超 thread 预算触发 `BudgetExhausted`（reason）。
-- **验收**：runaway agent 达预算中断，reason 写入，可提预算续跑。
+### INFRA-06 per-thread token 硬预算 — soft-stop 已落地
+- **证据**：`crates/slab-agent/src/config.rs` 暴露 `AgentConfig.token_budget`；`crates/slab-agent/src/port.rs` 暴露 `LlmResponse.usage`/`LlmUsage`；`crates/slab-agent/src/turn.rs` 在 LLM response 归一化后、工具执行或 Final 持久化前检查本次 run/resume usage；`crates/slab-agent/src/thread.rs` 写 `budget_exhausted`；`crates/slab-app-core/src/infra/agent/adapter.rs` 转发非流式与流式 usage。
+- **方案**：turn/thread 累计 `usage.total_tokens`，达到显式预算时触发 `BudgetExhausted`（reason）并保持 `Interrupted` 可续跑；`None`/`0` 禁用预算。
+- **验收**：runaway/tool-loop agent 达预算中断，reason 写入，可提预算续跑；超预算 tool-call response 不执行工具；生成 API 已包含 `AgentConfigInput.token_budget`。
+- **验证**：`cargo test -p slab-agent`、`cargo test -p slab-app-core agent`、`bun run gen:api`。
+- **剩余**：跨恢复持久 token ledger、全局/工作区预算策略、前端预算看板未落地；INFRA-05 仍负责 FIFO/内存熔断/并发治理。
 - **依赖**：INFRA-04
-- **effort/priority**：M / P4（Phase 0 先冻结字段定义）
+- **effort/priority**：soft-stop 已完成 / P4；持久账本与看板后续
 
-### INFRA-07 敏感路径审批黑名单 + 离线降级
+### INFRA-07 敏感路径审批黑名单 + 离线降级 — 敏感路径与静态风险分级已落地
 - **证据**：红队 must_add；[risk.rs](crates/slab-agent/src/risk.rs)（ToolRiskAnalyzer）
-- **方案**：read 类命中 `~/.ssh`/`.env`/`*credentials*`/`*token*`/`*.pem`/`.slab/slab.db` 强制 ask；agent 启动探测 provider 可达性，离线收窄工具集。
-- **验收**：read 敏感路径弹审批；离线时禁 web_search/外部 MCP 并 UI 标注。
+- **方案**：read/search 类命中 `~/.ssh`/`.env`/`*credentials*`/`*token*`/`*.pem`/`.slab/slab.db` 强制 ask；agent 启动探测 provider 可达性，离线收窄工具集。
+- **已落地**：`read_file`/`list_dir`/`grep`/`file_glob` 对敏感 path/glob/pattern 返回 `ToolApprovalRequest`；普通 `src/main.rs`、`*.rs`、`tokenization` 不触发；`BasicToolRiskAnalyzer` 静态标注 Low/Medium/High，并对无自带审批元数据的 `High` 风险调用走通用审批兜底。
+- **验收**：read/search 敏感路径弹审批；离线时禁 web_search/外部 MCP 并 UI 标注。
+- **剩余**：离线降级未落地；sandbox/配置化 allow-sandbox-ask 策略未落地。
 - **依赖**：无
-- **effort/priority**：M / P1（敏感路径）/ P2（离线）
+- **effort/priority**：敏感路径 read/search + 静态风险分级已完成 / P1；离线降级 P2
 
 ### INFRA-08 诊断包 export_diagnostics（host-only）
 - **证据**：ADR-014 白名单
@@ -350,12 +358,14 @@ graph LR
 - **依赖**：INFRA-03（redaction）
 - **effort/priority**：M / P4（Phase 0 先冻结白名单）
 
-### INFRA-09 subagent span 关联 + metrics event
+### INFRA-09 subagent span 关联 + metrics event — 循环检测埋点已部分落地
 - **证据**：`slab-agent-tracing`、[control.rs spawn_inner](crates/slab-agent/src/control.rs)
 - **方案**：spawn_child 透传 parent_span_id；MetricsEvent 落 tracing + session。
-- **验收**：trace JSONL 含 parent_span_id 链；预算看板可读 metrics。
+- **已落地**：循环 guard 命中写 `loop_detected` trace（含 `thread_id`、稳定 `signature_hash`、`hit_count`）和 `thread_repetition_detected` termination trace；签名参数不明文写入 loop trace。
+- **验收**：trace JSONL 含 parent_span_id 链；预算看板可读 metrics；循环检测 trace 已由 `repeated_side_effect_tool_call_interrupts_with_reason_and_trace_event` 覆盖。
+- **剩余**：subagent parent span 关联、token/tool-call metrics event 与预算看板未落地。
 - **依赖**：无
-- **effort/priority**：M / P2
+- **effort/priority**：循环检测埋点已完成；span/metrics 剩余 M / P2
 
 ### INFRA-10 安装器健康检查 + .slab 引导
 - **方案**：首次运行检查 sidecar spawn 降级 + bundled_lib_dir 完整性 + 写权限；`.slab` 自动创建。
@@ -387,7 +397,7 @@ gantt
     section Phase 0 基线
     诊断包白名单冻结 (INFRA-08 schema)        :p0a, 2026-06-26, 5d
     log rotation + redaction (INFRA-03)       :p0b, 2026-06-26, 5d
-    token 预算字段定义冻结 (INFRA-06 schema)  :p0c, 2026-06-26, 3d
+    token 预算 soft-stop (INFRA-06)            :p0c, 2026-06-26, 3d
     敏感路径字段定义冻结 (INFRA-07 schema)    :p0d, 2026-06-26, 3d
     CI gen 门禁 (INFRA-12)                    :p0e, after p0a, 5d
     section Phase 1-2

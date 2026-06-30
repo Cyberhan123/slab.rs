@@ -18,6 +18,7 @@ pub struct AgentStreamAssembler {
     content: String,
     reasoning: String,
     finish_reason: Option<String>,
+    usage: Option<crate::port::LlmUsage>,
     visibility: StreamVisibilityGate,
 }
 
@@ -35,6 +36,7 @@ pub struct AgentStreamCompletion {
     pub unstreamed_text_delta: Option<String>,
     pub tool_calls: Vec<ParsedToolCall>,
     pub finish_reason: Option<String>,
+    pub usage: Option<crate::port::LlmUsage>,
 }
 
 impl AgentStreamAssembler {
@@ -57,6 +59,9 @@ impl AgentStreamAssembler {
         }
         if parsed.finish_reason.is_some() {
             self.finish_reason = parsed.finish_reason;
+        }
+        if parsed.usage.is_some() {
+            self.usage = parsed.usage;
         }
 
         Ok(deltas)
@@ -89,6 +94,7 @@ impl AgentStreamAssembler {
             unstreamed_text_delta,
             tool_calls: parsed.tool_calls,
             finish_reason: self.finish_reason,
+            usage: self.usage,
         }
     }
 }
@@ -117,6 +123,7 @@ struct ParsedChatStreamChunk {
     content_delta: Option<String>,
     reasoning_delta: Option<String>,
     finish_reason: Option<String>,
+    usage: Option<crate::port::LlmUsage>,
 }
 
 fn parse_chat_stream_chunk(data: &str) -> Result<Option<ParsedChatStreamChunk>, AgentError> {
@@ -137,6 +144,7 @@ fn parse_chat_stream_chunk(data: &str) -> Result<Option<ParsedChatStreamChunk>, 
         content_delta: collect_text_delta(&payload, "content"),
         reasoning_delta: collect_text_delta(&payload, "reasoning_content"),
         finish_reason: stream_finish_reason(&payload),
+        usage: stream_usage(&payload),
     }))
 }
 
@@ -171,6 +179,20 @@ fn stream_finish_reason(payload: &Value) -> Option<String> {
         .filter_map(|choice| choice.get("finish_reason").and_then(Value::as_str))
         .find(|value| !value.is_empty())
         .map(str::to_owned)
+}
+
+fn stream_usage(payload: &Value) -> Option<crate::port::LlmUsage> {
+    let usage = payload.get("usage")?;
+    Some(crate::port::LlmUsage {
+        prompt_tokens: usage.get("prompt_tokens").and_then(Value::as_u64).unwrap_or_default()
+            as u32,
+        completion_tokens: usage
+            .get("completion_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or_default() as u32,
+        total_tokens: usage.get("total_tokens").and_then(Value::as_u64).unwrap_or_default() as u32,
+        estimated: usage.get("estimated").and_then(Value::as_bool).unwrap_or_default(),
+    })
 }
 
 #[derive(Default)]

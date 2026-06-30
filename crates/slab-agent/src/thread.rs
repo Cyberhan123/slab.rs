@@ -22,11 +22,29 @@ use crate::{
         AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, ThreadSnapshot, ThreadStatus,
         TurnEvent,
     },
+    repetition_guard::{RepetitionDetected, RepetitionGuard},
     risk::ToolRiskAnalyzer,
     state::ThreadStateMachine,
-    tool::ToolRouter,
+    tool::{AgentThreadContext, ToolRouter},
     turn::{TurnExecutionContext, TurnOutcome, execute_turn, persist_thread_message},
 };
+
+#[derive(Debug, Clone, Copy)]
+enum TerminationReason {
+    MaxTurns,
+    RepetitionDetected,
+    BudgetExhausted,
+}
+
+impl TerminationReason {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::MaxTurns => "max_turns_reached",
+            Self::RepetitionDetected => "repetition_detected",
+            Self::BudgetExhausted => "budget_exhausted",
+        }
+    }
+}
 
 /// A single agent conversation thread.
 ///
@@ -57,6 +75,7 @@ pub(crate) struct AgentThreadRuntime {
     pub risk: Arc<dyn ToolRiskAnalyzer>,
     pub trace: Arc<dyn AgentTraceSink>,
     pub trace_dir: Option<std::path::PathBuf>,
+    pub thread_context: AgentThreadContext,
     pub cancellation: CancellationToken,
 }
 
@@ -114,6 +133,7 @@ impl AgentThread {
             risk,
             trace,
             trace_dir,
+            thread_context,
             cancellation,
         } = runtime;
         let thread_id = self.id.clone();
@@ -244,6 +264,10 @@ impl AgentThread {
         let mut last_error: Option<AgentError> = None;
         let mut invalid_tool_call_retries = 0u8;
         let mut interrupted = false;
+        let mut termination_reason: Option<TerminationReason> = None;
+        let mut repetition_guard = RepetitionGuard::default();
+        let mut consumed_tokens = 0u32;
+        let mut reached_final_turn = false;
 
         'turns: for turn_offset in 0..self.config.max_turns {
             if cancellation.is_cancelled() {
@@ -290,14 +314,18 @@ impl AgentThread {
                     trace: trace.as_ref(),
                     trace_context: turn_trace_context,
                     cancellation: &cancellation,
+                    thread_context: &thread_context,
+                    consumed_tokens,
                 },
                 &mut messages,
             )
             .await
             {
                 Ok(outcome) => match outcome {
-                    TurnOutcome::Final => {
+                    TurnOutcome::Final { token_usage } => {
+                        consumed_tokens = consumed_tokens.saturating_add(token_usage);
                         // Extract the final assistant text.
+                        reached_final_turn = true;
                         completion_text = messages.iter().rev().find_map(|m| {
                             if m.role == "assistant"
                                 && let ConversationMessageContent::Text(ref t) = m.content
@@ -309,7 +337,13 @@ impl AgentThread {
                         });
                         break 'turns;
                     }
-                    TurnOutcome::ToolCalls { invalid_tool_calls } => {
+                    TurnOutcome::BudgetExceeded { token_usage } => {
+                        consumed_tokens = consumed_tokens.saturating_add(token_usage);
+                        termination_reason = Some(TerminationReason::BudgetExhausted);
+                        break 'turns;
+                    }
+                    TurnOutcome::ToolCalls { invalid_tool_calls, signatures, token_usage } => {
+                        consumed_tokens = consumed_tokens.saturating_add(token_usage);
                         if invalid_tool_calls == 0 {
                             invalid_tool_call_retries = 0;
                         } else {
@@ -322,6 +356,16 @@ impl AgentThread {
                                 )));
                                 break 'turns;
                             }
+                        }
+                        if let Some(detected) = repetition_guard.observe(&signatures) {
+                            self.record_repetition_detected(
+                                trace.as_ref(),
+                                &trace_context,
+                                &thread_id,
+                                &detected,
+                            );
+                            termination_reason = Some(TerminationReason::RepetitionDetected);
+                            break 'turns;
                         }
                     }
                 },
@@ -419,6 +463,53 @@ impl AgentThread {
             )
             .await;
             return Err(err);
+        }
+
+        if !reached_final_turn {
+            let termination_reason = termination_reason.unwrap_or(TerminationReason::MaxTurns);
+            let reason = termination_reason.as_str();
+            self.emit_response_event(
+                &notify,
+                starting_turn_index,
+                AgentEventKind::ResponseCancelled {
+                    response: AgentResponseRef {
+                        id: thread_id.clone(),
+                        status: ThreadStatus::Interrupted,
+                    },
+                    reason: reason.to_owned(),
+                },
+            )
+            .await;
+            self.emit_metrics(&notify, started_at, false).await;
+            self.set_status(ThreadStatus::Interrupted, &notify).await?;
+            record_json(
+                trace.as_ref(),
+                &trace_context,
+                "slab-agent",
+                termination_reason.trace_event_name(),
+                serde_json::json!({
+                    "status": ThreadStatus::Interrupted,
+                    "reason": reason,
+                    "max_turns": self.config.max_turns,
+                    "consumed_tokens": consumed_tokens,
+                    "token_budget": self.config.token_budget,
+                }),
+            );
+            store
+                .update_thread_status(&thread_id, ThreadStatus::Interrupted, Some(reason))
+                .await
+                .ok();
+            dispatch_registered_hooks(
+                &hooks,
+                &HookEvent::OnAgentEnd {
+                    thread_id: thread_id.clone(),
+                    session_id: self.session_id.clone(),
+                    status: ThreadStatus::Interrupted,
+                    error: None,
+                },
+            )
+            .await;
+            return Ok(String::new());
         }
 
         info!(thread_id, "thread completed");
@@ -662,6 +753,36 @@ impl AgentThread {
                 },
             )
             .await;
+    }
+
+    fn record_repetition_detected(
+        &self,
+        trace: &dyn AgentTraceSink,
+        trace_context: &AgentTraceContext,
+        thread_id: &str,
+        detected: &RepetitionDetected,
+    ) {
+        record_json(
+            trace,
+            trace_context,
+            "slab-agent",
+            "loop_detected",
+            serde_json::json!({
+                "thread_id": thread_id,
+                "signature_hash": detected.signature.signature_hash(),
+                "hit_count": detected.hit_count,
+            }),
+        );
+    }
+}
+
+impl TerminationReason {
+    const fn trace_event_name(self) -> &'static str {
+        match self {
+            Self::MaxTurns => "thread_max_turns_reached",
+            Self::RepetitionDetected => "thread_repetition_detected",
+            Self::BudgetExhausted => "thread_token_budget_exhausted",
+        }
     }
 }
 

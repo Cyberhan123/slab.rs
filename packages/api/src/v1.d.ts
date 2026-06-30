@@ -1252,6 +1252,8 @@ export interface components {
             system_prompt?: string | null;
             /** Format: float */
             temperature?: number | null;
+            /** Format: int32 */
+            token_budget?: number | null;
             tool_choice?: null | components["schemas"]["AgentToolChoiceInput"];
             /** Format: int32 */
             tool_concurrency?: number | null;
@@ -2306,7 +2308,7 @@ export interface components {
             status: number;
         };
         /** @enum {string} */
-        PluginCapabilityKind: "tool" | "workflow";
+        PluginCapabilityKind: "tool" | "workflow" | "a2u_surface";
         PluginCapabilityTransport: {
             function: string;
             type: components["schemas"]["PluginCapabilityTransportType"];

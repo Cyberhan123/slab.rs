@@ -4,9 +4,9 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{AgentError, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput};
 
-use crate::args::string_arg;
+use crate::{args::string_arg, sensitive_path::approval_for_path};
 
 const MAX_LINES: usize = 1000;
 
@@ -48,6 +48,10 @@ impl ToolHandler for ReadFileTool {
             },
             "required": ["path"]
         })
+    }
+
+    fn approval_request(&self, arguments: &Value) -> Option<ToolApprovalRequest> {
+        approval_for_path("read_file", "path", arguments.get("path").and_then(Value::as_str))
     }
 
     async fn execute(
@@ -189,6 +193,10 @@ impl ToolHandler for ListDirTool {
         })
     }
 
+    fn approval_request(&self, arguments: &Value) -> Option<ToolApprovalRequest> {
+        approval_for_path("list_dir", "path", arguments.get("path").and_then(Value::as_str))
+    }
+
     async fn execute(
         &self,
         _ctx: &ToolContext,
@@ -251,7 +259,7 @@ mod tests {
     use super::*;
 
     fn ctx() -> ToolContext {
-        ToolContext { thread_id: "thread".into(), turn_index: 0, depth: 0 }
+        ToolContext::for_thread("thread").build()
     }
 
     #[tokio::test]
@@ -279,6 +287,17 @@ mod tests {
         assert_eq!(value["returned_lines"], 0);
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn read_and_list_tools_require_approval_for_sensitive_paths() {
+        let read = ReadFileTool::new(Some(PathBuf::from(".")));
+        let list = ListDirTool::new(Some(PathBuf::from(".")));
+
+        assert!(read.approval_request(&json!({"path": ".env"})).is_some());
+        assert!(read.approval_request(&json!({"path": ".slab/slab.db"})).is_some());
+        assert!(list.approval_request(&json!({"path": "~/.ssh"})).is_some());
+        assert!(read.approval_request(&json!({"path": "src/main.rs"})).is_none());
     }
 
     #[tokio::test]

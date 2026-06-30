@@ -19,6 +19,19 @@ HTTP gateway for the Slab inference stack, built with [axum](https://github.com/
 
 Rust binary (axum HTTP server).
 
+## Local Validation
+
+```sh
+cargo test -p slab-server
+cargo check -p slab-server
+```
+
+## Boundaries
+
+- Keep HTTP routing and error mapping here; business logic belongs in `crates/slab-app-core`.
+- Keep Tauri host-only behavior in `bin/slab-app/src-tauri`.
+- File logging for `--log-file` uses a redacting size-rotating writer: 50 MiB per file, 5 files total, with secret-shaped values masked before disk writes.
+
 ## License
 
 AGPL-3.0-only. See [LICENSE](../../LICENSE).

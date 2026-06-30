@@ -505,7 +505,7 @@ mod tests {
     }
 
     fn ctx() -> ToolContext {
-        ToolContext { thread_id: "t1".into(), turn_index: 0, depth: 0 }
+        ToolContext::for_thread("t1").build()
     }
 
     #[test]

@@ -19,6 +19,7 @@ pub mod glob;
 pub mod grep;
 pub mod mcp;
 pub mod plan;
+mod sensitive_path;
 pub mod shell;
 pub mod subagent;
 pub mod web_search;

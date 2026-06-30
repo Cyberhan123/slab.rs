@@ -392,6 +392,8 @@ pub enum PluginLanguageServerTransport {
 pub enum PluginCapabilityKind {
     Tool,
     Workflow,
+    #[serde(rename = "a2u_surface")]
+    A2uSurface,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
@@ -430,7 +432,7 @@ pub struct PluginInfo {
 mod tests {
     use serde_json::json;
 
-    use super::PluginManifest;
+    use super::{PluginCapabilityKind, PluginManifest};
 
     #[test]
     fn manifest_integrity_defaults_to_empty_map() {
@@ -508,6 +510,38 @@ mod tests {
         assert_eq!(
             manifest.runtime.python.expect("python runtime").bundle.as_deref(),
             Some("python/backend.slabpy")
+        );
+    }
+
+    #[test]
+    fn agent_capability_accepts_a2u_surface_kind() {
+        let manifest = serde_json::from_value::<PluginManifest>(json!({
+            "manifestVersion": 1,
+            "id": "surface-plugin",
+            "name": "Surface Plugin",
+            "version": "0.1.0",
+            "runtime": { "ui": { "entry": "ui/index.html" } },
+            "permissions": {
+                "agent": ["capability:declare"]
+            },
+            "contributes": {
+                "agentCapabilities": [
+                    {
+                        "id": "surface-plugin.review",
+                        "kind": "a2u_surface",
+                        "transport": {
+                            "type": "pluginCall",
+                            "function": "review"
+                        }
+                    }
+                ]
+            }
+        }))
+        .expect("manifest should deserialize a2u surface capability");
+
+        assert_eq!(
+            manifest.contributes.agent_capabilities[0].kind,
+            PluginCapabilityKind::A2uSurface
         );
     }
 }

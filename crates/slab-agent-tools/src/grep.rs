@@ -8,7 +8,9 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use regex::Regex;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{AgentError, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput};
+
+use crate::sensitive_path::approval_for_values;
 
 const DEFAULT_MAX_RESULTS: usize = 200;
 const HARD_MAX_RESULTS: usize = 1000;
@@ -98,6 +100,17 @@ impl ToolHandler for GrepTool {
             },
             "required": ["pattern"]
         })
+    }
+
+    fn approval_request(&self, arguments: &Value) -> Option<ToolApprovalRequest> {
+        approval_for_values(
+            "grep",
+            &[
+                ("path", arguments.get("path").and_then(Value::as_str)),
+                ("glob", arguments.get("glob").and_then(Value::as_str)),
+                ("pattern", arguments.get("pattern").and_then(Value::as_str)),
+            ],
+        )
     }
 
     async fn execute(
@@ -249,7 +262,7 @@ mod tests {
     use super::*;
 
     fn ctx() -> ToolContext {
-        ToolContext { thread_id: "thread".into(), turn_index: 0, depth: 0 }
+        ToolContext::for_thread("thread").build()
     }
 
     #[tokio::test]
@@ -281,6 +294,21 @@ mod tests {
         assert!(value["matches"][0]["file"].as_str().expect("file").ends_with("lib.rs"));
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn grep_tool_requires_approval_for_sensitive_path_glob_or_pattern() {
+        let tool = GrepTool::new(Some(PathBuf::from(".")));
+
+        assert!(tool.approval_request(&json!({"path": ".env", "pattern": "KEY"})).is_some());
+        assert!(tool.approval_request(&json!({"path": ".", "pattern": "token"})).is_some());
+        assert!(
+            tool.approval_request(&json!({"path": ".", "pattern": "KEY", "glob": "*.pem"}))
+                .is_some()
+        );
+        assert!(
+            tool.approval_request(&json!({"path": "src", "pattern": "tokenization"})).is_none()
+        );
     }
 
     #[tokio::test]

@@ -80,7 +80,7 @@ mod tests {
     use super::*;
 
     fn ctx() -> ToolContext {
-        ToolContext { thread_id: "thread".into(), turn_index: 0, depth: 0 }
+        ToolContext::for_thread("thread").build()
     }
 
     #[tokio::test]

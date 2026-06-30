@@ -22,6 +22,7 @@ pub struct AgentConfigInput {
     pub system_prompt: Option<String>,
     pub max_turns: Option<u32>,
     pub max_tokens: Option<u32>,
+    pub token_budget: Option<u32>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub top_k: Option<i32>,
@@ -48,6 +49,7 @@ impl From<AgentConfigInput> for AgentConfig {
             max_depth: defaults.max_depth,
             max_threads: defaults.max_threads,
             max_tokens: v.max_tokens,
+            token_budget: v.token_budget,
             temperature: v.temperature,
             top_p: v.top_p,
             top_k: v.top_k,
@@ -470,6 +472,7 @@ mod tests {
 
         assert_eq!(config.model, "mock");
         assert_eq!(config.tool_choice, AgentToolChoice::Tool { name: "echo".into() });
+        assert_eq!(config.token_budget, None);
         assert_eq!(config.tool_concurrency, 4);
         assert_eq!(config.invalid_tool_call_retries, 3);
         assert_eq!(config.structured_output, Some(StructuredOutput::JsonObject));
@@ -504,6 +507,7 @@ mod tests {
             "max_depth": 3,
             "max_threads": 8,
             "max_tokens": null,
+            "token_budget": null,
             "temperature": null,
             "top_p": null,
             "top_k": null,
@@ -519,6 +523,7 @@ mod tests {
         assert_eq!(config.tool_concurrency, 1);
         assert_eq!(config.invalid_tool_call_retries, 1);
         assert_eq!(config.structured_output, None);
+        assert_eq!(config.token_budget, None);
         assert!(!config.transient);
     }
 

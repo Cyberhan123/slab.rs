@@ -30,6 +30,18 @@ pub struct LlmResponse {
     pub tool_calls: Vec<ParsedToolCall>,
     /// The finish reason reported by the provider (e.g. "stop", "tool_calls").
     pub finish_reason: Option<String>,
+    /// Token usage reported by the provider/runtime for this LLM call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<LlmUsage>,
+}
+
+/// Token usage reported for a single LLM call.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct LlmUsage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+    pub estimated: bool,
 }
 
 /// A single tool call parsed from the LLM response.

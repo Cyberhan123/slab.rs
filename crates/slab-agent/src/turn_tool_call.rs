@@ -13,11 +13,11 @@ use slab_types::{ConversationMessage, agent::ToolCallStatus};
 
 use crate::{
     error::AgentError,
-    event::{AgentEventKind, ToolRiskAssessment},
+    event::{AgentEventKind, ToolRiskAssessment, ToolRiskLevel},
     hook::{HookEvent, HookToolAction, dispatch_registered_hooks},
     port::{ApprovalDecision, ParsedToolCall, TurnEvent},
     state::ToolCallStateMachine,
-    tool::{ToolApprovalRequest, ToolContext, ToolHandler},
+    tool::{PlanRef, ToolApprovalRequest, ToolContext, ToolHandler},
     turn::TurnExecutionContext,
     turn_tool_record::{
         insert_tool_call_record, persist_tool_message_record,
@@ -36,11 +36,25 @@ pub(crate) async fn handle_tool_calls(
     tool_calls: &[ParsedToolCall],
     messages: &mut Vec<ConversationMessage>,
 ) -> Result<(), AgentError> {
-    let tool_context = ToolContext {
-        thread_id: context.thread_id.to_owned(),
-        turn_index: context.turn_index,
-        depth: context.depth,
-    };
+    let mut tool_context_builder = ToolContext::for_thread(context.thread_id)
+        .turn_index(context.turn_index)
+        .depth(context.depth);
+    if let Some(workspace) = context.thread_context.workspace.as_ref() {
+        let mut workspace = workspace.clone();
+        if workspace.session_id.is_none() {
+            workspace.session_id = Some(context.session_id.to_owned());
+        }
+        tool_context_builder = tool_context_builder.workspace(workspace);
+    }
+    if let Some(plan_id) = context.thread_context.plan_id.as_deref().map(str::trim)
+        && !plan_id.is_empty()
+    {
+        tool_context_builder = tool_context_builder.plan(PlanRef {
+            thread_id: context.thread_id.to_owned(),
+            plan_id: Some(plan_id.to_owned()),
+        });
+    }
+    let tool_context = tool_context_builder.build();
     let now = Utc::now().to_rfc3339();
     let total = tool_calls.len();
     if total == 0 {
@@ -316,8 +330,10 @@ async fn handle_tool_call(
         .await;
 
     let handler = context.tools.get(&tool_call.name);
-    let approval_request =
-        handler.as_ref().and_then(|handler| handler.approval_request(&effective_args));
+    let approval_request = handler
+        .as_ref()
+        .and_then(|handler| handler.approval_request(&effective_args))
+        .or_else(|| risk_based_approval_request(&tool_call.name, &effective_arguments, &risk));
     let initial_status =
         if approval_request.is_some() { ToolCallStatus::Pending } else { ToolCallStatus::Running };
     let mut tool_state = ToolCallStateMachine::new(initial_status);
@@ -400,6 +416,17 @@ async fn handle_tool_call(
     let message = crate::turn_tool_record::tool_message(tool_call, output);
 
     Ok(ToolCallRunResult { message, status: call_status })
+}
+
+fn risk_based_approval_request(
+    tool_name: &str,
+    effective_arguments: &str,
+    risk: &ToolRiskAssessment,
+) -> Option<ToolApprovalRequest> {
+    if risk.level != ToolRiskLevel::High {
+        return None;
+    }
+    Some(ToolApprovalRequest { command: format!("{tool_name} {effective_arguments}") })
 }
 
 struct ToolRunContext<'a, 'ctx> {

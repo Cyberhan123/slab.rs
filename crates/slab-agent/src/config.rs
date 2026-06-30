@@ -41,6 +41,9 @@ pub struct AgentConfig {
     pub max_threads: u32,
     /// Maximum output tokens per LLM call.
     pub max_tokens: Option<u32>,
+    /// Maximum cumulative LLM tokens for this run. `None` or `0` disables the budget.
+    #[serde(default)]
+    pub token_budget: Option<u32>,
     /// Sampling temperature passed to the LLM.
     pub temperature: Option<f32>,
     /// Nucleus sampling threshold.
@@ -87,6 +90,7 @@ impl Default for AgentConfig {
             max_depth: 3,
             max_threads: 8,
             max_tokens: None,
+            token_budget: None,
             temperature: None,
             top_p: None,
             top_k: None,

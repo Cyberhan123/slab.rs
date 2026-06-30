@@ -26,6 +26,7 @@ type PluginManifest = {
   contributes?: {
     agentCapabilities?: Array<{
       exposeAsMcpTool?: boolean;
+      kind?: "a2u_surface" | "tool" | "workflow";
     }>;
     agentHooks?: unknown[];
     commands?: unknown[];

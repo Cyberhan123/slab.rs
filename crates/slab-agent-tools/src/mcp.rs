@@ -215,7 +215,7 @@ mod tests {
     #[tokio::test]
     async fn mcp_list_tools_returns_json_array() {
         let tool = McpListToolsTool::new(Arc::new(McpClient::new()));
-        let ctx = ToolContext { thread_id: "thread".into(), turn_index: 0, depth: 0 };
+        let ctx = ToolContext::for_thread("thread").build();
         let output = tool.execute(&ctx, &json!({})).await.expect("list tools output");
 
         assert_eq!(tool.name(), "mcp_list_tools");

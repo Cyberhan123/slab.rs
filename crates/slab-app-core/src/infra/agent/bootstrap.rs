@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use slab_agent::{AgentControl, ToolRouter};
+use slab_agent::{AgentControl, AgentThreadContext, ToolRouter, WorkspaceRef};
 use slab_agent_tools::{ShellPolicy, ShellRuleSet};
 use slab_agent_tracing::{AgentTraceSink, FileAgentTraceSink, NoopAgentTraceSink};
 use slab_sandboxing::{SandboxEnvironment, SandboxPolicy, create_platform_driver};
@@ -159,17 +159,25 @@ fn build_agent_control(
         hooks.push(script_hook);
     }
 
-    let control = Arc::new(AgentControl::new_with_hooks_and_tracing(
-        llm,
-        store_adapter,
-        notify_port,
-        approval_port,
-        Arc::clone(&tool_router),
-        slab_agent::AgentControlLimits { max_threads: 32, max_depth: 4 },
-        hooks,
-        trace,
-        trace_dir,
-    ));
+    let thread_context = workspace_root
+        .clone()
+        .map(|root| WorkspaceRef { root, session_id: None })
+        .map(|workspace| AgentThreadContext::new().with_workspace(workspace))
+        .unwrap_or_default();
+    let control = Arc::new(
+        AgentControl::new_with_hooks_and_tracing(
+            llm,
+            store_adapter,
+            notify_port,
+            approval_port,
+            Arc::clone(&tool_router),
+            slab_agent::AgentControlLimits { max_threads: 32, max_depth: 4 },
+            hooks,
+            trace,
+            trace_dir,
+        )
+        .with_thread_context(thread_context),
+    );
     tool_router
         .register(Box::new(slab_agent_tools::DelegateSubagentTool::new(Arc::clone(&control))));
     memory_pipeline.set_control(Arc::clone(&control));
