@@ -1,6 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::document::ProviderFamily;
 use super::{
     defaults,
     document::{AgentSettingsConfig, GuardrailSettingsConfig, LoggingConfig, ServerSettingsConfig},
@@ -14,6 +15,9 @@ pub struct CloudProviderConfig {
     /// Unique provider identifier.
     #[serde(alias = "provider_id", alias = "providerId")]
     pub id: String,
+    /// Provider family implementation (maps to a `genai` `AdapterKind`).
+    #[serde(default)]
+    pub family: ProviderFamily,
     /// Human-readable display name.
     #[serde(default, alias = "displayName", alias = "provider_name")]
     pub name: String,

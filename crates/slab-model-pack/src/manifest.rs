@@ -44,15 +44,12 @@ pub struct ModelPackManifest {
     pub default_preset: Option<String>,
     #[serde(default)]
     pub footprint: ResourceFootprint,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cloud: Option<CloudModelTarget>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PackDeployment {
     Local,
-    Cloud,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
@@ -69,23 +66,6 @@ pub struct EngineTarget {
 pub struct PackPricing {
     pub input: f64,
     pub output: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct CloudModelTarget {
-    pub provider_id: String,
-    pub remote_model_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub preferred_api_base: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub credentials: Option<CloudCredentials>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct CloudCredentials {
-    pub secret_ref: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]

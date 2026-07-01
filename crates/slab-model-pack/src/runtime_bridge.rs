@@ -10,7 +10,7 @@ use slab_types::{
 };
 
 use crate::error::ModelPackError;
-use crate::manifest::{BackendConfigDocument, PackDeployment, PackSource, PackSourceFile};
+use crate::manifest::{BackendConfigDocument, PackSource, PackSourceFile};
 use crate::refs::ConfigRef;
 use crate::resolve::{ResolvedModelPack, ResolvedPreset};
 
@@ -60,12 +60,6 @@ impl ResolvedModelPack {
         &self,
         preset: &ResolvedPreset,
     ) -> Result<ModelPackRuntimeBridge, ModelPackError> {
-        if self.manifest.deployment == PackDeployment::Cloud {
-            return Err(ModelPackError::UnsupportedRuntimeBridgeSource {
-                source_kind: "cloud".into(),
-            });
-        }
-
         let capability = self
             .manifest
             .capabilities
@@ -600,33 +594,6 @@ mod v3_tests {
         );
         assert_eq!(bridge.load_defaults.context_length, Some(8192));
         assert_eq!(bridge.inference_defaults.get("temperature").and_then(Value::as_f64), Some(0.7));
-    }
-
-    #[test]
-    fn cloud_pack_does_not_compile_runtime_bridge() {
-        let pack = ModelPack::from_bytes(&build_pack(vec![(
-            "manifest.json",
-            json!({
-                "schema_version": 3,
-                "deployment": "cloud",
-                "id": "gpt-4.1-mini",
-                "label": "GPT-4.1 mini",
-                "family": "llama",
-                "capabilities": ["text_generation"],
-                "cloud": {
-                    "provider_id": "openai-main",
-                    "remote_model_id": "gpt-4.1-mini"
-                }
-            })
-            .to_string(),
-        )]))
-        .expect("load pack");
-        let resolved = pack.resolve().expect("resolve pack");
-        let error = resolved
-            .compile_default_runtime_bridge()
-            .expect_err("cloud pack must not compile runtime bridge");
-
-        assert!(error.to_string().contains("default_preset"));
     }
 
     #[test]

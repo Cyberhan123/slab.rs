@@ -6246,9 +6246,9 @@ dependencies = [
 
 [[package]]
 name = "genai"
-version = "0.6.0"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2430c2ae5bf07f7ea071e96498b0fad665980aa0c86e58ce64687c90e9804fe8"
+checksum = "1d12aba7e9dc2c4d54654566dc3dc8383b5cb52e0cfc5754989afe0480d933e3"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -14772,6 +14772,7 @@ dependencies = [
  "slab-agent-tools",
  "slab-agent-tracing",
  "slab-build-utils",
+ "slab-cloud-provider",
  "slab-config",
  "slab-file",
  "slab-git",
@@ -14848,6 +14849,18 @@ dependencies = [
  "slab-types",
  "thiserror 2.0.18",
  "tokenizers 0.23.1",
+ "tracing",
+]
+
+[[package]]
+name = "slab-cloud-provider"
+version = "0.1.0"
+dependencies = [
+ "genai",
+ "serde",
+ "serde_json",
+ "slab-config",
+ "thiserror 2.0.18",
  "tracing",
 ]
 

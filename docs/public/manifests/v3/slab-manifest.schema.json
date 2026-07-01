@@ -22,50 +22,6 @@
       ],
       "type": "string"
     },
-    "CloudCredentials": {
-      "additionalProperties": false,
-      "properties": {
-        "secret_ref": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "secret_ref"
-      ],
-      "type": "object"
-    },
-    "CloudModelTarget": {
-      "additionalProperties": false,
-      "properties": {
-        "credentials": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CloudCredentials"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "preferred_api_base": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "provider_id": {
-          "type": "string"
-        },
-        "remote_model_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "provider_id",
-        "remote_model_id"
-      ],
-      "type": "object"
-    },
     "ConfigEntryRef": {
       "additionalProperties": false,
       "properties": {
@@ -121,8 +77,7 @@
     },
     "PackDeployment": {
       "enum": [
-        "local",
-        "cloud"
+        "local"
       ],
       "type": "string"
     },
@@ -356,16 +311,6 @@
         "$ref": "#/$defs/Capability"
       },
       "type": "array"
-    },
-    "cloud": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/CloudModelTarget"
-        },
-        {
-          "type": "null"
-        }
-      ]
     },
     "components": {
       "items": {

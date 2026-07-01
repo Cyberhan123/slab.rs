@@ -162,6 +162,7 @@
         "@codingame/monaco-vscode-working-copy-service-override": "catalog:",
         "@codingame/monaco-vscode-xml-default-extension": "catalog:",
         "@codingame/monaco-vscode-yaml-default-extension": "catalog:",
+        "@hookform/resolvers": "catalog:",
         "@mantine/hooks": "catalog:",
         "@shikijs/monaco": "catalog:",
         "@slab/api": "workspace:*",
@@ -194,6 +195,7 @@
         "react": "catalog:",
         "react-arborist": "catalog:",
         "react-dom": "catalog:",
+        "react-hook-form": "catalog:",
         "react-router-dom": "catalog:",
         "request-light": "catalog:",
         "shiki": "catalog:",
@@ -208,6 +210,7 @@
         "vscode-uri": "catalog:",
         "vscode-ws-jsonrpc": "catalog:",
         "wtd-core": "catalog:",
+        "zod": "catalog:",
         "zustand": "catalog:",
       },
       "devDependencies": {

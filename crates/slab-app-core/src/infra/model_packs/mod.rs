@@ -5,11 +5,11 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use slab_model_pack::{
-    BackendConfigDocument, BackendConfigScope, CloudModelTarget, ConfigEntryRef, ConfigRef,
-    EngineTarget, MANIFEST_FILE_NAME, MODEL_PACK_SCHEMA_VERSION, ModelPack,
-    ModelPackCatalogSummary, ModelPackError, ModelPackLoadDefaults, ModelPackManifest,
-    ModelPackRuntimeBridge, PackDeployment, PackDocument, PackPricing, PackSource,
-    PackSourceCandidate, PackSourceFile, PresetDocument, PresetEntryRef, VariantDocument,
+    BackendConfigDocument, BackendConfigScope, ConfigEntryRef, ConfigRef, EngineTarget,
+    MANIFEST_FILE_NAME, MODEL_PACK_SCHEMA_VERSION, ModelPack, ModelPackCatalogSummary,
+    ModelPackError, ModelPackLoadDefaults, ModelPackManifest, ModelPackRuntimeBridge,
+    PackDeployment, PackDocument, PackPricing, PackSource, PackSourceCandidate, PackSourceFile,
+    PresetDocument, PresetEntryRef, VariantDocument,
 };
 use slab_types::{ArtifactFormat, DiffusionLoadOptions, ModelFamily, RuntimeBackendId};
 use slab_utils::hash::{sha256_hex_bytes, verify_sha256_hex_expected};
@@ -111,11 +111,6 @@ pub fn read_model_pack_runtime_bridge_from_bytes(
     let pack = open_model_pack_from_bytes(bytes)?;
     let resolved = pack.resolve().map_err(map_model_pack_error)?;
     resolved.compile_default_runtime_bridge().map_err(map_model_pack_error)
-}
-
-pub fn build_model_command_from_pack(path: &Path) -> Result<CreateModelCommand, AppCoreError> {
-    let bytes = read_pack_bytes(path)?;
-    build_model_command_from_pack_bytes(path, &bytes)
 }
 
 pub fn build_model_command_from_pack_bytes(
@@ -497,16 +492,11 @@ fn build_generated_manifest(config: &StoredModelConfig) -> ModelPackManifest {
     let mut metadata = BTreeMap::new();
     metadata.insert("generated_by".into(), "slab-app-core".into());
     let backend = infer_runtime_backend_from_config(config);
-    let deployment = if config.kind == UnifiedModelKind::Cloud {
-        PackDeployment::Cloud
-    } else {
-        PackDeployment::Local
-    };
 
     ModelPackManifest {
         schema: None,
         schema_version: MODEL_PACK_SCHEMA_VERSION,
-        deployment,
+        deployment: PackDeployment::Local,
         id: config.id.clone(),
         label: config.display_name.clone(),
         family,
@@ -528,20 +518,7 @@ fn build_generated_manifest(config: &StoredModelConfig) -> ModelPackManifest {
         presets: Vec::new(),
         default_preset: None,
         footprint: Default::default(),
-        cloud: build_cloud_target_from_config(config),
     }
-}
-
-fn build_cloud_target_from_config(config: &StoredModelConfig) -> Option<CloudModelTarget> {
-    if config.kind != UnifiedModelKind::Cloud {
-        return None;
-    }
-    Some(CloudModelTarget {
-        provider_id: config.spec.provider_id.clone()?,
-        remote_model_id: config.spec.remote_model_id.clone()?,
-        preferred_api_base: None,
-        credentials: None,
-    })
 }
 
 fn build_pack_sources_from_config(config: &StoredModelConfig) -> Vec<PackSourceCandidate> {

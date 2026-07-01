@@ -1101,28 +1101,36 @@
       },
       "type": "object"
     },
-    "ProviderDefaultsConfig": {
-      "description": "Provider-level default headers and query parameters.",
-      "properties": {
-        "headers": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "type": "object"
-        },
-        "query": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      },
-      "type": "object"
-    },
     "ProviderFamily": {
-      "description": "Supported provider transport families.",
+      "description": "Supported provider transport families.\n\nMirrors the `genai` crate's `AdapterKind` enum (see `slab-cloud-provider`). `OpenaiCompatible`\nis the catch-all \"Other / custom OpenAI-compatible endpoint\" family; every other variant maps\n1:1 to a `genai::adapter::AdapterKind`. When `genai` adds an `AdapterKind` variant, add the\nmatching variant here, in `ProviderFamily::all_str()`, and in `slab_cloud_provider`'s\n`family_to_adapter_kind` + `AdapterKindInfo` table.",
       "enum": [
-        "openai_compatible"
+        "openai_compatible",
+        "openai",
+        "openai_resp",
+        "gemini",
+        "anthropic",
+        "fireworks",
+        "together",
+        "groq",
+        "aihubmix",
+        "mimo",
+        "moonshot",
+        "nebius",
+        "xai",
+        "deep_seek",
+        "zai",
+        "big_model",
+        "aliyun",
+        "baidu",
+        "cohere",
+        "ollama",
+        "ollama_cloud",
+        "vertex",
+        "github_copilot",
+        "open_code_go",
+        "bedrock_api",
+        "open_router",
+        "mini_max"
       ],
       "type": "string"
     },
@@ -1135,10 +1143,6 @@
         },
         "auth": {
           "$ref": "#/$defs/ProviderAuthConfig",
-          "default": {}
-        },
-        "defaults": {
-          "$ref": "#/$defs/ProviderDefaultsConfig",
           "default": {}
         },
         "display_name": {

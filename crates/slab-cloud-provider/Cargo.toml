@@ -1,0 +1,17 @@
+[package]
+name = "slab-cloud-provider"
+version.workspace = true
+edition.workspace = true
+description = "Cloud model-provider infrastructure wrapping the genai crate"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[dependencies]
+genai = { workspace = true }
+slab-config = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

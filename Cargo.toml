@@ -29,6 +29,7 @@ members = [
     "crates/slab-runtime-core",
     "crates/slab-types",
     "crates/slab-config",
+    "crates/slab-cloud-provider",
     "crates/slab-subtitle",
     "crates/slab-ggml",
     "crates/slab-ggml-sys",
@@ -72,6 +73,7 @@ slab-candle = { path = "./crates/slab-candle", package = "slab-candle", version 
 slab-model-pack = { path = "./crates/slab-model-pack", package = "slab-model-pack", version = "0.1.0" }
 slab-types = { path = "./crates/slab-types", package = "slab-types", version = "0.1.0" }
 slab-config = { path = "./crates/slab-config", package = "slab-config", version = "0.1.0" }
+slab-cloud-provider = { path = "./crates/slab-cloud-provider", package = "slab-cloud-provider", version = "0.1.0" }
 slab-hub = { path = "./crates/slab-hub", package = "slab-hub", version = "0.1.0" }
 slab-diffusion-sys = { path = "./crates/slab-diffusion-sys", package = "slab-diffusion-sys", version = "0.1.0" }
 slab-diffusion = { path = "./crates/slab-diffusion", package = "slab-diffusion", version = "0.1.0" }
@@ -148,7 +150,9 @@ bytes = "1.11.1"
 futures = "0.3"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-genai = "0.6.0"
+# native-tls aligns with the workspace `reqwest` backend; genai 0.6.4+ defaults to
+# rustls-tls and emits a `compile_error!` when both TLS backends are unified.
+genai = { version = "0.6.5", default-features = false, features = ["native-tls"] }
 gix = "0.83.0"
 base64 = "0.22"
 hex = "0.4"

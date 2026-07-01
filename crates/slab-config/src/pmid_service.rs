@@ -1959,6 +1959,7 @@ fn normalize_string(raw: Option<String>) -> Option<String> {
 fn provider_registry_entry_to_cloud_provider(entry: &ProviderRegistryEntry) -> CloudProviderConfig {
     CloudProviderConfig {
         id: entry.id.clone(),
+        family: entry.family,
         name: entry.display_name.clone(),
         api_base: entry.api_base.clone(),
         api_key: entry.auth.api_key.clone(),
@@ -1995,9 +1996,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::{
-        InterfaceLanguagePreference, ProviderAuthConfig, ProviderDefaultsConfig, ProviderFamily,
-    };
+    use crate::{InterfaceLanguagePreference, ProviderAuthConfig, ProviderFamily};
 
     fn temp_settings_path() -> PathBuf {
         let base = std::env::temp_dir().join(format!("slab-pmid-test-{}", uuid::Uuid::new_v4()));
@@ -2014,7 +2013,6 @@ mod tests {
                 api_key: api_key.map(str::to_owned),
                 api_key_env: api_key_env.map(str::to_owned),
             },
-            defaults: ProviderDefaultsConfig::default(),
         }
     }
 

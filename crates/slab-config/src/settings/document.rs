@@ -1007,11 +1007,80 @@ pub struct ProvidersConfig {
 }
 
 /// Supported provider transport families.
+///
+/// Mirrors the `genai` crate's `AdapterKind` enum (see `slab-cloud-provider`). `OpenaiCompatible`
+/// is the catch-all "Other / custom OpenAI-compatible endpoint" family; every other variant maps
+/// 1:1 to a `genai::adapter::AdapterKind`. When `genai` adds an `AdapterKind` variant, add the
+/// matching variant here, in `ProviderFamily::all_str()`, and in `slab_cloud_provider`'s
+/// `family_to_adapter_kind` + `AdapterKindInfo` table.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderFamily {
     #[default]
     OpenaiCompatible,
+    Openai,
+    OpenaiResp,
+    Gemini,
+    Anthropic,
+    Fireworks,
+    Together,
+    Groq,
+    Aihubmix,
+    Mimo,
+    Moonshot,
+    Nebius,
+    Xai,
+    DeepSeek,
+    Zai,
+    BigModel,
+    Aliyun,
+    Baidu,
+    Cohere,
+    Ollama,
+    OllamaCloud,
+    Vertex,
+    GithubCopilot,
+    OpenCodeGo,
+    BedrockApi,
+    OpenRouter,
+    MiniMax,
+}
+
+impl ProviderFamily {
+    /// All variants in their canonical (serde snake_case) string form, in declaration order.
+    /// Used to generate the `providers.registry` JSON schema enum so the frontend dropdown
+    /// stays in sync with this type.
+    pub fn all_str() -> &'static [&'static str] {
+        &[
+            "openai_compatible",
+            "openai",
+            "openai_resp",
+            "gemini",
+            "anthropic",
+            "fireworks",
+            "together",
+            "groq",
+            "aihubmix",
+            "mimo",
+            "moonshot",
+            "nebius",
+            "xai",
+            "deep_seek",
+            "zai",
+            "big_model",
+            "aliyun",
+            "baidu",
+            "cohere",
+            "ollama",
+            "ollama_cloud",
+            "vertex",
+            "github_copilot",
+            "open_code_go",
+            "bedrock_api",
+            "open_router",
+            "mini_max",
+        ]
+    }
 }
 
 /// A single global provider entry.
@@ -1028,8 +1097,6 @@ pub struct ProviderRegistryEntry {
     pub api_base: String,
     #[serde(default)]
     pub auth: ProviderAuthConfig,
-    #[serde(default)]
-    pub defaults: ProviderDefaultsConfig,
 }
 
 /// Provider authentication settings.
@@ -1041,15 +1108,6 @@ pub struct ProviderAuthConfig {
     /// Environment variable containing the API key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key_env: Option<String>,
-}
-
-/// Provider-level default headers and query parameters.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct ProviderDefaultsConfig {
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub headers: BTreeMap<String, String>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub query: BTreeMap<String, String>,
 }
 
 /// Model storage settings.
@@ -1349,7 +1407,7 @@ pub fn provider_registry_json_schema() -> Value {
                     "type": "string",
                     "title": "Provider Family",
                     "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderFamilyTitle), None),
-                    "enum": ["openai_compatible"],
+                    "enum": ProviderFamily::all_str(),
                     "default": "openai_compatible"
                 },
                 "display_name": {
@@ -1385,31 +1443,6 @@ pub fn provider_registry_json_schema() -> Value {
                             "title": "API Key Environment Variable",
                             "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderApiKeyEnvTitle), None),
                             "default": null
-                        }
-                    }
-                },
-                "defaults": {
-                    "type": "object",
-                    "title": "Request Defaults",
-                    "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderRequestDefaultsTitle), None),
-                    "default": {
-                        "headers": {},
-                        "query": {}
-                    },
-                    "properties": {
-                        "headers": {
-                            "type": "object",
-                            "title": "Headers",
-                            "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderHeadersTitle), None),
-                            "default": {},
-                            "additionalProperties": { "type": "string" }
-                        },
-                        "query": {
-                            "type": "object",
-                            "title": "Query Parameters",
-                            "x-i18n": schema_i18n(Some(ServerI18nKey::SettingsSchemaProviderQueryTitle), None),
-                            "default": {},
-                            "additionalProperties": { "type": "string" }
                         }
                     }
                 }
@@ -1968,6 +2001,10 @@ mod tests {
             .expect("auth properties");
 
         assert!(properties.contains_key("api_base"));
+        assert!(
+            !properties.contains_key("defaults"),
+            "headers/query defaults were removed in favor of the 6-field provider form"
+        );
         assert_eq!(
             auth_properties
                 .get("api_key")
@@ -1975,6 +2012,21 @@ mod tests {
                 .and_then(|value| value.get("writeOnly")),
             Some(&Value::Bool(true))
         );
+
+        // The family dropdown is driven by ProviderFamily and must list every adapter kind.
+        let family_enum = properties
+            .get("family")
+            .and_then(Value::as_object)
+            .and_then(|family| family.get("enum"))
+            .and_then(Value::as_array)
+            .expect("family enum");
+        assert_eq!(
+            family_enum.len(),
+            ProviderFamily::all_str().len(),
+            "family enum must mirror ProviderFamily::all_str()"
+        );
+        assert!(family_enum.contains(&Value::String("openai_compatible".to_owned())));
+        assert!(family_enum.contains(&Value::String("anthropic".to_owned())));
     }
 
     #[test]

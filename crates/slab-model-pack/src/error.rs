@@ -74,15 +74,6 @@ pub enum ModelPackError {
     #[error("local model pack '{id}' must declare at least one preset")]
     MissingLocalPresets { id: String },
 
-    #[error("local model pack '{id}' must not declare cloud target")]
-    UnexpectedCloudTarget { id: String },
-
-    #[error("cloud model pack '{id}' must declare cloud target")]
-    MissingCloudTarget { id: String },
-
-    #[error("cloud model pack '{id}' must not declare local runtime fields")]
-    UnexpectedLocalRuntimeFields { id: String },
-
     #[error("invalid config reference '{value}': {reason}")]
     InvalidConfigRef { value: String, reason: String },
 
@@ -136,9 +127,6 @@ pub enum ModelPackError {
         "resolved preset '{preset_id}' uses non-materialized source kind '{source_kind}' and cannot build a runtime load spec yet"
     )]
     NonMaterializedSource { preset_id: String, source_kind: String },
-
-    #[error("source kind '{source_kind}' is not supported when building a runtime bridge")]
-    UnsupportedRuntimeBridgeSource { source_kind: String },
 
     #[error("document '{path}' has kind '{found}' but '{expected}' was required")]
     UnexpectedDocumentKind { path: String, expected: &'static str, found: &'static str },

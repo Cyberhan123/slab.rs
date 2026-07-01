@@ -33,7 +33,7 @@ import type {
   SettingResponse,
 } from '../types';
 import { valueToEditorString } from '../utils';
-import { ProviderRegistryField } from './provider-registry-field';
+import { CloudProviderField } from './cloud-provider-field';
 import { StructuredJsonField } from './structured-json-field';
 
 type SettingFieldCardProps = {
@@ -183,8 +183,7 @@ export function SettingFieldCard({
               aria-invalid={Boolean(errorState)}
             />
           ) : property.pmid === 'providers.registry' && structuredSchema ? (
-            <ProviderRegistryField
-              schema={structuredSchema}
+            <CloudProviderField
               value={structuredValue}
               errorState={errorState}
               onChange={(value) => onChange(property, value)}

@@ -214,6 +214,7 @@ fn cloud_chat_picker_requires_known_provider() {
         "openai-main".to_owned(),
         slab_config::CloudProviderConfig {
             id: "openai-main".to_owned(),
+            family: slab_config::ProviderFamily::Openai,
             name: "OpenAI".to_owned(),
             api_base: "https://api.openai.com/v1".to_owned(),
             api_key: None,
@@ -296,7 +297,6 @@ fn product_only_vad_pack_projects_into_local_catalog_model() {
         presets: Vec::new(),
         default_preset: Some("default".into()),
         footprint: Default::default(),
-        cloud: None,
     };
     let preset = slab_model_pack::ResolvedPreset {
         document: slab_model_pack::PresetDocument {

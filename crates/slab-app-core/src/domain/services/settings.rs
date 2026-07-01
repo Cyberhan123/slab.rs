@@ -2,6 +2,8 @@ use crate::context::ModelState;
 use crate::domain::models::{
     SettingChangeEffect, SettingPropertyView, SettingsDocumentView, UpdateSettingCommand,
 };
+use crate::domain::services::cloud_activation;
+use crate::domain::services::model::ModelService;
 use crate::domain::services::pmid::change_effect_for;
 use crate::error::AppCoreError;
 
@@ -9,18 +11,20 @@ use crate::error::AppCoreError;
 pub struct SettingsService {
     state: ModelState,
     agent_runtime: Option<crate::infra::agent::runtime::AgentRuntimeReloader>,
+    model_service: Option<ModelService>,
 }
 
 impl SettingsService {
     pub fn new(state: ModelState) -> Self {
-        Self::new_with_agent_runtime(state, None)
+        Self::new_with(state, None, None)
     }
 
-    pub(crate) fn new_with_agent_runtime(
+    pub(crate) fn new_with(
         state: ModelState,
         agent_runtime: Option<crate::infra::agent::runtime::AgentRuntimeReloader>,
+        model_service: Option<ModelService>,
     ) -> Self {
-        Self { state, agent_runtime }
+        Self { state, agent_runtime, model_service }
     }
 
     pub async fn list_settings(&self) -> Result<SettingsDocumentView, AppCoreError> {
@@ -41,6 +45,12 @@ impl SettingsService {
             && let Some(agent_runtime) = &self.agent_runtime
         {
             agent_runtime.reload().await?;
+        }
+        if pmid == "providers.registry"
+            && let Some(model_service) = &self.model_service
+        {
+            // Best-effort: never fail the settings save because of cloud activation.
+            cloud_activation::sync_provider_models(model_service, &self.state).await;
         }
         Ok(property)
     }

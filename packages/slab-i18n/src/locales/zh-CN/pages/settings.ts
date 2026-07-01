@@ -90,46 +90,53 @@ export const settings = {
     itemTitle: '{{label}} {{index}}',
   },
   providerRegistry: {
-    title: '提供商注册表',
+    title: '云模型提供商',
     configuredProviders_one: '已配置 {{count}} 个提供商',
     configuredProviders_other: '已配置 {{count}} 个提供商',
     addProvider: '添加提供商',
-    empty: '暂无配置的提供商。',
-    entryFallback: '提供商 {{index}}',
-    entryDescription: '配置一个远程提供商的连接详情和可选请求默认值。',
-    remove: '移除',
+    empty: '暂未配置云提供商。添加一个即可激活其模型。',
     selectFamily: '选择提供商家族',
+    noApiBase: '未设置 API 基础 URL',
+    dialog: {
+      addTitle: '添加云提供商',
+      editTitle: '编辑云提供商',
+      description: '选择提供商家族以自动填充端点默认值，再填写凭据。保存后即激活该供应商的模型列表。',
+      cancel: '取消',
+      add: '添加提供商',
+      save: '保存更改',
+    },
+    groups: {
+      popular: '常用',
+      china: '国内',
+      gateways: '网关与云',
+      local: '本地',
+      other: '其它',
+    },
     fields: {
       id: {
+        label: '提供商 ID',
         description: '应用使用的稳定内部标识符。',
       },
       displayName: {
+        label: '显示名称',
         description: '界面中显示的友好名称。',
       },
       family: {
-        description: '此提供商使用的协议家族。',
+        label: '提供商家族',
+        description: '此提供商使用的协议家族（对应 genai AdapterKind）。',
       },
       apiBase: {
+        label: 'API 基础 URL',
         description: '提供商端点的基础 URL。',
       },
       apiKey: {
+        label: 'API Key',
         description: '直接存储在设置中的可选密钥。',
       },
       apiKeyEnv: {
+        label: 'API Key 环境变量',
         description: '未存储明文密钥时使用的环境变量名。',
       },
-      headers: {
-        description: '发送到此提供商的每个请求都会附加的可选请求头。',
-      },
-      query: {
-        description: '每个请求都会附加的可选查询参数。',
-      },
-    },
-    map: {
-      empty: '暂无配置条目。',
-      keyPlaceholder: '键',
-      valuePlaceholder: '值',
-      add: '添加',
     },
   },
   validation: {

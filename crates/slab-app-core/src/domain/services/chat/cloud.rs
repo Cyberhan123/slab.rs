@@ -29,7 +29,7 @@ use crate::domain::models::{
 use crate::error::AppCoreError;
 use crate::infra::db::ModelStore;
 use crate::infra::endpoint::{ensure_http_base_url, join_http_url_path};
-use slab_config::secret_port::{EnvSecretAdapter, resolve_secret_or_plain};
+use slab_cloud_provider::family_to_adapter_kind;
 
 use super::GeneratedChatOutput;
 
@@ -39,6 +39,7 @@ type CloudProviderConfig = slab_config::CloudProviderConfig;
 struct ResolvedCloudModel {
     provider_id: String,
     provider_name: String,
+    adapter_kind: AdapterKind,
     api_base: String,
     api_key: String,
     remote_model: String,
@@ -235,15 +236,6 @@ pub(super) async fn create_text_completion(
         .await
 }
 
-fn looks_like_env_var_name(value: &str) -> bool {
-    let mut chars = value.chars();
-    match chars.next() {
-        Some(ch) if ch == '_' || ch.is_ascii_alphabetic() => {}
-        _ => return false,
-    }
-    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-}
-
 async fn load_cloud_providers_strict(
     state: &ModelState,
 ) -> Result<Vec<CloudProviderConfig>, AppCoreError> {
@@ -260,41 +252,18 @@ async fn load_cloud_provider_map(
         .collect())
 }
 
+/// Delegate credential resolution to `slab-cloud-provider`, mapping its error type.
 fn resolve_provider_api_key(provider: &CloudProviderConfig) -> Result<String, AppCoreError> {
-    if let Some(key) = provider.api_key.as_deref() {
-        // Plaintext passes through unchanged; a `secret://env/<VAR>` handle
-        // resolves in-process so config files need not store plaintext keys.
-        return resolve_secret_or_plain(&EnvSecretAdapter::default(), key).map_err(|error| {
-            AppCoreError::BadRequest(format!(
-                "cloud provider '{}' api key could not be resolved: {error}",
-                provider.id
-            ))
-        });
+    slab_cloud_provider::resolve_api_key(provider).map_err(map_cloud_error)
+}
+
+fn map_cloud_error(error: slab_cloud_provider::CloudError) -> AppCoreError {
+    let message = error.to_string();
+    if error.is_bad_request() {
+        AppCoreError::BadRequest(message)
+    } else {
+        AppCoreError::BackendNotReady(message)
     }
-
-    if let Some(env_key) = provider.api_key_env.as_deref() {
-        let env_key = env_key.trim();
-        if let Ok(value) = std::env::var(env_key) {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                return Ok(trimmed.to_owned());
-            }
-        }
-
-        // Be tolerant to common misconfiguration: users paste a literal API key into `api_key_env`.
-        if !env_key.is_empty() && !looks_like_env_var_name(env_key) {
-            warn!(
-                provider_id = %provider.id,
-                "api_key_env does not look like an env var name; treating it as a literal api key"
-            );
-            return Ok(env_key.to_owned());
-        }
-    }
-
-    Err(AppCoreError::BackendNotReady(format!(
-        "cloud provider '{}' is missing api key (set settings api_key or api_key_env)",
-        provider.id
-    )))
 }
 
 async fn resolve_cloud_model(
@@ -357,6 +326,7 @@ fn resolve_cloud_catalog_model(
     Ok(ResolvedCloudModel {
         provider_id: provider_id.clone(),
         provider_name: provider.name.clone(),
+        adapter_kind: family_to_adapter_kind(provider.family),
         api_base: provider.api_base.clone(),
         api_key,
         remote_model,
@@ -408,13 +378,14 @@ fn build_genai_client_for_target(target: &ResolvedCloudModel) -> Result<GenaiCli
     let endpoint = ensure_genai_endpoint_base(&target.api_base)?;
     let api_key = target.api_key.clone();
     let remote_model = target.remote_model.clone();
+    let adapter_kind = target.adapter_kind;
 
     let resolver = ServiceTargetResolver::from_resolver_fn(
         move |_service_target: GenaiServiceTarget| -> Result<GenaiServiceTarget, genai::resolver::Error> {
             Ok(GenaiServiceTarget {
                 endpoint: Endpoint::from_owned(endpoint.clone()),
                 auth: AuthData::from_single(api_key.clone()),
-                model: GenaiModelIden::new(AdapterKind::OpenAI, remote_model.clone()),
+                model: GenaiModelIden::new(adapter_kind, remote_model.clone()),
             })
         },
     );
@@ -1124,7 +1095,7 @@ fn redact_secret_json(value: &Value) -> String {
 #[cfg(test)]
 mod test {
     use super::{
-        CloudChatRequestConfig, GenaiChatResponseFormat, ResolvedCloudModel,
+        AdapterKind, CloudChatRequestConfig, GenaiChatResponseFormat, ResolvedCloudModel,
         build_cloud_http_request_body, build_openai_chat_completions_url,
         ensure_genai_endpoint_base, redact_header_value,
         structured_output_to_genai_response_format,
@@ -1233,6 +1204,7 @@ mod test {
         ResolvedCloudModel {
             provider_id: "openai".to_owned(),
             provider_name: "OpenAI".to_owned(),
+            adapter_kind: AdapterKind::OpenAI,
             api_base: "https://api.openai.com/v1".to_owned(),
             api_key: "secret".to_owned(),
             remote_model: "gpt-4.1-mini".to_owned(),

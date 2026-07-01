@@ -10,8 +10,8 @@ use zip::ZipArchive;
 use crate::error::ModelPackError;
 use crate::manifest::{
     BackendConfigDocument, BackendConfigScope, ComponentDocument, ConfigEntryRef,
-    MODEL_PACK_SCHEMA_VERSION, ModelPackManifest, PackDeployment, PackDocument, PresetDocument,
-    PresetEntryRef, VariantDocument,
+    MODEL_PACK_SCHEMA_VERSION, ModelPackManifest, PackDocument, PresetDocument, PresetEntryRef,
+    VariantDocument,
 };
 use crate::refs::ConfigRef;
 
@@ -200,10 +200,6 @@ impl ModelPack {
     }
 
     fn validate_manifest_references(&self) -> Result<(), ModelPackError> {
-        if self.manifest.deployment == PackDeployment::Cloud {
-            return Ok(());
-        }
-
         for reference in &self.manifest.components {
             self.validate_entry_ref(&reference.id, &reference.config_ref, "component")?;
         }
@@ -271,48 +267,16 @@ impl ModelPack {
             });
         }
 
-        match self.manifest.deployment {
-            PackDeployment::Local => {
-                if self.manifest.cloud.is_some() {
-                    return Err(ModelPackError::UnexpectedCloudTarget {
-                        id: self.manifest.id.clone(),
-                    });
-                }
-                if self.manifest.engines.is_empty() {
-                    return Err(ModelPackError::MissingLocalEngines {
-                        id: self.manifest.id.clone(),
-                    });
-                }
-                if self.manifest.variants.is_empty() {
-                    return Err(ModelPackError::MissingLocalVariants {
-                        id: self.manifest.id.clone(),
-                    });
-                }
-                if self.manifest.presets.is_empty() {
-                    return Err(ModelPackError::MissingLocalPresets {
-                        id: self.manifest.id.clone(),
-                    });
-                }
-            }
-            PackDeployment::Cloud => {
-                if self.manifest.cloud.is_none() {
-                    return Err(ModelPackError::MissingCloudTarget {
-                        id: self.manifest.id.clone(),
-                    });
-                }
-                if !self.manifest.engines.is_empty()
-                    || !self.manifest.sources.is_empty()
-                    || !self.manifest.components.is_empty()
-                    || !self.manifest.variants.is_empty()
-                    || !self.manifest.adapters.is_empty()
-                    || !self.manifest.presets.is_empty()
-                    || self.manifest.default_preset.is_some()
-                {
-                    return Err(ModelPackError::UnexpectedLocalRuntimeFields {
-                        id: self.manifest.id.clone(),
-                    });
-                }
-            }
+        // Packs are local-only now; cloud-vendor models are configured via `slab-cloud-provider`
+        // and activated as `UnifiedModel` rows rather than shipped as model packs.
+        if self.manifest.engines.is_empty() {
+            return Err(ModelPackError::MissingLocalEngines { id: self.manifest.id.clone() });
+        }
+        if self.manifest.variants.is_empty() {
+            return Err(ModelPackError::MissingLocalVariants { id: self.manifest.id.clone() });
+        }
+        if self.manifest.presets.is_empty() {
+            return Err(ModelPackError::MissingLocalPresets { id: self.manifest.id.clone() });
         }
 
         Ok(())

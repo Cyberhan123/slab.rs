@@ -9,9 +9,9 @@ use chrono::Utc;
 use futures::StreamExt;
 use futures::stream::{self, BoxStream};
 use slab_config::{
-    LaunchProfile, PluginJsRuntimeTransport, PluginPythonRuntimeTransport, ProviderDefaultsConfig,
-    ProviderFamily, ProviderRegistryEntry, ResolvedLaunchSpec, ResolvedRuntimeEndpoints,
-    RuntimeTransportMode, SettingsDocument,
+    LaunchProfile, PluginJsRuntimeTransport, PluginPythonRuntimeTransport, ProviderFamily,
+    ProviderRegistryEntry, ResolvedLaunchSpec, ResolvedRuntimeEndpoints, RuntimeTransportMode,
+    SettingsDocument,
 };
 use slab_types::{Capability, RuntimeBackendId, RuntimeBackendLoadSpec, sqlite_url_for_path};
 use tempfile::TempDir;
@@ -412,23 +412,52 @@ pub(crate) fn cloud_chat_model_command(id: &str, provider_id: &str) -> CreateMod
     }
 }
 
-pub(crate) fn cloud_model_pack_bytes(id: &str) -> Vec<u8> {
-    build_pack_bytes(vec![(
-        "manifest.json",
-        serde_json::json!({
-            "schema_version": 3,
-            "deployment": "cloud",
-            "id": id,
-            "label": id,
-            "family": "llama",
-            "capabilities": ["text_generation", "chat_generation"],
-            "cloud": {
-                "provider_id": TEST_PROVIDER_ID,
-                "remote_model_id": "gpt-4.1-mini"
-            }
-        })
-        .to_string(),
-    )])
+/// Bytes of a minimal but valid local `.slab` model pack (Qwen-style GGUF), for import/sync tests.
+pub(crate) fn local_model_pack_bytes(id: &str) -> Vec<u8> {
+    build_pack_bytes(vec![
+        (
+            "manifest.json",
+            serde_json::json!({
+                "schema_version": 3,
+                "deployment": "local",
+                "id": id,
+                "label": id,
+                "family": "llama",
+                "capabilities": ["text_generation", "chat_generation"],
+                "context_window": 32768,
+                "engines": [{"id": "ggml.llama", "format": "gguf"}],
+                "sources": [{
+                    "kind": "hugging_face",
+                    "repo_id": "bartowski/Qwen2.5-7B-Instruct-GGUF",
+                    "files": [{"id": "model", "path": "Qwen2.5-7B-Instruct-Q4_K_M.gguf"}]
+                }],
+                "variants": [{"id": "q4_k_m", "label": "Q4_K_M", "$ref": "ref://models/variants/q4.json"}],
+                "presets": [{"id": "default", "label": "Default", "$ref": "ref://models/presets/default.json"}],
+                "default_preset": "default"
+            })
+            .to_string(),
+        ),
+        (
+            "models/variants/q4.json",
+            serde_json::json!({
+                "kind": "variant",
+                "id": "q4_k_m",
+                "label": "Q4",
+                "format": "gguf"
+            })
+            .to_string(),
+        ),
+        (
+            "models/presets/default.json",
+            serde_json::json!({
+                "kind": "preset",
+                "id": "default",
+                "label": "Default",
+                "variant_id": "q4_k_m"
+            })
+            .to_string(),
+        ),
+    ])
 }
 
 pub(crate) fn build_pack_bytes(entries: Vec<(&str, String)>) -> Vec<u8> {
@@ -474,7 +503,6 @@ fn write_test_settings(
         display_name: "OpenAI Test".to_owned(),
         api_base: "https://api.openai.test/v1".to_owned(),
         auth: Default::default(),
-        defaults: ProviderDefaultsConfig::default(),
     });
 
     let raw = serde_json::to_string_pretty(&document).expect("serialize test settings");

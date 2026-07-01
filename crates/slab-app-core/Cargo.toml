@@ -34,6 +34,7 @@ slab-proto        = { workspace = true }
 slab-model-pack   = { workspace = true }
 slab-types        = { workspace = true }
 slab-config       = { workspace = true }
+slab-cloud-provider = { workspace = true }
 slab-libfetch     = { workspace = true }
 slab-hub          = { workspace = true }
 slab-jsonrpc      = { workspace = true }

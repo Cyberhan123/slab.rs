@@ -34,44 +34,28 @@ fn build_pack(entries: Vec<(&str, String)>) -> Vec<u8> {
     cursor.into_inner()
 }
 
-#[test]
-fn builds_cloud_model_command_from_pack_manifest() {
-    let bytes = build_pack(vec![(
-        "manifest.json",
-        json!({
-            "schema_version": 3,
-            "deployment": "cloud",
-            "id": "gpt_4_1_mini",
-            "label": "GPT-4.1 mini",
-            "family": "llama",
-            "capabilities": ["text_generation", "chat_generation"],
-            "context_window": 128000,
-            "pricing": {
-                "input": 0.4,
-                "output": 1.6
-            },
-            "cloud": {
-                "provider_id": "openai-main",
-                "remote_model_id": "gpt-4.1-mini"
-            }
-        })
-        .to_string(),
-    )]);
-
-    let command = build_model_command_from_pack_bytes(Path::new("gpt-4.1-mini.slab"), &bytes)
-        .expect("cloud command");
-
-    assert_eq!(command.id.as_deref(), Some("gpt_4_1_mini"));
-    assert_eq!(command.display_name, "GPT-4.1 mini");
-    assert_eq!(command.kind, UnifiedModelKind::Cloud);
-    assert_eq!(command.backend_id, None);
-    assert_eq!(command.status, Some(UnifiedModelStatus::Ready));
-    assert_eq!(command.spec.provider_id.as_deref(), Some("openai-main"));
-    assert_eq!(command.spec.remote_model_id.as_deref(), Some("gpt-4.1-mini"));
-    assert_eq!(command.spec.context_window, Some(128000));
-    assert_eq!(command.spec.pricing.as_ref().map(|pricing| pricing.input), Some(0.4));
-    assert_eq!(command.spec.pricing.as_ref().map(|pricing| pricing.output), Some(1.6));
-    assert!(command.runtime_presets.is_none());
+/// A minimal local StoredModelConfig used to generate full local packs in tests.
+fn local_stored_config(id: &str, label: &str) -> StoredModelConfig {
+    StoredModelConfig {
+        schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
+        policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
+        id: id.to_owned(),
+        display_name: label.to_owned(),
+        kind: UnifiedModelKind::Local,
+        backend_id: Some(ManagedModelBackendId::GgmlLlama),
+        capabilities: vec![Capability::TextGeneration, Capability::ChatGeneration],
+        status: Some(UnifiedModelStatus::NotDownloaded),
+        spec: ModelSpec {
+            repo_id: Some("bartowski/Qwen2.5-7B-Instruct-GGUF".to_owned()),
+            filename: Some("Qwen2.5-7B-Instruct-Q4_K_M.gguf".to_owned()),
+            context_window: Some(8192),
+            ..Default::default()
+        },
+        runtime_presets: None,
+        materialized_artifacts: BTreeMap::new(),
+        pack_selection: None,
+        selected_download_source: None,
+    }
 }
 
 #[test]
@@ -391,115 +375,37 @@ fn builds_local_model_command_using_preset_document_variant() {
 
 #[test]
 fn manifest_remains_the_source_of_truth_when_persisted_state_matches() {
-    let base_bytes = build_pack(vec![(
-        "manifest.json",
-        json!({
-            "schema_version": 3,
-            "deployment": "cloud",
-            "id": "openrouter-llama-3_1-8b-instruct",
-            "label": "Manifest Label",
-            "family": "llama",
-            "capabilities": ["text_generation"],
-            "cloud": {
-                "provider_id": "openrouter-main",
-                "remote_model_id": "meta-llama/llama-3.1-8b-instruct"
-            }
-        })
-        .to_string(),
-    )]);
-    let config = StoredModelConfig {
-        schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
-        policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
-        id: "openrouter-llama-3_1-8b-instruct".to_owned(),
-        display_name: "Persisted Label".to_owned(),
-        kind: UnifiedModelKind::Cloud,
-        backend_id: None,
-        capabilities: vec![Capability::TextGeneration, Capability::ChatGeneration],
-        status: Some(UnifiedModelStatus::Ready),
-        spec: ModelSpec {
-            provider_id: Some("openrouter-main".to_owned()),
-            remote_model_id: Some("meta-llama/llama-3.1-8b-instruct".to_owned()),
-            ..Default::default()
-        },
-        runtime_presets: Some(RuntimePresets {
-            temperature: Some(0.2),
-            top_p: Some(0.8),
-            ..Default::default()
-        }),
-        materialized_artifacts: BTreeMap::new(),
-        pack_selection: None,
-        selected_download_source: None,
-    };
+    let manifest_config = local_stored_config("local-qwen", "Manifest Label");
+    let base_bytes = build_generated_model_pack_bytes(&manifest_config).expect("generate pack");
+    // Persisted state disagrees on display_name; the manifest must win.
+    let mut persisted = manifest_config.clone();
+    persisted.display_name = "Persisted Label".to_owned();
 
-    let bytes =
-        attach_persisted_state_to_pack_bytes(&base_bytes, &config).expect("attach persisted state");
-    let command = build_model_command_from_pack_bytes(Path::new("openrouter.slab"), &bytes)
+    let bytes = attach_persisted_state_to_pack_bytes(&base_bytes, &persisted)
+        .expect("attach persisted state");
+    let command = build_model_command_from_pack_bytes(Path::new("local-qwen.slab"), &bytes)
         .expect("command from pack");
 
     assert_eq!(command.display_name, "Manifest Label");
-    assert!(command.runtime_presets.is_none());
 }
 
 #[test]
 fn ignores_persisted_state_after_manifest_change() {
-    let base_bytes = build_pack(vec![(
-        "manifest.json",
-        json!({
-            "schema_version": 3,
-            "deployment": "cloud",
-            "id": "openrouter-llama-3_1-8b-instruct",
-            "label": "Original Manifest Label",
-            "family": "llama",
-            "capabilities": ["text_generation"],
-            "cloud": {
-                "provider_id": "openrouter-main",
-                "remote_model_id": "meta-llama/llama-3.1-8b-instruct"
-            }
-        })
-        .to_string(),
-    )]);
-    let config = StoredModelConfig {
-        schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
-        policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
-        id: "openrouter-llama-3_1-8b-instruct".to_owned(),
-        display_name: "Persisted Label".to_owned(),
-        kind: UnifiedModelKind::Cloud,
-        backend_id: None,
-        capabilities: vec![Capability::TextGeneration, Capability::ChatGeneration],
-        status: Some(UnifiedModelStatus::Ready),
-        spec: ModelSpec {
-            provider_id: Some("openrouter-main".to_owned()),
-            remote_model_id: Some("meta-llama/llama-3.1-8b-instruct".to_owned()),
-            ..Default::default()
-        },
-        runtime_presets: None,
-        materialized_artifacts: BTreeMap::new(),
-        pack_selection: None,
-        selected_download_source: None,
-    };
-
-    let bytes =
-        attach_persisted_state_to_pack_bytes(&base_bytes, &config).expect("attach persisted state");
+    let manifest_config = local_stored_config("local-qwen", "Original Manifest Label");
+    let base_bytes = build_generated_model_pack_bytes(&manifest_config).expect("generate pack");
+    let bytes = attach_persisted_state_to_pack_bytes(&base_bytes, &manifest_config)
+        .expect("attach persisted state");
     let mut entries = collect_pack_entries(&bytes).expect("collect entries");
     for (path, payload) in &mut entries {
         if path == "manifest.json" {
-            *payload = serde_json::to_vec_pretty(&json!({
-                "schema_version": 3,
-                "deployment": "cloud",
-                "id": "openrouter-llama-3_1-8b-instruct",
-                "label": "Changed Manifest Label",
-                "family": "llama",
-                "capabilities": ["text_generation"],
-                "cloud": {
-                    "provider_id": "openrouter-main",
-                    "remote_model_id": "meta-llama/llama-3.1-8b-instruct"
-                }
-            }))
-            .expect("serialize manifest");
+            let manifest = serde_json::from_slice::<serde_json::Value>(payload).expect("manifest");
+            let mut changed = manifest.clone();
+            changed["label"] = json!("Changed Manifest Label");
+            *payload = serde_json::to_vec_pretty(&changed).expect("serialize manifest");
         }
     }
     let bytes = build_pack_bytes(entries).expect("rebuild pack");
-    let command = build_model_command_from_pack_bytes(Path::new("openrouter.slab"), &bytes)
+    let command = build_model_command_from_pack_bytes(Path::new("local-qwen.slab"), &bytes)
         .expect("command from pack");
 
     assert_eq!(command.display_name, "Changed Manifest Label");

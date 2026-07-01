@@ -91,47 +91,54 @@ export const settings = {
     itemTitle: '{{label}} {{index}}',
   },
   providerRegistry: {
-    title: 'Provider Registry',
+    title: 'Cloud Model Providers',
     configuredProviders_one: '{{count}} configured provider',
     configuredProviders_other: '{{count}} configured providers',
     addProvider: 'Add provider',
-    empty: 'No providers configured yet.',
-    entryFallback: 'Provider {{index}}',
-    entryDescription:
-      'Configure connection details and optional request defaults for one remote provider.',
-    remove: 'Remove',
+    empty: 'No cloud providers configured yet. Add one to activate its models.',
     selectFamily: 'Select a provider family',
+    noApiBase: 'No API base URL set',
+    dialog: {
+      addTitle: 'Add cloud provider',
+      editTitle: 'Edit cloud provider',
+      description:
+        'Pick a provider family to auto-fill its endpoint defaults, then add your credentials. The vendor model list activates on save.',
+      cancel: 'Cancel',
+      add: 'Add provider',
+      save: 'Save changes',
+    },
+    groups: {
+      popular: 'Popular',
+      china: 'China',
+      gateways: 'Gateways & Clouds',
+      local: 'Local',
+      other: 'Other',
+    },
     fields: {
       id: {
+        label: 'Provider ID',
         description: 'Stable internal identifier used by the app.',
       },
       displayName: {
+        label: 'Display Name',
         description: 'Friendly label shown in the UI.',
       },
       family: {
-        description: 'Protocol family used by this provider.',
+        label: 'Provider Family',
+        description: 'Protocol family used by this provider (maps to a genai AdapterKind).',
       },
       apiBase: {
+        label: 'API Base URL',
         description: 'Base URL for the provider endpoint.',
       },
       apiKey: {
+        label: 'API Key',
         description: 'Optional secret stored directly in settings.',
       },
       apiKeyEnv: {
+        label: 'API Key Env Var',
         description: 'Environment variable name used when no literal key is stored.',
       },
-      headers: {
-        description: 'Optional headers added to every request sent through this provider.',
-      },
-      query: {
-        description: 'Optional query parameters added to every request.',
-      },
-    },
-    map: {
-      empty: 'No entries configured.',
-      keyPlaceholder: 'Key',
-      valuePlaceholder: 'Value',
-      add: 'Add',
     },
   },
   validation: {

@@ -6,7 +6,7 @@ pub(super) use source::{
     materialized_model_source, same_model_download_source, source_preview_from_pack_source,
 };
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use chrono::Utc;
 use tracing::{info, warn};
@@ -23,7 +23,6 @@ use super::{ModelService, catalog};
 
 #[derive(Debug, Clone)]
 pub(super) struct ModelPackContext {
-    pub(super) path: PathBuf,
     pub(super) resolved: slab_model_pack::ResolvedModelPack,
     pub(super) persisted: Option<StoredModelConfig>,
 }
@@ -150,7 +149,7 @@ impl ModelService {
             .await?
             .or(model_packs::read_persisted_model_config_from_pack(&pack_path)?);
 
-        Ok(ModelPackContext { path: pack_path, resolved, persisted })
+        Ok(ModelPackContext { resolved, persisted })
     }
 
     pub(super) async fn build_selected_model_pack_command(
@@ -158,11 +157,6 @@ impl ModelService {
         id: &str,
     ) -> Result<CreateModelCommand, AppCoreError> {
         let context = self.load_model_pack_context(id).await?;
-        if context.resolved.manifest.deployment == slab_model_pack::PackDeployment::Cloud {
-            let command = model_packs::build_model_command_from_pack(&context.path)?;
-            return Ok(command);
-        }
-
         let selection = self.resolve_model_pack_selection(id, &context.resolved).await?;
         let command = build_model_command_from_pack_context(&context, &selection.selected_preset)?;
 
@@ -593,33 +587,32 @@ pub(super) fn model_config_state_record(
 mod tests {
     use crate::domain::models::{UnifiedModelKind, UnifiedModelStatus};
     use crate::error::AppCoreError;
-    use crate::test_support::{TEST_PROVIDER_ID, TestAppCore, cloud_model_pack_bytes};
+    use crate::test_support::{TestAppCore, local_model_pack_bytes};
 
     #[tokio::test]
-    async fn model_pack_import_model_pack_bytes_persists_cloud_model_and_pack() {
+    async fn model_pack_import_model_pack_bytes_persists_local_model_and_pack() {
         let app = TestAppCore::new().await;
-        let bytes = cloud_model_pack_bytes("pack-import-cloud");
+        let bytes = local_model_pack_bytes("pack-import-local");
 
         let model = app.model.import_model_pack_bytes(&bytes).await.expect("import pack");
 
-        assert_eq!(model.id, "pack-import-cloud");
-        assert_eq!(model.kind, UnifiedModelKind::Cloud);
-        assert_eq!(model.status, UnifiedModelStatus::Ready);
-        assert_eq!(model.spec.provider_id.as_deref(), Some(TEST_PROVIDER_ID));
-        assert_eq!(model.spec.remote_model_id.as_deref(), Some("gpt-4.1-mini"));
+        assert_eq!(model.id, "pack-import-local");
+        assert_eq!(model.kind, UnifiedModelKind::Local);
+        assert_eq!(model.status, UnifiedModelStatus::NotDownloaded);
+        assert_eq!(model.spec.repo_id.as_deref(), Some("bartowski/Qwen2.5-7B-Instruct-GGUF"));
         assert!(app.model_pack_path(&model.id).is_file());
 
         let fetched = app.model.get_model(&model.id).await.expect("fetch imported model");
         assert_eq!(fetched.id, model.id);
-        assert_eq!(fetched.kind, UnifiedModelKind::Cloud);
+        assert_eq!(fetched.kind, UnifiedModelKind::Local);
     }
 
     #[tokio::test]
     async fn model_pack_sync_model_packs_from_disk_imports_valid_and_skips_invalid() {
         let app = TestAppCore::new().await;
         std::fs::write(
-            app.model_pack_path("pack-sync-cloud"),
-            cloud_model_pack_bytes("pack-sync-cloud"),
+            app.model_pack_path("pack-sync-local"),
+            local_model_pack_bytes("pack-sync-local"),
         )
         .expect("write valid pack");
         std::fs::write(app.model_config_dir.join("invalid.slab"), b"not a slab pack")
@@ -627,8 +620,8 @@ mod tests {
 
         app.model.sync_model_packs_from_disk().await.expect("sync packs");
 
-        let synced = app.model.get_model("pack-sync-cloud").await.expect("synced model");
-        assert_eq!(synced.kind, UnifiedModelKind::Cloud);
+        let synced = app.model.get_model("pack-sync-local").await.expect("synced model");
+        assert_eq!(synced.kind, UnifiedModelKind::Local);
         let invalid = app.model.get_model("invalid").await.expect_err("invalid pack skipped");
         assert!(
             matches!(&invalid, AppCoreError::NotFound(message) if message.contains("model invalid not found")),

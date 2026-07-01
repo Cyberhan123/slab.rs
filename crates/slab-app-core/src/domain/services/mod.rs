@@ -2,6 +2,7 @@ pub mod agent;
 mod audio;
 mod backend;
 mod chat;
+mod cloud_activation;
 mod ffmpeg;
 mod image;
 mod model;
@@ -84,9 +85,10 @@ impl AppServices {
                 model_state.clone(),
                 Some(agent_runtime.clone()),
             ),
-            settings: SettingsService::new_with_agent_runtime(
+            settings: SettingsService::new_with(
                 model_state.clone(),
                 Some(agent_runtime),
+                Some(model.clone()),
             ),
             session: SessionService::new(model_state.clone()),
             setup: SetupService::new(model_state.clone(), worker_state.clone(), runtime_host),

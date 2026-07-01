@@ -11,9 +11,9 @@ use slab_app_core::infra::db::AnyStore;
 use slab_app_core::infra::rpc::gateway::GrpcGateway;
 use slab_app_core::runtime_supervisor::RuntimeSupervisorStatus;
 use slab_config::{
-    LaunchProfile, PluginJsRuntimeTransport, PluginPythonRuntimeTransport, ProviderDefaultsConfig,
-    ProviderFamily, ProviderRegistryEntry, ResolvedLaunchSpec, ResolvedRuntimeEndpoints,
-    RuntimeTransportMode, SettingsDocument,
+    LaunchProfile, PluginJsRuntimeTransport, PluginPythonRuntimeTransport, ProviderFamily,
+    ProviderRegistryEntry, ResolvedLaunchSpec, ResolvedRuntimeEndpoints, RuntimeTransportMode,
+    SettingsDocument,
 };
 use slab_types::sqlite_url_for_path;
 use tempfile::TempDir;
@@ -229,7 +229,6 @@ fn write_test_settings(
         display_name: "OpenAI Test".to_owned(),
         api_base: "https://api.openai.test/v1".to_owned(),
         auth: Default::default(),
-        defaults: ProviderDefaultsConfig::default(),
     });
 
     let raw = serde_json::to_string_pretty(&document).expect("serialize test settings");

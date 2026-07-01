@@ -105,6 +105,7 @@ Start with the nearest local README for the code you are changing.
 - Runtime worker: `bin/slab-runtime/README.md`
 - JS and Python plugin runtimes: `bin/slab-js-runtime/README.md`, `bin/slab-python-runtime/README.md`
 - Shared business logic: `crates/slab-app-core/README.md`
+- Cloud model-provider infrastructure (wraps `genai`): `crates/slab-cloud-provider/README.md`
 - Runtime protocol substrate: `crates/slab-runtime-core/README.md`
 - Agent control plane and tools: `crates/slab-agent/README.md`, `crates/slab-agent-tools/README.md`
 - Plugin model and packaging: `plugins/README.md`, `crates/slab-plugin/README.md`, `packages/slab-plugin-sdk/README.md`, `packages/slab-plugin-cli/README.md`, `packages/slab-plugin-ui/README.md`

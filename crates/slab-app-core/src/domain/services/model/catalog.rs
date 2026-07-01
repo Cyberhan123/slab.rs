@@ -33,6 +33,36 @@ impl ModelService {
         self.persist_model_definition(req).await
     }
 
+    /// Idempotently upsert a cloud catalog model (no model-pack sync, no download state).
+    ///
+    /// Used by cloud-provider activation when a provider is configured. Reuses
+    /// [`Self::persist_model_definition_with_options`] so capability/spec canonicalization still
+    /// runs and `created_at` is preserved when the model already exists.
+    pub(crate) async fn upsert_cloud_model(
+        &self,
+        id: &str,
+        display_name: &str,
+        provider_id: &str,
+        remote_model_id: &str,
+    ) -> Result<(), AppCoreError> {
+        let req = CreateModelCommand {
+            id: Some(id.to_owned()),
+            display_name: display_name.to_owned(),
+            kind: UnifiedModelKind::Cloud,
+            backend_id: None,
+            capabilities: None,
+            status: Some(UnifiedModelStatus::Ready),
+            spec: ModelSpec {
+                provider_id: Some(provider_id.to_owned()),
+                remote_model_id: Some(remote_model_id.to_owned()),
+                ..ModelSpec::default()
+            },
+            runtime_presets: None,
+        };
+        self.persist_model_definition_with_options(req, false).await?;
+        Ok(())
+    }
+
     pub async fn get_model(&self, id: &str) -> Result<UnifiedModel, AppCoreError> {
         let record = self
             .model_state
@@ -258,6 +288,11 @@ impl ModelService {
     }
 
     pub(super) fn write_model_pack(&self, model: &UnifiedModel) -> Result<(), AppCoreError> {
+        // Cloud models have no pack artifacts to persist; they are resolved from provider config
+        // at runtime via `slab-cloud-provider`. Skip pack generation entirely for them.
+        if model.kind == UnifiedModelKind::Cloud {
+            return Ok(());
+        }
         model_packs::write_persisted_model_pack(self.model_config_dir(), model)?;
         Ok(())
     }
