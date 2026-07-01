@@ -16,12 +16,13 @@ describe('dispatchA2uToolCall', () => {
   })
 
   it('maps plugin.launch as an ask-risk plugin surface', () => {
-    expect(
-      dispatchA2uToolCall(
-        'plugin.launch',
-        '{"plugin_id":"video-subtitle-translator","surface":"editor","payload":{"taskId":"task-1"}}'
-      )
-    ).toEqual({
+    const result = dispatchA2uToolCall(
+      'plugin.launch',
+      '{"plugin_id":"video-subtitle-translator","surface":"editor","payload":{"taskId":"task-1"}}'
+    )
+
+    expect(result?.riskLevel).toBe('ask')
+    expect(result).toEqual({
       riskLevel: 'ask',
       surface: {
         type: 'plugin',

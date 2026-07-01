@@ -6,6 +6,7 @@ describe("useAgentSurfaceStore", () => {
   beforeEach(() => {
     useAgentSurfaceStore.setState({
       draft: null,
+      focusComposerSignal: 0,
       pendingSurface: null,
     })
   })
@@ -72,5 +73,14 @@ describe("useAgentSurfaceStore", () => {
     expect(useAgentSurfaceStore.getState().pendingSurface).toBe(surface)
     expect(useAgentSurfaceStore.getState().consumePendingSurface(surface?.id)).toBe(surface)
     expect(useAgentSurfaceStore.getState().pendingSurface).toBeNull()
+  })
+
+  it("increments the composer focus signal for shell-owned surface close", () => {
+    expect(useAgentSurfaceStore.getState().focusComposerSignal).toBe(0)
+
+    useAgentSurfaceStore.getState().requestComposerFocus()
+    useAgentSurfaceStore.getState().requestComposerFocus()
+
+    expect(useAgentSurfaceStore.getState().focusComposerSignal).toBe(2)
   })
 })

@@ -55,6 +55,8 @@ type AgentSurfaceState = {
   consumeDraft: () => AssistantDraft | null
   consumePendingSurface: (surfaceId?: string) => AgentSurfaceRequest | null
   draft: AssistantDraft | null
+  focusComposerSignal: number
+  requestComposerFocus: () => void
   pendingSurface: AgentSurfaceRequest | null
   setDraft: (draft: AssistantDraft) => void
   setPendingSurface: (surface: AgentSurfaceInput, options?: PendingSurfaceOptions) => void
@@ -80,6 +82,7 @@ function createSurfaceRequest(
 
 export const useAgentSurfaceStore = create<AgentSurfaceState>()((set, get) => ({
   draft: null,
+  focusComposerSignal: 0,
   pendingSurface: null,
   clearDraft: () => set({ draft: null }),
   clearPendingSurface: (surfaceId) =>
@@ -104,6 +107,8 @@ export const useAgentSurfaceStore = create<AgentSurfaceState>()((set, get) => ({
     set({ pendingSurface: null })
     return pendingSurface
   },
+  requestComposerFocus: () =>
+    set((state) => ({ focusComposerSignal: state.focusComposerSignal + 1 })),
   setDraft: (draft) => set({ draft }),
   setPendingSurface: (surface, options) => set({ pendingSurface: createSurfaceRequest(surface, options) }),
 }))

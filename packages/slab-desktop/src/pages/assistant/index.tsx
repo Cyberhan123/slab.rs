@@ -43,7 +43,6 @@ import { ASSISTANT_BUBBLE_ROLES } from "./components/assistant-bubble-content"
 import { AssistantComposer } from "./components/assistant-composer"
 import { AssistantModelSwitchDialog } from "./components/assistant-model-switch-dialog"
 import { AssistantSessionSheet } from "./components/assistant-session-sheet"
-import { AgentSurfaceLayer } from "./components/agent-surface-layer"
 import { AgentProgress } from "./components/agent-progress"
 import { AgentResumeControl } from "./components/agent-resume-control"
 import {
@@ -85,6 +84,7 @@ function Assistant() {
   const setAdvancedPanelOpen = useAssistantUiStore((state) => state.setAdvancedPanelOpen)
   const assistantDraft = useAgentSurfaceStore((state) => state.draft)
   const consumeAssistantDraft = useAgentSurfaceStore((state) => state.consumeDraft)
+  const shellFocusComposerSignal = useAgentSurfaceStore((state) => state.focusComposerSignal)
   const { t } = useTranslation()
   const locale = useAssistantLocale()
   const resolvedLanguage = getResolvedAppLanguage()
@@ -673,10 +673,6 @@ function Assistant() {
     setComposerFocusSignal((value) => value + 1)
   }, [])
 
-  const handleSurfaceClosed = useCallback(() => {
-    setComposerFocusSignal((value) => value + 1)
-  }, [])
-
   useEffect(() => {
     if (!assistantDraft) {
       return
@@ -698,6 +694,12 @@ function Assistant() {
       void submitAssistantMessage(prompt)
     }
   }, [assistantDraft, consumeAssistantDraft, submitAssistantMessage])
+
+  useEffect(() => {
+    if (shellFocusComposerSignal > 0) {
+      setComposerFocusSignal((value) => value + 1)
+    }
+  }, [shellFocusComposerSignal])
 
   const bubbleItems = useMemo(
     () => {
@@ -850,7 +852,6 @@ function Assistant() {
         </ScrollArea>
 
         <div className="relative shrink-0 bg-[var(--shell-card)]">
-          <AgentSurfaceLayer onSurfaceClosed={handleSurfaceClosed} />
           <div className="relative mx-auto w-full max-w-[768px] px-6 pb-6 pt-4 md:px-8 lg:px-0">
             <AgentProgress
               progress={planProgress}

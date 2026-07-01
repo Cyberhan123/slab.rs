@@ -23,6 +23,9 @@ export const workspace = {
   projectSwitcher: {
     toggle: '切换工作区',
     noActive: '无工作区',
+    switched: '工作区已切换',
+    suspended_one: '已挂起 {{count}} 个 Agent 任务',
+    suspended_other: '已挂起 {{count}} 个 Agent 任务',
   },
   tree: {
     title: '文件',

@@ -34,10 +34,16 @@ function isWindowSurfaceKind(type: string): type is SurfaceKind {
 }
 
 type AgentSurfaceLayerProps = {
+  onActiveChange?: (active: boolean) => void
   onSurfaceClosed?: () => void
+  variant?: "inline" | "shell"
 }
 
-export function AgentSurfaceLayer({ onSurfaceClosed }: AgentSurfaceLayerProps) {
+export function AgentSurfaceLayer({
+  onActiveChange,
+  onSurfaceClosed,
+  variant = "inline",
+}: AgentSurfaceLayerProps) {
   const navigate = useNavigate()
   const { t } = useTranslation()
   const pendingSurface = useAgentSurfaceStore((state) => state.pendingSurface)
@@ -86,6 +92,10 @@ export function AgentSurfaceLayer({ onSurfaceClosed }: AgentSurfaceLayerProps) {
     }
   }, [activeSurface, t])
 
+  useEffect(() => {
+    onActiveChange?.(Boolean(activeSurface))
+  }, [activeSurface, onActiveChange])
+
   const closeSurface = useCallback(() => {
     setActiveSurface(null)
     setSurfaceCollapsed(false)
@@ -128,35 +138,41 @@ export function AgentSurfaceLayer({ onSurfaceClosed }: AgentSurfaceLayerProps) {
     }, {
       targetRoute: "workspace",
     })
+    closeSurface()
     navigate("/workspace")
-  }, [activeSurface, navigate, setPendingSurface])
+  }, [activeSurface, closeSurface, navigate, setPendingSurface])
 
   const openImage = useCallback(() => {
     if (!activeSurface || activeSurface.type !== "image") {
       return
     }
 
+    closeSurface()
     navigate({
       pathname: "/image",
       search: imageRouteSearch(activeSurface.payload?.prompt),
     })
-  }, [activeSurface, navigate])
+  }, [activeSurface, closeSurface, navigate])
 
   const openHub = useCallback(() => {
+    closeSurface()
     navigate("/hub")
-  }, [navigate])
+  }, [closeSurface, navigate])
 
   const openAudio = useCallback(() => {
+    closeSurface()
     navigate("/audio")
-  }, [navigate])
+  }, [closeSurface, navigate])
 
   const openPlugins = useCallback(() => {
+    closeSurface()
     navigate("/plugins")
-  }, [navigate])
+  }, [closeSurface, navigate])
 
   const openVideo = useCallback(() => {
+    closeSurface()
     navigate("/video")
-  }, [navigate])
+  }, [closeSurface, navigate])
 
   const actions = useMemo<A2uSurfaceAction[]>(() => {
     if (!activeSurface) {
@@ -245,10 +261,17 @@ export function AgentSurfaceLayer({ onSurfaceClosed }: AgentSurfaceLayerProps) {
         ref={surfaceRef}
         tabIndex={-1}
         aria-label={t("pages.assistant.surface.regionLabel")}
-        className="mx-auto w-full max-w-[768px] px-6 pb-4 md:px-8 lg:px-0"
+        className={variant === "shell"
+          ? "flex min-h-0 flex-1 px-[var(--shell-content-gutter)] pb-[var(--shell-content-gutter)] pt-4"
+          : "mx-auto w-full max-w-[768px] px-6 pb-4 md:px-8 lg:px-0"}
         data-testid="agent-surface-layer"
       >
-        <div className="relative" data-testid="agent-surface-frame">
+        <div
+          className={variant === "shell"
+            ? "relative flex min-h-0 w-full flex-1 flex-col overflow-hidden"
+            : "relative"}
+          data-testid="agent-surface-frame"
+        >
           <div className="absolute right-3 top-3 z-10 flex items-center gap-1">
             <Button
               type="button"
@@ -308,7 +331,11 @@ export function AgentSurfaceLayer({ onSurfaceClosed }: AgentSurfaceLayerProps) {
               {t("pages.assistant.surface.collapsed")}
             </div>
           ) : (
-            <div id="agent-surface-content" data-testid="agent-surface-content">
+            <div
+              id="agent-surface-content"
+              className={variant === "shell" ? "min-h-0 flex-1 overflow-auto" : undefined}
+              data-testid="agent-surface-content"
+            >
               {activeSurface.type === "workspace" ? (
                 <A2uWorkspaceSurface
                   actions={actions}

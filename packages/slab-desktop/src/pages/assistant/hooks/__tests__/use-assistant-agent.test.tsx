@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useAgentSurfaceStore } from "@/store/useAgentSurfaceStore"
 
@@ -24,6 +24,29 @@ const { mockMutateAsync, mockReadAssistantSseStream } = vi.hoisted(() => ({
   mockMutateAsync: vi.fn<() => Promise<unknown>>(),
   mockReadAssistantSseStream: vi.fn<MockReadAssistantSseStream>(),
 }))
+
+class MockWebSocket {
+  static readonly CONNECTING = 0
+  static readonly OPEN = 1
+  static readonly CLOSING = 2
+  static readonly CLOSED = 3
+
+  readonly CONNECTING = MockWebSocket.CONNECTING
+  readonly OPEN = MockWebSocket.OPEN
+  readonly CLOSING = MockWebSocket.CLOSING
+  readonly CLOSED = MockWebSocket.CLOSED
+
+  readyState = MockWebSocket.CLOSED
+
+  constructor(readonly url: string) {}
+
+  addEventListener = vi.fn<() => void>()
+  close = vi.fn<() => void>()
+  removeEventListener = vi.fn<() => void>()
+  send = vi.fn<() => void>()
+}
+
+vi.stubGlobal("WebSocket", MockWebSocket)
 
 vi.mock("@slab/api", () => ({
   createSlabApiFetchClient: vi.fn<() => { POST: () => Promise<void> }>(() => ({
@@ -79,8 +102,11 @@ function renderAssistantAgent() {
 }
 
 describe("useAssistantAgent a2u tool dispatch", () => {
+  let unmount: (() => void) | null = null
+
   beforeEach(() => {
     vi.clearAllMocks()
+    unmount = null
     mockMutateAsync.mockResolvedValue({
       status: "running",
       thread_id: "thread-1",
@@ -89,8 +115,13 @@ describe("useAssistantAgent a2u tool dispatch", () => {
     mockReadAssistantSseStream.mockResolvedValue(undefined)
     useAgentSurfaceStore.setState({
       draft: null,
+      focusComposerSignal: 0,
       pendingSurface: null,
     })
+  })
+
+  afterEach(() => {
+    unmount?.()
   })
 
   it("dispatches workspace.open tool calls to the agent surface store", async () => {
@@ -109,7 +140,9 @@ describe("useAssistantAgent a2u tool dispatch", () => {
       })
     })
 
-    const { result } = renderAssistantAgent()
+    const rendered = renderAssistantAgent()
+    const { result } = rendered
+    unmount = rendered.unmount
 
     await act(async () => {
       await result.current.handleSubmit("Open src/main.rs")
@@ -123,6 +156,49 @@ describe("useAssistantAgent a2u tool dispatch", () => {
         type: "workspace",
       })
     })
+  })
+
+  it("dispatches plugin.launch tool calls as preview-only pending surfaces", async () => {
+    mockReadAssistantSseStream.mockImplementation(async (_url, options) => {
+      options.onOpen?.()
+      options.onMessage({
+        data: JSON.stringify({
+          arguments: JSON.stringify({
+            plugin_id: "demo-plugin",
+            surface: "panel",
+            payload: { taskId: "task-1" },
+          }),
+          call_id: "call-plugin",
+          name: "plugin.launch",
+          sequence_number: 1,
+          thread_id: "thread-1",
+          type: "response.function_call_arguments.done",
+        }),
+        id: "1",
+      })
+    })
+
+    const rendered = renderAssistantAgent()
+    const { result } = rendered
+    unmount = rendered.unmount
+
+    await act(async () => {
+      await result.current.handleSubmit("Open plugin panel")
+    })
+
+    await waitFor(() => {
+      expect(useAgentSurfaceStore.getState().pendingSurface).toMatchObject({
+        payload: {
+          pluginId: "demo-plugin",
+          surface: "panel",
+          payload: {
+            taskId: "task-1",
+          },
+        },
+        type: "plugin",
+      })
+    })
+    expect(result.current.pendingApprovals).toEqual([])
   })
 
   it("keeps unknown tools on the ThoughtChain fallback path", async () => {
@@ -141,7 +217,9 @@ describe("useAssistantAgent a2u tool dispatch", () => {
       })
     })
 
-    const { result } = renderAssistantAgent()
+    const rendered = renderAssistantAgent()
+    const { result } = rendered
+    unmount = rendered.unmount
 
     await act(async () => {
       await result.current.handleSubmit("Read src/main.rs")
@@ -179,7 +257,9 @@ describe("useAssistantAgent a2u tool dispatch", () => {
       })
     })
 
-    const { result } = renderAssistantAgent()
+    const rendered = renderAssistantAgent()
+    const { result } = rendered
+    unmount = rendered.unmount
 
     await act(async () => {
       await result.current.handleSubmit("Open src/main.rs")

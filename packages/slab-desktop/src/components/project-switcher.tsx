@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
+import { useQueryClient } from "@tanstack/react-query"
 import { ChevronDown, Folder } from "lucide-react"
+import { toast } from "sonner"
 
 import { useTranslation } from "@slab/i18n"
+import { WORKSPACE_STATE_QUERY_KEY, workspaceState } from "@/lib/workspace-bridge"
 import { useWorkspaceUiStore } from "@/store/useWorkspaceUiStore"
 
 type RecentWorkspaceView = {
@@ -99,6 +102,7 @@ type MigrationResult = { projectId: string; suspendedCount: number }
 /** Wired ProjectSwitcher: reads recent workspaces + switches via the host. */
 export function ProjectSwitcher({ activeName }: { activeName?: string }) {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
   const recentWorkspaces = useWorkspaceUiStore((state) => state.recentWorkspaces)
   const [switching, setSwitching] = useState(false)
 
@@ -106,22 +110,37 @@ export function ProjectSwitcher({ activeName }: { activeName?: string }) {
     setSwitching(true)
     try {
       // The host interrupts active agent threads + snapshots them, then switches.
-      await invoke<MigrationResult>("switch_workspace_with_migration", { newRoot: rootPath })
+      const result = await invoke<MigrationResult>("switch_workspace_with_migration", { newRoot: rootPath })
+      try {
+        const nextWorkspaceState = await workspaceState()
+        queryClient.setQueryData(WORKSPACE_STATE_QUERY_KEY, nextWorkspaceState)
+        await queryClient.invalidateQueries({ queryKey: WORKSPACE_STATE_QUERY_KEY })
+      } catch (error) {
+        console.warn("workspace state refresh failed after migration", error)
+        await queryClient.invalidateQueries({ queryKey: WORKSPACE_STATE_QUERY_KEY }).catch((refreshError) => {
+          console.warn("workspace state invalidation failed after migration", refreshError)
+        })
+      }
+      toast.success(t("pages.workspace.projectSwitcher.switched"), {
+        description: t("pages.workspace.projectSwitcher.suspended", {
+          count: result.suspendedCount,
+        }),
+      })
     } catch (error) {
       // Surfaced in the UI by the workspace state subscription; keep switching.
       console.warn("workspace migration failed", error)
     } finally {
       setSwitching(false)
     }
-  }, [])
+  }, [queryClient, t])
 
   return (
     <ProjectSwitcherView
       activeName={activeName}
       disabled={switching}
       labels={{
-        toggle: t("workspace.projectSwitcher.toggle"),
-        noActive: t("workspace.projectSwitcher.noActive"),
+        toggle: t("pages.workspace.projectSwitcher.toggle"),
+        noActive: t("pages.workspace.projectSwitcher.noActive"),
       }}
       recentWorkspaces={recentWorkspaces}
       onSwitch={handleSwitch}

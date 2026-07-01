@@ -23,6 +23,9 @@ export const workspace = {
   projectSwitcher: {
     toggle: 'Switch workspace',
     noActive: 'No workspace',
+    switched: 'Workspace switched',
+    suspended_one: '{{count}} agent task suspended',
+    suspended_other: '{{count}} agent tasks suspended',
   },
   tree: {
     title: 'Files',

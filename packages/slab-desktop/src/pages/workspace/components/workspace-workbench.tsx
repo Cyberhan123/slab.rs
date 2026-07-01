@@ -11,6 +11,7 @@ import { useTranslation } from "@slab/i18n"
 import { Button } from "@slab/components/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@slab/components/tooltip"
 import { SoftPanel, StageEmptyState, StatusPill } from "@slab/components/workspace"
+import { ProjectSwitcher } from "@/components/project-switcher"
 import {
   ArrowLeft,
   Command as CommandPaletteIcon,
@@ -268,6 +269,7 @@ export function WorkspaceWorkbench({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <ProjectSwitcher activeName={workspace.name} />
           <Button variant="pill" size="sm" onClick={handleOpenFolder}>
             <FolderOpen className="size-4" />
             {t("pages.workspace.actions.openFolder")}
