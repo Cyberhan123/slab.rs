@@ -405,6 +405,62 @@ describe.sequential("workspace e2e", () => {
     expect(lspRequests.some((request) => request.includes("/v1/workspace/lsp/typescript"))).toBe(true)
     expect(workspaceFailures).toEqual([])
   })
+
+  it("keeps the workspace stable when JSON LSP initialization closes early", async () => {
+    const testEnv = requireEnv()
+    browserErrors = []
+    workspaceFailures = []
+    directoryRequests = []
+    fileRequests = []
+    lspRequests = []
+    statRequests = []
+    failedRequests = []
+    fileResponses = []
+    notFoundResponses = []
+
+    await requestJson<Schema["WorkspaceStateResponse"]>(testEnv.serverBaseUrl, "/v1/workspace/close", {
+      method: "POST",
+    })
+    await page.goto(`${testEnv.uiBaseUrl}/workspace`, {
+      waitUntil: "domcontentloaded",
+      timeout: 60_000,
+    })
+    await openWorkspaceFromUi(testEnv, page, workspaceRoot)
+
+    const explorer = page.getByTestId("workspace-vscode-explorer")
+    await page.getByRole("button", { name: /files/i }).click()
+    await explorer.waitFor({ state: "visible", timeout: 60_000 })
+    await expandWorkspaceExplorerRoot(explorer, workspaceRoot.split(/[\\/]/).findLast(Boolean) ?? "Workspace", "config")
+    await installClosingJsonLspWebSocket(page)
+    await clickExplorerPath(explorer, project.jsonConfigPathSegments)
+
+    const editor = page.getByTestId("workspace-vscode-editor")
+    const monacoEditor = editor.locator(".monaco-editor")
+    await monacoEditor.waitFor({ state: "visible", timeout: 60_000 })
+    await eventually("workspace JSON file remains visible after LSP close", async () =>
+      (await readMonacoEditorText(editor)).includes('"app": "workspace"') ? true : null
+    )
+    await expectWorkspaceWorkerLabelLoads(page, "OutputLinkDetectionWorker")
+    await eventually("workspace JSON LSP close is recorded without page teardown", async () => {
+      const lspClient = await readWorkspaceLspClientDebug(page) as {
+        connections?: Array<{ event?: string; language?: string }>
+      } | null
+      return lspClient?.connections?.some((connection) =>
+        (connection.event === "closed" || connection.event === "failed") && connection.language === "json"
+      )
+        ? lspClient
+        : null
+    }, 30_000, 500)
+    await page.waitForTimeout(1_000)
+    const jsonLspRequestCount = lspRequests.filter((request) => request.includes("/v1/workspace/lsp/json")).length
+    await page.waitForTimeout(1_000)
+
+    await page.getByTestId("workspace-active-screen").waitFor({ state: "visible", timeout: 10_000 })
+    expect(await readMonacoEditorText(editor)).toContain('"enabled": true')
+    expect(lspRequests.filter((request) => request.includes("/v1/workspace/lsp/json")).length).toBe(jsonLspRequestCount)
+    expect(browserErrors.filter(isUnhandledWorkspaceLspFailure)).toEqual([])
+    expect(workspaceFailures).toEqual([])
+  })
 })
 
 function requireEnv(): FullstackDevEnvironment {
@@ -632,6 +688,81 @@ async function waitForWorkspaceLspSession(
       ? session
       : null
   }, timeoutMs, 500)
+}
+
+function isUnhandledWorkspaceLspFailure(message: string) {
+  return /Client is not running and can't be stopped|Pending response rejected since connection got disposed|MCP\]\[BRIDGE\]\[UNHANDLED_REJECTION|Uncaught \(in promise\).*ResponseError|Uncaught \(in promise\).*Client is not running/i
+    .test(message)
+}
+
+async function expectWorkspaceWorkerLabelLoads(page: Page, label: string) {
+  await page.evaluate(async (workerLabel) => {
+    const environment = window.MonacoEnvironment as {
+      getWorkerOptions?: (moduleId: string, label: string) => WorkerOptions | undefined
+      getWorkerUrl?: (moduleId: string, label: string) => string | undefined
+    } | undefined
+    const workerUrl = environment?.getWorkerUrl?.("workerMain.js", workerLabel)
+    if (!workerUrl) {
+      throw new Error(`Missing worker URL for ${workerLabel}.`)
+    }
+    if (workerUrl === window.location.href || workerUrl.includes(`/workspace#${workerLabel}`)) {
+      throw new Error(`Worker URL for ${workerLabel} resolves to the workspace page: ${workerUrl}`)
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const bootstrapUrl = URL.createObjectURL(new Blob([
+        `await import(${JSON.stringify(workerUrl)}); postMessage("ready");`,
+      ], { type: "application/javascript" }))
+      const worker = new Worker(bootstrapUrl, {
+        name: workerLabel,
+        type: environment?.getWorkerOptions?.("workerMain.js", workerLabel)?.type ?? "module",
+      })
+      const timeout = window.setTimeout(() => {
+        worker.terminate()
+        URL.revokeObjectURL(bootstrapUrl)
+        reject(new Error(`Timed out loading worker ${workerLabel} from ${workerUrl}.`))
+      }, 10_000)
+      worker.addEventListener("message", () => {
+        window.clearTimeout(timeout)
+        worker.terminate()
+        URL.revokeObjectURL(bootstrapUrl)
+        resolve()
+      }, { once: true })
+      worker.addEventListener("error", (error) => {
+        window.clearTimeout(timeout)
+        worker.terminate()
+        URL.revokeObjectURL(bootstrapUrl)
+        reject(new Error(`Failed to load worker ${workerLabel} from ${workerUrl}: ${error.message}`))
+      }, { once: true })
+    })
+  }, label)
+}
+
+async function installClosingJsonLspWebSocket(page: Page) {
+  await page.evaluate(() => {
+    const NativeWebSocket = window.WebSocket
+    let jsonLspCloseInjected = false
+    class ClosingJsonLspWebSocket extends NativeWebSocket {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        if (protocols === undefined) {
+          super(url)
+        } else {
+          super(url, protocols)
+        }
+        if (String(url).includes("/v1/workspace/lsp/json") && !jsonLspCloseInjected) {
+          jsonLspCloseInjected = true
+          this.addEventListener("open", () => {
+            this.close(1000, "test json lsp init close")
+          }, { once: true })
+        }
+      }
+    }
+    Object.defineProperty(ClosingJsonLspWebSocket, "CONNECTING", { value: NativeWebSocket.CONNECTING })
+    Object.defineProperty(ClosingJsonLspWebSocket, "OPEN", { value: NativeWebSocket.OPEN })
+    Object.defineProperty(ClosingJsonLspWebSocket, "CLOSING", { value: NativeWebSocket.CLOSING })
+    Object.defineProperty(ClosingJsonLspWebSocket, "CLOSED", { value: NativeWebSocket.CLOSED })
+    window.WebSocket = ClosingJsonLspWebSocket
+  })
 }
 
 async function workspaceRuntimeDiagnostics(editor: ReturnType<Page["getByTestId"]>) {

@@ -96,7 +96,7 @@ describe("plugin API client", () => {
   it("uses nested API error messages and keeps parsed error data", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(() =>
+      vi.fn<() => Promise<Response>>(() =>
         Promise.resolve(jsonResponse({ error: { message: "runtime offline" } }, 500)),
       ),
     );
@@ -129,7 +129,7 @@ describe("plugin API client", () => {
   it("routes the OpenAPI client through fetch and parses the response", async () => {
     // Type the mock with the fetch call signature so the recorded call args are
     // reachable; openapi-fetch issues a Request object as the single argument.
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () =>
       jsonResponse([]),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -209,7 +209,7 @@ describe("plugin host bridge", () => {
   });
 
   it("uses noop event unsubscribers when the event bridge is unavailable", async () => {
-    const sdk = createSlabPluginSdk(pluginWindow(vi.fn()));
+    const sdk = createSlabPluginSdk(pluginWindow(vi.fn<InvokeMock>()));
 
     expect(await sdk.events.listen("demo", vi.fn<(payload: unknown) => void>())).toEqual(
       expect.any(Function),

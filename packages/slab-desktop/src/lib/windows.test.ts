@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn(),
+  invoke: vi.fn<(command: string, args?: unknown) => Promise<unknown>>(),
 }))
 vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: vi.fn(() => ({ label: "main" })),
+  getCurrentWindow: vi.fn<() => { label: string }>(() => ({ label: "main" })),
 }))
 
 import { invoke } from "@tauri-apps/api/core"

@@ -60,6 +60,7 @@ import { workspaceLspModelPath } from "../workspace-uri"
 import type {
   WorkspaceFileEntry,
   WorkspacePathMetadata,
+  WorkspaceWatchEvent,
 } from "@/lib/workspace-bridge"
 
 const WORKSPACE_ROOT = "C:\\test\\repo"
@@ -86,29 +87,41 @@ type BackendHandle = {
   backend: SlabWorkspaceBackendFileSystemProvider
   bridge: SlabWorkspaceBackendBridge
 }
+type TestWorkspaceWatcher = {
+  onError: (error: Event) => void
+  onEvent: (event: WorkspaceWatchEvent) => void
+}
 
 function createBackend(overrides: Partial<SlabWorkspaceBackendBridge> = {}): BackendHandle {
   const bridge: SlabWorkspaceBackendBridge = {
-    readDirectory: vi.fn(async () => ({ relativePath: "", entries: [], truncated: false })),
-    readFile: vi.fn(async (relativePath) => ({
+    readDirectory: vi.fn<SlabWorkspaceBackendBridge["readDirectory"]>(async () => ({
+      relativePath: "",
+      entries: [],
+      truncated: false,
+    })),
+    readFile: vi.fn<SlabWorkspaceBackendBridge["readFile"]>(async (relativePath) => ({
       relativePath,
       name: relativePath.split("/").findLast(Boolean) ?? relativePath,
       content: "hello world",
       sizeBytes: 11,
       contentHash: "hash",
     })),
-    statPath: vi.fn(async (relativePath) => ({
+    statPath: vi.fn<SlabWorkspaceBackendBridge["statPath"]>(async (relativePath) => ({
       relativePath,
       kind: "file" as const,
       sizeBytes: 11,
       modifiedAt: 1_000,
       createdAt: 500,
     })),
-    writeFile: vi.fn(async () => ({ relativePath: "", sizeBytes: 0, contentHash: "" })),
-    createDirectory: vi.fn(async () => ({ relativePath: "" })),
-    renamePath: vi.fn(async () => ({ relativePath: "" })),
-    deletePath: vi.fn(async () => ({ relativePath: "" })),
-    watch: vi.fn(() => ({ dispose() {} })),
+    writeFile: vi.fn<SlabWorkspaceBackendBridge["writeFile"]>(async () => ({
+      relativePath: "",
+      sizeBytes: 0,
+      contentHash: "",
+    })),
+    createDirectory: vi.fn<SlabWorkspaceBackendBridge["createDirectory"]>(async () => ({ relativePath: "" })),
+    renamePath: vi.fn<SlabWorkspaceBackendBridge["renamePath"]>(async () => ({ relativePath: "" })),
+    deletePath: vi.fn<SlabWorkspaceBackendBridge["deletePath"]>(async () => ({ relativePath: "" })),
+    watch: vi.fn<SlabWorkspaceBackendBridge["watch"]>(() => ({ dispose() {} })),
     ...overrides,
   }
   const backend = new SlabWorkspaceBackendFileSystemProvider({ bridge })
@@ -133,7 +146,7 @@ describe("SlabWorkspaceBackendFileSystemProvider", () => {
 
   it("backfills stat from a directory listing without an extra statPath call", async () => {
     const { backend, bridge } = createBackend({
-      readDirectory: vi.fn(async () => ({
+      readDirectory: vi.fn<SlabWorkspaceBackendBridge["readDirectory"]>(async () => ({
         relativePath: "src",
         entries: [fileEntry({ kind: "file", name: "a.ts", relativePath: "src/a.ts" })],
         truncated: false,
@@ -146,7 +159,7 @@ describe("SlabWorkspaceBackendFileSystemProvider", () => {
 
   it("throws when statPath rejects", async () => {
     const { backend } = createBackend({
-      statPath: vi.fn(async () => {
+      statPath: vi.fn<SlabWorkspaceBackendBridge["statPath"]>(async () => {
         throw new Error("missing")
       }),
     })
@@ -155,7 +168,7 @@ describe("SlabWorkspaceBackendFileSystemProvider", () => {
 
   it("rejects readFile for files above the preview size limit", async () => {
     const { backend } = createBackend({
-      statPath: vi.fn(async (relativePath) => ({
+      statPath: vi.fn<SlabWorkspaceBackendBridge["statPath"]>(async (relativePath) => ({
         relativePath,
         kind: "file" as const,
         sizeBytes: 2 * 1024 * 1024,
@@ -168,7 +181,7 @@ describe("SlabWorkspaceBackendFileSystemProvider", () => {
 
   it("deduplicates concurrent reads of the same file", async () => {
     const { backend, bridge } = createBackend({
-      readFile: vi.fn(async (relativePath: string) => ({
+      readFile: vi.fn<SlabWorkspaceBackendBridge["readFile"]>(async (relativePath) => ({
         relativePath,
         name: "a.ts",
         content: "content",
@@ -185,7 +198,11 @@ describe("SlabWorkspaceBackendFileSystemProvider", () => {
 
   it("writes through the bridge and emits an UPDATED change for the resource", async () => {
     const { backend, bridge } = createBackend({
-      writeFile: vi.fn(async () => ({ relativePath: "", sizeBytes: 0, contentHash: "" })),
+      writeFile: vi.fn<SlabWorkspaceBackendBridge["writeFile"]>(async () => ({
+        relativePath: "",
+        sizeBytes: 0,
+        contentHash: "",
+      })),
     })
     const changes: { type: number; resource: URI }[][] = []
     backend.onDidChangeFile((events) => changes.push(events as never))
@@ -209,7 +226,7 @@ describe("SlabWorkspaceBackendFileSystemProvider", () => {
 
   it("emits ADDED on mkdir and DELETED on delete", async () => {
     const { backend } = createBackend({
-      readDirectory: vi.fn(async () => ({
+      readDirectory: vi.fn<SlabWorkspaceBackendBridge["readDirectory"]>(async () => ({
         relativePath: "",
         entries: [fileEntry({ kind: "directory", name: "src", relativePath: "src" })],
         truncated: false,
@@ -238,10 +255,10 @@ describe("SlabWorkspaceBackendFileSystemProvider", () => {
 
   it("coalesces watch events into a single debounced change batch", async () => {
     vi.useFakeTimers()
-    let watcher: { onEvent: (e: unknown) => void; onError: (e: unknown) => void } | null = null
+    let watcher: TestWorkspaceWatcher | null = null
     const { backend } = createBackend({
-      watch: vi.fn(({ onEvent, onError }) => {
-        watcher = { onEvent, onError }
+      watch: vi.fn<SlabWorkspaceBackendBridge["watch"]>(({ onEvent, onError }) => {
+        watcher = { onEvent, onError: onError ?? (() => {}) }
         return { dispose() {} }
       }),
     })
@@ -274,7 +291,7 @@ describe("SlabWorkspaceBackendFileSystemProvider", () => {
   it("shares a single backend watch across concurrent file-service watchers", () => {
     let disposeCount = 0
     const { backend, bridge } = createBackend({
-      watch: vi.fn(() => ({
+      watch: vi.fn<SlabWorkspaceBackendBridge["watch"]>(() => ({
         dispose() {
           disposeCount += 1
         },
@@ -298,10 +315,10 @@ describe("SlabWorkspaceBackendFileSystemProvider", () => {
   })
 
   it("clears the whole cache and signals a root update when the watch stream errors", async () => {
-    let watcher: { onEvent: (e: unknown) => void; onError: (e: unknown) => void } | null = null
+    let watcher: TestWorkspaceWatcher | null = null
     const { backend } = createBackend({
-      watch: vi.fn(({ onEvent, onError }) => {
-        watcher = { onEvent, onError }
+      watch: vi.fn<SlabWorkspaceBackendBridge["watch"]>(({ onEvent, onError }) => {
+        watcher = { onEvent, onError: onError ?? (() => {}) }
         return { dispose() {} }
       }),
     })
@@ -318,15 +335,17 @@ describe("SlabWorkspaceBackendFileSystemProvider", () => {
 
   it("drops stale in-flight reads after clearCache bumps the generation", async () => {
     let firstCallTaken = false
-    let resolveFirstStat: (value: WorkspacePathMetadata) => void = () => {}
+    const firstStat = {
+      resolve: undefined as ((value: WorkspacePathMetadata) => void) | undefined,
+    }
     const { backend, bridge } = createBackend({
-      statPath: vi.fn(() => {
+      statPath: vi.fn<SlabWorkspaceBackendBridge["statPath"]>(() => {
         // First call is controllable so we can resolve it after clearCache;
         // later calls auto-resolve so the follow-up stat completes.
         if (!firstCallTaken) {
           firstCallTaken = true
           return new Promise<WorkspacePathMetadata>((resolve) => {
-            resolveFirstStat = resolve
+            firstStat.resolve = resolve
           })
         }
         return Promise.resolve({
@@ -346,7 +365,12 @@ describe("SlabWorkspaceBackendFileSystemProvider", () => {
       expect(vi.mocked(bridge.statPath)).toHaveBeenCalled()
     })
     backend.clearCache()
-    resolveFirstStat({
+    const resolveStat = firstStat.resolve
+    expect(resolveStat).toBeDefined()
+    if (!resolveStat) {
+      throw new Error("stat resolver was not captured.")
+    }
+    resolveStat({
       relativePath: "src/a.ts",
       kind: "file",
       sizeBytes: 4,

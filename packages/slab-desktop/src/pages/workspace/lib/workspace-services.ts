@@ -390,6 +390,10 @@ const workspaceMonacoWorkers: Record<string, SlabMonacoWorkerEntry> = {
     url: new URL("@codingame/monaco-vscode-language-detection-worker-service-override/worker", import.meta.url),
     options: { type: "module" },
   },
+  OutputLinkDetectionWorker: {
+    url: new URL("@codingame/monaco-vscode-output-service-override/worker", import.meta.url),
+    options: { type: "module" },
+  },
 }
 
 function registerWorkspaceMonacoWorkers() {
@@ -400,7 +404,7 @@ function registerWorkspaceMonacoWorkers() {
   const environment: monaco.Environment & {
     getWorkerOptions?: (moduleId: string, label: string) => WorkerOptions | undefined
   } = {
-    getWorkerUrl: (_moduleId, label) => workspaceMonacoWorkers[label]?.url?.toString() ?? "",
+    getWorkerUrl: (_moduleId, label) => workspaceMonacoWorkers[label]?.url?.toString(),
     getWorkerOptions: (_moduleId, label) => workspaceMonacoWorkers[label]?.options,
   }
   window.MonacoEnvironment = environment

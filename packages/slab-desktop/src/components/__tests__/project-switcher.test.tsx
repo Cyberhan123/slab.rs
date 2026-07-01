@@ -7,7 +7,7 @@ const labels = { toggle: "Switch workspace", noActive: "No workspace" }
 
 describe("ProjectSwitcherView", () => {
   it("lists recent workspaces and fires onSwitch with the root path", () => {
-    const onSwitch = vi.fn()
+    const onSwitch = vi.fn<(rootPath: string) => void>()
     render(
       <ProjectSwitcherView
         activeName="Slab"

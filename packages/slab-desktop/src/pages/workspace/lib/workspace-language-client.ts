@@ -5,6 +5,7 @@ import {
   ErrorAction,
   type LanguageClientOptions,
   type MessageTransports,
+  State,
 } from "vscode-languageclient/browser.js"
 import { SERVER_BASE_URL } from "@slab/api/config"
 import {
@@ -71,6 +72,21 @@ class WorkspaceLanguageClient extends BaseLanguageClient {
   protected createMessageTransports() {
     return Promise.resolve(this.messageTransports)
   }
+
+  stop(timeout?: number) {
+    if (this.state !== State.Running) {
+      return Promise.resolve()
+    }
+    return super.stop(timeout)
+  }
+
+  error(message: string, data?: unknown, showNotification?: boolean | "force") {
+    if (isExpectedWorkspaceLspLifecycleError(message, data)) {
+      console.debug("workspace LSP client lifecycle event", { data, message })
+      return
+    }
+    super.error(message, data, showNotification)
+  }
 }
 
 export async function startWorkspaceLspSession({
@@ -86,12 +102,21 @@ export async function startWorkspaceLspSession({
     return null
   }
 
+  installWorkspaceLspUnhandledRejectionGuard()
+
   let socket: WebSocket | null = null
   let languageClient: WorkspaceLanguageClient | null = null
   let disposed = false
   let connectPromise: Promise<void> | null = null
   let reconnectTimer: number | null = null
   let reconnectDelayMs = WORKSPACE_LSP_RECONNECT_INITIAL_DELAY_MS
+
+  const clearReconnectTimer = () => {
+    if (reconnectTimer !== null) {
+      window.clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+  }
 
   try {
     await ensureWorkspaceLspServices()
@@ -125,13 +150,6 @@ export async function startWorkspaceLspSession({
 
     const jsonrpc = await import("vscode-ws-jsonrpc")
 
-    const clearReconnectTimer = () => {
-      if (reconnectTimer !== null) {
-        window.clearTimeout(reconnectTimer)
-        reconnectTimer = null
-      }
-    }
-
     const connect = async () => {
       clearReconnectTimer()
       pushWorkspaceLspClientDebug("connections", { event: "connecting", language })
@@ -154,6 +172,7 @@ export async function startWorkspaceLspSession({
           initializationOptions: {
             workspaceRoot,
           },
+          initializationFailedHandler: () => false,
           errorHandler: {
             error: () => ({ action: ErrorAction.Continue }),
             closed: () => ({ action: CloseAction.DoNotRestart }),
@@ -169,6 +188,7 @@ export async function startWorkspaceLspSession({
       languageClient = nextLanguageClient
 
       nextSocket.addEventListener("close", (event) => {
+        expectWorkspaceLspRejectedPromise()
         pushWorkspaceLspClientDebug("connections", {
           code: event.code,
           event: "closed",
@@ -183,7 +203,7 @@ export async function startWorkspaceLspSession({
         if (languageClient === nextLanguageClient) {
           languageClient = null
         }
-        void nextLanguageClient.stop().catch(() => {})
+        void stopWorkspaceLspClient(nextLanguageClient)
         scheduleReconnect()
       })
 
@@ -191,13 +211,13 @@ export async function startWorkspaceLspSession({
         await waitForSocketOpen(nextSocket)
         if (disposed || socket !== nextSocket) {
           nextSocket.close(1000, "workspace LSP session replaced")
-          await nextLanguageClient.stop().catch(() => {})
+          await stopWorkspaceLspClient(nextLanguageClient)
           return
         }
 
-        await nextLanguageClient.start()
+        await startWorkspaceLspClient(nextLanguageClient)
         if (disposed || socket !== nextSocket || languageClient !== nextLanguageClient) {
-          await nextLanguageClient.stop().catch(() => {})
+          await stopWorkspaceLspClient(nextLanguageClient)
           return
         }
         setWorkspaceLspClientInitializeDebug(nextLanguageClient.initializeResult)
@@ -206,6 +226,7 @@ export async function startWorkspaceLspSession({
         reconnectDelayMs = WORKSPACE_LSP_RECONNECT_INITIAL_DELAY_MS
         pushWorkspaceLspClientDebug("connections", { event: "ready", language })
       } catch (error) {
+        expectWorkspaceLspRejectedPromise()
         pushWorkspaceLspClientDebug("connections", {
           error: error instanceof Error ? error.message : String(error),
           event: "failed",
@@ -218,7 +239,7 @@ export async function startWorkspaceLspSession({
           languageClient = null
         }
         nextSocket.close(1000, "workspace LSP reconnect failed")
-        await nextLanguageClient.stop().catch(() => {})
+        await stopWorkspaceLspClient(nextLanguageClient)
         throw error
       }
     }
@@ -329,11 +350,17 @@ export async function startWorkspaceLspSession({
       dispose: async () => {
         disposed = true
         clearReconnectTimer()
-        await languageClient?.stop()
-        socket?.close(1000, "workspace LSP session disposed")
+        const client = languageClient
+        const currentSocket = socket
+        languageClient = null
+        socket = null
+        currentSocket?.close(1000, "workspace LSP session disposed")
+        await stopWorkspaceLspClient(client)
       },
     }
   } catch (error) {
+    disposed = true
+    clearReconnectTimer()
     console.debug("workspace LSP unavailable", { language, uri: model.uri.toString(), error })
     closeWorkspaceLspSocket(socket, 1000, "workspace LSP session unavailable")
     await stopWorkspaceLspClient(languageClient)
@@ -367,12 +394,89 @@ function setWorkspaceLspClientInitializeDebug(value: unknown) {
   }
 }
 
+function isExpectedWorkspaceLspLifecycleError(message: string, data: unknown) {
+  const detail = workspaceLspErrorMessage(data)
+  return /Connection to server got closed|couldn't create connection to server|Server initialization failed|Error during socket reconnect|Pending response rejected since connection got disposed/i
+    .test(message)
+    && (
+      !detail
+      || /Pending response rejected since connection got disposed|Client is not running and can't be stopped|Error during socket reconnect|workspace LSP websocket failed/i
+        .test(detail)
+    )
+}
+
+function workspaceLspErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return `${error.message}\n${error.stack ?? ""}`
+  }
+
+  if (typeof error === "string") {
+    return error
+  }
+
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message?: unknown }).message ?? "")
+  }
+
+  return String(error ?? "")
+}
+
+let workspaceLspUnhandledRejectionGuardInstalled = false
+let workspaceLspExpectedRejectionUntil = 0
+
+function expectWorkspaceLspRejectedPromise() {
+  workspaceLspExpectedRejectionUntil = Math.max(
+    workspaceLspExpectedRejectionUntil,
+    Date.now() + 5_000,
+  )
+}
+
+function installWorkspaceLspUnhandledRejectionGuard() {
+  if (workspaceLspUnhandledRejectionGuardInstalled || typeof window === "undefined") {
+    return
+  }
+
+  window.addEventListener("unhandledrejection", (event) => {
+    if (!isExpectedWorkspaceLspRejectedPromise(event.reason)) {
+      return
+    }
+
+    event.preventDefault()
+    console.debug("workspace LSP ignored expected initialization rejection", {
+      reason: event.reason,
+    })
+  })
+  workspaceLspUnhandledRejectionGuardInstalled = true
+}
+
+function isExpectedWorkspaceLspRejectedPromise(reason: unknown) {
+  return Date.now() <= workspaceLspExpectedRejectionUntil
+    && /Pending response rejected since connection got disposed|Client is not running and can't be stopped\. It's current state is: starting/i
+    .test(workspaceLspErrorMessage(reason))
+}
+
 function closeWorkspaceLspSocket(socket: WebSocket | null, code: number, reason: string) {
   socket?.close(code, reason)
 }
 
-function stopWorkspaceLspClient(client: WorkspaceLanguageClient | null) {
-  return client?.stop().catch(() => {}) ?? Promise.resolve()
+async function stopWorkspaceLspClient(client: WorkspaceLanguageClient | null) {
+  if (!client) {
+    return
+  }
+
+  try {
+    await client.stop()
+  } catch {
+    // vscode-languageclient can throw synchronously when a socket closes while
+    // the client is still `starting`; cleanup must stay best-effort.
+  }
+}
+
+async function startWorkspaceLspClient(client: WorkspaceLanguageClient) {
+  expectWorkspaceLspRejectedPromise()
+  const startPromise = client.start()
+  startPromise.catch(() => {})
+  await startPromise
 }
 
 function textDocumentPositionParams(

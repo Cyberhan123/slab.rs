@@ -14,8 +14,15 @@ const runtimeLibDir = resolve(repoRoot, "bin/slab-app/src-tauri/resources/libs")
 const startupTimeoutMs = 120_000;
 const healthPollIntervalMs = 500;
 const serverLogRingLimit = 200;
+const cleanupRetryDelayMs = 100;
+const cleanupRetryLimit = 20;
 const serverBinaryName = globalThis.process.platform === "win32" ? "slab-server.exe" : "slab-server";
-const serverBinaryPath = resolve(repoRoot, "target", "debug", serverBinaryName);
+const serverBinaryPath = resolveServerBinaryPath();
+
+function resolveServerBinaryPath(): string {
+  const override = process.env.SLAB_SERVER_TEST_BINARY?.trim();
+  return override ? resolve(repoRoot, override) : resolve(repoRoot, "target", "debug", serverBinaryName);
+}
 
 function sqliteUrlForPath(path: string): string {
   const normalized = path.replaceAll("\\", "/");
@@ -92,10 +99,37 @@ async function killProcessTree(child: ChildProcessWithoutNullStreams): Promise<v
 
   if (globalThis.process.platform === "win32") {
     execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" });
+  } else {
+    child.kill("SIGTERM");
+  }
+
+  await waitForProcessExit(child);
+}
+
+async function waitForProcessExit(child: ChildProcessWithoutNullStreams): Promise<void> {
+  if (child.exitCode !== null) {
     return;
   }
 
-  child.kill("SIGTERM");
+  await new Promise<void>((resolveExit) => {
+    child.once("exit", () => resolveExit());
+  });
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
+}
+
+async function removeTreeWithRetry(path: string, attempt = 0): Promise<void> {
+  try {
+    rmSync(path, { force: true, recursive: true });
+  } catch (error) {
+    if (attempt + 1 >= cleanupRetryLimit) {
+      throw error;
+    }
+    await delay(cleanupRetryDelayMs);
+    return removeTreeWithRetry(path, attempt + 1);
+  }
 }
 
 export interface SlabServerTestHarnessOptions {
@@ -122,6 +156,7 @@ export interface RecordedRequest {
 export interface SlabServerTestHarness {
   readonly baseUrl: string;
   readonly databasePath?: string;
+  readonly workspaceRoot?: string;
   recordRequest(path: string, init?: RequestInit | string): void;
   recordedRequests(): readonly RecordedRequest[];
   request(path: string, init?: RequestInit): Promise<Response>;
@@ -186,7 +221,9 @@ export async function startSlabServerHarness(
   const port = await findFreePort();
   const rootDir = mkdtempSync(join(tmpdir(), "slab-server-vitest-"));
   const settingsDir = join(rootDir, "config");
+  const logFile = join(rootDir, "logs", "slab-server.log");
   const modelConfigDir = join(settingsDir, "models");
+  const workspaceRoot = join(rootDir, "workspace");
   const settingsPath = join(settingsDir, "settings.json");
   const databasePath = join(rootDir, "slab.db");
   const databaseUrl = sqliteUrlForPath(databasePath);
@@ -195,6 +232,8 @@ export async function startSlabServerHarness(
   const logLines: string[] = [];
 
   mkdirSync(modelConfigDir, { recursive: true });
+  mkdirSync(workspaceRoot, { recursive: true });
+  writeFileSync(join(workspaceRoot, "config.json"), "{\n  \"smoke\": true\n}\n", "utf8");
   writeTestSettings(settingsPath, bindAddress, options.adminToken);
 
   const prebuiltBinary = canUsePrebuiltBinary();
@@ -227,6 +266,7 @@ export async function startSlabServerHarness(
     SLAB_BIND: bindAddress,
     SLAB_ADMIN_TOKEN: options.adminToken,
     SLAB_LIB_DIR: runtimeLibDir,
+    SLAB_LOG_FILE: logFile,
     SLAB_LOG: process.env.SLAB_LOG ?? "warn",
     SLAB_ENABLE_SWAGGER: "true",
     NO_COLOR: "1"
@@ -262,14 +302,20 @@ export async function startSlabServerHarness(
       // Best effort cleanup. The temp directory removal below should not be
       // blocked if the process already exited between checks.
     } finally {
-      rmSync(rootDir, { force: true, recursive: true });
+      await removeTreeWithRetry(rootDir).catch((error) => {
+        console.warn(`Failed to remove slab-server test temp directory ${rootDir}: ${error}`);
+      });
     }
   };
 
   try {
-    const deadline = Date.now() + startupTimeoutMs;
+    const waitForHealthy = async (deadline: number): Promise<SlabServerTestHarness> => {
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `Timed out waiting ${startupTimeoutMs}ms for slab-server at ${baseUrl}.${describeLogs()}`
+        );
+      }
 
-    while (Date.now() < deadline) {
       if (child.exitCode !== null) {
         throw new Error(
           `slab-server exited before becoming healthy (exit code ${child.exitCode}).${describeLogs()}`
@@ -282,6 +328,7 @@ export async function startSlabServerHarness(
           return {
             baseUrl,
             databasePath,
+            workspaceRoot,
             recordRequest: recorder.record,
             recordedRequests: recorder.snapshot,
             request(path, init) {
@@ -306,12 +353,11 @@ export async function startSlabServerHarness(
         // Keep polling until the server comes up or the process exits.
       }
 
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, healthPollIntervalMs));
-    }
+      await delay(healthPollIntervalMs);
+      return waitForHealthy(deadline);
+    };
 
-    throw new Error(
-      `Timed out waiting ${startupTimeoutMs}ms for slab-server at ${baseUrl}.${describeLogs()}`
-    );
+    return await waitForHealthy(Date.now() + startupTimeoutMs);
   } catch (error) {
     await stop();
     throw error;

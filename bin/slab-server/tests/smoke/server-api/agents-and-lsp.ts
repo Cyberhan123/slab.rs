@@ -5,6 +5,7 @@ import {
   expectError,
   expectJson,
   expectWebSocketJsonReply,
+  expectWorkspaceLspInitializeReply,
   expectWebSocketOpens,
   jsonInit,
   type Schema
@@ -234,6 +235,33 @@ export function registerAgentsAndLspSmoke(getServer: () => SlabServerTestHarness
       });
 
       await expectWebSocketOpens(server, "/v1/workspace/lsp/smoke-no-provider");
+
+      const { workspaceRoot } = server;
+      if (workspaceRoot) {
+        await expectJsonWorkspaceLsp(server, workspaceRoot);
+      }
     });
   });
+}
+
+async function expectJsonWorkspaceLsp(
+  server: SlabServerTestHarness,
+  workspaceRoot: string
+): Promise<void> {
+  const openedWorkspace = await expectJson<Schema["WorkspaceStateResponse"]>(
+    server,
+    "/v1/workspace/open",
+    jsonInit(
+      { rootPath: workspaceRoot } satisfies Schema["WorkspaceOpenCommand"],
+      { method: "POST" }
+    )
+  );
+  expect(openedWorkspace.body.current?.rootPath).toBeTypeOf("string");
+
+  const initializedJsonLsp = await expectWorkspaceLspInitializeReply(server, "json", workspaceRoot);
+  expect(initializedJsonLsp).toMatchObject({
+    id: 1,
+    jsonrpc: "2.0"
+  });
+  expect(initializedJsonLsp.result?.capabilities?.textDocumentSync).toBeDefined();
 }

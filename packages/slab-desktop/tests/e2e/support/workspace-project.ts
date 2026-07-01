@@ -14,6 +14,9 @@ export type WorkspaceProjectFixture = {
   diffModifiedPath: string
   diffUntrackedContent: string
   diffUntrackedPath: string
+  jsonConfigContent: string
+  jsonConfigPathSegments: string[]
+  jsonConfigRelativePath: string
   mathFileRelativePath: string
   noteFileRelativePath: string
   terminalSentinelContent: string
@@ -45,13 +48,20 @@ export function prepareWorkspaceProject(root: string, title = "Workspace E2E"): 
   const diffModifiedNewContent = "Modified tracked diff line\nShared line\n"
   const diffUntrackedPath = "src/untracked-diff.txt"
   const diffUntrackedContent = "Untracked workspace diff line\n"
+  const jsonConfigRelativePath = "config/app.json"
+  const jsonConfigContent = `${JSON.stringify({
+    app: "workspace",
+    enabled: true,
+  }, null, 2)}\n`
 
   mkdirSync(dirname(deepFilePath), { recursive: true })
+  mkdirSync(join(root, "config"), { recursive: true })
   mkdirSync(join(root, "src", "lib"), { recursive: true })
   writeFileSync(join(root, ".gitignore"), ".slab/\n", "utf8")
   writeFileSync(join(root, "README.md"), `# ${title}\n`, "utf8")
   writeFileSync(join(root, noteFileRelativePath), "Initial workspace note\n", "utf8")
   writeFileSync(join(root, "src", "second.txt"), "Second workspace note\n", "utf8")
+  writeFileSync(join(root, jsonConfigRelativePath), jsonConfigContent, "utf8")
   writeFileSync(join(root, tsMainFileRelativePath), tsMainFileContent, "utf8")
   writeFileSync(
     join(root, mathFileRelativePath),
@@ -90,6 +100,9 @@ export function prepareWorkspaceProject(root: string, title = "Workspace E2E"): 
     diffModifiedPath,
     diffUntrackedContent,
     diffUntrackedPath,
+    jsonConfigContent,
+    jsonConfigPathSegments: jsonConfigRelativePath.split("/"),
+    jsonConfigRelativePath,
     mathFileRelativePath,
     noteFileRelativePath,
     terminalSentinelContent,

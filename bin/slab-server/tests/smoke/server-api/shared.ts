@@ -1,5 +1,6 @@
 import type { components, paths } from "@slab/api";
 import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import { expect } from "vitest";
 
 import type {
@@ -37,6 +38,13 @@ export type DeletedModelResponse = {
 };
 export type Schema = components["schemas"];
 export type TaskResponse = Schema["TaskResponse"];
+export type LspInitializeResponse = {
+  id?: number | string;
+  jsonrpc?: string;
+  result?: {
+    capabilities?: Record<string, unknown>;
+  };
+};
 export type SmokeOperation = {
   method: HttpMethod;
   path: ApiPath;
@@ -303,23 +311,28 @@ export async function eventually<T>(
   intervalMs = 250
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
-  let lastError: unknown;
 
-  while (Date.now() < deadline) {
+  const attempt = async (lastError?: unknown): Promise<T> => {
+    if (Date.now() >= deadline) {
+      const suffix = lastError instanceof Error ? ` Last error: ${lastError.message}` : "";
+      throw new Error(`${label} timed out after ${timeoutMs}ms.${suffix}`);
+    }
+
     try {
       const result = await assertion();
       if (result) {
         return result;
       }
     } catch (error) {
-      lastError = error;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, intervalMs));
+      return attempt(error);
     }
 
     await new Promise((resolveDelay) => setTimeout(resolveDelay, intervalMs));
-  }
+    return attempt(lastError);
+  };
 
-  const suffix = lastError instanceof Error ? ` Last error: ${lastError.message}` : "";
-  throw new Error(`${label} timed out after ${timeoutMs}ms.${suffix}`);
+  return attempt();
 }
 
 export async function waitForTask(
@@ -409,6 +422,32 @@ export async function expectWebSocketJsonReply<T>(
     socket.send(typeof payload === "string" ? payload : JSON.stringify(payload));
     const text = await waitForWebSocketMessage(socket);
     return JSON.parse(text) as T;
+  } finally {
+    socket.close();
+  }
+}
+
+export async function expectWorkspaceLspInitializeReply(
+  server: SlabServerTestHarness,
+  language: string,
+  workspaceRoot: string
+): Promise<LspInitializeResponse> {
+  const socket = await openWebSocket(server, `/v1/workspace/lsp/${encodeURIComponent(language)}`);
+  try {
+    const request = {
+      id: 1,
+      jsonrpc: "2.0",
+      method: "initialize",
+      params: {
+        capabilities: {},
+        processId: null,
+        rootUri: fileUri(workspaceRoot),
+        workspaceFolders: null
+      }
+    };
+    socket.send(JSON.stringify(request));
+    const text = await waitForWebSocketMessage(socket);
+    return JSON.parse(text) as LspInitializeResponse;
   } finally {
     socket.close();
   }
@@ -563,4 +602,8 @@ function webSocketUrl(baseUrl: string, path: string): string {
   const url = new URL(path, baseUrl);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   return url.toString();
+}
+
+function fileUri(path: string): string {
+  return pathToFileURL(path).toString();
 }

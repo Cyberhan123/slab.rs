@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
@@ -7,7 +8,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use futures::{SinkExt, StreamExt};
 use slab_app_core::context::AppState;
-use slab_app_core::domain::services::WorkspaceLspService;
+use slab_app_core::domain::services::WorkspaceService;
 use slab_types::plugin::PluginLanguageServerTransport;
 use slab_utils::lsp::{read_lsp_stdio_message, write_lsp_stdio_message};
 use slab_utils::path::absolute::canonicalize_existing_preserving_symlinks;
@@ -21,35 +22,32 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 async fn upgrade_workspace_lsp(
-    State(service): State<WorkspaceLspService>,
+    State(state): State<Arc<AppState>>,
     Path(language): Path<String>,
     upgrade: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    upgrade.on_upgrade(move |socket| handle_workspace_lsp_socket(service, language, socket))
+    upgrade.on_upgrade(move |socket| handle_workspace_lsp_socket(state, language, socket))
 }
 
-async fn handle_workspace_lsp_socket(
-    service: WorkspaceLspService,
-    language: String,
-    socket: WebSocket,
-) {
-    if let Err(error) = run_workspace_lsp_socket(service, language, socket).await {
+async fn handle_workspace_lsp_socket(state: Arc<AppState>, language: String, socket: WebSocket) {
+    if let Err(error) = run_workspace_lsp_socket(state, language, socket).await {
         warn!(error = %error, "workspace LSP session ended");
     }
 }
 
 async fn run_workspace_lsp_socket(
-    service: WorkspaceLspService,
+    state: Arc<AppState>,
     language: String,
     socket: WebSocket,
 ) -> Result<(), String> {
-    let workspace_root = service.workspace_root().map_err(|error| error.to_string())?;
+    let workspace_root = active_workspace_lsp_root(&state)?;
     let workspace_root = canonicalize_existing_preserving_symlinks(&workspace_root)
         .map_err(|error| format!("failed to resolve workspace root: {error}"))?;
     if !workspace_root.is_dir() {
         return Err(format!("workspace root {} is not a directory", workspace_root.display()));
     }
 
+    let service = state.services.workspace_lsp.clone();
     let Some(provider) =
         service.resolve_provider(&language).await.map_err(|error| error.to_string())?
     else {
@@ -120,6 +118,18 @@ where
     }
 
     Ok(())
+}
+
+fn active_workspace_lsp_root(state: &AppState) -> Result<PathBuf, String> {
+    state
+        .workspace_root()
+        .or_else(|| WorkspaceService::workspace_root_from_config(&state.context.config))
+        .ok_or_else(|| {
+            format!(
+                "settings path {} is not inside a workspace `.slab` directory and workspace_root is not set",
+                state.context.config.settings_path.display()
+            )
+        })
 }
 
 async fn bridge_websocket_to_websocket(
