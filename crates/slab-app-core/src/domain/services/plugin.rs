@@ -404,6 +404,78 @@ impl PluginService {
         Ok(plugins)
     }
 
+    /// Enabled plugins that declare at least one agent capability, with their
+    /// manifests (B-7). **Read-only**: scans the plugins directory + reads
+    /// plugin state but never upserts, so a background agent-runtime reload
+    /// cannot race (and clobber) a host- or test-seeded plugin state. The
+    /// capability proxy registration only needs the manifests, not a state sync.
+    pub(crate) async fn enabled_capability_sources_readonly(
+        &self,
+    ) -> Result<Vec<crate::infra::agent::plugin_capability::PluginCapabilitySource>, AppCoreError>
+    {
+        let scans = scan_plugins(&self.state.config().plugins_dir)?;
+        let enabled: HashMap<String, bool> = self
+            .state
+            .store()
+            .list_plugin_states()
+            .await?
+            .into_iter()
+            .map(|record| (record.plugin_id, record.enabled))
+            .collect();
+
+        let plugins = scans
+            .into_iter()
+            .filter(|scan| scan.valid)
+            .filter(|scan| enabled.get(&scan.id).copied().unwrap_or(true))
+            .filter_map(|scan| {
+                let manifest = scan.manifest?;
+                Some(crate::infra::agent::plugin_capability::PluginCapabilitySource {
+                    manifest,
+                    root_dir: scan.root_dir,
+                })
+            })
+            .filter(|plugin| !plugin.manifest.contributes.agent_capabilities.is_empty())
+            .collect();
+        Ok(plugins)
+    }
+
+    /// Dispatch a plugin agent-capability call by resolving `capability_id` to
+    /// its transport function and delegating to [`dispatch_rpc`] (B-7). Only
+    /// `Tool`-kind capabilities are invocable this way; other kinds (workflow,
+    /// a2u_surface) are surfaced via the a2u surface path, not as agent tools.
+    ///
+    /// [`dispatch_rpc`]: Self::dispatch_rpc
+    pub async fn dispatch_agent_capability(
+        &self,
+        plugin_id: &str,
+        capability_id: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, AppCoreError> {
+        self.ensure_plugin_state(plugin_id).await?;
+
+        let registry = self.plugin_registry()?;
+        registry.refresh().map_err(AppCoreError::Internal)?;
+        let plugin = registry.get_plugin(plugin_id).map_err(AppCoreError::BadRequest)?;
+
+        let function = plugin
+            .manifest
+            .contributes
+            .agent_capabilities
+            .iter()
+            .find(|capability| {
+                capability.id == capability_id
+                    && capability.kind == slab_types::PluginCapabilityKind::Tool
+            })
+            .map(|capability| capability.transport.function.clone())
+            .ok_or_else(|| {
+                AppCoreError::BadRequest(format!(
+                    "plugin `{plugin_id}` has no tool capability `{capability_id}`"
+                ))
+            })?;
+
+        self.dispatch_rpc(plugin_id, &function, params).await
+    }
+
     pub async fn dispatch_rpc(
         &self,
         plugin_id: &str,

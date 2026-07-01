@@ -7,16 +7,18 @@
 //! args) is not representable in [`DiagnosticsInput`].
 //!
 //! Active plugin/model ids are fetched from the running server (`/v1/plugins`,
-//! `/v1/models`); if the server is unreachable the snapshot still succeeds with
-//! those fields empty. Thread statistics / failed-tool-call aggregation still
-//! require dedicated server endpoints and remain a follow-up.
+//! `/v1/models`), as are recent agent thread stats + failed tool calls
+//! (`/v1/system/diagnostics/agent-stats`); if the server is unreachable the
+//! snapshot still succeeds with those fields empty.
 
 use std::time::Duration;
 
 use serde_json::Value;
 
 use slab_utils::app_home::server_log_file;
-use slab_utils::diagnostics::{DiagnosticsInput, build_diagnostics_snapshot};
+use slab_utils::diagnostics::{
+    DiagnosticsInput, FailedToolCall, ThreadStat, build_diagnostics_snapshot,
+};
 
 use crate::setup::ApiEndpointConfig;
 
@@ -36,14 +38,16 @@ pub fn export_diagnostics(
     let log_tail = read_log_tail(LOG_TAIL_BYTES).unwrap_or_default();
     let plugins_response = fetch_json(&api_endpoint, "v1/plugins");
     let models_response = fetch_json(&api_endpoint, "v1/models");
+    let agent_stats_response = fetch_json(&api_endpoint, "v1/system/diagnostics/agent-stats");
 
     let active_plugins =
         plugins_response.as_ref().map(extract_active_plugin_ids).unwrap_or_default();
     let active_models = models_response.as_ref().map(extract_active_model_ids).unwrap_or_default();
+    let threads = agent_stats_response.as_ref().map(extract_thread_stats).unwrap_or_default();
+    let failed_tool_calls =
+        agent_stats_response.as_ref().map(extract_failed_tool_calls).unwrap_or_default();
 
     let empty_args: [String; 0] = [];
-    let empty_threads: [slab_utils::diagnostics::ThreadStat; 0] = [];
-    let empty_failed: [slab_utils::diagnostics::FailedToolCall; 0] = [];
 
     let input = DiagnosticsInput {
         app_version: env!("CARGO_PKG_VERSION"),
@@ -51,8 +55,8 @@ pub fn export_diagnostics(
         os: std::env::consts::OS,
         sidecar_args: &empty_args,
         log_tail: &log_tail,
-        threads: &empty_threads,
-        failed_tool_calls: &empty_failed,
+        threads: &threads,
+        failed_tool_calls: &failed_tool_calls,
         resource_snapshot: None,
         active_plugins: &active_plugins,
         active_models: &active_models,
@@ -117,6 +121,45 @@ fn extract_active_model_ids(response: &Value) -> Vec<String> {
         .collect()
 }
 
+/// Extract recent agent thread stats from a `/v1/system/diagnostics/agent-stats`
+/// response. Items missing `thread_id` are skipped; other fields default safely.
+fn extract_thread_stats(response: &Value) -> Vec<ThreadStat> {
+    let Some(items) = response.get("threads").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let thread_id = item.get("thread_id")?.as_str()?.to_owned();
+            let status = item.get("status").and_then(Value::as_str).unwrap_or("").to_owned();
+            let turn_index = item.get("turn_index").and_then(Value::as_u64).unwrap_or(0) as u32;
+            let depth = item.get("depth").and_then(Value::as_u64).unwrap_or(0) as u32;
+            let reason = item
+                .get("reason")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned);
+            Some(ThreadStat { thread_id, status, turn_index, depth, reason })
+        })
+        .collect()
+}
+
+/// Extract recent failed tool calls from a `/v1/system/diagnostics/agent-stats`
+/// response. Items missing `tool_name` are skipped; `error` defaults to empty.
+fn extract_failed_tool_calls(response: &Value) -> Vec<FailedToolCall> {
+    let Some(items) = response.get("failed_tool_calls").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let tool_name = item.get("tool_name")?.as_str()?.to_owned();
+            let error = item.get("error").and_then(Value::as_str).unwrap_or("").to_owned();
+            Some(FailedToolCall { tool_name, error })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,5 +203,46 @@ mod tests {
     #[test]
     fn extract_active_model_ids_handles_non_array() {
         assert!(extract_active_model_ids(&json!("not-an-array")).is_empty());
+    }
+
+    #[test]
+    fn extract_thread_stats_maps_whitelist_fields_and_skips_invalid() {
+        let response = json!({
+            "threads": [
+                { "thread_id": "t1", "status": "interrupted", "turn_index": 4, "depth": 1, "reason": "max_turns_reached" },
+                { "thread_id": "t2", "status": "completed", "turn_index": 2, "depth": 0 },
+                { "status": "running" } // missing thread_id ⇒ skipped
+            ]
+        });
+        let stats = extract_thread_stats(&response);
+
+        assert_eq!(stats.len(), 2);
+        assert_eq!(stats[0].thread_id, "t1");
+        assert_eq!(stats[0].turn_index, 4);
+        assert_eq!(stats[0].depth, 1);
+        assert_eq!(stats[0].reason.as_deref(), Some("max_turns_reached"));
+        assert_eq!(stats[1].thread_id, "t2");
+        assert!(stats[1].reason.is_none());
+    }
+
+    #[test]
+    fn extract_thread_stats_handles_missing_threads_field() {
+        assert!(extract_thread_stats(&json!({})).is_empty());
+        assert!(extract_thread_stats(&json!({ "threads": "oops" })).is_empty());
+    }
+
+    #[test]
+    fn extract_failed_tool_calls_maps_tool_name_and_error() {
+        let response = json!({
+            "failed_tool_calls": [
+                { "tool_name": "shell", "error": "exit 1" },
+                { "error": "no name" } // missing tool_name ⇒ skipped
+            ]
+        });
+        let failed = extract_failed_tool_calls(&response);
+
+        assert_eq!(failed.len(), 1);
+        assert_eq!(failed[0].tool_name, "shell");
+        assert_eq!(failed[0].error, "exit 1");
     }
 }

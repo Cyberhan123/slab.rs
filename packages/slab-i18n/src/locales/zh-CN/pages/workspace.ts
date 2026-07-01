@@ -20,6 +20,10 @@ export const workspace = {
     title: '最近的工作区',
     empty: '暂无最近的工作区',
   },
+  projectSwitcher: {
+    toggle: '切换工作区',
+    noActive: '无工作区',
+  },
   tree: {
     title: '文件',
     loading: '正在加载文件',

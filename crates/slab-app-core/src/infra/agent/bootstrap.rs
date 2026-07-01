@@ -170,23 +170,38 @@ fn build_agent_control(
     // ADR-013: concurrency limits are configurable via settings
     // (agent.runtime.limits), defaulting to the historical 32/4 ceiling.
     let runtime_limits = ctx.pmid.config().agent.runtime.limits.clamped();
-    let control = Arc::new(
-        AgentControl::new_with_hooks_and_tracing(
-            llm,
-            store_adapter,
-            notify_port,
-            approval_port,
-            Arc::clone(&tool_router),
-            slab_agent::AgentControlLimits {
-                max_threads: runtime_limits.max_threads as usize,
-                max_depth: runtime_limits.max_depth,
-            },
-            hooks,
-            trace,
-            trace_dir,
-        )
-        .with_thread_context(thread_context),
-    );
+    let control = AgentControl::new_with_hooks_and_tracing(
+        llm,
+        store_adapter,
+        notify_port,
+        approval_port,
+        Arc::clone(&tool_router),
+        slab_agent::AgentControlLimits {
+            max_threads: runtime_limits.max_threads as usize,
+            max_depth: runtime_limits.max_depth,
+        },
+        hooks,
+        trace,
+        trace_dir,
+    )
+    .with_thread_context(thread_context)
+    // INFRA-05: FIFO wait queue for agent spawns (0 ⇒ legacy reject-at-cap).
+    .with_queue_capacity(runtime_limits.queue_capacity as usize);
+    // INFRA-05: optional memory circuit breaker. When an RSS threshold is
+    // configured, sample the host process and pause spawns while tripped.
+    let control = if let Some(threshold_mb) = runtime_limits.rss_threshold_mb {
+        let breaker = Arc::new(super::memory_breaker::MemoryCircuitBreaker::new(
+            threshold_mb as u64,
+            std::time::Duration::from_secs(runtime_limits.cooldown_secs as u64),
+        ));
+        super::memory_breaker::spawn_memory_sampler(Arc::clone(&breaker));
+        control.with_memory_pressure(Arc::new(super::memory_breaker::BreakerPressurePort::new(
+            breaker,
+        )))
+    } else {
+        control
+    };
+    let control = Arc::new(control);
     tool_router
         .register(Box::new(slab_agent_tools::DelegateSubagentTool::new(Arc::clone(&control))));
     memory_pipeline.set_control(Arc::clone(&control));

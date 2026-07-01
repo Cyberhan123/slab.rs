@@ -1,6 +1,7 @@
 """Contains all the data models used in inputs/outputs"""
 
 from .agent_config_input import AgentConfigInput
+from .agent_diagnostics_response import AgentDiagnosticsResponse
 from .agent_responses_action import AgentResponsesAction
 from .agent_responses_client_message_type_0 import AgentResponsesClientMessageType0
 from .agent_responses_client_message_type_0_type import (
@@ -49,6 +50,7 @@ from .agent_structured_output_input_type_1_type import (
 )
 from .agent_thread_message_response import AgentThreadMessageResponse
 from .agent_thread_response import AgentThreadResponse
+from .agent_thread_stat_response import AgentThreadStatResponse
 from .agent_tool_choice_input_type_0 import AgentToolChoiceInputType0
 from .agent_tool_choice_input_type_0_type import AgentToolChoiceInputType0Type
 from .agent_tool_choice_input_type_1 import AgentToolChoiceInputType1
@@ -110,6 +112,7 @@ from .delete_model_response import DeleteModelResponse
 from .delete_plugin_response import DeletePluginResponse
 from .delete_session_response import DeleteSessionResponse
 from .download_model_request import DownloadModelRequest
+from .failed_tool_call_response import FailedToolCallResponse
 from .gpu_device_status import GpuDeviceStatus
 from .gpu_status_response import GpuStatusResponse
 from .health_response import HealthResponse
@@ -264,6 +267,7 @@ from .workspace_git_status_entry import WorkspaceGitStatusEntry
 from .workspace_git_status_summary import WorkspaceGitStatusSummary
 from .workspace_git_status_view import WorkspaceGitStatusView
 from .workspace_info_response import WorkspaceInfoResponse
+from .workspace_migration_response import WorkspaceMigrationResponse
 from .workspace_open_command import WorkspaceOpenCommand
 from .workspace_path_metadata import WorkspacePathMetadata
 from .workspace_path_view import WorkspacePathView
@@ -282,6 +286,7 @@ from .workspace_write_file_view import WorkspaceWriteFileView
 
 __all__ = (
     "AgentConfigInput",
+    "AgentDiagnosticsResponse",
     "AgentResponsesAction",
     "AgentResponsesClientMessageType0",
     "AgentResponsesClientMessageType0Type",
@@ -308,6 +313,7 @@ __all__ = (
     "AgentStructuredOutputInputType1Type",
     "AgentThreadMessageResponse",
     "AgentThreadResponse",
+    "AgentThreadStatResponse",
     "AgentToolChoiceInputType0",
     "AgentToolChoiceInputType0Type",
     "AgentToolChoiceInputType1",
@@ -369,6 +375,7 @@ __all__ = (
     "DeletePluginResponse",
     "DeleteSessionResponse",
     "DownloadModelRequest",
+    "FailedToolCallResponse",
     "GpuDeviceStatus",
     "GpuStatusResponse",
     "HealthResponse",
@@ -517,6 +524,7 @@ __all__ = (
     "WorkspaceGitStatusSummary",
     "WorkspaceGitStatusView",
     "WorkspaceInfoResponse",
+    "WorkspaceMigrationResponse",
     "WorkspaceOpenCommand",
     "WorkspacePathMetadata",
     "WorkspacePathView",

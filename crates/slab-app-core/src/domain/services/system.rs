@@ -5,6 +5,7 @@ use crate::domain::models::{
     GpuDeviceSnapshot, GpuStatusSnapshot, SystemDiagnosticPath, SystemDiagnosticsSnapshot,
 };
 use crate::error::AppCoreError;
+use crate::schemas::system::AgentDiagnosticsResponse;
 #[cfg(feature = "gpu-telemetry")]
 use all_smi::AllSmi;
 use chrono::Utc;
@@ -109,6 +110,53 @@ impl SystemService {
                 .then(|| settings.server.cors.allowed_origins.join(",")),
             paths,
         })
+    }
+
+    /// Aggregate recent agent thread stats + failed tool calls for diagnostics
+    /// (INFRA-08). Thread stats carry only whitelist-safe fields (no message
+    /// content); failed tool calls carry tool name + error only (no arguments).
+    /// The reason field is populated from `completion_text` for non-completed
+    /// threads (where it stores the termination reason) and left `None` for
+    /// completed threads (where it stores the final answer, not a reason).
+    pub async fn agent_diagnostics(&self) -> Result<AgentDiagnosticsResponse, AppCoreError> {
+        let model_state = self.model_state.as_ref().ok_or_else(|| {
+            AppCoreError::Internal("agent diagnostics require app state".to_owned())
+        })?;
+        let store = model_state.store();
+        const LIMIT: i64 = 50;
+
+        let thread_rows = store.list_recent_agent_thread_stats(LIMIT).await?;
+        let failed_rows = store.list_recent_failed_tool_calls(LIMIT).await?;
+
+        let threads = thread_rows
+            .into_iter()
+            .map(|row| {
+                let reason = if row.status != "completed" {
+                    row.completion_text.filter(|value| !value.trim().is_empty())
+                } else {
+                    None
+                };
+                slab_utils::diagnostics::ThreadStat {
+                    thread_id: row.id,
+                    status: row.status,
+                    turn_index: row.turn_index,
+                    depth: row.depth,
+                    reason,
+                }
+            })
+            .map(Into::into)
+            .collect();
+
+        let failed_tool_calls = failed_rows
+            .into_iter()
+            .map(|row| slab_utils::diagnostics::FailedToolCall {
+                tool_name: row.tool_name,
+                error: row.output.unwrap_or_default(),
+            })
+            .map(Into::into)
+            .collect();
+
+        Ok(AgentDiagnosticsResponse { threads, failed_tool_calls })
     }
 }
 

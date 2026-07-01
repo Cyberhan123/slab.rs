@@ -284,6 +284,59 @@ pub trait AgentStorePort: Send + Sync {
     }
 }
 
+/// Host-inferred memory-pressure state for spawn admission (INFRA-05).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryPressure {
+    /// Memory is within budget; spawns may proceed.
+    Nominal,
+    /// Memory exceeded the configured threshold; new spawns should pause until
+    /// the breaker clears after a cooldown.
+    Tripped { current_mb: u64, threshold_mb: u64 },
+}
+
+/// Port that reports memory pressure to gate agent spawns (INFRA-05).
+///
+/// Keeps `slab-agent` free of `sysinfo`/process concerns: the host (app-core)
+/// owns the circuit breaker that samples process RSS and exposes its state here.
+/// The default [`NoopMemoryPressurePort`] never trips, preserving the legacy
+/// admission behavior when no breaker is wired.
+pub trait MemoryPressurePort: Send + Sync {
+    /// Return the current memory-pressure state.
+    fn check(&self) -> MemoryPressure;
+}
+
+/// [`MemoryPressurePort`] that never trips (no breaker wired).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoopMemoryPressurePort;
+
+impl MemoryPressurePort for NoopMemoryPressurePort {
+    fn check(&self) -> MemoryPressure {
+        MemoryPressure::Nominal
+    }
+}
+
+/// Port for dispatching plugin agent-capability calls (B-7 / ADR-009).
+///
+/// Keeps `slab-agent` free of plugin/runtime concerns: the host composition
+/// root (app-core) provides an adapter that routes a `plugin__<id>__<cap>`
+/// tool call to the supervised plugin runtime through this port. Plugins
+/// cannot self-report effects/trust — the host derives the isolation tier from
+/// the plugin's runtime kind and registers the proxy tool.
+#[async_trait]
+pub trait PluginToolPort: Send + Sync {
+    /// Invoke `capability_id` on `plugin_id` with JSON `arguments`.
+    ///
+    /// Returns the plugin's JSON-serialised result string. The adapter resolves
+    /// the capability's transport function and routes to the correct runtime
+    /// (js / python / wasm).
+    async fn call_capability(
+        &self,
+        plugin_id: &str,
+        capability_id: &str,
+        arguments: &serde_json::Value,
+    ) -> Result<String, AgentError>;
+}
+
 /// Port for status-change and turn-event notifications.
 ///
 /// The host provides an adapter that fans out to SSE streams, WebSockets, etc.

@@ -33,6 +33,7 @@ pub mod risk;
 pub mod thread;
 pub mod tool;
 
+mod concurrency_gate;
 mod llm_output;
 mod repetition_guard;
 mod state;
@@ -59,7 +60,8 @@ pub use llm_output::{
 };
 pub use port::{
     AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
-    ThreadStatus, TurnEvent, TurnStateRecord,
+    MemoryPressure, MemoryPressurePort, NoopMemoryPressurePort, PluginToolPort, ThreadStatus,
+    TurnEvent, TurnStateRecord,
 };
 pub use risk::{BasicToolRiskAnalyzer, ToolApprovalDecision, ToolApprovalPolicy, ToolRiskAnalyzer};
 pub use tool::{

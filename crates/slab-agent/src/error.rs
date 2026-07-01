@@ -15,6 +15,12 @@ pub enum AgentError {
     #[error("thread limit exceeded: {current}/{max}")]
     ThreadLimitExceeded { current: usize, max: usize },
 
+    /// Spawning is paused because the memory circuit breaker tripped
+    /// (process RSS above the configured threshold). The host owns the breaker
+    /// and clears it after a cooldown once pressure recedes (INFRA-05).
+    #[error("memory pressure exceeded: {current_mb}/{threshold_mb} MB")]
+    MemoryPressureExceeded { current_mb: u64, threshold_mb: u64 },
+
     /// A caller attempted to start another turn while the thread is still active.
     #[error("thread is busy: {0}")]
     ThreadBusy(String),

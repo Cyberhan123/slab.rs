@@ -117,3 +117,48 @@ impl From<SystemDiagnosticsSnapshot> for SystemDiagnosticsResponse {
         }
     }
 }
+
+/// One agent thread summary in the diagnostics snapshot (INFRA-08). No message
+/// content, config, or secret data is representable — the source whitelist type
+/// (`slab_utils::diagnostics::ThreadStat`) forbids them by construction.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct AgentThreadStatResponse {
+    pub thread_id: String,
+    pub status: String,
+    pub turn_index: u32,
+    pub depth: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// One failed tool call in the diagnostics snapshot (tool name + error only).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct FailedToolCallResponse {
+    pub tool_name: String,
+    pub error: String,
+}
+
+/// Aggregated agent diagnostics: recent thread stats + recent failed tool calls.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct AgentDiagnosticsResponse {
+    pub threads: Vec<AgentThreadStatResponse>,
+    pub failed_tool_calls: Vec<FailedToolCallResponse>,
+}
+
+impl From<slab_utils::diagnostics::ThreadStat> for AgentThreadStatResponse {
+    fn from(stat: slab_utils::diagnostics::ThreadStat) -> Self {
+        Self {
+            thread_id: stat.thread_id,
+            status: stat.status,
+            turn_index: stat.turn_index,
+            depth: stat.depth,
+            reason: stat.reason,
+        }
+    }
+}
+
+impl From<slab_utils::diagnostics::FailedToolCall> for FailedToolCallResponse {
+    fn from(call: slab_utils::diagnostics::FailedToolCall) -> Self {
+        Self { tool_name: call.tool_name, error: call.error }
+    }
+}

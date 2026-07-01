@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod chat;
 pub mod config;
+pub mod diagnostics;
 pub mod media_task;
 pub mod model;
 pub mod model_config_state;

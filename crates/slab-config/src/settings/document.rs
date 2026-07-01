@@ -347,11 +347,30 @@ pub struct AgentRuntimeLimitsConfig {
     pub max_threads: u32,
     #[serde(default = "default_max_depth")]
     pub max_depth: u32,
+    /// FIFO wait-queue capacity for agent spawns (INFRA-05). `0` keeps the
+    /// legacy behavior of rejecting spawns as soon as `max_threads` is reached;
+    /// `> 0` lets that many excess spawns wait in arrival order before rejection.
+    #[serde(default)]
+    pub queue_capacity: u32,
+    /// RSS threshold (MB) at which the memory circuit breaker trips and pauses
+    /// new agent spawns (INFRA-05). `None` (default) disables the breaker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rss_threshold_mb: Option<u32>,
+    /// Cooldown (seconds) the breaker enforces after tripping before probing
+    /// whether memory pressure has cleared (INFRA-05).
+    #[serde(default = "default_cooldown_secs")]
+    pub cooldown_secs: u32,
 }
 
 impl Default for AgentRuntimeLimitsConfig {
     fn default() -> Self {
-        Self { max_threads: 32, max_depth: 4 }
+        Self {
+            max_threads: 32,
+            max_depth: 4,
+            queue_capacity: 0,
+            rss_threshold_mb: None,
+            cooldown_secs: default_cooldown_secs(),
+        }
     }
 }
 
@@ -359,8 +378,18 @@ impl AgentRuntimeLimitsConfig {
     /// Clamp limits to sane non-zero minimums so a misconfiguration cannot
     /// disable agent spawning entirely.
     pub fn clamped(&self) -> Self {
-        Self { max_threads: self.max_threads.max(1), max_depth: self.max_depth.max(1) }
+        Self {
+            max_threads: self.max_threads.max(1),
+            max_depth: self.max_depth.max(1),
+            queue_capacity: self.queue_capacity,
+            rss_threshold_mb: self.rss_threshold_mb,
+            cooldown_secs: self.cooldown_secs.max(1),
+        }
     }
+}
+
+fn default_cooldown_secs() -> u32 {
+    30
 }
 
 fn default_max_threads() -> u32 {
@@ -1725,7 +1754,8 @@ mod tests {
 
     #[test]
     fn agent_runtime_limits_clamp_to_minimums() {
-        let limits = AgentRuntimeLimitsConfig { max_threads: 0, max_depth: 0 };
+        let limits =
+            AgentRuntimeLimitsConfig { max_threads: 0, max_depth: 0, ..Default::default() };
         let clamped = limits.clamped();
         assert_eq!(clamped.max_threads, 1);
         assert_eq!(clamped.max_depth, 1);

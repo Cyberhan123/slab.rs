@@ -95,6 +95,32 @@ pub fn read_session_snapshot(
     }
 }
 
+/// Derive a stable project id from a workspace root (B-8 / INFRA-01).
+///
+/// Canonicalizes the path (falling back to the input when it cannot be
+/// resolved, e.g. during tests with not-yet-existing paths) and normalizes
+/// separators so the same workspace always yields the same id. The id scopes
+/// session snapshots so a restored sidecar only resumes threads that belong to
+/// the active workspace (red-team boundary: no cross-workspace leakage).
+pub fn project_id_from_root(root: &Path) -> String {
+    let resolved = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    resolved.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_owned()
+}
+
+/// Build a project-scoped snapshot of the supplied threads, each recorded with
+/// an `interrupted` terminal status (B-8 / INFRA-01). Pure: separates the
+/// migration plan from agent-control I/O so it is fully testable.
+pub fn build_migration_snapshot(
+    project_id: impl Into<String>,
+    thread_ids: &[String],
+) -> SessionSnapshot {
+    let mut snapshot = SessionSnapshot::new(project_id);
+    for id in thread_ids {
+        snapshot = snapshot.with_thread(id.as_str(), "interrupted");
+    }
+    snapshot
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,5 +193,34 @@ mod tests {
     fn file_name_sanitizes_project_id() {
         assert_eq!(SessionSnapshot::file_name("proj 1/2"), "migration-proj_1_2.json");
         assert_eq!(SessionSnapshot::file_name("safe-id"), "migration-safe-id.json");
+    }
+
+    #[test]
+    fn project_id_is_stable_per_workspace_and_differs_across_workspaces() {
+        let a = tempfile::tempdir().expect("temp dir a");
+        let b = tempfile::tempdir().expect("temp dir b");
+
+        let id_a1 = project_id_from_root(a.path());
+        let id_a2 = project_id_from_root(a.path());
+        let id_b = project_id_from_root(b.path());
+
+        assert_eq!(id_a1, id_a2, "same workspace ⇒ same id");
+        assert_ne!(id_a1, id_b, "different workspaces ⇒ different ids");
+    }
+
+    #[test]
+    fn build_migration_snapshot_records_threads_as_interrupted() {
+        let ids = vec!["thread-1".to_owned(), "thread-2".to_owned()];
+        let snapshot = build_migration_snapshot("proj-1", &ids);
+
+        assert_eq!(snapshot.project_id, "proj-1");
+        assert_eq!(snapshot.threads.len(), 2);
+        assert_eq!(snapshot.threads[0].thread_id, "thread-1");
+        assert_eq!(snapshot.threads[0].status, "interrupted");
+        assert_eq!(snapshot.threads[1].thread_id, "thread-2");
+
+        // Empty thread list ⇒ snapshot with no entries (still project-scoped).
+        let empty = build_migration_snapshot("proj-1", &[]);
+        assert!(empty.threads.is_empty());
     }
 }

@@ -226,8 +226,10 @@
         "limits": {
           "$ref": "#/$defs/AgentRuntimeLimitsConfig",
           "default": {
+            "cooldown_secs": 30,
             "max_depth": 4,
-            "max_threads": 32
+            "max_threads": 32,
+            "queue_capacity": 0
           }
         }
       },
@@ -236,6 +238,13 @@
     "AgentRuntimeLimitsConfig": {
       "description": "Configurable agent concurrency limits (ADR-013). Defaults preserve the\nhistorical hardcoded ceiling (`max_threads: 32`, `max_depth: 4`).",
       "properties": {
+        "cooldown_secs": {
+          "default": 30,
+          "description": "Cooldown (seconds) the breaker enforces after tripping before probing\nwhether memory pressure has cleared (INFRA-05).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
         "max_depth": {
           "default": 4,
           "format": "uint32",
@@ -247,6 +256,22 @@
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
+        },
+        "queue_capacity": {
+          "default": 0,
+          "description": "FIFO wait-queue capacity for agent spawns (INFRA-05). `0` keeps the\nlegacy behavior of rejecting spawns as soon as `max_threads` is reached;\n`> 0` lets that many excess spawns wait in arrival order before rejection.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rss_threshold_mb": {
+          "description": "RSS threshold (MB) at which the memory circuit breaker trips and pauses\nnew agent spawns (INFRA-05). `None` (default) disables the breaker.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -289,8 +314,10 @@
           "$ref": "#/$defs/AgentRuntimeConfig",
           "default": {
             "limits": {
+              "cooldown_secs": 30,
               "max_depth": 4,
-              "max_threads": 32
+              "max_threads": 32,
+              "queue_capacity": 0
             }
           }
         },
@@ -1764,8 +1791,10 @@
         "offline": false,
         "runtime": {
           "limits": {
+            "cooldown_secs": 30,
             "max_depth": 4,
-            "max_threads": 32
+            "max_threads": 32,
+            "queue_capacity": 0
           }
         },
         "tools": {

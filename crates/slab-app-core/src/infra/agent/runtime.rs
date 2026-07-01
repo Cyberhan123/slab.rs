@@ -27,12 +27,15 @@ impl AgentRuntimeReloader {
         let memory_root = memory_root(&memory_config);
         self.refresh_memory_tools(&memory_config, &memory_root);
 
+        let plugin_service = PluginService::new(self.state.clone());
+
         let mut hooks = self.internal_memory_hooks(memory_config, memory_root);
         if settings.agent.hooks.enabled {
             let mut scripts =
                 crate::infra::agent::hooks::legacy_hook_scripts(&settings.agent.hooks);
-            let plugins =
-                PluginService::new(self.state.clone()).enabled_agent_hook_plugins().await?;
+            // Hooks need the synced plugin state (scan_and_sync), gated on
+            // hooks.enabled so a background reload never scans when hooks are off.
+            let plugins = plugin_service.enabled_agent_hook_plugins().await?;
             scripts.extend(crate::infra::agent::hooks::plugin_hook_scripts(&plugins));
             if let Some(script_hook) = crate::infra::agent::hooks::registered_hook_from_scripts(
                 scripts,
@@ -42,6 +45,21 @@ impl AgentRuntimeReloader {
             }
         }
         self.control.replace_hooks(hooks);
+
+        // B-7: register a `plugin__<id>__<cap>` proxy for every Tool-kind
+        // capability of enabled plugins. Uses a READ-ONLY manifest scan (no
+        // state upsert) so the background reload cannot race a host/test-seeded
+        // plugin state. Re-registering picks up installs / enables / disables.
+        let capability_sources = plugin_service.enabled_capability_sources_readonly().await?;
+        let capability_port: Arc<dyn slab_agent::PluginToolPort> =
+            Arc::new(crate::infra::agent::plugin_capability::PluginServiceCapabilityPort::new(
+                plugin_service,
+            ));
+        crate::infra::agent::plugin_capability::register_plugin_capability_tools(
+            &self.tool_router,
+            capability_port,
+            &capability_sources,
+        );
         Ok(())
     }
 

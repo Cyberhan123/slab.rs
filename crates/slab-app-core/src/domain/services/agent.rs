@@ -3,6 +3,7 @@
 //! Provides a stable, clone-friendly handle that the API handlers can extract
 //! from [`AppState`][crate::context::AppState] via Axum's `State` extractor.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use slab_agent::config::AgentConfig;
@@ -10,6 +11,9 @@ use slab_agent::control::AgentControl;
 use slab_agent::error::AgentError;
 use slab_agent::port::{AgentStorePort, ThreadMessageRecord, ThreadSnapshot};
 use slab_types::ConversationMessage;
+use slab_utils::session_snapshot::{
+    build_migration_snapshot, project_id_from_root, write_session_snapshot_atomic,
+};
 
 use crate::error::AppCoreError;
 use crate::infra::agent::event_hub::{AgentEventHub, AgentEventSubscription};
@@ -160,7 +164,32 @@ impl AgentService {
         self.control.active_thread_count().await
     }
 
+    /// Prepare a workspace switch (B-8 / INFRA-01): interrupt every active agent
+    /// thread, then write a project-scoped atomic snapshot of the interrupted
+    /// threads so a future restore only resumes threads that belong to the
+    /// originating workspace. Returns the project id + the number of threads that
+    /// were suspended. Any failure aborts the migration (the caller must not
+    /// proceed to switch workspaces on error).
+    pub async fn prepare_workspace_migration(
+        &self,
+        workspace_root: &Path,
+        snapshot_dir: &Path,
+    ) -> Result<WorkspaceMigrationOutcome, AppCoreError> {
+        let suspended = self.control.interrupt_all().await;
+        let project_id = project_id_from_root(workspace_root);
+        let snapshot = build_migration_snapshot(&project_id, &suspended);
+        write_session_snapshot_atomic(snapshot_dir, &snapshot).map_err(AppCoreError::Internal)?;
+        Ok(WorkspaceMigrationOutcome { project_id, suspended_count: suspended.len() })
+    }
+
     pub(crate) fn control(&self) -> Arc<AgentControl> {
         Arc::clone(&self.control)
     }
+}
+
+/// Outcome of a workspace migration preparation (B-8).
+#[derive(Debug, Clone)]
+pub struct WorkspaceMigrationOutcome {
+    pub project_id: String,
+    pub suspended_count: usize,
 }

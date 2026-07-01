@@ -5,6 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::Value;
 use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
+use slab_config::secret_port::{EnvSecretAdapter, resolve_secret_or_plain};
 use slab_config::{
     AgentWebSearchConfig, ProviderAuthConfig, WebSearchDuckDuckGoProviderConfig,
     WebSearchProviderId,
@@ -363,7 +364,10 @@ fn search_result_to_value(result: SearchResult, include_raw: bool) -> Value {
 
 fn resolve_api_key(provider: &str, auth: &ProviderAuthConfig) -> Result<String, AgentError> {
     if let Some(api_key) = trimmed(auth.api_key.as_deref()) {
-        return Ok(api_key.to_owned());
+        // Plaintext passes through unchanged; a `secret://env/<VAR>` handle
+        // resolves in-process so config files need not store plaintext keys.
+        return resolve_secret_or_plain(&EnvSecretAdapter::default(), api_key)
+            .map_err(AgentError::ToolExecution);
     }
 
     if let Some(env_key) = trimmed(auth.api_key_env.as_deref()) {

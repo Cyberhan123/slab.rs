@@ -1,6 +1,7 @@
 //! HTTP and WebSocket handlers for `/v1/agents/responses`.
 
 use std::convert::Infallible;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
@@ -9,14 +10,14 @@ use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::SinkExt;
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use slab_agent::{AgentEventKind, AgentStreamEvent, TurnEvent};
 use slab_app_core::context::AppState;
-use slab_app_core::domain::services::AgentService;
+use slab_app_core::domain::services::{AgentService, WorkspaceService};
 use slab_app_core::infra::agent::event_hub::AgentEventEnvelope;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
@@ -25,7 +26,7 @@ use utoipa::OpenApi;
 use crate::api::v1::agent::schema::{
     AgentConfigInput, AgentResponsesAction, AgentResponsesClientMessage,
     AgentResponsesServerMessage, AgentStatusValue, AgentThreadMessageResponse, AgentThreadResponse,
-    MessageInput,
+    MessageInput, WorkspaceMigrationResponse,
 };
 use crate::api::v1::chat::schema::{ChatToolCall, ChatToolFunction};
 use crate::api::validation::{ValidatedJson, validate};
@@ -34,7 +35,7 @@ use slab_types::ServerI18nKey;
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(agent_responses_get, agent_responses_post),
+    paths(agent_responses_get, agent_responses_post, migrate_workspace),
     components(schemas(
         AgentResponsesClientMessage,
         AgentResponsesServerMessage,
@@ -46,12 +47,15 @@ use slab_types::ServerI18nKey;
         AgentStatusValue,
         ChatToolCall,
         ChatToolFunction,
+        WorkspaceMigrationResponse
     ))
 )]
 pub struct AgentApi;
 
 pub fn router() -> Router<Arc<AppState>> {
-    Router::new().route("/agents/responses", get(agent_responses_get).post(agent_responses_post))
+    Router::new()
+        .route("/agents/responses", get(agent_responses_get).post(agent_responses_post))
+        .route("/agents/migrate", post(migrate_workspace))
 }
 
 #[derive(Debug, Deserialize)]
@@ -122,6 +126,28 @@ async fn agent_responses_post(
     ValidatedJson(command): ValidatedJson<AgentResponsesClientMessage>,
 ) -> Result<Json<AgentResponsesServerMessage>, ServerError> {
     Ok(Json(handle_agent_command(&service, command).await?.message))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/agents/migrate",
+    tag = "agents",
+    responses(
+        (status = 200, description = "Active threads interrupted + project-scoped snapshot written", body = WorkspaceMigrationResponse),
+        (status = 400, description = "No active workspace to migrate"),
+        (status = 500, description = "Backend error"),
+    )
+)]
+async fn migrate_workspace(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<WorkspaceMigrationResponse>, ServerError> {
+    let config = &state.context.config;
+    let workspace_root = WorkspaceService::workspace_root_from_config(config)
+        .ok_or_else(|| ServerError::BadRequest("no active workspace to migrate".into()))?;
+    let snapshot_dir = PathBuf::from(&config.session_state_dir);
+    let outcome =
+        state.services.agent.prepare_workspace_migration(&workspace_root, &snapshot_dir).await?;
+    Ok(Json(outcome.into()))
 }
 
 async fn agent_responses_socket(socket: WebSocket, service: AgentService) {

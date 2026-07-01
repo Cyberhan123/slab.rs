@@ -40,10 +40,12 @@ export type AgentSurfaceInput =
 export type AgentSurfaceRequest = AgentSurfaceInput & {
   createdAt: number
   id: string
+  target?: "inline" | "window"
   targetRoute?: "assistant" | "workspace"
 }
 
 type PendingSurfaceOptions = {
+  target?: AgentSurfaceRequest["target"]
   targetRoute?: AgentSurfaceRequest["targetRoute"]
 }
 
@@ -71,6 +73,7 @@ function createSurfaceRequest(
     ...surface,
     createdAt,
     id: `${surface.type}:${createdAt}:${surfaceRequestSequence}`,
+    target: options.target,
     targetRoute: options.targetRoute,
   }
 }

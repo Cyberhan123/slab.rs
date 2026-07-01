@@ -82,6 +82,7 @@ mod tests {
 
     const DOCUMENTED_METHODS: &[&str] = &["delete", "get", "patch", "post", "put"];
     const EXPECTED_OPERATIONS: &[(&str, &str)] = &[
+        ("/v1/agents/migrate", "post"),
         ("/v1/agents/responses", "get"),
         ("/v1/agents/responses", "post"),
         ("/v1/audio/transcriptions", "get"),
@@ -136,6 +137,7 @@ mod tests {
         ("/v1/setup/status", "get"),
         ("/v1/subtitles/render", "post"),
         ("/v1/system/diagnostics", "get"),
+        ("/v1/system/diagnostics/agent-stats", "get"),
         ("/v1/system/gpu", "get"),
         ("/v1/tasks", "get"),
         ("/v1/tasks/{id}", "get"),

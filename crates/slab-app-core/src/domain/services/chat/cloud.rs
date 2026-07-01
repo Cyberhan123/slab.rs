@@ -29,6 +29,7 @@ use crate::domain::models::{
 use crate::error::AppCoreError;
 use crate::infra::db::ModelStore;
 use crate::infra::endpoint::{ensure_http_base_url, join_http_url_path};
+use slab_config::secret_port::{EnvSecretAdapter, resolve_secret_or_plain};
 
 use super::GeneratedChatOutput;
 
@@ -261,7 +262,14 @@ async fn load_cloud_provider_map(
 
 fn resolve_provider_api_key(provider: &CloudProviderConfig) -> Result<String, AppCoreError> {
     if let Some(key) = provider.api_key.as_deref() {
-        return Ok(key.to_owned());
+        // Plaintext passes through unchanged; a `secret://env/<VAR>` handle
+        // resolves in-process so config files need not store plaintext keys.
+        return resolve_secret_or_plain(&EnvSecretAdapter::default(), key).map_err(|error| {
+            AppCoreError::BadRequest(format!(
+                "cloud provider '{}' api key could not be resolved: {error}",
+                provider.id
+            ))
+        });
     }
 
     if let Some(env_key) = provider.api_key_env.as_deref() {

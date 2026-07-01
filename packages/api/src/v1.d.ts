@@ -20,6 +20,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/agents/migrate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["migrate_workspace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/agents/responses": {
         parameters: {
             query?: never;
@@ -731,6 +747,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/system/diagnostics/agent-stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["agent_diagnostics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/system/gpu": {
         parameters: {
             query?: never;
@@ -1280,6 +1312,11 @@ export interface components {
             transient?: boolean | null;
             verbosity?: null | components["schemas"]["ChatVerbosity"];
         };
+        /** @description Aggregated agent diagnostics: recent thread stats + recent failed tool calls. */
+        AgentDiagnosticsResponse: {
+            failed_tool_calls: components["schemas"]["FailedToolCallResponse"][];
+            threads: components["schemas"]["AgentThreadStatResponse"][];
+        };
         /**
          * @description Client action acknowledged by `/v1/agents/responses`.
          * @enum {string}
@@ -1393,6 +1430,20 @@ export interface components {
             session_id: string;
             status: components["schemas"]["AgentStatusValue"];
             updated_at: string;
+        };
+        /**
+         * @description One agent thread summary in the diagnostics snapshot (INFRA-08). No message
+         *     content, config, or secret data is representable — the source whitelist type
+         *     (`slab_utils::diagnostics::ThreadStat`) forbids them by construction.
+         */
+        AgentThreadStatResponse: {
+            /** Format: int32 */
+            depth: number;
+            reason?: string | null;
+            status: string;
+            thread_id: string;
+            /** Format: int32 */
+            turn_index: number;
         };
         AgentToolChoiceInput: {
             /** @enum {string} */
@@ -1863,6 +1914,11 @@ export interface components {
         DownloadModelRequest: {
             /** @description Model ID from `/v1/models`. */
             model_id: string;
+        };
+        /** @description One failed tool call in the diagnostics snapshot (tool name + error only). */
+        FailedToolCallResponse: {
+            error: string;
+            tool_name: string;
         };
         /** @description Per-GPU snapshot from `all-smi`. */
         GpuDeviceStatus: {
@@ -3223,6 +3279,15 @@ export interface components {
             settingsPath: string;
             slabDir: string;
         };
+        /**
+         * @description Outcome of a workspace migration preparation (B-8 / INFRA-01): the project
+         *     id the snapshot was scoped to + how many agent threads were suspended.
+         */
+        WorkspaceMigrationResponse: {
+            project_id: string;
+            /** Format: int32 */
+            suspended_count: number;
+        };
         WorkspaceOpenCommand: {
             rootPath: string;
         };
@@ -3318,6 +3383,40 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
                 };
+            };
+        };
+    };
+    migrate_workspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active threads interrupted + project-scoped snapshot written */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMigrationResponse"];
+                };
+            };
+            /** @description No active workspace to migrate */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -5127,6 +5226,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SystemDiagnosticsResponse"];
+                };
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    agent_diagnostics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recent agent thread stats + failed tool calls */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentDiagnosticsResponse"];
                 };
             };
             /** @description Backend error */

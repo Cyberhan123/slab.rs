@@ -440,6 +440,22 @@ impl From<AgentThreadStatus> for AgentStatusValue {
     }
 }
 
+/// Outcome of a workspace migration preparation (B-8 / INFRA-01): the project
+/// id the snapshot was scoped to + how many agent threads were suspended.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct WorkspaceMigrationResponse {
+    pub project_id: String,
+    pub suspended_count: u32,
+}
+
+impl From<crate::domain::services::agent::WorkspaceMigrationOutcome>
+    for WorkspaceMigrationResponse
+{
+    fn from(outcome: crate::domain::services::agent::WorkspaceMigrationOutcome) -> Self {
+        Self { project_id: outcome.project_id, suspended_count: outcome.suspended_count as u32 }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use slab_agent::{

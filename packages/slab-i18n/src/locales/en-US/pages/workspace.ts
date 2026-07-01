@@ -20,6 +20,10 @@ export const workspace = {
     title: 'Recent workspaces',
     empty: 'No recent workspaces',
   },
+  projectSwitcher: {
+    toggle: 'Switch workspace',
+    noActive: 'No workspace',
+  },
   tree: {
     title: 'Files',
     loading: 'Loading files',

@@ -2765,6 +2765,40 @@ async fn agent_control_enforces_thread_limit() {
 }
 
 #[tokio::test]
+async fn active_thread_ids_and_interrupt_all_target_active_threads() {
+    let llm = Arc::new(MockLlm::new());
+    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
+    let notify = Arc::new(NoopNotify);
+    let router = Arc::new(ToolRouter::new());
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(AgentControl::new(llm, store, notify, approval, router, 8, 4));
+
+    // No active threads ⇒ empty enumeration and empty interrupt sweep.
+    assert!(control.active_thread_ids().await.is_empty());
+    assert!(control.interrupt_all().await.is_empty());
+
+    let config = AgentConfig { model: "mock".into(), max_turns: 1, ..AgentConfig::default() };
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: slab_types::ConversationMessageContent::Text("hi".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let thread_id = control.spawn("session-migrate".into(), config, messages).await.expect("spawn");
+
+    // The thread is registered before spawn returns, so it is enumerable now.
+    let active = control.active_thread_ids().await;
+    assert!(active.contains(&thread_id), "active threads should include the spawned thread");
+
+    // interrupt_all targets every active thread and reports what it interrupted.
+    let interrupted = control.interrupt_all().await;
+    assert_eq!(interrupted, vec![thread_id.clone()]);
+
+    let _ = control.shutdown(&thread_id).await;
+}
+
+#[tokio::test]
 async fn agent_control_enforces_depth_limit() {
     let llm = Arc::new(MockLlm::new());
     let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);

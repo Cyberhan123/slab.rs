@@ -117,6 +117,9 @@ reqwest = { version = "0.13.3", features = [
     "json",
     "blocking",
 ] }
+# OS credential store for host-side secret resolution (INFRA-02). Backends are
+# selected per-target in the host crate; no default features here.
+keyring = { version = "3", default-features = false }
 pyo3 = { version = "0.28", features = ["auto-initialize", "abi3-py39", "generate-import-lib"] }
 websearch = "0.1.1"
 serde = { version = "1.0", features = ["derive"] }

@@ -28,7 +28,8 @@
       },
       "capabilities": [
         "main-window",
-        "plugin-webview"
+        "plugin-webview",
+        "surface-windows"
       ]
     }
   },

@@ -13,10 +13,24 @@ import {
 } from "@slab/components/a2u"
 import { Button } from "@slab/components/button"
 import { useTranslation } from "@slab/i18n"
+import { openSurfaceWindow, type SurfaceKind } from "@/lib/windows"
 import { useAgentSurfaceStore, type AgentSurfaceRequest } from "@/store/useAgentSurfaceStore"
 
 function imageRouteSearch(prompt?: string) {
   return prompt ? `?prompt=${encodeURIComponent(prompt)}` : ""
+}
+
+const WINDOW_SURFACE_KINDS: readonly SurfaceKind[] = [
+  "workspace",
+  "image",
+  "review",
+  "plugin",
+  "hub",
+]
+
+/** Narrows a surface type to a kind that can open in its own OS window. */
+function isWindowSurfaceKind(type: string): type is SurfaceKind {
+  return (WINDOW_SURFACE_KINDS as readonly string[]).includes(type)
 }
 
 type AgentSurfaceLayerProps = {
@@ -37,6 +51,16 @@ export function AgentSurfaceLayer({ onSurfaceClosed }: AgentSurfaceLayerProps) {
 
   useEffect(() => {
     if (!pendingSurface) {
+      return
+    }
+
+    // Window-targeted surfaces are dispatched to their own OS window (INFRA-11),
+    // not rendered inline.
+    if (pendingSurface.target === "window") {
+      const request = consumePendingSurface(pendingSurface.id)
+      if (request && isWindowSurfaceKind(request.type)) {
+        void openSurfaceWindow(request.type, request.id)
+      }
       return
     }
 

@@ -14,6 +14,7 @@ use slab_types::{ConversationMessage, ConversationMessageContent};
 
 use crate::{
     compact::{CompactPort, SlidingWindowCompactPort},
+    concurrency_gate::ConcurrencyGate,
     config::AgentConfig,
     error::AgentError,
     event::{AgentEventKind, AgentResponseRef},
@@ -73,6 +74,8 @@ pub struct AgentControl {
     thread_context: AgentThreadContext,
     max_threads: usize,
     max_depth: u32,
+    gate: Arc<ConcurrencyGate>,
+    memory_pressure: Arc<dyn crate::port::MemoryPressurePort>,
 }
 
 impl AgentControl {
@@ -152,6 +155,8 @@ impl AgentControl {
             thread_context: AgentThreadContext::default(),
             max_threads: limits.max_threads,
             max_depth: limits.max_depth,
+            gate: Arc::new(ConcurrencyGate::new(limits.max_threads, 0)),
+            memory_pressure: Arc::new(crate::port::NoopMemoryPressurePort),
         }
     }
 
@@ -182,12 +187,37 @@ impl AgentControl {
             thread_context: AgentThreadContext::default(),
             max_threads: limits.max_threads,
             max_depth: limits.max_depth,
+            gate: Arc::new(ConcurrencyGate::new(limits.max_threads, 0)),
+            memory_pressure: Arc::new(crate::port::NoopMemoryPressurePort),
         }
     }
 
     /// Attach host-provided thread context used when building tool contexts.
     pub fn with_thread_context(mut self, thread_context: AgentThreadContext) -> Self {
         self.thread_context = thread_context;
+        self
+    }
+
+    /// Set the FIFO wait-queue capacity (INFRA-05). `0` (default) keeps the
+    /// legacy behavior of rejecting spawns as soon as `max_threads` is reached;
+    /// `> 0` lets that many excess spawns wait in arrival order before
+    /// rejection. Rebuilds the admission gate with the current `max_threads`.
+    pub fn with_queue_capacity(mut self, queue_capacity: usize) -> Self {
+        self.gate = Arc::new(ConcurrencyGate::new(self.max_threads, queue_capacity));
+        self
+    }
+
+    /// Number of spawns currently waiting for an admission slot (FIFO backlog).
+    pub fn queued_thread_count(&self) -> usize {
+        self.gate.waiting_count()
+    }
+
+    /// Attach a host-owned memory circuit breaker that gates spawns when
+    /// process RSS exceeds the configured threshold (INFRA-05). When the breaker
+    /// is tripped, [`spawn`](Self::spawn) / [`spawn_child`](Self::spawn_child)
+    /// return [`AgentError::MemoryPressureExceeded`] until it clears.
+    pub fn with_memory_pressure(mut self, port: Arc<dyn crate::port::MemoryPressurePort>) -> Self {
+        self.memory_pressure = port;
         self
     }
 
@@ -425,6 +455,24 @@ impl AgentControl {
         self.threads.read().await.len()
     }
 
+    /// IDs of all currently active (not yet completed) threads.
+    pub async fn active_thread_ids(&self) -> Vec<String> {
+        self.threads.read().await.keys().cloned().collect()
+    }
+
+    /// Interrupt every active thread (best-effort, graceful) and return the IDs
+    /// that were targeted. Used by workspace migration (B-8 / INFRA-01) to shed
+    /// agent work before a switch so no "ghost" threads carry into the new
+    /// workspace. A thread that terminates between enumeration and interrupt is
+    /// silently skipped.
+    pub async fn interrupt_all(&self) -> Vec<String> {
+        let ids = self.active_thread_ids().await;
+        for id in &ids {
+            let _ = self.interrupt(id).await;
+        }
+        ids
+    }
+
     /// Replace hooks used by active threads at their next hook dispatch.
     pub fn replace_hooks(&self, hooks: Vec<Arc<dyn AgentHook>>) {
         self.hooks.replace(hooks);
@@ -461,6 +509,19 @@ impl AgentControl {
         starting_turn_index: u32,
         persist_messages_from: Option<usize>,
     ) -> Result<String, AgentError> {
+        // Memory circuit breaker (INFRA-05): pause spawns while the host reports
+        // process RSS above the configured threshold.
+        if let crate::port::MemoryPressure::Tripped { current_mb, threshold_mb } =
+            self.memory_pressure.check()
+        {
+            return Err(AgentError::MemoryPressureExceeded { current_mb, threshold_mb });
+        }
+
+        // Bounded FIFO admission (INFRA-05). The permit is held for the thread's
+        // lifetime and dropped when the task finishes or is aborted, releasing
+        // the slot to the next waiter in arrival order.
+        let permit = self.gate.acquire().await?;
+
         let thread_id = thread.id.clone();
         let state = Arc::clone(&thread.state);
 
@@ -495,8 +556,10 @@ impl AgentControl {
 
         // Spawn the thread task first to obtain the AbortHandle.
         // The task removes itself from the registry when it finishes so that
-        // `active_thread_count` stays accurate.
+        // `active_thread_count` stays accurate. The admission permit is moved
+        // into the task and dropped on completion or abort.
         let join_handle = tokio::spawn(async move {
+            let _permit = permit;
             let result =
                 thread.run(messages, runtime, starting_turn_index, persist_messages_from).await;
             if let Err(ref e) = result {
@@ -508,17 +571,7 @@ impl AgentControl {
 
         let abort = join_handle.abort_handle();
 
-        // Atomically check the concurrency limit and insert the entry under the
-        // same write guard to prevent TOCTOU races between concurrent spawns.
-        // If the limit is already reached, abort the just-spawned task and bail.
         let mut guard = self.threads.write().await;
-        if guard.len() >= self.max_threads {
-            abort.abort();
-            return Err(AgentError::ThreadLimitExceeded {
-                current: guard.len(),
-                max: self.max_threads,
-            });
-        }
         guard.insert(thread_id.clone(), ThreadEntry { status_rx, state, abort, cancellation });
         drop(guard);
 
