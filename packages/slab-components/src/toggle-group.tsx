@@ -4,8 +4,8 @@ import * as React from "react"
 import { type VariantProps } from "class-variance-authority"
 import { ToggleGroup as ToggleGroupPrimitive } from "radix-ui"
 
+import { cn } from "@/lib/utils"
 import { toggleVariants } from "./toggle"
-import { cn } from "./lib/utils"
 
 const ToggleGroupContext = React.createContext<
   VariantProps<typeof toggleVariants> & {
@@ -28,8 +28,6 @@ function ToggleGroup({
   VariantProps<typeof toggleVariants> & {
     spacing?: number
   }) {
-  const contextValue = React.useMemo(() => ({ variant, size, spacing }), [variant, size, spacing])
-
   return (
     <ToggleGroupPrimitive.Root
       data-slot="toggle-group"
@@ -43,7 +41,7 @@ function ToggleGroup({
       )}
       {...props}
     >
-      <ToggleGroupContext.Provider value={contextValue}>
+      <ToggleGroupContext.Provider value={{ variant, size, spacing }}>
         {children}
       </ToggleGroupContext.Provider>
     </ToggleGroupPrimitive.Root>

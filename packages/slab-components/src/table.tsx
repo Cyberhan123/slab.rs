@@ -1,27 +1,10 @@
 "use client"
 
 import * as React from "react"
-import { cva, type VariantProps } from "class-variance-authority"
 
-import { cn } from "./lib/utils"
+import { cn } from "@/lib/utils"
 
-const tableVariants = cva("w-full caption-bottom text-sm", {
-  variants: {
-    variant: {
-      default: "",
-      roomy: "[&_td]:py-4 [&_th]:h-12 [&_th]:text-xs [&_th]:uppercase [&_th]:tracking-eyebrow",
-    },
-  },
-  defaultVariants: {
-    variant: "default",
-  },
-})
-
-function Table({
-  className,
-  variant = "default",
-  ...props
-}: React.ComponentProps<"table"> & VariantProps<typeof tableVariants>) {
+function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
     <div
       data-slot="table-container"
@@ -29,31 +12,18 @@ function Table({
     >
       <table
         data-slot="table"
-        data-variant={variant}
-        className={cn(tableVariants({ variant }), className)}
+        className={cn("w-full caption-bottom text-sm", className)}
         {...props}
       />
     </div>
   )
 }
 
-function TableHeader({
-  className,
-  variant = "default",
-  ...props
-}: React.ComponentProps<"thead"> & {
-  variant?: "default" | "soft-header"
-}) {
+function TableHeader({ className, ...props }: React.ComponentProps<"thead">) {
   return (
     <thead
       data-slot="table-header"
-      data-variant={variant}
-      className={cn(
-        "[&_tr]:border-b",
-        variant === "soft-header" &&
-          "[&_tr]:border-border/60 [&_tr]:bg-[var(--surface-soft)]",
-        className
-      )}
+      className={cn("[&_tr]:border-b", className)}
       {...props}
     />
   )
@@ -74,7 +44,7 @@ function TableFooter({ className, ...props }: React.ComponentProps<"tfoot">) {
     <tfoot
       data-slot="table-footer"
       className={cn(
-        "bg-muted/50 border-t font-medium [&>tr]:last:border-b-0",
+        "border-t bg-muted/50 font-medium [&>tr]:last:border-b-0",
         className
       )}
       {...props}
@@ -87,7 +57,7 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
     <tr
       data-slot="table-row"
       className={cn(
-        "hover:bg-muted/50 data-[state=selected]:bg-muted border-b transition-colors",
+        "border-b transition-colors hover:bg-muted/50 has-aria-expanded:bg-muted/50 data-[state=selected]:bg-muted",
         className
       )}
       {...props}
@@ -95,20 +65,12 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
   )
 }
 
-function TableHead({
-  className,
-  variant = "default",
-  ...props
-}: React.ComponentProps<"th"> & {
-  variant?: "default" | "soft-header"
-}) {
+function TableHead({ className, ...props }: React.ComponentProps<"th">) {
   return (
     <th
       data-slot="table-head"
-      data-variant={variant}
       className={cn(
-        "text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
-        variant === "soft-header" && "px-4 text-caption font-semibold tracking-eyebrow text-muted-foreground",
+        "h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
         className
       )}
       {...props}
@@ -116,22 +78,12 @@ function TableHead({
   )
 }
 
-function TableCell({
-  className,
-  variant = "default",
-  ...props
-}: React.ComponentProps<"td"> & {
-  variant?: "default" | "roomy" | "sticky-actions"
-}) {
+function TableCell({ className, ...props }: React.ComponentProps<"td">) {
   return (
     <td
       data-slot="table-cell"
-      data-variant={variant}
       className={cn(
         "p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
-        variant === "roomy" && "px-4 py-4",
-        variant === "sticky-actions" &&
-          "sticky right-0 z-10 bg-[var(--surface-1)] text-right shadow-[-1px_0_0_color-mix(in_oklab,var(--border)_85%,transparent)]",
         className
       )}
       {...props}
@@ -146,7 +98,7 @@ function TableCaption({
   return (
     <caption
       data-slot="table-caption"
-      className={cn("text-muted-foreground mt-4 text-sm", className)}
+      className={cn("mt-4 text-sm text-muted-foreground", className)}
       {...props}
     />
   )
@@ -161,5 +113,4 @@ export {
   TableRow,
   TableCell,
   TableCaption,
-  tableVariants,
 }
