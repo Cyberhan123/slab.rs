@@ -160,10 +160,6 @@ bun run gen:api
 bun run gen:schemas
 bun run gen:plugin-packs
 bun run gen:model-packs
-
-# Server compatibility tests
-python -m pip install -r bin/slab-server/tests/requirements.txt
-pytest bin/slab-server/tests
 ```
 
 ### Build Workflow Guide

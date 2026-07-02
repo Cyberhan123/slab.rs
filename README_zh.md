@@ -157,10 +157,6 @@ bun run gen:api
 bun run gen:schemas
 bun run gen:plugin-packs
 bun run gen:model-packs
-
-# 服务兼容性测试
-python -m pip install -r bin/slab-server/tests/requirements.txt
-pytest bin/slab-server/tests
 ```
 
 ### 构建流程指南
