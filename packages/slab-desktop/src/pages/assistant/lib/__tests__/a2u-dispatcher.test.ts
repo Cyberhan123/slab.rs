@@ -37,7 +37,7 @@ describe('dispatchA2uToolCall', () => {
     })
   })
 
-  it('leaves non-a2u tools on the ThoughtChain fallback path', () => {
+  it('leaves non-a2u tools on the reasoning trace fallback path', () => {
     expect(dispatchA2uToolCall('read_file', '{"path":"src/main.rs"}')).toBeNull()
     expect(dispatchA2uToolCall('workspace.open', 'not-json')).toEqual({
       riskLevel: 'allow',

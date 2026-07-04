@@ -32,14 +32,14 @@ function HeaderSelect({ control }: { control: HeaderSelectControl }) {
     <Select value={control.value} onValueChange={control.onValueChange} disabled={disabled}>
       <SelectTrigger
         size="sm"
-        variant="pill"
+        variant="default"
         title={selectedOption?.label ?? placeholder}
         className="shell-context hidden h-8 max-w-[18rem] shrink-0 border-border/30 bg-glass-bg-strong pl-3 pr-2.5 text-label font-semibold text-foreground/70 lg:flex"
       >
         <span className="size-2 shrink-0 rounded-full bg-[var(--brand-gold)]" />
         <SelectValue placeholder={placeholder} className="max-w-[11rem] truncate" />
       </SelectTrigger>
-      <SelectContent variant="pill" position="popper" align="start" className="max-h-80 min-w-[18rem]">
+      <SelectContent variant="default" position="popper" align="start" className="max-h-80 min-w-[18rem]">
         <SelectGroup>
           <SelectLabel>{control.groupLabel ?? t("layouts.header.select.options")}</SelectLabel>
           {control.options.length === 0 ? (

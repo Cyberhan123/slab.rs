@@ -1,9 +1,12 @@
-import type { SSEFields, XModelMessage } from '@ant-design/x-sdk'
-
-import { isRecord, type AssistantAgentRequestMessage, type AssistantUiMessage } from './assistant-types'
+import {
+  isRecord,
+  type AssistantAgentRequestMessage,
+  type AssistantSseField,
+  type AssistantUiMessage,
+} from './assistant-types'
 
 type AssistantMessageTextContentTarget = {
-  role: XModelMessage['role']
+  role: AssistantUiMessage['role']
   content?: unknown
 } & Omit<AssistantUiMessage, 'role' | 'content'>
 
@@ -57,11 +60,11 @@ export const stripTrailingAssistantTurnArtifacts = (value: string): string => {
 }
 
 const hasMeaningfulAssistantRequestContent = (
-  message?: Pick<XModelMessage, 'content'> | null
+  message?: Pick<AssistantUiMessage, 'content'> | null
 ): boolean => getAssistantMessageTextContent(message).trim().length > 0
 
 export const toAssistantRequestMessage = (
-  message?: Pick<XModelMessage, 'role' | 'content'> | null
+  message?: Pick<AssistantUiMessage, 'role' | 'content'> | null
 ): AssistantAgentRequestMessage | null => {
   if (!message || !hasMeaningfulAssistantRequestContent(message)) {
     return null
@@ -83,7 +86,7 @@ export const toAssistantRequestMessage = (
 }
 
 export const toAssistantRequestMessages = (
-  messages?: Array<Pick<XModelMessage, 'role' | 'content'> | null | undefined>
+  messages?: Array<Pick<AssistantUiMessage, 'role' | 'content'> | null | undefined>
 ): AssistantAgentRequestMessage[] => {
   return (messages ?? [])
     .map(toAssistantRequestMessage)
@@ -91,7 +94,7 @@ export const toAssistantRequestMessages = (
 }
 
 export const getContinueGenerationPrefix = (
-  messages?: Array<Pick<XModelMessage, 'role' | 'content'> | null | undefined>
+  messages?: Array<Pick<AssistantUiMessage, 'role' | 'content'> | null | undefined>
 ): string => {
   for (let index = (messages?.length ?? 0) - 1; index >= 0; index -= 1) {
     const message = messages?.[index]
@@ -152,7 +155,7 @@ const parseSsePayload = (value: unknown): unknown => {
   return null
 }
 
-export const extractChunkPayload = (chunk: Partial<Record<SSEFields, unknown>> | undefined): unknown => {
+export const extractChunkPayload = (chunk: Partial<Record<AssistantSseField, unknown>> | undefined): unknown => {
   const chunkData = (chunk as { data?: unknown } | undefined)?.data
   return parseSsePayload(chunkData) ?? chunkData ?? parseSsePayload(chunk) ?? chunk
 }
@@ -161,7 +164,7 @@ export const stripThinkTags = (value: string): string =>
   value.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '').trim()
 
 export const extractSseDeltaTextField = (
-  chunk: Partial<Record<SSEFields, unknown>> | undefined,
+  chunk: Partial<Record<AssistantSseField, unknown>> | undefined,
   field: string
 ): string => {
   const payload = extractChunkPayload(chunk)

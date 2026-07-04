@@ -11,11 +11,13 @@ export {
   type AgentThreadMessageResponse,
   type AgentThreadResponse,
   type AssistantMessageRecord,
+  type AssistantMessageStatus,
   type AssistantRequestErrorInfo,
   type AssistantRequestErrorType,
   type AssistantRequestParams,
   type AssistantRuntimePresets,
   type AssistantThought,
+  type AssistantThoughtStatus,
   type AssistantUiMessage,
 } from './lib/assistant-types'
 

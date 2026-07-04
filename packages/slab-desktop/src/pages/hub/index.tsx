@@ -66,7 +66,7 @@ export default function Hub() {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-1 pb-10">
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1.9fr)_minmax(280px,0.92fr)]">
           <Card
-            variant="hero"
+            variant="default"
             className="workspace-halo relative overflow-hidden rounded-3xl border-none px-7 py-8 md:px-10 md:py-10"
           >
             <div className="absolute top-10 right-14 size-28 rounded-full bg-[color:color-mix(in_oklab,var(--brand-gold)_18%,var(--surface-1))] blur-3xl" />
@@ -163,10 +163,10 @@ export default function Hub() {
               value={hub.status}
               onValueChange={(value) => hub.setStatus(value as typeof hub.status)}
             >
-              <SelectTrigger variant="pill" size="pill" className="h-9 min-w-[190px] bg-glass-bg-strong">
+              <SelectTrigger variant="default" size="pill" className="h-9 min-w-[190px] bg-glass-bg-strong">
                 <SelectValue placeholder={t('pages.hub.filters.statusPlaceholder')} />
               </SelectTrigger>
-              <SelectContent variant="pill">
+              <SelectContent variant="default">
                 {STATUS_OPTIONS.map((option) => (
                   <SelectItem key={option} value={option}>
                     {t(`pages.hub.filters.statuses.${option}`)}

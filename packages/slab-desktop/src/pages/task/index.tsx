@@ -181,7 +181,7 @@ export default function Task() {
           />
         ) : (
           <section className="overflow-hidden rounded-[20px] border border-border/40 bg-[var(--surface-1)]">
-            <Table className="min-w-[820px] xl:min-w-[980px]" variant="roomy">
+            <Table className="min-w-[820px] xl:min-w-[980px]" variant="default">
               <TableHeader className="[&_tr]:border-b-0 [&_tr]:bg-[var(--surface-soft)]">
                 <TableRow className="hover:bg-[var(--surface-soft)]">
                   <TableHead className="h-[45px] px-6 text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">

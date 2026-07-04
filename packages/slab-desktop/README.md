@@ -6,7 +6,7 @@ React frontend application for the Slab desktop shell.
 
 `@slab/desktop` is the primary frontend package for the Slab Tauri application. It provides the full user interface, including:
 
-- Chat interface with streaming language model responses (Ant Design X).
+- Chat interface with streaming language model responses built from shared shadcn-style Slab components.
 - Image generation, audio transcription, and video processing pages.
 - Model hub, plugin center, task queue, and settings views.
 - Integration with `bin/slab-server` via `openapi-fetch` and TanStack Query.
@@ -18,7 +18,7 @@ React frontend application for the Slab desktop shell.
 ## Stack
 
 - React 19, Vite, React Router 7
-- Ant Design X, Tailwind CSS 4, Radix UI
+- `@slab/components` shared shadcn-style primitives, Tailwind CSS 4, Radix UI/Base UI
 - TanStack Query, `openapi-fetch`, `openapi-react-query`
 - Zustand (client state), i18next (i18n)
 - TypeScript

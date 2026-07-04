@@ -1,25 +1,27 @@
-import {
-  CodeHighlighter,
-  ThoughtChain,
-  type BubbleListProps,
-  type ThoughtChainItemType,
-} from "@ant-design/x"
-import { useClipboard } from "@mantine/hooks"
+import { useClipboard } from '@mantine/hooks'
 import {
   AlertCircle,
   BotMessageSquare,
   Check,
   CheckCircle2,
+  ChevronDown,
   Copy,
   Pencil,
   RotateCcw,
   UserRound,
   XCircle,
-} from "lucide-react"
-import { memo, useMemo, useState } from "react"
+} from 'lucide-react'
+import { memo, useMemo, useState, type ReactNode } from 'react'
 
-import { Button } from "@slab/components/button"
-import { cn } from "@/lib/utils"
+import { Badge } from '@slab/components/badge'
+import { Button } from '@slab/components/button'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@slab/components/collapsible'
+import { Textarea } from '@slab/components/textarea'
+import { cn } from '@/lib/utils'
 
 import {
   getAssistantMessageTextContent,
@@ -27,9 +29,10 @@ import {
   stripTrailingAssistantTurnArtifacts,
   type AssistantMessageRecord,
   type AssistantThought,
-} from "../assistant-context"
-import { AgentActionCard } from "./agent-action-card"
-import { AssistantMarkdown } from "./assistant-markdown"
+  type AssistantThoughtStatus,
+} from '../assistant-context'
+import { AgentActionCard } from './agent-action-card'
+import { AssistantMarkdown } from './message/markdown'
 
 export type AssistantBubbleContent = {
   approvingCallIds: string[]
@@ -55,7 +58,6 @@ export type AssistantBubbleContent = {
     user: string
     waitingForResponse: string
   }
-  markdownClassName?: string
   onApprove?: (callId: string, approved: boolean) => void
   onEdit?: (messageId: string, nextContent: string) => void | Promise<void>
   onFeedback?: (prompt: string) => void
@@ -69,13 +71,42 @@ type ParsedThinkingContent = {
   thinkingLoading: boolean
 }
 
+type ReasoningTraceItem = {
+  content: ReactNode
+  description?: string
+  key: string
+  loading: boolean
+  status: AssistantThoughtStatus
+  title: string
+}
+
+export function AssistantMessageAvatar({ role }: { role: 'assistant' | 'user' }) {
+  if (role === 'assistant') {
+    return (
+      <span className="flex size-6 shrink-0 items-center justify-center rounded-[8px] bg-[var(--brand-teal)] text-[color:var(--brand-teal-foreground)]">
+        <BotMessageSquare />
+      </span>
+    )
+  }
+
+  return (
+    <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border/30 bg-[var(--shell-card)] text-foreground/70">
+      <UserRound />
+    </span>
+  )
+}
+
+export function getAssistantMessageLabel(content: AssistantBubbleContent) {
+  return content.item.message.role === 'assistant' ? content.labels.assistant : content.labels.user
+}
+
 function parseThinkingContent(rawContent: string): ParsedThinkingContent {
-  const openTagIndex = rawContent.indexOf("<think")
+  const openTagIndex = rawContent.indexOf('<think')
   if (openTagIndex < 0) {
     return { thinking: null, answer: rawContent, thinkingLoading: false }
   }
 
-  const openTagEnd = rawContent.indexOf(">", openTagIndex)
+  const openTagEnd = rawContent.indexOf('>', openTagIndex)
   if (openTagEnd < 0) {
     return {
       thinking: null,
@@ -86,7 +117,7 @@ function parseThinkingContent(rawContent: string): ParsedThinkingContent {
 
   const openTag = rawContent.slice(openTagIndex, openTagEnd + 1)
   const thinkingMarkedDone = /\bstatus\s*=\s*["']?done["']?/i.test(openTag)
-  const closeTag = "</think>"
+  const closeTag = '</think>'
   const closeTagIndex = rawContent.indexOf(closeTag, openTagEnd + 1)
 
   if (closeTagIndex < 0) {
@@ -112,20 +143,20 @@ function parseThinkingContent(rawContent: string): ParsedThinkingContent {
 
 function guessCodeLanguage(value: string) {
   const trimmed = value.trim()
-  if (trimmed.startsWith("diff --git") || trimmed.startsWith("--- ") || trimmed.startsWith("*** ")) {
-    return "diff"
+  if (trimmed.startsWith('diff --git') || trimmed.startsWith('--- ') || trimmed.startsWith('*** ')) {
+    return 'diff'
   }
 
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-    return "json"
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    return 'json'
   }
 
-  return "text"
+  return 'text'
 }
 
 function formatJsonCode(value: string) {
   const trimmed = value.trim()
-  if (!trimmed || (trimmed[0] !== "{" && trimmed[0] !== "[")) {
+  if (!trimmed || (trimmed[0] !== '{' && trimmed[0] !== '[')) {
     return value
   }
 
@@ -134,6 +165,22 @@ function formatJsonCode(value: string) {
   } catch {
     return value
   }
+}
+
+function AssistantCodeBlock({ value }: { value: string }) {
+  const language = guessCodeLanguage(value)
+  const detail = language === 'json' ? formatJsonCode(value) : value
+
+  return (
+    <div className="min-w-0 max-w-full overflow-x-auto rounded-[14px] border border-border/60 bg-background/80 text-xs">
+      <div className="border-b border-border/60 px-3 py-2 font-medium text-muted-foreground">
+        {language}
+      </div>
+      <pre className="m-0 max-w-full overflow-x-auto p-3">
+        <code>{detail}</code>
+      </pre>
+    </div>
+  )
 }
 
 function renderThoughtContent(
@@ -149,37 +196,28 @@ function renderThoughtContent(
     const callId = thought.pendingApproval.callId
     return (
       <div
-        className="min-w-0 max-w-full space-y-3 overflow-hidden"
+        className="flex min-w-0 max-w-full flex-col gap-3 overflow-hidden"
         data-testid={`assistant-thought-${thought.id}`}
       >
-        <div className="min-w-0 max-w-full overflow-x-auto">
-          <CodeHighlighter
-            lang="shell"
-            prismLightMode={false}
-            className="max-w-full rounded-[14px] border border-border/60 text-xs"
-          >
-            {thought.pendingApproval.command}
-          </CodeHighlighter>
-        </div>
+        <AssistantCodeBlock value={thought.pendingApproval.command} />
         <div className="flex flex-wrap justify-end gap-2">
           <Button
-            variant="quiet"
+            variant="ghost"
             size="sm"
             data-testid={`thought-reject-${callId}`}
             onClick={() => onApprove?.(callId, false)}
             disabled={approving}
           >
-            <XCircle className="size-4" />
+            <XCircle />
             {labels.reject}
           </Button>
           <Button
-            variant="pill"
             size="sm"
             data-testid={`thought-approve-${callId}`}
             onClick={() => onApprove?.(callId, true)}
             disabled={approving}
           >
-            <CheckCircle2 className="size-4" />
+            <CheckCircle2 />
             {labels.approve}
           </Button>
         </div>
@@ -191,22 +229,14 @@ function renderThoughtContent(
     return null
   }
 
-  const language = guessCodeLanguage(thought.detail)
-  const detail = language === "json" ? formatJsonCode(thought.detail) : thought.detail
-
   return (
-    <div className="min-w-0 max-w-full overflow-x-auto" data-testid={`assistant-thought-${thought.id}`}>
-      <CodeHighlighter
-        lang={language}
-        className="max-w-full rounded-[14px] border border-border/60 text-xs"
-      >
-        {detail}
-      </CodeHighlighter>
+    <div className="min-w-0 max-w-full" data-testid={`assistant-thought-${thought.id}`}>
+      <AssistantCodeBlock value={thought.detail} />
     </div>
   )
 }
 
-function toThoughtChainItems(
+function toReasoningTraceItems(
   thoughts: AssistantThought[] | undefined,
   approvingCallIds: string[],
   onApprove: ((callId: string, approved: boolean) => void) | undefined,
@@ -220,10 +250,8 @@ function toThoughtChainItems(
     loading: boolean
     title: string
   }
-): ThoughtChainItemType[] {
-  const items = (thoughts ?? []).map((thought) => ({
-    blink: thought.status === "loading",
-    collapsible: true,
+): ReasoningTraceItem[] {
+  const items = (thoughts ?? []).map<ReasoningTraceItem>((thought) => ({
     content: renderThoughtContent(
       thought,
       Boolean(thought.callId && approvingCallIds.includes(thought.callId)),
@@ -231,8 +259,8 @@ function toThoughtChainItems(
       labels
     ),
     description: thought.summary ?? thought.toolName ?? thought.callId,
-    icon: false,
     key: thought.id,
+    loading: thought.status === 'loading',
     status: thought.status,
     title: thought.title,
   }))
@@ -243,10 +271,8 @@ function toThoughtChainItems(
 
   return [
     {
-      blink: thinking.loading,
-      collapsible: true,
       content: (
-        <div data-testid={`assistant-thinking-${thinking.key.replace(/-thinking$/, "")}`}>
+        <div data-testid={`assistant-thinking-${thinking.key.replace(/-thinking$/, '')}`}>
           <AssistantMarkdown
             className="assistant-markdown--assistant"
             hasNextChunk={thinking.loading}
@@ -255,13 +281,53 @@ function toThoughtChainItems(
           </AssistantMarkdown>
         </div>
       ),
-      icon: false,
       key: thinking.key,
-      status: thinking.loading ? "loading" : "success",
+      loading: thinking.loading,
+      status: thinking.loading ? 'loading' : 'success',
       title: thinking.title,
     },
     ...items,
   ]
+}
+
+function AssistantReasoningTrace({ items }: { items: ReasoningTraceItem[] }) {
+  return (
+    <div className="flex min-w-0 max-w-full flex-col gap-2 overflow-hidden rounded-[18px] border border-border/50 bg-background/30 px-4 py-3">
+      {items.map((item) => (
+        <Collapsible key={item.key} defaultOpen>
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="flex w-full min-w-0 items-center justify-between gap-3 rounded-md px-1 py-2 text-left text-sm transition hover:bg-muted/50"
+            >
+              <span className="flex min-w-0 flex-col gap-1">
+                <span className={cn('font-medium', item.loading && 'shimmer')}>
+                  {item.title}
+                </span>
+                {item.description ? (
+                  <span className="truncate text-xs text-muted-foreground">
+                    {item.description}
+                  </span>
+                ) : null}
+              </span>
+              <span className="flex shrink-0 items-center gap-2">
+                <Badge
+                  variant={item.status === 'error' ? 'destructive' : 'secondary'}
+                  className="capitalize"
+                >
+                  {item.status}
+                </Badge>
+                <ChevronDown />
+              </span>
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="px-1 pb-3">
+            {item.content}
+          </CollapsibleContent>
+        </Collapsible>
+      ))}
+    </div>
+  )
 }
 
 const AssistantBubbleContentView = memo(function AssistantBubbleContentView({
@@ -270,27 +336,27 @@ const AssistantBubbleContentView = memo(function AssistantBubbleContentView({
   content: AssistantBubbleContent
 }) {
   const role = content.item.message.role
-  const isAssistant = role === "assistant"
-  const isBusy = content.item.status === "loading" || content.item.status === "updating"
-  const hasNextChunk = content.item.status === "updating"
+  const isAssistant = role === 'assistant'
+  const isBusy = content.item.status === 'loading' || content.item.status === 'updating'
+  const hasNextChunk = content.item.status === 'updating'
   const rawContent = stripTrailingAssistantTurnArtifacts(
     getAssistantMessageTextContent(content.item.message)
   )
   const parsed = useMemo(() => parseThinkingContent(rawContent), [rawContent])
   const liveThinking =
-    typeof content.item.message.reasoningContent === "string"
+    typeof content.item.message.reasoningContent === 'string'
       ? content.item.message.reasoningContent.trim()
-      : ""
+      : ''
   const thinking = liveThinking || parsed.thinking
   const answer = liveThinking
-    ? rawContent.includes("<think")
+    ? rawContent.includes('<think')
       ? parsed.answer
       : rawContent
     : parsed.answer
   const thinkingLoading = liveThinking ? isBusy : parsed.thinkingLoading
   const thoughtItems = useMemo(
     () =>
-      toThoughtChainItems(
+      toReasoningTraceItems(
         content.item.message.thoughts,
         content.approvingCallIds,
         content.onApprove,
@@ -324,29 +390,20 @@ const AssistantBubbleContentView = memo(function AssistantBubbleContentView({
       thinkingLoading,
     ]
   )
-  const expandedThoughtKeys = useMemo(
-    () => thoughtItems.map((thought) => thought.key).filter((key): key is string => Boolean(key)),
-    [thoughtItems]
-  )
 
   return (
     <div
-      className="min-w-0 max-w-full space-y-4 overflow-hidden"
+      className="flex min-w-0 max-w-full flex-col gap-4 overflow-hidden"
       data-testid={`assistant-message-${content.item.id}`}
     >
       {isAssistant && thoughtItems.length > 0 ? (
-        <ThoughtChain
-          items={thoughtItems}
-          defaultExpandedKeys={expandedThoughtKeys}
-          className="min-w-0 max-w-full overflow-hidden rounded-[18px] border border-border/50 bg-background/30 px-4 py-3"
-        />
+        <AssistantReasoningTrace items={thoughtItems} />
       ) : null}
 
       {answer ? (
         <AssistantMarkdown
           className={cn(
-            isAssistant ? "assistant-markdown--assistant" : "assistant-markdown--user",
-            content.markdownClassName
+            isAssistant ? 'assistant-markdown--assistant' : 'assistant-markdown--user'
           )}
           hasNextChunk={hasNextChunk}
         >
@@ -359,18 +416,22 @@ const AssistantBubbleContentView = memo(function AssistantBubbleContentView({
   )
 })
 
-function renderAssistantBubbleContent(content: AssistantBubbleContent) {
+export function AssistantBubbleContentViewByContent({
+  content,
+}: {
+  content: AssistantBubbleContent
+}) {
   return <AssistantBubbleContentView content={content} />
 }
 
-function AssistantBubbleFooter({ content }: { content: AssistantBubbleContent }) {
+export function AssistantBubbleFooter({ content }: { content: AssistantBubbleContent }) {
   const clipboard = useClipboard()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(() => getAssistantMessageTextContent(content.item.message))
-  const isAssistant = content.item.message.role === "assistant"
-  const isBusy = content.item.status === "loading" || content.item.status === "updating"
+  const isAssistant = content.item.message.role === 'assistant'
+  const isBusy = content.item.status === 'loading' || content.item.status === 'updating'
   const textContent = stripThinkTags(getAssistantMessageTextContent(content.item.message))
-  const terminalNotice = content.item.message.role === "assistant"
+  const terminalNotice = content.item.message.role === 'assistant'
     ? content.item.message.terminalNotice
     : undefined
   const artifactRefs = isAssistant ? content.item.message.artifactRefs ?? [] : []
@@ -393,16 +454,16 @@ function AssistantBubbleFooter({ content }: { content: AssistantBubbleContent })
       {terminalNotice ? (
         <div
           className={cn(
-            "flex items-start gap-2 rounded-xl border px-3 py-2 text-xs leading-5",
-            terminalNotice.type === "error"
-              ? "border-destructive/30 bg-destructive/10 text-destructive"
-              : "border-border/60 bg-[var(--surface-soft)] text-muted-foreground"
+            'flex items-start gap-2 rounded-xl border px-3 py-2 text-xs leading-5',
+            terminalNotice.type === 'error'
+              ? 'border-destructive/30 bg-destructive/10 text-destructive'
+              : 'border-border/60 bg-[var(--surface-soft)] text-muted-foreground'
           )}
           data-testid={`assistant-terminal-notice-${content.item.id}`}
         >
           <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
           <span className="min-w-0 break-words">
-            {terminalNotice.type === "cancelled"
+            {terminalNotice.type === 'cancelled'
               ? content.labels.terminalCancelled
               : terminalNotice.message}
           </span>
@@ -421,36 +482,33 @@ function AssistantBubbleFooter({ content }: { content: AssistantBubbleContent })
             void content.onEdit?.(String(content.item.id), nextContent)
           }}
         >
-          <textarea
+          <Textarea
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            className="min-h-24 resize-y rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none focus:border-[var(--brand-teal)]"
+            className="min-h-24 resize-y text-sm"
             data-testid={`assistant-edit-${content.item.id}`}
             aria-label={content.labels.edit}
           />
           <div className="flex justify-end gap-2">
             <Button
               type="button"
-              variant="quiet"
+              variant="ghost"
               size="sm"
-              className="h-7 rounded-full px-3 text-caption"
               onClick={() => {
                 setDraft(getAssistantMessageTextContent(content.item.message))
                 setEditing(false)
               }}
             >
-              <XCircle className="size-3.5" />
+              <XCircle />
               {content.labels.cancelEdit}
             </Button>
             <Button
               type="submit"
-              variant="pill"
               size="sm"
-              className="h-7 rounded-full px-3 text-caption"
               disabled={!draft.trim()}
               data-testid={`assistant-save-edit-${content.item.id}`}
             >
-              <Check className="size-3.5" />
+              <Check />
               {content.labels.saveEdit}
             </Button>
           </div>
@@ -459,20 +517,18 @@ function AssistantBubbleFooter({ content }: { content: AssistantBubbleContent })
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
-          variant="quiet"
+          variant="ghost"
           size="sm"
-          className="h-7 rounded-full px-3 text-caption text-muted-foreground hover:text-foreground"
           onClick={() => clipboard.copy(textContent)}
         >
-          <Copy className="size-3.5" />
+          <Copy />
           {content.labels.copy}
         </Button>
         {!isAssistant && content.onEdit ? (
           <Button
             type="button"
-            variant="quiet"
+            variant="ghost"
             size="sm"
-            className="h-7 rounded-full px-3 text-caption text-muted-foreground hover:text-foreground"
             disabled={isBusy}
             onClick={() => {
               setDraft(getAssistantMessageTextContent(content.item.message))
@@ -480,34 +536,32 @@ function AssistantBubbleFooter({ content }: { content: AssistantBubbleContent })
             }}
             data-testid={`assistant-edit-button-${content.item.id}`}
           >
-            <Pencil className="size-3.5" />
+            <Pencil />
             {content.labels.edit}
           </Button>
         ) : null}
         {isAssistant && !isBusy && content.onRegenerate ? (
           <Button
             type="button"
-            variant="quiet"
+            variant="ghost"
             size="sm"
-            className="h-7 rounded-full px-3 text-caption text-muted-foreground hover:text-foreground"
             onClick={() => {
               void content.onRegenerate?.(String(content.item.id))
             }}
             data-testid={`assistant-regenerate-${content.item.id}`}
           >
-            <RotateCcw className="size-3.5" />
+            <RotateCcw />
             {content.labels.regenerate}
           </Button>
         ) : null}
-        {terminalNotice?.type === "error" ? (
+        {terminalNotice?.type === 'error' ? (
           <Button
             type="button"
-            variant="quiet"
+            variant="ghost"
             size="sm"
-            className="h-7 rounded-full px-3 text-caption text-muted-foreground hover:text-foreground"
             onClick={content.onRetry}
           >
-            <RotateCcw className="size-3.5" />
+            <RotateCcw />
             {content.labels.retry}
           </Button>
         ) : null}
@@ -515,61 +569,3 @@ function AssistantBubbleFooter({ content }: { content: AssistantBubbleContent })
     </div>
   )
 }
-
-export const ASSISTANT_BUBBLE_ROLES = {
-  assistant: {
-    avatar: (
-      <span className="flex size-6 shrink-0 items-center justify-center rounded-[8px] bg-[var(--brand-teal)] text-[color:var(--brand-teal-foreground)]">
-        <BotMessageSquare className="size-3.5" />
-      </span>
-    ),
-    contentRender: renderAssistantBubbleContent,
-    footer: (content: AssistantBubbleContent) => <AssistantBubbleFooter content={content} />,
-    header: (content: AssistantBubbleContent) => content.labels.assistant,
-    placement: "start",
-    shape: "corner",
-    styles: {
-      content: {
-        background: "var(--ai-bubble)",
-        color: "var(--ai-bubble-foreground)",
-        maxWidth: "min(100%, 42rem)",
-        minWidth: 0,
-        overflow: "hidden",
-      },
-    },
-    variant: "filled",
-  },
-  user: {
-    avatar: (
-      <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border/30 bg-[var(--shell-card)] text-foreground/70">
-        <UserRound className="size-3.5" />
-      </span>
-    ),
-    contentRender: renderAssistantBubbleContent,
-    footer: (content: AssistantBubbleContent) => <AssistantBubbleFooter content={content} />,
-    header: (content: AssistantBubbleContent) => content.labels.user,
-    placement: "end",
-    shape: "corner",
-    styles: {
-      content: {
-        background: "var(--user-bubble)",
-        color: "var(--user-bubble-foreground)",
-        maxWidth: "min(100%, 42rem)",
-        minWidth: 0,
-        overflow: "hidden",
-      },
-    },
-    variant: "filled",
-  },
-  system: {
-    shape: "round",
-    styles: {
-      content: {
-        maxWidth: "100%",
-        minWidth: 0,
-        overflow: "hidden",
-      },
-    },
-    variant: "outlined",
-  },
-} satisfies BubbleListProps["role"]

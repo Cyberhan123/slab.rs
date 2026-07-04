@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parsePlanProgress } from './plan-progress'
+import { parsePlanProgress } from '../plan-progress'
 
 describe('parsePlanProgress', () => {
   it('reads completed/total from counts and surfaces the current step', () => {

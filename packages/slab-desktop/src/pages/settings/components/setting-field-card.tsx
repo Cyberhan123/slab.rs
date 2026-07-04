@@ -132,7 +132,7 @@ export function SettingFieldCard({
           {propertyType === 'boolean' ? (
             <Switch
               id={property.pmid}
-              variant="workspace"
+              variant="default"
               checked={booleanValue}
               onCheckedChange={(value) => onChange(property, value)}
               data-testid={`settings-input-${property.pmid}`}

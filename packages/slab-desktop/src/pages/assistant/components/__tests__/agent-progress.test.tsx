@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { cleanup, render, screen } from "@testing-library/react"
 
-import { AgentProgress } from "./agent-progress"
+import { AgentProgress } from "../agent-progress"
 
 describe("AgentProgress", () => {
   it("renders X/N and a native progress element when a plan exists", () => {

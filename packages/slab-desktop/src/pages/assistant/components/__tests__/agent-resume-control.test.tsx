@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 
-import { AgentResumeControl } from "./agent-resume-control"
+import { AgentResumeControl } from "../agent-resume-control"
 
 describe("AgentResumeControl", () => {
   it("renders the reason copy and a resume button that fires onResume", () => {

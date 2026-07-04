@@ -201,7 +201,7 @@ describe("useAssistantAgent a2u tool dispatch", () => {
     expect(result.current.pendingApprovals).toEqual([])
   })
 
-  it("keeps unknown tools on the ThoughtChain fallback path", async () => {
+  it("keeps unknown tools on the reasoning trace fallback path", async () => {
     mockReadAssistantSseStream.mockImplementation(async (_url, options) => {
       options.onOpen?.()
       options.onMessage({

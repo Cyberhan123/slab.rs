@@ -181,7 +181,7 @@ sequenceDiagram
 ```
 ┌─────────────────────────────────────────────────────┐
 │                  Desktop Frontend                    │
-│          (React / TypeScript / Ant Design X)         │
+│          (React / TypeScript / shadcn/Radix)         │
 ├─────────────────────────────────────────────────────┤
 │               Tauri Host (bin/slab-app)              │
 │         sidecar 管理 / WebView 容器 / CSP            │
@@ -211,7 +211,7 @@ sequenceDiagram
 | 层级 | 技术栈 |
 |:---|:---|
 | Desktop Shell | Tauri v2, Rust |
-| Frontend | React 19, Vite, React Router 7, Ant Design X, Tailwind CSS 4, Radix UI |
+| Frontend | React 19, Vite, React Router 7, shadcn/ui (@slab/components), Tailwind CSS 4, Radix UI |
 | State Management | Zustand (client), TanStack Query (server) |
 | HTTP Server | axum, tokio, utoipa (OpenAPI) |
 | gRPC | tonic, prost (protobuf) |

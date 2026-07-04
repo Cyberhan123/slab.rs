@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { isResumableReason, terminationReasonLabel } from './termination-reason'
+import { isResumableReason, terminationReasonLabel } from '../termination-reason'
 
 describe('terminationReasonLabel', () => {
   it('maps resumable reasons to user-facing copy', () => {

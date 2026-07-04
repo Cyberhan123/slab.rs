@@ -1,5 +1,3 @@
-import type { MessageInfo, XModelMessage, XModelParams } from '@ant-design/x-sdk'
-
 import type { components } from '@slab/api/v1'
 
 export type AssistantApiError = components['schemas']['OpenAiError']
@@ -41,7 +39,14 @@ export type AssistantArtifactRef = {
   path: string
 }
 
-export type AssistantUiMessage = XModelMessage & {
+export type AssistantMessageRole = 'assistant' | 'system' | 'user' | string
+export type AssistantMessageStatus = 'abort' | 'error' | 'loading' | 'success' | 'updating'
+export type AssistantSseField = 'data' | 'event' | 'id' | 'retry'
+export type AssistantSseResponse = unknown
+
+export type AssistantUiMessage = {
+  content?: unknown
+  role: AssistantMessageRole
   artifactRefs?: AssistantArtifactRef[]
   errorCode?: AssistantErrorCode
   errorParam?: AssistantApiError['param']
@@ -52,9 +57,13 @@ export type AssistantUiMessage = XModelMessage & {
   thoughts?: AssistantThought[]
 }
 
-export type AssistantMessageRecord = MessageInfo<AssistantUiMessage>
+export type AssistantMessageRecord = {
+  id: string | number
+  message: AssistantUiMessage
+  status: AssistantMessageStatus
+}
 
-export type AssistantRequestParams = XModelParams & {
+export type AssistantRequestParams = {
   continue_generation?: boolean
   max_tokens?: number | null
   temperature?: number | null

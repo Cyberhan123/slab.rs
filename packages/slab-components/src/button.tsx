@@ -10,12 +10,24 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        chip:
+          "rounded-full border border-border/60 bg-background/70 px-3 text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+        counter:
+          "rounded-full border border-border/60 bg-muted px-2 text-xs text-muted-foreground hover:bg-muted",
+        cta:
+          "bg-[var(--brand-teal)] text-[color:var(--brand-teal-foreground)] hover:bg-[color:color-mix(in_oklab,var(--brand-teal)_90%,black)]",
         destructive:
           "bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40",
         outline:
           "border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
+        pill:
+          "rounded-full bg-[var(--surface-soft)] text-foreground shadow-xs hover:bg-accent hover:text-accent-foreground",
+        quiet:
+          "bg-transparent text-muted-foreground hover:bg-accent/70 hover:text-foreground",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        status:
+          "rounded-full border border-border/60 bg-muted px-3 text-xs text-muted-foreground hover:bg-muted",
         ghost:
           "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
         link: "text-primary underline-offset-4 hover:underline",
@@ -24,6 +36,7 @@ const buttonVariants = cva(
         default: "h-9 px-4 py-2 has-[>svg]:px-3",
         xs: "h-6 gap-1 rounded-md px-2 text-xs has-[>svg]:px-1.5 [&_svg:not([class*='size-'])]:size-3",
         sm: "h-8 gap-1.5 rounded-md px-3 has-[>svg]:px-2.5",
+        pill: "h-9 gap-2 rounded-full px-4 has-[>svg]:px-3",
         lg: "h-10 rounded-md px-6 has-[>svg]:px-4",
         icon: "size-9",
         "icon-xs": "size-6 rounded-md [&_svg:not([class*='size-'])]:size-3",

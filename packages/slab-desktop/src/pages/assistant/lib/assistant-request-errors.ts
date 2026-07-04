@@ -1,4 +1,3 @@
-import type { SSEFields, XModelResponse } from '@ant-design/x-sdk'
 import {
   getErrorData,
   isApiErrorResponse,
@@ -15,6 +14,8 @@ import {
   type AssistantApiErrorResponse,
   type AssistantErrorCode,
   type AssistantRequestErrorInfo,
+  type AssistantSseField,
+  type AssistantSseResponse,
   type AssistantUiMessage,
 } from './assistant-types'
 
@@ -181,7 +182,7 @@ export const getResponseRequestId = (source?: Response | Headers | null): string
 }
 
 export const extractStreamChunkError = (
-  chunk: Partial<Record<SSEFields, XModelResponse>> | undefined
+  chunk: Partial<Record<AssistantSseField, AssistantSseResponse>> | undefined
 ): AssistantApiError | null => {
   const payload = extractChunkPayload(chunk)
   return isAssistantApiErrorResponse(payload) ? payload.error : null
