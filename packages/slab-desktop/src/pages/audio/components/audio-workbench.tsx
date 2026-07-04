@@ -7,7 +7,7 @@ import { SoftPanel } from '@slab/components/workspace';
 import { useTranslation } from '@slab/i18n';
 import { FileAudio2, History, Loader2, RotateCcw } from 'lucide-react';
 import type { SelectedFile } from '@/hooks/use-file';
-import type { CatalogModel } from '@slab/api/models';
+import type { AiModel } from '@/hooks/use-ai-model';
 import type { AudioTranscriptionTask, GenerationProgress } from '@/lib/media-task-api';
 import { GenerationProgressView } from '@/components/generation-progress';
 import type { PreparingStage } from '../const';
@@ -58,7 +58,7 @@ export type AudioWorkbenchProps = {
   previewRows: Array<{ label: string; value: string; accent: boolean; chip: boolean }>;
   refillFromHistory: (task: AudioTranscriptionTask) => void;
   selectedHistoryTask: AudioTranscriptionTask | null;
-  selectedVadModel: CatalogModel | undefined;
+  selectedVadModel: AiModel | undefined;
   selectedVadModelId: string;
   setDecodeEntropyThold: (value: string) => void;
   setDecodeDurationMs: (value: string) => void;
@@ -97,7 +97,7 @@ export type AudioWorkbenchProps = {
   vadSpeechPadMs: string;
   vadThreshold: string;
   webFileInputRef: RefObject<HTMLInputElement | null>;
-  whisperVadModels: CatalogModel[];
+  whisperVadModels: AiModel[];
 };
 
 function formatHistoryTime(value: string) {

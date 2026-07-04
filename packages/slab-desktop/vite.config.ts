@@ -113,7 +113,6 @@ export default defineConfig(async () => ({
       "@": path.resolve(__dirname, "./src"),
       "@slab/api/config": path.resolve(__dirname, "../api/src/config.ts"),
       "@slab/api/errors": path.resolve(__dirname, "../api/src/errors.ts"),
-      "@slab/api/models": path.resolve(__dirname, "../api/src/models.ts"),
       "@slab/api/v1": path.resolve(__dirname, "../api/src/v1.d.ts"),
       "@slab/api": path.resolve(__dirname, "../api/src/index.ts"),
       vscode: path.resolve(__dirname, "./node_modules/vscode"),

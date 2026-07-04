@@ -36,7 +36,7 @@ export default function Layout({ routes }: LayoutProps) {
         <div className="flex min-h-0 w-full flex-1">
           <AppSidebar routes={routes} variant={isChatShell ? "chat" : "default"} />
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <Header variant={isChatShell ? "chat" : "default"} />
+            <Header />
             <WorkspaceStage
               className="min-h-0 flex-1 !rounded-none !border-0 !bg-transparent !shadow-none"
             >

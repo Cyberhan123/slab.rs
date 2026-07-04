@@ -37,7 +37,7 @@ function SetupScaffold({ children }: { children: ReactNode }) {
           </aside>
         ) : null}
         <div className="flex min-w-0 flex-1 flex-col">
-          <Header variant="minimal" />
+          <Header />
           <div className="min-h-0 flex-1 overflow-auto">
             {children}
           </div>

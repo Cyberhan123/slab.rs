@@ -1,5 +1,5 @@
 import type { components } from "@slab/api"
-import type { CatalogModel } from "@slab/api/models"
+import type { AiModel } from "@/hooks/use-ai-model"
 
 type AssistantPageTranslation = (key: string, values?: Record<string, unknown>) => string
 
@@ -19,7 +19,7 @@ export type ModelOption = {
   source: ModelOptionSource
   capabilities: AssistantModelCapabilities
   contextWindow?: number | null
-  runtimePresets?: CatalogModel["runtime_presets"]
+  runtimePresets?: AiModel["runtime_presets"]
 }
 
 export type ModelRuntimeStatus = components["schemas"]["ModelStatusResponse"]
@@ -49,7 +49,7 @@ function defaultCapabilitiesForSource(source: ModelOptionSource): AssistantModel
 }
 
 export function resolveAssistantModelCapabilities(
-  model: Pick<CatalogModel, "chat_capabilities" | "kind">
+  model: Pick<AiModel, "chat_capabilities" | "kind">
 ): AssistantModelCapabilities {
   return model.chat_capabilities ?? defaultCapabilitiesForSource(model.kind)
 }

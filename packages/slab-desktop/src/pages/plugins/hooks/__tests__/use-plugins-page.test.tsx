@@ -14,7 +14,7 @@ vi.mock("@slab/i18n", () => ({
 }));
 
 vi.mock("@/hooks/use-header", () => ({
-  useHeaderSearch: vi.fn<() => void>(),
+  useHeader: vi.fn<() => unknown>(),
 }));
 
 vi.mock("@slab/api", () => ({

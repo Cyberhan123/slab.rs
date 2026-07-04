@@ -13,10 +13,10 @@ vi.mock('@/pages/video/hooks/use-video-generation', () => ({
 }));
 
 vi.mock('@/hooks/use-header', () => ({
-  useHeaderControl: vi.fn<() => void>(),
-  usePersistedHeaderSelect: vi.fn<() => unknown>(() => ({
-    value: 'model-1',
-    setValue: vi.fn<() => void>(),
+  useHeader: vi.fn<() => unknown>(() => ({
+    meta: { title: 'Video', subtitle: 'Video', icon: vi.fn(), contextLabel: null },
+    search: null,
+    select: null,
   })),
 }));
 

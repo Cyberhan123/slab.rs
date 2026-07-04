@@ -9,28 +9,35 @@ import {
 
 import {
   DEFAULT_HEADER_META,
-  type HeaderControl,
   type HeaderMeta,
-  type HeaderSearchControl,
+  type HeaderSearchConfig,
+  type HeaderSelectConfig,
 } from '@/layouts/header';
 
-type HeaderControlEntry = {
+type HeaderMetaEntry = {
   id: string;
-  control: HeaderControl;
+  meta: HeaderMeta;
+};
+
+type HeaderSelectEntry = {
+  id: string;
+  select: HeaderSelectConfig;
 };
 
 type HeaderSearchEntry = {
   id: string;
-  search: HeaderSearchControl;
+  search: HeaderSearchConfig;
 };
 
 export type HeaderContextValue = {
   meta: HeaderMeta;
-  control: HeaderControl | null;
-  search: HeaderSearchControl | null;
-  setControl: (id: string, control: HeaderControl) => void;
-  clearControl: (id: string) => void;
-  setSearch: (id: string, search: HeaderSearchControl) => void;
+  select: HeaderSelectConfig | null;
+  search: HeaderSearchConfig | null;
+  setMeta: (id: string, meta: HeaderMeta) => void;
+  clearMeta: (id: string) => void;
+  setSelect: (id: string, select: HeaderSelectConfig) => void;
+  clearSelect: (id: string) => void;
+  setSearch: (id: string, search: HeaderSearchConfig) => void;
   clearSearch: (id: string) => void;
 };
 
@@ -44,6 +51,7 @@ function upsertEntry<TEntry extends { id: string }>(
   entries: TEntry[],
   id: string,
   nextEntry: TEntry,
+  isSameEntry: (current: TEntry, next: TEntry) => boolean,
 ) {
   const index = entries.findIndex((entry) => entry.id === id);
 
@@ -51,50 +59,148 @@ function upsertEntry<TEntry extends { id: string }>(
     return [...entries, nextEntry];
   }
 
+  if (isSameEntry(entries[index], nextEntry)) {
+    return entries;
+  }
+
   return entries.map((entry, entryIndex) => (entryIndex === index ? nextEntry : entry));
+}
+
+function removeEntry<TEntry extends { id: string }>(entries: TEntry[], id: string) {
+  const nextEntries = entries.filter((entry) => entry.id !== id);
+  return nextEntries.length === entries.length ? entries : nextEntries;
+}
+
+function areHeaderMetaEqual(left: HeaderMeta, right: HeaderMeta) {
+  return (
+    left.title === right.title &&
+    left.subtitle === right.subtitle &&
+    left.icon === right.icon &&
+    (left.contextLabel ?? null) === (right.contextLabel ?? null)
+  );
+}
+
+function areHeaderSelectOptionsEqual(
+  left: HeaderSelectConfig['options'],
+  right: HeaderSelectConfig['options'],
+): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((leftOption, index) => {
+    const rightOption = right[index];
+    if (!rightOption) {
+      return false;
+    }
+
+    const leftChildren = leftOption.children;
+    const rightChildren = rightOption.children;
+    const childrenEqual =
+      !leftChildren && !rightChildren
+        ? true
+        : Boolean(
+            leftChildren &&
+              rightChildren &&
+              leftChildren.groupLabel === rightChildren.groupLabel &&
+              areHeaderSelectOptionsEqual(leftChildren.options, rightChildren.options),
+          );
+
+    return (
+      leftOption.id === rightOption.id &&
+      leftOption.label === rightOption.label &&
+      Boolean(leftOption.disabled) === Boolean(rightOption.disabled) &&
+      childrenEqual
+    );
+  });
+}
+
+function areHeaderSelectConfigsEqual(left: HeaderSelectConfig, right: HeaderSelectConfig) {
+  return (
+    left.value === right.value &&
+    left.placeholder === right.placeholder &&
+    left.onChange === right.onChange &&
+    left.groupLabel === right.groupLabel &&
+    Boolean(left.loading) === Boolean(right.loading) &&
+    Boolean(left.disabled) === Boolean(right.disabled) &&
+    left.emptyLabel === right.emptyLabel &&
+    areHeaderSelectOptionsEqual(left.options, right.options)
+  );
+}
+
+function areHeaderSearchConfigsEqual(left: HeaderSearchConfig, right: HeaderSearchConfig) {
+  return (
+    left.value === right.value &&
+    left.placeholder === right.placeholder &&
+    left.onChange === right.onChange &&
+    left.ariaLabel === right.ariaLabel &&
+    Boolean(left.disabled) === Boolean(right.disabled)
+  );
 }
 
 export function HeaderProvider({
   children,
   defaultMeta = DEFAULT_HEADER_META,
 }: HeaderProviderProps) {
-  const [controlEntries, setControlEntries] = useState<HeaderControlEntry[]>([]);
+  const [metaEntries, setMetaEntries] = useState<HeaderMetaEntry[]>([]);
+  const [selectEntries, setSelectEntries] = useState<HeaderSelectEntry[]>([]);
   const [searchEntries, setSearchEntries] = useState<HeaderSearchEntry[]>([]);
 
-  const setControl = useCallback((id: string, control: HeaderControl) => {
-    setControlEntries((current) => upsertEntry(current, id, { id, control }));
+  const setMeta = useCallback((id: string, meta: HeaderMeta) => {
+    setMetaEntries((current) =>
+      upsertEntry(current, id, { id, meta }, (left, right) => areHeaderMetaEqual(left.meta, right.meta)),
+    );
   }, []);
 
-  const clearControl = useCallback((id: string) => {
-    setControlEntries((current) => current.filter((entry) => entry.id !== id));
+  const clearMeta = useCallback((id: string) => {
+    setMetaEntries((current) => removeEntry(current, id));
   }, []);
 
-  const setSearch = useCallback((id: string, search: HeaderSearchControl) => {
-    setSearchEntries((current) => upsertEntry(current, id, { id, search }));
+  const setSelect = useCallback((id: string, select: HeaderSelectConfig) => {
+    setSelectEntries((current) =>
+      upsertEntry(current, id, { id, select }, (left, right) =>
+        areHeaderSelectConfigsEqual(left.select, right.select),
+      ),
+    );
+  }, []);
+
+  const clearSelect = useCallback((id: string) => {
+    setSelectEntries((current) => removeEntry(current, id));
+  }, []);
+
+  const setSearch = useCallback((id: string, search: HeaderSearchConfig) => {
+    setSearchEntries((current) =>
+      upsertEntry(current, id, { id, search }, (left, right) =>
+        areHeaderSearchConfigsEqual(left.search, right.search),
+      ),
+    );
   }, []);
 
   const clearSearch = useCallback((id: string) => {
-    setSearchEntries((current) => current.filter((entry) => entry.id !== id));
+    setSearchEntries((current) => removeEntry(current, id));
   }, []);
 
-  const control = controlEntries.at(-1)?.control ?? null;
+  const meta = metaEntries.at(-1)?.meta ?? defaultMeta;
+  const select = selectEntries.at(-1)?.select ?? null;
   const search = searchEntries.at(-1)?.search ?? null;
 
   useEffect(() => {
-    document.title = `${defaultMeta.title} | Slab`;
-  }, [defaultMeta.title]);
+    document.title = `${meta.title} | Slab`;
+  }, [meta.title]);
 
   const value = useMemo(
     () => ({
-      meta: defaultMeta,
-      control,
+      meta,
+      select,
       search,
-      setControl,
-      clearControl,
+      setMeta,
+      clearMeta,
+      setSelect,
+      clearSelect,
       setSearch,
       clearSearch,
     }),
-    [clearControl, clearSearch, control, defaultMeta, search, setControl, setSearch],
+    [clearMeta, clearSearch, clearSelect, meta, search, select, setMeta, setSearch, setSelect],
   );
 
   return <HeaderContext.Provider value={value}>{children}</HeaderContext.Provider>;

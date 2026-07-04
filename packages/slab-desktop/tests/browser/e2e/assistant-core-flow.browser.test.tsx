@@ -58,10 +58,10 @@ vi.mock('@/pages/assistant/hooks/use-markdown-theme', () => ({
 }));
 
 vi.mock('@/hooks/use-header', () => ({
-  useHeaderControl: vi.fn<() => void>(),
-  usePersistedHeaderSelect: vi.fn<() => unknown>(() => ({
-    setValue: vi.fn<() => void>(),
-    value: 'cloud-model',
+  useHeader: vi.fn<() => unknown>(() => ({
+    meta: { title: 'Assistant', subtitle: 'Assistant', icon: vi.fn(), contextLabel: null },
+    search: null,
+    select: null,
   })),
 }));
 
@@ -120,10 +120,6 @@ vi.mock('@slab/api', async () => {
     },
   });
 });
-
-vi.mock('@slab/api/models', () => ({
-  toCatalogModelList: vi.fn<(data: unknown) => unknown[]>((data) => (Array.isArray(data) ? data : [])),
-}));
 
 function createMockMessage(overrides: Partial<AssistantMessageRecord>): AssistantMessageRecord {
   return {

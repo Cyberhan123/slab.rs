@@ -4,7 +4,8 @@ import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 import { useNavigate } from 'react-router-dom';
 
-import { useHeaderControl, usePersistedHeaderSelect } from '@/hooks/use-header';
+import { useAiModel } from '@/hooks/use-ai-model';
+import { useHeader } from '@/hooks/use-header';
 
 import api, { getErrorMessage } from '@slab/api';
 import type { components } from '@slab/api/v1';
@@ -18,7 +19,6 @@ import {
 } from '@/lib/media-task-api';
 import { useMediaTaskPolling } from '@/pages/task/hooks/use-media-task-polling';
 import { useAgentSurfaceStore } from '@/store/useAgentSurfaceStore';
-import { toCatalogModelList } from '@slab/api/models';
 import { HEADER_SELECT_KEYS } from '@/layouts/header';
 import {
   DEFAULT_GENERATION_SIZE,
@@ -42,7 +42,6 @@ async function fileToDataUri(file: File): Promise<string> {
 export function useVideoGeneration() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [prompt, setPrompt] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
   const [widthStr, setWidthStr] = useState('512');
@@ -74,38 +73,25 @@ export function useVideoGeneration() {
   const initImageInputRef = useRef<HTMLInputElement>(null);
   const generationProgressRef = useRef<GenerationProgress | null>(null);
 
-  const { data: catalogModels, isLoading: catalogLoading } = api.useQuery(
-    'get',
-    '/v1/models',
-    {
-      params: {
-        query: {
-          capability: 'video_generation',
-        },
-      },
-    },
-  );
-  const { value: selectedModelId, setValue: setSelectedModelId } = usePersistedHeaderSelect({
-    key: HEADER_SELECT_KEYS.videoModel,
-    options: modelOptions.map((model) => ({
-      id: model.id,
-      disabled: !model.downloaded,
-    })),
-    isLoading: catalogLoading,
+  const videoModels = useAiModel({
+    capability: 'video_generation',
+    storageKey: HEADER_SELECT_KEYS.videoModel,
+    localOnly: true,
+    isOptionDisabled: (model) => !model.local_path,
   });
-
-  useEffect(() => {
-    const diffusionModels = toCatalogModelList(catalogModels)
-      .filter((model) => model.kind === 'local')
-      .map<ModelOption>((model) => ({
+  const catalogLoading = videoModels.loading;
+  const selectedModelId = videoModels.selectedId;
+  const setSelectedModelId = videoModels.setSelectedId;
+  const modelOptions = useMemo<ModelOption[]>(
+    () =>
+      videoModels.localModels.map((model) => ({
         id: model.id,
         label: model.display_name,
         downloaded: Boolean(model.local_path),
         local_path: model.local_path ?? null,
-      }));
-
-    setModelOptions(diffusionModels);
-  }, [catalogModels]);
+      })),
+    [videoModels.localModels],
+  );
 
   const selectedModel = useMemo(
     () => modelOptions.find((model) => model.id === selectedModelId),
@@ -140,7 +126,6 @@ export function useVideoGeneration() {
   const isGenerating = isSubmitting || generationPhase !== 'idle';
   const headerModelPicker = useMemo(
     () => ({
-      type: 'select' as const,
       value: selectedModelId,
       options: modelOptions.map((model) => ({
         id: model.id,
@@ -149,7 +134,7 @@ export function useVideoGeneration() {
           : t('pages.video.modelPicker.optionDownloadInHub', { model: model.label }),
         disabled: !model.downloaded,
       })),
-      onValueChange: setSelectedModelId,
+      onChange: setSelectedModelId,
       groupLabel: t('pages.video.modelPicker.groupLabel'),
       placeholder: t('pages.video.modelPicker.placeholder'),
       loading: catalogLoading,
@@ -159,7 +144,7 @@ export function useVideoGeneration() {
     [catalogLoading, isGenerating, modelOptions, selectedModelId, setSelectedModelId, t],
   );
 
-  useHeaderControl(headerModelPicker);
+  useHeader({ select: headerModelPicker });
 
   const clearGenerationTask = useCallback(() => {
     generationProgressRef.current = null;

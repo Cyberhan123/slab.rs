@@ -1,19 +1,16 @@
-import { useCallback, useContext, useEffect, useId, useLayoutEffect } from 'react';
+import { useContext, useId, useLayoutEffect } from 'react';
 
-import type { HeaderControl, HeaderSearchControl } from '@/layouts/header';
+import type {
+  HeaderMeta,
+  HeaderSearchConfig,
+  HeaderSelectConfig,
+} from '@/layouts/header';
 import { HeaderContext, type HeaderContextValue } from '@/layouts/header-provider';
-import { useHeaderUiStore } from '@/store/useHeaderUiStore';
 
-type PersistedHeaderSelectOption = {
-  id: string;
-  disabled?: boolean;
-};
-
-type UsePersistedHeaderSelectOptions<TOption extends PersistedHeaderSelectOption> = {
-  isLoading?: boolean;
-  key: string;
-  options: TOption[];
-  getDefaultValue?: (options: TOption[]) => string | undefined;
+export type UseHeaderRegistration = {
+  meta?: HeaderMeta | null;
+  select?: HeaderSelectConfig | null;
+  search?: HeaderSearchConfig | null;
 };
 
 function useRequiredHeaderContext(hookName: string): HeaderContextValue {
@@ -26,104 +23,75 @@ function useRequiredHeaderContext(hookName: string): HeaderContextValue {
   return context;
 }
 
-export function useHeader(): Pick<HeaderContextValue, 'meta' | 'control' | 'search'> {
+export function useHeader(): Pick<HeaderContextValue, 'meta' | 'select' | 'search'>;
+export function useHeader(registration: UseHeaderRegistration | null | undefined): Pick<
+  HeaderContextValue,
+  'meta' | 'select' | 'search'
+>;
+export function useHeader(registration?: UseHeaderRegistration | null) {
   const context = useRequiredHeaderContext('useHeader');
+  const id = useId();
+  const meta = registration?.meta ?? null;
+  const select = registration?.select ?? null;
+  const search = registration?.search ?? null;
+  const {
+    clearMeta,
+    clearSearch,
+    clearSelect,
+    setMeta,
+    setSearch,
+    setSelect,
+  } = context;
+
+  useLayoutEffect(() => {
+    if (registration === undefined) {
+      return undefined;
+    }
+
+    if (meta) {
+      setMeta(id, meta);
+    } else {
+      clearMeta(id);
+    }
+
+    if (select) {
+      setSelect(id, select);
+    } else {
+      clearSelect(id);
+    }
+
+    if (search) {
+      setSearch(id, search);
+    } else {
+      clearSearch(id);
+    }
+    return undefined;
+  }, [
+    clearMeta,
+    clearSearch,
+    clearSelect,
+    id,
+    meta,
+    registration,
+    search,
+    select,
+    setMeta,
+    setSearch,
+    setSelect,
+  ]);
+
+  useLayoutEffect(
+    () => () => {
+      clearMeta(id);
+      clearSelect(id);
+      clearSearch(id);
+    },
+    [clearMeta, clearSearch, clearSelect, id],
+  );
 
   return {
     meta: context.meta,
-    control: context.control,
+    select: context.select,
     search: context.search,
-  };
-}
-
-export function useHeaderControl(control: HeaderControl | null | undefined): void {
-  const { setControl, clearControl } = useRequiredHeaderContext('useHeaderControl');
-  const id = useId();
-
-  useLayoutEffect(() => {
-    if (!control) {
-      return undefined;
-    }
-
-    setControl(id, control);
-
-    return () => {
-      clearControl(id);
-    };
-  }, [clearControl, control, id, setControl]);
-}
-
-export function useHeaderSearch(search: HeaderSearchControl | null | undefined): void {
-  const { setSearch, clearSearch } = useRequiredHeaderContext('useHeaderSearch');
-  const id = useId();
-
-  useLayoutEffect(() => {
-    if (!search) {
-      return undefined;
-    }
-
-    setSearch(id, search);
-
-    return () => {
-      clearSearch(id);
-    };
-  }, [clearSearch, id, search, setSearch]);
-}
-
-export function usePersistedHeaderSelect<TOption extends PersistedHeaderSelectOption>({
-  isLoading = false,
-  key,
-  options,
-  getDefaultValue,
-}: UsePersistedHeaderSelectOptions<TOption>) {
-  const hasHydrated = useHeaderUiStore((state) => state.hasHydrated);
-  const value = useHeaderUiStore((state) => state.selections[key] ?? '');
-  const setSelection = useHeaderUiStore((state) => state.setSelection);
-  const clearSelection = useHeaderUiStore((state) => state.clearSelection);
-
-  const setValue = useCallback(
-    (nextValue: string) => {
-      setSelection(key, nextValue);
-    },
-    [key, setSelection],
-  );
-
-  useEffect(() => {
-    if (!hasHydrated || isLoading) {
-      return;
-    }
-
-    const enabledOptions = options.filter((option) => !option.disabled);
-
-    if (enabledOptions.length === 0) {
-      if (value) {
-        clearSelection(key);
-      }
-      return;
-    }
-
-    if (enabledOptions.some((option) => option.id === value)) {
-      return;
-    }
-
-    const preferredValue = getDefaultValue?.(options) ?? '';
-    const fallbackValue = enabledOptions.some((option) => option.id === preferredValue)
-      ? preferredValue
-      : enabledOptions[0]?.id ?? '';
-
-    if (!fallbackValue) {
-      clearSelection(key);
-      return;
-    }
-
-    if (fallbackValue !== value) {
-      setSelection(key, fallbackValue);
-    }
-  }, [clearSelection, getDefaultValue, hasHydrated, isLoading, key, options, setSelection, value]);
-
-  return {
-    hasHydrated,
-    setValue,
-    value,
   };
 }

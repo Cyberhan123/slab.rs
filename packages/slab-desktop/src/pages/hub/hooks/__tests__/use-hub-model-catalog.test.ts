@@ -6,7 +6,7 @@ import {
   type ModelItem,
   toModelItem,
 } from '../use-hub-model-catalog';
-import type { CatalogModel } from '@slab/api/models';
+import type { AiModel } from '@/hooks/use-ai-model';
 
 function model(
   capabilities: ModelItem['capabilities'],
@@ -86,7 +86,7 @@ describe('hub model catalog helpers', () => {
   });
 });
 
-function catalogModel(overrides: Partial<CatalogModel> = {}): CatalogModel {
+function catalogModel(overrides: Partial<AiModel> = {}): AiModel {
   return {
     backend_id: null,
     backend_ids: [],

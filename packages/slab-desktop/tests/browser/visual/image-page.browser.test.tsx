@@ -65,7 +65,11 @@ vi.mock('@/pages/image/hooks/use-image-model-preparation', () => ({
 }));
 
 vi.mock('@/hooks/use-header', () => ({
-  useHeaderControl: vi.fn<() => void>(),
+  useHeader: vi.fn<() => unknown>(() => ({
+    meta: { title: 'Image', subtitle: 'Image', icon: vi.fn(), contextLabel: null },
+    search: null,
+    select: null,
+  })),
 }));
 
 const createVoidMock = () => vi.fn<(...args: unknown[]) => void>();

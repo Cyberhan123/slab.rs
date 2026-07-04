@@ -15,7 +15,7 @@ import {
 } from '@slab/components/dialog';
 import { StageEmptyState, StatusPill } from '@slab/components/workspace';
 import { translateServerField, useTranslation } from '@slab/i18n';
-import { useHeaderSearch } from '@/hooks/use-header';
+import { useHeader } from '@/hooks/use-header';
 import { useUiStatePersistenceStatus } from '@/store/ui-state-storage';
 import api, { getErrorMessage } from '@slab/api';
 
@@ -105,12 +105,13 @@ export default function SettingsPage() {
     setActiveSectionId(nextSectionId);
   }, [activeSectionId, visibleSections]);
 
-  useHeaderSearch({
-    type: 'search',
-    value: searchQuery,
-    onValueChange: setSearchQuery,
-    placeholder: t('pages.settings.search.placeholder'),
-    ariaLabel: t('pages.settings.search.ariaLabel'),
+  useHeader({
+    search: {
+      value: searchQuery,
+      onChange: setSearchQuery,
+      placeholder: t('pages.settings.search.placeholder'),
+      ariaLabel: t('pages.settings.search.ariaLabel'),
+    },
   });
 
   const {

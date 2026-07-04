@@ -34,20 +34,12 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@slab/components/message-scroller"
-import api from "@slab/api"
-import { toCatalogModelList } from "@slab/api/models"
-import { useHeaderControl, usePersistedHeaderSelect } from "@/hooks/use-header"
+import { useAiModel } from "@/hooks/use-ai-model"
+import { useHeader } from "@/hooks/use-header"
 import { HEADER_SELECT_KEYS } from "@/layouts/header"
 import { useAssistantUiStore } from "@/store/useAssistantUiStore"
 import { useAgentSurfaceStore } from "@/store/useAgentSurfaceStore"
 import { GUARDRAIL_PMIDS, useGuardrailFlag } from "@/lib/guardrail-flags"
-import {
-  extractTaskId,
-  isFailedTaskStatus,
-  MODEL_DOWNLOAD_POLL_INTERVAL_MS,
-  MODEL_DOWNLOAD_TIMEOUT_MS,
-  sleep,
-} from "@/pages/task/utils"
 
 import {
   getAssistantErrorDescription,
@@ -87,7 +79,6 @@ function Assistant() {
   const [isSessionSheetOpen, setIsSessionSheetOpen] = useState(false)
   const [composerFocusSignal, setComposerFocusSignal] = useState(0)
   const [pendingModelSwitchId, setPendingModelSwitchId] = useState<string | null>(null)
-  const [loadedModelId, setLoadedModelId] = useState<string | null>(null)
   const [loadedModelStatus, setLoadedModelStatus] = useState<ModelRuntimeStatus | null>(null)
   const reasoningEffort = useAssistantUiStore((state) => state.reasoningEffort)
   const setReasoningEffort = useAssistantUiStore((state) => state.setReasoningEffort)
@@ -120,52 +111,15 @@ function Assistant() {
     updateSessionLabel,
   } = useAssistantSessions()
 
-  const {
-    data: catalogModels,
-    isLoading: catalogModelsLoading,
-    refetch: refetchCatalogModels,
-  } = api.useQuery("get", "/v1/models", {
-    params: {
-      query: {
-        capability: "chat_generation",
-      },
-    },
+  const assistantModels = useAiModel({
+    capability: "chat_generation",
+    storageKey: HEADER_SELECT_KEYS.assistantModel,
+    includeCloud: true,
   })
-
-  const downloadModelMutation = api.useMutation("post", "/v1/models/download", {
-    meta: {
-      skipGlobalErrorToast: true,
-    },
-  })
-  const loadModelMutation = api.useMutation("post", "/v1/models/load", {
-    meta: {
-      skipGlobalErrorToast: true,
-    },
-  })
-  const switchModelMutation = api.useMutation("post", "/v1/models/switch", {
-    meta: {
-      skipGlobalErrorToast: true,
-    },
-  })
-  const getTaskMutation = api.useMutation("get", "/v1/tasks/{id}", {
-    meta: {
-      skipGlobalErrorToast: true,
-    },
-  })
-
-  const parsedCatalogModels = useMemo(
-    () => toCatalogModelList(catalogModels),
-    [catalogModels]
-  )
-
-  const localAssistantModels = useMemo(
-    () => parsedCatalogModels.filter((model) => model.kind === "local"),
-    [parsedCatalogModels]
-  )
 
   const modelOptions = useMemo<ModelOption[]>(
     () =>
-      parsedCatalogModels.map((model) => {
+      assistantModels.models.map((model) => {
         const downloaded =
           model.kind === "cloud" ||
           (model.status === "ready" && typeof model.local_path === "string" && model.local_path.length > 0)
@@ -181,13 +135,10 @@ function Assistant() {
           source: model.kind,
         }
       }),
-    [parsedCatalogModels]
+    [assistantModels.models]
   )
-  const { value: selectedModelId, setValue: setSelectedModelId } = usePersistedHeaderSelect({
-    key: HEADER_SELECT_KEYS.assistantModel,
-    options: modelOptions,
-    isLoading: catalogModelsLoading,
-  })
+  const selectedModelId = assistantModels.selectedId
+  const setSelectedModelId = assistantModels.setSelectedId
   const selectedModel = useMemo(
     () => modelOptions.find((item) => item.id === selectedModelId),
     [modelOptions, selectedModelId]
@@ -197,106 +148,9 @@ function Assistant() {
     [modelOptions, pendingModelSwitchId]
   )
 
-  const waitForTaskToFinish = async (taskId: string) => {
-    const deadline = Date.now() + MODEL_DOWNLOAD_TIMEOUT_MS
-
-    while (Date.now() < deadline) {
-      // eslint-disable-next-line no-await-in-loop
-      const task = (await getTaskMutation.mutateAsync({
-        params: { path: { id: taskId } },
-      })) as { status: string; error_msg?: string | null }
-
-      if (task.status === "succeeded") {
-        return
-      }
-
-      if (isFailedTaskStatus(task.status)) {
-        throw new Error(task.error_msg ?? `Task ${taskId} ended with status: ${task.status}`)
-      }
-
-      // eslint-disable-next-line no-await-in-loop
-      await sleep(MODEL_DOWNLOAD_POLL_INTERVAL_MS)
-    }
-
-    throw new Error(t("pages.assistant.error.downloadTimedOut"))
-  }
-
-  const refreshCatalogAndFindModel = async (modelId: string) => {
-    const refreshed = await refetchCatalogModels()
-    const models = toCatalogModelList(refreshed.data)
-    return models.find((model) => model.id === modelId)
-  }
-
-  const ensureDownloadedModelPath = async (
-    modelId: string,
-    forceDownload = false
-  ): Promise<{ modelPath: string; downloadedNow: boolean }> => {
-    let model = localAssistantModels.find((item) => item.id === modelId)
-    if (!model) {
-      model = await refreshCatalogAndFindModel(modelId)
-    }
-
-    if (!model) {
-      throw new Error(t("pages.assistant.error.selectedModelMissing"))
-    }
-
-    if (model.kind !== "local") {
-      throw new Error(t("pages.assistant.error.selectedModelNotLocal"))
-    }
-
-    if (model.local_path && !forceDownload) {
-      return { modelPath: model.local_path, downloadedNow: false }
-    }
-
-    const downloadResponse = await downloadModelMutation.mutateAsync({
-      body: {
-        model_id: modelId,
-      },
-    })
-    const taskId = extractTaskId(downloadResponse)
-
-    if (!taskId) {
-      throw new Error("Failed to start model download task")
-    }
-
-    await waitForTaskToFinish(taskId)
-
-    const refreshedModel = await refreshCatalogAndFindModel(modelId)
-    if (!refreshedModel?.local_path) {
-      throw new Error("Model download completed, but local_path is empty")
-    }
-
-    return { modelPath: refreshedModel.local_path, downloadedNow: true }
-  }
-
-  const loadOrSwitchSelectedModel = async (modelId: string) => {
-    const shouldSwitch = Boolean(loadedModelId && loadedModelId !== selectedModelId)
-
-    if (shouldSwitch) {
-      const status = await switchModelMutation.mutateAsync({
-        body: {
-          model_id: modelId,
-        },
-      })
-      setLoadedModelStatus(status)
-      return
-    }
-
-    const status = await loadModelMutation.mutateAsync({
-      body: {
-        model_id: modelId,
-      },
-    })
-    setLoadedModelStatus(status)
-  }
-
   const prepareSelectedModel = async () => {
     if (!selectedModelId) {
       throw new Error(t("pages.assistant.error.selectModelFirst"))
-    }
-
-    if (loadedModelId === selectedModelId) {
-      return
     }
 
     const selectedOption = modelOptions.find((item) => item.id === selectedModelId)
@@ -305,13 +159,12 @@ function Assistant() {
     }
 
     if (selectedOption.source === "cloud") {
-      setLoadedModelId(selectedModelId)
       setLoadedModelStatus(null)
       return
     }
 
-    const selectedLocal = localAssistantModels.find((item) => item.id === selectedModelId)
-    const { downloadedNow } = await ensureDownloadedModelPath(selectedModelId)
+    const selectedLocal = assistantModels.localModels.find((item) => item.id === selectedModelId)
+    const { downloadedNow } = await assistantModels.ensureDownloaded(selectedModelId)
 
     if (downloadedNow) {
       toast.success(
@@ -322,7 +175,10 @@ function Assistant() {
     }
 
     try {
-      await loadOrSwitchSelectedModel(selectedModelId)
+      const status = await assistantModels.ensureLoaded(selectedModelId)
+      if (status.runtimeStatus) {
+        setLoadedModelStatus(status.runtimeStatus)
+      }
     } catch (firstLoadError) {
       if (downloadedNow) {
         throw firstLoadError
@@ -330,7 +186,7 @@ function Assistant() {
 
       toast.message(t("pages.assistant.toast.modelLoadRetry"))
 
-      const retry = await ensureDownloadedModelPath(selectedModelId, true)
+      const retry = await assistantModels.ensureDownloaded(selectedModelId, { forceDownload: true })
       if (retry.downloadedNow) {
         toast.success(
           t("pages.assistant.toast.downloaded", {
@@ -339,10 +195,11 @@ function Assistant() {
         )
       }
 
-      await loadOrSwitchSelectedModel(selectedModelId)
+      const status = await assistantModels.ensureLoaded(selectedModelId)
+      if (status.runtimeStatus) {
+        setLoadedModelStatus(status.runtimeStatus)
+      }
     }
-
-    setLoadedModelId(selectedModelId)
   }
 
   const ensureAssistantModelReady = async () => {
@@ -386,11 +243,8 @@ function Assistant() {
     toolConcurrency,
   })
 
-  const modelLoading = catalogModelsLoading
-  const isPreparingModel =
-    loadModelMutation.isPending ||
-    switchModelMutation.isPending ||
-    downloadModelMutation.isPending
+  const modelLoading = assistantModels.loading
+  const isPreparingModel = assistantModels.status.busy
   const isSessionBusy = isRequesting || isPreparingModel || isHistoryLoading || isSessionMutating
   const isSessionBootstrapping = (sessionsLoading || isCreatingSession) && conversationList.length === 0
   const safeMessages = useMemo<AssistantMessageRecord[]>(() => messages ?? [], [messages])
@@ -413,7 +267,7 @@ function Assistant() {
     conversationList.find((item) => item.key === curConversation)?.label?.trim() ||
     t("pages.assistant.sessionSummary.currentSession")
   const selectedRuntimeContextLength =
-    loadedModelId === selectedModelId ? loadedModelStatus?.context_length ?? null : null
+    loadedModelStatus?.context_length ?? null
   const selectedModelStatusLabel = useMemo(
     () =>
       getSelectedModelStatusLabel({
@@ -519,13 +373,12 @@ function Assistant() {
       emptyLabel: t("pages.assistant.modelPicker.emptyLabel"),
       groupLabel: t("pages.assistant.modelPicker.groupLabel"),
       loading: modelLoading,
-      onValueChange: handleModelPickerChange,
+      onChange: handleModelPickerChange,
       options: modelOptions.map((model) => ({
         id: model.id,
         label: model.label,
       })),
       placeholder: t("pages.assistant.modelPicker.placeholder"),
-      type: "select" as const,
       value: selectedModelId,
     }),
     [
@@ -541,7 +394,7 @@ function Assistant() {
   )
   const latestUserPrompt = getAssistantMessageTextContent(latestUserMessage?.message).trim()
 
-  useHeaderControl(headerModelPicker)
+  useHeader({ select: headerModelPicker })
 
   const sortedConversations = useMemo(() => {
     const currentConversation = conversationList.find((item) => item.key === curConversation)

@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
-import { useHeaderSearch } from '@/hooks/use-header';
+import { useHeader } from '@/hooks/use-header';
 import api, { getLocalizedErrorMessage, postFormData } from '@slab/api';
 import {
   isPluginRunning,
@@ -56,16 +56,15 @@ export function usePluginsPage() {
 
   const headerSearch = useMemo(
     () => ({
-      type: 'search' as const,
       value: searchQuery,
-      onValueChange: setSearchQuery,
+      onChange: setSearchQuery,
       placeholder: t('pages.plugins.search.placeholder'),
       ariaLabel: t('pages.plugins.search.ariaLabel'),
     }),
     [searchQuery, t],
   );
 
-  useHeaderSearch(headerSearch);
+  useHeader({ search: headerSearch });
 
   const {
     data: pluginRows,

@@ -52,7 +52,11 @@ const {
 }));
 
 vi.mock('@/hooks/use-header', () => ({
-  useHeaderSearch: vi.fn<() => void>(),
+  useHeader: vi.fn<() => unknown>(() => ({
+    meta: { title: 'Settings', subtitle: 'Settings', icon: vi.fn(), contextLabel: null },
+    search: null,
+    select: null,
+  })),
 }));
 
 vi.mock('@slab/api', async () => {

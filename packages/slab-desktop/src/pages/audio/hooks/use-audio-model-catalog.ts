@@ -1,48 +1,28 @@
 import { useMemo } from 'react';
 
-import api from '@slab/api';
-import { toCatalogModelList, type CatalogModel } from '@slab/api/models';
-import { usePersistedHeaderSelect } from '@/hooks/use-header';
+import {
+  useAiModel,
+  type AiModel,
+  type EnsureDownloadedResult,
+} from '@/hooks/use-ai-model';
 import { HEADER_SELECT_KEYS } from '@/layouts/header';
 
 export function useAudioModelCatalog() {
-  const {
-    data: transcriptionCatalogModels,
-    isLoading: transcriptionModelsLoading,
-    error: transcriptionModelsError,
-    refetch: refetchTranscriptionModels,
-  } = api.useQuery('get', '/v1/models', {
-    params: {
-      query: {
-        capability: 'audio_transcription',
-      },
-    },
+  const transcriptionCatalog = useAiModel({
+    capability: 'audio_transcription',
+    storageKey: HEADER_SELECT_KEYS.audioModel,
+    localOnly: true,
   });
-  const {
-    data: vadCatalogModels,
-    isLoading: vadModelsLoading,
-    error: vadModelsError,
-    refetch: refetchVadModels,
-  } = api.useQuery('get', '/v1/models', {
-    params: {
-      query: {
-        capability: 'audio_vad',
-      },
-    },
+  const vadCatalog = useAiModel({
+    capability: 'audio_vad',
+    localOnly: true,
   });
 
-  const whisperTranscribeModels = useMemo(
-    () => toCatalogModelList(transcriptionCatalogModels).filter((model) => model.kind === 'local'),
-    [transcriptionCatalogModels],
-  );
-
-  const whisperVadModels = useMemo(
-    () => toCatalogModelList(vadCatalogModels).filter((model) => model.kind === 'local'),
-    [vadCatalogModels],
-  );
+  const whisperTranscribeModels = transcriptionCatalog.localModels;
+  const whisperVadModels = vadCatalog.localModels;
 
   const audioModels = useMemo(() => {
-    const merged = new Map<string, CatalogModel>();
+    const merged = new Map<string, AiModel>();
     whisperTranscribeModels.forEach((model) => {
       merged.set(model.id, model);
     });
@@ -52,28 +32,30 @@ export function useAudioModelCatalog() {
     return Array.from(merged.values());
   }, [whisperTranscribeModels, whisperVadModels]);
 
-  const catalogModelsLoading = transcriptionModelsLoading || vadModelsLoading;
-  const catalogModelsError = transcriptionModelsError ?? vadModelsError;
-  const { value: selectedModelId, setValue: setSelectedModelId } = usePersistedHeaderSelect({
-    key: HEADER_SELECT_KEYS.audioModel,
-    options: whisperTranscribeModels,
-    isLoading: catalogModelsLoading,
-  });
+  const ensureDownloadedAudioModel = async (
+    modelId: string,
+  ): Promise<EnsureDownloadedResult> => {
+    if (whisperVadModels.some((model) => model.id === modelId)) {
+      return vadCatalog.ensureDownloaded(modelId);
+    }
 
-  const selectedModel = useMemo(
-    () => whisperTranscribeModels.find((model) => model.id === selectedModelId),
-    [whisperTranscribeModels, selectedModelId],
-  );
+    return transcriptionCatalog.ensureDownloaded(modelId);
+  };
 
   return {
     audioModels,
-    catalogModelsError,
-    catalogModelsLoading,
-    refetchTranscriptionModels,
-    refetchVadModels,
-    selectedModel,
-    selectedModelId,
-    setSelectedModelId,
+    catalogModelsError: transcriptionCatalog.error ?? vadCatalog.error,
+    catalogModelsLoading: transcriptionCatalog.loading || vadCatalog.loading,
+    ensureDownloadedAudioModel,
+    ensureDownloadedTranscriptionModel: transcriptionCatalog.ensureDownloaded,
+    ensureDownloadedVadModel: vadCatalog.ensureDownloaded,
+    loadTranscriptionModel: transcriptionCatalog.load,
+    modelLifecycleBusy: transcriptionCatalog.status.busy || vadCatalog.status.busy,
+    refetchTranscriptionModels: transcriptionCatalog.refetch,
+    refetchVadModels: vadCatalog.refetch,
+    selectedModel: transcriptionCatalog.selected,
+    selectedModelId: transcriptionCatalog.selectedId,
+    setSelectedModelId: transcriptionCatalog.setSelectedId,
     whisperTranscribeModels,
     whisperVadModels,
   };

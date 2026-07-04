@@ -3,7 +3,7 @@ import { Label } from '@slab/components/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slab/components/select';
 import { Switch } from '@slab/components/switch';
 import { useTranslation } from '@slab/i18n';
-import type { CatalogModel } from '@slab/api/models';
+import type { AiModel } from '@/hooks/use-ai-model';
 
 import { BUNDLED_VAD_MODEL_ID } from '../const';
 
@@ -18,8 +18,8 @@ export type VadSettingsProps = {
   selectedVadModelId: string;
   setSelectedVadModelId: (value: string) => void;
   catalogModelsLoading: boolean;
-  whisperVadModels: CatalogModel[];
-  selectedVadModel: CatalogModel | undefined;
+  whisperVadModels: AiModel[];
+  selectedVadModel: AiModel | undefined;
   vadThreshold: string;
   setVadThreshold: (value: string) => void;
   vadMinSpeechDurationMs: string;

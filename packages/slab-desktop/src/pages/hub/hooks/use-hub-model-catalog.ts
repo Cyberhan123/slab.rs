@@ -8,12 +8,14 @@ import { translateServerField, useTranslation } from '@slab/i18n';
 import api, { getErrorMessage, getLocalizedErrorMessage, postFormData } from '@slab/api';
 import type { components } from '@slab/api/v1';
 import {
-  modelSupportsCapability,
-  toCatalogModelList,
-  type CatalogModelRuntimeState,
-  type CatalogModelStatus,
+  type AiModel,
+  type AiModelRuntimeState,
+  type AiModelStatus,
   type ModelCapability,
-} from '@slab/api/models';
+  modelSupportsCapability,
+  toAiModelList,
+  useAiModel,
+} from '@/hooks/use-ai-model';
 import { isFailedTaskStatus } from '@/pages/task/utils';
 import {
   extractTaskId,
@@ -41,7 +43,7 @@ export const STATUS_OPTIONS = ['all', 'ready', 'downloading', 'not_downloaded', 
 
 export type ModelCategory = (typeof CATEGORY_OPTIONS)[number];
 export type ModelFilterStatus = (typeof STATUS_OPTIONS)[number];
-export type ModelStatus = CatalogModelStatus;
+export type ModelStatus = AiModelStatus;
 export type ModelVramRisk = 'unknown' | 'ok' | 'high';
 export type ModelItem = {
   id: string;
@@ -56,7 +58,7 @@ export type ModelItem = {
   status: ModelStatus;
   local_path: string | null;
   pending: boolean;
-  runtime_state: CatalogModelRuntimeState | null;
+  runtime_state: AiModelRuntimeState | null;
   download_task_id: string | null;
   download_progress: ModelDownloadProgress | null;
   size_bytes: number | null;
@@ -90,30 +92,9 @@ export function useHubModelCatalog() {
   const downloadTracking = useHubModelDownloadStore((state) => state.downloadTracking);
   const setModelDownloadTracking = useHubModelDownloadStore((state) => state.setDownloadTracking);
 
-  const {
-    data,
-    error,
-    isLoading,
-    isRefetching,
-    refetch,
-  } = api.useQuery('get', '/v1/models');
+  const modelCatalog = useAiModel();
   const { data: gpuStatus } = api.useQuery('get', '/v1/system/gpu');
   const deleteModelMutation = api.useMutation('delete', '/v1/models/{id}', {
-    meta: {
-      skipGlobalErrorToast: true,
-    },
-  });
-  const loadModelMutation = api.useMutation('post', '/v1/models/load', {
-    meta: {
-      skipGlobalErrorToast: true,
-    },
-  });
-  const unloadModelMutation = api.useMutation('post', '/v1/models/unload', {
-    meta: {
-      skipGlobalErrorToast: true,
-    },
-  });
-  const switchModelMutation = api.useMutation('post', '/v1/models/switch', {
     meta: {
       skipGlobalErrorToast: true,
     },
@@ -134,10 +115,10 @@ export function useHubModelCatalog() {
 
   const models = useMemo<ModelItem[]>(
     () =>
-      toCatalogModelList(data).map((model) =>
+      modelCatalog.models.map((model) =>
         toModelItem(model, downloadTracking[model.id], maxFreeGpuMemoryBytes),
       ),
-    [data, downloadTracking, maxFreeGpuMemoryBytes],
+    [downloadTracking, maxFreeGpuMemoryBytes, modelCatalog.models],
   );
   const filteredModels = useMemo(
     () =>
@@ -168,9 +149,9 @@ export function useHubModelCatalog() {
   const hasMore = visibleModels.length < filteredModels.length;
   const canCreate = Boolean(createFile && !createModelPending);
   const modelActionPending =
-    loadModelMutation.isPending ||
-    unloadModelMutation.isPending ||
-    switchModelMutation.isPending;
+    modelCatalog.status.loading ||
+    modelCatalog.status.unloading ||
+    modelCatalog.status.switching;
 
   useEffect(() => {
     setVisibleCount(DEFAULT_VISIBLE_COUNT);
@@ -178,7 +159,7 @@ export function useHubModelCatalog() {
 
   const hasPendingModels = models.some((model) => model.pending);
   const { start: startCatalogPoll, stop: stopCatalogPoll } = useInterval(() => {
-    void refetch();
+    void modelCatalog.refetch();
   }, 3000);
 
   useEffect(() => {
@@ -233,7 +214,7 @@ export function useHubModelCatalog() {
       setCategory('all');
       setStatus('all');
       setCreateOpen(false);
-      void refetch();
+      void modelCatalog.refetch();
     } catch (createError) {
       toast.error(t('pages.hub.toast.importFailed'), {
         description: getErrorMessage(createError),
@@ -276,14 +257,13 @@ export function useHubModelCatalog() {
   };
 
   const refreshCatalogAndFindModel = async (modelId: string) => {
-    const refreshed = await refetch();
-    const refreshedModels = toCatalogModelList(refreshed.data);
-    return refreshedModels.find((model) => model.id === modelId);
+    const refreshed = await modelCatalog.refetch();
+    return toAiModelList(refreshed.data).find((model) => model.id === modelId);
   };
 
   const refreshRuntimeState = useCallback(async () => {
     await Promise.all([
-      refetch(),
+      modelCatalog.refetch(),
       queryClient.invalidateQueries({
         predicate: (query) => {
           const key = JSON.stringify(query.queryKey);
@@ -291,7 +271,7 @@ export function useHubModelCatalog() {
         },
       }),
     ]);
-  }, [queryClient, refetch]);
+  }, [modelCatalog.refetch, queryClient]);
 
   async function trackModelDownload(model: ModelItem, taskId: string) {
     try {
@@ -311,7 +291,7 @@ export function useHubModelCatalog() {
       });
     } finally {
       setModelDownloadTracking(model.id, null);
-      void refetch();
+      void modelCatalog.refetch();
     }
   }
 
@@ -335,7 +315,7 @@ export function useHubModelCatalog() {
       toast.success(t('pages.hub.toast.downloadStarted'), {
         description: model.display_name,
       });
-      void refetch();
+      void modelCatalog.refetch();
       void trackModelDownload(model, taskId);
     } catch (downloadError) {
       toast.error(t('pages.hub.toast.downloadFailed'), {
@@ -407,37 +387,25 @@ export function useHubModelCatalog() {
   const loadModel = useCallback(
     (model: ModelItem) =>
       runModelAction(model, t('pages.hub.toast.loaded'), () =>
-        loadModelMutation.mutateAsync({
-          body: {
-            model_id: model.id,
-          },
-        }),
+        modelCatalog.load(model.id),
       ),
-    [loadModelMutation, runModelAction, t],
+    [modelCatalog.load, runModelAction, t],
   );
 
   const unloadModel = useCallback(
     (model: ModelItem) =>
       runModelAction(model, t('pages.hub.toast.unloaded'), () =>
-        unloadModelMutation.mutateAsync({
-          body: {
-            model_id: model.id,
-          },
-        }),
+        modelCatalog.unload(model.id),
       ),
-    [runModelAction, t, unloadModelMutation],
+    [modelCatalog.unload, runModelAction, t],
   );
 
   const switchModel = useCallback(
     (model: ModelItem) =>
       runModelAction(model, t('pages.hub.toast.switched'), () =>
-        switchModelMutation.mutateAsync({
-          body: {
-            model_id: model.id,
-          },
-        }),
+        modelCatalog.switchTo(model.id),
       ),
-    [runModelAction, switchModelMutation, t],
+    [modelCatalog.switchTo, runModelAction, t],
   );
 
   return {
@@ -460,11 +428,11 @@ export function useHubModelCatalog() {
     loadMore,
     downloadedCount,
     pendingCount,
-    isLoading,
-    isRefetching,
-    error,
-    dataErrorMessage: error ? getLocalizedErrorMessage(error, t) : null,
-    refetch,
+    isLoading: modelCatalog.loading,
+    isRefetching: modelCatalog.refetching,
+    error: modelCatalog.error,
+    dataErrorMessage: modelCatalog.error ? getLocalizedErrorMessage(modelCatalog.error, t) : null,
+    refetch: modelCatalog.refetch,
     canCreate,
     createModel,
     downloadModel,
@@ -590,7 +558,7 @@ function isModelPackFile(file: File): boolean {
 }
 
 export function toModelItem(
-  model: ReturnType<typeof toCatalogModelList>[number],
+  model: AiModel,
   tracking: DownloadTrackingState | undefined,
   maxFreeGpuMemoryBytes: number | null,
 ): ModelItem {

@@ -14,8 +14,11 @@ vi.mock('@/pages/settings/hooks/use-settings-autosave', () => ({
 }));
 
 vi.mock('@/hooks/use-header', () => ({
-  useHeaderControl: vi.fn<() => void>(),
-  useHeaderSearch: vi.fn<() => void>(),
+  useHeader: vi.fn<() => unknown>(() => ({
+    meta: { title: 'Settings', subtitle: 'Settings', icon: vi.fn(), contextLabel: null },
+    search: null,
+    select: null,
+  })),
 }));
 
 const { mockApiUseQuery } = vi.hoisted(() => ({

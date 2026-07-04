@@ -4,10 +4,10 @@ import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
 import useFile, { type SelectedFile } from '@/hooks/use-file';
-import { useHeaderControl } from '@/hooks/use-header';
+import { useHeader } from '@/hooks/use-header';
 import useIsTauri from '@/hooks/use-tauri';
 import api from '@slab/api';
-import { modelSupportsCapability, toCatalogModelList } from '@slab/api/models';
+import { modelSupportsCapability } from '@/hooks/use-ai-model';
 import {
   deriveProgress,
   getAudioTranscription,
@@ -21,13 +21,7 @@ import {
 } from '@/lib/model-config';
 import { useAudioUiStore } from '@/store/useAudioUiStore';
 import { useMediaTaskPolling } from '@/pages/task/hooks/use-media-task-polling';
-import {
-  extractTaskId,
-  isFailedTaskStatus,
-  MODEL_DOWNLOAD_POLL_INTERVAL_MS,
-  MODEL_DOWNLOAD_TIMEOUT_MS,
-  sleep,
-} from '@/pages/task/utils';
+import { MODEL_DOWNLOAD_POLL_INTERVAL_MS } from '@/pages/task/utils';
 import {
   BUNDLED_VAD_MODEL_ID,
   type PreparingStage,
@@ -75,32 +69,18 @@ export function useAudio() {
   const setModelControlOverrides = useAudioUiStore((state) => state.setModelControlOverrides);
   const clearModelControlOverrides = useAudioUiStore((state) => state.clearModelControlOverrides);
   const {
-    audioModels,
     catalogModelsError,
     catalogModelsLoading,
-    refetchTranscriptionModels,
-    refetchVadModels,
+    ensureDownloadedTranscriptionModel,
+    ensureDownloadedVadModel,
+    loadTranscriptionModel,
+    modelLifecycleBusy,
     selectedModel,
     selectedModelId,
     setSelectedModelId,
     whisperTranscribeModels,
     whisperVadModels,
   } = useAudioModelCatalog();
-  const downloadModelMutation = api.useMutation('post', '/v1/models/download', {
-    meta: {
-      skipGlobalErrorToast: true,
-    },
-  });
-  const loadModelMutation = api.useMutation('post', '/v1/models/load', {
-    meta: {
-      skipGlobalErrorToast: true,
-    },
-  });
-  const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}', {
-    meta: {
-      skipGlobalErrorToast: true,
-    },
-  });
   const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel', {
     meta: {
       skipGlobalErrorToast: true,
@@ -223,18 +203,16 @@ export function useAudio() {
     Boolean(preparingStage) ||
     transcriptionPhase !== 'idle' ||
     transcribe.isPending ||
-    loadModelMutation.isPending ||
-    downloadModelMutation.isPending ||
+    modelLifecycleBusy ||
     cancelTaskMutation.isPending;
   const headerModelPicker = useMemo(
     () => ({
-      type: 'select' as const,
       value: selectedModelId,
       options: whisperTranscribeModels.map((model) => ({
         id: model.id,
         label: model.display_name,
       })),
-      onValueChange: setSelectedModelId,
+      onChange: setSelectedModelId,
       groupLabel: t('pages.audio.modelPicker.groupLabel'),
       placeholder: t('pages.audio.modelPicker.placeholder'),
       loading: catalogModelsLoading,
@@ -245,7 +223,7 @@ export function useAudio() {
   );
   const webFileInputRef = useRef<HTMLInputElement>(null);
 
-  useHeaderControl(headerModelPicker);
+  useHeader({ select: headerModelPicker });
 
   useEffect(() => {
     if (!selectedModelId || !selectedModelConfigError) {
@@ -301,91 +279,6 @@ export function useAudio() {
     ],
   );
 
-  const waitForTaskToFinish = async (tid: string) => {
-    const deadline = Date.now() + MODEL_DOWNLOAD_TIMEOUT_MS;
-
-    while (Date.now() < deadline) {
-      // eslint-disable-next-line no-await-in-loop
-      const task = (await getTaskMutation.mutateAsync({
-        params: {
-          path: { id: tid },
-        },
-      })) as { status: string; error_msg?: string | null };
-
-      if (task.status === 'succeeded') {
-        return;
-      }
-
-      if (isFailedTaskStatus(task.status)) {
-        throw new Error(
-          task.error_msg ??
-            t('pages.hub.error.taskEndedWithStatus', {
-              taskId: tid,
-              status: task.status,
-            }),
-        );
-      }
-
-      // eslint-disable-next-line no-await-in-loop
-      await sleep(MODEL_DOWNLOAD_POLL_INTERVAL_MS);
-    }
-
-    throw new Error(t('pages.audio.error.downloadTimedOut'));
-  };
-
-  const refreshCatalogAndFindModel = async (modelId: string) => {
-    const [transcriptionRefresh, vadRefresh] = await Promise.all([
-      refetchTranscriptionModels(),
-      refetchVadModels(),
-    ]);
-    const models = [
-      ...toCatalogModelList(transcriptionRefresh.data),
-      ...toCatalogModelList(vadRefresh.data),
-    ];
-    return models.find((model) => model.id === modelId);
-  };
-
-  const ensureDownloadedModelPath = async (
-    modelId: string,
-  ): Promise<{ modelPath: string; downloadedNow: boolean }> => {
-    let model = audioModels.find((item) => item.id === modelId);
-    if (!model) {
-      model = await refreshCatalogAndFindModel(modelId);
-    }
-
-    if (!model) {
-      throw new Error(t('pages.audio.error.selectedModelMissingGeneric'));
-    }
-
-    if (model.kind !== 'local') {
-      throw new Error(t('pages.audio.error.selectedModelNotLocal'));
-    }
-
-    if (model.local_path) {
-      return { modelPath: model.local_path, downloadedNow: false };
-    }
-
-    const downloadResponse = await downloadModelMutation.mutateAsync({
-      body: {
-        model_id: modelId,
-      },
-    });
-    const tid = extractTaskId(downloadResponse);
-
-    if (!tid) {
-      throw new Error(t('pages.audio.error.startDownloadFailed'));
-    }
-
-    await waitForTaskToFinish(tid);
-
-    const refreshedModel = await refreshCatalogAndFindModel(modelId);
-    if (!refreshedModel?.local_path) {
-      throw new Error(t('pages.audio.error.missingDownloadedPath'));
-    }
-
-    return { modelPath: refreshedModel.local_path, downloadedNow: true };
-  };
-
   const prepareSelectedModel = async (): Promise<string> => {
     if (!selectedModelId) {
       throw new Error(t('pages.audio.error.selectModelFirst'));
@@ -396,17 +289,13 @@ export function useAudio() {
       throw new Error(t('pages.audio.error.selectedModelMissing'));
     }
 
-    const { downloadedNow } = await ensureDownloadedModelPath(selectedModelId);
+    const { downloadedNow } = await ensureDownloadedTranscriptionModel(selectedModelId);
 
     if (downloadedNow) {
       toast.success(t('pages.audio.toast.downloaded', { model: model.display_name }));
     }
 
-    await loadModelMutation.mutateAsync({
-      body: {
-        model_id: selectedModelId,
-      },
-    });
+    await loadTranscriptionModel(selectedModelId);
 
     return model.display_name;
   };
@@ -526,10 +415,7 @@ export function useAudio() {
         throw new Error(t('pages.audio.error.selectDedicatedVadModel'));
       }
 
-      let model = whisperVadModels.find((item) => item.id === selectedVadModelId);
-      if (!model) {
-        model = await refreshCatalogAndFindModel(selectedVadModelId);
-      }
+      const model = whisperVadModels.find((item) => item.id === selectedVadModelId);
       if (!model) {
         throw new Error(t('pages.audio.error.selectedVadMissing'));
       }
@@ -537,7 +423,7 @@ export function useAudio() {
         throw new Error(t('pages.audio.error.selectedModelNotDedicatedVad'));
       }
 
-      const preparedModel = await ensureDownloadedModelPath(selectedVadModelId);
+      const preparedModel = await ensureDownloadedVadModel(selectedVadModelId);
       modelPath = preparedModel.modelPath;
       modelName = model.display_name;
       if (preparedModel.downloadedNow) {

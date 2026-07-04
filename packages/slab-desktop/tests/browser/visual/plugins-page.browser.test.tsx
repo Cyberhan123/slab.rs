@@ -28,8 +28,11 @@ vi.mock("@/hooks/use-tauri", () => ({
 }));
 
 vi.mock("@/hooks/use-header", () => ({
-  useHeaderControl: vi.fn<() => void>(),
-  useHeaderSearch: vi.fn<() => void>(),
+  useHeader: vi.fn<() => unknown>(() => ({
+    meta: { title: "Plugins", subtitle: "Plugins", icon: vi.fn(), contextLabel: null },
+    search: null,
+    select: null,
+  })),
 }));
 
 vi.mock("@slab/api", async () => {

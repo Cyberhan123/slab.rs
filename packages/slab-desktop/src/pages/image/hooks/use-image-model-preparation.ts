@@ -1,18 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
-import { usePersistedHeaderSelect } from '@/hooks/use-header';
-import api from '@slab/api';
-import { toCatalogModelList } from '@slab/api/models';
+import { useAiModel } from '@/hooks/use-ai-model';
 import { HEADER_SELECT_KEYS } from '@/layouts/header';
-import {
-  extractTaskId,
-  isFailedTaskStatus,
-  MODEL_DOWNLOAD_POLL_INTERVAL_MS,
-  MODEL_DOWNLOAD_TIMEOUT_MS,
-  sleep,
-} from '@/pages/task/utils';
 
 export type ImageModelOption = {
   id: string;
@@ -24,50 +15,14 @@ export type ImageModelOption = {
 
 export function useImageModelPreparation() {
   const { t } = useTranslation();
-  const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
-
-  const {
-    data: catalogModels,
-    isLoading: catalogLoading,
-    refetch: refetchCatalogModels,
-  } = api.useQuery('get', '/v1/models', {
-    params: {
-      query: {
-        capability: 'image_generation',
-      },
-    },
-  });
-  const downloadModelMutation = api.useMutation('post', '/v1/models/download', {
-    meta: {
-      skipGlobalErrorToast: true,
-    },
-  });
-  const loadModelMutation = api.useMutation('post', '/v1/models/load', {
-    meta: {
-      skipGlobalErrorToast: true,
-    },
-  });
-  const switchModelMutation = api.useMutation('post', '/v1/models/switch', {
-    meta: {
-      skipGlobalErrorToast: true,
-    },
-  });
-  const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}', {
-    meta: {
-      skipGlobalErrorToast: true,
-    },
+  const imageModels = useAiModel({
+    capability: 'image_generation',
+    storageKey: HEADER_SELECT_KEYS.imageModel,
+    localOnly: true,
+    getDefaultModelId: (models) => models.find((model) => Boolean(model.local_path))?.id,
   });
 
-  const normalizedCatalogModels = useMemo(
-    () => toCatalogModelList(catalogModels),
-    [catalogModels],
-  );
-
-  const diffusionModels = useMemo(
-    () => normalizedCatalogModels.filter((model) => model.kind === 'local'),
-    [normalizedCatalogModels],
-  );
-
+  const diffusionModels = imageModels.localModels;
   const modelOptions = useMemo<ImageModelOption[]>(
     () =>
       diffusionModels.map((model) => ({
@@ -79,160 +34,35 @@ export function useImageModelPreparation() {
       })),
     [diffusionModels],
   );
-  const { value: selectedModelId, setValue: setSelectedModelId } = usePersistedHeaderSelect({
-    key: HEADER_SELECT_KEYS.imageModel,
-    options: modelOptions,
-    isLoading: catalogLoading,
-    getDefaultValue: (options) => options.find((option) => option.downloaded)?.id,
-  });
-
-  const waitForTaskToFinish = async (taskId: string) => {
-    const deadline = Date.now() + MODEL_DOWNLOAD_TIMEOUT_MS;
-
-    while (Date.now() < deadline) {
-      // eslint-disable-next-line no-await-in-loop
-      const task = (await getTaskMutation.mutateAsync({
-        params: { path: { id: taskId } },
-      })) as { status: string; error_msg?: string | null };
-
-      if (task.status === 'succeeded') {
-        return;
-      }
-
-      if (isFailedTaskStatus(task.status)) {
-        throw new Error(
-          task.error_msg ??
-            t('pages.hub.error.taskEndedWithStatus', {
-              taskId,
-              status: task.status,
-            }),
-        );
-      }
-
-      // eslint-disable-next-line no-await-in-loop
-      await sleep(MODEL_DOWNLOAD_POLL_INTERVAL_MS);
-    }
-
-    throw new Error(t('pages.image.error.downloadTimedOut'));
-  };
-
-  const refreshCatalogAndFindModel = async (modelId: string) => {
-    const refreshed = await refetchCatalogModels();
-    const models = toCatalogModelList(refreshed.data);
-    return models.find((model) => model.id === modelId);
-  };
-
-  const ensureDownloadedModelPath = async (
-    modelId: string,
-    forceDownload = false,
-  ): Promise<{ modelPath: string; downloadedNow: boolean }> => {
-    let model = diffusionModels.find((item) => item.id === modelId);
-    if (!model) {
-      model = await refreshCatalogAndFindModel(modelId);
-    }
-
-    if (!model) {
-        throw new Error(t('pages.image.error.selectedModelMissing'));
-    }
-
-    if (model.kind !== 'local') {
-      throw new Error(t('pages.image.error.selectedModelNotLocal'));
-    }
-
-    if (model.local_path && !forceDownload) {
-      return { modelPath: model.local_path, downloadedNow: false };
-    }
-
-    const downloadResponse = await downloadModelMutation.mutateAsync({
-      body: {
-        model_id: modelId,
-      },
-    });
-    const taskId = extractTaskId(downloadResponse);
-
-    if (!taskId) {
-      throw new Error(t('pages.image.error.startDownloadFailed'));
-    }
-
-    await waitForTaskToFinish(taskId);
-
-    const refreshedModel = await refreshCatalogAndFindModel(modelId);
-    if (!refreshedModel?.local_path) {
-      throw new Error(t('pages.image.error.missingDownloadedPath'));
-    }
-
-    return { modelPath: refreshedModel.local_path, downloadedNow: true };
-  };
-
-  const loadOrSwitchSelectedModel = async (modelId: string) => {
-    const shouldSwitch = Boolean(loadedModelId && loadedModelId !== selectedModelId);
-    if (shouldSwitch) {
-      await switchModelMutation.mutateAsync({
-        body: {
-          model_id: modelId,
-        },
-      });
-      return;
-    }
-
-    await loadModelMutation.mutateAsync({
-      body: {
-        model_id: modelId,
-      },
-    });
-  };
 
   const prepareSelectedModel = async (): Promise<string> => {
-    if (!selectedModelId) {
+    if (!imageModels.selectedId) {
       throw new Error(t('pages.image.error.selectModelFirst'));
     }
 
-    const selectedModel = diffusionModels.find((item) => item.id === selectedModelId);
+    const selectedModel = diffusionModels.find((item) => item.id === imageModels.selectedId);
     if (!selectedModel) {
       throw new Error(t('pages.image.error.selectedModelUnavailable'));
     }
 
-    const { modelPath, downloadedNow } = await ensureDownloadedModelPath(selectedModelId);
+    const { modelPath, downloadedNow } = await imageModels.ensureLoaded(imageModels.selectedId);
     if (downloadedNow) {
       toast.success(t('pages.image.toast.downloaded', { model: selectedModel.display_name }));
     }
 
-    if (loadedModelId === selectedModelId) {
-      return modelPath;
+    if (!modelPath) {
+      throw new Error(t('pages.image.error.missingDownloadedPath'));
     }
 
-    try {
-      await loadOrSwitchSelectedModel(selectedModelId);
-    } catch (firstLoadError) {
-      if (downloadedNow) {
-        throw firstLoadError;
-      }
-
-      toast.message(t('pages.image.toast.modelLoadRetry'));
-
-      const retry = await ensureDownloadedModelPath(selectedModelId, true);
-      if (retry.downloadedNow) {
-        toast.success(t('pages.image.toast.downloaded', { model: selectedModel.display_name }));
-      }
-
-      await loadOrSwitchSelectedModel(selectedModelId);
-      setLoadedModelId(selectedModelId);
-      return retry.modelPath;
-    }
-
-    setLoadedModelId(selectedModelId);
     return modelPath;
   };
 
   return {
-    catalogLoading,
-    isPreparingModel:
-      loadModelMutation.isPending ||
-      switchModelMutation.isPending ||
-      downloadModelMutation.isPending,
+    catalogLoading: imageModels.loading,
+    isPreparingModel: imageModels.status.busy,
     modelOptions,
     prepareSelectedModel,
-    selectedModelId,
-    setSelectedModelId,
+    selectedModelId: imageModels.selectedId,
+    setSelectedModelId: imageModels.setSelectedId,
   };
 }

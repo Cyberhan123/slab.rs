@@ -4,7 +4,7 @@ import { orderBy } from 'lodash-es';
 import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
-import { useHeaderControl } from '@/hooks/use-header';
+import { useHeader } from '@/hooks/use-header';
 import api, { getErrorMessage } from '@slab/api';
 import type { components } from '@slab/api/v1';
 import {
@@ -159,13 +159,12 @@ export function useImageGeneration() {
   const isBusy = isGenerating || isPreparingModel || isResolvingModelState;
   const headerModelPicker = useMemo(
     () => ({
-      type: 'select' as const,
       value: selectedModelId,
       options: modelOptions.map((model) => ({
         id: model.id,
         label: model.label,
       })),
-      onValueChange: setSelectedModelId,
+      onChange: setSelectedModelId,
       groupLabel: t('pages.image.modelPicker.groupLabel'),
       placeholder: t('pages.image.modelPicker.placeholder'),
       loading: catalogLoading,
@@ -175,7 +174,7 @@ export function useImageGeneration() {
     [catalogLoading, isBusy, modelOptions, selectedModelId, setSelectedModelId, t],
   );
 
-  useHeaderControl(headerModelPicker);
+  useHeader({ select: headerModelPicker });
 
   const clearGenerationTask = useCallback(() => {
     generationProgressRef.current = null;
