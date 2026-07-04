@@ -1,0 +1,20 @@
+{
+    "name": "project",
+    "interface": {
+        "displayName": "Project"
+    },
+    "plugins": [
+        {
+            "name": "build-react-web-application",
+            "source": {
+                "source": "local",
+                "path": "./.agents/plugins/build-react-web-application"
+            },
+            "policy": {
+                "installation": "AVAILABLE",
+                "authentication": "ON_INSTALL"
+            },
+            "category": "Development"
+        }
+    ]
+}
