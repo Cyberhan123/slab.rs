@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 import { useNavigate } from 'react-router-dom';
 
-import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
+import { useHeaderControl, usePersistedHeaderSelect } from '@/hooks/use-header';
 
 import api, { getErrorMessage } from '@slab/api';
 import type { components } from '@slab/api/v1';
@@ -19,8 +19,7 @@ import {
 import { useMediaTaskPolling } from '@/pages/task/hooks/use-media-task-polling';
 import { useAgentSurfaceStore } from '@/store/useAgentSurfaceStore';
 import { toCatalogModelList } from '@slab/api/models';
-import { useHeaderControl } from '@/hooks/use-header';
-import { HEADER_SELECT_KEYS } from '@/layouts/header-controls';
+import { HEADER_SELECT_KEYS } from '@/layouts/header';
 import {
   DEFAULT_GENERATION_SIZE,
   MAX_RANDOM_SEED,

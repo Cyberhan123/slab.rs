@@ -4,11 +4,10 @@ import { Outlet, useLocation } from "react-router-dom"
 import { WorkspaceStage } from "@slab/components/workspace"
 import { ErrorBoundary } from "@/components/error-boundary"
 import FooterStatusBar from "@/layouts/footer-status-bar"
-import { GlobalHeaderProvider } from "@/layouts/global-header-provider"
-import Header from "@/layouts/header"
+import Header, { DEFAULT_HEADER_META } from "@/layouts/header"
+import { HeaderProvider } from "@/layouts/header-provider"
 import { AppSidebar } from "@/layouts/sidebar"
 import { cn } from "@/lib/utils"
-import { DEFAULT_HEADER_META } from "@/layouts/header-controls"
 import { getHeaderMetaForPath } from "@/routes/route-meta"
 import type { DesktopRouteObject } from "@/routes/route-meta"
 import { AgentSurfaceLayer } from "@/pages/assistant/components/agent-surface-layer"
@@ -33,7 +32,7 @@ export default function Layout({ routes }: LayoutProps) {
 
   return (
     <div className="workspace-shell flex h-screen min-h-0 w-full flex-col overflow-hidden">
-      <GlobalHeaderProvider defaultMeta={headerMeta}>
+      <HeaderProvider defaultMeta={headerMeta}>
         <div className="flex min-h-0 w-full flex-1">
           <AppSidebar routes={routes} variant={isChatShell ? "chat" : "default"} />
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -67,7 +66,7 @@ export default function Layout({ routes }: LayoutProps) {
           </div>
         </div>
         <FooterStatusBar variant={isChatShell ? "chat" : "default"} />
-      </GlobalHeaderProvider>
+      </HeaderProvider>
     </div>
   )
 }

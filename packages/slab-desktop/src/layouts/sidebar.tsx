@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils"
 import { WindowControls } from "@/layouts/window-controls"
 import { useRuntimePlugins } from "@/pages/plugins/hooks/use-runtime-plugins"
 import { getDesktopRouteEntries, type DesktopRouteObject } from "@/routes/route-meta"
-import type { HeaderIcon } from "@/layouts/header-controls"
+import type { HeaderIcon } from "@/layouts/header"
 
 type SidebarItem = {
   to: string

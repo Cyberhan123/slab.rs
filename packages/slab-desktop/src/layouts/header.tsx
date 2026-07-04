@@ -1,8 +1,7 @@
-import { History, Search } from "lucide-react"
+import { BotMessageSquare, History, Search } from "lucide-react"
 import { useTranslation } from "@slab/i18n"
 import { Input } from "@slab/components/input"
 import { useHeader } from "@/hooks/use-header"
-import type { HeaderSelectControl } from "@/layouts/header-controls"
 import { WindowControls } from "@/layouts/window-controls"
 import { cn } from "@/lib/utils"
 import {
@@ -14,6 +13,59 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@slab/components/select"
+import type { ComponentType } from "react"
+
+export type HeaderIcon = ComponentType<{
+  className?: string
+}>
+
+export type HeaderMeta = {
+  title: string
+  subtitle: string
+  icon: HeaderIcon
+}
+
+export const DEFAULT_HEADER_META: HeaderMeta = {
+  title: "Slab",
+  subtitle: "ML Inference Platform",
+  icon: BotMessageSquare,
+}
+
+export type HeaderSelectOption = {
+  id: string
+  label: string
+  disabled?: boolean
+}
+
+export type HeaderSelectControl = {
+  type: "select"
+  value: string
+  options: HeaderSelectOption[]
+  onValueChange: (value: string) => void
+  groupLabel?: string
+  placeholder?: string
+  loading?: boolean
+  disabled?: boolean
+  emptyLabel?: string
+}
+
+export type HeaderSearchControl = {
+  type: "search"
+  value: string
+  onValueChange: (value: string) => void
+  placeholder?: string
+  ariaLabel?: string
+  disabled?: boolean
+}
+
+export type HeaderControl = HeaderSelectControl
+
+export const HEADER_SELECT_KEYS = {
+  assistantModel: "assistant:model",
+  audioModel: "audio:model",
+  imageModel: "image:model",
+  videoModel: "video:model",
+} as const
 
 type HeaderProps = {
   variant?: "default" | "chat" | "minimal"
@@ -69,11 +121,10 @@ export default function Header({
     search,
   } = useHeader()
   const isChatVariant = variant === "chat"
-  const isMinimalVariant = variant === "minimal"
-  const defaultSearchPlaceholder = isChatVariant
-    ? t("layouts.header.search.chat")
-    : t("layouts.header.search.default")
-  const searchPlaceholder = search?.placeholder ?? defaultSearchPlaceholder
+  const isInteractiveHeader = variant !== "minimal"
+  const searchPlaceholder =
+    search?.placeholder ??
+    (isChatVariant ? t("layouts.header.search.chat") : t("layouts.header.search.default"))
   const searchAriaLabel = search?.ariaLabel ?? searchPlaceholder
   const subtitleParts = isChatVariant ? subtitle.split(" - ") : [subtitle]
   const displaySubtitle = subtitleParts[0] ?? subtitle
@@ -96,7 +147,7 @@ export default function Header({
         <p className="hidden max-w-[28rem] min-w-0 truncate text-body font-medium leading-5 text-[color:var(--shell-subtitle)] xl:max-w-[34rem] sm:block">
           {displaySubtitle}
         </p>
-        {!isMinimalVariant ? (
+        {isInteractiveHeader ? (
           control?.type === "select" ? (
             <HeaderSelect control={control} />
           ) : (
@@ -109,7 +160,7 @@ export default function Header({
       </div>
 
       <div className="ml-auto flex min-w-0 items-center gap-3 md:gap-4">
-        {!isMinimalVariant ? (
+        {isInteractiveHeader ? (
           <>
             <div className="shell-search hidden h-8 min-w-[12rem] flex-1 items-center gap-2.5 rounded-full px-3.5 text-label text-[color:var(--shell-search-foreground)] md:flex lg:w-64">
               <Search className="size-3.5 shrink-0" />

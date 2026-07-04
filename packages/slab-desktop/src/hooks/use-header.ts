@@ -1,17 +1,33 @@
-import { useContext, useId, useLayoutEffect } from "react";
+import { useCallback, useContext, useEffect, useId, useLayoutEffect } from 'react';
 
-import {
-  GlobalHeaderContext,
-  type GlobalHeaderContextValue,
-} from "@/layouts/global-header-provider";
-import type { HeaderControl, HeaderSearchControl } from "@/layouts/header-controls";
+import type { HeaderControl, HeaderSearchControl } from '@/layouts/header';
+import { HeaderContext, type HeaderContextValue } from '@/layouts/header-provider';
+import { useHeaderUiStore } from '@/store/useHeaderUiStore';
 
-export function useHeader(): Pick<GlobalHeaderContextValue, "meta" | "control" | "search"> {
-  const context = useContext(GlobalHeaderContext);
+type PersistedHeaderSelectOption = {
+  id: string;
+  disabled?: boolean;
+};
+
+type UsePersistedHeaderSelectOptions<TOption extends PersistedHeaderSelectOption> = {
+  isLoading?: boolean;
+  key: string;
+  options: TOption[];
+  getDefaultValue?: (options: TOption[]) => string | undefined;
+};
+
+function useRequiredHeaderContext(hookName: string): HeaderContextValue {
+  const context = useContext(HeaderContext);
 
   if (!context) {
-    throw new Error("useHeader must be used within GlobalHeaderProvider");
+    throw new Error(`${hookName} must be used within HeaderProvider`);
   }
+
+  return context;
+}
+
+export function useHeader(): Pick<HeaderContextValue, 'meta' | 'control' | 'search'> {
+  const context = useRequiredHeaderContext('useHeader');
 
   return {
     meta: context.meta,
@@ -21,23 +37,8 @@ export function useHeader(): Pick<GlobalHeaderContextValue, "meta" | "control" |
 }
 
 export function useHeaderControl(control: HeaderControl | null | undefined): void {
-  const context = useContext(GlobalHeaderContext);
+  const { setControl, clearControl } = useRequiredHeaderContext('useHeaderControl');
   const id = useId();
-
-  if (!context) {
-    throw new Error("useHeaderControl must be used within GlobalHeaderProvider");
-  }
-
-  const { setControl, clearControl } = context;
-  const type = control?.type;
-  const value = control?.type === "select" ? control.value : undefined;
-  const options = control?.type === "select" ? control.options : undefined;
-  const onValueChange = control?.type === "select" ? control.onValueChange : undefined;
-  const groupLabel = control?.type === "select" ? control.groupLabel : undefined;
-  const placeholder = control?.type === "select" ? control.placeholder : undefined;
-  const loading = control?.type === "select" ? control.loading : undefined;
-  const disabled = control?.type === "select" ? control.disabled : undefined;
-  const emptyLabel = control?.type === "select" ? control.emptyLabel : undefined;
 
   useLayoutEffect(() => {
     if (!control) {
@@ -49,65 +50,80 @@ export function useHeaderControl(control: HeaderControl | null | undefined): voi
     return () => {
       clearControl(id);
     };
-  }, [
-    clearControl,
-    control,
-    disabled,
-    emptyLabel,
-    groupLabel,
-    id,
-    loading,
-    onValueChange,
-    options,
-    placeholder,
-    setControl,
-    type,
-    value,
-  ]);
+  }, [clearControl, control, id, setControl]);
 }
 
 export function useHeaderSearch(search: HeaderSearchControl | null | undefined): void {
-  const context = useContext(GlobalHeaderContext);
+  const { setSearch, clearSearch } = useRequiredHeaderContext('useHeaderSearch');
   const id = useId();
 
-  if (!context) {
-    throw new Error("useHeaderSearch must be used within GlobalHeaderProvider");
-  }
-
-  const { setSearch, clearSearch } = context;
-  const isActive = search != null;
-  const value = search?.type === "search" ? search.value : "";
-  const onValueChange = search?.type === "search" ? search.onValueChange : undefined;
-  const placeholder = search?.type === "search" ? search.placeholder : undefined;
-  const ariaLabel = search?.type === "search" ? search.ariaLabel : undefined;
-  const disabled = search?.type === "search" ? search.disabled : undefined;
-
   useLayoutEffect(() => {
-    if (!isActive || !onValueChange) {
+    if (!search) {
       return undefined;
     }
 
-    setSearch(id, {
-      type: "search",
-      value,
-      onValueChange,
-      placeholder,
-      ariaLabel,
-      disabled,
-    });
+    setSearch(id, search);
 
     return () => {
       clearSearch(id);
     };
-  }, [
-    ariaLabel,
-    clearSearch,
-    disabled,
-    id,
-    isActive,
-    onValueChange,
-    placeholder,
-    setSearch,
+  }, [clearSearch, id, search, setSearch]);
+}
+
+export function usePersistedHeaderSelect<TOption extends PersistedHeaderSelectOption>({
+  isLoading = false,
+  key,
+  options,
+  getDefaultValue,
+}: UsePersistedHeaderSelectOptions<TOption>) {
+  const hasHydrated = useHeaderUiStore((state) => state.hasHydrated);
+  const value = useHeaderUiStore((state) => state.selections[key] ?? '');
+  const setSelection = useHeaderUiStore((state) => state.setSelection);
+  const clearSelection = useHeaderUiStore((state) => state.clearSelection);
+
+  const setValue = useCallback(
+    (nextValue: string) => {
+      setSelection(key, nextValue);
+    },
+    [key, setSelection],
+  );
+
+  useEffect(() => {
+    if (!hasHydrated || isLoading) {
+      return;
+    }
+
+    const enabledOptions = options.filter((option) => !option.disabled);
+
+    if (enabledOptions.length === 0) {
+      if (value) {
+        clearSelection(key);
+      }
+      return;
+    }
+
+    if (enabledOptions.some((option) => option.id === value)) {
+      return;
+    }
+
+    const preferredValue = getDefaultValue?.(options) ?? '';
+    const fallbackValue = enabledOptions.some((option) => option.id === preferredValue)
+      ? preferredValue
+      : enabledOptions[0]?.id ?? '';
+
+    if (!fallbackValue) {
+      clearSelection(key);
+      return;
+    }
+
+    if (fallbackValue !== value) {
+      setSelection(key, fallbackValue);
+    }
+  }, [clearSelection, getDefaultValue, hasHydrated, isLoading, key, options, setSelection, value]);
+
+  return {
+    hasHydrated,
+    setValue,
     value,
-  ]);
+  };
 }

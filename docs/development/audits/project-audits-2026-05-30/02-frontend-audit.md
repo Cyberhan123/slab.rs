@@ -68,7 +68,7 @@ packages/slab-desktop/src/
 **Issues Found:**
 
 1. **Missing Memoization in Some Context Providers**
-   - File: `packages/slab-desktop/src/layouts/global-header-provider.tsx`
+   - File: `packages/slab-desktop/src/layouts/header-provider.tsx`
    - Lines: 119-130
    - Issue: Context value computation could benefit from memoization
    - Severity: Low

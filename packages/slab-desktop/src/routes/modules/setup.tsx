@@ -2,8 +2,8 @@ import { lazy, Suspense } from "react";
 import { Package } from "lucide-react";
 import { Spinner } from "@slab/components/spinner";
 
-import { GlobalHeaderProvider } from "@/layouts/global-header-provider";
-import type { HeaderMeta } from "@/layouts/header-controls";
+import type { HeaderMeta } from "@/layouts/header";
+import { HeaderProvider } from "@/layouts/header-provider";
 import type { DesktopRouteObject } from "../route-meta";
 
 const SetupPage = lazy(() => import("@/pages/setup"));
@@ -16,7 +16,7 @@ const setupRouteMeta = {
 
 function SetupRouteElement() {
   return (
-    <GlobalHeaderProvider defaultMeta={setupRouteMeta}>
+    <HeaderProvider defaultMeta={setupRouteMeta}>
       <Suspense
         fallback={
           <div className="flex h-screen items-center justify-center">
@@ -26,7 +26,7 @@ function SetupRouteElement() {
       >
         <SetupPage />
       </Suspense>
-    </GlobalHeaderProvider>
+    </HeaderProvider>
   );
 }
 

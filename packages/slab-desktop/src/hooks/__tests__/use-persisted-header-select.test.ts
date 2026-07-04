@@ -11,7 +11,7 @@ vi.mock('../../store/ui-state-storage', () => ({
 
 import { useHeaderUiStore } from '@/store/useHeaderUiStore';
 
-import { usePersistedHeaderSelect } from '../use-persisted-header-select';
+import { usePersistedHeaderSelect } from '../use-header';
 
 const modelOptions = [
   { id: 'model-a' },

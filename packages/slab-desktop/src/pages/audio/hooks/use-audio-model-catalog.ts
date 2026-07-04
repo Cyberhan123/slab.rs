@@ -2,8 +2,8 @@ import { useMemo } from 'react';
 
 import api from '@slab/api';
 import { toCatalogModelList, type CatalogModel } from '@slab/api/models';
-import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
-import { HEADER_SELECT_KEYS } from '@/layouts/header-controls';
+import { usePersistedHeaderSelect } from '@/hooks/use-header';
+import { HEADER_SELECT_KEYS } from '@/layouts/header';
 
 export function useAudioModelCatalog() {
   const {

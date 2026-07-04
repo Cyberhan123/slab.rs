@@ -15,9 +15,6 @@ vi.mock('@/pages/audio/hooks/use-audio', () => ({
 
 vi.mock('@/hooks/use-header', () => ({
   useHeaderControl: vi.fn<() => void>(),
-}));
-
-vi.mock('@/hooks/use-persisted-header-select', () => ({
   usePersistedHeaderSelect: vi.fn<() => unknown>(() => ({
     value: 'model-1',
     setValue: vi.fn<() => void>(),

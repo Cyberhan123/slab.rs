@@ -2,10 +2,10 @@ import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
-import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
+import { usePersistedHeaderSelect } from '@/hooks/use-header';
 import api from '@slab/api';
 import { toCatalogModelList } from '@slab/api/models';
-import { HEADER_SELECT_KEYS } from '@/layouts/header-controls';
+import { HEADER_SELECT_KEYS } from '@/layouts/header';
 import {
   extractTaskId,
   isFailedTaskStatus,

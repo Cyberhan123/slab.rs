@@ -44,9 +44,6 @@ vi.mock('@/pages/assistant/hooks/use-markdown-theme', () => ({
 
 vi.mock('@/hooks/use-header', () => ({
   useHeaderControl: vi.fn<() => void>(),
-}));
-
-vi.mock('@/hooks/use-persisted-header-select', () => ({
   usePersistedHeaderSelect: vi.fn<() => unknown>(() => ({
     value: 'model-1',
     setValue: vi.fn<() => void>(),

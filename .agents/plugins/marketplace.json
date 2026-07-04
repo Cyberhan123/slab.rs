@@ -1,7 +1,7 @@
 {
-    "name": "project",
+    "name": "slab-codex-plugin-market",
     "interface": {
-        "displayName": "Project"
+        "displayName": "Slab Codex Plugin Market"
     },
     "plugins": [
         {
@@ -11,7 +11,7 @@
                 "path": "./.agents/plugins/build-react-web-application"
             },
             "policy": {
-                "installation": "AVAILABLE",
+                "installation": "INSTALLED_BY_DEFAULT",
                 "authentication": "ON_INSTALL"
             },
             "category": "Development"

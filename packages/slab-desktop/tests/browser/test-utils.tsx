@@ -7,7 +7,7 @@ import { render } from 'vitest-browser-react';
 
 import { Toaster } from '@slab/components/sonner';
 import { TooltipProvider } from '@slab/components/tooltip';
-import { GlobalHeaderProvider } from '@/layouts/global-header-provider';
+import { HeaderProvider } from '@/layouts/header-provider';
 
 type DesktopSceneOptions = {
   route?: string;
@@ -37,10 +37,10 @@ export async function renderDesktopScene(
       >
         <QueryClientProvider client={queryClient}>
           <TooltipProvider>
-            <GlobalHeaderProvider>
+            <HeaderProvider>
               <RouterProvider router={router} />
               <Toaster />
-            </GlobalHeaderProvider>
+            </HeaderProvider>
           </TooltipProvider>
         </QueryClientProvider>
       </main>,
@@ -59,10 +59,10 @@ export async function renderDesktopScene(
           >
             <QueryClientProvider client={queryClient}>
               <TooltipProvider>
-                <GlobalHeaderProvider>
+                <HeaderProvider>
                   {ui}
                   <Toaster />
-                </GlobalHeaderProvider>
+                </HeaderProvider>
               </TooltipProvider>
             </QueryClientProvider>
           </main>

@@ -2,8 +2,16 @@ import { render, screen } from '@testing-library/react';
 import { Settings } from 'lucide-react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { GlobalHeaderProvider } from '@/layouts/global-header-provider';
-import type { HeaderSearchControl, HeaderSelectControl } from '@/layouts/header-controls';
+vi.mock('../../store/ui-state-storage', () => ({
+  createUiStateStorage: () => ({
+    getItem: vi.fn<() => Promise<null>>(async () => null),
+    removeItem: vi.fn<() => Promise<void>>(async () => {}),
+    setItem: vi.fn<() => Promise<void>>(async () => {}),
+  }),
+}));
+
+import type { HeaderSearchControl, HeaderSelectControl } from '@/layouts/header';
+import { HeaderProvider } from '@/layouts/header-provider';
 import {
   useHeader,
   useHeaderControl,
@@ -57,9 +65,9 @@ describe('useHeader hooks', () => {
     };
 
     render(
-      <GlobalHeaderProvider defaultMeta={defaultMeta}>
+      <HeaderProvider defaultMeta={defaultMeta}>
         <HeaderProbe />
-      </GlobalHeaderProvider>,
+      </HeaderProvider>,
     );
 
     expect(screen.getByTestId('header-title')).toHaveTextContent('Route title');
@@ -68,20 +76,20 @@ describe('useHeader hooks', () => {
 
   it('registers header control and search state, then clears them when inactive', () => {
     const { rerender } = render(
-      <GlobalHeaderProvider>
+      <HeaderProvider>
         <HeaderControlRegistration active />
         <HeaderProbe />
-      </GlobalHeaderProvider>,
+      </HeaderProvider>,
     );
 
     expect(screen.getByTestId('header-control')).toHaveTextContent('model-a');
     expect(screen.getByTestId('header-search')).toHaveTextContent('draft query');
 
     rerender(
-      <GlobalHeaderProvider>
+      <HeaderProvider>
         <HeaderControlRegistration active={false} />
         <HeaderProbe />
-      </GlobalHeaderProvider>,
+      </HeaderProvider>,
     );
 
     expect(screen.getByTestId('header-control')).toHaveTextContent('none');

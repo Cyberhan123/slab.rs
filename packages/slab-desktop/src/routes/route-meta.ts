@@ -1,5 +1,5 @@
 import type { RouteObject } from "react-router-dom";
-import type { HeaderMeta } from "@/layouts/header-controls";
+import type { HeaderMeta } from "@/layouts/header";
 
 export type DesktopRouteSidebarGroup = "primary" | "footer";
 
