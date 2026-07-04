@@ -18,11 +18,6 @@ vi.mock('@/pages/hub/hooks/use-hub-model-catalog', () => ({
   getModelUseRoute: vi.fn<() => string>(() => '/'),
 }));
 
-vi.mock('@/hooks/use-global-header-meta', () => ({
-  usePageHeader: vi.fn<() => void>(),
-  usePageHeaderControl: vi.fn<() => void>(),
-}));
-
 vi.mock('@slab/i18n', () => ({
   useTranslation: vi.fn<() => unknown>(() => ({
     t: vi.fn<(key: string) => string>((key) => key),

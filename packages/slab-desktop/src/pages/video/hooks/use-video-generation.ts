@@ -19,9 +19,8 @@ import {
 import { useMediaTaskPolling } from '@/pages/task/hooks/use-media-task-polling';
 import { useAgentSurfaceStore } from '@/store/useAgentSurfaceStore';
 import { toCatalogModelList } from '@slab/api/models';
-import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
+import { useHeaderControl } from '@/hooks/use-header';
 import { HEADER_SELECT_KEYS } from '@/layouts/header-controls';
-import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import {
   DEFAULT_GENERATION_SIZE,
   MAX_RANDOM_SEED,
@@ -75,12 +74,6 @@ export function useVideoGeneration() {
 
   const initImageInputRef = useRef<HTMLInputElement>(null);
   const generationProgressRef = useRef<GenerationProgress | null>(null);
-
-  usePageHeader({
-    icon: PAGE_HEADER_META.video.icon,
-    title: t('pages.video.header.title'),
-    subtitle: t('pages.video.header.subtitle'),
-  });
 
   const { data: catalogModels, isLoading: catalogLoading } = api.useQuery(
     'get',
@@ -167,7 +160,7 @@ export function useVideoGeneration() {
     [catalogLoading, isGenerating, modelOptions, selectedModelId, setSelectedModelId, t],
   );
 
-  usePageHeaderControl(headerModelPicker);
+  useHeaderControl(headerModelPicker);
 
   const clearGenerationTask = useCallback(() => {
     generationProgressRef.current = null;

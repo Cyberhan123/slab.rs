@@ -4,10 +4,12 @@ import { useEffect } from 'react';
 import { Route, Routes } from 'react-router-dom';
 
 import Layout from '@/layouts';
+import { staticDesktopRoutes } from '@/routes';
 import { useAgentSurfaceStore } from '@/store/useAgentSurfaceStore';
 import { renderDesktopScene } from '../test-utils';
 
 vi.mock('@/pages/plugins/hooks/use-runtime-plugins', () => ({
+  RUNTIME_PLUGINS_QUERY_KEY: ['plugin-runtime-list'],
   useRuntimePlugins: vi.fn<() => unknown>(() => ({
     data: [],
   })),
@@ -25,7 +27,7 @@ function RouteMarker({ id, label }: { id: string; label: string }) {
 async function renderSurfaceShell() {
   await renderDesktopScene(
     <Routes>
-      <Route element={<Layout />} path="/">
+      <Route element={<Layout routes={staticDesktopRoutes} />} path="/">
         <Route index element={<RouteMarker id="assistant" label="Assistant route" />} />
         <Route path="workspace" element={<RouteMarker id="workspace" label="Workspace route" />} />
         <Route path="image" element={<RouteMarker id="image" label="Image route" />} />

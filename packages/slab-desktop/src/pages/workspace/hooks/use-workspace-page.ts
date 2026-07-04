@@ -2,10 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 import { useTranslation } from "@slab/i18n"
-import { FolderKanban } from "lucide-react"
 import { toast } from "sonner"
 
-import { usePageHeader } from "@/hooks/use-global-header-meta"
 import { pickFolder } from "@/lib/pick-folder"
 import {
   workspaceClose,
@@ -63,12 +61,6 @@ export function useWorkspacePage() {
   const [editorThemeMode, setEditorThemeMode] = useState<WorkspaceThemeMode>(getWorkspaceThemeMode)
   const restoredWorkspaceRootRef = useRef<string | null>(null)
   const activeVscodeFileGenerationRef = useRef(0)
-
-  usePageHeader({
-    icon: FolderKanban,
-    title: t("pages.workspace.header.title"),
-    subtitle: t("pages.workspace.header.subtitle"),
-  })
 
   const workspaceQuery = useQuery({
     queryKey: WORKSPACE_STATE_QUERY_KEY,

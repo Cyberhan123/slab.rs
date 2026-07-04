@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
 import useFile, { type SelectedFile } from '@/hooks/use-file';
-import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
+import { useHeaderControl } from '@/hooks/use-header';
 import useIsTauri from '@/hooks/use-tauri';
 import api from '@slab/api';
 import { modelSupportsCapability, toCatalogModelList } from '@slab/api/models';
@@ -19,7 +19,6 @@ import {
   useModelConfigDocumentQuery,
   type ModelConfigDocumentResponse,
 } from '@/lib/model-config';
-import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import { useAudioUiStore } from '@/store/useAudioUiStore';
 import { useMediaTaskPolling } from '@/pages/task/hooks/use-media-task-polling';
 import {
@@ -49,11 +48,6 @@ import useTranscribe, { type TranscribeOptions, type TranscribeVadSettings } fro
 export function useAudio() {
   const { t } = useTranslation();
   const isTauri = useIsTauri();
-  usePageHeader({
-    icon: PAGE_HEADER_META.audio.icon,
-    title: t('pages.audio.header.title'),
-    subtitle: t('pages.audio.header.subtitle'),
-  });
 
   const [file, setFile] = useState<SelectedFile | null>(null);
   const [preparingStage, setPreparingStage] = useState<PreparingStage>(null);
@@ -251,7 +245,7 @@ export function useAudio() {
   );
   const webFileInputRef = useRef<HTMLInputElement>(null);
 
-  usePageHeaderControl(headerModelPicker);
+  useHeaderControl(headerModelPicker);
 
   useEffect(() => {
     if (!selectedModelId || !selectedModelConfigError) {

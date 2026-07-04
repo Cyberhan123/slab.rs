@@ -2,7 +2,7 @@ import { createMemoryRouter } from 'react-router-dom';
 import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createDesktopRoutes } from '@/router';
+import { createDesktopRoutes } from '@/routes';
 import type { SettingsDocumentResponse } from '@/pages/settings/types';
 import { renderDesktopScene } from '../test-utils';
 
@@ -57,6 +57,20 @@ vi.mock('@slab/api', async () => {
   const { createSlabApiMock } = await import('../support/mock-slab-api');
 
   return createSlabApiMock({
+    apiClient: {
+      DELETE: vi.fn<() => Promise<unknown>>().mockResolvedValue({
+        data: {},
+        response: { ok: true, status: 200 },
+      }),
+      GET: vi.fn<() => Promise<unknown>>().mockResolvedValue({
+        data: { entries: [] },
+        response: { ok: true, status: 200 },
+      }),
+      PUT: vi.fn<() => Promise<unknown>>().mockResolvedValue({
+        data: {},
+        response: { ok: true, status: 200 },
+      }),
+    },
     defaultExport: {
       useMutation: vi.fn<() => unknown>(() => ({
         isPending: false,

@@ -36,9 +36,8 @@ import {
 } from "@slab/components/message-scroller"
 import api from "@slab/api"
 import { toCatalogModelList } from "@slab/api/models"
-import { usePageHeader, usePageHeaderControl } from "@/hooks/use-global-header-meta"
+import { useHeaderControl } from "@/hooks/use-header"
 import { usePersistedHeaderSelect } from "@/hooks/use-persisted-header-select"
-import { PAGE_HEADER_META } from "@/layouts/header-meta"
 import { HEADER_SELECT_KEYS } from "@/layouts/header-controls"
 import { useAssistantUiStore } from "@/store/useAssistantUiStore"
 import { useAgentSurfaceStore } from "@/store/useAgentSurfaceStore"
@@ -543,12 +542,7 @@ function Assistant() {
   )
   const latestUserPrompt = getAssistantMessageTextContent(latestUserMessage?.message).trim()
 
-  usePageHeader({
-    ...PAGE_HEADER_META.assistant,
-    title: t("pages.assistant.header.title"),
-    subtitle: t("pages.assistant.header.subtitle"),
-  })
-  usePageHeaderControl(headerModelPicker)
+  useHeaderControl(headerModelPicker)
 
   const sortedConversations = useMemo(() => {
     const currentConversation = conversationList.find((item) => item.key === curConversation)

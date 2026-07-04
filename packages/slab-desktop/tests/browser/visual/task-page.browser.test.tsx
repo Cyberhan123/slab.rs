@@ -13,11 +13,6 @@ vi.mock('@/pages/task/hooks/use-task-list', () => ({
   useTaskList: mockUseTaskList,
 }));
 
-vi.mock('@/hooks/use-global-header-meta', () => ({
-  usePageHeader: vi.fn<() => void>(),
-  usePageHeaderControl: vi.fn<() => void>(),
-}));
-
 vi.mock('@slab/i18n', () => ({
   useTranslation: vi.fn<() => unknown>(() => ({
     t: vi.fn<(key: string) => string>((key) => key),

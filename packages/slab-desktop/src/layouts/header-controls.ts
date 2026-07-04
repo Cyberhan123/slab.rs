@@ -1,3 +1,22 @@
+import { BotMessageSquare } from 'lucide-react';
+import type { ComponentType } from 'react';
+
+export type HeaderIcon = ComponentType<{
+  className?: string;
+}>;
+
+export type HeaderMeta = {
+  title: string;
+  subtitle: string;
+  icon: HeaderIcon;
+};
+
+export const DEFAULT_HEADER_META: HeaderMeta = {
+  title: 'Slab',
+  subtitle: 'ML Inference Platform',
+  icon: BotMessageSquare,
+};
+
 export type HeaderSelectOption = {
   id: string;
   label: string;

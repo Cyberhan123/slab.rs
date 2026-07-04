@@ -1,15 +1,6 @@
 import {
-  BotMessageSquare,
-  ClipboardList,
-  Film,
-  FolderKanban,
-  ImageIcon,
-  Mic,
-  Package,
   Puzzle,
-  Settings,
   Subtitles,
-  type LucideIcon,
 } from "lucide-react"
 import { useTranslation } from "@slab/i18n"
 import { Link, useLocation } from "react-router-dom"
@@ -17,29 +8,16 @@ import { Link, useLocation } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { WindowControls } from "@/layouts/window-controls"
 import { useRuntimePlugins } from "@/pages/plugins/hooks/use-runtime-plugins"
+import { getDesktopRouteEntries, type DesktopRouteObject } from "@/routes/route-meta"
+import type { HeaderIcon } from "@/layouts/header-controls"
 
 type SidebarItem = {
   to: string
   labelKey?: string
   label?: string
-  icon: LucideIcon
+  icon: HeaderIcon
   end?: boolean
 }
-
-const primaryItems: SidebarItem[] = [
-  { to: "/", labelKey: "layouts.sidebar.items.assistant", icon: BotMessageSquare, end: true },
-  { to: "/workspace", labelKey: "layouts.sidebar.items.workspace", icon: FolderKanban },
-  { to: "/image", labelKey: "layouts.sidebar.items.image", icon: ImageIcon },
-  { to: "/video", labelKey: "layouts.sidebar.items.video", icon: Film },
-  { to: "/audio", labelKey: "layouts.sidebar.items.audio", icon: Mic },
-  { to: "/hub", labelKey: "layouts.sidebar.items.hub", icon: Package },
-  { to: "/task", labelKey: "layouts.sidebar.items.task", icon: ClipboardList },
-  { to: "/plugins", labelKey: "layouts.sidebar.items.plugins", icon: Puzzle },
-]
-
-const footerItems: SidebarItem[] = [
-  { to: "/settings", labelKey: "layouts.sidebar.items.settings", icon: Settings },
-]
 
 const isPathActive = (pathname: string, to: string, end = false) => {
   if (end) {
@@ -50,14 +28,33 @@ const isPathActive = (pathname: string, to: string, end = false) => {
 }
 
 type AppSidebarProps = {
+  routes: readonly DesktopRouteObject[]
   variant?: "default" | "chat"
 }
 
-export function AppSidebar({ variant = "default" }: AppSidebarProps) {
+export function AppSidebar({ routes, variant = "default" }: AppSidebarProps) {
   const { t } = useTranslation()
   const { pathname } = useLocation()
   const { data: runtimePlugins = [] } = useRuntimePlugins()
   const isChatVariant = variant === "chat"
+  const routeSidebarItems = getDesktopRouteEntries(routes)
+    .map(({ path, route }): (SidebarItem & { group: "primary" | "footer" }) | null => {
+      const meta = route.meta
+      const sidebar = meta?.sidebar
+      if (!meta || !sidebar) return null
+
+      return {
+        to: path,
+        labelKey: sidebar.labelKey,
+        label: sidebar.label,
+        icon: meta.icon,
+        end: sidebar.end,
+        group: sidebar.group,
+      }
+    })
+    .filter((item): item is SidebarItem & { group: "primary" | "footer" } => item !== null)
+  const primaryItems = routeSidebarItems.filter((item) => item.group === "primary")
+  const footerItems = routeSidebarItems.filter((item) => item.group === "footer")
   const pluginItems = runtimePlugins
     .filter((plugin) => plugin.valid && plugin.enabled && plugin.uiEntry && plugin.uiUrl)
     .flatMap((plugin) =>

@@ -51,9 +51,8 @@ const {
   } as SettingsDocumentResponse,
 }));
 
-vi.mock('@/hooks/use-global-header-meta', () => ({
-  usePageHeader: vi.fn<() => void>(),
-  usePageHeaderSearch: vi.fn<() => void>(),
+vi.mock('@/hooks/use-header', () => ({
+  useHeaderSearch: vi.fn<() => void>(),
 }));
 
 vi.mock('@slab/api', async () => {

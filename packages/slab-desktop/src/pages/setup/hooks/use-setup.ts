@@ -6,8 +6,6 @@ import api, { getErrorMessage } from '@slab/api';
 import { translateServerField, useTranslation } from '@slab/i18n';
 import useDesktopPlatform from '@/hooks/use-desktop-platform';
 import { queryClient } from '@/lib/query-client';
-import { usePageHeader } from '@/hooks/use-global-header-meta';
-import { PAGE_HEADER_META } from '@/layouts/header-meta';
 
 import {
   TASK_POLL_INTERVAL_MS,
@@ -46,12 +44,6 @@ export function useSetup(): SetupViewModel {
   const runtimePayloadMode: RuntimePayloadMode = platform === 'macos' ? 'bundled' : 'packaged';
   const setupMountedRef = useRef(true);
   const provisionTaskIdRef = useRef<string | null>(null);
-
-  usePageHeader({
-    ...PAGE_HEADER_META.setup,
-    title: t('pages.setup.header.title'),
-    subtitle: t('pages.setup.header.subtitle'),
-  });
 
   const [provisionState, setProvisionState] = useState<ProvisionState>('idle');
   const [provisionTaskId, setProvisionTaskId] = useState<string | null>(null);

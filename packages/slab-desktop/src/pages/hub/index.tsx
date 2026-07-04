@@ -24,8 +24,6 @@ import {
   SelectValue,
 } from '@slab/components/select';
 import { StageEmptyState } from '@slab/components/workspace';
-import { usePageHeader } from '@/hooks/use-global-header-meta';
-import { PAGE_HEADER_META } from '@/layouts/header-meta';
 
 import { HubCatalogTable } from './components/hub-catalog-table';
 import { HubCreateModelDialog } from './components/hub-create-model-dialog';
@@ -46,11 +44,6 @@ export default function Hub() {
   const { ref: loadMoreRef, entry: loadMoreEntry } = useIntersection<HTMLDivElement>({
     root: scrollRoot,
     rootMargin: '0px 0px 240px 0px',
-  });
-  usePageHeader({
-    icon: PAGE_HEADER_META.hub.icon,
-    title: t('pages.hub.header.title'),
-    subtitle: t('pages.hub.header.subtitle'),
   });
 
   const backendCount = uniq(hub.models.flatMap((model) => model.backend_ids)).length;

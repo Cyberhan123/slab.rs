@@ -17,10 +17,6 @@ const {
   mockFetchTaskDetail: vi.fn<(id: string) => Promise<void>>().mockResolvedValue(undefined),
 }));
 
-vi.mock('@/hooks/use-global-header-meta', () => ({
-  usePageHeader: vi.fn<() => void>(),
-}));
-
 vi.mock('@/pages/hub/hooks/use-hub-model-catalog', async () => {
   const React = await import('react');
 

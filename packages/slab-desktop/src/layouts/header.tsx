@@ -1,7 +1,7 @@
 import { History, Search } from "lucide-react"
 import { useTranslation } from "@slab/i18n"
 import { Input } from "@slab/components/input"
-import { useGlobalHeaderState } from "@/hooks/use-global-header-meta"
+import { useHeader } from "@/hooks/use-header"
 import type { HeaderSelectControl } from "@/layouts/header-controls"
 import { WindowControls } from "@/layouts/window-controls"
 import { cn } from "@/lib/utils"
@@ -67,7 +67,7 @@ export default function Header({
     meta: { title, subtitle },
     control,
     search,
-  } = useGlobalHeaderState()
+  } = useHeader()
   const isChatVariant = variant === "chat"
   const isMinimalVariant = variant === "minimal"
   const defaultSearchPlaceholder = isChatVariant

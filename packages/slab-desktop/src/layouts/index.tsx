@@ -8,12 +8,20 @@ import { GlobalHeaderProvider } from "@/layouts/global-header-provider"
 import Header from "@/layouts/header"
 import { AppSidebar } from "@/layouts/sidebar"
 import { cn } from "@/lib/utils"
+import { DEFAULT_HEADER_META } from "@/layouts/header-controls"
+import { getHeaderMetaForPath } from "@/routes/route-meta"
+import type { DesktopRouteObject } from "@/routes/route-meta"
 import { AgentSurfaceLayer } from "@/pages/assistant/components/agent-surface-layer"
 import { useAgentSurfaceStore } from "@/store/useAgentSurfaceStore"
 
-export default function Layout() {
+type LayoutProps = {
+  routes: readonly DesktopRouteObject[]
+}
+
+export default function Layout({ routes }: LayoutProps) {
   const location = useLocation()
   const { pathname } = location
+  const headerMeta = getHeaderMetaForPath(pathname, DEFAULT_HEADER_META, routes)
   const isChatShell = pathname === "/"
   const [agentSurfaceActive, setAgentSurfaceActive] = useState(false)
   const pendingSurface = useAgentSurfaceStore((state) => state.pendingSurface)
@@ -25,9 +33,9 @@ export default function Layout() {
 
   return (
     <div className="workspace-shell flex h-screen min-h-0 w-full flex-col overflow-hidden">
-      <GlobalHeaderProvider>
+      <GlobalHeaderProvider defaultMeta={headerMeta}>
         <div className="flex min-h-0 w-full flex-1">
-          <AppSidebar variant={isChatShell ? "chat" : "default"} />
+          <AppSidebar routes={routes} variant={isChatShell ? "chat" : "default"} />
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <Header variant={isChatShell ? "chat" : "default"} />
             <WorkspaceStage

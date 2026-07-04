@@ -57,9 +57,8 @@ vi.mock('@/pages/assistant/hooks/use-markdown-theme', () => ({
   useMarkdownTheme: vi.fn<() => unknown>(() => ['markdown-theme-dark']),
 }));
 
-vi.mock('@/hooks/use-global-header-meta', () => ({
-  usePageHeader: vi.fn<() => void>(),
-  usePageHeaderControl: vi.fn<() => void>(),
+vi.mock('@/hooks/use-header', () => ({
+  useHeaderControl: vi.fn<() => void>(),
 }));
 
 vi.mock('@/hooks/use-persisted-header-select', () => ({

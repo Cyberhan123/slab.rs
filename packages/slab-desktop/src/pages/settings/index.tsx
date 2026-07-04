@@ -15,8 +15,7 @@ import {
 } from '@slab/components/dialog';
 import { StageEmptyState, StatusPill } from '@slab/components/workspace';
 import { translateServerField, useTranslation } from '@slab/i18n';
-import { usePageHeader, usePageHeaderSearch } from '@/hooks/use-global-header-meta';
-import { PAGE_HEADER_META } from '@/layouts/header-meta';
+import { useHeaderSearch } from '@/hooks/use-header';
 import { useUiStatePersistenceStatus } from '@/store/ui-state-storage';
 import api, { getErrorMessage } from '@slab/api';
 
@@ -106,12 +105,7 @@ export default function SettingsPage() {
     setActiveSectionId(nextSectionId);
   }, [activeSectionId, visibleSections]);
 
-  usePageHeader({
-    ...PAGE_HEADER_META.settings,
-    title: t('pages.settings.header.title'),
-    subtitle: t('pages.settings.header.subtitle'),
-  });
-  usePageHeaderSearch({
+  useHeaderSearch({
     type: 'search',
     value: searchQuery,
     onValueChange: setSearchQuery,

@@ -64,9 +64,8 @@ vi.mock('@/pages/image/hooks/use-image-model-preparation', () => ({
   })),
 }));
 
-vi.mock('@/hooks/use-global-header-meta', () => ({
-  usePageHeader: vi.fn<() => void>(),
-  usePageHeaderControl: vi.fn<() => void>(),
+vi.mock('@/hooks/use-header', () => ({
+  useHeaderControl: vi.fn<() => void>(),
 }));
 
 const createVoidMock = () => vi.fn<(...args: unknown[]) => void>();

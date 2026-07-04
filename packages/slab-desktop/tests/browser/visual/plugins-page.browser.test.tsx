@@ -27,10 +27,9 @@ vi.mock("@/hooks/use-tauri", () => ({
   isTauri: mockIsTauri,
 }));
 
-vi.mock("@/hooks/use-global-header-meta", () => ({
-  usePageHeader: vi.fn<() => void>(),
-  usePageHeaderControl: vi.fn<() => void>(),
-  usePageHeaderSearch: vi.fn<() => void>(),
+vi.mock("@/hooks/use-header", () => ({
+  useHeaderControl: vi.fn<() => void>(),
+  useHeaderSearch: vi.fn<() => void>(),
 }));
 
 vi.mock("@slab/api", async () => {

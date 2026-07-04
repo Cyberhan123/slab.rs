@@ -4,8 +4,7 @@ import { orderBy } from 'lodash-es';
 import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
-import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
-import { PAGE_HEADER_META } from '@/layouts/header-meta';
+import { useHeaderControl } from '@/hooks/use-header';
 import api, { getErrorMessage } from '@slab/api';
 import type { components } from '@slab/api/v1';
 import {
@@ -156,15 +155,6 @@ export function useImageGeneration() {
     }
   }, [getPrefilledPrompt, location.key]);
 
-  usePageHeader({
-    icon: PAGE_HEADER_META.image.icon,
-    title: t('pages.image.header.title'),
-    subtitle:
-      mode === 'img2img'
-        ? t('pages.image.header.subtitleImg2Img')
-        : t('pages.image.header.subtitleTxt2Img'),
-  });
-
   const isGenerating = isSubmitting || generationPhase !== 'idle';
   const isBusy = isGenerating || isPreparingModel || isResolvingModelState;
   const headerModelPicker = useMemo(
@@ -185,7 +175,7 @@ export function useImageGeneration() {
     [catalogLoading, isBusy, modelOptions, selectedModelId, setSelectedModelId, t],
   );
 
-  usePageHeaderControl(headerModelPicker);
+  useHeaderControl(headerModelPicker);
 
   const clearGenerationTask = useCallback(() => {
     generationProgressRef.current = null;

@@ -1,24 +1,16 @@
 import { useContext, useId, useLayoutEffect } from "react";
-import { GlobalHeaderContext } from "@/layouts/global-header-provider";
-import type { HeaderMeta, HeaderMetaOverride } from "@/layouts/header-meta";
-import type { GlobalHeaderContextValue } from "@/layouts/global-header-provider";
+
+import {
+  GlobalHeaderContext,
+  type GlobalHeaderContextValue,
+} from "@/layouts/global-header-provider";
 import type { HeaderControl, HeaderSearchControl } from "@/layouts/header-controls";
 
-export function useGlobalHeaderMeta(): HeaderMeta {
+export function useHeader(): Pick<GlobalHeaderContextValue, "meta" | "control" | "search"> {
   const context = useContext(GlobalHeaderContext);
 
   if (!context) {
-    throw new Error("useGlobalHeaderMeta must be used within GlobalHeaderProvider");
-  }
-
-  return context.meta;
-}
-
-export function useGlobalHeaderState(): Pick<GlobalHeaderContextValue, "meta" | "control" | "search"> {
-  const context = useContext(GlobalHeaderContext);
-
-  if (!context) {
-    throw new Error("useGlobalHeaderState must be used within GlobalHeaderProvider");
+    throw new Error("useHeader must be used within GlobalHeaderProvider");
   }
 
   return {
@@ -28,45 +20,15 @@ export function useGlobalHeaderState(): Pick<GlobalHeaderContextValue, "meta" | 
   };
 }
 
-export function usePageHeader(meta: HeaderMetaOverride | null | undefined): void {
+export function useHeaderControl(control: HeaderControl | null | undefined): void {
   const context = useContext(GlobalHeaderContext);
   const id = useId();
 
   if (!context) {
-    throw new Error("usePageHeader must be used within GlobalHeaderProvider");
-  }
-
-  const { setMeta, clearMeta } = context;
-  const isActive = meta != null;
-  const title = meta?.title;
-  const subtitle = meta?.subtitle;
-  const icon = meta?.icon;
-
-  useLayoutEffect(() => {
-    if (!isActive) {
-      return undefined;
-    }
-
-    setMeta(id, { title, subtitle, icon });
-
-    return () => {
-      clearMeta(id);
-    };
-  }, [clearMeta, icon, id, isActive, setMeta, subtitle, title]);
-}
-
-export function usePageHeaderControl(
-  control: HeaderControl | null | undefined,
-): void {
-  const context = useContext(GlobalHeaderContext);
-  const id = useId();
-
-  if (!context) {
-    throw new Error("usePageHeaderControl must be used within GlobalHeaderProvider");
+    throw new Error("useHeaderControl must be used within GlobalHeaderProvider");
   }
 
   const { setControl, clearControl } = context;
-  const isActive = control != null;
   const type = control?.type;
   const value = control?.type === "select" ? control.value : undefined;
   const options = control?.type === "select" ? control.options : undefined;
@@ -78,7 +40,7 @@ export function usePageHeaderControl(
   const emptyLabel = control?.type === "select" ? control.emptyLabel : undefined;
 
   useLayoutEffect(() => {
-    if (!isActive || !control) {
+    if (!control) {
       return undefined;
     }
 
@@ -94,7 +56,6 @@ export function usePageHeaderControl(
     emptyLabel,
     groupLabel,
     id,
-    isActive,
     loading,
     onValueChange,
     options,
@@ -105,14 +66,12 @@ export function usePageHeaderControl(
   ]);
 }
 
-export function usePageHeaderSearch(
-  search: HeaderSearchControl | null | undefined,
-): void {
+export function useHeaderSearch(search: HeaderSearchControl | null | undefined): void {
   const context = useContext(GlobalHeaderContext);
   const id = useId();
 
   if (!context) {
-    throw new Error("usePageHeaderSearch must be used within GlobalHeaderProvider");
+    throw new Error("useHeaderSearch must be used within GlobalHeaderProvider");
   }
 
   const { setSearch, clearSearch } = context;

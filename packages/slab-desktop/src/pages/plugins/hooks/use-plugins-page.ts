@@ -3,8 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
-import { usePageHeader, usePageHeaderSearch } from '@/hooks/use-global-header-meta';
-import { PAGE_HEADER_META } from '@/layouts/header-meta';
+import { useHeaderSearch } from '@/hooks/use-header';
 import api, { getLocalizedErrorMessage, postFormData } from '@slab/api';
 import {
   isPluginRunning,
@@ -37,12 +36,6 @@ export function usePluginsPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
 
-  usePageHeader({
-    icon: PAGE_HEADER_META.plugins.icon,
-    title: t('pages.plugins.header.title'),
-    subtitle: t('pages.plugins.header.subtitle'),
-  });
-
   const [busyPluginId, setBusyPluginId] = useState<string | null>(null);
   const [pluginActionErrors, setPluginActionErrors] = useState<Record<string, PluginActionError>>({});
   const [searchQuery, setSearchQuery] = useState('');
@@ -72,7 +65,7 @@ export function usePluginsPage() {
     [searchQuery, t],
   );
 
-  usePageHeaderSearch(headerSearch);
+  useHeaderSearch(headerSearch);
 
   const {
     data: pluginRows,

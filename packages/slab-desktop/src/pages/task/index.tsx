@@ -23,8 +23,6 @@ import {
 } from '@slab/components/workspace';
 import { useTranslation } from '@slab/i18n';
 import { Link } from 'react-router-dom';
-import { usePageHeader } from '@/hooks/use-global-header-meta';
-import { PAGE_HEADER_META } from '@/layouts/header-meta';
 
 import { useTaskList } from './hooks/use-task-list';
 import {
@@ -43,11 +41,6 @@ import { renderStatusPill } from './components/task-status-pill';
 export default function Task() {
   const { t, i18n } = useTranslation();
   const locale = i18n.resolvedLanguage ?? i18n.language;
-  usePageHeader({
-    icon: PAGE_HEADER_META.task.icon,
-    title: t('pages.task.header.title'),
-    subtitle: t('pages.task.header.subtitle'),
-  });
 
   const {
     allTasks,

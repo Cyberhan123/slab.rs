@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMutationObserverTarget } from "@mantine/hooks";
 import { sortBy } from "lodash-es";
@@ -23,7 +23,7 @@ import {
 } from "@/lib/workspace-bridge";
 import { RUNTIME_PLUGINS_QUERY_KEY } from "@/pages/plugins/hooks/use-runtime-plugins";
 import { isPluginRunning } from "@/pages/plugins/utils";
-import AppRoutes from "@/routes";
+import { GUARDRAIL_PMIDS, useGuardrailFlag } from "@/lib/guardrail-flags";
 
 const PLUGIN_THEME_OBSERVER_OPTIONS: MutationObserverInit = {
   attributes: true,
@@ -268,6 +268,20 @@ function WorkspaceModeSync() {
   return null;
 }
 
+function WorkspaceLazyRollbackPreload() {
+  const workspaceMonacoLazyEnabled = useGuardrailFlag(GUARDRAIL_PMIDS.workspaceMonacoLazy);
+
+  useEffect(() => {
+    if (workspaceMonacoLazyEnabled) {
+      return;
+    }
+
+    void import("@/pages/workspace");
+  }, [workspaceMonacoLazyEnabled]);
+
+  return null;
+}
+
 function App() {
   return (
     <ErrorBoundary>
@@ -277,7 +291,8 @@ function App() {
           <WorkspaceModeSync />
           <AppLanguageSync />
           <PluginThemeSync />
-          <AppRoutes />
+          <WorkspaceLazyRollbackPreload />
+          <Outlet />
           <Toaster />
         </QueryClientProvider>
       </TooltipProvider>
