@@ -14,10 +14,9 @@ import type {
   UIMessage,
   UIMessagePart,
   UITools,
-  HttpChatTransportInitOptions
 } from "ai"
 
-import { SlabChatTransport } from "./chat-transport"
+import { SlabChatTransport, type SlabChatTransportOptions } from "./chat-transport"
 
 type JsonRecord = Record<string, unknown>
 
@@ -80,9 +79,7 @@ type ChatNextOptions<
 
 type ChatTransportOptions<
     UI_MESSAGE extends UIMessage,
-> = HttpChatTransportInitOptions<UI_MESSAGE> &{
-  chunkDelayMs?: number
-}
+> = SlabChatTransportOptions<UI_MESSAGE>
 
 type StreamTextOptions = {
   id?: string

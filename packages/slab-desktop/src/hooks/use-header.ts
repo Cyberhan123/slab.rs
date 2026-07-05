@@ -2,12 +2,14 @@ import { useContext, useId, useLayoutEffect } from 'react';
 
 import type {
   HeaderMeta,
+  HeaderHistoryConfig,
   HeaderSearchConfig,
   HeaderSelectConfig,
 } from '@/layouts/header';
 import { HeaderContext, type HeaderContextValue } from '@/layouts/header-provider';
 
 export type UseHeaderRegistration = {
+  history?: HeaderHistoryConfig | null;
   meta?: HeaderMeta | null;
   select?: HeaderSelectConfig | null;
   search?: HeaderSearchConfig | null;
@@ -23,21 +25,24 @@ function useRequiredHeaderContext(hookName: string): HeaderContextValue {
   return context;
 }
 
-export function useHeader(): Pick<HeaderContextValue, 'meta' | 'select' | 'search'>;
+export function useHeader(): Pick<HeaderContextValue, 'history' | 'meta' | 'select' | 'search'>;
 export function useHeader(registration: UseHeaderRegistration | null | undefined): Pick<
   HeaderContextValue,
-  'meta' | 'select' | 'search'
+  'history' | 'meta' | 'select' | 'search'
 >;
 export function useHeader(registration?: UseHeaderRegistration | null) {
   const context = useRequiredHeaderContext('useHeader');
   const id = useId();
+  const history = registration?.history ?? null;
   const meta = registration?.meta ?? null;
   const select = registration?.select ?? null;
   const search = registration?.search ?? null;
   const {
+    clearHistory,
     clearMeta,
     clearSearch,
     clearSelect,
+    setHistory,
     setMeta,
     setSearch,
     setSelect,
@@ -54,6 +59,12 @@ export function useHeader(registration?: UseHeaderRegistration | null) {
       clearMeta(id);
     }
 
+    if (history) {
+      setHistory(id, history);
+    } else {
+      clearHistory(id);
+    }
+
     if (select) {
       setSelect(id, select);
     } else {
@@ -67,14 +78,16 @@ export function useHeader(registration?: UseHeaderRegistration | null) {
     }
     return undefined;
   }, [
+    clearHistory,
     clearMeta,
     clearSearch,
     clearSelect,
+    history,
     id,
     meta,
-    registration,
     search,
     select,
+    setHistory,
     setMeta,
     setSearch,
     setSelect,
@@ -83,13 +96,15 @@ export function useHeader(registration?: UseHeaderRegistration | null) {
   useLayoutEffect(
     () => () => {
       clearMeta(id);
+      clearHistory(id);
       clearSelect(id);
       clearSearch(id);
     },
-    [clearMeta, clearSearch, clearSelect, id],
+    [clearHistory, clearMeta, clearSearch, clearSelect, id],
   );
 
   return {
+    history: context.history,
     meta: context.meta,
     select: context.select,
     search: context.search,

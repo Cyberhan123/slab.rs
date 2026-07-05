@@ -1,5 +1,6 @@
 import { BotMessageSquare, History, Search } from "lucide-react"
 import { useTranslation } from "@slab/i18n"
+import { Button } from "@slab/components/button"
 import { Input } from "@slab/components/input"
 import { useHeader } from "@/hooks/use-header"
 import { WindowControls } from "@/layouts/window-controls"
@@ -60,6 +61,13 @@ export type HeaderSearchConfig = {
   onChange: (value: string) => void
   ariaLabel?: string
   disabled?: boolean
+}
+
+export type HeaderHistoryConfig = {
+  ariaLabel?: string
+  disabled?: boolean
+  onClick: () => void
+  title?: string
 }
 
 export const HEADER_SELECT_KEYS = {
@@ -149,11 +157,13 @@ export default function Header() {
   const { t } = useTranslation()
   const {
     meta: { title, subtitle, contextLabel },
+    history,
     select,
     search,
   } = useHeader()
   const searchPlaceholder = search?.placeholder ?? t("layouts.header.search.default")
   const searchAriaLabel = search?.ariaLabel ?? searchPlaceholder
+  const historyLabel = history?.ariaLabel ?? history?.title ?? t("layouts.header.history")
 
   return (
     <header
@@ -196,13 +206,23 @@ export default function Header() {
               />
             </div>
             <span aria-hidden="true" className="hairline-v hidden h-4 w-px shrink-0 md:block" />
-            <div
-              aria-hidden="true"
+          </>
+        ) : null}
+        {history ? (
+          <>
+            <Button
+              aria-label={historyLabel}
               data-testid="header-history-control"
-              className="flex size-8 shrink-0 items-center justify-center rounded-full text-[color:var(--shell-rail-label)] transition duration-[var(--dur-180)] ease-out-expo hover:bg-glass-bg-strong hover:text-[color:var(--shell-title)]"
+              disabled={history.disabled}
+              onClick={history.onClick}
+              size="icon-sm"
+              title={history.title ?? historyLabel}
+              type="button"
+              variant="quiet"
+              className="size-8 shrink-0 rounded-full text-[color:var(--shell-rail-label)] hover:bg-glass-bg-strong hover:text-[color:var(--shell-title)]"
             >
-              <History className="size-4" />
-            </div>
+              <History data-icon="inline-start" />
+            </Button>
             <span aria-hidden="true" className="hairline-v hidden h-4 w-px shrink-0 md:block" />
           </>
         ) : null}

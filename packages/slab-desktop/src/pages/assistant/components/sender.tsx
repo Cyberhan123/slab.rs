@@ -37,7 +37,7 @@ import {
 } from "lucide-react"
 
 type SenderProps = {
-    onSubmit: (message: string, event?: SubmitEvent<HTMLFormElement>) => void
+    onSubmit: (message: string, event?: SubmitEvent<HTMLFormElement>) => Promise<void> | void
     loading?: boolean
 }
 
@@ -53,8 +53,11 @@ function Sender({ onSubmit, loading = false }: SenderProps) {
                 return
             }
 
-            onSubmit(message, e)
-            setValue("")
+            void Promise.resolve(onSubmit(message, e))
+                .then(() => {
+                    setValue("")
+                })
+                .catch(() => {})
         }}
         className="w-full"
     >

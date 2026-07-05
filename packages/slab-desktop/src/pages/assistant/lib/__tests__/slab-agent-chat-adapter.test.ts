@@ -47,6 +47,53 @@ describe("SlabAgentChatAdapter", () => {
     })
   })
 
+  it("continues from thread ids restored by the page-level session restore path", () => {
+    const adapter = new SlabAgentChatAdapter({
+      model: "test-model",
+      sessionId: "session-restored",
+    })
+
+    adapter.handleServerMessage({
+      messages: [],
+      session_id: "session-restored",
+      thread: {
+        id: "thread-restored",
+        session_id: "session-restored",
+        status: "completed",
+      },
+      type: "agent.session.restored",
+    })
+
+    expect(adapter.createCommand({ messages: [userMessage("continue")] })).toMatchObject({
+      content: "continue",
+      thread_id: "thread-restored",
+      type: "agent.input",
+    })
+  })
+
+  it("uses constructor thread ids without leaking across adapter instances", () => {
+    const restoredAdapter = new SlabAgentChatAdapter({
+      sessionId: "session-a",
+      threadId: "thread-a",
+    })
+    const freshAdapter = new SlabAgentChatAdapter({
+      model: "model-b",
+      sessionId: "session-b",
+    })
+
+    expect(restoredAdapter.createCommand({ messages: [userMessage("next")] })).toMatchObject({
+      thread_id: "thread-a",
+      type: "agent.input",
+    })
+    expect(freshAdapter.createCommand({ messages: [userMessage("first")] })).toMatchObject({
+      config: {
+        model: "model-b",
+      },
+      session_id: "session-b",
+      type: "agent.response.create",
+    })
+  })
+
   it("converts text streaming events into AI SDK UI chunks", () => {
     const adapter = new SlabAgentChatAdapter()
 

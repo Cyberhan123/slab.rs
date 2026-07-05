@@ -13,6 +13,7 @@ import { nextId } from "./assistant-agent-state"
 type SlabAgentChatAdapterOptions = {
   model?: string
   sessionId?: string
+  threadId?: string | null
 }
 
 type SlabAgentChatRequest = {
@@ -99,6 +100,7 @@ export class SlabAgentChatAdapter {
   constructor(options: SlabAgentChatAdapterOptions = {}) {
     this.model = options.model ?? DEFAULT_ASSISTANT_MODEL
     this.sessionId = options.sessionId ?? DEFAULT_SESSION_ID
+    this.state.threadId = options.threadId ?? null
   }
 
   createCommand(request: SlabAgentChatRequest): AgentResponsesClientMessage {
@@ -134,6 +136,10 @@ export class SlabAgentChatAdapter {
   handleServerMessage(message: AgentResponsesServerMessage) {
     if (message.type === "agent.ack" && message.thread_id) {
       this.state.threadId = message.thread_id
+    }
+
+    if (message.type === "agent.session.restored") {
+      this.state.threadId = message.thread?.id ?? null
     }
 
     if (message.type === "agent.error") {

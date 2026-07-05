@@ -3,7 +3,7 @@
 export interface CreateWebSocketFetchOptions {
   /**
    * WebSocket endpoint URL.
-   * @default 'ws://localhost:3000/v1/agent/responses'
+   * @default 'ws://localhost:3000/v1/agents/responses'
    */
   url?: string;
 }
@@ -11,7 +11,7 @@ export interface CreateWebSocketFetchOptions {
 export function createWebSocketFetch(
   options?: CreateWebSocketFetchOptions,
 ) {
-  const wsUrl = options?.url ?? 'ws://localhost:3000/v1/agent/responses';
+  const wsUrl = options?.url ?? 'ws://localhost:3000/v1/agents/responses';
 
   let ws: WebSocket | null = null;
   let connecting: Promise<WebSocket> | null = null;
@@ -96,10 +96,15 @@ export function createWebSocketFetch(
     const headers = normalizeHeaders(init.headers);
     const authorization = headers['authorization'] ?? '';
 
-    const connection = await getConnection(authorization);
+    const { stream: _, ...requestBody } = body;
+    let connection: WebSocket;
+    try {
+      connection = await getConnection(authorization);
+    } catch {
+      return fallbackFetch(input, init, requestBody);
+    }
     busy = true;
 
-    const { stream: _, ...requestBody } = body;
     const encoder = new TextEncoder();
 
     const responseStream = new ReadableStream<Uint8Array>({
@@ -199,6 +204,97 @@ export function createWebSocketFetch(
       }
     },
   });
+}
+
+async function fallbackFetch(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  body: Record<string, unknown>,
+) {
+  const response = await globalThis.fetch(input, {
+    ...init,
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    return response;
+  }
+
+  const serverMessage = await response.json();
+  const threadId =
+    typeof serverMessage === 'object' &&
+    serverMessage !== null &&
+    'thread_id' in serverMessage &&
+    typeof serverMessage.thread_id === 'string'
+      ? serverMessage.thread_id
+      : null;
+  const streamUrl = threadId ? createSseUrl(input, threadId) : null;
+  const encoder = new TextEncoder();
+
+  const responseStream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify(serverMessage)}\n\n`));
+
+      if (!streamUrl) {
+        controller.close();
+        return;
+      }
+
+      const streamResponse = await globalThis.fetch(streamUrl, {
+        headers: {
+          Accept: 'text/event-stream',
+        },
+        signal: init?.signal,
+      });
+
+      if (!streamResponse.ok) {
+        controller.error(
+          new Error((await streamResponse.text()) || 'Failed to fetch the chat stream.'),
+        );
+        return;
+      }
+
+      if (!streamResponse.body) {
+        controller.error(new Error('The response body is empty.'));
+        return;
+      }
+
+      const reader = streamResponse.body.getReader();
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          controller.enqueue(value);
+        }
+        controller.close();
+      } catch (error) {
+        controller.error(error);
+      } finally {
+        reader.releaseLock();
+      }
+    },
+  });
+
+  return new Response(responseStream, {
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' },
+  });
+}
+
+function createSseUrl(input: RequestInfo | URL, threadId: string) {
+  const url =
+    input instanceof URL
+      ? new URL(input)
+      : typeof input === 'string'
+        ? new URL(input)
+        : new URL(input.url);
+
+  url.search = '';
+  url.searchParams.set('transport', 'sse');
+  url.searchParams.set('thread_id', threadId);
+  url.hash = '';
+  return url.toString();
 }
 
 function normalizeHeaders(

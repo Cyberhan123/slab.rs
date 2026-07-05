@@ -115,7 +115,7 @@ function MessageRow({
                 <MessageHeader>{isUserMessage ? t("pages.assistant.message.user") : t("pages.assistant.message.assistant")}</MessageHeader>
                 <Bubble
                     align={message.role === "user" ? "end" : "start"}
-                    variant={message.role === "user" ? "tinted" : "default"}
+                    variant={message.role === "user" ? "tinted" : "outline"}
                 >
                     <BubbleContent className="space-y-2">
                         <MessageParts<TRenderableMessagePart, TMessage>

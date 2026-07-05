@@ -9,6 +9,7 @@ import {
 
 import {
   DEFAULT_HEADER_META,
+  type HeaderHistoryConfig,
   type HeaderMeta,
   type HeaderSearchConfig,
   type HeaderSelectConfig,
@@ -29,12 +30,20 @@ type HeaderSearchEntry = {
   search: HeaderSearchConfig;
 };
 
+type HeaderHistoryEntry = {
+  id: string;
+  history: HeaderHistoryConfig;
+};
+
 export type HeaderContextValue = {
   meta: HeaderMeta;
+  history: HeaderHistoryConfig | null;
   select: HeaderSelectConfig | null;
   search: HeaderSearchConfig | null;
   setMeta: (id: string, meta: HeaderMeta) => void;
   clearMeta: (id: string) => void;
+  setHistory: (id: string, history: HeaderHistoryConfig) => void;
+  clearHistory: (id: string) => void;
   setSelect: (id: string, select: HeaderSelectConfig) => void;
   clearSelect: (id: string) => void;
   setSearch: (id: string, search: HeaderSearchConfig) => void;
@@ -138,11 +147,21 @@ function areHeaderSearchConfigsEqual(left: HeaderSearchConfig, right: HeaderSear
   );
 }
 
+function areHeaderHistoryConfigsEqual(left: HeaderHistoryConfig, right: HeaderHistoryConfig) {
+  return (
+    left.onClick === right.onClick &&
+    left.ariaLabel === right.ariaLabel &&
+    left.title === right.title &&
+    Boolean(left.disabled) === Boolean(right.disabled)
+  );
+}
+
 export function HeaderProvider({
   children,
   defaultMeta = DEFAULT_HEADER_META,
 }: HeaderProviderProps) {
   const [metaEntries, setMetaEntries] = useState<HeaderMetaEntry[]>([]);
+  const [historyEntries, setHistoryEntries] = useState<HeaderHistoryEntry[]>([]);
   const [selectEntries, setSelectEntries] = useState<HeaderSelectEntry[]>([]);
   const [searchEntries, setSearchEntries] = useState<HeaderSearchEntry[]>([]);
 
@@ -154,6 +173,18 @@ export function HeaderProvider({
 
   const clearMeta = useCallback((id: string) => {
     setMetaEntries((current) => removeEntry(current, id));
+  }, []);
+
+  const setHistory = useCallback((id: string, history: HeaderHistoryConfig) => {
+    setHistoryEntries((current) =>
+      upsertEntry(current, id, { id, history }, (left, right) =>
+        areHeaderHistoryConfigsEqual(left.history, right.history),
+      ),
+    );
+  }, []);
+
+  const clearHistory = useCallback((id: string) => {
+    setHistoryEntries((current) => removeEntry(current, id));
   }, []);
 
   const setSelect = useCallback((id: string, select: HeaderSelectConfig) => {
@@ -181,6 +212,7 @@ export function HeaderProvider({
   }, []);
 
   const meta = metaEntries.at(-1)?.meta ?? defaultMeta;
+  const history = historyEntries.at(-1)?.history ?? null;
   const select = selectEntries.at(-1)?.select ?? null;
   const search = searchEntries.at(-1)?.search ?? null;
 
@@ -191,16 +223,32 @@ export function HeaderProvider({
   const value = useMemo(
     () => ({
       meta,
+      history,
       select,
       search,
       setMeta,
       clearMeta,
+      setHistory,
+      clearHistory,
       setSelect,
       clearSelect,
       setSearch,
       clearSearch,
     }),
-    [clearMeta, clearSearch, clearSelect, meta, search, select, setMeta, setSearch, setSelect],
+    [
+      clearHistory,
+      clearMeta,
+      clearSearch,
+      clearSelect,
+      history,
+      meta,
+      search,
+      select,
+      setHistory,
+      setMeta,
+      setSearch,
+      setSelect,
+    ],
   );
 
   return <HeaderContext.Provider value={value}>{children}</HeaderContext.Provider>;

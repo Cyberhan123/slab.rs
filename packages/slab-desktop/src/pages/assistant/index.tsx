@@ -1,20 +1,23 @@
 "use client"
 
 import { useChat } from "@ai-sdk/react"
+import type { UIMessage } from "ai"
+import { MessageCircleDashedIcon } from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { toast } from "sonner"
+
+import api from "@slab/api"
 import {
-    MessageCircleDashedIcon,
-} from "lucide-react"
-import {
-    useGreeting,
-} from "./hooks/use-greeting"
-import { createChat } from "@/pages/assistant/lib/message-provider"
-import { useTranslation } from "@slab/i18n"
+    DEFAULT_ASSISTANT_LABELS,
+    LEGACY_DEFAULT_CHAT_LABELS,
+    getResolvedAppLanguage,
+    useTranslation,
+} from "@slab/i18n"
 import {
     Card,
     CardContent,
     CardFooter,
 } from "@slab/components/card"
-
 import {
     Empty,
     EmptyDescription,
@@ -22,64 +25,115 @@ import {
     EmptyMedia,
     EmptyTitle,
 } from "@slab/components/empty"
-
 import {
     MessageScrollerProvider,
 } from "@slab/components/message-scroller"
 
+import { useAiModel } from "@/hooks/use-ai-model"
+import { useHeader } from "@/hooks/use-header"
+import { HEADER_SELECT_KEYS } from "@/layouts/header"
 
 import MessageList from "@/pages/assistant/components/message/index.tsx"
 import Sender from "@/pages/assistant/components/sender.tsx"
+import {
+    getAssistantErrorDescription,
+    getAssistantMessageTextContent,
+    type AgentResponsesServerMessage,
+} from "./assistant-context"
+import { AssistantModelSwitchDialog } from "./components/assistant-model-switch-dialog"
+import { AssistantSessionSheet } from "./components/assistant-session-sheet"
+import { useGreeting } from "./hooks/use-greeting"
+import { useAssistantSessions } from "./hooks/use-assistant-sessions"
+import { nextId } from "./lib/assistant-agent-state"
+import { projectAgentThreadMessages } from "./lib/assistant-message-projection"
+import {
+    createConversationLabel,
+    getSelectedModelStatusLabel,
+    resolveAssistantModelCapabilities,
+    type ModelOption,
+    type ModelRuntimeStatus,
+} from "./lib/assistant-page-state"
+import { createChat } from "./lib/message-provider"
 
-const chat = createChat()
-    .user(
-        "I'm building a chat for our app and the scroll behavior is driving me nuts. Every time the AI streams a reply, the whole thread jumps around."
-    )
-    .sleep(1000)
-    .assistant(
-        "That's the classic streaming scroll problem. Wrap your message list in `MessageScroller` and turn on `autoScroll` — the viewport pins to the bottom as tokens arrive, so users always see the latest text land in place.\n\nThe important part: it only auto-scrolls while the reader is already at the bottom. The moment they scroll up to read something earlier, auto-scroll backs off and their position is preserved. You get smooth streaming without fighting the user's intent."
-    )
-    .user(
-        "Okay, but when someone sends a new message the view still feels jarring — like the whole conversation reloads from the top."
-    )
-    .sleep(1000)
-    .assistant(
-        "MessageScrollerItem fixes that with turn anchoring. Set `scrollAnchor` on the turn that should settle near the top instead of blindly snapping to the document bottom.\n\nIt also leaves a small peek of the previous exchange visible above the anchor, so context isn't lost. The reply starts in view without that disorienting jump you get from a plain overflow container."
-    )
-    .user(
-        "And if they've scrolled up to re-read an older answer? I don't want to yank them back down."
-    )
-    .sleep(1000)
-    .assistant(
-        "You won't. Auto-scroll only runs when the viewport is already pinned to the bottom, so scrolling up is a deliberate opt-out — their place in the thread stays put even as new tokens keep arriving below.\n\nWhen there is content they haven't seen yet, `MessageScrollerButton` appears at the bottom of the viewport. One tap jumps them back to the newest message and re-engages auto-scroll. Same pattern as Slack or iMessage: quiet when you're caught up, helpful when you're not."
-    )
-    .user("Last one — does this work with assistive tech?")
-    .sleep(1000)
-    .assistant(
-        '`MessageScrollerContent` sets `role="log"` and `aria-relevant="additions"` by default, so screen readers announce new messages as they stream in.\n\nThe scroll button is a real `<button>` with an sr-only label, and it\'s removed from the tab order when you\'re already at the bottom — no ghost focus stops.'
-    )
-const initialMessages = chat.get({ count: 0 })
-const transport = chat.transport({ chunkDelayMs: 20 })
+type RestoredSessionMessage = Extract<
+    AgentResponsesServerMessage,
+    { type: "agent.session.restored" }
+>
 
-function Assistant() {
+type AssistantChatPaneProps = {
+    disabled: boolean
+    initialMessages: UIMessage[]
+    isHistoryLoading: boolean
+    modelStatusLabel: string
+    onBeforeSubmit: (value: string) => Promise<void>
+    onBusyChange: (busy: boolean) => void
+    onMessageCountChange: (count: number) => void
+    transport: ReturnType<ReturnType<typeof createChat>["transport"]>
+}
 
+function toChatMessages(response: RestoredSessionMessage): UIMessage[] {
+    return projectAgentThreadMessages(response.messages, response.thread?.status ?? undefined)
+        .map((record): UIMessage | null => {
+            const text = getAssistantMessageTextContent(record.message).trim()
+
+            if (!text) {
+                return null
+            }
+
+            return {
+                id: String(record.id),
+                parts: [{ text, type: "text" }],
+                role: record.message.role === "assistant" ? "assistant" : "user",
+            } satisfies UIMessage
+        })
+        .filter((message): message is UIMessage => Boolean(message))
+}
+
+function AssistantChatPane({
+    disabled,
+    initialMessages,
+    isHistoryLoading,
+    modelStatusLabel,
+    onBeforeSubmit,
+    onBusyChange,
+    onMessageCountChange,
+    transport,
+}: AssistantChatPaneProps) {
     const { t } = useTranslation()
     const { messages, sendMessage, status } = useChat({
         messages: initialMessages,
         transport,
     })
-
     const isBusy = status === "submitted" || status === "streaming"
-
     const greeting = useGreeting()
+
+    useEffect(() => {
+        onBusyChange(isBusy)
+    }, [isBusy, onBusyChange])
+
+    useEffect(() => {
+        onMessageCountChange(messages.length)
+    }, [messages.length, onMessageCountChange])
 
     return (
         <MessageScrollerProvider>
             <div className="relative flex min-h-0 flex-1 flex-col bg-[var(--shell-card)]">
                 <Card className="h-full w-full gap-0 border-none shadow-none">
                     <CardContent className="flex-1 overflow-hidden p-0">
-                        {messages.length === 0 ? (
-                            <Empty className="h-full">
+                        {isHistoryLoading && messages.length === 0 ? (
+                            <Empty className="h-full" data-testid="assistant-loading-state">
+                                <EmptyHeader>
+                                    <EmptyMedia variant="icon">
+                                        <MessageCircleDashedIcon />
+                                    </EmptyMedia>
+                                    <EmptyTitle>{t("pages.assistant.loading.title")}</EmptyTitle>
+                                    <EmptyDescription>
+                                        {t("pages.assistant.loading.description")}
+                                    </EmptyDescription>
+                                </EmptyHeader>
+                            </Empty>
+                        ) : messages.length === 0 ? (
+                            <Empty className="h-full" data-testid="assistant-empty-state">
                                 <EmptyHeader>
                                     <EmptyMedia variant="icon">
                                         <MessageCircleDashedIcon />
@@ -96,18 +150,508 @@ function Assistant() {
                     </CardContent>
                     <CardFooter className="flex-col gap-2">
                         <Sender
-                            onSubmit={(value) => {
-                                sendMessage({
-                                    text: value,
-                                })
+                            onSubmit={async (value) => {
+                                await onBeforeSubmit(value)
+                                sendMessage({ text: value })
                             }}
-                            loading={isBusy}
+                            loading={disabled || isBusy}
                         />
-
+                        <p
+                            className="w-full truncate text-xs text-muted-foreground"
+                            data-testid="assistant-model-status"
+                        >
+                            {modelStatusLabel}
+                        </p>
                     </CardFooter>
                 </Card>
             </div>
         </MessageScrollerProvider>
+    )
+}
+
+function Assistant() {
+    const { t } = useTranslation()
+    const [isSessionSheetOpen, setIsSessionSheetOpen] = useState(false)
+    const [pendingModelSwitchId, setPendingModelSwitchId] = useState<string | null>(null)
+    const [loadedModelStatus, setLoadedModelStatus] = useState<ModelRuntimeStatus | null>(null)
+    const [restoredMessages, setRestoredMessages] = useState<UIMessage[]>([])
+    const [restoredThreadId, setRestoredThreadId] = useState<string | null>(null)
+    const [restoreVersion, setRestoreVersion] = useState(0)
+    const [isHistoryLoading, setIsHistoryLoading] = useState(false)
+    const [activeConversation, setActiveConversation] = useState<string>()
+    const [isChatBusy, setIsChatBusy] = useState(false)
+    const [messageCount, setMessageCount] = useState(0)
+    const resolvedLanguage = getResolvedAppLanguage()
+
+    const {
+        conversationList,
+        createSession: createEmptySession,
+        currentSessionId: curConversation,
+        deleteSession: deleteConversationSession,
+        isCreatingSession,
+        isDeletingSession,
+        isSessionMutating,
+        isSessionsLoading: sessionsLoading,
+        setCurrentSessionId: setCurConversation,
+        updateSessionLabel,
+    } = useAssistantSessions()
+    const restoreSessionMutation = api.useMutation("post", "/v1/agents/responses", {
+        meta: {
+            skipGlobalErrorToast: true,
+        },
+    })
+    const restoreSession = restoreSessionMutation.mutateAsync
+
+    const assistantModels = useAiModel({
+        capability: "chat_generation",
+        storageKey: HEADER_SELECT_KEYS.assistantModel,
+        includeCloud: true,
+    })
+
+    const modelOptions = useMemo<ModelOption[]>(
+        () =>
+            assistantModels.models.map((model) => {
+                const downloaded =
+                    model.kind === "cloud" ||
+                    (model.status === "ready" &&
+                        typeof model.local_path === "string" &&
+                        model.local_path.length > 0)
+
+                return {
+                    capabilities: resolveAssistantModelCapabilities(model),
+                    contextWindow: model.spec.context_window ?? null,
+                    downloaded,
+                    id: model.id,
+                    label: model.display_name,
+                    pending: model.pending,
+                    runtimePresets: model.runtime_presets ?? null,
+                    source: model.kind,
+                }
+            }),
+        [assistantModels.models]
+    )
+    const selectedModelId = assistantModels.selectedId
+    const setSelectedModelId = assistantModels.setSelectedId
+    const selectedModel = useMemo(
+        () => modelOptions.find((item) => item.id === selectedModelId),
+        [modelOptions, selectedModelId]
+    )
+    const pendingModelSwitch = useMemo(
+        () => modelOptions.find((item) => item.id === pendingModelSwitchId) ?? null,
+        [modelOptions, pendingModelSwitchId]
+    )
+
+    const modelLoading = assistantModels.loading
+    const isPreparingModel = assistantModels.status.busy
+    const isSessionBootstrapping = (sessionsLoading || isCreatingSession) && conversationList.length === 0
+    const isSessionBusy = isChatBusy || isPreparingModel || isHistoryLoading || isSessionMutating
+    const selectedRuntimeContextLength = loadedModelStatus?.context_length ?? null
+    const currentConversationLabel =
+        conversationList.find((item) => item.key === curConversation)?.label?.trim() ||
+        t("pages.assistant.sessionSummary.currentSession")
+
+    useEffect(() => {
+        if (!curConversation) {
+            setRestoredMessages([])
+            setRestoredThreadId(null)
+            setActiveConversation(undefined)
+            setMessageCount(0)
+            setRestoreVersion((value) => value + 1)
+            return
+        }
+
+        let disposed = false
+        setIsHistoryLoading(true)
+        setRestoredMessages([])
+        setRestoredThreadId(null)
+        setActiveConversation(undefined)
+        setMessageCount(0)
+
+        void restoreSession({
+                body: {
+                    request_id: nextId("request"),
+                    session_id: curConversation,
+                    type: "agent.session.restore",
+                },
+            })
+            .then((response) => {
+                if (disposed) {
+                    return
+                }
+
+                if (response.type === "agent.session.restored") {
+                    const nextMessages = toChatMessages(response)
+                    setActiveConversation(response.session_id)
+                    setRestoredMessages(nextMessages)
+                    setRestoredThreadId(response.thread?.id ?? null)
+                    setMessageCount(nextMessages.length)
+                    return
+                }
+
+                if (response.type === "agent.error") {
+                    toast.error(t("pages.assistant.toast.failedToLoadSession"), {
+                        description: response.message,
+                    })
+                }
+            })
+            .catch((error) => {
+                if (disposed) {
+                    return
+                }
+
+                toast.error(t("pages.assistant.toast.failedToLoadSession"), {
+                    description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError"), t),
+                })
+            })
+            .finally(() => {
+                if (disposed) {
+                    return
+                }
+
+                setIsHistoryLoading(false)
+                setRestoreVersion((value) => value + 1)
+            })
+
+        return () => {
+            disposed = true
+        }
+    }, [curConversation, restoreSession, t])
+
+    const prepareSelectedModel = useCallback(async () => {
+        if (!selectedModelId) {
+            throw new Error(t("pages.assistant.error.selectModelFirst"))
+        }
+
+        const selectedOption = modelOptions.find((item) => item.id === selectedModelId)
+        if (!selectedOption) {
+            throw new Error(t("pages.assistant.error.selectedModelUnavailable"))
+        }
+
+        if (selectedOption.source === "cloud") {
+            setLoadedModelStatus(null)
+            return
+        }
+
+        const selectedLocal = assistantModels.localModels.find((item) => item.id === selectedModelId)
+        const { downloadedNow } = await assistantModels.ensureDownloaded(selectedModelId)
+
+        if (downloadedNow) {
+            toast.success(
+                t("pages.assistant.toast.downloaded", {
+                    model: selectedLocal?.display_name ?? selectedModelId,
+                })
+            )
+        }
+
+        try {
+            const status = await assistantModels.ensureLoaded(selectedModelId)
+            if (status.runtimeStatus) {
+                setLoadedModelStatus(status.runtimeStatus)
+            }
+        } catch (firstLoadError) {
+            if (downloadedNow) {
+                throw firstLoadError
+            }
+
+            toast.message(t("pages.assistant.toast.modelLoadRetry"))
+
+            const retry = await assistantModels.ensureDownloaded(selectedModelId, { forceDownload: true })
+            if (retry.downloadedNow) {
+                toast.success(
+                    t("pages.assistant.toast.downloaded", {
+                        model: selectedLocal?.display_name ?? selectedModelId,
+                    })
+                )
+            }
+
+            const status = await assistantModels.ensureLoaded(selectedModelId)
+            if (status.runtimeStatus) {
+                setLoadedModelStatus(status.runtimeStatus)
+            }
+        }
+    }, [assistantModels, modelOptions, selectedModelId, t])
+
+    const ensureAssistantModelReady = useCallback(async () => {
+        try {
+            await prepareSelectedModel()
+        } catch (error) {
+            toast.error(t("pages.assistant.toast.failedToPrepareModel"), {
+                description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError"), t),
+            })
+            throw error
+        }
+    }, [prepareSelectedModel, t])
+
+    const sortedConversations = useMemo(() => {
+        const currentConversation = conversationList.find((item) => item.key === curConversation)
+        const remainingConversations = conversationList.filter((item) => item.key !== curConversation)
+
+        return currentConversation
+            ? [currentConversation, ...remainingConversations]
+            : remainingConversations
+    }, [conversationList, curConversation])
+
+    const setConversationLabelIfNeeded = useCallback(
+        async (conversationKey: string, prompt: string) => {
+            const conversation = conversationList.find((item) => item.key === conversationKey)
+            const label = conversation?.label ?? t("pages.assistant.runtime.newChat")
+            const defaultLabels = new Set([
+                t("pages.assistant.runtime.newChat"),
+                t("pages.assistant.runtime.newConversation"),
+                ...DEFAULT_ASSISTANT_LABELS,
+                ...LEGACY_DEFAULT_CHAT_LABELS,
+            ])
+
+            if (!defaultLabels.has(label)) {
+                return
+            }
+
+            const nextLabel = createConversationLabel(prompt, t("pages.assistant.runtime.newChat"))
+            if (nextLabel) {
+                await updateSessionLabel(conversationKey, nextLabel)
+            }
+        },
+        [conversationList, t, updateSessionLabel]
+    )
+
+    const handleModelPickerChange = useCallback(
+        (nextModelId: string) => {
+            if (!nextModelId || nextModelId === selectedModelId) {
+                return
+            }
+
+            if (isSessionBusy || isSessionBootstrapping) {
+                toast.info(t("pages.assistant.toast.waitBeforeSwitchingModels"))
+                return
+            }
+
+            if (!curConversation || messageCount === 0) {
+                setSelectedModelId(nextModelId)
+                return
+            }
+
+            setPendingModelSwitchId(nextModelId)
+        },
+        [
+            curConversation,
+            isSessionBootstrapping,
+            isSessionBusy,
+            messageCount,
+            selectedModelId,
+            setSelectedModelId,
+            t,
+        ]
+    )
+
+    const headerModelPicker = useMemo(
+        () => ({
+            disabled:
+                modelLoading ||
+                isSessionBusy ||
+                isSessionBootstrapping ||
+                Boolean(pendingModelSwitchId) ||
+                modelOptions.length === 0,
+            emptyLabel: t("pages.assistant.modelPicker.emptyLabel"),
+            groupLabel: t("pages.assistant.modelPicker.groupLabel"),
+            loading: modelLoading,
+            onChange: handleModelPickerChange,
+            options: modelOptions.map((model) => ({
+                id: model.id,
+                label: model.label,
+            })),
+            placeholder: t("pages.assistant.modelPicker.placeholder"),
+            value: selectedModelId,
+        }),
+        [
+            handleModelPickerChange,
+            isSessionBootstrapping,
+            isSessionBusy,
+            modelLoading,
+            modelOptions,
+            pendingModelSwitchId,
+            selectedModelId,
+            t,
+        ]
+    )
+
+    const headerHistoryButton = useMemo(
+        () => ({
+            ariaLabel: t("pages.assistant.sessionSheet.title"),
+            disabled: isSessionBootstrapping,
+            onClick: () => setIsSessionSheetOpen(true),
+            title: t("pages.assistant.sessionSheet.title"),
+        }),
+        [isSessionBootstrapping, t]
+    )
+
+    useHeader({ history: headerHistoryButton, select: headerModelPicker })
+
+    const selectedModelStatusLabel = useMemo(
+        () =>
+            getSelectedModelStatusLabel({
+                curConversation,
+                eventsConnected: Boolean(restoredThreadId) || !isHistoryLoading,
+                isCreatingSession,
+                isDeletingSession,
+                isHistoryLoading,
+                isPreparingModel,
+                isSessionBootstrapping,
+                modelLoading,
+                resolvedLanguage,
+                selectedModel,
+                selectedRuntimeContextLength,
+                t,
+            }),
+        [
+            curConversation,
+            isCreatingSession,
+            isDeletingSession,
+            isHistoryLoading,
+            isPreparingModel,
+            isSessionBootstrapping,
+            modelLoading,
+            resolvedLanguage,
+            restoredThreadId,
+            selectedModel,
+            selectedRuntimeContextLength,
+            t,
+        ]
+    )
+
+    const transport = useMemo(
+        () =>
+            createChat().transport({
+                model: selectedModelId || "slab-llama",
+                sessionId: curConversation || undefined,
+                threadId: restoredThreadId,
+            }),
+        [curConversation, restoredThreadId, selectedModelId]
+    )
+
+    const handleBeforeSubmit = useCallback(
+        async (value: string) => {
+            if (!curConversation || isSessionBusy || isSessionBootstrapping) {
+                toast.info(t("pages.assistant.toast.sessionSyncing"))
+                throw new Error("Assistant session is not ready.")
+            }
+
+            await ensureAssistantModelReady()
+            void setConversationLabelIfNeeded(curConversation, value)
+        },
+        [
+            curConversation,
+            ensureAssistantModelReady,
+            isSessionBootstrapping,
+            isSessionBusy,
+            setConversationLabelIfNeeded,
+            t,
+        ]
+    )
+
+    const handleDeleteConversation = useCallback(
+        async (conversationKey: string) => {
+            if (isSessionBusy) {
+                toast.info(t("pages.assistant.toast.waitBeforeDeletingSessions"))
+                return
+            }
+
+            await deleteConversationSession(conversationKey)
+        },
+        [deleteConversationSession, isSessionBusy, t]
+    )
+
+    const handleSelectConversation = useCallback(
+        (conversationKey: string) => {
+            if (conversationKey === curConversation) {
+                setIsSessionSheetOpen(false)
+                return
+            }
+
+            if (isSessionBusy || isSessionBootstrapping) {
+                toast.info(t("pages.assistant.toast.sessionSyncing"))
+                return
+            }
+
+            setCurConversation(conversationKey)
+            setIsSessionSheetOpen(false)
+        },
+        [curConversation, isSessionBootstrapping, isSessionBusy, setCurConversation, t]
+    )
+
+    const closePendingModelSwitch = useCallback(() => {
+        if (isCreatingSession) {
+            return
+        }
+
+        setPendingModelSwitchId(null)
+    }, [isCreatingSession])
+
+    const handleKeepSessionOnModelSwitch = useCallback(() => {
+        if (!pendingModelSwitchId) {
+            return
+        }
+
+        setSelectedModelId(pendingModelSwitchId)
+        setPendingModelSwitchId(null)
+    }, [pendingModelSwitchId, setSelectedModelId])
+
+    const handleCreateSessionOnModelSwitch = useCallback(async () => {
+        if (!pendingModelSwitchId) {
+            return
+        }
+
+        const nextModelId = pendingModelSwitchId
+        const session = await createEmptySession({ select: true })
+
+        if (!session) {
+            return
+        }
+
+        setSelectedModelId(nextModelId)
+        setPendingModelSwitchId(null)
+    }, [createEmptySession, pendingModelSwitchId, setSelectedModelId])
+
+    return (
+        <>
+            <AssistantChatPane
+                key={`${curConversation ?? "none"}:${restoreVersion}`}
+                disabled={isSessionBootstrapping || isHistoryLoading || isSessionMutating || !curConversation}
+                initialMessages={restoredMessages}
+                isHistoryLoading={isHistoryLoading}
+                modelStatusLabel={selectedModelStatusLabel}
+                onBeforeSubmit={handleBeforeSubmit}
+                onBusyChange={setIsChatBusy}
+                onMessageCountChange={setMessageCount}
+                transport={transport}
+            />
+
+            <AssistantSessionSheet
+                open={isSessionSheetOpen}
+                onOpenChange={setIsSessionSheetOpen}
+                conversations={sortedConversations}
+                currentConversation={curConversation}
+                activeConversation={activeConversation}
+                busy={isSessionBusy || isSessionBootstrapping}
+                onSelect={handleSelectConversation}
+                onDelete={handleDeleteConversation}
+            />
+
+            <AssistantModelSwitchDialog
+                conversationLabel={currentConversationLabel}
+                isCreatingSession={isCreatingSession}
+                messageCount={messageCount}
+                onCreateSession={() => void handleCreateSessionOnModelSwitch()}
+                onKeepSession={handleKeepSessionOnModelSwitch}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        closePendingModelSwitch()
+                    }
+                }}
+                pendingModelId={pendingModelSwitchId}
+                pendingModelLabel={pendingModelSwitch?.label}
+                selectedModelLabel={selectedModel?.label}
+            />
+        </>
     )
 }
 
