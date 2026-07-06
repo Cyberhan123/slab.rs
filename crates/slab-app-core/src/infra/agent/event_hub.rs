@@ -224,6 +224,7 @@ mod tests {
                     text: "done".into(),
                     artifact_refs: Vec::new(),
                     reason: None,
+                    phase: None,
                 },
             },
         );

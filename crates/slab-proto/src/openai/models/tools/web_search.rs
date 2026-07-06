@@ -19,9 +19,6 @@ impl WebSearch {
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchActionFind {
-    /// The action type.
-    #[serde(rename = "type")]
-    pub r#type: WebSearchActionFindType,
     /// The URL of the page searched for the pattern.
     #[serde(rename = "url")]
     pub url: String,
@@ -32,29 +29,13 @@ pub struct WebSearchActionFind {
 
 impl WebSearchActionFind {
     /// Action type \"find_in_page\": Searches for a pattern within a loaded page.
-    pub fn new(
-        r#type: WebSearchActionFindType,
-        url: String,
-        pattern: String,
-    ) -> WebSearchActionFind {
-        WebSearchActionFind { r#type, url, pattern }
+    pub fn new(url: String, pattern: String) -> WebSearchActionFind {
+        WebSearchActionFind { url, pattern }
     }
-}
-/// The action type.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum WebSearchActionFindType {
-    #[serde(rename = "find_in_page")]
-    #[default]
-    FindInPage,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchActionOpenPage {
-    /// The action type.
-    #[serde(rename = "type")]
-    pub r#type: WebSearchActionOpenPageType,
     /// The URL opened by the model.
     #[serde(
         rename = "url",
@@ -67,25 +48,13 @@ pub struct WebSearchActionOpenPage {
 
 impl WebSearchActionOpenPage {
     /// Action type \"open_page\" - Opens a specific URL from search results.
-    pub fn new(r#type: WebSearchActionOpenPageType) -> WebSearchActionOpenPage {
-        WebSearchActionOpenPage { r#type, url: None }
+    pub fn new() -> WebSearchActionOpenPage {
+        WebSearchActionOpenPage { url: None }
     }
-}
-/// The action type.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum WebSearchActionOpenPageType {
-    #[serde(rename = "open_page")]
-    #[default]
-    OpenPage,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchActionSearch {
-    /// The action type.
-    #[serde(rename = "type")]
-    pub r#type: WebSearchActionSearchType,
     /// [DEPRECATED] The search query.
     #[serde(rename = "query")]
     pub query: String,
@@ -99,18 +68,9 @@ pub struct WebSearchActionSearch {
 
 impl WebSearchActionSearch {
     /// Action type \"search\" - Performs a web search query.
-    pub fn new(r#type: WebSearchActionSearchType, query: String) -> WebSearchActionSearch {
-        WebSearchActionSearch { r#type, query, queries: None, sources: None }
+    pub fn new(query: String) -> WebSearchActionSearch {
+        WebSearchActionSearch { query, queries: None, sources: None }
     }
-}
-/// The action type.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum WebSearchActionSearchType {
-    #[serde(rename = "search")]
-    #[default]
-    Search,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -222,9 +182,6 @@ impl WebSearchLocation {
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchPreviewTool {
-    /// The type of the web search tool. One of `web_search_preview` or `web_search_preview_2025_03_11`.
-    #[serde(rename = "type")]
-    pub r#type: WebSearchPreviewToolType,
     /// The user's location.
     #[serde(
         rename = "user_location",
@@ -242,25 +199,13 @@ pub struct WebSearchPreviewTool {
 
 impl WebSearchPreviewTool {
     /// This tool searches the web for relevant results to use in a response. Learn more about the [web search tool](https://platform.openai.com/docs/guides/tools-web-search).
-    pub fn new(r#type: WebSearchPreviewToolType) -> WebSearchPreviewTool {
+    pub fn new() -> WebSearchPreviewTool {
         WebSearchPreviewTool {
-            r#type,
             user_location: None,
             search_context_size: None,
             search_content_types: None,
         }
     }
-}
-/// The type of the web search tool. One of `web_search_preview` or `web_search_preview_2025_03_11`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum WebSearchPreviewToolType {
-    #[serde(rename = "web_search_preview")]
-    #[default]
-    WebSearchPreview,
-    #[serde(rename = "web_search_preview_2025_03_11")]
-    WebSearchPreview20250311,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -291,9 +236,6 @@ pub enum WebSearchSourceType {
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebSearchTool {
-    /// The type of the web search tool. One of `web_search` or `web_search_2025_08_26`.
-    #[serde(rename = "type")]
-    pub r#type: WebSearchToolType,
     #[serde(
         rename = "filters",
         default,
@@ -315,20 +257,9 @@ pub struct WebSearchTool {
 
 impl WebSearchTool {
     /// Search the Internet for sources related to the prompt. Learn more about the [web search tool](/docs/guides/tools-web-search).
-    pub fn new(r#type: WebSearchToolType) -> WebSearchTool {
-        WebSearchTool { r#type, filters: None, user_location: None, search_context_size: None }
+    pub fn new() -> WebSearchTool {
+        WebSearchTool { filters: None, user_location: None, search_context_size: None }
     }
-}
-/// The type of the web search tool. One of `web_search` or `web_search_2025_08_26`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum WebSearchToolType {
-    #[serde(rename = "web_search")]
-    #[default]
-    WebSearch,
-    #[serde(rename = "web_search_2025_08_26")]
-    WebSearch20250826,
 }
 
 use super::misc::ToolStatus;
@@ -373,11 +304,11 @@ pub enum WebSearchToolCallType {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum WebSearchToolCallAction {
-    #[serde(rename = "WebSearchActionSearch")]
+    #[serde(rename = "search")]
     WebSearchActionSearch(Box<models::WebSearchActionSearch>),
-    #[serde(rename = "WebSearchActionOpenPage")]
+    #[serde(rename = "open_page")]
     WebSearchActionOpenPage(Box<models::WebSearchActionOpenPage>),
-    #[serde(rename = "WebSearchActionFind")]
+    #[serde(rename = "find_in_page")]
     WebSearchActionFind(Box<models::WebSearchActionFind>),
 }
 

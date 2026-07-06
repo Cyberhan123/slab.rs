@@ -390,6 +390,7 @@ async fn handle_tool_call(
                     name: tool_call.name.clone(),
                     output_index: 0,
                     arguments: effective_arguments.clone(),
+                    namespace: None,
                     risk: Some(risk.clone()),
                 },
             },

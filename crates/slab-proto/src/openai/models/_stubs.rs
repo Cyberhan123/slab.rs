@@ -34,30 +34,40 @@ pub struct ComputerCallOutputItemParam {
 
 /// Computer tool declaration placeholder.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ComputerTool {
-    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
-    pub r#type: Option<String>,
-}
+pub struct ComputerTool {}
 
 /// Computer-use preview tool declaration placeholder.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ComputerUsePreviewTool {
-    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
-    pub r#type: Option<String>,
-}
+pub struct ComputerUsePreviewTool {}
 
 /// Code interpreter tool declaration placeholder.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CodeInterpreterTool {
-    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
-    pub r#type: Option<String>,
+    #[serde(rename = "container", skip_serializing_if = "Option::is_none")]
+    pub container: Option<serde_json::Value>,
 }
 
-/// File search tool declaration placeholder.
+impl CodeInterpreterTool {
+    pub fn new() -> Self {
+        CodeInterpreterTool { container: None }
+    }
+}
+
+/// File search tool declaration.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FileSearchTool {
-    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
-    pub r#type: Option<String>,
+    /// Optional filter criteria for search results.
+    #[serde(rename = "filters", skip_serializing_if = "Option::is_none")]
+    pub filters: Option<serde_json::Value>,
+    /// Maximum number of results to return.
+    #[serde(rename = "max_num_results", skip_serializing_if = "Option::is_none")]
+    pub max_num_results: Option<i32>,
+    /// Ranking options (ranker + score_threshold) as opaque JSON.
+    #[serde(rename = "ranking_options", skip_serializing_if = "Option::is_none")]
+    pub ranking_options: Option<serde_json::Value>,
+    /// Vector store IDs to search.
+    #[serde(rename = "vector_store_ids", skip_serializing_if = "Option::is_none")]
+    pub vector_store_ids: Option<Vec<String>>,
 }
 
 /// Citation metadata for files produced by a hosted container.
@@ -108,10 +118,7 @@ pub struct FilePath {
 
 /// File annotation placeholder used by generated response content.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct FileAnnotation {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub r#type: Option<String>,
-}
+pub struct FileAnnotation {}
 
 /// File citation body placeholder.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -203,25 +210,32 @@ pub struct Conversation2 {
     pub id: Option<String>,
 }
 
-/// Shell-call environment placeholder.
+/// Shell-call environment. Either `{type:"local"}` or
+/// `{type:"container_reference",container_id:"..."}`.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionShellCallEnvironment {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub key: Option<String>,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+    #[serde(rename = "container_id", skip_serializing_if = "Option::is_none")]
+    pub container_id: Option<String>,
 }
 
 /// Shell-call item parameter environment placeholder.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionShellCallItemParamEnvironment {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub key: Option<String>,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+    #[serde(rename = "container_id", skip_serializing_if = "Option::is_none")]
+    pub container_id: Option<String>,
 }
 
-/// Shell-tool parameter environment placeholder.
+/// Shell-tool parameter environment. Mirrors `FunctionShellCallEnvironment`.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionShellToolParamEnvironment {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub key: Option<String>,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+    #[serde(rename = "container_id", skip_serializing_if = "Option::is_none")]
+    pub container_id: Option<String>,
 }
 
 /// Input token-count request placeholder.

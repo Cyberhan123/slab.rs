@@ -112,7 +112,17 @@ fn render_minijinja_template(
         AppCoreError::BadRequest(format!("configured chat_template failed to load: {error}"))
     })?;
     let eos_token = infer_eos_token(source);
-    let template_tools = serde_json::to_value(tools).unwrap_or_else(|_| Value::Array(Vec::new()));
+    // Wrap each function tool in the canonical `Tool` enum so the internal
+    // `type` tag is emitted on the wire. The bare `FunctionTool` struct no
+    // longer carries a `type` field (slab-proto Tool serde Option 2 fix), so
+    // serializing it directly would omit `"type":"function"`.
+    let template_tools = serde_json::to_value(
+        tools
+            .iter()
+            .map(|t| slab_proto::openai::Tool::FunctionTool(Box::new(t.clone())))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|_| Value::Array(Vec::new()));
 
     let render_result = match enable_thinking {
         Some(enable_thinking) => template.render(context! {
@@ -293,7 +303,9 @@ fn render_raw_chat(
 }
 
 fn raw_tool_prompt(tools: &[slab_proto::openai::FunctionTool]) -> String {
-    let tools_json = serde_json::to_string_pretty(tools).unwrap_or_else(|_| "[]".to_owned());
+    let wrapped: Vec<slab_proto::openai::Tool> =
+        tools.iter().map(|t| slab_proto::openai::Tool::FunctionTool(Box::new(t.clone()))).collect();
+    let tools_json = serde_json::to_string_pretty(&wrapped).unwrap_or_else(|_| "[]".to_owned());
     format!(
         "Tools are available as OpenAI Responses function tools.\n\
 Available tools:\n{tools_json}\n\
@@ -332,7 +344,7 @@ mod tests {
         ConversationMessageContent,
     };
     use serde_json::Value;
-    use slab_proto::openai::{FunctionTool, FunctionToolType};
+    use slab_proto::openai::FunctionTool;
 
     const QWEN35_TEMPLATE: &str =
         include_str!("../../../../../../models/llama/Qwen3.5-9B/configs/chat_template.jinja");
@@ -349,7 +361,6 @@ mod tests {
 
     fn echo_tool() -> FunctionTool {
         let mut tool = FunctionTool::new(
-            FunctionToolType::Function,
             "echo".to_owned(),
             Some([("type".to_owned(), Value::String("object".to_owned()))].into_iter().collect()),
             Some(true),

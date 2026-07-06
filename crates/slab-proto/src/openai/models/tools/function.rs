@@ -3,9 +3,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionTool {
-    /// The type of the function tool. Always `function`.
-    #[serde(rename = "type")]
-    pub r#type: FunctionToolType,
     /// The name of the function to call.
     #[serde(rename = "name")]
     pub name: String,
@@ -31,22 +28,12 @@ pub struct FunctionTool {
 impl FunctionTool {
     /// Defines a function in your own code the model can choose to call. Learn more about [function calling](https://platform.openai.com/docs/guides/function-calling).
     pub fn new(
-        r#type: FunctionToolType,
         name: String,
         parameters: Option<std::collections::HashMap<String, serde_json::Value>>,
         strict: Option<bool>,
     ) -> FunctionTool {
-        FunctionTool { r#type, name, parameters, strict, description: None, defer_loading: None }
+        FunctionTool { name, parameters, strict, description: None, defer_loading: None }
     }
-}
-/// The type of the function tool. Always `function`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum FunctionToolType {
-    #[serde(rename = "function")]
-    #[default]
-    Function,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -296,8 +283,6 @@ pub enum FunctionToolCallResourceType {
 pub struct FunctionToolParam {
     #[serde(rename = "name")]
     pub name: String,
-    #[serde(rename = "type")]
-    pub r#type: FunctionToolParamType,
     #[serde(
         rename = "description",
         default,
@@ -325,24 +310,15 @@ pub struct FunctionToolParam {
 }
 
 impl FunctionToolParam {
-    pub fn new(name: String, r#type: FunctionToolParamType) -> FunctionToolParam {
+    pub fn new(name: String) -> FunctionToolParam {
         FunctionToolParam {
             name,
-            r#type,
             description: None,
             parameters: None,
             strict: None,
             defer_loading: None,
         }
     }
-}
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum FunctionToolParamType {
-    #[serde(rename = "function")]
-    #[default]
-    Function,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -469,11 +445,11 @@ impl Default for FunctionCallOutputItemParamOutput {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum FunctionCallOutputItemParamOutputOneOfInner {
-    #[serde(rename = "InputTextContentParam")]
+    #[serde(rename = "input_text")]
     InputTextContentParam(Box<models::InputTextContentParam>),
-    #[serde(rename = "InputImageContentParamAutoParam")]
+    #[serde(rename = "input_image")]
     InputImageContentParamAutoParam(Box<models::InputImageContentParamAutoParam>),
-    #[serde(rename = "InputFileContentParam")]
+    #[serde(rename = "input_file")]
     InputFileContentParam(Box<models::InputFileContentParam>),
 }
 
@@ -532,11 +508,11 @@ impl std::fmt::Display for FunctionCallStatus {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum FunctionAndCustomToolCallOutput {
-    #[serde(rename = "InputTextContent")]
+    #[serde(rename = "input_text")]
     InputTextContent(Box<models::InputTextContent>),
-    #[serde(rename = "InputImageContent")]
+    #[serde(rename = "input_image")]
     InputImageContent(Box<models::InputImageContent>),
-    #[serde(rename = "InputFileContent")]
+    #[serde(rename = "input_file")]
     InputFileContent(Box<models::InputFileContent>),
 }
 

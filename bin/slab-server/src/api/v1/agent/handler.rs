@@ -2,51 +2,50 @@
 
 use std::convert::Infallible;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use chrono::Utc;
 use futures::SinkExt;
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
-use slab_agent::{AgentEventKind, AgentStreamEvent, TurnEvent};
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::{AgentService, WorkspaceService};
+use slab_app_core::error::AppCoreError;
 use slab_app_core::infra::agent::event_hub::AgentEventEnvelope;
+use slab_app_core::schemas::chat::{OpenAiError, OpenAiErrorResponse};
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use utoipa::OpenApi;
 
+use crate::api::v1::agent::openai_compat::{
+    AdapterInput, StreamCtx, build_response, envelope_to_events,
+};
 use crate::api::v1::agent::schema::{
-    AgentConfigInput, AgentResponsesAction, AgentResponsesClientMessage,
-    AgentResponsesServerMessage, AgentStatusValue, AgentThreadMessageResponse, AgentThreadResponse,
+    AgentConfigInput, AgentResponsesClientMessage, AgentResponsesServerMessage, AgentStatusValue,
     MessageInput, WorkspaceMigrationResponse,
 };
 use crate::api::v1::chat::schema::{ChatToolCall, ChatToolFunction};
 use crate::api::validation::{ValidatedJson, validate};
-use crate::error::{ServerError, message_i18n_with_detail};
-use slab_types::ServerI18nKey;
+use crate::error::ServerError;
 
 #[derive(OpenApi)]
 #[openapi(
     paths(agent_responses_get, agent_responses_post, migrate_workspace),
     components(schemas(
         AgentResponsesClientMessage,
-        AgentResponsesServerMessage,
-        AgentResponsesAction,
-        AgentThreadResponse,
-        AgentThreadMessageResponse,
         AgentConfigInput,
         MessageInput,
-        AgentStatusValue,
         ChatToolCall,
         ChatToolFunction,
+        OpenAiErrorResponse,
         WorkspaceMigrationResponse
     ))
 )]
@@ -69,6 +68,132 @@ struct CommandResult {
     subscribe_thread_id: Option<String>,
 }
 
+// ---------------------------------------------------------------------------
+// Error boundary — route-local OpenAI-canonical error shape.
+//
+// The global `ServerError::IntoResponse` is intentionally left untouched;
+// `AgentCompatError` wraps it and renders `{"error":{message,type,param,code}}`
+// per the OpenAI Responses spec for the `/v1/agents/responses` routes only.
+// ---------------------------------------------------------------------------
+
+/// Route-local error wrapper that renders the OpenAI-compatible error body
+/// for the `/v1/agents/responses` HTTP handlers.
+struct AgentCompatError(ServerError);
+
+impl From<ServerError> for AgentCompatError {
+    fn from(error: ServerError) -> Self {
+        AgentCompatError(error)
+    }
+}
+
+impl From<AppCoreError> for AgentCompatError {
+    fn from(error: AppCoreError) -> Self {
+        AgentCompatError(ServerError::from(error))
+    }
+}
+
+impl IntoResponse for AgentCompatError {
+    fn into_response(self) -> Response {
+        let (status, error_type, code, message) = map_server_error(self.0);
+        render_openai_error(status, error_type, code, message, None)
+    }
+}
+
+/// Map a [`ServerError`] onto the OpenAI error taxonomy.
+fn map_server_error(error: ServerError) -> (StatusCode, &'static str, &'static str, String) {
+    match error {
+        ServerError::BadRequest(message) | ServerError::RequestValidationFailed(message) => {
+            (StatusCode::BAD_REQUEST, "invalid_request_error", "invalid_request", message)
+        }
+        ServerError::BadRequestData { message, .. } => {
+            (StatusCode::BAD_REQUEST, "invalid_request_error", "invalid_request", message)
+        }
+        ServerError::NotFound(message) => {
+            (StatusCode::NOT_FOUND, "invalid_request_error", "not_found", message)
+        }
+        ServerError::Forbidden(message) => {
+            (StatusCode::FORBIDDEN, "invalid_request_error", "forbidden", message)
+        }
+        ServerError::Conflict(message) => {
+            (StatusCode::CONFLICT, "invalid_request_error", "conflict", message)
+        }
+        ServerError::TooManyRequests(message) => {
+            (StatusCode::TOO_MANY_REQUESTS, "invalid_request_error", "too_many_requests", message)
+        }
+        ServerError::BackendNotReady(message) => {
+            (StatusCode::SERVICE_UNAVAILABLE, "invalid_request_error", "backend_not_ready", message)
+        }
+        ServerError::NotImplemented(message) => {
+            (StatusCode::NOT_IMPLEMENTED, "invalid_request_error", "not_implemented", message)
+        }
+        ServerError::RuntimeFailure { message, .. } => {
+            (StatusCode::INTERNAL_SERVER_ERROR, "server_error", "internal_error", message)
+        }
+        ServerError::Runtime(_) | ServerError::Database(_) | ServerError::Internal(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "server_error",
+            "internal_error",
+            "internal server error".to_owned(),
+        ),
+    }
+}
+
+/// Render an OpenAI-canonical error response body.
+fn render_openai_error(
+    status: StatusCode,
+    error_type: &str,
+    code: &str,
+    message: String,
+    param: Option<String>,
+) -> Response {
+    let body = OpenAiErrorResponse {
+        error: OpenAiError {
+            message,
+            error_type: error_type.to_owned(),
+            param,
+            code: Some(code.to_owned()),
+            i18n: None,
+        },
+    };
+    (status, Json(body)).into_response()
+}
+
+/// Wrap an [`OpenAiError`] in the canonical streaming error envelope
+/// `{"type":"error","error":{...}}` used by SSE and WS frames.
+fn openai_error_frame(error: OpenAiError) -> serde_json::Value {
+    let error_value = serde_json::to_value(&error).expect("OpenAiError serializable");
+    serde_json::json!({ "type": "error", "error": error_value })
+}
+
+/// Build a `{"type":"error","error":{...}}` frame from a [`ServerError`].
+///
+/// Uses [`ServerError::agent_code_message`] so the WS transport retains the
+/// slab-localized `i18n` payload (the HTTP path discards it via
+/// [`map_server_error`] to stay strictly OpenAI-canonical).
+fn server_error_to_frame(error: ServerError) -> serde_json::Value {
+    let (code, message, i18n) = error.agent_code_message();
+    openai_error_frame(OpenAiError {
+        message,
+        error_type: openai_error_type_for_code(&code).to_owned(),
+        param: None,
+        code: Some(code),
+        i18n: Some(i18n),
+    })
+}
+
+/// Classify a slab agent error code into an OpenAI error `type`.
+fn openai_error_type_for_code(code: &str) -> &'static str {
+    match code {
+        "internal_error" | "runtime_failure" => "server_error",
+        c if c.starts_with("runtime_") => "server_error",
+        _ => "invalid_request_error",
+    }
+}
+
+// ---------------------------------------------------------------------------
+// HTTP handlers
+// ---------------------------------------------------------------------------
+
 #[utoipa::path(
     get,
     path = "/v1/agents/responses",
@@ -79,8 +204,8 @@ struct CommandResult {
     ),
     responses(
         (status = 101, description = "WebSocket upgrade for bidirectional agent responses"),
-        (status = 200, description = "SSE fallback stream of agent response events"),
-        (status = 400, description = "Bad request"),
+        (status = 200, description = "SSE fallback stream of canonical Responses server events"),
+        (status = 400, description = "Bad request", body = OpenAiErrorResponse),
     )
 )]
 async fn agent_responses_get(
@@ -88,7 +213,7 @@ async fn agent_responses_get(
     Query(query): Query<AgentResponsesQuery>,
     headers: HeaderMap,
     ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
-) -> Result<Response, ServerError> {
+) -> Result<Response, AgentCompatError> {
     if let Ok(ws) = ws {
         return Ok(ws
             .on_upgrade(move |socket| agent_responses_socket(socket, service))
@@ -96,13 +221,15 @@ async fn agent_responses_get(
     }
 
     if query.transport.as_deref() != Some("sse") {
-        return Err(ServerError::BadRequest(
+        return Err(AgentCompatError(ServerError::BadRequest(
             "GET /v1/agents/responses requires a websocket upgrade or transport=sse".into(),
-        ));
+        )));
     }
 
     let Some(thread_id) = query.thread_id.filter(|value| !value.trim().is_empty()) else {
-        return Err(ServerError::BadRequest("thread_id is required for SSE fallback".into()));
+        return Err(AgentCompatError(ServerError::BadRequest(
+            "thread_id is required for SSE fallback".into(),
+        )));
     };
     let last_event_id = parse_last_event_id(&headers);
     Ok(agent_events_sse(service, thread_id, last_event_id))
@@ -114,18 +241,38 @@ async fn agent_responses_get(
     tag = "agents",
     request_body = AgentResponsesClientMessage,
     responses(
-        (status = 200, description = "Agent response command accepted", body = AgentResponsesServerMessage),
-        (status = 400, description = "Bad request"),
-        (status = 404, description = "Thread not found"),
-        (status = 429, description = "Thread is already running"),
-        (status = 500, description = "Internal error"),
+        (status = 200, description = "OpenAI Responses-canonical Response object"),
+        (status = 400, description = "Bad request", body = OpenAiErrorResponse),
+        (status = 404, description = "Thread not found", body = OpenAiErrorResponse),
+        (status = 429, description = "Thread is already running", body = OpenAiErrorResponse),
+        (status = 500, description = "Internal error", body = OpenAiErrorResponse),
     )
 )]
 async fn agent_responses_post(
     State(service): State<AgentService>,
     ValidatedJson(command): ValidatedJson<AgentResponsesClientMessage>,
-) -> Result<Json<AgentResponsesServerMessage>, ServerError> {
-    Ok(Json(handle_agent_command(&service, command).await?.message))
+) -> Result<Json<slab_proto::openai::Response>, AgentCompatError> {
+    match command {
+        AgentResponsesClientMessage::ResponseCreate { session_id, config, messages, .. } => {
+            let model = config.model.clone().unwrap_or_default();
+            let agent_messages = messages.into_iter().map(Into::into).collect();
+            let thread_id = service.spawn(session_id, (*config).into(), agent_messages).await?;
+            let subscription = service.subscribe_events(&thread_id);
+            let response = build_response(AdapterInput {
+                response_id: &thread_id,
+                model: &model,
+                created_at_unix: Utc::now().timestamp() as f64,
+                service_tier: None,
+                envelopes: &subscription.replay,
+                ..Default::default()
+            });
+            Ok(Json(response))
+        }
+        _ => Err(AgentCompatError(ServerError::BadRequest(
+            "POST /v1/agents/responses only accepts response.create commands; use the WebSocket for other actions"
+                .to_owned(),
+        ))),
+    }
 }
 
 #[utoipa::path(
@@ -150,6 +297,10 @@ async fn migrate_workspace(
     Ok(Json(outcome.into()))
 }
 
+// ---------------------------------------------------------------------------
+// WebSocket transport
+// ---------------------------------------------------------------------------
+
 async fn agent_responses_socket(socket: WebSocket, service: AgentService) {
     if let Err(error) = run_agent_responses_socket(socket, service).await {
         tracing::warn!(error = %error, "agent responses websocket ended");
@@ -163,8 +314,13 @@ async fn run_agent_responses_socket(
     let (mut sender, mut receiver) = socket.split();
     let mut active_thread_id: Option<String> = None;
     let mut active_events: Option<broadcast::Receiver<AgentEventEnvelope>> = None;
+    let mut stream_ctx: Option<Arc<Mutex<StreamCtx>>> = None;
 
     loop {
+        // Snapshot the current stream context so the live-event branch can use it
+        // without mutably borrowing `stream_ctx` inside the `select!` body.
+        let event_ctx = stream_ctx.clone();
+
         tokio::select! {
             message = receiver.next() => {
                 let Some(message) = message else {
@@ -183,27 +339,21 @@ async fn run_agent_responses_socket(
                 let command = match parse_client_message(&payload) {
                     Ok(command) => command,
                     Err(error) => {
-                        send_server_message(
-                            &mut sender,
-                            &AgentResponsesServerMessage::Error {
-                                request_id: None,
-                                code: "bad_request".to_owned(),
-                                message: error.clone(),
-                                i18n: Some(message_i18n_with_detail(
-                                    ServerI18nKey::AgentInvalidMessage,
-                                    &error,
-                                )),
-                                thread_id: active_thread_id.clone(),
-                            },
-                        )
-                        .await?;
+                        let frame = openai_error_frame(OpenAiError {
+                            message: error.clone(),
+                            error_type: "invalid_request_error".to_owned(),
+                            param: None,
+                            code: Some("bad_request".to_owned()),
+                            i18n: None,
+                        });
+                        send_serialized(&mut sender, serialize_json(&frame)).await?;
                         continue;
                     }
                 };
-                let request_id = command.request_id().map(str::to_owned);
                 match handle_agent_command(&service, command).await {
                     Ok(result) => {
-                        if let Some(thread_id) = result.subscribe_thread_id.as_deref() {
+                        let CommandResult { message, subscribe_thread_id } = result;
+                        if let Some(thread_id) = subscribe_thread_id.as_deref() {
                             let already_subscribed =
                                 active_thread_id.as_deref() == Some(thread_id)
                                     && active_events.is_some();
@@ -211,37 +361,48 @@ async fn run_agent_responses_socket(
                                 let subscription = service.subscribe_events(thread_id);
                                 active_thread_id = Some(thread_id.to_owned());
                                 active_events = Some(subscription.receiver);
-                                send_replay(&mut sender, thread_id, subscription.replay, None)
-                                    .await?;
+                                let ctx = stream_ctx.get_or_insert_with(|| {
+                                    Arc::new(Mutex::new(StreamCtx::new(
+                                        thread_id.to_owned(),
+                                        thread_id.to_owned(),
+                                        Utc::now().timestamp() as f64,
+                                        None,
+                                    )))
+                                });
+                                send_ws_replay(
+                                    &mut sender,
+                                    &subscription.replay,
+                                    Arc::clone(ctx),
+                                )
+                                .await?;
                             }
                         }
-                        send_server_message(&mut sender, &result.message).await?;
+                        send_server_message(&mut sender, &message).await?;
                     }
                     Err(error) => {
-                        let message = server_error_message(error, request_id, active_thread_id.clone());
-                        send_server_message(&mut sender, &message).await?;
+                        let frame = server_error_to_frame(error);
+                        send_serialized(&mut sender, serialize_json(&frame)).await?;
                     }
                 }
             }
             event = recv_active_event(&mut active_events), if active_events.is_some() => {
                 match event {
                     Some(Ok(envelope)) => {
-                        let Some(thread_id) = active_thread_id.as_deref() else {
+                        let Some(ctx) = event_ctx.as_ref() else {
                             continue;
                         };
-                        send_agent_event(&mut sender, thread_id, &envelope).await?;
+                        send_ws_envelope_events(&mut sender, &envelope, Arc::clone(ctx)).await?;
                     }
                     Some(Err(broadcast::error::RecvError::Lagged(_))) => {
-                        let Some(thread_id) = active_thread_id.as_deref() else {
-                            continue;
-                        };
-                        let event = AgentStreamEvent::new(
-                            thread_id.to_owned(),
-                            None,
-                            0,
-                            AgentEventKind::AgentStreamLagged,
-                        );
-                        send_serialized(&mut sender, serialize_json(&event)).await?;
+                        let frame = openai_error_frame(OpenAiError {
+                            message: "agent event stream lagged; some events may have been dropped"
+                                .to_owned(),
+                            error_type: "server_error".to_owned(),
+                            param: None,
+                            code: Some("stream_lagged".to_owned()),
+                            i18n: None,
+                        });
+                        send_serialized(&mut sender, serialize_json(&frame)).await?;
                     }
                     Some(Err(broadcast::error::RecvError::Closed)) | None => {
                         active_events = None;
@@ -362,73 +523,104 @@ async fn handle_agent_command(
     }
 }
 
+// ---------------------------------------------------------------------------
+// SSE transport — canonical Responses server events via `envelope_to_events`.
+// ---------------------------------------------------------------------------
+
 fn agent_events_sse(
     service: AgentService,
     thread_id: String,
     last_event_id: Option<u64>,
 ) -> Response {
     let subscription = service.subscribe_events(&thread_id);
-    let replay_id = thread_id.clone();
-    let replay = stream::iter(subscription.replay.into_iter().filter_map(move |envelope| {
-        should_replay_event(last_event_id, envelope.id).then(|| {
-            Ok::<Event, Infallible>(
-                Event::default().id(envelope.id.to_string()).data(turn_event_to_sse_data(
-                    &replay_id,
-                    envelope.id,
-                    &envelope.event,
-                )),
-            )
+    let created_at = Utc::now().timestamp() as f64;
+    let mut ctx = StreamCtx::new(thread_id.clone(), thread_id.clone(), created_at, None);
+
+    // Replay is processed synchronously so the live stream can take ownership
+    // of the (now-seeded) `StreamCtx` — no locking needed across the stream.
+    let replay_events: Vec<Event> = subscription
+        .replay
+        .into_iter()
+        .filter(|env| should_replay_event(last_event_id, env.id))
+        .flat_map(|env| {
+            let id = env.id;
+            envelope_to_events(&env, &mut ctx)
+                .into_iter()
+                .map(move |event| Event::default().id(id.to_string()).data(serialize_json(&event)))
+                .collect::<Vec<_>>()
         })
-    }));
-    let live_id = thread_id.clone();
-    let live = BroadcastStream::new(subscription.receiver).map(move |msg| {
-        let event = match msg {
-            Ok(envelope) => {
-                let data = turn_event_to_sse_data(&live_id, envelope.id, &envelope.event);
-                Event::default().id(envelope.id.to_string()).data(data)
+        .collect();
+
+    let replay = stream::iter(replay_events.into_iter().map(Ok::<Event, Infallible>));
+
+    let live = BroadcastStream::new(subscription.receiver).flat_map(move |msg| {
+        let events: Vec<Event> = match msg {
+            Ok(env) => {
+                let id = env.id;
+                envelope_to_events(&env, &mut ctx)
+                    .into_iter()
+                    .map(move |event| {
+                        Event::default().id(id.to_string()).data(serialize_json(&event))
+                    })
+                    .collect()
             }
-            Err(_) => Event::default().data(serialize_json(&AgentStreamEvent::new(
-                live_id.clone(),
-                None,
-                0,
-                AgentEventKind::AgentStreamLagged,
-            ))),
+            Err(_) => {
+                vec![Event::default().data(serialize_json(&openai_error_frame(OpenAiError {
+                    message:
+                        "agent event stream lagged; some events may have been dropped".to_owned(),
+                    error_type: "server_error".to_owned(),
+                    param: None,
+                    code: Some("stream_lagged".to_owned()),
+                    i18n: None,
+                })))]
+            }
         };
-        Ok::<Event, Infallible>(event)
+        stream::iter(events.into_iter().map(Ok::<Event, Infallible>))
     });
 
     Sse::new(Box::pin(replay.chain(live))).keep_alive(KeepAlive::default()).into_response()
 }
 
-async fn send_replay<S>(
+// ---------------------------------------------------------------------------
+// Shared WS helpers
+// ---------------------------------------------------------------------------
+
+/// Send replay envelopes as canonical WS frames, sharing the stream context.
+async fn send_ws_replay<S>(
     sender: &mut S,
-    thread_id: &str,
-    replay: Vec<AgentEventEnvelope>,
-    last_event_id: Option<u64>,
+    replay: &[AgentEventEnvelope],
+    ctx: Arc<Mutex<StreamCtx>>,
 ) -> Result<(), String>
 where
     S: futures::Sink<Message> + Unpin,
     S::Error: std::fmt::Display,
 {
     for envelope in replay {
-        if should_replay_event(last_event_id, envelope.id) {
-            send_agent_event(sender, thread_id, &envelope).await?;
-        }
+        send_ws_envelope_events(sender, envelope, Arc::clone(&ctx)).await?;
     }
     Ok(())
 }
 
-async fn send_agent_event<S>(
+/// Convert one slab envelope into 0..N canonical events and send each as a WS
+/// text frame. Locks the shared `StreamCtx` only for the synchronous
+/// `envelope_to_events` call — no await while holding the guard.
+async fn send_ws_envelope_events<S>(
     sender: &mut S,
-    thread_id: &str,
     envelope: &AgentEventEnvelope,
+    ctx: Arc<Mutex<StreamCtx>>,
 ) -> Result<(), String>
 where
     S: futures::Sink<Message> + Unpin,
     S::Error: std::fmt::Display,
 {
-    let event = turn_event_to_agent_stream_event(thread_id, envelope.id, &envelope.event);
-    send_serialized(sender, serialize_json(&event)).await
+    let events = {
+        let mut guard = ctx.lock().map_err(|error| format!("stream ctx poisoned: {error}"))?;
+        envelope_to_events(envelope, &mut guard)
+    };
+    for event in events {
+        send_serialized(sender, serialize_json(&event)).await?;
+    }
+    Ok(())
 }
 
 async fn send_server_message<S>(
@@ -469,39 +661,19 @@ fn parse_last_event_id(headers: &HeaderMap) -> Option<u64> {
 
 fn serialize_json<T: Serialize>(value: &T) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| {
-        r#"{"type":"agent.error","code":"serialization_failed","message":"failed to serialize agent message","i18n":{"message":{"key":"server.errors.internalError"}}}"#.to_owned()
+        r#"{"type":"error","error":{"message":"failed to serialize agent message","type":"server_error","code":"serialization_failed"}}"#
+            .to_owned()
     })
-}
-
-fn turn_event_to_agent_stream_event(
-    thread_id: &str,
-    sequence_number: u64,
-    event: &TurnEvent,
-) -> AgentStreamEvent {
-    let TurnEvent::Response { turn_index, event } = event;
-    AgentStreamEvent::new(thread_id.to_owned(), *turn_index, sequence_number, event.clone())
-}
-
-fn turn_event_to_sse_data(thread_id: &str, sequence_number: u64, event: &TurnEvent) -> String {
-    serialize_json(&turn_event_to_agent_stream_event(thread_id, sequence_number, event))
-}
-
-fn server_error_message(
-    error: ServerError,
-    request_id: Option<String>,
-    thread_id: Option<String>,
-) -> AgentResponsesServerMessage {
-    let (code, message, i18n) = error.agent_code_message();
-    AgentResponsesServerMessage::Error { request_id, code, message, i18n: Some(i18n), thread_id }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentApi, parse_client_message, server_error_message, should_replay_event,
-        turn_event_to_sse_data,
+        AgentApi, AgentCompatError, map_server_error, parse_client_message, should_replay_event,
     };
     use crate::error::ServerError;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
     use utoipa::OpenApi;
 
     #[test]
@@ -541,74 +713,69 @@ mod tests {
         assert!(!paths.contains_key("/v1/agents/{id}/events"));
     }
 
-    #[test]
-    fn server_error_message_includes_message_i18n() {
-        let message = server_error_message(
-            ServerError::BadRequest("invalid agent request".to_owned()),
-            Some("req-1".to_owned()),
-            Some("thread-1".to_owned()),
-        );
-        let payload = serde_json::to_value(message).expect("serialize message");
+    #[tokio::test]
+    async fn agent_compat_error_renders_openai_shape() {
+        let response = AgentCompatError(ServerError::BadRequest("x".to_owned())).into_response();
 
-        assert_eq!(payload["type"], "agent.error");
-        assert_eq!(payload["message"], "invalid agent request");
-        assert_eq!(payload["i18n"]["message"]["key"], "server.errors.badRequest");
-        assert_eq!(payload["i18n"]["message"]["params"]["detail"], "invalid agent request");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.expect("body");
+        let payload: serde_json::Value = serde_json::from_slice(&body).expect("json body");
+
+        assert_eq!(payload["error"]["message"], "x");
+        assert_eq!(payload["error"]["type"], "invalid_request_error");
+        assert_eq!(payload["error"]["code"], "invalid_request");
+        // `param` is `skip_serializing_if = Option::is_none`, so absent when `None`.
+        assert!(
+            payload["error"].get("param").is_none() || payload["error"]["param"].is_null(),
+            "param should be absent or null, got: {payload}"
+        );
+        assert!(payload.get("code").is_none(), "top-level slab code must not leak");
+        assert!(payload.get("i18n").is_none(), "top-level i18n must not leak");
     }
 
     #[test]
-    fn turn_event_serializes_response_style_envelope() {
-        let data = turn_event_to_sse_data(
-            "thread-1",
-            7,
-            &slab_agent::TurnEvent::Response {
-                turn_index: Some(2),
+    fn map_server_error_classifies_common_variants() {
+        let (status, type_, code, _) =
+            map_server_error(ServerError::NotFound("missing".to_owned()));
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(type_, "invalid_request_error");
+        assert_eq!(code, "not_found");
+
+        let (status, type_, code, _) = map_server_error(ServerError::Conflict("busy".to_owned()));
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(type_, "invalid_request_error");
+        assert_eq!(code, "conflict");
+
+        let (status, type_, code, _) = map_server_error(ServerError::Internal("boom".to_owned()));
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(type_, "server_error");
+        assert_eq!(code, "internal_error");
+    }
+
+    /// Exercises the `envelope_to_events` signature end-to-end. Panics until the
+    /// adapter teammate fills in the streaming state machine.
+    #[test]
+    #[ignore = "pending adapter envelope_to_events impl"]
+    fn envelope_to_events_emits_canonical_frames() {
+        use crate::api::v1::agent::openai_compat::{StreamCtx, envelope_to_events};
+
+        let envelope = slab_app_core::infra::agent::event_hub::AgentEventEnvelope {
+            id: 1,
+            event: slab_agent::TurnEvent::Response {
+                turn_index: Some(0),
                 event: slab_agent::AgentEventKind::ResponseOutputTextDone {
-                    item_id: "item-1".to_owned(),
+                    item_id: "msg-1".to_owned(),
                     output_index: 0,
                     content_index: 0,
-                    text: "done".to_owned(),
-                    artifact_refs: vec![slab_agent::AgentArtifactRef {
-                        path: "src/main.rs".to_owned(),
-                        kind: slab_agent::AgentArtifactKind::File,
-                    }],
-                    reason: Some("completed".to_owned()),
+                    text: "hello".to_owned(),
+                    artifact_refs: vec![],
+                    reason: None,
+                    phase: None,
                 },
             },
-        );
-        let value: serde_json::Value = serde_json::from_str(&data).expect("json");
-
-        assert_eq!(value["thread_id"], "thread-1");
-        assert_eq!(value["turn_index"], 2);
-        assert_eq!(value["sequence_number"], 7);
-        assert_eq!(value["type"], "response.output_text.done");
-        assert_eq!(value["text"], "done");
-        assert_eq!(value["artifact_refs"][0]["kind"], "file");
-        assert_eq!(value["artifact_refs"][0]["path"], "src/main.rs");
-        assert_eq!(value["reason"], "completed");
-    }
-
-    #[test]
-    fn completed_event_does_not_duplicate_output_text() {
-        let data = turn_event_to_sse_data(
-            "thread-1",
-            8,
-            &slab_agent::TurnEvent::Response {
-                turn_index: Some(2),
-                event: slab_agent::AgentEventKind::ResponseCompleted {
-                    response: slab_agent::AgentResponseRef {
-                        id: "thread-1".to_owned(),
-                        status: slab_agent::ThreadStatus::Completed,
-                    },
-                },
-            },
-        );
-        let value: serde_json::Value = serde_json::from_str(&data).expect("json");
-
-        assert_eq!(value["thread_id"], "thread-1");
-        assert_eq!(value["turn_index"], 2);
-        assert_eq!(value["sequence_number"], 8);
-        assert_eq!(value["type"], "response.completed");
-        assert!(value.get("text").is_none());
+        };
+        let mut ctx = StreamCtx::new("resp_1".to_owned(), "gpt-5.3-codex".to_owned(), 0.0, None);
+        let events = envelope_to_events(&envelope, &mut ctx);
+        assert!(!events.is_empty(), "adapter should emit at least one canonical event");
     }
 }

@@ -209,6 +209,33 @@ pub(crate) async fn response_json(response: axum::http::Response<Body>) -> TestR
     TestResponse { status, body }
 }
 
+/// Collect an SSE response body into a list of parsed JSON `data:` payloads.
+///
+/// Splits the body on `"\n\n"`, looks for a `data:` line in each chunk, trims
+/// the `data:` prefix, skips the OpenAI terminal `"[DONE]"` sentinel, and
+/// parses the remainder as a JSON [`Value`]. Non-`data:` chunks (e.g. keep-alive
+/// comments) and empty chunks are skipped. The status code is ignored — callers
+/// that need it should inspect the [`axum::http::Response`] before calling this.
+pub(crate) async fn collect_sse(response: axum::http::Response<Body>) -> Vec<Value> {
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.expect("sse body");
+    let body = String::from_utf8_lossy(&bytes);
+
+    body.split("\n\n")
+        .filter_map(|chunk| {
+            let data_line = chunk
+                .lines()
+                .find_map(|line| {
+                    line.strip_prefix("data:").or_else(|| line.strip_prefix("data: "))
+                })?
+                .trim();
+            if data_line.is_empty() || data_line == "[DONE]" {
+                return None;
+            }
+            serde_json::from_str::<Value>(data_line).ok()
+        })
+        .collect()
+}
+
 fn write_test_settings(
     settings_path: &std::path::Path,
     model_cache_dir: &std::path::Path,
@@ -233,4 +260,32 @@ fn write_test_settings(
 
     let raw = serde_json::to_string_pretty(&document).expect("serialize test settings");
     std::fs::write(settings_path, format!("{raw}\n")).expect("write test settings");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::collect_sse;
+    use axum::body::Body;
+    use axum::http::Response;
+
+    #[tokio::test]
+    async fn collect_sse_parses_data_frames_and_skips_done() {
+        let body = "data: {\"a\":1}\n\ndata:{\"b\":2}\n\ndata: [DONE]\n\n\n\n";
+        let response = Response::new(Body::from(body));
+        let values = collect_sse(response).await;
+
+        assert_eq!(values.len(), 2);
+        assert_eq!(values[0]["a"], 1);
+        assert_eq!(values[1]["b"], 2);
+    }
+
+    #[tokio::test]
+    async fn collect_sse_ignores_non_data_lines() {
+        let body = ": keep-alive\n\nevent: response.created\ndata: {\"x\":42}\n\n";
+        let response = Response::new(Body::from(body));
+        let values = collect_sse(response).await;
+
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0]["x"], 42);
+    }
 }

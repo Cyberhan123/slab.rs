@@ -15,9 +15,6 @@ pub struct EasyInputMessage {
         skip_serializing_if = "Option::is_none"
     )]
     pub phase: Option<Option<models::MessagePhase>>,
-    /// The type of the message input. Always `message`.
-    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
-    pub r#type: Option<CommonMessageType>,
 }
 
 impl EasyInputMessage {
@@ -26,7 +23,7 @@ impl EasyInputMessage {
         role: CommonMessageRole,
         content: models::EasyInputMessageContent,
     ) -> EasyInputMessage {
-        EasyInputMessage { role, content: Box::new(content), phase: None, r#type: None }
+        EasyInputMessage { role, content: Box::new(content), phase: None }
     }
 }
 /// The role of the message input. One of `user`, `assistant`, `system`, or `developer`.
@@ -43,16 +40,6 @@ pub enum CommonMessageRole {
     System,
     #[serde(rename = "developer")]
     Developer,
-}
-
-/// The type of the message input. Always `message`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum CommonMessageType {
-    #[serde(rename = "message")]
-    #[default]
-    Message,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

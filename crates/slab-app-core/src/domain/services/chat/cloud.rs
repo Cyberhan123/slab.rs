@@ -1105,7 +1105,7 @@ mod test {
         StructuredOutput, StructuredOutputJsonSchema,
     };
     use serde_json::json;
-    use slab_proto::openai::{FunctionTool, FunctionToolType};
+    use slab_proto::openai::FunctionTool;
 
     #[test]
     fn ensure_genai_endpoint_base_keeps_v1_path() {
@@ -1223,7 +1223,6 @@ mod test {
 
     fn make_function_tool() -> FunctionTool {
         let mut tool = FunctionTool::new(
-            FunctionToolType::Function,
             "web_search".to_owned(),
             Some([("type".to_owned(), json!("object"))].into_iter().collect()),
             Some(true),

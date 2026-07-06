@@ -15351,6 +15351,7 @@ dependencies = [
  "slab-config",
  "slab-jsonrpc",
  "slab-otel",
+ "slab-proto",
  "slab-runtime-core",
  "slab-types",
  "slab-utils",

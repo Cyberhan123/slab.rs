@@ -488,6 +488,7 @@ async fn persist_final_answer(
                     text: content.clone(),
                     artifact_refs,
                     reason,
+                    phase: None,
                 },
             },
         )
@@ -850,6 +851,8 @@ impl LlmStreamObserver for TurnTextDeltaObserver<'_> {
                         output_index: 0,
                         content_index: 0,
                         text: text.to_owned(),
+                        encrypted_content: None,
+                        summary: None,
                     },
                 },
             )

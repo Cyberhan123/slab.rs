@@ -21,6 +21,12 @@ pub struct CustomToolCall {
     /// The namespace of the custom tool being called.
     #[serde(rename = "namespace", skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
+    /// The status of the item. One of `in_progress`, `completed`, or
+    /// `incomplete`. Populated when items are returned via API. Omitted on the
+    /// `output_item.added` skeleton (in_progress) and present on the finalized
+    /// `output_item.done` payload.
+    #[serde(rename = "status", skip_serializing_if = "Option::is_none")]
+    pub status: Option<models::FunctionCallStatus>,
 }
 
 impl CustomToolCall {
@@ -31,7 +37,7 @@ impl CustomToolCall {
         name: String,
         input: String,
     ) -> CustomToolCall {
-        CustomToolCall { r#type, call_id, name, input, id: None, namespace: None }
+        CustomToolCall { r#type, call_id, name, input, id: None, namespace: None, status: None }
     }
 }
 /// The type of the custom tool call. Always `custom_tool_call`.
@@ -232,9 +238,6 @@ pub enum CustomToolChatCompletionsType {
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CustomToolParam {
-    /// The type of the custom tool. Always `custom`.
-    #[serde(rename = "type")]
-    pub r#type: CustomToolParamType,
     /// The name of the custom tool, used to identify it in tool calls.
     #[serde(rename = "name")]
     pub name: String,
@@ -250,26 +253,17 @@ pub struct CustomToolParam {
 
 impl CustomToolParam {
     /// A custom tool that processes input using a specified format. Learn more about   [custom tools](/docs/guides/function-calling#custom-tools)
-    pub fn new(r#type: CustomToolParamType, name: String) -> CustomToolParam {
-        CustomToolParam { r#type, name, description: None, format: None, defer_loading: None }
+    pub fn new(name: String) -> CustomToolParam {
+        CustomToolParam { name, description: None, format: None, defer_loading: None }
     }
-}
-/// The type of the custom tool. Always `custom`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum CustomToolParamType {
-    #[serde(rename = "custom")]
-    #[default]
-    Custom,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum CustomToolParamFormat {
-    #[serde(rename = "CustomTextFormatParam")]
+    #[serde(rename = "text")]
     CustomTextFormatParam(Box<models::CustomTextFormatParam>),
-    #[serde(rename = "CustomGrammarFormatParam")]
+    #[serde(rename = "grammar")]
     CustomGrammarFormatParam(Box<models::CustomGrammarFormatParam>),
 }
 

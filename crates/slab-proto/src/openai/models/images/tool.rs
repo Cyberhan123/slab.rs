@@ -5,9 +5,6 @@ use super::params::ImageParamsModeration;
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImageGenTool {
-    /// The type of the image generation tool. Always `image_generation`.
-    #[serde(rename = "type")]
-    pub r#type: ImageGenToolType,
     #[serde(rename = "model", skip_serializing_if = "Option::is_none")]
     pub model: Option<Box<models::ImageGenToolModel>>,
     /// The quality of the generated image. One of `low`, `medium`, `high`, or `auto`. Default: `auto`.
@@ -42,13 +39,15 @@ pub struct ImageGenTool {
     /// Whether to generate a new image or edit an existing image. Default: `auto`.
     #[serde(rename = "action", skip_serializing_if = "Option::is_none")]
     pub action: Option<models::ImageGenActionEnum>,
+    /// Number of images to generate.
+    #[serde(rename = "n", skip_serializing_if = "Option::is_none")]
+    pub n: Option<i32>,
 }
 
 impl ImageGenTool {
     /// A tool that generates images using the GPT image models.
-    pub fn new(r#type: ImageGenToolType) -> ImageGenTool {
+    pub fn new() -> ImageGenTool {
         ImageGenTool {
-            r#type,
             model: None,
             quality: None,
             size: None,
@@ -60,17 +59,9 @@ impl ImageGenTool {
             input_image_mask: None,
             partial_images: None,
             action: None,
+            n: None,
         }
     }
-}
-/// The type of the image generation tool. Always `image_generation`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum ImageGenToolType {
-    #[serde(rename = "image_generation")]
-    #[default]
-    ImageGeneration,
 }
 
 /// The quality of the generated image. One of `low`, `medium`, `high`, or `auto`. Default: `auto`.
@@ -133,6 +124,21 @@ pub struct ImageGenToolCall {
     /// The generated image encoded in base64.
     #[serde(rename = "result", deserialize_with = "Option::deserialize")]
     pub result: Option<String>,
+    /// Background transparency (`opaque` / `transparent` / `auto`).
+    #[serde(rename = "background", skip_serializing_if = "Option::is_none")]
+    pub background: Option<String>,
+    /// Output format (`webp` / `png` / `jpeg`).
+    #[serde(rename = "output_format", skip_serializing_if = "Option::is_none")]
+    pub output_format: Option<String>,
+    /// Quality level (`low` / `medium` / `high` / `auto`).
+    #[serde(rename = "quality", skip_serializing_if = "Option::is_none")]
+    pub quality: Option<String>,
+    /// The revised prompt used for image generation.
+    #[serde(rename = "revised_prompt", skip_serializing_if = "Option::is_none")]
+    pub revised_prompt: Option<String>,
+    /// Image dimensions (e.g. `1024x1024`).
+    #[serde(rename = "size", skip_serializing_if = "Option::is_none")]
+    pub size: Option<String>,
 }
 
 impl ImageGenToolCall {
@@ -143,7 +149,17 @@ impl ImageGenToolCall {
         status: ImageParamsStatus,
         result: Option<String>,
     ) -> ImageGenToolCall {
-        ImageGenToolCall { r#type, id, status, result }
+        ImageGenToolCall {
+            r#type,
+            id,
+            status,
+            result,
+            background: None,
+            output_format: None,
+            quality: None,
+            revised_prompt: None,
+            size: None,
+        }
     }
 }
 /// The type of the image generation call. Always `image_generation_call`.
@@ -182,12 +198,17 @@ impl ImageGenToolModel {
     }
 }
 
+/// Image size as a bare string (e.g. `"1024x1024"`). Transparent newtype so
+/// it serializes as the inner string, matching the OpenAI wire format.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ImageGenToolSize {}
+#[serde(transparent)]
+pub struct ImageGenToolSize(pub String);
 
 impl ImageGenToolSize {
-    /// The size of the generated images. For `gpt-image-2` and `gpt-image-2-2026-04-21`, arbitrary resolutions are supported as `WIDTHxHEIGHT` strings, for example `1536x864`. Width and height must both be divisible by 16 and the requested aspect ratio must be between 1:3 and 3:1. Resolutions above `2560x1440` are experimental, and the maximum supported resolution is `3840x2160`. The requested size must also satisfy the model's current pixel and edge limits. The standard sizes `1024x1024`, `1536x1024`, and `1024x1536` are supported by the GPT image models; `auto` is supported for models that allow automatic sizing. For `dall-e-2`, use one of `256x256`, `512x512`, or `1024x1024`. For `dall-e-3`, use one of `1024x1024`, `1792x1024`, or `1024x1792`.
     pub fn new() -> ImageGenToolSize {
-        ImageGenToolSize {}
+        ImageGenToolSize(String::new())
+    }
+    pub fn from_string(s: String) -> ImageGenToolSize {
+        ImageGenToolSize(s)
     }
 }

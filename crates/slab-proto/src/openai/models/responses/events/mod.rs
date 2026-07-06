@@ -10,6 +10,7 @@ mod mcp;
 mod output;
 mod reasoning;
 mod refusal;
+mod shell;
 mod text;
 mod web_search;
 
@@ -25,5 +26,6 @@ pub use mcp::*;
 pub use output::*;
 pub use reasoning::*;
 pub use refusal::*;
+pub use shell::*;
 pub use text::*;
 pub use web_search::*;

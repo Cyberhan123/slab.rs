@@ -437,6 +437,8 @@ impl AgentThread {
                                 status: ThreadStatus::Errored,
                             },
                             error: err.to_string(),
+                            error_code: None,
+                            error_type: None,
                         },
                     },
                 )

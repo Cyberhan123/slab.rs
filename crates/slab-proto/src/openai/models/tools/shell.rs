@@ -308,9 +308,6 @@ impl FunctionShellCallOutputContentParam {
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionShellCallOutputExitOutcome {
-    /// The outcome type. Always `exit`.
-    #[serde(rename = "type")]
-    pub r#type: FunctionShellCallOutputExitOutcomeType,
     /// Exit code from the shell process.
     #[serde(rename = "exit_code")]
     pub exit_code: i32,
@@ -318,28 +315,13 @@ pub struct FunctionShellCallOutputExitOutcome {
 
 impl FunctionShellCallOutputExitOutcome {
     /// Indicates that the shell commands finished and returned an exit code.
-    pub fn new(
-        r#type: FunctionShellCallOutputExitOutcomeType,
-        exit_code: i32,
-    ) -> FunctionShellCallOutputExitOutcome {
-        FunctionShellCallOutputExitOutcome { r#type, exit_code }
+    pub fn new(exit_code: i32) -> FunctionShellCallOutputExitOutcome {
+        FunctionShellCallOutputExitOutcome { exit_code }
     }
-}
-/// The outcome type. Always `exit`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum FunctionShellCallOutputExitOutcomeType {
-    #[serde(rename = "exit")]
-    #[default]
-    Exit,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionShellCallOutputExitOutcomeParam {
-    /// The outcome type. Always `exit`.
-    #[serde(rename = "type")]
-    pub r#type: FunctionShellCallOutputExitOutcomeParamType,
     /// The exit code returned by the shell process.
     #[serde(rename = "exit_code")]
     pub exit_code: i32,
@@ -347,21 +329,9 @@ pub struct FunctionShellCallOutputExitOutcomeParam {
 
 impl FunctionShellCallOutputExitOutcomeParam {
     /// Indicates that the shell commands finished and returned an exit code.
-    pub fn new(
-        r#type: FunctionShellCallOutputExitOutcomeParamType,
-        exit_code: i32,
-    ) -> FunctionShellCallOutputExitOutcomeParam {
-        FunctionShellCallOutputExitOutcomeParam { r#type, exit_code }
+    pub fn new(exit_code: i32) -> FunctionShellCallOutputExitOutcomeParam {
+        FunctionShellCallOutputExitOutcomeParam { exit_code }
     }
-}
-/// The outcome type. Always `exit`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum FunctionShellCallOutputExitOutcomeParamType {
-    #[serde(rename = "exit")]
-    #[default]
-    Exit,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -431,11 +401,11 @@ pub enum FunctionShellCallOutputItemParamType {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum FunctionShellCallOutputOutcomeParam {
-    #[serde(rename = "FunctionShellCallOutputTimeoutOutcomeParam")]
+    #[serde(rename = "timeout")]
     FunctionShellCallOutputTimeoutOutcomeParam(
         Box<models::FunctionShellCallOutputTimeoutOutcomeParam>,
     ),
-    #[serde(rename = "FunctionShellCallOutputExitOutcomeParam")]
+    #[serde(rename = "exit")]
     FunctionShellCallOutputExitOutcomeParam(Box<models::FunctionShellCallOutputExitOutcomeParam>),
 }
 
@@ -469,53 +439,23 @@ impl std::fmt::Display for FunctionShellCallOutputStatusEnum {
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct FunctionShellCallOutputTimeoutOutcome {
-    /// The outcome type. Always `timeout`.
-    #[serde(rename = "type")]
-    pub r#type: FunctionShellCallOutputTimeoutOutcomeType,
-}
+pub struct FunctionShellCallOutputTimeoutOutcome {}
 
 impl FunctionShellCallOutputTimeoutOutcome {
     /// Indicates that the shell call exceeded its configured time limit.
-    pub fn new(
-        r#type: FunctionShellCallOutputTimeoutOutcomeType,
-    ) -> FunctionShellCallOutputTimeoutOutcome {
-        FunctionShellCallOutputTimeoutOutcome { r#type }
+    pub fn new() -> FunctionShellCallOutputTimeoutOutcome {
+        FunctionShellCallOutputTimeoutOutcome {}
     }
-}
-/// The outcome type. Always `timeout`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum FunctionShellCallOutputTimeoutOutcomeType {
-    #[serde(rename = "timeout")]
-    #[default]
-    Timeout,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct FunctionShellCallOutputTimeoutOutcomeParam {
-    /// The outcome type. Always `timeout`.
-    #[serde(rename = "type")]
-    pub r#type: FunctionShellCallOutputTimeoutOutcomeParamType,
-}
+pub struct FunctionShellCallOutputTimeoutOutcomeParam {}
 
 impl FunctionShellCallOutputTimeoutOutcomeParam {
     /// Indicates that the shell call exceeded its configured time limit.
-    pub fn new(
-        r#type: FunctionShellCallOutputTimeoutOutcomeParamType,
-    ) -> FunctionShellCallOutputTimeoutOutcomeParam {
-        FunctionShellCallOutputTimeoutOutcomeParam { r#type }
+    pub fn new() -> FunctionShellCallOutputTimeoutOutcomeParam {
+        FunctionShellCallOutputTimeoutOutcomeParam {}
     }
-}
-/// The outcome type. Always `timeout`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum FunctionShellCallOutputTimeoutOutcomeParamType {
-    #[serde(rename = "timeout")]
-    #[default]
-    Timeout,
 }
 
 #[derive(
@@ -543,9 +483,6 @@ impl std::fmt::Display for FunctionShellCallStatus {
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionShellToolParam {
-    /// The type of the shell tool. Always `shell`.
-    #[serde(rename = "type")]
-    pub r#type: FunctionShellToolParamType,
     #[serde(
         rename = "environment",
         default,
@@ -557,18 +494,9 @@ pub struct FunctionShellToolParam {
 
 impl FunctionShellToolParam {
     /// A tool that allows the model to execute shell commands.
-    pub fn new(r#type: FunctionShellToolParamType) -> FunctionShellToolParam {
-        FunctionShellToolParam { r#type, environment: None }
+    pub fn new() -> FunctionShellToolParam {
+        FunctionShellToolParam { environment: None }
     }
-}
-/// The type of the shell tool. Always `shell`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum FunctionShellToolParamType {
-    #[serde(rename = "shell")]
-    #[default]
-    Shell,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
@@ -793,34 +721,21 @@ pub enum LocalShellToolCallOutputStatus {
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct LocalShellToolParam {
-    /// The type of the local shell tool. Always `local_shell`.
-    #[serde(rename = "type")]
-    pub r#type: LocalShellToolParamType,
-}
+pub struct LocalShellToolParam {}
 
 impl LocalShellToolParam {
     /// A tool that allows the model to execute shell commands in a local environment.
-    pub fn new(r#type: LocalShellToolParamType) -> LocalShellToolParam {
-        LocalShellToolParam { r#type }
+    pub fn new() -> LocalShellToolParam {
+        LocalShellToolParam {}
     }
-}
-/// The type of the local shell tool. Always `local_shell`.
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum LocalShellToolParamType {
-    #[serde(rename = "local_shell")]
-    #[default]
-    LocalShell,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ShellCallOutcome {
-    #[serde(rename = "FunctionShellCallOutputTimeoutOutcome")]
+    #[serde(rename = "timeout")]
     FunctionShellCallOutputTimeoutOutcome(Box<models::FunctionShellCallOutputTimeoutOutcome>),
-    #[serde(rename = "FunctionShellCallOutputExitOutcome")]
+    #[serde(rename = "exit")]
     FunctionShellCallOutputExitOutcome(Box<models::FunctionShellCallOutputExitOutcome>),
 }
 

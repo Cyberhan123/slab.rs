@@ -15,7 +15,7 @@ use slab_agent::{
     port::{LlmPort, LlmResponse, LlmStreamObserver, LlmUsage, ParsedToolCall, ToolSpec},
 };
 use slab_agent_tracing::{AgentTraceContext, record_json_from_context};
-use slab_proto::openai::{FunctionTool, FunctionToolType};
+use slab_proto::openai::FunctionTool;
 use slab_types::{ConversationMessage, ConversationMessageContent};
 use tracing::warn;
 use uuid::Uuid;
@@ -288,12 +288,7 @@ fn response_function_tools_from_agent_tools(tools: &[ToolSpec]) -> Vec<FunctionT
                 }
                 _ => None,
             };
-            let mut function_tool = FunctionTool::new(
-                FunctionToolType::Function,
-                tool.name.clone(),
-                parameters,
-                Some(true),
-            );
+            let mut function_tool = FunctionTool::new(tool.name.clone(), parameters, Some(true));
             if !tool.description.trim().is_empty() {
                 function_tool.description = Some(Some(tool.description.clone()));
             }

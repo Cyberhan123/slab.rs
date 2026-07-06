@@ -215,15 +215,36 @@ impl Default for CreateChatCompletionRequestAllOfFunctionCall {
     }
 }
 
+/// Dedicated chat-completions response-format inner structs. These intentionally
+/// carry NO `type` field: the wrapping enum is internally tagged
+/// (`#[serde(tag = "type")]`), so the tag supplies the discriminator and the
+/// enum round-trips. They are kept SEPARATE from the Responses-side
+/// `ResponseFormatText` / `ResponseFormatJsonObject` (in `responses/format.rs`)
+/// because those are shared with the `#[serde(untagged)]`
+/// `TextResponseFormatConfiguration`, which needs the inner `type` field to
+/// disambiguate — reusing them here would collide (the same tag/inner-type
+/// conflict the `Tool` Option-2 fix resolved).
+#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChatResponseFormatText {}
+
+#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChatResponseFormatJsonObject {}
+
+#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChatResponseFormatJsonSchema {
+    #[serde(rename = "json_schema")]
+    pub json_schema: Box<models::JsonSchema>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum CreateChatCompletionRequestAllOfResponseFormat {
-    #[serde(rename = "ResponseFormatText")]
-    ResponseFormatText(Box<models::ResponseFormatText>),
-    #[serde(rename = "ResponseFormatJsonSchema")]
-    ResponseFormatJsonSchema(Box<models::ResponseFormatJsonSchema>),
-    #[serde(rename = "ResponseFormatJsonObject")]
-    ResponseFormatJsonObject(Box<models::ResponseFormatJsonObject>),
+    #[serde(rename = "text")]
+    ResponseFormatText(Box<ChatResponseFormatText>),
+    #[serde(rename = "json_schema")]
+    ResponseFormatJsonSchema(Box<ChatResponseFormatJsonSchema>),
+    #[serde(rename = "json_object")]
+    ResponseFormatJsonObject(Box<ChatResponseFormatJsonObject>),
 }
 
 impl Default for CreateChatCompletionRequestAllOfResponseFormat {

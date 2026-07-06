@@ -174,43 +174,18 @@ pub enum StreamFormat {
     Audio,
 }
 
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum CustomTextFormatType {
-    #[serde(rename = "text")]
-    #[default]
-    Text,
-}
-
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CustomTextFormatParam {
-    /// Unconstrained text format. Always `text`.
-    #[serde(rename = "type")]
-    pub r#type: CustomTextFormatType,
-}
+pub struct CustomTextFormatParam {}
 
 impl CustomTextFormatParam {
     /// Unconstrained free-form text.
-    pub fn new(r#type: CustomTextFormatType) -> CustomTextFormatParam {
-        CustomTextFormatParam { r#type }
+    pub fn new() -> CustomTextFormatParam {
+        CustomTextFormatParam {}
     }
-}
-
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
-)]
-pub enum CustomGrammarFormatType {
-    #[serde(rename = "grammar")]
-    #[default]
-    Grammar,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CustomGrammarFormatParam {
-    /// Grammar format. Always `grammar`.
-    #[serde(rename = "type")]
-    pub r#type: CustomGrammarFormatType,
     /// The syntax of the grammar definition. One of `lark` or `regex`.
     #[serde(rename = "syntax")]
     pub syntax: models::GrammarSyntax1,
@@ -221,12 +196,8 @@ pub struct CustomGrammarFormatParam {
 
 impl CustomGrammarFormatParam {
     /// A grammar defined by the user.
-    pub fn new(
-        r#type: CustomGrammarFormatType,
-        syntax: models::GrammarSyntax1,
-        definition: String,
-    ) -> CustomGrammarFormatParam {
-        CustomGrammarFormatParam { r#type, syntax, definition }
+    pub fn new(syntax: models::GrammarSyntax1, definition: String) -> CustomGrammarFormatParam {
+        CustomGrammarFormatParam { syntax, definition }
     }
 }
 

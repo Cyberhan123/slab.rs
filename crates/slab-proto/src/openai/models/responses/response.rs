@@ -24,8 +24,8 @@ pub struct Response {
     #[serde(rename = "instructions", deserialize_with = "Option::deserialize")]
     pub instructions: Option<Box<models::ResponseAllOfInstructions>>,
     /// Whether to allow the model to run tool calls in parallel.
-    #[serde(rename = "parallel_tool_calls")]
-    pub parallel_tool_calls: bool,
+    #[serde(rename = "parallel_tool_calls", skip_serializing_if = "Option::is_none")]
+    pub parallel_tool_calls: Option<bool>,
     /// Set of 16 key-value pairs that can be attached to an object. This can be useful for storing additional information about the object in a structured format, and querying for objects via API or the dashboard.  Keys are strings with a maximum length of 64 characters. Values are strings with a maximum length of 512 characters.
     #[serde(rename = "metadata", skip_serializing_if = "Option::is_none")]
     pub metadata: Option<std::collections::HashMap<String, String>>,
@@ -124,6 +124,24 @@ pub struct Response {
         skip_serializing_if = "Option::is_none"
     )]
     pub max_output_tokens: Option<Option<i32>>,
+    /// Whether to store the generated response for later retrieval. Defaults to
+    /// `true`.
+    #[serde(rename = "store", skip_serializing_if = "Option::is_none")]
+    pub store: Option<bool>,
+    /// Billing attribution for the response (e.g. `{ "payer": "developer" }`).
+    #[serde(rename = "billing", skip_serializing_if = "Option::is_none")]
+    pub billing: Option<serde_json::Value>,
+    /// Penalties applied to token sampling. Mirror the chat-completion fields.
+    #[serde(rename = "frequency_penalty", skip_serializing_if = "Option::is_none")]
+    pub frequency_penalty: Option<f64>,
+    #[serde(rename = "presence_penalty", skip_serializing_if = "Option::is_none")]
+    pub presence_penalty: Option<f64>,
+    /// The input items submitted on the request, echoed when applicable.
+    #[serde(rename = "input", skip_serializing_if = "Option::is_none")]
+    pub input: Option<Vec<models::InputItem>>,
+    /// Backend fingerprint. Optional and redacted in fixture comparison.
+    #[serde(rename = "system_fingerprint", skip_serializing_if = "Option::is_none")]
+    pub system_fingerprint: Option<String>,
 }
 
 impl Response {
@@ -135,7 +153,7 @@ impl Response {
         incomplete_details: Option<models::ResponseAllOfIncompleteDetails>,
         output: Vec<models::OutputItem>,
         instructions: Option<models::ResponseAllOfInstructions>,
-        parallel_tool_calls: bool,
+        parallel_tool_calls: Option<bool>,
     ) -> Response {
         Response {
             id,
@@ -146,31 +164,7 @@ impl Response {
             output,
             instructions: instructions.map(Box::new),
             parallel_tool_calls,
-            metadata: None,
-            top_logprobs: None,
-            temperature: None,
-            top_p: None,
-            user: None,
-            safety_identifier: None,
-            prompt_cache_key: None,
-            service_tier: None,
-            prompt_cache_retention: None,
-            previous_response_id: None,
-            model: None,
-            reasoning: None,
-            background: None,
-            max_tool_calls: None,
-            text: None,
-            tools: None,
-            tool_choice: None,
-            prompt: None,
-            truncation: None,
-            status: None,
-            completed_at: None,
-            output_text: None,
-            usage: None,
-            conversation: None,
-            max_output_tokens: None,
+            ..Default::default()
         }
     }
 }
