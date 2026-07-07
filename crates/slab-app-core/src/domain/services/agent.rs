@@ -1,4 +1,4 @@
-//! Application service wrapping [`AgentControl`].
+//! Application service wrapping [`slab_agent::AgentRuntime`].
 //!
 //! Provides a stable, clone-friendly handle that the API handlers can extract
 //! from [`AppState`][crate::context::AppState] via Axum's `State` extractor.
@@ -6,8 +6,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use slab_agent::AgentRuntime;
 use slab_agent::config::AgentConfig;
-use slab_agent::control::AgentControl;
 use slab_agent::error::AgentError;
 use slab_agent::port::{AgentStorePort, ThreadMessageRecord, ThreadSnapshot};
 use slab_types::ConversationMessage;
@@ -15,13 +15,16 @@ use slab_utils::session_snapshot::{
     build_migration_snapshot, project_id_from_root, write_session_snapshot_atomic,
 };
 
+use crate::domain::models::{
+    AgentCommand, AgentCommandResult, AgentCommandStatus, AgentSessionSnapshot,
+};
 use crate::error::AppCoreError;
 use crate::infra::agent::event_hub::{AgentEventHub, AgentEventSubscription};
 
-/// Thin wrapper around [`AgentControl`] that exposes an application-layer API.
+/// Thin wrapper around [`AgentRuntime`] that exposes an application-layer API.
 #[derive(Clone)]
 pub struct AgentService {
-    control: Arc<AgentControl>,
+    runtime: AgentRuntime,
     store: Arc<dyn AgentStorePort>,
     events: Arc<AgentEventHub>,
 }
@@ -37,11 +40,11 @@ pub struct RestoredAgentSession {
 
 impl AgentService {
     pub fn new(
-        control: Arc<AgentControl>,
+        runtime: AgentRuntime,
         store: Arc<dyn AgentStorePort>,
         events: Arc<AgentEventHub>,
     ) -> Self {
-        Self { control, store, events }
+        Self { runtime, store, events }
     }
 
     /// Spawn a root agent thread.  Returns the new thread ID.
@@ -51,7 +54,87 @@ impl AgentService {
         config: AgentConfig,
         messages: Vec<ConversationMessage>,
     ) -> Result<String, AppCoreError> {
-        self.control.spawn(session_id, config, messages).await.map_err(AppCoreError::from)
+        self.runtime.create_response(session_id, config, messages).await.map_err(AppCoreError::from)
+    }
+
+    /// Handle one transport-neutral agent command.
+    ///
+    /// HTTP, WebSocket, and other callers should enter the agent use case here
+    /// after converting their wire DTOs into [`AgentCommand`].
+    pub async fn handle_command(
+        &self,
+        command: AgentCommand,
+    ) -> Result<AgentCommandResult, AppCoreError> {
+        match command {
+            AgentCommand::RestoreSession { session_id, request_id } => {
+                let command =
+                    AgentCommand::RestoreSession { request_id, session_id: session_id.clone() };
+                let restored = self.restore_session(&session_id).await?;
+                Ok(AgentCommandResult::restored(
+                    &command,
+                    AgentSessionSnapshot {
+                        session_id,
+                        thread: restored.thread,
+                        messages: restored.messages,
+                        responses: restored.responses,
+                    },
+                ))
+            }
+            AgentCommand::CreateResponse { request_id, session_id, config, messages } => {
+                let command = AgentCommand::CreateResponse {
+                    request_id,
+                    session_id: session_id.clone(),
+                    config: config.clone(),
+                    messages: messages.clone(),
+                };
+                let thread_id = self.spawn(session_id, config, messages).await?;
+                Ok(AgentCommandResult::ack(
+                    &command,
+                    Some(thread_id),
+                    Some(AgentCommandStatus::Pending),
+                    None,
+                ))
+            }
+            AgentCommand::AppendInput { request_id, thread_id, content } => {
+                let command = AgentCommand::AppendInput {
+                    request_id,
+                    thread_id: thread_id.clone(),
+                    content: content.clone(),
+                };
+                self.send_input(&thread_id, content).await?;
+                Ok(AgentCommandResult::ack(&command, Some(thread_id), None, None))
+            }
+            AgentCommand::ResolveApproval { request_id, thread_id, call_id, approved } => {
+                let command = AgentCommand::ResolveApproval {
+                    request_id,
+                    thread_id: thread_id.clone(),
+                    call_id: call_id.clone(),
+                    approved,
+                };
+                let delivered = self.approve_call(&thread_id, &call_id, approved);
+                Ok(AgentCommandResult::ack(&command, Some(thread_id), None, Some(delivered)))
+            }
+            AgentCommand::Interrupt { request_id, thread_id } => {
+                let command = AgentCommand::Interrupt { request_id, thread_id: thread_id.clone() };
+                self.interrupt(&thread_id).await?;
+                Ok(AgentCommandResult::ack(
+                    &command,
+                    Some(thread_id),
+                    Some(AgentCommandStatus::Interrupting),
+                    None,
+                ))
+            }
+            AgentCommand::Shutdown { request_id, thread_id } => {
+                let command = AgentCommand::Shutdown { request_id, thread_id: thread_id.clone() };
+                self.shutdown(&thread_id).await?;
+                Ok(AgentCommandResult::ack(
+                    &command,
+                    Some(thread_id),
+                    Some(AgentCommandStatus::Shutdown),
+                    None,
+                ))
+            }
+        }
     }
 
     /// Get the current status of an agent thread.
@@ -64,7 +147,7 @@ impl AgentService {
         thread_id: &str,
     ) -> Result<slab_types::agent::AgentThreadStatus, AppCoreError> {
         // Try the live in-memory registry first.
-        match self.control.subscribe(thread_id).await {
+        match self.runtime.subscribe(thread_id).await {
             Ok(rx) => {
                 return Ok(*rx.borrow());
             }
@@ -85,17 +168,17 @@ impl AgentService {
 
     /// Gracefully shut down a running agent thread.
     pub async fn shutdown(&self, thread_id: &str) -> Result<(), AppCoreError> {
-        self.control.shutdown(thread_id).await.map_err(AppCoreError::from)
+        self.runtime.shutdown(thread_id).await.map_err(AppCoreError::from)
     }
 
     /// Interrupt the currently running turn while keeping the thread resumable.
     pub async fn interrupt(&self, thread_id: &str) -> Result<(), AppCoreError> {
-        self.control.interrupt(thread_id).await.map_err(AppCoreError::from)
+        self.runtime.interrupt(thread_id).await.map_err(AppCoreError::from)
     }
 
     /// Append user input to an existing agent thread and run the next turn.
     pub async fn send_input(&self, thread_id: &str, content: String) -> Result<(), AppCoreError> {
-        self.control.send_input(thread_id, content).await.map_err(AppCoreError::from)
+        self.runtime.append_input(thread_id, content).await.map_err(AppCoreError::from)
     }
 
     /// List persisted root agent threads for a chat session, newest first.
@@ -187,7 +270,7 @@ impl AgentService {
     /// Return the number of currently active threads.
     #[allow(dead_code)]
     pub async fn active_thread_count(&self) -> usize {
-        self.control.active_thread_count().await
+        self.runtime.active_thread_count().await
     }
 
     /// Prepare a workspace switch (B-8 / INFRA-01): interrupt every active agent
@@ -201,15 +284,15 @@ impl AgentService {
         workspace_root: &Path,
         snapshot_dir: &Path,
     ) -> Result<WorkspaceMigrationOutcome, AppCoreError> {
-        let suspended = self.control.interrupt_all().await;
+        let suspended = self.runtime.interrupt_all().await;
         let project_id = project_id_from_root(workspace_root);
         let snapshot = build_migration_snapshot(&project_id, &suspended);
         write_session_snapshot_atomic(snapshot_dir, &snapshot).map_err(AppCoreError::Internal)?;
         Ok(WorkspaceMigrationOutcome { project_id, suspended_count: suspended.len() })
     }
 
-    pub(crate) fn control(&self) -> Arc<AgentControl> {
-        Arc::clone(&self.control)
+    pub(crate) fn runtime(&self) -> AgentRuntime {
+        self.runtime.clone()
     }
 }
 

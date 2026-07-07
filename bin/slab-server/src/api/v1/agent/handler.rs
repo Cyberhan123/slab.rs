@@ -17,11 +17,11 @@ use futures::SinkExt;
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use slab_app_core::context::AppState;
+use slab_app_core::domain::models::AgentCommandResult;
 use slab_app_core::domain::services::{AgentService, WorkspaceService};
 use slab_app_core::error::AppCoreError;
 use slab_app_core::infra::agent::event_hub::AgentEventEnvelope;
 use slab_app_core::schemas::chat::{OpenAiError, OpenAiErrorResponse};
-use slab_types::ConversationMessage;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use utoipa::OpenApi;
@@ -30,8 +30,8 @@ use crate::api::v1::agent::openai_compat::{
     AdapterInput, StreamCtx, build_response, envelope_to_events,
 };
 use crate::api::v1::agent::schema::{
-    AgentConfigInput, AgentResponsesClientMessage, AgentResponsesServerMessage, AgentStatusValue,
-    MessageInput, OpenAICreateRequest, WorkspaceMigrationResponse,
+    AgentConfigInput, AgentResponsesClientMessage, AgentResponsesServerMessage, MessageInput,
+    OpenAICreateRequest, WorkspaceMigrationResponse,
 };
 use crate::api::v1::chat::schema::{ChatToolCall, ChatToolFunction};
 use crate::api::validation::validate;
@@ -90,7 +90,7 @@ struct OpenAIResponseCreateEvent {
     body: OpenAICreateRequest,
 }
 
-struct CommandResult {
+struct TransportCommandResult {
     /// `None` suppresses the slab `agent.ack` / `agent.session.restored` control
     /// frame — canonical mode relies on the `response.*` events (which carry the
     /// thread id as `response.id`) instead.
@@ -300,18 +300,11 @@ async fn agent_responses_post(
 ) -> Result<Response, AgentCompatError> {
     let session_id = bearer_session_id(&headers);
     let model = req.model.clone().unwrap_or_default();
-    let config = req.to_config_input().into();
-    let messages: Vec<ConversationMessage> =
-        req.to_messages().into_iter().map(Into::into).collect();
-
-    // Multi-turn: `previous_response_id` chains on the slab thread id; otherwise
-    // spawn a fresh thread.
-    let thread_id = match req.previous_response_id.clone() {
-        Some(prev) if !prev.is_empty() => {
-            service.send_input(&prev, last_user_text(&messages)).await?;
-            prev
-        }
-        _ => service.spawn(session_id, config, messages).await?,
+    let result = service.handle_command(req.to_agent_command(session_id)).await?;
+    let Some(thread_id) = result.subscribe_thread_id else {
+        return Err(AgentCompatError(ServerError::Internal(
+            "agent response create did not return a thread id".to_owned(),
+        )));
     };
 
     if req.stream.unwrap_or(false) {
@@ -348,16 +341,6 @@ fn bearer_session_id(headers: &HeaderMap) -> String {
         .unwrap_or(trimmed);
     let token = token.trim();
     if token.is_empty() { default } else { token.to_owned() }
-}
-
-/// Render the last user message's text (the new turn for `send_input`).
-fn last_user_text(messages: &[ConversationMessage]) -> String {
-    messages
-        .iter()
-        .rev()
-        .find(|m| m.role == "user")
-        .map(|m| m.content.rendered_text())
-        .unwrap_or_default()
 }
 
 #[utoipa::path(
@@ -445,7 +428,7 @@ async fn run_agent_responses_socket(
                 };
                 match handle_agent_command(&service, command, &session_id).await {
                     Ok(result) => {
-                        let CommandResult { message, subscribe_thread_id } = result;
+                        let TransportCommandResult { message, subscribe_thread_id } = result;
                         if let Some(thread_id) = subscribe_thread_id.as_deref() {
                             let already_subscribed =
                                 active_thread_id.as_deref() == Some(thread_id)
@@ -550,139 +533,29 @@ async fn handle_agent_command(
     service: &AgentService,
     command: InboundCommand,
     session_id: &str,
-) -> Result<CommandResult, ServerError> {
+) -> Result<TransportCommandResult, ServerError> {
     match command {
         InboundCommand::ResponseCreate(req) => {
-            let subscribe_thread_id =
-                handle_canonical_response_create(service, session_id, req).await?;
+            let result =
+                service.handle_command(req.to_agent_command(session_id.to_owned())).await?;
             // Canonical mode: no `agent.ack` — the `response.*` events emitted by
             // `envelope_to_events` carry the thread id as `response.id`.
-            Ok(CommandResult { message: None, subscribe_thread_id })
+            Ok(transport_result_from_agent_result(result, false))
         }
         InboundCommand::Slab(command) => {
-            let (message, subscribe_thread_id) = handle_slab_command(service, command).await?;
-            Ok(CommandResult { message: Some(message), subscribe_thread_id })
+            let result = service.handle_command(command.into()).await?;
+            Ok(transport_result_from_agent_result(result, true))
         }
     }
 }
 
-/// Slab-dialect dispatch (the original WS protocol). Behavior unchanged — each
-/// arm returns its control frame + the thread id to subscribe to.
-async fn handle_slab_command(
-    service: &AgentService,
-    command: AgentResponsesClientMessage,
-) -> Result<(AgentResponsesServerMessage, Option<String>), ServerError> {
-    let action = command.action();
-    let request_id = command.request_id().map(str::to_owned);
-
-    match command {
-        AgentResponsesClientMessage::SessionRestore { session_id, .. } => {
-            let restored = service.restore_session(&session_id).await?;
-            let subscribe_thread_id = restored.thread.as_ref().map(|thread| thread.id.clone());
-            let message = AgentResponsesServerMessage::SessionRestored {
-                request_id,
-                session_id,
-                thread: restored.thread.map(Into::into),
-                messages: restored.messages.into_iter().map(Into::into).collect(),
-                responses: restored.responses,
-            };
-            Ok((message, subscribe_thread_id))
-        }
-        AgentResponsesClientMessage::ResponseCreate { session_id, config, messages, .. } => {
-            let messages = messages.into_iter().map(Into::into).collect();
-            let thread_id = service.spawn(session_id, (*config).into(), messages).await?;
-            Ok((
-                AgentResponsesServerMessage::Ack {
-                    request_id,
-                    action,
-                    accepted: true,
-                    thread_id: Some(thread_id.clone()),
-                    status: Some(AgentStatusValue::Pending),
-                    delivered: None,
-                },
-                Some(thread_id),
-            ))
-        }
-        AgentResponsesClientMessage::Input { thread_id, content, .. } => {
-            service.send_input(&thread_id, content).await?;
-            Ok((
-                AgentResponsesServerMessage::Ack {
-                    request_id,
-                    action,
-                    accepted: true,
-                    thread_id: Some(thread_id.clone()),
-                    status: None,
-                    delivered: None,
-                },
-                Some(thread_id),
-            ))
-        }
-        AgentResponsesClientMessage::ApprovalResolve { thread_id, call_id, approved, .. } => {
-            let delivered = service.approve_call(&thread_id, &call_id, approved);
-            Ok((
-                AgentResponsesServerMessage::Ack {
-                    request_id,
-                    action,
-                    accepted: delivered,
-                    thread_id: Some(thread_id.clone()),
-                    status: None,
-                    delivered: Some(delivered),
-                },
-                Some(thread_id),
-            ))
-        }
-        AgentResponsesClientMessage::Interrupt { thread_id, .. } => {
-            service.interrupt(&thread_id).await?;
-            Ok((
-                AgentResponsesServerMessage::Ack {
-                    request_id,
-                    action,
-                    accepted: true,
-                    thread_id: Some(thread_id.clone()),
-                    status: Some(AgentStatusValue::Interrupting),
-                    delivered: None,
-                },
-                Some(thread_id),
-            ))
-        }
-        AgentResponsesClientMessage::Shutdown { thread_id, .. } => {
-            service.shutdown(&thread_id).await?;
-            Ok((
-                AgentResponsesServerMessage::Ack {
-                    request_id,
-                    action,
-                    accepted: true,
-                    thread_id: Some(thread_id.clone()),
-                    status: Some(AgentStatusValue::Shutdown),
-                    delivered: None,
-                },
-                Some(thread_id),
-            ))
-        }
-    }
-}
-
-/// OpenAI-canonical `response.create` over WS — mirrors the POST path: reuse
-/// the Phase F translators (`OpenAICreateRequest::to_messages` /
-/// `to_config_input`), branch on `previous_response_id`, and return the thread
-/// id to subscribe to. The session id comes from the `?token=` query (browsers
-/// can't set WS headers).
-async fn handle_canonical_response_create(
-    service: &AgentService,
-    session_id: &str,
-    req: OpenAICreateRequest,
-) -> Result<Option<String>, ServerError> {
-    let config = req.to_config_input().into();
-    let messages: Vec<ConversationMessage> =
-        req.to_messages().into_iter().map(Into::into).collect();
-    let thread_id = match req.previous_response_id.clone() {
-        Some(prev) if !prev.is_empty() => {
-            service.send_input(&prev, last_user_text(&messages)).await?;
-            prev
-        }
-        _ => service.spawn(session_id.to_owned(), config, messages).await?,
-    };
-    Ok(Some(thread_id))
+fn transport_result_from_agent_result(
+    result: AgentCommandResult,
+    include_control_message: bool,
+) -> TransportCommandResult {
+    let subscribe_thread_id = result.subscribe_thread_id.clone();
+    let message = include_control_message.then(|| result.into());
+    TransportCommandResult { message, subscribe_thread_id }
 }
 
 // ---------------------------------------------------------------------------

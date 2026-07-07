@@ -30,6 +30,7 @@ pub mod event;
 pub mod hook;
 pub mod port;
 pub mod risk;
+pub mod runtime;
 pub mod thread;
 pub mod tool;
 
@@ -64,6 +65,7 @@ pub use port::{
     TurnEvent, TurnStateRecord,
 };
 pub use risk::{BasicToolRiskAnalyzer, ToolApprovalDecision, ToolApprovalPolicy, ToolRiskAnalyzer};
+pub use runtime::AgentRuntime;
 pub use tool::{
     AgentThreadContext, PlanRef, ToolApprovalRequest, ToolContext, ToolContextBuilder, ToolHandler,
     ToolOutput, ToolRouter, WorkspaceRef,

@@ -1,3 +1,4 @@
+mod agent;
 mod audio;
 mod backend;
 mod chat;
@@ -17,6 +18,9 @@ mod ui_state;
 mod video;
 mod workspace;
 
+pub use agent::{
+    AgentCommand, AgentCommandAction, AgentCommandResult, AgentCommandStatus, AgentSessionSnapshot,
+};
 pub use audio::{AudioTranscriptionCommand, TranscribeDecodeOptions, TranscribeVadOptions};
 pub use backend::{BackendStatusQuery, BackendStatusView};
 #[allow(unused_imports)]

@@ -5,11 +5,12 @@ use slab_agent::config::{
     AgentConfig, AgentToolChoice, MAX_INVALID_TOOL_CALL_RETRIES, MAX_TOOL_CONCURRENCY,
 };
 use slab_agent::port::{ThreadMessageRecord, ThreadSnapshot};
-use slab_types::{I18nPayload, agent::AgentThreadStatus};
+use slab_types::{ConversationMessage, I18nPayload, agent::AgentThreadStatus};
 use utoipa::ToSchema;
 use validator::{Validate, ValidationError, ValidationErrors};
 
 use crate::domain::models::{
+    AgentCommand, AgentCommandAction, AgentCommandResult, AgentCommandStatus,
     StructuredOutput as DomainStructuredOutput,
     StructuredOutputJsonSchema as DomainStructuredOutputJsonSchema,
 };
@@ -226,6 +227,35 @@ impl OpenAICreateRequest {
             ..Default::default()
         }
     }
+
+    /// Translate the OpenAI-compatible create request into the app-core agent
+    /// command used by the application service.
+    pub fn to_agent_command(&self, session_id: String) -> AgentCommand {
+        let messages: Vec<ConversationMessage> =
+            self.to_messages().into_iter().map(Into::into).collect();
+        match self.previous_response_id.as_deref().filter(|value| !value.is_empty()) {
+            Some(thread_id) => AgentCommand::AppendInput {
+                request_id: None,
+                thread_id: thread_id.to_owned(),
+                content: last_user_text(&messages),
+            },
+            None => AgentCommand::CreateResponse {
+                request_id: None,
+                session_id,
+                config: self.to_config_input().into(),
+                messages,
+            },
+        }
+    }
+}
+
+fn last_user_text(messages: &[ConversationMessage]) -> String {
+    messages
+        .iter()
+        .rev()
+        .find(|message| message.role == "user")
+        .map(|message| message.content.rendered_text())
+        .unwrap_or_default()
 }
 
 fn openai_input_to_messages(input: &serde_json::Value) -> Vec<MessageInput> {
@@ -450,6 +480,42 @@ impl AgentResponsesClientMessage {
     }
 }
 
+impl From<AgentResponsesClientMessage> for AgentCommand {
+    fn from(message: AgentResponsesClientMessage) -> Self {
+        match message {
+            AgentResponsesClientMessage::SessionRestore { request_id, session_id } => {
+                Self::RestoreSession { request_id, session_id }
+            }
+            AgentResponsesClientMessage::ResponseCreate {
+                request_id,
+                session_id,
+                config,
+                messages,
+            } => Self::CreateResponse {
+                request_id,
+                session_id,
+                config: (*config).into(),
+                messages: messages.into_iter().map(Into::into).collect(),
+            },
+            AgentResponsesClientMessage::Input { request_id, thread_id, content } => {
+                Self::AppendInput { request_id, thread_id, content }
+            }
+            AgentResponsesClientMessage::ApprovalResolve {
+                request_id,
+                thread_id,
+                call_id,
+                approved,
+            } => Self::ResolveApproval { request_id, thread_id, call_id, approved },
+            AgentResponsesClientMessage::Interrupt { request_id, thread_id } => {
+                Self::Interrupt { request_id, thread_id }
+            }
+            AgentResponsesClientMessage::Shutdown { request_id, thread_id } => {
+                Self::Shutdown { request_id, thread_id }
+            }
+        }
+    }
+}
+
 impl Validate for AgentResponsesClientMessage {
     fn validate(&self) -> Result<(), ValidationErrors> {
         let mut errors = ValidationErrors::new();
@@ -533,6 +599,19 @@ pub enum AgentResponsesAction {
     Shutdown,
 }
 
+impl From<AgentCommandAction> for AgentResponsesAction {
+    fn from(action: AgentCommandAction) -> Self {
+        match action {
+            AgentCommandAction::RestoreSession => Self::SessionRestore,
+            AgentCommandAction::CreateResponse => Self::ResponseCreate,
+            AgentCommandAction::AppendInput => Self::Input,
+            AgentCommandAction::ResolveApproval => Self::ApprovalResolve,
+            AgentCommandAction::Interrupt => Self::Interrupt,
+            AgentCommandAction::Shutdown => Self::Shutdown,
+        }
+    }
+}
+
 /// Server message returned by `POST /v1/agents/responses` and emitted on the
 /// WebSocket control channel. Agent response events are sent as raw
 /// `AgentStreamEvent` frames.
@@ -579,6 +658,29 @@ pub enum AgentResponsesServerMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         thread_id: Option<String>,
     },
+}
+
+impl From<AgentCommandResult> for AgentResponsesServerMessage {
+    fn from(result: AgentCommandResult) -> Self {
+        if let Some(session) = result.session {
+            return Self::SessionRestored {
+                request_id: result.request_id,
+                session_id: session.session_id,
+                thread: session.thread.map(Into::into),
+                messages: session.messages.into_iter().map(Into::into).collect(),
+                responses: session.responses,
+            };
+        }
+
+        Self::Ack {
+            request_id: result.request_id,
+            action: result.action.into(),
+            accepted: result.accepted,
+            thread_id: result.thread_id,
+            status: result.status.map(Into::into),
+            delivered: result.delivered,
+        }
+    }
 }
 
 /// Persisted agent thread summary.
@@ -674,6 +776,16 @@ impl From<AgentThreadStatus> for AgentStatusValue {
     }
 }
 
+impl From<AgentCommandStatus> for AgentStatusValue {
+    fn from(status: AgentCommandStatus) -> Self {
+        match status {
+            AgentCommandStatus::Pending => Self::Pending,
+            AgentCommandStatus::Interrupting => Self::Interrupting,
+            AgentCommandStatus::Shutdown => Self::Shutdown,
+        }
+    }
+}
+
 /// Outcome of a workspace migration preparation (B-8 / INFRA-01): the project
 /// id the snapshot was scoped to + how many agent threads were suspended.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -755,6 +867,131 @@ mod tests {
         assert!(config.reasoning_effort.is_some());
         assert!(matches!(config.tool_choice, AgentToolChoice::Required));
         assert!(config.structured_output.is_some());
+    }
+
+    #[test]
+    fn openai_create_request_maps_to_agent_create_command() {
+        let req: OpenAICreateRequest =
+            serde_json::from_str(r#"{"model":"gpt-x","instructions":"be brief","input":"hello"}"#)
+                .unwrap();
+
+        let command = req.to_agent_command("session-1".into());
+        let AgentCommand::CreateResponse { request_id, session_id, config, messages } = command
+        else {
+            panic!("expected create response command");
+        };
+
+        assert_eq!(request_id, None);
+        assert_eq!(session_id, "session-1");
+        assert_eq!(config.model, "gpt-x");
+        assert_eq!(config.system_prompt.as_deref(), Some("be brief"));
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[0].content.rendered_text(), "hello");
+    }
+
+    #[test]
+    fn openai_previous_response_maps_to_agent_append_input_command() {
+        let req: OpenAICreateRequest = serde_json::from_str(
+            r#"{"previous_response_id":"thread-1","input":[
+                {"type":"message","role":"assistant","content":"old"},
+                {"type":"message","role":"user","content":"new turn"}
+            ]}"#,
+        )
+        .unwrap();
+
+        let command = req.to_agent_command("session-1".into());
+        let AgentCommand::AppendInput { request_id, thread_id, content } = command else {
+            panic!("expected append input command");
+        };
+
+        assert_eq!(request_id, None);
+        assert_eq!(thread_id, "thread-1");
+        assert_eq!(content, "new turn");
+    }
+
+    #[test]
+    fn slab_client_messages_map_to_agent_commands() {
+        let restore = AgentCommand::from(AgentResponsesClientMessage::SessionRestore {
+            request_id: Some("req-restore".into()),
+            session_id: "session-1".into(),
+        });
+        assert!(matches!(
+            restore,
+            AgentCommand::RestoreSession { request_id: Some(ref id), session_id }
+                if id == "req-restore" && session_id == "session-1"
+        ));
+
+        let create = AgentCommand::from(AgentResponsesClientMessage::ResponseCreate {
+            request_id: Some("req-create".into()),
+            session_id: "session-1".into(),
+            config: Box::new(AgentConfigInput { model: Some("mock".into()), ..Default::default() }),
+            messages: vec![MessageInput {
+                role: "user".into(),
+                content: "hello".into(),
+                ..Default::default()
+            }],
+        });
+        assert!(matches!(
+            create,
+            AgentCommand::CreateResponse {
+                request_id: Some(ref id),
+                session_id,
+                ref config,
+                ref messages,
+            } if id == "req-create"
+                && session_id == "session-1"
+                && config.model == "mock"
+                && messages.len() == 1
+                && messages[0].content.rendered_text() == "hello"
+        ));
+
+        let input = AgentCommand::from(AgentResponsesClientMessage::Input {
+            request_id: Some("req-input".into()),
+            thread_id: "thread-1".into(),
+            content: "next".into(),
+        });
+        assert!(matches!(
+            input,
+            AgentCommand::AppendInput { request_id: Some(ref id), thread_id, content }
+                if id == "req-input" && thread_id == "thread-1" && content == "next"
+        ));
+
+        let approval = AgentCommand::from(AgentResponsesClientMessage::ApprovalResolve {
+            request_id: Some("req-approval".into()),
+            thread_id: "thread-1".into(),
+            call_id: "call-1".into(),
+            approved: true,
+        });
+        assert!(matches!(
+            approval,
+            AgentCommand::ResolveApproval {
+                request_id: Some(ref id),
+                thread_id,
+                call_id,
+                approved: true,
+            } if id == "req-approval" && thread_id == "thread-1" && call_id == "call-1"
+        ));
+
+        let interrupt = AgentCommand::from(AgentResponsesClientMessage::Interrupt {
+            request_id: Some("req-interrupt".into()),
+            thread_id: "thread-1".into(),
+        });
+        assert!(matches!(
+            interrupt,
+            AgentCommand::Interrupt { request_id: Some(ref id), thread_id }
+                if id == "req-interrupt" && thread_id == "thread-1"
+        ));
+
+        let shutdown = AgentCommand::from(AgentResponsesClientMessage::Shutdown {
+            request_id: Some("req-shutdown".into()),
+            thread_id: "thread-1".into(),
+        });
+        assert!(matches!(
+            shutdown,
+            AgentCommand::Shutdown { request_id: Some(ref id), thread_id }
+                if id == "req-shutdown" && thread_id == "thread-1"
+        ));
     }
 
     use crate::schemas::chat::{ChatToolCall, ChatToolFunction};

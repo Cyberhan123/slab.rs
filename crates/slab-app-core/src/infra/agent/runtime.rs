@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use slab_agent::{AgentControl, AgentHook, ToolRouter};
+use slab_agent::{AgentHook, AgentRuntime, ToolRouter};
 use slab_config::AgentMemoriesConfig;
 
 use crate::context::ModelState;
@@ -11,14 +11,14 @@ use crate::error::AppCoreError;
 #[derive(Clone)]
 pub(crate) struct AgentRuntimeReloader {
     state: ModelState,
-    control: Arc<AgentControl>,
+    runtime: AgentRuntime,
     tool_router: Arc<ToolRouter>,
 }
 
 impl AgentRuntimeReloader {
-    pub(crate) fn new(state: ModelState, control: Arc<AgentControl>) -> Self {
-        let tool_router = control.tool_router();
-        Self { state, control, tool_router }
+    pub(crate) fn new(state: ModelState, runtime: AgentRuntime) -> Self {
+        let tool_router = runtime.tool_router();
+        Self { state, runtime, tool_router }
     }
 
     pub(crate) async fn reload(&self) -> Result<(), AppCoreError> {
@@ -44,7 +44,7 @@ impl AgentRuntimeReloader {
                 hooks.push(script_hook);
             }
         }
-        self.control.replace_hooks(hooks);
+        self.runtime.replace_hooks(hooks);
 
         // B-7: register a `plugin__<id>__<cap>` proxy for every Tool-kind
         // capability of enabled plugins. Uses a READ-ONLY manifest scan (no
@@ -100,7 +100,7 @@ impl AgentRuntimeReloader {
             memory_config.clone(),
             memory_root.clone(),
         );
-        memory_pipeline.set_control(Arc::clone(&self.control));
+        memory_pipeline.set_control(self.runtime.control());
         vec![
             Arc::new(slab_agent_memories::hooks::MemoryInstructionHook::new(
                 memory_config.enabled,

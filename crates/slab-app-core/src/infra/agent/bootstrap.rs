@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use slab_agent::{AgentControl, AgentThreadContext, ToolRouter, WorkspaceRef};
+use slab_agent::{AgentControl, AgentRuntime, AgentThreadContext, ToolRouter, WorkspaceRef};
 use slab_agent_tools::{ShellPolicy, ShellRuleSet};
 use slab_agent_tracing::{AgentTraceSink, FileAgentTraceSink, NoopAgentTraceSink};
 use slab_sandboxing::{SandboxEnvironment, SandboxPolicy, create_platform_driver};
@@ -33,8 +33,9 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
         ]));
     let control =
         build_agent_control(ctx, Arc::clone(&store), Arc::clone(&event_hub), composite_notify);
-    let service = AgentService::new(control, store_for_agent, Arc::clone(&event_hub));
-    let runtime = AgentRuntimeReloader::new((*ctx.model_state).clone(), service.control());
+    let agent_runtime = AgentRuntime::new(control);
+    let service = AgentService::new(agent_runtime.clone(), store_for_agent, Arc::clone(&event_hub));
+    let runtime = AgentRuntimeReloader::new((*ctx.model_state).clone(), service.runtime());
     schedule_agent_runtime_reload(runtime.clone());
 
     AgentBootstrap { service, runtime }

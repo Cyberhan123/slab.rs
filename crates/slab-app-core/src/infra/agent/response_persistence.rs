@@ -7,7 +7,8 @@
 //! [`super::event_hub::CompositeNotifyPort`]). It buffers one run's envelopes
 //! per thread and, on the run's terminal event (`ResponseCompleted` /
 //! `ResponseFailed` / `ResponseCancelled`), assembles the canonical
-//! [`slab_proto::openai::Response`] via [`super::openai_response::build_response`]
+//! [`slab_proto::openai::Response`] via
+//! [`crate::application::agent::projection::openai_response::build_response`]
 //! and stores it as JSON.
 //!
 //! Run segmentation: one run == one terminal event. `run_id` is generated here
@@ -25,7 +26,7 @@ use slab_proto::openai::ResponseStatus;
 use tracing::warn;
 
 use super::event_hub::AgentEventEnvelope;
-use super::openai_response::{AdapterInput, build_response};
+use crate::application::agent::projection::openai_response::{AdapterInput, build_response};
 
 /// Hard cap on buffered envelopes per run. Runs are bounded by `max_turns`, so
 /// this is a backstop against unbounded memory on pathological runs; when

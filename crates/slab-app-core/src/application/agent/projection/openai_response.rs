@@ -1,13 +1,13 @@
-//! OpenAI-Responses-canonical `Response` assembler — pure conversion from
+//! OpenAI-Responses-canonical `Response` assembler for pure conversion from
 //! slab-owned agent domain events into the canonical
 //! [`slab_proto::openai::Response`] wire/persistence type.
 //!
-//! Relocated from `bin/slab-server/src/api/v1/agent/openai_compat.rs` so both
-//! the HTTP handler (immediate non-streaming POST return) and the in-process
+//! Kept in app-core projection so both the HTTP handler (immediate
+//! non-streaming POST return) and the in-process
 //! response-persistence observer (run completion) share one assembler.
 //!
 //! Boundary rules (unchanged from the original adapter):
-//! - Pure conversion only — never calls `AgentService`, never touches
+//! - Pure conversion only: never calls `AgentService`, never touches
 //!   `tokio`/`axum`/sqlx.
 //! - HTTP / SSE / WebSocket framing stays in the server crate.
 

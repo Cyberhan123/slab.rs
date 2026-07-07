@@ -73,10 +73,10 @@ use slab_proto::openai::{
 };
 
 // The non-streaming `Response` assembler (`build_response` + `AdapterInput`)
-// and the shared parsing helpers live in `slab_app_core::infra::agent::openai_response`
-// so both this HTTP handler and the in-process response-persistence observer
-// share one implementation. Re-exported here to keep the historical call sites.
-pub use slab_app_core::infra::agent::openai_response::{
+// and the shared parsing helpers live in the app-core response projection so
+// both the HTTP handler and persistence observer share one implementation.
+// Re-exported here to keep the historical call sites.
+pub use slab_app_core::application::agent::projection::openai_response::{
     AdapterInput, build_response, parse_mcp_status, parse_phase, parse_shell_output_content,
 };
 
