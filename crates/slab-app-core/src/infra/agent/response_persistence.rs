@@ -20,13 +20,14 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use chrono::Utc;
-use slab_agent::port::{AgentNotifyPort, AgentStorePort, ThreadResponseRecord, ThreadStatus};
+use slab_agent::port::{AgentNotifyPort, AgentStorePort, ThreadStatus};
 use slab_agent::{AgentEventKind, TurnEvent};
 use slab_proto::openai::ResponseStatus;
 use tracing::warn;
 
 use super::event_hub::AgentEventEnvelope;
 use crate::application::agent::projection::openai_response::{AdapterInput, build_response};
+use crate::infra::db::repository::agent_response::{AgentResponseStore, ThreadResponseRecord};
 
 /// Hard cap on buffered envelopes per run. Runs are bounded by `max_turns`, so
 /// this is a backstop against unbounded memory on pathological runs; when
@@ -47,12 +48,16 @@ struct RunBuffer {
 /// Notify-port observer that persists the complete per-run `Response` JSON.
 pub struct ResponsePersistenceObserver {
     store: Arc<dyn AgentStorePort>,
+    response_store: Arc<dyn AgentResponseStore>,
     runs: Mutex<HashMap<String, RunBuffer>>,
 }
 
 impl ResponsePersistenceObserver {
-    pub fn new(store: Arc<dyn AgentStorePort>) -> Self {
-        Self { store, runs: Mutex::new(HashMap::new()) }
+    pub fn new(
+        store: Arc<dyn AgentStorePort>,
+        response_store: Arc<dyn AgentResponseStore>,
+    ) -> Self {
+        Self { store, response_store, runs: Mutex::new(HashMap::new()) }
     }
 }
 
@@ -159,7 +164,7 @@ impl AgentNotifyPort for ResponsePersistenceObserver {
             created_at: Utc::now().to_rfc3339(),
             completed_at: Some(Utc::now().to_rfc3339()),
         };
-        if let Err(error) = self.store.insert_thread_response(&record).await {
+        if let Err(error) = self.response_store.insert_thread_response(&record).await {
             warn!(%error, thread_id, "failed to persist agent run response");
         }
     }
@@ -198,7 +203,8 @@ mod tests {
         }
     }
 
-    async fn seeded_observer() -> (Arc<dyn AgentStorePort>, ResponsePersistenceObserver) {
+    async fn seeded_observer()
+    -> (Arc<dyn AgentStorePort>, Arc<dyn AgentResponseStore>, ResponsePersistenceObserver) {
         let sqlite = SqlxStore::connect("sqlite::memory:").await.expect("store");
         let now = "2026-01-01T00:00:00Z".to_owned();
         sqlx::query(
@@ -224,22 +230,25 @@ mod tests {
             })
             .await
             .expect("thread");
-        let store: Arc<dyn AgentStorePort> = Arc::new(sqlite);
-        let observer = ResponsePersistenceObserver::new(Arc::clone(&store));
-        (store, observer)
+        let store = Arc::new(sqlite);
+        let agent_store: Arc<dyn AgentStorePort> = store.clone();
+        let response_store: Arc<dyn AgentResponseStore> = store;
+        let observer =
+            ResponsePersistenceObserver::new(Arc::clone(&agent_store), Arc::clone(&response_store));
+        (agent_store, response_store, observer)
     }
 
     #[tokio::test]
     async fn observer_persists_response_only_on_terminal_event() {
-        let (store, observer) = seeded_observer().await;
+        let (_store, response_store, observer) = seeded_observer().await;
 
         observer.on_turn_event("thread-1", &text_done_event()).await;
         // Non-terminal: nothing persisted yet.
-        assert!(store.list_thread_responses("thread-1").await.unwrap().is_empty());
+        assert!(response_store.list_thread_responses("thread-1").await.unwrap().is_empty());
 
         observer.on_turn_event("thread-1", &completed_event()).await;
 
-        let responses = store.list_thread_responses("thread-1").await.expect("list");
+        let responses = response_store.list_thread_responses("thread-1").await.expect("list");
         assert_eq!(responses.len(), 1);
         assert_eq!(responses[0].status, "completed");
         assert_eq!(responses[0].session_id, "session-1");
@@ -251,7 +260,7 @@ mod tests {
 
     #[tokio::test]
     async fn observer_segments_runs_by_terminal_event() {
-        let (store, observer) = seeded_observer().await;
+        let (_store, response_store, observer) = seeded_observer().await;
 
         // Run 1.
         observer.on_turn_event("thread-1", &text_done_event()).await;
@@ -260,7 +269,7 @@ mod tests {
         observer.on_turn_event("thread-1", &text_done_event()).await;
         observer.on_turn_event("thread-1", &completed_event()).await;
 
-        let responses = store.list_thread_responses("thread-1").await.expect("list");
+        let responses = response_store.list_thread_responses("thread-1").await.expect("list");
         assert_eq!(responses.len(), 2, "two runs produce two stored responses");
         assert_ne!(responses[0].run_id, responses[1].run_id);
     }

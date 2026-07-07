@@ -19,7 +19,7 @@ mod video;
 mod workspace;
 
 pub use agent::{
-    AgentCommand, AgentCommandAction, AgentCommandResult, AgentCommandStatus, AgentSessionSnapshot,
+    AgentCommand, AgentControlCommand, AgentControlResult, AgentControlStatus, AgentSessionSnapshot,
 };
 pub use audio::{AudioTranscriptionCommand, TranscribeDecodeOptions, TranscribeVadOptions};
 pub use backend::{BackendStatusQuery, BackendStatusView};

@@ -4,9 +4,11 @@
 export {
   DEFAULT_CONVERSATION_KEY,
   isEphemeralConversationKey,
-  type AgentResponsesClientMessage,
-  type AgentResponsesServerMessage,
+  type AgentApprovalResolveRequest,
+  type AgentControlResponse,
+  type AgentHistoryResponse,
   type AgentStatus,
+  type AgentThreadControlRequest,
   type AssistantArtifactRef,
   type AgentThreadMessageResponse,
   type AgentThreadResponse,
@@ -19,6 +21,7 @@ export {
   type AssistantThought,
   type AssistantThoughtStatus,
   type AssistantUiMessage,
+  type OpenAICreateRequest,
 } from './lib/assistant-types'
 
 export {

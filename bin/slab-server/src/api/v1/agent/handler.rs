@@ -17,7 +17,7 @@ use futures::SinkExt;
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use slab_app_core::context::AppState;
-use slab_app_core::domain::models::AgentCommandResult;
+use slab_app_core::domain::models::AgentControlCommand;
 use slab_app_core::domain::services::{AgentService, WorkspaceService};
 use slab_app_core::error::AppCoreError;
 use slab_app_core::infra::agent::event_hub::AgentEventEnvelope;
@@ -30,20 +30,33 @@ use crate::api::v1::agent::openai_compat::{
     AdapterInput, StreamCtx, build_response, envelope_to_events,
 };
 use crate::api::v1::agent::schema::{
-    AgentConfigInput, AgentResponsesClientMessage, AgentResponsesServerMessage, MessageInput,
-    OpenAICreateRequest, WorkspaceMigrationResponse,
+    AgentApprovalResolveRequest, AgentConfigInput, AgentControlResponse, AgentThreadControlRequest,
+    MessageInput, OpenAICreateRequest, OpenAIReasoningInput, OpenAITextInput,
+    WorkspaceMigrationResponse,
 };
 use crate::api::v1::chat::schema::{ChatToolCall, ChatToolFunction};
-use crate::api::validation::validate;
+use crate::api::validation::ValidatedJson;
 use crate::error::ServerError;
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(agent_responses_get, agent_responses_post, migrate_workspace),
+    paths(
+        agent_responses_get,
+        agent_responses_post,
+        agent_control_approval,
+        agent_control_interrupt,
+        agent_control_shutdown,
+        migrate_workspace
+    ),
     components(schemas(
-        AgentResponsesClientMessage,
+        AgentApprovalResolveRequest,
         AgentConfigInput,
+        AgentControlResponse,
+        AgentThreadControlRequest,
         MessageInput,
+        OpenAICreateRequest,
+        OpenAIReasoningInput,
+        OpenAITextInput,
         ChatToolCall,
         ChatToolFunction,
         OpenAiErrorResponse,
@@ -55,6 +68,9 @@ pub struct AgentApi;
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/agents/responses", get(agent_responses_get).post(agent_responses_post))
+        .route("/agents/control/approval", post(agent_control_approval))
+        .route("/agents/control/interrupt", post(agent_control_interrupt))
+        .route("/agents/control/shutdown", post(agent_control_shutdown))
         .route("/agents/migrate", post(migrate_workspace))
 }
 
@@ -70,12 +86,10 @@ struct AgentResponsesQuery {
     token: Option<String>,
 }
 
-/// Parsed inbound WS command. Slab-dialect clients send tagged
-/// [`AgentResponsesClientMessage`] frames; canonical (openai-protocol) clients
-/// send a `response.create` event whose body is an [`OpenAICreateRequest`].
+/// Parsed inbound WS command. The responses socket only accepts canonical
+/// `response.create` events whose body is an [`OpenAICreateRequest`].
 #[derive(Debug)]
 enum InboundCommand {
-    Slab(AgentResponsesClientMessage),
     ResponseCreate(OpenAICreateRequest),
 }
 
@@ -91,10 +105,6 @@ struct OpenAIResponseCreateEvent {
 }
 
 struct TransportCommandResult {
-    /// `None` suppresses the slab `agent.ack` / `agent.session.restored` control
-    /// frame — canonical mode relies on the `response.*` events (which carry the
-    /// thread id as `response.id`) instead.
-    message: Option<AgentResponsesServerMessage>,
     subscribe_thread_id: Option<String>,
 }
 
@@ -245,9 +255,8 @@ async fn agent_responses_get(
     ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> Result<Response, AgentCompatError> {
     if let Ok(ws) = ws {
-        // Canonical (openai-protocol) mode is requested via the `slab.responses`
-        // subprotocol. Agree to it so the handshake completes, and remember
-        // whether it was negotiated so the socket speaks the right dialect.
+        // Keep accepting the historical `slab.responses` subprotocol as a
+        // handshake signal; all websocket payloads are canonical Responses events.
         let is_canonical = is_canonical_ws_request(&headers);
         let ws = if is_canonical { ws.protocols(["slab.responses"]) } else { ws };
         let session_id = query
@@ -300,12 +309,7 @@ async fn agent_responses_post(
 ) -> Result<Response, AgentCompatError> {
     let session_id = bearer_session_id(&headers);
     let model = req.model.clone().unwrap_or_default();
-    let result = service.handle_command(req.to_agent_command(session_id)).await?;
-    let Some(thread_id) = result.subscribe_thread_id else {
-        return Err(AgentCompatError(ServerError::Internal(
-            "agent response create did not return a thread id".to_owned(),
-        )));
-    };
+    let thread_id = service.handle_command(req.to_agent_command(session_id)).await?;
 
     if req.stream.unwrap_or(false) {
         // Canonical SSE stream of ResponseStreamEvent (reuses the GET resume
@@ -341,6 +345,64 @@ fn bearer_session_id(headers: &HeaderMap) -> String {
         .unwrap_or(trimmed);
     let token = token.trim();
     if token.is_empty() { default } else { token.to_owned() }
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/agents/control/approval",
+    tag = "agents",
+    request_body = AgentApprovalResolveRequest,
+    responses(
+        (status = 200, description = "Approval decision delivered status", body = AgentControlResponse),
+        (status = 400, description = "Bad request"),
+        (status = 500, description = "Backend error"),
+    )
+)]
+async fn agent_control_approval(
+    State(service): State<AgentService>,
+    ValidatedJson(req): ValidatedJson<AgentApprovalResolveRequest>,
+) -> Result<Json<AgentControlResponse>, ServerError> {
+    Ok(Json(service.handle_control(req.into()).await?.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/agents/control/interrupt",
+    tag = "agents",
+    request_body = AgentThreadControlRequest,
+    responses(
+        (status = 200, description = "Thread interrupt accepted", body = AgentControlResponse),
+        (status = 400, description = "Bad request"),
+        (status = 404, description = "Thread not found"),
+        (status = 500, description = "Backend error"),
+    )
+)]
+async fn agent_control_interrupt(
+    State(service): State<AgentService>,
+    ValidatedJson(req): ValidatedJson<AgentThreadControlRequest>,
+) -> Result<Json<AgentControlResponse>, ServerError> {
+    let command = AgentControlCommand::Interrupt { thread_id: req.thread_id };
+    Ok(Json(service.handle_control(command).await?.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/agents/control/shutdown",
+    tag = "agents",
+    request_body = AgentThreadControlRequest,
+    responses(
+        (status = 200, description = "Thread shutdown accepted", body = AgentControlResponse),
+        (status = 400, description = "Bad request"),
+        (status = 404, description = "Thread not found"),
+        (status = 500, description = "Backend error"),
+    )
+)]
+async fn agent_control_shutdown(
+    State(service): State<AgentService>,
+    ValidatedJson(req): ValidatedJson<AgentThreadControlRequest>,
+) -> Result<Json<AgentControlResponse>, ServerError> {
+    let command = AgentControlCommand::Shutdown { thread_id: req.thread_id };
+    Ok(Json(service.handle_control(command).await?.into()))
 }
 
 #[utoipa::path(
@@ -428,7 +490,7 @@ async fn run_agent_responses_socket(
                 };
                 match handle_agent_command(&service, command, &session_id).await {
                     Ok(result) => {
-                        let TransportCommandResult { message, subscribe_thread_id } = result;
+                        let TransportCommandResult { subscribe_thread_id } = result;
                         if let Some(thread_id) = subscribe_thread_id.as_deref() {
                             let already_subscribed =
                                 active_thread_id.as_deref() == Some(thread_id)
@@ -452,9 +514,6 @@ async fn run_agent_responses_socket(
                                 )
                                 .await?;
                             }
-                        }
-                        if let Some(message) = message {
-                            send_server_message(&mut sender, &message).await?;
                         }
                     }
                     Err(error) => {
@@ -502,25 +561,19 @@ async fn recv_active_event(
     }
 }
 
-fn parse_client_message(payload: &str, is_canonical: bool) -> Result<InboundCommand, String> {
-    if is_canonical {
-        let event = serde_json::from_str::<OpenAIResponseCreateEvent>(payload)
-            .map_err(|error| format!("invalid canonical response.create event: {error}"))?;
-        if event.kind != "response.create" {
-            return Err(format!(
-                "canonical WS mode only accepts `response.create`; got type={:?}",
-                event.kind
-            ));
-        }
-        return Ok(InboundCommand::ResponseCreate(event.body));
+fn parse_client_message(payload: &str, _is_canonical: bool) -> Result<InboundCommand, String> {
+    let event = serde_json::from_str::<OpenAIResponseCreateEvent>(payload)
+        .map_err(|error| format!("invalid canonical response.create event: {error}"))?;
+    if event.kind != "response.create" {
+        return Err(format!(
+            "responses websocket only accepts `response.create`; got type={:?}",
+            event.kind
+        ));
     }
-    let command = serde_json::from_str::<AgentResponsesClientMessage>(payload)
-        .map_err(|error| format!("invalid agent responses message: {error}"))?;
-    validate(command).map_err(|error| error.to_string()).map(InboundCommand::Slab)
+    Ok(InboundCommand::ResponseCreate(event.body))
 }
 
-/// True when the WS client offered the `slab.responses` subprotocol — selects
-/// canonical (openai-protocol) mode for the socket.
+/// True when the WS client offered the historical `slab.responses` subprotocol.
 fn is_canonical_ws_request(headers: &HeaderMap) -> bool {
     headers
         .get("sec-websocket-protocol")
@@ -536,26 +589,11 @@ async fn handle_agent_command(
 ) -> Result<TransportCommandResult, ServerError> {
     match command {
         InboundCommand::ResponseCreate(req) => {
-            let result =
+            let thread_id =
                 service.handle_command(req.to_agent_command(session_id.to_owned())).await?;
-            // Canonical mode: no `agent.ack` — the `response.*` events emitted by
-            // `envelope_to_events` carry the thread id as `response.id`.
-            Ok(transport_result_from_agent_result(result, false))
-        }
-        InboundCommand::Slab(command) => {
-            let result = service.handle_command(command.into()).await?;
-            Ok(transport_result_from_agent_result(result, true))
+            Ok(TransportCommandResult { subscribe_thread_id: Some(thread_id) })
         }
     }
-}
-
-fn transport_result_from_agent_result(
-    result: AgentCommandResult,
-    include_control_message: bool,
-) -> TransportCommandResult {
-    let subscribe_thread_id = result.subscribe_thread_id.clone();
-    let message = include_control_message.then(|| result.into());
-    TransportCommandResult { message, subscribe_thread_id }
 }
 
 // ---------------------------------------------------------------------------
@@ -658,17 +696,6 @@ where
     Ok(())
 }
 
-async fn send_server_message<S>(
-    sender: &mut S,
-    message: &AgentResponsesServerMessage,
-) -> Result<(), String>
-where
-    S: futures::Sink<Message> + Unpin,
-    S::Error: std::fmt::Display,
-{
-    send_serialized(sender, serialize_json(message)).await
-}
-
 async fn send_serialized<S>(sender: &mut S, payload: String) -> Result<(), String>
 where
     S: futures::Sink<Message> + Unpin,
@@ -713,40 +740,13 @@ mod tests {
     use utoipa::OpenApi;
 
     #[test]
-    fn parses_typed_client_message() {
-        let command = parse_client_message(
-            r#"{"type":"agent.input","request_id":"r1","thread_id":"thread-1","content":"hello"}"#,
-            false,
-        )
-        .expect("valid command");
-        let InboundCommand::Slab(command) = command else {
-            panic!("slab-dialect parse should yield the Slab variant");
-        };
-
-        assert_eq!(command.request_id(), Some("r1"));
-    }
-
-    #[test]
-    fn rejects_blank_client_message_fields() {
-        let error = parse_client_message(
-            r#"{"type":"agent.input","request_id":"r1","thread_id":" ","content":"hello"}"#,
-            false,
-        )
-        .expect_err("invalid command");
-
-        assert!(error.contains("thread_id"));
-    }
-
-    #[test]
     fn parses_canonical_response_create_event() {
         let command = parse_client_message(
             r#"{"type":"response.create","model":"slab-llama","input":"hi","stream":true}"#,
             true,
         )
         .expect("valid canonical event");
-        let InboundCommand::ResponseCreate(req) = command else {
-            panic!("canonical parse should yield the ResponseCreate variant");
-        };
+        let InboundCommand::ResponseCreate(req) = command;
 
         assert_eq!(req.model.as_deref(), Some("slab-llama"));
         assert_eq!(req.input.as_str(), Some("hi"));
@@ -761,9 +761,7 @@ mod tests {
             true,
         )
         .expect("valid canonical event");
-        let InboundCommand::ResponseCreate(req) = command else {
-            panic!("canonical parse should yield the ResponseCreate variant");
-        };
+        let InboundCommand::ResponseCreate(req) = command;
 
         assert_eq!(req.previous_response_id.as_deref(), Some("thread-9"));
     }

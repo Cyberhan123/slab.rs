@@ -213,27 +213,27 @@ async function fallbackFetch(
 ) {
   const response = await globalThis.fetch(input, {
     ...init,
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, stream: false }),
   });
 
   if (!response.ok) {
     return response;
   }
 
-  const serverMessage = await response.json();
+  const createResponse = await response.json();
   const threadId =
-    typeof serverMessage === 'object' &&
-    serverMessage !== null &&
-    'thread_id' in serverMessage &&
-    typeof serverMessage.thread_id === 'string'
-      ? serverMessage.thread_id
+    typeof createResponse === 'object' &&
+    createResponse !== null &&
+    'id' in createResponse &&
+    typeof createResponse.id === 'string'
+      ? createResponse.id
       : null;
   const streamUrl = threadId ? createSseUrl(input, threadId) : null;
   const encoder = new TextEncoder();
 
   const responseStream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      controller.enqueue(encoder.encode(`data: ${JSON.stringify(serverMessage)}\n\n`));
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify(createResponse)}\n\n`));
 
       if (!streamUrl) {
         controller.close();

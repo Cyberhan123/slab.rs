@@ -178,7 +178,7 @@ export function latestAssistantTextAfter(
   prompt: string
 ): string {
   const promptIndex = messages.findIndex(
-    (message) => message.role === "user" && message.content === prompt
+    (message: AgentThreadMessageResponse) => message.role === "user" && message.content === prompt
   )
   if (promptIndex < 0) {
     return ""
@@ -186,7 +186,7 @@ export function latestAssistantTextAfter(
 
   return messages
     .slice(promptIndex + 1)
-    .findLast((message) => message.role === "assistant" && nonBlank(message.content))?.content ?? ""
+    .findLast((message: AgentThreadMessageResponse) => message.role === "assistant" && nonBlank(message.content))?.content ?? ""
 }
 
 export function nonBlank(value: string | null | undefined): boolean {
@@ -214,7 +214,7 @@ function latestFinalAssistantTextAfterTool(
   }
 
   const lastToolIndex = messages.findLastIndex(
-    (message) =>
+    (message: AgentThreadMessageResponse) =>
       message.role === "tool" &&
       typeof message.tool_call_id === "string" &&
       callIds.includes(message.tool_call_id)
@@ -225,7 +225,7 @@ function latestFinalAssistantTextAfterTool(
 
   return messages
     .slice(lastToolIndex + 1)
-    .findLast((message) => message.role === "assistant" && nonBlank(message.content))?.content ?? ""
+    .findLast((message: AgentThreadMessageResponse) => message.role === "assistant" && nonBlank(message.content))?.content ?? ""
 }
 
 function normalizeVisibleText(text: string): string {

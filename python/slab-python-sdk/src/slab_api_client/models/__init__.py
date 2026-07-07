@@ -1,44 +1,10 @@
 """Contains all the data models used in inputs/outputs"""
 
+from .agent_approval_resolve_request import AgentApprovalResolveRequest
 from .agent_config_input import AgentConfigInput
+from .agent_control_response import AgentControlResponse
 from .agent_diagnostics_response import AgentDiagnosticsResponse
-from .agent_responses_action import AgentResponsesAction
-from .agent_responses_client_message_type_0 import AgentResponsesClientMessageType0
-from .agent_responses_client_message_type_0_type import (
-    AgentResponsesClientMessageType0Type,
-)
-from .agent_responses_client_message_type_1 import AgentResponsesClientMessageType1
-from .agent_responses_client_message_type_1_type import (
-    AgentResponsesClientMessageType1Type,
-)
-from .agent_responses_client_message_type_2 import AgentResponsesClientMessageType2
-from .agent_responses_client_message_type_2_type import (
-    AgentResponsesClientMessageType2Type,
-)
-from .agent_responses_client_message_type_3 import AgentResponsesClientMessageType3
-from .agent_responses_client_message_type_3_type import (
-    AgentResponsesClientMessageType3Type,
-)
-from .agent_responses_client_message_type_4 import AgentResponsesClientMessageType4
-from .agent_responses_client_message_type_4_type import (
-    AgentResponsesClientMessageType4Type,
-)
-from .agent_responses_client_message_type_5 import AgentResponsesClientMessageType5
-from .agent_responses_client_message_type_5_type import (
-    AgentResponsesClientMessageType5Type,
-)
-from .agent_responses_server_message_type_0 import AgentResponsesServerMessageType0
-from .agent_responses_server_message_type_0_type import (
-    AgentResponsesServerMessageType0Type,
-)
-from .agent_responses_server_message_type_1 import AgentResponsesServerMessageType1
-from .agent_responses_server_message_type_1_type import (
-    AgentResponsesServerMessageType1Type,
-)
-from .agent_responses_server_message_type_2 import AgentResponsesServerMessageType2
-from .agent_responses_server_message_type_2_type import (
-    AgentResponsesServerMessageType2Type,
-)
+from .agent_history_response import AgentHistoryResponse
 from .agent_status_value import AgentStatusValue
 from .agent_structured_output_input_type_0 import AgentStructuredOutputInputType0
 from .agent_structured_output_input_type_0_type import (
@@ -48,6 +14,7 @@ from .agent_structured_output_input_type_1 import AgentStructuredOutputInputType
 from .agent_structured_output_input_type_1_type import (
     AgentStructuredOutputInputType1Type,
 )
+from .agent_thread_control_request import AgentThreadControlRequest
 from .agent_thread_message_response import AgentThreadMessageResponse
 from .agent_thread_response import AgentThreadResponse
 from .agent_thread_stat_response import AgentThreadStatResponse
@@ -149,8 +116,11 @@ from .model_runtime_state_response import ModelRuntimeStateResponse
 from .model_spec_request import ModelSpecRequest
 from .model_spec_response import ModelSpecResponse
 from .model_status_response import ModelStatusResponse
+from .open_ai_create_request import OpenAICreateRequest
 from .open_ai_error import OpenAiError
 from .open_ai_error_response import OpenAiErrorResponse
+from .open_ai_reasoning_input import OpenAIReasoningInput
+from .open_ai_text_input import OpenAITextInput
 from .operation_accepted_response import OperationAcceptedResponse
 from .plugin_agent_capability_contribution import PluginAgentCapabilityContribution
 from .plugin_agent_hook_contribution import PluginAgentHookContribution
@@ -285,32 +255,17 @@ from .workspace_write_file_command import WorkspaceWriteFileCommand
 from .workspace_write_file_view import WorkspaceWriteFileView
 
 __all__ = (
+    "AgentApprovalResolveRequest",
     "AgentConfigInput",
+    "AgentControlResponse",
     "AgentDiagnosticsResponse",
-    "AgentResponsesAction",
-    "AgentResponsesClientMessageType0",
-    "AgentResponsesClientMessageType0Type",
-    "AgentResponsesClientMessageType1",
-    "AgentResponsesClientMessageType1Type",
-    "AgentResponsesClientMessageType2",
-    "AgentResponsesClientMessageType2Type",
-    "AgentResponsesClientMessageType3",
-    "AgentResponsesClientMessageType3Type",
-    "AgentResponsesClientMessageType4",
-    "AgentResponsesClientMessageType4Type",
-    "AgentResponsesClientMessageType5",
-    "AgentResponsesClientMessageType5Type",
-    "AgentResponsesServerMessageType0",
-    "AgentResponsesServerMessageType0Type",
-    "AgentResponsesServerMessageType1",
-    "AgentResponsesServerMessageType1Type",
-    "AgentResponsesServerMessageType2",
-    "AgentResponsesServerMessageType2Type",
+    "AgentHistoryResponse",
     "AgentStatusValue",
     "AgentStructuredOutputInputType0",
     "AgentStructuredOutputInputType0Type",
     "AgentStructuredOutputInputType1",
     "AgentStructuredOutputInputType1Type",
+    "AgentThreadControlRequest",
     "AgentThreadMessageResponse",
     "AgentThreadResponse",
     "AgentThreadStatResponse",
@@ -412,8 +367,11 @@ __all__ = (
     "ModelSpecRequest",
     "ModelSpecResponse",
     "ModelStatusResponse",
+    "OpenAICreateRequest",
     "OpenAiError",
     "OpenAiErrorResponse",
+    "OpenAIReasoningInput",
+    "OpenAITextInput",
     "OperationAcceptedResponse",
     "PluginAgentCapabilityContribution",
     "PluginAgentHookContribution",

@@ -16,16 +16,18 @@ use slab_utils::session_snapshot::{
 };
 
 use crate::domain::models::{
-    AgentCommand, AgentCommandResult, AgentCommandStatus, AgentSessionSnapshot,
+    AgentCommand, AgentControlCommand, AgentControlResult, AgentControlStatus, AgentSessionSnapshot,
 };
 use crate::error::AppCoreError;
 use crate::infra::agent::event_hub::{AgentEventHub, AgentEventSubscription};
+use crate::infra::db::repository::agent_response::AgentResponseStore;
 
 /// Thin wrapper around [`AgentRuntime`] that exposes an application-layer API.
 #[derive(Clone)]
 pub struct AgentService {
     runtime: AgentRuntime,
     store: Arc<dyn AgentStorePort>,
+    response_store: Arc<dyn AgentResponseStore>,
     events: Arc<AgentEventHub>,
 }
 
@@ -42,9 +44,10 @@ impl AgentService {
     pub fn new(
         runtime: AgentRuntime,
         store: Arc<dyn AgentStorePort>,
+        response_store: Arc<dyn AgentResponseStore>,
         events: Arc<AgentEventHub>,
     ) -> Self {
-        Self { runtime, store, events }
+        Self { runtime, store, response_store, events }
     }
 
     /// Spawn a root agent thread.  Returns the new thread ID.
@@ -61,78 +64,55 @@ impl AgentService {
     ///
     /// HTTP, WebSocket, and other callers should enter the agent use case here
     /// after converting their wire DTOs into [`AgentCommand`].
-    pub async fn handle_command(
-        &self,
-        command: AgentCommand,
-    ) -> Result<AgentCommandResult, AppCoreError> {
+    pub async fn handle_command(&self, command: AgentCommand) -> Result<String, AppCoreError> {
         match command {
-            AgentCommand::RestoreSession { session_id, request_id } => {
-                let command =
-                    AgentCommand::RestoreSession { request_id, session_id: session_id.clone() };
-                let restored = self.restore_session(&session_id).await?;
-                Ok(AgentCommandResult::restored(
-                    &command,
-                    AgentSessionSnapshot {
-                        session_id,
-                        thread: restored.thread,
-                        messages: restored.messages,
-                        responses: restored.responses,
-                    },
-                ))
+            AgentCommand::CreateResponse { session_id, config, messages } => {
+                self.spawn(session_id, config, messages).await
             }
-            AgentCommand::CreateResponse { request_id, session_id, config, messages } => {
-                let command = AgentCommand::CreateResponse {
-                    request_id,
-                    session_id: session_id.clone(),
-                    config: config.clone(),
-                    messages: messages.clone(),
-                };
-                let thread_id = self.spawn(session_id, config, messages).await?;
-                Ok(AgentCommandResult::ack(
-                    &command,
-                    Some(thread_id),
-                    Some(AgentCommandStatus::Pending),
-                    None,
-                ))
-            }
-            AgentCommand::AppendInput { request_id, thread_id, content } => {
-                let command = AgentCommand::AppendInput {
-                    request_id,
-                    thread_id: thread_id.clone(),
-                    content: content.clone(),
-                };
+            AgentCommand::AppendInput { thread_id, content } => {
                 self.send_input(&thread_id, content).await?;
-                Ok(AgentCommandResult::ack(&command, Some(thread_id), None, None))
+                Ok(thread_id)
             }
-            AgentCommand::ResolveApproval { request_id, thread_id, call_id, approved } => {
-                let command = AgentCommand::ResolveApproval {
-                    request_id,
-                    thread_id: thread_id.clone(),
-                    call_id: call_id.clone(),
-                    approved,
-                };
+        }
+    }
+
+    pub async fn restore_session_snapshot(
+        &self,
+        session_id: &str,
+    ) -> Result<AgentSessionSnapshot, AppCoreError> {
+        let restored = self.restore_session(session_id).await?;
+        Ok(AgentSessionSnapshot {
+            session_id: session_id.to_owned(),
+            thread: restored.thread,
+            messages: restored.messages,
+            responses: restored.responses,
+        })
+    }
+
+    pub async fn handle_control(
+        &self,
+        command: AgentControlCommand,
+    ) -> Result<AgentControlResult, AppCoreError> {
+        match command {
+            AgentControlCommand::ResolveApproval { thread_id, call_id, approved } => {
                 let delivered = self.approve_call(&thread_id, &call_id, approved);
-                Ok(AgentCommandResult::ack(&command, Some(thread_id), None, Some(delivered)))
+                Ok(AgentControlResult { thread_id, delivered: Some(delivered), status: None })
             }
-            AgentCommand::Interrupt { request_id, thread_id } => {
-                let command = AgentCommand::Interrupt { request_id, thread_id: thread_id.clone() };
+            AgentControlCommand::Interrupt { thread_id } => {
                 self.interrupt(&thread_id).await?;
-                Ok(AgentCommandResult::ack(
-                    &command,
-                    Some(thread_id),
-                    Some(AgentCommandStatus::Interrupting),
-                    None,
-                ))
+                Ok(AgentControlResult {
+                    thread_id,
+                    delivered: None,
+                    status: Some(AgentControlStatus::Interrupting),
+                })
             }
-            AgentCommand::Shutdown { request_id, thread_id } => {
-                let command = AgentCommand::Shutdown { request_id, thread_id: thread_id.clone() };
+            AgentControlCommand::Shutdown { thread_id } => {
                 self.shutdown(&thread_id).await?;
-                Ok(AgentCommandResult::ack(
-                    &command,
-                    Some(thread_id),
-                    Some(AgentCommandStatus::Shutdown),
-                    None,
-                ))
+                Ok(AgentControlResult {
+                    thread_id,
+                    delivered: None,
+                    status: Some(AgentControlStatus::Shutdown),
+                })
             }
         }
     }
@@ -202,7 +182,7 @@ impl AgentService {
             Some(thread) => {
                 let messages = self.list_thread_messages(&thread.id).await?;
                 let responses = self
-                    .store
+                    .response_store
                     .list_thread_responses(&thread.id)
                     .await
                     .map_err(|e| AppCoreError::Internal(e.to_string()))?

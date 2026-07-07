@@ -5,20 +5,20 @@ import httpx
 
 from ... import errors
 from ...client import AuthenticatedClient, Client
-from ...models.open_ai_create_request import OpenAICreateRequest
-from ...models.open_ai_error_response import OpenAiErrorResponse
+from ...models.agent_control_response import AgentControlResponse
+from ...models.agent_thread_control_request import AgentThreadControlRequest
 from ...types import Response
 
 
 def _get_kwargs(
     *,
-    body: OpenAICreateRequest,
+    body: AgentThreadControlRequest,
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/v1/agents/responses",
+        "url": "/v1/agents/control/shutdown",
     }
 
     _kwargs["json"] = body.to_dict()
@@ -31,29 +31,22 @@ def _get_kwargs(
 
 def _parse_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Any | OpenAiErrorResponse | None:
+) -> AgentControlResponse | Any | None:
     if response.status_code == 200:
-        response_200 = cast(Any, None)
+        response_200 = AgentControlResponse.from_dict(response.json())
+
         return response_200
 
     if response.status_code == 400:
-        response_400 = OpenAiErrorResponse.from_dict(response.json())
-
+        response_400 = cast(Any, None)
         return response_400
 
     if response.status_code == 404:
-        response_404 = OpenAiErrorResponse.from_dict(response.json())
-
+        response_404 = cast(Any, None)
         return response_404
 
-    if response.status_code == 429:
-        response_429 = OpenAiErrorResponse.from_dict(response.json())
-
-        return response_429
-
     if response.status_code == 500:
-        response_500 = OpenAiErrorResponse.from_dict(response.json())
-
+        response_500 = cast(Any, None)
         return response_500
 
     if client.raise_on_unexpected_status:
@@ -64,7 +57,7 @@ def _parse_response(
 
 def _build_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[Any | OpenAiErrorResponse]:
+) -> Response[AgentControlResponse | Any]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -76,23 +69,18 @@ def _build_response(
 def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
-    body: OpenAICreateRequest,
-) -> Response[Any | OpenAiErrorResponse]:
+    body: AgentThreadControlRequest,
+) -> Response[AgentControlResponse | Any]:
     """
     Args:
-        body (OpenAICreateRequest): `POST /v1/agents/responses` body as sent by the official
-            `openai` SDK
-            (`ResponseCreateParamsBase`). Slab translates `input` + a subset of config;
-            unknown fields are ignored (no `deny_unknown_fields`) so future SDK fields
-            don't break the server. `input` is held as a `serde_json::Value` (a string
-            or an array of input items) so the type is `ToSchema`-derivable.
+        body (AgentThreadControlRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | OpenAiErrorResponse]
+        Response[AgentControlResponse | Any]
     """
 
     kwargs = _get_kwargs(
@@ -109,23 +97,18 @@ def sync_detailed(
 def sync(
     *,
     client: AuthenticatedClient | Client,
-    body: OpenAICreateRequest,
-) -> Any | OpenAiErrorResponse | None:
+    body: AgentThreadControlRequest,
+) -> AgentControlResponse | Any | None:
     """
     Args:
-        body (OpenAICreateRequest): `POST /v1/agents/responses` body as sent by the official
-            `openai` SDK
-            (`ResponseCreateParamsBase`). Slab translates `input` + a subset of config;
-            unknown fields are ignored (no `deny_unknown_fields`) so future SDK fields
-            don't break the server. `input` is held as a `serde_json::Value` (a string
-            or an array of input items) so the type is `ToSchema`-derivable.
+        body (AgentThreadControlRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | OpenAiErrorResponse
+        AgentControlResponse | Any
     """
 
     return sync_detailed(
@@ -137,23 +120,18 @@ def sync(
 async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
-    body: OpenAICreateRequest,
-) -> Response[Any | OpenAiErrorResponse]:
+    body: AgentThreadControlRequest,
+) -> Response[AgentControlResponse | Any]:
     """
     Args:
-        body (OpenAICreateRequest): `POST /v1/agents/responses` body as sent by the official
-            `openai` SDK
-            (`ResponseCreateParamsBase`). Slab translates `input` + a subset of config;
-            unknown fields are ignored (no `deny_unknown_fields`) so future SDK fields
-            don't break the server. `input` is held as a `serde_json::Value` (a string
-            or an array of input items) so the type is `ToSchema`-derivable.
+        body (AgentThreadControlRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | OpenAiErrorResponse]
+        Response[AgentControlResponse | Any]
     """
 
     kwargs = _get_kwargs(
@@ -168,23 +146,18 @@ async def asyncio_detailed(
 async def asyncio(
     *,
     client: AuthenticatedClient | Client,
-    body: OpenAICreateRequest,
-) -> Any | OpenAiErrorResponse | None:
+    body: AgentThreadControlRequest,
+) -> AgentControlResponse | Any | None:
     """
     Args:
-        body (OpenAICreateRequest): `POST /v1/agents/responses` body as sent by the official
-            `openai` SDK
-            (`ResponseCreateParamsBase`). Slab translates `input` + a subset of config;
-            unknown fields are ignored (no `deny_unknown_fields`) so future SDK fields
-            don't break the server. `input` is held as a `serde_json::Value` (a string
-            or an array of input items) so the type is `ToSchema`-derivable.
+        body (AgentThreadControlRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | OpenAiErrorResponse
+        AgentControlResponse | Any
     """
 
     return (

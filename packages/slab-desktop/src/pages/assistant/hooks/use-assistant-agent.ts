@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { translateServerField, useTranslation } from '@slab/i18n'
 
 import api, { createSlabApiFetchClient, getErrorMessage } from '@slab/api'
 import { GUARDRAIL_PMIDS, useGuardrailFlag } from '@/lib/guardrail-flags'
@@ -13,16 +12,17 @@ import {
   stripTrailingAssistantTurnArtifacts,
   toAssistantRequestMessages,
   type AssistantArtifactRef,
-  type AgentResponsesClientMessage,
-  type AgentResponsesServerMessage,
+  type AgentApprovalResolveRequest,
+  type AgentHistoryResponse,
+  type AgentThreadControlRequest,
   type AgentStatus,
   type AssistantMessageRecord,
   type AssistantRuntimePresets,
   type AssistantThought,
+  type OpenAICreateRequest,
 } from '../assistant-context'
 import { useAssistantLocale } from '../assistant-locale'
 import {
-  parseAssistantAgentServerMessage,
   parseAssistantAgentStreamEvent,
   type AssistantAgentStreamEvent,
 } from '../lib/assistant-agent-events'
@@ -38,18 +38,14 @@ import {
   isBusyStatus,
   nextId,
   parseAssistantSlashCommand,
-  serverMessageThreadId,
-  toAgentConfig,
   updateLastAssistantMessage,
   withThoughts,
   type AssistantReasoningEffort,
   type AssistantToolChoice,
 } from '../lib/assistant-agent-state'
 import { withAssistantMessageReasoningContent } from '../lib/assistant-message-utils'
-import {
-  formatKnownToolResult,
-  projectAgentThreadMessages,
-} from '../lib/assistant-message-projection'
+import { formatKnownToolResult } from '../lib/assistant-message-projection'
+import { projectRestoreSession } from '../lib/openai-responses'
 import { dispatchA2uToolCall } from '../lib/a2u-dispatcher'
 import { parsePlanProgress, type PlanProgress } from '../lib/plan-progress'
 
@@ -60,6 +56,28 @@ type PendingApproval = {
 }
 
 const MAX_SSE_RECONNECT_ATTEMPTS = 6
+
+function createResponseRequest({
+  input,
+  model,
+  previousResponseId,
+  sessionId,
+}: {
+  input: string
+  model: string
+  previousResponseId?: string | null
+  sessionId: string
+}): OpenAICreateRequest {
+  return {
+    input,
+    metadata: {
+      session_id: sessionId,
+    },
+    model,
+    ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
+    stream: true,
+  } as OpenAICreateRequest
+}
 
 function shouldIgnoreAfterAbort(event: AssistantAgentStreamEvent) {
   switch (event.type) {
@@ -98,15 +116,8 @@ type UseAssistantAgentOptions = {
 export function useAssistantAgent({
   beforeRequest,
   model,
-  reasoningEffort,
-  reasoningSupported,
-  runtimePresets,
   sessionId,
-  systemPrompt,
-  toolConcurrency,
-  toolChoice,
 }: UseAssistantAgentOptions) {
-  const { t } = useTranslation()
   const locale = useAssistantLocale()
   const resolvedSessionId = sessionId || DEFAULT_CONVERSATION_KEY
   const canLoadSession = !isEphemeralConversationKey(resolvedSessionId)
@@ -142,7 +153,7 @@ export function useAssistantAgent({
     () => {}
   )
   const openSseRef = useRef<(threadId: string, attempt?: number) => void>(() => {})
-  const postAgentCommandRef = useRef<(command: AgentResponsesClientMessage) => Promise<void>>(
+  const createResponseRef = useRef<(request: OpenAICreateRequest) => Promise<void>>(
     async () => {}
   )
   const interruptThreadRef = useRef<(threadId: string) => Promise<void>>(async () => {})
@@ -153,9 +164,34 @@ export function useAssistantAgent({
     },
   })
   const assistantSseResumeEnabled = useGuardrailFlag(GUARDRAIL_PMIDS.assistantSseResume)
+  const approvalMutation = api.useMutation('post', '/v1/agents/control/approval', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  })
+  const interruptMutation = api.useMutation('post', '/v1/agents/control/interrupt', {
+    meta: {
+      skipGlobalErrorToast: true,
+    },
+  })
+  const { data: restoredSession, error: restoreError, isLoading: isRestoringSession } = api.useQuery(
+    'get',
+    '/v1/sessions/{id}/agent-history',
+    {
+      params: {
+        path: { id: resolvedSessionId },
+      },
+    },
+    {
+      enabled: canLoadSession,
+      meta: {
+        skipGlobalErrorToast: true,
+      },
+    }
+  )
 
   const isRequesting = isBusyStatus(status) || responsesMutation.isPending
-  const isHistoryLoading = !restoreComplete
+  const isHistoryLoading = !restoreComplete || isRestoringSession
 
   useEffect(() => {
     threadIdRef.current = threadId
@@ -401,6 +437,41 @@ export function useAssistantAgent({
     })
   }, [])
 
+  useEffect(() => {
+    if (!canLoadSession) {
+      return
+    }
+
+    if (restoreError) {
+      const message = getErrorMessage(restoreError)
+      setRestoreComplete(true)
+      setStatus('errored')
+      appendAssistantError(message || locale.requestFailed)
+      toast.error(locale.requestFailed, {
+        description: message,
+      })
+      return
+    }
+
+    if (!restoredSession || restoredSession.session_id !== resolvedSessionId) {
+      return
+    }
+
+    const snapshot = restoredSession as AgentHistoryResponse
+    setRestoreComplete(true)
+    setActiveConversation(snapshot.session_id)
+    setThreadId(snapshot.thread?.id ?? null)
+    setMessages(projectRestoreSession(snapshot.messages, snapshot.responses))
+    setStatus(snapshot.thread?.status ?? null)
+  }, [
+    appendAssistantError,
+    canLoadSession,
+    locale.requestFailed,
+    resolvedSessionId,
+    restoreError,
+    restoredSession,
+  ])
+
   const markAssistantTurnFailed = useCallback((message: string) => {
     setMessages((current) => {
       const updated = updateLastAssistantMessage(current, (record) => ({
@@ -598,49 +669,6 @@ export function useAssistantAgent({
     ]
   )
 
-  const handleServerMessage = useCallback(
-    (message: AgentResponsesServerMessage) => {
-      switch (message.type) {
-        case 'agent.ack':
-          if (message.thread_id) {
-            setThreadId(message.thread_id)
-            if (pendingAbortRef.current) {
-              pendingAbortRef.current = false
-              closeTransports()
-              void interruptThreadRef.current(message.thread_id)
-            }
-          }
-          if (message.status) {
-            setStatus(message.status)
-          }
-          if (message.action === 'approval_resolve' && message.delivered === false) {
-            toast.error(locale.approvalNotDelivered)
-          }
-          break
-        case 'agent.session.restored':
-          setRestoreComplete(true)
-          setActiveConversation(message.session_id)
-          setThreadId(message.thread?.id ?? null)
-          setMessages(
-            projectAgentThreadMessages(message.messages, message.thread?.status ?? undefined)
-          )
-          setStatus(message.thread?.status ?? null)
-          break
-        case 'agent.error': {
-          const errorMessage = translateServerField(message.i18n, 'message', message.message, t)
-          setRestoreComplete(true)
-          setStatus('errored')
-          appendAssistantError(errorMessage)
-          toast.error(locale.requestFailed, {
-            description: errorMessage,
-          })
-          break
-        }
-      }
-    },
-    [appendAssistantError, closeTransports, locale.approvalNotDelivered, locale.requestFailed, t]
-  )
-
   const handleTransportPayload = useCallback(
     (data: string, eventId?: string | null) => {
       if (eventId) {
@@ -651,12 +679,6 @@ export function useAssistantAgent({
             sequenceNumber
           )
         }
-      }
-
-      const serverMessage = parseAssistantAgentServerMessage(data)
-      if (serverMessage) {
-        handleServerMessage(serverMessage)
-        return
       }
 
       const key = agentEventKey(data)
@@ -675,7 +697,7 @@ export function useAssistantAgent({
       }
       handleAgentEvent(data)
     },
-    [handleAgentEvent, handleServerMessage]
+    [handleAgentEvent]
   )
 
   const openSse = useCallback(
@@ -723,18 +745,13 @@ export function useAssistantAgent({
     [assistantSseResumeEnabled, closeSse, handleTransportPayload, locale.eventStreamInterrupted]
   )
 
-  const postAgentCommand = useCallback(
-    async (command: AgentResponsesClientMessage) => {
-      const response = await responsesMutation.mutateAsync({
-        body: command,
+  const createResponse = useCallback(
+    async (request: OpenAICreateRequest) => {
+      await responsesMutation.mutateAsync({
+        body: request,
       })
-      handleServerMessage(response)
-      const nextThreadId = serverMessageThreadId(response)
-      if (nextThreadId) {
-        openSse(nextThreadId)
-      }
     },
-    [handleServerMessage, openSse, responsesMutation]
+    [responsesMutation]
   )
 
   useEffect(() => {
@@ -746,17 +763,17 @@ export function useAssistantAgent({
   }, [openSse])
 
   useEffect(() => {
-    postAgentCommandRef.current = postAgentCommand
-  }, [postAgentCommand])
+    createResponseRef.current = createResponse
+  }, [createResponse])
 
-  const sendAgentCommand = useCallback(async (command: AgentResponsesClientMessage) => {
+  const sendResponseCreate = useCallback(async (request: OpenAICreateRequest) => {
     const socket = socketRef.current
     if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify(command))
+      socket.send(JSON.stringify({ ...request, type: 'response.create' }))
       return
     }
 
-    await postAgentCommandRef.current(command)
+    await createResponseRef.current(request)
   }, [])
 
   useEffect(() => {
@@ -786,41 +803,17 @@ export function useAssistantAgent({
     socketRef.current = socket
     transportRef.current = 'websocket'
     let opened = false
-    let fallbackStarted = false
     let disposed = false
-
-    const fallbackRestore = () => {
-      if (fallbackStarted || disposed) {
-        return
-      }
-      fallbackStarted = true
-      transportRef.current = 'none'
-      void postAgentCommandRef.current({
-        request_id: nextId('request'),
-        session_id: resolvedSessionId,
-        type: 'agent.session.restore',
-      })
-    }
 
     socket.addEventListener('open', () => {
       opened = true
       setEventsConnected(true)
-      socket.send(
-        JSON.stringify({
-          request_id: nextId('request'),
-          session_id: resolvedSessionId,
-          type: 'agent.session.restore',
-        } satisfies AgentResponsesClientMessage)
-      )
     })
     socket.addEventListener('message', (event) => {
       handleTransportPayloadRef.current(String(event.data))
     })
     socket.addEventListener('error', () => {
       setEventsConnected(false)
-      if (!opened) {
-        fallbackRestore()
-      }
     })
     socket.addEventListener('close', () => {
       if (socketRef.current === socket) {
@@ -837,10 +830,7 @@ export function useAssistantAgent({
       if (disposed) {
         return
       }
-      if (!opened) {
-        fallbackRestore()
-        return
-      }
+      if (!opened) return
 
       const activeThreadId = threadIdRef.current
       if (activeThreadId) {
@@ -860,12 +850,10 @@ export function useAssistantAgent({
       transportRef.current = 'none'
       setEventsConnected(false)
       if (activeThreadId) {
-        void keepaliveApiClient.POST('/v1/agents/responses', {
+        void keepaliveApiClient.POST('/v1/agents/control/shutdown', {
           body: {
-            request_id: nextId('request'),
             thread_id: activeThreadId,
-            type: 'agent.shutdown',
-          },
+          } satisfies AgentThreadControlRequest,
         }).catch(() => {})
       }
     }
@@ -926,31 +914,24 @@ export function useAssistantAgent({
             ...messages.map((message) => message.message),
             userMessage.message,
           ])
-          await sendAgentCommand({
-            config: toAgentConfig({
+          await sendResponseCreate(
+            createResponseRequest({
+              input: requestMessages.map((message) => message.content).join('\n\n'),
               model,
-              reasoningEffort,
-              reasoningSupported,
-              runtimePresets,
-              slashCommand,
-              systemPrompt,
-              toolChoice,
-              toolConcurrency,
-            }),
-            messages: requestMessages,
-            request_id: nextId('request'),
-            session_id: resolvedSessionId,
-            type: 'agent.response.create',
-          })
+              sessionId: resolvedSessionId,
+            })
+          )
           return
         }
 
-        await sendAgentCommand({
-          content: submittedPrompt,
-          request_id: nextId('request'),
-          thread_id: threadId,
-          type: 'agent.input',
-        })
+        await sendResponseCreate(
+          createResponseRequest({
+            input: submittedPrompt,
+            model,
+            previousResponseId: threadId,
+            sessionId: resolvedSessionId,
+          })
+        )
         setStatus('running')
       } catch (error) {
         const message = getErrorMessage(error)
@@ -969,15 +950,9 @@ export function useAssistantAgent({
       locale.requestFailed,
       messages,
       model,
-      reasoningEffort,
-      reasoningSupported,
       resolvedSessionId,
-      runtimePresets,
-      sendAgentCommand,
-      systemPrompt,
+      sendResponseCreate,
       threadId,
-      toolChoice,
-      toolConcurrency,
     ]
   )
 
@@ -1028,22 +1003,13 @@ export function useAssistantAgent({
       ])
 
       try {
-        await sendAgentCommand({
-          config: toAgentConfig({
+        await sendResponseCreate(
+          createResponseRequest({
+            input: requestMessages.map((message) => message.content).join('\n\n'),
             model,
-            reasoningEffort,
-            reasoningSupported,
-            runtimePresets,
-            slashCommand,
-            systemPrompt,
-            toolChoice,
-            toolConcurrency,
-          }),
-          messages: requestMessages,
-          request_id: nextId('request'),
-          session_id: resolvedSessionId,
-          type: 'agent.response.create',
-        })
+            sessionId: resolvedSessionId,
+          })
+        )
       } catch (error) {
         const message = getErrorMessage(error)
         setStatus('errored')
@@ -1061,14 +1027,8 @@ export function useAssistantAgent({
       isRequesting,
       locale.requestFailed,
       model,
-      reasoningEffort,
-      reasoningSupported,
       resolvedSessionId,
-      runtimePresets,
-      sendAgentCommand,
-      systemPrompt,
-      toolChoice,
-      toolConcurrency,
+      sendResponseCreate,
     ]
   )
 
@@ -1140,13 +1100,16 @@ export function useAssistantAgent({
       updateThoughtStatus(decision.callId, approved ? 'loading' : 'abort')
 
       try {
-        await sendAgentCommand({
-          approved,
-          call_id: decision.callId,
-          request_id: nextId('request'),
-          thread_id: threadId,
-          type: 'agent.approval.resolve',
+        const result = await approvalMutation.mutateAsync({
+          body: {
+            approved,
+            call_id: decision.callId,
+            thread_id: threadId,
+          } satisfies AgentApprovalResolveRequest,
         })
+        if (result.delivered === false) {
+          toast.error(locale.approvalNotDelivered)
+        }
       } catch (error) {
         toast.error(locale.approvalFailed, {
           description: getErrorMessage(error),
@@ -1165,8 +1128,9 @@ export function useAssistantAgent({
     [
       clearPendingApproval,
       locale.approvalFailed,
+      approvalMutation,
+      locale.approvalNotDelivered,
       pendingApprovals,
-      sendAgentCommand,
       threadId,
       updateThoughtStatus,
     ]
@@ -1176,10 +1140,10 @@ export function useAssistantAgent({
     async (activeThreadId: string) => {
       markInterrupting()
       try {
-        await postAgentCommandRef.current({
-          request_id: nextId('request'),
-          thread_id: activeThreadId,
-          type: 'agent.interrupt',
+        await interruptMutation.mutateAsync({
+          body: {
+            thread_id: activeThreadId,
+          } satisfies AgentThreadControlRequest,
         })
       } catch (error) {
         toast.error(locale.interruptFailed, {
@@ -1187,7 +1151,7 @@ export function useAssistantAgent({
         })
       }
     },
-    [locale.interruptFailed, markInterrupting]
+    [interruptMutation, locale.interruptFailed, markInterrupting]
   )
 
   useEffect(() => {

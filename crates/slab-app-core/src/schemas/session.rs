@@ -5,8 +5,9 @@ use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
 use crate::domain::models::{
-    CreateSessionCommand, DeleteSessionView, SessionMessageView, SessionView,
+    AgentSessionSnapshot, CreateSessionCommand, DeleteSessionView, SessionMessageView, SessionView,
 };
+use crate::schemas::agent::{AgentThreadMessageResponse, AgentThreadResponse};
 
 #[derive(Debug, Clone, Deserialize, ToSchema, IntoParams, Validate)]
 pub struct SessionIdPath {
@@ -63,6 +64,16 @@ pub struct DeleteSessionResponse {
     pub deleted: bool,
 }
 
+/// Agent history restored through the sessions API.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct AgentHistoryResponse {
+    pub session_id: String,
+    pub thread: Option<AgentThreadResponse>,
+    pub messages: Vec<AgentThreadMessageResponse>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub responses: Vec<serde_json::Value>,
+}
+
 // ── conversions ───────────────────────────────────────────────────────────────
 
 impl From<SessionView> for SessionResponse {
@@ -92,6 +103,17 @@ impl From<SessionMessageView> for MessageResponse {
 impl From<DeleteSessionView> for DeleteSessionResponse {
     fn from(view: DeleteSessionView) -> Self {
         Self { deleted: view.deleted }
+    }
+}
+
+impl From<AgentSessionSnapshot> for AgentHistoryResponse {
+    fn from(snapshot: AgentSessionSnapshot) -> Self {
+        Self {
+            session_id: snapshot.session_id,
+            thread: snapshot.thread.map(Into::into),
+            messages: snapshot.messages.into_iter().map(Into::into).collect(),
+            responses: snapshot.responses,
+        }
     }
 }
 

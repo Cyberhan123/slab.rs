@@ -5,9 +5,12 @@ export type AssistantApiErrorResponse = components['schemas']['OpenAiErrorRespon
 export type AgentStatus = components['schemas']['AgentStatusValue']
 export type AgentThreadResponse = components['schemas']['AgentThreadResponse']
 export type AgentThreadMessageResponse = components['schemas']['AgentThreadMessageResponse']
+export type AgentHistoryResponse = components['schemas']['AgentHistoryResponse']
+export type AgentApprovalResolveRequest = components['schemas']['AgentApprovalResolveRequest']
+export type AgentThreadControlRequest = components['schemas']['AgentThreadControlRequest']
+export type AgentControlResponse = components['schemas']['AgentControlResponse']
+export type OpenAICreateRequest = components['schemas']['OpenAICreateRequest']
 export type AssistantAgentRequestMessage = components['schemas']['MessageInput']
-export type AgentResponsesClientMessage = components['schemas']['AgentResponsesClientMessage']
-export type AgentResponsesServerMessage = components['schemas']['AgentResponsesServerMessage']
 
 export type AssistantRequestErrorType = AssistantApiError['type']
 export type AssistantErrorCode = AssistantApiError['code'] | number

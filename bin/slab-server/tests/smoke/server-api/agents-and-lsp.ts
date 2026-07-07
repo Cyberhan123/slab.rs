@@ -4,6 +4,7 @@ import type { SlabServerTestHarness } from "../../support/slab-server";
 import {
   expectError,
   expectJson,
+  expectOpenAiError,
   expectWebSocketJsonReply,
   expectWorkspaceLspInitializeReply,
   expectWebSocketOpens,
@@ -20,48 +21,76 @@ export function registerAgentsAndLspSmoke(getServer: () => SlabServerTestHarness
     });
 
     it("covers unified agent responses and workspace LSP routes without running agent work", async () => {
-      await expectError(
+      await expectOpenAiError(
         server,
         "/v1/agents/responses",
         400,
         jsonInit(
           {
-            messages: [],
-            session_id: "",
-            type: "agent.response.create"
-          } satisfies Schema["AgentResponsesClientMessage"],
+            input: ""
+          } satisfies Schema["OpenAICreateRequest"],
           { method: "POST" }
         )
       );
 
-      const restored = await expectJson<Schema["AgentResponsesServerMessage"]>(
+      const history = await expectJson<Schema["AgentHistoryResponse"]>(
         server,
-        "/v1/agents/responses",
+        "/v1/sessions/missing-session/agent-history"
+      );
+      expect(history.response.ok).toBe(true);
+      expect(history.body).toMatchObject({
+        messages: [],
+        session_id: "missing-session"
+      });
+      expect(Array.isArray(history.body.responses)).toBe(true);
+
+      const approval = await expectJson<Schema["AgentControlResponse"]>(
+        server,
+        "/v1/agents/control/approval",
         jsonInit(
           {
-            session_id: "missing-session",
-            type: "agent.session.restore"
-          } satisfies Schema["AgentResponsesClientMessage"],
+            approved: false,
+            call_id: "missing-call",
+            thread_id: "missing-agent"
+          } satisfies Schema["AgentApprovalResolveRequest"],
           { method: "POST" }
         )
       );
-      expect(restored.response.ok).toBe(true);
-      expect(restored.body).toMatchObject({
-        messages: [],
-        session_id: "missing-session",
-        type: "agent.session.restored"
+      expect(approval.body).toMatchObject({
+        delivered: false,
+        thread_id: "missing-agent"
       });
 
       await expectError(
         server,
-        "/v1/agents/responses",
+        "/v1/agents/control/interrupt",
         404,
+        jsonInit(
+          { thread_id: "missing-agent" } satisfies Schema["AgentThreadControlRequest"],
+          { method: "POST" }
+        )
+      );
+
+      await expectError(
+        server,
+        "/v1/agents/control/shutdown",
+        404,
+        jsonInit(
+          { thread_id: "missing-agent" } satisfies Schema["AgentThreadControlRequest"],
+          { method: "POST" }
+        )
+      );
+
+      await expectOpenAiError(
+        server,
+        "/v1/agents/responses",
+        400,
         jsonInit(
           {
             content: "resume this agent",
             thread_id: "missing-agent",
             type: "agent.input"
-          } satisfies Schema["AgentResponsesClientMessage"],
+          },
           { method: "POST" }
         )
       );
@@ -224,14 +253,19 @@ export function registerAgentsAndLspSmoke(getServer: () => SlabServerTestHarness
         )
       ]);
 
-      const wsError = await expectWebSocketJsonReply<Schema["AgentResponsesServerMessage"]>(
+      const wsError = await expectWebSocketJsonReply<{
+        error: { code?: string; type?: string };
+        type: string;
+      }>(
         server,
         "/v1/agents/responses",
         "not json"
       );
       expect(wsError).toMatchObject({
-        code: "bad_request",
-        type: "agent.error"
+        error: {
+          code: "bad_request"
+        },
+        type: "error"
       });
 
       await expectWebSocketOpens(server, "/v1/workspace/lsp/smoke-no-provider");

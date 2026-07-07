@@ -6,9 +6,6 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
-from ..models.agent_responses_server_message_type_1_type import (
-    AgentResponsesServerMessageType1Type,
-)
 from ..types import UNSET, Unset
 
 if TYPE_CHECKING:
@@ -16,24 +13,23 @@ if TYPE_CHECKING:
     from ..models.agent_thread_response import AgentThreadResponse
 
 
-T = TypeVar("T", bound="AgentResponsesServerMessageType1")
+T = TypeVar("T", bound="AgentHistoryResponse")
 
 
 @_attrs_define
-class AgentResponsesServerMessageType1:
-    """
+class AgentHistoryResponse:
+    """Agent history restored through the sessions API.
+
     Attributes:
         messages (list[AgentThreadMessageResponse]):
         session_id (str):
-        type_ (AgentResponsesServerMessageType1Type):
-        request_id (None | str | Unset):
+        responses (list[Any] | Unset):
         thread (AgentThreadResponse | None | Unset):
     """
 
     messages: list[AgentThreadMessageResponse]
     session_id: str
-    type_: AgentResponsesServerMessageType1Type
-    request_id: None | str | Unset = UNSET
+    responses: list[Any] | Unset = UNSET
     thread: AgentThreadResponse | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -47,13 +43,9 @@ class AgentResponsesServerMessageType1:
 
         session_id = self.session_id
 
-        type_ = self.type_.value
-
-        request_id: None | str | Unset
-        if isinstance(self.request_id, Unset):
-            request_id = UNSET
-        else:
-            request_id = self.request_id
+        responses: list[Any] | Unset = UNSET
+        if not isinstance(self.responses, Unset):
+            responses = self.responses
 
         thread: dict[str, Any] | None | Unset
         if isinstance(self.thread, Unset):
@@ -69,11 +61,10 @@ class AgentResponsesServerMessageType1:
             {
                 "messages": messages,
                 "session_id": session_id,
-                "type": type_,
             }
         )
-        if request_id is not UNSET:
-            field_dict["request_id"] = request_id
+        if responses is not UNSET:
+            field_dict["responses"] = responses
         if thread is not UNSET:
             field_dict["thread"] = thread
 
@@ -94,16 +85,7 @@ class AgentResponsesServerMessageType1:
 
         session_id = d.pop("session_id")
 
-        type_ = AgentResponsesServerMessageType1Type(d.pop("type"))
-
-        def _parse_request_id(data: object) -> None | str | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(None | str | Unset, data)
-
-        request_id = _parse_request_id(d.pop("request_id", UNSET))
+        responses = cast(list[Any], d.pop("responses", UNSET))
 
         def _parse_thread(data: object) -> AgentThreadResponse | None | Unset:
             if data is None:
@@ -122,16 +104,15 @@ class AgentResponsesServerMessageType1:
 
         thread = _parse_thread(d.pop("thread", UNSET))
 
-        agent_responses_server_message_type_1 = cls(
+        agent_history_response = cls(
             messages=messages,
             session_id=session_id,
-            type_=type_,
-            request_id=request_id,
+            responses=responses,
             thread=thread,
         )
 
-        agent_responses_server_message_type_1.additional_properties = d
-        return agent_responses_server_message_type_1
+        agent_history_response.additional_properties = d
+        return agent_history_response
 
     @property
     def additional_keys(self) -> list[str]:

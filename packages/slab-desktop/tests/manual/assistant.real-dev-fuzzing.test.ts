@@ -10,14 +10,10 @@ import type { components } from "@slab/api/v1"
 
 type Schema = components["schemas"]
 type AgentConfigInput = Schema["AgentConfigInput"]
-type AgentResponsesServerMessage = Schema["AgentResponsesServerMessage"]
-type AgentAck = Extract<AgentResponsesServerMessage, { type: "agent.ack" }>
-type AgentSessionRestored = Extract<
-  AgentResponsesServerMessage,
-  { type: "agent.session.restored" }
->
+type AgentSessionRestored = Schema["AgentHistoryResponse"]
 type AgentThreadMessageResponse = Schema["AgentThreadMessageResponse"]
 type ChatToolCall = Schema["ChatToolCall"]
+type OpenAICreateRequest = Schema["OpenAICreateRequest"]
 type SessionResponse = Schema["SessionResponse"]
 type SetupStatusResponse = Schema["SetupStatusResponse"]
 type SystemDiagnosticsResponse = Schema["SystemDiagnosticsResponse"]
@@ -453,51 +449,54 @@ async function createAgentResponse(
   sessionId: string,
   prompt: string,
   configOverrides: Partial<AgentConfigInput> = {}
-): Promise<AgentAck & { thread_id: string }> {
-  const response = await requestJson<AgentResponsesServerMessage>("/v1/agents/responses", {
-    json: {
-      config: {
-        model: assistantModelId,
-        temperature: 0,
-        ...configOverrides,
-      },
-      messages: [{ content: prompt, role: "user" }],
-      request_id: `create-${Date.now()}`,
-      session_id: sessionId,
-      type: "agent.response.create",
-    } satisfies Schema["AgentResponsesClientMessage"],
+): Promise<{ thread_id: string }> {
+  const body = {
+    input: prompt,
+    instructions: configOverrides.system_prompt,
+    max_output_tokens: configOverrides.max_tokens,
+    metadata: { session_id: sessionId },
+    model: configOverrides.model ?? assistantModelId,
+    reasoning: configOverrides.reasoning_effort
+      ? { effort: configOverrides.reasoning_effort }
+      : undefined,
+    stream: false,
+    temperature: configOverrides.temperature ?? 0,
+    tool_choice: configOverrides.tool_choice,
+    top_p: configOverrides.top_p,
+  } satisfies OpenAICreateRequest & { metadata: { session_id: string } }
+  const response = await requestJson<unknown>("/v1/agents/responses", {
+    json: body,
     method: "POST",
   })
-
-  if (response.type !== "agent.ack") {
-    throw new Error(`Expected agent.ack, received ${response.type}`)
-  }
-  if (!response.accepted || !response.thread_id) {
-    throw new Error(`Agent response create was not accepted: ${JSON.stringify(response)}`)
+  const responseId = responseIdFromCreateResponse(response)
+  if (!responseId) {
+    throw new Error(`OpenAI response create did not return an id: ${JSON.stringify(response)}`)
   }
 
-  return response as AgentAck & { thread_id: string }
+  return { thread_id: responseId }
 }
 
-async function sendAgentInput(threadId: string, content: string): Promise<AgentAck> {
-  const response = await requestJson<AgentResponsesServerMessage>("/v1/agents/responses", {
+async function sendAgentInput(threadId: string, content: string): Promise<void> {
+  const response = await requestJson<unknown>("/v1/agents/responses", {
     json: {
-      content,
-      request_id: `input-${Date.now()}`,
-      thread_id: threadId,
-      type: "agent.input",
-    } satisfies Schema["AgentResponsesClientMessage"],
+      input: content,
+      model: assistantModelId,
+      previous_response_id: threadId,
+      stream: false,
+    } satisfies OpenAICreateRequest,
     method: "POST",
   })
-
-  if (response.type !== "agent.ack") {
-    throw new Error(`Expected agent.ack for agent.input, received ${response.type}`)
+  if (!responseIdFromCreateResponse(response)) {
+    throw new Error(`OpenAI response input did not return an id: ${JSON.stringify(response)}`)
   }
-  if (!response.accepted) {
-    throw new Error(`Agent input was not accepted: ${JSON.stringify(response)}`)
-  }
+}
 
-  return response
+function responseIdFromCreateResponse(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+  const id = (value as { id?: unknown }).id
+  return typeof id === "string" && id.length > 0 ? id : null
 }
 
 async function waitForCompletedAssistantReply(
@@ -705,18 +704,16 @@ async function approveMatchingToolRequest(
 }
 
 async function resolveApproval(threadId: string, callId: string, approved: boolean): Promise<void> {
-  const response = await requestJson<AgentResponsesServerMessage>("/v1/agents/responses", {
+  const response = await requestJson<Schema["AgentControlResponse"]>("/v1/agents/control/approval", {
     json: {
       approved,
       call_id: callId,
-      request_id: `approval-${Date.now()}`,
       thread_id: threadId,
-      type: "agent.approval.resolve",
-    } satisfies Schema["AgentResponsesClientMessage"],
+    } satisfies Schema["AgentApprovalResolveRequest"],
     method: "POST",
   })
 
-  if (response.type !== "agent.ack" || !response.accepted) {
+  if (response.delivered === false) {
     throw new Error(`Approval resolve failed: ${JSON.stringify(response)}`)
   }
 }
@@ -769,20 +766,7 @@ async function restoreUiState(): Promise<void> {
 }
 
 async function restoreSession(sessionId: string): Promise<AgentSessionRestored> {
-  const response = await requestJson<AgentResponsesServerMessage>("/v1/agents/responses", {
-    json: {
-      request_id: `restore-${Date.now()}`,
-      session_id: sessionId,
-      type: "agent.session.restore",
-    } satisfies Schema["AgentResponsesClientMessage"],
-    method: "POST",
-  })
-
-  if (response.type !== "agent.session.restored") {
-    throw new Error(`Expected agent.session.restored, received ${response.type}`)
-  }
-
-  return response
+  return requestJson<AgentSessionRestored>(`/v1/sessions/${encodeURIComponent(sessionId)}/agent-history`)
 }
 
 async function listSessions(): Promise<SessionResponse[]> {

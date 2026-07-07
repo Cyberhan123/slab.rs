@@ -1,5 +1,4 @@
 import type {
-  AgentResponsesServerMessage,
   AgentStatus,
   AssistantArtifactRef,
 } from './assistant-types'
@@ -135,28 +134,4 @@ function parseArtifactRefs(value: unknown): AssistantArtifactRef[] {
         return [{ kind: 'other', path }]
     }
   })
-}
-
-export function parseAssistantAgentServerMessage(
-  data: string
-): AgentResponsesServerMessage | null {
-  let value: unknown
-  try {
-    value = JSON.parse(data)
-  } catch {
-    return null
-  }
-
-  if (!isRecord(value) || typeof value.type !== 'string') {
-    return null
-  }
-
-  switch (value.type) {
-    case 'agent.ack':
-    case 'agent.session.restored':
-    case 'agent.error':
-      return value as AgentResponsesServerMessage
-    default:
-      return null
-  }
 }

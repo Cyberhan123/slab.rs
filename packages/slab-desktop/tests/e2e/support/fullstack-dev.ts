@@ -20,11 +20,7 @@ import { setTimeout as delay } from "node:timers/promises"
 import type { components } from "@slab/api/v1"
 
 type Schema = components["schemas"]
-export type AgentResponsesServerMessage = Schema["AgentResponsesServerMessage"]
-export type AgentSessionRestored = Extract<
-  AgentResponsesServerMessage,
-  { type: "agent.session.restored" }
->
+export type AgentSessionRestored = Schema["AgentHistoryResponse"]
 export type AgentThreadMessageResponse = Schema["AgentThreadMessageResponse"]
 export type ChatToolCall = Schema["ChatToolCall"]
 export type SessionResponse = Schema["SessionResponse"]
@@ -397,20 +393,10 @@ export async function restoreSession(
   baseUrl: string,
   sessionId: string
 ): Promise<AgentSessionRestored> {
-  const response = await requestJson<AgentResponsesServerMessage>(baseUrl, "/v1/agents/responses", {
-    json: {
-      request_id: `restore-${Date.now()}`,
-      session_id: sessionId,
-      type: "agent.session.restore",
-    } satisfies Schema["AgentResponsesClientMessage"],
-    method: "POST",
-  })
-
-  if (response.type !== "agent.session.restored") {
-    throw new Error(`Expected agent.session.restored, received ${response.type}`)
-  }
-
-  return response
+  return requestJson<AgentSessionRestored>(
+    baseUrl,
+    `/v1/sessions/${encodeURIComponent(sessionId)}/agent-history`
+  )
 }
 
 export async function listSessions(baseUrl: string): Promise<SessionResponse[]> {

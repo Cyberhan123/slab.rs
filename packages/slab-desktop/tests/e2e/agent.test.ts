@@ -9,6 +9,8 @@ import {
   restoreSession,
   selectAssistantSession,
   startFullstackDev,
+  type AgentThreadMessageResponse,
+  type ChatToolCall,
   type FullstackDevEnvironment,
   type ManagedDevProcess,
   type SessionResponse,
@@ -102,14 +104,14 @@ describe.sequential("agent e2e", () => {
     expect(restored.thread?.status).toBe("completed")
     expect(
       restored.messages.some(
-        (message) =>
+        (message: AgentThreadMessageResponse) =>
           message.role === "assistant" &&
-          (message.tool_calls ?? []).some((toolCall) => toolCall.function.name === "shell")
+          (message.tool_calls ?? []).some((toolCall: ChatToolCall) => toolCall.function.name === "shell")
       )
     ).toBe(true)
     expect(
       restored.messages.some(
-        (message) => message.role === "tool" && message.content.includes(marker)
+        (message: AgentThreadMessageResponse) => message.role === "tool" && message.content.includes(marker)
       )
     ).toBe(true)
   })

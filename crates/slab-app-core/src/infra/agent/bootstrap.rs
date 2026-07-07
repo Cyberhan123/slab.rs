@@ -22,10 +22,16 @@ pub(crate) struct AgentBootstrap {
 pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> AgentBootstrap {
     let store_for_agent: Arc<dyn slab_agent::port::AgentStorePort> =
         Arc::clone(&store) as Arc<dyn slab_agent::port::AgentStorePort>;
+    let store_for_responses: Arc<
+        dyn crate::infra::db::repository::agent_response::AgentResponseStore,
+    > = Arc::clone(&store)
+        as Arc<dyn crate::infra::db::repository::agent_response::AgentResponseStore>;
     let event_hub = Arc::new(AgentEventHub::new());
-    let response_observer = Arc::new(
-        super::response_persistence::ResponsePersistenceObserver::new(Arc::clone(&store_for_agent)),
-    );
+    let response_observer =
+        Arc::new(super::response_persistence::ResponsePersistenceObserver::new(
+            Arc::clone(&store_for_agent),
+            Arc::clone(&store_for_responses),
+        ));
     let composite_notify: Arc<dyn slab_agent::AgentNotifyPort> =
         Arc::new(super::event_hub::CompositeNotifyPort::new(vec![
             Arc::clone(&event_hub) as Arc<dyn slab_agent::AgentNotifyPort>,
@@ -34,7 +40,12 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
     let control =
         build_agent_control(ctx, Arc::clone(&store), Arc::clone(&event_hub), composite_notify);
     let agent_runtime = AgentRuntime::new(control);
-    let service = AgentService::new(agent_runtime.clone(), store_for_agent, Arc::clone(&event_hub));
+    let service = AgentService::new(
+        agent_runtime.clone(),
+        store_for_agent,
+        store_for_responses,
+        Arc::clone(&event_hub),
+    );
     let runtime = AgentRuntimeReloader::new((*ctx.model_state).clone(), service.runtime());
     schedule_agent_runtime_reload(runtime.clone());
 

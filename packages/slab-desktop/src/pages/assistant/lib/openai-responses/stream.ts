@@ -2,10 +2,9 @@
  * Streaming layer for the OpenAI Responses protocol.
  *
  * The slab server emits canonical `response.*` events on the wire (produced by
- * `envelope_to_events`), plus `agent.ack` / `agent.session.restored` control
- * frames and slab-localized `{"type":"error",...}` transport-error frames on
- * the WebSocket. This module parses those frames and converts the canonical
- * events into AI-SDK `UIMessageChunk`s.
+ * `envelope_to_events`), plus OpenAI-compatible error frames. This module
+ * parses those frames and converts the canonical events into AI-SDK
+ * `UIMessageChunk`s.
  *
  * IMPORTANT differences from the legacy slab-dialect parser:
  * - Reasoning streams as `response.reasoning_summary_text.delta/done` (NOT
@@ -18,34 +17,9 @@
 
 import type { UIMessageChunk } from "ai"
 
-import type {
-  AgentResponsesServerMessage,
-} from "../assistant-types"
 import type { ResponseOutputItem, ResponseStreamEvent } from "./types"
 
-/** Parse a `agent.*` control frame. Returns `null` for non-control data. */
-export function parseControlMessage(data: string): AgentResponsesServerMessage | null {
-  let value: unknown
-  try {
-    value = JSON.parse(data)
-  } catch {
-    return null
-  }
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    typeof (value as { type?: unknown }).type !== "string"
-  ) {
-    return null
-  }
-  const type = (value as { type: string }).type
-  if (type === "agent.ack" || type === "agent.session.restored" || type === "agent.error") {
-    return value as AgentResponsesServerMessage
-  }
-  return null
-}
-
-/** Parse one canonical `response.*` stream event (or a slab `error` frame). */
+/** Parse one canonical `response.*` stream event or OpenAI-compatible error frame. */
 export function parseStreamEvent(data: string): ResponseStreamEvent | null {
   let value: unknown
   try {

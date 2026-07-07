@@ -1,32 +1,24 @@
 from http import HTTPStatus
 from typing import Any, cast
+from urllib.parse import quote
 
 import httpx
 
 from ... import errors
 from ...client import AuthenticatedClient, Client
-from ...models.open_ai_error_response import OpenAiErrorResponse
-from ...types import UNSET, Response, Unset
+from ...models.agent_history_response import AgentHistoryResponse
+from ...types import Response
 
 
 def _get_kwargs(
-    *,
-    transport: str | Unset = UNSET,
-    thread_id: str | Unset = UNSET,
+    id: str,
 ) -> dict[str, Any]:
-
-    params: dict[str, Any] = {}
-
-    params["transport"] = transport
-
-    params["thread_id"] = thread_id
-
-    params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/v1/agents/responses",
-        "params": params,
+        "url": "/v1/sessions/{id}/agent-history".format(
+            id=quote(str(id), safe=""),
+        ),
     }
 
     return _kwargs
@@ -34,19 +26,19 @@ def _get_kwargs(
 
 def _parse_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Any | OpenAiErrorResponse | None:
-    if response.status_code == 101:
-        response_101 = cast(Any, None)
-        return response_101
-
+) -> AgentHistoryResponse | Any | None:
     if response.status_code == 200:
-        response_200 = cast(Any, None)
+        response_200 = AgentHistoryResponse.from_dict(response.json())
+
         return response_200
 
     if response.status_code == 400:
-        response_400 = OpenAiErrorResponse.from_dict(response.json())
-
+        response_400 = cast(Any, None)
         return response_400
+
+    if response.status_code == 500:
+        response_500 = cast(Any, None)
+        return response_500
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -56,7 +48,7 @@ def _parse_response(
 
 def _build_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[Any | OpenAiErrorResponse]:
+) -> Response[AgentHistoryResponse | Any]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -66,27 +58,24 @@ def _build_response(
 
 
 def sync_detailed(
+    id: str,
     *,
     client: AuthenticatedClient | Client,
-    transport: str | Unset = UNSET,
-    thread_id: str | Unset = UNSET,
-) -> Response[Any | OpenAiErrorResponse]:
+) -> Response[AgentHistoryResponse | Any]:
     """
     Args:
-        transport (str | Unset):
-        thread_id (str | Unset):
+        id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | OpenAiErrorResponse]
+        Response[AgentHistoryResponse | Any]
     """
 
     kwargs = _get_kwargs(
-        transport=transport,
-        thread_id=thread_id,
+        id=id,
     )
 
     response = client.get_httpx_client().request(
@@ -97,53 +86,47 @@ def sync_detailed(
 
 
 def sync(
+    id: str,
     *,
     client: AuthenticatedClient | Client,
-    transport: str | Unset = UNSET,
-    thread_id: str | Unset = UNSET,
-) -> Any | OpenAiErrorResponse | None:
+) -> AgentHistoryResponse | Any | None:
     """
     Args:
-        transport (str | Unset):
-        thread_id (str | Unset):
+        id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | OpenAiErrorResponse
+        AgentHistoryResponse | Any
     """
 
     return sync_detailed(
+        id=id,
         client=client,
-        transport=transport,
-        thread_id=thread_id,
     ).parsed
 
 
 async def asyncio_detailed(
+    id: str,
     *,
     client: AuthenticatedClient | Client,
-    transport: str | Unset = UNSET,
-    thread_id: str | Unset = UNSET,
-) -> Response[Any | OpenAiErrorResponse]:
+) -> Response[AgentHistoryResponse | Any]:
     """
     Args:
-        transport (str | Unset):
-        thread_id (str | Unset):
+        id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | OpenAiErrorResponse]
+        Response[AgentHistoryResponse | Any]
     """
 
     kwargs = _get_kwargs(
-        transport=transport,
-        thread_id=thread_id,
+        id=id,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -152,28 +135,25 @@ async def asyncio_detailed(
 
 
 async def asyncio(
+    id: str,
     *,
     client: AuthenticatedClient | Client,
-    transport: str | Unset = UNSET,
-    thread_id: str | Unset = UNSET,
-) -> Any | OpenAiErrorResponse | None:
+) -> AgentHistoryResponse | Any | None:
     """
     Args:
-        transport (str | Unset):
-        thread_id (str | Unset):
+        id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | OpenAiErrorResponse
+        AgentHistoryResponse | Any
     """
 
     return (
         await asyncio_detailed(
+            id=id,
             client=client,
-            transport=transport,
-            thread_id=thread_id,
         )
     ).parsed

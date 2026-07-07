@@ -20,6 +20,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/agents/control/approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["agent_control_approval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/control/interrupt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["agent_control_interrupt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/control/shutdown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["agent_control_shutdown"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/agents/migrate": {
         parameters: {
             query?: never;
@@ -611,6 +659,22 @@ export interface paths {
         put: operations["update_session"];
         post?: never;
         delete: operations["delete_session"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{id}/agent-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_session_agent_history"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1279,6 +1343,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AgentApprovalResolveRequest: {
+            approved: boolean;
+            call_id: string;
+            thread_id: string;
+        };
         /** @description Agent configuration provided by the caller. */
         AgentConfigInput: {
             allowed_tools?: string[] | null;
@@ -1312,89 +1381,22 @@ export interface components {
             transient?: boolean | null;
             verbosity?: null | components["schemas"]["ChatVerbosity"];
         };
+        AgentControlResponse: {
+            delivered?: boolean | null;
+            status?: null | components["schemas"]["AgentStatusValue"];
+            thread_id: string;
+        };
         /** @description Aggregated agent diagnostics: recent thread stats + recent failed tool calls. */
         AgentDiagnosticsResponse: {
             failed_tool_calls: components["schemas"]["FailedToolCallResponse"][];
             threads: components["schemas"]["AgentThreadStatResponse"][];
         };
-        /**
-         * @description Client action acknowledged by `/v1/agents/responses`.
-         * @enum {string}
-         */
-        AgentResponsesAction: "session_restore" | "response_create" | "input" | "approval_resolve" | "interrupt" | "shutdown";
-        /** @description Client message accepted by `GET` WebSocket and `POST /v1/agents/responses`. */
-        AgentResponsesClientMessage: {
-            request_id?: string | null;
-            session_id: string;
-            /** @enum {string} */
-            type: "agent.session.restore";
-        } | {
-            config?: components["schemas"]["AgentConfigInput"];
-            messages?: components["schemas"]["MessageInput"][];
-            request_id?: string | null;
-            session_id: string;
-            /** @enum {string} */
-            type: "agent.response.create";
-        } | {
-            content: string;
-            request_id?: string | null;
-            thread_id: string;
-            /** @enum {string} */
-            type: "agent.input";
-        } | {
-            approved: boolean;
-            call_id: string;
-            request_id?: string | null;
-            thread_id: string;
-            /** @enum {string} */
-            type: "agent.approval.resolve";
-        } | {
-            request_id?: string | null;
-            thread_id: string;
-            /** @enum {string} */
-            type: "agent.interrupt";
-        } | {
-            request_id?: string | null;
-            thread_id: string;
-            /** @enum {string} */
-            type: "agent.shutdown";
-        };
-        /**
-         * @description Server message returned by `POST /v1/agents/responses` and emitted on the
-         *     WebSocket control channel. Agent response events are sent as raw
-         *     `AgentStreamEvent` frames.
-         */
-        AgentResponsesServerMessage: {
-            accepted: boolean;
-            action: components["schemas"]["AgentResponsesAction"];
-            delivered?: boolean | null;
-            request_id?: string | null;
-            status?: null | components["schemas"]["AgentStatusValue"];
-            thread_id?: string | null;
-            /** @enum {string} */
-            type: "agent.ack";
-        } | {
+        /** @description Agent history restored through the sessions API. */
+        AgentHistoryResponse: {
             messages: components["schemas"]["AgentThreadMessageResponse"][];
-            request_id?: string | null;
-            /**
-             * Complete OpenAI-Responses-canonical `Response` objects, one per
-             * agent run (oldest first). Modeled as `unknown[]` here because
-             * utoipa cannot generate the slab-proto Response tree; the
-             * `openai` SDK types are the source of truth on the client side.
-             */
             responses?: unknown[];
             session_id: string;
             thread?: null | components["schemas"]["AgentThreadResponse"];
-            /** @enum {string} */
-            type: "agent.session.restored";
-        } | {
-            code: string;
-            i18n?: null | components["schemas"]["I18nPayload"];
-            message: string;
-            request_id?: string | null;
-            thread_id?: string | null;
-            /** @enum {string} */
-            type: "agent.error";
         };
         /**
          * @description Serializable mirror of [`AgentThreadStatus`].
@@ -1411,6 +1413,9 @@ export interface components {
             strict?: boolean | null;
             /** @enum {string} */
             type: "json_schema";
+        };
+        AgentThreadControlRequest: {
+            thread_id: string;
         };
         /** @description Persisted agent thread message. */
         AgentThreadMessageResponse: {
@@ -2328,6 +2333,35 @@ export interface components {
              * @description Training context window length reported by the loaded model.
              */
             training_context_length?: number | null;
+        };
+        /**
+         * @description `POST /v1/agents/responses` body as sent by the official `openai` SDK
+         *     (`ResponseCreateParamsBase`). Slab translates `input` + a subset of config;
+         *     unknown fields are ignored (no `deny_unknown_fields`) so future SDK fields
+         *     don't break the server. `input` is held as a `serde_json::Value` (a string
+         *     or an array of input items) so the type is `ToSchema`-derivable.
+         */
+        OpenAICreateRequest: {
+            input?: unknown;
+            instructions?: string | null;
+            /** Format: int32 */
+            max_output_tokens?: number | null;
+            model?: string | null;
+            previous_response_id?: string | null;
+            reasoning?: null | components["schemas"]["OpenAIReasoningInput"];
+            stream?: boolean | null;
+            /** Format: float */
+            temperature?: number | null;
+            text?: null | components["schemas"]["OpenAITextInput"];
+            tool_choice?: unknown;
+            /** Format: float */
+            top_p?: number | null;
+        };
+        OpenAIReasoningInput: {
+            effort?: string | null;
+        };
+        OpenAITextInput: {
+            format?: unknown;
         };
         OpenAiError: {
             code?: string | null;
@@ -3393,6 +3427,134 @@ export interface operations {
             };
         };
     };
+    agent_control_approval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentApprovalResolveRequest"];
+            };
+        };
+        responses: {
+            /** @description Approval decision delivered status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentControlResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    agent_control_interrupt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentThreadControlRequest"];
+            };
+        };
+        responses: {
+            /** @description Thread interrupt accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentControlResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Thread not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    agent_control_shutdown: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentThreadControlRequest"];
+            };
+        };
+        responses: {
+            /** @description Thread shutdown accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentControlResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Thread not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     migrate_workspace: {
         parameters: {
             query?: never;
@@ -3448,7 +3610,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description SSE fallback stream of agent response events */
+            /** @description SSE fallback stream of canonical Responses server events */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3460,7 +3622,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OpenAiErrorResponse"];
+                };
             };
         };
     };
@@ -3473,46 +3637,52 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AgentResponsesClientMessage"];
+                "application/json": components["schemas"]["OpenAICreateRequest"];
             };
         };
         responses: {
-            /** @description Agent response command accepted */
+            /** @description OpenAI Responses-canonical Response object; an SSE stream of ResponseStreamEvent when `stream: true` */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["AgentResponsesServerMessage"];
-                };
+                content?: never;
             };
             /** @description Bad request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OpenAiErrorResponse"];
+                };
             };
             /** @description Thread not found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OpenAiErrorResponse"];
+                };
             };
             /** @description Thread is already running */
             429: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OpenAiErrorResponse"];
+                };
             };
             /** @description Internal error */
             500: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OpenAiErrorResponse"];
+                };
             };
         };
     };
@@ -4923,6 +5093,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeleteSessionResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_session_agent_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session agent history retrieved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentHistoryResponse"];
                 };
             };
             /** @description Bad request */

@@ -9,6 +9,6 @@ pub use entities::{
     UiStateRecord, UnifiedModelRecord, VideoGenerationTaskRecord, VideoGenerationTaskViewRecord,
 };
 pub use repository::{
-    AnyStore, ChatStore, MediaTaskStore, ModelConfigStateStore, ModelDownloadStore, ModelStore,
-    PluginStateStore, SessionStore, TaskStore, UiStateStore,
+    AgentResponseStore, AnyStore, ChatStore, MediaTaskStore, ModelConfigStateStore,
+    ModelDownloadStore, ModelStore, PluginStateStore, SessionStore, TaskStore, UiStateStore,
 };

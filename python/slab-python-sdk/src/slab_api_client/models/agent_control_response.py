@@ -6,56 +6,34 @@ from typing import Any, TypeVar, cast
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
-from ..models.agent_responses_action import AgentResponsesAction
-from ..models.agent_responses_server_message_type_0_type import (
-    AgentResponsesServerMessageType0Type,
-)
 from ..models.agent_status_value import AgentStatusValue
 from ..types import UNSET, Unset
 
-T = TypeVar("T", bound="AgentResponsesServerMessageType0")
+T = TypeVar("T", bound="AgentControlResponse")
 
 
 @_attrs_define
-class AgentResponsesServerMessageType0:
+class AgentControlResponse:
     """
     Attributes:
-        accepted (bool):
-        action (AgentResponsesAction): Client action acknowledged by `/v1/agents/responses`.
-        type_ (AgentResponsesServerMessageType0Type):
+        thread_id (str):
         delivered (bool | None | Unset):
-        request_id (None | str | Unset):
         status (AgentStatusValue | None | Unset):
-        thread_id (None | str | Unset):
     """
 
-    accepted: bool
-    action: AgentResponsesAction
-    type_: AgentResponsesServerMessageType0Type
+    thread_id: str
     delivered: bool | None | Unset = UNSET
-    request_id: None | str | Unset = UNSET
     status: AgentStatusValue | None | Unset = UNSET
-    thread_id: None | str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        accepted = self.accepted
-
-        action = self.action.value
-
-        type_ = self.type_.value
+        thread_id = self.thread_id
 
         delivered: bool | None | Unset
         if isinstance(self.delivered, Unset):
             delivered = UNSET
         else:
             delivered = self.delivered
-
-        request_id: None | str | Unset
-        if isinstance(self.request_id, Unset):
-            request_id = UNSET
-        else:
-            request_id = self.request_id
 
         status: None | str | Unset
         if isinstance(self.status, Unset):
@@ -65,40 +43,24 @@ class AgentResponsesServerMessageType0:
         else:
             status = self.status
 
-        thread_id: None | str | Unset
-        if isinstance(self.thread_id, Unset):
-            thread_id = UNSET
-        else:
-            thread_id = self.thread_id
-
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update(
             {
-                "accepted": accepted,
-                "action": action,
-                "type": type_,
+                "thread_id": thread_id,
             }
         )
         if delivered is not UNSET:
             field_dict["delivered"] = delivered
-        if request_id is not UNSET:
-            field_dict["request_id"] = request_id
         if status is not UNSET:
             field_dict["status"] = status
-        if thread_id is not UNSET:
-            field_dict["thread_id"] = thread_id
 
         return field_dict
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        accepted = d.pop("accepted")
-
-        action = AgentResponsesAction(d.pop("action"))
-
-        type_ = AgentResponsesServerMessageType0Type(d.pop("type"))
+        thread_id = d.pop("thread_id")
 
         def _parse_delivered(data: object) -> bool | None | Unset:
             if data is None:
@@ -108,15 +70,6 @@ class AgentResponsesServerMessageType0:
             return cast(bool | None | Unset, data)
 
         delivered = _parse_delivered(d.pop("delivered", UNSET))
-
-        def _parse_request_id(data: object) -> None | str | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(None | str | Unset, data)
-
-        request_id = _parse_request_id(d.pop("request_id", UNSET))
 
         def _parse_status(data: object) -> AgentStatusValue | None | Unset:
             if data is None:
@@ -135,27 +88,14 @@ class AgentResponsesServerMessageType0:
 
         status = _parse_status(d.pop("status", UNSET))
 
-        def _parse_thread_id(data: object) -> None | str | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(None | str | Unset, data)
-
-        thread_id = _parse_thread_id(d.pop("thread_id", UNSET))
-
-        agent_responses_server_message_type_0 = cls(
-            accepted=accepted,
-            action=action,
-            type_=type_,
-            delivered=delivered,
-            request_id=request_id,
-            status=status,
+        agent_control_response = cls(
             thread_id=thread_id,
+            delivered=delivered,
+            status=status,
         )
 
-        agent_responses_server_message_type_0.additional_properties = d
-        return agent_responses_server_message_type_0
+        agent_control_response.additional_properties = d
+        return agent_control_response
 
     @property
     def additional_keys(self) -> list[str]:

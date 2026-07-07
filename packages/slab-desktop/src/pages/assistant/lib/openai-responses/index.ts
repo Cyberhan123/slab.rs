@@ -14,7 +14,6 @@ export { projectRestoreSession } from "./project"
 export {
   convertEvent,
   createStreamState,
-  parseControlMessage,
   parseStreamEvent,
 } from "./stream"
 export type { StreamState } from "./stream"

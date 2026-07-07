@@ -75,9 +75,8 @@ describe('createWebSocketFetch', () => {
 
     const response = await fetch('http://localhost:3000/v1/agents/responses', {
       body: JSON.stringify({
-        messages: [],
+        input: [],
         stream: true,
-        type: 'agent.response.create',
       }),
       method: 'POST',
     })
@@ -85,8 +84,8 @@ describe('createWebSocketFetch', () => {
 
     expect(sockets[0]?.url).toBe('ws://localhost:3000/v1/agents/responses')
     expect(JSON.parse(String(sockets[0]?.sent[0]))).toEqual({
-      messages: [],
-      type: 'agent.response.create',
+      input: [],
+      type: 'response.create',
     })
 
     sockets[0]?.emit('{"thread_id":"thread-1","sequence_number":1,"type":"response.output_text.delta","delta":"hi"}')
@@ -105,18 +104,16 @@ describe('createWebSocketFetch', () => {
     )
   })
 
-  it('falls back to post ack plus SSE stream when websocket connection fails', async () => {
+  it('falls back to canonical post plus SSE stream when websocket connection fails', async () => {
     vi.stubGlobal('WebSocket', FailingWebSocket)
     const fetchMock = vi
       .fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            accepted: true,
-            action: 'response_create',
-            status: 'pending',
-            thread_id: 'thread-1',
-            type: 'agent.ack',
+            id: 'thread-1',
+            object: 'response',
+            status: 'in_progress',
           }),
         ),
       )
@@ -130,23 +127,22 @@ describe('createWebSocketFetch', () => {
 
     const response = await fetch('http://localhost:3000/v1/agents/responses', {
       body: JSON.stringify({
-        messages: [],
+        input: [],
         stream: true,
-        type: 'agent.response.create',
       }),
       method: 'POST',
     })
 
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
-      messages: [],
-      type: 'agent.response.create',
+      input: [],
+      stream: false,
     })
     expect(fetchMock.mock.calls[1]?.[0]).toBe(
       'http://localhost:3000/v1/agents/responses?transport=sse&thread_id=thread-1',
     )
     expect(await response.text()).toBe(
       [
-        'data: {"accepted":true,"action":"response_create","status":"pending","thread_id":"thread-1","type":"agent.ack"}',
+        'data: {"id":"thread-1","object":"response","status":"in_progress"}',
         '',
         'data: {"thread_id":"thread-1","sequence_number":1,"type":"response.output_text.delta","delta":"hi"}',
         '',
@@ -164,8 +160,8 @@ describe('createWebSocketFetch', () => {
 
     const response = await fetch('http://localhost:3000/v1/agents/responses', {
       body: JSON.stringify({
+        input: '',
         stream: false,
-        type: 'agent.response.create',
       }),
       method: 'POST',
     })

@@ -39,9 +39,10 @@ const mocks = vi.hoisted(() => {
       status: "ready",
     },
   ]
-  const restoreMutation = {
-    isPending: false,
-    mutateAsync: vi.fn(),
+  const restoreQuery = {
+    data: null as ReturnType<typeof restoredSessionResponse> | { messages: never[]; session_id: string; thread: null } | null,
+    error: null as unknown,
+    isLoading: false,
   }
 
   return {
@@ -58,7 +59,6 @@ const mocks = vi.hoisted(() => {
     deleteSession: vi.fn<() => Promise<boolean>>(),
     ensureDownloaded: vi.fn<() => Promise<{ downloadedNow: boolean }>>(),
     ensureLoaded: vi.fn<() => Promise<{ runtimeStatus: null }>>(),
-    mutateAsync: restoreMutation.mutateAsync,
     sendMessage: vi.fn(),
     models,
     setCurrentSessionId: vi.fn(),
@@ -66,7 +66,7 @@ const mocks = vi.hoisted(() => {
     toastInfo: vi.fn(),
     toastError: vi.fn(),
     translate,
-    restoreMutation,
+    restoreQuery,
     updateSessionLabel: vi.fn<() => Promise<boolean>>(),
   }
 })
@@ -85,7 +85,7 @@ vi.mock("@ai-sdk/react", () => ({
 
 vi.mock("@slab/api", () => ({
   default: {
-    useMutation: vi.fn(() => mocks.restoreMutation),
+    useQuery: vi.fn(() => mocks.restoreQuery),
   },
 }))
 
@@ -277,16 +277,16 @@ function restoredSessionResponse(sessionId: string, threadId: string) {
         created_at: "2026-07-05T00:00:00Z",
         id: "message-user",
         role: "user",
-        sequence_number: 1,
         thread_id: threadId,
+        turn_index: 1,
       },
       {
         content: "previous answer",
         created_at: "2026-07-05T00:00:01Z",
         id: "message-assistant",
         role: "assistant",
-        sequence_number: 2,
         thread_id: threadId,
+        turn_index: 2,
       },
     ],
     session_id: sessionId,
@@ -295,7 +295,6 @@ function restoredSessionResponse(sessionId: string, threadId: string) {
       session_id: sessionId,
       status: "completed",
     },
-    type: "agent.session.restored",
   }
 }
 
@@ -315,7 +314,9 @@ describe("Assistant page session and model lifecycle", () => {
     mocks.deleteSession.mockResolvedValue(true)
     mocks.ensureDownloaded.mockResolvedValue({ downloadedNow: false })
     mocks.ensureLoaded.mockResolvedValue({ runtimeStatus: null })
-    mocks.mutateAsync.mockResolvedValue(restoredSessionResponse("session-a", "thread-a"))
+    mocks.restoreQuery.data = restoredSessionResponse("session-a", "thread-a")
+    mocks.restoreQuery.error = null
+    mocks.restoreQuery.isLoading = false
     mocks.sendMessage.mockClear()
     mocks.setCurrentSessionId.mockClear()
     mocks.setSelectedModelId.mockClear()
@@ -326,15 +327,6 @@ describe("Assistant page session and model lifecycle", () => {
 
   it("restores the current session and renders restored messages", async () => {
     renderAssistant()
-
-    await waitFor(() =>
-      expect(mocks.mutateAsync).toHaveBeenCalledWith({
-        body: expect.objectContaining({
-          session_id: "session-a",
-          type: "agent.session.restore",
-        }),
-      }),
-    )
 
     expect(await screen.findByText("previous prompt")).toBeInTheDocument()
     expect(screen.getByText("previous answer")).toBeInTheDocument()
@@ -366,16 +358,14 @@ describe("Assistant page session and model lifecycle", () => {
   })
 
   it("switches models immediately when the current session has no messages", async () => {
-    mocks.mutateAsync.mockResolvedValue({
+    mocks.restoreQuery.data = {
       messages: [],
       session_id: "session-a",
       thread: null,
-      type: "agent.session.restored",
-    })
+    }
 
     renderAssistant()
 
-    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalled())
     fireEvent.click(screen.getByText("Model B"))
 
     expect(mocks.setSelectedModelId).toHaveBeenCalledWith("model-b")
@@ -406,13 +396,8 @@ describe("Assistant page session and model lifecycle", () => {
   })
 
   it("blocks model switching while session restore is still busy", async () => {
-    let resolveRestore: (value: unknown) => void = () => {}
-    mocks.mutateAsync.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveRestore = resolve
-        }),
-    )
+    mocks.restoreQuery.data = null
+    mocks.restoreQuery.isLoading = true
 
     renderAssistant()
 
@@ -420,6 +405,6 @@ describe("Assistant page session and model lifecycle", () => {
 
     expect(screen.queryByText("Model B")).not.toBeInTheDocument()
 
-    resolveRestore(restoredSessionResponse("session-a", "thread-a"))
+    mocks.restoreQuery.isLoading = false
   })
 })

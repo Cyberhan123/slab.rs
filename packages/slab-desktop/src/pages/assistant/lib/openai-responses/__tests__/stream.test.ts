@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { convertEvent, createStreamState, parseControlMessage, parseStreamEvent } from "../stream"
+import { convertEvent, createStreamState, parseStreamEvent } from "../stream"
 import type { ResponseOutputItem, ResponseStreamEvent } from "../types"
 
 // Test fixtures are intentionally minimal; cast through `unknown` to the
@@ -14,13 +14,6 @@ function ev(e: unknown): ResponseStreamEvent {
 }
 
 describe("openai-responses stream", () => {
-  it("parses agent.ack as a control message", () => {
-    const msg = parseControlMessage(
-      JSON.stringify({ type: "agent.ack", thread_id: "thread-1", accepted: true }),
-    )
-    expect(msg).toMatchObject({ type: "agent.ack", thread_id: "thread-1" })
-  })
-
   it("parses canonical response events", () => {
     const event = parseStreamEvent(
       JSON.stringify({ type: "response.output_text.delta", delta: "hi", output_index: 0, content_index: 0 }),

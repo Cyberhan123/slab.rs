@@ -2,7 +2,6 @@ import { SERVER_BASE_URL } from '@slab/api/config'
 import type { components } from '@slab/api'
 
 import type {
-  AgentResponsesServerMessage,
   AgentStatus,
   AssistantMessageRecord,
   AssistantRuntimePresets,
@@ -223,17 +222,4 @@ export function agentEventKey(data: string): string | null {
   }
 
   return null
-}
-
-export function serverMessageThreadId(message: AgentResponsesServerMessage): string | null {
-  switch (message.type) {
-    case 'agent.ack':
-      return message.thread_id ?? null
-    case 'agent.session.restored':
-      return message.thread?.id ?? null
-    case 'agent.error':
-      return message.thread_id ?? null
-    default:
-      return null
-  }
 }

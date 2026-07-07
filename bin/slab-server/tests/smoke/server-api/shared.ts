@@ -59,6 +59,9 @@ const locallySeededOperationKeys = new Set(["POST /v1/tasks/{id}/restart"]);
 
 export const executableSmokeOperations = [
   { method: "get", path: "/health" },
+  { method: "post", path: "/v1/agents/control/approval" },
+  { method: "post", path: "/v1/agents/control/interrupt" },
+  { method: "post", path: "/v1/agents/control/shutdown" },
   { method: "get", path: "/v1/agents/responses" },
   { method: "post", path: "/v1/agents/responses" },
   { method: "get", path: "/v1/audio/transcriptions" },
@@ -104,6 +107,7 @@ export const executableSmokeOperations = [
   { method: "get", path: "/v1/sessions" },
   { method: "post", path: "/v1/sessions" },
   { method: "put", path: "/v1/sessions/{id}" },
+  { method: "get", path: "/v1/sessions/{id}/agent-history" },
   { method: "get", path: "/v1/sessions/{id}/messages" },
   { method: "get", path: "/v1/settings" },
   { method: "get", path: "/v1/settings/{pmid}" },

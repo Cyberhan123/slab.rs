@@ -112,30 +112,6 @@ pub struct ThreadMessageRecord {
     pub created_at: String,
 }
 
-/// Persisted complete OpenAI-Responses-canonical `Response` for a single agent
-/// run. `response_json` holds the serialized `slab_proto::openai::Response` (the
-/// shape of `testdata/fixtures/openai-compatible/responses/*.json`). Stored as a
-/// `String` because `slab-agent` does not depend on `slab-proto`; the host
-/// (app-core) builds and re-parses the typed `Response`.
-#[derive(Debug, Clone)]
-pub struct ThreadResponseRecord {
-    /// Per-run identifier (the OpenAI `Response.id`). Distinct across runs in a
-    /// multi-turn thread.
-    pub run_id: String,
-    pub thread_id: String,
-    pub session_id: String,
-    /// turn_index of the run's first turn.
-    pub turn_index_start: u32,
-    /// `completed` / `failed` / `cancelled` / `incomplete`.
-    pub status: String,
-    /// Serialized `slab_proto::openai::Response` JSON.
-    pub response_json: String,
-    /// RFC 3339 creation timestamp.
-    pub created_at: String,
-    /// RFC 3339 completion timestamp, if the run reached a terminal state.
-    pub completed_at: Option<String>,
-}
-
 /// Persisted state snapshot for a single agent turn.
 #[derive(Debug, Clone)]
 pub struct TurnStateRecord {
@@ -299,29 +275,6 @@ pub trait AgentStorePort: Send + Sync {
         &self,
         thread_id: &str,
     ) -> Result<Vec<ThreadMessageRecord>, AgentError>;
-
-    /// Insert a persisted complete `Response` for a single agent run.
-    ///
-    /// Hosts that have not yet migrated to per-run Response storage can keep
-    /// this default no-op.
-    async fn insert_thread_response(
-        &self,
-        _record: &ThreadResponseRecord,
-    ) -> Result<(), AgentError> {
-        Ok(())
-    }
-
-    /// Return persisted complete `Response` records for a thread, oldest run
-    /// first. `response_json` is the serialized `slab_proto::openai::Response`.
-    ///
-    /// Hosts that have not yet migrated to per-run Response storage can keep
-    /// this default (returns none).
-    async fn list_thread_responses(
-        &self,
-        _thread_id: &str,
-    ) -> Result<Vec<ThreadResponseRecord>, AgentError> {
-        Ok(Vec::new())
-    }
 
     /// Insert or update detailed state for a single agent turn.
     ///

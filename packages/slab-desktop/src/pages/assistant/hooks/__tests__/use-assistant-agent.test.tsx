@@ -108,9 +108,9 @@ describe("useAssistantAgent a2u tool dispatch", () => {
     vi.clearAllMocks()
     unmount = null
     mockMutateAsync.mockResolvedValue({
-      status: "running",
-      thread_id: "thread-1",
-      type: "agent.ack",
+      id: "thread-1",
+      object: "response",
+      status: "in_progress",
     })
     mockReadAssistantSseStream.mockResolvedValue(undefined)
     useAgentSurfaceStore.setState({

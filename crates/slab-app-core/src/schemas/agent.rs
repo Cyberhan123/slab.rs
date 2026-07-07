@@ -5,12 +5,14 @@ use slab_agent::config::{
     AgentConfig, AgentToolChoice, MAX_INVALID_TOOL_CALL_RETRIES, MAX_TOOL_CONCURRENCY,
 };
 use slab_agent::port::{ThreadMessageRecord, ThreadSnapshot};
-use slab_types::{ConversationMessage, I18nPayload, agent::AgentThreadStatus};
+use slab_types::{ConversationMessage, agent::AgentThreadStatus};
 use utoipa::ToSchema;
-use validator::{Validate, ValidationError, ValidationErrors};
+use validator::Validate;
+#[cfg(test)]
+use validator::{ValidationError, ValidationErrors};
 
 use crate::domain::models::{
-    AgentCommand, AgentCommandAction, AgentCommandResult, AgentCommandStatus,
+    AgentCommand, AgentControlCommand, AgentControlResult, AgentControlStatus,
     StructuredOutput as DomainStructuredOutput,
     StructuredOutputJsonSchema as DomainStructuredOutputJsonSchema,
 };
@@ -235,12 +237,10 @@ impl OpenAICreateRequest {
             self.to_messages().into_iter().map(Into::into).collect();
         match self.previous_response_id.as_deref().filter(|value| !value.is_empty()) {
             Some(thread_id) => AgentCommand::AppendInput {
-                request_id: None,
                 thread_id: thread_id.to_owned(),
                 content: last_user_text(&messages),
             },
             None => AgentCommand::CreateResponse {
-                request_id: None,
                 session_id,
                 config: self.to_config_input().into(),
                 messages,
@@ -407,146 +407,7 @@ fn parse_text_format(value: &serde_json::Value) -> Option<AgentStructuredOutputI
     }
 }
 
-/// Client message accepted by `GET` WebSocket and `POST /v1/agents/responses`.
-#[derive(Debug, Deserialize, ToSchema)]
-#[serde(tag = "type")]
-pub enum AgentResponsesClientMessage {
-    #[serde(rename = "agent.session.restore")]
-    SessionRestore {
-        #[serde(default)]
-        request_id: Option<String>,
-        session_id: String,
-    },
-    #[serde(rename = "agent.response.create")]
-    ResponseCreate {
-        #[serde(default)]
-        request_id: Option<String>,
-        session_id: String,
-        #[serde(default)]
-        config: Box<AgentConfigInput>,
-        #[serde(default)]
-        messages: Vec<MessageInput>,
-    },
-    #[serde(rename = "agent.input")]
-    Input {
-        #[serde(default)]
-        request_id: Option<String>,
-        thread_id: String,
-        content: String,
-    },
-    #[serde(rename = "agent.approval.resolve")]
-    ApprovalResolve {
-        #[serde(default)]
-        request_id: Option<String>,
-        thread_id: String,
-        call_id: String,
-        approved: bool,
-    },
-    #[serde(rename = "agent.interrupt")]
-    Interrupt {
-        #[serde(default)]
-        request_id: Option<String>,
-        thread_id: String,
-    },
-    #[serde(rename = "agent.shutdown")]
-    Shutdown {
-        #[serde(default)]
-        request_id: Option<String>,
-        thread_id: String,
-    },
-}
-
-impl AgentResponsesClientMessage {
-    pub fn action(&self) -> AgentResponsesAction {
-        match self {
-            Self::SessionRestore { .. } => AgentResponsesAction::SessionRestore,
-            Self::ResponseCreate { .. } => AgentResponsesAction::ResponseCreate,
-            Self::Input { .. } => AgentResponsesAction::Input,
-            Self::ApprovalResolve { .. } => AgentResponsesAction::ApprovalResolve,
-            Self::Interrupt { .. } => AgentResponsesAction::Interrupt,
-            Self::Shutdown { .. } => AgentResponsesAction::Shutdown,
-        }
-    }
-
-    pub fn request_id(&self) -> Option<&str> {
-        match self {
-            Self::SessionRestore { request_id, .. }
-            | Self::ResponseCreate { request_id, .. }
-            | Self::Input { request_id, .. }
-            | Self::ApprovalResolve { request_id, .. }
-            | Self::Interrupt { request_id, .. }
-            | Self::Shutdown { request_id, .. } => request_id.as_deref(),
-        }
-    }
-}
-
-impl From<AgentResponsesClientMessage> for AgentCommand {
-    fn from(message: AgentResponsesClientMessage) -> Self {
-        match message {
-            AgentResponsesClientMessage::SessionRestore { request_id, session_id } => {
-                Self::RestoreSession { request_id, session_id }
-            }
-            AgentResponsesClientMessage::ResponseCreate {
-                request_id,
-                session_id,
-                config,
-                messages,
-            } => Self::CreateResponse {
-                request_id,
-                session_id,
-                config: (*config).into(),
-                messages: messages.into_iter().map(Into::into).collect(),
-            },
-            AgentResponsesClientMessage::Input { request_id, thread_id, content } => {
-                Self::AppendInput { request_id, thread_id, content }
-            }
-            AgentResponsesClientMessage::ApprovalResolve {
-                request_id,
-                thread_id,
-                call_id,
-                approved,
-            } => Self::ResolveApproval { request_id, thread_id, call_id, approved },
-            AgentResponsesClientMessage::Interrupt { request_id, thread_id } => {
-                Self::Interrupt { request_id, thread_id }
-            }
-            AgentResponsesClientMessage::Shutdown { request_id, thread_id } => {
-                Self::Shutdown { request_id, thread_id }
-            }
-        }
-    }
-}
-
-impl Validate for AgentResponsesClientMessage {
-    fn validate(&self) -> Result<(), ValidationErrors> {
-        let mut errors = ValidationErrors::new();
-        match self {
-            Self::SessionRestore { session_id, .. } => {
-                add_non_blank(&mut errors, "session_id", session_id);
-            }
-            Self::ResponseCreate { session_id, config, messages, .. } => {
-                add_non_blank(&mut errors, "session_id", session_id);
-                validate_agent_config(&mut errors, config);
-                for message in messages {
-                    add_non_blank(&mut errors, "role", &message.role);
-                }
-            }
-            Self::Input { thread_id, content, .. } => {
-                add_non_blank(&mut errors, "thread_id", thread_id);
-                add_non_blank(&mut errors, "content", content);
-            }
-            Self::ApprovalResolve { thread_id, call_id, .. } => {
-                add_non_blank(&mut errors, "thread_id", thread_id);
-                add_non_blank(&mut errors, "call_id", call_id);
-            }
-            Self::Interrupt { thread_id, .. } | Self::Shutdown { thread_id, .. } => {
-                add_non_blank(&mut errors, "thread_id", thread_id);
-            }
-        }
-
-        if errors.is_empty() { Ok(()) } else { Err(errors) }
-    }
-}
-
+#[cfg(test)]
 fn add_non_blank(errors: &mut ValidationErrors, field: &'static str, value: &str) {
     if !value.trim().is_empty() {
         return;
@@ -557,6 +418,7 @@ fn add_non_blank(errors: &mut ValidationErrors, field: &'static str, value: &str
     errors.add(field, error);
 }
 
+#[cfg(test)]
 fn validate_agent_config(errors: &mut ValidationErrors, config: &AgentConfigInput) {
     if let Some(0) = config.tool_concurrency {
         add_field_error(errors, "tool_concurrency", "tool_concurrency must be at least 1");
@@ -581,106 +443,11 @@ fn validate_agent_config(errors: &mut ValidationErrors, config: &AgentConfigInpu
     }
 }
 
+#[cfg(test)]
 fn add_field_error(errors: &mut ValidationErrors, field: &'static str, message: &'static str) {
     let mut error = ValidationError::new("range");
     error.message = Some(message.into());
     errors.add(field, error);
-}
-
-/// Client action acknowledged by `/v1/agents/responses`.
-#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentResponsesAction {
-    SessionRestore,
-    ResponseCreate,
-    Input,
-    ApprovalResolve,
-    Interrupt,
-    Shutdown,
-}
-
-impl From<AgentCommandAction> for AgentResponsesAction {
-    fn from(action: AgentCommandAction) -> Self {
-        match action {
-            AgentCommandAction::RestoreSession => Self::SessionRestore,
-            AgentCommandAction::CreateResponse => Self::ResponseCreate,
-            AgentCommandAction::AppendInput => Self::Input,
-            AgentCommandAction::ResolveApproval => Self::ApprovalResolve,
-            AgentCommandAction::Interrupt => Self::Interrupt,
-            AgentCommandAction::Shutdown => Self::Shutdown,
-        }
-    }
-}
-
-/// Server message returned by `POST /v1/agents/responses` and emitted on the
-/// WebSocket control channel. Agent response events are sent as raw
-/// `AgentStreamEvent` frames.
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(tag = "type")]
-pub enum AgentResponsesServerMessage {
-    #[serde(rename = "agent.ack")]
-    Ack {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        request_id: Option<String>,
-        action: AgentResponsesAction,
-        accepted: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        thread_id: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        status: Option<AgentStatusValue>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        delivered: Option<bool>,
-    },
-    #[serde(rename = "agent.session.restored")]
-    SessionRestored {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        request_id: Option<String>,
-        session_id: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        thread: Option<AgentThreadResponse>,
-        /// Legacy per-message history (chat-completion shape). Retained for
-        /// backward compatibility while the frontend migrates to `responses`.
-        messages: Vec<AgentThreadMessageResponse>,
-        /// Complete OpenAI-Responses-canonical `Response` objects, one per agent
-        /// run, oldest first. Serialized verbatim from
-        /// `agent_thread_responses.response_json`.
-        #[serde(skip_serializing_if = "Vec::is_empty", default)]
-        responses: Vec<serde_json::Value>,
-    },
-    #[serde(rename = "agent.error")]
-    Error {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        request_id: Option<String>,
-        code: String,
-        message: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        i18n: Option<I18nPayload>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        thread_id: Option<String>,
-    },
-}
-
-impl From<AgentCommandResult> for AgentResponsesServerMessage {
-    fn from(result: AgentCommandResult) -> Self {
-        if let Some(session) = result.session {
-            return Self::SessionRestored {
-                request_id: result.request_id,
-                session_id: session.session_id,
-                thread: session.thread.map(Into::into),
-                messages: session.messages.into_iter().map(Into::into).collect(),
-                responses: session.responses,
-            };
-        }
-
-        Self::Ack {
-            request_id: result.request_id,
-            action: result.action.into(),
-            accepted: result.accepted,
-            thread_id: result.thread_id,
-            status: result.status.map(Into::into),
-            delivered: result.delivered,
-        }
-    }
 }
 
 /// Persisted agent thread summary.
@@ -776,12 +543,64 @@ impl From<AgentThreadStatus> for AgentStatusValue {
     }
 }
 
-impl From<AgentCommandStatus> for AgentStatusValue {
-    fn from(status: AgentCommandStatus) -> Self {
+impl From<AgentControlStatus> for AgentStatusValue {
+    fn from(status: AgentControlStatus) -> Self {
         match status {
-            AgentCommandStatus::Pending => Self::Pending,
-            AgentCommandStatus::Interrupting => Self::Interrupting,
-            AgentCommandStatus::Shutdown => Self::Shutdown,
+            AgentControlStatus::Interrupting => Self::Interrupting,
+            AgentControlStatus::Shutdown => Self::Shutdown,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema, Validate)]
+pub struct AgentApprovalResolveRequest {
+    #[validate(custom(
+        function = "crate::schemas::validation::validate_non_blank",
+        message = "thread_id must not be empty"
+    ))]
+    pub thread_id: String,
+    #[validate(custom(
+        function = "crate::schemas::validation::validate_non_blank",
+        message = "call_id must not be empty"
+    ))]
+    pub call_id: String,
+    pub approved: bool,
+}
+
+impl From<AgentApprovalResolveRequest> for AgentControlCommand {
+    fn from(request: AgentApprovalResolveRequest) -> Self {
+        Self::ResolveApproval {
+            thread_id: request.thread_id,
+            call_id: request.call_id,
+            approved: request.approved,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema, Validate)]
+pub struct AgentThreadControlRequest {
+    #[validate(custom(
+        function = "crate::schemas::validation::validate_non_blank",
+        message = "thread_id must not be empty"
+    ))]
+    pub thread_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct AgentControlResponse {
+    pub thread_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delivered: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<AgentStatusValue>,
+}
+
+impl From<AgentControlResult> for AgentControlResponse {
+    fn from(result: AgentControlResult) -> Self {
+        Self {
+            thread_id: result.thread_id,
+            delivered: result.delivered,
+            status: result.status.map(Into::into),
         }
     }
 }
@@ -804,6 +623,7 @@ impl From<crate::domain::services::agent::WorkspaceMigrationOutcome>
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use slab_agent::{
         config::{AgentConfig, AgentToolChoice},
         port::ThreadMessageRecord,
@@ -812,9 +632,6 @@ mod tests {
         ConversationMessage, ConversationMessageContent, ConversationToolCall,
         ConversationToolFunction, StructuredOutput,
     };
-    use validator::Validate;
-
-    use super::*;
 
     #[test]
     fn openai_input_string_translates_to_single_user_message() {
@@ -876,12 +693,10 @@ mod tests {
                 .unwrap();
 
         let command = req.to_agent_command("session-1".into());
-        let AgentCommand::CreateResponse { request_id, session_id, config, messages } = command
-        else {
+        let AgentCommand::CreateResponse { session_id, config, messages } = command else {
             panic!("expected create response command");
         };
 
-        assert_eq!(request_id, None);
         assert_eq!(session_id, "session-1");
         assert_eq!(config.model, "gpt-x");
         assert_eq!(config.system_prompt.as_deref(), Some("be brief"));
@@ -901,104 +716,19 @@ mod tests {
         .unwrap();
 
         let command = req.to_agent_command("session-1".into());
-        let AgentCommand::AppendInput { request_id, thread_id, content } = command else {
+        let AgentCommand::AppendInput { thread_id, content } = command else {
             panic!("expected append input command");
         };
 
-        assert_eq!(request_id, None);
         assert_eq!(thread_id, "thread-1");
         assert_eq!(content, "new turn");
-    }
-
-    #[test]
-    fn slab_client_messages_map_to_agent_commands() {
-        let restore = AgentCommand::from(AgentResponsesClientMessage::SessionRestore {
-            request_id: Some("req-restore".into()),
-            session_id: "session-1".into(),
-        });
-        assert!(matches!(
-            restore,
-            AgentCommand::RestoreSession { request_id: Some(ref id), session_id }
-                if id == "req-restore" && session_id == "session-1"
-        ));
-
-        let create = AgentCommand::from(AgentResponsesClientMessage::ResponseCreate {
-            request_id: Some("req-create".into()),
-            session_id: "session-1".into(),
-            config: Box::new(AgentConfigInput { model: Some("mock".into()), ..Default::default() }),
-            messages: vec![MessageInput {
-                role: "user".into(),
-                content: "hello".into(),
-                ..Default::default()
-            }],
-        });
-        assert!(matches!(
-            create,
-            AgentCommand::CreateResponse {
-                request_id: Some(ref id),
-                session_id,
-                ref config,
-                ref messages,
-            } if id == "req-create"
-                && session_id == "session-1"
-                && config.model == "mock"
-                && messages.len() == 1
-                && messages[0].content.rendered_text() == "hello"
-        ));
-
-        let input = AgentCommand::from(AgentResponsesClientMessage::Input {
-            request_id: Some("req-input".into()),
-            thread_id: "thread-1".into(),
-            content: "next".into(),
-        });
-        assert!(matches!(
-            input,
-            AgentCommand::AppendInput { request_id: Some(ref id), thread_id, content }
-                if id == "req-input" && thread_id == "thread-1" && content == "next"
-        ));
-
-        let approval = AgentCommand::from(AgentResponsesClientMessage::ApprovalResolve {
-            request_id: Some("req-approval".into()),
-            thread_id: "thread-1".into(),
-            call_id: "call-1".into(),
-            approved: true,
-        });
-        assert!(matches!(
-            approval,
-            AgentCommand::ResolveApproval {
-                request_id: Some(ref id),
-                thread_id,
-                call_id,
-                approved: true,
-            } if id == "req-approval" && thread_id == "thread-1" && call_id == "call-1"
-        ));
-
-        let interrupt = AgentCommand::from(AgentResponsesClientMessage::Interrupt {
-            request_id: Some("req-interrupt".into()),
-            thread_id: "thread-1".into(),
-        });
-        assert!(matches!(
-            interrupt,
-            AgentCommand::Interrupt { request_id: Some(ref id), thread_id }
-                if id == "req-interrupt" && thread_id == "thread-1"
-        ));
-
-        let shutdown = AgentCommand::from(AgentResponsesClientMessage::Shutdown {
-            request_id: Some("req-shutdown".into()),
-            thread_id: "thread-1".into(),
-        });
-        assert!(matches!(
-            shutdown,
-            AgentCommand::Shutdown { request_id: Some(ref id), thread_id }
-                if id == "req-shutdown" && thread_id == "thread-1"
-        ));
     }
 
     use crate::schemas::chat::{ChatToolCall, ChatToolFunction};
 
     use super::{
-        AgentConfigInput, AgentResponsesClientMessage, AgentStructuredOutputInput,
-        AgentThreadMessageResponse, AgentToolChoiceInput, MessageInput,
+        AgentConfigInput, AgentStructuredOutputInput, AgentThreadMessageResponse,
+        AgentToolChoiceInput, MessageInput,
     };
 
     #[test]
@@ -1022,19 +752,15 @@ mod tests {
 
     #[test]
     fn agent_config_input_rejects_out_of_range_tool_controls() {
-        let message = AgentResponsesClientMessage::ResponseCreate {
-            request_id: None,
-            session_id: "session-1".into(),
-            config: Box::new(AgentConfigInput {
-                tool_concurrency: Some(5),
-                invalid_tool_call_retries: Some(4),
-                tool_choice: Some(AgentToolChoiceInput::Tool { name: " ".into() }),
-                ..AgentConfigInput::default()
-            }),
-            messages: Vec::new(),
+        let config = AgentConfigInput {
+            tool_concurrency: Some(5),
+            invalid_tool_call_retries: Some(4),
+            tool_choice: Some(AgentToolChoiceInput::Tool { name: " ".into() }),
+            ..AgentConfigInput::default()
         };
+        let mut errors = ValidationErrors::new();
+        validate_agent_config(&mut errors, &config);
 
-        let errors = message.validate().expect_err("invalid config");
         assert!(errors.field_errors().contains_key("tool_concurrency"));
         assert!(errors.field_errors().contains_key("invalid_tool_call_retries"));
         assert!(errors.field_errors().contains_key("tool_choice.name"));

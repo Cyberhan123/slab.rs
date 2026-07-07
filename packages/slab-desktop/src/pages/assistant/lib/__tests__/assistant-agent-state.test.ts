@@ -2,7 +2,6 @@ import { SERVER_BASE_URL } from '@slab/api/config'
 import { describe, expect, it } from 'vitest'
 
 import type {
-  AgentResponsesServerMessage,
   AssistantMessageRecord,
   AssistantThought,
 } from '../assistant-types'
@@ -11,7 +10,6 @@ import {
   agentResponsesSseUrl,
   agentResponsesWebSocketUrl,
   parseAssistantSlashCommand,
-  serverMessageThreadId,
   toAgentConfig,
   updateLastAssistantMessage,
   withThoughts,
@@ -206,45 +204,9 @@ describe('assistant agent state helpers', () => {
     )
   })
 
-  it('extracts event keys and server message thread ids safely', () => {
+  it('extracts event keys safely', () => {
     expect(agentEventKey('{"thread_id":"thread-1","sequence_number":2}')).toBe('thread-1:2')
     expect(agentEventKey('{"thread_id":"thread-1","sequence_number":"2"}')).toBeNull()
     expect(agentEventKey('not json')).toBeNull()
-
-    expect(
-      serverMessageThreadId({
-        accepted: true,
-        request_id: 'req-1',
-        thread_id: 'thread-1',
-        type: 'agent.ack',
-      } as AgentResponsesServerMessage)
-    ).toBe('thread-1')
-    expect(
-      serverMessageThreadId({
-        code: 'server_error',
-        message: 'boom',
-        request_id: 'req-2',
-        thread_id: 'thread-2',
-        type: 'agent.error',
-      } as AgentResponsesServerMessage)
-    ).toBe('thread-2')
-    expect(
-      serverMessageThreadId({
-        messages: [],
-        request_id: 'req-3',
-        session_id: 'session-1',
-        thread: {
-          completion_text: null,
-          config_json: '{}',
-          created_at: '2026-01-01T00:00:00Z',
-          depth: 0,
-          id: 'thread-3',
-          session_id: 'session-1',
-          status: 'completed',
-          updated_at: '2026-01-01T00:00:00Z',
-        },
-        type: 'agent.session.restored',
-      } as AgentResponsesServerMessage)
-    ).toBe('thread-3')
   })
 })

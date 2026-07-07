@@ -38,13 +38,12 @@ import Sender from "@/pages/assistant/components/sender.tsx"
 import {
     getAssistantErrorDescription,
     getAssistantMessageTextContent,
-    type AgentResponsesServerMessage,
+    type AgentHistoryResponse,
 } from "./assistant-context"
 import { AssistantModelSwitchDialog } from "./components/assistant-model-switch-dialog"
 import { AssistantSessionSheet } from "./components/assistant-session-sheet"
 import { useGreeting } from "./hooks/use-greeting"
 import { useAssistantSessions } from "./hooks/use-assistant-sessions"
-import { nextId } from "./lib/assistant-agent-state"
 import { projectRestoreSession } from "./lib/openai-responses"
 import {
     createConversationLabel,
@@ -54,11 +53,6 @@ import {
     type ModelRuntimeStatus,
 } from "./lib/assistant-page-state"
 import { createChat } from "./lib/message-provider"
-
-type RestoredSessionMessage = Extract<
-    AgentResponsesServerMessage,
-    { type: "agent.session.restored" }
->
 
 type AssistantChatPaneProps = {
     disabled: boolean
@@ -71,7 +65,7 @@ type AssistantChatPaneProps = {
     transport: ReturnType<ReturnType<typeof createChat>["transport"]>
 }
 
-function toChatMessages(response: RestoredSessionMessage): UIMessage[] {
+function toChatMessages(response: AgentHistoryResponse): UIMessage[] {
     return projectRestoreSession(response.messages, response.responses)
         .map((record): UIMessage | null => {
             const text = getAssistantMessageTextContent(record.message).trim()
@@ -195,12 +189,25 @@ function Assistant() {
         setCurrentSessionId: setCurConversation,
         updateSessionLabel,
     } = useAssistantSessions()
-    const restoreSessionMutation = api.useMutation("post", "/v1/agents/responses", {
-        meta: {
-            skipGlobalErrorToast: true,
+    const {
+        data: restoredSession,
+        error: restoreSessionError,
+        isLoading: isRestoreSessionLoading,
+    } = api.useQuery(
+        "get",
+        "/v1/sessions/{id}/agent-history",
+        {
+            params: {
+                path: { id: curConversation ?? "" },
+            },
         },
-    })
-    const restoreSession = restoreSessionMutation.mutateAsync
+        {
+            enabled: Boolean(curConversation),
+            meta: {
+                skipGlobalErrorToast: true,
+            },
+        }
+    )
 
     const assistantModels = useAiModel({
         capability: "chat_generation",
@@ -251,6 +258,24 @@ function Assistant() {
         t("pages.assistant.sessionSummary.currentSession")
 
     useEffect(() => {
+        setIsHistoryLoading(isRestoreSessionLoading)
+    }, [isRestoreSessionLoading])
+
+    useEffect(() => {
+        if (!restoreSessionError) {
+            return
+        }
+
+        toast.error(t("pages.assistant.toast.failedToLoadSession"), {
+            description: getAssistantErrorDescription(
+                restoreSessionError,
+                t("pages.assistant.toast.unknownError"),
+                t
+            ),
+        })
+    }, [restoreSessionError, t])
+
+    useEffect(() => {
         if (!curConversation) {
             setRestoredMessages([])
             setRestoredThreadId(null)
@@ -260,62 +285,21 @@ function Assistant() {
             return
         }
 
-        let disposed = false
-        setIsHistoryLoading(true)
-        setRestoredMessages([])
-        setRestoredThreadId(null)
-        setActiveConversation(undefined)
-        setMessageCount(0)
-
-        void restoreSession({
-                body: {
-                    request_id: nextId("request"),
-                    session_id: curConversation,
-                    type: "agent.session.restore",
-                },
-            })
-            .then((response) => {
-                if (disposed) {
-                    return
-                }
-
-                if (response.type === "agent.session.restored") {
-                    const nextMessages = toChatMessages(response)
-                    setActiveConversation(response.session_id)
-                    setRestoredMessages(nextMessages)
-                    setRestoredThreadId(response.thread?.id ?? null)
-                    setMessageCount(nextMessages.length)
-                    return
-                }
-
-                if (response.type === "agent.error") {
-                    toast.error(t("pages.assistant.toast.failedToLoadSession"), {
-                        description: response.message,
-                    })
-                }
-            })
-            .catch((error) => {
-                if (disposed) {
-                    return
-                }
-
-                toast.error(t("pages.assistant.toast.failedToLoadSession"), {
-                    description: getAssistantErrorDescription(error, t("pages.assistant.toast.unknownError"), t),
-                })
-            })
-            .finally(() => {
-                if (disposed) {
-                    return
-                }
-
-                setIsHistoryLoading(false)
-                setRestoreVersion((value) => value + 1)
-            })
-
-        return () => {
-            disposed = true
+        if (!restoredSession || restoredSession.session_id !== curConversation) {
+            setRestoredMessages([])
+            setRestoredThreadId(null)
+            setActiveConversation(undefined)
+            setMessageCount(0)
+            return
         }
-    }, [curConversation, restoreSession, t])
+
+        const nextMessages = toChatMessages(restoredSession)
+        setActiveConversation(restoredSession.session_id)
+        setRestoredMessages(nextMessages)
+        setRestoredThreadId(restoredSession.thread?.id ?? null)
+        setMessageCount(nextMessages.length)
+        setRestoreVersion((value) => value + 1)
+    }, [curConversation, restoredSession])
 
     const prepareSelectedModel = useCallback(async () => {
         if (!selectedModelId) {

@@ -10,6 +10,7 @@ import {
   restoreSession,
   selectAssistantSession,
   startFullstackDev,
+  type AgentThreadMessageResponse,
   type FullstackDevEnvironment,
   type ManagedDevProcess,
   type SessionResponse,
@@ -74,8 +75,8 @@ describe.sequential("assistant e2e", () => {
     await expectAssistantPageText(page, reply.text)
 
     const restored = await restoreSession(testEnv.serverBaseUrl, session.id)
-    expect(restored.messages.some((message) => message.role === "user" && message.content === prompt)).toBe(true)
-    expect(restored.messages.some((message) => message.role === "assistant" && message.content.trim().length > 0)).toBe(true)
+    expect(restored.messages.some((message: AgentThreadMessageResponse) => message.role === "user" && message.content === prompt)).toBe(true)
+    expect(restored.messages.some((message: AgentThreadMessageResponse) => message.role === "assistant" && message.content.trim().length > 0)).toBe(true)
 
     await page.getByTestId("assistant-summary-desktop-new-session-button").click()
     const secondSessionId = await waitForCurrentAssistantSession(
