@@ -9,7 +9,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use dashmap::DashMap;
 use serde_json::Value;
 use slab_jsonrpc::{
-    application_error_response, id_key, parse_message, request as rpc_request, success_response,
+    APPLICATION_ERROR, JSONRPC_VERSION, JSONRPCError, JSONRPCErrorError, JSONRPCMessage,
+    JSONRPCRequest, JSONRPCResponse, RequestId,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{Mutex, mpsc, oneshot};
@@ -173,11 +174,11 @@ impl PluginSidecarRuntimeClient {
         mut request: PluginRuntimeCallRequest,
     ) -> Result<PluginRuntimeCallResponse, AppCoreError> {
         let child = self.ensure_child().await?;
-        let id = Value::String(format!(
+        let id = RequestId::String(format!(
             "plugin-call-{}",
             self.inner.request_id.fetch_add(1, Ordering::Relaxed)
         ));
-        let key = id_key(&id);
+        let key = id.to_string();
         if !request.blocked_fetch_origins.iter().any(|origin| origin == &self.inner.api_base_url) {
             request.blocked_fetch_origins.push(self.inner.api_base_url.clone());
         }
@@ -185,12 +186,15 @@ impl PluginSidecarRuntimeClient {
         let params = serde_json::to_value(&request).map_err(|error| {
             AppCoreError::Internal(format!("failed to serialize plugin runtime call: {error}"))
         })?;
-        let payload =
-            serde_json::to_string(&rpc_request(id, "plugin.call", params)).map_err(|error| {
-                AppCoreError::Internal(format!(
-                    "failed to serialize plugin runtime JSON-RPC: {error}"
-                ))
-            })?;
+        let payload = serialize_wire_message(&JSONRPCMessage::Request(JSONRPCRequest {
+            id,
+            method: "plugin.call".to_owned(),
+            params: Some(params),
+            trace: None,
+        }))
+        .map_err(|error| {
+            AppCoreError::Internal(format!("failed to serialize plugin runtime JSON-RPC: {error}"))
+        })?;
 
         let (tx, rx) = oneshot::channel();
         child.pending.lock().await.insert(key.clone(), tx);
@@ -392,7 +396,7 @@ async fn read_runtime_line(
     outbound: RuntimeOutbound,
     inner: Arc<PluginSidecarRuntimeClientInner>,
 ) {
-    let incoming = match parse_message(&line) {
+    let incoming = match parse_wire_message(&line) {
         Ok(value) => value,
         Err(error) => {
             tracing::warn!(
@@ -404,29 +408,73 @@ async fn read_runtime_line(
         }
     };
 
-    if let Some(method) = incoming.method.clone() {
-        if method == "runtime.ready" {
-            tracing::info!(runtime = inner.kind.process_label(), "plugin runtime reported ready");
-            return;
+    match incoming {
+        JSONRPCMessage::Notification(notification) => {
+            if notification.method == "runtime.ready" {
+                tracing::info!(
+                    runtime = inner.kind.process_label(),
+                    "plugin runtime reported ready"
+                );
+            }
         }
-        let Some(id) = incoming.id.clone() else {
-            return;
-        };
-        let result = handle_runtime_host_request(&inner, &method, incoming.params).await;
-        send_child_response(&outbound, id, result);
-        return;
+        JSONRPCMessage::Request(request) => {
+            if request.method == "runtime.ready" {
+                tracing::info!(
+                    runtime = inner.kind.process_label(),
+                    "plugin runtime reported ready"
+                );
+                return;
+            }
+            let result = handle_runtime_host_request(
+                &inner,
+                &request.method,
+                request.params.unwrap_or(Value::Null),
+            )
+            .await;
+            send_child_response(&outbound, request.id, result);
+        }
+        JSONRPCMessage::Response(response) => {
+            if let Some(sender) = pending.lock().await.remove(&response.id.to_string()) {
+                let _ = sender.send(Ok(response.result));
+            }
+        }
+        JSONRPCMessage::Error(error) => {
+            if let Some(sender) = pending.lock().await.remove(&error.id.to_string()) {
+                let _ = sender.send(Err(error.error.message));
+            }
+        }
     }
+}
 
-    let Some(id) = incoming.id.as_ref().map(id_key) else {
-        return;
+fn parse_wire_message(line: &str) -> Result<JSONRPCMessage, serde_json::Error> {
+    let mut value = serde_json::from_str::<Value>(line)?;
+    if value.get("jsonrpc").and_then(Value::as_str) != Some(JSONRPC_VERSION) {
+        return serde_json::from_value(Value::Null);
+    }
+    if let Value::Object(object) = &mut value {
+        object.remove("jsonrpc");
+    }
+    serde_json::from_value(value)
+}
+
+fn serialize_wire_message(message: &JSONRPCMessage) -> serde_json::Result<String> {
+    let mut value = serde_json::to_value(message)?;
+    if let Value::Object(object) = &mut value {
+        object.insert("jsonrpc".to_owned(), Value::String(JSONRPC_VERSION.to_owned()));
+    }
+    serde_json::to_string(&value)
+}
+
+fn send_child_response(outbound: &RuntimeOutbound, id: RequestId, result: Result<Value, String>) {
+    let response = match result {
+        Ok(result) => JSONRPCMessage::Response(JSONRPCResponse { id, result }),
+        Err(message) => JSONRPCMessage::Error(JSONRPCError {
+            error: JSONRPCErrorError { code: APPLICATION_ERROR, data: None, message },
+            id,
+        }),
     };
-    if let Some(sender) = pending.lock().await.remove(&id) {
-        let response = if let Some(error) = incoming.error {
-            Err(error.message)
-        } else {
-            Ok(incoming.result.unwrap_or(Value::Null))
-        };
-        let _ = sender.send(response);
+    if let Ok(line) = serialize_wire_message(&response) {
+        let _ = outbound.send_line(line);
     }
 }
 
@@ -478,16 +526,6 @@ async fn handle_runtime_host_request(
             serde_json::to_value(payload).map_err(|error| error.to_string())
         }
         _ => Err(format!("unknown {} host method `{method}`", inner.kind.process_label())),
-    }
-}
-
-fn send_child_response(outbound: &RuntimeOutbound, id: Value, result: Result<Value, String>) {
-    let response = match result {
-        Ok(result) => success_response(id, result),
-        Err(message) => application_error_response(id, message),
-    };
-    if let Ok(line) = serde_json::to_string(&response) {
-        let _ = outbound.send_line(line);
     }
 }
 
