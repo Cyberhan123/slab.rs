@@ -30,6 +30,9 @@ pub struct AgentService {
 pub struct RestoredAgentSession {
     pub thread: Option<ThreadSnapshot>,
     pub messages: Vec<ThreadMessageRecord>,
+    /// Complete OpenAI-Responses-canonical `Response` JSON objects, one per
+    /// agent run, oldest first. Empty for pre-migration history.
+    pub responses: Vec<serde_json::Value>,
 }
 
 impl AgentService {
@@ -112,11 +115,34 @@ impl AgentService {
         session_id: &str,
     ) -> Result<RestoredAgentSession, AppCoreError> {
         let thread = self.list_session_threads(session_id).await?.into_iter().next();
-        let messages = match thread.as_ref() {
-            Some(thread) => self.list_thread_messages(&thread.id).await?,
-            None => Vec::new(),
+        let (messages, responses) = match thread.as_ref() {
+            Some(thread) => {
+                let messages = self.list_thread_messages(&thread.id).await?;
+                let responses = self
+                    .store
+                    .list_thread_responses(&thread.id)
+                    .await
+                    .map_err(|e| AppCoreError::Internal(e.to_string()))?
+                    .into_iter()
+                    .filter_map(|record| {
+                        serde_json::from_str::<serde_json::Value>(&record.response_json)
+                            .map_err(|error| {
+                                tracing::warn!(
+                                    run_id = %record.run_id,
+                                    thread_id = %record.thread_id,
+                                    %error,
+                                    "stored agent response_json is not valid JSON; skipping"
+                                );
+                                error
+                            })
+                            .ok()
+                    })
+                    .collect::<Vec<_>>();
+                (messages, responses)
+            }
+            None => (Vec::new(), Vec::new()),
         };
-        Ok(RestoredAgentSession { thread, messages })
+        Ok(RestoredAgentSession { thread, messages, responses })
     }
 
     /// List persisted messages for a thread in replay order.

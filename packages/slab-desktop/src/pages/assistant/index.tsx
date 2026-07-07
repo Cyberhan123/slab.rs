@@ -45,7 +45,7 @@ import { AssistantSessionSheet } from "./components/assistant-session-sheet"
 import { useGreeting } from "./hooks/use-greeting"
 import { useAssistantSessions } from "./hooks/use-assistant-sessions"
 import { nextId } from "./lib/assistant-agent-state"
-import { projectAgentThreadMessages } from "./lib/assistant-message-projection"
+import { projectRestoreSession } from "./lib/openai-responses"
 import {
     createConversationLabel,
     getSelectedModelStatusLabel,
@@ -72,7 +72,7 @@ type AssistantChatPaneProps = {
 }
 
 function toChatMessages(response: RestoredSessionMessage): UIMessage[] {
-    return projectAgentThreadMessages(response.messages, response.thread?.status ?? undefined)
+    return projectRestoreSession(response.messages, response.responses)
         .map((record): UIMessage | null => {
             const text = getAssistantMessageTextContent(record.message).trim()
 

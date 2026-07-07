@@ -1,92 +1,119 @@
 import type { UIMessage, UIMessageChunk } from 'ai'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import OpenAI from 'openai'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { SlabChatTransport } from '../chat-transport'
+import type { ResponseOutputItem, ResponseStreamEvent } from '../openai-responses/types'
+import { FakeWebSocket } from './fake-websocket'
 
-function userMessage(text: string): UIMessage {
+/** Build an async iterable of canonical events (stands in for the SDK `Stream`). */
+function eventStream(events: ResponseStreamEvent[]): AsyncIterable<ResponseStreamEvent> {
   return {
-    id: 'user-message',
-    parts: [{ text, type: 'text' }],
-    role: 'user',
+    async *[Symbol.asyncIterator]() {
+      for (const event of events) {
+        yield event
+      }
+    },
   }
 }
 
-function responseFromText(text: string) {
-  const stream = new ReadableStream({
-    start(controller) {
-      controller.enqueue(new TextEncoder().encode(text))
-      controller.close()
-    },
-  })
+function userMessage(text: string): UIMessage {
+  return { id: 'user-1', parts: [{ text, type: 'text' }], role: 'user' }
+}
 
-  return new Response(stream, {
-    status: 200,
-    statusText: 'OK',
+const messageItem = { type: 'message', role: 'assistant', content: [] } as unknown as ResponseOutputItem
+const finalizedMessage = {
+  type: 'message',
+  role: 'assistant',
+  content: [{ type: 'output_text', text: 'hi', annotations: [] }],
+} as unknown as ResponseOutputItem
+
+function asEvent(e: unknown): ResponseStreamEvent {
+  return e as ResponseStreamEvent
+}
+
+/** A canonical text-stream sequence ending in response.completed with thread id `tid`. */
+function textRunEvents(tid: string): ResponseStreamEvent[] {
+  return [
+    asEvent({ type: 'response.output_item.added', output_index: 0, item: messageItem, sequence_number: 1 }),
+    asEvent({ type: 'response.output_text.delta', output_index: 0, content_index: 0, delta: 'hi', item_id: 'i', sequence_number: 2 }),
+    asEvent({ type: 'response.output_item.done', output_index: 0, item: finalizedMessage, sequence_number: 3 }),
+    asEvent({
+      type: 'response.completed',
+      sequence_number: 4,
+      response: { id: tid, object: 'response', created_at: 0, status: 'completed', output: [] },
+    }),
+  ]
+}
+
+/** A real `OpenAI` client so `ResponsesWSBase` can derive the WS URL etc.; only
+ * `responses.create` is spied (so the SSE path is deterministic + network-free). */
+function realClient(): OpenAI {
+  return new OpenAI({
+    apiKey: 'sess',
+    baseURL: 'http://localhost:3000/v1/agents',
+    dangerouslyAllowBrowser: true,
   })
 }
 
-async function collectChunks(stream: ReadableStream<UIMessageChunk>) {
+function mockClient(events: ResponseStreamEvent[]) {
+  const client = realClient()
+  const create = vi.spyOn(client.responses, 'create')
+  create.mockResolvedValue(eventStream(events) as never)
+  return { client, create }
+}
+
+function mockRejectingClient(message = 'network down') {
+  const client = realClient()
+  const create = vi.spyOn(client.responses, 'create')
+  create.mockRejectedValue(new Error(message))
+  return { client, create }
+}
+
+async function collectChunks(stream: ReadableStream<UIMessageChunk>): Promise<UIMessageChunk[]> {
   const chunks: UIMessageChunk[] = []
   const reader = stream.getReader()
-
   while (true) {
+    // eslint-disable-next-line no-await-in-loop -- sequential stream reads
     const { done, value } = await reader.read()
     if (done) break
     chunks.push(value)
   }
-
   return chunks
 }
 
-describe('SlabChatTransport', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
+const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 
-  it('uses the configured fetch through the base transport send path', async () => {
-    const globalFetch = vi.fn(() => {
-      throw new Error('global fetch should not be called')
-    })
-    vi.stubGlobal('fetch', globalFetch)
+const sendArgs = (transport: SlabChatTransport<UIMessage>, messages: UIMessage[]) =>
+  transport.sendMessages({ chatId: 'c', messages, trigger: 'submit-message' } as Parameters<
+    SlabChatTransport<UIMessage>['sendMessages']
+  >[0])
 
-    const fetchMock = vi
-      .fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
-      .mockResolvedValue(
-        responseFromText(
-          [
-            'data: {"accepted":true,"action":"response_create","status":"pending","thread_id":"thread-1","type":"agent.ack"}',
-            '',
-            'data: {"thread_id":"thread-1","sequence_number":1,"type":"response.output_text.delta","delta":"hi"}',
-            '',
-            'data: {"thread_id":"thread-1","sequence_number":2,"type":"response.output_text.done","text":"hi"}',
-            '',
-          ].join('\n'),
-        ),
-      )
-    const transport = new SlabChatTransport<UIMessage>({
-      fetch: fetchMock,
-    })
+beforeEach(() => {
+  // Default: the WS handshake auto-fails, so the transport degrades to SSE.
+  FakeWebSocket.reset('fail')
+  vi.stubGlobal('WebSocket', FakeWebSocket)
+})
 
-    const stream = await transport.sendMessages({
-      chatId: 'chat-1',
-      messages: [userMessage('hi')],
-      trigger: 'submit-message',
-    } as Parameters<SlabChatTransport<UIMessage>['sendMessages']>[0])
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
-    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
-    expect(globalFetch).not.toHaveBeenCalled()
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining('/v1/agents/responses'),
-      expect.objectContaining({
-        method: 'POST',
-      }),
-    )
-    expect(requestBody).toMatchObject({
-      messages: [{ content: 'hi', role: 'user' }],
-      stream: true,
-      type: 'agent.response.create',
-    })
-    expect(await collectChunks(stream)).toEqual([
+describe('SlabChatTransport — SSE fallback (WS handshake fails)', () => {
+  it('falls back to POST /v1/agents/responses and streams canonical events into UI chunks', async () => {
+    const { client, create } = mockClient(textRunEvents('thread-1'))
+    const transport = new SlabChatTransport<UIMessage>({ client, model: 'slab-llama' })
+
+    const stream = await sendArgs(transport, [userMessage('hi')])
+    const chunks = await collectChunks(stream)
+
+    // WS was attempted (a socket was constructed) but the SDK SSE path was used.
+    expect(FakeWebSocket.last).toBeDefined()
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(create.mock.calls[0]?.[0]).toMatchObject({ model: 'slab-llama', input: 'hi', stream: true })
+    expect(create.mock.calls[0]?.[0]).not.toHaveProperty('previous_response_id')
+
+    expect(chunks).toEqual([
       { id: 'assistant-text', type: 'text-start' },
       { delta: 'hi', id: 'assistant-text', type: 'text-delta' },
       { id: 'assistant-text', type: 'text-end' },
@@ -95,143 +122,107 @@ describe('SlabChatTransport', () => {
     ])
   })
 
-  it('keeps Slab request adaptation when a caller prepares the request', async () => {
-    const fetchMock = vi
-      .fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
-      .mockResolvedValue(responseFromText('data: {"type":"response.completed"}\n\n'))
-    const prepareSendMessagesRequest = vi.fn(async (request) => ({
-      api: 'http://localhost/custom/responses',
-      body: request.body,
-      credentials: 'include' as RequestCredentials,
-      headers: {
-        ...request.headers,
-        'x-test': '1',
-      },
-    }))
-    const transport = new SlabChatTransport<UIMessage>({
-      body: {
-        messages: [userMessage('body fallback')],
-      },
-      fetch: fetchMock,
-      prepareSendMessagesRequest,
-    })
+  it('chains the next turn on previous_response_id from response.completed (SSE)', async () => {
+    const { client, create } = mockClient(textRunEvents('thread-9'))
+    const transport = new SlabChatTransport<UIMessage>({ client })
 
-    await transport.sendMessages({
-      chatId: 'chat-1',
-      messages: [userMessage('hello')],
-      trigger: 'submit-message',
-    } as Parameters<SlabChatTransport<UIMessage>['sendMessages']>[0])
+    await collectChunks(await sendArgs(transport, [userMessage('first')]))
+    expect(create.mock.calls[0]?.[0]).not.toHaveProperty('previous_response_id')
 
-    const requestInit = fetchMock.mock.calls[0]?.[1]
-    const requestBody = JSON.parse(String(requestInit?.body))
-    expect(prepareSendMessagesRequest).toHaveBeenCalledWith(
-      expect.objectContaining({
-        api: expect.stringContaining('/v1/agents/responses'),
-        body: expect.objectContaining({
-          stream: true,
-          type: 'agent.response.create',
-        }),
-      }),
-    )
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://localhost/custom/responses')
-    expect(new Headers(requestInit?.headers).get('x-test')).toBe('1')
-    expect(requestInit?.credentials).toBe('include')
-    expect(requestBody).toMatchObject({
-      messages: [{ content: 'hello', role: 'user' }],
-      stream: true,
-      type: 'agent.response.create',
+    await collectChunks(await sendArgs(transport, [userMessage('second')]))
+    expect(create.mock.calls[1]?.[0]).toMatchObject({ input: 'second', previous_response_id: 'thread-9' })
+  })
+
+  it('starts with previous_response_id when constructed with a restored threadId (SSE)', async () => {
+    const { client, create } = mockClient(textRunEvents('thread-restored'))
+    const transport = new SlabChatTransport<UIMessage>({ client, threadId: 'thread-restored' })
+
+    await collectChunks(await sendArgs(transport, [userMessage('continue')]))
+
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      input: 'continue',
+      previous_response_id: 'thread-restored',
     })
   })
 
-  it('sends agent input after the stream ack supplies a thread id', async () => {
-    const fetchMock = vi
-      .fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
-      .mockResolvedValueOnce(
-        responseFromText(
-          'data: {"accepted":true,"action":"response_create","status":"pending","thread_id":"thread-1","type":"agent.ack"}\n\n',
-        ),
-      )
-      .mockResolvedValueOnce(responseFromText('data: {"type":"response.completed"}\n\n'))
-    const transport = new SlabChatTransport<UIMessage>({
-      fetch: fetchMock,
-    })
+  it('emits an error + finish when the SSE create() rejects', async () => {
+    const { client, create } = mockRejectingClient('network down')
+    const transport = new SlabChatTransport<UIMessage>({ client })
 
-    await collectChunks(
-      await transport.sendMessages({
-        chatId: 'chat-1',
-        messages: [userMessage('first')],
-        trigger: 'submit-message',
-      } as Parameters<SlabChatTransport<UIMessage>['sendMessages']>[0]),
-    )
-    await collectChunks(
-      await transport.sendMessages({
-        chatId: 'chat-1',
-        messages: [userMessage('next')],
-        trigger: 'submit-message',
-      } as Parameters<SlabChatTransport<UIMessage>['sendMessages']>[0]),
-    )
+    const chunks = await collectChunks(await sendArgs(transport, [userMessage('hi')]))
 
-    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
-      content: 'next',
-      stream: true,
-      thread_id: 'thread-1',
-      type: 'agent.input',
-    })
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(chunks[0]).toMatchObject({ type: 'error', errorText: 'network down' })
+    expect(chunks.at(-1)).toMatchObject({ type: 'finish', finishReason: 'error' })
   })
 
-  it('starts a fresh response create when no restored thread id is supplied', async () => {
-    const fetchMock = vi
-      .fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
-      .mockResolvedValue(responseFromText('data: {"type":"response.completed"}\n\n'))
-    const transport = new SlabChatTransport<UIMessage>({
-      fetch: fetchMock,
-      model: 'model-restored',
-      sessionId: 'session-restored',
-    })
+  it('reconnectToStream returns null (no server resumable stream)', async () => {
+    const { client } = mockClient([])
+    const transport = new SlabChatTransport<UIMessage>({ client })
+    expect(await transport.reconnectToStream({ chatId: 'c' })).toBeNull()
+  })
+})
 
-    await collectChunks(
-      await transport.sendMessages({
-        chatId: 'chat-1',
-        messages: [userMessage('fresh restored session')],
-        trigger: 'submit-message',
-      } as Parameters<SlabChatTransport<UIMessage>['sendMessages']>[0]),
-    )
+describe('SlabChatTransport — WebSocket primary', () => {
+  beforeEach(() => FakeWebSocket.reset('manual'))
 
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
-      config: {
-        model: 'model-restored',
-      },
-      messages: [{ content: 'fresh restored session', role: 'user' }],
-      session_id: 'session-restored',
-      stream: true,
-      type: 'agent.response.create',
-    })
+  /** Drive the captured fake socket through a full canonical turn. */
+  async function driveWsTurn(events: ResponseStreamEvent[]): Promise<void> {
+    // Let execute() construct the WS (it runs when the stream is first read).
+    await tick()
+    const fake = FakeWebSocket.last
+    if (!fake) throw new Error('FakeWebSocket was not constructed')
+    fake.simOpen()
+    // awaitWsOpen resolves → runWsTurn registers listeners + sends response.create:
+    await tick()
+    for (const event of events) {
+      fake.simMessage(JSON.stringify(event))
+      // eslint-disable-next-line no-await-in-loop -- sequential frame simulation
+      await tick()
+    }
+  }
+
+  it('uses the WS transport when it establishes and does NOT call responses.create', async () => {
+    const { client, create } = mockClient(textRunEvents('thread-ws'))
+    const transport = new SlabChatTransport<UIMessage>({ client, model: 'slab-llama' })
+
+    const stream = await sendArgs(transport, [userMessage('hi')])
+    const chunksPromise = collectChunks(stream)
+
+    await driveWsTurn(textRunEvents('thread-ws'))
+    const chunks = await chunksPromise
+
+    // WS path taken — SSE never touched.
+    expect(create).not.toHaveBeenCalled()
+    // The transport sent a canonical `response.create` client event.
+    expect(FakeWebSocket.last?.sent[0]).toMatch(/"type":"response.create"/)
+    expect(FakeWebSocket.last?.sent[0]).toMatch(/"input":"hi"/)
+
+    expect(chunks).toEqual([
+      { id: 'assistant-text', type: 'text-start' },
+      { delta: 'hi', id: 'assistant-text', type: 'text-delta' },
+      { id: 'assistant-text', type: 'text-end' },
+      { type: 'finish-step' },
+      { finishReason: 'stop', type: 'finish' },
+    ])
   })
 
-  it('continues restored sessions when a page-level restore supplies the thread id', async () => {
-    const fetchMock = vi
-      .fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
-      .mockResolvedValue(responseFromText('data: {"type":"response.completed"}\n\n'))
-    const transport = new SlabChatTransport<UIMessage>({
-      fetch: fetchMock,
-      model: 'model-restored',
-      sessionId: 'session-restored',
-      threadId: 'thread-restored',
-    })
+  it('chains the next turn on the response.completed thread id (WS)', async () => {
+    const { client, create } = mockClient(textRunEvents('never'))
+    const transport = new SlabChatTransport<UIMessage>({ client })
 
-    await collectChunks(
-      await transport.sendMessages({
-        chatId: 'chat-1',
-        messages: [userMessage('continue restored')],
-        trigger: 'submit-message',
-      } as Parameters<SlabChatTransport<UIMessage>['sendMessages']>[0]),
-    )
+    // First turn (WS) → captures thread-42 from response.completed.
+    const chunks1 = collectChunks(await sendArgs(transport, [userMessage('one')]))
+    await driveWsTurn(textRunEvents('thread-42'))
+    await chunks1
 
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
-      content: 'continue restored',
-      stream: true,
-      thread_id: 'thread-restored',
-      type: 'agent.input',
-    })
+    // Second turn (WS) → carries previous_response_id = thread-42.
+    const chunks2 = collectChunks(await sendArgs(transport, [userMessage('two')]))
+    await driveWsTurn(textRunEvents('thread-42'))
+    await chunks2
+
+    expect(create).not.toHaveBeenCalled()
+    expect(FakeWebSocket.last?.sent[0]).toMatch(/"previous_response_id":"thread-42"/)
+    expect(FakeWebSocket.last?.sent[0]).toMatch(/"input":"two"/)
   })
 })

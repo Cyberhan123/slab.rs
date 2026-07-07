@@ -23,7 +23,16 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
     let store_for_agent: Arc<dyn slab_agent::port::AgentStorePort> =
         Arc::clone(&store) as Arc<dyn slab_agent::port::AgentStorePort>;
     let event_hub = Arc::new(AgentEventHub::new());
-    let control = build_agent_control(ctx, Arc::clone(&store), Arc::clone(&event_hub));
+    let response_observer = Arc::new(
+        super::response_persistence::ResponsePersistenceObserver::new(Arc::clone(&store_for_agent)),
+    );
+    let composite_notify: Arc<dyn slab_agent::AgentNotifyPort> =
+        Arc::new(super::event_hub::CompositeNotifyPort::new(vec![
+            Arc::clone(&event_hub) as Arc<dyn slab_agent::AgentNotifyPort>,
+            Arc::clone(&response_observer) as Arc<dyn slab_agent::AgentNotifyPort>,
+        ]));
+    let control =
+        build_agent_control(ctx, Arc::clone(&store), Arc::clone(&event_hub), composite_notify);
     let service = AgentService::new(control, store_for_agent, Arc::clone(&event_hub));
     let runtime = AgentRuntimeReloader::new((*ctx.model_state).clone(), service.control());
     schedule_agent_runtime_reload(runtime.clone());
@@ -47,7 +56,8 @@ fn schedule_agent_runtime_reload(agent_runtime: AgentRuntimeReloader) {
 fn build_agent_control(
     ctx: &AppContext,
     store: Arc<AnyStore>,
-    notify: Arc<AgentEventHub>,
+    event_hub: Arc<AgentEventHub>,
+    notify_port: Arc<dyn slab_agent::AgentNotifyPort>,
 ) -> Arc<AgentControl> {
     let llm = Arc::new(super::adapter::ServerLlmAdapter::new(Arc::clone(&ctx.model_state)));
     let memory_store = Arc::clone(&store);
@@ -101,8 +111,7 @@ fn build_agent_control(
     )));
 
     let tool_router = Arc::new(tool_router);
-    let notify_port: Arc<dyn slab_agent::AgentNotifyPort> = notify.clone();
-    let approval_port: Arc<dyn slab_agent::ApprovalPort> = notify;
+    let approval_port: Arc<dyn slab_agent::ApprovalPort> = event_hub;
     let settings = ctx.pmid.config();
     let (trace, trace_dir): (Arc<dyn AgentTraceSink>, Option<PathBuf>) =
         if settings.agent.debug && settings.telemetry.enabled {

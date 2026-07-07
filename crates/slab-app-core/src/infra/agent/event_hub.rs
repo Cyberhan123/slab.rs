@@ -146,6 +146,35 @@ impl AgentNotifyPort for AgentEventHub {
     }
 }
 
+/// Notify port that fans out status changes and turn events to a list of
+/// [`AgentNotifyPort`]s. Used to wire additional observers (e.g. the
+/// response-persistence observer) alongside [`AgentEventHub`].
+#[derive(Default)]
+pub struct CompositeNotifyPort {
+    inner: Vec<Arc<dyn AgentNotifyPort>>,
+}
+
+impl CompositeNotifyPort {
+    pub fn new(inner: Vec<Arc<dyn AgentNotifyPort>>) -> Self {
+        Self { inner }
+    }
+}
+
+#[async_trait]
+impl AgentNotifyPort for CompositeNotifyPort {
+    async fn on_status_change(&self, thread_id: &str, status: ThreadStatus) {
+        for port in &self.inner {
+            port.on_status_change(thread_id, status).await;
+        }
+    }
+
+    async fn on_turn_event(&self, thread_id: &str, event: &TurnEvent) {
+        for port in &self.inner {
+            port.on_turn_event(thread_id, event).await;
+        }
+    }
+}
+
 #[async_trait]
 impl ApprovalPort for AgentEventHub {
     async fn request_approval(

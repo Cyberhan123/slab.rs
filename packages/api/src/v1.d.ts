@@ -1376,6 +1376,13 @@ export interface components {
         } | {
             messages: components["schemas"]["AgentThreadMessageResponse"][];
             request_id?: string | null;
+            /**
+             * Complete OpenAI-Responses-canonical `Response` objects, one per
+             * agent run (oldest first). Modeled as `unknown[]` here because
+             * utoipa cannot generate the slab-proto Response tree; the
+             * `openai` SDK types are the source of truth on the client side.
+             */
+            responses?: unknown[];
             session_id: string;
             thread?: null | components["schemas"]["AgentThreadResponse"];
             /** @enum {string} */

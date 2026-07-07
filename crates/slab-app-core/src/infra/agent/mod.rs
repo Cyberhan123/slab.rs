@@ -6,5 +6,7 @@ pub mod event_hub;
 pub(crate) mod hooks;
 pub(crate) mod memory;
 pub(crate) mod memory_breaker;
+pub mod openai_response;
 pub(crate) mod plugin_capability;
+pub mod response_persistence;
 pub(crate) mod runtime;

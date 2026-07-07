@@ -126,7 +126,7 @@ impl From<AgentStructuredOutputInput> for DomainStructuredOutput {
 }
 
 /// A single message in the initial conversation.
-#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, ToSchema)]
 pub struct MessageInput {
     pub role: String,
     pub content: String,
@@ -147,6 +147,233 @@ impl From<MessageInput> for slab_types::ConversationMessage {
             tool_call_id: v.tool_call_id,
             tool_calls: v.tool_calls.into_iter().map(Into::into).collect(),
         }
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// OpenAI-Responses-canonical request body (`client.responses.create({...})`)
+// ──────────────────────────────────────────────────────────────────────────
+
+/// `POST /v1/agents/responses` body as sent by the official `openai` SDK
+/// (`ResponseCreateParamsBase`). Slab translates `input` + a subset of config;
+/// unknown fields are ignored (no `deny_unknown_fields`) so future SDK fields
+/// don't break the server. `input` is held as a `serde_json::Value` (a string
+/// or an array of input items) so the type is `ToSchema`-derivable.
+#[derive(Debug, Clone, Deserialize, Default, ToSchema)]
+pub struct OpenAICreateRequest {
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub input: serde_json::Value,
+    #[serde(default)]
+    pub instructions: Option<String>,
+    #[serde(default)]
+    pub stream: Option<bool>,
+    #[serde(default)]
+    pub previous_response_id: Option<String>,
+    #[serde(default)]
+    pub temperature: Option<f32>,
+    #[serde(default)]
+    pub top_p: Option<f32>,
+    #[serde(default)]
+    pub max_output_tokens: Option<u32>,
+    #[serde(default)]
+    pub tool_choice: Option<serde_json::Value>,
+    #[serde(default)]
+    pub reasoning: Option<OpenAIReasoningInput>,
+    #[serde(default)]
+    pub text: Option<OpenAITextInput>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default, ToSchema)]
+pub struct OpenAIReasoningInput {
+    #[serde(default)]
+    pub effort: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default, ToSchema)]
+pub struct OpenAITextInput {
+    #[serde(default)]
+    pub format: Option<serde_json::Value>,
+}
+
+impl OpenAICreateRequest {
+    /// Translate the OpenAI `input` into slab `MessageInput`s.
+    pub fn to_messages(&self) -> Vec<MessageInput> {
+        openai_input_to_messages(&self.input)
+    }
+
+    /// Translate the OpenAI request into slab's `AgentConfigInput`
+    /// (then `AgentConfig::from(...)`).
+    pub fn to_config_input(&self) -> AgentConfigInput {
+        AgentConfigInput {
+            model: self.model.clone(),
+            system_prompt: self.instructions.clone(),
+            max_tokens: self.max_output_tokens,
+            temperature: self.temperature,
+            top_p: self.top_p,
+            reasoning_effort: self
+                .reasoning
+                .as_ref()
+                .and_then(|r| r.effort.as_deref())
+                .and_then(parse_reasoning_effort),
+            tool_choice: self.tool_choice.as_ref().and_then(parse_tool_choice),
+            structured_output: self
+                .text
+                .as_ref()
+                .and_then(|t| t.format.as_ref())
+                .and_then(parse_text_format),
+            ..Default::default()
+        }
+    }
+}
+
+fn openai_input_to_messages(input: &serde_json::Value) -> Vec<MessageInput> {
+    match input {
+        serde_json::Value::String(text) => {
+            vec![MessageInput {
+                role: "user".to_owned(),
+                content: text.clone(),
+                ..Default::default()
+            }]
+        }
+        serde_json::Value::Array(items) => {
+            let mut messages: Vec<MessageInput> = Vec::new();
+            for item in items {
+                let kind = item.get("type").and_then(|v| v.as_str()).unwrap_or("message");
+                match kind {
+                    "message" => {
+                        let role =
+                            item.get("role").and_then(|v| v.as_str()).unwrap_or("user").to_owned();
+                        let content = render_message_content(item.get("content"));
+                        // Skip empty assistant turns (a bare function_call follows it).
+                        if !(role == "assistant" && content.trim().is_empty()) {
+                            messages.push(MessageInput { role, content, ..Default::default() });
+                        }
+                    }
+                    "function_call" => {
+                        let call = ChatToolCall {
+                            id: item.get("call_id").and_then(|v| v.as_str()).map(str::to_owned),
+                            r#type: "function".to_owned(),
+                            function: crate::schemas::chat::ChatToolFunction {
+                                name: item
+                                    .get("name")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_owned(),
+                                arguments: item
+                                    .get("arguments")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_owned(),
+                            },
+                        };
+                        fold_tool_call(&mut messages, call);
+                    }
+                    "function_call_output" => {
+                        let call_id =
+                            item.get("call_id").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+                        let output = item.get("output").map(render_output).unwrap_or_default();
+                        messages.push(MessageInput {
+                            role: "tool".to_owned(),
+                            content: output,
+                            tool_call_id: Some(call_id),
+                            ..Default::default()
+                        });
+                    }
+                    // reasoning / computer / file_search / mcp / shell / apply_patch / etc.:
+                    // slab has no carrier today; dropped.
+                    _ => {}
+                }
+            }
+            messages
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Concatenate the `text` of `input_text` / `output_text` / `refusal` parts, or
+/// return the bare string content.
+fn render_message_content(content: Option<&serde_json::Value>) -> String {
+    let Some(value) = content else {
+        return String::new();
+    };
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(parts) => parts
+            .iter()
+            .filter_map(|part| {
+                let t = part.get("type").and_then(|v| v.as_str())?;
+                let text = part.get("text").and_then(|v| v.as_str())?;
+                matches!(t, "input_text" | "output_text" | "refusal").then_some(text.to_owned())
+            })
+            .collect::<Vec<_>>()
+            .join(""),
+        _ => String::new(),
+    }
+}
+
+fn render_output(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// OpenAI represents an assistant turn as `[message, function_call, ...]` items;
+/// slab models tool calls as fields on the assistant `MessageInput`. Fold a call
+/// onto the most recent assistant message (creating one if absent).
+fn fold_tool_call(messages: &mut Vec<MessageInput>, call: ChatToolCall) {
+    let needs_new = messages.last().map(|m| m.role != "assistant").unwrap_or(true);
+    if needs_new {
+        messages.push(MessageInput {
+            role: "assistant".to_owned(),
+            content: String::new(),
+            ..Default::default()
+        });
+    }
+    messages.last_mut().expect("assistant message").tool_calls.push(call);
+}
+
+fn parse_reasoning_effort(raw: &str) -> Option<ChatReasoningEffort> {
+    Some(match raw {
+        "none" => ChatReasoningEffort::None,
+        "low" => ChatReasoningEffort::Low,
+        "medium" => ChatReasoningEffort::Medium,
+        "high" => ChatReasoningEffort::High,
+        "minimal" => ChatReasoningEffort::Minimal,
+        _ => return None,
+    })
+}
+
+fn parse_tool_choice(value: &serde_json::Value) -> Option<AgentToolChoiceInput> {
+    match value {
+        serde_json::Value::String(s) => match s.as_str() {
+            "auto" => Some(AgentToolChoiceInput::Auto),
+            "none" => Some(AgentToolChoiceInput::None),
+            "required" => Some(AgentToolChoiceInput::Required),
+            _ => None,
+        },
+        serde_json::Value::Object(obj) => {
+            let name = obj.get("name").and_then(|v| v.as_str()).map(str::to_owned)?;
+            Some(AgentToolChoiceInput::Tool { name })
+        }
+        _ => None,
+    }
+}
+
+fn parse_text_format(value: &serde_json::Value) -> Option<AgentStructuredOutputInput> {
+    let obj = value.as_object()?;
+    let kind = obj.get("type").and_then(|v| v.as_str())?;
+    match kind {
+        "json_object" => Some(AgentStructuredOutputInput::JsonObject),
+        "json_schema" => Some(AgentStructuredOutputInput::JsonSchema {
+            name: obj.get("name").and_then(|v| v.as_str()).map(str::to_owned),
+            description: obj.get("description").and_then(|v| v.as_str()).map(str::to_owned),
+            strict: obj.get("strict").and_then(|v| v.as_bool()),
+            schema: obj.get("schema").cloned().unwrap_or(serde_json::Value::Null),
+        }),
+        _ => None,
     }
 }
 
@@ -332,7 +559,14 @@ pub enum AgentResponsesServerMessage {
         session_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         thread: Option<AgentThreadResponse>,
+        /// Legacy per-message history (chat-completion shape). Retained for
+        /// backward compatibility while the frontend migrates to `responses`.
         messages: Vec<AgentThreadMessageResponse>,
+        /// Complete OpenAI-Responses-canonical `Response` objects, one per agent
+        /// run, oldest first. Serialized verbatim from
+        /// `agent_thread_responses.response_json`.
+        #[serde(skip_serializing_if = "Vec::is_empty", default)]
+        responses: Vec<serde_json::Value>,
     },
     #[serde(rename = "agent.error")]
     Error {
@@ -467,6 +701,61 @@ mod tests {
         ConversationToolFunction, StructuredOutput,
     };
     use validator::Validate;
+
+    use super::*;
+
+    #[test]
+    fn openai_input_string_translates_to_single_user_message() {
+        let req: OpenAICreateRequest =
+            serde_json::from_str(r#"{"model":"m","input":"hello"}"#).unwrap();
+        let messages = req.to_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[0].content, "hello");
+    }
+
+    #[test]
+    fn openai_input_array_groups_function_calls_into_assistant_message() {
+        let req: OpenAICreateRequest = serde_json::from_str(
+            r#"{"input":[
+                {"type":"message","role":"user","content":"hi"},
+                {"type":"message","role":"assistant","content":[{"type":"output_text","text":"thinking"}]},
+                {"type":"function_call","call_id":"c1","name":"search","arguments":"{\"q\":\"x\"}"},
+                {"type":"function_call_output","call_id":"c1","output":"result"}
+            ]}"#,
+        )
+        .unwrap();
+        let messages = req.to_messages();
+        // user, assistant (with folded tool call), tool
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[0].content, "hi");
+        assert_eq!(messages[1].role, "assistant");
+        assert_eq!(messages[1].content, "thinking");
+        assert_eq!(messages[1].tool_calls.len(), 1);
+        assert_eq!(messages[1].tool_calls[0].function.name, "search");
+        assert_eq!(messages[2].role, "tool");
+        assert_eq!(messages[2].tool_call_id.as_deref(), Some("c1"));
+        assert_eq!(messages[2].content, "result");
+    }
+
+    #[test]
+    fn openai_request_maps_to_agent_config_input() {
+        let req: OpenAICreateRequest = serde_json::from_str(
+            r#"{"model":"gpt-x","instructions":"be brief","max_output_tokens":128,
+               "temperature":0.5,"reasoning":{"effort":"high"},
+               "tool_choice":"required","text":{"format":{"type":"json_object"}}}"#,
+        )
+        .unwrap();
+        let config = AgentConfig::from(req.to_config_input());
+        assert_eq!(config.model, "gpt-x");
+        assert_eq!(config.system_prompt.as_deref(), Some("be brief"));
+        assert_eq!(config.max_tokens, Some(128));
+        assert_eq!(config.temperature, Some(0.5));
+        assert!(config.reasoning_effort.is_some());
+        assert!(matches!(config.tool_choice, AgentToolChoice::Required));
+        assert!(config.structured_output.is_some());
+    }
 
     use crate::schemas::chat::{ChatToolCall, ChatToolFunction};
 

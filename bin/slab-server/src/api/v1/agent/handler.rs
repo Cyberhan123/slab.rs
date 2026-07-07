@@ -21,6 +21,7 @@ use slab_app_core::domain::services::{AgentService, WorkspaceService};
 use slab_app_core::error::AppCoreError;
 use slab_app_core::infra::agent::event_hub::AgentEventEnvelope;
 use slab_app_core::schemas::chat::{OpenAiError, OpenAiErrorResponse};
+use slab_types::ConversationMessage;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use utoipa::OpenApi;
@@ -30,10 +31,10 @@ use crate::api::v1::agent::openai_compat::{
 };
 use crate::api::v1::agent::schema::{
     AgentConfigInput, AgentResponsesClientMessage, AgentResponsesServerMessage, AgentStatusValue,
-    MessageInput, WorkspaceMigrationResponse,
+    MessageInput, OpenAICreateRequest, WorkspaceMigrationResponse,
 };
 use crate::api::v1::chat::schema::{ChatToolCall, ChatToolFunction};
-use crate::api::validation::{ValidatedJson, validate};
+use crate::api::validation::validate;
 use crate::error::ServerError;
 
 #[derive(OpenApi)]
@@ -61,10 +62,39 @@ pub fn router() -> Router<Arc<AppState>> {
 struct AgentResponsesQuery {
     transport: Option<String>,
     thread_id: Option<String>,
+    /// Slab session id for the canonical (openai-protocol) WS mode. Browsers
+    /// cannot set headers on a WebSocket handshake, so the SDK carries the
+    /// session as `?token=` (the slab-dialect mode reads it from the first
+    /// client message body instead).
+    #[serde(default)]
+    token: Option<String>,
+}
+
+/// Parsed inbound WS command. Slab-dialect clients send tagged
+/// [`AgentResponsesClientMessage`] frames; canonical (openai-protocol) clients
+/// send a `response.create` event whose body is an [`OpenAICreateRequest`].
+#[derive(Debug)]
+enum InboundCommand {
+    Slab(AgentResponsesClientMessage),
+    ResponseCreate(OpenAICreateRequest),
+}
+
+/// `response.create` client event over the canonical WS channel. The `type`
+/// tag selects the arm; the rest is the standard OpenAI `CreateResponse` body,
+/// reused via [`OpenAICreateRequest`] (the POST path's translators).
+#[derive(Debug, Deserialize)]
+struct OpenAIResponseCreateEvent {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(flatten)]
+    body: OpenAICreateRequest,
 }
 
 struct CommandResult {
-    message: AgentResponsesServerMessage,
+    /// `None` suppresses the slab `agent.ack` / `agent.session.restored` control
+    /// frame — canonical mode relies on the `response.*` events (which carry the
+    /// thread id as `response.id`) instead.
+    message: Option<AgentResponsesServerMessage>,
     subscribe_thread_id: Option<String>,
 }
 
@@ -215,8 +245,21 @@ async fn agent_responses_get(
     ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> Result<Response, AgentCompatError> {
     if let Ok(ws) = ws {
+        // Canonical (openai-protocol) mode is requested via the `slab.responses`
+        // subprotocol. Agree to it so the handshake completes, and remember
+        // whether it was negotiated so the socket speaks the right dialect.
+        let is_canonical = is_canonical_ws_request(&headers);
+        let ws = if is_canonical { ws.protocols(["slab.responses"]) } else { ws };
+        let session_id = query
+            .token
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| bearer_session_id(&headers));
         return Ok(ws
-            .on_upgrade(move |socket| agent_responses_socket(socket, service))
+            .on_upgrade(move |socket| {
+                agent_responses_socket(socket, service, session_id, is_canonical)
+            })
             .into_response());
     }
 
@@ -239,9 +282,11 @@ async fn agent_responses_get(
     post,
     path = "/v1/agents/responses",
     tag = "agents",
-    request_body = AgentResponsesClientMessage,
+    // Standard OpenAI Responses `ResponseCreateParamsBase` body (consumed by
+    // the official `openai` SDK). Not typed here because utoipa can't model the
+    // `input` untagged string|items union; see `OpenAICreateRequest`.
     responses(
-        (status = 200, description = "OpenAI Responses-canonical Response object"),
+        (status = 200, description = "OpenAI Responses-canonical Response object; an SSE stream of ResponseStreamEvent when `stream: true`"),
         (status = 400, description = "Bad request", body = OpenAiErrorResponse),
         (status = 404, description = "Thread not found", body = OpenAiErrorResponse),
         (status = 429, description = "Thread is already running", body = OpenAiErrorResponse),
@@ -250,29 +295,69 @@ async fn agent_responses_get(
 )]
 async fn agent_responses_post(
     State(service): State<AgentService>,
-    ValidatedJson(command): ValidatedJson<AgentResponsesClientMessage>,
-) -> Result<Json<slab_proto::openai::Response>, AgentCompatError> {
-    match command {
-        AgentResponsesClientMessage::ResponseCreate { session_id, config, messages, .. } => {
-            let model = config.model.clone().unwrap_or_default();
-            let agent_messages = messages.into_iter().map(Into::into).collect();
-            let thread_id = service.spawn(session_id, (*config).into(), agent_messages).await?;
-            let subscription = service.subscribe_events(&thread_id);
-            let response = build_response(AdapterInput {
-                response_id: &thread_id,
-                model: &model,
-                created_at_unix: Utc::now().timestamp() as f64,
-                service_tier: None,
-                envelopes: &subscription.replay,
-                ..Default::default()
-            });
-            Ok(Json(response))
+    headers: HeaderMap,
+    Json(req): Json<OpenAICreateRequest>,
+) -> Result<Response, AgentCompatError> {
+    let session_id = bearer_session_id(&headers);
+    let model = req.model.clone().unwrap_or_default();
+    let config = req.to_config_input().into();
+    let messages: Vec<ConversationMessage> =
+        req.to_messages().into_iter().map(Into::into).collect();
+
+    // Multi-turn: `previous_response_id` chains on the slab thread id; otherwise
+    // spawn a fresh thread.
+    let thread_id = match req.previous_response_id.clone() {
+        Some(prev) if !prev.is_empty() => {
+            service.send_input(&prev, last_user_text(&messages)).await?;
+            prev
         }
-        _ => Err(AgentCompatError(ServerError::BadRequest(
-            "POST /v1/agents/responses only accepts response.create commands; use the WebSocket for other actions"
-                .to_owned(),
-        ))),
+        _ => service.spawn(session_id, config, messages).await?,
+    };
+
+    if req.stream.unwrap_or(false) {
+        // Canonical SSE stream of ResponseStreamEvent (reuses the GET resume
+        // path's assembler).
+        Ok(agent_events_sse(service, thread_id, None))
+    } else {
+        let subscription = service.subscribe_events(&thread_id);
+        let response = build_response(AdapterInput {
+            response_id: &thread_id,
+            model: &model,
+            created_at_unix: Utc::now().timestamp() as f64,
+            service_tier: None,
+            envelopes: &subscription.replay,
+            ..Default::default()
+        });
+        Ok(Json(response).into_response())
     }
+}
+
+/// Read the slab session id from an `Authorization: Bearer <session>` header
+/// (the `openai` SDK is constructed with `apiKey: <session>`). Falls back to the
+/// assistant default when absent.
+fn bearer_session_id(headers: &HeaderMap) -> String {
+    let default = "assistant-default".to_owned();
+    let Some(value) = headers.get(axum::http::header::AUTHORIZATION).and_then(|h| h.to_str().ok())
+    else {
+        return default;
+    };
+    let trimmed = value.trim();
+    let token = trimmed
+        .strip_prefix("Bearer ")
+        .or_else(|| trimmed.strip_prefix("bearer "))
+        .unwrap_or(trimmed);
+    let token = token.trim();
+    if token.is_empty() { default } else { token.to_owned() }
+}
+
+/// Render the last user message's text (the new turn for `send_input`).
+fn last_user_text(messages: &[ConversationMessage]) -> String {
+    messages
+        .iter()
+        .rev()
+        .find(|m| m.role == "user")
+        .map(|m| m.content.rendered_text())
+        .unwrap_or_default()
 }
 
 #[utoipa::path(
@@ -301,8 +386,14 @@ async fn migrate_workspace(
 // WebSocket transport
 // ---------------------------------------------------------------------------
 
-async fn agent_responses_socket(socket: WebSocket, service: AgentService) {
-    if let Err(error) = run_agent_responses_socket(socket, service).await {
+async fn agent_responses_socket(
+    socket: WebSocket,
+    service: AgentService,
+    session_id: String,
+    is_canonical: bool,
+) {
+    if let Err(error) = run_agent_responses_socket(socket, service, session_id, is_canonical).await
+    {
         tracing::warn!(error = %error, "agent responses websocket ended");
     }
 }
@@ -310,6 +401,8 @@ async fn agent_responses_socket(socket: WebSocket, service: AgentService) {
 async fn run_agent_responses_socket(
     socket: WebSocket,
     service: AgentService,
+    session_id: String,
+    is_canonical: bool,
 ) -> Result<(), String> {
     let (mut sender, mut receiver) = socket.split();
     let mut active_thread_id: Option<String> = None;
@@ -336,7 +429,7 @@ async fn run_agent_responses_socket(
                         continue;
                     }
                 };
-                let command = match parse_client_message(&payload) {
+                let command = match parse_client_message(&payload, is_canonical) {
                     Ok(command) => command,
                     Err(error) => {
                         let frame = openai_error_frame(OpenAiError {
@@ -350,7 +443,7 @@ async fn run_agent_responses_socket(
                         continue;
                     }
                 };
-                match handle_agent_command(&service, command).await {
+                match handle_agent_command(&service, command, &session_id).await {
                     Ok(result) => {
                         let CommandResult { message, subscribe_thread_id } = result;
                         if let Some(thread_id) = subscribe_thread_id.as_deref() {
@@ -377,7 +470,9 @@ async fn run_agent_responses_socket(
                                 .await?;
                             }
                         }
-                        send_server_message(&mut sender, &message).await?;
+                        if let Some(message) = message {
+                            send_server_message(&mut sender, &message).await?;
+                        }
                     }
                     Err(error) => {
                         let frame = server_error_to_frame(error);
@@ -424,16 +519,59 @@ async fn recv_active_event(
     }
 }
 
-fn parse_client_message(payload: &str) -> Result<AgentResponsesClientMessage, String> {
+fn parse_client_message(payload: &str, is_canonical: bool) -> Result<InboundCommand, String> {
+    if is_canonical {
+        let event = serde_json::from_str::<OpenAIResponseCreateEvent>(payload)
+            .map_err(|error| format!("invalid canonical response.create event: {error}"))?;
+        if event.kind != "response.create" {
+            return Err(format!(
+                "canonical WS mode only accepts `response.create`; got type={:?}",
+                event.kind
+            ));
+        }
+        return Ok(InboundCommand::ResponseCreate(event.body));
+    }
     let command = serde_json::from_str::<AgentResponsesClientMessage>(payload)
         .map_err(|error| format!("invalid agent responses message: {error}"))?;
-    validate(command).map_err(|error| error.to_string())
+    validate(command).map_err(|error| error.to_string()).map(InboundCommand::Slab)
+}
+
+/// True when the WS client offered the `slab.responses` subprotocol — selects
+/// canonical (openai-protocol) mode for the socket.
+fn is_canonical_ws_request(headers: &HeaderMap) -> bool {
+    headers
+        .get("sec-websocket-protocol")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.split(',').any(|proto| proto.trim() == "slab.responses"))
+        .unwrap_or(false)
 }
 
 async fn handle_agent_command(
     service: &AgentService,
-    command: AgentResponsesClientMessage,
+    command: InboundCommand,
+    session_id: &str,
 ) -> Result<CommandResult, ServerError> {
+    match command {
+        InboundCommand::ResponseCreate(req) => {
+            let subscribe_thread_id =
+                handle_canonical_response_create(service, session_id, req).await?;
+            // Canonical mode: no `agent.ack` — the `response.*` events emitted by
+            // `envelope_to_events` carry the thread id as `response.id`.
+            Ok(CommandResult { message: None, subscribe_thread_id })
+        }
+        InboundCommand::Slab(command) => {
+            let (message, subscribe_thread_id) = handle_slab_command(service, command).await?;
+            Ok(CommandResult { message: Some(message), subscribe_thread_id })
+        }
+    }
+}
+
+/// Slab-dialect dispatch (the original WS protocol). Behavior unchanged — each
+/// arm returns its control frame + the thread id to subscribe to.
+async fn handle_slab_command(
+    service: &AgentService,
+    command: AgentResponsesClientMessage,
+) -> Result<(AgentResponsesServerMessage, Option<String>), ServerError> {
     let action = command.action();
     let request_id = command.request_id().map(str::to_owned);
 
@@ -446,14 +584,15 @@ async fn handle_agent_command(
                 session_id,
                 thread: restored.thread.map(Into::into),
                 messages: restored.messages.into_iter().map(Into::into).collect(),
+                responses: restored.responses,
             };
-            Ok(CommandResult { message, subscribe_thread_id })
+            Ok((message, subscribe_thread_id))
         }
         AgentResponsesClientMessage::ResponseCreate { session_id, config, messages, .. } => {
             let messages = messages.into_iter().map(Into::into).collect();
             let thread_id = service.spawn(session_id, (*config).into(), messages).await?;
-            Ok(CommandResult {
-                message: AgentResponsesServerMessage::Ack {
+            Ok((
+                AgentResponsesServerMessage::Ack {
                     request_id,
                     action,
                     accepted: true,
@@ -461,13 +600,13 @@ async fn handle_agent_command(
                     status: Some(AgentStatusValue::Pending),
                     delivered: None,
                 },
-                subscribe_thread_id: Some(thread_id),
-            })
+                Some(thread_id),
+            ))
         }
         AgentResponsesClientMessage::Input { thread_id, content, .. } => {
             service.send_input(&thread_id, content).await?;
-            Ok(CommandResult {
-                message: AgentResponsesServerMessage::Ack {
+            Ok((
+                AgentResponsesServerMessage::Ack {
                     request_id,
                     action,
                     accepted: true,
@@ -475,13 +614,13 @@ async fn handle_agent_command(
                     status: None,
                     delivered: None,
                 },
-                subscribe_thread_id: Some(thread_id),
-            })
+                Some(thread_id),
+            ))
         }
         AgentResponsesClientMessage::ApprovalResolve { thread_id, call_id, approved, .. } => {
             let delivered = service.approve_call(&thread_id, &call_id, approved);
-            Ok(CommandResult {
-                message: AgentResponsesServerMessage::Ack {
+            Ok((
+                AgentResponsesServerMessage::Ack {
                     request_id,
                     action,
                     accepted: delivered,
@@ -489,13 +628,13 @@ async fn handle_agent_command(
                     status: None,
                     delivered: Some(delivered),
                 },
-                subscribe_thread_id: Some(thread_id),
-            })
+                Some(thread_id),
+            ))
         }
         AgentResponsesClientMessage::Interrupt { thread_id, .. } => {
             service.interrupt(&thread_id).await?;
-            Ok(CommandResult {
-                message: AgentResponsesServerMessage::Ack {
+            Ok((
+                AgentResponsesServerMessage::Ack {
                     request_id,
                     action,
                     accepted: true,
@@ -503,13 +642,13 @@ async fn handle_agent_command(
                     status: Some(AgentStatusValue::Interrupting),
                     delivered: None,
                 },
-                subscribe_thread_id: Some(thread_id),
-            })
+                Some(thread_id),
+            ))
         }
         AgentResponsesClientMessage::Shutdown { thread_id, .. } => {
             service.shutdown(&thread_id).await?;
-            Ok(CommandResult {
-                message: AgentResponsesServerMessage::Ack {
+            Ok((
+                AgentResponsesServerMessage::Ack {
                     request_id,
                     action,
                     accepted: true,
@@ -517,10 +656,33 @@ async fn handle_agent_command(
                     status: Some(AgentStatusValue::Shutdown),
                     delivered: None,
                 },
-                subscribe_thread_id: Some(thread_id),
-            })
+                Some(thread_id),
+            ))
         }
     }
+}
+
+/// OpenAI-canonical `response.create` over WS — mirrors the POST path: reuse
+/// the Phase F translators (`OpenAICreateRequest::to_messages` /
+/// `to_config_input`), branch on `previous_response_id`, and return the thread
+/// id to subscribe to. The session id comes from the `?token=` query (browsers
+/// can't set WS headers).
+async fn handle_canonical_response_create(
+    service: &AgentService,
+    session_id: &str,
+    req: OpenAICreateRequest,
+) -> Result<Option<String>, ServerError> {
+    let config = req.to_config_input().into();
+    let messages: Vec<ConversationMessage> =
+        req.to_messages().into_iter().map(Into::into).collect();
+    let thread_id = match req.previous_response_id.clone() {
+        Some(prev) if !prev.is_empty() => {
+            service.send_input(&prev, last_user_text(&messages)).await?;
+            prev
+        }
+        _ => service.spawn(session_id.to_owned(), config, messages).await?,
+    };
+    Ok(Some(thread_id))
 }
 
 // ---------------------------------------------------------------------------
@@ -669,7 +831,8 @@ fn serialize_json<T: Serialize>(value: &T) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentApi, AgentCompatError, map_server_error, parse_client_message, should_replay_event,
+        AgentApi, AgentCompatError, InboundCommand, map_server_error, parse_client_message,
+        should_replay_event,
     };
     use crate::error::ServerError;
     use axum::http::StatusCode;
@@ -680,8 +843,12 @@ mod tests {
     fn parses_typed_client_message() {
         let command = parse_client_message(
             r#"{"type":"agent.input","request_id":"r1","thread_id":"thread-1","content":"hello"}"#,
+            false,
         )
         .expect("valid command");
+        let InboundCommand::Slab(command) = command else {
+            panic!("slab-dialect parse should yield the Slab variant");
+        };
 
         assert_eq!(command.request_id(), Some("r1"));
     }
@@ -690,10 +857,51 @@ mod tests {
     fn rejects_blank_client_message_fields() {
         let error = parse_client_message(
             r#"{"type":"agent.input","request_id":"r1","thread_id":" ","content":"hello"}"#,
+            false,
         )
         .expect_err("invalid command");
 
         assert!(error.contains("thread_id"));
+    }
+
+    #[test]
+    fn parses_canonical_response_create_event() {
+        let command = parse_client_message(
+            r#"{"type":"response.create","model":"slab-llama","input":"hi","stream":true}"#,
+            true,
+        )
+        .expect("valid canonical event");
+        let InboundCommand::ResponseCreate(req) = command else {
+            panic!("canonical parse should yield the ResponseCreate variant");
+        };
+
+        assert_eq!(req.model.as_deref(), Some("slab-llama"));
+        assert_eq!(req.input.as_str(), Some("hi"));
+        assert!(req.stream.unwrap_or(false));
+        assert!(req.previous_response_id.is_none());
+    }
+
+    #[test]
+    fn canonical_mode_chains_previous_response_id() {
+        let command = parse_client_message(
+            r#"{"type":"response.create","model":"m","input":"more","previous_response_id":"thread-9"}"#,
+            true,
+        )
+        .expect("valid canonical event");
+        let InboundCommand::ResponseCreate(req) = command else {
+            panic!("canonical parse should yield the ResponseCreate variant");
+        };
+
+        assert_eq!(req.previous_response_id.as_deref(), Some("thread-9"));
+    }
+
+    #[test]
+    fn canonical_mode_rejects_non_response_create_type() {
+        let error =
+            parse_client_message(r#"{"type":"agent.input","thread_id":"t","content":"hi"}"#, true)
+                .expect_err("slab-dialect type should be rejected in canonical mode");
+
+        assert!(error.contains("response.create"), "error should mention response.create: {error}");
     }
 
     #[test]

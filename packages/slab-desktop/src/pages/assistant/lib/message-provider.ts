@@ -77,9 +77,7 @@ type ChatNextOptions<
   after?: Array<UIMessage<METADATA, DATA_PARTS, TOOLS>>
 }
 
-type ChatTransportOptions<
-    UI_MESSAGE extends UIMessage,
-> = SlabChatTransportOptions<UI_MESSAGE>
+type ChatTransportOptions = SlabChatTransportOptions
 
 type StreamTextOptions = {
   id?: string
@@ -512,7 +510,7 @@ export async function* streamMessageParts<
   }
 }
 
-export function createAiMessageFaker<
+export function createSlabAiMessage<
   METADATA = unknown,
   DATA_PARTS extends UIDataTypes = UIDataTypes,
   TOOLS extends UITools = UITools,
@@ -1370,7 +1368,7 @@ export function createAiMessageFaker<
         return cloneMessage(turns[index].message)
       },
 
-      transport(options: ChatTransportOptions<UIMessage<METADATA, DATA_PARTS, TOOLS>> = {}) {
+      transport(options: ChatTransportOptions = {}) {
          
          return new SlabChatTransport<UIMessage<METADATA, DATA_PARTS, TOOLS>>({
           ...options
@@ -1402,5 +1400,5 @@ export function createChat<
   DATA_PARTS extends UIDataTypes = UIDataTypes,
   TOOLS extends UITools = UITools,
 >(options: AiMessageFakerOptions = {}) {
-  return createAiMessageFaker<METADATA, DATA_PARTS, TOOLS>(options).chat()
+  return createSlabAiMessage<METADATA, DATA_PARTS, TOOLS>(options).chat()
 }
