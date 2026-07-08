@@ -6,10 +6,11 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use chrono::Utc;
 use slab_agent::AgentRuntime;
 use slab_agent::config::AgentConfig;
 use slab_agent::error::AgentError;
-use slab_agent::port::{AgentStorePort, ThreadMessageRecord, ThreadSnapshot};
+use slab_agent::port::{AgentStorePort, ThreadListFilter, ThreadMessageRecord, ThreadSnapshot};
 use slab_types::ConversationMessage;
 use slab_utils::session_snapshot::{
     build_migration_snapshot, project_id_from_root, write_session_snapshot_atomic,
@@ -20,14 +21,12 @@ use crate::domain::models::{
 };
 use crate::error::AppCoreError;
 use crate::infra::agent::event_hub::{AgentEventHub, AgentEventSubscription};
-use crate::infra::db::repository::agent_response::AgentResponseStore;
 
 /// Thin wrapper around [`AgentRuntime`] that exposes an application-layer API.
 #[derive(Clone)]
 pub struct AgentService {
     runtime: AgentRuntime,
     store: Arc<dyn AgentStorePort>,
-    response_store: Arc<dyn AgentResponseStore>,
     events: Arc<AgentEventHub>,
 }
 
@@ -44,10 +43,9 @@ impl AgentService {
     pub fn new(
         runtime: AgentRuntime,
         store: Arc<dyn AgentStorePort>,
-        response_store: Arc<dyn AgentResponseStore>,
         events: Arc<AgentEventHub>,
     ) -> Self {
-        Self { runtime, store, response_store, events }
+        Self { runtime, store, events }
     }
 
     /// Spawn a root agent thread.  Returns the new thread ID.
@@ -172,40 +170,111 @@ impl AgentService {
             .map_err(|e| AppCoreError::Internal(e.to_string()))
     }
 
+    /// List root agent threads with limit/cursor pagination (harness
+    /// `thread/list`).
+    pub async fn list_session_threads_filtered(
+        &self,
+        session_id: &str,
+        filter: &ThreadListFilter,
+    ) -> Result<Vec<ThreadSnapshot>, AppCoreError> {
+        self.store
+            .list_session_threads_filtered(session_id, filter)
+            .await
+            .map_err(|e| AppCoreError::Internal(e.to_string()))
+    }
+
     /// Restore the latest root thread for a chat session and its persisted messages.
     pub async fn restore_session(
         &self,
         session_id: &str,
     ) -> Result<RestoredAgentSession, AppCoreError> {
         let thread = self.list_session_threads(session_id).await?.into_iter().next();
-        let (messages, responses) = match thread.as_ref() {
-            Some(thread) => {
-                let messages = self.list_thread_messages(&thread.id).await?;
-                let responses = self
-                    .response_store
-                    .list_thread_responses(&thread.id)
-                    .await
-                    .map_err(|e| AppCoreError::Internal(e.to_string()))?
-                    .into_iter()
-                    .filter_map(|record| {
-                        serde_json::from_str::<serde_json::Value>(&record.response_json)
-                            .map_err(|error| {
-                                tracing::warn!(
-                                    run_id = %record.run_id,
-                                    thread_id = %record.thread_id,
-                                    %error,
-                                    "stored agent response_json is not valid JSON; skipping"
-                                );
-                                error
-                            })
-                            .ok()
-                    })
-                    .collect::<Vec<_>>();
-                (messages, responses)
-            }
-            None => (Vec::new(), Vec::new()),
+        let messages = match thread.as_ref() {
+            Some(thread) => self.list_thread_messages(&thread.id).await?,
+            None => Vec::new(),
         };
+        // response_json persistence was removed — only complete messages and
+        // turn state are stored now. The field is retained for interface
+        // stability (`/v1/sessions/{id}/agent-history` still returns it, empty).
+        let responses = Vec::new();
         Ok(RestoredAgentSession { thread, messages, responses })
+    }
+
+    /// Fork a thread: clone its persisted history (messages + turn states) into
+    /// a new child thread at `depth + 1`, without running a turn. An optional
+    /// `model_override` replaces the parent's model on the cloned config.
+    /// Returns the forked child snapshot.
+    pub async fn fork_thread(
+        &self,
+        parent_thread_id: &str,
+        model_override: Option<String>,
+    ) -> Result<ThreadSnapshot, AppCoreError> {
+        let control = self.runtime.control();
+        let child_id = control
+            .fork_thread(parent_thread_id, model_override)
+            .await
+            .map_err(AppCoreError::from)?;
+        control
+            .thread_snapshot(&child_id)
+            .await
+            .map_err(AppCoreError::from)?
+            .ok_or_else(|| AppCoreError::Internal(format!("forked thread missing: {child_id}")))
+    }
+
+    /// Soft-archive a thread by stamping `archived_at`. Archived threads are
+    /// excluded from `thread/list` unless the caller opts in via `include_archived`.
+    pub async fn archive_thread(&self, thread_id: &str) -> Result<ThreadSnapshot, AppCoreError> {
+        let now = Utc::now().to_rfc3339();
+        self.store
+            .archive_thread(thread_id, Some(&now))
+            .await
+            .map_err(|e| AppCoreError::Internal(e.to_string()))?;
+        self.get_thread_snapshot(thread_id).await
+    }
+
+    /// Rollback a thread to the state *through* `to_turn_index` (inclusive):
+    /// deletes persisted messages and turn states with `turn_index > to_turn_index`.
+    /// Refuses while the thread is running — interrupt it first.
+    pub async fn rollback_thread(
+        &self,
+        thread_id: &str,
+        to_turn_index: u32,
+    ) -> Result<ThreadSnapshot, AppCoreError> {
+        let active = self.runtime.control().active_thread_ids().await;
+        if active.iter().any(|id| id == thread_id) {
+            return Err(AppCoreError::Internal(
+                "thread is running; interrupt it before rolling back".to_owned(),
+            ));
+        }
+        let from = to_turn_index
+            .checked_add(1)
+            .ok_or_else(|| AppCoreError::Internal("turn index overflow".to_owned()))?;
+        self.store
+            .delete_turn_states_from(thread_id, from)
+            .await
+            .map_err(|e| AppCoreError::Internal(e.to_string()))?;
+        self.store
+            .delete_thread_messages_from(thread_id, from)
+            .await
+            .map_err(|e| AppCoreError::Internal(e.to_string()))?;
+        self.get_thread_snapshot(thread_id).await
+    }
+
+    /// Return a persisted thread snapshot by id (used by `thread/resume`).
+    pub async fn thread_snapshot(
+        &self,
+        thread_id: &str,
+    ) -> Result<Option<ThreadSnapshot>, AppCoreError> {
+        self.runtime.control().thread_snapshot(thread_id).await.map_err(AppCoreError::from)
+    }
+
+    /// Fetch a thread snapshot or fail with `NotFound`.
+    async fn get_thread_snapshot(&self, thread_id: &str) -> Result<ThreadSnapshot, AppCoreError> {
+        self.store
+            .get_thread(thread_id)
+            .await
+            .map_err(|e| AppCoreError::Internal(e.to_string()))?
+            .ok_or_else(|| AppCoreError::NotFound(format!("agent thread not found: {thread_id}")))
     }
 
     /// List persisted messages for a thread in replay order.

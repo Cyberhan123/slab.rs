@@ -23,3 +23,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_with = { workspace = true , features = ["json"] }
 serde_repr = { workspace = true }
+# Harness protocol contracts (thread/turn/item model). Transport-agnostic:
+# the JSON-RPC envelope types live in `slab-jsonrpc` and are applied by the
+# server dispatcher, so this crate does NOT depend on `slab-jsonrpc`.
+schemars = { workspace = true }
+strum = { workspace = true }

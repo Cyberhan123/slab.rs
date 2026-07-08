@@ -329,6 +329,7 @@ mod tests {
                     completion_text: Some("parent".to_owned()),
                     created_at: now.clone(),
                     updated_at: now,
+                    archived_at: None,
                 },
             );
         }

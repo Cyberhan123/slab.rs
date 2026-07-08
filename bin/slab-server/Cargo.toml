@@ -19,6 +19,7 @@ path = "src/main.rs"
 # Core AI runtime
 slab-agent        = { workspace = true }
 slab-app-core     = { workspace = true, features = ["axum"] }
+slab-cloud-provider = { workspace = true }
 slab-proto        = { workspace = true }
 slab-runtime-core = { workspace = true }
 slab-types        = { workspace = true }

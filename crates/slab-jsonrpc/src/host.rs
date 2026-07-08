@@ -46,6 +46,16 @@ pub trait RequestHandler: Send + Sync + 'static {
     ) -> std::result::Result<Value, String>;
 }
 
+/// Handles inbound JSON-RPC notifications (no response expected).
+///
+/// The line-based [`serve_reader`] drops inbound notifications because the host
+/// there is the initiator. The WebSocket server ([`crate::ws::serve_websocket`])
+/// accepts client→server notifications and routes them here.
+#[async_trait::async_trait]
+pub trait NotificationHandler: Send + Sync + 'static {
+    async fn handle_notification(&self, method: String, params: Value);
+}
+
 #[derive(Clone)]
 pub struct JsonRpcRuntimeHost {
     outbound: mpsc::UnboundedSender<String>,
@@ -283,17 +293,21 @@ fn drain_finished_tasks(tasks: &mut JoinSet<()>) {
 }
 
 #[derive(Debug)]
-struct InvalidVersionMessage {
-    id: Option<RequestId>,
+pub struct InvalidVersionMessage {
+    pub id: Option<RequestId>,
 }
 
 #[derive(Debug)]
-enum ParseWireMessageError {
+pub enum ParseWireMessageError {
     InvalidJson(serde_json::Error),
     InvalidVersion(InvalidVersionMessage),
 }
 
-fn parse_wire_message(line: &str) -> std::result::Result<JSONRPCMessage, ParseWireMessageError> {
+/// Parse a single JSON-RPC wire message, verifying the `jsonrpc: "2.0"`
+/// envelope and stripping it before typed decode.
+pub fn parse_wire_message(
+    line: &str,
+) -> std::result::Result<JSONRPCMessage, ParseWireMessageError> {
     let mut value =
         serde_json::from_str::<Value>(line).map_err(ParseWireMessageError::InvalidJson)?;
     if value.get("jsonrpc").and_then(Value::as_str) != Some(JSONRPC_VERSION) {
@@ -307,11 +321,14 @@ fn parse_wire_message(line: &str) -> std::result::Result<JSONRPCMessage, ParseWi
     serde_json::from_value::<JSONRPCMessage>(value).map_err(ParseWireMessageError::InvalidJson)
 }
 
-fn parse_wire_id(value: &Value) -> Option<RequestId> {
+/// Extract a [`RequestId`] from an otherwise-invalid payload so an error
+/// response can echo the caller's id.
+pub fn parse_wire_id(value: &Value) -> Option<RequestId> {
     value.get("id").cloned().and_then(|id| serde_json::from_value(id).ok())
 }
 
-fn serialize_wire_message(message: &JSONRPCMessage) -> serde_json::Result<String> {
+/// Serialize a typed JSON-RPC message and re-inject the `jsonrpc: "2.0"` field.
+pub fn serialize_wire_message(message: &JSONRPCMessage) -> serde_json::Result<String> {
     let mut value = serde_json::to_value(message)?;
     if let Value::Object(object) = &mut value {
         object.insert("jsonrpc".to_owned(), Value::String(JSONRPC_VERSION.to_owned()));
@@ -319,7 +336,9 @@ fn serialize_wire_message(message: &JSONRPCMessage) -> serde_json::Result<String
     serde_json::to_string(&value)
 }
 
-fn fallback_error_id() -> RequestId {
+/// The request id used when a payload cannot be parsed well enough to recover
+/// the caller's id.
+pub fn fallback_error_id() -> RequestId {
     RequestId::String("parse-error".to_owned())
 }
 

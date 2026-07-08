@@ -62,6 +62,7 @@ export const executableSmokeOperations = [
   { method: "post", path: "/v1/agents/control/approval" },
   { method: "post", path: "/v1/agents/control/interrupt" },
   { method: "post", path: "/v1/agents/control/shutdown" },
+  { method: "get", path: "/v1/agents/harness" },
   { method: "get", path: "/v1/agents/responses" },
   { method: "post", path: "/v1/agents/responses" },
   { method: "get", path: "/v1/audio/transcriptions" },

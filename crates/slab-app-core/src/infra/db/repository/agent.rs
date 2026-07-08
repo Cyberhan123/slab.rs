@@ -3,7 +3,8 @@
 use async_trait::async_trait;
 use slab_agent::port::ThreadStatus;
 use slab_agent::port::{
-    AgentStorePort, ThreadMessageRecord, ThreadSnapshot, ToolCallRecord, TurnStateRecord,
+    AgentStorePort, ThreadListFilter, ThreadMessageRecord, ThreadSnapshot, ToolCallRecord,
+    TurnStateRecord,
 };
 use slab_types::agent::ToolCallStatus;
 use slab_types::{ConversationMessage, ConversationMessageContent};
@@ -34,6 +35,7 @@ struct AgentThreadRow {
     completion_text: Option<String>,
     created_at: String,
     updated_at: String,
+    archived_at: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -74,6 +76,7 @@ impl TryFrom<AgentThreadRow> for ThreadSnapshot {
             completion_text: r.completion_text,
             created_at: r.created_at,
             updated_at: r.updated_at,
+            archived_at: r.archived_at,
         })
     }
 }
@@ -121,8 +124,8 @@ impl AgentStorePort for SqlxStore {
         sqlx::query(
             "INSERT INTO agent_threads \
              (id, session_id, parent_id, depth, status, role_name, config_json, \
-              completion_text, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
+              completion_text, created_at, updated_at, archived_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
              ON CONFLICT(id) DO UPDATE SET \
                session_id=excluded.session_id, \
                parent_id=excluded.parent_id, \
@@ -132,7 +135,8 @@ impl AgentStorePort for SqlxStore {
                config_json=excluded.config_json, \
                completion_text=excluded.completion_text, \
                created_at=agent_threads.created_at, \
-               updated_at=excluded.updated_at",
+               updated_at=excluded.updated_at, \
+               archived_at=excluded.archived_at",
         )
         .bind(&snapshot.id)
         .bind(&snapshot.session_id)
@@ -144,6 +148,7 @@ impl AgentStorePort for SqlxStore {
         .bind(&snapshot.completion_text)
         .bind(&snapshot.created_at)
         .bind(&snapshot.updated_at)
+        .bind(&snapshot.archived_at)
         .execute(&self.pool)
         .await
         .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
@@ -153,7 +158,7 @@ impl AgentStorePort for SqlxStore {
     async fn get_thread(&self, id: &str) -> Result<Option<ThreadSnapshot>, slab_agent::AgentError> {
         let row: Option<AgentThreadRow> = sqlx::query_as(
             "SELECT id, session_id, parent_id, depth, status, role_name, \
-             config_json, completion_text, created_at, updated_at \
+             config_json, completion_text, created_at, updated_at, archived_at \
              FROM agent_threads WHERE id = ?1",
         )
         .bind(id)
@@ -170,7 +175,7 @@ impl AgentStorePort for SqlxStore {
     ) -> Result<Vec<ThreadSnapshot>, slab_agent::AgentError> {
         let rows: Vec<AgentThreadRow> = sqlx::query_as(
             "SELECT id, session_id, parent_id, depth, status, role_name, \
-             config_json, completion_text, created_at, updated_at \
+             config_json, completion_text, created_at, updated_at, archived_at \
              FROM agent_threads WHERE session_id = ?1 AND parent_id IS NULL \
              ORDER BY updated_at DESC, created_at DESC, id ASC",
         )
@@ -178,6 +183,47 @@ impl AgentStorePort for SqlxStore {
         .fetch_all(&self.pool)
         .await
         .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
+
+        rows.into_iter().map(ThreadSnapshot::try_from).collect()
+    }
+
+    async fn list_session_threads_filtered(
+        &self,
+        session_id: &str,
+        filter: &ThreadListFilter,
+    ) -> Result<Vec<ThreadSnapshot>, slab_agent::AgentError> {
+        // Bind all client-influenced values (cursor + limit) — never interpolate.
+        // `before`: a far-future sentinel makes `updated_at < ?` match everything
+        //   when no cursor is supplied (RFC 3339 sorts lexicographically).
+        // `limit`: SQLite treats `LIMIT -1` as no limit.
+        let before = filter.before_updated_at.as_deref().unwrap_or("9999-12-31T23:59:59Z");
+        let limit = filter.limit.map_or(-1i64, |limit| limit as i64);
+        // `include_archived == false` hides threads soft-deleted via `thread/archive`.
+        // Two static literals (no dynamic SQL) — sqlx 0.9's `SqlSafeStr` rejects
+        // built strings, and both branches are compile-time constants.
+        let sql = if filter.include_archived {
+            "SELECT id, session_id, parent_id, depth, status, role_name, \
+             config_json, completion_text, created_at, updated_at, archived_at \
+             FROM agent_threads \
+             WHERE session_id = ?1 AND parent_id IS NULL AND updated_at < ?2 \
+             ORDER BY updated_at DESC, created_at DESC, id ASC \
+             LIMIT ?3"
+        } else {
+            "SELECT id, session_id, parent_id, depth, status, role_name, \
+             config_json, completion_text, created_at, updated_at, archived_at \
+             FROM agent_threads \
+             WHERE session_id = ?1 AND parent_id IS NULL AND updated_at < ?2 \
+             AND archived_at IS NULL \
+             ORDER BY updated_at DESC, created_at DESC, id ASC \
+             LIMIT ?3"
+        };
+        let rows: Vec<AgentThreadRow> = sqlx::query_as(sql)
+            .bind(session_id)
+            .bind(before)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
 
         rows.into_iter().map(ThreadSnapshot::try_from).collect()
     }
@@ -332,12 +378,109 @@ impl AgentStorePort for SqlxStore {
         .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
         Ok(())
     }
+
+    async fn list_turn_states(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<TurnStateRecord>, slab_agent::AgentError> {
+        let rows: Vec<AgentTurnStateRow> = sqlx::query_as(
+            "SELECT thread_id, turn_index, status, input_messages_json, tool_specs_json, \
+             llm_response_json, error, started_at, completed_at \
+             FROM agent_turn_states WHERE thread_id = ?1 ORDER BY turn_index ASC",
+        )
+        .bind(thread_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
+
+        rows.into_iter().map(AgentTurnStateRow::into_record).collect()
+    }
+
+    async fn delete_turn_states_from(
+        &self,
+        thread_id: &str,
+        from_turn_index: u32,
+    ) -> Result<(), slab_agent::AgentError> {
+        sqlx::query("DELETE FROM agent_turn_states WHERE thread_id = ?1 AND turn_index >= ?2")
+            .bind(thread_id)
+            .bind(i64::from(from_turn_index))
+            .execute(&self.pool)
+            .await
+            .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn delete_thread_messages_from(
+        &self,
+        thread_id: &str,
+        from_turn_index: u32,
+    ) -> Result<(), slab_agent::AgentError> {
+        sqlx::query("DELETE FROM agent_thread_messages WHERE thread_id = ?1 AND turn_index >= ?2")
+            .bind(thread_id)
+            .bind(i64::from(from_turn_index))
+            .execute(&self.pool)
+            .await
+            .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn archive_thread(
+        &self,
+        id: &str,
+        archived_at: Option<&str>,
+    ) -> Result<(), slab_agent::AgentError> {
+        sqlx::query(
+            "UPDATE agent_threads SET archived_at = ?1, \
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?2",
+        )
+        .bind(archived_at)
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
+        Ok(())
+    }
+}
+
+/// sqlx row type for the `agent_turn_states` table.
+#[derive(sqlx::FromRow)]
+struct AgentTurnStateRow {
+    thread_id: String,
+    turn_index: i64,
+    status: String,
+    input_messages_json: Option<String>,
+    tool_specs_json: Option<String>,
+    llm_response_json: Option<String>,
+    error: Option<String>,
+    started_at: String,
+    completed_at: Option<String>,
+}
+
+impl AgentTurnStateRow {
+    fn into_record(self) -> Result<TurnStateRecord, slab_agent::AgentError> {
+        let turn_index = u32::try_from(self.turn_index).map_err(|error| {
+            slab_agent::AgentError::Store(format!(
+                "invalid turn_index for '{}': {} ({})",
+                self.thread_id, self.turn_index, error
+            ))
+        })?;
+        Ok(TurnStateRecord {
+            thread_id: self.thread_id,
+            turn_index,
+            status: self.status,
+            input_messages_json: self.input_messages_json,
+            tool_specs_json: self.tool_specs_json,
+            llm_response_json: self.llm_response_json,
+            error: self.error,
+            started_at: self.started_at,
+            completed_at: self.completed_at,
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::infra::db::repository::agent_response::{AgentResponseStore, ThreadResponseRecord};
 
     #[tokio::test]
     async fn turn_state_upsert_preserves_existing_payload_fields() {
@@ -363,6 +506,7 @@ mod tests {
                 completion_text: None,
                 created_at: now.clone(),
                 updated_at: now.clone(),
+                archived_at: None,
             })
             .await
             .expect("thread");
@@ -429,56 +573,6 @@ mod tests {
         assert!(messages[0].message.tool_calls.is_empty());
     }
 
-    #[tokio::test]
-    async fn thread_response_round_trips_and_enforces_checks() {
-        let store = seeded_store().await;
-        let response_json = r#"{"id":"resp_1","object":"response","created_at":0,"status":"completed","output":[]}"#;
-        store
-            .insert_thread_response(&ThreadResponseRecord {
-                run_id: "resp_1".to_owned(),
-                thread_id: "thread-1".to_owned(),
-                session_id: "session-1".to_owned(),
-                turn_index_start: 0,
-                status: "completed".to_owned(),
-                response_json: response_json.to_owned(),
-                created_at: "2026-01-01T00:00:00Z".to_owned(),
-                completed_at: Some("2026-01-01T00:00:01Z".to_owned()),
-            })
-            .await
-            .expect("insert response");
-
-        let responses = store.list_thread_responses("thread-1").await.expect("list responses");
-        assert_eq!(responses.len(), 1);
-        assert_eq!(responses[0].run_id, "resp_1");
-        assert_eq!(responses[0].status, "completed");
-        assert_eq!(responses[0].turn_index_start, 0);
-        assert!(responses[0].response_json.contains("\"object\":\"response\""));
-
-        // json_valid() CHECK rejects non-JSON response_json.
-        let bad_json = sqlx::query(
-            "INSERT INTO agent_thread_responses \
-             (run_id, thread_id, session_id, turn_index_start, status, response_json, \
-              created_at, completed_at) \
-             VALUES ('resp_bad', 'thread-1', 'session-1', 0, 'completed', 'not-json{', \
-             '2026-01-01T00:00:00Z', NULL)",
-        )
-        .execute(&store.pool)
-        .await;
-        assert!(bad_json.is_err(), "json_valid CHECK should reject non-JSON response_json");
-
-        // status CHECK rejects an unknown status.
-        let bad_status = sqlx::query(
-            "INSERT INTO agent_thread_responses \
-             (run_id, thread_id, session_id, turn_index_start, status, response_json, \
-              created_at, completed_at) \
-             VALUES ('resp_bad2', 'thread-1', 'session-1', 0, 'bogus', '{}', \
-             '2026-01-01T00:00:00Z', NULL)",
-        )
-        .execute(&store.pool)
-        .await;
-        assert!(bad_status.is_err(), "status CHECK should reject an unknown status value");
-    }
-
     #[test]
     fn thread_depth_overflow_is_rejected_on_read() {
         let error = ThreadSnapshot::try_from(AgentThreadRow {
@@ -492,6 +586,7 @@ mod tests {
             completion_text: None,
             created_at: "2026-01-01T00:00:00Z".to_owned(),
             updated_at: "2026-01-01T00:00:00Z".to_owned(),
+            archived_at: None,
         })
         .expect_err("invalid depth should fail");
         assert!(error.to_string().contains("invalid agent thread depth"));
@@ -510,6 +605,94 @@ mod tests {
         .into_record()
         .expect_err("invalid turn index should fail");
         assert!(error.to_string().contains("invalid agent thread message turn_index"));
+    }
+
+    #[tokio::test]
+    async fn archive_thread_sets_archived_at_and_hides_from_default_list() {
+        let store = seeded_store().await;
+        store.archive_thread("thread-1", Some("2026-02-01T00:00:00Z")).await.expect("archive");
+        let snap = store.get_thread("thread-1").await.expect("get").expect("present");
+        assert_eq!(snap.archived_at.as_deref(), Some("2026-02-01T00:00:00Z"));
+
+        // Default filter excludes archived; opting in returns it.
+        let hidden = store
+            .list_session_threads_filtered(
+                "session-1",
+                &ThreadListFilter { limit: None, before_updated_at: None, include_archived: false },
+            )
+            .await
+            .expect("list");
+        assert!(hidden.is_empty(), "archived thread hidden by default");
+
+        let shown = store
+            .list_session_threads_filtered(
+                "session-1",
+                &ThreadListFilter { limit: None, before_updated_at: None, include_archived: true },
+            )
+            .await
+            .expect("list");
+        assert_eq!(shown.len(), 1, "archived thread visible when include_archived");
+    }
+
+    #[tokio::test]
+    async fn list_and_delete_turn_states_keep_at_or_below_target() {
+        let store = seeded_store().await;
+        let now = "2026-01-01T00:00:00Z".to_owned();
+        for turn_index in 0u32..3 {
+            store
+                .upsert_turn_state(&TurnStateRecord {
+                    thread_id: "thread-1".to_owned(),
+                    turn_index,
+                    status: "completed".to_owned(),
+                    input_messages_json: None,
+                    tool_specs_json: None,
+                    llm_response_json: None,
+                    error: None,
+                    started_at: now.clone(),
+                    completed_at: Some(now.clone()),
+                })
+                .await
+                .expect("upsert turn state");
+        }
+        let listed = store.list_turn_states("thread-1").await.expect("list");
+        assert_eq!(listed.len(), 3);
+        assert_eq!(listed[0].turn_index, 0);
+        assert_eq!(listed[2].turn_index, 2);
+
+        // keep ≤ 1 → delete turn_index >= 2.
+        store.delete_turn_states_from("thread-1", 2).await.expect("delete");
+        let remaining = store.list_turn_states("thread-1").await.expect("list");
+        assert_eq!(remaining.len(), 2);
+        assert_eq!(remaining.iter().map(|r| r.turn_index).collect::<Vec<_>>(), vec![0, 1]);
+    }
+
+    #[tokio::test]
+    async fn delete_thread_messages_from_removes_at_or_above_target() {
+        let store = seeded_store().await;
+        let now = "2026-01-01T00:00:00Z".to_owned();
+        for (id, turn_index) in [("m0", 0u32), ("m1", 1), ("m2", 2)] {
+            store
+                .insert_thread_message(&ThreadMessageRecord {
+                    id: id.to_owned(),
+                    thread_id: "thread-1".to_owned(),
+                    turn_index,
+                    message: ConversationMessage {
+                        role: "user".to_owned(),
+                        content: ConversationMessageContent::Text(id.to_owned()),
+                        name: None,
+                        tool_call_id: None,
+                        tool_calls: vec![],
+                    },
+                    created_at: now.clone(),
+                })
+                .await
+                .expect("insert message");
+        }
+        // keep ≤ 0 → delete turn_index >= 1.
+        store.delete_thread_messages_from("thread-1", 1).await.expect("delete");
+        let remaining = store.list_thread_messages("thread-1").await.expect("list");
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].turn_index, 0);
     }
 
     async fn seeded_store() -> SqlxStore {
@@ -535,6 +718,7 @@ mod tests {
                 completion_text: None,
                 created_at: now.clone(),
                 updated_at: now,
+                archived_at: None,
             })
             .await
             .expect("thread");

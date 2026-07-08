@@ -183,6 +183,7 @@ impl AgentThread {
             completion_text: None,
             created_at: now.clone(),
             updated_at: now,
+            archived_at: None,
         };
         if let Err(e) = store.upsert_thread(&snapshot).await {
             error!(thread_id, error = %e, "failed to persist thread snapshot");

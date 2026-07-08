@@ -86,6 +86,7 @@ mod tests {
         ("/v1/agents/control/approval", "post"),
         ("/v1/agents/control/interrupt", "post"),
         ("/v1/agents/control/shutdown", "post"),
+        ("/v1/agents/harness", "get"),
         ("/v1/agents/responses", "get"),
         ("/v1/agents/responses", "post"),
         ("/v1/audio/transcriptions", "get"),

@@ -1,5 +1,4 @@
 pub mod agent;
-pub mod agent_response;
 pub mod chat;
 pub mod config;
 pub mod diagnostics;
@@ -12,7 +11,6 @@ pub mod session;
 pub mod task;
 pub mod ui_state;
 
-pub use agent_response::AgentResponseStore;
 pub use chat::ChatStore;
 pub use media_task::MediaTaskStore;
 pub use model::ModelStore;

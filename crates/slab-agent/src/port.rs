@@ -83,6 +83,10 @@ pub struct ThreadSnapshot {
     pub created_at: String,
     /// RFC 3339 last-updated timestamp.
     pub updated_at: String,
+    /// RFC 3339 timestamp the thread was archived, or `None` for a live thread.
+    /// Archived threads are excluded from `list_session_threads_filtered`
+    /// unless the filter opts in via `include_archived`.
+    pub archived_at: Option<String>,
 }
 
 /// Audit record for a single tool call within an agent thread.
@@ -223,6 +227,18 @@ pub trait LlmStreamObserver: Send {
     }
 }
 
+/// Filter / pagination parameters for [`AgentStorePort::list_session_threads_filtered`].
+#[derive(Debug, Clone, Default)]
+pub struct ThreadListFilter {
+    /// Maximum number of threads to return.
+    pub limit: Option<u32>,
+    /// Cursor: only return threads whose `updated_at` sorts strictly before this
+    /// RFC 3339 timestamp (enables `next_cursor`-style pagination).
+    pub before_updated_at: Option<String>,
+    /// Include archived threads in the result (default excludes them).
+    pub include_archived: bool,
+}
+
 /// Port for persisting agent state.
 ///
 /// The host provides an adapter that wraps its SQLx-backed store.
@@ -239,6 +255,19 @@ pub trait AgentStorePort: Send + Sync {
         &self,
         session_id: &str,
     ) -> Result<Vec<ThreadSnapshot>, AgentError>;
+
+    /// Return root thread snapshots for a session, honoring a [`ThreadListFilter`]
+    /// (limit + cursor pagination, archived inclusion). Hosts that do not support
+    /// filtering fall back to the unfiltered [`Self::list_session_threads`].
+    async fn list_session_threads_filtered(
+        &self,
+        session_id: &str,
+        filter: &ThreadListFilter,
+    ) -> Result<Vec<ThreadSnapshot>, AgentError> {
+        // Default ignores the filter so existing adapters keep compiling.
+        let _ = filter;
+        self.list_session_threads(session_id).await
+    }
 
     /// Update only the status (and optional completion text) of an existing thread.
     async fn update_thread_status(
@@ -280,6 +309,48 @@ pub trait AgentStorePort: Send + Sync {
     ///
     /// Hosts that do not need turn-level state can keep this default no-op.
     async fn upsert_turn_state(&self, _record: &TurnStateRecord) -> Result<(), AgentError> {
+        Ok(())
+    }
+
+    /// Return persisted turn-state records for a thread ordered by `turn_index`.
+    ///
+    /// Hosts that do not store turn-level state return an empty list.
+    async fn list_turn_states(&self, _thread_id: &str) -> Result<Vec<TurnStateRecord>, AgentError> {
+        Ok(Vec::new())
+    }
+
+    /// Delete turn-state records with `turn_index >= from_turn_index`.
+    ///
+    /// Used by thread rollback to discard turns after a target index. Hosts that
+    /// do not store turn-level state can keep this default no-op.
+    async fn delete_turn_states_from(
+        &self,
+        _thread_id: &str,
+        _from_turn_index: u32,
+    ) -> Result<(), AgentError> {
+        Ok(())
+    }
+
+    /// Delete persisted messages with `turn_index >= from_turn_index`.
+    ///
+    /// Used by thread rollback to discard messages after a target index. Hosts
+    /// that do not store messages can keep this default no-op.
+    async fn delete_thread_messages_from(
+        &self,
+        _thread_id: &str,
+        _from_turn_index: u32,
+    ) -> Result<(), AgentError> {
+        Ok(())
+    }
+
+    /// Mark a thread archived (`Some`) or restore it (`None`).
+    ///
+    /// Hosts that do not support archiving can keep this default no-op.
+    async fn archive_thread(
+        &self,
+        _id: &str,
+        _archived_at: Option<&str>,
+    ) -> Result<(), AgentError> {
         Ok(())
     }
 }

@@ -1093,6 +1093,19 @@ impl AgentStorePort for PersistingStore {
         self.turn_states.lock().unwrap().push(record.clone());
         Ok(())
     }
+
+    async fn list_turn_states(&self, thread_id: &str) -> Result<Vec<TurnStateRecord>, AgentError> {
+        let mut records: Vec<TurnStateRecord> = self
+            .turn_states
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|record| record.thread_id == thread_id)
+            .cloned()
+            .collect();
+        records.sort_by_key(|record| record.turn_index);
+        Ok(records)
+    }
 }
 
 // ── Mock notify ───────────────────────────────────────────────────────────────
@@ -1315,6 +1328,7 @@ async fn wait_for_terminal_snapshot_polls_persisted_status_when_thread_is_not_ac
             completion_text: None,
             created_at: now.clone(),
             updated_at: now,
+            archived_at: None,
         },
     );
 
@@ -2833,6 +2847,97 @@ async fn agent_control_enforces_depth_limit() {
         matches!(result, Err(AgentError::DepthLimitExceeded { .. })),
         "child agent at depth 1 should exceed limit of 0"
     );
+}
+
+#[tokio::test]
+async fn fork_thread_clones_history_at_depth_plus_one() {
+    let llm = Arc::new(MockLlm::new());
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = Arc::new(ToolRouter::new());
+    let approval = Arc::clone(&notify);
+    let control =
+        Arc::new(AgentControl::new(llm, store_port.clone(), notify, approval, router, 8, 4));
+
+    // Seed a parent thread (depth 0) with two messages and one turn state.
+    let now = "2026-01-01T00:00:00Z".to_owned();
+    let parent_config = AgentConfig { model: "parent-model".into(), ..AgentConfig::default() };
+    store_port
+        .upsert_thread(&ThreadSnapshot {
+            id: "parent-1".into(),
+            session_id: "session-1".into(),
+            parent_id: None,
+            depth: 0,
+            status: ThreadStatus::Completed,
+            role_name: None,
+            config_json: serde_json::to_string(&parent_config).expect("config"),
+            completion_text: Some("done".into()),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            archived_at: None,
+        })
+        .await
+        .expect("seed parent");
+    for (id, turn_index) in [("pmsg-0", 0u32), ("pmsg-1", 1)] {
+        store_port
+            .insert_thread_message(&ThreadMessageRecord {
+                id: id.into(),
+                thread_id: "parent-1".into(),
+                turn_index,
+                message: ConversationMessage {
+                    role: "user".into(),
+                    content: ConversationMessageContent::Text(id.into()),
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: vec![],
+                },
+                created_at: now.clone(),
+            })
+            .await
+            .expect("seed message");
+    }
+    store_port
+        .upsert_turn_state(&TurnStateRecord {
+            thread_id: "parent-1".into(),
+            turn_index: 1,
+            status: "completed".into(),
+            input_messages_json: None,
+            tool_specs_json: None,
+            llm_response_json: None,
+            error: None,
+            started_at: now.clone(),
+            completed_at: Some(now.clone()),
+        })
+        .await
+        .expect("seed turn state");
+
+    // Fork with a model override.
+    let child_id = control
+        .fork_thread("parent-1", Some("child-model".into()))
+        .await
+        .expect("fork should succeed");
+
+    let child = control.thread_snapshot(&child_id).await.expect("read").expect("child present");
+    assert_eq!(child.depth, 1, "child is one level deeper than the parent");
+    assert_eq!(child.parent_id.as_deref(), Some("parent-1"));
+    assert_eq!(child.status, ThreadStatus::Pending);
+    let child_config: AgentConfig =
+        serde_json::from_str(&child.config_json).expect("child config parses");
+    assert_eq!(child_config.model, "child-model", "model override applied");
+
+    // History cloned: two messages and one turn state under the child id.
+    let messages = store_port.list_thread_messages(&child_id).await.expect("child messages");
+    assert_eq!(messages.len(), 2, "parent messages cloned into child");
+    let turn_states = store_port.list_turn_states(&child_id).await.expect("turn states");
+    assert_eq!(turn_states.len(), 1, "parent turn state cloned into child");
+    assert_eq!(turn_states[0].turn_index, 1);
+
+    // The fork must not mutate the parent's history.
+    let parent_messages = store_port.list_thread_messages("parent-1").await.expect("parent msgs");
+    assert_eq!(parent_messages.len(), 2);
+    let parent_turns = store_port.list_turn_states("parent-1").await.expect("parent turns");
+    assert_eq!(parent_turns.len(), 1);
 }
 
 // ── Error propagation tests ───────────────────────────────────────────────────────────

@@ -43,6 +43,7 @@ use crate::error::ServerError;
     paths(
         agent_responses_get,
         agent_responses_post,
+        crate::api::v1::agent::harness::agent_harness,
         agent_control_approval,
         agent_control_interrupt,
         agent_control_shutdown,
@@ -68,6 +69,7 @@ pub struct AgentApi;
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/agents/responses", get(agent_responses_get).post(agent_responses_post))
+        .route("/agents/harness", get(crate::api::v1::agent::harness::agent_harness))
         .route("/agents/control/approval", post(agent_control_approval))
         .route("/agents/control/interrupt", post(agent_control_interrupt))
         .route("/agents/control/shutdown", post(agent_control_shutdown))

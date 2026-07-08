@@ -9,8 +9,10 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
+use chrono::Utc;
 use slab_agent_tracing::{AgentTraceSink, NoopAgentTraceSink};
 use slab_types::{ConversationMessage, ConversationMessageContent};
+use uuid::Uuid;
 
 use crate::{
     compact::{CompactPort, SlidingWindowCompactPort},
@@ -19,7 +21,10 @@ use crate::{
     error::AgentError,
     event::{AgentEventKind, AgentResponseRef},
     hook::{AgentHook, AgentHookRegistry},
-    port::{AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, ThreadStatus},
+    port::{
+        AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, ThreadMessageRecord,
+        ThreadSnapshot, ThreadStatus, TurnStateRecord,
+    },
     risk::{BasicToolRiskAnalyzer, ToolRiskAnalyzer},
     state::ThreadStateMachine,
     thread::{AgentThread, AgentThreadRuntime},
@@ -293,6 +298,78 @@ impl AgentControl {
             });
         }
         self.spawn_child(parent.session_id, parent.id, depth, config, messages).await
+    }
+
+    /// Fork a thread: create a child at `parent.depth + 1` whose persisted
+    /// history (messages + turn states) is cloned from the parent, without
+    /// running a new turn.
+    ///
+    /// The child is persisted with [`ThreadStatus::Pending`] and is not
+    /// registered as a live thread — a later `send_input` / first turn
+    /// materializes it, mirroring the lazy-spawn path. An optional
+    /// `model_override` replaces the parent's model on the cloned config.
+    /// Returns the new child thread id.
+    pub async fn fork_thread(
+        &self,
+        parent_thread_id: &str,
+        model_override: Option<String>,
+    ) -> Result<String, AgentError> {
+        let parent = self
+            .store
+            .get_thread(parent_thread_id)
+            .await?
+            .ok_or_else(|| AgentError::ThreadNotFound(parent_thread_id.to_owned()))?;
+        let mut config = serde_json::from_str::<AgentConfig>(&parent.config_json).map_err(|e| {
+            AgentError::Internal(format!("failed to deserialize parent agent config: {e}"))
+        })?;
+        if let Some(model) = model_override {
+            config.model = model;
+        }
+
+        let depth = parent.depth + 1;
+        if depth > config.max_depth {
+            return Err(AgentError::DepthLimitExceeded { current: depth, max: config.max_depth });
+        }
+
+        let now = Utc::now().to_rfc3339();
+        let child_id = Uuid::new_v4().to_string();
+        let child = ThreadSnapshot {
+            id: child_id.clone(),
+            session_id: parent.session_id.clone(),
+            parent_id: Some(parent.id.clone()),
+            depth,
+            status: ThreadStatus::Pending,
+            role_name: parent.role_name.clone(),
+            config_json: serde_json::to_string(&config).map_err(|e| {
+                AgentError::Internal(format!("failed to serialize fork config: {e}"))
+            })?,
+            completion_text: None,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            archived_at: None,
+        };
+        self.store.upsert_thread(&child).await?;
+
+        // Clone the parent's persisted history into the child.
+        let messages = self.store.list_thread_messages(parent_thread_id).await?;
+        for record in messages {
+            let cloned = ThreadMessageRecord {
+                id: Uuid::new_v4().to_string(),
+                thread_id: child_id.clone(),
+                turn_index: record.turn_index,
+                message: record.message,
+                created_at: now.clone(),
+            };
+            self.store.insert_thread_message(&cloned).await?;
+        }
+
+        let turn_states = self.store.list_turn_states(parent_thread_id).await?;
+        for record in turn_states {
+            let cloned = TurnStateRecord { thread_id: child_id.clone(), ..record };
+            self.store.upsert_turn_state(&cloned).await?;
+        }
+
+        Ok(child_id)
     }
 
     /// Return a persisted thread snapshot.

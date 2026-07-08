@@ -7,5 +7,4 @@ pub(crate) mod hooks;
 pub(crate) mod memory;
 pub(crate) mod memory_breaker;
 pub(crate) mod plugin_capability;
-pub mod response_persistence;
 pub(crate) mod runtime;
