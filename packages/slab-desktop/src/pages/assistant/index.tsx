@@ -6,7 +6,6 @@ import { MessageCircleDashedIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 
-import api from "@slab/api"
 import {
     DEFAULT_ASSISTANT_LABELS,
     LEGACY_DEFAULT_CHAT_LABELS,
@@ -35,16 +34,13 @@ import { HEADER_SELECT_KEYS } from "@/layouts/header"
 
 import MessageList from "@/pages/assistant/components/message/index.tsx"
 import Sender from "@/pages/assistant/components/sender.tsx"
-import {
-    getAssistantErrorDescription,
-    getAssistantMessageTextContent,
-    type AgentHistoryResponse,
-} from "./assistant-context"
+import { getAssistantErrorDescription } from "./assistant-context"
 import { AssistantModelSwitchDialog } from "./components/assistant-model-switch-dialog"
 import { AssistantSessionSheet } from "./components/assistant-session-sheet"
+import { useHarnessConversation } from "./hooks/use-harness-conversation"
 import { useGreeting } from "./hooks/use-greeting"
 import { useAssistantSessions } from "./hooks/use-assistant-sessions"
-import { projectRestoreSession } from "./lib/openai-responses"
+import type { HarnessChatTransport } from "./lib/harness"
 import {
     createConversationLabel,
     getSelectedModelStatusLabel,
@@ -52,7 +48,6 @@ import {
     type ModelOption,
     type ModelRuntimeStatus,
 } from "./lib/assistant-page-state"
-import { createChat } from "./lib/message-provider"
 
 type AssistantChatPaneProps = {
     disabled: boolean
@@ -62,25 +57,7 @@ type AssistantChatPaneProps = {
     onBeforeSubmit: (value: string) => Promise<void>
     onBusyChange: (busy: boolean) => void
     onMessageCountChange: (count: number) => void
-    transport: ReturnType<ReturnType<typeof createChat>["transport"]>
-}
-
-function toChatMessages(response: AgentHistoryResponse): UIMessage[] {
-    return projectRestoreSession(response.messages, response.responses)
-        .map((record): UIMessage | null => {
-            const text = getAssistantMessageTextContent(record.message).trim()
-
-            if (!text) {
-                return null
-            }
-
-            return {
-                id: String(record.id),
-                parts: [{ text, type: "text" }],
-                role: record.message.role === "assistant" ? "assistant" : "user",
-            } satisfies UIMessage
-        })
-        .filter((message): message is UIMessage => Boolean(message))
+    transport: HarnessChatTransport<UIMessage>
 }
 
 function AssistantChatPane({
@@ -168,11 +145,6 @@ function Assistant() {
     const [isSessionSheetOpen, setIsSessionSheetOpen] = useState(false)
     const [pendingModelSwitchId, setPendingModelSwitchId] = useState<string | null>(null)
     const [loadedModelStatus, setLoadedModelStatus] = useState<ModelRuntimeStatus | null>(null)
-    const [restoredMessages, setRestoredMessages] = useState<UIMessage[]>([])
-    const [restoredThreadId, setRestoredThreadId] = useState<string | null>(null)
-    const [restoreVersion, setRestoreVersion] = useState(0)
-    const [isHistoryLoading, setIsHistoryLoading] = useState(false)
-    const [activeConversation, setActiveConversation] = useState<string>()
     const [isChatBusy, setIsChatBusy] = useState(false)
     const [messageCount, setMessageCount] = useState(0)
     const resolvedLanguage = getResolvedAppLanguage()
@@ -189,25 +161,6 @@ function Assistant() {
         setCurrentSessionId: setCurConversation,
         updateSessionLabel,
     } = useAssistantSessions()
-    const {
-        data: restoredSession,
-        error: restoreSessionError,
-        isLoading: isRestoreSessionLoading,
-    } = api.useQuery(
-        "get",
-        "/v1/sessions/{id}/agent-history",
-        {
-            params: {
-                path: { id: curConversation ?? "" },
-            },
-        },
-        {
-            enabled: Boolean(curConversation),
-            meta: {
-                skipGlobalErrorToast: true,
-            },
-        }
-    )
 
     const assistantModels = useAiModel({
         capability: "chat_generation",
@@ -248,6 +201,16 @@ function Assistant() {
         [modelOptions, pendingModelSwitchId]
     )
 
+    const {
+        transport,
+        restoredMessages,
+        restoredThreadId,
+        activeConversation,
+        restoreVersion,
+        isHistoryLoading,
+        error: harnessError,
+    } = useHarnessConversation(curConversation, selectedModelId || "slab-llama")
+
     const modelLoading = assistantModels.loading
     const isPreparingModel = assistantModels.status.busy
     const isSessionBootstrapping = (sessionsLoading || isCreatingSession) && conversationList.length === 0
@@ -258,48 +221,18 @@ function Assistant() {
         t("pages.assistant.sessionSummary.currentSession")
 
     useEffect(() => {
-        setIsHistoryLoading(isRestoreSessionLoading)
-    }, [isRestoreSessionLoading])
-
-    useEffect(() => {
-        if (!restoreSessionError) {
+        if (!harnessError) {
             return
         }
 
         toast.error(t("pages.assistant.toast.failedToLoadSession"), {
             description: getAssistantErrorDescription(
-                restoreSessionError,
+                new Error(harnessError),
                 t("pages.assistant.toast.unknownError"),
                 t
             ),
         })
-    }, [restoreSessionError, t])
-
-    useEffect(() => {
-        if (!curConversation) {
-            setRestoredMessages([])
-            setRestoredThreadId(null)
-            setActiveConversation(undefined)
-            setMessageCount(0)
-            setRestoreVersion((value) => value + 1)
-            return
-        }
-
-        if (!restoredSession || restoredSession.session_id !== curConversation) {
-            setRestoredMessages([])
-            setRestoredThreadId(null)
-            setActiveConversation(undefined)
-            setMessageCount(0)
-            return
-        }
-
-        const nextMessages = toChatMessages(restoredSession)
-        setActiveConversation(restoredSession.session_id)
-        setRestoredMessages(nextMessages)
-        setRestoredThreadId(restoredSession.thread?.id ?? null)
-        setMessageCount(nextMessages.length)
-        setRestoreVersion((value) => value + 1)
-    }, [curConversation, restoredSession])
+    }, [harnessError, t])
 
     const prepareSelectedModel = useCallback(async () => {
         if (!selectedModelId) {
@@ -500,16 +433,6 @@ function Assistant() {
             selectedRuntimeContextLength,
             t,
         ]
-    )
-
-    const transport = useMemo(
-        () =>
-            createChat().transport({
-                model: selectedModelId || "slab-llama",
-                sessionId: curConversation || undefined,
-                threadId: restoredThreadId,
-            }),
-        [curConversation, restoredThreadId, selectedModelId]
     )
 
     const handleBeforeSubmit = useCallback(

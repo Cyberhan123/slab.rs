@@ -39,10 +39,14 @@ const mocks = vi.hoisted(() => {
       status: "ready",
     },
   ]
-  const restoreQuery = {
-    data: null as ReturnType<typeof restoredSessionResponse> | { messages: never[]; session_id: string; thread: null } | null,
-    error: null as unknown,
-    isLoading: false,
+  const harnessConversation = {
+    activeConversation: undefined as string | undefined,
+    error: null as string | null,
+    isHistoryLoading: false,
+    restoredMessages: [] as UIMessage[],
+    restoredThreadId: null as string | null,
+    restoreVersion: 1,
+    transport: {},
   }
 
   return {
@@ -66,7 +70,7 @@ const mocks = vi.hoisted(() => {
     toastInfo: vi.fn(),
     toastError: vi.fn(),
     translate,
-    restoreQuery,
+    harnessConversation,
     updateSessionLabel: vi.fn<() => Promise<boolean>>(),
   }
 })
@@ -83,10 +87,8 @@ vi.mock("@ai-sdk/react", () => ({
   }),
 }))
 
-vi.mock("@slab/api", () => ({
-  default: {
-    useQuery: vi.fn(() => mocks.restoreQuery),
-  },
+vi.mock("../hooks/use-harness-conversation", () => ({
+  useHarnessConversation: vi.fn(() => mocks.harnessConversation),
 }))
 
 vi.mock("@slab/i18n", () => ({
@@ -269,33 +271,11 @@ vi.mock("@/pages/assistant/components/message/index.tsx", () => ({
 
 import Assistant from "../index"
 
-function restoredSessionResponse(sessionId: string, threadId: string) {
-  return {
-    messages: [
-      {
-        content: "previous prompt",
-        created_at: "2026-07-05T00:00:00Z",
-        id: "message-user",
-        role: "user",
-        thread_id: threadId,
-        turn_index: 1,
-      },
-      {
-        content: "previous answer",
-        created_at: "2026-07-05T00:00:01Z",
-        id: "message-assistant",
-        role: "assistant",
-        thread_id: threadId,
-        turn_index: 2,
-      },
-    ],
-    session_id: sessionId,
-    thread: {
-      id: threadId,
-      session_id: sessionId,
-      status: "completed",
-    },
-  }
+function restoredMessages(): UIMessage[] {
+  return [
+    { id: "message-user", parts: [{ text: "previous prompt", type: "text" }], role: "user" },
+    { id: "message-assistant", parts: [{ text: "previous answer", type: "text" }], role: "assistant" },
+  ]
 }
 
 function renderAssistant() {
@@ -314,9 +294,11 @@ describe("Assistant page session and model lifecycle", () => {
     mocks.deleteSession.mockResolvedValue(true)
     mocks.ensureDownloaded.mockResolvedValue({ downloadedNow: false })
     mocks.ensureLoaded.mockResolvedValue({ runtimeStatus: null })
-    mocks.restoreQuery.data = restoredSessionResponse("session-a", "thread-a")
-    mocks.restoreQuery.error = null
-    mocks.restoreQuery.isLoading = false
+    mocks.harnessConversation.restoredMessages = restoredMessages()
+    mocks.harnessConversation.restoredThreadId = "thread-a"
+    mocks.harnessConversation.activeConversation = "session-a"
+    mocks.harnessConversation.isHistoryLoading = false
+    mocks.harnessConversation.error = null
     mocks.sendMessage.mockClear()
     mocks.setCurrentSessionId.mockClear()
     mocks.setSelectedModelId.mockClear()
@@ -358,11 +340,7 @@ describe("Assistant page session and model lifecycle", () => {
   })
 
   it("switches models immediately when the current session has no messages", async () => {
-    mocks.restoreQuery.data = {
-      messages: [],
-      session_id: "session-a",
-      thread: null,
-    }
+    mocks.harnessConversation.restoredMessages = []
 
     renderAssistant()
 
@@ -396,8 +374,7 @@ describe("Assistant page session and model lifecycle", () => {
   })
 
   it("blocks model switching while session restore is still busy", async () => {
-    mocks.restoreQuery.data = null
-    mocks.restoreQuery.isLoading = true
+    mocks.harnessConversation.isHistoryLoading = true
 
     renderAssistant()
 
@@ -405,6 +382,6 @@ describe("Assistant page session and model lifecycle", () => {
 
     expect(screen.queryByText("Model B")).not.toBeInTheDocument()
 
-    mocks.restoreQuery.isLoading = false
+    mocks.harnessConversation.isHistoryLoading = false
   })
 })

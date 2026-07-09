@@ -16,7 +16,7 @@ use futures::{SinkExt, StreamExt};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use slab_agent::port::{ThreadListFilter, ThreadSnapshot};
+use slab_agent::port::{ThreadListFilter, ThreadMessageRecord, ThreadSnapshot, TurnStateRecord};
 use slab_app_core::application::agent::projection::harness::HarnessProjection;
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::{AgentService, WorkspaceService};
@@ -25,6 +25,7 @@ use slab_jsonrpc::host::{HostConfig, NotificationHandler, RequestHandler};
 use slab_jsonrpc::ws::{WsFrame, serve_websocket};
 use slab_jsonrpc::{JSONRPCMessage, JSONRPCNotification};
 use slab_proto::harness::event::EventMsg;
+use slab_proto::harness::item::{TurnItem, UserMessageContent};
 use slab_proto::harness::messages::{
     ApprovalPolicy, ApprovalResolveParams, ApprovalResolveResult, InitializeResult,
     ReasoningEffort, SandboxPolicy, ServerCapabilities, ServerInfo, ShutdownParams, ShutdownResult,
@@ -479,8 +480,24 @@ impl HarnessDispatcher {
             harness_id.clone(),
             self.outbound.clone(),
         );
+        // Fetch the persisted conversation so the client can render the full
+        // history (user + assistant + tool items) straight from the resume
+        // result — the replay notification stream carries assistant-side events
+        // only, so user prompts would otherwise be lost on reload.
+        let messages = self
+            .service
+            .list_thread_messages(&snapshot.id)
+            .await
+            .map_err(|error| error.to_string())?;
+        let turn_states =
+            self.service.list_turn_states(&snapshot.id).await.map_err(|error| error.to_string())?;
         ok_value(ThreadResumeResult {
-            thread: thread_from_snapshot_with_id(&harness_id, &snapshot),
+            thread: thread_from_snapshot_with_turns(
+                &harness_id,
+                &snapshot,
+                &messages,
+                &turn_states,
+            ),
         })
     }
 }
@@ -503,6 +520,107 @@ fn thread_from_snapshot_with_id(id: &str, snapshot: &ThreadSnapshot) -> Thread {
         // until a structured accessor exists.
         model_provider: String::new(),
         created_at,
+        ..Default::default()
+    }
+}
+
+/// Map one persisted message into one or more harness [`TurnItem`]s.
+///
+/// `role:"user"` → a single `UserMessage`; `role:"assistant"` → an
+/// `AgentMessage` (text) plus one `McpToolCall` per emitted tool call; any other
+/// role (e.g. tool results) → a `CommandExecution` surfacing the rendered output.
+fn turn_items_for_message(message: &ThreadMessageRecord) -> Vec<TurnItem> {
+    let id = message.id.clone();
+    let record = &message.message;
+    match record.role.as_str() {
+        "user" => vec![TurnItem::UserMessage {
+            id,
+            content: vec![UserMessageContent::Text { text: record.content.rendered_text() }],
+        }],
+        "assistant" => {
+            let mut items = Vec::new();
+            let text = record.content.rendered_text();
+            if !text.trim().is_empty() {
+                items.push(TurnItem::AgentMessage { id: format!("{id}-text"), text });
+            }
+            for (index, call) in record.tool_calls.iter().enumerate() {
+                let arguments =
+                    serde_json::from_str(&call.function.arguments).unwrap_or(Value::Null);
+                items.push(TurnItem::McpToolCall {
+                    id: call.id.clone().unwrap_or_else(|| format!("{id}-tool-{index}")),
+                    server: String::new(),
+                    tool: call.function.name.clone(),
+                    arguments,
+                    status: "completed".to_owned(),
+                    result: None,
+                    error: None,
+                    duration_ms: None,
+                });
+            }
+            if items.is_empty() {
+                items.push(TurnItem::AgentMessage { id, text: String::new() });
+            }
+            items
+        }
+        _ => vec![TurnItem::CommandExecution {
+            id,
+            command: String::new(),
+            cwd: String::new(),
+            process_id: None,
+            status: "completed".to_owned(),
+            aggregated_output: Some(record.rendered_text()),
+            exit_code: None,
+            duration_ms: None,
+        }],
+    }
+}
+
+/// Like [`thread_from_snapshot_with_id`] but populates `turns` from the
+/// persisted message + turn-state records, so `thread/resume` returns the full
+/// conversation (user + assistant + tool items) for client-side restore.
+fn thread_from_snapshot_with_turns(
+    id: &str,
+    snapshot: &ThreadSnapshot,
+    messages: &[ThreadMessageRecord],
+    turn_states: &[TurnStateRecord],
+) -> Thread {
+    let created_at = chrono::DateTime::parse_from_rfc3339(&snapshot.created_at)
+        .map(|dt| dt.timestamp_millis())
+        .unwrap_or(0);
+
+    // Group messages by turn index, preserving chronological order within a turn.
+    let mut by_turn: std::collections::BTreeMap<u32, Vec<&ThreadMessageRecord>> =
+        std::collections::BTreeMap::new();
+    for message in messages {
+        by_turn.entry(message.turn_index).or_default().push(message);
+    }
+    for msgs in by_turn.values_mut() {
+        msgs.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+    }
+
+    let turns = by_turn
+        .into_iter()
+        .map(|(index, msgs)| {
+            let mut items = Vec::new();
+            for message in msgs {
+                items.extend(turn_items_for_message(message));
+            }
+            let status = turn_states
+                .iter()
+                .find(|state| state.turn_index == index)
+                .map(|state| state.status.clone())
+                .filter(|status| !status.trim().is_empty())
+                .unwrap_or_else(|| "completed".to_owned());
+            Turn { id: index.to_string(), items, status, error: None }
+        })
+        .collect();
+
+    Thread {
+        id: id.to_owned(),
+        preview: snapshot.completion_text.clone().unwrap_or_default(),
+        model_provider: String::new(),
+        created_at,
+        turns,
         ..Default::default()
     }
 }
@@ -743,5 +861,79 @@ mod tests {
         let parsed: u32 = "3".parse().expect("numeric turn id");
         assert_eq!(parsed, 3);
         assert!("x".parse::<u32>().is_err(), "non-numeric turn id must be rejected");
+    }
+
+    fn record(id: &str, turn: u32, role: &str, text: &str, created: &str) -> ThreadMessageRecord {
+        ThreadMessageRecord {
+            id: id.to_owned(),
+            thread_id: "t1".to_owned(),
+            turn_index: turn,
+            message: ConversationMessage {
+                role: role.to_owned(),
+                content: ConversationMessageContent::Text(text.to_owned()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: Vec::new(),
+            },
+            created_at: created.to_owned(),
+        }
+    }
+
+    fn snapshot() -> ThreadSnapshot {
+        ThreadSnapshot {
+            id: "t1".to_owned(),
+            session_id: "s1".to_owned(),
+            parent_id: None,
+            depth: 0,
+            status: slab_types::agent::AgentThreadStatus::Completed,
+            role_name: None,
+            config_json: "{}".to_owned(),
+            completion_text: Some("hi there".to_owned()),
+            created_at: "2024-01-01T00:00:00Z".to_owned(),
+            updated_at: "2024-01-01T00:00:00Z".to_owned(),
+            archived_at: None,
+        }
+    }
+
+    #[test]
+    fn thread_from_snapshot_with_turns_groups_messages_into_turns() {
+        let messages = vec![
+            record("m1", 0, "user", "hello", "2024-01-01T00:00:01Z"),
+            record("m2", 0, "assistant", "hi there", "2024-01-01T00:00:02Z"),
+            record("m3", 1, "user", "again", "2024-01-01T00:00:03Z"),
+            record("m4", 1, "assistant", "yes", "2024-01-01T00:00:04Z"),
+        ];
+        let turn_states = vec![TurnStateRecord {
+            thread_id: "t1".to_owned(),
+            turn_index: 0,
+            status: "completed".to_owned(),
+            input_messages_json: None,
+            tool_specs_json: None,
+            llm_response_json: None,
+            error: None,
+            started_at: "2024-01-01T00:00:01Z".to_owned(),
+            completed_at: None,
+        }];
+
+        let thread =
+            thread_from_snapshot_with_turns("hthread-1", &snapshot(), &messages, &turn_states);
+
+        assert_eq!(thread.id, "hthread-1");
+        assert_eq!(thread.preview, "hi there");
+        assert_eq!(thread.turns.len(), 2);
+
+        let turn0 = &thread.turns[0];
+        assert_eq!(turn0.id, "0");
+        assert_eq!(turn0.status, "completed");
+        assert_eq!(turn0.items.len(), 2);
+        // Messages keep chronological (created_at) order within a turn.
+        assert!(matches!(turn0.items[0], TurnItem::UserMessage { .. }));
+        assert!(matches!(turn0.items[1], TurnItem::AgentMessage { .. }));
+
+        // Turn 1 has no turn-state record → status defaults to "completed".
+        let turn1 = &thread.turns[1];
+        assert_eq!(turn1.id, "1");
+        assert_eq!(turn1.status, "completed");
+        assert!(turn1.items.iter().any(|item| matches!(item, TurnItem::UserMessage { .. })));
     }
 }

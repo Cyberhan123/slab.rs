@@ -10,7 +10,9 @@ use chrono::Utc;
 use slab_agent::AgentRuntime;
 use slab_agent::config::AgentConfig;
 use slab_agent::error::AgentError;
-use slab_agent::port::{AgentStorePort, ThreadListFilter, ThreadMessageRecord, ThreadSnapshot};
+use slab_agent::port::{
+    AgentStorePort, ThreadListFilter, ThreadMessageRecord, ThreadSnapshot, TurnStateRecord,
+};
 use slab_types::ConversationMessage;
 use slab_utils::session_snapshot::{
     build_migration_snapshot, project_id_from_root, write_session_snapshot_atomic,
@@ -294,6 +296,17 @@ impl AgentService {
 
         self.store
             .list_thread_messages(thread_id)
+            .await
+            .map_err(|e| AppCoreError::Internal(e.to_string()))
+    }
+
+    /// List persisted turn-state records for a thread ordered by `turn_index`.
+    pub async fn list_turn_states(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<TurnStateRecord>, AppCoreError> {
+        self.store
+            .list_turn_states(thread_id)
             .await
             .map_err(|e| AppCoreError::Internal(e.to_string()))
     }
