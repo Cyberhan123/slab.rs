@@ -7,7 +7,7 @@ import api from "@slab/api"
 import { useAssistantUiStore } from "@/store/useAssistantUiStore"
 import { GUARDRAIL_PMIDS, useGuardrailFlag } from "@/lib/guardrail-flags"
 
-import { getAssistantErrorDescription } from "../assistant-context"
+import { getAssistantErrorDescription } from "../lib/assistant-request-errors"
 
 type SessionRecord = components["schemas"]["SessionResponse"]
 

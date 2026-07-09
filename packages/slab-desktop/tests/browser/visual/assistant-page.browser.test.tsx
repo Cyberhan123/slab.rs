@@ -2,7 +2,7 @@ import { page } from 'vitest/browser';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import AssistantPage from '@/pages/assistant';
-import type { AssistantMessageRecord } from '@/pages/assistant/assistant-context';
+import type { AssistantMessageRecord } from '@/pages/assistant/lib/assistant-types';
 import type { AssistantConversationItem } from '@/pages/assistant/hooks/use-assistant-sessions';
 import {
   expectDesktopSceneAccessible,

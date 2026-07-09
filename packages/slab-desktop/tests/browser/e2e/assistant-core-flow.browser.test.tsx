@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 
 import AssistantPage from '@/pages/assistant';
-import type { AssistantMessageRecord } from '@/pages/assistant/assistant-context';
+import type { AssistantMessageRecord } from '@/pages/assistant/lib/assistant-types';
 import { useAgentSurfaceStore } from '@/store/useAgentSurfaceStore';
 import { renderDesktopScene } from '../test-utils';
 
