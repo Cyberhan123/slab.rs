@@ -20,13 +20,25 @@ use slab_proto::harness::notification::*;
 
 use crate::infra::agent::event_hub::AgentEventEnvelope;
 
+/// Command-execution metadata captured at `item/started` and threaded through
+/// to `item/completed`. `slab-agent` only repeats the command/cwd on the start
+/// event; the completion event carries output only, so the projection must
+/// retain this to avoid losing it on the wire.
+#[derive(Debug, Clone, Default)]
+struct CommandMeta {
+    command: String,
+    cwd: String,
+}
+
 /// Stateful projector that turns a stream of [`AgentEventEnvelope`]s into the
 /// harness event model. Tracks which items have already been announced via
-/// `item/started` so each item id emits exactly one start.
+/// `item/started` so each item id emits exactly one start, and retains
+/// per-item metadata (e.g. command/cwd) that upstream events only report once.
 #[derive(Debug, Default)]
 pub struct HarnessProjection {
     started_items: HashSet<String>,
     turn_started: bool,
+    command_meta: std::collections::HashMap<String, CommandMeta>,
 }
 
 impl HarnessProjection {
@@ -38,6 +50,7 @@ impl HarnessProjection {
     pub fn reset(&mut self) {
         self.started_items.clear();
         self.turn_started = false;
+        self.command_meta.clear();
     }
 
     /// Project one envelope into zero or more harness events.
@@ -149,11 +162,16 @@ impl HarnessProjection {
                     delta: delta.clone(),
                 })]
             }
-            AgentEventKind::ResponseReasoningTextDone { item_id, text, .. } => {
+            AgentEventKind::ResponseReasoningTextDone { item_id, text, summary, .. } => {
+                // `summary` is the model-authored recap of the reasoning; `text`
+                // is the full trace. They are distinct fields on the wire, so
+                // fall back to `text` only when the agent didn't provide a
+                // summary rather than echoing the same string into both.
+                let summary_text = summary.clone().unwrap_or_else(|| text.clone());
                 vec![EventMsg::ItemCompleted(ItemCompletedParams {
                     item: TurnItem::Reasoning {
                         id: item_id.clone(),
-                        summary: slab_proto::harness::item::ReasoningText::one(text.clone()),
+                        summary: slab_proto::harness::item::ReasoningText::one(summary_text),
                         content: slab_proto::harness::item::ReasoningText::one(text.clone()),
                     },
                     thread_id: tid,
@@ -171,11 +189,12 @@ impl HarnessProjection {
                 })]
             }
             AgentEventKind::ResponseShellCallOutputContentDone { item_id, outputs, .. } => {
+                let meta = self.command_meta.remove(item_id).unwrap_or_default();
                 vec![EventMsg::ItemCompleted(ItemCompletedParams {
                     item: TurnItem::CommandExecution {
                         id: item_id.clone(),
-                        command: String::new(),
-                        cwd: String::new(),
+                        command: meta.command,
+                        cwd: meta.cwd,
                         process_id: None,
                         status: "completed".to_owned(),
                         aggregated_output: Some(serde_json::to_string(outputs).unwrap_or_default()),
@@ -186,11 +205,19 @@ impl HarnessProjection {
                     turn_id: turn_id.to_owned(),
                 })]
             }
-            AgentEventKind::ResponseLocalShellCallDone { item_id, command, .. } => {
-                self.command_started(&tid, turn_id, item_id, command.join(" "))
-            }
+            AgentEventKind::ResponseLocalShellCallDone {
+                item_id, command, working_directory, ..
+            } => self.command_started(
+                &tid,
+                turn_id,
+                item_id,
+                command.join(" "),
+                working_directory.clone().unwrap_or_default(),
+            ),
             AgentEventKind::ResponseFunctionShellCallDone { item_id, commands, .. } => {
-                self.command_started(&tid, turn_id, item_id, commands.join(" "))
+                // The function-shell variant doesn't report a working directory;
+                // leave `cwd` empty rather than guessing.
+                self.command_started(&tid, turn_id, item_id, commands.join(" "), String::new())
             }
 
             // ---- file changes ----
@@ -276,20 +303,24 @@ impl HarnessProjection {
     }
 
     /// Emit an `item/started` for a command-execution item the first time its
-    /// item id is seen on this turn.
+    /// item id is seen on this turn, and retain its command/cwd so the later
+    /// `item/completed` (which only carries output) can echo it back.
     fn command_started(
         &mut self,
         thread_id: &str,
         turn_id: &str,
         item_id: &str,
         command: String,
+        cwd: String,
     ) -> Vec<EventMsg> {
+        let meta = CommandMeta { command, cwd };
+        self.command_meta.insert(item_id.to_owned(), meta.clone());
         if self.started_items.insert(item_id.to_owned()) {
             vec![EventMsg::ItemStarted(ItemStartedParams {
                 item: TurnItem::CommandExecution {
                     id: item_id.to_owned(),
-                    command,
-                    cwd: String::new(),
+                    command: meta.command,
+                    cwd: meta.cwd,
                     process_id: None,
                     status: "running".to_owned(),
                     aggregated_output: None,
@@ -316,6 +347,7 @@ mod tests {
     use super::*;
     use slab_agent::AgentResponseRef;
     use slab_agent::port::{ThreadStatus, TurnEvent};
+    use slab_proto::harness::item::ReasoningText;
 
     fn env(turn_index: Option<u32>, event: AgentEventKind) -> AgentEventEnvelope {
         AgentEventEnvelope { id: 0, event: TurnEvent::Response { turn_index, event } }
@@ -411,5 +443,133 @@ mod tests {
         );
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], EventMsg::Error(_)));
+    }
+
+    #[test]
+    fn command_execution_completed_echoes_command_and_cwd_from_started() {
+        let mut proj = HarnessProjection::new();
+        let started = proj.project(
+            "t1",
+            &env(
+                Some(0),
+                AgentEventKind::ResponseLocalShellCallDone {
+                    item_id: "c1".into(),
+                    call_id: "call-1".into(),
+                    output_index: 0,
+                    command: vec!["ls".into(), "-la".into()],
+                    env: Default::default(),
+                    working_directory: Some("/workspace".into()),
+                },
+            ),
+        );
+        let item = started
+            .iter()
+            .find_map(|e| match e {
+                EventMsg::ItemStarted(p) => Some(&p.item),
+                _ => None,
+            })
+            .unwrap();
+        match item {
+            TurnItem::CommandExecution { command, cwd, status, .. } => {
+                assert_eq!(command, "ls -la");
+                assert_eq!(cwd, "/workspace");
+                assert_eq!(status, "running");
+            }
+            other => panic!("unexpected item: {other:?}"),
+        }
+
+        let completed = proj.project(
+            "t1",
+            &env(
+                Some(0),
+                AgentEventKind::ResponseShellCallOutputContentDone {
+                    item_id: "c1".into(),
+                    call_id: "call-1".into(),
+                    output_index: 0,
+                    outputs: vec![serde_json::json!({"type": "stdout", "text": "ok"})],
+                },
+            ),
+        );
+        let item = completed
+            .iter()
+            .find_map(|e| match e {
+                EventMsg::ItemCompleted(p) => Some(&p.item),
+                _ => None,
+            })
+            .unwrap();
+        match item {
+            TurnItem::CommandExecution { command, cwd, aggregated_output, .. } => {
+                assert_eq!(command, "ls -la", "command must survive to completion");
+                assert_eq!(cwd, "/workspace", "cwd must survive to completion");
+                assert!(aggregated_output.is_some());
+            }
+            other => panic!("unexpected item: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reasoning_completed_uses_distinct_summary_and_falls_back_to_text() {
+        let mut proj = HarnessProjection::new();
+
+        // With an explicit summary, `summary` and `content` must not collapse
+        // to the same string.
+        let events = proj.project(
+            "t1",
+            &env(
+                Some(0),
+                AgentEventKind::ResponseReasoningTextDone {
+                    item_id: "r1".into(),
+                    output_index: 0,
+                    content_index: 0,
+                    text: "full chain-of-thought trace".into(),
+                    encrypted_content: None,
+                    summary: Some("short recap".into()),
+                },
+            ),
+        );
+        let item = events
+            .iter()
+            .find_map(|e| match e {
+                EventMsg::ItemCompleted(p) => Some(&p.item),
+                _ => None,
+            })
+            .unwrap();
+        match item {
+            TurnItem::Reasoning { summary, content, .. } => {
+                assert_eq!(*summary, ReasoningText::one("short recap"));
+                assert_eq!(*content, ReasoningText::one("full chain-of-thought trace"));
+            }
+            other => panic!("unexpected item: {other:?}"),
+        }
+
+        // Without a summary, fall back to the full text rather than losing it.
+        let events = proj.project(
+            "t1",
+            &env(
+                Some(0),
+                AgentEventKind::ResponseReasoningTextDone {
+                    item_id: "r2".into(),
+                    output_index: 0,
+                    content_index: 0,
+                    text: "only text available".into(),
+                    encrypted_content: None,
+                    summary: None,
+                },
+            ),
+        );
+        let item = events
+            .iter()
+            .find_map(|e| match e {
+                EventMsg::ItemCompleted(p) => Some(&p.item),
+                _ => None,
+            })
+            .unwrap();
+        match item {
+            TurnItem::Reasoning { summary, content, .. } => {
+                assert_eq!(*summary, ReasoningText::one("only text available"));
+                assert_eq!(*content, ReasoningText::one("only text available"));
+            }
+            other => panic!("unexpected item: {other:?}"),
+        }
     }
 }

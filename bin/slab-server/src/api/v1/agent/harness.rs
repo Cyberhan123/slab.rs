@@ -169,12 +169,18 @@ impl HarnessDispatcher {
         }
     }
 
+    /// Lock the thread-binding table, recovering from a poisoned lock instead
+    /// of panicking. The bindings map is plain in-memory state (no invariants
+    /// span the critical section beyond a single insert/lookup), so a panic in
+    /// one holder should not permanently wedge the socket.
+    fn bindings(&self) -> std::sync::MutexGuard<'_, HashMap<String, ThreadBinding>> {
+        self.bindings.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// Resolve the real slab thread id for a harness thread id, falling back to
     /// the harness id itself (so direct/external thread ids still work).
     fn real_id_for(&self, harness_id: &str) -> String {
-        self.bindings
-            .lock()
-            .expect("bindings mutex")
+        self.bindings()
             .get(harness_id)
             .and_then(|binding| binding.real_id.clone())
             .unwrap_or_else(|| harness_id.to_owned())
@@ -236,10 +242,7 @@ impl HarnessDispatcher {
         let thread_id = self.mint_thread_id();
         let model_provider =
             params.model_provider.clone().or_else(|| params.model.clone()).unwrap_or_default();
-        self.bindings
-            .lock()
-            .expect("bindings mutex")
-            .insert(thread_id.clone(), ThreadBinding::default());
+        self.bindings().insert(thread_id.clone(), ThreadBinding::default());
 
         let cwd =
             params.cwd.as_ref().map(|path| path.to_string_lossy().into_owned()).unwrap_or_default();
@@ -264,9 +267,7 @@ impl HarnessDispatcher {
 
     async fn handle_turn_start(&self, params: TurnStartParams) -> Result<Value, String> {
         let existing_real = self
-            .bindings
-            .lock()
-            .expect("bindings mutex")
+            .bindings()
             .get(&params.thread_id)
             .and_then(|binding| binding.real_id.clone());
 
@@ -288,7 +289,7 @@ impl HarnessDispatcher {
                     .spawn(self.session_id.clone(), config, messages)
                     .await
                     .map_err(|error| error.to_string())?;
-                self.bindings.lock().expect("bindings mutex").insert(
+                self.bindings().insert(
                     params.thread_id.clone(),
                     ThreadBinding { real_id: Some(real_id.clone()) },
                 );
@@ -408,9 +409,7 @@ impl HarnessDispatcher {
             .await
             .map_err(|error| error.to_string())?;
         let harness_id = self.mint_thread_id();
-        self.bindings
-            .lock()
-            .expect("bindings mutex")
+        self.bindings()
             .insert(harness_id.clone(), ThreadBinding { real_id: Some(snapshot.id.clone()) });
         // Establish the event stream so a subsequent `turn/start` (append path)
         // has a fan-out task to deliver through.
@@ -469,9 +468,7 @@ impl HarnessDispatcher {
                 (self.mint_thread_id(), snapshot)
             }
         };
-        self.bindings
-            .lock()
-            .expect("bindings mutex")
+        self.bindings()
             .insert(harness_id.clone(), ThreadBinding { real_id: Some(snapshot.id.clone()) });
         // Replay persisted history + establish the live event stream.
         spawn_event_fanout(
