@@ -470,7 +470,12 @@ mod tests {
             })
             .unwrap();
         match item {
-            TurnItem::CommandExecution { command, cwd, status, .. } => {
+            &TurnItem::CommandExecution {
+                ref command,
+                ref cwd,
+                ref status,
+                ..
+            } => {
                 assert_eq!(command, "ls -la");
                 assert_eq!(cwd, "/workspace");
                 assert_eq!(status, "running");
@@ -498,7 +503,12 @@ mod tests {
             })
             .unwrap();
         match item {
-            TurnItem::CommandExecution { command, cwd, aggregated_output, .. } => {
+            &TurnItem::CommandExecution {
+                ref command,
+                ref cwd,
+                ref aggregated_output,
+                ..
+            } => {
                 assert_eq!(command, "ls -la", "command must survive to completion");
                 assert_eq!(cwd, "/workspace", "cwd must survive to completion");
                 assert!(aggregated_output.is_some());
@@ -535,9 +545,13 @@ mod tests {
             })
             .unwrap();
         match item {
-            TurnItem::Reasoning { summary, content, .. } => {
-                assert_eq!(*summary, ReasoningText::one("short recap"));
-                assert_eq!(*content, ReasoningText::one("full chain-of-thought trace"));
+            &TurnItem::Reasoning {
+                ref summary,
+                ref content,
+                ..
+            } => {
+                assert_eq!(summary, &ReasoningText::one("short recap"));
+                assert_eq!(content, &ReasoningText::one("full chain-of-thought trace"));
             }
             other => panic!("unexpected item: {other:?}"),
         }
@@ -565,9 +579,13 @@ mod tests {
             })
             .unwrap();
         match item {
-            TurnItem::Reasoning { summary, content, .. } => {
-                assert_eq!(*summary, ReasoningText::one("only text available"));
-                assert_eq!(*content, ReasoningText::one("only text available"));
+            &TurnItem::Reasoning {
+                ref summary,
+                ref content,
+                ..
+            } => {
+                assert_eq!(summary, &ReasoningText::one("only text available"));
+                assert_eq!(content, &ReasoningText::one("only text available"));
             }
             other => panic!("unexpected item: {other:?}"),
         }
