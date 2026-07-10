@@ -22,6 +22,7 @@ import MessageTextPart from "./message-text-part"
 import MessageReasoningPart from "./message-reasoning-part"
 import MessageFallbackPart from "./message-fallback-part"
 import MessageToolPart from "./message-tool-part"
+import MessageToolCommandPart from "./message-tool-command-part"
 
 type TMessagePart = {
     state?: string;
@@ -91,9 +92,9 @@ function MessageItem({
 const messagePartComponents: MessagePartComponents<TMessagePart, TMessage> = {
     text: MessageTextPart,
     reasoning: MessageReasoningPart,
-    tool: MessageToolPart,     
+    tool: MessageToolPart,
     fallback: MessageFallbackPart,
-    tools: {},
+    tools: { commandExecution: MessageToolCommandPart },
 }
 
 

@@ -18,13 +18,12 @@ import {
 import { isValidElement, type ComponentProps, type ReactNode } from "react"
 
 import { CodeBlock } from "./code-block"
-import { Terminal } from "./terminal"
 import { useMessageInteraction, type ApprovalStatus } from "./message-interaction-context"
 import type { MessagePartRenderProps } from "./message-parts"
 import type { TMessage, TMessagePart } from "./message-item"
 
 /** Display states for a tool card (mirrors the AI-SDK + approval vocabulary). */
-type ToolState =
+export type ToolState =
   | "approval-requested"
   | "approval-responded"
   | "input-available"
@@ -60,7 +59,7 @@ const getStatusBadge = (state: ToolState) => (
   </Badge>
 )
 
-type ToolPartLike = TMessagePart & {
+export type ToolPartLike = TMessagePart & {
   toolName?: string
   toolCallId?: string
   input?: unknown
@@ -69,7 +68,7 @@ type ToolPartLike = TMessagePart & {
 }
 
 /** Resolve the display state from the part data + the out-of-band approval status. */
-function deriveState(part: ToolPartLike, approval: ApprovalStatus | undefined): ToolState {
+export function deriveState(part: ToolPartLike, approval: ApprovalStatus | undefined): ToolState {
   if (approval === "pending") return "approval-requested"
   if (approval === "denied") return "output-denied"
   // approval === "approved" falls through to the part state (tool is now running).
@@ -85,11 +84,11 @@ function deriveState(part: ToolPartLike, approval: ApprovalStatus | undefined): 
   return "input-available"
 }
 
-const Tool = ({ className, ...props }: ComponentProps<typeof Collapsible>) => (
+export const Tool = ({ className, ...props }: ComponentProps<typeof Collapsible>) => (
   <Collapsible className={cn("group not-prose mb-2 w-full rounded-md border", className)} {...props} />
 )
 
-const ToolHeader = ({
+export const ToolHeader = ({
   className,
   title,
   state,
@@ -108,7 +107,7 @@ const ToolHeader = ({
   </CollapsibleTrigger>
 )
 
-const ToolContent = ({ className, ...props }: ComponentProps<typeof CollapsibleContent>) => (
+export const ToolContent = ({ className, ...props }: ComponentProps<typeof CollapsibleContent>) => (
   <CollapsibleContent
     className={cn(
       "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 space-y-4 p-4 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
@@ -170,6 +169,15 @@ const ToolOutput = ({
   )
 }
 
+/** Whether a tool card should be expanded by default (still running / awaiting a decision). */
+export function isToolActive(state: ToolState): boolean {
+  return (
+    state === "input-available" ||
+    state === "input-streaming" ||
+    state === "approval-requested"
+  )
+}
+
 function MessageToolPart({
   part,
   kind,
@@ -188,32 +196,9 @@ function MessageToolPart({
     ? partType.split("-").slice(1).join("-")
     : partType
   const derivedName = (name ?? p.toolName ?? fromType) || "tool"
-  const isActive = state === "input-available" || state === "input-streaming" || state === "approval-requested"
-
-  // Command-execution tools render as an interactive terminal (ANSI output,
-  // streaming cursor) rather than JSON parameter/result cards.
-  if (derivedName === "commandExecution") {
-    const input = (p.input ?? {}) as { command?: string; cwd?: string }
-    const output = typeof p.output === "string" ? p.output : ""
-    const terminalOutput = [
-      input.cwd ? `# cd ${input.cwd}` : null,
-      input.command ? `$ ${input.command}` : null,
-      output || (p.errorText ?? ""),
-    ]
-      .filter((line) => line !== null && line !== "")
-      .join("\n")
-    return (
-      <Tool defaultOpen={isActive}>
-        <ToolHeader title={derivedName} state={state} />
-        <ToolContent>
-          <Terminal output={terminalOutput} isStreaming={isActive} />
-        </ToolContent>
-      </Tool>
-    )
-  }
 
   return (
-    <Tool defaultOpen={isActive}>
+    <Tool defaultOpen={isToolActive(state)}>
       <ToolHeader title={derivedName} state={state} />
       <ToolContent>
         <ToolInput input={p.input} />
