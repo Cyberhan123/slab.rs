@@ -3,6 +3,11 @@ export const assistant = {
     approve: 'Approve',
     reject: 'Reject',
   },
+  approval: {
+    title: 'Approval required',
+    command: 'command',
+    fileChange: 'file change',
+  },
   header: {
     title: 'Assistant',
     subtitle: 'Persistent AI agent assistant',

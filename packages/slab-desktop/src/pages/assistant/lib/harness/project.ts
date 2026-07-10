@@ -6,8 +6,8 @@
  * Items are walked in turn/item order. `userMessage` items start a user message;
  * consecutive non-user items (assistant text, reasoning, tool calls) are grouped
  * into one assistant message. Text and reasoning become typed UI parts; tool
- * items are rendered as text parts (the generic `ToolUIPart` is tool-set-typed,
- * so restore keeps to the type-safe text/reasoning vocabulary).
+ * items become `type: "tool-<name>"` parts (matching the live streaming path in
+ * `stream.ts`) so restored tool calls render the same rich cards as live ones.
  */
 
 import type { UIMessage } from "ai"
@@ -18,34 +18,93 @@ function reasoningToString(value: ReasoningText): string {
   return Array.isArray(value) ? value.join("\n") : value
 }
 
-/** Render a non-user item as a UI part (text or reasoning). */
+/** Stringify a tool value of unknown shape for an error/output field. */
+function stringifyToolValue(value: unknown): string {
+  if (typeof value === "string") return value
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+type ToolUIPartLike = {
+  type: `tool-${string}`
+  toolCallId: string
+  toolName: string
+  input: unknown
+  state: "input-available" | "output-available" | "output-error"
+  output?: unknown
+  errorText?: string
+}
+
+/** Build a finalized tool UI part (input + output/error) for a restored item. */
+function toolPartFromItem(item: TurnItem): ToolUIPartLike | null {
+  switch (item.type) {
+    case "commandExecution": {
+      const failed = item.exitCode !== undefined && item.exitCode !== 0
+      return {
+        input: { command: item.command, cwd: item.cwd },
+        errorText: failed ? item.aggregatedOutput ?? `exit code ${item.exitCode}` : undefined,
+        output: !failed && item.aggregatedOutput ? item.aggregatedOutput : undefined,
+        state: failed ? "output-error" : "output-available",
+        toolCallId: item.id,
+        toolName: "commandExecution",
+        type: "tool-commandExecution",
+      }
+    }
+    case "mcpToolCall": {
+      const failed = item.error !== undefined && item.error !== null
+      return {
+        errorText: failed ? stringifyToolValue(item.error) : undefined,
+        input: item.arguments,
+        output: !failed && item.result !== undefined && item.result !== null
+          ? item.result
+          : undefined,
+        state: failed ? "output-error" : "output-available",
+        toolCallId: item.id,
+        toolName: item.tool,
+        type: `tool-${item.tool}`,
+      }
+    }
+    case "fileChange":
+      return {
+        input: { changes: item.changes },
+        output: { status: item.status },
+        state: "output-available",
+        toolCallId: item.id,
+        toolName: "fileChange",
+        type: "tool-fileChange",
+      }
+    case "webSearch":
+      return {
+        input: { query: item.query },
+        state: "output-available",
+        toolCallId: item.id,
+        toolName: "webSearch",
+        type: "tool-webSearch",
+      }
+    default:
+      return null
+  }
+}
+
+/** Render a non-user item as a UI part (text, reasoning, or tool). */
 function partFromItem(item: TurnItem): UIMessage["parts"][number] | null {
   switch (item.type) {
     case "agentMessage":
       return item.text ? { text: item.text, type: "text" } : null
     case "reasoning": {
       const text = reasoningToString(item.summary ?? item.content)
-      return text ? { text, type: "reasoning" } : null
+      // `state: "done"` so the restored reasoning part is not treated as
+      // streaming and renders as an openable "Thought for a few seconds" block.
+      return text ? { state: "done" as const, text, type: "reasoning" as const } : null
     }
-    case "commandExecution": {
-      const lines = [`[command] ${item.command || "(shell)"}`.trim()]
-      if (item.aggregatedOutput) lines.push(item.aggregatedOutput)
-      return { text: lines.join("\n"), type: "text" }
-    }
-    case "mcpToolCall": {
-      const args = (() => {
-        try {
-          return JSON.stringify(item.arguments)
-        } catch {
-          return String(item.arguments)
-        }
-      })()
-      return { text: `[tool] ${item.tool}(${args})`, type: "text" }
-    }
+    case "commandExecution":
+    case "mcpToolCall":
     case "fileChange":
-      return { text: `[file] ${item.changes.length} change(s)`, type: "text" }
     case "webSearch":
-      return { text: `[search] ${item.query}`, type: "text" }
+      return toolPartFromItem(item) as UIMessage["parts"][number] | null
     case "imageView":
       return { text: "[image]", type: "text" }
     case "userMessage":

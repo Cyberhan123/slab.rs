@@ -405,9 +405,15 @@ async fn handle_tool_call(
             // ADR-008: when the tool has no own approval metadata, the
             // configured risk policy decides (default asks for Medium+ tools).
             if context.risk.approval_decision(&risk) == ToolApprovalDecision::Ask {
-                Some(ToolApprovalRequest {
-                    command: format!("{} {effective_arguments}", tool_call.name),
-                })
+                // Prefer the inner `command` argument (e.g. shell) so the
+                // approval prompt shows the real command instead of
+                // "<tool_name> <json args>"; fall back to name + args otherwise.
+                let command = effective_args
+                    .get("command")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_owned())
+                    .unwrap_or_else(|| format!("{} {effective_arguments}", tool_call.name));
+                Some(ToolApprovalRequest { command })
             } else {
                 None
             }

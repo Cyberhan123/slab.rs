@@ -67,7 +67,7 @@ impl AgentService {
     pub async fn handle_command(&self, command: AgentCommand) -> Result<String, AppCoreError> {
         match command {
             AgentCommand::CreateResponse { session_id, config, messages } => {
-                self.spawn(session_id, config, messages).await
+                self.spawn(session_id, *config, messages).await
             }
             AgentCommand::AppendInput { thread_id, content } => {
                 self.send_input(&thread_id, content).await?;

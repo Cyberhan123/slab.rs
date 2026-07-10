@@ -3,7 +3,7 @@
 import { useChat } from "@ai-sdk/react"
 import type { UIMessage } from "ai"
 import { MessageCircleDashedIcon } from "lucide-react"
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
 
 import { useTranslation } from "@slab/i18n"
 import { Card, CardContent, CardFooter } from "@slab/components/card"
@@ -20,7 +20,12 @@ import {
 
 import MessageList from "@/pages/assistant/components/message/index.tsx"
 import Sender from "@/pages/assistant/components/sender.tsx"
+import { MessageInteractionContext } from "@/pages/assistant/components/message/message-interaction-context.ts"
 import { useGreeting } from "../hooks/use-greeting"
+import type {
+    ApprovalRequest,
+    ApprovalStatus,
+} from "../hooks/use-harness-conversation"
 import type { HarnessChatTransport } from "../lib/harness"
 
 export type AssistantChatPaneProps = {
@@ -32,6 +37,9 @@ export type AssistantChatPaneProps = {
     onBusyChange: (busy: boolean) => void
     onMessageCountChange: (count: number) => void
     transport: HarnessChatTransport<UIMessage>
+    approvals: ApprovalRequest[]
+    approvalStatusByItemId: ReadonlyMap<string, ApprovalStatus>
+    resolveApproval: (itemId: string, approved: boolean) => Promise<void>
 }
 
 export function AssistantChatPane({
@@ -43,14 +51,22 @@ export function AssistantChatPane({
     onBusyChange,
     onMessageCountChange,
     transport,
+    approvals,
+    approvalStatusByItemId,
+    resolveApproval,
 }: AssistantChatPaneProps) {
     const { t } = useTranslation()
-    const { messages, sendMessage, status } = useChat({
+    const { messages, sendMessage, status, stop } = useChat({
         messages: initialMessages,
         transport,
     })
     const isBusy = status === "submitted" || status === "streaming"
     const greeting = useGreeting()
+
+    const interactionValue = useMemo(
+        () => ({ approvalStatusByItemId }),
+        [approvalStatusByItemId],
+    )
 
     useEffect(() => {
         onBusyChange(isBusy)
@@ -65,41 +81,50 @@ export function AssistantChatPane({
             <div className="relative flex min-h-0 flex-1 flex-col bg-[var(--shell-card)]">
                 <Card className="h-full w-full gap-0 border-none shadow-none">
                     <CardContent className="flex-1 overflow-hidden p-0">
-                        {isHistoryLoading && messages.length === 0 ? (
-                            <Empty className="h-full" data-testid="assistant-loading-state">
-                                <EmptyHeader>
-                                    <EmptyMedia variant="icon">
-                                        <MessageCircleDashedIcon />
-                                    </EmptyMedia>
-                                    <EmptyTitle>{t("pages.assistant.loading.title")}</EmptyTitle>
-                                    <EmptyDescription>
-                                        {t("pages.assistant.loading.description")}
-                                    </EmptyDescription>
-                                </EmptyHeader>
-                            </Empty>
-                        ) : messages.length === 0 ? (
-                            <Empty className="h-full" data-testid="assistant-empty-state">
-                                <EmptyHeader>
-                                    <EmptyMedia variant="icon">
-                                        <MessageCircleDashedIcon />
-                                    </EmptyMedia>
-                                    <EmptyTitle>{greeting}</EmptyTitle>
-                                    <EmptyDescription>
-                                        {t("pages.assistant.hero.description")}
-                                    </EmptyDescription>
-                                </EmptyHeader>
-                            </Empty>
-                        ) : (
-                            <MessageList messages={messages} isBusy={isBusy} />
-                        )}
+                        <div className="flex h-full flex-col">
+                            <div className="min-h-0 flex-1">
+                                {isHistoryLoading && messages.length === 0 ? (
+                                    <Empty className="h-full" data-testid="assistant-loading-state">
+                                        <EmptyHeader>
+                                            <EmptyMedia variant="icon">
+                                                <MessageCircleDashedIcon />
+                                            </EmptyMedia>
+                                            <EmptyTitle>{t("pages.assistant.loading.title")}</EmptyTitle>
+                                            <EmptyDescription>
+                                                {t("pages.assistant.loading.description")}
+                                            </EmptyDescription>
+                                        </EmptyHeader>
+                                    </Empty>
+                                ) : messages.length === 0 ? (
+                                    <Empty className="h-full" data-testid="assistant-empty-state">
+                                        <EmptyHeader>
+                                            <EmptyMedia variant="icon">
+                                                <MessageCircleDashedIcon />
+                                            </EmptyMedia>
+                                            <EmptyTitle>{greeting}</EmptyTitle>
+                                            <EmptyDescription>
+                                                {t("pages.assistant.hero.description")}
+                                            </EmptyDescription>
+                                        </EmptyHeader>
+                                    </Empty>
+                                ) : (
+                                    <MessageInteractionContext.Provider value={interactionValue}>
+                                        <MessageList messages={messages} isBusy={isBusy} />
+                                    </MessageInteractionContext.Provider>
+                                )}
+                            </div>
+                        </div>
                     </CardContent>
                     <CardFooter className="flex-col gap-2">
                         <Sender
-                            onSubmit={async (value) => {
+                            onSubmit={async (value, { files, effort }) => {
                                 await onBeforeSubmit(value)
-                                sendMessage({ text: value })
+                                sendMessage({ text: value, files, metadata: { effort } })
                             }}
+                            onStop={stop}
                             loading={disabled || isBusy}
+                            approvals={approvals}
+                            onResolveApproval={resolveApproval}
                         />
                         <p
                             className="w-full truncate text-xs text-muted-foreground"

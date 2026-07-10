@@ -13,15 +13,34 @@
  * the thread unbound so the first `turn/start` lazily creates it.
  */
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import type { UIMessage } from "ai"
 
 import {
+  HARNESS_NOTIFICATION,
   HarnessChatTransport,
   HarnessClient,
   projectThread,
+  type CommandExecutionRequestApprovalParams,
+  type FileChangeApprovalChange,
+  type FileChangeRequestApprovalParams,
+  type JsonRpcNotification,
   type Thread,
 } from "../lib/harness"
+
+/** A pending human-approval request surfaced from the harness (commands / file changes). */
+export type ApprovalRequest = {
+  itemId: string
+  threadId: string
+  kind: "command" | "fileChange"
+  command?: string
+  cwd?: string
+  changes?: FileChangeApprovalChange[]
+  reason?: string
+  status: "pending" | "approved" | "denied"
+}
+
+export type ApprovalStatus = "pending" | "approved" | "denied"
 
 export interface HarnessConversation {
   /** Transport bound to the live client (always defined; safe to pass to `useChat`). */
@@ -38,6 +57,12 @@ export interface HarnessConversation {
   isHistoryLoading: boolean
   /** Restore error message, if any. */
   error: string | null
+  /** Approval requests still awaiting a user decision (rendered in the banner). */
+  approvals: ApprovalRequest[]
+  /** itemId → approval status, for the in-stream tool-card status badge. */
+  approvalStatusByItemId: ReadonlyMap<string, ApprovalStatus>
+  /** Resolve a pending approval via `approval/resolve`. */
+  resolveApproval: (itemId: string, approved: boolean) => Promise<void>
 }
 
 /** Highest numeric turn id in a thread (-1 when there are no turns). */
@@ -64,8 +89,103 @@ export function useHarnessConversation(
   const [restoreVersion, setRestoreVersion] = useState(0)
   const [isHistoryLoading, setIsHistoryLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [approvalMap, setApprovalMap] = useState<Map<string, ApprovalRequest>>(new Map())
 
   const transport = useMemo(() => new HarnessChatTransport({ client, model }), [client, model])
+
+  /** Track pending human-approval requests independently of the live-turn stream. */
+  useEffect(() => {
+    return client.onNotification((notification: JsonRpcNotification) => {
+      const { method } = notification
+      const isCommandApproval = method === HARNESS_NOTIFICATION.ITEM_COMMAND_EXECUTION_REQUEST_APPROVAL
+      const isFileApproval = method === HARNESS_NOTIFICATION.ITEM_FILE_CHANGE_REQUEST_APPROVAL
+      if (!isCommandApproval && !isFileApproval) return
+
+      const params = (notification.params ?? {}) as
+        | CommandExecutionRequestApprovalParams
+        | FileChangeRequestApprovalParams
+      // Only track approvals for the currently bound thread on this socket.
+      if (params.threadId !== client.currentThreadId) return
+
+      setApprovalMap((prev) => {
+        if (prev.has(params.itemId)) return prev
+        const next = new Map(prev)
+        if (isCommandApproval) {
+          const command = params as CommandExecutionRequestApprovalParams
+          next.set(params.itemId, {
+            itemId: params.itemId,
+            threadId: params.threadId,
+            kind: "command",
+            command: command.command,
+            cwd: command.cwd,
+            reason: command.reason,
+            status: "pending",
+          })
+        } else {
+          const file = params as FileChangeRequestApprovalParams
+          next.set(params.itemId, {
+            itemId: params.itemId,
+            threadId: params.threadId,
+            kind: "fileChange",
+            changes: file.changes,
+            status: "pending",
+          })
+        }
+        return next
+      })
+    })
+  }, [client])
+
+  const resolveApproval = useCallback(
+    async (itemId: string, approved: boolean) => {
+      const entry = approvalMap.get(itemId)
+      if (!entry) return
+      // Optimistically mark resolved so the banner/card update immediately.
+      setApprovalMap((prev) => {
+        const existing = prev.get(itemId)
+        if (!existing) return prev
+        const next = new Map(prev)
+        next.set(itemId, { ...existing, status: approved ? "approved" : "denied" })
+        return next
+      })
+      try {
+        const result = await client.approvalResolve({ threadId: entry.threadId, itemId, approved })
+        // If the server couldn't deliver the decision (e.g. the pending entry
+        // was gone), revert to pending so the user sees it wasn't actioned.
+        if (result.delivered === false) {
+          setApprovalMap((prev) => {
+            const existing = prev.get(itemId)
+            if (!existing) return prev
+            const next = new Map(prev)
+            next.set(itemId, { ...existing, status: "pending" })
+            return next
+          })
+          throw new Error("approval not delivered")
+        }
+      } catch (resolveError) {
+        // Revert to pending if the server rejected the resolution.
+        setApprovalMap((prev) => {
+          const existing = prev.get(itemId)
+          if (!existing) return prev
+          const next = new Map(prev)
+          next.set(itemId, { ...existing, status: "pending" })
+          return next
+        })
+        throw resolveError
+      }
+    },
+    [approvalMap, client],
+  )
+
+  const approvals = useMemo(
+    () => Array.from(approvalMap.values()).filter((a) => a.status === "pending"),
+    [approvalMap],
+  )
+  const approvalStatusByItemId = useMemo(() => {
+    const map = new Map<string, ApprovalStatus>()
+    for (const [id, req] of approvalMap) map.set(id, req.status)
+    return map
+  }, [approvalMap])
 
   // Close the client when it is replaced or on unmount.
   useEffect(() => {
@@ -76,6 +196,8 @@ export function useHarnessConversation(
 
   // (Re)restore whenever the session or its client changes.
   useEffect(() => {
+    // A new session means a new thread; drop any stale approval state.
+    setApprovalMap(new Map())
     if (!sessionId) {
       client.currentThreadId = null
       client.lastTurnIndex = -1
@@ -146,5 +268,8 @@ export function useHarnessConversation(
     restoreVersion,
     isHistoryLoading,
     error,
+    approvals,
+    approvalStatusByItemId,
+    resolveApproval,
   }
 }

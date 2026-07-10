@@ -221,7 +221,7 @@ function createMessageParts<TMessage>(
 
   const all = orderMessagePartItems(
     protocol,
-    options.order ?? "role",
+    options.order ?? "protocol",
     role,
     message
   )

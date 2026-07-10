@@ -11,7 +11,8 @@ import UserAvatar from "@/pages/assistant/components/message/user-avatar"
 import { Message, MessageContent, MessageHeader, MessageAvatar, MessageFooter } from "@slab/components/message"
 import { MessageScrollerItem } from "@slab/components/message-scroller"
 import { useTranslation } from "@slab/i18n"
-import { CopyIcon } from "lucide-react"
+import { useClipboard } from "@mantine/hooks"
+import { CheckIcon, CopyIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { createMessageParts, MessageParts } from "./message-parts"
 import type { MessagePartComponents, MessagePartItem, MessagePartsResult } from "./message-parts"
@@ -91,7 +92,8 @@ const messagePartComponents: MessagePartComponents<TMessagePart, TMessage> = {
     text: MessageTextPart,
     reasoning: MessageReasoningPart,
     tool: MessageToolPart,     
-    fallback: MessageFallbackPart
+    fallback: MessageFallbackPart,
+    tools: {},
 }
 
 
@@ -101,11 +103,19 @@ function MessageRow({
     message: TMessage
 }) {
     const isUserMessage = message.role === "user"
+    // `createMessageParts` defaults to protocol (temporal) order — a tool call
+    // renders where it actually occurred relative to the text/reasoning.
     const parsedParts = createMessageParts<TMessage>(message) as MessagePartsResult<
         TRenderableMessagePart,
         TMessage
     > & { all: Array<MessagePartItem<TRenderableMessagePart, TMessage>> }
     const { t } = useTranslation()
+    const clipboard = useClipboard({ timeout: 2000 })
+    const plainText = (message.parts ?? [])
+        .filter((part) => (part as TMessagePart).type === "text")
+        .map((part) => (part as TMessagePart).text ?? "")
+        .join("")
+        .trim()
     return (
         <Message align={isUserMessage ? "end" : "start"}>
             <MessageAvatar className={cn("items-start self-start group-has-data-[slot=message-footer]/message:-translate-y-0")}>
@@ -124,11 +134,21 @@ function MessageRow({
                         />
                     </BubbleContent>
                 </Bubble>
-                <MessageFooter>
-                    <Button variant="ghost" size="icon" aria-label="Copy" title="Copy">
-                        <CopyIcon />
-                    </Button>
-                </MessageFooter>
+                {plainText ? (
+                    <MessageFooter>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Copy"
+                            title="Copy"
+                            onClick={() => {
+                                clipboard.copy(plainText)
+                            }}
+                        >
+                            {clipboard.copied ? <CheckIcon /> : <CopyIcon />}
+                        </Button>
+                    </MessageFooter>
+                ) : null}
             </MessageContent>
         </Message>
     )

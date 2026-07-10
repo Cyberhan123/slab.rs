@@ -15,7 +15,11 @@ describe("Sender", () => {
     await user.type(textarea, "  hello slab  ")
     await user.click(screen.getByRole("button", { name: "Send" }))
 
-    expect(onSubmit).toHaveBeenCalledWith("hello slab", expect.anything())
+    expect(onSubmit).toHaveBeenCalledWith(
+      "hello slab",
+      expect.objectContaining({ files: [], effort: "off" }),
+      expect.anything(),
+    )
     expect(textarea).toHaveValue("")
   })
 

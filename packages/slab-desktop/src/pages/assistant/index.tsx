@@ -55,6 +55,9 @@ function Assistant() {
         restoreVersion,
         isHistoryLoading,
         error: harnessError,
+        approvals,
+        approvalStatusByItemId,
+        resolveApproval,
     } = useHarnessConversation(curConversation, selectedModelId || "slab-llama")
 
     const isSessionBootstrapping = (sessionsLoading || isCreatingSession) && conversationList.length === 0
@@ -168,6 +171,9 @@ function Assistant() {
                 onBusyChange={setIsChatBusy}
                 onMessageCountChange={setMessageCount}
                 transport={transport}
+                approvals={approvals}
+                approvalStatusByItemId={approvalStatusByItemId}
+                resolveApproval={resolveApproval}
             />
 
             <AssistantSessionSheet

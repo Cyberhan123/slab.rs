@@ -101,14 +101,16 @@ impl AgentEventHub {
 
     /// Send an approval decision for a pending tool call.
     ///
-    /// Both `thread_id` (from the URL path) and `call_id` must match the
-    /// pending entry so that a caller cannot approve tool calls belonging to a
-    /// different thread.
+    /// The pending entry is matched by `call_id` alone — it is a fresh
+    /// per-call UUID (globally unique), so no `thread_id` scoping is needed.
+    /// Keying by `call_id` only avoids the fragile harness↔real thread-id
+    /// remap that previously caused resolves to miss the pending entry.
     ///
     /// Returns `true` if the pending approval was found and the decision was
     /// delivered; `false` if no matching pending approval exists.
     pub fn approve_call(&self, thread_id: &str, call_id: &str, approved: bool) -> bool {
-        let key = approval_key(thread_id, call_id);
+        let _ = thread_id;
+        let key = approval_key(call_id);
         if let Some((_, tx)) = self.approvals.remove(&key) {
             let decision =
                 if approved { ApprovalDecision::Approved } else { ApprovalDecision::Rejected };
@@ -127,8 +129,8 @@ impl AgentEventHub {
     }
 }
 
-fn approval_key(thread_id: &str, call_id: &str) -> String {
-    format!("{thread_id}:{call_id}")
+fn approval_key(call_id: &str) -> String {
+    format!("approval:{call_id}")
 }
 
 #[async_trait]
@@ -186,7 +188,7 @@ impl ApprovalPort for AgentEventHub {
         risk: Option<ToolRiskAssessment>,
     ) -> ApprovalDecision {
         let (tx, rx) = oneshot::channel();
-        let key = approval_key(thread_id, call_id);
+        let key = approval_key(call_id);
         self.approvals.insert(key.clone(), tx);
 
         // Notify SSE subscribers that approval is needed.

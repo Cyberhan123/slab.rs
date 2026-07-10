@@ -242,7 +242,7 @@ impl OpenAICreateRequest {
             },
             None => AgentCommand::CreateResponse {
                 session_id,
-                config: self.to_config_input().into(),
+                config: Box::new(self.to_config_input().into()),
                 messages,
             },
         }

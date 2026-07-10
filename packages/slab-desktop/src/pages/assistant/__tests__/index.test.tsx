@@ -47,6 +47,9 @@ const mocks = vi.hoisted(() => {
     restoredThreadId: null as string | null,
     restoreVersion: 1,
     transport: {},
+    approvals: [] as Array<Record<string, unknown>>,
+    approvalStatusByItemId: new Map<string, "pending" | "approved" | "denied">(),
+    resolveApproval: vi.fn<(itemId: string, approved: boolean) => Promise<void>>(),
   }
 
   return {
@@ -64,6 +67,7 @@ const mocks = vi.hoisted(() => {
     ensureDownloaded: vi.fn<() => Promise<{ downloadedNow: boolean }>>(),
     ensureLoaded: vi.fn<() => Promise<{ runtimeStatus: null }>>(),
     sendMessage: vi.fn(),
+    stop: vi.fn(),
     models,
     setCurrentSessionId: vi.fn(),
     setSelectedModelId: vi.fn(),
@@ -83,6 +87,7 @@ vi.mock("@ai-sdk/react", () => ({
       messages,
       sendMessage: mocks.sendMessage,
       status: "ready",
+      stop: mocks.stop,
     }
   }),
 }))
@@ -300,6 +305,7 @@ describe("Assistant page session and model lifecycle", () => {
     mocks.harnessConversation.isHistoryLoading = false
     mocks.harnessConversation.error = null
     mocks.sendMessage.mockClear()
+    mocks.stop.mockClear()
     mocks.setCurrentSessionId.mockClear()
     mocks.setSelectedModelId.mockClear()
     mocks.toastInfo.mockClear()
@@ -336,7 +342,9 @@ describe("Assistant page session and model lifecycle", () => {
     await user.click(screen.getByRole("button", { name: "Send" }))
 
     await waitFor(() => expect(mocks.ensureDownloaded).not.toHaveBeenCalled())
-    expect(mocks.sendMessage).toHaveBeenCalledWith({ text: "continue restored" })
+    expect(mocks.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "continue restored" }),
+    )
   })
 
   it("switches models immediately when the current session has no messages", async () => {

@@ -266,10 +266,8 @@ impl HarnessDispatcher {
     }
 
     async fn handle_turn_start(&self, params: TurnStartParams) -> Result<Value, String> {
-        let existing_real = self
-            .bindings()
-            .get(&params.thread_id)
-            .and_then(|binding| binding.real_id.clone());
+        let existing_real =
+            self.bindings().get(&params.thread_id).and_then(|binding| binding.real_id.clone());
 
         match existing_real {
             Some(real_id) => {

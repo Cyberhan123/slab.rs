@@ -206,7 +206,10 @@ impl HarnessProjection {
                 })]
             }
             AgentEventKind::ResponseLocalShellCallDone {
-                item_id, command, working_directory, ..
+                item_id,
+                command,
+                working_directory,
+                ..
             } => self.command_started(
                 &tid,
                 turn_id,
@@ -470,12 +473,7 @@ mod tests {
             })
             .unwrap();
         match item {
-            &TurnItem::CommandExecution {
-                ref command,
-                ref cwd,
-                ref status,
-                ..
-            } => {
+            TurnItem::CommandExecution { command, cwd, status, .. } => {
                 assert_eq!(command, "ls -la");
                 assert_eq!(cwd, "/workspace");
                 assert_eq!(status, "running");
@@ -503,12 +501,7 @@ mod tests {
             })
             .unwrap();
         match item {
-            &TurnItem::CommandExecution {
-                ref command,
-                ref cwd,
-                ref aggregated_output,
-                ..
-            } => {
+            TurnItem::CommandExecution { command, cwd, aggregated_output, .. } => {
                 assert_eq!(command, "ls -la", "command must survive to completion");
                 assert_eq!(cwd, "/workspace", "cwd must survive to completion");
                 assert!(aggregated_output.is_some());
@@ -545,11 +538,7 @@ mod tests {
             })
             .unwrap();
         match item {
-            &TurnItem::Reasoning {
-                ref summary,
-                ref content,
-                ..
-            } => {
+            TurnItem::Reasoning { summary, content, .. } => {
                 assert_eq!(summary, &ReasoningText::one("short recap"));
                 assert_eq!(content, &ReasoningText::one("full chain-of-thought trace"));
             }
@@ -579,11 +568,7 @@ mod tests {
             })
             .unwrap();
         match item {
-            &TurnItem::Reasoning {
-                ref summary,
-                ref content,
-                ..
-            } => {
+            TurnItem::Reasoning { summary, content, .. } => {
                 assert_eq!(summary, &ReasoningText::one("only text available"));
                 assert_eq!(content, &ReasoningText::one("only text available"));
             }

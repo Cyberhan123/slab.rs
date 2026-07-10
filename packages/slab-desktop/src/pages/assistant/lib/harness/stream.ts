@@ -7,10 +7,12 @@
  * OpenAI-Responses `convertEvent` state machine but keyed on harness item ids
  * (which are stable within a turn).
  *
- * Tool calls are finalized via `item/completed` → `tool-input-available`
- * (matching the OpenAI-Responses transport, which does not progressively chunk
- * tool input). `tool-input-delta` is intentionally avoided — it requires a
- * preceding `tool-input-start` we never emit.
+ * Tool calls are finalized via `item/completed` → `tool-input-available` followed
+ * by `tool-output-available` (result) or `tool-output-error` (failure). The
+ * approval-request notifications also emit `tool-input-available` so the card
+ * shows the pending command/changes; approval status is tracked out-of-band by
+ * the conversation hook. `tool-input-delta` is intentionally avoided — it
+ * requires a preceding `tool-input-start` we never emit.
  *
  * Terminal detection: a failed turn emits an `error` notification with NO
  * subsequent `turn/completed`, so both `turn/completed` and `error` are treated
@@ -100,44 +102,99 @@ function finishChunks(state: StreamState, reason: "stop" | "error" = "stop"): UI
   return chunks
 }
 
-/** Build a `tool-input-available` chunk for a finalized tool-like item. */
-function toolChunkFromItem(item: TurnItem): UIMessageChunk | null {
+/** Stringify a tool error/result value of unknown shape for display. */
+function stringifyToolValue(value: unknown): string {
+  if (typeof value === "string") return value
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+/**
+ * Build `tool-input-available` (and, when finalized, `tool-output-available` /
+ * `tool-output-error`) chunks for a tool-like item. Mirrors the AI-SDK tool-part
+ * lifecycle so the assembled `type: "tool-<name>"` part carries its parameters
+ * AND its result/error — letting the tool card render a Completed/Error badge
+ * with the result, instead of folding everything into the input.
+ */
+function toolChunksFromItem(item: TurnItem): UIMessageChunk[] {
   switch (item.type) {
-    case "commandExecution":
-      return {
-        input: {
-          command: item.command,
-          cwd: item.cwd,
-          exitCode: item.exitCode,
-          output: item.aggregatedOutput,
+    case "commandExecution": {
+      const chunks: UIMessageChunk[] = [
+        {
+          input: { command: item.command, cwd: item.cwd },
+          toolCallId: item.id,
+          toolName: "commandExecution",
+          type: "tool-input-available",
         },
-        toolCallId: item.id,
-        toolName: "commandExecution",
-        type: "tool-input-available",
+      ]
+      const failed = item.exitCode !== undefined && item.exitCode !== 0
+      if (failed) {
+        chunks.push({
+          errorText: item.aggregatedOutput ?? `exit code ${item.exitCode}`,
+          toolCallId: item.id,
+          type: "tool-output-error",
+        })
+      } else if (item.aggregatedOutput !== undefined && item.aggregatedOutput !== "") {
+        chunks.push({
+          output: item.aggregatedOutput,
+          toolCallId: item.id,
+          type: "tool-output-available",
+        })
       }
-    case "mcpToolCall":
-      return {
-        input: item.arguments,
-        toolCallId: item.id,
-        toolName: item.tool,
-        type: "tool-input-available",
+      return chunks
+    }
+    case "mcpToolCall": {
+      const chunks: UIMessageChunk[] = [
+        {
+          input: item.arguments,
+          toolCallId: item.id,
+          toolName: item.tool,
+          type: "tool-input-available",
+        },
+      ]
+      if (item.error !== undefined && item.error !== null) {
+        chunks.push({
+          errorText: stringifyToolValue(item.error),
+          toolCallId: item.id,
+          type: "tool-output-error",
+        })
+      } else if (item.result !== undefined && item.result !== null) {
+        chunks.push({
+          output: item.result,
+          toolCallId: item.id,
+          type: "tool-output-available",
+        })
       }
+      return chunks
+    }
     case "fileChange":
-      return {
-        input: { changes: item.changes },
-        toolCallId: item.id,
-        toolName: "fileChange",
-        type: "tool-input-available",
-      }
+      return [
+        {
+          input: { changes: item.changes },
+          toolCallId: item.id,
+          toolName: "fileChange",
+          type: "tool-input-available",
+        },
+        {
+          output: { status: item.status },
+          toolCallId: item.id,
+          type: "tool-output-available",
+        },
+      ]
     case "webSearch":
-      return {
-        input: { query: item.query },
-        toolCallId: item.id,
-        toolName: "webSearch",
-        type: "tool-input-available",
-      }
+      return [
+        {
+          input: { query: item.query },
+          toolCallId: item.id,
+          toolName: "webSearch",
+          type: "tool-input-available",
+        },
+      ]
     default:
-      return null
+      return []
   }
 }
 
@@ -152,8 +209,7 @@ function handleItemCompleted(state: StreamState, params: ItemCompletedParams): U
   const { item } = params
   if (item.type === "agentMessage") return closeText(state, item.id)
   if (item.type === "reasoning") return closeReasoning(state, item.id)
-  const tool = toolChunkFromItem(item)
-  return tool ? [tool] : []
+  return toolChunksFromItem(item)
 }
 
 function handleAgentMessageDelta(

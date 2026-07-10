@@ -70,7 +70,24 @@ describe("harness projectThread", () => {
     expect(messages[0].role).toBe("user")
     const assistant = messages[1]
     expect(assistant.role).toBe("assistant")
-    expect(assistant.parts.map((p) => p.type)).toEqual(["reasoning", "text", "text"])
+    // reasoning, agentMessage text, then the commandExecution renders as a tool part.
+    expect(assistant.parts.map((p) => p.type)).toEqual(["reasoning", "text", "tool-commandExecution"])
+    const toolPart = assistant.parts[2] as {
+      type: string
+      toolCallId: string
+      toolName: string
+      input: unknown
+      output: unknown
+      state: string
+    }
+    expect(toolPart).toMatchObject({
+      type: "tool-commandExecution",
+      toolCallId: "c1",
+      toolName: "commandExecution",
+      input: { command: "ls", cwd: "/tmp" },
+      output: "a",
+      state: "output-available",
+    })
   })
 
   it("returns no messages for an empty thread", () => {

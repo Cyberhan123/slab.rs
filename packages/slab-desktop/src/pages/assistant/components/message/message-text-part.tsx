@@ -1,4 +1,4 @@
-import {Markdown} from "./markdown"
+import { Markdown } from "./markdown"
 import type { MessagePartRenderProps } from "./message-parts"
 import type { TMessage, TMessagePart } from "./message-item"
 
@@ -10,10 +10,14 @@ function MessageTextPart({
     return null
   }
 
+  // While the assistant is still streaming this chunk, keep Streamdown in its
+  // streaming mode so partial markdown renders gracefully.
+  const isStreaming = part.state === "streaming"
+
   return (
-    <span className="whitespace-pre-wrap">
-      <Markdown>{part.text}</Markdown>
-    </span>
+    <div className="min-w-0">
+      <Markdown hasNextChunk={isStreaming}>{part.text}</Markdown>
+    </div>
   )
 }
 

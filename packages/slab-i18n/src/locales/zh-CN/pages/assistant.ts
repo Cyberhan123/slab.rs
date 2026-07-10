@@ -3,6 +3,11 @@ export const assistant = {
     approve: '批准',
     reject: '拒绝',
   },
+  approval: {
+    title: '需要审批',
+    command: '命令',
+    fileChange: '文件变更',
+  },
   header: {
     title: '助手',
     subtitle: '持续运行的 AI Agent 助手',

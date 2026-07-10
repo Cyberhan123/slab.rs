@@ -11,8 +11,17 @@ use slab_types::ConversationMessage;
 /// Command accepted by the app-core agent application service.
 #[derive(Debug)]
 pub enum AgentCommand {
-    CreateResponse { session_id: String, config: AgentConfig, messages: Vec<ConversationMessage> },
-    AppendInput { thread_id: String, content: String },
+    // `config` is boxed so the enum isn't dominated by the large `AgentConfig`
+    // variant (clippy::large_enum_variant).
+    CreateResponse {
+        session_id: String,
+        config: Box<AgentConfig>,
+        messages: Vec<ConversationMessage>,
+    },
+    AppendInput {
+        thread_id: String,
+        content: String,
+    },
 }
 
 /// Transport-neutral session restoration payload.

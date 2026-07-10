@@ -47,7 +47,7 @@ describe("harness stream convertNotification", () => {
     ).toEqual([{ delta: "think", id: "r1", type: "reasoning-delta" }])
   })
 
-  it("finalizes a tool call on item/completed(commandExecution)", () => {
+  it("finalizes a commandExecution with input + output chunks", () => {
     const state = createStreamState()
     const item: TurnItem = {
       type: "commandExecution",
@@ -61,12 +61,82 @@ describe("harness stream convertNotification", () => {
       { method: "item/completed", params: { item, threadId: THREAD, turnId: TURN } },
       state,
     )
-    expect(chunks).toHaveLength(1)
-    expect(chunks[0]).toMatchObject({
-      toolCallId: "c1",
-      toolName: "commandExecution",
-      type: "tool-input-available",
+    expect(chunks).toEqual([
+      {
+        input: { command: "ls", cwd: "/tmp" },
+        toolCallId: "c1",
+        toolName: "commandExecution",
+        type: "tool-input-available",
+      },
+      { output: "a\nb", toolCallId: "c1", type: "tool-output-available" },
+    ])
+  })
+
+  it("emits a tool-output-error chunk for a failed commandExecution", () => {
+    const state = createStreamState()
+    const item: TurnItem = {
+      type: "commandExecution",
+      id: "c2",
+      command: "false",
+      cwd: "/tmp",
+      status: "completed",
+      exitCode: 1,
+      aggregatedOutput: "boom",
+    }
+    const chunks = convertNotification(
+      { method: "item/completed", params: { item, threadId: THREAD, turnId: TURN } },
+      state,
+    )
+    expect(chunks).toEqual([
+      {
+        input: { command: "false", cwd: "/tmp" },
+        toolCallId: "c2",
+        toolName: "commandExecution",
+        type: "tool-input-available",
+      },
+      { errorText: "boom", toolCallId: "c2", type: "tool-output-error" },
+    ])
+  })
+
+  it("emits a tool-output-error chunk for a failed mcpToolCall", () => {
+    const state = createStreamState()
+    const item: TurnItem = {
+      type: "mcpToolCall",
+      id: "m1",
+      server: "srv",
+      tool: "ping",
+      arguments: { host: "x" },
+      status: "completed",
+      error: { message: "offline" },
+    }
+    const chunks = convertNotification(
+      { method: "item/completed", params: { item, threadId: THREAD, turnId: TURN } },
+      state,
+    )
+    expect(chunks.at(-1)).toMatchObject({
+      errorText: JSON.stringify({ message: "offline" }, null, 2),
+      toolCallId: "m1",
+      type: "tool-output-error",
     })
+  })
+
+  it("renders an approval request as a tool-input-available chunk", () => {
+    const state = createStreamState()
+    const chunks = convertNotification(
+      {
+        method: "item/commandExecution/requestApproval",
+        params: { threadId: THREAD, turnId: TURN, itemId: "c3", command: "rm -rf", cwd: "/" },
+      },
+      state,
+    )
+    expect(chunks).toEqual([
+      {
+        input: { command: "rm -rf", cwd: "/" },
+        toolCallId: "c3",
+        toolName: "commandExecution",
+        type: "tool-input-available",
+      },
+    ])
   })
 
   it("emits finish chunks on turn/completed and stops after", () => {

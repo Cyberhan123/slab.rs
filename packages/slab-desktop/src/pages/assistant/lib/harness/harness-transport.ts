@@ -29,7 +29,12 @@ import {
   createStreamState,
   isTerminalNotification,
 } from "./stream"
-import type { JsonRpcNotification, UserInput } from "./types"
+import type {
+  JsonRpcNotification,
+  ReasoningEffort,
+  TurnStartParams,
+  UserInput,
+} from "./types"
 
 export interface HarnessChatTransportOptions {
   /** The shared, long-lived harness client (owns the WS + bound thread). */
@@ -38,18 +43,48 @@ export interface HarnessChatTransportOptions {
   model?: string
 }
 
-/** Extract the latest user message text to send as the new turn's `input`. */
-function lastUserInput(messages: UIMessage[]): string {
+/**
+ * Build the new turn's `input` from the latest user message: its text plus any
+ * image attachments (AI-SDK `file` parts with an image media type), mapped to
+ * harness `UserInput` variants. Non-image files are ignored here (no harness
+ * upload path yet).
+ */
+function buildTurnInput(messages: UIMessage[]): UserInput[] {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i]
     if (message.role !== "user") continue
-    return message.parts
-        .filter((part): part is Extract<(typeof message.parts)[number], { type: "text" }> => part.type === "text")
-        .map((part) => part.text)
-        .join("")
-        .trim()
+    const input: UserInput[] = []
+    const text = message.parts
+      .filter((part): part is { type: "text"; text: string } => part.type === "text")
+      .map((part) => part.text)
+      .join("")
+      .trim()
+    if (text) input.push({ type: "text", text, textElements: [] })
+    for (const part of message.parts) {
+      if (part.type !== "file") continue
+      const file = part as { type: "file"; mediaType?: string; url: string }
+      if (!file.mediaType?.startsWith("image")) continue
+      input.push({ type: "image", imageUrl: file.url, detail: "auto" })
+    }
+    return input
   }
-  return ""
+  return []
+}
+
+/** Read the reasoning-effort selector carried via `sendMessage({ metadata })`. */
+function readEffort(metadata: unknown): ReasoningEffort | undefined {
+  if (!metadata || typeof metadata !== "object") return undefined
+  const effort = (metadata as { effort?: unknown }).effort
+  if (
+    effort === "off" ||
+    effort === "low" ||
+    effort === "medium" ||
+    effort === "high" ||
+    effort === "xhigh"
+  ) {
+    return effort
+  }
+  return undefined
 }
 
 export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatTransport<UI_MESSAGE> {
@@ -64,8 +99,11 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
   async sendMessages(options: {
     messages: UI_MESSAGE[]
     abortSignal?: AbortSignal
+    /** Carries `effort` from `sendMessage({ metadata })`. */
+    requestMetadata?: unknown
   }): Promise<ReadableStream<UIMessageChunk>> {
-    const input = lastUserInput(options.messages)
+    const input = buildTurnInput(options.messages)
+    const effort = readEffort(options.requestMetadata)
 
     return createUIMessageStream({
       execute: async ({ writer }) => {
@@ -121,12 +159,18 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
           // Fire the turn; its events arrive via the subscription above. The
           // `turnStart` response is not awaited (its `turn.id` is hardcoded and
           // uninformative) — a rejection is surfaced as an error + finish.
+          const turnParams: TurnStartParams = {
+            threadId,
+            // Always send at least a text part so the turn has well-formed input.
+            input:
+              input.length > 0
+                ? input
+                : ([{ text: "", textElements: [], type: "text" }] satisfies UserInput[]),
+            model: this.model,
+          }
+          if (effort) turnParams.effort = effort
           this.client
-            .turnStart({
-              threadId,
-              input: [{ text: input, textElements: [], type: "text" }] satisfies UserInput[],
-              model: this.model,
-            })
+            .turnStart(turnParams)
             .catch((error) => {
               if (finished) return
               const message = error instanceof Error ? error.message : "turn failed"
