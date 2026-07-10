@@ -16,7 +16,9 @@ use futures::{SinkExt, StreamExt};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use slab_agent::port::{ThreadListFilter, ThreadMessageRecord, ThreadSnapshot, TurnStateRecord};
+use slab_agent::port::{
+    ThreadListFilter, ThreadMessageRecord, ThreadSnapshot, TurnItemRecord, TurnStateRecord,
+};
 use slab_app_core::application::agent::projection::harness::HarnessProjection;
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::{AgentService, WorkspaceService};
@@ -486,12 +488,15 @@ impl HarnessDispatcher {
             .map_err(|error| error.to_string())?;
         let turn_states =
             self.service.list_turn_states(&snapshot.id).await.map_err(|error| error.to_string())?;
+        let turn_items =
+            self.service.list_turn_items(&snapshot.id).await.map_err(|error| error.to_string())?;
         ok_value(ThreadResumeResult {
             thread: thread_from_snapshot_with_turns(
                 &harness_id,
                 &snapshot,
                 &messages,
                 &turn_states,
+                &turn_items,
             ),
         })
     }
@@ -570,36 +575,83 @@ fn turn_items_for_message(message: &ThreadMessageRecord) -> Vec<TurnItem> {
     }
 }
 
-/// Like [`thread_from_snapshot_with_id`] but populates `turns` from the
-/// persisted message + turn-state records, so `thread/resume` returns the full
-/// conversation (user + assistant + tool items) for client-side restore.
+/// Like [`thread_from_snapshot_with_id`] but populates `turns` for `thread/resume`.
+///
+/// Turns with persisted full-fidelity `TurnItem` snapshots (in `turn_items`)
+/// are rebuilt verbatim from those — user prompt (from `messages`) followed by
+/// the assistant-side items in arrival order. Turns WITHOUT snapshots
+/// (pre-migration history that was never captured) fall back to lossy synthesis
+/// from `messages` via [`turn_items_for_message`], so old threads keep rendering
+/// whatever was persisted instead of going blank.
 fn thread_from_snapshot_with_turns(
     id: &str,
     snapshot: &ThreadSnapshot,
     messages: &[ThreadMessageRecord],
     turn_states: &[TurnStateRecord],
+    turn_items: &[TurnItemRecord],
 ) -> Thread {
     let created_at = chrono::DateTime::parse_from_rfc3339(&snapshot.created_at)
         .map(|dt| dt.timestamp_millis())
         .unwrap_or(0);
 
+    // Decode persisted TurnItem snapshots, grouped by turn. SQL returns them
+    // ordered by (turn_index, seq); decode failures are skipped with a warning.
+    let mut items_by_turn: std::collections::BTreeMap<u32, Vec<TurnItem>> =
+        std::collections::BTreeMap::new();
+    for record in turn_items {
+        match serde_json::from_str::<TurnItem>(&record.item_json) {
+            Ok(item) => items_by_turn.entry(record.turn_index).or_default().push(item),
+            Err(error) => {
+                tracing::warn!(
+                    thread_id = %snapshot.id,
+                    turn_index = record.turn_index,
+                    item_id = %record.id,
+                    error = %error,
+                    "failed to decode persisted TurnItem; skipping",
+                );
+            }
+        }
+    }
+
     // Group messages by turn index, preserving chronological order within a turn.
-    let mut by_turn: std::collections::BTreeMap<u32, Vec<&ThreadMessageRecord>> =
+    let mut msgs_by_turn: std::collections::BTreeMap<u32, Vec<&ThreadMessageRecord>> =
         std::collections::BTreeMap::new();
     for message in messages {
-        by_turn.entry(message.turn_index).or_default().push(message);
+        msgs_by_turn.entry(message.turn_index).or_default().push(message);
     }
-    for msgs in by_turn.values_mut() {
+    for msgs in msgs_by_turn.values_mut() {
         msgs.sort_by(|a, b| a.created_at.cmp(&b.created_at));
     }
 
-    let turns = by_turn
+    // Union of turn indices across snapshots and messages.
+    let mut indices: std::collections::BTreeSet<u32> = items_by_turn.keys().copied().collect();
+    indices.extend(msgs_by_turn.keys().copied());
+
+    let turns = indices
         .into_iter()
-        .map(|(index, msgs)| {
-            let mut items = Vec::new();
-            for message in msgs {
-                items.extend(turn_items_for_message(message));
-            }
+        .map(|index| {
+            let persisted = items_by_turn.remove(&index).unwrap_or_default();
+            let msgs = msgs_by_turn.get(&index);
+            let items = if !persisted.is_empty() {
+                // Full-fidelity turn: user prompt (from messages) + persisted items.
+                let mut items = Vec::new();
+                if let Some(user) = msgs.and_then(|ms| ms.iter().find(|m| m.message.role == "user"))
+                    && let Some(item) = user_message_item(user)
+                {
+                    items.push(item);
+                }
+                items.extend(persisted);
+                items
+            } else {
+                // Pre-migration turn (no snapshots): synthesize from messages.
+                let mut items = Vec::new();
+                if let Some(msgs) = msgs {
+                    for message in msgs {
+                        items.extend(turn_items_for_message(message));
+                    }
+                }
+                items
+            };
             let status = turn_states
                 .iter()
                 .find(|state| state.turn_index == index)
@@ -618,6 +670,18 @@ fn thread_from_snapshot_with_turns(
         turns,
         ..Default::default()
     }
+}
+
+/// Build a `UserMessage` item from a persisted user-role message (the user
+/// prompt prefix for a full-fidelity turn).
+fn user_message_item(message: &ThreadMessageRecord) -> Option<TurnItem> {
+    if message.message.role != "user" {
+        return None;
+    }
+    Some(TurnItem::UserMessage {
+        id: message.id.clone(),
+        content: vec![UserMessageContent::Text { text: message.message.content.rendered_text() }],
+    })
 }
 
 /// Project a curated [`CloudModelSpec`] for a configured provider into the
@@ -911,7 +975,7 @@ mod tests {
         }];
 
         let thread =
-            thread_from_snapshot_with_turns("hthread-1", &snapshot(), &messages, &turn_states);
+            thread_from_snapshot_with_turns("hthread-1", &snapshot(), &messages, &turn_states, &[]);
 
         assert_eq!(thread.id, "hthread-1");
         assert_eq!(thread.preview, "hi there");
@@ -921,7 +985,7 @@ mod tests {
         assert_eq!(turn0.id, "0");
         assert_eq!(turn0.status, "completed");
         assert_eq!(turn0.items.len(), 2);
-        // Messages keep chronological (created_at) order within a turn.
+        // No persisted items → fallback synthesizes from messages in created_at order.
         assert!(matches!(turn0.items[0], TurnItem::UserMessage { .. }));
         assert!(matches!(turn0.items[1], TurnItem::AgentMessage { .. }));
 
@@ -930,5 +994,68 @@ mod tests {
         assert_eq!(turn1.id, "1");
         assert_eq!(turn1.status, "completed");
         assert!(turn1.items.iter().any(|item| matches!(item, TurnItem::UserMessage { .. })));
+    }
+
+    #[test]
+    fn thread_from_snapshot_with_turns_replays_full_fidelity_items() {
+        // Turn 0 has persisted snapshots → rendered verbatim; turn 1 has none →
+        // falls back to message synthesis.
+        let messages = vec![
+            record("u1", 0, "user", "hello", "2024-01-01T00:00:01Z"),
+            record("a1", 0, "assistant", "stale lossy text", "2024-01-01T00:00:02Z"),
+        ];
+        let persisted = vec![
+            TurnItemRecord {
+                id: "r1".to_owned(),
+                thread_id: "t1".to_owned(),
+                turn_index: 0,
+                seq: 0,
+                item_json: serde_json::to_string(&TurnItem::Reasoning {
+                    id: "r1".to_owned(),
+                    summary: slab_proto::harness::item::ReasoningText::one("recap"),
+                    content: slab_proto::harness::item::ReasoningText::one("full trace"),
+                })
+                .unwrap(),
+                created_at: "2024-01-01T00:00:01Z".to_owned(),
+            },
+            TurnItemRecord {
+                id: "c1".to_owned(),
+                thread_id: "t1".to_owned(),
+                turn_index: 0,
+                seq: 1,
+                item_json: serde_json::to_string(&TurnItem::CommandExecution {
+                    id: "c1".to_owned(),
+                    command: "ls -la".to_owned(),
+                    cwd: "/workspace".to_owned(),
+                    process_id: None,
+                    status: "completed".to_owned(),
+                    aggregated_output: Some("out".to_owned()),
+                    exit_code: Some(0),
+                    duration_ms: None,
+                })
+                .unwrap(),
+                created_at: "2024-01-01T00:00:02Z".to_owned(),
+            },
+        ];
+
+        let thread =
+            thread_from_snapshot_with_turns("hthread-1", &snapshot(), &messages, &[], &persisted);
+
+        assert_eq!(thread.turns.len(), 1);
+        let turn0 = &thread.turns[0];
+        // User prompt prefix from messages, then persisted items in seq order.
+        // The stale assistant message is NOT synthesized (snapshots win).
+        assert_eq!(turn0.items.len(), 3);
+        assert!(matches!(turn0.items[0], TurnItem::UserMessage { .. }));
+        assert!(matches!(
+            &turn0.items[1],
+            TurnItem::Reasoning { content, .. }
+            if matches!(content, slab_proto::harness::item::ReasoningText::One(s) if s == "full trace")
+        ));
+        assert!(matches!(
+            &turn0.items[2],
+            TurnItem::CommandExecution { command, cwd, exit_code: Some(0), .. }
+            if command == "ls -la" && cwd == "/workspace"
+        ));
     }
 }

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use slab_agent::port::ThreadStatus;
 use slab_agent::port::{
     AgentStorePort, ThreadListFilter, ThreadMessageRecord, ThreadSnapshot, ToolCallRecord,
-    TurnStateRecord,
+    TurnItemRecord, TurnStateRecord,
 };
 use slab_types::agent::ToolCallStatus;
 use slab_types::{ConversationMessage, ConversationMessageContent};
@@ -424,6 +424,61 @@ impl AgentStorePort for SqlxStore {
         Ok(())
     }
 
+    async fn insert_turn_item(
+        &self,
+        record: &TurnItemRecord,
+    ) -> Result<(), slab_agent::AgentError> {
+        // INSERT OR IGNORE — idempotent so an observer that replays the event
+        // history (subscribe replay buffer / lag-resubscribe) cannot duplicate
+        // rows. PK is (thread_id, id).
+        sqlx::query(
+            "INSERT OR IGNORE INTO agent_turn_items \
+             (id, thread_id, turn_index, seq, item_json, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )
+        .bind(&record.id)
+        .bind(&record.thread_id)
+        .bind(i64::from(record.turn_index))
+        .bind(i64::from(record.seq))
+        .bind(&record.item_json)
+        .bind(&record.created_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn list_turn_items(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<TurnItemRecord>, slab_agent::AgentError> {
+        let rows: Vec<AgentTurnItemRow> = sqlx::query_as(
+            "SELECT id, thread_id, turn_index, seq, item_json, created_at \
+             FROM agent_turn_items WHERE thread_id = ?1 \
+             ORDER BY turn_index ASC, seq ASC",
+        )
+        .bind(thread_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
+
+        rows.into_iter().map(AgentTurnItemRow::into_record).collect()
+    }
+
+    async fn delete_turn_items_from(
+        &self,
+        thread_id: &str,
+        from_turn_index: u32,
+    ) -> Result<(), slab_agent::AgentError> {
+        sqlx::query("DELETE FROM agent_turn_items WHERE thread_id = ?1 AND turn_index >= ?2")
+            .bind(thread_id)
+            .bind(i64::from(from_turn_index))
+            .execute(&self.pool)
+            .await
+            .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
+        Ok(())
+    }
+
     async fn archive_thread(
         &self,
         id: &str,
@@ -439,6 +494,42 @@ impl AgentStorePort for SqlxStore {
         .await
         .map_err(|e| slab_agent::AgentError::Store(e.to_string()))?;
         Ok(())
+    }
+}
+
+/// sqlx row type for the `agent_turn_items` table.
+#[derive(sqlx::FromRow)]
+struct AgentTurnItemRow {
+    id: String,
+    thread_id: String,
+    turn_index: i64,
+    seq: i64,
+    item_json: String,
+    created_at: String,
+}
+
+impl AgentTurnItemRow {
+    fn into_record(self) -> Result<TurnItemRecord, slab_agent::AgentError> {
+        let turn_index = u32::try_from(self.turn_index).map_err(|error| {
+            slab_agent::AgentError::Store(format!(
+                "invalid turn_index for turn item '{}': {} ({})",
+                self.id, self.turn_index, error
+            ))
+        })?;
+        let seq = u32::try_from(self.seq).map_err(|error| {
+            slab_agent::AgentError::Store(format!(
+                "invalid seq for turn item '{}': {} ({})",
+                self.id, self.seq, error
+            ))
+        })?;
+        Ok(TurnItemRecord {
+            id: self.id,
+            thread_id: self.thread_id,
+            turn_index,
+            seq,
+            item_json: self.item_json,
+            created_at: self.created_at,
+        })
     }
 }
 
@@ -693,6 +784,61 @@ mod tests {
         let remaining = store.list_thread_messages("thread-1").await.expect("list");
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].turn_index, 0);
+    }
+
+    #[tokio::test]
+    async fn insert_turn_item_is_idempotent_and_ordered() {
+        let store = seeded_store().await;
+        let now = "2026-01-01T00:00:00Z".to_owned();
+        let mk = |id: &str, turn_index: u32, seq: u32, item_json: &str| TurnItemRecord {
+            id: id.to_owned(),
+            thread_id: "thread-1".to_owned(),
+            turn_index,
+            seq,
+            item_json: item_json.to_owned(),
+            created_at: now.clone(),
+        };
+        store
+            .insert_turn_item(&mk("i0", 0, 0, r#"{"type":"agentMessage","text":"first"}"#))
+            .await
+            .expect("insert i0");
+        store
+            .insert_turn_item(&mk(
+                "i1",
+                0,
+                1,
+                r#"{"type":"reasoning","summary":"s","content":"c"}"#,
+            ))
+            .await
+            .expect("insert i1");
+        // Re-inserting the same (thread_id, turn_index, seq) is a no-op (PK) even
+        // with a different item id — this is the replay-safety guarantee.
+        store
+            .insert_turn_item(&mk("i0-replay", 0, 0, r#"{"type":"agentMessage","text":"replay"}"#))
+            .await
+            .expect("re-insert at same (turn, seq) ignored");
+        // A second item at the same (turn, seq) is also ignored (seq dedup).
+        store
+            .insert_turn_item(&mk("i0-other", 0, 1, r#"{"type":"webSearch","query":"q"}"#))
+            .await
+            .expect("re-insert at (0,1) ignored");
+
+        let listed = store.list_turn_items("thread-1").await.expect("list");
+        assert_eq!(listed.len(), 2, "duplicate (turn, seq) inserts must not add rows");
+        assert_eq!(listed[0].id, "i0");
+        assert_eq!(listed[0].turn_index, 0);
+        assert_eq!(listed[0].seq, 0);
+        assert_eq!(listed[1].id, "i1");
+
+        // A higher turn exercises turn-scoped delete.
+        store
+            .insert_turn_item(&mk("i2", 2, 0, r#"{"type":"webSearch","query":"q"}"#))
+            .await
+            .expect("insert i2 at turn 2");
+        store.delete_turn_items_from("thread-1", 1).await.expect("delete");
+        let after = store.list_turn_items("thread-1").await.expect("list after");
+        assert_eq!(after.len(), 2);
+        assert!(after.iter().all(|r| r.turn_index == 0));
     }
 
     async fn seeded_store() -> SqlxStore {

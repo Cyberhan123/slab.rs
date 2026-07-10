@@ -5,7 +5,7 @@
  * - {@link HarnessClient}: persistent JSON-RPC WS client (initialize, request
  *   correlation, notification dispatch).
  * - {@link HarnessChatTransport}: `ChatTransport<UIMessage>` driving live turns.
- * - {@link projectThread}: restore a resumed `Thread` into `UIMessage[]`.
+ * - {@link turnItemsToMessages}: restore resumed `TurnItem`s into `UIMessage[]`.
  * - {@link convertNotification}: harness notification → `UIMessageChunk[]`.
  */
 
@@ -14,7 +14,7 @@ export type {
   HarnessChatTransportOptions,
 } from "./harness-transport"
 export { HarnessChatTransport } from "./harness-transport"
-export { projectThread } from "./project"
+export { turnItemsToMessages } from "./turn-items"
 export {
   coerceServerNotification,
   convertNotification,

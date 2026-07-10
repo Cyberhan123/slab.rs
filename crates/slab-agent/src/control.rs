@@ -23,7 +23,7 @@ use crate::{
     hook::{AgentHook, AgentHookRegistry},
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, ThreadMessageRecord,
-        ThreadSnapshot, ThreadStatus, TurnStateRecord,
+        ThreadSnapshot, ThreadStatus, TurnItemRecord, TurnStateRecord,
     },
     risk::{BasicToolRiskAnalyzer, ToolRiskAnalyzer},
     state::ThreadStateMachine,
@@ -367,6 +367,22 @@ impl AgentControl {
         for record in turn_states {
             let cloned = TurnStateRecord { thread_id: child_id.clone(), ..record };
             self.store.upsert_turn_state(&cloned).await?;
+        }
+
+        // Clone the parent's full-fidelity TurnItem snapshots. PK is
+        // (thread_id, turn_index, seq), so reusing the same logical id under a
+        // new thread_id needs no remapping.
+        let turn_items = self.store.list_turn_items(parent_thread_id).await?;
+        for record in turn_items {
+            let cloned = TurnItemRecord {
+                thread_id: child_id.clone(),
+                id: record.id,
+                turn_index: record.turn_index,
+                seq: record.seq,
+                item_json: record.item_json,
+                created_at: now.clone(),
+            };
+            self.store.insert_turn_item(&cloned).await?;
         }
 
         Ok(child_id)

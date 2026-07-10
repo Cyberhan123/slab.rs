@@ -112,7 +112,7 @@ mod tests {
             assert_foreign_key(&pool, table, "task_id", "tasks", "CASCADE").await;
             assert!(!table_columns(&pool, table).await.contains("result_data"));
         }
-        for table in ["agent_turn_states", "agent_memory_phase1_outputs"] {
+        for table in ["agent_turn_states", "agent_memory_phase1_outputs", "agent_turn_items"] {
             assert_foreign_key(&pool, table, "thread_id", "agent_threads", "CASCADE").await;
         }
 
@@ -282,6 +282,14 @@ mod tests {
         .execute(&pool)
         .await;
         assert!(invalid_agent_role.is_err());
+        let invalid_turn_item_json = sqlx::query(
+            "INSERT INTO agent_turn_items (id, thread_id, turn_index, seq, item_json, created_at) \
+             VALUES ('item-bad-json', 'thread-defaults', 0, 0, 'not-json', \
+                '2026-06-17T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await;
+        assert!(invalid_turn_item_json.is_err());
 
         let invalid_plugin_enabled = sqlx::query(
             "INSERT INTO plugin_states (plugin_id, source_kind, enabled, runtime_status, installed_at, updated_at) \

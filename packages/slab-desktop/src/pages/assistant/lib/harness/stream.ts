@@ -22,6 +22,7 @@
 import type { UIMessageChunk } from "ai"
 
 import { HARNESS_NOTIFICATION } from "./types"
+import { toolItemFields } from "./turn-items"
 import type {
   AgentMessageDeltaParams,
   CommandExecutionRequestApprovalParams,
@@ -102,100 +103,42 @@ function finishChunks(state: StreamState, reason: "stop" | "error" = "stop"): UI
   return chunks
 }
 
-/** Stringify a tool error/result value of unknown shape for display. */
-function stringifyToolValue(value: unknown): string {
-  if (typeof value === "string") return value
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return String(value)
-  }
-}
-
 /**
  * Build `tool-input-available` (and, when finalized, `tool-output-available` /
  * `tool-output-error`) chunks for a tool-like item. Mirrors the AI-SDK tool-part
  * lifecycle so the assembled `type: "tool-<name>"` part carries its parameters
  * AND its result/error — letting the tool card render a Completed/Error badge
  * with the result, instead of folding everything into the input.
+ *
+ * Field derivation is delegated to {@link toolItemFields} (shared with the
+ * history path in `turn-items.ts`) so live + history cannot drift on how a
+ * command/mcp/file/websearch item maps to input/output/error.
  */
 function toolChunksFromItem(item: TurnItem): UIMessageChunk[] {
-  switch (item.type) {
-    case "commandExecution": {
-      const chunks: UIMessageChunk[] = [
-        {
-          input: { command: item.command, cwd: item.cwd },
-          toolCallId: item.id,
-          toolName: "commandExecution",
-          type: "tool-input-available",
-        },
-      ]
-      const failed = item.exitCode !== undefined && item.exitCode !== 0
-      if (failed) {
-        chunks.push({
-          errorText: item.aggregatedOutput ?? `exit code ${item.exitCode}`,
-          toolCallId: item.id,
-          type: "tool-output-error",
-        })
-      } else if (item.aggregatedOutput !== undefined && item.aggregatedOutput !== "") {
-        chunks.push({
-          output: item.aggregatedOutput,
-          toolCallId: item.id,
-          type: "tool-output-available",
-        })
-      }
-      return chunks
-    }
-    case "mcpToolCall": {
-      const chunks: UIMessageChunk[] = [
-        {
-          input: item.arguments,
-          toolCallId: item.id,
-          toolName: item.tool,
-          type: "tool-input-available",
-        },
-      ]
-      if (item.error !== undefined && item.error !== null) {
-        chunks.push({
-          errorText: stringifyToolValue(item.error),
-          toolCallId: item.id,
-          type: "tool-output-error",
-        })
-      } else if (item.result !== undefined && item.result !== null) {
-        chunks.push({
-          output: item.result,
-          toolCallId: item.id,
-          type: "tool-output-available",
-        })
-      }
-      return chunks
-    }
-    case "fileChange":
-      return [
-        {
-          input: { changes: item.changes },
-          toolCallId: item.id,
-          toolName: "fileChange",
-          type: "tool-input-available",
-        },
-        {
-          output: { status: item.status },
-          toolCallId: item.id,
-          type: "tool-output-available",
-        },
-      ]
-    case "webSearch":
-      return [
-        {
-          input: { query: item.query },
-          toolCallId: item.id,
-          toolName: "webSearch",
-          type: "tool-input-available",
-        },
-      ]
-    default:
-      return []
+  const fields = toolItemFields(item)
+  if (!fields) return []
+  const chunks: UIMessageChunk[] = [
+    {
+      input: fields.input,
+      toolCallId: item.id,
+      toolName: fields.toolName,
+      type: "tool-input-available",
+    },
+  ]
+  if (fields.failed) {
+    chunks.push({
+      errorText: fields.errorText ?? "",
+      toolCallId: item.id,
+      type: "tool-output-error",
+    })
+  } else if (fields.output !== undefined) {
+    chunks.push({
+      output: fields.output,
+      toolCallId: item.id,
+      type: "tool-output-available",
+    })
   }
+  return chunks
 }
 
 function handleItemStarted(state: StreamState, params: ItemStartedParams): UIMessageChunk[] {

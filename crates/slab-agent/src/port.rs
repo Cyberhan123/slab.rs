@@ -130,6 +130,23 @@ pub struct TurnStateRecord {
     pub completed_at: Option<String>,
 }
 
+/// Persisted full-fidelity harness `TurnItem` snapshot (one finalized item).
+///
+/// `item_json` is the serialized `slab_proto::harness::item::TurnItem`. The
+/// store layer treats it as opaque JSON so `slab-agent` stays free of the
+/// harness proto; decoding back to `TurnItem` happens in the application layer.
+/// `seq` orders items within `(thread_id, turn_index)` for deterministic replay.
+#[derive(Debug, Clone)]
+pub struct TurnItemRecord {
+    pub id: String,
+    pub thread_id: String,
+    pub turn_index: u32,
+    pub seq: u32,
+    pub item_json: String,
+    /// RFC 3339 creation timestamp.
+    pub created_at: String,
+}
+
 /// A streaming event emitted during a single LLM turn.
 #[derive(Debug, Clone)]
 pub enum TurnEvent {
@@ -336,6 +353,34 @@ pub trait AgentStorePort: Send + Sync {
     /// Used by thread rollback to discard messages after a target index. Hosts
     /// that do not store messages can keep this default no-op.
     async fn delete_thread_messages_from(
+        &self,
+        _thread_id: &str,
+        _from_turn_index: u32,
+    ) -> Result<(), AgentError> {
+        Ok(())
+    }
+
+    /// Insert one finalized `TurnItem` snapshot.
+    ///
+    /// Idempotent: re-inserting the same `(thread_id, id)` is a no-op so
+    /// replay-safe observers (which may reprocess the event history) are
+    /// tolerated. Hosts that do not persist turn items can keep this default.
+    async fn insert_turn_item(&self, _record: &TurnItemRecord) -> Result<(), AgentError> {
+        Ok(())
+    }
+
+    /// Return persisted `TurnItem` snapshots for a thread, ordered by
+    /// `(turn_index, seq)` for deterministic replay. Hosts that do not persist
+    /// turn items return an empty list.
+    async fn list_turn_items(&self, _thread_id: &str) -> Result<Vec<TurnItemRecord>, AgentError> {
+        Ok(Vec::new())
+    }
+
+    /// Delete `TurnItem` snapshots with `turn_index >= from_turn_index`.
+    ///
+    /// Used by thread rollback. Hosts that do not persist turn items can keep
+    /// this default no-op.
+    async fn delete_turn_items_from(
         &self,
         _thread_id: &str,
         _from_turn_index: u32,

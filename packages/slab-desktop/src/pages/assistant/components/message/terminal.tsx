@@ -10,7 +10,7 @@
 import { Button } from "@slab/components/button"
 import { useClipboard } from "@mantine/hooks"
 import { cn } from "@/lib/utils"
-import Ansi from "ansi-to-react"
+import Ansi from "./ansi-to-react"
 import { CheckIcon, CopyIcon, TerminalIcon, Trash2Icon } from "lucide-react"
 import type { ComponentProps, HTMLAttributes } from "react"
 import {
@@ -129,7 +129,7 @@ export const TerminalContent = ({ className, children, ...props }: TerminalConte
       containerRef.current.scrollTop = containerRef.current.scrollHeight
     }
   }, [output, autoScroll])
-
+  
   return (
     <div
       className={cn("max-h-96 overflow-auto p-4 font-mono text-sm leading-relaxed", className)}

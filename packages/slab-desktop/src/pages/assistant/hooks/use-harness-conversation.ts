@@ -20,7 +20,7 @@ import {
   HARNESS_NOTIFICATION,
   HarnessChatTransport,
   HarnessClient,
-  projectThread,
+  turnItemsToMessages,
   type CommandExecutionRequestApprovalParams,
   type FileChangeApprovalChange,
   type FileChangeRequestApprovalParams,
@@ -219,7 +219,7 @@ export function useHarnessConversation(
         await client.open()
         try {
           const { thread } = await client.threadResume({})
-          const messages = projectThread(thread)
+          const messages = turnItemsToMessages(thread.turns.flatMap((turn) => turn.items))
           client.currentThreadId = thread.id
           client.lastTurnIndex = computeLastTurnIndex(thread)
           if (cancelled) return
