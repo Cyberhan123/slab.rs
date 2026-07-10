@@ -14,6 +14,7 @@
  */
 
 import "@codingame/monaco-vscode-search-result-default-extension"
+import { whenReady as configurationEditingExtensionReady } from "@codingame/monaco-vscode-configuration-editing-default-extension"
 import { whenReady as cppExtensionReady } from "@codingame/monaco-vscode-cpp-default-extension"
 import { whenReady as cssExtensionReady } from "@codingame/monaco-vscode-css-default-extension"
 import { whenReady as goExtensionReady } from "@codingame/monaco-vscode-go-default-extension"
@@ -22,6 +23,12 @@ import { whenReady as javascriptExtensionReady } from "@codingame/monaco-vscode-
 import { whenReady as jsonExtensionReady } from "@codingame/monaco-vscode-json-default-extension"
 import { whenReady as markdownBasicsExtensionReady } from "@codingame/monaco-vscode-markdown-basics-default-extension"
 import { whenReady as markdownLanguageFeaturesExtensionReady } from "@codingame/monaco-vscode-markdown-language-features-default-extension"
+import { whenReady as markdownMathExtensionReady } from "@codingame/monaco-vscode-markdown-math-default-extension"
+import { whenReady as mediaPreviewExtensionReady } from "@codingame/monaco-vscode-media-preview-default-extension"
+import { whenReady as powershellExtensionReady } from "@codingame/monaco-vscode-powershell-default-extension"
+import { whenReady as pythonExtensionReady } from "@codingame/monaco-vscode-python-default-extension"
+import { whenReady as rustExtensionReady } from "@codingame/monaco-vscode-rust-default-extension"
+import { whenReady as shellscriptExtensionReady } from "@codingame/monaco-vscode-shellscript-default-extension"
 import { whenReady as sqlExtensionReady } from "@codingame/monaco-vscode-sql-default-extension"
 import { whenReady as themeDefaultsExtensionReady } from "@codingame/monaco-vscode-theme-defaults-default-extension"
 import { whenReady as setiThemeExtensionReady } from "@codingame/monaco-vscode-theme-seti-default-extension"
@@ -47,6 +54,8 @@ export async function whenWorkspaceExtensionsReady(): Promise<void> {
     htmlExtensionReady(),
     markdownBasicsExtensionReady(),
     markdownLanguageFeaturesExtensionReady(),
+    markdownMathExtensionReady(),
+    mediaPreviewExtensionReady(),
     yamlExtensionReady(),
     emmetExtensionReady(),
     dockerExtensionReady(),
@@ -55,5 +64,10 @@ export async function whenWorkspaceExtensionsReady(): Promise<void> {
     goExtensionReady(),
     sqlExtensionReady(),
     xmlExtensionReady(),
+    rustExtensionReady(),
+    pythonExtensionReady(),
+    powershellExtensionReady(),
+    shellscriptExtensionReady(),
+    configurationEditingExtensionReady(),
   ])
 }
