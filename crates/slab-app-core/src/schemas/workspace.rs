@@ -18,6 +18,20 @@ pub struct WorkspaceStateResponse {
     pub current: Option<WorkspaceInfoResponse>,
     pub recent: Vec<RecentWorkspaceResponse>,
     pub config: Option<WorkspaceConfigResponse>,
+    /// Present when this response triggered a workspace migration (interrupt
+    /// all agent threads + write a project-scoped snapshot), e.g. when
+    /// `POST /v1/workspace/open` switches away from a different active workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migrated: Option<WorkspaceMigrationSummary>,
+}
+
+/// Summary of the migration folded into a [`WorkspaceStateResponse`] when a
+/// workspace switch interrupted + snapshotted the originating workspace.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceMigrationSummary {
+    pub project_id: String,
+    pub suspended_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

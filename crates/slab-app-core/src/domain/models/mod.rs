@@ -18,9 +18,7 @@ mod ui_state;
 mod video;
 mod workspace;
 
-pub use agent::{
-    AgentCommand, AgentControlCommand, AgentControlResult, AgentControlStatus, AgentSessionSnapshot,
-};
+pub use agent::{AgentCommand, AgentSessionSnapshot};
 pub use audio::{AudioTranscriptionCommand, TranscribeDecodeOptions, TranscribeVadOptions};
 pub use backend::{BackendStatusQuery, BackendStatusView};
 #[allow(unused_imports)]

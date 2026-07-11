@@ -6,13 +6,13 @@ from typing import Any, TypeVar
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
-T = TypeVar("T", bound="WorkspaceMigrationResponse")
+T = TypeVar("T", bound="WorkspaceMigrationSummary")
 
 
 @_attrs_define
-class WorkspaceMigrationResponse:
-    """Outcome of a workspace migration preparation (B-8 / INFRA-01): the project
-    id the snapshot was scoped to + how many agent threads were suspended.
+class WorkspaceMigrationSummary:
+    """Summary of the migration folded into a [`WorkspaceStateResponse`] when a
+    workspace switch interrupted + snapshotted the originating workspace.
 
         Attributes:
             project_id (str):
@@ -32,8 +32,8 @@ class WorkspaceMigrationResponse:
         field_dict.update(self.additional_properties)
         field_dict.update(
             {
-                "project_id": project_id,
-                "suspended_count": suspended_count,
+                "projectId": project_id,
+                "suspendedCount": suspended_count,
             }
         )
 
@@ -42,17 +42,17 @@ class WorkspaceMigrationResponse:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        project_id = d.pop("project_id")
+        project_id = d.pop("projectId")
 
-        suspended_count = d.pop("suspended_count")
+        suspended_count = d.pop("suspendedCount")
 
-        workspace_migration_response = cls(
+        workspace_migration_summary = cls(
             project_id=project_id,
             suspended_count=suspended_count,
         )
 
-        workspace_migration_response.additional_properties = d
-        return workspace_migration_response
+        workspace_migration_summary.additional_properties = d
+        return workspace_migration_summary
 
     @property
     def additional_keys(self) -> list[str]:

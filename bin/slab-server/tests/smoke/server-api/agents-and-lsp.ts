@@ -44,43 +44,6 @@ export function registerAgentsAndLspSmoke(getServer: () => SlabServerTestHarness
       });
       expect(Array.isArray(history.body.responses)).toBe(true);
 
-      const approval = await expectJson<Schema["AgentControlResponse"]>(
-        server,
-        "/v1/agents/control/approval",
-        jsonInit(
-          {
-            approved: false,
-            call_id: "missing-call",
-            thread_id: "missing-agent"
-          } satisfies Schema["AgentApprovalResolveRequest"],
-          { method: "POST" }
-        )
-      );
-      expect(approval.body).toMatchObject({
-        delivered: false,
-        thread_id: "missing-agent"
-      });
-
-      await expectError(
-        server,
-        "/v1/agents/control/interrupt",
-        404,
-        jsonInit(
-          { thread_id: "missing-agent" } satisfies Schema["AgentThreadControlRequest"],
-          { method: "POST" }
-        )
-      );
-
-      await expectError(
-        server,
-        "/v1/agents/control/shutdown",
-        404,
-        jsonInit(
-          { thread_id: "missing-agent" } satisfies Schema["AgentThreadControlRequest"],
-          { method: "POST" }
-        )
-      );
-
       await expectOpenAiError(
         server,
         "/v1/agents/responses",

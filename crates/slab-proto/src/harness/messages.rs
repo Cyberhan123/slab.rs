@@ -429,7 +429,10 @@ pub struct ShutdownResult {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceMigrateParams {
     /// Target workspace root. When omitted the server resolves the root from
-    /// its own configuration (mirrors the existing POST `/v1/agents/migrate`).
+    /// its own configuration. This is the canonical workspace-migration method:
+    /// the old `POST /v1/agents/migrate` REST endpoint was removed, and the
+    /// server-side `POST /v1/workspace/open` runs the same migration internally
+    /// when switching away from a different active workspace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_root: Option<PathBuf>,
 }

@@ -1,28 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { invoke } from "@tauri-apps/api/core"
 import { toast } from "sonner"
 
 import { useWorkspaceUiStore } from "@/store/useWorkspaceUiStore"
 import { ProjectSwitcher, ProjectSwitcherView } from "../project-switcher"
 
-const { mockToastSuccess, mockWorkspaceState } = vi.hoisted(() => ({
+const { mockToastError, mockToastSuccess, mockWorkspaceOpen } = vi.hoisted(() => ({
+  mockToastError: vi.fn<() => void>(),
   mockToastSuccess: vi.fn<() => void>(),
-  mockWorkspaceState: vi.fn<() => Promise<unknown>>(),
-}))
-
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn<() => Promise<unknown>>(),
+  mockWorkspaceOpen: vi.fn<() => Promise<unknown>>(),
 }))
 
 vi.mock("sonner", () => ({
   toast: {
     success: mockToastSuccess,
+    error: mockToastError,
   },
 }))
 
 vi.mock("@slab/i18n", () => ({
+  // `default` is the i18next instance; the server-backed UI-state store uses it
+  // to render persistence-failure messages, so expose a passthrough `t`.
+  default: { t: (key: string) => key },
   useTranslation: vi.fn<() => { t: (key: string, options?: { count?: number }) => string }>(() => ({
     t: (key, options) => (options ? `${key}:${options.count}` : key),
   })),
@@ -30,14 +30,14 @@ vi.mock("@slab/i18n", () => ({
 
 vi.mock("@/lib/workspace-bridge", () => ({
   WORKSPACE_STATE_QUERY_KEY: ["workspace-state"],
-  workspaceState: mockWorkspaceState,
+  workspaceOpen: mockWorkspaceOpen,
 }))
 
 const labels = { toggle: "Switch workspace", noActive: "No workspace" }
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mockWorkspaceState.mockReset()
+  mockWorkspaceOpen.mockReset()
   useWorkspaceUiStore.setState({
     recentWorkspaces: [],
     workspaces: {},
@@ -88,7 +88,7 @@ describe("ProjectSwitcherView", () => {
 })
 
 describe("ProjectSwitcher", () => {
-  it("switches through the host migration command and reports suspended tasks", async () => {
+  it("switches through the server open endpoint and reports suspended tasks", async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: {
@@ -96,16 +96,13 @@ describe("ProjectSwitcher", () => {
         },
       },
     })
-    vi.mocked(invoke).mockResolvedValue({
-      projectId: "project-1",
-      suspendedCount: 2,
-    })
-    mockWorkspaceState.mockResolvedValue({
+    mockWorkspaceOpen.mockResolvedValue({
       current: {
         name: "Beta",
         rootPath: "repo-b",
       },
       recent: [],
+      migrated: { projectId: "project-1", suspendedCount: 2 },
     })
     useWorkspaceUiStore.setState({
       recentWorkspaces: [
@@ -126,9 +123,7 @@ describe("ProjectSwitcher", () => {
     })
 
     await vi.waitFor(() => {
-      expect(invoke).toHaveBeenCalledExactlyOnceWith("switch_workspace_with_migration", {
-        newRoot: "repo-b",
-      })
+      expect(mockWorkspaceOpen).toHaveBeenCalledExactlyOnceWith("repo-b")
     })
     await vi.waitFor(() => {
       expect(toast.success).toHaveBeenCalledOnce()
@@ -138,9 +133,9 @@ describe("ProjectSwitcher", () => {
           rootPath: "repo-b",
         },
         recent: [],
+        migrated: { projectId: "project-1", suspendedCount: 2 },
       })
     })
-    expect(mockWorkspaceState).toHaveBeenCalledOnce()
     expect(toast.success).toHaveBeenCalledExactlyOnceWith(
       "pages.workspace.projectSwitcher.switched",
       {

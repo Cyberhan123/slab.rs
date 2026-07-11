@@ -1,7 +1,6 @@
 //! HTTP and WebSocket handlers for `/v1/agents/responses`.
 
 use std::convert::Infallible;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
@@ -10,15 +9,14 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::get;
 use axum::{Json, Router};
 use chrono::Utc;
 use futures::SinkExt;
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use slab_app_core::context::AppState;
-use slab_app_core::domain::models::AgentControlCommand;
-use slab_app_core::domain::services::{AgentService, WorkspaceService};
+use slab_app_core::domain::services::AgentService;
 use slab_app_core::error::AppCoreError;
 use slab_app_core::infra::agent::event_hub::AgentEventEnvelope;
 use slab_app_core::schemas::chat::{OpenAiError, OpenAiErrorResponse};
@@ -30,12 +28,9 @@ use crate::api::v1::agent::openai_compat::{
     AdapterInput, StreamCtx, build_response, envelope_to_events,
 };
 use crate::api::v1::agent::schema::{
-    AgentApprovalResolveRequest, AgentConfigInput, AgentControlResponse, AgentThreadControlRequest,
-    MessageInput, OpenAICreateRequest, OpenAIReasoningInput, OpenAITextInput,
-    WorkspaceMigrationResponse,
+    AgentConfigInput, MessageInput, OpenAICreateRequest, OpenAIReasoningInput, OpenAITextInput,
 };
 use crate::api::v1::chat::schema::{ChatToolCall, ChatToolFunction};
-use crate::api::validation::ValidatedJson;
 use crate::error::ServerError;
 
 #[derive(OpenApi)]
@@ -43,25 +38,17 @@ use crate::error::ServerError;
     paths(
         agent_responses_get,
         agent_responses_post,
-        crate::api::v1::agent::harness::agent_harness,
-        agent_control_approval,
-        agent_control_interrupt,
-        agent_control_shutdown,
-        migrate_workspace
+        crate::api::v1::agent::harness::agent_harness
     ),
     components(schemas(
-        AgentApprovalResolveRequest,
         AgentConfigInput,
-        AgentControlResponse,
-        AgentThreadControlRequest,
         MessageInput,
         OpenAICreateRequest,
         OpenAIReasoningInput,
         OpenAITextInput,
         ChatToolCall,
         ChatToolFunction,
-        OpenAiErrorResponse,
-        WorkspaceMigrationResponse
+        OpenAiErrorResponse
     ))
 )]
 pub struct AgentApi;
@@ -70,10 +57,6 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/agents/responses", get(agent_responses_get).post(agent_responses_post))
         .route("/agents/harness", get(crate::api::v1::agent::harness::agent_harness))
-        .route("/agents/control/approval", post(agent_control_approval))
-        .route("/agents/control/interrupt", post(agent_control_interrupt))
-        .route("/agents/control/shutdown", post(agent_control_shutdown))
-        .route("/agents/migrate", post(migrate_workspace))
 }
 
 #[derive(Debug, Deserialize)]
@@ -347,86 +330,6 @@ fn bearer_session_id(headers: &HeaderMap) -> String {
         .unwrap_or(trimmed);
     let token = token.trim();
     if token.is_empty() { default } else { token.to_owned() }
-}
-
-#[utoipa::path(
-    post,
-    path = "/v1/agents/control/approval",
-    tag = "agents",
-    request_body = AgentApprovalResolveRequest,
-    responses(
-        (status = 200, description = "Approval decision delivered status", body = AgentControlResponse),
-        (status = 400, description = "Bad request"),
-        (status = 500, description = "Backend error"),
-    )
-)]
-async fn agent_control_approval(
-    State(service): State<AgentService>,
-    ValidatedJson(req): ValidatedJson<AgentApprovalResolveRequest>,
-) -> Result<Json<AgentControlResponse>, ServerError> {
-    Ok(Json(service.handle_control(req.into()).await?.into()))
-}
-
-#[utoipa::path(
-    post,
-    path = "/v1/agents/control/interrupt",
-    tag = "agents",
-    request_body = AgentThreadControlRequest,
-    responses(
-        (status = 200, description = "Thread interrupt accepted", body = AgentControlResponse),
-        (status = 400, description = "Bad request"),
-        (status = 404, description = "Thread not found"),
-        (status = 500, description = "Backend error"),
-    )
-)]
-async fn agent_control_interrupt(
-    State(service): State<AgentService>,
-    ValidatedJson(req): ValidatedJson<AgentThreadControlRequest>,
-) -> Result<Json<AgentControlResponse>, ServerError> {
-    let command = AgentControlCommand::Interrupt { thread_id: req.thread_id };
-    Ok(Json(service.handle_control(command).await?.into()))
-}
-
-#[utoipa::path(
-    post,
-    path = "/v1/agents/control/shutdown",
-    tag = "agents",
-    request_body = AgentThreadControlRequest,
-    responses(
-        (status = 200, description = "Thread shutdown accepted", body = AgentControlResponse),
-        (status = 400, description = "Bad request"),
-        (status = 404, description = "Thread not found"),
-        (status = 500, description = "Backend error"),
-    )
-)]
-async fn agent_control_shutdown(
-    State(service): State<AgentService>,
-    ValidatedJson(req): ValidatedJson<AgentThreadControlRequest>,
-) -> Result<Json<AgentControlResponse>, ServerError> {
-    let command = AgentControlCommand::Shutdown { thread_id: req.thread_id };
-    Ok(Json(service.handle_control(command).await?.into()))
-}
-
-#[utoipa::path(
-    post,
-    path = "/v1/agents/migrate",
-    tag = "agents",
-    responses(
-        (status = 200, description = "Active threads interrupted + project-scoped snapshot written", body = WorkspaceMigrationResponse),
-        (status = 400, description = "No active workspace to migrate"),
-        (status = 500, description = "Backend error"),
-    )
-)]
-async fn migrate_workspace(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<WorkspaceMigrationResponse>, ServerError> {
-    let config = &state.context.config;
-    let workspace_root = WorkspaceService::workspace_root_from_config(config)
-        .ok_or_else(|| ServerError::BadRequest("no active workspace to migrate".into()))?;
-    let snapshot_dir = PathBuf::from(&config.session_state_dir);
-    let outcome =
-        state.services.agent.prepare_workspace_migration(&workspace_root, &snapshot_dir).await?;
-    Ok(Json(outcome.into()))
 }
 
 // ---------------------------------------------------------------------------

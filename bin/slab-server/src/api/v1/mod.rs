@@ -82,10 +82,6 @@ mod tests {
 
     const DOCUMENTED_METHODS: &[&str] = &["delete", "get", "patch", "post", "put"];
     const EXPECTED_OPERATIONS: &[(&str, &str)] = &[
-        ("/v1/agents/migrate", "post"),
-        ("/v1/agents/control/approval", "post"),
-        ("/v1/agents/control/interrupt", "post"),
-        ("/v1/agents/control/shutdown", "post"),
         ("/v1/agents/harness", "get"),
         ("/v1/agents/responses", "get"),
         ("/v1/agents/responses", "post"),
@@ -211,10 +207,7 @@ mod tests {
         let schemas = openapi["components"]["schemas"].as_object().expect("schema components");
 
         for schema in [
-            "AgentApprovalResolveRequest",
-            "AgentControlResponse",
             "AgentHistoryResponse",
-            "AgentThreadControlRequest",
             "AudioTranscriptionRequest",
             "BackendStatusResponse",
             "ChatCompletionRequest",

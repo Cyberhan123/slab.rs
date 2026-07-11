@@ -32,35 +32,3 @@ pub struct AgentSessionSnapshot {
     pub messages: Vec<ThreadMessageRecord>,
     pub responses: Vec<serde_json::Value>,
 }
-
-/// Agent control-plane command accepted by the app-core agent application service.
-#[derive(Debug)]
-pub enum AgentControlCommand {
-    ResolveApproval {
-        thread_id: String,
-        call_id: String,
-        approved: bool,
-        scope: slab_exec_policy::ApprovalScope,
-    },
-    Interrupt {
-        thread_id: String,
-    },
-    Shutdown {
-        thread_id: String,
-    },
-}
-
-/// Result returned after app-core applies an [`AgentControlCommand`].
-#[derive(Debug, Clone)]
-pub struct AgentControlResult {
-    pub thread_id: String,
-    pub delivered: Option<bool>,
-    pub status: Option<AgentControlStatus>,
-}
-
-/// Transport-neutral thread status used by control acknowledgements.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgentControlStatus {
-    Interrupting,
-    Shutdown,
-}

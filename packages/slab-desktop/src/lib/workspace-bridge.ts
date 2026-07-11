@@ -32,6 +32,7 @@ export type WorkspaceStateResponse = {
   current?: WorkspaceInfo | null
   recent?: RecentWorkspace[]
   config?: WorkspaceConfig | null
+  migrated?: { projectId: string; suspendedCount: number } | null
 }
 
 export type WorkspaceFileEntry = {

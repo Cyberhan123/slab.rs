@@ -7,7 +7,6 @@ mod secrets;
 mod setup;
 mod surface_windows;
 mod workspace;
-mod workspace_migration;
 
 use setup::ApiEndpointConfig;
 use tracing_subscriber::layer::SubscriberExt;
@@ -45,7 +44,6 @@ pub fn run() {
             plugins::plugin_theme_snapshot,
             diagnostics::export_diagnostics,
             secrets::verify_secret_handle,
-            workspace_migration::switch_workspace_with_migration,
             surface_windows::open_surface_window,
             surface_windows::close_surface_window,
             surface_windows::focus_surface_window,

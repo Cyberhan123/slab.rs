@@ -21,9 +21,7 @@ use slab_utils::session_snapshot::{
 };
 
 use crate::application::agent::turn_item_persistence;
-use crate::domain::models::{
-    AgentCommand, AgentControlCommand, AgentControlResult, AgentControlStatus, AgentSessionSnapshot,
-};
+use crate::domain::models::{AgentCommand, AgentSessionSnapshot};
 use crate::error::AppCoreError;
 use crate::infra::agent::event_hub::{AgentEventHub, AgentEventSubscription};
 
@@ -114,34 +112,6 @@ impl AgentService {
             messages: restored.messages,
             responses: restored.responses,
         })
-    }
-
-    pub async fn handle_control(
-        &self,
-        command: AgentControlCommand,
-    ) -> Result<AgentControlResult, AppCoreError> {
-        match command {
-            AgentControlCommand::ResolveApproval { thread_id, call_id, approved, scope } => {
-                let delivered = self.approve_call(&thread_id, &call_id, approved, scope);
-                Ok(AgentControlResult { thread_id, delivered: Some(delivered), status: None })
-            }
-            AgentControlCommand::Interrupt { thread_id } => {
-                self.interrupt(&thread_id).await?;
-                Ok(AgentControlResult {
-                    thread_id,
-                    delivered: None,
-                    status: Some(AgentControlStatus::Interrupting),
-                })
-            }
-            AgentControlCommand::Shutdown { thread_id } => {
-                self.shutdown(&thread_id).await?;
-                Ok(AgentControlResult {
-                    thread_id,
-                    delivered: None,
-                    status: Some(AgentControlStatus::Shutdown),
-                })
-            }
-        }
     }
 
     /// Get the current status of an agent thread.

@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { invoke } from "@tauri-apps/api/core"
 import { useQueryClient } from "@tanstack/react-query"
 import { ChevronDown, Folder } from "lucide-react"
 import { toast } from "sonner"
 
 import { useTranslation } from "@slab/i18n"
-import { WORKSPACE_STATE_QUERY_KEY, workspaceState } from "@/lib/workspace-bridge"
+import { WORKSPACE_STATE_QUERY_KEY, workspaceOpen } from "@/lib/workspace-bridge"
 import { useWorkspaceUiStore } from "@/store/useWorkspaceUiStore"
 
 type RecentWorkspaceView = {
@@ -23,12 +22,13 @@ type ProjectSwitcherProps = {
 
 /**
  * Dropdown that lists recent workspaces and switches the active one. Switching
- * goes through the host `switch_workspace_with_migration` command (B-8) so
- * active agent threads are interrupted + snapshotted before the switch.
+ * goes through the server's `POST /v1/workspace/open` (see `workspaceOpen`),
+ * which atomically interrupts + snapshots the originating workspace's agent
+ * threads before switching the active root.
  *
  * Presentational (props-driven) so it is straightforward to test; the default
- * export {@link ProjectSwitcher} wires it to the workspace UI store + the host
- * migration command.
+ * export {@link ProjectSwitcher} wires it to the workspace UI store + the
+ * server-side open.
  */
 export function ProjectSwitcherView({
   activeName,
@@ -97,9 +97,7 @@ export function ProjectSwitcherView({
   )
 }
 
-type MigrationResult = { projectId: string; suspendedCount: number }
-
-/** Wired ProjectSwitcher: reads recent workspaces + switches via the host. */
+/** Wired ProjectSwitcher: reads recent workspaces + switches via the server open. */
 export function ProjectSwitcher({ activeName }: { activeName?: string }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -109,26 +107,26 @@ export function ProjectSwitcher({ activeName }: { activeName?: string }) {
   const handleSwitch = useCallback(async (rootPath: string) => {
     setSwitching(true)
     try {
-      // The host interrupts active agent threads + snapshots them, then switches.
-      const result = await invoke<MigrationResult>("switch_workspace_with_migration", { newRoot: rootPath })
+      // Server-side open atomically interrupts + snapshots the originating
+      // workspace's agent threads, then switches the active root. The response
+      // is the fresh workspace state, used to update the cache directly.
+      const result = await workspaceOpen(rootPath)
       try {
-        const nextWorkspaceState = await workspaceState()
-        queryClient.setQueryData(WORKSPACE_STATE_QUERY_KEY, nextWorkspaceState)
+        queryClient.setQueryData(WORKSPACE_STATE_QUERY_KEY, result)
         await queryClient.invalidateQueries({ queryKey: WORKSPACE_STATE_QUERY_KEY })
       } catch (error) {
-        console.warn("workspace state refresh failed after migration", error)
+        console.warn("workspace state refresh failed after switch", error)
         await queryClient.invalidateQueries({ queryKey: WORKSPACE_STATE_QUERY_KEY }).catch((refreshError) => {
-          console.warn("workspace state invalidation failed after migration", refreshError)
+          console.warn("workspace state invalidation failed after switch", refreshError)
         })
       }
-      toast.success(t("pages.workspace.projectSwitcher.switched"), {
-        description: t("pages.workspace.projectSwitcher.suspended", {
-          count: result.suspendedCount,
-        }),
-      })
+      const description = result.migrated
+        ? t("pages.workspace.projectSwitcher.suspended", { count: result.migrated.suspendedCount })
+        : undefined
+      toast.success(t("pages.workspace.projectSwitcher.switched"), { description })
     } catch (error) {
       // Surfaced in the UI by the workspace state subscription; keep switching.
-      console.warn("workspace migration failed", error)
+      console.warn("workspace switch failed", error)
     } finally {
       setSwitching(false)
     }

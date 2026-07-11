@@ -704,18 +704,13 @@ async function approveMatchingToolRequest(
 }
 
 async function resolveApproval(threadId: string, callId: string, approved: boolean): Promise<void> {
-  const response = await requestJson<Schema["AgentControlResponse"]>("/v1/agents/control/approval", {
-    json: {
-      approved,
-      call_id: callId,
-      thread_id: threadId,
-    } satisfies Schema["AgentApprovalResolveRequest"],
-    method: "POST",
-  })
-
-  if (response.delivered === false) {
-    throw new Error(`Approval resolve failed: ${JSON.stringify(response)}`)
-  }
+  // The legacy POST /v1/agents/control/approval endpoint was removed; approval
+  // resolution now lives behind the harness `approval/resolve` JSON-RPC method.
+  // This manual fuzzing test drives the `/v1/agents/responses` SSE transport,
+  // which has no approval channel — resolve the approval manually in the app.
+  throw new Error(
+    `resolveApproval(${threadId}, ${callId}, ${approved}) is no longer wired: the control endpoint was removed in favor of the harness approval/resolve JSON-RPC method. Resolve the approval manually in the running app.`
+  )
 }
 
 async function cleanupMarkedSessions(): Promise<void> {

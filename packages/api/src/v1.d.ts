@@ -20,64 +20,16 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/agents/control/approval": {
+    "/v1/agents/harness": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["agent_harness"];
         put?: never;
-        post: operations["agent_control_approval"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agents/control/interrupt": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["agent_control_interrupt"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agents/control/shutdown": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["agent_control_shutdown"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agents/migrate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["migrate_workspace"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1343,11 +1295,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        AgentApprovalResolveRequest: {
-            approved: boolean;
-            call_id: string;
-            thread_id: string;
-        };
         /** @description Agent configuration provided by the caller. */
         AgentConfigInput: {
             allowed_tools?: string[] | null;
@@ -1381,11 +1328,6 @@ export interface components {
             transient?: boolean | null;
             verbosity?: null | components["schemas"]["ChatVerbosity"];
         };
-        AgentControlResponse: {
-            delivered?: boolean | null;
-            status?: null | components["schemas"]["AgentStatusValue"];
-            thread_id: string;
-        };
         /** @description Aggregated agent diagnostics: recent thread stats + recent failed tool calls. */
         AgentDiagnosticsResponse: {
             failed_tool_calls: components["schemas"]["FailedToolCallResponse"][];
@@ -1413,9 +1355,6 @@ export interface components {
             strict?: boolean | null;
             /** @enum {string} */
             type: "json_schema";
-        };
-        AgentThreadControlRequest: {
-            thread_id: string;
         };
         /** @description Persisted agent thread message. */
         AgentThreadMessageResponse: {
@@ -3321,13 +3260,13 @@ export interface components {
             slabDir: string;
         };
         /**
-         * @description Outcome of a workspace migration preparation (B-8 / INFRA-01): the project
-         *     id the snapshot was scoped to + how many agent threads were suspended.
+         * @description Summary of the migration folded into a [`WorkspaceStateResponse`] when a
+         *     workspace switch interrupted + snapshotted the originating workspace.
          */
-        WorkspaceMigrationResponse: {
-            project_id: string;
+        WorkspaceMigrationSummary: {
+            projectId: string;
             /** Format: int32 */
-            suspended_count: number;
+            suspendedCount: number;
         };
         WorkspaceOpenCommand: {
             rootPath: string;
@@ -3358,6 +3297,7 @@ export interface components {
         WorkspaceStateResponse: {
             config?: null | components["schemas"]["WorkspaceConfigResponse"];
             current?: null | components["schemas"]["WorkspaceInfoResponse"];
+            migrated?: null | components["schemas"]["WorkspaceMigrationSummary"];
             recent: components["schemas"]["RecentWorkspaceResponse"][];
         };
         WorkspaceTextSearchFileMatch: {
@@ -3427,161 +3367,20 @@ export interface operations {
             };
         };
     };
-    agent_control_approval: {
+    agent_harness: {
         parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AgentApprovalResolveRequest"];
+            query?: {
+                /** @description Slab session id (browsers cannot set WS headers) */
+                token?: string;
             };
-        };
-        responses: {
-            /** @description Approval decision delivered status */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentControlResponse"];
-                };
-            };
-            /** @description Bad request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Backend error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    agent_control_interrupt: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AgentThreadControlRequest"];
-            };
-        };
-        responses: {
-            /** @description Thread interrupt accepted */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentControlResponse"];
-                };
-            };
-            /** @description Bad request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Thread not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Backend error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    agent_control_shutdown: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AgentThreadControlRequest"];
-            };
-        };
-        responses: {
-            /** @description Thread shutdown accepted */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentControlResponse"];
-                };
-            };
-            /** @description Bad request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Thread not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Backend error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    migrate_workspace: {
-        parameters: {
-            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Active threads interrupted + project-scoped snapshot written */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkspaceMigrationResponse"];
-                };
-            };
-            /** @description No active workspace to migrate */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Backend error */
-            500: {
+            /** @description WebSocket upgrade for the JSON-RPC 2.0 harness protocol */
+            101: {
                 headers: {
                     [name: string]: unknown;
                 };

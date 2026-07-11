@@ -1,8 +1,6 @@
 """Contains all the data models used in inputs/outputs"""
 
-from .agent_approval_resolve_request import AgentApprovalResolveRequest
 from .agent_config_input import AgentConfigInput
-from .agent_control_response import AgentControlResponse
 from .agent_diagnostics_response import AgentDiagnosticsResponse
 from .agent_history_response import AgentHistoryResponse
 from .agent_status_value import AgentStatusValue
@@ -14,7 +12,6 @@ from .agent_structured_output_input_type_1 import AgentStructuredOutputInputType
 from .agent_structured_output_input_type_1_type import (
     AgentStructuredOutputInputType1Type,
 )
-from .agent_thread_control_request import AgentThreadControlRequest
 from .agent_thread_message_response import AgentThreadMessageResponse
 from .agent_thread_response import AgentThreadResponse
 from .agent_thread_stat_response import AgentThreadStatResponse
@@ -237,7 +234,7 @@ from .workspace_git_status_entry import WorkspaceGitStatusEntry
 from .workspace_git_status_summary import WorkspaceGitStatusSummary
 from .workspace_git_status_view import WorkspaceGitStatusView
 from .workspace_info_response import WorkspaceInfoResponse
-from .workspace_migration_response import WorkspaceMigrationResponse
+from .workspace_migration_summary import WorkspaceMigrationSummary
 from .workspace_open_command import WorkspaceOpenCommand
 from .workspace_path_metadata import WorkspacePathMetadata
 from .workspace_path_view import WorkspacePathView
@@ -255,9 +252,7 @@ from .workspace_write_file_command import WorkspaceWriteFileCommand
 from .workspace_write_file_view import WorkspaceWriteFileView
 
 __all__ = (
-    "AgentApprovalResolveRequest",
     "AgentConfigInput",
-    "AgentControlResponse",
     "AgentDiagnosticsResponse",
     "AgentHistoryResponse",
     "AgentStatusValue",
@@ -265,7 +260,6 @@ __all__ = (
     "AgentStructuredOutputInputType0Type",
     "AgentStructuredOutputInputType1",
     "AgentStructuredOutputInputType1Type",
-    "AgentThreadControlRequest",
     "AgentThreadMessageResponse",
     "AgentThreadResponse",
     "AgentThreadStatResponse",
@@ -482,7 +476,7 @@ __all__ = (
     "WorkspaceGitStatusSummary",
     "WorkspaceGitStatusView",
     "WorkspaceInfoResponse",
-    "WorkspaceMigrationResponse",
+    "WorkspaceMigrationSummary",
     "WorkspaceOpenCommand",
     "WorkspacePathMetadata",
     "WorkspacePathView",

@@ -7,13 +7,11 @@ use slab_agent::config::{
 use slab_agent::port::{ThreadMessageRecord, ThreadSnapshot};
 use slab_types::{ConversationMessage, agent::AgentThreadStatus};
 use utoipa::ToSchema;
-use validator::Validate;
 #[cfg(test)]
 use validator::{ValidationError, ValidationErrors};
 
 use crate::domain::models::{
-    AgentCommand, AgentControlCommand, AgentControlResult, AgentControlStatus,
-    StructuredOutput as DomainStructuredOutput,
+    AgentCommand, StructuredOutput as DomainStructuredOutput,
     StructuredOutputJsonSchema as DomainStructuredOutputJsonSchema,
 };
 use crate::schemas::chat::{ChatReasoningEffort, ChatToolCall, ChatVerbosity};
@@ -540,112 +538,6 @@ impl From<AgentThreadStatus> for AgentStatusValue {
             AgentThreadStatus::Errored => Self::Errored,
             AgentThreadStatus::Shutdown => Self::Shutdown,
         }
-    }
-}
-
-impl From<AgentControlStatus> for AgentStatusValue {
-    fn from(status: AgentControlStatus) -> Self {
-        match status {
-            AgentControlStatus::Interrupting => Self::Interrupting,
-            AgentControlStatus::Shutdown => Self::Shutdown,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, ToSchema, Validate)]
-pub struct AgentApprovalResolveRequest {
-    #[validate(custom(
-        function = "crate::schemas::validation::validate_non_blank",
-        message = "thread_id must not be empty"
-    ))]
-    pub thread_id: String,
-    #[validate(custom(
-        function = "crate::schemas::validation::validate_non_blank",
-        message = "call_id must not be empty"
-    ))]
-    pub call_id: String,
-    pub approved: bool,
-    /// Persistence scope for the approval. Older clients omit this; the server
-    /// treats a missing scope as `run_once` (no persistence).
-    #[serde(default)]
-    pub scope: AgentApprovalScope,
-}
-
-/// REST mirror of `slab_exec_policy::ApprovalScope` (kept local so the schema
-/// crate stays decoupled from the runtime policy crate).
-#[derive(Debug, Clone, Copy, Default, Deserialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentApprovalScope {
-    #[default]
-    RunOnce,
-    AlwaysInWorkspace,
-    Always,
-    Deny,
-}
-
-impl From<AgentApprovalScope> for slab_exec_policy::ApprovalScope {
-    fn from(scope: AgentApprovalScope) -> Self {
-        match scope {
-            AgentApprovalScope::RunOnce => Self::RunOnce,
-            AgentApprovalScope::AlwaysInWorkspace => Self::AlwaysInWorkspace,
-            AgentApprovalScope::Always => Self::Always,
-            AgentApprovalScope::Deny => Self::Deny,
-        }
-    }
-}
-
-impl From<AgentApprovalResolveRequest> for AgentControlCommand {
-    fn from(request: AgentApprovalResolveRequest) -> Self {
-        Self::ResolveApproval {
-            thread_id: request.thread_id,
-            call_id: request.call_id,
-            approved: request.approved,
-            scope: request.scope.into(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, ToSchema, Validate)]
-pub struct AgentThreadControlRequest {
-    #[validate(custom(
-        function = "crate::schemas::validation::validate_non_blank",
-        message = "thread_id must not be empty"
-    ))]
-    pub thread_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct AgentControlResponse {
-    pub thread_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub delivered: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<AgentStatusValue>,
-}
-
-impl From<AgentControlResult> for AgentControlResponse {
-    fn from(result: AgentControlResult) -> Self {
-        Self {
-            thread_id: result.thread_id,
-            delivered: result.delivered,
-            status: result.status.map(Into::into),
-        }
-    }
-}
-
-/// Outcome of a workspace migration preparation (B-8 / INFRA-01): the project
-/// id the snapshot was scoped to + how many agent threads were suspended.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct WorkspaceMigrationResponse {
-    pub project_id: String,
-    pub suspended_count: u32,
-}
-
-impl From<crate::domain::services::agent::WorkspaceMigrationOutcome>
-    for WorkspaceMigrationResponse
-{
-    fn from(outcome: crate::domain::services::agent::WorkspaceMigrationOutcome) -> Self {
-        Self { project_id: outcome.project_id, suspended_count: outcome.suspended_count as u32 }
     }
 }
 

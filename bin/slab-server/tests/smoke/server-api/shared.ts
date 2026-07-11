@@ -59,9 +59,6 @@ const locallySeededOperationKeys = new Set(["POST /v1/tasks/{id}/restart"]);
 
 export const executableSmokeOperations = [
   { method: "get", path: "/health" },
-  { method: "post", path: "/v1/agents/control/approval" },
-  { method: "post", path: "/v1/agents/control/interrupt" },
-  { method: "post", path: "/v1/agents/control/shutdown" },
   { method: "get", path: "/v1/agents/harness" },
   { method: "get", path: "/v1/agents/responses" },
   { method: "post", path: "/v1/agents/responses" },
