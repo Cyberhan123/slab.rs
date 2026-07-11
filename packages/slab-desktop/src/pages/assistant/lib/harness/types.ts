@@ -99,6 +99,19 @@ export type ReasoningEffort = "off" | "low" | "medium" | "high" | "xhigh"
 
 export type ApprovalPolicy = "never" | "on-request" | "on-failure" | "untrusted"
 
+/** Per-session permission mode. `approve_for_me` is a stub (treated as `request_approval`). */
+export type PermissionMode =
+  | "request_approval"
+  | "approve_for_me"
+  | "full_control"
+  | "custom"
+
+/** Persistence scope chosen when approving a prompt. */
+export type ApprovalScope = "run_once" | "always_in_workspace" | "always" | "deny"
+
+/** Operation category for an approval prompt. */
+export type OperationCategory = "shell" | "file_edit" | "network" | "read_only"
+
 export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access"
 
 export type NetworkAccess = "restricted" | "enabled"
@@ -248,6 +261,7 @@ export interface ThreadStartParams {
   cwd?: string
   approvalPolicy?: ApprovalPolicy
   sandbox?: SandboxMode
+  permissionMode?: PermissionMode
   baseInstructions?: string
   developerInstructions?: string
   experimentalRawEvents?: boolean
@@ -279,6 +293,7 @@ export interface TurnStartParams {
   cwd?: string
   approvalPolicy?: ApprovalPolicy
   sandboxPolicy?: SandboxPolicy
+  permissionMode?: PermissionMode
   model?: string
   effort?: ReasoningEffort
   outputSchema?: unknown
@@ -301,6 +316,8 @@ export interface ApprovalResolveParams {
   threadId: string
   itemId: string
   approved: boolean
+  /** Persistence scope. Omitted by older clients (server treats as `run_once`). */
+  scope?: ApprovalScope
 }
 
 export interface ApprovalResolveResult {
@@ -459,6 +476,9 @@ export interface CommandExecutionRequestApprovalParams {
   command: string
   cwd: string
   reason?: string
+  category?: OperationCategory
+  /** Scopes the client may offer; empty for servers that only support approve/reject. */
+  allowedScopes?: ApprovalScope[]
 }
 
 export interface FileChangeApprovalChange {
@@ -472,6 +492,7 @@ export interface FileChangeRequestApprovalParams {
   turnId: string
   itemId: string
   changes: FileChangeApprovalChange[]
+  allowedScopes?: ApprovalScope[]
 }
 
 export interface ErrorParams {

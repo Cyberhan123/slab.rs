@@ -2,6 +2,7 @@ pub mod agent;
 pub mod chat;
 pub mod config;
 pub mod diagnostics;
+pub mod exec_rule;
 pub mod media_task;
 pub mod model;
 pub mod model_config_state;
@@ -12,6 +13,7 @@ pub mod task;
 pub mod ui_state;
 
 pub use chat::ChatStore;
+pub use exec_rule::ExecRuleWorkspaceStore;
 pub use media_task::MediaTaskStore;
 pub use model::ModelStore;
 pub use model_config_state::ModelConfigStateStore;

@@ -14631,6 +14631,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slab-agent-tracing",
+ "slab-exec-policy",
  "slab-otel",
  "slab-types",
  "thiserror 2.0.18",
@@ -14774,6 +14775,7 @@ dependencies = [
  "slab-build-utils",
  "slab-cloud-provider",
  "slab-config",
+ "slab-exec-policy",
  "slab-file",
  "slab-git",
  "slab-hub",
@@ -14909,6 +14911,24 @@ version = "0.1.0"
 dependencies = [
  "libloading 0.9.0",
  "slab-build-utils",
+]
+
+[[package]]
+name = "slab-exec-policy"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "dashmap 6.2.1",
+ "dunce",
+ "pretty_assertions",
+ "ring",
+ "serde",
+ "serde_json",
+ "slab-sandboxing",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -15386,6 +15406,7 @@ dependencies = [
  "async-trait",
  "serde",
  "serde_json",
+ "slab-exec-policy",
  "slab-sandboxing",
  "slab-utils",
  "thiserror 2.0.18",

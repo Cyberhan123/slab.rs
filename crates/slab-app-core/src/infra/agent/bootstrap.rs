@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use slab_agent::{AgentControl, AgentRuntime, AgentThreadContext, ToolRouter, WorkspaceRef};
-use slab_agent_tools::{ShellPolicy, ShellRuleSet};
 use slab_agent_tracing::{AgentTraceSink, FileAgentTraceSink, NoopAgentTraceSink};
 use slab_sandboxing::{SandboxEnvironment, SandboxPolicy, create_platform_driver};
 
@@ -61,6 +60,7 @@ fn build_agent_control(
 ) -> Arc<AgentControl> {
     let llm = Arc::new(super::adapter::ServerLlmAdapter::new(Arc::clone(&ctx.model_state)));
     let memory_store = Arc::clone(&store);
+    let exec_db = Arc::clone(&store);
     let store_adapter: Arc<dyn slab_agent::port::AgentStorePort> = store;
     let workspace_root = crate::domain::services::workspace_root_from_config(&ctx.config);
     let sandbox_driver = workspace_root.clone().and_then(|root| {
@@ -73,34 +73,16 @@ fn build_agent_control(
             }
         }
     });
-    let mut shell_policy =
-        if sandbox_driver.is_some() { ShellPolicy::Allow } else { ShellPolicy::Block };
-    let shell_rules_dir = ctx.config.exec_rules_dir.clone();
-    let shell_rules = match ShellRuleSet::from_dir(&shell_rules_dir) {
-        Ok(rules) => rules,
-        Err(error) => {
-            tracing::warn!(
-                rules_dir = %shell_rules_dir.display(),
-                error = %error,
-                "failed to load shell exec rules; shell tool will stay blocked"
-            );
-            shell_policy = ShellPolicy::Block;
-            ShellRuleSet::default()
-        }
-    };
-
     let mut tool_router = ToolRouter::new();
     let web_search_config = ctx.pmid.config().agent.tools.websearch;
     let mcp_client = build_agent_mcp_client(ctx);
-    slab_agent_tools::register_all_tools_with_shell_rules(
+    slab_agent_tools::register_all_tools(
         &mut tool_router,
-        shell_policy,
         sandbox_driver,
         workspace_root.clone(),
         mcp_client,
         false,
         web_search_config,
-        shell_rules,
     );
     super::a2u_tools::register_builtin_a2u_tools(&tool_router);
     tool_router.register(Box::new(super::code_tools::CodeLspStatusTool::new(
@@ -179,6 +161,14 @@ fn build_agent_control(
     // ADR-013: concurrency limits are configurable via settings
     // (agent.runtime.limits), defaulting to the historical 32/4 ceiling.
     let runtime_limits = ctx.pmid.config().agent.runtime.limits.clamped();
+    let exec_baseline =
+        super::exec_policy::baseline_from_config(ctx.pmid.config().agent.permissions.baseline);
+    let exec_policy = super::exec_policy::build_exec_policy_engine(
+        exec_baseline,
+        ctx.config.exec_rules_dir.clone(),
+        exec_db,
+        workspace_root.clone(),
+    );
     let control = AgentControl::new_with_hooks_and_tracing(
         llm,
         store_adapter,
@@ -194,6 +184,7 @@ fn build_agent_control(
         trace_dir,
     )
     .with_thread_context(thread_context)
+    .with_exec_policy(exec_policy)
     // INFRA-05: FIFO wait queue for agent spawns (0 ⇒ legacy reject-at-cap).
     .with_queue_capacity(runtime_limits.queue_capacity as usize);
     // INFRA-05: optional memory circuit breaker. When an RSS threshold is

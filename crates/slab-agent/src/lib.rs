@@ -60,12 +60,16 @@ pub use llm_output::{
     parse_rendered_tool_call_output,
 };
 pub use port::{
-    AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
-    MemoryPressure, MemoryPressurePort, NoopMemoryPressurePort, PluginToolPort, ThreadStatus,
-    TurnEvent, TurnStateRecord,
+    AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, ExecPolicyPort, LlmPort,
+    LlmResponse, MemoryPressure, MemoryPressurePort, NoopMemoryPressurePort, PluginToolPort,
+    ThreadStatus, TurnEvent, TurnStateRecord,
 };
 pub use risk::{BasicToolRiskAnalyzer, ToolApprovalDecision, ToolApprovalPolicy, ToolRiskAnalyzer};
 pub use runtime::AgentRuntime;
+pub use slab_exec_policy::{
+    AllowAllExecPolicy, ApprovalScope, ExecDecision, ExecPolicyEngine, OperationCategory,
+    OperationDescriptor, PermissionBaseline, PermissionMode,
+};
 pub use tool::{
     AgentThreadContext, PlanRef, ToolApprovalRequest, ToolContext, ToolContextBuilder, ToolHandler,
     ToolOutput, ToolRouter, WorkspaceRef,

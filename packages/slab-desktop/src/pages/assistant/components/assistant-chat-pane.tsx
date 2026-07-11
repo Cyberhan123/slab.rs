@@ -26,7 +26,7 @@ import type {
     ApprovalRequest,
     ApprovalStatus,
 } from "../hooks/use-harness-conversation"
-import type { HarnessChatTransport } from "../lib/harness"
+import type { ApprovalScope, HarnessChatTransport } from "../lib/harness"
 
 export type AssistantChatPaneProps = {
     disabled: boolean
@@ -39,7 +39,7 @@ export type AssistantChatPaneProps = {
     transport: HarnessChatTransport<UIMessage>
     approvals: ApprovalRequest[]
     approvalStatusByItemId: ReadonlyMap<string, ApprovalStatus>
-    resolveApproval: (itemId: string, approved: boolean) => Promise<void>
+    resolveApproval: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>
 }
 
 export function AssistantChatPane({

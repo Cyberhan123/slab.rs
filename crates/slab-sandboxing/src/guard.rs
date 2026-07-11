@@ -4,7 +4,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use crate::{NetworkPolicy, SandboxEnvironment, SandboxError, SandboxPolicy, SandboxedCommand};
 
-pub(crate) fn validate_command(
+pub fn validate_command(
     env: &SandboxEnvironment,
     cmd: &SandboxedCommand,
 ) -> Result<(), SandboxError> {

@@ -302,6 +302,14 @@ impl HarnessDispatcher {
             }
         }
 
+        // Apply the per-session permission mode (if any) to the real thread id.
+        if let Some(mode) = params.permission_mode {
+            let real_id = self.real_id_for(&params.thread_id);
+            let runtime_mode =
+                slab_app_core::infra::agent::exec_policy::permission_mode_from_proto(mode);
+            self.service.set_thread_mode(&real_id, runtime_mode).await;
+        }
+
         ok_value(TurnStartResult {
             turn: Turn {
                 id: "0".to_owned(),
@@ -323,7 +331,11 @@ impl HarnessDispatcher {
         params: ApprovalResolveParams,
     ) -> Result<Value, String> {
         let real_id = self.real_id_for(&params.thread_id);
-        let delivered = self.service.approve_call(&real_id, &params.item_id, params.approved);
+        let scope = slab_app_core::infra::agent::exec_policy::approval_scope_from_proto(
+            params.scope.unwrap_or(slab_proto::harness::ApprovalScope::RunOnce),
+        );
+        let delivered =
+            self.service.approve_call(&real_id, &params.item_id, params.approved, scope);
         ok_value(ApprovalResolveResult { delivered: Some(delivered), status: None })
     }
 

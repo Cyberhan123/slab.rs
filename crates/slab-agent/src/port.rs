@@ -155,12 +155,17 @@ pub enum TurnEvent {
 
 // ── Approval ──────────────────────────────────────────────────────────────────
 
-/// Decision returned by an [`ApprovalPort`] implementation.
+/// Decision returned by an [`ApprovalPort`] implementation. An approval carries
+/// the user-chosen [`ApprovalScope`] so the kernel can persist the rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApprovalDecision {
-    Approved,
+    Approved(slab_exec_policy::ApprovalScope),
     Rejected,
 }
+
+/// Re-export the unified exec-policy port so the kernel can hold
+/// `Arc<dyn ExecPolicyPort>` without a separate import.
+pub use slab_exec_policy::ExecPolicyPort;
 
 /// Port that lets the host review and approve sensitive tool calls before they
 /// are executed.
@@ -172,13 +177,14 @@ pub trait ApprovalPort: Send + Sync {
     /// Request approval for a pending tool call.
     ///
     /// The call blocks until the host sends a decision (or the implementation
-    /// chooses to auto-approve / auto-reject after a timeout).
+    /// chooses to auto-approve / auto-reject after a timeout). The returned
+    /// [`ApprovalDecision`] carries the user's persistence scope.
     async fn request_approval(
         &self,
         thread_id: &str,
         call_id: &str,
         tool_name: &str,
-        command: &str,
+        descriptor: &slab_exec_policy::OperationDescriptor,
         risk: Option<ToolRiskAssessment>,
     ) -> ApprovalDecision;
 }

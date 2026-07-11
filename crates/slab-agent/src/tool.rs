@@ -152,10 +152,16 @@ pub struct ToolOutput {
     pub metadata: Option<serde_json::Value>,
 }
 
-/// Metadata returned by tools that require host approval before execution.
+/// Metadata returned by the policy engine when an invocation requires host
+/// approval before execution.
+///
+/// `descriptor` carries the operation category + subject (so the approval UI
+/// can render category-appropriate choices and the engine can persist a rule);
+/// `display` is the human-readable summary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolApprovalRequest {
-    pub command: String,
+    pub descriptor: slab_exec_policy::OperationDescriptor,
+    pub display: String,
 }
 
 // ── ToolHandler trait ────────────────────────────────────────────────────────
@@ -172,8 +178,14 @@ pub trait ToolHandler: Send + Sync {
     /// JSON Schema describing the tool's parameter object.
     fn parameters_schema(&self) -> serde_json::Value;
 
-    /// Return approval metadata when this invocation requires host review.
-    fn approval_request(&self, _arguments: &serde_json::Value) -> Option<ToolApprovalRequest> {
+    /// Describe the operation this invocation performs, for the unified policy
+    /// engine. Returning `None` (the default) lets the kernel infer the
+    /// category from the tool name. Tools that carry a meaningful subject
+    /// (command / path / query) should override this.
+    fn describe_operation(
+        &self,
+        _arguments: &serde_json::Value,
+    ) -> Option<slab_exec_policy::OperationDescriptor> {
         None
     }
 

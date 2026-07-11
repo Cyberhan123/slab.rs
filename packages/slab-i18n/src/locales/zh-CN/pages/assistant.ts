@@ -7,6 +7,9 @@ export const assistant = {
     title: '需要审批',
     command: '命令',
     fileChange: '文件变更',
+    runOnce: '仅本次允许',
+    alwaysInWorkspace: '当前工作区总是允许',
+    always: '总是允许',
   },
   header: {
     title: '助手',

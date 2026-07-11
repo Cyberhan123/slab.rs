@@ -7,6 +7,9 @@ export const assistant = {
     title: 'Approval required',
     command: 'command',
     fileChange: 'file change',
+    runOnce: 'Allow once',
+    alwaysInWorkspace: 'Always in workspace',
+    always: 'Always allow',
   },
   header: {
     title: 'Assistant',

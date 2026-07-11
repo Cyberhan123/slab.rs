@@ -14,8 +14,7 @@ use std::{
 
 use crate::{
     AgentControl, AgentControlLimits, AgentError, AgentHook, AgentThreadContext, HookEvent,
-    HookOutcome, PlanRef, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput, ToolRouter,
-    WorkspaceRef,
+    HookOutcome, PlanRef, ToolContext, ToolHandler, ToolOutput, ToolRouter, WorkspaceRef,
     compact::{CompactPort, SlidingWindowCompactPort},
     config::{AgentConfig, AgentToolChoice},
     event::AgentEventKind,
@@ -161,14 +160,12 @@ impl ToolHandler for ApprovalEchoTool {
         })
     }
 
-    fn approval_request(&self, arguments: &serde_json::Value) -> Option<ToolApprovalRequest> {
-        Some(ToolApprovalRequest {
-            command: arguments
-                .get("message")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .to_string(),
-        })
+    fn describe_operation(
+        &self,
+        arguments: &serde_json::Value,
+    ) -> Option<crate::OperationDescriptor> {
+        let message = arguments.get("message").and_then(serde_json::Value::as_str).unwrap_or("");
+        Some(crate::OperationDescriptor::shell(message))
     }
 
     async fn execute(
@@ -199,6 +196,15 @@ impl ToolHandler for SecretTool {
 
     fn parameters_schema(&self) -> serde_json::Value {
         serde_json::json!({ "type": "object" })
+    }
+
+    fn describe_operation(
+        &self,
+        _arguments: &serde_json::Value,
+    ) -> Option<crate::OperationDescriptor> {
+        // Classify as a shell-like operation so the exec-policy engine gates it
+        // (a tool with no category would default to read-only and be allowed).
+        Some(crate::OperationDescriptor::shell("secret"))
     }
 
     async fn execute(
@@ -1143,10 +1149,10 @@ impl ApprovalPort for RecordingNotify {
         _thread_id: &str,
         _call_id: &str,
         _tool_name: &str,
-        _command: &str,
+        _descriptor: &crate::OperationDescriptor,
         _risk: Option<crate::ToolRiskAssessment>,
     ) -> ApprovalDecision {
-        ApprovalDecision::Approved
+        ApprovalDecision::Approved(crate::ApprovalScope::RunOnce)
     }
 }
 
@@ -1157,10 +1163,10 @@ impl ApprovalPort for NoopNotify {
         _thread_id: &str,
         _call_id: &str,
         _tool_name: &str,
-        _command: &str,
+        _descriptor: &crate::OperationDescriptor,
         _risk: Option<crate::ToolRiskAssessment>,
     ) -> ApprovalDecision {
-        ApprovalDecision::Approved
+        ApprovalDecision::Approved(crate::ApprovalScope::RunOnce)
     }
 }
 
@@ -1173,10 +1179,96 @@ impl ApprovalPort for RejectingApproval {
         _thread_id: &str,
         _call_id: &str,
         _tool_name: &str,
-        _command: &str,
+        _descriptor: &crate::OperationDescriptor,
         _risk: Option<crate::ToolRiskAssessment>,
     ) -> ApprovalDecision {
         ApprovalDecision::Rejected
+    }
+}
+
+/// Test exec-policy that requires approval for every non-read-only operation,
+/// mirroring the legacy `ApprovalEchoTool` behavior so approval-flow tests
+/// still observe a `Pending` → `Running`/`Failed` transition.
+struct AskAllExecPolicy;
+
+#[async_trait]
+impl crate::ExecPolicyPort for AskAllExecPolicy {
+    async fn evaluate(
+        &self,
+        _thread_id: &str,
+        descriptor: &crate::OperationDescriptor,
+    ) -> crate::ExecDecision {
+        match descriptor.category {
+            crate::OperationCategory::ReadOnly => crate::ExecDecision::Allow,
+            _ => crate::ExecDecision::RequireApproval,
+        }
+    }
+    async fn remember(
+        &self,
+        _thread_id: &str,
+        _descriptor: &crate::OperationDescriptor,
+        _scope: crate::ApprovalScope,
+    ) {
+    }
+    async fn set_thread_mode(&self, _thread_id: &str, _mode: crate::PermissionMode) {}
+    async fn clear_thread(&self, _thread_id: &str) {}
+}
+
+/// Test exec-policy that refuses every non-read-only operation. Proves the
+/// kernel returns "blocked by policy" WITHOUT requesting approval (the
+/// approve-then-block bug).
+struct DenyAllExecPolicy;
+
+#[async_trait]
+impl crate::ExecPolicyPort for DenyAllExecPolicy {
+    async fn evaluate(
+        &self,
+        _thread_id: &str,
+        descriptor: &crate::OperationDescriptor,
+    ) -> crate::ExecDecision {
+        match descriptor.category {
+            crate::OperationCategory::ReadOnly => crate::ExecDecision::Allow,
+            _ => crate::ExecDecision::Deny,
+        }
+    }
+    async fn remember(
+        &self,
+        _thread_id: &str,
+        _descriptor: &crate::OperationDescriptor,
+        _scope: crate::ApprovalScope,
+    ) {
+    }
+    async fn set_thread_mode(&self, _thread_id: &str, _mode: crate::PermissionMode) {}
+    async fn clear_thread(&self, _thread_id: &str) {}
+}
+
+/// ApprovalPort that counts how many times `request_approval` was called, so a
+/// test can assert the kernel did NOT prompt for a hard-denied operation.
+struct CountingApproval {
+    calls: Arc<std::sync::atomic::AtomicU32>,
+}
+
+impl CountingApproval {
+    fn new() -> Self {
+        Self { calls: Arc::new(std::sync::atomic::AtomicU32::new(0)) }
+    }
+    fn calls(&self) -> u32 {
+        self.calls.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+#[async_trait]
+impl ApprovalPort for CountingApproval {
+    async fn request_approval(
+        &self,
+        _thread_id: &str,
+        _call_id: &str,
+        _tool_name: &str,
+        _descriptor: &crate::OperationDescriptor,
+        _risk: Option<crate::ToolRiskAssessment>,
+    ) -> ApprovalDecision {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        ApprovalDecision::Approved(crate::ApprovalScope::RunOnce)
     }
 }
 
@@ -1952,6 +2044,71 @@ fn tool_router_supports_runtime_unregister() {
 }
 
 #[tokio::test]
+async fn denied_tool_does_not_request_approval_and_is_blocked() {
+    // Reproduces the approve-then-block bug's fix: when the exec-policy denies
+    // an operation, the kernel must NOT request approval and must return a
+    // blocked result. Previously a shell tool under `Block` policy would still
+    // prompt (risk fallback) then fail with "blocked by policy".
+    let llm = Arc::new(MockLlm::new());
+    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
+    let approval = Arc::new(CountingApproval::new());
+    let router = ToolRouter::new();
+    router.register(Box::new(ApprovalEchoTool));
+
+    let approval_port: Arc<dyn ApprovalPort> = approval.clone();
+    let control = Arc::new(
+        AgentControl::new(llm, store, Arc::new(NoopNotify), approval_port, Arc::new(router), 8, 4)
+            .with_exec_policy(Arc::new(DenyAllExecPolicy)),
+    );
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text("Please echo".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+    let thread_id = control.spawn("session-deny".into(), config, messages).await.expect("spawn");
+    let final_status = wait_for_control_terminal_status(&control, &thread_id).await;
+
+    assert_eq!(final_status, ThreadStatus::Completed);
+    // The operation was denied — approval must NOT have been requested.
+    assert_eq!(approval.calls(), 0, "denied tool must not prompt for approval");
+}
+
+#[tokio::test]
+async fn approved_tool_runs_after_prompting_exec_policy() {
+    // Counterpart: when the exec-policy requires approval and the host approves
+    // (RunOnce), the tool executes and the turn completes.
+    let llm = Arc::new(MockLlm::new());
+    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
+    let approval = Arc::new(CountingApproval::new());
+    let router = ToolRouter::new();
+    router.register(Box::new(ApprovalEchoTool));
+
+    let approval_port: Arc<dyn ApprovalPort> = approval.clone();
+    let control = Arc::new(
+        AgentControl::new(llm, store, Arc::new(NoopNotify), approval_port, Arc::new(router), 8, 4)
+            .with_exec_policy(Arc::new(AskAllExecPolicy)),
+    );
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: ConversationMessageContent::Text("Please echo".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+    let thread_id = control.spawn("session-approve".into(), config, messages).await.expect("spawn");
+    let final_status = wait_for_control_terminal_status(&control, &thread_id).await;
+
+    assert_eq!(final_status, ThreadStatus::Completed);
+    assert_eq!(approval.calls(), 1, "approved tool must prompt exactly once");
+}
+
+#[tokio::test]
 async fn approval_required_tool_is_recorded_pending_then_completed() {
     let llm = Arc::new(MockLlm::new());
     let store = Arc::new(RecordingStore::default());
@@ -1962,8 +2119,10 @@ async fn approval_required_tool_is_recorded_pending_then_completed() {
     router.register(Box::new(ApprovalEchoTool));
 
     let approval = Arc::clone(&notify);
-    let control =
-        Arc::new(AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4));
+    let control = Arc::new(
+        AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4)
+            .with_exec_policy(Arc::new(AskAllExecPolicy)),
+    );
 
     let messages = vec![ConversationMessage {
         role: "user".into(),
@@ -2018,7 +2177,8 @@ async fn rejected_approval_tool_is_recorded_pending_then_failed() {
         Arc::new(router),
         8,
         4,
-    );
+    )
+    .with_exec_policy(Arc::new(AskAllExecPolicy));
 
     let messages = vec![ConversationMessage {
         role: "user".into(),
@@ -3318,7 +3478,8 @@ async fn high_risk_tool_calls_require_approval_even_without_tool_metadata() {
         AgentControlLimits { max_threads: 8, max_depth: 4 },
         Arc::new(SlidingWindowCompactPort::default()),
         Arc::new(HighRiskToolAnalyzer),
-    );
+    )
+    .with_exec_policy(Arc::new(AskAllExecPolicy));
 
     let config = AgentConfig { model: "mock".into(), max_turns: 2, ..AgentConfig::default() };
     let thread_id = control

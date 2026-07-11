@@ -43,6 +43,7 @@ members = [
     "crates/slab-mcp",
     "crates/slab-plugin",
     "crates/slab-apply-patch",
+    "crates/slab-exec-policy",
     "bin/slab-python-runtime",
 ]
 
@@ -100,6 +101,7 @@ slab-plugin = { path = "./crates/slab-plugin", package = "slab-plugin", version 
 slab-js-runtime = { path = "./bin/slab-js-runtime", package = "slab-js-runtime", version = "0.1.0" }
 slab-python-runtime = { path = "./bin/slab-python-runtime", package = "slab-python-runtime", version = "0.1.0" }
 slab-apply-patch = { path = "./crates/slab-apply-patch", package = "slab-apply-patch", version = "0.1.0" }
+slab-exec-policy = { path = "./crates/slab-exec-policy", package = "slab-exec-policy", version = "0.1.0" }
 
 notify = "8"
 ignore = "0.4"

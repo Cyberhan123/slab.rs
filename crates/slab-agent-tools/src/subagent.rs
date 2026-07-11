@@ -419,10 +419,10 @@ mod tests {
             _thread_id: &str,
             _call_id: &str,
             _tool_name: &str,
-            _command: &str,
+            _descriptor: &slab_agent::OperationDescriptor,
             _risk: Option<slab_agent::ToolRiskAssessment>,
         ) -> ApprovalDecision {
-            ApprovalDecision::Approved
+            ApprovalDecision::Approved(slab_agent::ApprovalScope::RunOnce)
         }
     }
 

@@ -19,7 +19,6 @@ pub mod glob;
 pub mod grep;
 pub mod mcp;
 pub mod plan;
-mod sensitive_path;
 pub mod shell;
 pub mod subagent;
 pub mod task_complete;
@@ -44,45 +43,20 @@ pub use verify::{CommandWorkspaceVerifier, VerifyTarget, VerifyTool, WorkspaceVe
 pub use web_search::WebSearchTool;
 
 /// Register the full production tool suite.
+///
+/// Permission decisions (allow / require-approval / deny) are owned by the
+/// `slab-exec-policy` engine wired into `AgentControl` — the tools only
+/// describe their operation (`describe_operation`) and execute when authorized.
+#[allow(clippy::too_many_arguments)]
 pub fn register_all_tools(
     router: &mut ToolRouter,
-    shell_policy: ShellPolicy,
     sandbox_driver: Option<Arc<dyn SandboxDriver>>,
     workspace_root: Option<PathBuf>,
     mcp_client: Option<Arc<McpClient>>,
     git_tools: bool,
     web_search_config: AgentWebSearchConfig,
 ) {
-    register_all_tools_with_shell_rules(
-        router,
-        shell_policy,
-        sandbox_driver,
-        workspace_root,
-        mcp_client,
-        git_tools,
-        web_search_config,
-        ShellRuleSet::default(),
-    );
-}
-
-/// Register the full production tool suite with command-specific shell rules.
-#[allow(clippy::too_many_arguments)]
-pub fn register_all_tools_with_shell_rules(
-    router: &mut ToolRouter,
-    shell_policy: ShellPolicy,
-    sandbox_driver: Option<Arc<dyn SandboxDriver>>,
-    workspace_root: Option<PathBuf>,
-    mcp_client: Option<Arc<McpClient>>,
-    git_tools: bool,
-    web_search_config: AgentWebSearchConfig,
-    shell_rules: ShellRuleSet,
-) {
-    router.register(Box::new(ShellTool::new_with_rules(
-        shell_policy,
-        workspace_root.clone(),
-        sandbox_driver,
-        shell_rules,
-    )));
+    router.register(Box::new(ShellTool::new(workspace_root.clone(), sandbox_driver)));
     router.register(Box::new(ReadFileTool::new(workspace_root.clone())));
     router.register(Box::new(WriteFileTool::new(workspace_root.clone())));
     router.register(Box::new(ListDirTool::new(workspace_root.clone())));
@@ -124,15 +98,7 @@ mod tests {
     #[test]
     fn register_all_tools_respects_workspace_and_git_switches() {
         let mut router = ToolRouter::new();
-        register_all_tools(
-            &mut router,
-            ShellPolicy::Block,
-            None,
-            None,
-            None,
-            true,
-            AgentWebSearchConfig::default(),
-        );
+        register_all_tools(&mut router, None, None, None, true, AgentWebSearchConfig::default());
         assert!(router.get("shell").is_some());
         assert!(router.get("file_glob").is_some());
         assert!(router.get("plan_update").is_some());
@@ -145,7 +111,6 @@ mod tests {
         let mut router = ToolRouter::new();
         register_all_tools(
             &mut router,
-            ShellPolicy::Block,
             None,
             Some(PathBuf::from(".")),
             None,
@@ -160,7 +125,6 @@ mod tests {
         let mut router = ToolRouter::new();
         register_all_tools(
             &mut router,
-            ShellPolicy::Block,
             None,
             Some(PathBuf::from(".")),
             None,

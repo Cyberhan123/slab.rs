@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
 use slab_git::GitRepository;
 
 pub struct GitStatusTool {
@@ -124,9 +124,12 @@ impl ToolHandler for GitCommitTool {
         })
     }
 
-    fn approval_request(&self, arguments: &Value) -> Option<ToolApprovalRequest> {
+    fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
         let message = arguments.get("message").and_then(Value::as_str)?;
-        Some(ToolApprovalRequest { command: format!("git add --all && git commit -m {message:?}") })
+        Some(
+            slab_agent::OperationDescriptor::file_edit(format!("git_commit: {message}"))
+                .with_workspace(Some(self.workspace_root.clone())),
+        )
     }
 
     async fn execute(
@@ -175,15 +178,15 @@ mod tests {
     }
 
     #[test]
-    fn git_commit_approval_quotes_message_for_shell_display() {
+    fn git_commit_describes_file_edit_operation() {
         let tool = GitCommitTool::new(PathBuf::from("."));
 
-        let request = tool
-            .approval_request(&json!({"message": "fix \"quoted\" path"}))
-            .expect("approval request");
+        let desc =
+            tool.describe_operation(&json!({"message": "fix quoted path"})).expect("descriptor");
 
-        assert_eq!(request.command, "git add --all && git commit -m \"fix \\\"quoted\\\" path\"");
-        assert!(tool.approval_request(&json!({"message": false})).is_none());
+        assert_eq!(desc.category, slab_agent::OperationCategory::FileEdit);
+        assert_eq!(desc.subject, "git_commit: fix quoted path");
+        assert!(tool.describe_operation(&json!({"message": false})).is_none());
     }
 
     #[tokio::test]

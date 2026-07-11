@@ -565,6 +565,33 @@ pub struct AgentApprovalResolveRequest {
     ))]
     pub call_id: String,
     pub approved: bool,
+    /// Persistence scope for the approval. Older clients omit this; the server
+    /// treats a missing scope as `run_once` (no persistence).
+    #[serde(default)]
+    pub scope: AgentApprovalScope,
+}
+
+/// REST mirror of `slab_exec_policy::ApprovalScope` (kept local so the schema
+/// crate stays decoupled from the runtime policy crate).
+#[derive(Debug, Clone, Copy, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentApprovalScope {
+    #[default]
+    RunOnce,
+    AlwaysInWorkspace,
+    Always,
+    Deny,
+}
+
+impl From<AgentApprovalScope> for slab_exec_policy::ApprovalScope {
+    fn from(scope: AgentApprovalScope) -> Self {
+        match scope {
+            AgentApprovalScope::RunOnce => Self::RunOnce,
+            AgentApprovalScope::AlwaysInWorkspace => Self::AlwaysInWorkspace,
+            AgentApprovalScope::Always => Self::Always,
+            AgentApprovalScope::Deny => Self::Deny,
+        }
+    }
 }
 
 impl From<AgentApprovalResolveRequest> for AgentControlCommand {
@@ -573,6 +600,7 @@ impl From<AgentApprovalResolveRequest> for AgentControlCommand {
             thread_id: request.thread_id,
             call_id: request.call_id,
             approved: request.approved,
+            scope: request.scope.into(),
         }
     }
 }

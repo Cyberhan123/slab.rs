@@ -17,8 +17,8 @@ use crate::{
     event::{AgentArtifactKind, AgentArtifactRef, AgentEventKind, AgentMetrics},
     hook::{AgentHookRegistry, HookEvent, dispatch_registered_hooks},
     port::{
-        AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, LlmStreamObserver, ParsedToolCall,
-        ThreadMessageRecord, ToolSpec, TurnEvent, TurnStateRecord,
+        AgentNotifyPort, AgentStorePort, ApprovalPort, ExecPolicyPort, LlmPort, LlmStreamObserver,
+        ParsedToolCall, ThreadMessageRecord, ToolSpec, TurnEvent, TurnStateRecord,
     },
     repetition_guard::ToolCallSignature,
     risk::ToolRiskAnalyzer,
@@ -43,6 +43,7 @@ pub(crate) struct TurnExecutionContext<'a> {
     pub store: &'a dyn AgentStorePort,
     pub notify: &'a dyn AgentNotifyPort,
     pub approval: &'a dyn ApprovalPort,
+    pub exec_policy: &'a dyn ExecPolicyPort,
     pub hooks: &'a AgentHookRegistry,
     pub risk: &'a dyn ToolRiskAnalyzer,
     pub trace: &'a dyn AgentTraceSink,

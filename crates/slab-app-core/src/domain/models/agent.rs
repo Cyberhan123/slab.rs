@@ -36,9 +36,18 @@ pub struct AgentSessionSnapshot {
 /// Agent control-plane command accepted by the app-core agent application service.
 #[derive(Debug)]
 pub enum AgentControlCommand {
-    ResolveApproval { thread_id: String, call_id: String, approved: bool },
-    Interrupt { thread_id: String },
-    Shutdown { thread_id: String },
+    ResolveApproval {
+        thread_id: String,
+        call_id: String,
+        approved: bool,
+        scope: slab_exec_policy::ApprovalScope,
+    },
+    Interrupt {
+        thread_id: String,
+    },
+    Shutdown {
+        thread_id: String,
+    },
 }
 
 /// Result returned after app-core applies an [`AgentControlCommand`].

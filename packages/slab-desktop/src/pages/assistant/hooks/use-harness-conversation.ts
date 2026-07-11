@@ -21,10 +21,12 @@ import {
   HarnessChatTransport,
   HarnessClient,
   turnItemsToMessages,
+  type ApprovalScope,
   type CommandExecutionRequestApprovalParams,
   type FileChangeApprovalChange,
   type FileChangeRequestApprovalParams,
   type JsonRpcNotification,
+  type OperationCategory,
   type Thread,
 } from "../lib/harness"
 
@@ -37,6 +39,9 @@ export type ApprovalRequest = {
   cwd?: string
   changes?: FileChangeApprovalChange[]
   reason?: string
+  category?: OperationCategory
+  /** Persistence scopes the server allows the user to pick. */
+  allowedScopes?: ApprovalScope[]
   status: "pending" | "approved" | "denied"
 }
 
@@ -61,8 +66,8 @@ export interface HarnessConversation {
   approvals: ApprovalRequest[]
   /** itemId → approval status, for the in-stream tool-card status badge. */
   approvalStatusByItemId: ReadonlyMap<string, ApprovalStatus>
-  /** Resolve a pending approval via `approval/resolve`. */
-  resolveApproval: (itemId: string, approved: boolean) => Promise<void>
+  /** Resolve a pending approval via `approval/resolve` with a persistence scope. */
+  resolveApproval: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>
 }
 
 /** Highest numeric turn id in a thread (-1 when there are no turns). */
@@ -119,6 +124,8 @@ export function useHarnessConversation(
             command: command.command,
             cwd: command.cwd,
             reason: command.reason,
+            category: command.category,
+            allowedScopes: command.allowedScopes,
             status: "pending",
           })
         } else {
@@ -128,6 +135,7 @@ export function useHarnessConversation(
             threadId: params.threadId,
             kind: "fileChange",
             changes: file.changes,
+            allowedScopes: file.allowedScopes,
             status: "pending",
           })
         }
@@ -137,7 +145,7 @@ export function useHarnessConversation(
   }, [client])
 
   const resolveApproval = useCallback(
-    async (itemId: string, approved: boolean) => {
+    async (itemId: string, approved: boolean, scope: ApprovalScope) => {
       const entry = approvalMap.get(itemId)
       if (!entry) return
       // Optimistically mark resolved so the banner/card update immediately.
@@ -149,7 +157,7 @@ export function useHarnessConversation(
         return next
       })
       try {
-        const result = await client.approvalResolve({ threadId: entry.threadId, itemId, approved })
+        const result = await client.approvalResolve({ threadId: entry.threadId, itemId, approved, scope })
         // If the server couldn't deliver the decision (e.g. the pending entry
         // was gone), revert to pending so the user sees it wasn't actioned.
         if (result.delivered === false) {

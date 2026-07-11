@@ -121,8 +121,8 @@ impl AgentService {
         command: AgentControlCommand,
     ) -> Result<AgentControlResult, AppCoreError> {
         match command {
-            AgentControlCommand::ResolveApproval { thread_id, call_id, approved } => {
-                let delivered = self.approve_call(&thread_id, &call_id, approved);
+            AgentControlCommand::ResolveApproval { thread_id, call_id, approved, scope } => {
+                let delivered = self.approve_call(&thread_id, &call_id, approved, scope);
                 Ok(AgentControlResult { thread_id, delivered: Some(delivered), status: None })
             }
             AgentControlCommand::Interrupt { thread_id } => {
@@ -379,8 +379,20 @@ impl AgentService {
     ///
     /// Returns `true` if a pending approval with the given key was found and
     /// the decision was delivered.
-    pub fn approve_call(&self, thread_id: &str, call_id: &str, approved: bool) -> bool {
-        self.events.approve_call(thread_id, call_id, approved)
+    pub fn approve_call(
+        &self,
+        thread_id: &str,
+        call_id: &str,
+        approved: bool,
+        scope: slab_exec_policy::ApprovalScope,
+    ) -> bool {
+        self.events.approve_call(thread_id, call_id, approved, scope)
+    }
+
+    /// Set the per-session permission mode for a thread (flows from the harness
+    /// `thread/start` / `turn/start` `permission_mode` param).
+    pub async fn set_thread_mode(&self, thread_id: &str, mode: slab_exec_policy::PermissionMode) {
+        self.runtime.control().set_thread_mode(thread_id, mode).await;
     }
 
     /// Return the number of currently active threads.

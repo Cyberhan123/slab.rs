@@ -121,6 +121,11 @@ impl ToolHandler for WebSearchTool {
         })
     }
 
+    fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
+        let query = arguments.get("query").and_then(Value::as_str)?.to_string();
+        Some(slab_agent::OperationDescriptor::network(query))
+    }
+
     async fn execute(
         &self,
         _ctx: &ToolContext,

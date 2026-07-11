@@ -12,6 +12,7 @@ license.workspace = true
 slab-types    = { workspace = true }
 slab-agent-tracing = { workspace = true }
 slab-otel     = { workspace = true }
+slab-exec-policy = { workspace = true }
 tokio         = { workspace = true }
 tokio-util    = { workspace = true }
 futures       = { workspace = true }

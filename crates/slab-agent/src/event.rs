@@ -162,6 +162,7 @@ pub enum AgentEventKind {
         call_id: String,
         tool_name: String,
         command: String,
+        category: slab_exec_policy::OperationCategory,
         #[serde(skip_serializing_if = "Option::is_none")]
         risk: Option<ToolRiskAssessment>,
     },

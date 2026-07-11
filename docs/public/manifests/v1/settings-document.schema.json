@@ -220,6 +220,26 @@
       },
       "type": "object"
     },
+    "AgentPermissionBaseline": {
+      "description": "Sandbox policy baseline, mapping 1:1 onto `slab_sandboxing::SandboxPolicy`.",
+      "enum": [
+        "read_only",
+        "workspace_write",
+        "full_access"
+      ],
+      "type": "string"
+    },
+    "AgentPermissionsConfig": {
+      "description": "Global agent permission baseline (the `agent.permissions` PMID setting).\n\nThis mirrors `slab_exec_policy::PermissionBaseline` (kept decoupled so the\nconfig crate does not depend on the runtime policy crate). The host converts\nit to the runtime type when building the exec-policy engine.",
+      "properties": {
+        "baseline": {
+          "$ref": "#/$defs/AgentPermissionBaseline",
+          "default": "workspace_write",
+          "description": "Sandbox policy baseline used by `Custom` permission mode."
+        }
+      },
+      "type": "object"
+    },
     "AgentRuntimeConfig": {
       "description": "Agent runtime budget / concurrency settings (ADR-013).",
       "properties": {
@@ -309,6 +329,13 @@
           "default": false,
           "description": "Force offline degradation (INFRA-07): when true the agent's tool list is\nnarrowed to drop tools that need external network/provider reachability\n(`web_search`, `mcp_call`, `mcp_list_tools`, `mcp__*`). Set this when the\nenvironment is known to be offline. Defaults to `false`; a host-side\nprovider reachability probe can set this automatically in a follow-up.",
           "type": "boolean"
+        },
+        "permissions": {
+          "$ref": "#/$defs/AgentPermissionsConfig",
+          "default": {
+            "baseline": "workspace_write"
+          },
+          "description": "Global permission baseline used by the agent's `Custom` permission mode.\nMaps onto the sandbox policy. Surfaced as a PMID setting."
         },
         "runtime": {
           "$ref": "#/$defs/AgentRuntimeConfig",
@@ -1793,6 +1820,9 @@
           "phase2_limit": 64
         },
         "offline": false,
+        "permissions": {
+          "baseline": "workspace_write"
+        },
         "runtime": {
           "limits": {
             "cooldown_secs": 30,

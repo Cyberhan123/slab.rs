@@ -113,6 +113,13 @@ pub struct CommandExecutionRequestApprovalParams {
     pub cwd: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Operation category so the UI can render category-appropriate choices.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<crate::harness::messages::OperationCategory>,
+    /// Persistence scopes the client may offer (run-once / workspace / always
+    /// / deny). Empty for servers that only support approve/reject.
+    #[serde(default)]
+    pub allowed_scopes: Vec<crate::harness::messages::ApprovalScope>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
@@ -122,6 +129,8 @@ pub struct FileChangeRequestApprovalParams {
     pub turn_id: String,
     pub item_id: String,
     pub changes: Vec<FileChangeApprovalChange>,
+    #[serde(default)]
+    pub allowed_scopes: Vec<crate::harness::messages::ApprovalScope>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]

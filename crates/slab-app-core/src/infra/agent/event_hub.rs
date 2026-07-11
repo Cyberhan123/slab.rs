@@ -106,14 +106,27 @@ impl AgentEventHub {
     /// Keying by `call_id` only avoids the fragile harness↔real thread-id
     /// remap that previously caused resolves to miss the pending entry.
     ///
+    /// `scope` is the user's persistence choice (run-once / workspace / always
+    /// / deny); it flows back to the exec-policy engine via the returned
+    /// [`ApprovalDecision`].
+    ///
     /// Returns `true` if the pending approval was found and the decision was
     /// delivered; `false` if no matching pending approval exists.
-    pub fn approve_call(&self, thread_id: &str, call_id: &str, approved: bool) -> bool {
+    pub fn approve_call(
+        &self,
+        thread_id: &str,
+        call_id: &str,
+        approved: bool,
+        scope: slab_exec_policy::ApprovalScope,
+    ) -> bool {
         let _ = thread_id;
         let key = approval_key(call_id);
         if let Some((_, tx)) = self.approvals.remove(&key) {
-            let decision =
-                if approved { ApprovalDecision::Approved } else { ApprovalDecision::Rejected };
+            let decision = if approved {
+                ApprovalDecision::Approved(scope)
+            } else {
+                ApprovalDecision::Rejected
+            };
             tx.send(decision).is_ok()
         } else {
             false
@@ -184,7 +197,7 @@ impl ApprovalPort for AgentEventHub {
         thread_id: &str,
         call_id: &str,
         tool_name: &str,
-        command: &str,
+        descriptor: &slab_exec_policy::OperationDescriptor,
         risk: Option<ToolRiskAssessment>,
     ) -> ApprovalDecision {
         let (tx, rx) = oneshot::channel();
@@ -200,7 +213,8 @@ impl ApprovalPort for AgentEventHub {
                     item_id: call_id.to_owned(),
                     call_id: call_id.to_owned(),
                     tool_name: tool_name.to_owned(),
-                    command: command.to_owned(),
+                    command: descriptor.subject.clone(),
+                    category: descriptor.category,
                     risk,
                 },
             },

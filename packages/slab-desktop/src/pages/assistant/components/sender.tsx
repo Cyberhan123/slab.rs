@@ -38,7 +38,7 @@ import {
   XIcon,
 } from "lucide-react"
 
-import type { ReasoningEffort } from "../lib/harness"
+import type { ApprovalScope, ReasoningEffort } from "../lib/harness"
 import type { ApprovalRequest } from "../hooks/use-harness-conversation"
 import { ApprovalCard } from "./approval-banner"
 
@@ -66,7 +66,7 @@ type SenderProps = {
   loading?: boolean
   /** Pending human-approval requests rendered in a slot above the textarea. */
   approvals?: ApprovalRequest[]
-  onResolveApproval?: (itemId: string, approved: boolean) => Promise<void> | void
+  onResolveApproval?: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void> | void
 }
 
 function fileToDataUrl(file: File): Promise<string> {

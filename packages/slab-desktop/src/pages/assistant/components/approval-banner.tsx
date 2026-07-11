@@ -13,6 +13,7 @@ import {
 } from "lucide-react"
 import { useState } from "react"
 
+import type { ApprovalScope } from "../lib/harness"
 import type { ApprovalRequest } from "../hooks/use-harness-conversation"
 
 const changeTypeVariant: Record<string, "default" | "secondary" | "destructive"> = {
@@ -21,24 +22,49 @@ const changeTypeVariant: Record<string, "default" | "secondary" | "destructive">
   delete: "destructive",
 }
 
+type ScopeChoice = {
+  scope: ApprovalScope
+  approved: boolean
+  label: string
+  icon: typeof CheckIcon
+  variant: "default" | "outline"
+}
+
+const ALL_SCOPES: ScopeChoice[] = [
+  { scope: "run_once", approved: true, label: "pages.assistant.approval.runOnce", icon: CheckIcon, variant: "default" },
+  { scope: "always_in_workspace", approved: true, label: "pages.assistant.approval.alwaysInWorkspace", icon: CheckIcon, variant: "outline" },
+  { scope: "always", approved: true, label: "pages.assistant.approval.always", icon: CheckIcon, variant: "outline" },
+  { scope: "deny", approved: false, label: "pages.assistant.actions.reject", icon: XIcon, variant: "outline" },
+]
+
 export function ApprovalCard({
   approval,
   onResolve,
 }: {
   approval: ApprovalRequest
-  onResolve: (itemId: string, approved: boolean) => Promise<void> | void
+  onResolve: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void> | void
 }) {
   const { t } = useTranslation()
-  const [pendingAction, setPendingAction] = useState<"approve" | "reject" | null>(null)
+  const [pendingAction, setPendingAction] = useState<string | null>(null)
 
-  const handle = async (approved: boolean) => {
-    setPendingAction(approved ? "approve" : "reject")
+  const handle = async (approved: boolean, scope: ApprovalScope, label: string) => {
+    setPendingAction(label)
     try {
-      await onResolve(approval.itemId, approved)
+      await onResolve(approval.itemId, approved, scope)
     } finally {
       setPendingAction(null)
     }
   }
+
+  // Prefer the server-advertised scopes; fall back to a simple approve/reject
+  // (approve = run-once, reject = deny) for older servers.
+  const choices: ScopeChoice[] =
+    approval.allowedScopes && approval.allowedScopes.length > 0
+      ? ALL_SCOPES.filter((choice) => approval.allowedScopes!.includes(choice.scope))
+      : [
+          { scope: "run_once", approved: true, label: "pages.assistant.actions.approve", icon: CheckIcon, variant: "default" },
+          { scope: "deny", approved: false, label: "pages.assistant.actions.reject", icon: XIcon, variant: "outline" },
+        ]
 
   const isCommand = approval.kind === "command"
 
@@ -87,37 +113,28 @@ export function ApprovalCard({
         )}
       </div>
 
-      <div className="mt-3 flex items-center gap-2">
-        <Button
-          size="sm"
-          variant="default"
-          disabled={pendingAction !== null}
-          onClick={() => {
-            void handle(true)
-          }}
-        >
-          {pendingAction === "approve" ? (
-            <Spinner className="size-3.5" />
-          ) : (
-            <CheckIcon className="size-3.5" />
-          )}
-          {t("pages.assistant.actions.approve")}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={pendingAction !== null}
-          onClick={() => {
-            void handle(false)
-          }}
-        >
-          {pendingAction === "reject" ? (
-            <Spinner className="size-3.5" />
-          ) : (
-            <XIcon className="size-3.5" />
-          )}
-          {t("pages.assistant.actions.reject")}
-        </Button>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {choices.map((choice) => {
+          const Icon = choice.icon
+          return (
+            <Button
+              key={choice.scope}
+              size="sm"
+              variant={choice.variant}
+              disabled={pendingAction !== null}
+              onClick={() => {
+                void handle(choice.approved, choice.scope, choice.label)
+              }}
+            >
+              {pendingAction === choice.label ? (
+                <Spinner className="size-3.5" />
+              ) : (
+                <Icon className="size-3.5" />
+              )}
+              {t(choice.label)}
+            </Button>
+          )
+        })}
       </div>
     </div>
   )

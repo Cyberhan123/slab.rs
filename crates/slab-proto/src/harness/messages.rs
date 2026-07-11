@@ -57,6 +57,40 @@ pub enum NetworkAccess {
     Enabled,
 }
 
+/// Per-session permission mode (flows via `ThreadStartParams`/`TurnStartParams`).
+/// Mirrors `slab_exec_policy::PermissionMode`.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionMode {
+    #[default]
+    RequestApproval,
+    ApproveForMe,
+    FullControl,
+    Custom,
+}
+
+/// Persistence scope chosen by the user when approving a prompt. Mirrors
+/// `slab_exec_policy::ApprovalScope`.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalScope {
+    RunOnce,
+    AlwaysInWorkspace,
+    Always,
+    Deny,
+}
+
+/// Operation category for an approval prompt. Mirrors
+/// `slab_exec_policy::OperationCategory`.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationCategory {
+    Shell,
+    FileEdit,
+    Network,
+    ReadOnly,
+}
+
 /// Sandbox policy — a `type`-discriminated union mirroring the TS contract.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -192,6 +226,10 @@ pub struct ThreadStartParams {
     pub approval_policy: Option<ApprovalPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<SandboxMode>,
+    /// Per-session permission mode (request-approval / approve-for-me /
+    /// full-control / custom). When unset the server uses `RequestApproval`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<PermissionMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_instructions: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -313,6 +351,9 @@ pub struct TurnStartParams {
     pub approval_policy: Option<ApprovalPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox_policy: Option<SandboxPolicy>,
+    /// Per-session permission mode override for this turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<PermissionMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -352,6 +393,10 @@ pub struct ApprovalResolveParams {
     /// The pending item / tool-call id awaiting approval.
     pub item_id: String,
     pub approved: bool,
+    /// Persistence scope chosen by the user. Older clients omit this; the
+    /// server treats a missing scope as `RunOnce` (no persistence).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<ApprovalScope>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]

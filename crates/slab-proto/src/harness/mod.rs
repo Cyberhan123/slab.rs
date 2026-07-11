@@ -24,12 +24,12 @@ pub use error::{ErrorEvent, TurnError, WarningEvent};
 pub use event::{Event, EventMsg};
 pub use item::TurnItem;
 pub use messages::{
-    ApprovalResolveParams, ApprovalResolveResult, InitializeParams, InitializeResult,
-    ReasoningEffort, ShutdownParams, ShutdownResult, Thread, ThreadArchiveParams,
-    ThreadArchiveResult, ThreadForkParams, ThreadForkResult, ThreadListParams, ThreadListResult,
-    ThreadResumeParams, ThreadResumeResult, ThreadRollbackParams, ThreadRollbackResult,
-    ThreadStartParams, ThreadStartResult, Turn, TurnInterruptParams, TurnInterruptResult,
-    TurnStartParams, TurnStartResult,
+    ApprovalResolveParams, ApprovalResolveResult, ApprovalScope, InitializeParams,
+    InitializeResult, OperationCategory, PermissionMode, ReasoningEffort, ShutdownParams,
+    ShutdownResult, Thread, ThreadArchiveParams, ThreadArchiveResult, ThreadForkParams,
+    ThreadForkResult, ThreadListParams, ThreadListResult, ThreadResumeParams, ThreadResumeResult,
+    ThreadRollbackParams, ThreadRollbackResult, ThreadStartParams, ThreadStartResult, Turn,
+    TurnInterruptParams, TurnInterruptResult, TurnStartParams, TurnStartResult,
 };
 pub use model::{ModelInfo, ModelListParams, ModelListResult, ReasoningEffortOption};
 pub use notification::ServerNotification;

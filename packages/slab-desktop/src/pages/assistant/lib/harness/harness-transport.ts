@@ -31,6 +31,7 @@ import {
 } from "./stream"
 import type {
   JsonRpcNotification,
+  PermissionMode,
   ReasoningEffort,
   TurnStartParams,
   UserInput,
@@ -87,6 +88,21 @@ function readEffort(metadata: unknown): ReasoningEffort | undefined {
   return undefined
 }
 
+/** Read the per-session permission-mode selector carried via `sendMessage({ metadata })`. */
+function readPermissionMode(metadata: unknown): PermissionMode | undefined {
+  if (!metadata || typeof metadata !== "object") return undefined
+  const mode = (metadata as { permissionMode?: unknown }).permissionMode
+  if (
+    mode === "request_approval" ||
+    mode === "approve_for_me" ||
+    mode === "full_control" ||
+    mode === "custom"
+  ) {
+    return mode
+  }
+  return undefined
+}
+
 export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatTransport<UI_MESSAGE> {
   private readonly client: HarnessClient
   private readonly model: string
@@ -104,6 +120,7 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
   }): Promise<ReadableStream<UIMessageChunk>> {
     const input = buildTurnInput(options.messages)
     const effort = readEffort(options.requestMetadata)
+    const permissionMode = readPermissionMode(options.requestMetadata)
 
     return createUIMessageStream({
       execute: async ({ writer }) => {
@@ -169,6 +186,7 @@ export class HarnessChatTransport<UI_MESSAGE extends UIMessage> implements ChatT
             model: this.model,
           }
           if (effort) turnParams.effort = effort
+          if (permissionMode) turnParams.permissionMode = permissionMode
           this.client
             .turnStart(turnParams)
             .catch((error) => {

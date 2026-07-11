@@ -283,7 +283,9 @@ impl HarnessProjection {
             }
 
             // ---- approvals ----
-            AgentEventKind::ResponseToolCallApprovalRequired { item_id, command, .. } => {
+            AgentEventKind::ResponseToolCallApprovalRequired {
+                item_id, command, category, ..
+            } => {
                 vec![EventMsg::CommandExecutionRequestApproval(
                     CommandExecutionRequestApprovalParams {
                         thread_id: tid,
@@ -292,6 +294,8 @@ impl HarnessProjection {
                         command: command.clone(),
                         cwd: String::new(),
                         reason: None,
+                        category: Some(to_proto_category(*category)),
+                        allowed_scopes: default_allowed_scopes(),
                     },
                 )]
             }
@@ -343,6 +347,30 @@ impl HarnessProjection {
 /// `Error`, `Warning`, and `TurnAborted` return `None` (the dispatcher adapts).
 pub fn notification_for(msg: EventMsg) -> Option<ServerNotification> {
     msg.into_notification()
+}
+
+/// Map the runtime `OperationCategory` (from `slab-exec-policy`) onto the
+/// mirrored wire type in `slab-proto`.
+fn to_proto_category(
+    category: slab_agent::OperationCategory,
+) -> slab_proto::harness::OperationCategory {
+    match category {
+        slab_agent::OperationCategory::Shell => slab_proto::harness::OperationCategory::Shell,
+        slab_agent::OperationCategory::FileEdit => slab_proto::harness::OperationCategory::FileEdit,
+        slab_agent::OperationCategory::Network => slab_proto::harness::OperationCategory::Network,
+        slab_agent::OperationCategory::ReadOnly => slab_proto::harness::OperationCategory::ReadOnly,
+    }
+}
+
+/// The full set of persistence scopes a client may offer when approving.
+fn default_allowed_scopes() -> Vec<slab_proto::harness::ApprovalScope> {
+    use slab_proto::harness::ApprovalScope;
+    vec![
+        ApprovalScope::RunOnce,
+        ApprovalScope::AlwaysInWorkspace,
+        ApprovalScope::Always,
+        ApprovalScope::Deny,
+    ]
 }
 
 #[cfg(test)]

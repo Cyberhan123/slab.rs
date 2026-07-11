@@ -39,6 +39,16 @@ impl ToolHandler for ApplyPatchTool {
         })
     }
 
+    fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
+        let patch = arguments.get("patch").and_then(Value::as_str)?;
+        let subject = first_path_in_patch(patch);
+        Some(
+            slab_agent::OperationDescriptor::file_edit(subject)
+                .with_workspace(Some(self.workspace_root.clone()))
+                .with_detail(patch),
+        )
+    }
+
     async fn execute(
         &self,
         _ctx: &ToolContext,
@@ -64,6 +74,21 @@ impl ToolHandler for ApplyPatchTool {
             metadata: None,
         })
     }
+}
+
+/// Extract the first modified file path from a unified diff, for the
+/// file-edit descriptor subject. Falls back to `"patch"` when no path parses.
+fn first_path_in_patch(patch: &str) -> String {
+    for line in patch.lines() {
+        if let Some(rest) = line.strip_prefix("+++ ") {
+            let trimmed = rest.trim();
+            let path = trimmed.strip_prefix("b/").unwrap_or(trimmed).trim_matches('"');
+            if !path.is_empty() && path != "/dev/null" {
+                return path.to_owned();
+            }
+        }
+    }
+    "patch".to_owned()
 }
 
 #[cfg(test)]

@@ -16,7 +16,6 @@ use crate::{
     event::{AgentArtifactKind, AgentArtifactRef, AgentEventKind, ToolRiskAssessment},
     hook::{HookEvent, HookToolAction, dispatch_registered_hooks},
     port::{ApprovalDecision, ParsedToolCall, TurnEvent},
-    risk::ToolApprovalDecision,
     state::ToolCallStateMachine,
     tool::{PlanRef, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput},
     turn::TurnExecutionContext,
@@ -398,26 +397,52 @@ async fn handle_tool_call(
         .await;
 
     let handler = context.tools.get(&tool_call.name);
-    let approval_request = handler
+    // Unified permission decision (slab-exec-policy). The descriptor is built
+    // from the tool's own `describe_operation`, falling back to a name-based
+    // inference. The engine is the SINGLE owner of Allow/RequireApproval/Deny —
+    // this replaces the legacy per-tool `approval_request` + risk-fallback pair
+    // that could disagree (the approve-then-block bug).
+    let descriptor = handler
         .as_ref()
-        .and_then(|handler| handler.approval_request(&effective_args))
-        .or_else(|| {
-            // ADR-008: when the tool has no own approval metadata, the
-            // configured risk policy decides (default asks for Medium+ tools).
-            if context.risk.approval_decision(&risk) == ToolApprovalDecision::Ask {
-                // Prefer the inner `command` argument (e.g. shell) so the
-                // approval prompt shows the real command instead of
-                // "<tool_name> <json args>"; fall back to name + args otherwise.
-                let command = effective_args
-                    .get("command")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_owned())
-                    .unwrap_or_else(|| format!("{} {effective_arguments}", tool_call.name));
-                Some(ToolApprovalRequest { command })
-            } else {
-                None
-            }
+        .and_then(|handler| handler.describe_operation(&effective_args))
+        .or_else(|| infer_descriptor(&tool_call.name, &effective_args, context))
+        .unwrap_or_else(|| {
+            slab_exec_policy::OperationDescriptor::read_only(tool_call.name.clone())
         });
+    let decision = context.exec_policy.evaluate(context.thread_id, &descriptor).await;
+    let approval_request = match decision {
+        slab_exec_policy::ExecDecision::Allow => None,
+        slab_exec_policy::ExecDecision::Deny => {
+            // Hard refusal by policy: do NOT request approval — return blocked
+            // output immediately so the model learns the operation is refused.
+            record_json(
+                context.trace,
+                &context.trace_context,
+                "slab-agent",
+                "tool_call_blocked_by_policy",
+                serde_json::json!({
+                    "item_id": tool_call.id,
+                    "call_id": call_id,
+                    "tool_name": tool_call.name,
+                    "category": descriptor.category.as_str(),
+                }),
+            );
+            let output = "tool call blocked by permission policy".to_string();
+            let message = record_failed_tool_call_without_persisting_message(
+                context, &call_id, tool_call, output, created_at,
+            )
+            .await?;
+            return Ok(ToolCallRunResult {
+                message,
+                status: ToolCallStatus::Failed,
+                task_completion: None,
+            });
+        }
+        slab_exec_policy::ExecDecision::RequireApproval => Some(ToolApprovalRequest {
+            descriptor: descriptor.clone(),
+            display: descriptor.subject.clone(),
+        }),
+    };
     let initial_status =
         if approval_request.is_some() { ToolCallStatus::Pending } else { ToolCallStatus::Running };
     let mut tool_state = ToolCallStateMachine::new(initial_status);
@@ -541,7 +566,8 @@ async fn run_tool_with_optional_approval(
             "item_id": run.tool_call.id,
             "call_id": run.call_id,
             "tool_name": run.tool_call.name,
-            "command": &request.command,
+            "command": &request.display,
+            "category": request.descriptor.category.as_str(),
             "risk": run.risk,
         }),
     );
@@ -559,15 +585,21 @@ async fn run_tool_with_optional_approval(
             run.context.thread_id,
             run.call_id,
             &run.tool_call.name,
-            &request.command,
+            &request.descriptor,
             Some(run.risk.clone()),
         ) => decision,
         _ = run.context.cancellation.cancelled() => return Err(AgentError::Interrupted),
     };
 
     match decision {
-        ApprovalDecision::Approved => {
+        ApprovalDecision::Approved(scope) => {
             emit_approval_resolved(&run, true).await;
+            // Persist the user's scope as a rule (no-op for RunOnce/Deny) so
+            // future identical operations skip the prompt.
+            run.context
+                .exec_policy
+                .remember(run.context.thread_id, &request.descriptor, scope)
+                .await;
             if run.context.cancellation.is_cancelled() {
                 return Err(AgentError::Interrupted);
             }
@@ -727,6 +759,55 @@ async fn execute_tool_call(
     );
 
     result
+}
+
+/// Infer an [`slab_exec_policy::OperationDescriptor`] for a tool that does not
+/// override [`ToolHandler::describe_operation`]. Maps the tool name to a
+/// category and pulls the most relevant subject (command / path / query) from
+/// the arguments. Tools with their own `describe_operation` bypass this.
+fn infer_descriptor(
+    tool_name: &str,
+    args: &serde_json::Value,
+    context: &TurnExecutionContext<'_>,
+) -> Option<slab_exec_policy::OperationDescriptor> {
+    let workspace_root = context.thread_context.workspace.as_ref().map(|w| w.root.clone());
+    let descriptor = match tool_name {
+        "shell" => {
+            let command = args.get("command").and_then(serde_json::Value::as_str).unwrap_or("");
+            slab_exec_policy::OperationDescriptor::shell(command)
+        }
+        "write_file" => {
+            let path = args.get("path").and_then(serde_json::Value::as_str).unwrap_or("");
+            slab_exec_policy::OperationDescriptor::file_edit(path)
+        }
+        "apply_patch" => {
+            let patch = args.get("patch").and_then(serde_json::Value::as_str).unwrap_or("");
+            slab_exec_policy::OperationDescriptor::file_edit(first_path_in_patch(patch))
+        }
+        "web_search" => {
+            let query = args.get("query").and_then(serde_json::Value::as_str).unwrap_or("");
+            slab_exec_policy::OperationDescriptor::network(query)
+        }
+        _ => return None,
+    };
+    Some(descriptor.with_workspace(workspace_root))
+}
+
+/// Extract the first modified file path from a unified diff, for the file-edit
+/// descriptor subject. Falls back to `"patch"` when no path can be parsed.
+fn first_path_in_patch(patch: &str) -> String {
+    for line in patch.lines() {
+        if let Some(rest) = line.strip_prefix("+++ ") {
+            let trimmed = rest.trim();
+            // Strip the leading `b/` that git diffs use.
+            let path = trimmed.strip_prefix("b/").unwrap_or(trimmed);
+            let path = path.trim_matches('"');
+            if !path.is_empty() && path != "/dev/null" {
+                return path.to_owned();
+            }
+        }
+    }
+    "patch".to_owned()
 }
 
 fn append_hook_observations(output: &mut String, observations: Vec<String>) {

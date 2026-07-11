@@ -3,6 +3,7 @@ pub mod adapter;
 pub(crate) mod bootstrap;
 pub(crate) mod code_tools;
 pub mod event_hub;
+pub mod exec_policy;
 pub(crate) mod hooks;
 pub(crate) mod memory;
 pub(crate) mod memory_breaker;

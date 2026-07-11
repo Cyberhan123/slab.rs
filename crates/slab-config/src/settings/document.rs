@@ -310,6 +310,10 @@ pub struct AgentSettingsConfig {
     pub memories: AgentMemoriesConfig,
     #[serde(default)]
     pub runtime: AgentRuntimeConfig,
+    /// Global permission baseline used by the agent's `Custom` permission mode.
+    /// Maps onto the sandbox policy. Surfaced as a PMID setting.
+    #[serde(default)]
+    pub permissions: AgentPermissionsConfig,
     /// Force offline degradation (INFRA-07): when true the agent's tool list is
     /// narrowed to drop tools that need external network/provider reachability
     /// (`web_search`, `mcp_call`, `mcp_list_tools`, `mcp__*`). Set this when the
@@ -327,9 +331,32 @@ impl Default for AgentSettingsConfig {
             hooks: AgentHooksConfig::default(),
             memories: AgentMemoriesConfig::default(),
             runtime: AgentRuntimeConfig::default(),
+            permissions: AgentPermissionsConfig::default(),
             offline: false,
         }
     }
+}
+
+/// Global agent permission baseline (the `agent.permissions` PMID setting).
+///
+/// This mirrors `slab_exec_policy::PermissionBaseline` (kept decoupled so the
+/// config crate does not depend on the runtime policy crate). The host converts
+/// it to the runtime type when building the exec-policy engine.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct AgentPermissionsConfig {
+    /// Sandbox policy baseline used by `Custom` permission mode.
+    #[serde(default)]
+    pub baseline: AgentPermissionBaseline,
+}
+
+/// Sandbox policy baseline, mapping 1:1 onto `slab_sandboxing::SandboxPolicy`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentPermissionBaseline {
+    ReadOnly,
+    #[default]
+    WorkspaceWrite,
+    FullAccess,
 }
 
 /// Agent runtime budget / concurrency settings (ADR-013).

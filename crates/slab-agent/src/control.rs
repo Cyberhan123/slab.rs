@@ -70,6 +70,7 @@ pub struct AgentControl {
     store: Arc<dyn AgentStorePort>,
     notify: Arc<dyn AgentNotifyPort>,
     approval: Arc<dyn ApprovalPort>,
+    exec_policy: Arc<dyn crate::port::ExecPolicyPort>,
     tool_router: Arc<ToolRouter>,
     hooks: AgentHookRegistry,
     compact: Arc<dyn CompactPort>,
@@ -151,6 +152,7 @@ impl AgentControl {
             store,
             notify,
             approval,
+            exec_policy: Arc::new(slab_exec_policy::AllowAllExecPolicy),
             tool_router,
             hooks: AgentHookRegistry::new(hooks),
             compact: Arc::new(SlidingWindowCompactPort::default()),
@@ -183,6 +185,7 @@ impl AgentControl {
             store,
             notify,
             approval,
+            exec_policy: Arc::new(slab_exec_policy::AllowAllExecPolicy),
             tool_router,
             hooks: AgentHookRegistry::default(),
             compact,
@@ -223,6 +226,14 @@ impl AgentControl {
     /// return [`AgentError::MemoryPressureExceeded`] until it clears.
     pub fn with_memory_pressure(mut self, port: Arc<dyn crate::port::MemoryPressurePort>) -> Self {
         self.memory_pressure = port;
+        self
+    }
+
+    /// Attach the unified permission decision engine. When unset, a permissive
+    /// [`slab_exec_policy::AllowAllExecPolicy`] stub is used (every operation
+    /// allowed, nothing persisted) — suitable for tests but not production.
+    pub fn with_exec_policy(mut self, port: Arc<dyn crate::port::ExecPolicyPort>) -> Self {
+        self.exec_policy = port;
         self
     }
 
@@ -576,6 +587,18 @@ impl AgentControl {
         Arc::clone(&self.tool_router)
     }
 
+    /// Set the per-session permission mode for a thread (flows from
+    /// `ThreadStartParams`/`TurnStartParams`). The engine keys mode by
+    /// `thread_id` so concurrent sessions on the singleton control don't race.
+    pub async fn set_thread_mode(&self, thread_id: &str, mode: slab_exec_policy::PermissionMode) {
+        self.exec_policy.set_thread_mode(thread_id, mode).await;
+    }
+
+    /// Drop per-thread permission state when the thread ends.
+    pub async fn clear_thread_mode(&self, thread_id: &str) {
+        self.exec_policy.clear_thread(thread_id).await;
+    }
+
     // ── private helpers ──────────────────────────────────────────────────────
 
     async fn spawn_inner(&self, request: SpawnRequest) -> Result<String, AgentError> {
@@ -622,6 +645,7 @@ impl AgentControl {
         let store = Arc::clone(&self.store);
         let notify = Arc::clone(&self.notify);
         let approval = Arc::clone(&self.approval);
+        let exec_policy = Arc::clone(&self.exec_policy);
         let tools = Arc::clone(&self.tool_router);
         let hooks = self.hooks.clone();
         let compact = Arc::clone(&self.compact);
@@ -637,6 +661,7 @@ impl AgentControl {
             store,
             notify,
             approval,
+            exec_policy,
             tools,
             hooks,
             compact,

@@ -1,13 +1,17 @@
 //! Shell command execution tool backed by `slab-shell-command`.
+//!
+//! Permission decisions are owned by `slab-exec-policy`; this tool only
+//! describes its operation (`describe_operation`) and executes when the kernel
+//! has authorized it.
 
 use std::{path::PathBuf, sync::Arc};
 
 use async_trait::async_trait;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput};
+use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
 use slab_sandboxing::SandboxDriver;
 pub use slab_shell_command::ShellPolicy;
-use slab_shell_command::{ShellCommand, ShellExecutor, ShellRuleSet};
+use slab_shell_command::{ShellCommand, ShellExecutor};
 
 pub struct ShellTool {
     executor: ShellExecutor,
@@ -15,28 +19,16 @@ pub struct ShellTool {
 
 impl ShellTool {
     pub fn new(
-        policy: ShellPolicy,
         workspace_root: Option<PathBuf>,
         sandbox_driver: Option<Arc<dyn SandboxDriver>>,
     ) -> Self {
-        Self { executor: ShellExecutor::new(policy, workspace_root, sandbox_driver) }
-    }
-
-    pub fn new_with_rules(
-        policy: ShellPolicy,
-        workspace_root: Option<PathBuf>,
-        sandbox_driver: Option<Arc<dyn SandboxDriver>>,
-        rules: ShellRuleSet,
-    ) -> Self {
-        Self {
-            executor: ShellExecutor::new(policy, workspace_root, sandbox_driver).with_rules(rules),
-        }
+        Self { executor: ShellExecutor::new(workspace_root, sandbox_driver) }
     }
 }
 
 impl Default for ShellTool {
     fn default() -> Self {
-        Self::new(ShellPolicy::Allow, None, None)
+        Self::new(None, None)
     }
 }
 
@@ -74,12 +66,9 @@ impl ToolHandler for ShellTool {
         })
     }
 
-    fn approval_request(&self, arguments: &Value) -> Option<ToolApprovalRequest> {
+    fn describe_operation(&self, arguments: &Value) -> Option<slab_agent::OperationDescriptor> {
         let command = arguments.get("command").and_then(Value::as_str)?.to_string();
-        if !self.executor.approval_required_for_command(&command) {
-            return None;
-        }
-        Some(ToolApprovalRequest { command })
+        Some(slab_agent::OperationDescriptor::shell(command))
     }
 
     async fn execute(
@@ -130,7 +119,6 @@ mod tests {
     use serde_json::{Value, json};
     use slab_agent::{ToolContext, ToolHandler};
     use slab_sandboxing::{SandboxError, SandboxedCommand, SandboxedOutput};
-    use slab_shell_command::{ShellRule, ShellRuleAction, ShellRuleMatcher};
 
     use super::*;
 
@@ -160,7 +148,6 @@ mod tests {
     async fn shell_tool_maps_sandbox_output_to_json_and_filters_env_values() {
         let seen = Arc::new(Mutex::new(None));
         let tool = ShellTool::new(
-            ShellPolicy::Allow,
             Some(PathBuf::from("workspace")),
             Some(Arc::new(RecordingDriver {
                 seen: Arc::clone(&seen),
@@ -202,39 +189,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shell_tool_rejects_missing_command_and_policy_blocks() {
-        let blocked = ShellTool::new(ShellPolicy::Block, None, None);
+    async fn shell_tool_rejects_missing_command_and_dangerous_command() {
+        let tool = ShellTool::new(None, None);
 
-        let missing = blocked.execute(&ctx(), &json!({})).await.expect_err("missing command");
+        let missing = tool.execute(&ctx(), &json!({})).await.expect_err("missing command");
         assert_eq!(missing.to_string(), "tool execution error: missing 'command' argument");
 
-        let blocked_error = blocked
-            .execute(&ctx(), &json!({"command": "echo blocked"}))
+        let dangerous = tool
+            .execute(&ctx(), &json!({"command": "rm -rf /"}))
             .await
-            .expect_err("blocked command");
-        assert!(blocked_error.to_string().contains("blocked by policy"));
+            .expect_err("dangerous command");
+        assert!(dangerous.to_string().contains("command blocked"));
     }
 
     #[test]
-    fn shell_tool_approval_respects_policy_and_rules() {
-        let review = ShellTool::new(ShellPolicy::RequireApproval, None, None);
-        assert_eq!(
-            review
-                .approval_request(&json!({"command": "echo review"}))
-                .map(|request| request.command),
-            Some("echo review".to_string())
-        );
-        assert!(review.approval_request(&json!({"command": false})).is_none());
-
-        let rules = ShellRuleSet::from_rules(vec![ShellRule::new(
-            ShellRuleAction::Allow,
-            ShellRuleMatcher::Prefix,
-            "cargo check",
-        )]);
-        let auto = ShellTool::new_with_rules(ShellPolicy::RequireApproval, None, None, rules);
-
-        assert!(auto.approval_request(&json!({"command": "cargo check -p slab-agent"})).is_none());
-        assert!(auto.approval_request(&json!({"command": "cargo test -p slab-agent"})).is_some());
+    fn shell_tool_describes_operation_as_shell_command() {
+        let tool = ShellTool::new(None, None);
+        let descriptor =
+            tool.describe_operation(&json!({"command": "cargo check"})).expect("descriptor");
+        assert_eq!(descriptor.category, slab_agent::OperationCategory::Shell);
+        assert_eq!(descriptor.subject, "cargo check");
     }
 
     #[test]
