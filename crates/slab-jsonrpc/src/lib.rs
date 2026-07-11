@@ -4,6 +4,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub mod host;
+pub mod notifier;
+pub mod router;
 pub mod ws;
 
 pub const JSONRPC_VERSION: &str = "2.0";
