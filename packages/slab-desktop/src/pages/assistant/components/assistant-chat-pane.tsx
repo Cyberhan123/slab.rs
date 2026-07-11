@@ -117,9 +117,9 @@ export function AssistantChatPane({
                     </CardContent>
                     <CardFooter className="flex-col gap-2">
                         <Sender
-                            onSubmit={async (value, { files, effort }) => {
+                            onSubmit={async (value, { files, effort, permissionMode }) => {
                                 await onBeforeSubmit(value)
-                                sendMessage({ text: value, files, metadata: { effort } })
+                                sendMessage({ text: value, files, metadata: { effort, permissionMode } })
                             }}
                             onStop={stop}
                             loading={disabled || isBusy}

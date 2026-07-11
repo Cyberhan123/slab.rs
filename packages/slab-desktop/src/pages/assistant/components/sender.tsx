@@ -28,19 +28,29 @@ import { useTranslation } from "@slab/i18n"
 import {
   ArrowUpIcon,
   Brain,
+  Check,
   Dot,
   File,
   PaperclipIcon,
   PlusIcon,
+  ShieldCheck,
   Slash,
   Sparkle,
   SquareIcon,
   XIcon,
 } from "lucide-react"
 
-import type { ApprovalScope, ReasoningEffort } from "../lib/harness"
+import type { ApprovalScope, PermissionMode, ReasoningEffort } from "../lib/harness"
 import type { ApprovalRequest } from "../hooks/use-harness-conversation"
 import { ApprovalCard } from "./approval-banner"
+
+/** Per-session permission modes offered in the composer. */
+const PERMISSION_MODES: ReadonlyArray<{ value: PermissionMode; label: string }> = [
+  { value: "request_approval", label: "pages.assistant.composer.permission.requestApproval" },
+  { value: "approve_for_me", label: "pages.assistant.composer.permission.approveForMe" },
+  { value: "full_control", label: "pages.assistant.composer.permission.fullControl" },
+  { value: "custom", label: "pages.assistant.composer.permission.custom" },
+]
 
 type EffortLevel = "low" | "medium" | "high"
 
@@ -53,6 +63,7 @@ interface Attachment {
 export type SenderSubmitOptions = {
   files: FileUIPart[]
   effort: ReasoningEffort
+  permissionMode: PermissionMode
 }
 
 type SenderProps = {
@@ -84,6 +95,7 @@ function Sender({ onSubmit, onStop, loading = false, approvals, onResolveApprova
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [thinkingEnabled, setThinkingEnabled] = useState(false)
   const [effortLevel, setEffortLevel] = useState<EffortLevel>("high")
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>("request_approval")
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const effort: ReasoningEffort = thinkingEnabled ? effortLevel : "off"
@@ -128,7 +140,7 @@ function Sender({ onSubmit, onStop, loading = false, approvals, onResolveApprova
       })),
     )
 
-    await onSubmit(message, { files, effort }, event)
+    await onSubmit(message, { files, effort, permissionMode }, event)
 
     setValue("")
     for (const item of attachments) URL.revokeObjectURL(item.previewUrl)
@@ -303,6 +315,24 @@ function Sender({ onSubmit, onStop, loading = false, approvals, onResolveApprova
                     onCheckedChange={setThinkingEnabled}
                   />
                 </DropdownMenuItem>
+              </DropdownMenuGroup>
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>
+                  {t("pages.assistant.composer.permission.title")}
+                </DropdownMenuLabel>
+                {PERMISSION_MODES.map((mode) => (
+                  <DropdownMenuItem
+                    key={mode.value}
+                    onSelect={(event) => {
+                      event.preventDefault()
+                      setPermissionMode(mode.value)
+                    }}
+                  >
+                    <ShieldCheck />
+                    {t(mode.label)}
+                    {permissionMode === mode.value ? <Check className="ml-auto size-3.5" /> : null}
+                  </DropdownMenuItem>
+                ))}
               </DropdownMenuGroup>
               <DropdownMenuGroup>
                 <DropdownMenuLabel>

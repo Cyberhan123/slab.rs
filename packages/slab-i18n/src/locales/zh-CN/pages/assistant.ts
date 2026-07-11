@@ -140,6 +140,13 @@ export const assistant = {
     commandMcpDescription: '连接工具与上下文',
     commandWebSearch: '网页搜索',
     commandWebSearchDescription: '使用可用网页搜索工具',
+    permission: {
+      title: '权限模式',
+      requestApproval: '请求批准',
+      approveForMe: '替我审批（敬请期待）',
+      fullControl: '完全控制',
+      custom: '自定义',
+    },
     stopGeneratingResponse: '停止生成回复',
     sendMessage: '发送消息',
     deepThink: '深度思考',

@@ -142,17 +142,18 @@
     "@testing-library/react": "catalog:",
     "@testing-library/user-event": "catalog:",
     "@types/bun": "catalog:",
+    "@types/linkify-it": "^5.0.0",
+    "@types/lodash-es": "catalog:",
     "@types/node": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "@vitest/coverage-v8": "catalog:",
     "autoprefixer": "catalog:",
     "cross-spawn": "catalog:",
-    "postcss": "catalog:",
+    "import-meta-resolve": "catalog:",
     "jsdom": "catalog:",
+    "postcss": "catalog:",
     "vite": "catalog:",
-    "vitest": "catalog:",
-    "@types/lodash-es": "catalog:",
-    "import-meta-resolve": "catalog:"
+    "vitest": "catalog:"
   },
   "browserslist": {
     "production": [

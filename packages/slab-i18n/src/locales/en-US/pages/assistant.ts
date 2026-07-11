@@ -140,6 +140,13 @@ export const assistant = {
     commandMcp: 'MCP',
     commandMcpDescription: 'Connect tools and context',
     commandWebSearch: 'Web search',
+    permission: {
+      title: 'Permission mode',
+      requestApproval: 'Request approval',
+      approveForMe: 'Approve for me (soon)',
+      fullControl: 'Full control',
+      custom: 'Custom',
+    },
     commandWebSearchDescription: 'Use the available web search tool',
     stopGeneratingResponse: 'Stop generating response',
     sendMessage: 'Send message',
