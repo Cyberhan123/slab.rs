@@ -334,8 +334,11 @@ mod tests {
         .await
         .expect("insert model");
 
+        // The `remove_models_provider` migration was folded into the initial
+        // schema by d84606f8; inline the statements so this regression guard no
+        // longer depends on the deleted migration file.
         for statement in
-            include_str!("../../../../migrations/20260530000000_remove_models_provider.sql")
+            "DROP INDEX IF EXISTS idx_models_provider;\n\nALTER TABLE models DROP COLUMN provider;\n"
                 .split(';')
                 .map(str::trim)
                 .filter(|statement| !statement.is_empty())

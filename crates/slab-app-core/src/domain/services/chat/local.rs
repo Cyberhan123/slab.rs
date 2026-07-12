@@ -9,12 +9,12 @@ use uuid::Uuid;
 use crate::context::ModelState;
 use crate::domain::models::{
     ChatReasoningEffort, ChatVerbosity, ConversationMessage as DomainConversationMessage,
-    StructuredOutput, TextGenerationChunk, TextGenerationResponse, TextGenerationUsage,
-    TextPromptTokensDetails,
+    StructuredOutput, TextGenerationResponse, TextGenerationUsage,
 };
-use crate::domain::ports::{
-    RuntimeTextGenerationChunk, RuntimeTextGenerationRequest, RuntimeTextGenerationResponse,
-    RuntimeTextGenerationUsage,
+use crate::domain::ports::RuntimeTextGenerationRequest;
+use crate::domain::services::llm::local::{
+    local_chat, local_chat_stream, runtime_chunk_payload, runtime_request_payload,
+    runtime_response_payload, text_chunk_from_runtime, text_response_from_runtime,
 };
 use crate::domain::services::model;
 use crate::error::AppCoreError;
@@ -182,15 +182,7 @@ pub(super) async fn create_chat_completion(
     }
 
     if config.stream {
-        let usage_guard =
-            state.auto_unload().acquire_for_inference(backend_id).await.map_err(|error| {
-                AppCoreError::BackendNotReady(format!(
-                    "{} backend not ready: {error}",
-                    backend_id.canonical_id()
-                ))
-            })?;
-
-        let backend_stream = state.runtime().chat_stream(request.clone()).await?;
+        let (backend_stream, usage_guard) = local_chat_stream(state, backend_id, request).await?;
 
         let completion_id = format!("chatcmpl-{}", Uuid::new_v4());
         let created_ts = Utc::now().timestamp();
@@ -471,15 +463,7 @@ pub(super) async fn create_chat_completion(
         return Ok(GeneratedChatOutput::Stream(Box::pin(sse_stream)));
     }
 
-    let _usage_guard =
-        state.auto_unload().acquire_for_inference(backend_id).await.map_err(|error| {
-            AppCoreError::BackendNotReady(format!(
-                "{} backend not ready: {error}",
-                backend_id.canonical_id()
-            ))
-        })?;
-
-    let runtime_response = state.runtime().chat(request).await?;
+    let runtime_response = local_chat(state, backend_id, request).await?;
     if let Some(trace_context) = config.agent_trace.as_ref() {
         record_json_from_context(
             trace_context,
@@ -563,15 +547,7 @@ pub(super) async fn create_text_completion(
         agent_trace: None,
     };
 
-    let _usage_guard =
-        state.auto_unload().acquire_for_inference(backend_id).await.map_err(|error| {
-            AppCoreError::BackendNotReady(format!(
-                "{} backend not ready: {error}",
-                backend_id.canonical_id()
-            ))
-        })?;
-
-    let mut response = text_response_from_runtime(state.runtime().chat(request).await?);
+    let mut response = text_response_from_runtime(local_chat(state, backend_id, request).await?);
 
     let usage = response.usage.clone().unwrap_or_else(|| {
         super::build_estimated_usage(&prompt, &response.text, response.tokens_used)
@@ -585,87 +561,6 @@ pub(super) async fn create_text_completion(
     Ok(response)
 }
 
-fn text_usage_from_runtime(usage: RuntimeTextGenerationUsage) -> TextGenerationUsage {
-    TextGenerationUsage {
-        prompt_tokens: usage.prompt_tokens,
-        completion_tokens: usage.completion_tokens,
-        total_tokens: usage.total_tokens,
-        prompt_tokens_details: TextPromptTokensDetails {
-            cached_tokens: usage.prompt_tokens_details.cached_tokens,
-        },
-        estimated: usage.estimated,
-    }
-}
-
-fn runtime_request_payload(request: &RuntimeTextGenerationRequest) -> serde_json::Value {
-    serde_json::json!({
-        "model": request.model,
-        "backend_id": request.backend_id.map(|backend| backend.canonical_id()),
-        "prompt": request.prompt,
-        "system_prompt": request.system_prompt,
-        "max_tokens": request.max_tokens,
-        "temperature": request.temperature,
-        "top_p": request.top_p,
-        "top_k": request.top_k,
-        "min_p": request.min_p,
-        "presence_penalty": request.presence_penalty,
-        "repetition_penalty": request.repetition_penalty,
-        "session_key": request.session_key,
-        "stream": request.stream,
-        "gbnf": request.gbnf,
-        "stop_sequences": request.stop_sequences,
-    })
-}
-
-fn runtime_response_payload(response: &RuntimeTextGenerationResponse) -> serde_json::Value {
-    serde_json::json!({
-        "text": response.text,
-        "finish_reason": response.finish_reason,
-        "tokens_used": response.tokens_used,
-        "usage": response.usage.as_ref().map(runtime_usage_payload),
-        "metadata": response.metadata,
-    })
-}
-
-fn runtime_chunk_payload(chunk: &RuntimeTextGenerationChunk) -> serde_json::Value {
-    serde_json::json!({
-        "delta": chunk.delta,
-        "done": chunk.done,
-        "finish_reason": chunk.finish_reason,
-        "usage": chunk.usage.as_ref().map(runtime_usage_payload),
-        "metadata": chunk.metadata,
-    })
-}
-
-fn runtime_usage_payload(usage: &RuntimeTextGenerationUsage) -> serde_json::Value {
-    serde_json::json!({
-        "prompt_tokens": usage.prompt_tokens,
-        "completion_tokens": usage.completion_tokens,
-        "total_tokens": usage.total_tokens,
-        "prompt_tokens_details": {
-            "cached_tokens": usage.prompt_tokens_details.cached_tokens,
-        },
-        "estimated": usage.estimated,
-    })
-}
-
-fn text_response_from_runtime(response: RuntimeTextGenerationResponse) -> TextGenerationResponse {
-    TextGenerationResponse {
-        text: response.text,
-        finish_reason: response.finish_reason,
-        tokens_used: response.tokens_used,
-        usage: response.usage.map(text_usage_from_runtime),
-        metadata: response.metadata,
-        tool_calls: Vec::new(),
-    }
-}
-
-fn text_chunk_from_runtime(chunk: RuntimeTextGenerationChunk) -> TextGenerationChunk {
-    TextGenerationChunk {
-        delta: chunk.delta,
-        done: chunk.done,
-        finish_reason: chunk.finish_reason,
-        usage: chunk.usage.map(text_usage_from_runtime),
-        metadata: chunk.metadata,
-    }
-}
+// runtime exec + RuntimeTextGeneration* -> TextGeneration* conversion + trace payloads
+// have been pushed down to `domain::services::llm::local`, shared by chat and the future
+// response service.

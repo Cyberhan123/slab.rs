@@ -8,44 +8,6 @@ use crate::error::{AppCoreError, AppCoreErrorData};
 
 const REASONING_CONTENT_METADATA_KEY: &str = "reasoning_content";
 
-fn estimate_token_count(text: &str) -> u32 {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return 0;
-    }
-
-    let bytes = trimmed.len() as u32;
-    let whitespace_groups = trimmed.split_whitespace().count() as u32;
-    let byte_estimate = bytes.div_ceil(4);
-    byte_estimate.max(whitespace_groups).max(1)
-}
-
-pub(super) fn finish_reason_from_token_budget(completion_tokens: u32, max_tokens: u32) -> String {
-    if completion_tokens >= max_tokens && max_tokens > 0 {
-        "length".to_owned()
-    } else {
-        "stop".to_owned()
-    }
-}
-
-pub(super) fn build_estimated_usage(
-    prompt_text: &str,
-    completion_text: &str,
-    completion_tokens: Option<u32>,
-) -> TextGenerationUsage {
-    let prompt_tokens = estimate_token_count(prompt_text);
-    let completion_tokens =
-        completion_tokens.unwrap_or_else(|| estimate_token_count(completion_text));
-
-    TextGenerationUsage {
-        prompt_tokens,
-        completion_tokens,
-        total_tokens: prompt_tokens.saturating_add(completion_tokens),
-        prompt_tokens_details: Default::default(),
-        estimated: true,
-    }
-}
-
 pub(super) fn text_response_has_visible_output(response: &TextGenerationResponse) -> bool {
     let has_content = !response.text.trim_end_matches('\0').trim().is_empty();
     let has_reasoning = response

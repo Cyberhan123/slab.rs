@@ -5,6 +5,7 @@ mod chat;
 mod cloud_activation;
 mod ffmpeg;
 mod image;
+pub(crate) mod llm;
 mod model;
 mod plugin;
 mod pmid;

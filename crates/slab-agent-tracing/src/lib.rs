@@ -161,10 +161,38 @@ impl FileAgentTraceSink {
         }
         value
     }
+
+    /// Append one trace record as a JSONL line to the per-session file under
+    /// `log_dir`. Creates the directory and file as needed. Errors are
+    /// diagnostic only — callers must not abort agent execution on failure.
+    fn append_to_session_file(
+        &self,
+        context: &AgentTraceContext,
+        payload: &Value,
+    ) -> std::io::Result<()> {
+        use std::io::Write;
+        let date = Utc::now().date_naive();
+        let path = session_log_path(&self.log_dir, &context.session_id, date);
+        std::fs::create_dir_all(&self.log_dir)?;
+        let file = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+        let mut writer = std::io::BufWriter::new(file);
+        serde_json::to_writer(&mut writer, payload)?;
+        writer.write_all(b"\n")?;
+        writer.flush()?;
+        Ok(())
+    }
 }
 
 impl AgentTraceSink for FileAgentTraceSink {
     fn record(&self, context: &AgentTraceContext, event: AgentTraceEvent) {
+        let payload = self.record_payload(context, &event);
+
+        // Persist the trace record to the per-session JSONL file. Write failures
+        // are diagnostic only — agent execution must continue (see trait docs).
+        if let Err(error) = self.append_to_session_file(context, &payload) {
+            tracing::warn!(error = %error, "agent trace file append failed");
+        }
+
         let mut telemetry = slab_otel::SessionTelemetry::new(context.session_id.clone());
         if let Some(thread_id) = context.thread_id.as_deref() {
             telemetry = telemetry.with_thread(thread_id);
@@ -172,7 +200,7 @@ impl AgentTraceSink for FileAgentTraceSink {
         if let Some(turn_index) = context.turn_index {
             telemetry = telemetry.with_turn(turn_index);
         }
-        telemetry.emit_event(&event.source, &event.event, self.record_payload(context, &event));
+        telemetry.emit_event(&event.source, &event.event, payload);
     }
 }
 
@@ -331,6 +359,46 @@ mod tests {
         });
 
         assert!(events.lock().expect("events").iter().any(|target| target == "slab_otel::session"));
+    }
+
+    #[test]
+    fn file_sink_writes_jsonl_to_session_file() {
+        let temp = tempfile::tempdir().expect("temp dir should be created");
+        let context = AgentTraceContext::new("session").with_trace_dir(temp.path());
+        let sink = FileAgentTraceSink::new(temp.path());
+
+        // Drive `record` under an enabled registry subscriber so the telemetry
+        // bridge evaluates its tracing callsites against a real dispatcher. This
+        // keeps cross-test callsite interest caching deterministic — otherwise a
+        // no-op dispatcher can cache "never" and starve later subscriber tests.
+        tracing::subscriber::with_default(tracing_subscriber::registry(), || {
+            sink.record(
+                &context,
+                AgentTraceEvent::new("test", "first", serde_json::json!({ "value": 1 })),
+            );
+            sink.record(
+                &context,
+                AgentTraceEvent::new("test", "second", serde_json::json!({ "value": 2 })),
+            );
+        });
+
+        let date = chrono::Utc::now().date_naive();
+        let path = session_log_path(temp.path(), "session", date);
+        let contents = std::fs::read_to_string(&path).expect("session log file should exist");
+        let lines: Vec<&str> = contents.trim().lines().collect();
+        assert_eq!(lines.len(), 2, "one JSONL line per record");
+
+        let first: serde_json::Value =
+            serde_json::from_str(lines[0]).expect("first line should be valid JSON");
+        assert_eq!(first["session_id"], "session");
+        assert_eq!(first["source"], "test");
+        assert_eq!(first["event"], "first");
+        assert_eq!(first["sequence"], 0);
+
+        let second: serde_json::Value =
+            serde_json::from_str(lines[1]).expect("second line should be valid JSON");
+        assert_eq!(second["event"], "second");
+        assert_eq!(second["sequence"], 1);
     }
 
     struct CaptureTargets(Arc<Mutex<Vec<String>>>);

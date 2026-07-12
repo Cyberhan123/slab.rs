@@ -22,12 +22,15 @@ use crate::domain::models::{
     TextCompletionCommand, TextCompletionOutput, TextCompletionResult, TextGenerationResponse,
     TextResultChoice, assistant_message_from_text_response,
 };
+use crate::domain::services::llm::{
+    build_estimated_usage, cloud::CloudChatRequestConfig, finish_reason_from_token_budget,
+};
 use crate::error::AppCoreError;
 #[cfg(test)]
 use params::validate_cloud_structured_output;
 use params::{
-    apply_stop_sequences, build_estimated_usage, finish_reason_from_token_budget, merge_usage,
-    text_response_has_visible_output, validate_chat_route_params, validate_text_route_params,
+    apply_stop_sequences, merge_usage, text_response_has_visible_output,
+    validate_chat_route_params, validate_text_route_params,
 };
 use session::{build_messages, persist_session_message};
 use streaming::{
@@ -35,7 +38,6 @@ use streaming::{
     build_usage_chunk, into_text_completion_stream, with_stream_session_persistence,
 };
 
-const CLOUD_MODEL_ID_PREFIX: &str = "cloud";
 const DEFAULT_COMPLETION_MAX_TOKENS: u32 = 512;
 const SYSTEM_FINGERPRINT: &str = "b-slab";
 
@@ -109,7 +111,8 @@ async fn create_chat_completion_with_state(
 
     let max_tokens = command.common.max_tokens.unwrap_or(DEFAULT_COMPLETION_MAX_TOKENS);
     let temperature = command.common.temperature.unwrap_or(0.7);
-    let route_to_cloud = cloud::should_route_to_cloud(&state, &resolved_model).await?;
+    let route_to_cloud =
+        crate::domain::services::llm::should_route_to_cloud(&state, &resolved_model).await?;
     let telemetry_config = state.pmid().config().telemetry;
     let capture_content = telemetry_config.capture_content;
     let gen_ai_provider = if route_to_cloud { "cloud" } else { "local" };
@@ -164,7 +167,7 @@ async fn create_chat_completion_with_state(
                 &state,
                 &resolved_model,
                 &resolved_messages,
-                cloud::CloudChatRequestConfig {
+                CloudChatRequestConfig {
                     max_tokens,
                     temperature,
                     top_p: command.common.top_p,
@@ -264,7 +267,7 @@ async fn create_chat_completion_with_state(
                 &state,
                 &resolved_model,
                 &resolved_messages,
-                cloud::CloudChatRequestConfig {
+                CloudChatRequestConfig {
                     max_tokens,
                     temperature,
                     top_p: command.common.top_p,
@@ -511,7 +514,8 @@ async fn create_text_completion_with_state(
     let resolved_model = resolve_requested_model(&state, &command.model).await?;
     let max_tokens = command.common.max_tokens.unwrap_or(DEFAULT_COMPLETION_MAX_TOKENS);
     let temperature = command.common.temperature.unwrap_or(0.7);
-    let route_to_cloud = cloud::should_route_to_cloud(&state, &resolved_model).await?;
+    let route_to_cloud =
+        crate::domain::services::llm::should_route_to_cloud(&state, &resolved_model).await?;
     validate_text_route_params(route_to_cloud, &command)?;
 
     debug!(
@@ -529,7 +533,7 @@ async fn create_text_completion_with_state(
                 &state,
                 &resolved_model,
                 &command.prompt,
-                cloud::CloudChatRequestConfig {
+                CloudChatRequestConfig {
                     max_tokens,
                     temperature,
                     top_p: command.common.top_p,
@@ -610,7 +614,7 @@ async fn generate_cloud_chat_text(
     state: &ModelState,
     model: &str,
     messages: &[DomainConversationMessage],
-    config: cloud::CloudChatRequestConfig,
+    config: CloudChatRequestConfig,
 ) -> Result<TextGenerationResponse, AppCoreError> {
     match cloud::create_chat_completion(state, model, messages, config).await? {
         GeneratedChatOutput::Text(text) => Ok(text),
