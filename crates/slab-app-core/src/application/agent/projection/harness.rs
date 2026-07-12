@@ -1,12 +1,13 @@
 //! Harness projection — pure conversion from slab-agent events to the
 //! harness wire protocol (`slab_proto::harness`).
 //!
-//! This mirrors [`super::openai_response`] in shape but emits the slab-owned
-//! thread/turn/item model instead of OpenAI Responses events. One inbound
-//! [`AgentEventEnvelope`] maps to zero or more [`EventMsg`]s; the server
-//! dispatcher lifts each into a JSON-RPC notification.
+//! This mirrors the OpenAI Responses projection (now in
+//! `crate::domain::services::agent::response::projection`) in shape but emits
+//! the slab-owned thread/turn/item model instead of OpenAI Responses events.
+//! One inbound [`AgentEventEnvelope`] maps to zero or more [`EventMsg`]s; the
+//! server dispatcher lifts each into a JSON-RPC notification.
 //!
-//! Boundary: pure conversion only. No `tokio`, `axum`, or `AgentService` calls.
+//! Boundary: pure conversion only. No `tokio`, `axum`, or agent-service calls.
 
 use std::collections::HashSet;
 
@@ -294,7 +295,7 @@ impl HarnessProjection {
                         command: command.clone(),
                         cwd: String::new(),
                         reason: None,
-                        category: Some(to_proto_category(*category)),
+                        category: Some(*category),
                         allowed_scopes: default_allowed_scopes(),
                     },
                 )]
@@ -343,28 +344,47 @@ impl HarnessProjection {
     }
 }
 
-/// Lifting helper: pull the harness notification method for an event, if any.
-/// `Error`, `Warning`, and `TurnAborted` return `None` (the dispatcher adapts).
-pub fn notification_for(msg: EventMsg) -> Option<ServerNotification> {
-    msg.into_notification()
-}
-
-/// Map the runtime `OperationCategory` (from `slab-exec-policy`) onto the
-/// mirrored wire type in `slab-proto`.
-fn to_proto_category(
-    category: slab_agent::OperationCategory,
-) -> slab_proto::harness::OperationCategory {
-    match category {
-        slab_agent::OperationCategory::Shell => slab_proto::harness::OperationCategory::Shell,
-        slab_agent::OperationCategory::FileEdit => slab_proto::harness::OperationCategory::FileEdit,
-        slab_agent::OperationCategory::Network => slab_proto::harness::OperationCategory::Network,
-        slab_agent::OperationCategory::ReadOnly => slab_proto::harness::OperationCategory::ReadOnly,
+/// Lifting helper: convert an [`EventMsg`] into its wire [`ServerNotification`],
+/// if any. `Error`, `Warning`, and `TurnAborted` return `None` — the dispatcher
+/// adapts them (error needs correlation ids; aborted maps to a `turn/completed`
+/// with interrupted status). This free function replaces the old
+/// `EventMsg::into_notification` method, which could not live on the slab-agent
+/// semantic type without dragging in the wire-envelope crate.
+pub fn event_msg_to_notification(msg: EventMsg) -> Option<ServerNotification> {
+    match msg {
+        EventMsg::ThreadStarted(p) => Some(ServerNotification::ThreadStarted(p)),
+        EventMsg::TurnStarted(p) => Some(ServerNotification::TurnStarted(p)),
+        EventMsg::TurnCompleted(p) => Some(ServerNotification::TurnCompleted(p)),
+        EventMsg::ItemStarted(p) => Some(ServerNotification::ItemStarted(p)),
+        EventMsg::ItemCompleted(p) => Some(ServerNotification::ItemCompleted(p)),
+        EventMsg::AgentMessageDelta(p) => Some(ServerNotification::AgentMessageDelta(p)),
+        EventMsg::ReasoningTextDelta(p) => Some(ServerNotification::ReasoningTextDelta(p)),
+        EventMsg::ReasoningSummaryTextDelta(p) => {
+            Some(ServerNotification::ReasoningSummaryTextDelta(p))
+        }
+        EventMsg::CommandExecutionOutputDelta(p) => {
+            Some(ServerNotification::CommandExecutionOutputDelta(p))
+        }
+        EventMsg::FileChangeOutputDelta(p) => Some(ServerNotification::FileChangeOutputDelta(p)),
+        EventMsg::CommandExecutionRequestApproval(p) => {
+            Some(ServerNotification::CommandExecutionRequestApproval(p))
+        }
+        EventMsg::FileChangeRequestApproval(p) => {
+            Some(ServerNotification::FileChangeRequestApproval(p))
+        }
+        EventMsg::Error(_) | EventMsg::Warning(_) | EventMsg::TurnAborted(_) => None,
+        // `EventMsg` is `#[non_exhaustive]`; future variants added in slab-agent
+        // have no wire-notification mapping yet — drop them rather than failing
+        // to compile the projection when slab-agent grows a new event.
+        _ => None,
     }
 }
 
-/// The full set of persistence scopes a client may offer when approving.
-fn default_allowed_scopes() -> Vec<slab_proto::harness::ApprovalScope> {
-    use slab_proto::harness::ApprovalScope;
+/// The full set of persistence scopes a client may offer when approving. Uses
+/// `slab_exec_policy::ApprovalScope` (re-exported by slab-agent) — the approval
+/// param field type, wire-byte-identical to the old `slab-proto` mirror.
+fn default_allowed_scopes() -> Vec<slab_agent::ApprovalScope> {
+    use slab_agent::ApprovalScope;
     vec![
         ApprovalScope::RunOnce,
         ApprovalScope::AlwaysInWorkspace,
@@ -602,5 +622,23 @@ mod tests {
             }
             other => panic!("unexpected item: {other:?}"),
         }
+    }
+
+    #[test]
+    fn delta_event_lifts_to_notification() {
+        let event = EventMsg::AgentMessageDelta(AgentMessageDeltaParams {
+            thread_id: "t".to_owned(),
+            turn_id: "tu".to_owned(),
+            item_id: "i".to_owned(),
+            delta: "x".to_owned(),
+        });
+        let n = event_msg_to_notification(event).unwrap();
+        assert_eq!(n.method(), "item/agentMessage/delta");
+    }
+
+    #[test]
+    fn error_event_does_not_lift_to_notification() {
+        let event = EventMsg::Error(ErrorEvent::new("boom"));
+        assert!(event_msg_to_notification(event).is_none());
     }
 }

@@ -18,7 +18,7 @@ use futures::{SinkExt, StreamExt};
 use serde_json::Value;
 use slab_agent::port::{ThreadMessageRecord, ThreadSnapshot, TurnItemRecord, TurnStateRecord};
 use slab_app_core::context::AppState;
-use slab_app_core::domain::services::AgentService;
+use slab_app_core::domain::services::HarnessService;
 use slab_cloud_provider::CloudModelSpec;
 use slab_jsonrpc::JSONRPCMessage;
 use slab_jsonrpc::host::{HostConfig, NotificationHandler};
@@ -57,7 +57,7 @@ pub async fn agent_harness(
         .token
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "assistant-default".to_owned());
-    let service = state.services.agent.clone();
+    let service = state.services.harness.clone();
     ws.on_upgrade(move |socket| run_harness_socket(socket, state, service, session_id))
 }
 
@@ -70,7 +70,7 @@ pub struct HarnessQuery {
 async fn run_harness_socket(
     socket: WebSocket,
     state: Arc<AppState>,
-    service: AgentService,
+    service: HarnessService,
     session_id: String,
 ) {
     let (sink, stream) = socket.split();

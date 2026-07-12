@@ -197,8 +197,11 @@ async fn open_workspace(
     let migrated = match state.workspace_root() {
         Some(old_root) if !same_workspace(&old_root, &new_root) => {
             let snapshot_dir = PathBuf::from(&state.context.config.session_state_dir);
-            let outcome =
-                state.services.agent.prepare_workspace_migration(&old_root, &snapshot_dir).await?;
+            let outcome = state
+                .services
+                .harness
+                .prepare_workspace_migration(&old_root, &snapshot_dir)
+                .await?;
             Some(WorkspaceMigrationSummary {
                 project_id: outcome.project_id,
                 suspended_count: outcome.suspended_count as u32,

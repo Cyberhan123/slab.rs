@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use slab_app_core::context::AppState;
-use slab_app_core::domain::services::AgentService;
+use slab_app_core::domain::services::HarnessService;
 use slab_jsonrpc::host::RequestHandler;
 use slab_jsonrpc::notifier::Notifier;
 use slab_jsonrpc::router::Router;
@@ -40,7 +40,7 @@ impl HarnessHost {
     pub(crate) fn new(
         session_id: String,
         state: Arc<AppState>,
-        service: AgentService,
+        service: HarnessService,
         notifier: Notifier,
     ) -> Self {
         let session = HarnessSession::new(session_id, state, service, notifier);

@@ -83,6 +83,7 @@ pub(crate) struct Established<R> {
 /// Adapter that runs an establish body, then binds + fans out centrally.
 pub(crate) struct EstablishAdapter<B, P, R, Fut> {
     body: B,
+    #[allow(clippy::type_complexity)]
     _phantom: PhantomData<fn(HarnessSession, P) -> (R, Fut)>,
 }
 

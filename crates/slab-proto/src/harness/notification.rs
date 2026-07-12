@@ -1,148 +1,22 @@
 //! Server → client notification param shapes and the `ServerNotification` union.
 //!
-//! These param structs are the authoritative payloads: they are serialized as
-//! the `params` field of a `JSONRPCNotification { method, params }`, and are
-//! also wrapped by [`crate::harness::EventMsg`] variants for in-process use.
+//! The notification param structs (the authoritative payloads, also wrapped by
+//! [`crate::harness::EventMsg`]) now live in `slab_agent::protocol::notification`;
+//! this module re-exports them and keeps the wire-envelope union
+//! [`ServerNotification`], which is transport-specific. On-the-wire bytes are
+//! unchanged.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::harness::item::TurnItem;
-use crate::harness::messages::Thread;
-
-// ---- lifecycle ----
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ThreadStartedParams {
-    pub thread: Thread,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct TurnStartedParams {
-    pub thread_id: String,
-    pub turn: crate::harness::messages::Turn,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct TurnCompletedParams {
-    pub thread_id: String,
-    pub turn: crate::harness::messages::Turn,
-}
-
-// ---- items ----
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ItemStartedParams {
-    pub item: TurnItem,
-    pub thread_id: String,
-    pub turn_id: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ItemCompletedParams {
-    pub item: TurnItem,
-    pub thread_id: String,
-    pub turn_id: String,
-}
-
-// ---- deltas ----
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentMessageDeltaParams {
-    pub thread_id: String,
-    pub turn_id: String,
-    pub item_id: String,
-    pub delta: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ReasoningTextDeltaParams {
-    pub thread_id: String,
-    pub turn_id: String,
-    pub item_id: String,
-    pub content_index: u32,
-    pub delta: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ReasoningSummaryTextDeltaParams {
-    pub thread_id: String,
-    pub turn_id: String,
-    pub item_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary_index: Option<u32>,
-    pub delta: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct CommandExecutionOutputDeltaParams {
-    pub thread_id: String,
-    pub turn_id: String,
-    pub item_id: String,
-    pub delta: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FileChangeOutputDeltaParams {
-    pub thread_id: String,
-    pub turn_id: String,
-    pub item_id: String,
-    pub delta: String,
-}
-
-// ---- approvals ----
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct CommandExecutionRequestApprovalParams {
-    pub thread_id: String,
-    pub turn_id: String,
-    pub item_id: String,
-    pub command: String,
-    pub cwd: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    /// Operation category so the UI can render category-appropriate choices.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub category: Option<crate::harness::messages::OperationCategory>,
-    /// Persistence scopes the client may offer (run-once / workspace / always
-    /// / deny). Empty for servers that only support approve/reject.
-    #[serde(default)]
-    pub allowed_scopes: Vec<crate::harness::messages::ApprovalScope>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FileChangeRequestApprovalParams {
-    pub thread_id: String,
-    pub turn_id: String,
-    pub item_id: String,
-    pub changes: Vec<FileChangeApprovalChange>,
-    #[serde(default)]
-    pub allowed_scopes: Vec<crate::harness::messages::ApprovalScope>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FileChangeApprovalChange {
-    pub path: String,
-    /// Change kind, e.g. `add` / `edit` / `delete`.
-    #[serde(rename = "type")]
-    pub change_type: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diff: Option<String>,
-}
+pub use slab_agent::protocol::{
+    AgentMessageDeltaParams, CommandExecutionOutputDeltaParams,
+    CommandExecutionRequestApprovalParams, FileChangeApprovalChange, FileChangeOutputDeltaParams,
+    FileChangeRequestApprovalParams, ItemCompletedParams, ItemStartedParams,
+    ReasoningSummaryTextDeltaParams, ReasoningTextDeltaParams, ThreadStartedParams,
+    TurnCompletedParams, TurnStartedParams,
+};
 
 // ---- error / account ----
 
@@ -188,7 +62,7 @@ pub struct Account {
 }
 
 /// Union of every server → client notification, discriminated by `method`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "method", content = "params")]
 pub enum ServerNotification {
     #[serde(rename = "thread/started")]

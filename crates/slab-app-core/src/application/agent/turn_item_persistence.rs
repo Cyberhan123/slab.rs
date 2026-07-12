@@ -1,7 +1,7 @@
 //! Persists finalized harness `TurnItem` snapshots by consuming the agent event
 //! stream.
 //!
-//! One observer task per thread (spawn-once — [`AgentService`][crate::domain] guards
+//! One observer task per thread (spawn-once — the agent `AgentCore` guards
 //! with a `DashSet`). It owns a private [`HarnessProjection`], subscribes to
 //! [`AgentEventHub`], and on each [`EventMsg::ItemCompleted`] writes the carried
 //! `TurnItem` via [`AgentStorePort::insert_turn_item`].

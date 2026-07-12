@@ -12,7 +12,7 @@ use crate::api::v1::session::schema::{
 use crate::api::validation::{ValidatedJson, validate};
 use crate::error::ServerError;
 use slab_app_core::context::AppState;
-use slab_app_core::domain::services::AgentService;
+use slab_app_core::domain::services::ResponseService;
 use slab_app_core::domain::services::SessionService;
 
 #[derive(OpenApi)]
@@ -154,7 +154,7 @@ async fn list_session_messages(
     )
 )]
 async fn get_session_agent_history(
-    State(service): State<AgentService>,
+    State(service): State<ResponseService>,
     Path(params): Path<SessionIdPath>,
 ) -> Result<Json<AgentHistoryResponse>, ServerError> {
     let params = validate(params)?;

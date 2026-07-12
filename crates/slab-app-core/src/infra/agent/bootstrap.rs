@@ -7,14 +7,18 @@ use slab_agent_tracing::{AgentTraceSink, FileAgentTraceSink, NoopAgentTraceSink}
 use slab_sandboxing::{SandboxEnvironment, SandboxPolicy, create_platform_driver};
 
 use crate::context::AppContext;
-use crate::domain::services::{AgentService, PluginService, WorkspaceLspService};
+use crate::domain::services::agent::AgentCore;
+use crate::domain::services::{
+    HarnessService, PluginService, ResponseService, WorkspaceLspService,
+};
 use crate::infra::db::AnyStore;
 
 use super::event_hub::AgentEventHub;
 use super::runtime::AgentRuntimeReloader;
 
 pub(crate) struct AgentBootstrap {
-    pub(crate) service: AgentService,
+    pub(crate) harness: HarnessService,
+    pub(crate) response: ResponseService,
     pub(crate) runtime: AgentRuntimeReloader,
 }
 
@@ -24,7 +28,7 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
     let event_hub = Arc::new(AgentEventHub::new());
     // Only the event hub is wired as a notify port now. response_json
     // persistence was removed — complete messages + turn state remain the store
-    // of record (see AgentService / AgentStorePort).
+    // of record (see AgentCore / AgentStorePort).
     let composite_notify: Arc<dyn slab_agent::AgentNotifyPort> =
         Arc::new(super::event_hub::CompositeNotifyPort::new(vec![
             Arc::clone(&event_hub) as Arc<dyn slab_agent::AgentNotifyPort>
@@ -32,11 +36,13 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
     let control =
         build_agent_control(ctx, Arc::clone(&store), Arc::clone(&event_hub), composite_notify);
     let agent_runtime = AgentRuntime::new(control);
-    let service = AgentService::new(agent_runtime.clone(), store_for_agent, Arc::clone(&event_hub));
-    let runtime = AgentRuntimeReloader::new((*ctx.model_state).clone(), service.runtime());
+    let core = AgentCore::new(agent_runtime.clone(), store_for_agent, Arc::clone(&event_hub));
+    let runtime = AgentRuntimeReloader::new((*ctx.model_state).clone(), core.runtime());
     schedule_agent_runtime_reload(runtime.clone());
+    let harness = HarnessService::new(core.clone());
+    let response = ResponseService::new(core);
 
-    AgentBootstrap { service, runtime }
+    AgentBootstrap { harness, response, runtime }
 }
 
 fn schedule_agent_runtime_reload(agent_runtime: AgentRuntimeReloader) {

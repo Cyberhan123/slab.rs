@@ -9,9 +9,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::harness::error::TurnError;
-use crate::harness::item::TurnItem;
 use crate::harness::user_input::UserInput;
+
+// `Thread` / `GitInfo` / `Turn` now live in `slab_agent::protocol`; re-export so
+// the staying request/response DTOs below (and the `slab_proto::harness::*`
+// paths) keep resolving. On-the-wire bytes are unchanged.
+pub use slab_agent::protocol::{GitInfo, Thread, Turn};
 
 // ============ Reasoning effort ============
 
@@ -167,49 +170,7 @@ pub struct ServerCapabilities {
 }
 
 // ============ Thread / Turn ============
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct Thread {
-    pub id: String,
-    pub preview: String,
-    pub model_provider: String,
-    /// Unix epoch milliseconds.
-    pub created_at: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cli_version: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub git_info: Option<GitInfo>,
-    #[serde(default)]
-    pub turns: Vec<Turn>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct GitInfo {
-    pub branch: String,
-    pub sha: String,
-    pub is_dirty: bool,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct Turn {
-    pub id: String,
-    #[serde(default)]
-    pub items: Vec<TurnItem>,
-    /// Open string set: `completed` / `interrupted` / `failed` / `inProgress`
-    /// (plus PascalCase aliases accepted on decode).
-    pub status: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<TurnError>,
-}
+// `Thread` / `GitInfo` / `Turn` are re-exported above from `slab_agent::protocol`.
 
 // ============ thread/start ============
 
@@ -240,7 +201,7 @@ pub struct ThreadStartParams {
     pub config: Option<Value>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadStartResult {
     pub thread: Thread,
@@ -264,7 +225,7 @@ pub struct ThreadResumeParams {
     pub path: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadResumeResult {
     pub thread: Thread,
@@ -282,7 +243,7 @@ pub struct ThreadForkParams {
     pub sandbox_override: Option<SandboxMode>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadForkResult {
     pub thread: Thread,
@@ -297,7 +258,7 @@ pub struct ThreadRollbackParams {
     pub to_turn_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadRollbackResult {
     pub thread: Thread,
@@ -311,7 +272,7 @@ pub struct ThreadArchiveParams {
     pub thread_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadArchiveResult {
     pub thread: Thread,
@@ -330,7 +291,7 @@ pub struct ThreadListParams {
     pub model_providers: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadListResult {
     pub data: Vec<Thread>,
@@ -362,7 +323,7 @@ pub struct TurnStartParams {
     pub output_schema: Option<Value>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnStartResult {
     pub turn: Turn,
@@ -476,21 +437,6 @@ mod tests {
         assert_eq!(json["type"], "workspaceWrite");
         assert_eq!(json["writableRoots"][0], "/a");
         assert_eq!(json["networkAccess"], true);
-    }
-
-    #[test]
-    fn thread_serializes_camel_case_fields() {
-        let thread = Thread {
-            id: "t1".to_owned(),
-            preview: "hi".to_owned(),
-            model_provider: "openai".to_owned(),
-            created_at: 1_700_000_000_000,
-            turns: vec![],
-            ..Default::default()
-        };
-        let json = serde_json::to_value(&thread).unwrap();
-        assert_eq!(json["modelProvider"], "openai");
-        assert_eq!(json["createdAt"], 1_700_000_000_000_i64);
     }
 
     #[test]

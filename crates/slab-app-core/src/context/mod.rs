@@ -94,7 +94,8 @@ impl AppState {
         let services = Arc::new(crate::domain::services::AppServices::new(
             (*context.model_state).clone(),
             (*context.worker_state).clone(),
-            agent.service,
+            agent.harness,
+            agent.response,
             agent.runtime,
             runtime_host,
         ));
@@ -124,10 +125,10 @@ impl AppState {
 mod axum_extractors {
     use crate::context::{AppState, ModelState, WorkerState};
     use crate::domain::services::{
-        AgentService, AudioService, BackendService, ChatService, FfmpegService, ImageService,
-        ModelService, PluginService, SessionService, SettingsService, SetupService,
-        SubtitleService, SystemService, TaskApplicationService, UiStateService, VideoService,
-        WorkspaceLspService,
+        AudioService, BackendService, ChatService, FfmpegService, HarnessService, ImageService,
+        ModelService, PluginService, ResponseService, SessionService, SettingsService,
+        SetupService, SubtitleService, SystemService, TaskApplicationService, UiStateService,
+        VideoService, WorkspaceLspService,
     };
     use axum::extract::FromRef;
     use std::sync::Arc;
@@ -234,9 +235,15 @@ mod axum_extractors {
         }
     }
 
-    impl FromRef<Arc<AppState>> for AgentService {
+    impl FromRef<Arc<AppState>> for HarnessService {
         fn from_ref(input: &Arc<AppState>) -> Self {
-            input.services.agent.clone()
+            input.services.harness.clone()
+        }
+    }
+
+    impl FromRef<Arc<AppState>> for ResponseService {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            input.services.response.clone()
         }
     }
 

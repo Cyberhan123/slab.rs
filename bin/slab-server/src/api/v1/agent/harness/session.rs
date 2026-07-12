@@ -1,7 +1,7 @@
 //! Per-connection harness session state.
 //!
 //! [`HarnessSession`] owns the connection-level transient state — the bound
-//! `session_id`, the [`AgentService`] handle, the outbound [`Notifier`], the
+//! `session_id`, the [`HarnessService`] handle, the outbound [`Notifier`], the
 //! harness-id ↔ real-id binding table, the `initialize` handshake flag, and the
 //! harness-thread-id mint. It is cheap to clone (an `Arc` inside) so it can be
 //! passed **by value** to typed handlers (see [`slab_jsonrpc::router`]: context
@@ -9,16 +9,18 @@
 //!
 //! State is connection-scoped: a reconnect gets a fresh session and rebuilds
 //! its transient state via `thread/resume` from the persistence layer. The
-//! `session_id` is only a namespace key for [`AgentService`], never an in-memory
+//! `session_id` is only a namespace key for [`HarnessService`], never an in-memory
 //! isolation boundary.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
-use slab_app_core::application::agent::projection::harness::HarnessProjection;
+use slab_app_core::application::agent::projection::harness::{
+    HarnessProjection, event_msg_to_notification,
+};
 use slab_app_core::context::AppState;
-use slab_app_core::domain::services::AgentService;
+use slab_app_core::domain::services::HarnessService;
 use slab_jsonrpc::notifier::Notifier;
 use slab_proto::harness::event::EventMsg;
 use slab_proto::harness::method;
@@ -41,7 +43,7 @@ pub(crate) struct HarnessSession {
 struct SessionInner {
     session_id: String,
     state: Arc<AppState>,
-    service: AgentService,
+    service: HarnessService,
     notifier: Notifier,
     bindings: StdMutex<HashMap<String, ThreadBinding>>,
     initialized: AtomicBool,
@@ -52,7 +54,7 @@ impl HarnessSession {
     pub(crate) fn new(
         session_id: String,
         state: Arc<AppState>,
-        service: AgentService,
+        service: HarnessService,
         notifier: Notifier,
     ) -> Self {
         Self {
@@ -76,7 +78,7 @@ impl HarnessSession {
         &self.inner.state
     }
 
-    pub(crate) fn service(&self) -> &AgentService {
+    pub(crate) fn service(&self) -> &HarnessService {
         &self.inner.service
     }
 
@@ -180,7 +182,7 @@ impl HarnessSession {
 
 /// Push one projected harness event onto the session's outbound stream as a
 /// JSON-RPC notification. `Error`/`TurnAborted` are adapted (they do not lift
-/// directly via [`EventMsg::into_notification`]); `Warning` is dropped.
+/// directly via `event_msg_to_notification`); `Warning` is dropped.
 fn push_event(notifier: &Notifier, thread_id: &str, msg: EventMsg) {
     match msg {
         EventMsg::Error(error) => notifier.notify(
@@ -198,9 +200,9 @@ fn push_event(notifier: &Notifier, thread_id: &str, msg: EventMsg) {
             method::TURN_COMPLETED,
             &TurnCompletedParams { thread_id: aborted.thread_id, turn: aborted.turn },
         ),
-        EventMsg::Warning(_) => return,
+        EventMsg::Warning(_) => {}
         other => {
-            if let Some(notification) = other.into_notification() {
+            if let Some(notification) = event_msg_to_notification(other) {
                 notifier.notify(notification.method(), &notification.payload());
             }
         }

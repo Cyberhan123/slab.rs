@@ -19,7 +19,7 @@ mod ui_state;
 mod video;
 mod workspace;
 
-pub use agent::AgentService;
+pub use agent::{HarnessService, ResponseService};
 pub use audio::AudioService;
 pub use backend::BackendService;
 pub use chat::ChatService;
@@ -62,7 +62,8 @@ pub struct AppServices {
     pub task_application: TaskApplicationService,
     pub ui_state: UiStateService,
     pub video: VideoService,
-    pub agent: AgentService,
+    pub harness: HarnessService,
+    pub response: ResponseService,
     pub workspace_lsp: WorkspaceLspService,
 }
 
@@ -70,7 +71,8 @@ impl AppServices {
     pub(crate) fn new(
         model_state: ModelState,
         worker_state: WorkerState,
-        agent: AgentService,
+        harness: HarnessService,
+        response: ResponseService,
         agent_runtime: AgentRuntimeReloader,
         runtime_host: Option<Arc<ManagedRuntimeHost>>,
     ) -> Self {
@@ -98,7 +100,8 @@ impl AppServices {
             task_application: TaskApplicationService::new(worker_state.clone(), model),
             ui_state: UiStateService::new(model_state.clone()),
             video: VideoService::new(worker_state),
-            agent,
+            harness,
+            response,
             workspace_lsp: WorkspaceLspService::new(
                 Arc::clone(model_state.config()),
                 PluginService::new(model_state),

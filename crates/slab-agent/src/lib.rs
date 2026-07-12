@@ -29,6 +29,7 @@ pub mod error;
 pub mod event;
 pub mod hook;
 pub mod port;
+pub mod protocol;
 pub mod risk;
 pub mod runtime;
 pub mod thread;

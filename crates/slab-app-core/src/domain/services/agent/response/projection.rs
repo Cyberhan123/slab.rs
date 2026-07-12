@@ -2,12 +2,12 @@
 //! slab-owned agent domain events into the canonical
 //! [`slab_proto::openai::Response`] wire/persistence type.
 //!
-//! Kept in app-core projection so both the HTTP handler (immediate
-//! non-streaming POST return) and the in-process
+//! Lives inside the [`ResponseService`](super::ResponseService) module (slice
+//! 1e) so the HTTP handler (immediate non-streaming POST return) and the
 //! response-persistence observer (run completion) share one assembler.
 //!
 //! Boundary rules (unchanged from the original adapter):
-//! - Pure conversion only: never calls `AgentService`, never touches
+//! - Pure conversion only: never calls the agent services, never touches
 //!   `tokio`/`axum`/sqlx.
 //! - HTTP / SSE / WebSocket framing stays in the server crate.
 
@@ -23,9 +23,9 @@ use crate::infra::agent::event_hub::AgentEventEnvelope;
 #[allow(unused_imports)]
 use slab_proto::openai::*;
 
-/// Input the converter needs from the caller. Decouples from `AgentService`
-/// (a concrete struct, not a trait) so unit tests can construct this directly
-/// without mocking the service.
+/// Input the converter needs from the caller. Decouples from the agent services
+/// (concrete structs, not traits) so unit tests can construct this directly
+/// without mocking a service.
 ///
 /// Every field beyond the core identifiers is an optional echoed request-config
 /// value: the caller fills in whichever fields the upstream request carried, and

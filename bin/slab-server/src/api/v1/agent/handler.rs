@@ -16,7 +16,7 @@ use futures::SinkExt;
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use slab_app_core::context::AppState;
-use slab_app_core::domain::services::AgentService;
+use slab_app_core::domain::services::ResponseService;
 use slab_app_core::error::AppCoreError;
 use slab_app_core::infra::agent::event_hub::AgentEventEnvelope;
 use slab_app_core::schemas::chat::{OpenAiError, OpenAiErrorResponse};
@@ -234,7 +234,7 @@ fn openai_error_type_for_code(code: &str) -> &'static str {
     )
 )]
 async fn agent_responses_get(
-    State(service): State<AgentService>,
+    State(service): State<ResponseService>,
     Query(query): Query<AgentResponsesQuery>,
     headers: HeaderMap,
     ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
@@ -288,7 +288,7 @@ async fn agent_responses_get(
     )
 )]
 async fn agent_responses_post(
-    State(service): State<AgentService>,
+    State(service): State<ResponseService>,
     headers: HeaderMap,
     Json(req): Json<OpenAICreateRequest>,
 ) -> Result<Response, AgentCompatError> {
@@ -338,7 +338,7 @@ fn bearer_session_id(headers: &HeaderMap) -> String {
 
 async fn agent_responses_socket(
     socket: WebSocket,
-    service: AgentService,
+    service: ResponseService,
     session_id: String,
     is_canonical: bool,
 ) {
@@ -350,7 +350,7 @@ async fn agent_responses_socket(
 
 async fn run_agent_responses_socket(
     socket: WebSocket,
-    service: AgentService,
+    service: ResponseService,
     session_id: String,
     is_canonical: bool,
 ) -> Result<(), String> {
@@ -488,7 +488,7 @@ fn is_canonical_ws_request(headers: &HeaderMap) -> bool {
 }
 
 async fn handle_agent_command(
-    service: &AgentService,
+    service: &ResponseService,
     command: InboundCommand,
     session_id: &str,
 ) -> Result<TransportCommandResult, ServerError> {
@@ -506,7 +506,7 @@ async fn handle_agent_command(
 // ---------------------------------------------------------------------------
 
 fn agent_events_sse(
-    service: AgentService,
+    service: ResponseService,
     thread_id: String,
     last_event_id: Option<u64>,
 ) -> Response {
