@@ -113,7 +113,7 @@
     "monaco-editor": "catalog:",
     "motion": "catalog:",
     "nanoid": "catalog:",
-    "openai": "^6.45.0",
+    "openai": "^6.46.0",
     "react": "catalog:",
     "react-arborist": "catalog:",
     "react-dom": "catalog:",
