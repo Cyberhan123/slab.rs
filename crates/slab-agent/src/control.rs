@@ -25,6 +25,7 @@ use crate::{
         AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, ThreadMessageRecord,
         ThreadSnapshot, ThreadStatus, TurnItemRecord, TurnStateRecord,
     },
+    protocol::{EventMsg, Turn, TurnAbortedParams},
     risk::{BasicToolRiskAnalyzer, ToolRiskAnalyzer},
     state::ThreadStateMachine,
     thread::{AgentThread, AgentThreadRuntime},
@@ -547,6 +548,21 @@ impl AgentControl {
                 },
             )
             .await;
+        // Mirror the interrupt on the harness protocol channel. `turn_index`
+        // is unknown here (no active turn context), so the turn id is the
+        // placeholder `"current"` — matching what the legacy projection derived
+        // from a `None` turn index. The authoritative `TurnAborted` is also
+        // emitted by the turn loop when it observes the cancellation.
+        let abort_msg = EventMsg::TurnAborted(TurnAbortedParams {
+            thread_id: thread_id.to_owned(),
+            turn: Turn {
+                id: "current".to_owned(),
+                items: Vec::new(),
+                status: "interrupted".to_owned(),
+                error: None,
+            },
+        });
+        self.notify.on_event_msg(thread_id, &abort_msg).await;
         self.store
             .update_thread_status(thread_id, ThreadStatus::Interrupting, Some("interrupting"))
             .await

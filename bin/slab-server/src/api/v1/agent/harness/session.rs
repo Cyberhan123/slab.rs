@@ -16,9 +16,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
-use slab_app_core::application::agent::projection::harness::{
-    HarnessProjection, event_msg_to_notification,
-};
+use slab_app_core::application::agent::projection::harness::event_msg_to_notification;
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::HarnessService;
 use slab_jsonrpc::notifier::Notifier;
@@ -131,9 +129,14 @@ impl HarnessSession {
         format!("hthread-{}", self.inner.next_thread_id.fetch_add(1, Ordering::Relaxed))
     }
 
-    /// Spawn a per-thread fan-out task: subscribe to the agent event stream,
-    /// project each envelope to harness events, and push them as JSON-RPC
-    /// notifications onto the session's outbound stream.
+    /// Spawn a per-thread fan-out task: subscribe to the harness-protocol
+    /// (`EventMsg`) stream, rewrite each event's real thread id to the
+    /// harness-visible id, and push them as JSON-RPC notifications onto the
+    /// session's outbound stream.
+    ///
+    /// slab-agent emits the harness protocol directly (`EventMsg`), so this
+    /// consumes `EventMsg` only — no projection layer. The legacy
+    /// `AgentEventKind` stream stays separate and feeds `/responses`.
     ///
     /// ⚠️ The caller must ensure at most one fan-out task per real thread id
     /// (a duplicate would double-deliver every event to the client).
@@ -141,22 +144,19 @@ impl HarnessSession {
         let service = self.inner.service.clone();
         let notifier = self.inner.notifier.clone();
         tokio::spawn(async move {
-            let subscription = service.subscribe_events(&real_thread_id);
-            let mut proj = HarnessProjection::new();
+            let subscription = service.subscribe_event_msgs(&real_thread_id);
 
             for envelope in &subscription.replay {
-                for msg in proj.project(&harness_thread_id, envelope) {
-                    push_event(&notifier, &harness_thread_id, msg);
-                }
+                let msg = rewrite_thread_id(envelope.msg.clone(), &harness_thread_id);
+                push_event(&notifier, &harness_thread_id, msg);
             }
 
             let mut receiver = subscription.receiver;
             loop {
                 match receiver.recv().await {
                     Ok(envelope) => {
-                        for msg in proj.project(&harness_thread_id, &envelope) {
-                            push_event(&notifier, &harness_thread_id, msg);
-                        }
+                        let msg = rewrite_thread_id(envelope.msg, &harness_thread_id);
+                        push_event(&notifier, &harness_thread_id, msg);
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => {
                         notifier.notify(
@@ -178,6 +178,33 @@ impl HarnessSession {
             }
         });
     }
+}
+
+/// Rewrite the top-level `thread_id` of an [`EventMsg`] from the real slab
+/// thread id to the harness-visible thread id. Nested `TurnItem`s carry no
+/// `thread_id`, so only the params' `thread_id` field is rewritten; `turn_id`
+/// and item ids are preserved.
+fn rewrite_thread_id(mut msg: EventMsg, harness_id: &str) -> EventMsg {
+    let tid = harness_id.to_owned();
+    match &mut msg {
+        EventMsg::TurnStarted(p) => p.thread_id = tid.clone(),
+        EventMsg::TurnCompleted(p) => p.thread_id = tid.clone(),
+        EventMsg::TurnAborted(p) => p.thread_id = tid.clone(),
+        EventMsg::ItemStarted(p) => p.thread_id = tid.clone(),
+        EventMsg::ItemCompleted(p) => p.thread_id = tid.clone(),
+        EventMsg::AgentMessageDelta(p) => p.thread_id = tid.clone(),
+        EventMsg::ReasoningTextDelta(p) => p.thread_id = tid.clone(),
+        EventMsg::ReasoningSummaryTextDelta(p) => p.thread_id = tid.clone(),
+        EventMsg::CommandExecutionOutputDelta(p) => p.thread_id = tid.clone(),
+        EventMsg::FileChangeOutputDelta(p) => p.thread_id = tid.clone(),
+        EventMsg::CommandExecutionRequestApproval(p) => p.thread_id = tid.clone(),
+        EventMsg::FileChangeRequestApproval(p) => p.thread_id = tid.clone(),
+        // Error / Warning / ThreadStarted carry no thread_id; leave unchanged.
+        // `EventMsg` is `#[non_exhaustive]`: future slab-agent variants with no
+        // known thread_id mapping pass through untouched.
+        _ => {}
+    }
+    msg
 }
 
 /// Push one projected harness event onto the session's outbound stream as a

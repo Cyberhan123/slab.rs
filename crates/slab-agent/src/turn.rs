@@ -20,11 +20,15 @@ use crate::{
         AgentNotifyPort, AgentStorePort, ApprovalPort, ExecPolicyPort, LlmPort, LlmStreamObserver,
         ParsedToolCall, ThreadMessageRecord, ToolSpec, TurnEvent, TurnStateRecord,
     },
+    protocol::{
+        AgentMessageDeltaParams, EventMsg, ItemCompletedParams, ItemStartedParams, ReasoningText,
+        ReasoningTextDeltaParams, TurnItem,
+    },
     repetition_guard::ToolCallSignature,
     risk::ToolRiskAnalyzer,
     tool::{AgentThreadContext, ToolRouter},
     tool_validation::{InvalidToolCall, validate_tool_calls},
-    turn_tool_call::handle_tool_calls,
+    turn_tool_call::{emit_tool_item_failed, handle_tool_calls},
     turn_tool_record::record_failed_tool_call,
 };
 
@@ -132,6 +136,7 @@ pub(crate) async fn execute_turn(
         thread_id: context.thread_id,
         turn_index: context.turn_index,
         notify: context.notify,
+        text_started: false,
     };
     let response_result = tokio::select! {
         response = context.llm.chat_completion_streaming(
@@ -456,11 +461,19 @@ async fn record_invalid_tool_calls(
                 },
             )
             .await;
+        let invalid_output = format!("invalid tool call: {}", invalid_call.reason);
+        emit_tool_item_failed(
+            context,
+            &invalid_call.tool_call,
+            &serde_json::Value::Null,
+            &invalid_output,
+        )
+        .await;
         record_failed_tool_call(
             context,
             &call_id,
             &invalid_call.tool_call,
-            format!("invalid tool call: {}", invalid_call.reason),
+            invalid_output,
             &created_at,
             messages,
         )
@@ -494,6 +507,14 @@ async fn persist_final_answer(
             },
         )
         .await;
+    emit_agent_message_completed(
+        context.notify,
+        context.thread_id,
+        context.turn_index,
+        &assistant_item_id(context.turn_index),
+        &content,
+    )
+    .await;
 
     let message = ConversationMessage {
         role: "assistant".to_owned(),
@@ -604,6 +625,14 @@ async fn emit_unstreamed_tool_text(
                 },
             },
         )
+        .await;
+    // This path only runs when the content was NOT streamed, so the streaming
+    // observer never announced the item — emit the harness ItemStarted here,
+    // then the delta (mirrors the projection's first-delta behavior).
+    let item_id = assistant_item_id(context.turn_index);
+    emit_agent_message_started(context.notify, context.thread_id, context.turn_index, &item_id)
+        .await;
+    emit_agent_message_delta(context.notify, context.thread_id, context.turn_index, &item_id, text)
         .await;
 }
 
@@ -785,10 +814,106 @@ fn parsed_tool_calls_trace_payload(tool_calls: &[ParsedToolCall]) -> serde_json:
     )
 }
 
+// ── Harness-protocol (EventMsg) text/reasoning emits ──────────────────────────
+//
+// Direct emits of the harness protocol alongside the legacy `AgentEventKind`
+// emits (which feed `/responses`). These mirror, byte-for-byte, what
+// `HarnessProjection` used to derive from `AgentEventKind`, so the wire is
+// unchanged; they exist so the harness can consume `EventMsg` directly.
+
+fn harness_turn_id(turn_index: u32) -> String {
+    turn_index.to_string()
+}
+
+async fn emit_agent_message_started(
+    notify: &dyn AgentNotifyPort,
+    thread_id: &str,
+    turn_index: u32,
+    item_id: &str,
+) {
+    let msg = EventMsg::ItemStarted(ItemStartedParams {
+        item: TurnItem::AgentMessage { id: item_id.to_owned(), text: String::new() },
+        thread_id: thread_id.to_owned(),
+        turn_id: harness_turn_id(turn_index),
+    });
+    notify.on_event_msg(thread_id, &msg).await;
+}
+
+async fn emit_agent_message_delta(
+    notify: &dyn AgentNotifyPort,
+    thread_id: &str,
+    turn_index: u32,
+    item_id: &str,
+    delta: &str,
+) {
+    let msg = EventMsg::AgentMessageDelta(AgentMessageDeltaParams {
+        thread_id: thread_id.to_owned(),
+        turn_id: harness_turn_id(turn_index),
+        item_id: item_id.to_owned(),
+        delta: delta.to_owned(),
+    });
+    notify.on_event_msg(thread_id, &msg).await;
+}
+
+async fn emit_agent_message_completed(
+    notify: &dyn AgentNotifyPort,
+    thread_id: &str,
+    turn_index: u32,
+    item_id: &str,
+    text: &str,
+) {
+    let msg = EventMsg::ItemCompleted(ItemCompletedParams {
+        item: TurnItem::AgentMessage { id: item_id.to_owned(), text: text.to_owned() },
+        thread_id: thread_id.to_owned(),
+        turn_id: harness_turn_id(turn_index),
+    });
+    notify.on_event_msg(thread_id, &msg).await;
+}
+
+async fn emit_reasoning_delta_msg(
+    notify: &dyn AgentNotifyPort,
+    thread_id: &str,
+    turn_index: u32,
+    item_id: &str,
+    delta: &str,
+) {
+    let msg = EventMsg::ReasoningTextDelta(ReasoningTextDeltaParams {
+        thread_id: thread_id.to_owned(),
+        turn_id: harness_turn_id(turn_index),
+        item_id: item_id.to_owned(),
+        content_index: 0,
+        delta: delta.to_owned(),
+    });
+    notify.on_event_msg(thread_id, &msg).await;
+}
+
+async fn emit_reasoning_completed(
+    notify: &dyn AgentNotifyPort,
+    thread_id: &str,
+    turn_index: u32,
+    item_id: &str,
+    text: &str,
+) {
+    let msg = EventMsg::ItemCompleted(ItemCompletedParams {
+        item: TurnItem::Reasoning {
+            id: item_id.to_owned(),
+            summary: ReasoningText::one(text),
+            content: ReasoningText::one(text),
+        },
+        thread_id: thread_id.to_owned(),
+        turn_id: harness_turn_id(turn_index),
+    });
+    notify.on_event_msg(thread_id, &msg).await;
+}
+
 struct TurnTextDeltaObserver<'a> {
     thread_id: &'a str,
     turn_index: u32,
     notify: &'a dyn AgentNotifyPort,
+    /// Whether the `ItemStarted(AgentMessage)` for this turn's assistant item
+    /// has been emitted. Mirrors the projection's `started_items` dedup: the
+    /// first text delta announces the item, later deltas only carry content.
+    text_started: bool,
 }
 
 #[async_trait]
@@ -812,6 +937,14 @@ impl LlmStreamObserver for TurnTextDeltaObserver<'_> {
                 },
             )
             .await;
+        let item_id = assistant_item_id(self.turn_index);
+        if !self.text_started {
+            self.text_started = true;
+            emit_agent_message_started(self.notify, self.thread_id, self.turn_index, &item_id)
+                .await;
+        }
+        emit_agent_message_delta(self.notify, self.thread_id, self.turn_index, &item_id, delta)
+            .await;
         Ok(())
     }
 
@@ -834,6 +967,14 @@ impl LlmStreamObserver for TurnTextDeltaObserver<'_> {
                 },
             )
             .await;
+        emit_reasoning_delta_msg(
+            self.notify,
+            self.thread_id,
+            self.turn_index,
+            &assistant_item_id(self.turn_index),
+            delta,
+        )
+        .await;
         Ok(())
     }
 
@@ -858,6 +999,14 @@ impl LlmStreamObserver for TurnTextDeltaObserver<'_> {
                 },
             )
             .await;
+        emit_reasoning_completed(
+            self.notify,
+            self.thread_id,
+            self.turn_index,
+            &assistant_item_id(self.turn_index),
+            text,
+        )
+        .await;
         Ok(())
     }
 }

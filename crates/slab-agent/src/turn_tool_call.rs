@@ -16,6 +16,10 @@ use crate::{
     event::{AgentArtifactKind, AgentArtifactRef, AgentEventKind, ToolRiskAssessment},
     hook::{HookEvent, HookToolAction, dispatch_registered_hooks},
     port::{ApprovalDecision, ParsedToolCall, TurnEvent},
+    protocol::{
+        CommandExecutionRequestApprovalParams, EventMsg, ItemCompletedParams, ItemStartedParams,
+        TurnItem,
+    },
     state::ToolCallStateMachine,
     tool::{PlanRef, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput},
     turn::TurnExecutionContext,
@@ -77,6 +81,209 @@ struct ToolCallRunResult {
     message: ConversationMessage,
     status: ToolCallStatus,
     task_completion: Option<TaskCompletion>,
+}
+
+// ── Harness-protocol (EventMsg) tool-item emits ───────────────────────────────
+//
+// slab-agent emits the harness protocol directly (the `EventMsg`/`TurnItem`
+// surface in `crate::protocol`) alongside the legacy `AgentEventKind` emits
+// (which feed `/responses`). This is what makes tool calls visible to the
+// harness WS fan-out and turn-item persistence (bug 1). The legacy emits stay
+// until `/responses` is decoupled from the turn loop (slice C2).
+
+/// Workspace root for `CommandExecution.cwd`, or `None` when no workspace is bound.
+fn workspace_root_of(context: &TurnExecutionContext<'_>) -> Option<String> {
+    context.thread_context.workspace.as_ref().map(|w| w.root.to_string_lossy().into_owned())
+}
+
+/// Split an `mcp__{server}__{tool}` proxy name into `(server, tool)`.
+///
+/// `proxy_tool_name` formats with exactly two `__` separators, so `splitn(3,
+/// "__")` is the reversible parse. Falls back to `("<unknown>", name)` when the
+/// name is malformed. Server/tool are display-only on the wire.
+fn parse_mcp_proxy_name(name: &str) -> (String, String) {
+    let mut parts = name.splitn(3, "__");
+    let _ = parts.next(); // leading "mcp"
+    match (parts.next(), parts.next()) {
+        (Some(server), Some(tool)) if !server.is_empty() => (server.to_owned(), tool.to_owned()),
+        _ => ("<unknown>".to_owned(), name.to_owned()),
+    }
+}
+
+/// Build the harness `TurnItem` for a tool call.
+///
+/// `status` is `"running"` for `ItemStarted`, `"completed"`/`"failed"` for
+/// `ItemCompleted`. `output` is the tool result text (filled only on
+/// completion). The item id is the provider-assigned `tool_call.id`. Unknown /
+/// read-only tools fall back to `CommandExecution` so every tool call is
+/// visible on the harness timeline (no new wire variant).
+fn tool_turn_item(
+    tool_call: &ParsedToolCall,
+    args: &serde_json::Value,
+    status: &str,
+    output: Option<&str>,
+    workspace_root: Option<&str>,
+) -> TurnItem {
+    let id = tool_call.id.clone();
+    let status = status.to_owned();
+    match tool_call.name.as_str() {
+        "shell" => TurnItem::CommandExecution {
+            id,
+            command: args
+                .get("command")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_owned(),
+            cwd: workspace_root.unwrap_or("").to_owned(),
+            process_id: None,
+            status,
+            aggregated_output: output.map(str::to_owned),
+            exit_code: None,
+            duration_ms: None,
+        },
+        "write_file" => TurnItem::FileChange {
+            id,
+            changes: vec![serde_json::json!({
+                "path": args.get("path").and_then(serde_json::Value::as_str).unwrap_or(""),
+                "type": "edit",
+            })],
+            status,
+        },
+        "apply_patch" => {
+            let patch = args.get("patch").and_then(serde_json::Value::as_str).unwrap_or("");
+            TurnItem::FileChange {
+                id,
+                changes: vec![serde_json::json!({
+                    "path": first_path_in_patch(patch),
+                    "type": "edit",
+                    "diff": patch,
+                })],
+                status,
+            }
+        }
+        "web_search" => TurnItem::WebSearch {
+            id,
+            query: args.get("query").and_then(serde_json::Value::as_str).unwrap_or("").to_owned(),
+        },
+        "mcp_call" => TurnItem::McpToolCall {
+            id,
+            server: args
+                .get("server")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("<unknown>")
+                .to_owned(),
+            tool: args
+                .get("tool")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("<unknown>")
+                .to_owned(),
+            arguments: args.get("arguments").cloned().unwrap_or_else(|| args.clone()),
+            status,
+            result: output.and_then(|o| serde_json::from_str(o).ok()),
+            error: None,
+            duration_ms: None,
+        },
+        name if name.starts_with("mcp__") => {
+            let (server, tool) = parse_mcp_proxy_name(name);
+            TurnItem::McpToolCall {
+                id,
+                server,
+                tool,
+                arguments: args.clone(),
+                status,
+                result: output.and_then(|o| serde_json::from_str(o).ok()),
+                error: None,
+                duration_ms: None,
+            }
+        }
+        // Fallback: every other tool (read_file/grep/plan/verify/task.complete/…)
+        // maps to CommandExecution so it is visible on the harness timeline.
+        _ => TurnItem::CommandExecution {
+            id,
+            command: tool_call.name.clone(),
+            cwd: String::new(),
+            process_id: None,
+            status,
+            aggregated_output: output.map(str::to_owned),
+            exit_code: None,
+            duration_ms: None,
+        },
+    }
+}
+
+/// Emit `EventMsg::ItemStarted` for `item` on the harness channel.
+async fn emit_item_started(context: &TurnExecutionContext<'_>, item: TurnItem) {
+    let msg = EventMsg::ItemStarted(ItemStartedParams {
+        item,
+        thread_id: context.thread_id.to_owned(),
+        turn_id: context.turn_index.to_string(),
+    });
+    context.notify.on_event_msg(context.thread_id, &msg).await;
+}
+
+/// Emit `EventMsg::ItemCompleted` for `item` on the harness channel.
+async fn emit_item_completed(context: &TurnExecutionContext<'_>, item: TurnItem) {
+    let msg = EventMsg::ItemCompleted(ItemCompletedParams {
+        item,
+        thread_id: context.thread_id.to_owned(),
+        turn_id: context.turn_index.to_string(),
+    });
+    context.notify.on_event_msg(context.thread_id, &msg).await;
+}
+
+/// Emit a well-formed `ItemStarted` + `ItemCompleted(failed)` pair for a tool
+/// call that never reaches the normal execution path (argument-parse failure,
+/// hook block, policy deny, invalid tool call).
+///
+/// Every `item_id` the client ever observes must have a start→complete
+/// lifecycle; callers that bail before the success-path `ItemStarted` use this
+/// so a lone `ItemCompleted` never appears for an unseen item.
+pub(crate) async fn emit_tool_item_failed(
+    context: &TurnExecutionContext<'_>,
+    tool_call: &ParsedToolCall,
+    args: &serde_json::Value,
+    output: &str,
+) {
+    let workspace_root = workspace_root_of(context);
+    let started = tool_turn_item(tool_call, args, "running", None, workspace_root.as_deref());
+    emit_item_started(context, started).await;
+    let completed =
+        tool_turn_item(tool_call, args, "failed", Some(output), workspace_root.as_deref());
+    emit_item_completed(context, completed).await;
+}
+
+/// The full set of persistence scopes a client may offer when approving.
+/// Mirrors the harness projection's `default_allowed_scopes` so the approval
+/// banner offers the same choices on the `EventMsg` path.
+fn default_allowed_scopes() -> Vec<slab_exec_policy::ApprovalScope> {
+    use slab_exec_policy::ApprovalScope;
+    vec![
+        ApprovalScope::RunOnce,
+        ApprovalScope::AlwaysInWorkspace,
+        ApprovalScope::Always,
+        ApprovalScope::Deny,
+    ]
+}
+
+/// Emit `EventMsg::CommandExecutionRequestApproval` for a tool that the
+/// exec-policy engine gated behind approval. `item_id` is the per-call UUID
+/// (`call_id`) — the same key the approval resolution flow correlates on, so
+/// the client can match the banner back to the pending decision.
+async fn emit_approval_request(run: &ToolRunContext<'_, '_>) {
+    let Some(request) = &run.approval_request else {
+        return;
+    };
+    let msg = EventMsg::CommandExecutionRequestApproval(CommandExecutionRequestApprovalParams {
+        thread_id: run.context.thread_id.to_owned(),
+        turn_id: run.context.turn_index.to_string(),
+        item_id: run.call_id.to_owned(),
+        command: request.display.clone(),
+        cwd: String::new(),
+        reason: None,
+        category: Some(request.descriptor.category),
+        allowed_scopes: default_allowed_scopes(),
+    });
+    run.context.notify.on_event_msg(run.context.thread_id, &msg).await;
 }
 
 /// Execute the given tool calls and persist their results.
@@ -293,6 +500,7 @@ async fn handle_tool_call(
                 "failed to parse tool call arguments as JSON"
             );
             let output = format!("invalid tool call arguments: {error}");
+            emit_tool_item_failed(context, tool_call, &serde_json::Value::Null, &output).await;
             let message = record_failed_tool_call_without_persisting_message(
                 context, &call_id, tool_call, output, created_at,
             )
@@ -350,6 +558,7 @@ async fn handle_tool_call(
                 reason = %output,
                 "tool call blocked by hook"
             );
+            emit_tool_item_failed(context, tool_call, &parsed_args, &output).await;
             let message = record_failed_tool_call_without_persisting_message(
                 context, &call_id, tool_call, output, created_at,
             )
@@ -428,6 +637,7 @@ async fn handle_tool_call(
                 }),
             );
             let output = "tool call blocked by permission policy".to_string();
+            emit_tool_item_failed(context, tool_call, &effective_args, &output).await;
             let message = record_failed_tool_call_without_persisting_message(
                 context, &call_id, tool_call, output, created_at,
             )
@@ -447,6 +657,12 @@ async fn handle_tool_call(
         if approval_request.is_some() { ToolCallStatus::Pending } else { ToolCallStatus::Running };
     let mut tool_state = ToolCallStateMachine::new(initial_status);
     insert_tool_call_record(context, &call_id, tool_call, tool_state.status(), created_at).await;
+    let workspace_root = workspace_root_of(context);
+    emit_item_started(
+        context,
+        tool_turn_item(tool_call, &effective_args, "running", None, workspace_root.as_deref()),
+    )
+    .await;
 
     let (tool_output, call_status) = run_tool_with_optional_approval(ToolRunContext {
         context,
@@ -508,7 +724,7 @@ async fn handle_tool_call(
         messages: messages.to_vec(),
         call_id: call_id.clone(),
         tool_name: tool_call.name.clone(),
-        arguments: effective_args,
+        arguments: effective_args.clone(),
         output: content.clone(),
         status: call_status,
     };
@@ -530,6 +746,19 @@ async fn handle_tool_call(
             },
         )
         .await;
+    let item_status =
+        if matches!(call_status, ToolCallStatus::Completed) { "completed" } else { "failed" };
+    emit_item_completed(
+        context,
+        tool_turn_item(
+            tool_call,
+            &effective_args,
+            item_status,
+            Some(&content),
+            workspace_root.as_deref(),
+        ),
+    )
+    .await;
 
     update_tool_call_record(context, &call_id, Some(&content), call_status).await;
     let message = crate::turn_tool_record::tool_message(tool_call, content);
@@ -556,6 +785,7 @@ async fn run_tool_with_optional_approval(
     let Some(ref request) = run.approval_request else {
         return run_tool_without_approval(&run).await;
     };
+    emit_approval_request(&run).await;
 
     record_json(
         run.context.trace,
@@ -826,5 +1056,119 @@ fn append_hook_observations(output: &mut String, observations: Vec<String>) {
         output.push_str("- ");
         output.push_str(observation.trim());
         output.push('\n');
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::port::ParsedToolCall;
+
+    fn call(name: &str) -> ParsedToolCall {
+        ParsedToolCall {
+            id: "call-1".to_owned(),
+            name: name.to_owned(),
+            arguments: "{}".to_owned(),
+        }
+    }
+
+    #[test]
+    fn shell_maps_to_command_execution_with_workspace_cwd() {
+        let item = tool_turn_item(
+            &call("shell"),
+            &serde_json::json!({"command": "ls -la"}),
+            "running",
+            None,
+            Some("/ws"),
+        );
+        match item {
+            TurnItem::CommandExecution { command, cwd, status, aggregated_output, .. } => {
+                assert_eq!(command, "ls -la");
+                assert_eq!(cwd, "/ws");
+                assert_eq!(status, "running");
+                assert!(aggregated_output.is_none());
+            }
+            other => panic!("unexpected item: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fallback_tool_maps_to_command_execution_catch_all() {
+        // Unknown / read-only tools fall back to CommandExecution so every tool
+        // call is visible on the harness timeline (bug 1: nothing was emitted).
+        let item = tool_turn_item(
+            &call("read_file"),
+            &serde_json::json!({}),
+            "completed",
+            Some("file contents"),
+            None,
+        );
+        match item {
+            TurnItem::CommandExecution { command, aggregated_output, status, .. } => {
+                assert_eq!(command, "read_file");
+                assert_eq!(status, "completed");
+                assert_eq!(aggregated_output.as_deref(), Some("file contents"));
+            }
+            other => panic!("unexpected item: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mcp_proxy_name_maps_to_mcp_tool_call() {
+        let item = tool_turn_item(
+            &call("mcp__server_label__search"),
+            &serde_json::json!({"q": "x"}),
+            "running",
+            None,
+            None,
+        );
+        match item {
+            TurnItem::McpToolCall { server, tool, arguments, .. } => {
+                assert_eq!(server, "server_label");
+                assert_eq!(tool, "search");
+                assert_eq!(arguments["q"], "x");
+            }
+            other => panic!("unexpected item: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn web_search_maps_query() {
+        let item = tool_turn_item(
+            &call("web_search"),
+            &serde_json::json!({"query": "rust async"}),
+            "running",
+            None,
+            None,
+        );
+        match item {
+            TurnItem::WebSearch { query, .. } => assert_eq!(query, "rust async"),
+            other => panic!("unexpected item: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn apply_patch_maps_first_path_into_file_change() {
+        let args = serde_json::json!({
+            "patch": "--- a/x.rs\n+++ b/x.rs\n@@ -1 +1 @@\n-a\n+b\n"
+        });
+        let item = tool_turn_item(&call("apply_patch"), &args, "completed", None, None);
+        match item {
+            TurnItem::FileChange { changes, status, .. } => {
+                assert_eq!(status, "completed");
+                assert_eq!(changes[0]["path"].as_str(), Some("x.rs"));
+            }
+            other => panic!("unexpected item: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_mcp_proxy_name_handles_namespaced_and_malformed() {
+        assert_eq!(parse_mcp_proxy_name("mcp__srv__tool"), ("srv".to_owned(), "tool".to_owned()));
+        // Fewer than two separators: cannot recover server/tool → placeholder.
+        assert_eq!(
+            parse_mcp_proxy_name("mcp__only"),
+            ("<unknown>".to_owned(), "mcp__only".to_owned())
+        );
     }
 }

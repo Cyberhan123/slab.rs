@@ -26,7 +26,9 @@ use slab_types::ConversationMessage;
 
 use crate::application::agent::turn_item_persistence;
 use crate::error::AppCoreError;
-use crate::infra::agent::event_hub::{AgentEventHub, AgentEventSubscription};
+use crate::infra::agent::event_hub::{
+    AgentEventHub, AgentEventMsgSubscription, AgentEventSubscription,
+};
 
 /// Shared core held by both the harness and response services.
 ///
@@ -214,5 +216,14 @@ impl AgentCore {
     /// Returns a broadcast receiver that replays events emitted after the call.
     pub(crate) fn subscribe_events(&self, thread_id: &str) -> AgentEventSubscription {
         self.events.subscribe_events(thread_id)
+    }
+
+    /// Subscribe to the harness-protocol (`EventMsg`) stream for a thread.
+    ///
+    /// Sibling of [`Self::subscribe_events`]: independent replay+live channel
+    /// carrying slab-agent's harness protocol. Consumed by the harness WS
+    /// fan-out and turn-item persistence.
+    pub(crate) fn subscribe_event_msgs(&self, thread_id: &str) -> AgentEventMsgSubscription {
+        self.events.subscribe_event_msgs(thread_id)
     }
 }

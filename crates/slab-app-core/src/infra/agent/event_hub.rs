@@ -20,6 +20,7 @@ use dashmap::DashMap;
 use slab_agent::{
     AgentEventKind, ToolRiskAssessment,
     port::{AgentNotifyPort, ApprovalDecision, ApprovalPort, ThreadStatus, TurnEvent},
+    protocol::EventMsg,
 };
 use tokio::sync::{broadcast, oneshot};
 use tracing::{debug, warn};
@@ -44,15 +45,35 @@ pub struct AgentEventSubscription {
     pub receiver: broadcast::Receiver<AgentEventEnvelope>,
 }
 
+/// Replay plus live receiver for the harness-protocol event stream.
+///
+/// Distinct from [`AgentEventSubscription`]: that carries `AgentEventKind`
+/// (the OpenAI `/responses` surface); this carries the slab-agent harness
+/// protocol [`EventMsg`] (turn lifecycle / text / reasoning / tool items).
+pub struct AgentEventMsgSubscription {
+    pub replay: Vec<AgentEventMsgEnvelope>,
+    pub receiver: broadcast::Receiver<AgentEventMsgEnvelope>,
+}
+
 #[derive(Clone)]
 pub struct AgentEventEnvelope {
     pub id: u64,
     pub event: TurnEvent,
 }
 
+/// Envelope for a harness-protocol [`EventMsg`]. `id` shares the same per-thread
+/// monotonic counter as [`AgentEventEnvelope::id`], so the two streams can be
+/// merged deterministically by `id` if a future consumer needs total order.
+#[derive(Clone)]
+pub struct AgentEventMsgEnvelope {
+    pub id: u64,
+    pub msg: EventMsg,
+}
+
 #[derive(Clone)]
 struct EventChannel {
     sender: broadcast::Sender<AgentEventEnvelope>,
+    msg_sender: broadcast::Sender<AgentEventMsgEnvelope>,
     state: Arc<Mutex<EventChannelState>>,
 }
 
@@ -60,18 +81,26 @@ struct EventChannel {
 struct EventChannelState {
     next_id: u64,
     history: Vec<AgentEventEnvelope>,
+    msg_history: Vec<AgentEventMsgEnvelope>,
 }
 
 impl EventChannel {
     fn new() -> Self {
         let (sender, _) = broadcast::channel(CHANNEL_CAPACITY);
-        Self { sender, state: Arc::new(Mutex::new(EventChannelState::default())) }
+        let (msg_sender, _) = broadcast::channel(CHANNEL_CAPACITY);
+        Self { sender, msg_sender, state: Arc::new(Mutex::new(EventChannelState::default())) }
     }
 
     fn subscribe(&self) -> AgentEventSubscription {
         let state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let receiver = self.sender.subscribe();
         AgentEventSubscription { replay: state.history.clone(), receiver }
+    }
+
+    fn subscribe_msgs(&self) -> AgentEventMsgSubscription {
+        let state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let receiver = self.msg_sender.subscribe();
+        AgentEventMsgSubscription { replay: state.msg_history.clone(), receiver }
     }
 
     fn send(&self, event: TurnEvent) {
@@ -83,6 +112,17 @@ impl EventChannel {
         }
         state.history.push(envelope.clone());
         let _ = self.sender.send(envelope);
+    }
+
+    fn send_msg(&self, msg: EventMsg) {
+        let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let envelope = AgentEventMsgEnvelope { id: state.next_id, msg };
+        state.next_id += 1;
+        if state.msg_history.len() >= CHANNEL_CAPACITY {
+            state.msg_history.remove(0);
+        }
+        state.msg_history.push(envelope.clone());
+        let _ = self.msg_sender.send(envelope);
     }
 }
 
@@ -97,6 +137,15 @@ impl AgentEventHub {
     /// recent events emitted before the subscription and all later live events.
     pub fn subscribe_events(&self, thread_id: &str) -> AgentEventSubscription {
         self.channel(thread_id).subscribe()
+    }
+
+    /// Subscribe to the harness-protocol (`EventMsg`) stream for `thread_id`.
+    ///
+    /// Sibling of [`Self::subscribe_events`]: same replay+live semantics, but
+    /// for the slab-agent harness protocol surface consumed by the harness WS
+    /// fan-out and turn-item persistence. Independent channel + history.
+    pub fn subscribe_event_msgs(&self, thread_id: &str) -> AgentEventMsgSubscription {
+        self.channel(thread_id).subscribe_msgs()
     }
 
     /// Send an approval decision for a pending tool call.
@@ -137,6 +186,10 @@ impl AgentEventHub {
         self.channel(thread_id).send(event);
     }
 
+    fn broadcast_msg(&self, thread_id: &str, msg: EventMsg) {
+        self.channel(thread_id).send_msg(msg);
+    }
+
     fn channel(&self, thread_id: &str) -> EventChannel {
         self.channels.entry(thread_id.to_owned()).or_insert_with(EventChannel::new).clone()
     }
@@ -158,6 +211,10 @@ impl AgentNotifyPort for AgentEventHub {
 
     async fn on_turn_event(&self, thread_id: &str, event: &TurnEvent) {
         self.broadcast(thread_id, event.clone());
+    }
+
+    async fn on_event_msg(&self, thread_id: &str, msg: &EventMsg) {
+        self.broadcast_msg(thread_id, msg.clone());
     }
 }
 
@@ -186,6 +243,12 @@ impl AgentNotifyPort for CompositeNotifyPort {
     async fn on_turn_event(&self, thread_id: &str, event: &TurnEvent) {
         for port in &self.inner {
             port.on_turn_event(thread_id, event).await;
+        }
+    }
+
+    async fn on_event_msg(&self, thread_id: &str, msg: &EventMsg) {
+        for port in &self.inner {
+            port.on_event_msg(thread_id, msg).await;
         }
     }
 }

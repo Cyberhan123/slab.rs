@@ -13,6 +13,7 @@ use slab_types::agent::ToolCallStatus;
 use crate::config::AgentConfig;
 use crate::error::AgentError;
 use crate::event::{AgentEventKind, ToolRiskAssessment};
+use crate::protocol::EventMsg;
 
 /// Thread lifecycle status, re-exported from `slab_types` for convenience.
 pub type ThreadStatus = slab_types::agent::AgentThreadStatus;
@@ -472,4 +473,14 @@ pub trait AgentNotifyPort: Send + Sync {
     /// The default implementation is a no-op so existing adapters that only
     /// care about status changes do not need to be updated.
     async fn on_turn_event(&self, _thread_id: &str, _event: &TurnEvent) {}
+
+    /// Called for each harness-protocol [`EventMsg`] the agent emits directly.
+    ///
+    /// This is the harness surface (`slab-agent::protocol`): turn lifecycle,
+    /// assistant text/reasoning, and tool items. It is distinct from
+    /// [`Self::on_turn_event`] (which carries `AgentEventKind` and feeds the
+    /// OpenAI `/responses` projection). Adapters that fan harness events out to
+    /// a client override this; the default is a no-op so adapters only serving
+    /// `/responses` are unaffected.
+    async fn on_event_msg(&self, _thread_id: &str, _msg: &EventMsg) {}
 }

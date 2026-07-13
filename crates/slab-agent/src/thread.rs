@@ -22,12 +22,54 @@ use crate::{
         AgentNotifyPort, AgentStorePort, ApprovalPort, ExecPolicyPort, LlmPort, ThreadSnapshot,
         ThreadStatus, TurnEvent,
     },
+    protocol::{
+        ErrorEvent, EventMsg, Turn, TurnAbortedParams, TurnCompletedParams, TurnStartedParams,
+    },
     repetition_guard::{RepetitionDetected, RepetitionGuard},
     risk::ToolRiskAnalyzer,
     state::ThreadStateMachine,
     tool::{AgentThreadContext, ToolRouter},
     turn::{TurnExecutionContext, TurnOutcome, execute_turn, persist_thread_message},
 };
+
+// ── Harness-protocol (EventMsg) lifecycle emits ───────────────────────────────
+//
+// Direct emits of the harness turn lifecycle alongside the legacy
+// `AgentEventKind` emits (which feed `/responses`). These mirror what
+// `HarnessProjection` used to derive so the harness consumes `EventMsg` only.
+
+fn harness_turn(id: String, status: &str) -> Turn {
+    Turn { id, items: Vec::new(), status: status.to_owned(), error: None }
+}
+
+async fn emit_turn_started(notify: &Arc<dyn AgentNotifyPort>, thread_id: &str, turn_index: u32) {
+    let msg = EventMsg::TurnStarted(TurnStartedParams {
+        thread_id: thread_id.to_owned(),
+        turn: harness_turn(turn_index.to_string(), "inProgress"),
+    });
+    notify.on_event_msg(thread_id, &msg).await;
+}
+
+async fn emit_turn_completed(notify: &Arc<dyn AgentNotifyPort>, thread_id: &str, turn_index: u32) {
+    let msg = EventMsg::TurnCompleted(TurnCompletedParams {
+        thread_id: thread_id.to_owned(),
+        turn: harness_turn(turn_index.to_string(), "completed"),
+    });
+    notify.on_event_msg(thread_id, &msg).await;
+}
+
+async fn emit_turn_aborted(notify: &Arc<dyn AgentNotifyPort>, thread_id: &str, turn_index: u32) {
+    let msg = EventMsg::TurnAborted(TurnAbortedParams {
+        thread_id: thread_id.to_owned(),
+        turn: harness_turn(turn_index.to_string(), "interrupted"),
+    });
+    notify.on_event_msg(thread_id, &msg).await;
+}
+
+async fn emit_turn_error(notify: &Arc<dyn AgentNotifyPort>, thread_id: &str, message: &str) {
+    let msg = EventMsg::Error(ErrorEvent::new(message.to_owned()));
+    notify.on_event_msg(thread_id, &msg).await;
+}
 
 #[derive(Debug, Clone, Copy)]
 enum TerminationReason {
@@ -295,6 +337,7 @@ impl AgentThread {
                 },
             )
             .await;
+            emit_turn_started(&notify, &thread_id, turn_index).await;
             let turn_trace_context = trace_context.clone().with_turn(turn_index);
             self.maybe_compact(
                 &notify,
@@ -447,6 +490,7 @@ impl AgentThread {
                     },
                 )
                 .await;
+            emit_turn_error(&notify, &thread_id, &err.to_string()).await;
             self.emit_metrics(&notify, started_at, false).await;
             self.set_status(ThreadStatus::Errored, &notify).await?;
             record_json(
@@ -491,6 +535,7 @@ impl AgentThread {
                 },
             )
             .await;
+            emit_turn_aborted(&notify, &thread_id, starting_turn_index).await;
             self.emit_metrics(&notify, started_at, false).await;
             self.set_status(ThreadStatus::Interrupted, &notify).await?;
             record_json(
@@ -535,6 +580,7 @@ impl AgentThread {
             },
         )
         .await;
+        emit_turn_completed(&notify, &thread_id, starting_turn_index).await;
         self.emit_metrics(&notify, started_at, true).await;
         self.set_status(ThreadStatus::Completed, &notify).await?;
         record_json(
