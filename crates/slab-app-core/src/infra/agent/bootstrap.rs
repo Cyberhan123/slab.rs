@@ -40,7 +40,7 @@ pub(crate) fn build_agent_bootstrap(ctx: &AppContext, store: Arc<AnyStore>) -> A
     let runtime = AgentRuntimeReloader::new((*ctx.model_state).clone(), core.runtime());
     schedule_agent_runtime_reload(runtime.clone());
     let harness = HarnessService::new(core.clone());
-    let response = ResponseService::new(core);
+    let response = ResponseService::new(core, (*ctx.model_state).clone());
 
     AgentBootstrap { harness, response, runtime }
 }

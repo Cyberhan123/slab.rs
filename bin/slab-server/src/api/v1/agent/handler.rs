@@ -18,14 +18,12 @@ use serde::{Deserialize, Serialize};
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::ResponseService;
 use slab_app_core::error::AppCoreError;
-use slab_app_core::infra::agent::event_hub::AgentEventEnvelope;
 use slab_app_core::schemas::chat::{OpenAiError, OpenAiErrorResponse};
-use tokio::sync::broadcast;
-use tokio_stream::wrappers::BroadcastStream;
+use slab_proto::openai::{ResponseCompletedEvent, ResponseCompletedType, ResponsesServerEvent};
 use utoipa::OpenApi;
 
 use crate::api::v1::agent::openai_compat::{
-    AdapterInput, StreamCtx, build_response, envelope_to_events,
+    StreamCtx, StreamFrame, build_terminal_event, envelope_to_events,
 };
 use crate::api::v1::agent::schema::{
     AgentConfigInput, MessageInput, OpenAICreateRequest, OpenAIReasoningInput, OpenAITextInput,
@@ -87,10 +85,6 @@ struct OpenAIResponseCreateEvent {
     kind: String,
     #[serde(flatten)]
     body: OpenAICreateRequest,
-}
-
-struct TransportCommandResult {
-    subscribe_thread_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -268,8 +262,10 @@ async fn agent_responses_get(
             "thread_id is required for SSE fallback".into(),
         )));
     };
-    let last_event_id = parse_last_event_id(&headers);
-    Ok(agent_events_sse(service, thread_id, last_event_id))
+    // Slice C2: `/responses` is single-shot per request — there is no in-flight
+    // hub stream to resume. GET SSE reconstructs the finalized response from
+    // the thread store and replays it as a terminal `response.completed`.
+    Ok(agent_events_sse_resume(service, thread_id).await)
 }
 
 #[utoipa::path(
@@ -293,23 +289,12 @@ async fn agent_responses_post(
     Json(req): Json<OpenAICreateRequest>,
 ) -> Result<Response, AgentCompatError> {
     let session_id = bearer_session_id(&headers);
-    let model = req.model.clone().unwrap_or_default();
-    let thread_id = service.handle_command(req.to_agent_command(session_id)).await?;
-
     if req.stream.unwrap_or(false) {
-        // Canonical SSE stream of ResponseStreamEvent (reuses the GET resume
-        // path's assembler).
-        Ok(agent_events_sse(service, thread_id, None))
+        let model = req.model.clone().unwrap_or_default();
+        let (response_id, frames) = service.stream_response(req, session_id).await?;
+        Ok(agent_events_sse_from_frames(response_id, model, frames))
     } else {
-        let subscription = service.subscribe_events(&thread_id);
-        let response = build_response(AdapterInput {
-            response_id: &thread_id,
-            model: &model,
-            created_at_unix: Utc::now().timestamp() as f64,
-            service_tier: None,
-            envelopes: &subscription.replay,
-            ..Default::default()
-        });
+        let response = service.create_response(req, session_id).await?;
         Ok(Json(response).into_response())
     }
 }
@@ -355,115 +340,50 @@ async fn run_agent_responses_socket(
     is_canonical: bool,
 ) -> Result<(), String> {
     let (mut sender, mut receiver) = socket.split();
-    let mut active_thread_id: Option<String> = None;
-    let mut active_events: Option<broadcast::Receiver<AgentEventEnvelope>> = None;
-    let mut stream_ctx: Option<Arc<Mutex<StreamCtx>>> = None;
 
     loop {
-        // Snapshot the current stream context so the live-event branch can use it
-        // without mutably borrowing `stream_ctx` inside the `select!` body.
-        let event_ctx = stream_ctx.clone();
-
-        tokio::select! {
-            message = receiver.next() => {
-                let Some(message) = message else {
-                    break;
-                };
-                let message = message.map_err(|error| format!("websocket receive failed: {error}"))?;
-                let payload = match message {
-                    Message::Text(payload) => payload,
-                    Message::Close(_) => {
-                        break;
-                    }
-                    _ => {
-                        continue;
-                    }
-                };
-                let command = match parse_client_message(&payload, is_canonical) {
-                    Ok(command) => command,
-                    Err(error) => {
-                        let frame = openai_error_frame(OpenAiError {
-                            message: error.clone(),
-                            error_type: "invalid_request_error".to_owned(),
-                            param: None,
-                            code: Some("bad_request".to_owned()),
-                            i18n: None,
-                        });
-                        send_serialized(&mut sender, serialize_json(&frame)).await?;
-                        continue;
-                    }
-                };
-                match handle_agent_command(&service, command, &session_id).await {
-                    Ok(result) => {
-                        let TransportCommandResult { subscribe_thread_id } = result;
-                        if let Some(thread_id) = subscribe_thread_id.as_deref() {
-                            let already_subscribed =
-                                active_thread_id.as_deref() == Some(thread_id)
-                                    && active_events.is_some();
-                            if !already_subscribed {
-                                let subscription = service.subscribe_events(thread_id);
-                                active_thread_id = Some(thread_id.to_owned());
-                                active_events = Some(subscription.receiver);
-                                let ctx = stream_ctx.get_or_insert_with(|| {
-                                    Arc::new(Mutex::new(StreamCtx::new(
-                                        thread_id.to_owned(),
-                                        thread_id.to_owned(),
-                                        Utc::now().timestamp() as f64,
-                                        None,
-                                    )))
-                                });
-                                send_ws_replay(
-                                    &mut sender,
-                                    &subscription.replay,
-                                    Arc::clone(ctx),
-                                )
-                                .await?;
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        let frame = server_error_to_frame(error);
-                        send_serialized(&mut sender, serialize_json(&frame)).await?;
-                    }
-                }
+        let message = receiver.next().await;
+        let Some(message) = message else { break };
+        let message = message.map_err(|error| format!("websocket receive failed: {error}"))?;
+        let payload = match message {
+            Message::Text(payload) => payload,
+            Message::Close(_) => break,
+            _ => continue,
+        };
+        let req = match parse_client_message(&payload, is_canonical) {
+            Ok(InboundCommand::ResponseCreate(req)) => req,
+            Err(error) => {
+                let frame = openai_error_frame(OpenAiError {
+                    message: error.clone(),
+                    error_type: "invalid_request_error".to_owned(),
+                    param: None,
+                    code: Some("bad_request".to_owned()),
+                    i18n: None,
+                });
+                send_serialized(&mut sender, serialize_json(&frame)).await?;
+                continue;
             }
-            event = recv_active_event(&mut active_events), if active_events.is_some() => {
-                match event {
-                    Some(Ok(envelope)) => {
-                        let Some(ctx) = event_ctx.as_ref() else {
-                            continue;
-                        };
-                        send_ws_envelope_events(&mut sender, &envelope, Arc::clone(ctx)).await?;
-                    }
-                    Some(Err(broadcast::error::RecvError::Lagged(_))) => {
-                        let frame = openai_error_frame(OpenAiError {
-                            message: "agent event stream lagged; some events may have been dropped"
-                                .to_owned(),
-                            error_type: "server_error".to_owned(),
-                            param: None,
-                            code: Some("stream_lagged".to_owned()),
-                            i18n: None,
-                        });
-                        send_serialized(&mut sender, serialize_json(&frame)).await?;
-                    }
-                    Some(Err(broadcast::error::RecvError::Closed)) | None => {
-                        active_events = None;
-                    }
-                }
+        };
+
+        let model = req.model.clone().unwrap_or_default();
+        match service.stream_response(req, session_id.clone()).await {
+            Ok((response_id, frames)) => {
+                let ctx = Arc::new(Mutex::new(StreamCtx::new(
+                    response_id,
+                    model,
+                    Utc::now().timestamp() as f64,
+                    None,
+                )));
+                send_ws_frame_stream(&mut sender, frames, Arc::clone(&ctx)).await?;
+            }
+            Err(error) => {
+                let frame = server_error_to_frame(error.into());
+                send_serialized(&mut sender, serialize_json(&frame)).await?;
             }
         }
     }
 
     Ok(())
-}
-
-async fn recv_active_event(
-    receiver: &mut Option<broadcast::Receiver<AgentEventEnvelope>>,
-) -> Option<Result<AgentEventEnvelope, broadcast::error::RecvError>> {
-    match receiver {
-        Some(receiver) => Some(receiver.recv().await),
-        None => None,
-    }
 }
 
 fn parse_client_message(payload: &str, _is_canonical: bool) -> Result<InboundCommand, String> {
@@ -487,116 +407,94 @@ fn is_canonical_ws_request(headers: &HeaderMap) -> bool {
         .unwrap_or(false)
 }
 
-async fn handle_agent_command(
-    service: &ResponseService,
-    command: InboundCommand,
-    session_id: &str,
-) -> Result<TransportCommandResult, ServerError> {
-    match command {
-        InboundCommand::ResponseCreate(req) => {
-            let thread_id =
-                service.handle_command(req.to_agent_command(session_id.to_owned())).await?;
-            Ok(TransportCommandResult { subscribe_thread_id: Some(thread_id) })
-        }
+// ---------------------------------------------------------------------------
+// SSE + WS framing — canonical Responses server events from synthesized frames.
+// ---------------------------------------------------------------------------
+
+/// Expand one synthesized [`StreamFrame`] into 0..N canonical wire events,
+/// sharing the per-response [`StreamCtx`].
+fn frame_to_events(frame: &StreamFrame, ctx: &mut StreamCtx) -> Vec<ResponsesServerEvent> {
+    match frame {
+        StreamFrame::Envelope(env) => envelope_to_events(env, ctx),
+        StreamFrame::Terminal(kind) => build_terminal_event(ctx, kind),
     }
 }
 
-// ---------------------------------------------------------------------------
-// SSE transport — canonical Responses server events via `envelope_to_events`.
-// ---------------------------------------------------------------------------
-
-fn agent_events_sse(
-    service: ResponseService,
-    thread_id: String,
-    last_event_id: Option<u64>,
+/// POST `stream:true` — frame the synthesized single-shot stream as SSE.
+fn agent_events_sse_from_frames(
+    response_id: String,
+    model: String,
+    frames: impl futures::Stream<Item = StreamFrame> + Send + 'static,
 ) -> Response {
-    let subscription = service.subscribe_events(&thread_id);
     let created_at = Utc::now().timestamp() as f64;
-    let mut ctx = StreamCtx::new(thread_id.clone(), thread_id.clone(), created_at, None);
-
-    // Replay is processed synchronously so the live stream can take ownership
-    // of the (now-seeded) `StreamCtx` — no locking needed across the stream.
-    let replay_events: Vec<Event> = subscription
-        .replay
-        .into_iter()
-        .filter(|env| should_replay_event(last_event_id, env.id))
-        .flat_map(|env| {
-            let id = env.id;
-            envelope_to_events(&env, &mut ctx)
-                .into_iter()
-                .map(move |event| Event::default().id(id.to_string()).data(serialize_json(&event)))
-                .collect::<Vec<_>>()
-        })
-        .collect();
-
-    let replay = stream::iter(replay_events.into_iter().map(Ok::<Event, Infallible>));
-
-    let live = BroadcastStream::new(subscription.receiver).flat_map(move |msg| {
-        let events: Vec<Event> = match msg {
-            Ok(env) => {
-                let id = env.id;
-                envelope_to_events(&env, &mut ctx)
-                    .into_iter()
-                    .map(move |event| {
-                        Event::default().id(id.to_string()).data(serialize_json(&event))
-                    })
-                    .collect()
-            }
-            Err(_) => {
-                vec![Event::default().data(serialize_json(&openai_error_frame(OpenAiError {
-                    message:
-                        "agent event stream lagged; some events may have been dropped".to_owned(),
-                    error_type: "server_error".to_owned(),
-                    param: None,
-                    code: Some("stream_lagged".to_owned()),
-                    i18n: None,
-                })))]
-            }
-        };
-        stream::iter(events.into_iter().map(Ok::<Event, Infallible>))
+    let mut ctx = StreamCtx::new(response_id, model, created_at, None);
+    let events = frames.flat_map(move |frame| {
+        let expanded: Vec<Event> = frame_to_events(&frame, &mut ctx)
+            .into_iter()
+            .map(|event| Event::default().data(serialize_json(&event)))
+            .collect();
+        stream::iter(expanded)
     });
+    Sse::new(Box::pin(events.map(Ok::<_, Infallible>)))
+        .keep_alive(KeepAlive::default())
+        .into_response()
+}
 
-    Sse::new(Box::pin(replay.chain(live))).keep_alive(KeepAlive::default()).into_response()
+/// GET SSE resume — `/responses` is single-shot per request, so reconstruct the
+/// finalized response from the thread store and replay it as a terminal
+/// `response.completed`.
+async fn agent_events_sse_resume(service: ResponseService, thread_id: String) -> Response {
+    let response = match service.get_response(&thread_id).await {
+        Ok(response) => response,
+        Err(error) => {
+            let frame = openai_error_frame(OpenAiError {
+                message: error.to_string(),
+                error_type: "server_error".to_owned(),
+                param: None,
+                code: Some("not_found".to_owned()),
+                i18n: None,
+            });
+            let event = Event::default().data(serialize_json(&frame));
+            return Sse::new(Box::pin(stream::iter(vec![Ok::<_, Infallible>(event)])))
+                .keep_alive(KeepAlive::default())
+                .into_response();
+        }
+    };
+    let event = ResponsesServerEvent::ResponseCompletedEvent(Box::new(
+        ResponseCompletedEvent::new(ResponseCompletedType::ResponseCompleted, response, 0),
+    ));
+    let sse_event = Event::default().data(serialize_json(&event));
+    Sse::new(Box::pin(stream::iter(vec![Ok::<_, Infallible>(sse_event)])))
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 // ---------------------------------------------------------------------------
 // Shared WS helpers
 // ---------------------------------------------------------------------------
 
-/// Send replay envelopes as canonical WS frames, sharing the stream context.
-async fn send_ws_replay<S>(
+/// Drain the synthesized single-shot frame stream and send each expanded wire
+/// event as a WS text frame. Locks the shared `StreamCtx` only for the
+/// synchronous projection call — no await while holding the guard.
+async fn send_ws_frame_stream<S, St>(
     sender: &mut S,
-    replay: &[AgentEventEnvelope],
+    frames: St,
     ctx: Arc<Mutex<StreamCtx>>,
 ) -> Result<(), String>
 where
     S: futures::Sink<Message> + Unpin,
     S::Error: std::fmt::Display,
+    St: futures::Stream<Item = StreamFrame> + Unpin,
 {
-    for envelope in replay {
-        send_ws_envelope_events(sender, envelope, Arc::clone(&ctx)).await?;
-    }
-    Ok(())
-}
-
-/// Convert one slab envelope into 0..N canonical events and send each as a WS
-/// text frame. Locks the shared `StreamCtx` only for the synchronous
-/// `envelope_to_events` call — no await while holding the guard.
-async fn send_ws_envelope_events<S>(
-    sender: &mut S,
-    envelope: &AgentEventEnvelope,
-    ctx: Arc<Mutex<StreamCtx>>,
-) -> Result<(), String>
-where
-    S: futures::Sink<Message> + Unpin,
-    S::Error: std::fmt::Display,
-{
-    let events = {
-        let mut guard = ctx.lock().map_err(|error| format!("stream ctx poisoned: {error}"))?;
-        envelope_to_events(envelope, &mut guard)
-    };
-    for event in events {
-        send_serialized(sender, serialize_json(&event)).await?;
+    let mut frames = frames;
+    while let Some(frame) = frames.next().await {
+        let events = {
+            let mut guard = ctx.lock().map_err(|error| format!("stream ctx poisoned: {error}"))?;
+            frame_to_events(&frame, &mut guard)
+        };
+        for event in events {
+            send_serialized(sender, serialize_json(&event)).await?;
+        }
     }
     Ok(())
 }
@@ -612,20 +510,6 @@ where
         .map_err(|error| format!("websocket send failed: {error}"))
 }
 
-fn should_replay_event(last_event_id: Option<u64>, event_id: u64) -> bool {
-    match last_event_id {
-        Some(last_event_id) => event_id > last_event_id,
-        None => true,
-    }
-}
-
-fn parse_last_event_id(headers: &HeaderMap) -> Option<u64> {
-    headers
-        .get("last-event-id")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.trim().parse().ok())
-}
-
 fn serialize_json<T: Serialize>(value: &T) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| {
         r#"{"type":"error","error":{"message":"failed to serialize agent message","type":"server_error","code":"serialization_failed"}}"#
@@ -637,7 +521,6 @@ fn serialize_json<T: Serialize>(value: &T) -> String {
 mod tests {
     use super::{
         AgentApi, AgentCompatError, InboundCommand, map_server_error, parse_client_message,
-        should_replay_event,
     };
     use crate::error::ServerError;
     use axum::http::StatusCode;
@@ -678,13 +561,6 @@ mod tests {
                 .expect_err("slab-dialect type should be rejected in canonical mode");
 
         assert!(error.contains("response.create"), "error should mention response.create: {error}");
-    }
-
-    #[test]
-    fn last_event_id_replays_only_later_events() {
-        assert!(!should_replay_event(Some(7), 7));
-        assert!(should_replay_event(Some(7), 8));
-        assert!(should_replay_event(None, 0));
     }
 
     #[test]

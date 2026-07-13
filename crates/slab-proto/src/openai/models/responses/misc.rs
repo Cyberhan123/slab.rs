@@ -184,6 +184,8 @@ pub enum Reason {
     MaxOutputTokens,
     #[serde(rename = "content_filter")]
     ContentFilter,
+    #[serde(rename = "tool_calls")]
+    ToolCalls,
 }
 
 #[derive(

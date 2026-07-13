@@ -16,6 +16,7 @@ use slab_agent::AgentEventKind;
 use slab_proto::openai::*;
 
 use super::projection::{parse_mcp_status, parse_phase, parse_shell_output_content};
+use super::single_shot::TerminalKind;
 use crate::infra::agent::event_hub::AgentEventEnvelope;
 
 /// Per-response streaming state. Carries the assembled output items, the
@@ -177,13 +178,91 @@ impl StreamCtx {
     /// the resolved service tier, the assembled output items, default usage,
     /// and a `completed` status.
     fn completed_response(&self) -> Response {
+        self.terminal_response(ResponseStatus::Completed, None, None)
+    }
+
+    /// Clone the skeleton for a terminal lifecycle event
+    /// (`response.completed` / `response.incomplete`): apply the resolved
+    /// service tier, completion timestamp, assembled output items, the given
+    /// status, optional `incomplete_details`, and optional token `usage`
+    /// (defaults to [`ResponseUsage::default`] when `None`, matching the
+    /// original `completed_response` behaviour).
+    fn terminal_response(
+        &self,
+        status: ResponseStatus,
+        incomplete_reason: Option<Reason>,
+        usage: Option<ResponseUsage>,
+    ) -> Response {
         let mut r = self.skeleton.clone();
-        r.status = Some(ResponseStatus::Completed);
+        r.status = Some(status);
         r.service_tier = self.completed_service_tier.map(Some);
         r.completed_at = self.completed_at_unix.map(Some);
         r.output = self.items.clone();
-        r.usage = Some(Box::new(ResponseUsage::default()));
+        r.usage = Some(Box::new(usage.unwrap_or_default()));
+        r.incomplete_details = incomplete_reason
+            .map(|reason| Box::new(ResponseAllOfIncompleteDetails { reason: Some(reason) }));
         r
+    }
+}
+
+/// Emit the terminal lifecycle event for a single-shot run: `response.completed`,
+/// `response.incomplete`, or `response.failed` (the latter preceded by the
+/// standalone nested `error` event, matching the [`envelope_to_events`]
+/// `ResponseFailed` arm). Used by the `/responses` transport after draining the
+/// synthesized envelope stream from [`super::single_shot`].
+pub fn build_terminal_event(
+    ctx: &mut StreamCtx,
+    terminal: &TerminalKind,
+) -> Vec<ResponsesServerEvent> {
+    match terminal {
+        TerminalKind::Completed => {
+            vec![ResponsesServerEvent::ResponseCompletedEvent(Box::new(
+                ResponseCompletedEvent::new(
+                    ResponseCompletedType::ResponseCompleted,
+                    ctx.completed_response(),
+                    ctx.next_seq(),
+                ),
+            ))]
+        }
+        TerminalKind::Incomplete { reason } => {
+            let response = ctx.terminal_response(ResponseStatus::Incomplete, Some(*reason), None);
+            vec![ResponsesServerEvent::ResponseIncompleteEvent(Box::new(
+                ResponseIncompleteEvent::new(
+                    ResponseIncompleteType::ResponseIncomplete,
+                    response,
+                    ctx.next_seq(),
+                ),
+            ))]
+        }
+        TerminalKind::Failed { message, code, error_type } => {
+            let err_payload = slab_proto::openai::Error::new(
+                code.clone(),
+                message.clone(),
+                None,
+                error_type.clone().unwrap_or_else(|| "server_error".to_owned()),
+            );
+            let mut out =
+                vec![ResponsesServerEvent::ResponseErrorEvent(Box::new(ResponseErrorEvent::new(
+                    slab_proto::openai::ErrorType::Error,
+                    ctx.next_seq(),
+                    err_payload,
+                )))];
+            let mut response = ctx.skeleton_with_status(ResponseStatus::Failed);
+            response.error = Some(Box::new(slab_proto::openai::ResponseError {
+                code: code.clone(),
+                message: message.clone(),
+                param: None,
+                r#type: None,
+            }));
+            out.push(ResponsesServerEvent::ResponseFailedEvent(Box::new(
+                ResponseFailedEvent::new(
+                    ResponseFailedType::ResponseFailed,
+                    ctx.next_seq(),
+                    response,
+                ),
+            )));
+            out
+        }
     }
 }
 

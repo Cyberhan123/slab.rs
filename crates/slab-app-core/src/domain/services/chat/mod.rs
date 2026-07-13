@@ -71,7 +71,7 @@ impl ChatService {
     }
 }
 
-async fn resolve_requested_model(
+pub(crate) async fn resolve_requested_model(
     state: &ModelState,
     requested_model: &str,
 ) -> Result<String, AppCoreError> {

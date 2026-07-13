@@ -15,6 +15,8 @@ use std::collections::HashMap;
 
 use slab_agent::{AgentEventKind, TurnEvent};
 
+use super::single_shot::SingleShotOutcome;
+use crate::domain::models::TextGenerationUsage;
 use crate::infra::agent::event_hub::AgentEventEnvelope;
 
 // Glob import: `build_response` references ~70 slab-proto types. Glob imports do
@@ -498,6 +500,44 @@ pub fn parse_phase(raw: &str) -> MessagePhase {
     match raw {
         "final_answer" => MessagePhase::FinalAnswer,
         _ => MessagePhase::Commentary,
+    }
+}
+
+/// Post-process a [`Response`] assembled by [`build_response`] for the
+/// single-shot Model:
+/// - set `status` + `incomplete_details` from the outcome — tool calls present
+///   ⇒ `Incomplete { reason: ToolCalls }` (client-side tool loop); failure ⇒
+///   `Failed`; otherwise `Completed` (the projection itself defaults to
+///   `Completed`, so this only diverges on tool calls / failure),
+/// - populate `usage` from the LLM call's token usage (the projection defaults
+///   it to `ResponseUsage::default()`).
+pub(crate) fn apply_terminal(response: &mut Response, outcome: &SingleShotOutcome) {
+    match outcome {
+        SingleShotOutcome::Failed { .. } => {
+            response.status = Some(ResponseStatus::Failed);
+            response.incomplete_details = None;
+        }
+        _ if outcome.has_tool_calls() => {
+            response.status = Some(ResponseStatus::Incomplete);
+            response.incomplete_details =
+                Some(Box::new(ResponseAllOfIncompleteDetails { reason: Some(Reason::ToolCalls) }));
+        }
+        _ => {
+            response.status = Some(ResponseStatus::Completed);
+            response.incomplete_details = None;
+        }
+    }
+    if let Some(usage) = outcome.usage() {
+        response.usage = Some(Box::new(response_usage_from_text(usage)));
+    }
+}
+
+fn response_usage_from_text(usage: &TextGenerationUsage) -> ResponseUsage {
+    ResponseUsage {
+        input_tokens: usage.prompt_tokens as i32,
+        output_tokens: usage.completion_tokens as i32,
+        total_tokens: usage.total_tokens as i32,
+        ..Default::default()
     }
 }
 
