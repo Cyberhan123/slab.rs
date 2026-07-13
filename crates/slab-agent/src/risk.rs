@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::event::{ToolRiskAssessment, ToolRiskLevel};
+use crate::port::{ToolRiskAssessment, ToolRiskLevel};
 
 /// Approval decision derived from a risk assessment + the configured policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,7 +155,7 @@ mod tests {
     use super::{
         BasicToolRiskAnalyzer, ToolApprovalDecision, ToolApprovalPolicy, ToolRiskAnalyzer,
     };
-    use crate::event::ToolRiskLevel;
+    use crate::port::ToolRiskLevel;
 
     async fn analyze_shell(command: &str) -> crate::ToolRiskAssessment {
         BasicToolRiskAnalyzer::new().analyze("shell", &json!({ "command": command })).await

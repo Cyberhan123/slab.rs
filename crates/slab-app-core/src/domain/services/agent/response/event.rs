@@ -1,19 +1,20 @@
+//! OpenAI-Responses wire event vocabulary for the `/responses` surface.
+//!
+//! Slice C3 relocated these types out of `slab-agent` (the engine crate) into the
+//! response layer (the `/responses` host): `slab-agent` now owns only its harness
+//! protocol (`EventMsg`/`TurnItem`) and holds zero OpenAI-Responses wire types.
+//! `AgentEventKind` is the event model the pure projections
+//! ([`super::projection::build_response`]/[`super::stream::envelope_to_events`]) consume;
+//! [`single_shot`](super::single_shot) synthesizes the envelopes locally from one LLM call.
+//!
+//! `ToolRiskAssessment` is imported back from `slab-agent` — it stays there because it is
+//! the `ApprovalPort::request_approval` signature. The serde shape of every type here is
+//! byte-identical to the pre-C3 definitions (the 44 openai_compat fixtures are the canary).
+
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
-use crate::port::ThreadStatus;
-
-/// Response-style event emitted by the Slab agent stream.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AgentStreamEvent {
-    pub thread_id: String,
-    pub turn_index: Option<u32>,
-    pub sequence_number: u64,
-    #[serde(flatten)]
-    pub event: AgentEventKind,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<Value>,
-}
+use slab_agent::ToolRiskAssessment;
+use slab_types::agent::AgentThreadStatus as ThreadStatus;
 
 /// Slab-owned agent event payloads aligned with OpenAI Responses event names.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -249,13 +250,12 @@ pub enum AgentEventKind {
         execution: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         call_id: Option<String>,
-        /// Resolved tool definitions the search discovered, as opaque JSON
-        /// (the slab-agent crate does not depend on slab-proto).
+        /// Resolved tool definitions the search discovered, carried as opaque
+        /// JSON; the projection parses each into the typed `Tool` shape.
         tools: Vec<serde_json::Value>,
     },
     /// Finalized MCP list-tools call (`type: "mcp_list_tools"`). Carries the
-    /// tools a server exposed as opaque JSON (slab-agent does not depend on
-    /// slab-proto).
+    /// tools a server exposed as opaque JSON.
     #[serde(rename = "response.mcp_list_tools.done")]
     ResponseMcpListToolsDone {
         item_id: String,
@@ -292,8 +292,7 @@ pub enum AgentEventKind {
         arguments: String,
     },
     /// Finalized code-interpreter tool call (`type: "code_interpreter_call"`).
-    /// `outputs` is opaque JSON (e.g. `{ type: "logs", logs }`) since slab-agent
-    /// does not depend on slab-proto.
+    /// `outputs` is opaque JSON (e.g. `{ type: "logs", logs }`).
     #[serde(rename = "response.code_interpreter_call.done")]
     ResponseCodeInterpreterCallDone {
         item_id: String,
@@ -304,8 +303,7 @@ pub enum AgentEventKind {
         outputs: Vec<serde_json::Value>,
     },
     /// Finalized web-search tool call (`type: "web_search_call"`). `action` is
-    /// opaque JSON (search / open_page / find_in_page) since slab-agent does
-    /// not depend on slab-proto.
+    /// opaque JSON (search / open_page / find_in_page).
     #[serde(rename = "response.web_search_call.done")]
     ResponseWebSearchCallDone { item_id: String, output_index: i32, action: serde_json::Value },
     /// Finalized function-shell tool call (`type: "shell_call"`). Distinct from
@@ -406,23 +404,6 @@ pub enum ToolExecutionStatus {
     Failed,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolRiskLevel {
-    Low,
-    Medium,
-    High,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ToolRiskAssessment {
-    pub level: ToolRiskLevel,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub labels: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentMetrics {
     pub name: String,
@@ -431,13 +412,20 @@ pub struct AgentMetrics {
     pub success: Option<bool>,
 }
 
-impl AgentStreamEvent {
-    pub fn new(
-        thread_id: impl Into<String>,
-        turn_index: Option<u32>,
-        sequence_number: u64,
-        event: AgentEventKind,
-    ) -> Self {
-        Self { thread_id: thread_id.into(), turn_index, sequence_number, event, metadata: None }
-    }
+/// A streaming event emitted during a single LLM turn, wrapped by the
+/// response layer. The engine no longer produces this — `/responses`
+/// synthesizes envelopes directly in [`single_shot`](super::single_shot).
+#[derive(Debug, Clone)]
+pub enum TurnEvent {
+    Response { turn_index: Option<u32>, event: AgentEventKind },
+}
+
+/// Envelope for a response-layer event sequence. `id` is the per-stream
+/// monotonic ordering key (used for SSE `Last-Event-Id`); the projections never
+/// read it. Built by [`single_shot`](super::single_shot) and consumed by
+/// [`super::projection::build_response`] / [`super::stream::envelope_to_events`].
+#[derive(Clone)]
+pub struct AgentEventEnvelope {
+    pub id: u64,
+    pub event: TurnEvent,
 }

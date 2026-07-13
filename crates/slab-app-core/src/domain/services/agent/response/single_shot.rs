@@ -17,10 +17,11 @@
 
 use chrono::Utc;
 use slab_agent::port::{ThreadMessageRecord, ThreadSnapshot};
-use slab_agent::{AgentConfig, AgentEventKind, AgentResponseRef, ThreadStatus, TurnEvent};
+use slab_agent::{AgentConfig, ThreadStatus};
 use slab_proto::openai::{Reason, Response};
 use uuid::Uuid;
 
+use super::event::{AgentEventEnvelope, AgentEventKind, AgentResponseRef, TurnEvent};
 use super::projection::{AdapterInput, apply_terminal, build_response};
 use crate::context::ModelState;
 use crate::domain::models::{
@@ -31,7 +32,6 @@ use crate::domain::models::{
 use crate::domain::services::agent::AgentCore;
 use crate::domain::services::chat::ChatService;
 use crate::error::AppCoreError;
-use crate::infra::agent::event_hub::AgentEventEnvelope;
 use crate::schemas::agent::OpenAICreateRequest;
 
 /// Terminal outcome of the single-shot LLM call.

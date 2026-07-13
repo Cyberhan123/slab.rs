@@ -17,11 +17,10 @@ use crate::{
     HookOutcome, PlanRef, ToolContext, ToolHandler, ToolOutput, ToolRouter, WorkspaceRef,
     compact::{CompactPort, SlidingWindowCompactPort},
     config::{AgentConfig, AgentToolChoice},
-    event::AgentEventKind,
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, LlmPort, LlmResponse,
-        LlmStreamObserver, LlmUsage, ParsedToolCall, ThreadMessageRecord, ThreadSnapshot,
-        ThreadStatus, ToolCallRecord, ToolSpec, TurnEvent, TurnStateRecord,
+        LlmUsage, ParsedToolCall, ThreadMessageRecord, ThreadSnapshot, ThreadStatus,
+        ToolCallRecord, ToolSpec, TurnStateRecord,
     },
     risk::ToolRiskAnalyzer,
 };
@@ -630,120 +629,6 @@ impl LlmPort for TwoToolCallsLlm {
     }
 }
 
-struct StreamingLlm;
-
-#[async_trait]
-impl LlmPort for StreamingLlm {
-    async fn chat_completion(
-        &self,
-        _model: &str,
-        _messages: &[ConversationMessage],
-        _tools: &[ToolSpec],
-        _config: &AgentConfig,
-        _trace_context: &AgentTraceContext,
-    ) -> Result<LlmResponse, AgentError> {
-        Ok(LlmResponse {
-            content: Some("hello".into()),
-            content_already_streamed: false,
-            tool_calls: Vec::new(),
-            finish_reason: Some("stop".into()),
-            usage: None,
-        })
-    }
-
-    async fn chat_completion_streaming(
-        &self,
-        _model: &str,
-        _messages: &[ConversationMessage],
-        _tools: &[ToolSpec],
-        _config: &AgentConfig,
-        _trace_context: &AgentTraceContext,
-        observer: &mut dyn LlmStreamObserver,
-    ) -> Result<LlmResponse, AgentError> {
-        observer.on_text_delta("hel").await?;
-        observer.on_reasoning_delta("thinking").await?;
-        observer.on_reasoning_done("thinking").await?;
-        observer.on_text_delta("lo").await?;
-        Ok(LlmResponse {
-            content: Some("hello".into()),
-            content_already_streamed: true,
-            tool_calls: Vec::new(),
-            finish_reason: Some("stop".into()),
-            usage: None,
-        })
-    }
-}
-
-struct StreamingToolCallLlm {
-    call_count: Mutex<u32>,
-}
-
-impl StreamingToolCallLlm {
-    fn new() -> Self {
-        Self { call_count: Mutex::new(0) }
-    }
-}
-
-#[async_trait]
-impl LlmPort for StreamingToolCallLlm {
-    async fn chat_completion(
-        &self,
-        _model: &str,
-        _messages: &[ConversationMessage],
-        _tools: &[ToolSpec],
-        _config: &AgentConfig,
-        _trace_context: &AgentTraceContext,
-    ) -> Result<LlmResponse, AgentError> {
-        Ok(LlmResponse {
-            content: Some("done".into()),
-            content_already_streamed: false,
-            tool_calls: Vec::new(),
-            finish_reason: Some("stop".into()),
-            usage: None,
-        })
-    }
-
-    async fn chat_completion_streaming(
-        &self,
-        _model: &str,
-        _messages: &[ConversationMessage],
-        _tools: &[ToolSpec],
-        _config: &AgentConfig,
-        _trace_context: &AgentTraceContext,
-        observer: &mut dyn LlmStreamObserver,
-    ) -> Result<LlmResponse, AgentError> {
-        let next_call = {
-            let mut count = self.call_count.lock().unwrap();
-            *count += 1;
-            *count
-        };
-
-        if next_call == 1 {
-            observer.on_text_delta("checking ").await?;
-            Ok(LlmResponse {
-                content: Some("checking ".into()),
-                content_already_streamed: true,
-                tool_calls: vec![ParsedToolCall {
-                    id: "call-1".into(),
-                    name: "echo".into(),
-                    arguments: r#"{"message":"hello"}"#.into(),
-                }],
-                finish_reason: Some("tool_calls".into()),
-                usage: None,
-            })
-        } else {
-            observer.on_text_delta("done").await?;
-            Ok(LlmResponse {
-                content: Some("done".into()),
-                content_already_streamed: true,
-                tool_calls: Vec::new(),
-                finish_reason: Some("stop".into()),
-                usage: None,
-            })
-        }
-    }
-}
-
 struct CapturingMessagesLlm {
     calls: Arc<Mutex<Vec<Vec<ConversationMessage>>>>,
     first_call_uses_tool: bool,
@@ -1124,22 +1009,11 @@ impl AgentNotifyPort for NoopNotify {
 }
 
 #[derive(Default)]
-struct RecordingNotify {
-    events: Mutex<Vec<TurnEvent>>,
-}
+struct RecordingNotify;
 
 #[async_trait]
 impl AgentNotifyPort for RecordingNotify {
-    async fn on_status_change(&self, _thread_id: &str, status: ThreadStatus) {
-        self.events.lock().unwrap().push(TurnEvent::Response {
-            turn_index: None,
-            event: AgentEventKind::AgentStatus { status },
-        });
-    }
-
-    async fn on_turn_event(&self, _thread_id: &str, event: &TurnEvent) {
-        self.events.lock().unwrap().push(event.clone());
-    }
+    async fn on_status_change(&self, _thread_id: &str, _status: ThreadStatus) {}
 }
 
 #[async_trait]
@@ -1860,7 +1734,7 @@ async fn disallowed_registered_tool_is_not_executed_and_feedback_is_persisted() 
     let llm = Arc::new(SecretToolCallLlm::new());
     let store = Arc::new(PersistingStore::default());
     let store_port: Arc<dyn AgentStorePort> = store.clone();
-    let notify = Arc::new(RecordingNotify::default());
+    let notify = Arc::new(RecordingNotify);
     let router = ToolRouter::new();
     router.register(Box::new(TestEchoTool));
     router.register(Box::new(SecretTool { executions: executions.clone() }));
@@ -2280,243 +2154,6 @@ async fn hook_blocked_tool_call_is_recorded_failed() {
     assert_eq!(
         store.updated_statuses.lock().unwrap().as_slice(),
         &[slab_types::agent::ToolCallStatus::Failed]
-    );
-}
-
-#[tokio::test]
-async fn response_style_events_include_text_tool_and_metrics() {
-    let llm = Arc::new(MockLlm::new());
-    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
-    let notify = Arc::new(RecordingNotify::default());
-
-    let router = ToolRouter::new();
-    router.register(Box::new(ApprovalEchoTool));
-
-    let approval = Arc::clone(&notify);
-    let control =
-        Arc::new(AgentControl::new(llm, store, notify.clone(), approval, Arc::new(router), 8, 4));
-
-    let messages = vec![ConversationMessage {
-        role: "user".into(),
-        content: slab_types::ConversationMessageContent::Text("Please echo".into()),
-        name: None,
-        tool_call_id: None,
-        tool_calls: vec![],
-    }];
-    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
-
-    let thread_id = control.spawn("session-events".into(), config, messages).await.expect("spawn");
-    let mut status_rx = control.subscribe(&thread_id).await.expect("subscribe");
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        loop {
-            status_rx.changed().await.expect("status channel closed");
-            if *status_rx.borrow() == ThreadStatus::Completed {
-                return;
-            }
-        }
-    })
-    .await
-    .expect("thread should complete");
-
-    let events = notify.events.lock().unwrap();
-    assert!(events.iter().any(|event| {
-        matches!(
-            event,
-            TurnEvent::Response {
-                event: AgentEventKind::ResponseFunctionCallArgumentsDone { risk: Some(_), .. },
-                ..
-            }
-        )
-    }));
-    assert!(events.iter().any(|event| {
-        matches!(
-            event,
-            TurnEvent::Response { event: AgentEventKind::ResponseOutputTextDone { .. }, .. }
-        )
-    }));
-    assert!(events.iter().any(|event| {
-        matches!(event, TurnEvent::Response { event: AgentEventKind::ResponseMetrics { .. }, .. })
-    }));
-}
-
-#[tokio::test]
-async fn streaming_llm_deltas_arrive_before_text_done() {
-    let llm = Arc::new(StreamingLlm);
-    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
-    let notify = Arc::new(RecordingNotify::default());
-    let router = Arc::new(ToolRouter::new());
-
-    let approval = Arc::clone(&notify);
-    let control = Arc::new(AgentControl::new(llm, store, notify.clone(), approval, router, 8, 4));
-
-    let messages = vec![ConversationMessage {
-        role: "user".into(),
-        content: slab_types::ConversationMessageContent::Text("Say hello".into()),
-        name: None,
-        tool_call_id: None,
-        tool_calls: vec![],
-    }];
-    let config = AgentConfig { model: "mock".into(), max_turns: 1, ..AgentConfig::default() };
-
-    let thread_id =
-        control.spawn("session-streaming".into(), config, messages).await.expect("spawn");
-    let mut status_rx = control.subscribe(&thread_id).await.expect("subscribe");
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        loop {
-            status_rx.changed().await.expect("status channel closed");
-            if *status_rx.borrow() == ThreadStatus::Completed {
-                return;
-            }
-        }
-    })
-    .await
-    .expect("thread should complete");
-
-    let events = notify.events.lock().unwrap();
-    let first_delta = events
-        .iter()
-        .position(|event| {
-            matches!(
-                event,
-                TurnEvent::Response {
-                    event: AgentEventKind::ResponseOutputTextDelta { delta, .. },
-                    ..
-                } if delta == "hel"
-            )
-        })
-        .expect("first text delta");
-    let done = events
-        .iter()
-        .position(|event| {
-            matches!(
-                event,
-                TurnEvent::Response {
-                    event: AgentEventKind::ResponseOutputTextDone { text, .. },
-                    ..
-                } if text == "hello"
-            )
-        })
-        .expect("text done");
-    let reasoning_delta = events
-        .iter()
-        .position(|event| {
-            matches!(
-                event,
-                TurnEvent::Response {
-                    event: AgentEventKind::ResponseReasoningTextDelta { delta, .. },
-                    ..
-                } if delta == "thinking"
-            )
-        })
-        .expect("reasoning delta");
-    let reasoning_done = events
-        .iter()
-        .position(|event| {
-            matches!(
-                event,
-                TurnEvent::Response {
-                    event: AgentEventKind::ResponseReasoningTextDone { text, .. },
-                    ..
-                } if text == "thinking"
-            )
-        })
-        .expect("reasoning done");
-
-    assert!(first_delta < done);
-    assert!(reasoning_delta < reasoning_done);
-    assert!(reasoning_done < done);
-}
-
-#[tokio::test]
-async fn streaming_tool_call_emits_text_before_function_call_without_duplicate_delta() {
-    let llm = Arc::new(StreamingToolCallLlm::new());
-    let store = Arc::new(PersistingStore::default());
-    let store_port: Arc<dyn AgentStorePort> = store.clone();
-    let notify = Arc::new(RecordingNotify::default());
-
-    let router = ToolRouter::new();
-    router.register(Box::new(TestEchoTool));
-
-    let approval = Arc::clone(&notify);
-    let control = Arc::new(AgentControl::new(
-        llm,
-        store_port,
-        notify.clone(),
-        approval,
-        Arc::new(router),
-        8,
-        4,
-    ));
-
-    let messages = vec![ConversationMessage {
-        role: "user".into(),
-        content: slab_types::ConversationMessageContent::Text("Please echo".into()),
-        name: None,
-        tool_call_id: None,
-        tool_calls: vec![],
-    }];
-    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
-
-    let thread_id =
-        control.spawn("session-streaming-tool".into(), config, messages).await.expect("spawn");
-    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Completed).await;
-
-    let events = notify.events.lock().unwrap();
-    let text_delta_positions = events
-        .iter()
-        .enumerate()
-        .filter_map(|(index, event)| match event {
-            TurnEvent::Response {
-                event: AgentEventKind::ResponseOutputTextDelta { delta, .. },
-                ..
-            } if delta == "checking " => Some(index),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(text_delta_positions.len(), 1);
-
-    let function_call_position = events
-        .iter()
-        .position(|event| {
-            matches!(
-                event,
-                TurnEvent::Response {
-                    event: AgentEventKind::ResponseFunctionCallArgumentsDone {
-                        item_id,
-                        name,
-                        arguments,
-                        ..
-                    },
-                    ..
-                } if item_id == "call-1" && name == "echo" && arguments == r#"{"message":"hello"}"#
-            )
-        })
-        .expect("function call event");
-    assert!(text_delta_positions[0] < function_call_position);
-    drop(events);
-
-    let records = store.messages.lock().unwrap();
-    let debug_records = records
-        .iter()
-        .map(|record| {
-            format!(
-                "{}:{}:{}:{:?}:{}",
-                record.thread_id,
-                record.turn_index,
-                record.message.role,
-                record.message.tool_call_id,
-                record.message.rendered_text()
-            )
-        })
-        .collect::<Vec<_>>();
-    assert!(
-        records.iter().any(|record| {
-            record.thread_id == thread_id
-                && record.message.role == "tool"
-                && record.message.tool_call_id.as_deref() == Some("call-1")
-                && record.message.rendered_text().contains("hello")
-        }),
-        "{debug_records:#?}"
     );
 }
 
@@ -3263,7 +2900,7 @@ async fn repeated_side_effect_tool_call_interrupts_with_reason_and_trace_event()
     ));
     let store = Arc::new(PersistingStore::default());
     let store_port: Arc<dyn AgentStorePort> = store.clone();
-    let notify = Arc::new(RecordingNotify::default());
+    let notify = Arc::new(RecordingNotify);
     let router = ToolRouter::new();
     router.register(Box::new(JsonNoopTool { name: "write_file" }));
     let trace = Arc::new(RecordingTraceSink::default());
@@ -3309,18 +2946,6 @@ async fn repeated_side_effect_tool_call_interrupts_with_reason_and_trace_event()
         control.send_input(&thread_id, "continue".into()).await.is_ok(),
         "repetition-interrupted threads should remain resumable"
     );
-
-    let events = notify.events.lock().unwrap();
-    assert!(events.iter().any(|event| {
-        matches!(
-            event,
-            TurnEvent::Response {
-                event: AgentEventKind::ResponseCancelled { reason, .. },
-                ..
-            } if reason == "repetition_detected"
-        )
-    }));
-    drop(events);
 
     let trace_events = trace.events.lock().unwrap().clone();
     assert_trace_event(&trace_events, "loop_detected");

@@ -5,13 +5,13 @@ use slab_agent::config::{
     AgentConfig, AgentToolChoice, MAX_INVALID_TOOL_CALL_RETRIES, MAX_TOOL_CONCURRENCY,
 };
 use slab_agent::port::{ThreadMessageRecord, ThreadSnapshot};
-use slab_types::{ConversationMessage, agent::AgentThreadStatus};
+use slab_types::agent::AgentThreadStatus;
 use utoipa::ToSchema;
 #[cfg(test)]
 use validator::{ValidationError, ValidationErrors};
 
 use crate::domain::models::{
-    AgentCommand, StructuredOutput as DomainStructuredOutput,
+    StructuredOutput as DomainStructuredOutput,
     StructuredOutputJsonSchema as DomainStructuredOutputJsonSchema,
 };
 use crate::schemas::chat::{ChatReasoningEffort, ChatToolCall, ChatVerbosity};
@@ -227,33 +227,6 @@ impl OpenAICreateRequest {
             ..Default::default()
         }
     }
-
-    /// Translate the OpenAI-compatible create request into the app-core agent
-    /// command used by the application service.
-    pub fn to_agent_command(&self, session_id: String) -> AgentCommand {
-        let messages: Vec<ConversationMessage> =
-            self.to_messages().into_iter().map(Into::into).collect();
-        match self.previous_response_id.as_deref().filter(|value| !value.is_empty()) {
-            Some(thread_id) => AgentCommand::AppendInput {
-                thread_id: thread_id.to_owned(),
-                content: last_user_text(&messages),
-            },
-            None => AgentCommand::CreateResponse {
-                session_id,
-                config: Box::new(self.to_config_input().into()),
-                messages,
-            },
-        }
-    }
-}
-
-fn last_user_text(messages: &[ConversationMessage]) -> String {
-    messages
-        .iter()
-        .rev()
-        .find(|message| message.role == "user")
-        .map(|message| message.content.rendered_text())
-        .unwrap_or_default()
 }
 
 fn openai_input_to_messages(input: &serde_json::Value) -> Vec<MessageInput> {
@@ -604,44 +577,6 @@ mod tests {
         assert!(config.reasoning_effort.is_some());
         assert!(matches!(config.tool_choice, AgentToolChoice::Required));
         assert!(config.structured_output.is_some());
-    }
-
-    #[test]
-    fn openai_create_request_maps_to_agent_create_command() {
-        let req: OpenAICreateRequest =
-            serde_json::from_str(r#"{"model":"gpt-x","instructions":"be brief","input":"hello"}"#)
-                .unwrap();
-
-        let command = req.to_agent_command("session-1".into());
-        let AgentCommand::CreateResponse { session_id, config, messages } = command else {
-            panic!("expected create response command");
-        };
-
-        assert_eq!(session_id, "session-1");
-        assert_eq!(config.model, "gpt-x");
-        assert_eq!(config.system_prompt.as_deref(), Some("be brief"));
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].role, "user");
-        assert_eq!(messages[0].content.rendered_text(), "hello");
-    }
-
-    #[test]
-    fn openai_previous_response_maps_to_agent_append_input_command() {
-        let req: OpenAICreateRequest = serde_json::from_str(
-            r#"{"previous_response_id":"thread-1","input":[
-                {"type":"message","role":"assistant","content":"old"},
-                {"type":"message","role":"user","content":"new turn"}
-            ]}"#,
-        )
-        .unwrap();
-
-        let command = req.to_agent_command("session-1".into());
-        let AgentCommand::AppendInput { thread_id, content } = command else {
-            panic!("expected append input command");
-        };
-
-        assert_eq!(thread_id, "thread-1");
-        assert_eq!(content, "new turn");
     }
 
     use crate::schemas::chat::{ChatToolCall, ChatToolFunction};

@@ -619,11 +619,11 @@ mod tests {
     fn envelope_to_events_emits_canonical_frames() {
         use crate::api::v1::agent::openai_compat::{StreamCtx, envelope_to_events};
 
-        let envelope = slab_app_core::infra::agent::event_hub::AgentEventEnvelope {
+        let envelope = slab_app_core::domain::services::agent::response::AgentEventEnvelope {
             id: 1,
-            event: slab_agent::TurnEvent::Response {
+            event: slab_app_core::domain::services::agent::response::TurnEvent::Response {
                 turn_index: Some(0),
-                event: slab_agent::AgentEventKind::ResponseOutputTextDone {
+                event: slab_app_core::domain::services::agent::response::AgentEventKind::ResponseOutputTextDone {
                     item_id: "msg-1".to_owned(),
                     output_index: 0,
                     content_index: 0,

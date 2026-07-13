@@ -1,23 +1,27 @@
 //! Response service — OpenAI Responses wire host for `/responses`.
 //!
-//! Slice C2 turns `/responses` into a standalone single-shot Model: one LLM
-//! call via `llm-service` (through `ChatService`), with the canonical OpenAI
-//! Responses wire produced by feeding *synthesized* [`AgentEventKind`] envelopes
-//! into the existing pure projections ([`projection::build_response`] /
+//! `/responses` is a standalone single-shot Model: one LLM call via
+//! `llm-service` (through `ChatService`), with the canonical OpenAI Responses
+//! wire produced by feeding *synthesized* [`AgentEventKind`] envelopes into the
+//! pure projections ([`projection::build_response`] /
 //! [`stream::envelope_to_events`]). The non-streaming assembler lives in
 //! [`projection`], the streaming state machine in [`stream`], and the
 //! single-shot orchestration (resolve model → route → call → persist →
 //! synthesize) in [`single_shot`].
 //!
-//! `/responses` no longer drives the slab-agent turn loop and no longer
-//! subscribes to the `AgentEventHub` `AgentEventKind` channel — that channel
-//! now has zero consumers, which lets slice C3 retire `AgentEventKind` from
-//! slab-agent entirely.
+//! Slice C3 relocated the OpenAI-Responses wire vocabulary
+//! ([`AgentEventKind`]/[`TurnEvent`]/[`AgentEventEnvelope`]/[`AgentResponseRef`])
+//! out of `slab-agent` into [`event`] — the engine crate now owns only its
+//! harness protocol (`EventMsg`/`TurnItem`) and holds zero `/responses` wire
+//! types. `/responses` synthesizes the envelopes locally; it never drives the
+//! slab-agent turn loop and never touches `AgentEventHub`.
 
+pub mod event;
 pub mod projection;
 pub mod single_shot;
 pub mod stream;
 
+pub use event::{AgentEventEnvelope, AgentEventKind, AgentResponseRef, TurnEvent};
 pub use projection::{
     AdapterInput, build_response, parse_mcp_status, parse_phase, parse_shell_output_content,
 };

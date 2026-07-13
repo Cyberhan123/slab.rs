@@ -8,8 +8,7 @@ use slab_types::{ConversationMessage, ConversationMessageContent, agent::ToolCal
 
 use crate::{
     error::AgentError,
-    event::{AgentEventKind, ToolExecutionStatus},
-    port::{ParsedToolCall, ToolCallRecord, TurnEvent},
+    port::{ParsedToolCall, ToolCallRecord},
     state::ToolCallStateMachine,
     turn::{TurnExecutionContext, persist_thread_message},
 };
@@ -40,21 +39,6 @@ pub(crate) async fn record_failed_tool_call_without_persisting_message(
     let mut tool_state = ToolCallStateMachine::new(ToolCallStatus::Running);
     insert_tool_call_record(context, call_id, tool_call, tool_state.status(), created_at).await;
     let call_status = tool_state.transition(ToolCallStatus::Failed)?;
-    context
-        .notify
-        .on_turn_event(
-            context.thread_id,
-            &TurnEvent::Response {
-                turn_index: Some(context.turn_index),
-                event: AgentEventKind::ResponseToolCallOutput {
-                    item_id: tool_call.id.clone(),
-                    call_id: call_id.to_owned(),
-                    output: output.clone(),
-                    status: ToolExecutionStatus::Failed,
-                },
-            },
-        )
-        .await;
     update_tool_call_record(context, call_id, Some(&output), call_status).await;
     Ok(tool_message(tool_call, output))
 }
@@ -172,12 +156,4 @@ pub(crate) async fn update_tool_call_record(
             "output": output,
         }),
     );
-}
-
-pub(crate) fn tool_execution_status(status: ToolCallStatus) -> ToolExecutionStatus {
-    match status {
-        ToolCallStatus::Pending | ToolCallStatus::Running => ToolExecutionStatus::Failed,
-        ToolCallStatus::Completed => ToolExecutionStatus::Completed,
-        ToolCallStatus::Failed => ToolExecutionStatus::Failed,
-    }
 }

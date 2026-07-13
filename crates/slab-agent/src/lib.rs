@@ -26,7 +26,6 @@ pub mod compact;
 pub mod config;
 pub mod control;
 pub mod error;
-pub mod event;
 pub mod hook;
 pub mod port;
 pub mod protocol;
@@ -51,10 +50,6 @@ pub use compact::{CompactOutcome, CompactPort, NoopCompactPort, SlidingWindowCom
 pub use config::{AgentConfig, AgentToolChoice};
 pub use control::{AgentControl, AgentControlLimits};
 pub use error::AgentError;
-pub use event::{
-    AgentArtifactKind, AgentArtifactRef, AgentEventKind, AgentMetrics, AgentResponseRef,
-    AgentStreamEvent, ToolExecutionStatus, ToolRiskAssessment, ToolRiskLevel,
-};
 pub use hook::{AgentHook, AgentHookRegistry, HookEffects, HookEvent, HookOutcome, HookToolAction};
 pub use llm_output::{
     AgentStreamAssembler, AgentStreamCompletion, AgentStreamDelta, RenderedToolCallOutput,
@@ -63,7 +58,7 @@ pub use llm_output::{
 pub use port::{
     AgentNotifyPort, AgentStorePort, ApprovalDecision, ApprovalPort, ExecPolicyPort, LlmPort,
     LlmResponse, MemoryPressure, MemoryPressurePort, NoopMemoryPressurePort, PluginToolPort,
-    ThreadStatus, TurnEvent, TurnStateRecord,
+    ThreadStatus, ToolRiskAssessment, ToolRiskLevel, TurnStateRecord,
 };
 pub use risk::{BasicToolRiskAnalyzer, ToolApprovalDecision, ToolApprovalPolicy, ToolRiskAnalyzer};
 pub use runtime::AgentRuntime;

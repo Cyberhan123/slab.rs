@@ -13,9 +13,8 @@ use slab_types::{ConversationMessage, agent::ToolCallStatus};
 
 use crate::{
     error::AgentError,
-    event::{AgentArtifactKind, AgentArtifactRef, AgentEventKind, ToolRiskAssessment},
     hook::{HookEvent, HookToolAction, dispatch_registered_hooks},
-    port::{ApprovalDecision, ParsedToolCall, TurnEvent},
+    port::{ApprovalDecision, ParsedToolCall, ToolRiskAssessment},
     protocol::{
         CommandExecutionRequestApprovalParams, EventMsg, ItemCompletedParams, ItemStartedParams,
         TurnItem,
@@ -25,8 +24,8 @@ use crate::{
     turn::TurnExecutionContext,
     turn_tool_record::{
         insert_tool_call_record, persist_tool_message_record,
-        record_failed_tool_call_without_persisting_message, tool_execution_status,
-        update_tool_call_record, update_tool_call_status,
+        record_failed_tool_call_without_persisting_message, update_tool_call_record,
+        update_tool_call_status,
     },
 };
 
@@ -45,7 +44,6 @@ const TASK_COMPLETE_METADATA_KEY: &str = "task_complete";
 #[derive(Debug, Clone)]
 pub(crate) struct TaskCompletion {
     pub summary: String,
-    pub artifact_refs: Vec<AgentArtifactRef>,
 }
 
 /// Parse a [`TaskCompletion`] out of a tool's metadata marker, when the tool
@@ -56,25 +54,7 @@ fn parse_task_completion(metadata: Option<&serde_json::Value>) -> Option<TaskCom
     if summary.is_empty() {
         return None;
     }
-    let artifact_refs = marker
-        .get("artifact_refs")
-        .and_then(|refs| refs.as_array())
-        .map(|refs| refs.iter().filter_map(parse_artifact_ref).collect())
-        .unwrap_or_default();
-    Some(TaskCompletion { summary, artifact_refs })
-}
-
-fn parse_artifact_ref(value: &serde_json::Value) -> Option<AgentArtifactRef> {
-    let path = value.get("path")?.as_str()?.trim();
-    if path.is_empty() {
-        return None;
-    }
-    let kind = match value.get("kind").and_then(|kind| kind.as_str()).map(str::to_ascii_lowercase) {
-        Some(ref kind) if kind == "diff" => AgentArtifactKind::Diff,
-        Some(ref kind) if kind == "image" => AgentArtifactKind::Image,
-        _ => AgentArtifactKind::File,
-    };
-    Some(AgentArtifactRef { path: path.to_owned(), kind })
+    Some(TaskCompletion { summary })
 }
 
 struct ToolCallRunResult {
@@ -86,10 +66,9 @@ struct ToolCallRunResult {
 // ── Harness-protocol (EventMsg) tool-item emits ───────────────────────────────
 //
 // slab-agent emits the harness protocol directly (the `EventMsg`/`TurnItem`
-// surface in `crate::protocol`) alongside the legacy `AgentEventKind` emits
-// (which feed `/responses`). This is what makes tool calls visible to the
-// harness WS fan-out and turn-item persistence (bug 1). The legacy emits stay
-// until `/responses` is decoupled from the turn loop (slice C2).
+// surface in `crate::protocol`). This is what makes tool calls visible to the
+// harness WS fan-out and turn-item persistence (bug 1). The legacy
+// `AgentEventKind`/`/responses` emits left this crate in slice C3.
 
 /// Workspace root for `CommandExecution.cwd`, or `None` when no workspace is bound.
 fn workspace_root_of(context: &TurnExecutionContext<'_>) -> Option<String> {
@@ -397,16 +376,6 @@ async fn emit_tool_concurrency_started(
             "concurrency": concurrency,
         }),
     );
-    context
-        .notify
-        .on_turn_event(
-            context.thread_id,
-            &TurnEvent::Response {
-                turn_index: Some(context.turn_index),
-                event: AgentEventKind::ResponseToolCallConcurrencyStarted { total, concurrency },
-            },
-        )
-        .await;
 }
 
 async fn emit_tool_concurrency_completed(
@@ -426,20 +395,6 @@ async fn emit_tool_concurrency_completed(
             "failed": failed,
         }),
     );
-    context
-        .notify
-        .on_turn_event(
-            context.thread_id,
-            &TurnEvent::Response {
-                turn_index: Some(context.turn_index),
-                event: AgentEventKind::ResponseToolCallConcurrencyCompleted {
-                    total,
-                    completed,
-                    failed,
-                },
-            },
-        )
-        .await;
 }
 
 async fn handle_tool_call(
@@ -586,25 +541,6 @@ async fn handle_tool_call(
         "agent function call arguments done"
     );
 
-    context
-        .notify
-        .on_turn_event(
-            context.thread_id,
-            &TurnEvent::Response {
-                turn_index: Some(context.turn_index),
-                event: AgentEventKind::ResponseFunctionCallArgumentsDone {
-                    item_id: tool_call.id.clone(),
-                    call_id: call_id.clone(),
-                    name: tool_call.name.clone(),
-                    output_index: 0,
-                    arguments: effective_arguments.clone(),
-                    namespace: None,
-                    risk: Some(risk.clone()),
-                },
-            },
-        )
-        .await;
-
     let handler = context.tools.get(&tool_call.name);
     // Unified permission decision (slab-exec-policy). The descriptor is built
     // from the tool's own `describe_operation`, falling back to a name-based
@@ -731,21 +667,6 @@ async fn handle_tool_call(
     let post_effects = dispatch_registered_hooks(context.hooks, &post_event).await;
     append_hook_observations(&mut content, post_effects.observations);
 
-    context
-        .notify
-        .on_turn_event(
-            context.thread_id,
-            &TurnEvent::Response {
-                turn_index: Some(context.turn_index),
-                event: AgentEventKind::ResponseToolCallOutput {
-                    item_id: tool_call.id.clone(),
-                    call_id: call_id.clone(),
-                    output: content.clone(),
-                    status: tool_execution_status(call_status),
-                },
-            },
-        )
-        .await;
     let item_status =
         if matches!(call_status, ToolCallStatus::Completed) { "completed" } else { "failed" };
     emit_item_completed(
@@ -901,21 +822,6 @@ async fn emit_approval_resolved(run: &ToolRunContext<'_, '_>, approved: bool) {
         status = if approved { "approved" } else { "rejected" },
         "agent tool call approval resolved"
     );
-    run.context
-        .notify
-        .on_turn_event(
-            run.context.thread_id,
-            &TurnEvent::Response {
-                turn_index: Some(run.context.turn_index),
-                event: AgentEventKind::ResponseToolCallApprovalResolved {
-                    item_id: run.tool_call.id.clone(),
-                    call_id: run.call_id.to_owned(),
-                    tool_name: run.tool_call.name.clone(),
-                    approved,
-                },
-            },
-        )
-        .await;
 }
 
 async fn emit_tool_execution_started(run: &ToolRunContext<'_, '_>) {

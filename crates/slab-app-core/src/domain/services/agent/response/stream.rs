@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use slab_agent::AgentEventKind;
+use super::event::{AgentEventEnvelope, AgentEventKind, TurnEvent};
 
 // Glob import: the streaming state machine references ~70 slab-proto types. Glob
 // imports do not trigger `unused_imports`, which keeps this module
@@ -17,7 +17,6 @@ use slab_proto::openai::*;
 
 use super::projection::{parse_mcp_status, parse_phase, parse_shell_output_content};
 use super::single_shot::TerminalKind;
-use crate::infra::agent::event_hub::AgentEventEnvelope;
 
 /// Per-response streaming state. Carries the assembled output items, the
 /// running sequence-number counter, and response-level metadata so synthesized
@@ -274,7 +273,7 @@ pub fn envelope_to_events(
     env: &AgentEventEnvelope,
     ctx: &mut StreamCtx,
 ) -> Vec<ResponsesServerEvent> {
-    let slab_agent::TurnEvent::Response { event, .. } = &env.event;
+    let TurnEvent::Response { event, .. } = &env.event;
     match event {
         // --- Lifecycle -------------------------------------------------------
         AgentEventKind::ResponseQueued { .. } => {

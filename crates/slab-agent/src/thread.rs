@@ -13,14 +13,13 @@ use slab_types::{ConversationMessage, ConversationMessageContent};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    compact::{CompactOutcome, CompactPort, compact_skipped_event},
+    compact::{CompactOutcome, CompactPort},
     config::AgentConfig,
     error::AgentError,
-    event::{AgentEventKind, AgentMetrics, AgentResponseRef},
     hook::{AgentHookRegistry, HookEvent, dispatch_registered_hooks},
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalPort, ExecPolicyPort, LlmPort, ThreadSnapshot,
-        ThreadStatus, TurnEvent,
+        ThreadStatus,
     },
     protocol::{
         ErrorEvent, EventMsg, Turn, TurnAbortedParams, TurnCompletedParams, TurnStartedParams,
@@ -34,9 +33,9 @@ use crate::{
 
 // ── Harness-protocol (EventMsg) lifecycle emits ───────────────────────────────
 //
-// Direct emits of the harness turn lifecycle alongside the legacy
-// `AgentEventKind` emits (which feed `/responses`). These mirror what
-// `HarnessProjection` used to derive so the harness consumes `EventMsg` only.
+// The harness turn lifecycle emits. slab-agent speaks `EventMsg` (its harness
+// protocol) exclusively — the legacy `AgentEventKind`/`/responses` wire left
+// this crate in slice C3. These mirror what `HarnessProjection` used to derive.
 
 fn harness_turn(id: String, status: &str) -> Turn {
     Turn { id, items: Vec::new(), status: status.to_owned(), error: None }
@@ -192,7 +191,6 @@ impl AgentThread {
             trace_context = trace_context.with_trace_dir(trace_dir);
         }
         let now = Utc::now().to_rfc3339();
-        let started_at = std::time::Instant::now();
         record_json(
             trace.as_ref(),
             &trace_context,
@@ -326,24 +324,11 @@ impl AgentThread {
             }
             let turn_index = starting_turn_index + turn_offset;
             debug!(thread_id, turn_index, "starting turn");
-            self.emit_response_event(
-                &notify,
-                turn_index,
-                AgentEventKind::ResponseInProgress {
-                    response: AgentResponseRef {
-                        id: thread_id.clone(),
-                        status: ThreadStatus::Running,
-                    },
-                },
-            )
-            .await;
             emit_turn_started(&notify, &thread_id, turn_index).await;
             let turn_trace_context = trace_context.clone().with_turn(turn_index);
             self.maybe_compact(
-                &notify,
                 compact.as_ref(),
                 &mut messages,
-                turn_index,
                 trace.as_ref(),
                 &turn_trace_context,
             )
@@ -434,19 +419,6 @@ impl AgentThread {
         }
 
         if interrupted {
-            self.emit_response_event(
-                &notify,
-                starting_turn_index,
-                AgentEventKind::ResponseCancelled {
-                    response: AgentResponseRef {
-                        id: thread_id.clone(),
-                        status: ThreadStatus::Interrupted,
-                    },
-                    reason: "interrupted".to_owned(),
-                },
-            )
-            .await;
-            self.emit_metrics(&notify, started_at, false).await;
             self.set_status(ThreadStatus::Interrupted, &notify).await?;
             record_json(
                 trace.as_ref(),
@@ -473,25 +445,7 @@ impl AgentThread {
         }
 
         if let Some(err) = last_error {
-            notify
-                .on_turn_event(
-                    &thread_id,
-                    &TurnEvent::Response {
-                        turn_index: Some(starting_turn_index),
-                        event: AgentEventKind::ResponseFailed {
-                            response: AgentResponseRef {
-                                id: thread_id.clone(),
-                                status: ThreadStatus::Errored,
-                            },
-                            error: err.to_string(),
-                            error_code: None,
-                            error_type: None,
-                        },
-                    },
-                )
-                .await;
             emit_turn_error(&notify, &thread_id, &err.to_string()).await;
-            self.emit_metrics(&notify, started_at, false).await;
             self.set_status(ThreadStatus::Errored, &notify).await?;
             record_json(
                 trace.as_ref(),
@@ -523,20 +477,7 @@ impl AgentThread {
         if !reached_final_turn {
             let termination_reason = termination_reason.unwrap_or(TerminationReason::MaxTurns);
             let reason = termination_reason.as_str();
-            self.emit_response_event(
-                &notify,
-                starting_turn_index,
-                AgentEventKind::ResponseCancelled {
-                    response: AgentResponseRef {
-                        id: thread_id.clone(),
-                        status: ThreadStatus::Interrupted,
-                    },
-                    reason: reason.to_owned(),
-                },
-            )
-            .await;
             emit_turn_aborted(&notify, &thread_id, starting_turn_index).await;
-            self.emit_metrics(&notify, started_at, false).await;
             self.set_status(ThreadStatus::Interrupted, &notify).await?;
             record_json(
                 trace.as_ref(),
@@ -569,19 +510,7 @@ impl AgentThread {
         }
 
         info!(thread_id, "thread completed");
-        self.emit_response_event(
-            &notify,
-            starting_turn_index,
-            AgentEventKind::ResponseCompleted {
-                response: AgentResponseRef {
-                    id: thread_id.clone(),
-                    status: ThreadStatus::Completed,
-                },
-            },
-        )
-        .await;
         emit_turn_completed(&notify, &thread_id, starting_turn_index).await;
-        self.emit_metrics(&notify, started_at, true).await;
         self.set_status(ThreadStatus::Completed, &notify).await?;
         record_json(
             trace.as_ref(),
@@ -625,23 +554,10 @@ impl AgentThread {
         Ok(())
     }
 
-    async fn emit_response_event(
-        &self,
-        notify: &Arc<dyn AgentNotifyPort>,
-        turn_index: u32,
-        event: AgentEventKind,
-    ) {
-        notify
-            .on_turn_event(&self.id, &TurnEvent::Response { turn_index: Some(turn_index), event })
-            .await;
-    }
-
     async fn maybe_compact(
         &self,
-        notify: &Arc<dyn AgentNotifyPort>,
         compact: &dyn CompactPort,
         messages: &mut Vec<ConversationMessage>,
-        turn_index: u32,
         trace: &dyn AgentTraceSink,
         trace_context: &AgentTraceContext,
     ) {
@@ -670,34 +586,9 @@ impl AgentThread {
                     "reason": "below threshold",
                 }),
             );
-            notify
-                .on_turn_event(
-                    &self.id,
-                    &TurnEvent::Response {
-                        turn_index: Some(turn_index),
-                        event: compact_skipped_event(
-                            input_tokens,
-                            threshold_tokens,
-                            "below threshold".to_owned(),
-                        ),
-                    },
-                )
-                .await;
             return;
         }
 
-        notify
-            .on_turn_event(
-                &self.id,
-                &TurnEvent::Response {
-                    turn_index: Some(turn_index),
-                    event: AgentEventKind::ResponseContextCompactStarted {
-                        input_tokens,
-                        threshold_tokens,
-                    },
-                },
-            )
-            .await;
         record_json(
             trace,
             trace_context,
@@ -728,19 +619,6 @@ impl AgentThread {
                         "messages": messages,
                     }),
                 );
-                notify
-                    .on_turn_event(
-                        &self.id,
-                        &TurnEvent::Response {
-                            turn_index: Some(turn_index),
-                            event: AgentEventKind::ResponseContextCompactCompleted {
-                                input_tokens,
-                                output_tokens,
-                                replaced_messages,
-                            },
-                        },
-                    )
-                    .await;
             }
             Ok(CompactOutcome::Skipped { reason }) => {
                 record_json(
@@ -754,15 +632,6 @@ impl AgentThread {
                         "reason": reason,
                     }),
                 );
-                notify
-                    .on_turn_event(
-                        &self.id,
-                        &TurnEvent::Response {
-                            turn_index: Some(turn_index),
-                            event: compact_skipped_event(input_tokens, threshold_tokens, reason),
-                        },
-                    )
-                    .await;
             }
             Err(error) => {
                 record_json(
@@ -776,44 +645,8 @@ impl AgentThread {
                         "reason": error.to_string(),
                     }),
                 );
-                notify
-                    .on_turn_event(
-                        &self.id,
-                        &TurnEvent::Response {
-                            turn_index: Some(turn_index),
-                            event: compact_skipped_event(
-                                input_tokens,
-                                threshold_tokens,
-                                error.to_string(),
-                            ),
-                        },
-                    )
-                    .await;
             }
         }
-    }
-
-    async fn emit_metrics(
-        &self,
-        notify: &Arc<dyn AgentNotifyPort>,
-        started_at: std::time::Instant,
-        success: bool,
-    ) {
-        notify
-            .on_turn_event(
-                &self.id,
-                &TurnEvent::Response {
-                    turn_index: None,
-                    event: AgentEventKind::ResponseMetrics {
-                        metrics: AgentMetrics {
-                            name: "agent_thread".to_owned(),
-                            duration_ms: started_at.elapsed().as_millis(),
-                            success: Some(success),
-                        },
-                    },
-                },
-            )
-            .await;
     }
 
     fn record_repetition_detected(

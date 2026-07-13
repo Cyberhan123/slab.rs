@@ -1,16 +1,19 @@
 //! Agent event hub for real-time agent event streaming.
 //!
 //! [`AgentEventHub`] implements both [`AgentNotifyPort`] (for status changes and
-//! turn events) and [`ApprovalPort`] (for interactive command approval).
+//! harness-protocol event messages) and [`ApprovalPort`] (for interactive
+//! command approval).
 //!
 //! # Design
 //!
-//! - One replaying event channel per thread, stored in a [`DashMap`].
-//!   Calling `subscribe_events()` returns recent events plus a live receiver.
+//! - One replaying event channel per thread, stored in a [`DashMap`]. Calling
+//!   `subscribe_event_msgs()` returns recent events plus a live receiver. The
+//!   channel carries slab-agent's harness protocol [`EventMsg`] (turn lifecycle
+//!   / text / reasoning / tool items).
 //! - Pending approvals are stored as `oneshot::Sender<ApprovalDecision>` keyed
-//!   by `"<thread_id>:<call_id>"`.  The HTTP approve handler must supply both
+//!   by `"<thread_id>:<call_id>"`. The HTTP approve handler must supply both
 //!   the thread ID (from the URL path) and the call_id to prevent cross-thread
-//!   approval.  Requests that receive no decision within
+//!   approval. Requests that receive no decision within
 //!   [`APPROVAL_TIMEOUT_SECS`] are automatically rejected.
 
 use std::sync::{Arc, Mutex};
@@ -18,8 +21,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use dashmap::DashMap;
 use slab_agent::{
-    AgentEventKind, ToolRiskAssessment,
-    port::{AgentNotifyPort, ApprovalDecision, ApprovalPort, ThreadStatus, TurnEvent},
+    ToolRiskAssessment,
+    port::{AgentNotifyPort, ApprovalDecision, ApprovalPort, ThreadStatus},
     protocol::EventMsg,
 };
 use tokio::sync::{broadcast, oneshot};
@@ -39,31 +42,18 @@ pub struct AgentEventHub {
     approvals: Arc<DashMap<String, oneshot::Sender<ApprovalDecision>>>,
 }
 
-/// Replay plus live receiver for an agent event stream.
-pub struct AgentEventSubscription {
-    pub replay: Vec<AgentEventEnvelope>,
-    pub receiver: broadcast::Receiver<AgentEventEnvelope>,
-}
-
 /// Replay plus live receiver for the harness-protocol event stream.
 ///
-/// Distinct from [`AgentEventSubscription`]: that carries `AgentEventKind`
-/// (the OpenAI `/responses` surface); this carries the slab-agent harness
-/// protocol [`EventMsg`] (turn lifecycle / text / reasoning / tool items).
+/// Carries the slab-agent harness protocol [`EventMsg`] (turn lifecycle / text /
+/// reasoning / tool items) consumed by the harness WS fan-out and turn-item
+/// persistence.
 pub struct AgentEventMsgSubscription {
     pub replay: Vec<AgentEventMsgEnvelope>,
     pub receiver: broadcast::Receiver<AgentEventMsgEnvelope>,
 }
 
-#[derive(Clone)]
-pub struct AgentEventEnvelope {
-    pub id: u64,
-    pub event: TurnEvent,
-}
-
-/// Envelope for a harness-protocol [`EventMsg`]. `id` shares the same per-thread
-/// monotonic counter as [`AgentEventEnvelope::id`], so the two streams can be
-/// merged deterministically by `id` if a future consumer needs total order.
+/// Envelope for a harness-protocol [`EventMsg`]. `id` is the per-thread
+/// monotonic counter used for replay ordering.
 #[derive(Clone)]
 pub struct AgentEventMsgEnvelope {
     pub id: u64,
@@ -72,7 +62,6 @@ pub struct AgentEventMsgEnvelope {
 
 #[derive(Clone)]
 struct EventChannel {
-    sender: broadcast::Sender<AgentEventEnvelope>,
     msg_sender: broadcast::Sender<AgentEventMsgEnvelope>,
     state: Arc<Mutex<EventChannelState>>,
 }
@@ -80,38 +69,19 @@ struct EventChannel {
 #[derive(Default)]
 struct EventChannelState {
     next_id: u64,
-    history: Vec<AgentEventEnvelope>,
     msg_history: Vec<AgentEventMsgEnvelope>,
 }
 
 impl EventChannel {
     fn new() -> Self {
-        let (sender, _) = broadcast::channel(CHANNEL_CAPACITY);
         let (msg_sender, _) = broadcast::channel(CHANNEL_CAPACITY);
-        Self { sender, msg_sender, state: Arc::new(Mutex::new(EventChannelState::default())) }
-    }
-
-    fn subscribe(&self) -> AgentEventSubscription {
-        let state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let receiver = self.sender.subscribe();
-        AgentEventSubscription { replay: state.history.clone(), receiver }
+        Self { msg_sender, state: Arc::new(Mutex::new(EventChannelState::default())) }
     }
 
     fn subscribe_msgs(&self) -> AgentEventMsgSubscription {
         let state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let receiver = self.msg_sender.subscribe();
         AgentEventMsgSubscription { replay: state.msg_history.clone(), receiver }
-    }
-
-    fn send(&self, event: TurnEvent) {
-        let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let envelope = AgentEventEnvelope { id: state.next_id, event };
-        state.next_id += 1;
-        if state.history.len() >= CHANNEL_CAPACITY {
-            state.history.remove(0);
-        }
-        state.history.push(envelope.clone());
-        let _ = self.sender.send(envelope);
     }
 
     fn send_msg(&self, msg: EventMsg) {
@@ -131,19 +101,10 @@ impl AgentEventHub {
         Self::default()
     }
 
-    /// Subscribe to the event stream for `thread_id`.
-    ///
-    /// Creates the channel on first call.  The returned subscription includes
-    /// recent events emitted before the subscription and all later live events.
-    pub fn subscribe_events(&self, thread_id: &str) -> AgentEventSubscription {
-        self.channel(thread_id).subscribe()
-    }
-
     /// Subscribe to the harness-protocol (`EventMsg`) stream for `thread_id`.
     ///
-    /// Sibling of [`Self::subscribe_events`]: same replay+live semantics, but
-    /// for the slab-agent harness protocol surface consumed by the harness WS
-    /// fan-out and turn-item persistence. Independent channel + history.
+    /// Creates the channel on first call. The returned subscription includes
+    /// recent events emitted before the subscription and all later live events.
     pub fn subscribe_event_msgs(&self, thread_id: &str) -> AgentEventMsgSubscription {
         self.channel(thread_id).subscribe_msgs()
     }
@@ -182,10 +143,6 @@ impl AgentEventHub {
         }
     }
 
-    fn broadcast(&self, thread_id: &str, event: TurnEvent) {
-        self.channel(thread_id).send(event);
-    }
-
     fn broadcast_msg(&self, thread_id: &str, msg: EventMsg) {
         self.channel(thread_id).send_msg(msg);
     }
@@ -203,14 +160,6 @@ fn approval_key(call_id: &str) -> String {
 impl AgentNotifyPort for AgentEventHub {
     async fn on_status_change(&self, thread_id: &str, status: ThreadStatus) {
         debug!(thread_id, ?status, "agent status change");
-        self.broadcast(
-            thread_id,
-            TurnEvent::Response { turn_index: None, event: AgentEventKind::AgentStatus { status } },
-        );
-    }
-
-    async fn on_turn_event(&self, thread_id: &str, event: &TurnEvent) {
-        self.broadcast(thread_id, event.clone());
     }
 
     async fn on_event_msg(&self, thread_id: &str, msg: &EventMsg) {
@@ -218,7 +167,7 @@ impl AgentNotifyPort for AgentEventHub {
     }
 }
 
-/// Notify port that fans out status changes and turn events to a list of
+/// Notify port that fans out status changes and event messages to a list of
 /// [`AgentNotifyPort`]s. Used to wire additional observers (e.g. the
 /// response-persistence observer) alongside [`AgentEventHub`].
 #[derive(Default)]
@@ -240,12 +189,6 @@ impl AgentNotifyPort for CompositeNotifyPort {
         }
     }
 
-    async fn on_turn_event(&self, thread_id: &str, event: &TurnEvent) {
-        for port in &self.inner {
-            port.on_turn_event(thread_id, event).await;
-        }
-    }
-
     async fn on_event_msg(&self, thread_id: &str, msg: &EventMsg) {
         for port in &self.inner {
             port.on_event_msg(thread_id, msg).await;
@@ -259,29 +202,13 @@ impl ApprovalPort for AgentEventHub {
         &self,
         thread_id: &str,
         call_id: &str,
-        tool_name: &str,
-        descriptor: &slab_exec_policy::OperationDescriptor,
-        risk: Option<ToolRiskAssessment>,
+        _tool_name: &str,
+        _descriptor: &slab_exec_policy::OperationDescriptor,
+        _risk: Option<ToolRiskAssessment>,
     ) -> ApprovalDecision {
         let (tx, rx) = oneshot::channel();
         let key = approval_key(call_id);
         self.approvals.insert(key.clone(), tx);
-
-        // Notify SSE subscribers that approval is needed.
-        self.broadcast(
-            thread_id,
-            TurnEvent::Response {
-                turn_index: None,
-                event: AgentEventKind::ResponseToolCallApprovalRequired {
-                    item_id: call_id.to_owned(),
-                    call_id: call_id.to_owned(),
-                    tool_name: tool_name.to_owned(),
-                    command: descriptor.subject.clone(),
-                    category: descriptor.category,
-                    risk,
-                },
-            },
-        );
 
         // Wait for an operator decision, but auto-reject after the timeout so
         // the agent turn is never permanently blocked.
@@ -314,38 +241,28 @@ impl ApprovalPort for AgentEventHub {
 
 #[cfg(test)]
 mod tests {
-    use slab_agent::port::TurnEvent;
-
     use super::AgentEventHub;
+    use slab_agent::protocol::EventMsg;
 
     #[test]
-    fn subscribe_events_replays_events_emitted_before_subscription() {
+    fn subscribe_event_msgs_replays_messages_emitted_before_subscription() {
         let adapter = AgentEventHub::new();
-        adapter.broadcast(
+        adapter.broadcast_msg(
             "thread-1",
-            TurnEvent::Response {
-                turn_index: Some(0),
-                event: slab_agent::AgentEventKind::ResponseOutputTextDone {
-                    item_id: "item-1".into(),
-                    output_index: 0,
-                    content_index: 0,
-                    text: "done".into(),
-                    artifact_refs: Vec::new(),
-                    reason: None,
-                    phase: None,
-                },
-            },
+            EventMsg::AgentMessageDelta(slab_agent::protocol::AgentMessageDeltaParams {
+                thread_id: "thread-1".to_owned(),
+                turn_id: "0".to_owned(),
+                item_id: "item-1".to_owned(),
+                delta: "done".into(),
+            }),
         );
 
-        let subscription = adapter.subscribe_events("thread-1");
+        let subscription = adapter.subscribe_event_msgs("thread-1");
 
         assert_eq!(subscription.replay.len(), 1);
         assert!(matches!(
-            &subscription.replay[0].event,
-            TurnEvent::Response {
-                event: slab_agent::AgentEventKind::ResponseOutputTextDone { text, .. },
-                ..
-            } if text == "done"
+            &subscription.replay[0].msg,
+            EventMsg::AgentMessageDelta(params) if params.delta == "done"
         ));
     }
 }

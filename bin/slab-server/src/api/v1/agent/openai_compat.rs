@@ -31,7 +31,8 @@ use serde_json::Value;
 // consumed them, and it imports them directly from `super::projection`.
 pub use slab_app_core::domain::services::agent::response::single_shot::StreamFrame;
 pub use slab_app_core::domain::services::agent::response::{
-    AdapterInput, StreamCtx, build_response, build_terminal_event, envelope_to_events,
+    AdapterInput, AgentEventEnvelope, AgentEventKind, AgentResponseRef, StreamCtx, TurnEvent,
+    build_response, build_terminal_event, envelope_to_events,
 };
 
 /// Build an OpenAI-style top-level error envelope `{"error": {...}}` for the

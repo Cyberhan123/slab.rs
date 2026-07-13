@@ -14,11 +14,10 @@ use slab_types::{
 use crate::{
     config::{AgentConfig, AgentToolChoice},
     error::AgentError,
-    event::{AgentArtifactKind, AgentArtifactRef, AgentEventKind, AgentMetrics},
     hook::{AgentHookRegistry, HookEvent, dispatch_registered_hooks},
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalPort, ExecPolicyPort, LlmPort, LlmStreamObserver,
-        ParsedToolCall, ThreadMessageRecord, ToolSpec, TurnEvent, TurnStateRecord,
+        ParsedToolCall, ThreadMessageRecord, ToolSpec, TurnStateRecord,
     },
     protocol::{
         AgentMessageDeltaParams, EventMsg, ItemCompletedParams, ItemStartedParams, ReasoningText,
@@ -67,7 +66,6 @@ pub(crate) async fn execute_turn(
     context: TurnExecutionContext<'_>,
     messages: &mut Vec<ConversationMessage>,
 ) -> Result<TurnOutcome, AgentError> {
-    let turn_started_at = std::time::Instant::now();
     if context.cancellation.is_cancelled() {
         return Err(AgentError::Interrupted);
     }
@@ -251,15 +249,7 @@ pub(crate) async fn execute_turn(
             .await;
             return Err(error);
         }
-        persist_final_answer(
-            &context,
-            messages,
-            response.content.unwrap_or_default(),
-            collect_turn_artifact_refs(messages),
-            None,
-        )
-        .await;
-        emit_turn_metrics(&context, turn_started_at, true).await;
+        persist_final_answer(&context, messages, response.content.unwrap_or_default()).await;
         persist_turn_state(
             &context,
             "completed",
@@ -302,15 +292,7 @@ pub(crate) async fn execute_turn(
             // 双轨 2: the deterministic `task.complete` gate passed; emit the
             // summary as the final answer and end the run (alongside the
             // existing `tool_calls.is_empty()` Final path).
-            persist_final_answer(
-                &context,
-                messages,
-                completion.summary,
-                completion.artifact_refs,
-                Some("completed".to_owned()),
-            )
-            .await;
-            emit_turn_metrics(&context, turn_started_at, true).await;
+            persist_final_answer(&context, messages, completion.summary).await;
             persist_turn_state(
                 &context,
                 "completed",
@@ -332,7 +314,6 @@ pub(crate) async fn execute_turn(
         }
     }
 
-    emit_turn_metrics(&context, turn_started_at, true).await;
     persist_turn_state(
         &context,
         "tool_calls_completed",
@@ -446,21 +427,6 @@ async fn record_invalid_tool_calls(
                 "reason": invalid_call.reason,
             }),
         );
-        context
-            .notify
-            .on_turn_event(
-                context.thread_id,
-                &TurnEvent::Response {
-                    turn_index: Some(context.turn_index),
-                    event: AgentEventKind::ResponseToolCallValidationFailed {
-                        item_id: invalid_call.tool_call.id.clone(),
-                        call_id: call_id.clone(),
-                        tool_name: invalid_call.tool_call.name.clone(),
-                        reason: invalid_call.reason.clone(),
-                    },
-                },
-            )
-            .await;
         let invalid_output = format!("invalid tool call: {}", invalid_call.reason);
         emit_tool_item_failed(
             context,
@@ -486,27 +452,7 @@ async fn persist_final_answer(
     context: &TurnExecutionContext<'_>,
     messages: &mut Vec<ConversationMessage>,
     content: String,
-    artifact_refs: Vec<AgentArtifactRef>,
-    reason: Option<String>,
 ) {
-    context
-        .notify
-        .on_turn_event(
-            context.thread_id,
-            &TurnEvent::Response {
-                turn_index: Some(context.turn_index),
-                event: AgentEventKind::ResponseOutputTextDone {
-                    item_id: assistant_item_id(context.turn_index),
-                    output_index: 0,
-                    content_index: 0,
-                    text: content.clone(),
-                    artifact_refs,
-                    reason,
-                    phase: None,
-                },
-            },
-        )
-        .await;
     emit_agent_message_completed(
         context.notify,
         context.thread_id,
@@ -537,68 +483,6 @@ async fn persist_final_answer(
     messages.push(message);
 }
 
-fn collect_turn_artifact_refs(messages: &[ConversationMessage]) -> Vec<AgentArtifactRef> {
-    let mut refs = messages
-        .iter()
-        .rev()
-        .take_while(|message| message.role == "tool")
-        .filter_map(tool_message_artifact_ref)
-        .collect::<Vec<_>>();
-    refs.reverse();
-    refs
-}
-
-fn tool_message_artifact_ref(message: &ConversationMessage) -> Option<AgentArtifactRef> {
-    let raw = message.content.rendered_text();
-    let value = serde_json::from_str::<serde_json::Value>(raw.trim()).ok()?;
-    let surface = value.get("surface").and_then(serde_json::Value::as_str)?;
-    match surface {
-        "workspace" => string_field(&value, "revealPath")
-            .or_else(|| string_field(&value, "path"))
-            .and_then(|path| normalize_workspace_artifact_path(&path))
-            .map(|path| AgentArtifactRef { path, kind: AgentArtifactKind::File }),
-        "review" => string_field(&value, "path")
-            .and_then(|path| normalize_workspace_artifact_path(&path))
-            .map(|path| AgentArtifactRef { path, kind: AgentArtifactKind::Diff }),
-        "image" => string_field(&value, "path")
-            .and_then(|path| normalize_workspace_artifact_path(&path))
-            .map(|path| AgentArtifactRef { path, kind: AgentArtifactKind::Image }),
-        _ => None,
-    }
-}
-
-fn string_field(value: &serde_json::Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
-}
-
-fn normalize_workspace_artifact_path(path: &str) -> Option<String> {
-    let trimmed = path.trim();
-    if trimmed.is_empty() || is_absolute_or_drive_path(trimmed) {
-        return None;
-    }
-
-    let normalized = trimmed.replace('\\', "/");
-    let parts =
-        normalized.split('/').filter(|part| !part.is_empty() && *part != ".").collect::<Vec<_>>();
-    if parts.is_empty() || parts.contains(&"..") {
-        return None;
-    }
-
-    Some(parts.join("/"))
-}
-
-fn is_absolute_or_drive_path(path: &str) -> bool {
-    let bytes = path.as_bytes();
-    path.starts_with('/')
-        || path.starts_with('\\')
-        || (bytes.first().is_some_and(u8::is_ascii_alphabetic) && bytes.get(1) == Some(&b':'))
-}
-
 async fn emit_unstreamed_tool_text(
     context: &TurnExecutionContext<'_>,
     content: Option<&str>,
@@ -611,21 +495,6 @@ async fn emit_unstreamed_tool_text(
         return;
     }
 
-    context
-        .notify
-        .on_turn_event(
-            context.thread_id,
-            &TurnEvent::Response {
-                turn_index: Some(context.turn_index),
-                event: AgentEventKind::ResponseOutputTextDelta {
-                    item_id: assistant_item_id(context.turn_index),
-                    output_index: 0,
-                    content_index: 0,
-                    delta: text.to_owned(),
-                },
-            },
-        )
-        .await;
     // This path only runs when the content was NOT streamed, so the streaming
     // observer never announced the item — emit the harness ItemStarted here,
     // then the delta (mirrors the projection's first-delta behavior).
@@ -757,29 +626,6 @@ fn append_observations(messages: &mut Vec<ConversationMessage>, observations: Ve
     }
 }
 
-async fn emit_turn_metrics(
-    context: &TurnExecutionContext<'_>,
-    started_at: std::time::Instant,
-    success: bool,
-) {
-    context
-        .notify
-        .on_turn_event(
-            context.thread_id,
-            &TurnEvent::Response {
-                turn_index: Some(context.turn_index),
-                event: AgentEventKind::ResponseMetrics {
-                    metrics: AgentMetrics {
-                        name: "agent_turn".to_owned(),
-                        duration_ms: started_at.elapsed().as_millis(),
-                        success: Some(success),
-                    },
-                },
-            },
-        )
-        .await;
-}
-
 fn assistant_item_id(turn_index: u32) -> String {
     format!("assistant-{turn_index}")
 }
@@ -816,10 +662,10 @@ fn parsed_tool_calls_trace_payload(tool_calls: &[ParsedToolCall]) -> serde_json:
 
 // ── Harness-protocol (EventMsg) text/reasoning emits ──────────────────────────
 //
-// Direct emits of the harness protocol alongside the legacy `AgentEventKind`
-// emits (which feed `/responses`). These mirror, byte-for-byte, what
-// `HarnessProjection` used to derive from `AgentEventKind`, so the wire is
-// unchanged; they exist so the harness can consume `EventMsg` directly.
+// The harness text/reasoning emits. slab-agent speaks `EventMsg` (its harness
+// protocol) exclusively — the legacy `AgentEventKind`/`/responses` wire left
+// this crate in slice C3. These mirror, byte-for-byte, what `HarnessProjection`
+// used to derive so the harness wire is unchanged.
 
 fn harness_turn_id(turn_index: u32) -> String {
     turn_index.to_string()
@@ -923,20 +769,6 @@ impl LlmStreamObserver for TurnTextDeltaObserver<'_> {
             return Ok(());
         }
 
-        self.notify
-            .on_turn_event(
-                self.thread_id,
-                &TurnEvent::Response {
-                    turn_index: Some(self.turn_index),
-                    event: AgentEventKind::ResponseOutputTextDelta {
-                        item_id: assistant_item_id(self.turn_index),
-                        output_index: 0,
-                        content_index: 0,
-                        delta: delta.to_owned(),
-                    },
-                },
-            )
-            .await;
         let item_id = assistant_item_id(self.turn_index);
         if !self.text_started {
             self.text_started = true;
@@ -953,20 +785,6 @@ impl LlmStreamObserver for TurnTextDeltaObserver<'_> {
             return Ok(());
         }
 
-        self.notify
-            .on_turn_event(
-                self.thread_id,
-                &TurnEvent::Response {
-                    turn_index: Some(self.turn_index),
-                    event: AgentEventKind::ResponseReasoningTextDelta {
-                        item_id: assistant_item_id(self.turn_index),
-                        output_index: 0,
-                        content_index: 0,
-                        delta: delta.to_owned(),
-                    },
-                },
-            )
-            .await;
         emit_reasoning_delta_msg(
             self.notify,
             self.thread_id,
@@ -983,22 +801,6 @@ impl LlmStreamObserver for TurnTextDeltaObserver<'_> {
             return Ok(());
         }
 
-        self.notify
-            .on_turn_event(
-                self.thread_id,
-                &TurnEvent::Response {
-                    turn_index: Some(self.turn_index),
-                    event: AgentEventKind::ResponseReasoningTextDone {
-                        item_id: assistant_item_id(self.turn_index),
-                        output_index: 0,
-                        content_index: 0,
-                        text: text.to_owned(),
-                        encrypted_content: None,
-                        summary: None,
-                    },
-                },
-            )
-            .await;
         emit_reasoning_completed(
             self.notify,
             self.thread_id,
@@ -1013,11 +815,7 @@ impl LlmStreamObserver for TurnTextDeltaObserver<'_> {
 
 #[cfg(test)]
 mod tests {
-    use slab_types::{ConversationMessage, ConversationMessageContent};
-
-    use crate::event::AgentArtifactKind;
-
-    use super::{collect_turn_artifact_refs, is_external_tool_name};
+    use super::is_external_tool_name;
 
     #[test]
     fn is_external_tool_name_classifies_offline_droppable_tools() {
@@ -1036,56 +834,5 @@ mod tests {
         ] {
             assert!(!is_external_tool_name(local), "{local} should stay available offline");
         }
-    }
-
-    fn message(role: &str, content: &str) -> ConversationMessage {
-        ConversationMessage {
-            role: role.to_owned(),
-            content: ConversationMessageContent::Text(content.to_owned()),
-            name: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn collect_turn_artifact_refs_uses_only_latest_tool_block() {
-        let messages = vec![
-            message("tool", r#"{"surface":"workspace","revealPath":"old.rs","opened":true}"#),
-            message("assistant", "older answer"),
-            message("tool", r#"{"surface":"workspace","revealPath":"src\\main.rs","opened":true}"#),
-            message("tool", r#"{"surface":"review","path":"src/lib.rs","opened":true}"#),
-        ];
-
-        let refs = collect_turn_artifact_refs(&messages);
-
-        assert_eq!(refs.len(), 2);
-        assert_eq!(refs[0].path, "src/main.rs");
-        assert_eq!(refs[0].kind, AgentArtifactKind::File);
-        assert_eq!(refs[1].path, "src/lib.rs");
-        assert_eq!(refs[1].kind, AgentArtifactKind::Diff);
-    }
-
-    #[test]
-    fn collect_turn_artifact_refs_drops_unsafe_and_non_path_payloads() {
-        let messages = vec![
-            message(
-                "tool",
-                r#"{"surface":"workspace","revealPath":"C:/Users/example/.ssh/id_rsa","opened":true}"#,
-            ),
-            message(
-                "tool",
-                r#"{"surface":"review","diff":"diff --git a/src/lib.rs b/src/lib.rs","opened":true}"#,
-            ),
-            message("tool", r#"{"surface":"image","prompt":"draw a logo","opened":true}"#),
-            message(
-                "tool",
-                r#"{"surface":"workspace","revealPath":"../outside.rs","opened":true}"#,
-            ),
-        ];
-
-        let refs = collect_turn_artifact_refs(&messages);
-
-        assert!(refs.is_empty());
     }
 }

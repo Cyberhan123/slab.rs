@@ -8,7 +8,10 @@
 
 use serde_json::Value;
 
-use super::{AdapterInput, StreamCtx, build_error_response, build_response, envelope_to_events};
+use super::{
+    AdapterInput, AgentEventEnvelope, AgentEventKind, AgentResponseRef, StreamCtx, TurnEvent,
+    build_error_response, build_response, envelope_to_events,
+};
 
 const PHASE_1_JSON: &str = include_str!(
     "../../../../../../../testdata/fixtures/openai-compatible/responses/openai-phase.1.json"
@@ -158,7 +161,7 @@ fn non_streaming_message_with_phase_round_trips() {
     let expected = parse_fixture(PHASE_1_JSON);
 
     let envelopes = vec![
-        envelope(slab_agent::AgentEventKind::ResponseOutputTextDone {
+        envelope(AgentEventKind::ResponseOutputTextDone {
             item_id: "msg-1".to_owned(),
             output_index: 0,
             content_index: 0,
@@ -167,7 +170,7 @@ fn non_streaming_message_with_phase_round_trips() {
             reason: None,
             phase: Some("commentary".to_owned()),
         }),
-        envelope(slab_agent::AgentEventKind::ResponseOutputTextDone {
+        envelope(AgentEventKind::ResponseOutputTextDone {
             item_id: "msg-2".to_owned(),
             output_index: 1,
             content_index: 0,
@@ -193,13 +196,8 @@ fn non_streaming_message_with_phase_round_trips() {
     assert_eq!(expected, actual);
 }
 
-fn envelope(
-    event: slab_agent::AgentEventKind,
-) -> slab_app_core::infra::agent::event_hub::AgentEventEnvelope {
-    slab_app_core::infra::agent::event_hub::AgentEventEnvelope {
-        id: 0,
-        event: slab_agent::TurnEvent::Response { turn_index: Some(0), event },
-    }
+fn envelope(event: AgentEventKind) -> AgentEventEnvelope {
+    AgentEventEnvelope { id: 0, event: TurnEvent::Response { turn_index: Some(0), event } }
 }
 
 // ---------------------------------------------------------------------------
@@ -264,7 +262,7 @@ fn non_streaming_reasoning_round_trips() {
     let message_text = "12 + 7 = 19\n19 \u{d7} 3 = 57\n57 \u{d7} 10 = 570\n\nFinal result: 570";
 
     let envelopes = vec![
-        envelope(slab_agent::AgentEventKind::ResponseReasoningTextDone {
+        envelope(AgentEventKind::ResponseReasoningTextDone {
             item_id: "rs_1".to_owned(),
             output_index: 0,
             content_index: 0,
@@ -272,7 +270,7 @@ fn non_streaming_reasoning_round_trips() {
             encrypted_content: Some("opaque".to_owned()),
             summary: Some(reasoning_summary.to_owned()),
         }),
-        envelope(slab_agent::AgentEventKind::ResponseOutputTextDone {
+        envelope(AgentEventKind::ResponseOutputTextDone {
             item_id: "msg_1".to_owned(),
             output_index: 1,
             content_index: 0,
@@ -458,7 +456,7 @@ fn non_streaming_function_call_round_trips() {
     let expected = parse_fixture(FUNCTION_CALL_JSON);
 
     let arguments = "{\"location\":\"San Francisco, CA\",\"unit\":\"fahrenheit\"}";
-    let envelopes = vec![envelope(slab_agent::AgentEventKind::ResponseFunctionCallArgumentsDone {
+    let envelopes = vec![envelope(AgentEventKind::ResponseFunctionCallArgumentsDone {
         item_id: "fc_1".to_owned(),
         call_id: "call_test".to_owned(),
         name: "get_weather".to_owned(),
@@ -530,10 +528,7 @@ fn redacted_chunks(raw: &str) -> Vec<Value> {
 
 /// Drive a sequence of slab envelopes through [`envelope_to_events`] and collect
 /// the redacted serialized events.
-fn redacted_stream_events(
-    envelopes: &[slab_app_core::infra::agent::event_hub::AgentEventEnvelope],
-    ctx: &mut StreamCtx,
-) -> Vec<Value> {
+fn redacted_stream_events(envelopes: &[AgentEventEnvelope], ctx: &mut StreamCtx) -> Vec<Value> {
     let mut out = Vec::new();
     for env in envelopes {
         for ev in envelope_to_events(env, ctx) {
@@ -582,15 +577,12 @@ fn i32_field(v: &Value, key: &str) -> i32 {
 ///
 /// `phase` for each message item is recovered from the `output_item.added`
 /// wrapper (the slab `ResponseOutputTextDelta` event does not carry it).
-fn envelopes_from_chunks(
-    raw: &str,
-) -> Vec<slab_app_core::infra::agent::event_hub::AgentEventEnvelope> {
-    use slab_agent::{AgentResponseRef, TurnEvent};
+fn envelopes_from_chunks(raw: &str) -> Vec<AgentEventEnvelope> {
     use slab_types::agent::AgentThreadStatus;
 
     let mut item_phase: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
-    let mut envelopes: Vec<slab_app_core::infra::agent::event_hub::AgentEventEnvelope> = Vec::new();
+    let mut envelopes: Vec<AgentEventEnvelope> = Vec::new();
 
     for line in raw.lines() {
         let line = line.trim();
@@ -600,19 +592,19 @@ fn envelopes_from_chunks(
         let v: Value = serde_json::from_str(line).expect("chunk line parses");
         let ty = str_field(&v, "type");
         let event = match ty {
-            "response.created" => Some(slab_agent::AgentEventKind::ResponseQueued {
+            "response.created" => Some(AgentEventKind::ResponseQueued {
                 response: AgentResponseRef {
                     id: "resp_test".to_owned(),
                     status: AgentThreadStatus::Pending,
                 },
             }),
-            "response.in_progress" => Some(slab_agent::AgentEventKind::ResponseInProgress {
+            "response.in_progress" => Some(AgentEventKind::ResponseInProgress {
                 response: AgentResponseRef {
                     id: "resp_test".to_owned(),
                     status: AgentThreadStatus::Running,
                 },
             }),
-            "response.completed" => Some(slab_agent::AgentEventKind::ResponseCompleted {
+            "response.completed" => Some(AgentEventKind::ResponseCompleted {
                 response: AgentResponseRef {
                     id: "resp_test".to_owned(),
                     status: AgentThreadStatus::Running,
@@ -629,7 +621,7 @@ fn envelopes_from_chunks(
             }
             "response.output_text.delta" => {
                 let item_id = str_field(&v, "item_id").to_owned();
-                Some(slab_agent::AgentEventKind::ResponseOutputTextDelta {
+                Some(AgentEventKind::ResponseOutputTextDelta {
                     item_id,
                     output_index: i32_field(&v, "output_index"),
                     content_index: i32_field(&v, "content_index"),
@@ -639,7 +631,7 @@ fn envelopes_from_chunks(
             "response.output_text.done" => {
                 let item_id = str_field(&v, "item_id").to_owned();
                 let phase = item_phase.get(&item_id).cloned();
-                Some(slab_agent::AgentEventKind::ResponseOutputTextDone {
+                Some(AgentEventKind::ResponseOutputTextDone {
                     item_id,
                     output_index: i32_field(&v, "output_index"),
                     content_index: i32_field(&v, "content_index"),
@@ -652,7 +644,7 @@ fn envelopes_from_chunks(
             _ => None,
         };
         if let Some(event) = event {
-            envelopes.push(slab_app_core::infra::agent::event_hub::AgentEventEnvelope {
+            envelopes.push(AgentEventEnvelope {
                 id: 0,
                 event: TurnEvent::Response { turn_index: Some(0), event },
             });
@@ -764,7 +756,7 @@ fn write_sql_tool() -> slab_proto::openai::Tool {
 fn custom_tool_non_streaming_round_trips() {
     let expected = parse_fixture(CUSTOM_TOOL_JSON);
 
-    let envelopes = vec![envelope(slab_agent::AgentEventKind::ResponseCustomToolCallInputDone {
+    let envelopes = vec![envelope(AgentEventKind::ResponseCustomToolCallInputDone {
         item_id: "ct_1".to_owned(),
         call_id: "call_test".to_owned(),
         name: "write_sql".to_owned(),
@@ -820,21 +812,21 @@ fn custom_tool_streaming_round_trips() {
     let final_input = "SELECT * FROM users WHERE age > 25";
 
     let mut envelopes = vec![
-        envelope(slab_agent::AgentEventKind::ResponseQueued {
-            response: slab_agent::AgentResponseRef {
+        envelope(AgentEventKind::ResponseQueued {
+            response: AgentResponseRef {
                 id: "resp_test".to_owned(),
                 status: slab_types::agent::AgentThreadStatus::Pending,
             },
         }),
-        envelope(slab_agent::AgentEventKind::ResponseInProgress {
-            response: slab_agent::AgentResponseRef {
+        envelope(AgentEventKind::ResponseInProgress {
+            response: AgentResponseRef {
                 id: "resp_test".to_owned(),
                 status: slab_types::agent::AgentThreadStatus::Running,
             },
         }),
     ];
     for d in &deltas {
-        envelopes.push(envelope(slab_agent::AgentEventKind::ResponseCustomToolCallInputDelta {
+        envelopes.push(envelope(AgentEventKind::ResponseCustomToolCallInputDelta {
             item_id: "ct_1".to_owned(),
             call_id: "call_test".to_owned(),
             name: "write_sql".to_owned(),
@@ -842,7 +834,7 @@ fn custom_tool_streaming_round_trips() {
             delta: (*d).to_owned(),
         }));
     }
-    envelopes.push(envelope(slab_agent::AgentEventKind::ResponseCustomToolCallInputDone {
+    envelopes.push(envelope(AgentEventKind::ResponseCustomToolCallInputDone {
         item_id: "ct_1".to_owned(),
         call_id: "call_test".to_owned(),
         name: "write_sql".to_owned(),
@@ -850,8 +842,8 @@ fn custom_tool_streaming_round_trips() {
         input: final_input.to_owned(),
         namespace: None,
     }));
-    envelopes.push(envelope(slab_agent::AgentEventKind::ResponseCompleted {
-        response: slab_agent::AgentResponseRef {
+    envelopes.push(envelope(AgentEventKind::ResponseCompleted {
+        response: AgentResponseRef {
             id: "resp_test".to_owned(),
             status: slab_types::agent::AgentThreadStatus::Completed,
         },
@@ -913,7 +905,7 @@ fn local_shell_non_streaming_round_trips() {
     let expected = parse_fixture(LOCAL_SHELL_JSON);
 
     let envelopes = vec![
-        envelope(slab_agent::AgentEventKind::ResponseReasoningTextDone {
+        envelope(AgentEventKind::ResponseReasoningTextDone {
             item_id: "rs_1".to_owned(),
             output_index: 0,
             content_index: 0,
@@ -921,7 +913,7 @@ fn local_shell_non_streaming_round_trips() {
             encrypted_content: None,
             summary: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseLocalShellCallDone {
+        envelope(AgentEventKind::ResponseLocalShellCallDone {
             item_id: "lsh_1".to_owned(),
             call_id: "call_test".to_owned(),
             output_index: 1,
@@ -977,19 +969,19 @@ fn local_shell_streaming_round_trips() {
     let expected = redacted_chunks(LOCAL_SHELL_CHUNKS);
 
     let envelopes = vec![
-        envelope(slab_agent::AgentEventKind::ResponseQueued {
-            response: slab_agent::AgentResponseRef {
+        envelope(AgentEventKind::ResponseQueued {
+            response: AgentResponseRef {
                 id: "resp_test".to_owned(),
                 status: slab_types::agent::AgentThreadStatus::Pending,
             },
         }),
-        envelope(slab_agent::AgentEventKind::ResponseInProgress {
-            response: slab_agent::AgentResponseRef {
+        envelope(AgentEventKind::ResponseInProgress {
+            response: AgentResponseRef {
                 id: "resp_test".to_owned(),
                 status: slab_types::agent::AgentThreadStatus::Running,
             },
         }),
-        envelope(slab_agent::AgentEventKind::ResponseReasoningTextDone {
+        envelope(AgentEventKind::ResponseReasoningTextDone {
             item_id: "rs_1".to_owned(),
             output_index: 0,
             content_index: 0,
@@ -997,7 +989,7 @@ fn local_shell_streaming_round_trips() {
             encrypted_content: None,
             summary: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseLocalShellCallDone {
+        envelope(AgentEventKind::ResponseLocalShellCallDone {
             item_id: "lsh_1".to_owned(),
             call_id: "call_test".to_owned(),
             output_index: 1,
@@ -1005,8 +997,8 @@ fn local_shell_streaming_round_trips() {
             env: std::collections::HashMap::new(),
             working_directory: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseCompleted {
-            response: slab_agent::AgentResponseRef {
+        envelope(AgentEventKind::ResponseCompleted {
+            response: AgentResponseRef {
                 id: "resp_test".to_owned(),
                 status: slab_types::agent::AgentThreadStatus::Completed,
             },
@@ -1076,7 +1068,7 @@ fn apply_patch_non_streaming_round_trips() {
     let expected = parse_fixture(APPLY_PATCH_JSON);
 
     let diff = "+## Shopping Checklist\n+\n+- [ ] Milk\n+- [ ] Bread\n+- [ ] Eggs\n+- [ ] Apples\n+- [ ] Coffee\n+\n";
-    let envelopes = vec![envelope(slab_agent::AgentEventKind::ResponseApplyPatchCallDone {
+    let envelopes = vec![envelope(AgentEventKind::ResponseApplyPatchCallDone {
         item_id: "apc_1".to_owned(),
         call_id: "call_test".to_owned(),
         output_index: 0,
@@ -1133,19 +1125,19 @@ fn apply_patch_delete_streaming_round_trips() {
     let expected = redacted_chunks(APPLY_PATCH_DELETE_CHUNKS);
 
     let envelopes = vec![
-        envelope(slab_agent::AgentEventKind::ResponseQueued {
-            response: slab_agent::AgentResponseRef {
+        envelope(AgentEventKind::ResponseQueued {
+            response: AgentResponseRef {
                 id: "resp_test".to_owned(),
                 status: slab_types::agent::AgentThreadStatus::Pending,
             },
         }),
-        envelope(slab_agent::AgentEventKind::ResponseInProgress {
-            response: slab_agent::AgentResponseRef {
+        envelope(AgentEventKind::ResponseInProgress {
+            response: AgentResponseRef {
                 id: "resp_test".to_owned(),
                 status: slab_types::agent::AgentThreadStatus::Running,
             },
         }),
-        envelope(slab_agent::AgentEventKind::ResponseApplyPatchCallDone {
+        envelope(AgentEventKind::ResponseApplyPatchCallDone {
             item_id: "apc_delete_001".to_owned(),
             call_id: "call_delete_1".to_owned(),
             output_index: 0,
@@ -1153,8 +1145,8 @@ fn apply_patch_delete_streaming_round_trips() {
             path: "obsolete.txt".to_owned(),
             diff: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseCompleted {
-            response: slab_agent::AgentResponseRef {
+        envelope(AgentEventKind::ResponseCompleted {
+            response: AgentResponseRef {
                 id: "resp_test".to_owned(),
                 status: slab_types::agent::AgentThreadStatus::Completed,
             },
@@ -1268,20 +1260,20 @@ fn streaming_error_round_trips() {
     let expected = redacted_chunks(ERROR_CHUNKS);
 
     let envelopes = vec![
-        envelope(slab_agent::AgentEventKind::ResponseQueued {
-            response: slab_agent::AgentResponseRef {
+        envelope(AgentEventKind::ResponseQueued {
+            response: AgentResponseRef {
                 id: "resp_test".to_owned(),
                 status: slab_types::agent::AgentThreadStatus::Pending,
             },
         }),
-        envelope(slab_agent::AgentEventKind::ResponseInProgress {
-            response: slab_agent::AgentResponseRef {
+        envelope(AgentEventKind::ResponseInProgress {
+            response: AgentResponseRef {
                 id: "resp_test".to_owned(),
                 status: slab_types::agent::AgentThreadStatus::Running,
             },
         }),
-        envelope(slab_agent::AgentEventKind::ResponseFailed {
-            response: slab_agent::AgentResponseRef {
+        envelope(AgentEventKind::ResponseFailed {
+            response: AgentResponseRef {
                 id: "resp_test".to_owned(),
                 status: slab_types::agent::AgentThreadStatus::Errored,
             },
@@ -1348,21 +1340,21 @@ fn streaming_function_call_arguments_delta_round_trips() {
     ];
 
     let mut envelopes = vec![
-        envelope(slab_agent::AgentEventKind::ResponseQueued {
-            response: slab_agent::AgentResponseRef {
+        envelope(AgentEventKind::ResponseQueued {
+            response: AgentResponseRef {
                 id: "resp_test".to_owned(),
                 status: slab_types::agent::AgentThreadStatus::Pending,
             },
         }),
-        envelope(slab_agent::AgentEventKind::ResponseInProgress {
-            response: slab_agent::AgentResponseRef {
+        envelope(AgentEventKind::ResponseInProgress {
+            response: AgentResponseRef {
                 id: "resp_test".to_owned(),
                 status: slab_types::agent::AgentThreadStatus::Running,
             },
         }),
     ];
     for d in &deltas {
-        envelopes.push(envelope(slab_agent::AgentEventKind::ResponseFunctionCallArgumentsDelta {
+        envelopes.push(envelope(AgentEventKind::ResponseFunctionCallArgumentsDelta {
             item_id: item_id.clone(),
             call_id: call_id.clone(),
             name: name.clone(),
@@ -1370,7 +1362,7 @@ fn streaming_function_call_arguments_delta_round_trips() {
             delta: (*d).to_owned(),
         }));
     }
-    envelopes.push(envelope(slab_agent::AgentEventKind::ResponseFunctionCallArgumentsDone {
+    envelopes.push(envelope(AgentEventKind::ResponseFunctionCallArgumentsDone {
         item_id: item_id.clone(),
         call_id,
         name,
@@ -1379,8 +1371,8 @@ fn streaming_function_call_arguments_delta_round_trips() {
         namespace: None,
         risk: None,
     }));
-    envelopes.push(envelope(slab_agent::AgentEventKind::ResponseCompleted {
-        response: slab_agent::AgentResponseRef {
+    envelopes.push(envelope(AgentEventKind::ResponseCompleted {
+        response: AgentResponseRef {
             id: "resp_test".to_owned(),
             status: slab_types::agent::AgentThreadStatus::Completed,
         },
@@ -1488,7 +1480,7 @@ fn compaction_non_streaming_round_trips() {
         .to_owned();
 
     let envelopes = vec![
-        envelope(slab_agent::AgentEventKind::ResponseOutputTextDone {
+        envelope(AgentEventKind::ResponseOutputTextDone {
             item_id: "msg_1".to_owned(),
             output_index: 0,
             content_index: 0,
@@ -1497,7 +1489,7 @@ fn compaction_non_streaming_round_trips() {
             reason: None,
             phase: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseCompactionDone {
+        envelope(AgentEventKind::ResponseCompactionDone {
             item_id: "cmp_1".to_owned(),
             output_index: 1,
             encrypted_content: encrypted,
@@ -1601,21 +1593,21 @@ fn tool_search_non_streaming_round_trips() {
         .unwrap_or_default();
 
     let envelopes = vec![
-        envelope(slab_agent::AgentEventKind::ResponseToolSearchCallDone {
+        envelope(AgentEventKind::ResponseToolSearchCallDone {
             item_id: "tsc_1".to_owned(),
             output_index: 0,
             execution: "server".to_owned(),
             call_id: None,
             arguments: serde_json::json!({ "paths": ["get_weather"] }),
         }),
-        envelope(slab_agent::AgentEventKind::ResponseToolSearchOutputDone {
+        envelope(AgentEventKind::ResponseToolSearchOutputDone {
             item_id: "tso_1".to_owned(),
             output_index: 1,
             execution: "server".to_owned(),
             call_id: None,
             tools: tso_tools,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseFunctionCallArgumentsDone {
+        envelope(AgentEventKind::ResponseFunctionCallArgumentsDone {
             item_id: "fc_1".to_owned(),
             call_id: "call_test".to_owned(),
             name: "get_weather".to_owned(),
@@ -1681,7 +1673,7 @@ fn tool_search_non_streaming_round_trips() {
 fn client_tool_search_non_streaming_round_trips() {
     let expected = parse_fixture(CLIENT_TOOL_SEARCH_JSON);
 
-    let envelopes = vec![envelope(slab_agent::AgentEventKind::ResponseToolSearchCallDone {
+    let envelopes = vec![envelope(AgentEventKind::ResponseToolSearchCallDone {
         item_id: "tsc_1".to_owned(),
         output_index: 0,
         execution: "client".to_owned(),
@@ -1780,14 +1772,14 @@ fn mcp_tool_non_streaming_round_trips() {
         .to_owned();
 
     let envelopes = vec![
-        envelope(slab_agent::AgentEventKind::ResponseMcpListToolsDone {
+        envelope(AgentEventKind::ResponseMcpListToolsDone {
             item_id: "mcpl_1".to_owned(),
             output_index: 0,
             server_label: list_server_label,
             tools: list_tools,
             error: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseReasoningTextDone {
+        envelope(AgentEventKind::ResponseReasoningTextDone {
             item_id: "rs_1".to_owned(),
             output_index: 1,
             content_index: 0,
@@ -1795,7 +1787,7 @@ fn mcp_tool_non_streaming_round_trips() {
             encrypted_content: None,
             summary: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseMcpCallDone {
+        envelope(AgentEventKind::ResponseMcpCallDone {
             item_id: "mcp_1".to_owned(),
             output_index: 2,
             server_label: call_server_label,
@@ -1806,7 +1798,7 @@ fn mcp_tool_non_streaming_round_trips() {
             status: Some("completed".to_owned()),
             approval_request_id: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseReasoningTextDone {
+        envelope(AgentEventKind::ResponseReasoningTextDone {
             item_id: "rs_2".to_owned(),
             output_index: 3,
             content_index: 0,
@@ -1814,7 +1806,7 @@ fn mcp_tool_non_streaming_round_trips() {
             encrypted_content: None,
             summary: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseOutputTextDone {
+        envelope(AgentEventKind::ResponseOutputTextDone {
             item_id: "msg_1".to_owned(),
             output_index: 4,
             content_index: 0,
@@ -1885,7 +1877,7 @@ const SHELL_TOOL_JSON: &str = include_str!(
 fn shell_tool_non_streaming_round_trips() {
     let expected = parse_fixture(SHELL_TOOL_JSON);
 
-    let envelopes = vec![envelope(slab_agent::AgentEventKind::ResponseFunctionShellCallDone {
+    let envelopes = vec![envelope(AgentEventKind::ResponseFunctionShellCallDone {
         item_id: "sh_1".to_owned(),
         call_id: "call_test".to_owned(),
         output_index: 0,
@@ -2007,7 +1999,7 @@ fn file_search_non_streaming_round_trips() {
     let expected = strip_annotations(parse_fixture(FILE_SEARCH_JSON));
 
     let envelopes = vec![
-        envelope(slab_agent::AgentEventKind::ResponseReasoningTextDone {
+        envelope(AgentEventKind::ResponseReasoningTextDone {
             item_id: "rs_1".to_owned(),
             output_index: 0,
             content_index: 0,
@@ -2015,7 +2007,7 @@ fn file_search_non_streaming_round_trips() {
             encrypted_content: None,
             summary: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseFileSearchCallDone {
+        envelope(AgentEventKind::ResponseFileSearchCallDone {
             item_id: "fs_1".to_owned(),
             output_index: 1,
             queries: vec![
@@ -2026,7 +2018,7 @@ fn file_search_non_streaming_round_trips() {
             ],
             results: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseReasoningTextDone {
+        envelope(AgentEventKind::ResponseReasoningTextDone {
             item_id: "rs_2".to_owned(),
             output_index: 2,
             content_index: 0,
@@ -2034,7 +2026,7 @@ fn file_search_non_streaming_round_trips() {
             encrypted_content: None,
             summary: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseOutputTextDone {
+        envelope(AgentEventKind::ResponseOutputTextDone {
             item_id: "msg_1".to_owned(),
             output_index: 3,
             content_index: 0,
@@ -2111,7 +2103,7 @@ fn image_generation_non_streaming_round_trips() {
     let revised_prompt = ig.get("revised_prompt").and_then(|v| v.as_str()).map(|s| s.to_owned());
 
     let envelopes = vec![
-        envelope(slab_agent::AgentEventKind::ResponseReasoningTextDone {
+        envelope(AgentEventKind::ResponseReasoningTextDone {
             item_id: "rs_1".to_owned(),
             output_index: 0,
             content_index: 0,
@@ -2119,7 +2111,7 @@ fn image_generation_non_streaming_round_trips() {
             encrypted_content: None,
             summary: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseImageGenCallDone {
+        envelope(AgentEventKind::ResponseImageGenCallDone {
             item_id: "ig_1".to_owned(),
             output_index: 1,
             result,
@@ -2129,7 +2121,7 @@ fn image_generation_non_streaming_round_trips() {
             quality: "low".to_owned(),
             size: "1024x1024".to_owned(),
         }),
-        envelope(slab_agent::AgentEventKind::ResponseReasoningTextDone {
+        envelope(AgentEventKind::ResponseReasoningTextDone {
             item_id: "rs_2".to_owned(),
             output_index: 2,
             content_index: 0,
@@ -2137,7 +2129,7 @@ fn image_generation_non_streaming_round_trips() {
             encrypted_content: None,
             summary: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseOutputTextDone {
+        envelope(AgentEventKind::ResponseOutputTextDone {
             item_id: "msg_1".to_owned(),
             output_index: 3,
             content_index: 0,
@@ -2246,9 +2238,7 @@ fn none_reasoning() -> slab_proto::openai::Reasoning {
 /// extracted verbatim so they round-trip exactly. Used by the shell-skills and
 /// shell-container fixtures (both interleave shell_call + shell_call_output
 /// pairs before a final message).
-fn shell_output_envelopes(
-    output: &[Value],
-) -> Vec<slab_app_core::infra::agent::event_hub::AgentEventEnvelope> {
+fn shell_output_envelopes(output: &[Value]) -> Vec<AgentEventEnvelope> {
     let mut envelopes = Vec::new();
     let mut call_counter = 0;
     let mut out_counter = 0;
@@ -2275,18 +2265,16 @@ fn shell_output_envelopes(
                     .and_then(|e| e.get("container_id"))
                     .and_then(|c| c.as_str())
                     .map(|s| s.to_owned());
-                envelopes.push(envelope(
-                    slab_agent::AgentEventKind::ResponseFunctionShellCallDone {
-                        item_id: format!("sh_{call_counter}"),
-                        call_id,
-                        output_index: idx as i32,
-                        commands,
-                        max_output_length: None,
-                        timeout_ms: None,
-                        environment_type,
-                        container_id,
-                    },
-                ));
+                envelopes.push(envelope(AgentEventKind::ResponseFunctionShellCallDone {
+                    item_id: format!("sh_{call_counter}"),
+                    call_id,
+                    output_index: idx as i32,
+                    commands,
+                    max_output_length: None,
+                    timeout_ms: None,
+                    environment_type,
+                    container_id,
+                }));
             }
             "shell_call_output" => {
                 out_counter += 1;
@@ -2294,14 +2282,12 @@ fn shell_output_envelopes(
                     item.get("call_id").and_then(|c| c.as_str()).unwrap_or_default().to_owned();
                 let outputs =
                     item.get("output").and_then(|o| o.as_array()).cloned().unwrap_or_default();
-                envelopes.push(envelope(
-                    slab_agent::AgentEventKind::ResponseShellCallOutputContentDone {
-                        item_id: format!("sho_{out_counter}"),
-                        call_id,
-                        output_index: idx as i32,
-                        outputs,
-                    },
-                ));
+                envelopes.push(envelope(AgentEventKind::ResponseShellCallOutputContentDone {
+                    item_id: format!("sho_{out_counter}"),
+                    call_id,
+                    output_index: idx as i32,
+                    outputs,
+                }));
             }
             "message" => {
                 let text = item
@@ -2312,7 +2298,7 @@ fn shell_output_envelopes(
                     .and_then(|t| t.as_str())
                     .unwrap_or_default()
                     .to_owned();
-                envelopes.push(envelope(slab_agent::AgentEventKind::ResponseOutputTextDone {
+                envelopes.push(envelope(AgentEventKind::ResponseOutputTextDone {
                     item_id: "msg_1".to_owned(),
                     output_index: idx as i32,
                     content_index: 0,
@@ -2365,14 +2351,14 @@ fn mcp_approval_1_non_streaming_round_trips() {
     let ap_arguments = approval["arguments"].as_str().unwrap().to_owned();
 
     let envelopes = vec![
-        envelope(slab_agent::AgentEventKind::ResponseMcpListToolsDone {
+        envelope(AgentEventKind::ResponseMcpListToolsDone {
             item_id: "mcpl_1".to_owned(),
             output_index: 0,
             server_label: list_server_label,
             tools: list_tools,
             error: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseReasoningTextDone {
+        envelope(AgentEventKind::ResponseReasoningTextDone {
             item_id: "rs_1".to_owned(),
             output_index: 1,
             content_index: 0,
@@ -2380,7 +2366,7 @@ fn mcp_approval_1_non_streaming_round_trips() {
             encrypted_content: None,
             summary: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseMcpApprovalRequestDone {
+        envelope(AgentEventKind::ResponseMcpApprovalRequestDone {
             item_id: "mcpr_1".to_owned(),
             output_index: 2,
             server_label: ap_server_label,
@@ -2446,14 +2432,14 @@ fn mcp_approval_2_non_streaming_round_trips() {
         .to_owned();
 
     let envelopes = vec![
-        envelope(slab_agent::AgentEventKind::ResponseMcpListToolsDone {
+        envelope(AgentEventKind::ResponseMcpListToolsDone {
             item_id: "mcpl_1".to_owned(),
             output_index: 0,
             server_label: list_server_label,
             tools: list_tools,
             error: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseReasoningTextDone {
+        envelope(AgentEventKind::ResponseReasoningTextDone {
             item_id: "rs_1".to_owned(),
             output_index: 1,
             content_index: 0,
@@ -2461,7 +2447,7 @@ fn mcp_approval_2_non_streaming_round_trips() {
             encrypted_content: None,
             summary: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseOutputTextDone {
+        envelope(AgentEventKind::ResponseOutputTextDone {
             item_id: "msg_1".to_owned(),
             output_index: 2,
             content_index: 0,
@@ -2526,14 +2512,14 @@ fn mcp_approval_3_non_streaming_round_trips() {
     let ap_arguments = approval["arguments"].as_str().unwrap().to_owned();
 
     let envelopes = vec![
-        envelope(slab_agent::AgentEventKind::ResponseMcpListToolsDone {
+        envelope(AgentEventKind::ResponseMcpListToolsDone {
             item_id: "mcpl_1".to_owned(),
             output_index: 0,
             server_label: list_server_label,
             tools: list_tools,
             error: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseReasoningTextDone {
+        envelope(AgentEventKind::ResponseReasoningTextDone {
             item_id: "rs_1".to_owned(),
             output_index: 1,
             content_index: 0,
@@ -2541,7 +2527,7 @@ fn mcp_approval_3_non_streaming_round_trips() {
             encrypted_content: None,
             summary: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseMcpApprovalRequestDone {
+        envelope(AgentEventKind::ResponseMcpApprovalRequestDone {
             item_id: "mcpr_1".to_owned(),
             output_index: 2,
             server_label: ap_server_label,
@@ -2619,14 +2605,14 @@ fn mcp_approval_4_non_streaming_round_trips() {
         .to_owned();
 
     let envelopes = vec![
-        envelope(slab_agent::AgentEventKind::ResponseMcpListToolsDone {
+        envelope(AgentEventKind::ResponseMcpListToolsDone {
             item_id: "mcpl_1".to_owned(),
             output_index: 0,
             server_label: list_server_label,
             tools: list_tools,
             error: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseMcpCallDone {
+        envelope(AgentEventKind::ResponseMcpCallDone {
             item_id: "mcp_1".to_owned(),
             output_index: 1,
             server_label: call_server_label,
@@ -2637,7 +2623,7 @@ fn mcp_approval_4_non_streaming_round_trips() {
             status: Some("completed".to_owned()),
             approval_request_id: call_approval_id,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseOutputTextDone {
+        envelope(AgentEventKind::ResponseOutputTextDone {
             item_id: "msg_1".to_owned(),
             output_index: 2,
             content_index: 0,
@@ -2704,31 +2690,27 @@ fn code_interpreter_non_streaming_round_trips() {
     for (idx, item) in output.iter().enumerate() {
         let ty = item.get("type").and_then(|t| t.as_str()).unwrap_or("");
         match ty {
-            "reasoning" => {
-                envelopes.push(envelope(slab_agent::AgentEventKind::ResponseReasoningTextDone {
-                    item_id: format!("rs_{idx}"),
-                    output_index: idx as i32,
-                    content_index: 0,
-                    text: String::new(),
-                    encrypted_content: None,
-                    summary: None,
-                }))
-            }
+            "reasoning" => envelopes.push(envelope(AgentEventKind::ResponseReasoningTextDone {
+                item_id: format!("rs_{idx}"),
+                output_index: idx as i32,
+                content_index: 0,
+                text: String::new(),
+                encrypted_content: None,
+                summary: None,
+            })),
             "code_interpreter_call" => {
                 let code = item.get("code").and_then(|c| c.as_str()).unwrap_or_default().to_owned();
                 let container_id =
                     item.get("container_id").and_then(|c| c.as_str()).map(|s| s.to_owned());
                 let ci_outputs =
                     item.get("outputs").and_then(|o| o.as_array()).cloned().unwrap_or_default();
-                envelopes.push(envelope(
-                    slab_agent::AgentEventKind::ResponseCodeInterpreterCallDone {
-                        item_id: format!("ci_{idx}"),
-                        output_index: idx as i32,
-                        code,
-                        container_id,
-                        outputs: ci_outputs,
-                    },
-                ));
+                envelopes.push(envelope(AgentEventKind::ResponseCodeInterpreterCallDone {
+                    item_id: format!("ci_{idx}"),
+                    output_index: idx as i32,
+                    code,
+                    container_id,
+                    outputs: ci_outputs,
+                }));
             }
             "message" => {
                 let text = item
@@ -2739,7 +2721,7 @@ fn code_interpreter_non_streaming_round_trips() {
                     .and_then(|t| t.as_str())
                     .unwrap_or_default()
                     .to_owned();
-                envelopes.push(envelope(slab_agent::AgentEventKind::ResponseOutputTextDone {
+                envelopes.push(envelope(AgentEventKind::ResponseOutputTextDone {
                     item_id: format!("msg_{idx}"),
                     output_index: idx as i32,
                     content_index: 0,
@@ -2806,19 +2788,17 @@ fn web_search_non_streaming_round_trips() {
     for (idx, item) in output.iter().enumerate() {
         let ty = item.get("type").and_then(|t| t.as_str()).unwrap_or("");
         match ty {
-            "reasoning" => {
-                envelopes.push(envelope(slab_agent::AgentEventKind::ResponseReasoningTextDone {
-                    item_id: format!("rs_{idx}"),
-                    output_index: idx as i32,
-                    content_index: 0,
-                    text: String::new(),
-                    encrypted_content: None,
-                    summary: None,
-                }))
-            }
+            "reasoning" => envelopes.push(envelope(AgentEventKind::ResponseReasoningTextDone {
+                item_id: format!("rs_{idx}"),
+                output_index: idx as i32,
+                content_index: 0,
+                text: String::new(),
+                encrypted_content: None,
+                summary: None,
+            })),
             "web_search_call" => {
                 let action = item.get("action").cloned().unwrap_or(Value::Null);
-                envelopes.push(envelope(slab_agent::AgentEventKind::ResponseWebSearchCallDone {
+                envelopes.push(envelope(AgentEventKind::ResponseWebSearchCallDone {
                     item_id: format!("ws_{idx}"),
                     output_index: idx as i32,
                     action,
@@ -2833,7 +2813,7 @@ fn web_search_non_streaming_round_trips() {
                     .and_then(|t| t.as_str())
                     .unwrap_or_default()
                     .to_owned();
-                envelopes.push(envelope(slab_agent::AgentEventKind::ResponseOutputTextDone {
+                envelopes.push(envelope(AgentEventKind::ResponseOutputTextDone {
                     item_id: format!("msg_{idx}"),
                     output_index: idx as i32,
                     content_index: 0,
@@ -2919,7 +2899,7 @@ fn file_search_2_non_streaming_round_trips() {
         .to_owned();
 
     let envelopes = vec![
-        envelope(slab_agent::AgentEventKind::ResponseReasoningTextDone {
+        envelope(AgentEventKind::ResponseReasoningTextDone {
             item_id: "rs_1".to_owned(),
             output_index: 0,
             content_index: 0,
@@ -2927,13 +2907,13 @@ fn file_search_2_non_streaming_round_trips() {
             encrypted_content: None,
             summary: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseFileSearchCallDone {
+        envelope(AgentEventKind::ResponseFileSearchCallDone {
             item_id: "fs_1".to_owned(),
             output_index: 1,
             queries,
             results,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseReasoningTextDone {
+        envelope(AgentEventKind::ResponseReasoningTextDone {
             item_id: "rs_2".to_owned(),
             output_index: 2,
             content_index: 0,
@@ -2941,7 +2921,7 @@ fn file_search_2_non_streaming_round_trips() {
             encrypted_content: None,
             summary: None,
         }),
-        envelope(slab_agent::AgentEventKind::ResponseOutputTextDone {
+        envelope(AgentEventKind::ResponseOutputTextDone {
             item_id: "msg_1".to_owned(),
             output_index: 3,
             content_index: 0,
@@ -3109,7 +3089,7 @@ fn run_shell_multiturn_round_trip(raw: &'static str, top_p: f64) -> Value {
         .unwrap_or_default()
         .to_owned();
 
-    let envelopes = vec![envelope(slab_agent::AgentEventKind::ResponseOutputTextDone {
+    let envelopes = vec![envelope(AgentEventKind::ResponseOutputTextDone {
         item_id: "msg_1".to_owned(),
         output_index: 0,
         content_index: 0,
@@ -3256,7 +3236,7 @@ struct StreamItemMeta {
 }
 
 /// Walk a `.chunks.txt` NDJSON stream and derive the slab
-/// [`slab_agent::AgentEventKind`] envelope sequence whose `envelope_to_events`
+/// [`AgentEventKind`] envelope sequence whose `envelope_to_events`
 /// expansion reproduces the fixture. Lifecycle/wrapper/sub-events the adapter
 /// synthesizes are skipped; the slab delta events (text/function/shell) map 1:1;
 /// and tool streams slab-agent lacks a delta variant for (code-interpreter
@@ -3266,11 +3246,7 @@ struct StreamItemMeta {
 /// The response-level shell environment is captured from the first `shell_call`
 /// `output_item.added` and pinned on `ctx` (slab-agent's command-stream variants
 /// do not carry the `environment` discriminator).
-fn streaming_envelopes_from_chunks(
-    raw: &str,
-    ctx: &mut StreamCtx,
-) -> Vec<slab_app_core::infra::agent::event_hub::AgentEventEnvelope> {
-    use slab_agent::AgentResponseRef;
+fn streaming_envelopes_from_chunks(raw: &str, ctx: &mut StreamCtx) -> Vec<AgentEventEnvelope> {
     use slab_types::agent::AgentThreadStatus;
     use std::collections::{HashMap, HashSet};
 
@@ -3279,7 +3255,7 @@ fn streaming_envelopes_from_chunks(
     let mut reasoning_done_emitted: HashSet<String> = HashSet::new();
     let mut ci_delta_count: HashMap<String, usize> = HashMap::new();
     let mut mcp_delta_count: HashMap<String, usize> = HashMap::new();
-    let mut envelopes: Vec<slab_app_core::infra::agent::event_hub::AgentEventEnvelope> = Vec::new();
+    let mut envelopes: Vec<AgentEventEnvelope> = Vec::new();
 
     for line in raw.lines() {
         let line = line.trim();
@@ -3290,30 +3266,26 @@ fn streaming_envelopes_from_chunks(
         let ty = str_field(&v, "type");
         let output_index = i32_field(&v, "output_index");
         match ty {
-            "response.created" => {
-                envelopes.push(envelope(slab_agent::AgentEventKind::ResponseQueued {
-                    response: AgentResponseRef {
-                        id: "resp_test".to_owned(),
-                        status: AgentThreadStatus::Pending,
-                    },
-                }))
-            }
+            "response.created" => envelopes.push(envelope(AgentEventKind::ResponseQueued {
+                response: AgentResponseRef {
+                    id: "resp_test".to_owned(),
+                    status: AgentThreadStatus::Pending,
+                },
+            })),
             "response.in_progress" => {
-                envelopes.push(envelope(slab_agent::AgentEventKind::ResponseInProgress {
+                envelopes.push(envelope(AgentEventKind::ResponseInProgress {
                     response: AgentResponseRef {
                         id: "resp_test".to_owned(),
                         status: AgentThreadStatus::Running,
                     },
                 }))
             }
-            "response.completed" => {
-                envelopes.push(envelope(slab_agent::AgentEventKind::ResponseCompleted {
-                    response: AgentResponseRef {
-                        id: "resp_test".to_owned(),
-                        status: AgentThreadStatus::Completed,
-                    },
-                }))
-            }
+            "response.completed" => envelopes.push(envelope(AgentEventKind::ResponseCompleted {
+                response: AgentResponseRef {
+                    id: "resp_test".to_owned(),
+                    status: AgentThreadStatus::Completed,
+                },
+            })),
             "response.output_item.added" => {
                 if let Some(item) = v.get("item") {
                     let item_id = str_field(item, "id").to_owned();
@@ -3376,34 +3348,32 @@ fn streaming_envelopes_from_chunks(
                     m.tools =
                         item.get("tools").and_then(|x| x.as_array()).cloned().unwrap_or_default();
                     match itype {
-                        "mcp_list_tools" => envelopes.push(envelope(
-                            slab_agent::AgentEventKind::ResponseMcpListToolsDone {
+                        "mcp_list_tools" => {
+                            envelopes.push(envelope(AgentEventKind::ResponseMcpListToolsDone {
                                 item_id: item_id.clone(),
                                 output_index,
                                 server_label: m.server_label.clone(),
                                 tools: m.tools.clone(),
                                 error: m.error.clone(),
-                            },
-                        )),
+                            }))
+                        }
                         "mcp_call" => {
                             let n = mcp_delta_count.get(&item_id).copied().unwrap_or(1);
                             ctx.set_tool_delta_split(&item_id, n.max(1));
-                            envelopes.push(envelope(
-                                slab_agent::AgentEventKind::ResponseMcpCallDone {
-                                    item_id: item_id.clone(),
-                                    output_index,
-                                    server_label: m.server_label.clone(),
-                                    name: m.name.clone(),
-                                    arguments: m.arguments.clone(),
-                                    output: m.output.clone(),
-                                    error: m.error.clone(),
-                                    status: m.status.clone(),
-                                    approval_request_id: m.approval_request_id.clone(),
-                                },
-                            ));
+                            envelopes.push(envelope(AgentEventKind::ResponseMcpCallDone {
+                                item_id: item_id.clone(),
+                                output_index,
+                                server_label: m.server_label.clone(),
+                                name: m.name.clone(),
+                                arguments: m.arguments.clone(),
+                                output: m.output.clone(),
+                                error: m.error.clone(),
+                                status: m.status.clone(),
+                                approval_request_id: m.approval_request_id.clone(),
+                            }));
                         }
                         "mcp_approval_request" => envelopes.push(envelope(
-                            slab_agent::AgentEventKind::ResponseMcpApprovalRequestDone {
+                            AgentEventKind::ResponseMcpApprovalRequestDone {
                                 item_id: item_id.clone(),
                                 output_index,
                                 server_label: m.server_label.clone(),
@@ -3415,7 +3385,7 @@ fn streaming_envelopes_from_chunks(
                             let n = ci_delta_count.get(&item_id).copied().unwrap_or(1);
                             ctx.set_tool_delta_split(&item_id, n.max(1));
                             envelopes.push(envelope(
-                                slab_agent::AgentEventKind::ResponseCodeInterpreterCallDone {
+                                AgentEventKind::ResponseCodeInterpreterCallDone {
                                     item_id: item_id.clone(),
                                     output_index,
                                     code: m.code.clone(),
@@ -3424,32 +3394,30 @@ fn streaming_envelopes_from_chunks(
                                 },
                             ));
                         }
-                        "web_search_call" => envelopes.push(envelope(
-                            slab_agent::AgentEventKind::ResponseWebSearchCallDone {
+                        "web_search_call" => {
+                            envelopes.push(envelope(AgentEventKind::ResponseWebSearchCallDone {
                                 item_id: item_id.clone(),
                                 output_index,
                                 action: m.action.clone(),
-                            },
-                        )),
-                        "file_search_call" => envelopes.push(envelope(
-                            slab_agent::AgentEventKind::ResponseFileSearchCallDone {
+                            }))
+                        }
+                        "file_search_call" => {
+                            envelopes.push(envelope(AgentEventKind::ResponseFileSearchCallDone {
                                 item_id: item_id.clone(),
                                 output_index,
                                 queries: m.queries.clone(),
                                 results: m.results.clone(),
-                            },
-                        )),
+                            }))
+                        }
                         "reasoning" if !reasoning_done_emitted.contains(&item_id) => {
-                            envelopes.push(envelope(
-                                slab_agent::AgentEventKind::ResponseReasoningTextDone {
-                                    item_id: item_id.clone(),
-                                    output_index,
-                                    content_index: 0,
-                                    text: String::new(),
-                                    encrypted_content: m.encrypted_content.clone(),
-                                    summary: None,
-                                },
-                            ));
+                            envelopes.push(envelope(AgentEventKind::ResponseReasoningTextDone {
+                                item_id: item_id.clone(),
+                                output_index,
+                                content_index: 0,
+                                text: String::new(),
+                                encrypted_content: m.encrypted_content.clone(),
+                                summary: None,
+                            }));
                             reasoning_done_emitted.insert(item_id);
                         }
                         _ => {}
@@ -3457,7 +3425,7 @@ fn streaming_envelopes_from_chunks(
                 }
             }
             "response.output_text.delta" => {
-                envelopes.push(envelope(slab_agent::AgentEventKind::ResponseOutputTextDelta {
+                envelopes.push(envelope(AgentEventKind::ResponseOutputTextDelta {
                     item_id: str_field(&v, "item_id").to_owned(),
                     output_index,
                     content_index: i32_field(&v, "content_index"),
@@ -3467,7 +3435,7 @@ fn streaming_envelopes_from_chunks(
             "response.output_text.done" => {
                 let item_id = str_field(&v, "item_id").to_owned();
                 let phase = meta.get(&item_id).and_then(|x| x.phase.clone());
-                envelopes.push(envelope(slab_agent::AgentEventKind::ResponseOutputTextDone {
+                envelopes.push(envelope(AgentEventKind::ResponseOutputTextDone {
                     item_id,
                     output_index,
                     content_index: i32_field(&v, "content_index"),
@@ -3478,7 +3446,7 @@ fn streaming_envelopes_from_chunks(
                 }));
             }
             "response.reasoning_summary_text.delta" => {
-                envelopes.push(envelope(slab_agent::AgentEventKind::ResponseReasoningTextDelta {
+                envelopes.push(envelope(AgentEventKind::ResponseReasoningTextDelta {
                     item_id: str_field(&v, "item_id").to_owned(),
                     output_index,
                     content_index: 0,
@@ -3489,7 +3457,7 @@ fn streaming_envelopes_from_chunks(
                 let item_id = str_field(&v, "item_id").to_owned();
                 let summary = v.get("text").and_then(|t| t.as_str()).map(|s| s.to_owned());
                 let encrypted = meta.get(&item_id).and_then(|x| x.encrypted_content.clone());
-                envelopes.push(envelope(slab_agent::AgentEventKind::ResponseReasoningTextDone {
+                envelopes.push(envelope(AgentEventKind::ResponseReasoningTextDone {
                     item_id: item_id.clone(),
                     output_index,
                     content_index: 0,
@@ -3505,15 +3473,13 @@ fn streaming_envelopes_from_chunks(
                     .get(&item_id)
                     .map(|x| (x.call_id.clone(), x.name.clone()))
                     .unwrap_or_default();
-                envelopes.push(envelope(
-                    slab_agent::AgentEventKind::ResponseFunctionCallArgumentsDelta {
-                        item_id,
-                        call_id,
-                        name,
-                        output_index,
-                        delta: v.get("delta").and_then(|d| d.as_str()).unwrap_or("").to_owned(),
-                    },
-                ));
+                envelopes.push(envelope(AgentEventKind::ResponseFunctionCallArgumentsDelta {
+                    item_id,
+                    call_id,
+                    name,
+                    output_index,
+                    delta: v.get("delta").and_then(|d| d.as_str()).unwrap_or("").to_owned(),
+                }));
             }
             "response.function_call_arguments.done" => {
                 let item_id = str_field(&v, "item_id").to_owned();
@@ -3521,48 +3487,38 @@ fn streaming_envelopes_from_chunks(
                     .get(&item_id)
                     .map(|x| (x.call_id.clone(), x.name.clone()))
                     .unwrap_or_default();
-                envelopes.push(envelope(
-                    slab_agent::AgentEventKind::ResponseFunctionCallArgumentsDone {
-                        item_id,
-                        call_id,
-                        name,
-                        output_index,
-                        arguments: v
-                            .get("arguments")
-                            .and_then(|d| d.as_str())
-                            .unwrap_or("")
-                            .to_owned(),
-                        namespace: None,
-                        risk: None,
-                    },
-                ));
+                envelopes.push(envelope(AgentEventKind::ResponseFunctionCallArgumentsDone {
+                    item_id,
+                    call_id,
+                    name,
+                    output_index,
+                    arguments: v.get("arguments").and_then(|d| d.as_str()).unwrap_or("").to_owned(),
+                    namespace: None,
+                    risk: None,
+                }));
             }
             "response.shell_call_command.delta" => {
                 let item_id = item_id_by_idx.get(&output_index).cloned().unwrap_or_default();
                 let call_id = meta.get(&item_id).map(|x| x.call_id.clone()).unwrap_or_default();
-                envelopes.push(envelope(
-                    slab_agent::AgentEventKind::ResponseShellCallCommandDelta {
-                        item_id,
-                        call_id,
-                        output_index,
-                        delta: v.get("delta").and_then(|d| d.as_str()).unwrap_or("").to_owned(),
-                    },
-                ));
+                envelopes.push(envelope(AgentEventKind::ResponseShellCallCommandDelta {
+                    item_id,
+                    call_id,
+                    output_index,
+                    delta: v.get("delta").and_then(|d| d.as_str()).unwrap_or("").to_owned(),
+                }));
             }
             "response.shell_call_command.done" => {
                 let item_id = item_id_by_idx.get(&output_index).cloned().unwrap_or_default();
                 let call_id = meta.get(&item_id).map(|x| x.call_id.clone()).unwrap_or_default();
                 let command = v.get("command").and_then(|d| d.as_str()).unwrap_or("").to_owned();
-                envelopes.push(envelope(
-                    slab_agent::AgentEventKind::ResponseShellCallCommandDone {
-                        item_id,
-                        call_id,
-                        output_index,
-                        commands: vec![command],
-                        max_output_length: None,
-                        timeout_ms: None,
-                    },
-                ));
+                envelopes.push(envelope(AgentEventKind::ResponseShellCallCommandDone {
+                    item_id,
+                    call_id,
+                    output_index,
+                    commands: vec![command],
+                    max_output_length: None,
+                    timeout_ms: None,
+                }));
             }
             "response.shell_call_output_content.delta" => {
                 let item_id = str_field(&v, "item_id").to_owned();
@@ -3573,28 +3529,24 @@ fn streaming_envelopes_from_chunks(
                     .and_then(|s| s.as_str())
                     .unwrap_or("")
                     .to_owned();
-                envelopes.push(envelope(
-                    slab_agent::AgentEventKind::ResponseShellCallOutputContentDelta {
-                        item_id,
-                        call_id,
-                        output_index,
-                        delta: stdout,
-                    },
-                ));
+                envelopes.push(envelope(AgentEventKind::ResponseShellCallOutputContentDelta {
+                    item_id,
+                    call_id,
+                    output_index,
+                    delta: stdout,
+                }));
             }
             "response.shell_call_output_content.done" => {
                 let item_id = str_field(&v, "item_id").to_owned();
                 let call_id = meta.get(&item_id).map(|x| x.call_id.clone()).unwrap_or_default();
                 let outputs =
                     v.get("output").and_then(|o| o.as_array()).cloned().unwrap_or_default();
-                envelopes.push(envelope(
-                    slab_agent::AgentEventKind::ResponseShellCallOutputContentDone {
-                        item_id,
-                        call_id,
-                        output_index,
-                        outputs,
-                    },
-                ));
+                envelopes.push(envelope(AgentEventKind::ResponseShellCallOutputContentDone {
+                    item_id,
+                    call_id,
+                    output_index,
+                    outputs,
+                }));
             }
             "response.code_interpreter_call_code.delta" => {
                 *ci_delta_count.entry(str_field(&v, "item_id").to_owned()).or_default() += 1;

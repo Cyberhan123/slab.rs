@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use slab_types::{ConversationMessage, ConversationMessageContent};
 
-use crate::{error::AgentError, event::AgentEventKind};
+use crate::error::AgentError;
 
 /// Estimates the token pressure of agent history and optionally compacts it.
 #[async_trait]
@@ -124,14 +124,6 @@ impl CompactPort for SlidingWindowCompactPort {
             output_tokens,
         })
     }
-}
-
-pub(crate) fn compact_skipped_event(
-    input_tokens: usize,
-    threshold_tokens: usize,
-    reason: String,
-) -> AgentEventKind {
-    AgentEventKind::ResponseContextCompactSkipped { input_tokens, threshold_tokens, reason }
 }
 
 fn estimate_tokens(messages: &[ConversationMessage]) -> usize {

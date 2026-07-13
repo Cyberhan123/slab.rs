@@ -17,7 +17,7 @@ use slab_utils::session_snapshot::{
 
 use super::{AgentCore, RestoredAgentSession};
 use crate::error::AppCoreError;
-use crate::infra::agent::event_hub::{AgentEventMsgSubscription, AgentEventSubscription};
+use crate::infra::agent::event_hub::AgentEventMsgSubscription;
 
 /// Engine-side agent service: owns the turn-loop control surface consumed by
 /// the harness WebSocket transport.
@@ -53,15 +53,10 @@ impl HarnessService {
         self.0.send_input(thread_id, content).await
     }
 
-    /// Subscribe to the turn-event stream for a thread.
-    pub fn subscribe_events(&self, thread_id: &str) -> AgentEventSubscription {
-        self.0.subscribe_events(thread_id)
-    }
-
     /// Subscribe to the harness-protocol (`EventMsg`) stream for a thread.
     ///
-    /// Sibling of [`Self::subscribe_events`] for the slab-agent harness protocol
-    /// surface (turn lifecycle / text / reasoning / tool items).
+    /// Carries slab-agent's harness protocol surface (turn lifecycle / text /
+    /// reasoning / tool items).
     pub fn subscribe_event_msgs(&self, thread_id: &str) -> AgentEventMsgSubscription {
         self.0.subscribe_event_msgs(thread_id)
     }

@@ -4,6 +4,8 @@
 //! Instead, the host (`slab-server`) provides concrete adapters that implement
 //! these traits and are injected at construction time.
 
+use serde::{Deserialize, Serialize};
+
 use async_trait::async_trait;
 
 use slab_agent_tracing::AgentTraceContext;
@@ -12,7 +14,6 @@ use slab_types::agent::ToolCallStatus;
 
 use crate::config::AgentConfig;
 use crate::error::AgentError;
-use crate::event::{AgentEventKind, ToolRiskAssessment};
 use crate::protocol::EventMsg;
 
 /// Thread lifecycle status, re-exported from `slab_types` for convenience.
@@ -148,10 +149,28 @@ pub struct TurnItemRecord {
     pub created_at: String,
 }
 
-/// A streaming event emitted during a single LLM turn.
-#[derive(Debug, Clone)]
-pub enum TurnEvent {
-    Response { turn_index: Option<u32>, event: AgentEventKind },
+/// Risk level assigned to a tool call by the risk analyzer.
+///
+/// Relocated from `event.rs` in slice C3 — `event.rs` was deleted when the
+/// OpenAI-Responses wire vocabulary (`AgentEventKind`) left the crate. Risk
+/// assessment stays in slab-agent because it is part of the `ApprovalPort`
+/// surface and the `risk` analyzer, not the response wire.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolRiskLevel {
+    Low,
+    Medium,
+    High,
+}
+
+/// Structured risk assessment for a tool call.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ToolRiskAssessment {
+    pub level: ToolRiskLevel,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 // ── Approval ──────────────────────────────────────────────────────────────────
@@ -460,7 +479,7 @@ pub trait PluginToolPort: Send + Sync {
     ) -> Result<String, AgentError>;
 }
 
-/// Port for status-change and turn-event notifications.
+/// Port for status-change and harness-protocol notifications.
 ///
 /// The host provides an adapter that fans out to SSE streams, WebSockets, etc.
 #[async_trait]
@@ -468,19 +487,10 @@ pub trait AgentNotifyPort: Send + Sync {
     /// Called whenever a thread transitions to a new [`ThreadStatus`].
     async fn on_status_change(&self, thread_id: &str, status: ThreadStatus);
 
-    /// Called for each [`TurnEvent`] emitted during an LLM turn.
-    ///
-    /// The default implementation is a no-op so existing adapters that only
-    /// care about status changes do not need to be updated.
-    async fn on_turn_event(&self, _thread_id: &str, _event: &TurnEvent) {}
-
     /// Called for each harness-protocol [`EventMsg`] the agent emits directly.
     ///
     /// This is the harness surface (`slab-agent::protocol`): turn lifecycle,
-    /// assistant text/reasoning, and tool items. It is distinct from
-    /// [`Self::on_turn_event`] (which carries `AgentEventKind` and feeds the
-    /// OpenAI `/responses` projection). Adapters that fan harness events out to
-    /// a client override this; the default is a no-op so adapters only serving
-    /// `/responses` are unaffected.
+    /// assistant text/reasoning, and tool items. Adapters that fan harness
+    /// events out to a client override this; the default is a no-op.
     async fn on_event_msg(&self, _thread_id: &str, _msg: &EventMsg) {}
 }

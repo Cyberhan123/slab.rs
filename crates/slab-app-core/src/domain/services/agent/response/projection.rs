@@ -13,11 +13,9 @@
 
 use std::collections::HashMap;
 
-use slab_agent::{AgentEventKind, TurnEvent};
-
+use super::event::{AgentEventEnvelope, AgentEventKind, TurnEvent};
 use super::single_shot::SingleShotOutcome;
 use crate::domain::models::TextGenerationUsage;
-use crate::infra::agent::event_hub::AgentEventEnvelope;
 
 // Glob import: `build_response` references ~70 slab-proto types. Glob imports do
 // not trigger `unused_imports`, which keeps this module `clippy -D warnings` clean

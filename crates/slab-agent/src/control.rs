@@ -19,7 +19,6 @@ use crate::{
     concurrency_gate::ConcurrencyGate,
     config::AgentConfig,
     error::AgentError,
-    event::{AgentEventKind, AgentResponseRef},
     hook::{AgentHook, AgentHookRegistry},
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalPort, LlmPort, ThreadMessageRecord,
@@ -533,22 +532,7 @@ impl AgentControl {
         state.transition(ThreadStatus::Interrupting)?;
         cancellation.cancel();
         self.notify.on_status_change(thread_id, ThreadStatus::Interrupting).await;
-        self.notify
-            .on_turn_event(
-                thread_id,
-                &crate::port::TurnEvent::Response {
-                    turn_index: None,
-                    event: AgentEventKind::ResponseCancelled {
-                        response: AgentResponseRef {
-                            id: thread_id.to_owned(),
-                            status: ThreadStatus::Interrupting,
-                        },
-                        reason: "interrupt requested".to_owned(),
-                    },
-                },
-            )
-            .await;
-        // Mirror the interrupt on the harness protocol channel. `turn_index`
+        // Surface the interrupt on the harness protocol channel. `turn_index`
         // is unknown here (no active turn context), so the turn id is the
         // placeholder `"current"` — matching what the legacy projection derived
         // from a `None` turn index. The authoritative `TurnAborted` is also
