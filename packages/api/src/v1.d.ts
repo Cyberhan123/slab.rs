@@ -2293,6 +2293,14 @@ export interface components {
             temperature?: number | null;
             text?: null | components["schemas"]["OpenAITextInput"];
             tool_choice?: unknown;
+            /**
+             * @description OpenAI Responses `tools` array (function tool definitions). Held as a
+             *     `serde_json::Value` — like `input`/`tool_choice` — so the struct stays
+             *     `ToSchema`-derivable while accepting the canonical Responses shape
+             *     (`[{"type":"function","name":...,"parameters":...}]`). Use
+             *     [`OpenAICreateRequest::function_tools`] to extract the function tools.
+             */
+            tools?: unknown;
             /** Format: float */
             top_p?: number | null;
         };

@@ -16,9 +16,11 @@
 //! See `slab-agent-3-snuggly-eich.md` (slice C2) for the design.
 
 use chrono::Utc;
+use futures::stream::{self, BoxStream, StreamExt};
 use slab_agent::port::{ThreadMessageRecord, ThreadSnapshot};
 use slab_agent::{AgentConfig, ThreadStatus};
 use slab_proto::openai::{Reason, Response};
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 use super::event::{AgentEventEnvelope, AgentEventKind, AgentResponseRef, TurnEvent};
@@ -31,6 +33,12 @@ use crate::domain::models::{
 };
 use crate::domain::services::agent::AgentCore;
 use crate::domain::services::chat::ChatService;
+use crate::domain::services::chat::local::{LocalChatRequestConfig, build_local_runtime_request};
+use crate::domain::services::llm::cloud::{
+    CloudChatRequestConfig, CloudDelta, cloud_chat_stream, resolve_cloud_model,
+};
+use crate::domain::services::llm::local::{local_chat_stream, text_usage_from_runtime};
+use crate::domain::services::llm::should_route_to_cloud;
 use crate::error::AppCoreError;
 use crate::schemas::agent::OpenAICreateRequest;
 
@@ -308,8 +316,10 @@ pub(crate) fn synthesize_envelopes(
 // cloud/local routing + prompt engineering over `llm-service` — and feeds the
 // result through the pure projections. No slab-agent turn loop, no
 // `AgentEventHub` subscription. Thread-store persistence is reused so
-// `previous_response_id` (= thread id) keeps chaining. C2 is text-only: the
-// request carries no `tools`, so tool-call synthesis is correct but dormant.
+// `previous_response_id` (= thread id) keeps chaining. The request may carry
+// `tools` (function definitions); when the model returns tool calls the
+// terminal is `Incomplete { ToolCalls }` and the client drives the tool loop by
+// POSTing again with `previous_response_id` + `function_call_output` input.
 
 const DEFAULT_RESPONSE_MAX_TOKENS: u32 = 1024;
 
@@ -392,7 +402,7 @@ fn build_command(
         id: None,
         model: req.model.clone().unwrap_or_default(),
         messages,
-        tools: Vec::new(),
+        tools: req.function_tools(),
         agent_trace: None,
         continue_generation: false,
         common: CommonChatParams {
@@ -497,8 +507,13 @@ async fn persist_assistant_and_complete(
         SingleShotOutcome::Empty => {
             core.store().update_thread_status(response_id, ThreadStatus::Completed, None).await?;
         }
-        SingleShotOutcome::Failed { .. } => {
-            core.store().update_thread_status(response_id, ThreadStatus::Errored, None).await?;
+        SingleShotOutcome::Failed { message, .. } => {
+            // Stash the error message on the thread's completion_text so a later
+            // GET can reconstruct `response.failed` instead of degrading to
+            // `completed` (response state is not persisted separately).
+            core.store()
+                .update_thread_status(response_id, ThreadStatus::Errored, Some(message.as_str()))
+                .await?;
         }
     }
     Ok(())
@@ -549,33 +564,275 @@ pub(crate) async fn run_create_response(
     Ok(response)
 }
 
-/// Run one LLM call and return the response id plus the synthesized frame
-/// list (lifecycle + output-item envelopes + terminal). The service boxes the
-/// frames into a stream; the handler seeds `StreamCtx` from the response id.
-/// C2 emits the full sequence as a burst; true token streaming is a follow-up.
+/// One normalized event from the underlying LLM token stream. Reasoning deltas
+/// are intentionally dropped for now — `/responses` does not surface reasoning
+/// (the non-streaming path sets `reasoning: None`), so streaming matches that
+/// output shape; reasoning streaming is a follow-up.
+enum DeltaEvent {
+    Text(String),
+    Done { usage: Option<TextGenerationUsage> },
+    Failed(String),
+}
+
+/// Streaming state shared between the per-delta mapper and the terminal future
+/// (run after the delta stream ends). Behind an `Arc<Mutex>` so the terminal can
+/// read the finalized text/usage/failure.
+#[derive(Clone, Default)]
+struct StreamAccumulator {
+    text: String,
+    usage: Option<TextGenerationUsage>,
+    failed: Option<String>,
+    /// Next envelope id (the lifecycle prefix uses 0 and 1; deltas start at 2).
+    next_id: u64,
+}
+
+/// Build the cloud chat request config from the `/responses` request + resolved
+/// agent config (mirrors `chat/mod.rs`'s `CloudChatRequestConfig` mapping).
+fn cloud_stream_config(req: &OpenAICreateRequest, config: &AgentConfig) -> CloudChatRequestConfig {
+    CloudChatRequestConfig {
+        max_tokens: config.max_tokens.unwrap_or(DEFAULT_RESPONSE_MAX_TOKENS),
+        temperature: config.temperature.unwrap_or(0.7),
+        top_p: config.top_p,
+        structured_output: config.structured_output.clone(),
+        reasoning_effort: config.reasoning_effort,
+        verbosity: config.verbosity,
+        tools: req.function_tools(),
+        stream: true,
+        include_usage: false,
+    }
+}
+
+/// Build the local chat request config. Defaults mirror `chat/mod.rs`
+/// (`temperature` 0.7, `max_tokens` DEFAULT_RESPONSE_MAX_TOKENS).
+fn local_stream_config(req: &OpenAICreateRequest, config: &AgentConfig) -> LocalChatRequestConfig {
+    LocalChatRequestConfig {
+        session_id: None,
+        max_tokens: config
+            .max_tokens
+            .or(Some(DEFAULT_RESPONSE_MAX_TOKENS))
+            .unwrap_or(DEFAULT_RESPONSE_MAX_TOKENS),
+        temperature: config.temperature.unwrap_or(0.7),
+        top_p: config.top_p,
+        top_k: config.top_k,
+        min_p: config.min_p,
+        presence_penalty: config.presence_penalty,
+        repetition_penalty: config.repetition_penalty,
+        reasoning_effort: config.reasoning_effort,
+        verbosity: config.verbosity,
+        gbnf: None,
+        structured_output: config.structured_output.clone(),
+        tools: req.function_tools(),
+        stop: Vec::new(),
+        agent_trace: None,
+        stream: true,
+        include_usage: true,
+    }
+}
+
+/// Resolve the route and start the LLM token stream, normalized to
+/// [`DeltaEvent`]. Cloud uses [`cloud_chat_stream`] directly (text + reasoning
+/// deltas); local uses [`build_local_runtime_request`] + [`local_chat_stream`]
+/// and holds the inference guard for the whole stream.
+async fn build_delta_events(
+    state: &ModelState,
+    req: &OpenAICreateRequest,
+    input: &ResolvedInput,
+    config: &AgentConfig,
+) -> Result<BoxStream<'static, DeltaEvent>, AppCoreError> {
+    let model = req.model.clone().unwrap_or_default();
+    if should_route_to_cloud(state, &model).await? {
+        let target = resolve_cloud_model(state, &model).await?;
+        let cfg = cloud_stream_config(req, config);
+        let trace_http = state.pmid().config().server.cloud_http_trace;
+        let raw = cloud_chat_stream(&target, &input.messages, cfg, trace_http).await?;
+        let mapped = raw.filter_map(|item| match item {
+            Ok(CloudDelta::Content(t)) => futures::future::ready(Some(DeltaEvent::Text(t))),
+            // Reasoning + tool-call chunks are not surfaced (see DeltaEvent doc).
+            Ok(CloudDelta::Reasoning(_)) => futures::future::ready(None),
+            Err(error) => futures::future::ready(Some(DeltaEvent::Failed(error.to_string()))),
+        });
+        Ok(Box::pin(mapped))
+    } else {
+        let cfg = local_stream_config(req, config);
+        let built = build_local_runtime_request(state, &model, &input.messages, &cfg).await?;
+        let (raw, guard) = local_chat_stream(state, built.backend_id, built.request).await?;
+        let mapped = raw.flat_map(|item| match item {
+            Ok(chunk) => {
+                // A chunk is a reasoning chunk when the runtime tagged its
+                // metadata with `reasoning_content`; drop those (reasoning is
+                // not surfaced for `/responses`).
+                let is_reasoning =
+                    chunk.metadata.get("reasoning_content").map(|v| !v.is_null()).unwrap_or(false);
+                let text =
+                    if !is_reasoning && !chunk.delta.is_empty() { Some(chunk.delta) } else { None };
+                let mut events: Vec<DeltaEvent> = Vec::new();
+                if let Some(t) = text {
+                    events.push(DeltaEvent::Text(t));
+                }
+                if chunk.done {
+                    events
+                        .push(DeltaEvent::Done { usage: chunk.usage.map(text_usage_from_runtime) });
+                }
+                stream::iter(events)
+            }
+            Err(error) => stream::iter(vec![DeltaEvent::Failed(error.to_string())]),
+        });
+        // Keep the inference guard alive for the whole stream so the model is
+        // not auto-unloaded mid-stream (see `llm::local::local_chat_stream`).
+        let with_guard = mapped.map(move |event| {
+            let _keep_alive = &guard;
+            event
+        });
+        Ok(Box::pin(with_guard))
+    }
+}
+
+/// Map one delta event to 0..1 frames, mutating the shared accumulator.
+fn map_delta_event(event: DeltaEvent, acc: &mut StreamAccumulator) -> Option<StreamFrame> {
+    match event {
+        DeltaEvent::Text(t) => {
+            acc.text.push_str(&t);
+            let id = acc.next_id;
+            acc.next_id += 1;
+            Some(StreamFrame::Envelope(text_delta_envelope(id, "msg_0", 0, &t)))
+        }
+        DeltaEvent::Done { usage } => {
+            acc.usage = usage;
+            None
+        }
+        DeltaEvent::Failed(message) => {
+            acc.failed = Some(message);
+            None
+        }
+    }
+}
+
+/// Derive the finalized single-shot outcome from the accumulator.
+fn outcome_from_accumulator(acc: &StreamAccumulator) -> SingleShotOutcome {
+    match &acc.failed {
+        Some(message) => SingleShotOutcome::Failed {
+            message: message.clone(),
+            code: None,
+            error_type: Some("server_error".to_owned()),
+        },
+        None => {
+            let text = if acc.text.is_empty() { None } else { Some(acc.text.clone()) };
+            if text.is_none() && acc.usage.is_none() {
+                SingleShotOutcome::Empty
+            } else {
+                SingleShotOutcome::Completed {
+                    text,
+                    reasoning: None,
+                    tool_calls: Vec::new(),
+                    usage: acc.usage.clone(),
+                }
+            }
+        }
+    }
+}
+
+/// Build the tail frames (text-done + terminal) for a finalized outcome.
+fn terminal_frames(acc: &StreamAccumulator, outcome: &SingleShotOutcome) -> Vec<StreamFrame> {
+    let mut frames: Vec<StreamFrame> = Vec::new();
+    if let SingleShotOutcome::Completed { text: Some(t), .. } = outcome
+        && !t.is_empty()
+    {
+        frames.push(StreamFrame::Envelope(text_done_envelope(acc.next_id, "msg_0", 0, t)));
+    }
+    frames.push(StreamFrame::Terminal(TerminalKind::from_outcome(outcome)));
+    frames
+}
+
+/// Wrap a normalized delta-event stream into the `/responses` frame stream:
+/// `queued` → `in_progress` → per-delta `text.delta` envelopes → (on end)
+/// `text.done` + terminal. The terminal persists the finalized outcome.
+fn build_frame_stream(
+    events: BoxStream<'static, DeltaEvent>,
+    acc: Arc<Mutex<StreamAccumulator>>,
+    core: AgentCore,
+    response_id: String,
+    turn_index: u32,
+) -> super::StreamFrameStream {
+    let response_id_for_lifecycle = response_id.clone();
+    let acc_for_deltas = Arc::clone(&acc);
+    let delta_frames = events.filter_map(move |event| {
+        let mut a = acc_for_deltas.lock().expect("stream accumulator lock");
+        futures::future::ready(map_delta_event(event, &mut a))
+    });
+
+    let core_for_terminal = core;
+    let response_id_for_terminal = response_id.clone();
+    let acc_for_terminal = acc;
+    let terminal = stream::once(async move {
+        let a = acc_for_terminal.lock().expect("stream accumulator lock").clone();
+        let outcome = outcome_from_accumulator(&a);
+        persist_assistant_and_complete(
+            &core_for_terminal,
+            &response_id_for_terminal,
+            turn_index,
+            &outcome,
+        )
+        .await
+        .ok();
+        stream::iter(terminal_frames(&a, &outcome))
+    })
+    .flatten();
+
+    let lifecycle = stream::iter([
+        StreamFrame::Envelope(queued_envelope(0, &response_id_for_lifecycle)),
+        StreamFrame::Envelope(in_progress_envelope(1, &response_id_for_lifecycle)),
+    ]);
+    Box::pin(lifecycle.chain(delta_frames).chain(terminal))
+}
+
+/// Run one `/responses` stream. Text-only requests stream token-by-token
+/// (cloud via `cloud_chat_stream`, local via `local_chat_stream`); a request
+/// carrying `tools` falls back to the whole-envelope burst (tool calls only
+/// surface in the non-streaming result). A pre-stream error becomes a
+/// `response.failed` (consistent with [`run_llm_or_failure`]).
 pub(crate) async fn run_stream_response(
     core: &AgentCore,
     state: &ModelState,
     req: &OpenAICreateRequest,
     session_id: &str,
-) -> Result<(String, Vec<StreamFrame>), AppCoreError> {
+) -> Result<(String, super::StreamFrameStream), AppCoreError> {
     let config: AgentConfig = req.to_config_input().into();
     let input = resolve_input(core, req).await?;
-    let command = build_command(req, input.messages.clone(), &config);
     persist_input(core, &input, session_id, &config).await?;
 
-    let outcome = run_llm_or_failure(state, command).await;
-    persist_assistant_and_complete(core, &input.response_id, input.turn_index, &outcome).await?;
+    // Burst fallback: a request carrying tools may yield tool_calls, which only
+    // surface in the non-streaming result (cloud_chat_stream filters
+    // ToolCallChunk; RuntimeTextGenerationChunk has no tool channel).
+    if !req.function_tools().is_empty() {
+        let command = build_command(req, input.messages.clone(), &config);
+        let outcome = run_llm_or_failure(state, command).await;
+        persist_assistant_and_complete(core, &input.response_id, input.turn_index, &outcome)
+            .await?;
+        let (envs, terminal) = synthesize_envelopes(&input.response_id, &outcome);
+        let mut frames: Vec<StreamFrame> = envs.into_iter().map(StreamFrame::Envelope).collect();
+        frames.push(StreamFrame::Terminal(terminal));
+        return Ok((input.response_id, Box::pin(stream::iter(frames))));
+    }
 
-    let (envs, terminal) = synthesize_envelopes(&input.response_id, &outcome);
-    let mut frames: Vec<StreamFrame> = envs.into_iter().map(StreamFrame::Envelope).collect();
-    frames.push(StreamFrame::Terminal(terminal));
-    Ok((input.response_id, frames))
+    let acc = Arc::new(Mutex::new(StreamAccumulator { next_id: 2, ..Default::default() }));
+    let events = match build_delta_events(state, req, &input, &config).await {
+        Ok(events) => events,
+        Err(error) => {
+            acc.lock().expect("stream accumulator lock").failed = Some(error.to_string());
+            Box::pin(stream::empty())
+        }
+    };
+    let stream =
+        build_frame_stream(events, acc, core.clone(), input.response_id.clone(), input.turn_index);
+    Ok((input.response_id, stream))
 }
 
 /// Reconstruct a [`Response`] for an already-completed run (GET SSE resume /
 /// `get_response`). Best-effort: response state is not persisted, so this
-/// rebuilds from the persisted thread messages.
+/// rebuilds from the persisted thread messages. An errored thread reconstructs
+/// `response.failed` (the error message was stashed on `completion_text` by
+/// [`persist_assistant_and_complete`]). Usage/reasoning are not recovered
+/// (documented limitation).
 pub(crate) async fn run_get_response(
     core: &AgentCore,
     response_id: &str,
@@ -586,34 +843,48 @@ pub(crate) async fn run_get_response(
         })?;
     let records = core.store().list_thread_messages(response_id).await?;
 
-    let mut text_parts: Vec<String> = Vec::new();
-    let mut tool_calls: Vec<ConversationToolCall> = Vec::new();
-    for rec in &records {
-        if rec.message.role == "assistant" {
-            if let ConversationMessageContent::Text(t) = &rec.message.content
-                && !t.is_empty()
-            {
-                text_parts.push(t.clone());
-            }
-            tool_calls.extend(rec.message.tool_calls.clone());
+    let outcome = if thread.status == ThreadStatus::Errored {
+        SingleShotOutcome::Failed {
+            message: thread.completion_text.clone().unwrap_or_else(|| "response failed".to_owned()),
+            code: None,
+            error_type: Some("server_error".to_owned()),
         }
-    }
-    let outcome = if text_parts.is_empty() && tool_calls.is_empty() {
-        SingleShotOutcome::Empty
     } else {
-        let joined = text_parts.join("\n");
-        SingleShotOutcome::Completed {
-            text: if joined.is_empty() { None } else { Some(joined) },
-            reasoning: None,
-            tool_calls,
-            usage: None,
+        let mut text_parts: Vec<String> = Vec::new();
+        let mut tool_calls: Vec<ConversationToolCall> = Vec::new();
+        for rec in &records {
+            if rec.message.role == "assistant" {
+                if let ConversationMessageContent::Text(t) = &rec.message.content
+                    && !t.is_empty()
+                {
+                    text_parts.push(t.clone());
+                }
+                tool_calls.extend(rec.message.tool_calls.clone());
+            }
+        }
+        if text_parts.is_empty() && tool_calls.is_empty() {
+            SingleShotOutcome::Empty
+        } else {
+            let joined = text_parts.join("\n");
+            SingleShotOutcome::Completed {
+                text: if joined.is_empty() { None } else { Some(joined) },
+                reasoning: None,
+                tool_calls,
+                usage: None,
+            }
         }
     };
 
     let (envs, _terminal) = synthesize_envelopes(response_id, &outcome);
+    // Recover the model id from the persisted AgentConfig (config_json is the
+    // serialized AgentConfig written by persist_input); fall back to empty.
+    let model = serde_json::from_str::<AgentConfig>(&thread.config_json)
+        .ok()
+        .map(|c| c.model)
+        .unwrap_or_default();
     let mut response = build_response(AdapterInput {
         response_id,
-        model: &thread.config_json,
+        model: &model,
         created_at_unix: Utc::now().timestamp() as f64,
         envelopes: &envs,
         ..Default::default()
@@ -776,6 +1047,71 @@ mod tests {
         );
         assert!(matches!(terminal, TerminalKind::Failed { .. }));
         assert_eq!(envs.len(), 2); // lifecycle only
+    }
+
+    #[test]
+    fn stream_mapping_text_deltas_then_terminal() {
+        let mut acc = StreamAccumulator { next_id: 2, ..Default::default() };
+        let d1 = map_delta_event(DeltaEvent::Text("hel".into()), &mut acc);
+        let d2 = map_delta_event(DeltaEvent::Text("lo".into()), &mut acc);
+        let d3 = map_delta_event(DeltaEvent::Done { usage: None }, &mut acc);
+        // Text deltas emit text-delta envelopes with monotonic ids; Done emits none.
+        assert!(d3.is_none());
+        let delta_frames: Vec<StreamFrame> = [d1, d2].into_iter().flatten().collect();
+        assert_eq!(delta_frames.len(), 2);
+        assert!(matches!(
+            delta_frames[0],
+            StreamFrame::Envelope(ref e) if matches!(
+                kind(e),
+                AgentEventKind::ResponseOutputTextDelta { delta, output_index, .. }
+                    if delta.as_str() == "hel" && *output_index == 0
+            )
+        ));
+        assert!(matches!(
+            delta_frames[1],
+            StreamFrame::Envelope(ref e) if matches!(
+                kind(e),
+                AgentEventKind::ResponseOutputTextDelta { delta, .. } if delta.as_str() == "lo"
+            )
+        ));
+        assert_eq!(acc.text, "hello");
+        // Terminal: one text-done (msg_0) + Completed.
+        let outcome = outcome_from_accumulator(&acc);
+        assert!(matches!(outcome, SingleShotOutcome::Completed { .. }));
+        let term = terminal_frames(&acc, &outcome);
+        assert_eq!(term.len(), 2);
+        assert!(matches!(
+            term[0],
+            StreamFrame::Envelope(ref e) if matches!(
+                kind(e),
+                AgentEventKind::ResponseOutputTextDone { text, .. } if text.as_str() == "hello"
+            )
+        ));
+        assert!(matches!(term[1], StreamFrame::Terminal(TerminalKind::Completed)));
+    }
+
+    #[test]
+    fn stream_mapping_failed_emits_no_text_done() {
+        let mut acc = StreamAccumulator { next_id: 2, ..Default::default() };
+        map_delta_event(DeltaEvent::Text("partial".into()), &mut acc);
+        map_delta_event(DeltaEvent::Failed("boom".into()), &mut acc);
+        let outcome = outcome_from_accumulator(&acc);
+        assert!(matches!(outcome, SingleShotOutcome::Failed { .. }));
+        // Failed → no text-done envelope, just the terminal.
+        let term = terminal_frames(&acc, &outcome);
+        assert_eq!(term.len(), 1);
+        assert!(matches!(term[0], StreamFrame::Terminal(TerminalKind::Failed { .. })));
+    }
+
+    #[test]
+    fn stream_mapping_empty_emits_completed_only() {
+        let acc = StreamAccumulator { next_id: 2, ..Default::default() };
+        let outcome = outcome_from_accumulator(&acc);
+        assert!(matches!(outcome, SingleShotOutcome::Empty));
+        // Empty → Completed terminal, no text-done envelope.
+        let term = terminal_frames(&acc, &outcome);
+        assert_eq!(term.len(), 1);
+        assert!(matches!(term[0], StreamFrame::Terminal(TerminalKind::Completed)));
     }
 
     fn output_index_of(e: &AgentEventKind) -> i32 {

@@ -35,6 +35,11 @@ class OpenAICreateRequest:
             temperature (float | None | Unset):
             text (None | OpenAITextInput | Unset):
             tool_choice (Any | Unset):
+            tools (Any | Unset): OpenAI Responses `tools` array (function tool definitions). Held as a
+                `serde_json::Value` — like `input`/`tool_choice` — so the struct stays
+                `ToSchema`-derivable while accepting the canonical Responses shape
+                (`[{"type":"function","name":...,"parameters":...}]`). Use
+                [`OpenAICreateRequest::function_tools`] to extract the function tools.
             top_p (float | None | Unset):
     """
 
@@ -48,6 +53,7 @@ class OpenAICreateRequest:
     temperature: float | None | Unset = UNSET
     text: None | OpenAITextInput | Unset = UNSET
     tool_choice: Any | Unset = UNSET
+    tools: Any | Unset = UNSET
     top_p: float | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -111,6 +117,8 @@ class OpenAICreateRequest:
 
         tool_choice = self.tool_choice
 
+        tools = self.tools
+
         top_p: float | None | Unset
         if isinstance(self.top_p, Unset):
             top_p = UNSET
@@ -140,6 +148,8 @@ class OpenAICreateRequest:
             field_dict["text"] = text
         if tool_choice is not UNSET:
             field_dict["tool_choice"] = tool_choice
+        if tools is not UNSET:
+            field_dict["tools"] = tools
         if top_p is not UNSET:
             field_dict["top_p"] = top_p
 
@@ -245,6 +255,8 @@ class OpenAICreateRequest:
 
         tool_choice = d.pop("tool_choice", UNSET)
 
+        tools = d.pop("tools", UNSET)
+
         def _parse_top_p(data: object) -> float | None | Unset:
             if data is None:
                 return data
@@ -265,6 +277,7 @@ class OpenAICreateRequest:
             temperature=temperature,
             text=text,
             tool_choice=tool_choice,
+            tools=tools,
             top_p=top_p,
         )
 

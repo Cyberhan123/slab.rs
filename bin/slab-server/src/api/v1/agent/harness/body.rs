@@ -9,12 +9,13 @@
 
 use chrono::Utc;
 use slab_agent::port::ThreadListFilter;
+use slab_agent::protocol::{Thread, Turn};
 use slab_cloud_provider::default_models_for_provider;
 use slab_proto::harness::messages::{
     ApprovalPolicy, ApprovalResolveParams, ApprovalResolveResult, SandboxPolicy, ShutdownParams,
-    ShutdownResult, Thread, ThreadArchiveParams, ThreadArchiveResult, ThreadForkParams,
-    ThreadForkResult, ThreadListParams, ThreadListResult, ThreadResumeParams, ThreadResumeResult,
-    ThreadRollbackParams, ThreadRollbackResult, ThreadStartParams, ThreadStartResult, Turn,
+    ShutdownResult, ThreadArchiveParams, ThreadArchiveResult, ThreadForkParams, ThreadForkResult,
+    ThreadListParams, ThreadListResult, ThreadResumeParams, ThreadResumeResult,
+    ThreadRollbackParams, ThreadRollbackResult, ThreadStartParams, ThreadStartResult,
     TurnInterruptParams, TurnInterruptResult, TurnStartParams, TurnStartResult,
     WorkspaceMigrateParams, WorkspaceMigrateResult,
 };

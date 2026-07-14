@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use chrono::Utc;
 use futures::{StreamExt, stream};
 use slab_agent_tracing::record_json_from_context;
+use slab_types::RuntimeBackendId;
 use uuid::Uuid;
 
 use crate::context::ModelState;
@@ -37,24 +38,24 @@ struct LocalStreamTerminalMetadata {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct LocalChatRequestConfig {
-    pub(super) session_id: Option<String>,
-    pub(super) max_tokens: u32,
-    pub(super) temperature: f32,
-    pub(super) top_p: Option<f32>,
-    pub(super) top_k: Option<i32>,
-    pub(super) min_p: Option<f32>,
-    pub(super) presence_penalty: Option<f32>,
-    pub(super) repetition_penalty: Option<f32>,
-    pub(super) reasoning_effort: Option<ChatReasoningEffort>,
-    pub(super) verbosity: Option<ChatVerbosity>,
-    pub(super) gbnf: Option<String>,
-    pub(super) structured_output: Option<StructuredOutput>,
-    pub(super) tools: Vec<slab_proto::openai::FunctionTool>,
-    pub(super) stop: Vec<String>,
-    pub(super) agent_trace: Option<slab_agent_tracing::AgentTraceContext>,
-    pub(super) stream: bool,
-    pub(super) include_usage: bool,
+pub(crate) struct LocalChatRequestConfig {
+    pub(crate) session_id: Option<String>,
+    pub(crate) max_tokens: u32,
+    pub(crate) temperature: f32,
+    pub(crate) top_p: Option<f32>,
+    pub(crate) top_k: Option<i32>,
+    pub(crate) min_p: Option<f32>,
+    pub(crate) presence_penalty: Option<f32>,
+    pub(crate) repetition_penalty: Option<f32>,
+    pub(crate) reasoning_effort: Option<ChatReasoningEffort>,
+    pub(crate) verbosity: Option<ChatVerbosity>,
+    pub(crate) gbnf: Option<String>,
+    pub(crate) structured_output: Option<StructuredOutput>,
+    pub(crate) tools: Vec<slab_proto::openai::FunctionTool>,
+    pub(crate) stop: Vec<String>,
+    pub(crate) agent_trace: Option<slab_agent_tracing::AgentTraceContext>,
+    pub(crate) stream: bool,
+    pub(crate) include_usage: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -72,12 +73,30 @@ pub(super) struct LocalTextRequestConfig {
     pub(super) structured_output: Option<StructuredOutput>,
 }
 
-pub(super) async fn create_chat_completion(
+/// A resolved local runtime request plus the prompt-engineering byproducts the
+/// chat streaming layer still needs (stop sequences + trailing markers for
+/// output trimming / usage estimation). Shared between
+/// [`create_chat_completion`] and the `/responses` single-shot path.
+#[derive(Debug, Clone)]
+pub(crate) struct LocalRuntimeRequest {
+    pub(crate) backend_id: RuntimeBackendId,
+    pub(crate) request: RuntimeTextGenerationRequest,
+    pub(crate) prompt: String,
+    pub(crate) effective_stop: Vec<String>,
+    pub(crate) trailing_stop_markers: Vec<String>,
+}
+
+/// Render the local chat prompt (template + reasoning controls + gbnf) and
+/// assemble the [`RuntimeTextGenerationRequest`]. Shared by the chat streaming
+/// layer ([`create_chat_completion`]) and the `/responses` single-shot path so
+/// the local prompt engineering is not duplicated. Records the same agent-trace
+/// payloads as the inline path did.
+pub(crate) async fn build_local_runtime_request(
     state: &ModelState,
     model: &str,
     messages: &[DomainConversationMessage],
-    config: LocalChatRequestConfig,
-) -> Result<GeneratedChatOutput, AppCoreError> {
+    config: &LocalChatRequestConfig,
+) -> Result<LocalRuntimeRequest, AppCoreError> {
     let prompt_profile = model::resolve_local_chat_prompt_profile(state, model).await?;
     let backend_id = prompt_profile.backend_id;
 
@@ -180,6 +199,18 @@ pub(super) async fn create_chat_completion(
             runtime_request_payload(&request),
         );
     }
+
+    Ok(LocalRuntimeRequest { backend_id, request, prompt, effective_stop, trailing_stop_markers })
+}
+
+pub(super) async fn create_chat_completion(
+    state: &ModelState,
+    model: &str,
+    messages: &[DomainConversationMessage],
+    config: LocalChatRequestConfig,
+) -> Result<GeneratedChatOutput, AppCoreError> {
+    let LocalRuntimeRequest { backend_id, request, prompt, effective_stop, trailing_stop_markers } =
+        build_local_runtime_request(state, model, messages, &config).await?;
 
     if config.stream {
         let (backend_stream, usage_guard) = local_chat_stream(state, backend_id, request).await?;

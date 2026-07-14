@@ -10,7 +10,7 @@
 //!
 //! Boundary: pure conversion only. No `tokio`, `axum`, or agent-service calls.
 
-use slab_proto::harness::event::EventMsg;
+use slab_agent::protocol::EventMsg;
 use slab_proto::harness::notification::ServerNotification;
 
 /// Lifting helper: convert an [`EventMsg`] into its wire [`ServerNotification`],
@@ -52,8 +52,7 @@ pub fn event_msg_to_notification(msg: EventMsg) -> Option<ServerNotification> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use slab_proto::harness::error::ErrorEvent;
-    use slab_proto::harness::notification::AgentMessageDeltaParams;
+    use slab_agent::protocol::{AgentMessageDeltaParams, ErrorEvent};
 
     #[test]
     fn delta_event_lifts_to_notification() {

@@ -17,6 +17,7 @@ use axum::response::Response;
 use futures::{SinkExt, StreamExt};
 use serde_json::Value;
 use slab_agent::port::{ThreadMessageRecord, ThreadSnapshot, TurnItemRecord, TurnStateRecord};
+use slab_agent::protocol::{Thread, Turn, TurnItem, UserMessageContent};
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::HarnessService;
 use slab_cloud_provider::CloudModelSpec;
@@ -24,8 +25,7 @@ use slab_jsonrpc::JSONRPCMessage;
 use slab_jsonrpc::host::{HostConfig, NotificationHandler};
 use slab_jsonrpc::notifier::Notifier;
 use slab_jsonrpc::ws::{WsFrame, serve_websocket};
-use slab_proto::harness::item::{TurnItem, UserMessageContent};
-use slab_proto::harness::messages::{ReasoningEffort, Thread, Turn};
+use slab_proto::harness::messages::ReasoningEffort;
 use slab_proto::harness::{ModelInfo, ReasoningEffortOption};
 use slab_types::{ConversationMessage, ConversationMessageContent};
 use tokio::sync::mpsc;
@@ -530,8 +530,8 @@ mod tests {
                 seq: 0,
                 item_json: serde_json::to_string(&TurnItem::Reasoning {
                     id: "r1".to_owned(),
-                    summary: slab_proto::harness::item::ReasoningText::one("recap"),
-                    content: slab_proto::harness::item::ReasoningText::one("full trace"),
+                    summary: slab_agent::protocol::ReasoningText::one("recap"),
+                    content: slab_agent::protocol::ReasoningText::one("full trace"),
                 })
                 .unwrap(),
                 created_at: "2024-01-01T00:00:01Z".to_owned(),
@@ -568,7 +568,7 @@ mod tests {
         assert!(matches!(
             &turn0.items[1],
             TurnItem::Reasoning { content, .. }
-            if matches!(content, slab_proto::harness::item::ReasoningText::One(s) if s == "full trace")
+            if matches!(content, slab_agent::protocol::ReasoningText::One(s) if s == "full trace")
         ));
         assert!(matches!(
             &turn0.items[2],

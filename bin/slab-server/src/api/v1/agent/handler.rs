@@ -22,14 +22,15 @@ use slab_app_core::schemas::chat::{OpenAiError, OpenAiErrorResponse};
 use slab_proto::openai::{ResponseCompletedEvent, ResponseCompletedType, ResponsesServerEvent};
 use utoipa::OpenApi;
 
-use crate::api::v1::agent::openai_compat::{
-    StreamCtx, StreamFrame, build_terminal_event, envelope_to_events,
-};
 use crate::api::v1::agent::schema::{
     AgentConfigInput, MessageInput, OpenAICreateRequest, OpenAIReasoningInput, OpenAITextInput,
 };
 use crate::api::v1::chat::schema::{ChatToolCall, ChatToolFunction};
 use crate::error::ServerError;
+use slab_app_core::domain::services::agent::response::single_shot::StreamFrame;
+use slab_app_core::domain::services::agent::response::stream::{
+    StreamCtx, build_terminal_event, envelope_to_events,
+};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -617,13 +618,18 @@ mod tests {
     #[test]
     #[ignore = "pending adapter envelope_to_events impl"]
     fn envelope_to_events_emits_canonical_frames() {
-        use crate::api::v1::agent::openai_compat::{StreamCtx, envelope_to_events};
+        use slab_app_core::domain::services::agent::response::event::{
+            AgentEventEnvelope, AgentEventKind, TurnEvent,
+        };
+        use slab_app_core::domain::services::agent::response::stream::{
+            StreamCtx, envelope_to_events,
+        };
 
-        let envelope = slab_app_core::domain::services::agent::response::AgentEventEnvelope {
+        let envelope = AgentEventEnvelope {
             id: 1,
-            event: slab_app_core::domain::services::agent::response::TurnEvent::Response {
+            event: TurnEvent::Response {
                 turn_index: Some(0),
-                event: slab_app_core::domain::services::agent::response::AgentEventKind::ResponseOutputTextDone {
+                event: AgentEventKind::ResponseOutputTextDone {
                     item_id: "msg-1".to_owned(),
                     output_index: 0,
                     content_index: 0,

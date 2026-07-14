@@ -184,6 +184,13 @@ pub struct OpenAICreateRequest {
     pub reasoning: Option<OpenAIReasoningInput>,
     #[serde(default)]
     pub text: Option<OpenAITextInput>,
+    /// OpenAI Responses `tools` array (function tool definitions). Held as a
+    /// `serde_json::Value` — like `input`/`tool_choice` — so the struct stays
+    /// `ToSchema`-derivable while accepting the canonical Responses shape
+    /// (`[{"type":"function","name":...,"parameters":...}]`). Use
+    /// [`OpenAICreateRequest::function_tools`] to extract the function tools.
+    #[serde(default)]
+    pub tools: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default, ToSchema)]
@@ -227,6 +234,54 @@ impl OpenAICreateRequest {
             ..Default::default()
         }
     }
+
+    /// Extract the `function` tool definitions to feed the LLM.
+    ///
+    /// The Responses `tools` array may carry other tool types (file_search,
+    /// web_search, …); only `function` tools reach the chat completion, since
+    /// the client-side tool loop only implements function calls. Items are built
+    /// leniently via [`function_tool_from_json`] (the canonical Responses shape
+    /// omits `strict`/`parameters`); a non-array `tools` value or an item
+    /// without a `name` is dropped.
+    pub fn function_tools(&self) -> Vec<slab_proto::openai::FunctionTool> {
+        let Some(value) = self.tools.as_ref() else {
+            return Vec::new();
+        };
+        let Some(items) = value.as_array() else {
+            return Vec::new();
+        };
+        items
+            .iter()
+            .filter(|item| item.get("type").and_then(|v| v.as_str()) == Some("function"))
+            .filter_map(function_tool_from_json)
+            .collect()
+    }
+}
+
+/// Leniently build a [`FunctionTool`] from one Responses `function` tool JSON
+/// object. `slab-proto`'s `FunctionTool` marks `strict`/`parameters` as
+/// deserialize-required (`deserialize_with` without `default`), but the
+/// canonical Responses shape omits them — so deserialize the fields manually.
+/// Only `name` is truly required; an item without a name is dropped.
+fn function_tool_from_json(item: &serde_json::Value) -> Option<slab_proto::openai::FunctionTool> {
+    let name = item.get("name")?.as_str()?.to_owned();
+    let parameters = item.get("parameters").and_then(|v| {
+        serde_json::from_value::<std::collections::HashMap<String, serde_json::Value>>(v.clone())
+            .ok()
+    });
+    let strict = item.get("strict").and_then(|v| v.as_bool());
+    let description = item.get("description").and_then(|v| match v {
+        serde_json::Value::Null => Some(None),
+        serde_json::Value::String(s) => Some(Some(s.clone())),
+        _ => None,
+    });
+    Some(slab_proto::openai::FunctionTool {
+        name,
+        parameters,
+        strict,
+        description,
+        defer_loading: None,
+    })
 }
 
 fn openai_input_to_messages(input: &serde_json::Value) -> Vec<MessageInput> {
@@ -534,6 +589,40 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].role, "user");
         assert_eq!(messages[0].content, "hello");
+    }
+
+    #[test]
+    fn function_tools_extracts_function_definitions_and_drops_others() {
+        let req: OpenAICreateRequest = serde_json::from_str(
+            r#"{"input":"hi","tools":[
+                {"type":"function","name":"get_weather","description":"Get weather","parameters":{"type":"object"}},
+                {"type":"web_search"}
+            ]}"#,
+        )
+        .unwrap();
+        let tools = req.function_tools();
+        assert_eq!(tools.len(), 1, "non-function tools are dropped");
+        assert_eq!(tools[0].name, "get_weather");
+        assert_eq!(tools[0].description, Some(Some("Get weather".to_owned())));
+        // Canonical shape omits strict/parameters — both default leniently.
+        let req: OpenAICreateRequest =
+            serde_json::from_str(r#"{"input":"hi","tools":[{"type":"function","name":"noop"}]}"#)
+                .unwrap();
+        let tools = req.function_tools();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "noop");
+        assert!(tools[0].strict.is_none() && tools[0].parameters.is_none());
+    }
+
+    #[test]
+    fn function_tools_empty_when_absent_or_malformed() {
+        let req: OpenAICreateRequest = serde_json::from_str(r#"{"input":"hi"}"#).unwrap();
+        assert!(req.function_tools().is_empty());
+
+        // A non-array `tools` value is dropped leniently.
+        let req: OpenAICreateRequest =
+            serde_json::from_str(r#"{"input":"hi","tools":"not-an-array"}"#).unwrap();
+        assert!(req.function_tools().is_empty());
     }
 
     #[test]

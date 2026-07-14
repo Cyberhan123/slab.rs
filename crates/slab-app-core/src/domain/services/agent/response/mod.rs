@@ -2,15 +2,15 @@
 //!
 //! `/responses` is a standalone single-shot Model: one LLM call via
 //! `llm-service` (through `ChatService`), with the canonical OpenAI Responses
-//! wire produced by feeding *synthesized* [`AgentEventKind`] envelopes into the
-//! pure projections ([`projection::build_response`] /
+//! wire produced by feeding *synthesized* [`event::AgentEventKind`] envelopes
+//! into the pure projections ([`projection::build_response`] /
 //! [`stream::envelope_to_events`]). The non-streaming assembler lives in
 //! [`projection`], the streaming state machine in [`stream`], and the
 //! single-shot orchestration (resolve model → route → call → persist →
 //! synthesize) in [`single_shot`].
 //!
 //! Slice C3 relocated the OpenAI-Responses wire vocabulary
-//! ([`AgentEventKind`]/[`TurnEvent`]/[`AgentEventEnvelope`]/[`AgentResponseRef`])
+//! ([`event::AgentEventKind`]/[`event::TurnEvent`]/[`event::AgentEventEnvelope`]/[`event::AgentResponseRef`])
 //! out of `slab-agent` into [`event`] — the engine crate now owns only its
 //! harness protocol (`EventMsg`/`TurnItem`) and holds zero `/responses` wire
 //! types. `/responses` synthesizes the envelopes locally; it never drives the
@@ -21,11 +21,8 @@ pub mod projection;
 pub mod single_shot;
 pub mod stream;
 
-pub use event::{AgentEventEnvelope, AgentEventKind, AgentResponseRef, TurnEvent};
-pub use projection::{
-    AdapterInput, build_response, parse_mcp_status, parse_phase, parse_shell_output_content,
-};
-pub use stream::{StreamCtx, build_terminal_event, envelope_to_events};
+#[cfg(test)]
+mod openai_compat_tests;
 
 use std::pin::Pin;
 
@@ -68,9 +65,9 @@ impl ResponseService {
         run_create_response(&self.core, &self.state, &req, &session_id).await
     }
 
-    /// Streaming single-shot: returns the response id plus the synthesized
-    /// frame stream (lifecycle + output-item envelopes + terminal). C2 emits
-    /// the full sequence as a burst; true token streaming is a follow-up.
+    /// Streaming single-shot: returns the response id plus the frame stream
+    /// (lifecycle + per-token output-item envelopes + terminal). Text-only
+    /// requests stream token-by-token; tool requests fall back to a burst.
     pub async fn stream_response(
         &self,
         req: OpenAICreateRequest,
@@ -78,7 +75,7 @@ impl ResponseService {
     ) -> Result<(String, StreamFrameStream), AppCoreError> {
         let (response_id, frames) =
             run_stream_response(&self.core, &self.state, &req, &session_id).await?;
-        Ok((response_id, Box::pin(futures::stream::iter(frames))))
+        Ok((response_id, frames))
     }
 
     /// Reconstruct a [`Response`] for an already-completed run (GET SSE resume).

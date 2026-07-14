@@ -16,13 +16,13 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
+use slab_agent::protocol::{EventMsg, TurnCompletedParams};
 use slab_app_core::application::agent::projection::harness::event_msg_to_notification;
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::HarnessService;
 use slab_jsonrpc::notifier::Notifier;
-use slab_proto::harness::event::EventMsg;
 use slab_proto::harness::method;
-use slab_proto::harness::notification::{ErrorParams, TurnCompletedParams};
+use slab_proto::harness::notification::ErrorParams;
 use tokio::sync::broadcast;
 
 /// harness-visible thread id → real slab thread id, set once the first turn
@@ -238,8 +238,8 @@ fn push_event(notifier: &Notifier, thread_id: &str, msg: EventMsg) {
 
 #[cfg(test)]
 mod tests {
+    use slab_agent::protocol::ErrorEvent;
     use slab_jsonrpc::JSONRPCMessage;
-    use slab_proto::harness::error::ErrorEvent;
     use tokio::sync::mpsc;
 
     use super::*;

@@ -24,9 +24,9 @@ use slab_agent::error::AgentError;
 use slab_agent::port::{AgentStorePort, ThreadMessageRecord, ThreadSnapshot};
 use slab_types::ConversationMessage;
 
-use crate::application::agent::turn_item_persistence;
 use crate::error::AppCoreError;
 use crate::infra::agent::event_hub::{AgentEventHub, AgentEventMsgSubscription};
+use crate::infra::agent::turn_item_persistence;
 
 /// Shared core held by both the harness and response services.
 ///

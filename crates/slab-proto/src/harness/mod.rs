@@ -11,24 +11,18 @@
 //! The `example/` subdirectory holds the original design pseudocode (`.rs` +
 //! `.ts`); the compiled types in this module are the authoritative contract.
 
-pub mod error;
-pub mod event;
-pub mod item;
 pub mod messages;
 pub mod model;
 pub mod notification;
 pub mod operation;
 pub mod user_input;
 
-pub use error::{ErrorEvent, TurnError, WarningEvent};
-pub use event::{Event, EventMsg};
-pub use item::TurnItem;
 pub use messages::{
     ApprovalResolveParams, ApprovalResolveResult, ApprovalScope, InitializeParams,
     InitializeResult, OperationCategory, PermissionMode, ReasoningEffort, ShutdownParams,
-    ShutdownResult, Thread, ThreadArchiveParams, ThreadArchiveResult, ThreadForkParams,
-    ThreadForkResult, ThreadListParams, ThreadListResult, ThreadResumeParams, ThreadResumeResult,
-    ThreadRollbackParams, ThreadRollbackResult, ThreadStartParams, ThreadStartResult, Turn,
+    ShutdownResult, ThreadArchiveParams, ThreadArchiveResult, ThreadForkParams, ThreadForkResult,
+    ThreadListParams, ThreadListResult, ThreadResumeParams, ThreadResumeResult,
+    ThreadRollbackParams, ThreadRollbackResult, ThreadStartParams, ThreadStartResult,
     TurnInterruptParams, TurnInterruptResult, TurnStartParams, TurnStartResult,
 };
 pub use model::{ModelInfo, ModelListParams, ModelListResult, ReasoningEffortOption};

@@ -12,13 +12,16 @@
 //! for per-run termination or terminal-status detection. Inserts are idempotent
 //! (`INSERT OR IGNORE` on `(thread_id, id)`), so any overlap is harmless. The
 //! live WS fan-out never writes the store, so there is no double-write.
+//!
+//! Lives in `infra` (a background persistence task bridging the event stream to
+//! the store) so the domain layer never backflows into `application`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::Utc;
 use slab_agent::port::{AgentStorePort, TurnItemRecord};
-use slab_proto::harness::event::EventMsg;
+use slab_agent::protocol::EventMsg;
 use tokio::sync::broadcast;
 
 use crate::infra::agent::event_hub::AgentEventHub;

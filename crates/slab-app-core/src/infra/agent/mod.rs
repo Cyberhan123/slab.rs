@@ -9,3 +9,4 @@ pub(crate) mod memory;
 pub(crate) mod memory_breaker;
 pub(crate) mod plugin_capability;
 pub(crate) mod runtime;
+pub(crate) mod turn_item_persistence;

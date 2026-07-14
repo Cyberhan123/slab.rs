@@ -1008,28 +1008,6 @@ impl AgentNotifyPort for NoopNotify {
     async fn on_status_change(&self, _thread_id: &str, _status: ThreadStatus) {}
 }
 
-#[derive(Default)]
-struct RecordingNotify;
-
-#[async_trait]
-impl AgentNotifyPort for RecordingNotify {
-    async fn on_status_change(&self, _thread_id: &str, _status: ThreadStatus) {}
-}
-
-#[async_trait]
-impl ApprovalPort for RecordingNotify {
-    async fn request_approval(
-        &self,
-        _thread_id: &str,
-        _call_id: &str,
-        _tool_name: &str,
-        _descriptor: &crate::OperationDescriptor,
-        _risk: Option<crate::ToolRiskAssessment>,
-    ) -> ApprovalDecision {
-        ApprovalDecision::Approved(crate::ApprovalScope::RunOnce)
-    }
-}
-
 #[async_trait]
 impl ApprovalPort for NoopNotify {
     async fn request_approval(
@@ -1734,7 +1712,7 @@ async fn disallowed_registered_tool_is_not_executed_and_feedback_is_persisted() 
     let llm = Arc::new(SecretToolCallLlm::new());
     let store = Arc::new(PersistingStore::default());
     let store_port: Arc<dyn AgentStorePort> = store.clone();
-    let notify = Arc::new(RecordingNotify);
+    let notify = Arc::new(NoopNotify);
     let router = ToolRouter::new();
     router.register(Box::new(TestEchoTool));
     router.register(Box::new(SecretTool { executions: executions.clone() }));
@@ -2900,7 +2878,7 @@ async fn repeated_side_effect_tool_call_interrupts_with_reason_and_trace_event()
     ));
     let store = Arc::new(PersistingStore::default());
     let store_port: Arc<dyn AgentStorePort> = store.clone();
-    let notify = Arc::new(RecordingNotify);
+    let notify = Arc::new(NoopNotify);
     let router = ToolRouter::new();
     router.register(Box::new(JsonNoopTool { name: "write_file" }));
     let trace = Arc::new(RecordingTraceSink::default());

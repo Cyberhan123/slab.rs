@@ -11,10 +11,10 @@ use serde_json::Value;
 
 use crate::harness::user_input::UserInput;
 
-// `Thread` / `GitInfo` / `Turn` now live in `slab_agent::protocol`; re-export so
-// the staying request/response DTOs below (and the `slab_proto::harness::*`
-// paths) keep resolving. On-the-wire bytes are unchanged.
-pub use slab_agent::protocol::{GitInfo, Thread, Turn};
+// `Thread` / `Turn` are owned by `slab_agent::protocol`; import them here so the
+// request/response DTOs below (e.g. `ThreadStartResult.thread`) can reference
+// them. They are no longer re-exported — consumers use `slab_agent::protocol`.
+use slab_agent::protocol::{Thread, Turn};
 
 // ============ Reasoning effort ============
 

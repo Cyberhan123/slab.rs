@@ -10,9 +10,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub use slab_agent::protocol::{
+// Notification param payloads are owned by `slab_agent::protocol`; imported
+// here (not re-exported) so the `ServerNotification` union variants below can
+// reference them. Consumers use `slab_agent::protocol` directly.
+use slab_agent::protocol::{
     AgentMessageDeltaParams, CommandExecutionOutputDeltaParams,
-    CommandExecutionRequestApprovalParams, FileChangeApprovalChange, FileChangeOutputDeltaParams,
+    CommandExecutionRequestApprovalParams, FileChangeOutputDeltaParams,
     FileChangeRequestApprovalParams, ItemCompletedParams, ItemStartedParams,
     ReasoningSummaryTextDeltaParams, ReasoningTextDeltaParams, ThreadStartedParams,
     TurnCompletedParams, TurnStartedParams,

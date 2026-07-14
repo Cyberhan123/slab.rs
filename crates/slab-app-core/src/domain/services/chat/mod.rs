@@ -2,7 +2,7 @@
 
 mod cloud;
 mod gbnf;
-mod local;
+pub(crate) mod local;
 mod params;
 mod session;
 mod streaming;

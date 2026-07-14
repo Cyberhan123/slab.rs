@@ -1,4 +1,5 @@
-//! Conversion-layer tests for [`super::openai_compat`].
+//! Golden-fixture tests for the OpenAI-Responses projection
+//! ([`super::build_response`] / [`super::envelope_to_events`]).
 //!
 //! Each test loads a golden fixture from
 //! `testdata/fixtures/openai-compatible/responses/`, builds the matching slab
@@ -8,10 +9,9 @@
 
 use serde_json::Value;
 
-use super::{
-    AdapterInput, AgentEventEnvelope, AgentEventKind, AgentResponseRef, StreamCtx, TurnEvent,
-    build_error_response, build_response, envelope_to_events,
-};
+use super::event::{AgentEventEnvelope, AgentEventKind, AgentResponseRef, TurnEvent};
+use super::projection::{AdapterInput, build_response};
+use super::stream::{StreamCtx, envelope_to_events};
 
 const PHASE_1_JSON: &str = include_str!(
     "../../../../../../../testdata/fixtures/openai-compatible/responses/openai-phase.1.json"
@@ -319,32 +319,6 @@ fn non_streaming_reasoning_round_trips() {
 }
 
 const COMMENTARY_TEXT: &str = "I\u{2019}ll quickly check reliable, up-to-date sources (major tech/news outlets and company blogs) to pull the most recent AI headlines for today, then summarize them for you with links.";
-
-// ---------------------------------------------------------------------------
-// Non-streaming error envelope
-// ---------------------------------------------------------------------------
-
-const ERROR_JSON: &str = include_str!(
-    "../../../../../../../testdata/fixtures/openai-compatible/responses/openai-error.1.json"
-);
-
-#[test]
-fn non_streaming_error_body_round_trips() {
-    let expected = parse_fixture(ERROR_JSON);
-
-    let message = "You exceeded your current quota, please check your plan and billing details. \
-                   For more information on this error, read the docs: \
-                   https://platform.openai.com/docs/guides/error-codes/api-errors.";
-
-    let actual = redact_dynamic_fields(build_error_response(
-        message,
-        "insufficient_quota",
-        "insufficient_quota",
-        None,
-    ));
-
-    assert_eq!(expected, actual);
-}
 
 // ---------------------------------------------------------------------------
 // Function call output item
