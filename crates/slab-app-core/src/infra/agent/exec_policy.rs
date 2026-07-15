@@ -10,7 +10,6 @@ use slab_exec_policy::{
     ApprovalScope, ExecPolicyEngine, ExecPolicyPort, FsRuleStore, PermissionBaseline, Rule,
     RuleSet, RuleStore, RuleStoreError,
 };
-use slab_sandboxing::{SandboxEnvironment, SandboxPolicy};
 use tracing::warn;
 
 use crate::infra::db::repository::{AnyStore, ExecRuleWorkspaceStore};
@@ -119,8 +118,7 @@ pub fn build_exec_policy_engine(
 ) -> Arc<dyn ExecPolicyPort> {
     let store = Arc::new(DbRuleStore::new(rules_dir.clone(), db));
     let rules = load_rules_sync(&rules_dir, workspace_root.as_deref());
-    let sandbox_env = SandboxEnvironment::new(workspace_root, SandboxPolicy::WorkspaceWrite);
-    Arc::new(ExecPolicyEngine::new(baseline, rules, store, sandbox_env))
+    Arc::new(ExecPolicyEngine::new(baseline, rules, store))
 }
 
 /// Synchronously load `default.rules` + the current workspace's

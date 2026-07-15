@@ -57,6 +57,7 @@ function Assistant() {
         error: harnessError,
         approvals,
         approvalStatusByItemId,
+        liveOutputByItemId,
         resolveApproval,
     } = useHarnessConversation(curConversation, selectedModelId || "slab-llama")
 
@@ -173,6 +174,7 @@ function Assistant() {
                 transport={transport}
                 approvals={approvals}
                 approvalStatusByItemId={approvalStatusByItemId}
+                liveOutputByItemId={liveOutputByItemId}
                 resolveApproval={resolveApproval}
             />
 

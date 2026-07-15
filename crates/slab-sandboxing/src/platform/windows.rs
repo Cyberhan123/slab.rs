@@ -50,6 +50,7 @@ impl SandboxDriver for WindowsSandboxDriver {
                 command.current_dir(cwd);
             }
             command.kill_on_drop(true);
+            command.stdin(Stdio::null());
             command.stdout(Stdio::piped());
             command.stderr(Stdio::piped());
 
@@ -62,7 +63,7 @@ impl SandboxDriver for WindowsSandboxDriver {
             job.assign_process(process_handle as windows_sys::Win32::Foundation::HANDLE)?;
 
             debug!(pid = spawned.id(), "spawned process in Windows Job Object");
-            let output = wait_for_child(spawned, cmd.timeout).await?;
+            let output = wait_for_child(spawned, cmd.timeout, cmd.output_sink.clone()).await?;
             drop(job);
             Ok(output)
         }

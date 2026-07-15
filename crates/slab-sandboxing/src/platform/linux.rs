@@ -66,7 +66,7 @@ impl SandboxDriver for LinuxSandboxDriver {
             command.stderr(Stdio::piped());
 
             let spawned = command.spawn().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
-            wait_for_child(spawned, cmd.timeout).await
+            wait_for_child(spawned, cmd.timeout, cmd.output_sink.clone()).await
         }
     }
 

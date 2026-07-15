@@ -39,6 +39,7 @@ export type AssistantChatPaneProps = {
     transport: HarnessChatTransport<UIMessage>
     approvals: ApprovalRequest[]
     approvalStatusByItemId: ReadonlyMap<string, ApprovalStatus>
+    liveOutputByItemId: ReadonlyMap<string, string>
     resolveApproval: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>
 }
 
@@ -53,6 +54,7 @@ export function AssistantChatPane({
     transport,
     approvals,
     approvalStatusByItemId,
+    liveOutputByItemId,
     resolveApproval,
 }: AssistantChatPaneProps) {
     const { t } = useTranslation()
@@ -64,8 +66,8 @@ export function AssistantChatPane({
     const greeting = useGreeting()
 
     const interactionValue = useMemo(
-        () => ({ approvalStatusByItemId }),
-        [approvalStatusByItemId],
+        () => ({ approvalStatusByItemId, liveOutputByItemId }),
+        [approvalStatusByItemId, liveOutputByItemId],
     )
 
     useEffect(() => {

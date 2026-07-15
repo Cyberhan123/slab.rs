@@ -35,7 +35,7 @@ pub use mcp::{McpCallTool, McpListToolsTool, McpProxyTool};
 pub use plan::PlanUpdateTool;
 pub use shell::{ShellPolicy, ShellTool};
 pub use slab_shell_command::{
-    ShellRule, ShellRuleAction, ShellRuleError, ShellRuleMatcher, ShellRuleSet,
+    ShellLauncher, ShellRule, ShellRuleAction, ShellRuleError, ShellRuleMatcher, ShellRuleSet,
 };
 pub use subagent::DelegateSubagentTool;
 pub use task_complete::{TASK_COMPLETE_METADATA_KEY, TASK_COMPLETE_TOOL_NAME, TaskCompleteTool};
@@ -55,8 +55,15 @@ pub fn register_all_tools(
     mcp_client: Option<Arc<McpClient>>,
     git_tools: bool,
     web_search_config: AgentWebSearchConfig,
+    shell_launcher: ShellLauncher,
+    shell_bash_path: Option<PathBuf>,
 ) {
-    router.register(Box::new(ShellTool::new(workspace_root.clone(), sandbox_driver)));
+    router.register(Box::new(ShellTool::new(
+        workspace_root.clone(),
+        sandbox_driver,
+        shell_launcher,
+        shell_bash_path,
+    )));
     router.register(Box::new(ReadFileTool::new(workspace_root.clone())));
     router.register(Box::new(WriteFileTool::new(workspace_root.clone())));
     router.register(Box::new(ListDirTool::new(workspace_root.clone())));
@@ -98,7 +105,16 @@ mod tests {
     #[test]
     fn register_all_tools_respects_workspace_and_git_switches() {
         let mut router = ToolRouter::new();
-        register_all_tools(&mut router, None, None, None, true, AgentWebSearchConfig::default());
+        register_all_tools(
+            &mut router,
+            None,
+            None,
+            None,
+            true,
+            AgentWebSearchConfig::default(),
+            ShellLauncher::default(),
+            None,
+        );
         assert!(router.get("shell").is_some());
         assert!(router.get("file_glob").is_some());
         assert!(router.get("plan_update").is_some());
@@ -116,6 +132,8 @@ mod tests {
             None,
             false,
             AgentWebSearchConfig::default(),
+            ShellLauncher::default(),
+            None,
         );
         assert!(router.get("file_glob").is_some());
         assert!(router.get("plan_update").is_some());
@@ -130,6 +148,8 @@ mod tests {
             None,
             true,
             AgentWebSearchConfig::default(),
+            ShellLauncher::default(),
+            None,
         );
         assert!(router.get("git_status").is_some());
         assert!(router.get("git_diff").is_some());

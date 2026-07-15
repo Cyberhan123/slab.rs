@@ -498,11 +498,12 @@ impl AgentMemoriesPmids {
 pub struct AgentToolsPmids {
     pub mcp: AgentMcpPmids,
     pub websearch: AgentWebSearchPmids,
+    pub shell: AgentShellToolsPmids,
 }
 
 impl AgentToolsPmids {
     pub const fn new() -> Self {
-        Self { mcp: AgentMcpPmids, websearch: AgentWebSearchPmids }
+        Self { mcp: AgentMcpPmids, websearch: AgentWebSearchPmids, shell: AgentShellToolsPmids }
     }
 }
 
@@ -535,6 +536,19 @@ impl AgentWebSearchPmids {
 
     pub fn providers(self) -> SettingPmid {
         SettingPmid::from_path("agent.tools.websearch.providers")
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AgentShellToolsPmids;
+
+impl AgentShellToolsPmids {
+    pub fn launcher(self) -> SettingPmid {
+        SettingPmid::from_path("agent.tools.shell.launcher")
+    }
+
+    pub fn bash_path(self) -> SettingPmid {
+        SettingPmid::from_path("agent.tools.shell.bash_path")
     }
 }
 

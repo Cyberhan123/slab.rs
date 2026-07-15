@@ -1,21 +1,17 @@
 //! The permission decision engine: the single owner of every
 //! Allow/RequireApproval/Deny verdict, plus a permissive stub for tests.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use dashmap::DashMap;
-use slab_sandboxing::{SandboxEnvironment, SandboxError, SandboxPolicy, SandboxedCommand};
 use tokio::sync::RwLock;
 use tracing::warn;
 
 use crate::category::{OperationCategory, OperationDescriptor};
 use crate::decision::{ApprovalScope, ExecDecision, PermissionBaseline, PermissionMode};
 use crate::rule::{RuleAction, RuleSet};
-use crate::safety::{
-    CommandSafetyChecker, SafetyDecision, is_destructive_command, is_sensitive_path,
-};
+use crate::safety::{CommandSafetyChecker, SafetyDecision, is_sensitive_path};
 use crate::store::{RuleStore, workspace_rules_filename};
 
 /// Decision engine the agent kernel calls. The SINGLE owner of the
@@ -44,7 +40,8 @@ pub trait ExecPolicyPort: Send + Sync {
 /// Internal behavior after resolving `PermissionMode` (+ baseline for Custom).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Behavior {
-    /// Prompt for shell/file-edit/network; auto-allow safe shell commands.
+    /// Prompt for shell/file-edit/network. Every shell call prompts unless a
+    /// remembered Allow rule matches (acceptForSession / AlwaysInWorkspace).
     RequestApproval,
     /// Allow everything (hard-deny safety patterns still apply).
     FullControl,
@@ -71,51 +68,16 @@ pub struct ExecPolicyEngine {
     baseline: PermissionBaseline,
     rules: RwLock<RuleSet>,
     store: Arc<dyn RuleStore>,
-    sandbox_env: SandboxEnvironment,
 }
 
 impl ExecPolicyEngine {
-    pub fn new(
-        baseline: PermissionBaseline,
-        rules: RuleSet,
-        store: Arc<dyn RuleStore>,
-        sandbox_env: SandboxEnvironment,
-    ) -> Self {
-        Self { modes: DashMap::new(), baseline, rules: RwLock::new(rules), store, sandbox_env }
+    pub fn new(baseline: PermissionBaseline, rules: RuleSet, store: Arc<dyn RuleStore>) -> Self {
+        Self { modes: DashMap::new(), baseline, rules: RwLock::new(rules), store }
     }
 
     fn mode_for(&self, thread_id: &str) -> PermissionMode {
         self.modes.get(thread_id).map(|m| *m).unwrap_or_default()
     }
-
-    /// Resolve the sandbox env to use for shell classification. The classification
-    /// policy is always `WorkspaceWrite` (the only behavior that classifies is
-    /// `RequestApproval`); the workspace root comes from the engine's env.
-    fn classify_shell(&self, command: &str) -> ShellSafety {
-        if is_destructive_command(command) {
-            return ShellSafety::NeedsReview;
-        }
-        let cmd = SandboxedCommand {
-            argv: vec![command.to_owned()],
-            env: Default::default(),
-            cwd: self.sandbox_env.workspace_root.clone(),
-            timeout: None,
-        };
-        match slab_sandboxing::validate_command(&self.sandbox_env, &cmd) {
-            Ok(()) => ShellSafety::Safe,
-            Err(SandboxError::PermissionDenied(_)) => ShellSafety::NeedsReview,
-            Err(other) => {
-                warn!(error = %other, "sandbox classification failed; treating as needs-review");
-                ShellSafety::NeedsReview
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ShellSafety {
-    Safe,
-    NeedsReview,
 }
 
 #[async_trait]
@@ -158,7 +120,9 @@ impl ExecPolicyPort for ExecPolicyEngine {
         let base = default_base(category);
 
         // 5. Rules override (first-match-wins). A `Block` rule denies; `Allow`
-        //    short-circuits to Allow; `RequireApproval` prompts.
+        //    short-circuits to Allow; `RequireApproval` prompts. A remembered
+        //    Allow rule (acceptForSession / AlwaysInWorkspace) is how repeat
+        //    shell calls get silenced.
         let rules = self.rules.read().await;
         if let Some(rule) = rules.evaluate(category, subject) {
             return match rule.action {
@@ -169,14 +133,9 @@ impl ExecPolicyPort for ExecPolicyEngine {
         }
         drop(rules);
 
-        // 6. Sandbox-classify shell commands: auto-allow safe ones, prompt the rest.
-        if category == OperationCategory::Shell && base == ExecDecision::RequireApproval {
-            return match self.classify_shell(subject) {
-                ShellSafety::Safe => ExecDecision::Allow,
-                ShellSafety::NeedsReview => ExecDecision::RequireApproval,
-            };
-        }
-
+        // 6. Shell commands prompt by default (`base == RequireApproval`) — the
+        //    sandbox safe-auto-allow was removed so every shell call surfaces an
+        //    approval decision. FileEdit/Network likewise use their `base`.
         base
     }
 
@@ -263,17 +222,14 @@ impl ExecPolicyPort for AllowAllExecPolicy {
     async fn clear_thread(&self, _thread_id: &str) {}
 }
 
-/// Build the default sandbox environment used for shell classification.
-pub fn default_sandbox_env(workspace_root: Option<PathBuf>) -> SandboxEnvironment {
-    SandboxEnvironment::new(workspace_root, SandboxPolicy::WorkspaceWrite)
-}
-
 // Re-export so callers don't need a separate `use` for the error type.
 pub use crate::store::RuleStoreError as StoreError;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
     use crate::category::OperationDescriptor;
     use crate::rule::{Rule, RuleSet};
     use crate::store::FsRuleStore;
@@ -282,12 +238,11 @@ mod tests {
         mode: PermissionMode,
         baseline: PermissionBaseline,
         rules: Vec<Rule>,
-        workspace: Option<PathBuf>,
+        _workspace: Option<PathBuf>,
     ) -> ExecPolicyEngine {
         let dir = tempfile::tempdir().expect("dir");
         let store = Arc::new(FsRuleStore::new(dir.path().to_path_buf()));
-        let env = default_sandbox_env(workspace.clone());
-        let engine = ExecPolicyEngine::new(baseline, RuleSet::from_rules(rules), store, env);
+        let engine = ExecPolicyEngine::new(baseline, RuleSet::from_rules(rules), store);
         engine.modes.insert("t1".to_owned(), mode);
         // Leak the tempdir for the test lifetime (rules persist to it).
         std::mem::forget(dir);
@@ -299,15 +254,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn request_approval_safe_shell_auto_allows() {
+    async fn request_approval_shell_prompts_by_default() {
         let engine = engine_with_rules(
             PermissionMode::RequestApproval,
             PermissionBaseline::WorkspaceWrite,
             vec![],
             ws(),
         );
+        // Safe shell commands prompt too (safe-auto-allow removed); only a
+        // remembered Allow rule (acceptForSession) silences them.
         let d = OperationDescriptor::shell("git status");
-        assert_eq!(engine.evaluate("t1", &d).await, ExecDecision::Allow);
+        assert_eq!(engine.evaluate("t1", &d).await, ExecDecision::RequireApproval);
     }
 
     #[tokio::test]
@@ -464,9 +421,10 @@ mod tests {
             vec![],
             ws(),
         );
+        // ApproveForMe resolves to RequestApproval; shell prompts there too now.
         assert_eq!(
             engine.evaluate("t1", &OperationDescriptor::shell("git status")).await,
-            ExecDecision::Allow
+            ExecDecision::RequireApproval
         );
     }
 }

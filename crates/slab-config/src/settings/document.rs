@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
@@ -561,6 +562,32 @@ pub struct AgentToolsConfig {
     pub mcp: AgentMcpConfig,
     #[serde(default)]
     pub websearch: AgentWebSearchConfig,
+    #[serde(default)]
+    pub shell: AgentShellToolsConfig,
+}
+
+/// Which shell the `shell` tool uses to run commands. `auto` probes for a
+/// POSIX shell (Git Bash on Windows) and falls back to PowerShell.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ShellLauncherKind {
+    #[default]
+    Auto,
+    Bash,
+    PowerShell,
+    Cmd,
+}
+
+/// Agent `shell` tool configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct AgentShellToolsConfig {
+    /// Shell launcher the `shell` tool invokes.
+    #[serde(default)]
+    pub launcher: ShellLauncherKind,
+    /// Explicit POSIX shell path; overrides auto-detection when it points to an
+    /// existing file. Only meaningful when `launcher` is `auto` or `bash`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bash_path: Option<PathBuf>,
 }
 
 /// Agent MCP tool integration settings.

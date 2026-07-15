@@ -68,5 +68,5 @@ pub use slab_exec_policy::{
 };
 pub use tool::{
     AgentThreadContext, PlanRef, ToolApprovalRequest, ToolContext, ToolContextBuilder, ToolHandler,
-    ToolOutput, ToolRouter, WorkspaceRef,
+    ToolOutput, ToolOutputObserver, ToolOutputStream, ToolRouter, WorkspaceRef,
 };

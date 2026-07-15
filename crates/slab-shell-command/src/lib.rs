@@ -10,7 +10,9 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use slab_exec_policy::{CommandSafetyChecker, SafetyDecision};
-use slab_sandboxing::{SandboxDriver, SandboxError, SandboxedCommand};
+use slab_sandboxing::{
+    OutputSink, PassThroughDriver, SandboxDriver, SandboxError, SandboxedCommand,
+};
 use slab_utils::string::decode_truncated_output;
 use thiserror::Error;
 use tracing::{debug, warn};
@@ -70,14 +72,22 @@ pub struct ShellExecutor {
     workspace_root: Option<PathBuf>,
     sandbox_driver: Option<Arc<dyn SandboxDriver>>,
     output_limit_bytes: usize,
+    shell: ResolvedShell,
 }
 
 impl ShellExecutor {
     pub fn new(
         workspace_root: Option<PathBuf>,
         sandbox_driver: Option<Arc<dyn SandboxDriver>>,
+        launcher: ShellLauncher,
+        bash_path: Option<PathBuf>,
     ) -> Self {
-        Self { workspace_root, sandbox_driver, output_limit_bytes: DEFAULT_OUTPUT_LIMIT_BYTES }
+        Self {
+            workspace_root,
+            sandbox_driver,
+            output_limit_bytes: DEFAULT_OUTPUT_LIMIT_BYTES,
+            shell: launcher.resolve(bash_path),
+        }
     }
 
     pub fn with_output_limit_bytes(mut self, output_limit_bytes: usize) -> Self {
@@ -86,6 +96,17 @@ impl ShellExecutor {
     }
 
     pub async fn execute(&self, command: ShellCommand) -> Result<ShellOutput, ShellError> {
+        self.execute_with_sink(command, None).await
+    }
+
+    /// Execute a command, optionally streaming stdout/stderr chunks to `sink` as
+    /// they arrive. The finalized `ShellOutput` (fully accumulated output) is
+    /// returned either way — streaming is for live display only.
+    pub async fn execute_with_sink(
+        &self,
+        command: ShellCommand,
+        sink: Option<Arc<dyn OutputSink>>,
+    ) -> Result<ShellOutput, ShellError> {
         // Defense-in-depth: the exec-policy engine already hard-denies these,
         // but refuse dangerous commands here too so a caller that bypasses the
         // engine cannot run them.
@@ -94,107 +115,162 @@ impl ShellExecutor {
             return Err(ShellError::DangerousCommand(reason));
         }
 
-        if let Some(driver) = &self.sandbox_driver {
-            let argv = shell_argv(&command.command);
-            debug!(driver = driver.name(), "executing shell command through sandbox driver");
-            let output = driver
-                .run(SandboxedCommand {
-                    argv,
-                    env: command.env,
-                    cwd: self.workspace_root.clone(),
-                    timeout: Some(Duration::from_secs(command.timeout_secs)),
-                })
-                .await?;
+        let argv = self.shell.argv(&command.command);
+        // Route through the configured sandbox driver, or a pass-through driver
+        // when no workspace/sandbox is bound — both honor `output_sink`.
+        let driver: Arc<dyn SandboxDriver> =
+            self.sandbox_driver.clone().unwrap_or_else(|| Arc::new(PassThroughDriver));
+        debug!(driver = driver.name(), "executing shell command");
+        tracing::info!(command = %command.command, driver = driver.name(), argv0 = ?argv.first(), "execute_with_sink: enter");
+        let output = driver
+            .run(SandboxedCommand {
+                argv,
+                env: command.env,
+                cwd: self.workspace_root.clone(),
+                timeout: Some(Duration::from_secs(command.timeout_secs)),
+                output_sink: sink,
+            })
+            .await?;
+        tracing::info!(command = %command.command, exit_code = output.exit_code, timed_out = output.timed_out, "execute_with_sink: driver returned");
 
-            return Ok(ShellOutput {
-                stdout: decode_truncated_output(&output.stdout, self.output_limit_bytes),
-                stderr: decode_truncated_output(&output.stderr, self.output_limit_bytes),
-                exit_code: output.exit_code,
-                timed_out: output.timed_out,
-            });
-        }
-
-        let output = execute_direct(command, self.workspace_root.clone()).await?;
         Ok(ShellOutput {
             stdout: decode_truncated_output(&output.stdout, self.output_limit_bytes),
             stderr: decode_truncated_output(&output.stderr, self.output_limit_bytes),
-            exit_code: output.status.code().unwrap_or(-1),
+            exit_code: output.exit_code,
             timed_out: output.timed_out,
         })
     }
 }
 
-struct DirectOutput {
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
-    status: std::process::ExitStatus,
-    timed_out: bool,
+/// Configurable shell launcher preference. `Auto` probes for a POSIX shell
+/// (`bash`/`sh`, including Git for Windows) and falls back to PowerShell on
+/// Windows. The host converts its own config enum into this 1:1 at the boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ShellLauncher {
+    /// Probe for a POSIX shell; fall back to PowerShell (Windows) / bash (Unix).
+    #[default]
+    Auto,
+    /// Always invoke a POSIX shell.
+    Bash,
+    /// Always invoke Windows PowerShell.
+    PowerShell,
+    /// Always invoke cmd.exe.
+    Cmd,
 }
 
-async fn execute_direct(
-    command: ShellCommand,
-    workspace_root: Option<PathBuf>,
-) -> Result<DirectOutput, ShellError> {
-    let mut child = platform_command(&command.command);
-    for (key, value) in command.env {
-        child.env(key, value);
-    }
-    if let Some(root) = workspace_root {
-        child.current_dir(root);
-    }
-    child.kill_on_drop(true);
+/// Concrete shell resolved from a [`ShellLauncher`] (`Auto` folded to a choice).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ResolvedShell {
+    /// POSIX shell; the path is explicit when discovered, else a bare `bash`.
+    Bash(PathBuf),
+    PowerShell,
+    Cmd,
+}
 
-    let child = child.spawn().map_err(|e| ShellError::SpawnFailed(e.to_string()))?;
-    let wait =
-        tokio::time::timeout(Duration::from_secs(command.timeout_secs), child.wait_with_output())
-            .await;
-
-    match wait {
-        Ok(Ok(output)) => Ok(DirectOutput {
-            stdout: output.stdout,
-            stderr: output.stderr,
-            status: output.status,
-            timed_out: false,
-        }),
-        Ok(Err(e)) => Err(ShellError::WaitFailed(e.to_string())),
-        Err(_) => {
-            #[cfg(windows)]
-            let status = std::os::windows::process::ExitStatusExt::from_raw(1);
-            #[cfg(unix)]
-            let status = std::os::unix::process::ExitStatusExt::from_raw(1);
-            Ok(DirectOutput {
-                stdout: Vec::new(),
-                stderr: b"command timed out".to_vec(),
-                status,
-                timed_out: true,
-            })
+impl ShellLauncher {
+    /// Resolve `Auto` to a concrete shell by probing for a POSIX shell.
+    fn resolve(self, bash_path: Option<PathBuf>) -> ResolvedShell {
+        match self {
+            ShellLauncher::Bash => {
+                ResolvedShell::Bash(resolve_bash(bash_path).unwrap_or_else(|| {
+                    PathBuf::from(if cfg!(windows) { "bash.exe" } else { "bash" })
+                }))
+            }
+            ShellLauncher::PowerShell => ResolvedShell::PowerShell,
+            ShellLauncher::Cmd => ResolvedShell::Cmd,
+            ShellLauncher::Auto => match resolve_bash(bash_path) {
+                Some(bash) => ResolvedShell::Bash(bash),
+                None => {
+                    #[cfg(windows)]
+                    {
+                        ResolvedShell::PowerShell
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        ResolvedShell::Bash(PathBuf::from("bash"))
+                    }
+                }
+            },
         }
     }
 }
 
-fn platform_command(command: &str) -> tokio::process::Command {
-    let argv = shell_argv(command);
-    let mut process = tokio::process::Command::new(&argv[0]);
-    process.args(&argv[1..]);
-    process
+impl ResolvedShell {
+    /// Build the argv that launches `command` through this shell.
+    fn argv(&self, command: &str) -> Vec<String> {
+        match self {
+            ResolvedShell::Bash(path) => {
+                vec![path.to_string_lossy().into_owned(), "-lc".to_string(), command.to_string()]
+            }
+            ResolvedShell::PowerShell => vec![
+                "powershell.exe".to_string(),
+                "-NoLogo".to_string(),
+                "-NoProfile".to_string(),
+                "-NonInteractive".to_string(),
+                "-Command".to_string(),
+                command.to_string(),
+            ],
+            ResolvedShell::Cmd => {
+                vec!["cmd.exe".to_string(), "/S".to_string(), "/C".to_string(), command.to_string()]
+            }
+        }
+    }
 }
 
-fn shell_argv(command: &str) -> Vec<String> {
+/// Resolve a POSIX shell binary. Honors an explicit `preferred` path, then
+/// well-known install locations, then a `PATH` walk for `bash`/`sh`.
+fn resolve_bash(preferred: Option<PathBuf>) -> Option<PathBuf> {
+    if let Some(path) = preferred.filter(|p| p.is_file()) {
+        return Some(path);
+    }
+    for candidate in well_known_bash_paths() {
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    find_on_path("bash").or_else(|| find_on_path("sh"))
+}
+
+/// Canonical Git for Windows / POSIX bash locations, most specific first.
+fn well_known_bash_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
     #[cfg(windows)]
     {
-        vec![
-            "powershell.exe".to_string(),
-            "-NoLogo".to_string(),
-            "-NoProfile".to_string(),
-            "-Command".to_string(),
-            command.to_string(),
-        ]
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            paths.push(
+                PathBuf::from(&local).join("Programs").join("Git").join("bin").join("bash.exe"),
+            );
+        }
+        paths.push(PathBuf::from(r"C:\Program Files\Git\bin\bash.exe"));
+        paths.push(PathBuf::from(r"C:\Program Files\Git\usr\bin\bash.exe"));
+        paths.push(PathBuf::from(r"C:\Program Files (x86)\Git\bin\bash.exe"));
     }
-
     #[cfg(not(windows))]
     {
-        vec!["sh".to_string(), "-lc".to_string(), command.to_string()]
+        paths.push(PathBuf::from("/bin/bash"));
+        paths.push(PathBuf::from("/usr/bin/bash"));
+        paths.push(PathBuf::from("/usr/local/bin/bash"));
     }
+    paths
+}
+
+/// Walk `PATH` for an executable named `name` (appends `.exe` on Windows).
+fn find_on_path(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        #[cfg(windows)]
+        {
+            let exe = dir.join(format!("{name}.exe"));
+            if exe.is_file() {
+                return Some(exe);
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -237,6 +313,8 @@ mod tests {
                     timed_out: true,
                 },
             })),
+            ShellLauncher::PowerShell,
+            None,
         );
 
         let output = executor
@@ -259,7 +337,7 @@ mod tests {
 
     #[tokio::test]
     async fn shell_executor_refuses_dangerous_command() {
-        let executor = ShellExecutor::new(None, None);
+        let executor = ShellExecutor::new(None, None, ShellLauncher::default(), None);
         let error =
             executor.execute(ShellCommand::new("rm -rf /")).await.expect_err("dangerous command");
         assert!(matches!(error, ShellError::DangerousCommand(_)));
@@ -267,12 +345,14 @@ mod tests {
 
     #[tokio::test]
     async fn direct_execution_reports_timeout() {
+        // Match the launcher to the platform's command syntax so the process
+        // actually runs long enough to hit the timeout.
         #[cfg(windows)]
-        let command = "Start-Sleep -Seconds 2";
+        let (launcher, command) = (ShellLauncher::PowerShell, "Start-Sleep -Seconds 2");
         #[cfg(not(windows))]
-        let command = "sleep 2";
+        let (launcher, command) = (ShellLauncher::Bash, "sleep 2");
 
-        let output = ShellExecutor::new(None, None)
+        let output = ShellExecutor::new(None, None, launcher, None)
             .execute(ShellCommand {
                 command: command.to_string(),
                 timeout_secs: 1,
@@ -282,9 +362,104 @@ mod tests {
             .expect("timed out commands should return output");
 
         assert!(output.timed_out);
-        #[cfg(windows)]
+        // Both the sandbox driver and PassThroughDriver route timeouts through
+        // `wait_for_child`, which reports exit_code 1 regardless of platform.
         assert_eq!(output.exit_code, 1);
-        #[cfg(not(windows))]
-        assert_eq!(output.exit_code, -1);
+    }
+
+    #[test]
+    fn shell_launcher_argv_per_variant() {
+        // PowerShell argv now carries -NonInteractive (prevents prompt-hangs).
+        let ps = ShellLauncher::PowerShell.resolve(None);
+        assert_eq!(
+            ps.argv("date +%A"),
+            ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "date +%A"]
+        );
+
+        // Bash argv shape: `<bash> -lc <cmd>` (test the pure argv builder, not
+        // PATH resolution — see resolve_bash_honors_explicit_existing_path...).
+        let bash = ResolvedShell::Bash(PathBuf::from("/usr/local/bin/bash"));
+        assert_eq!(bash.argv("echo hi"), ["/usr/local/bin/bash", "-lc", "echo hi"]);
+
+        let cmd = ShellLauncher::Cmd.resolve(None);
+        assert_eq!(cmd.argv("dir"), ["cmd.exe", "/S", "/C", "dir"]);
+    }
+
+    #[test]
+    fn resolve_bash_honors_explicit_existing_path_and_ignores_missing() {
+        // A real file on disk is trusted as the explicit bash path.
+        let exe = std::env::current_exe().expect("current exe");
+        assert_eq!(resolve_bash(Some(exe.clone())), Some(exe));
+
+        // A non-existent preferred path is ignored, never blindly trusted.
+        let bogus = PathBuf::from("/does/not/exist/bash");
+        assert_ne!(resolve_bash(Some(bogus.clone())), Some(bogus));
+    }
+
+    #[tokio::test]
+    async fn execute_with_sink_threads_sink_into_command() {
+        struct NoopSink;
+        impl slab_sandboxing::OutputSink for NoopSink {
+            fn on_output(&self, _stream: slab_sandboxing::OutputStream, _delta: &str) {}
+        }
+        let seen = Arc::new(Mutex::new(None));
+        let executor = ShellExecutor::new(
+            Some(PathBuf::from("workspace")),
+            Some(Arc::new(RecordingDriver {
+                seen: Arc::clone(&seen),
+                output: slab_sandboxing::SandboxedOutput {
+                    stdout: b"ok".to_vec(),
+                    stderr: vec![],
+                    exit_code: 0,
+                    timed_out: false,
+                },
+            })),
+            ShellLauncher::PowerShell,
+            None,
+        );
+        let sink: Arc<dyn slab_sandboxing::OutputSink> = Arc::new(NoopSink);
+        executor
+            .execute_with_sink(
+                ShellCommand {
+                    command: "echo x".to_string(),
+                    timeout_secs: 5,
+                    env: HashMap::new(),
+                },
+                Some(sink),
+            )
+            .await
+            .unwrap();
+        let cmd = seen.lock().unwrap().clone().expect("driver command");
+        assert!(cmd.output_sink.is_some(), "sink must be threaded into SandboxedCommand");
+    }
+
+    #[tokio::test]
+    async fn execute_with_sink_streams_chunks_and_returns_full_output() {
+        struct CapturingSink(Arc<Mutex<Vec<String>>>);
+        impl slab_sandboxing::OutputSink for CapturingSink {
+            fn on_output(&self, _stream: slab_sandboxing::OutputStream, delta: &str) {
+                self.0.lock().unwrap().push(delta.to_string());
+            }
+        }
+        let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink: Arc<dyn slab_sandboxing::OutputSink> =
+            Arc::new(CapturingSink(Arc::clone(&captured)));
+        // No sandbox driver → PassThroughDriver path, which forwards via read_stream.
+        let executor = ShellExecutor::new(None, None, ShellLauncher::Auto, None);
+        let output = executor
+            .execute_with_sink(
+                ShellCommand {
+                    command: "echo slab-stream-marker".to_string(),
+                    timeout_secs: 10,
+                    env: HashMap::new(),
+                },
+                Some(sink),
+            )
+            .await
+            .expect("output");
+        assert_eq!(output.exit_code, 0, "stderr: {}", output.stderr);
+        let streamed: String = captured.lock().unwrap().concat();
+        assert!(streamed.contains("slab-stream-marker"), "streamed = {streamed:?}");
+        assert!(output.stdout.contains("slab-stream-marker"), "stdout = {}", output.stdout);
     }
 }

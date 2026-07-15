@@ -354,6 +354,9 @@
             "mcp": {
               "enabled": false
             },
+            "shell": {
+              "launcher": "auto"
+            },
             "websearch": {
               "default_provider": "duckduckgo",
               "providers": {
@@ -382,6 +385,24 @@
       },
       "type": "object"
     },
+    "AgentShellToolsConfig": {
+      "description": "Agent `shell` tool configuration.",
+      "properties": {
+        "bash_path": {
+          "description": "Explicit POSIX shell path; overrides auto-detection when it points to an\nexisting file. Only meaningful when `launcher` is `auto` or `bash`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "launcher": {
+          "$ref": "#/$defs/ShellLauncherKind",
+          "default": "auto",
+          "description": "Shell launcher the `shell` tool invokes."
+        }
+      },
+      "type": "object"
+    },
     "AgentToolsConfig": {
       "description": "Agent tool settings.",
       "properties": {
@@ -389,6 +410,12 @@
           "$ref": "#/$defs/AgentMcpConfig",
           "default": {
             "enabled": false
+          }
+        },
+        "shell": {
+          "$ref": "#/$defs/AgentShellToolsConfig",
+          "default": {
+            "launcher": "auto"
           }
         },
         "websearch": {
@@ -1464,6 +1491,16 @@
       ],
       "type": "object"
     },
+    "ShellLauncherKind": {
+      "description": "Which shell the `shell` tool uses to run commands. `auto` probes for a\nPOSIX shell (Git Bash on Windows) and falls back to PowerShell.",
+      "enum": [
+        "auto",
+        "bash",
+        "power_shell",
+        "cmd"
+      ],
+      "type": "string"
+    },
     "SingleRuntimeFamilyConfig": {
       "description": "Single-node runtime family configuration used for candle and onnx.",
       "properties": {
@@ -1834,6 +1871,9 @@
         "tools": {
           "mcp": {
             "enabled": false
+          },
+          "shell": {
+            "launcher": "auto"
           },
           "websearch": {
             "default_provider": "duckduckgo",

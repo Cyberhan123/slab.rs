@@ -64,7 +64,7 @@ impl SandboxDriver for MacosSandboxDriver {
             command.stderr(Stdio::piped());
 
             let spawned = command.spawn().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
-            let output = wait_for_child(spawned, cmd.timeout).await;
+            let output = wait_for_child(spawned, cmd.timeout, cmd.output_sink.clone()).await;
             let _ = std::fs::remove_file(profile_path);
             output
         }

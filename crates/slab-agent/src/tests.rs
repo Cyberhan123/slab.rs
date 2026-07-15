@@ -2011,6 +2011,127 @@ async fn approval_required_tool_is_recorded_pending_then_completed() {
     );
 }
 
+/// Reproduces the post-approval hang with a tool that streams output via
+/// `ctx.output` (like the real shell tool), driven through the FULL
+/// `handle_tool_call` path: approval → `tokio::join!(run, drain)`. The hard
+/// timeout turns a hang into a test failure.
+#[tokio::test]
+async fn streaming_tool_after_approval_completes_without_hang() {
+    use crate::tool::ToolOutputStream;
+
+    struct StreamingEchoTool;
+    #[async_trait]
+    impl ToolHandler for StreamingEchoTool {
+        fn name(&self) -> &str {
+            "streaming_echo"
+        }
+        fn description(&self) -> &str {
+            "Echo with streaming output."
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({"type":"object","properties":{"message":{"type":"string"}},"required":["message"]})
+        }
+        fn describe_operation(
+            &self,
+            args: &serde_json::Value,
+        ) -> Option<crate::OperationDescriptor> {
+            Some(crate::OperationDescriptor::shell(
+                args.get("message").and_then(serde_json::Value::as_str).unwrap_or(""),
+            ))
+        }
+        async fn execute(
+            &self,
+            ctx: &ToolContext,
+            args: &serde_json::Value,
+        ) -> Result<ToolOutput, AgentError> {
+            if let Some(observer) = ctx.output.as_ref() {
+                observer.on_output(ToolOutputStream::Stdout, "chunk-1\n");
+                observer.on_output(ToolOutputStream::Stdout, "chunk-2\n");
+            }
+            let msg = args.get("message").and_then(serde_json::Value::as_str).unwrap_or("");
+            Ok(ToolOutput { content: format!("streamed: {msg}"), metadata: None })
+        }
+    }
+
+    struct StreamingLlm {
+        count: Mutex<u32>,
+    }
+    impl StreamingLlm {
+        fn new() -> Self {
+            Self { count: Mutex::new(0) }
+        }
+    }
+    #[async_trait]
+    impl LlmPort for StreamingLlm {
+        async fn chat_completion(
+            &self,
+            _model: &str,
+            _messages: &[ConversationMessage],
+            _tools: &[ToolSpec],
+            _config: &AgentConfig,
+            _trace_context: &AgentTraceContext,
+        ) -> Result<LlmResponse, AgentError> {
+            let mut c = self.count.lock().unwrap();
+            *c += 1;
+            if *c == 1 {
+                Ok(LlmResponse {
+                    content: None,
+                    content_already_streamed: false,
+                    tool_calls: vec![ParsedToolCall {
+                        id: "sc-1".into(),
+                        name: "streaming_echo".into(),
+                        arguments: r#"{"message":"hi"}"#.into(),
+                    }],
+                    finish_reason: Some("tool_calls".into()),
+                    usage: None,
+                })
+            } else {
+                Ok(LlmResponse {
+                    content: Some("done".into()),
+                    content_already_streamed: false,
+                    tool_calls: vec![],
+                    finish_reason: Some("stop".into()),
+                    usage: None,
+                })
+            }
+        }
+    }
+
+    let llm = Arc::new(StreamingLlm::new());
+    let store_port: Arc<dyn AgentStorePort> = Arc::new(RecordingStore::default());
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(StreamingEchoTool));
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(
+        AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4)
+            .with_exec_policy(Arc::new(AskAllExecPolicy)),
+    );
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: slab_types::ConversationMessageContent::Text("go".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
+
+    let thread_id = control.spawn("sess-stream".into(), config, messages).await.expect("spawn");
+    let mut rx = control.subscribe(&thread_id).await.expect("subscribe");
+    let status = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            rx.changed().await.expect("status channel closed");
+            let s = *rx.borrow();
+            if matches!(s, ThreadStatus::Completed | ThreadStatus::Errored) {
+                break s;
+            }
+        }
+    })
+    .await
+    .expect("HANG: streaming tool after approval did not complete in 10s");
+    assert_eq!(status, ThreadStatus::Completed);
+}
+
 #[tokio::test]
 async fn rejected_approval_tool_is_recorded_pending_then_failed() {
     let llm = Arc::new(MockLlm::new());

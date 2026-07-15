@@ -5,8 +5,8 @@ pub mod platform;
 pub mod policy;
 
 pub use driver::{
-    PassThroughDriver, SandboxCapabilities, SandboxDriver, SandboxIsolation, SandboxPlatform,
-    SandboxSetupStatus, SandboxedCommand, SandboxedOutput,
+    OutputSink, OutputStream, PassThroughDriver, SandboxCapabilities, SandboxDriver,
+    SandboxIsolation, SandboxPlatform, SandboxSetupStatus, SandboxedCommand, SandboxedOutput,
 };
 pub use error::SandboxError;
 pub use guard::validate_command;

@@ -13,8 +13,23 @@ use crate::port::ToolSpec;
 
 // ── Context & output types ───────────────────────────────────────────────────
 
+/// Which process stream a tool output delta came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolOutputStream {
+    Stdout,
+    Stderr,
+}
+
+/// Receiver for incremental tool output (e.g. live shell stdout/stderr). The
+/// agent forwards each delta to the harness display while the tool runs; the
+/// tool still returns its finalized result via [`ToolOutput`]. Default `None` —
+/// tools opt in by reading [`ToolContext::output`].
+pub trait ToolOutputObserver: Send + Sync {
+    fn on_output(&self, stream: ToolOutputStream, delta: &str);
+}
+
 /// Contextual information available to a tool handler during execution.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ToolContext {
     /// ID of the agent thread invoking the tool.
     pub thread_id: String,
@@ -26,6 +41,22 @@ pub struct ToolContext {
     pub workspace: Option<WorkspaceRef>,
     /// Durable plan scope associated with the thread, when plan-aware tools need it.
     pub plan: Option<PlanRef>,
+    /// Optional live-output observer. Set per-call by the agent for tools that
+    /// stream output (e.g. `shell`); `None` by default.
+    pub output: Option<Arc<dyn ToolOutputObserver>>,
+}
+
+impl std::fmt::Debug for ToolContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolContext")
+            .field("thread_id", &self.thread_id)
+            .field("turn_index", &self.turn_index)
+            .field("depth", &self.depth)
+            .field("workspace", &self.workspace)
+            .field("plan", &self.plan)
+            .field("output", &self.output.as_ref().map(|_| "<observer>"))
+            .finish()
+    }
 }
 
 impl ToolContext {
@@ -37,6 +68,7 @@ impl ToolContext {
             depth: 0,
             workspace: None,
             plan: None,
+            output: None,
         }
     }
 }
@@ -102,13 +134,27 @@ pub struct PlanRef {
 }
 
 /// Builder for [`ToolContext`].
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ToolContextBuilder {
     thread_id: String,
     turn_index: u32,
     depth: u32,
     workspace: Option<WorkspaceRef>,
     plan: Option<PlanRef>,
+    output: Option<Arc<dyn ToolOutputObserver>>,
+}
+
+impl std::fmt::Debug for ToolContextBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolContextBuilder")
+            .field("thread_id", &self.thread_id)
+            .field("turn_index", &self.turn_index)
+            .field("depth", &self.depth)
+            .field("workspace", &self.workspace)
+            .field("plan", &self.plan)
+            .field("output", &self.output.as_ref().map(|_| "<observer>"))
+            .finish()
+    }
 }
 
 impl ToolContextBuilder {
@@ -132,6 +178,12 @@ impl ToolContextBuilder {
         self
     }
 
+    /// Attach a live-output observer (used by streaming tools like `shell`).
+    pub fn output(mut self, output: Arc<dyn ToolOutputObserver>) -> Self {
+        self.output = Some(output);
+        self
+    }
+
     pub fn build(self) -> ToolContext {
         ToolContext {
             thread_id: self.thread_id,
@@ -139,6 +191,7 @@ impl ToolContextBuilder {
             depth: self.depth,
             workspace: self.workspace,
             plan: self.plan,
+            output: self.output,
         }
     }
 }

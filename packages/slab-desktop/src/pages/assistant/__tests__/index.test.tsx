@@ -49,6 +49,7 @@ const mocks = vi.hoisted(() => {
     transport: {},
     approvals: [] as Array<Record<string, unknown>>,
     approvalStatusByItemId: new Map<string, "pending" | "approved" | "denied">(),
+    liveOutputByItemId: new Map<string, string>(),
     resolveApproval: vi.fn<
       (itemId: string, approved: boolean, scope: "run_once" | "always_in_workspace" | "always" | "deny") => Promise<void>
     >(),

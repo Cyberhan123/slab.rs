@@ -66,7 +66,11 @@ describe.sequential("agent e2e", () => {
     const testEnv = requireEnv()
     const marker = `SLAB_AGENT_E2E_${Date.now()}`
     const prompt = [
-      `Use the shell tool exactly once to run this PowerShell command: Write-Output ${marker}`,
+      // POSIX command (echo) — the default `auto` shell launcher resolves to
+      // Git Bash on Windows, so PowerShell-isms like `Write-Output` would exit
+      // 127. `echo` validates the launcher fix (POSIX commands now succeed) AND
+      // exercises the post-approval execute path (hangs here → test times out).
+      `Use the shell tool exactly once to run this POSIX shell command: echo ${marker}`,
       "Wait for approval if it is required.",
       `After the tool result, reply with a short sentence containing ${marker}.`,
     ].join("\n")

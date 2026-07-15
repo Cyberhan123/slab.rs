@@ -81,6 +81,13 @@ fn build_agent_control(
     });
     let mut tool_router = ToolRouter::new();
     let web_search_config = ctx.pmid.config().agent.tools.websearch;
+    let shell_config = ctx.pmid.config().agent.tools.shell;
+    let shell_launcher = match shell_config.launcher {
+        slab_config::ShellLauncherKind::Auto => slab_agent_tools::ShellLauncher::Auto,
+        slab_config::ShellLauncherKind::Bash => slab_agent_tools::ShellLauncher::Bash,
+        slab_config::ShellLauncherKind::PowerShell => slab_agent_tools::ShellLauncher::PowerShell,
+        slab_config::ShellLauncherKind::Cmd => slab_agent_tools::ShellLauncher::Cmd,
+    };
     let mcp_client = build_agent_mcp_client(ctx);
     slab_agent_tools::register_all_tools(
         &mut tool_router,
@@ -89,6 +96,8 @@ fn build_agent_control(
         mcp_client,
         false,
         web_search_config,
+        shell_launcher,
+        shell_config.bash_path.clone(),
     );
     super::a2u_tools::register_builtin_a2u_tools(&tool_router);
     tool_router.register(Box::new(super::code_tools::CodeLspStatusTool::new(

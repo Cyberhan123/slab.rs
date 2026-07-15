@@ -8,10 +8,26 @@ use std::{path::PathBuf, sync::Arc};
 
 use async_trait::async_trait;
 use serde_json::Value;
-use slab_agent::{AgentError, ToolContext, ToolHandler, ToolOutput};
-use slab_sandboxing::SandboxDriver;
+use slab_agent::{
+    AgentError, ToolContext, ToolHandler, ToolOutput, ToolOutputObserver, ToolOutputStream,
+};
+use slab_sandboxing::{OutputSink, OutputStream, SandboxDriver};
 pub use slab_shell_command::ShellPolicy;
-use slab_shell_command::{ShellCommand, ShellExecutor};
+use slab_shell_command::{ShellCommand, ShellExecutor, ShellLauncher};
+
+/// Adapts the agent-side [`ToolOutputObserver`] to the sandbox's [`OutputSink`],
+/// mapping stream tags 1:1.
+struct ToolObserverSink(Arc<dyn ToolOutputObserver>);
+
+impl OutputSink for ToolObserverSink {
+    fn on_output(&self, stream: OutputStream, delta: &str) {
+        let mapped = match stream {
+            OutputStream::Stdout => ToolOutputStream::Stdout,
+            OutputStream::Stderr => ToolOutputStream::Stderr,
+        };
+        self.0.on_output(mapped, delta);
+    }
+}
 
 pub struct ShellTool {
     executor: ShellExecutor,
@@ -21,14 +37,16 @@ impl ShellTool {
     pub fn new(
         workspace_root: Option<PathBuf>,
         sandbox_driver: Option<Arc<dyn SandboxDriver>>,
+        launcher: ShellLauncher,
+        bash_path: Option<PathBuf>,
     ) -> Self {
-        Self { executor: ShellExecutor::new(workspace_root, sandbox_driver) }
+        Self { executor: ShellExecutor::new(workspace_root, sandbox_driver, launcher, bash_path) }
     }
 }
 
 impl Default for ShellTool {
     fn default() -> Self {
-        Self::new(None, None)
+        Self::new(None, None, ShellLauncher::default(), None)
     }
 }
 
@@ -73,7 +91,7 @@ impl ToolHandler for ShellTool {
 
     async fn execute(
         &self,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
         let command = arguments
@@ -94,9 +112,15 @@ impl ToolHandler for ShellTool {
             })
             .unwrap_or_default();
 
+        // When the agent attached a live-output observer, stream stdout/stderr
+        // chunks through it while the command runs (display-only).
+        let sink = ctx.output.as_ref().map(|observer| {
+            Arc::new(ToolObserverSink(Arc::clone(observer))) as Arc<dyn OutputSink>
+        });
+
         let output = self
             .executor
-            .execute(ShellCommand { command, timeout_secs, env })
+            .execute_with_sink(ShellCommand { command, timeout_secs, env }, sink)
             .await
             .map_err(|e| AgentError::ToolExecution(e.to_string()))?;
 
@@ -158,6 +182,8 @@ mod tests {
                     timed_out: true,
                 },
             })),
+            ShellLauncher::PowerShell,
+            None,
         );
 
         let output = tool
@@ -190,7 +216,7 @@ mod tests {
 
     #[tokio::test]
     async fn shell_tool_rejects_missing_command_and_dangerous_command() {
-        let tool = ShellTool::new(None, None);
+        let tool = ShellTool::new(None, None, ShellLauncher::default(), None);
 
         let missing = tool.execute(&ctx(), &json!({})).await.expect_err("missing command");
         assert_eq!(missing.to_string(), "tool execution error: missing 'command' argument");
@@ -204,7 +230,7 @@ mod tests {
 
     #[test]
     fn shell_tool_describes_operation_as_shell_command() {
-        let tool = ShellTool::new(None, None);
+        let tool = ShellTool::new(None, None, ShellLauncher::default(), None);
         let descriptor =
             tool.describe_operation(&json!({"command": "cargo check"})).expect("descriptor");
         assert_eq!(descriptor.category, slab_agent::OperationCategory::Shell);
@@ -218,5 +244,99 @@ mod tests {
         assert_eq!(schema["properties"]["command"]["type"], "string");
         assert_eq!(schema["properties"]["env"]["additionalProperties"]["type"], "string");
         assert_eq!(schema["required"], json!(["command"]));
+    }
+
+    /// Faithful mirror of `turn_tool_call::handle_tool_call`: a run-local
+    /// `ToolContext` carries a channel-backed observer; `ShellTool::execute`
+    /// runs concurrently with a drain via `tokio::join!`. The sender drops when
+    /// the run block ends (execute completes), so the drain must terminate.
+    #[tokio::test]
+    async fn shell_tool_execute_in_join_drain_completes() {
+        use slab_agent::{ToolOutputObserver, ToolOutputStream};
+        use std::time::Duration;
+
+        struct ChannelObserver {
+            sender: tokio::sync::mpsc::UnboundedSender<String>,
+        }
+        impl ToolOutputObserver for ChannelObserver {
+            fn on_output(&self, _stream: ToolOutputStream, delta: &str) {
+                let _ = self.sender.send(delta.to_string());
+            }
+        }
+
+        let tool = ShellTool::new(Some(PathBuf::from(".")), None, ShellLauncher::Auto, None);
+        let args = json!({ "command": "echo join-drain-marker" });
+        let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+        let run = async {
+            let mut ctx = ToolContext::for_thread("thread").build();
+            ctx.output =
+                Some(Arc::new(ChannelObserver { sender: delta_tx }) as Arc<dyn ToolOutputObserver>);
+            tool.execute(&ctx, &args).await
+        };
+        let drain = async {
+            while let Some(delta) = delta_rx.recv().await {
+                let _ = delta;
+            }
+        };
+
+        let (result, ()) =
+            tokio::time::timeout(Duration::from_secs(20), async { tokio::join!(run, drain) })
+                .await
+                .expect("join!(execute, drain) hung past 20s");
+        let output = result.expect("execute");
+        let value: Value = serde_json::from_str(&output.content).expect("json");
+        assert_eq!(value["exit_code"], 0, "stderr: {}", value["stderr"]);
+    }
+
+    /// Full production combination: `ShellTool` + the real platform sandbox
+    /// driver + a channel-backed observer drained concurrently via `join!`.
+    /// Reproduces the post-approval execute path end-to-end.
+    #[tokio::test]
+    async fn shell_tool_with_platform_driver_in_join_drain_completes() {
+        use slab_agent::{ToolOutputObserver, ToolOutputStream};
+        use slab_sandboxing::{SandboxEnvironment, SandboxPolicy, create_platform_driver};
+        use std::time::Duration;
+
+        struct ChannelObserver {
+            sender: tokio::sync::mpsc::UnboundedSender<String>,
+        }
+        impl ToolOutputObserver for ChannelObserver {
+            fn on_output(&self, _stream: ToolOutputStream, delta: &str) {
+                let _ = self.sender.send(delta.to_string());
+            }
+        }
+
+        let workspace = PathBuf::from(".");
+        let env = SandboxEnvironment::new(Some(workspace.clone()), SandboxPolicy::WorkspaceWrite);
+        let driver = create_platform_driver(env).expect("platform driver");
+        if !driver.setup_status().available {
+            eprintln!("skipping: platform driver unavailable");
+            return;
+        }
+
+        let tool = ShellTool::new(Some(workspace), Some(driver), ShellLauncher::Auto, None);
+        let args = json!({ "command": "echo prod-drain-marker" });
+        let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+        let run = async {
+            let mut ctx = ToolContext::for_thread("thread").build();
+            ctx.output =
+                Some(Arc::new(ChannelObserver { sender: delta_tx }) as Arc<dyn ToolOutputObserver>);
+            tool.execute(&ctx, &args).await
+        };
+        let drain = async {
+            while let Some(delta) = delta_rx.recv().await {
+                let _ = delta;
+            }
+        };
+
+        let (result, ()) =
+            tokio::time::timeout(Duration::from_secs(20), async { tokio::join!(run, drain) })
+                .await
+                .expect("join!(execute, drain) with platform driver hung past 20s");
+        let output = result.expect("execute");
+        let value: Value = serde_json::from_str(&output.content).expect("json");
+        assert_eq!(value["exit_code"], 0, "stderr: {}", value["stderr"]);
     }
 }

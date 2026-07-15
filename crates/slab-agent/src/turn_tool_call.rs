@@ -16,11 +16,14 @@ use crate::{
     hook::{HookEvent, HookToolAction, dispatch_registered_hooks},
     port::{ApprovalDecision, ParsedToolCall, ToolRiskAssessment},
     protocol::{
-        CommandExecutionRequestApprovalParams, EventMsg, ItemCompletedParams, ItemStartedParams,
-        TurnItem,
+        CommandExecutionOutputDeltaParams, CommandExecutionRequestApprovalParams, EventMsg,
+        ItemCompletedParams, ItemStartedParams, TurnItem,
     },
     state::ToolCallStateMachine,
-    tool::{PlanRef, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput},
+    tool::{
+        PlanRef, ToolApprovalRequest, ToolContext, ToolHandler, ToolOutput, ToolOutputObserver,
+        ToolOutputStream,
+    },
     turn::TurnExecutionContext,
     turn_tool_record::{
         insert_tool_call_record, persist_tool_message_record,
@@ -102,6 +105,8 @@ fn tool_turn_item(
     status: &str,
     output: Option<&str>,
     workspace_root: Option<&str>,
+    exit_code: Option<i64>,
+    duration_ms: Option<u64>,
 ) -> TurnItem {
     let id = tool_call.id.clone();
     let status = status.to_owned();
@@ -117,8 +122,8 @@ fn tool_turn_item(
             process_id: None,
             status,
             aggregated_output: output.map(str::to_owned),
-            exit_code: None,
-            duration_ms: None,
+            exit_code,
+            duration_ms,
         },
         "write_file" => TurnItem::FileChange {
             id,
@@ -184,8 +189,8 @@ fn tool_turn_item(
             process_id: None,
             status,
             aggregated_output: output.map(str::to_owned),
-            exit_code: None,
-            duration_ms: None,
+            exit_code,
+            duration_ms,
         },
     }
 }
@@ -210,6 +215,30 @@ async fn emit_item_completed(context: &TurnExecutionContext<'_>, item: TurnItem)
     context.notify.on_event_msg(context.thread_id, &msg).await;
 }
 
+/// Emit `EventMsg::CommandExecutionOutputDelta` for a running command item.
+/// Display-only: the finalized output still arrives via `item/completed`.
+async fn emit_command_output_delta(context: &TurnExecutionContext<'_>, item_id: &str, delta: &str) {
+    let msg = EventMsg::CommandExecutionOutputDelta(CommandExecutionOutputDeltaParams {
+        thread_id: context.thread_id.to_owned(),
+        turn_id: context.turn_index.to_string(),
+        item_id: item_id.to_owned(),
+        delta: delta.to_owned(),
+    });
+    context.notify.on_event_msg(context.thread_id, &msg).await;
+}
+
+/// [`ToolOutputObserver`] that funnels incremental tool output into a channel a
+/// concurrent drain task forwards to `emit_command_output_delta`.
+struct ChannelToolOutputObserver {
+    sender: tokio::sync::mpsc::UnboundedSender<String>,
+}
+
+impl ToolOutputObserver for ChannelToolOutputObserver {
+    fn on_output(&self, _stream: ToolOutputStream, delta: &str) {
+        let _ = self.sender.send(delta.to_string());
+    }
+}
+
 /// Emit a well-formed `ItemStarted` + `ItemCompleted(failed)` pair for a tool
 /// call that never reaches the normal execution path (argument-parse failure,
 /// hook block, policy deny, invalid tool call).
@@ -224,10 +253,18 @@ pub(crate) async fn emit_tool_item_failed(
     output: &str,
 ) {
     let workspace_root = workspace_root_of(context);
-    let started = tool_turn_item(tool_call, args, "running", None, workspace_root.as_deref());
+    let started =
+        tool_turn_item(tool_call, args, "running", None, workspace_root.as_deref(), None, None);
     emit_item_started(context, started).await;
-    let completed =
-        tool_turn_item(tool_call, args, "failed", Some(output), workspace_root.as_deref());
+    let completed = tool_turn_item(
+        tool_call,
+        args,
+        "failed",
+        Some(output),
+        workspace_root.as_deref(),
+        None,
+        None,
+    );
     emit_item_completed(context, completed).await;
 }
 
@@ -596,23 +633,61 @@ async fn handle_tool_call(
     let workspace_root = workspace_root_of(context);
     emit_item_started(
         context,
-        tool_turn_item(tool_call, &effective_args, "running", None, workspace_root.as_deref()),
+        tool_turn_item(
+            tool_call,
+            &effective_args,
+            "running",
+            None,
+            workspace_root.as_deref(),
+            None,
+            None,
+        ),
     )
     .await;
 
-    let (tool_output, call_status) = run_tool_with_optional_approval(ToolRunContext {
-        context,
-        call_id: &call_id,
-        tool_call,
-        tool_context,
-        effective_args: &effective_args,
-        effective_arguments: &effective_arguments,
-        risk: &risk,
-        handler,
-        approval_request,
-        tool_state: &mut tool_state,
-    })
-    .await?;
+    // Stream incremental command output (display-only) while the tool runs. A
+    // channel-backed observer on the tool context forwards each delta to the
+    // harness; the finalized result still arrives via `item/completed` below.
+    let item_id = tool_call.id.clone();
+    let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let started = Instant::now();
+    let run = async {
+        // The streaming context (and the sender inside it) is dropped at the end
+        // of this block, which closes the channel so the drain below terminates.
+        let mut streaming_context = tool_context.clone();
+        streaming_context.output =
+            Some(Arc::new(ChannelToolOutputObserver { sender: delta_tx })
+                as Arc<dyn ToolOutputObserver>);
+        run_tool_with_optional_approval(ToolRunContext {
+            context,
+            call_id: &call_id,
+            tool_call,
+            tool_context: &streaming_context,
+            effective_args: &effective_args,
+            effective_arguments: &effective_arguments,
+            risk: &risk,
+            handler,
+            approval_request,
+            tool_state: &mut tool_state,
+        })
+        .await
+    };
+    let drain = async {
+        while let Some(delta) = delta_rx.recv().await {
+            emit_command_output_delta(context, &item_id, &delta).await;
+        }
+    };
+    let (run_result, ()) = tokio::join!(run, drain);
+    let (tool_output, call_status) = run_result?;
+    let duration_ms = started.elapsed().as_millis() as u64;
+    // Best-effort: surface the shell exit code on the completed item.
+    let shell_exit_code = if tool_call.name == "shell" {
+        serde_json::from_str::<serde_json::Value>(&tool_output.content)
+            .ok()
+            .and_then(|v| v.get("exit_code").and_then(|c| c.as_i64()))
+    } else {
+        None
+    };
     let call_status = tool_state.transition(call_status)?;
     if context.cancellation.is_cancelled() {
         return Err(AgentError::Interrupted);
@@ -677,6 +752,8 @@ async fn handle_tool_call(
             item_status,
             Some(&content),
             workspace_root.as_deref(),
+            shell_exit_code,
+            Some(duration_ms),
         ),
     )
     .await;
@@ -986,6 +1063,8 @@ mod tests {
             "running",
             None,
             Some("/ws"),
+            None,
+            None,
         );
         match item {
             TurnItem::CommandExecution { command, cwd, status, aggregated_output, .. } => {
@@ -993,6 +1072,27 @@ mod tests {
                 assert_eq!(cwd, "/ws");
                 assert_eq!(status, "running");
                 assert!(aggregated_output.is_none());
+            }
+            other => panic!("unexpected item: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn shell_completed_carries_exit_code_and_duration() {
+        let item = tool_turn_item(
+            &call("shell"),
+            &serde_json::json!({"command": "date +%A"}),
+            "completed",
+            Some("{\"stdout\":\"Tuesday\\n\",\"exit_code\":0}"),
+            None,
+            Some(0),
+            Some(42),
+        );
+        match item {
+            TurnItem::CommandExecution { exit_code, duration_ms, status, .. } => {
+                assert_eq!(status, "completed");
+                assert_eq!(exit_code, Some(0));
+                assert_eq!(duration_ms, Some(42));
             }
             other => panic!("unexpected item: {other:?}"),
         }
@@ -1007,6 +1107,8 @@ mod tests {
             &serde_json::json!({}),
             "completed",
             Some("file contents"),
+            None,
+            None,
             None,
         );
         match item {
@@ -1025,6 +1127,8 @@ mod tests {
             &call("mcp__server_label__search"),
             &serde_json::json!({"q": "x"}),
             "running",
+            None,
+            None,
             None,
             None,
         );
@@ -1046,6 +1150,8 @@ mod tests {
             "running",
             None,
             None,
+            None,
+            None,
         );
         match item {
             TurnItem::WebSearch { query, .. } => assert_eq!(query, "rust async"),
@@ -1058,7 +1164,7 @@ mod tests {
         let args = serde_json::json!({
             "patch": "--- a/x.rs\n+++ b/x.rs\n@@ -1 +1 @@\n-a\n+b\n"
         });
-        let item = tool_turn_item(&call("apply_patch"), &args, "completed", None, None);
+        let item = tool_turn_item(&call("apply_patch"), &args, "completed", None, None, None, None);
         match item {
             TurnItem::FileChange { changes, status, .. } => {
                 assert_eq!(status, "completed");

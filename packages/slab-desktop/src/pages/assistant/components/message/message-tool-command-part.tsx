@@ -32,17 +32,21 @@ function MessageToolCommandPart({
   if (kind !== "tool") return null
 
   const p = part as ToolPartLike
-  const { approvalStatusByItemId } = useMessageInteraction()
+  const { approvalStatusByItemId, liveOutputByItemId } = useMessageInteraction()
   const approval = toolCallId ? approvalStatusByItemId.get(toolCallId) : undefined
   const state = deriveState(p, approval)
   const active = isToolActive(state)
 
   const input = (p.input ?? {}) as { command?: string; cwd?: string }
-  const output = typeof p.output === "string" ? p.output : ""
+  const finalizedOutput = typeof p.output === "string" ? p.output : p.errorText ?? ""
+  // While the command is still running, render the streamed output deltas; once
+  // it completes, the finalized output (aggregated by the server) takes over.
+  const liveOutput = toolCallId ? liveOutputByItemId.get(toolCallId) : undefined
+  const body = active && liveOutput !== undefined ? liveOutput : finalizedOutput
   const terminalOutput = [
     input.cwd ? `# cd ${input.cwd}` : null,
     input.command ? `$ ${input.command}` : null,
-    output || (p.errorText ?? ""),
+    body,
   ]
     .filter((line) => line !== null && line !== "")
     .join("\n")

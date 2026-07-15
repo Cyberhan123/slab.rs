@@ -22,6 +22,7 @@ import {
   HarnessClient,
   turnItemsToMessages,
   type ApprovalScope,
+  type CommandExecutionOutputDeltaParams,
   type CommandExecutionRequestApprovalParams,
   type FileChangeApprovalChange,
   type FileChangeRequestApprovalParams,
@@ -66,6 +67,8 @@ export interface HarnessConversation {
   approvals: ApprovalRequest[]
   /** itemId → approval status, for the in-stream tool-card status badge. */
   approvalStatusByItemId: ReadonlyMap<string, ApprovalStatus>
+  /** itemId → accumulated live command output (stdout/stderr deltas so far). */
+  liveOutputByItemId: ReadonlyMap<string, string>
   /** Resolve a pending approval via `approval/resolve` with a persistence scope. */
   resolveApproval: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>
 }
@@ -95,6 +98,7 @@ export function useHarnessConversation(
   const [isHistoryLoading, setIsHistoryLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [approvalMap, setApprovalMap] = useState<Map<string, ApprovalRequest>>(new Map())
+  const [liveOutputMap, setLiveOutputMap] = useState<Map<string, string>>(new Map())
 
   const transport = useMemo(() => new HarnessChatTransport({ client, model }), [client, model])
 
@@ -102,6 +106,23 @@ export function useHarnessConversation(
   useEffect(() => {
     return client.onNotification((notification: JsonRpcNotification) => {
       const { method } = notification
+
+      // Accumulate live command output (stdout/stderr deltas) so the terminal
+      // card can render output as it streams, before `item/completed` finalizes.
+      if (method === HARNESS_NOTIFICATION.ITEM_COMMAND_EXECUTION_OUTPUT_DELTA) {
+        const params = (notification.params ?? {}) as CommandExecutionOutputDeltaParams
+        if (params.threadId !== client.currentThreadId) return
+        setLiveOutputMap((prev) => {
+          const existing = prev.get(params.itemId) ?? ""
+          // Bound per-item accumulation so a runaway command can't exhaust memory.
+          if (existing.length + params.delta.length > 256 * 1024) return prev
+          const next = new Map(prev)
+          next.set(params.itemId, existing + params.delta)
+          return next
+        })
+        return
+      }
+
       const isCommandApproval = method === HARNESS_NOTIFICATION.ITEM_COMMAND_EXECUTION_REQUEST_APPROVAL
       const isFileApproval = method === HARNESS_NOTIFICATION.ITEM_FILE_CHANGE_REQUEST_APPROVAL
       if (!isCommandApproval && !isFileApproval) return
@@ -206,6 +227,7 @@ export function useHarnessConversation(
   useEffect(() => {
     // A new session means a new thread; drop any stale approval state.
     setApprovalMap(new Map())
+    setLiveOutputMap(new Map())
     if (!sessionId) {
       client.currentThreadId = null
       client.lastTurnIndex = -1
@@ -278,6 +300,7 @@ export function useHarnessConversation(
     error,
     approvals,
     approvalStatusByItemId,
+    liveOutputByItemId: liveOutputMap,
     resolveApproval,
   }
 }
