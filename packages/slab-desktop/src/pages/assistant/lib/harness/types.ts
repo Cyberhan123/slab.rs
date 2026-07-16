@@ -82,6 +82,9 @@ export const HARNESS_NOTIFICATION = {
   ERROR: "error",
   ACCOUNT_UPDATED: "account/updated",
   ACCOUNT_LOGIN_COMPLETED: "account/loginCompleted",
+  // Model load lifecycle, emitted directly from the turn/start handler.
+  MODEL_LOAD_DELTA: "model/load/delta",
+  MODEL_LOAD_COMPLETED: "model/load/completed",
 } as const
 
 /** Harness-specific error codes (reserved; the dispatcher currently emits `-32000`). */
@@ -505,6 +508,40 @@ export interface ErrorParams {
 }
 
 /**
+ * `model/load/delta` — coarse progress for a model load driven by the
+ * `turn/start` handler. Carries `threadId` (required: the client routes by it)
+ * and deliberately NO numeric `turnId` (the transport's replay guard drops any
+ * notification whose `turnId` parses `<= threshold`). Handled out-of-band by the
+ * conversation hook, NOT turned into AI-SDK message parts.
+ */
+export type ModelLoadPhase = "downloading" | "loading"
+
+export interface ModelLoadDeltaParams {
+  threadId: string
+  modelId?: string
+  phase: ModelLoadPhase
+  downloadedBytes?: number
+  totalBytes?: number
+  message?: string
+}
+
+export interface ModelLoadError {
+  code: string
+  message: string
+}
+
+/** `model/load/completed` — terminal load result (`status: "ready" | "error"`). */
+export interface ModelLoadCompletedParams {
+  threadId: string
+  modelId: string
+  backend?: string
+  status: "ready" | "error"
+  contextLength?: number
+  trainingContextLength?: number
+  error?: ModelLoadError
+}
+
+/**
  * Union of every server → client notification, discriminated by `method`.
  * Matches `ServerNotification` in `slab-proto/src/harness/notification.rs`.
  */
@@ -539,6 +576,8 @@ export type ServerNotification =
   | { method: typeof HARNESS_NOTIFICATION.ERROR; params: ErrorParams }
   | { method: typeof HARNESS_NOTIFICATION.ACCOUNT_UPDATED; params: unknown }
   | { method: typeof HARNESS_NOTIFICATION.ACCOUNT_LOGIN_COMPLETED; params: unknown }
+  | { method: typeof HARNESS_NOTIFICATION.MODEL_LOAD_DELTA; params: ModelLoadDeltaParams }
+  | { method: typeof HARNESS_NOTIFICATION.MODEL_LOAD_COMPLETED; params: ModelLoadCompletedParams }
 
 /** A notification whose `method` we don't model explicitly. */
 export interface UnknownNotification {

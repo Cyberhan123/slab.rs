@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -166,9 +166,23 @@ impl SandboxDriver for PassThroughDriver {
         child.stdin(std::process::Stdio::null());
         child.stdout(std::process::Stdio::piped());
         child.stderr(std::process::Stdio::piped());
+        // Run the command in its own process group so a backgrounded child that
+        // inherits the stdout/stderr pipes can be tree-killed after it exits
+        // (otherwise the read tasks wait for pipe EOF forever).
+        #[cfg(unix)]
+        {
+            child.process_group(0);
+        }
 
         let spawned = child.spawn().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
-        wait_for_child(spawned, cmd.timeout, cmd.output_sink.clone()).await
+        // PassThrough has no Windows Job Object: on Unix kill the child's process
+        // group; on Windows the grace-timeout backstop in `wait_for_child` is the
+        // only protection (this driver is dev/test-only).
+        #[cfg(unix)]
+        let kill_tree = unix_kill_tree(spawned.id());
+        #[cfg(not(unix))]
+        let kill_tree: Option<Box<dyn FnOnce() + Send + 'static>> = None;
+        wait_for_child(spawned, cmd.timeout, cmd.output_sink.clone(), kill_tree).await
     }
 
     fn capabilities(&self) -> SandboxCapabilities {
@@ -206,26 +220,42 @@ pub(crate) fn command_env(
     merged
 }
 
+/// After the direct child exits, how long to keep draining its stdout/stderr
+/// pipes before aborting the read tasks. Normally the pipes close immediately
+/// once the process tree is killed; this backstop guards pathological cases
+/// (e.g. a reparented descendant that kept a handle) so the run can never hang.
+const READ_DRAIN_GRACE: Duration = Duration::from_secs(5);
+
+#[allow(clippy::type_complexity)]
 pub(crate) async fn wait_for_child(
     mut child: tokio::process::Child,
     timeout: Option<Duration>,
     sink: Option<Arc<dyn OutputSink>>,
+    // Invoked once the direct child has exited, to tear down any leftover
+    // descendants so they release the stdout/stderr pipes. `None` when the
+    // caller has no tree-kill mechanism (then the grace backstop below applies).
+    kill_tree: Option<Box<dyn FnOnce() + Send + 'static>>,
 ) -> Result<SandboxedOutput, SandboxError> {
     let pid = child.id();
     tracing::info!(
         ?pid,
         ?timeout,
         has_sink = sink.is_some(),
+        has_kill_tree = kill_tree.is_some(),
         "wait_for_child: spawned, awaiting child.wait"
     );
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let stdout_sink = sink.clone();
     let stderr_sink = sink.clone();
+    // Shared accumulators: read tasks append here as they go, so the partial
+    // output survives even if a task is aborted before EOF (see drain grace).
+    let stdout_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    let stderr_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
     let stdout_task =
-        tokio::spawn(async move { read_stream(stdout, stdout_sink, OutputStream::Stdout).await });
+        tokio::spawn(read_stream(stdout, stdout_sink, OutputStream::Stdout, stdout_buf.clone()));
     let stderr_task =
-        tokio::spawn(async move { read_stream(stderr, stderr_sink, OutputStream::Stderr).await });
+        tokio::spawn(read_stream(stderr, stderr_sink, OutputStream::Stderr, stderr_buf.clone()));
 
     let (exit_code, timed_out) = if let Some(timeout) = timeout {
         match tokio::time::timeout(timeout, child.wait()).await {
@@ -241,18 +271,32 @@ pub(crate) async fn wait_for_child(
         let status = child.wait().await.map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
         (status.code().unwrap_or(-1), false)
     };
-    tracing::info!(?pid, exit_code, timed_out, "wait_for_child: child exited, awaiting read tasks");
+    tracing::info!(?pid, exit_code, timed_out, "wait_for_child: child exited, killing tree");
 
-    let stdout = stdout_task
-        .await
-        .map_err(|e| SandboxError::SpawnFailed(e.to_string()))?
-        .map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
-    tracing::info!(?pid, stdout_len = stdout.len(), "wait_for_child: stdout_task done");
-    let mut stderr = stderr_task
-        .await
-        .map_err(|e| SandboxError::SpawnFailed(e.to_string()))?
-        .map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
-    tracing::info!(?pid, stderr_len = stderr.len(), "wait_for_child: stderr_task done, returning");
+    // The direct child has exited. Kill the entire process tree so any live
+    // grandchildren release the inherited stdout/stderr pipes. Without this the
+    // read tasks below wait for pipe EOF forever — the exact cause of a turn
+    // hanging indefinitely after a shell approval when the command backgrounds a
+    // long-lived process. Must happen BEFORE awaiting the read tasks.
+    if let Some(kill) = kill_tree {
+        kill();
+        tracing::info!(?pid, "wait_for_child: process tree killed");
+    }
+
+    // Drain the pipes within a grace window. If a read still hasn't hit EOF,
+    // abort it and keep whatever reached the shared buffer.
+    drain_with_grace(stdout_task, READ_DRAIN_GRACE).await;
+    drain_with_grace(stderr_task, READ_DRAIN_GRACE).await;
+    tracing::info!(
+        ?pid,
+        stdout_len = stdout_buf.lock().map(|b| b.len()).unwrap_or(0),
+        stderr_len = stderr_buf.lock().map(|b| b.len()).unwrap_or(0),
+        "wait_for_child: read tasks drained, returning"
+    );
+
+    let stdout = stdout_buf.lock().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?.clone();
+    let mut stderr =
+        stderr_buf.lock().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?.clone();
     if timed_out && stderr.is_empty() {
         stderr.extend_from_slice(b"command timed out");
     }
@@ -260,33 +304,55 @@ pub(crate) async fn wait_for_child(
     Ok(SandboxedOutput { stdout, stderr, exit_code, timed_out })
 }
 
+/// Await a read task for at most `grace`; on timeout abort it. The shared
+/// accumulator buffer retains whatever was read before the abort.
+async fn drain_with_grace(
+    mut handle: tokio::task::JoinHandle<std::io::Result<()>>,
+    grace: Duration,
+) {
+    if tokio::time::timeout(grace, &mut handle).await.is_err() {
+        handle.abort();
+        let _ = (&mut handle).await;
+    }
+}
+
 /// Read a child pipe to EOF. When a sink is present, forward each chunk
-/// incrementally (lossy UTF-8) AND accumulate the full buffer; otherwise just
-/// `read_to_end`. The accumulated buffer is returned so the final output is
-/// identical whether or not streaming was requested.
+/// incrementally (lossy UTF-8); chunks are always accumulated into the shared
+/// `buffer` so the final output is available even if this task is aborted.
 async fn read_stream<R: AsyncRead + Unpin>(
     reader: Option<R>,
     sink: Option<Arc<dyn OutputSink>>,
     stream: OutputStream,
-) -> std::io::Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    let Some(mut reader) = reader else { return Ok(bytes) };
-    match sink.as_ref() {
-        Some(sink) => {
-            let mut buf = [0u8; 8192];
-            loop {
-                let n = reader.read(&mut buf).await?;
-                if n == 0 {
-                    break;
-                }
-                bytes.extend_from_slice(&buf[..n]);
-                let delta = String::from_utf8_lossy(&buf[..n]);
-                sink.on_output(stream, &delta);
-            }
+    buffer: Arc<Mutex<Vec<u8>>>,
+) -> std::io::Result<()> {
+    let Some(mut reader) = reader else { return Ok(()) };
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = reader.read(&mut buf).await?;
+        if n == 0 {
+            break;
         }
-        None => {
-            reader.read_to_end(&mut bytes).await?;
+        if let Some(sink) = sink.as_ref() {
+            let delta = String::from_utf8_lossy(&buf[..n]);
+            sink.on_output(stream, &delta);
+        }
+        if let Ok(mut guard) = buffer.lock() {
+            guard.extend_from_slice(&buf[..n]);
         }
     }
-    Ok(bytes)
+    Ok(())
+}
+
+/// Build a tree-kill closure for a Unix child: send `SIGKILL` to the child's
+/// process group so backgrounded descendants die and release the pipes. `pgid`
+/// is the spawned child's id (it must be a group leader — ensured by a new
+/// session or `process_group(0)`).
+#[cfg(unix)]
+pub(crate) fn unix_kill_tree(pgid: Option<u32>) -> Option<Box<dyn FnOnce() + Send + 'static>> {
+    pgid.map(|p| {
+        Box::new(move || {
+            // A negative pid targets the whole process group.
+            let _ = unsafe { libc::kill(-(p as i32), libc::SIGKILL) };
+        }) as Box<dyn FnOnce() + Send + 'static>
+    })
 }

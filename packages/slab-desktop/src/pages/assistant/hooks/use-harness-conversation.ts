@@ -27,6 +27,8 @@ import {
   type FileChangeApprovalChange,
   type FileChangeRequestApprovalParams,
   type JsonRpcNotification,
+  type ModelLoadDeltaParams,
+  type ModelLoadPhase,
   type OperationCategory,
   type Thread,
 } from "../lib/harness"
@@ -47,6 +49,18 @@ export type ApprovalRequest = {
 }
 
 export type ApprovalStatus = "pending" | "approved" | "denied"
+
+/**
+ * Transient model-load indicator state, driven by `model/load/delta` +
+ * `model/load/completed` notifications emitted from `turn/start`. `null` when
+ * no load is in progress (the indicator is hidden).
+ */
+export type ModelLoadState = {
+  phase: ModelLoadPhase
+  modelId?: string
+  downloadedBytes?: number
+  totalBytes?: number
+} | null
 
 export interface HarnessConversation {
   /** Transport bound to the live client (always defined; safe to pass to `useChat`). */
@@ -69,6 +83,8 @@ export interface HarnessConversation {
   approvalStatusByItemId: ReadonlyMap<string, ApprovalStatus>
   /** itemId → accumulated live command output (stdout/stderr deltas so far). */
   liveOutputByItemId: ReadonlyMap<string, string>
+  /** Transient model-load indicator state (null when idle). */
+  modelLoad: ModelLoadState
   /** Resolve a pending approval via `approval/resolve` with a persistence scope. */
   resolveApproval: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>
 }
@@ -99,6 +115,7 @@ export function useHarnessConversation(
   const [error, setError] = useState<string | null>(null)
   const [approvalMap, setApprovalMap] = useState<Map<string, ApprovalRequest>>(new Map())
   const [liveOutputMap, setLiveOutputMap] = useState<Map<string, string>>(new Map())
+  const [modelLoad, setModelLoad] = useState<ModelLoadState>(null)
 
   const transport = useMemo(() => new HarnessChatTransport({ client, model }), [client, model])
 
@@ -120,6 +137,24 @@ export function useHarnessConversation(
           next.set(params.itemId, existing + params.delta)
           return next
         })
+        return
+      }
+
+      // Transient model-load indicator: set on each delta, clear on completed.
+      // The load is per-turn and short-lived; a `completed` always resets it, so
+      // no thread filtering is needed (one active turn on the socket at a time).
+      if (method === HARNESS_NOTIFICATION.MODEL_LOAD_DELTA) {
+        const params = (notification.params ?? {}) as ModelLoadDeltaParams
+        setModelLoad({
+          phase: params.phase,
+          modelId: params.modelId,
+          downloadedBytes: params.downloadedBytes,
+          totalBytes: params.totalBytes,
+        })
+        return
+      }
+      if (method === HARNESS_NOTIFICATION.MODEL_LOAD_COMPLETED) {
+        setModelLoad(null)
         return
       }
 
@@ -228,6 +263,7 @@ export function useHarnessConversation(
     // A new session means a new thread; drop any stale approval state.
     setApprovalMap(new Map())
     setLiveOutputMap(new Map())
+    setModelLoad(null)
     if (!sessionId) {
       client.currentThreadId = null
       client.lastTurnIndex = -1
@@ -301,6 +337,7 @@ export function useHarnessConversation(
     approvals,
     approvalStatusByItemId,
     liveOutputByItemId: liveOutputMap,
+    modelLoad,
     resolveApproval,
   }
 }

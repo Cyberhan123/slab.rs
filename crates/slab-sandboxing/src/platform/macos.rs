@@ -35,7 +35,7 @@ impl SandboxDriver for MacosSandboxDriver {
         {
             use std::process::Stdio;
 
-            use crate::driver::{command_env, wait_for_child};
+            use crate::driver::{command_env, unix_kill_tree, wait_for_child};
 
             validate_command(&self.env, &cmd)?;
 
@@ -62,9 +62,14 @@ impl SandboxDriver for MacosSandboxDriver {
             command.kill_on_drop(true);
             command.stdout(Stdio::piped());
             command.stderr(Stdio::piped());
+            // sandbox-exec doesn't create a new session, so put it in its own
+            // process group so the whole tree can be killed after it exits.
+            command.process_group(0);
 
             let spawned = command.spawn().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
-            let output = wait_for_child(spawned, cmd.timeout, cmd.output_sink.clone()).await;
+            let kill_tree = unix_kill_tree(spawned.id());
+            let output =
+                wait_for_child(spawned, cmd.timeout, cmd.output_sink.clone(), kill_tree).await;
             let _ = std::fs::remove_file(profile_path);
             output
         }

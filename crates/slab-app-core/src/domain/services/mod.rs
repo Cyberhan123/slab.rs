@@ -25,7 +25,7 @@ pub use backend::BackendService;
 pub use chat::ChatService;
 pub use ffmpeg::FfmpegService;
 pub use image::ImageService;
-pub use model::ModelService;
+pub use model::{ModelLoadProgress, ModelService};
 pub use plugin::PluginService;
 pub use pmid::PmidService;
 pub use session::SessionService;

@@ -238,6 +238,11 @@ export function convertNotification(
     case HARNESS_NOTIFICATION.ACCOUNT_UPDATED:
     case HARNESS_NOTIFICATION.ACCOUNT_LOGIN_COMPLETED:
       return []
+    case HARNESS_NOTIFICATION.MODEL_LOAD_DELTA:
+    case HARNESS_NOTIFICATION.MODEL_LOAD_COMPLETED:
+      // Model load lifecycle is consumed out-of-band by the conversation hook
+      // (transient `modelLoad` state), not as AI-SDK message parts.
+      return []
     default:
       // Exhaustiveness guard for future notification variants.
       return []

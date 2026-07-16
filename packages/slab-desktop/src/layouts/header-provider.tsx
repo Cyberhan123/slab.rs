@@ -5,6 +5,7 @@ import {
   useMemo,
   useState,
   type PropsWithChildren,
+  type ReactNode,
 } from 'react';
 
 import {
@@ -35,11 +36,18 @@ type HeaderHistoryEntry = {
   history: HeaderHistoryConfig;
 };
 
+type HeaderSlotEntry = {
+  id: string;
+  node: ReactNode;
+};
+
 export type HeaderContextValue = {
   meta: HeaderMeta;
   history: HeaderHistoryConfig | null;
   select: HeaderSelectConfig | null;
   search: HeaderSearchConfig | null;
+  left: ReactNode | null;
+  right: ReactNode | null;
   setMeta: (id: string, meta: HeaderMeta) => void;
   clearMeta: (id: string) => void;
   setHistory: (id: string, history: HeaderHistoryConfig) => void;
@@ -48,6 +56,10 @@ export type HeaderContextValue = {
   clearSelect: (id: string) => void;
   setSearch: (id: string, search: HeaderSearchConfig) => void;
   clearSearch: (id: string) => void;
+  setLeft: (id: string, node: ReactNode) => void;
+  clearLeft: (id: string) => void;
+  setRight: (id: string, node: ReactNode) => void;
+  clearRight: (id: string) => void;
 };
 
 export const HeaderContext = createContext<HeaderContextValue | null>(null);
@@ -164,6 +176,8 @@ export function HeaderProvider({
   const [historyEntries, setHistoryEntries] = useState<HeaderHistoryEntry[]>([]);
   const [selectEntries, setSelectEntries] = useState<HeaderSelectEntry[]>([]);
   const [searchEntries, setSearchEntries] = useState<HeaderSearchEntry[]>([]);
+  const [leftEntries, setLeftEntries] = useState<HeaderSlotEntry[]>([]);
+  const [rightEntries, setRightEntries] = useState<HeaderSlotEntry[]>([]);
 
   const setMeta = useCallback((id: string, meta: HeaderMeta) => {
     setMetaEntries((current) =>
@@ -211,10 +225,35 @@ export function HeaderProvider({
     setSearchEntries((current) => removeEntry(current, id));
   }, []);
 
+  // Render-prop slots: ReactNode can't be deep-compared, so equality is
+  // referential. Callers must keep the node referentially stable (e.g. via
+  // `useMemo`) to avoid re-render churn — same contract as a `children` prop.
+  const setLeft = useCallback((id: string, node: ReactNode) => {
+    setLeftEntries((current) =>
+      upsertEntry(current, id, { id, node }, (left, right) => left.node === right.node),
+    );
+  }, []);
+
+  const clearLeft = useCallback((id: string) => {
+    setLeftEntries((current) => removeEntry(current, id));
+  }, []);
+
+  const setRight = useCallback((id: string, node: ReactNode) => {
+    setRightEntries((current) =>
+      upsertEntry(current, id, { id, node }, (left, right) => left.node === right.node),
+    );
+  }, []);
+
+  const clearRight = useCallback((id: string) => {
+    setRightEntries((current) => removeEntry(current, id));
+  }, []);
+
   const meta = metaEntries.at(-1)?.meta ?? defaultMeta;
   const history = historyEntries.at(-1)?.history ?? null;
   const select = selectEntries.at(-1)?.select ?? null;
   const search = searchEntries.at(-1)?.search ?? null;
+  const left = leftEntries.at(-1)?.node ?? null;
+  const right = rightEntries.at(-1)?.node ?? null;
 
   useEffect(() => {
     document.title = `${meta.title} | Slab`;
@@ -226,6 +265,8 @@ export function HeaderProvider({
       history,
       select,
       search,
+      left,
+      right,
       setMeta,
       clearMeta,
       setHistory,
@@ -234,18 +275,28 @@ export function HeaderProvider({
       clearSelect,
       setSearch,
       clearSearch,
+      setLeft,
+      clearLeft,
+      setRight,
+      clearRight,
     }),
     [
       clearHistory,
+      clearLeft,
       clearMeta,
+      clearRight,
       clearSearch,
       clearSelect,
       history,
+      left,
       meta,
+      right,
       search,
       select,
       setHistory,
+      setLeft,
       setMeta,
+      setRight,
       setSearch,
       setSelect,
     ],

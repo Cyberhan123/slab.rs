@@ -115,6 +115,54 @@ async fn platform_driver_streams_bash_lc_command_with_sink() {
     assert!(!stdout.trim().is_empty(), "expected weekday from `date +%A`");
 }
 
+/// Regression: a command that prints a marker then backgrounds a long-lived
+/// child (which inherits and holds the stdout pipe) must NOT hang. Before the
+/// tree-kill fix the read tasks waited for pipe EOF forever and the turn hung
+/// indefinitely after a shell approval.
+#[tokio::test]
+async fn platform_driver_does_not_hang_on_backgrounded_child() {
+    let Some(bash) = find_posix_shell() else {
+        eprintln!("skipping: no bash/sh found on PATH");
+        return;
+    };
+    let Some((workspace, driver)) = smoke_workspace(SandboxPolicy::WorkspaceWrite) else {
+        return;
+    };
+    // `sleep 120 &` backgrounds a child that inherits the shell's stdout pipe.
+    // Under POSIX shells (incl. Git Bash on Windows) this reliably holds the
+    // pipe open after the shell exits, reproducing the post-approval hang that
+    // the tree-kill in `wait_for_child` must resolve.
+    let cmd = SandboxedCommand {
+        argv: vec![
+            bash.to_string_lossy().into_owned(),
+            "-lc".to_string(),
+            "echo slab-bg-marker; sleep 120 &".to_string(),
+        ],
+        env: HashMap::new(),
+        cwd: Some(workspace.path().to_path_buf()),
+        timeout: Some(Duration::from_secs(10)),
+        output_sink: None,
+    };
+
+    let started = std::time::Instant::now();
+    let output = tokio::time::timeout(Duration::from_secs(20), driver.run(cmd))
+        .await
+        .expect("driver.run hung past 20s (backgrounded-child pipe deadlock?)")
+        .expect("run");
+    let elapsed = started.elapsed();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    eprintln!("bg-child elapsed={elapsed:?} exit={} stdout={stdout:?}", output.exit_code);
+    assert!(stdout.contains("slab-bg-marker"), "marker missing from stdout");
+    // Tree-kill closes the pipes so reads reach EOF immediately (~sub-second).
+    // Without it the read tasks fall back to the `READ_DRAIN_GRACE` backstop
+    // (~5s per stream, drained sequentially ≈ 10s), which exceeds this bound —
+    // so this trips if tree-kill regresses.
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "run took too long ({elapsed:?}) — tree-kill regressed?"
+    );
+}
+
 fn find_posix_shell() -> Option<PathBuf> {
     for name in ["bash", "sh"] {
         if let Some(p) = which(name) {

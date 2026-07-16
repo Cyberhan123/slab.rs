@@ -63,8 +63,13 @@ impl SandboxDriver for WindowsSandboxDriver {
             job.assign_process(process_handle as windows_sys::Win32::Foundation::HANDLE)?;
 
             debug!(pid = spawned.id(), "spawned process in Windows Job Object");
-            let output = wait_for_child(spawned, cmd.timeout, cmd.output_sink.clone()).await?;
-            drop(job);
+            // `wait_for_child` drops the job right after the direct child exits so
+            // `KILL_ON_JOB_CLOSE` tears down the whole tree; this is what releases
+            // the stdout/stderr pipes a backgrounded grandchild may be holding.
+            let kill_tree: Box<dyn FnOnce() + Send + 'static> = Box::new(move || drop(job));
+            let output =
+                wait_for_child(spawned, cmd.timeout, cmd.output_sink.clone(), Some(kill_tree))
+                    .await?;
             Ok(output)
         }
     }

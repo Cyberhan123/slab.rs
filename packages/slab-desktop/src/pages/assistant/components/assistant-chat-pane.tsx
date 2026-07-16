@@ -19,12 +19,14 @@ import {
 } from "@slab/components/message-scroller"
 
 import MessageList from "@/pages/assistant/components/message/index.tsx"
+import { ModelLoadIndicator } from "@/pages/assistant/components/message/model-load-indicator"
 import Sender from "@/pages/assistant/components/sender.tsx"
 import { MessageInteractionContext } from "@/pages/assistant/components/message/message-interaction-context.ts"
 import { useGreeting } from "../hooks/use-greeting"
 import type {
     ApprovalRequest,
     ApprovalStatus,
+    ModelLoadState,
 } from "../hooks/use-harness-conversation"
 import type { ApprovalScope, HarnessChatTransport } from "../lib/harness"
 
@@ -40,6 +42,8 @@ export type AssistantChatPaneProps = {
     approvals: ApprovalRequest[]
     approvalStatusByItemId: ReadonlyMap<string, ApprovalStatus>
     liveOutputByItemId: ReadonlyMap<string, string>
+    /** Transient model-load indicator state (null when idle). */
+    modelLoad: ModelLoadState
     resolveApproval: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>
 }
 
@@ -55,6 +59,7 @@ export function AssistantChatPane({
     approvals,
     approvalStatusByItemId,
     liveOutputByItemId,
+    modelLoad,
     resolveApproval,
 }: AssistantChatPaneProps) {
     const { t } = useTranslation()
@@ -111,13 +116,18 @@ export function AssistantChatPane({
                                     </Empty>
                                 ) : (
                                     <MessageInteractionContext.Provider value={interactionValue}>
-                                        <MessageList messages={messages} isBusy={isBusy} />
+                                        <MessageList
+                                            messages={messages}
+                                            isBusy={isBusy}
+                                            showHistoryMarker={initialMessages.length > 0}
+                                        />
                                     </MessageInteractionContext.Provider>
                                 )}
                             </div>
                         </div>
                     </CardContent>
                     <CardFooter className="flex-col gap-2">
+                        <ModelLoadIndicator modelLoad={modelLoad} />
                         <Sender
                             onSubmit={async (value, { files, effort, permissionMode }) => {
                                 await onBeforeSubmit(value)

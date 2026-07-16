@@ -119,6 +119,7 @@ export function ApprovalCard({
           return (
             <Button
               key={choice.scope}
+              data-testid={`assistant-approval-${choice.scope}`}
               size="sm"
               variant={choice.variant}
               disabled={pendingAction !== null}

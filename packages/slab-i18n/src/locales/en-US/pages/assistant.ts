@@ -14,6 +14,7 @@ export const assistant = {
   header: {
     title: 'Assistant',
     subtitle: 'Persistent AI agent assistant',
+    newSession: 'New session',
   },
   runtime: {
     requestAborted: 'Request aborted',
@@ -39,6 +40,13 @@ export const assistant = {
   loading: {
     title: 'Loading this session...',
     description: 'Restoring the saved conversation history before you continue.',
+  },
+  history: {
+    restored: 'History restored',
+  },
+  modelLoad: {
+    downloading: 'Downloading model...',
+    loading: 'Loading model...',
   },
   emptyState: {
     title: 'Start a new thread and keep the stage focused.',

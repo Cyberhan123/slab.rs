@@ -10,6 +10,8 @@
 use chrono::Utc;
 use slab_agent::port::ThreadListFilter;
 use slab_agent::protocol::{Thread, Turn};
+use slab_app_core::domain::models::ModelLoadCommand;
+use slab_app_core::domain::services::ModelLoadProgress;
 use slab_cloud_provider::default_models_for_provider;
 use slab_proto::harness::messages::{
     ApprovalPolicy, ApprovalResolveParams, ApprovalResolveResult, SandboxPolicy, ShutdownParams,
@@ -19,7 +21,12 @@ use slab_proto::harness::messages::{
     TurnInterruptParams, TurnInterruptResult, TurnStartParams, TurnStartResult,
     WorkspaceMigrateParams, WorkspaceMigrateResult,
 };
-use slab_proto::harness::{ModelInfo, ModelListParams, ModelListResult};
+use slab_proto::harness::method;
+use slab_proto::harness::{
+    ModelInfo, ModelListParams, ModelListResult, ModelLoadCompletedParams, ModelLoadDeltaParams,
+    ModelLoadError, ModelLoadPhase,
+};
+use tokio::sync::mpsc;
 
 use super::session::HarnessSession;
 use super::transform::Established;
@@ -63,6 +70,15 @@ pub(crate) async fn turn_start(
     session: HarnessSession,
     params: TurnStartParams,
 ) -> Result<TurnStartResult, String> {
+    // Server-driven model load: ensure the selected local model is downloaded
+    // and loaded into the runtime before the turn runs, streaming `model/load/*`
+    // notifications. Because these are pushed on the same notifier FIFO as the
+    // turn's fan-out (established below), the deltas are guaranteed to precede
+    // `turn/started` on the wire. Models selected implicitly (no `params.model`)
+    // skip this — the agent picks a default/cloud model itself. On load failure
+    // the turn does NOT start.
+    ensure_turn_model_loaded(&session, &params).await?;
+
     match session.existing_real(&params.thread_id) {
         Some(real_id) => {
             let content = join_user_text(&params.input);
@@ -101,6 +117,97 @@ pub(crate) async fn turn_start(
             error: None,
         },
     })
+}
+
+/// Ensure the turn's selected model is downloaded + loaded, streaming
+/// `model/load/delta`/`model/load/completed` notifications. Returns `Ok(())` if
+/// the turn may proceed, or `Err(message)` if the load failed (the turn must not
+/// start). No-op when no explicit model is selected.
+async fn ensure_turn_model_loaded(
+    session: &HarnessSession,
+    params: &TurnStartParams,
+) -> Result<(), String> {
+    let Some(model_id) = params.model.as_deref().map(str::trim).filter(|id| !id.is_empty()) else {
+        return Ok(());
+    };
+    let thread_id = params.thread_id.clone();
+    let model_service = session.state().services.model.clone();
+    let command = ModelLoadCommand {
+        model_id: Some(model_id.to_owned()),
+        backend_id: None,
+        model_path: None,
+        num_workers: None,
+    };
+
+    let (tx, mut rx) = mpsc::channel::<ModelLoadProgress>(64);
+    // Run the load in a detached task that owns the sender; drain progress from
+    // this task so notifications stream while the load is in flight.
+    let load =
+        tokio::spawn(
+            async move { model_service.ensure_model_loaded_with_progress(command, tx).await },
+        );
+
+    let notifier = session.notifier().clone();
+    while let Some(progress) = rx.recv().await {
+        let delta = match progress {
+            ModelLoadProgress::Download { downloaded_bytes, total_bytes } => ModelLoadDeltaParams {
+                thread_id: thread_id.clone(),
+                model_id: Some(model_id.to_owned()),
+                phase: ModelLoadPhase::Downloading,
+                downloaded_bytes: Some(downloaded_bytes),
+                total_bytes,
+                message: None,
+            },
+            ModelLoadProgress::LoadPhase => ModelLoadDeltaParams {
+                thread_id: thread_id.clone(),
+                model_id: Some(model_id.to_owned()),
+                phase: ModelLoadPhase::Loading,
+                downloaded_bytes: None,
+                total_bytes: None,
+                message: None,
+            },
+        };
+        notifier.notify(method::MODEL_LOAD_DELTA, &delta);
+    }
+
+    // Sender dropped → the load finished. Recover the terminal result.
+    let result = load.await.map_err(|join_error| join_error.to_string())?;
+    match result {
+        Ok(status) => {
+            notifier.notify(
+                method::MODEL_LOAD_COMPLETED,
+                &ModelLoadCompletedParams {
+                    thread_id,
+                    model_id: model_id.to_owned(),
+                    backend: Some(status.backend.clone()),
+                    status: "ready".to_owned(),
+                    context_length: status.context_length,
+                    training_context_length: status.training_context_length,
+                    error: None,
+                },
+            );
+            Ok(())
+        }
+        Err(error) => {
+            let message = error.to_string();
+            notifier.notify(
+                method::MODEL_LOAD_COMPLETED,
+                &ModelLoadCompletedParams {
+                    thread_id,
+                    model_id: model_id.to_owned(),
+                    backend: None,
+                    status: "error".to_owned(),
+                    context_length: None,
+                    training_context_length: None,
+                    error: Some(ModelLoadError {
+                        code: "load_failed".to_owned(),
+                        message: message.clone(),
+                    }),
+                },
+            );
+            Err(message)
+        }
+    }
 }
 
 pub(crate) async fn turn_interrupt(

@@ -43,7 +43,7 @@ impl SandboxDriver for LinuxSandboxDriver {
         {
             use std::process::Stdio;
 
-            use crate::driver::{command_env, wait_for_child};
+            use crate::driver::{command_env, unix_kill_tree, wait_for_child};
 
             validate_command(&self.env, &cmd)?;
 
@@ -66,7 +66,10 @@ impl SandboxDriver for LinuxSandboxDriver {
             command.stderr(Stdio::piped());
 
             let spawned = command.spawn().map_err(|e| SandboxError::SpawnFailed(e.to_string()))?;
-            wait_for_child(spawned, cmd.timeout, cmd.output_sink.clone()).await
+            // bwrap runs with `--new-session`, so it is a session/group leader:
+            // killing its process group tears down the whole tree.
+            let kill_tree = unix_kill_tree(spawned.id());
+            wait_for_child(spawned, cmd.timeout, cmd.output_sink.clone(), kill_tree).await
         }
     }
 

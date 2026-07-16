@@ -1,4 +1,4 @@
-import { useContext, useId, useLayoutEffect } from 'react';
+import { useContext, useId, useLayoutEffect, type ReactNode } from 'react';
 
 import type {
   HeaderMeta,
@@ -13,6 +13,10 @@ export type UseHeaderRegistration = {
   meta?: HeaderMeta | null;
   select?: HeaderSelectConfig | null;
   search?: HeaderSearchConfig | null;
+  /** Custom content rendered at the end of the header's left block. */
+  left?: ReactNode;
+  /** Custom content rendered right of the history control (before window controls). */
+  right?: ReactNode;
 };
 
 function useRequiredHeaderContext(hookName: string): HeaderContextValue {
@@ -25,10 +29,13 @@ function useRequiredHeaderContext(hookName: string): HeaderContextValue {
   return context;
 }
 
-export function useHeader(): Pick<HeaderContextValue, 'history' | 'meta' | 'select' | 'search'>;
+export function useHeader(): Pick<
+  HeaderContextValue,
+  'history' | 'meta' | 'select' | 'search' | 'left' | 'right'
+>;
 export function useHeader(registration: UseHeaderRegistration | null | undefined): Pick<
   HeaderContextValue,
-  'history' | 'meta' | 'select' | 'search'
+  'history' | 'meta' | 'select' | 'search' | 'left' | 'right'
 >;
 export function useHeader(registration?: UseHeaderRegistration | null) {
   const context = useRequiredHeaderContext('useHeader');
@@ -37,13 +44,19 @@ export function useHeader(registration?: UseHeaderRegistration | null) {
   const meta = registration?.meta ?? null;
   const select = registration?.select ?? null;
   const search = registration?.search ?? null;
+  const left = registration?.left ?? null;
+  const right = registration?.right ?? null;
   const {
     clearHistory,
+    clearLeft,
     clearMeta,
+    clearRight,
     clearSearch,
     clearSelect,
     setHistory,
+    setLeft,
     setMeta,
+    setRight,
     setSearch,
     setSelect,
   } = context;
@@ -76,19 +89,37 @@ export function useHeader(registration?: UseHeaderRegistration | null) {
     } else {
       clearSearch(id);
     }
+
+    if (left !== null) {
+      setLeft(id, left);
+    } else {
+      clearLeft(id);
+    }
+
+    if (right !== null) {
+      setRight(id, right);
+    } else {
+      clearRight(id);
+    }
     return undefined;
   }, [
     clearHistory,
+    clearLeft,
     clearMeta,
+    clearRight,
     clearSearch,
     clearSelect,
     history,
     id,
+    left,
     meta,
+    right,
     search,
     select,
     setHistory,
+    setLeft,
     setMeta,
+    setRight,
     setSearch,
     setSelect,
   ]);
@@ -99,8 +130,10 @@ export function useHeader(registration?: UseHeaderRegistration | null) {
       clearHistory(id);
       clearSelect(id);
       clearSearch(id);
+      clearLeft(id);
+      clearRight(id);
     },
-    [clearHistory, clearMeta, clearSearch, clearSelect, id],
+    [clearHistory, clearLeft, clearMeta, clearRight, clearSearch, clearSelect, id],
   );
 
   return {
@@ -108,5 +141,7 @@ export function useHeader(registration?: UseHeaderRegistration | null) {
     meta: context.meta,
     select: context.select,
     search: context.search,
+    left: context.left,
+    right: context.right,
   };
 }

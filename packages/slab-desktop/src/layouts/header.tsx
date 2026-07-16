@@ -160,6 +160,8 @@ export default function Header() {
     history,
     select,
     search,
+    left,
+    right,
   } = useHeader()
   const searchPlaceholder = search?.placeholder ?? t("layouts.header.search.default")
   const searchAriaLabel = search?.ariaLabel ?? searchPlaceholder
@@ -188,6 +190,7 @@ export default function Header() {
             <span className="max-w-[11rem] truncate">{contextLabel}</span>
           </div>
         ) : null}
+        {left}
       </div>
 
       <div className="ml-auto flex min-w-0 items-center gap-3 md:gap-4">
@@ -226,6 +229,7 @@ export default function Header() {
             <span aria-hidden="true" className="hairline-v hidden h-4 w-px shrink-0 md:block" />
           </>
         ) : null}
+        {right}
         <WindowControls placement="header" />
       </div>
     </header>

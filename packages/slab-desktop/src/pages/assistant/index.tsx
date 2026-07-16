@@ -43,7 +43,6 @@ function Assistant() {
         setSelectedModelId,
         modelLoading,
         isPreparingModel,
-        ensureAssistantModelReady,
         loadedModelStatus,
     } = useAssistantModel()
 
@@ -58,6 +57,7 @@ function Assistant() {
         approvals,
         approvalStatusByItemId,
         liveOutputByItemId,
+        modelLoad,
         resolveApproval,
     } = useHarnessConversation(curConversation, selectedModelId || "slab-llama")
 
@@ -114,6 +114,9 @@ function Assistant() {
     })
 
     const openSessionSheet = useCallback(() => setIsSessionSheetOpen(true), [])
+    const handleNewSession = useCallback(() => {
+        void createEmptySession()
+    }, [createEmptySession])
 
     useAssistantHeader({
         modelOptions,
@@ -124,6 +127,7 @@ function Assistant() {
         pendingModelSwitchId,
         onModelPickerChange: handleModelPickerChange,
         onOpenSessionSheet: openSessionSheet,
+        onNewSession: handleNewSession,
     })
 
     useEffect(() => {
@@ -147,12 +151,13 @@ function Assistant() {
                 throw new Error("Assistant session is not ready.")
             }
 
-            await ensureAssistantModelReady()
+            // NOTE: model loading is now server-driven inside `turn/start`
+            // (streaming `model/load/*` notifications rendered by the in-stream
+            // ModelLoadIndicator), so there is no HTTP pre-flight here.
             void setConversationLabelIfNeeded(curConversation, value)
         },
         [
             curConversation,
-            ensureAssistantModelReady,
             isSessionBootstrapping,
             isSessionBusy,
             setConversationLabelIfNeeded,
@@ -175,6 +180,7 @@ function Assistant() {
                 approvals={approvals}
                 approvalStatusByItemId={approvalStatusByItemId}
                 liveOutputByItemId={liveOutputByItemId}
+                modelLoad={modelLoad}
                 resolveApproval={resolveApproval}
             />
 

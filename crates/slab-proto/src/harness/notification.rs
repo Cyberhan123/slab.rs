@@ -64,6 +64,69 @@ pub struct Account {
     pub subscription: Option<String>,
 }
 
+// ---- model/load ----
+//
+// Emitted directly from the `turn/start` handler via `Notifier::notify` (NOT
+// projected from `slab_agent::protocol::EventMsg`), so these are standalone
+// payloads — intentionally NOT variants of `ServerNotification` below (adding
+// them there would imply a projection path through `event_msg_to_notification`
+// that does not exist).
+
+/// Coarse phase of an in-progress model load streamed via `model/load/delta`.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelLoadPhase {
+    /// Weights are being downloaded into the local cache.
+    Downloading,
+    /// Weights are on disk; the engine is loading them.
+    Loading,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelLoadDeltaParams {
+    /// Harness thread id the load is associated with (matches `turn/start`'s
+    /// `thread_id`). Required: the client routes notifications by `threadId`.
+    ///
+    /// NOTE: deliberately no numeric `turnId` — the client transport drops
+    /// notifications whose `turnId` parses as `<= threshold` (replay guard).
+    pub thread_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    pub phase: ModelLoadPhase,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub downloaded_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelLoadError {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelLoadCompletedParams {
+    /// Harness thread id the load is associated with.
+    pub thread_id: String,
+    pub model_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+    /// `"ready"` on success, `"error"` on failure (see `error`).
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_length: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub training_context_length: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<ModelLoadError>,
+}
+
 /// Union of every server → client notification, discriminated by `method`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "method", content = "params")]
@@ -173,5 +236,54 @@ mod tests {
         let json = serde_json::to_value(&n).unwrap();
         assert_eq!(json["method"], "error");
         assert_eq!(json["params"]["code"], "turn_failed");
+    }
+
+    #[test]
+    fn model_load_delta_params_round_trip() {
+        let p = ModelLoadDeltaParams {
+            thread_id: "t1".to_owned(),
+            model_id: Some("m1".to_owned()),
+            phase: ModelLoadPhase::Downloading,
+            downloaded_bytes: Some(1024),
+            total_bytes: Some(4096),
+            message: None,
+        };
+        let json = serde_json::to_value(&p).unwrap();
+        assert_eq!(json["threadId"], "t1");
+        assert_eq!(json["phase"], "downloading");
+        assert_eq!(json["downloadedBytes"], 1024);
+        // No turnId field is serialized.
+        assert!(json.get("turnId").is_none());
+        let back: ModelLoadDeltaParams = serde_json::from_value(json).unwrap();
+        assert_eq!(p, back);
+    }
+
+    #[test]
+    fn model_load_completed_params_round_trip() {
+        let p = ModelLoadCompletedParams {
+            thread_id: "t1".to_owned(),
+            model_id: "m1".to_owned(),
+            backend: Some("ggml.llama".to_owned()),
+            status: "ready".to_owned(),
+            context_length: Some(8192),
+            training_context_length: None,
+            error: None,
+        };
+        let json = serde_json::to_value(&p).unwrap();
+        assert_eq!(json["status"], "ready");
+        assert_eq!(json["backend"], "ggml.llama");
+        let back: ModelLoadCompletedParams = serde_json::from_value(json).unwrap();
+        assert_eq!(p, back);
+
+        let err = ModelLoadCompletedParams {
+            status: "error".to_owned(),
+            error: Some(ModelLoadError {
+                code: "download_failed".to_owned(),
+                message: "boom".to_owned(),
+            }),
+            ..p
+        };
+        let json = serde_json::to_value(&err).unwrap();
+        assert_eq!(json["error"]["code"], "download_failed");
     }
 }

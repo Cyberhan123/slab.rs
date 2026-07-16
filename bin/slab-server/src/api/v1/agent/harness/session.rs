@@ -80,9 +80,9 @@ impl HarnessSession {
         &self.inner.service
     }
 
-    /// Surface the outbound notifier (for future server-initiated pushes via a
-    /// `NotifierRegistry`; not used by request handlers today).
-    #[allow(dead_code)]
+    /// Surface the outbound notifier. Used by request handlers that emit
+    /// notifications directly (e.g. `turn/start` emits `model/load/*` before the
+    /// turn's fan-out is established).
     pub(crate) fn notifier(&self) -> &Notifier {
         &self.inner.notifier
     }

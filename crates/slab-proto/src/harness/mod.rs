@@ -26,7 +26,10 @@ pub use messages::{
     TurnInterruptParams, TurnInterruptResult, TurnStartParams, TurnStartResult,
 };
 pub use model::{ModelInfo, ModelListParams, ModelListResult, ReasoningEffortOption};
-pub use notification::ServerNotification;
+pub use notification::{
+    ModelLoadCompletedParams, ModelLoadDeltaParams, ModelLoadError, ModelLoadPhase,
+    ServerNotification,
+};
 pub use operation::{AdditionalContextEntry, ThreadSettingsOverrides, UserSubmissionOp};
 pub use user_input::UserInput;
 
@@ -65,6 +68,10 @@ pub mod method {
     pub const ERROR: &str = "error";
     pub const ACCOUNT_UPDATED: &str = "account/updated";
     pub const ACCOUNT_LOGIN_COMPLETED: &str = "account/loginCompleted";
+    // Model load lifecycle, emitted directly from the `turn/start` handler (NOT
+    // projected from `EventMsg`). `<noun>/delta* → <noun>/completed` convention.
+    pub const MODEL_LOAD_DELTA: &str = "model/load/delta";
+    pub const MODEL_LOAD_COMPLETED: &str = "model/load/completed";
 }
 
 /// Harness-scoped JSON-RPC error codes (application-errors below the standard

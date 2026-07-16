@@ -3,11 +3,13 @@ mod config_document;
 mod download;
 mod download_progress;
 mod download_status;
+mod load_progress;
 mod pack;
 mod runtime;
 
 pub(crate) use catalog::list_chat_models_from_state;
 pub(crate) use download::MODEL_DOWNLOAD_TASK_TYPE;
+pub use load_progress::ModelLoadProgress;
 pub(crate) use runtime::{
     resolve_local_chat_prompt_profile, resolve_worker_model_backend_or_default,
 };

@@ -24,8 +24,6 @@ export type ToolExecutionResult = {
   toolMessages: AgentThreadMessageResponse[]
 }
 
-const approveButtonName = /^(Approve|\u6279\u51c6)$/u
-
 export async function openAssistant(page: Page, uiBaseUrl: string): Promise<void> {
   // WorkspaceModeSync (App.tsx) redirects a *fresh full load* at `/` to
   // `/workspace` once when a workspace is active (intended workspace-mode
@@ -44,11 +42,11 @@ export async function openAssistant(page: Page, uiBaseUrl: string): Promise<void
 export async function sendAssistantMessage(page: Page, message: string): Promise<void> {
   const composer = await waitForComposerReady(page)
   await composer.fill(message)
-  await page.getByTestId("assistant-send-button").locator("button").click()
+  await page.getByTestId("assistant-send-button").click()
 }
 
 export async function waitForComposerReady(page: Page): Promise<Locator> {
-  const composer = page.getByTestId("assistant-composer-input").locator("textarea")
+  const composer = page.getByTestId("assistant-composer-input")
   await composer.waitFor({ state: "visible", timeout: 90_000 })
   await eventually("assistant composer is editable", async () => composer.isEditable(), 90_000)
   return composer
@@ -144,7 +142,16 @@ export async function waitForToolExecution(
 }
 
 export async function approvePendingToolCall(page: Page): Promise<void> {
-  await page.getByRole("button", { name: approveButtonName }).click({ timeout: 240_000 })
+  // The ApprovalCard renders one button per advertised scope, each tagged
+  // `assistant-approval-<scope>`; `run_once` is the plain approve action and is
+  // always present (the legacy fallback maps approve → run_once).
+  await page.getByTestId("assistant-approval-run_once").click({ timeout: 240_000 })
+}
+
+/** Approve the pending tool call with a specific persistence scope (e.g.
+ * `always_in_workspace`, which silences repeats for equivalent commands). */
+export async function approveToolCallWithScope(page: Page, scope: string): Promise<void> {
+  await page.getByTestId(`assistant-approval-${scope}`).click({ timeout: 240_000 })
 }
 
 export async function expectAssistantPageText(page: Page, text: string): Promise<void> {

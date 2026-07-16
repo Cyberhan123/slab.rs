@@ -14,6 +14,7 @@ export const assistant = {
   header: {
     title: '助手',
     subtitle: '持续运行的 AI Agent 助手',
+    newSession: '新建会话',
   },
   runtime: {
     requestAborted: '请求已中止',
@@ -39,6 +40,13 @@ export const assistant = {
   loading: {
     title: '正在加载此会话...',
     description: '继续之前，正在恢复已保存的对话历史。',
+  },
+  history: {
+    restored: '历史消息已经恢复',
+  },
+  modelLoad: {
+    downloading: '下载模型...',
+    loading: '加载模型...',
   },
   emptyState: {
     title: '开始一个新的助手线程，让上下文保持聚焦。',

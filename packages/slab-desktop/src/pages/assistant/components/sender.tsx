@@ -213,6 +213,7 @@ function Sender({ onSubmit, onStop, loading = false, approvals, onResolveApprova
       <InputGroup>
         <InputGroupTextarea
           aria-label="Message"
+          data-testid="assistant-composer-input"
           disabled={loading}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {
@@ -366,6 +367,7 @@ function Sender({ onSubmit, onStop, loading = false, approvals, onResolveApprova
           ) : (
             <InputGroupButton
               aria-label="Send"
+              data-testid="assistant-send-button"
               type="submit"
               variant="default"
               size="icon-sm"
