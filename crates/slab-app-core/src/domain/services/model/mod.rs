@@ -5,6 +5,7 @@ mod download_progress;
 mod download_status;
 mod load_progress;
 mod pack;
+mod quantize;
 mod runtime;
 
 pub(crate) use catalog::list_chat_models_from_state;

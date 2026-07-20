@@ -110,6 +110,7 @@ mod tests {
         ("/v1/models/download", "post"),
         ("/v1/models/import-pack", "post"),
         ("/v1/models/load", "post"),
+        ("/v1/models/quantize", "post"),
         ("/v1/models/switch", "post"),
         ("/v1/models/unload", "post"),
         ("/v1/plugins", "get"),

@@ -24,4 +24,5 @@ serde = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-hf-hub = { workspace = true, features = ["ureq", "native-tls"] }
+# hf-hub 1.0: `ureq`/`native-tls` dropped; use the `blocking` sync API + rustls.
+hf-hub = { workspace = true, features = ["blocking", "rustls-tls"] }

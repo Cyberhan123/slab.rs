@@ -51,10 +51,10 @@ pub use model::{
     ModelConfigSourceSummary, ModelConfigValueType, ModelConfigVariantOption,
     ModelEnhancementPresetOption, ModelEnhancementVariantOption, ModelEnhancementView,
     ModelLoadCommand, ModelPackSelection, ModelRuntimeState, ModelSpec, ModelStatus, Pricing,
-    RuntimePresets, SelectedModelDownloadSource, StoredModelConfig, UnifiedModel, UnifiedModelKind,
-    UnifiedModelStatus, UpdateModelCommand, UpdateModelConfigSelectionCommand,
-    UpdateModelEnhancementCommand, default_model_capabilities, normalize_model_capabilities,
-    validate_stored_model_config,
+    QuantizeModelCommand, RuntimePresets, SelectedModelDownloadSource, StoredModelConfig,
+    UnifiedModel, UnifiedModelKind, UnifiedModelStatus, UpdateModelCommand,
+    UpdateModelConfigSelectionCommand, UpdateModelEnhancementCommand, default_model_capabilities,
+    normalize_model_capabilities, validate_stored_model_config,
 };
 pub use plugin::{InstallPluginCommand, PluginView};
 pub use pmid::PMID;

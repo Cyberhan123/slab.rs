@@ -25,8 +25,9 @@ use crate::domain::models::{
 use crate::domain::ports::{
     RuntimeBackendStatus, RuntimeDiffusionImageRequest, RuntimeDiffusionImageResult,
     RuntimeDiffusionVideoRequest, RuntimeDiffusionVideoResult, RuntimeInferenceGateway,
-    RuntimeTextGenerationChunk, RuntimeTextGenerationRequest, RuntimeTextGenerationResponse,
-    RuntimeTranscriptionRequest, RuntimeTranscriptionResult,
+    RuntimeQuantizeRequest, RuntimeQuantizeResult, RuntimeTextGenerationChunk,
+    RuntimeTextGenerationRequest, RuntimeTextGenerationResponse, RuntimeTranscriptionRequest,
+    RuntimeTranscriptionResult,
 };
 use crate::domain::services::{ModelService, PmidService};
 use crate::error::AppCoreError;
@@ -156,6 +157,14 @@ impl RuntimeInferenceGateway for RecordingRuntimeGateway {
             context_length: None,
             training_context_length: None,
         })
+    }
+
+    async fn quantize_model(
+        &self,
+        request: RuntimeQuantizeRequest,
+    ) -> Result<RuntimeQuantizeResult, AppCoreError> {
+        // Recording gateway stub — tests that drive quantize should assert via the task store.
+        Ok(RuntimeQuantizeResult { layers_processed: 0, output_path: request.output_path })
     }
 }
 

@@ -153,6 +153,15 @@ export function registerModelsAndChatSmoke(
           method: "POST"
         })
       );
+      await expectError(
+        server,
+        "/v1/models/quantize",
+        400,
+        jsonInit(
+          { input_path: "", output_path: "", ftype: 15 } satisfies Schema["QuantizeModelRequest"],
+          { method: "POST" }
+        )
+      );
 
       const emptyPack = new FormData();
       const importPack = await server.requestFormData("/v1/models/import-pack", emptyPack, {

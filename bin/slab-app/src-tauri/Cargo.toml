@@ -56,15 +56,16 @@ uuid = { workspace = true }
 tauri-plugin-window-state = { workspace = true }
 
 # INFRA-02: OS keyring backend, selected per desktop platform so the build pulls
-# in only the native credential store for the target.
+# in only the native credential store for the target. keyring 4 renamed the
+# platform backend features from `<plat>-native` to `<plat>-<backend>-keyring-store`.
 [target.'cfg(target_os = "windows")'.dependencies]
-keyring = { workspace = true, features = ["windows-native"] }
+keyring = { workspace = true, features = ["windows-native-keyring-store"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-keyring = { workspace = true, features = ["apple-native"] }
+keyring = { workspace = true, features = ["apple-native-keyring-store"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-keyring = { workspace = true, features = ["linux-native"] }
+keyring = { workspace = true, features = ["zbus-secret-service-keyring-store"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -9,9 +9,10 @@ pub(crate) use backend_payload::{
 pub(crate) use contracts::{
     AudioTranscriptionDecodeOptions, AudioTranscriptionOptions, AudioTranscriptionResponse,
     AudioTranscriptionVadOptions, AudioTranscriptionVadParams, GeneratedImage,
-    GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, GgmlWhisperLoadConfig,
-    ImageGenerationRequest, ImageGenerationResponse, OnnxInferenceRequest, OnnxInferenceResponse,
-    OnnxTensor, TextGenerationMetadata, TextGenerationOptions, TextGenerationResponse,
+    GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, GgmlLlamaQuantizeInput,
+    GgmlLlamaQuantizeOutput, GgmlWhisperLoadConfig, ImageGenerationRequest,
+    ImageGenerationResponse, OnnxInferenceRequest, OnnxInferenceResponse, OnnxTensor,
+    TextGenerationMetadata, TextGenerationOptions, TextGenerationResponse,
     TextGenerationStreamEvent, TextGenerationUsage,
 };
 #[cfg(feature = "ggml")]

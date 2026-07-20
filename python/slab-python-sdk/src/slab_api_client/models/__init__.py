@@ -156,6 +156,7 @@ from .plugin_settings_contribution import PluginSettingsContribution
 from .plugin_sidebar_contribution import PluginSidebarContribution
 from .pricing_request import PricingRequest
 from .pricing_response import PricingResponse
+from .quantize_model_request import QuantizeModelRequest
 from .recent_workspace_response import RecentWorkspaceResponse
 from .render_subtitle_request import RenderSubtitleRequest
 from .render_subtitle_response import RenderSubtitleResponse
@@ -398,6 +399,7 @@ __all__ = (
     "PluginSidebarContribution",
     "PricingRequest",
     "PricingResponse",
+    "QuantizeModelRequest",
     "RecentWorkspaceResponse",
     "RenderSubtitleRequest",
     "RenderSubtitleResponse",

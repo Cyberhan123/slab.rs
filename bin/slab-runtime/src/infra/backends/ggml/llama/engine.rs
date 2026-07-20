@@ -1,8 +1,9 @@
 use crate::infra::backends::ggml;
 use slab_agent_tracing::record_json_from_context;
 use slab_llama::{
-    Llama, LlamaContextParams, LlamaInferenceOutput, LlamaLogitBias, LlamaModel, LlamaModelParams,
-    LlamaRuntime, LlamaSamplingOptions, LlamaSessionSnapshot, LlamaStopInfo,
+    Llama, LlamaContextParams, LlamaFtype, LlamaInferenceOutput, LlamaLogitBias, LlamaModel,
+    LlamaModelParams, LlamaQuantizeParams, LlamaRuntime, LlamaSamplingOptions,
+    LlamaSessionSnapshot, LlamaStopInfo,
 };
 use slab_runtime_core::backend::{
     StreamChunk as BaseStreamChunk, StreamHandle as BaseStreamHandle,
@@ -16,8 +17,9 @@ use tokio::sync::{mpsc, watch};
 use tracing::{info, warn};
 
 use crate::domain::models::{
-    GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, TextGenerationMetadata, TextGenerationStreamEvent,
-    TextGenerationUsage, TextPromptTokensDetails, TextStopMetadata,
+    GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, GgmlLlamaQuantizeInput, GgmlLlamaQuantizeOutput,
+    TextGenerationMetadata, TextGenerationStreamEvent, TextGenerationUsage,
+    TextPromptTokensDetails, TextStopMetadata,
 };
 
 use super::{GGMLLlamaEngineError, SessionId, StreamChunk, StreamHandle};
@@ -1482,6 +1484,36 @@ impl GGMLLlamaEngine {
     }
 
     /// Unload the current model and stop all inference workers.
+    /// Quantize `input.input_path` into `input.output_path` using the engine's
+    /// llama library handle. Does not need a loaded inference context — only the
+    /// library handle initialised at construction (so the backend must have been
+    /// loaded at least once).
+    pub(crate) async fn quantize(
+        &self,
+        input: GgmlLlamaQuantizeInput,
+    ) -> Result<GgmlLlamaQuantizeOutput, ggml::EngineError> {
+        let params = LlamaQuantizeParams {
+            nthread: input.nthread.unwrap_or(0),
+            ftype: LlamaFtype::from_raw(input.ftype),
+            allow_requantize: input.allow_requantize,
+            quantize_output_tensor: input.quantize_output_tensor,
+            only_copy: input.only_copy,
+            pure: input.pure,
+            keep_split: input.keep_split,
+            dry_run: input.dry_run,
+            ..LlamaQuantizeParams::default()
+        };
+        let layers_processed = self
+            .instance
+            .model_quantize(&input.input_path, &input.output_path, &params)
+            .map_err(|source| GGMLLlamaEngineError::Quantize {
+                input_path: input.input_path.clone(),
+                output_path: input.output_path.clone(),
+                source,
+            })?;
+        Ok(GgmlLlamaQuantizeOutput { layers_processed, output_path: input.output_path })
+    }
+
     pub fn unload(&self) -> Result<(), ggml::EngineError> {
         Ok(self.do_unload()?)
     }

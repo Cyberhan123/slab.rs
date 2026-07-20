@@ -1,0 +1,13 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 8a8dafd..445a9a9 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -139,7 +139,7 @@ features = [
+ default-features = false
+ 
+ [dependencies.libsqlite3-sys]
+-version = ">=0.30.1, <0.38.0"
++version = ">=0.30.1, <0.39.0"
+ features = [
+     "pkg-config",
+     "vcpkg",

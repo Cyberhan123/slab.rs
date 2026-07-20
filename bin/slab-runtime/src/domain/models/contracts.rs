@@ -25,6 +25,38 @@ pub(crate) struct GgmlLlamaLoadMetadata {
     pub training_context_length: Option<u32>,
 }
 
+/// Typed quantize request payload that flows through the driver to the engine.
+/// `ftype` is the raw `llama_ftype` int (e.g. 15 = Q4_K_M, 36 = TQ1_0).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct GgmlLlamaQuantizeInput {
+    pub input_path: String,
+    pub output_path: String,
+    #[serde(default)]
+    pub ftype: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nthread: Option<i32>,
+    #[serde(default)]
+    pub allow_requantize: bool,
+    #[serde(default)]
+    pub quantize_output_tensor: bool,
+    #[serde(default)]
+    pub only_copy: bool,
+    #[serde(default)]
+    pub pure: bool,
+    #[serde(default)]
+    pub keep_split: bool,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct GgmlLlamaQuantizeOutput {
+    #[serde(default)]
+    pub layers_processed: u32,
+    #[serde(default)]
+    pub output_path: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct GgmlWhisperLoadConfig {
     pub model_path: PathBuf,

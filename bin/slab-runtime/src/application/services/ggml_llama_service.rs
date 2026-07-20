@@ -64,4 +64,11 @@ impl GgmlLlamaService {
     > {
         clone_loaded(&self.loaded).await?.chat_stream(request).await.map_err(Into::into)
     }
+
+    pub(crate) async fn quantize_model(
+        &self,
+        request: dto::GgmlLlamaQuantizeRequest,
+    ) -> Result<dto::GgmlLlamaQuantizeResult, RuntimeApplicationError> {
+        clone_loaded(&self.loaded).await?.quantize(request).await.map_err(Into::into)
+    }
 }

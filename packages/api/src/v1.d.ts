@@ -328,6 +328,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/models/quantize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["quantize_model"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/models/switch": {
         parameters: {
             query?: never;
@@ -2526,6 +2542,35 @@ export interface components {
             /** Format: double */
             output: number;
         };
+        /** @description Request body for `POST /v1/models/quantize`. */
+        QuantizeModelRequest: {
+            /** @description Allow re-quantizing already-quantized tensors. */
+            allow_requantize?: boolean | null;
+            /** @description Do not write a file — only report what would happen. */
+            dry_run?: boolean | null;
+            /**
+             * Format: int32
+             * @description Target quantization format as a raw `llama_ftype` int (e.g. 15 = Q4_K_M, 36 = TQ1_0).
+             */
+            ftype: number;
+            /** @description Path to the source GGUF model file. */
+            input_path: string;
+            /** @description Keep the model split layout. */
+            keep_split?: boolean | null;
+            /**
+             * Format: int32
+             * @description Number of threads (0 = let llama.cpp decide).
+             */
+            nthread?: number | null;
+            /** @description Only copy tensors instead of quantizing. */
+            only_copy?: boolean | null;
+            /** @description Path to write the quantized GGUF model to. */
+            output_path: string;
+            /** @description Disable mix-and-match of quantization types when not specified. */
+            pure?: boolean | null;
+            /** @description Quantize the `output` tensor (default true). */
+            quantize_output_tensor?: boolean | null;
+        };
         RecentWorkspaceResponse: {
             /** Format: int64 */
             lastOpenedAt: number;
@@ -4200,6 +4245,44 @@ export interface operations {
                 };
             };
             /** @description Unknown backend or invalid paths */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    quantize_model: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuantizeModelRequest"];
+            };
+        };
+        responses: {
+            /** @description Quantize task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationAcceptedResponse"];
+                };
+            };
+            /** @description Bad request */
             400: {
                 headers: {
                     [name: string]: unknown;

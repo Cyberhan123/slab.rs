@@ -20,6 +20,8 @@ thiserror = { workspace = true }
 async-trait = { workspace = true }
 strum = { workspace = true }
 
-hf-hub = { workspace = true, default-features = false, features = ["tokio", "native-tls"], optional = true }
+# hf-hub 1.0 dropped the `tokio` and `native-tls` features; the async API now
+# lives under `default` and TLS is `rustls-tls` (native-tls is no longer offered).
+hf-hub = { workspace = true, features = ["default", "rustls-tls"], optional = true }
 models-cat = { workspace = true, default-features = false, features = ["tokio"], optional = true }
 huggingface-hub = { workspace = true, default-features = false, optional = true }

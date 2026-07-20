@@ -30,8 +30,9 @@ use crate::domain::models::{
     ModelEnhancementView as DomainModelEnhancementView, ModelLoadCommand as DomainModelLoadCommand,
     ModelRuntimeState as DomainModelRuntimeState, ModelSpec as DomainModelSpec,
     ModelStatus as DomainModelStatus, Pricing as DomainPricing,
-    RuntimePresets as DomainRuntimePresets, UnifiedModel as DomainUnifiedModel,
-    UnifiedModelKind as DomainUnifiedModelKind, UpdateModelCommand as DomainUpdateModelCommand,
+    QuantizeModelCommand as DomainQuantizeModelCommand, RuntimePresets as DomainRuntimePresets,
+    UnifiedModel as DomainUnifiedModel, UnifiedModelKind as DomainUnifiedModelKind,
+    UpdateModelCommand as DomainUpdateModelCommand,
     UpdateModelConfigSelectionCommand as DomainUpdateModelConfigSelectionCommand,
     UpdateModelEnhancementCommand as DomainUpdateModelEnhancementCommand,
 };
@@ -316,6 +317,47 @@ pub struct DownloadModelRequest {
         message = "model_id must not be empty"
     ))]
     pub model_id: String,
+}
+
+/// Request body for `POST /v1/models/quantize`.
+#[derive(Debug, Deserialize, ToSchema, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct QuantizeModelRequest {
+    /// Path to the source GGUF model file.
+    #[validate(custom(
+        function = "crate::schemas::validation::validate_non_blank",
+        message = "input_path must not be empty"
+    ))]
+    pub input_path: String,
+    /// Path to write the quantized GGUF model to.
+    #[validate(custom(
+        function = "crate::schemas::validation::validate_non_blank",
+        message = "output_path must not be empty"
+    ))]
+    pub output_path: String,
+    /// Target quantization format as a raw `llama_ftype` int (e.g. 15 = Q4_K_M, 36 = TQ1_0).
+    pub ftype: i32,
+    /// Number of threads (0 = let llama.cpp decide).
+    #[serde(default)]
+    pub nthread: Option<i32>,
+    /// Allow re-quantizing already-quantized tensors.
+    #[serde(default)]
+    pub allow_requantize: Option<bool>,
+    /// Quantize the `output` tensor (default true).
+    #[serde(default)]
+    pub quantize_output_tensor: Option<bool>,
+    /// Only copy tensors instead of quantizing.
+    #[serde(default)]
+    pub only_copy: Option<bool>,
+    /// Disable mix-and-match of quantization types when not specified.
+    #[serde(default)]
+    pub pure: Option<bool>,
+    /// Keep the model split layout.
+    #[serde(default)]
+    pub keep_split: Option<bool>,
+    /// Do not write a file — only report what would happen.
+    #[serde(default)]
+    pub dry_run: Option<bool>,
 }
 
 /// Query parameters for listing files in a HuggingFace repo.
@@ -1101,6 +1143,23 @@ impl From<ListAvailableQuery> for DomainAvailableModelsQuery {
 impl From<DownloadModelRequest> for DomainDownloadModelCommand {
     fn from(req: DownloadModelRequest) -> Self {
         Self { model_id: req.model_id }
+    }
+}
+
+impl From<QuantizeModelRequest> for DomainQuantizeModelCommand {
+    fn from(req: QuantizeModelRequest) -> Self {
+        Self {
+            input_path: req.input_path,
+            output_path: req.output_path,
+            ftype: req.ftype,
+            nthread: req.nthread,
+            allow_requantize: req.allow_requantize,
+            quantize_output_tensor: req.quantize_output_tensor,
+            only_copy: req.only_copy,
+            pure: req.pure,
+            keep_split: req.keep_split,
+            dry_run: req.dry_run,
+        }
     }
 }
 

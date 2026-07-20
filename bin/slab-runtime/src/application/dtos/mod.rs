@@ -29,7 +29,8 @@ pub(crate) use ggml_diffusion::{
 };
 pub(crate) use ggml_llama::{
     decode_ggml_llama_chat_request, decode_ggml_llama_load_request,
-    encode_ggml_llama_chat_response, encode_ggml_llama_chat_stream_chunk,
+    decode_ggml_llama_quantize_request, encode_ggml_llama_chat_response,
+    encode_ggml_llama_chat_stream_chunk, encode_ggml_llama_quantize_response,
 };
 pub(crate) use ggml_whisper::{
     decode_ggml_whisper_load_request, decode_ggml_whisper_transcribe_request,
@@ -205,6 +206,26 @@ pub(crate) struct GgmlLlamaLoadRequest {
     pub chat_template: Option<String>,
     pub gbnf: Option<String>,
     pub flash_attn: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct GgmlLlamaQuantizeRequest {
+    pub input_path: String,
+    pub output_path: String,
+    pub ftype: i32,
+    pub nthread: Option<i32>,
+    pub allow_requantize: Option<bool>,
+    pub quantize_output_tensor: Option<bool>,
+    pub only_copy: Option<bool>,
+    pub pure: Option<bool>,
+    pub keep_split: Option<bool>,
+    pub dry_run: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct GgmlLlamaQuantizeResult {
+    pub layers_processed: u32,
+    pub output_path: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]

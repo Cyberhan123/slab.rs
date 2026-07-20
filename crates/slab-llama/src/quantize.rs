@@ -202,7 +202,60 @@ impl LlamaFtype {
             Self::Unknown(raw) => raw,
         }
     }
+
+    /// Inverse of [`to_raw`](Self::to_raw): map a raw `llama_ftype` int back to
+    /// a named variant when it is known, otherwise [`LlamaFtype::Unknown`].
+    ///
+    /// Used by callers (e.g. the runtime RPC layer) that receive the file type
+    /// as an opaque integer over the wire.
+    pub fn from_raw(raw: i32) -> Self {
+        KNOWN_FTYPES
+            .iter()
+            .copied()
+            .find(|ftype| ftype.to_raw() == raw)
+            .unwrap_or(Self::Unknown(raw))
+    }
 }
+
+/// All named [`LlamaFtype`] variants. [`LlamaFtype::from_raw`] iterates this to
+/// invert [`LlamaFtype::to_raw`] without duplicating the constant mapping.
+const KNOWN_FTYPES: &[LlamaFtype] = &[
+    LlamaFtype::AllF32,
+    LlamaFtype::MostlyF16,
+    LlamaFtype::MostlyQ4_0,
+    LlamaFtype::MostlyQ4_1,
+    LlamaFtype::MostlyQ8_0,
+    LlamaFtype::MostlyQ5_0,
+    LlamaFtype::MostlyQ5_1,
+    LlamaFtype::MostlyQ2K,
+    LlamaFtype::MostlyQ3KS,
+    LlamaFtype::MostlyQ3KM,
+    LlamaFtype::MostlyQ3KL,
+    LlamaFtype::MostlyQ4KS,
+    LlamaFtype::MostlyQ4KM,
+    LlamaFtype::MostlyQ5KS,
+    LlamaFtype::MostlyQ5KM,
+    LlamaFtype::MostlyQ6K,
+    LlamaFtype::MostlyIq2Xxs,
+    LlamaFtype::MostlyIq2Xs,
+    LlamaFtype::MostlyQ2KS,
+    LlamaFtype::MostlyIq3Xs,
+    LlamaFtype::MostlyIq3Xxs,
+    LlamaFtype::MostlyIq1S,
+    LlamaFtype::MostlyIq4Nl,
+    LlamaFtype::MostlyIq3S,
+    LlamaFtype::MostlyIq3M,
+    LlamaFtype::MostlyIq2S,
+    LlamaFtype::MostlyIq2M,
+    LlamaFtype::MostlyIq4Xs,
+    LlamaFtype::MostlyIq1M,
+    LlamaFtype::MostlyBf16,
+    LlamaFtype::MostlyTq1_0,
+    LlamaFtype::MostlyTq2_0,
+    LlamaFtype::MostlyMxfp4Moe,
+    LlamaFtype::MostlyNvfp4,
+    LlamaFtype::MostlyQ1_0,
+];
 
 /// Parameters for [`Llama::model_quantize`].
 ///
@@ -338,5 +391,22 @@ mod tests {
         assert_eq!(raw.ftype, 15);
         assert!(raw.imatrix.is_null());
         assert!(raw.kv_overrides.is_null());
+    }
+
+    #[test]
+    fn from_raw_round_trips_named_variants() {
+        for variant in KNOWN_FTYPES {
+            assert_eq!(LlamaFtype::from_raw(variant.to_raw()), *variant);
+        }
+        // Spot-check the wire-comment values from ggml/llama.proto.
+        assert_eq!(LlamaFtype::from_raw(15), LlamaFtype::MostlyQ4KM);
+        assert_eq!(LlamaFtype::from_raw(36), LlamaFtype::MostlyTq1_0);
+        assert_eq!(LlamaFtype::from_raw(37), LlamaFtype::MostlyTq2_0);
+    }
+
+    #[test]
+    fn from_raw_unknown_passthrough() {
+        assert_eq!(LlamaFtype::from_raw(-1), LlamaFtype::Unknown(-1));
+        assert_eq!(LlamaFtype::from_raw(9999), LlamaFtype::Unknown(9999));
     }
 }

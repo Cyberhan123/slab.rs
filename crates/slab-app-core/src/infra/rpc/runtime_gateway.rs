@@ -10,9 +10,10 @@ use tonic::transport::Channel;
 use crate::domain::ports::{
     RuntimeBackendStatus, RuntimeDiffusionImageRequest, RuntimeDiffusionImageResult,
     RuntimeDiffusionVideoRequest, RuntimeDiffusionVideoResult, RuntimeInferenceGateway,
-    RuntimeTextGenerationChunk, RuntimeTextGenerationRequest, RuntimeTextGenerationResponse,
-    RuntimeTranscriptionDecodeOptions, RuntimeTranscriptionRequest, RuntimeTranscriptionResult,
-    RuntimeTranscriptionVadOptions, RuntimeTranscriptionVadParams,
+    RuntimeQuantizeRequest, RuntimeQuantizeResult, RuntimeTextGenerationChunk,
+    RuntimeTextGenerationRequest, RuntimeTextGenerationResponse, RuntimeTranscriptionDecodeOptions,
+    RuntimeTranscriptionRequest, RuntimeTranscriptionResult, RuntimeTranscriptionVadOptions,
+    RuntimeTranscriptionVadParams,
 };
 use crate::error::AppCoreError;
 use crate::error::AppCoreErrorData;
@@ -213,6 +214,33 @@ impl RuntimeInferenceGateway for GrpcRuntimeInferenceGateway {
             .await
             .map_err(map_runtime_error("unload model"))?;
         runtime_status_from_pb(response)
+    }
+
+    async fn quantize_model(
+        &self,
+        request: RuntimeQuantizeRequest,
+    ) -> Result<RuntimeQuantizeResult, AppCoreError> {
+        let backend_id = RuntimeBackendId::GgmlLlama;
+        let channel = self.channel(backend_id)?;
+        let grpc_request = pb::GgmlLlamaQuantizeRequest {
+            input_path: Some(request.input_path),
+            output_path: Some(request.output_path),
+            ftype: Some(request.ftype),
+            nthread: request.nthread,
+            allow_requantize: request.allow_requantize,
+            quantize_output_tensor: request.quantize_output_tensor,
+            only_copy: request.only_copy,
+            pure: request.pure,
+            keep_split: request.keep_split,
+            dry_run: request.dry_run,
+        };
+        let response = client::quantize_model(channel, grpc_request)
+            .await
+            .map_err(map_runtime_error("quantize model"))?;
+        Ok(RuntimeQuantizeResult {
+            layers_processed: response.layers_processed.unwrap_or(0),
+            output_path: response.output_path.unwrap_or_default(),
+        })
     }
 }
 

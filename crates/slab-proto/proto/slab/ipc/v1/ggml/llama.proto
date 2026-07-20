@@ -9,10 +9,9 @@ service GgmlLlamaService {
   rpc ChatStream(GgmlLlamaChatRequest) returns (stream GgmlLlamaChatStreamChunk);
   rpc LoadModel(GgmlLlamaLoadRequest) returns (ModelStatusResponse);
   rpc UnloadModel(ModelUnloadRequest) returns (ModelStatusResponse);
-  // NOTE: `QuantizeModel(GgmlLlamaQuantizeRequest)` is designed but not yet
-  // wired — adding it here would require the full runtime→app-core→server
-  // chain (see plan Slice E). The request/response messages below are the
-  // agreed contract, ready for that focused implementation.
+  // Quantize a GGUF model on disk (goal #4). Requires the ggml.llama backend to
+  // be loaded so the engine's llama library handle is initialised.
+  rpc QuantizeModel(GgmlLlamaQuantizeRequest) returns (GgmlLlamaQuantizeResponse);
 }
 
 message GgmlLlamaLoadRequest {

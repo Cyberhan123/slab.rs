@@ -5,7 +5,10 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::application::dtos as dto;
-use crate::domain::models::{GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, TextGenerationOptions};
+use crate::domain::models::{
+    GgmlLlamaLoadConfig, GgmlLlamaLoadMetadata, GgmlLlamaQuantizeInput, GgmlLlamaQuantizeOutput,
+    TextGenerationOptions,
+};
 use crate::domain::runtime::CoreError;
 
 use super::ExecutionHub;
@@ -123,6 +126,38 @@ impl GgmlLlamaService {
         });
 
         Ok(ReceiverStream::new(rx).boxed())
+    }
+
+    pub(crate) async fn quantize(
+        &self,
+        request: dto::GgmlLlamaQuantizeRequest,
+    ) -> Result<dto::GgmlLlamaQuantizeResult, CoreError> {
+        let input = GgmlLlamaQuantizeInput {
+            input_path: request.input_path,
+            output_path: request.output_path,
+            ftype: request.ftype,
+            nthread: request.nthread,
+            allow_requantize: request.allow_requantize.unwrap_or(false),
+            // Mirrors `llama_model_quantize_default_params()`: quantize the
+            // output tensor by default unless the caller explicitly disables it.
+            quantize_output_tensor: request.quantize_output_tensor.unwrap_or(true),
+            only_copy: request.only_copy.unwrap_or(false),
+            pure: request.pure.unwrap_or(false),
+            keep_split: request.keep_split.unwrap_or(false),
+            dry_run: request.dry_run.unwrap_or(false),
+        };
+        let output = self
+            .runtime
+            .invoke_without_options::<GgmlLlamaQuantizeInput, GgmlLlamaQuantizeOutput>(
+                RequestRoute::Quantize,
+                input,
+                Vec::new(),
+            )
+            .await?;
+        Ok(dto::GgmlLlamaQuantizeResult {
+            layers_processed: output.layers_processed,
+            output_path: output.output_path,
+        })
     }
 }
 

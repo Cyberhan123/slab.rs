@@ -629,6 +629,22 @@ pub struct DownloadModelCommand {
     pub model_id: String,
 }
 
+/// Quantize a GGUF model on disk. `ftype` is the raw `llama_ftype` int
+/// (e.g. 15 = Q4_K_M, 36 = TQ1_0); see `slab_llama::LlamaFtype`.
+#[derive(Debug, Clone)]
+pub struct QuantizeModelCommand {
+    pub input_path: String,
+    pub output_path: String,
+    pub ftype: i32,
+    pub nthread: Option<i32>,
+    pub allow_requantize: Option<bool>,
+    pub quantize_output_tensor: Option<bool>,
+    pub only_copy: Option<bool>,
+    pub pure: Option<bool>,
+    pub keep_split: Option<bool>,
+    pub dry_run: Option<bool>,
+}
+
 impl From<StoredModelConfig> for CreateModelCommand {
     fn from(config: StoredModelConfig) -> Self {
         Self {

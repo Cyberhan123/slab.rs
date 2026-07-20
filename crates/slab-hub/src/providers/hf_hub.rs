@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use hf_hub::{Cache, Repo, RepoType};
+use hf_hub::progress::{DownloadEvent, ProgressEvent, ProgressHandler};
+use hf_hub::{HFClient, HFClientBuilder, split_id};
 
 use crate::client::HubClient;
 use crate::error::{HubError, map_hf_hub_error};
@@ -13,12 +15,11 @@ impl HubClient {
         &self,
         repo_id: &str,
     ) -> Result<Vec<String>, HubError> {
-        let api = self.hf_hub_api(HubProvider::HfHub)?;
-        let repo = api.model(repo_id.to_owned());
-        let info = repo.info().await.map_err(|error| {
+        let repo = self.hf_hub_repo(HubProvider::HfHub, repo_id)?;
+        let info = repo.info().send().await.map_err(|error| {
             map_hf_hub_error(HubProvider::HfHub, "list repo files failed", error)
         })?;
-        Ok(info.siblings.into_iter().map(|item| item.rfilename).collect())
+        Ok(info.siblings.unwrap_or_default().into_iter().map(|item| item.rfilename).collect())
     }
 
     pub(crate) async fn download_file_with_hf_hub(
@@ -27,55 +28,56 @@ impl HubClient {
         filename: &str,
         progress: Option<Arc<dyn DownloadProgress>>,
     ) -> Result<PathBuf, HubError> {
-        if let Some(cached_path) = self.hf_hub_cached_path(repo_id, filename) {
-            return Ok(cached_path);
+        let repo = self.hf_hub_repo(HubProvider::HfHub, repo_id)?;
+
+        // Fast path: serve from the local cache without any network request.
+        if let Ok(cached) =
+            repo.download_file().filename(filename.to_owned()).local_files_only(true).send().await
+        {
+            return Ok(cached);
         }
 
-        let api = self.hf_hub_api(HubProvider::HfHub)?;
-        let repo = api.model(repo_id.to_owned());
-        match progress {
+        let builder = repo.download_file().filename(filename.to_owned());
+        let result = match progress {
             Some(progress) => {
                 let adapter =
                     HfHubProgressAdapter::new(HubProvider::HfHub, repo_id, filename, progress);
-                repo.download_with_progress(filename, adapter).await.map_err(|error| {
-                    map_hf_hub_error(
-                        HubProvider::HfHub,
-                        format!("download failed for {filename}"),
-                        error,
-                    )
-                })
+                builder.progress(adapter).send().await
             }
-            None => repo.get(filename).await.map_err(|error| {
-                map_hf_hub_error(
-                    HubProvider::HfHub,
-                    format!("download failed for {filename}"),
-                    error,
-                )
-            }),
-        }
+            None => builder.send().await,
+        };
+        result.map_err(|error| {
+            map_hf_hub_error(HubProvider::HfHub, format!("download failed for {filename}"), error)
+        })
     }
 
-    fn hf_hub_api(&self, provider: HubProvider) -> Result<hf_hub::api::tokio::Api, HubError> {
-        let mut builder = hf_hub::api::tokio::ApiBuilder::from_env()
-            .with_progress(false)
-            .with_endpoint(self.endpoints.hf_endpoint.clone());
+    fn hf_hub_repo(
+        &self,
+        provider: HubProvider,
+        repo_id: &str,
+    ) -> Result<hf_hub::HFRepository<hf_hub::RepoTypeModel>, HubError> {
+        let client = self.hf_hub_client(provider)?;
+        let (owner, name) = split_id(repo_id);
+        Ok(client.model(owner.to_owned(), name.to_owned()))
+    }
+
+    fn hf_hub_client(&self, provider: HubProvider) -> Result<HFClient, HubError> {
+        let mut builder = HFClientBuilder::new().endpoint(self.endpoints.hf_endpoint.clone());
         if let Some(cache_dir) = self.cache_dir.clone() {
-            builder = builder.with_cache_dir(cache_dir);
+            builder = builder.cache_dir(cache_dir).cache_enabled(true);
         }
         builder.build().map_err(|error| {
             map_hf_hub_error(provider, "failed to initialize hf-hub client", error)
         })
     }
-
-    fn hf_hub_cached_path(&self, repo_id: &str, filename: &str) -> Option<PathBuf> {
-        let cache = self.cache_dir.clone().map(Cache::new).unwrap_or_else(Cache::from_env);
-        cache.repo(Repo::new(repo_id.to_owned(), RepoType::Model)).get(filename)
-    }
 }
 
-#[derive(Clone)]
 struct HfHubProgressAdapter {
     progress: SharedDownloadProgress,
+    /// Running total of bytes reported by hf-hub, used to convert the cumulative
+    /// `DownloadEvent::Progress` byte counts into the delta increments expected by
+    /// [`SharedDownloadProgress`].
+    seen: AtomicU64,
 }
 
 impl HfHubProgressAdapter {
@@ -85,20 +87,31 @@ impl HfHubProgressAdapter {
         filename: &str,
         observer: Arc<dyn DownloadProgress>,
     ) -> Self {
-        Self { progress: SharedDownloadProgress::new(provider, repo_id, filename, observer) }
+        Self {
+            progress: SharedDownloadProgress::new(provider, repo_id, filename, observer),
+            seen: AtomicU64::new(0),
+        }
     }
 }
 
-impl hf_hub::api::tokio::Progress for HfHubProgressAdapter {
-    async fn init(&mut self, size: usize, _filename: &str) {
-        self.progress.start(Some(size as u64));
-    }
-
-    async fn update(&mut self, size: usize) {
-        self.progress.increment(size as u64);
-    }
-
-    async fn finish(&mut self) {
-        self.progress.finish();
+impl ProgressHandler for HfHubProgressAdapter {
+    fn on_progress(&self, event: &ProgressEvent) {
+        let ProgressEvent::Download(download) = event else { return };
+        match download {
+            DownloadEvent::Start { total_bytes, .. } => {
+                self.progress.start(Some(*total_bytes));
+            }
+            DownloadEvent::Progress { files } => {
+                let total: u64 = files.iter().map(|file| file.bytes_completed).sum();
+                let previous = self.seen.swap(total, Ordering::Relaxed);
+                if total > previous {
+                    self.progress.increment(total - previous);
+                }
+            }
+            DownloadEvent::Complete => {
+                self.progress.finish();
+            }
+            _ => {}
+        }
     }
 }

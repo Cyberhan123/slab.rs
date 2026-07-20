@@ -201,6 +201,28 @@ pub struct RuntimeBackendStatus {
     pub training_context_length: Option<u32>,
 }
 
+/// Quantize a GGUF model on disk. `ftype` is the raw `llama_ftype` int
+/// (e.g. 15 = Q4_K_M, 36 = TQ1_0); see `slab_llama::LlamaFtype`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeQuantizeRequest {
+    pub input_path: String,
+    pub output_path: String,
+    pub ftype: i32,
+    pub nthread: Option<i32>,
+    pub allow_requantize: Option<bool>,
+    pub quantize_output_tensor: Option<bool>,
+    pub only_copy: Option<bool>,
+    pub pure: Option<bool>,
+    pub keep_split: Option<bool>,
+    pub dry_run: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeQuantizeResult {
+    pub layers_processed: u32,
+    pub output_path: String,
+}
+
 /// Domain port for model runtime inference.
 ///
 /// Implementations adapt business runtime commands to a concrete transport while
@@ -243,4 +265,9 @@ pub trait RuntimeInferenceGateway: Send + Sync + std::fmt::Debug {
         &self,
         backend_id: RuntimeBackendId,
     ) -> Result<RuntimeBackendStatus, AppCoreError>;
+
+    async fn quantize_model(
+        &self,
+        request: RuntimeQuantizeRequest,
+    ) -> Result<RuntimeQuantizeResult, AppCoreError>;
 }

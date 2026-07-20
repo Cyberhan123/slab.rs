@@ -352,6 +352,21 @@ pub async fn generate_image(
     Ok(response.into_inner())
 }
 
+pub async fn quantize_model(
+    channel: Channel,
+    req: pb::GgmlLlamaQuantizeRequest,
+) -> anyhow::Result<pb::GgmlLlamaQuantizeResponse> {
+    debug!("sending gRPC ggml llama quantize_model request");
+    let response = call_initial_response_with_retry("quantize_model", || {
+        let (mut client, request_id) = ggml_llama_client(channel.clone());
+        let request = with_request_timeout(req.clone());
+        (async move { client.quantize_model(request).await }, request_id)
+    })
+    .await
+    .map_err(|status| grpc_status_to_anyhow("quantize_model", "retry-exhausted", status))?;
+    Ok(response.into_inner())
+}
+
 pub async fn candle_generate_image(
     channel: Channel,
     req: pb::CandleDiffusionGenerateImageRequest,

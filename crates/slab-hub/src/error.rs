@@ -106,18 +106,13 @@ fn provider_error_kind(
 pub(crate) fn map_hf_hub_error(
     provider: HubProvider,
     context: impl Into<String>,
-    error: hf_hub::api::tokio::ApiError,
+    error: hf_hub::HFError,
 ) -> HubError {
     let context = context.into();
-    let kind = match &error {
-        hf_hub::api::tokio::ApiError::RequestError(reqwest_error) => {
-            provider_error_kind(is_network_message(&reqwest_error.to_string()), None)
-        }
-        hf_hub::api::tokio::ApiError::IoError(io_error) => {
-            provider_error_kind(false, Some(io_error))
-        }
-        _ => provider_error_kind(false, None),
-    };
+    // hf-hub 1.0 collapsed the old api::tokio::ApiError variants into a single
+    // HFError; classify via the error's display string (network errors carry
+    // recognizable reqwest/hyper connect/timeout wording).
+    let kind = provider_error_kind(is_network_message(&error.to_string()), None);
     HubError::new(kind, Some(provider), format!("{context}: {error}"))
 }
 

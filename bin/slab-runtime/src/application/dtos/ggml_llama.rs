@@ -1,9 +1,9 @@
 use slab_proto::slab::ipc::v1 as pb;
 
 use super::{
-    GgmlLlamaChatRequest, GgmlLlamaLoadRequest, LlamaChatResponse, LlamaChatStreamChunk,
-    ProtoConversionError, decode_optional_path, decode_optional_string_list, encode_chat_metadata,
-    encode_usage,
+    GgmlLlamaChatRequest, GgmlLlamaLoadRequest, GgmlLlamaQuantizeRequest, GgmlLlamaQuantizeResult,
+    LlamaChatResponse, LlamaChatStreamChunk, ProtoConversionError, decode_optional_path,
+    decode_optional_string_list, encode_chat_metadata, encode_usage,
 };
 
 pub(crate) fn decode_ggml_llama_load_request(
@@ -68,5 +68,31 @@ pub(crate) fn encode_ggml_llama_chat_stream_chunk(
         usage: chunk.usage.as_ref().map(encode_usage),
         reasoning_content: chunk.reasoning_content.clone(),
         metadata: chunk.metadata.as_ref().map(encode_chat_metadata),
+    }
+}
+
+pub(crate) fn decode_ggml_llama_quantize_request(
+    request: &pb::GgmlLlamaQuantizeRequest,
+) -> Result<GgmlLlamaQuantizeRequest, ProtoConversionError> {
+    Ok(GgmlLlamaQuantizeRequest {
+        input_path: request.input_path.clone().ok_or(ProtoConversionError)?,
+        output_path: request.output_path.clone().ok_or(ProtoConversionError)?,
+        ftype: request.ftype.ok_or(ProtoConversionError)?,
+        nthread: request.nthread,
+        allow_requantize: request.allow_requantize,
+        quantize_output_tensor: request.quantize_output_tensor,
+        only_copy: request.only_copy,
+        pure: request.pure,
+        keep_split: request.keep_split,
+        dry_run: request.dry_run,
+    })
+}
+
+pub(crate) fn encode_ggml_llama_quantize_response(
+    result: &GgmlLlamaQuantizeResult,
+) -> pb::GgmlLlamaQuantizeResponse {
+    pb::GgmlLlamaQuantizeResponse {
+        layers_processed: Some(result.layers_processed),
+        output_path: Some(result.output_path.clone()),
     }
 }

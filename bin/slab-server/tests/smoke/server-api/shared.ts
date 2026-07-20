@@ -82,6 +82,7 @@ export const executableSmokeOperations = [
   { method: "post", path: "/v1/models/download" },
   { method: "post", path: "/v1/models/import-pack" },
   { method: "post", path: "/v1/models/load" },
+  { method: "post", path: "/v1/models/quantize" },
   { method: "post", path: "/v1/models/switch" },
   { method: "post", path: "/v1/models/unload" },
   { method: "delete", path: "/v1/models/{id}" },

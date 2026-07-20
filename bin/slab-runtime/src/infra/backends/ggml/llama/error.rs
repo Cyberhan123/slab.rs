@@ -41,6 +41,14 @@ pub enum GGMLLlamaEngineError {
 
     #[error("Inference stream error: {message}")]
     InferenceStreamError { message: String },
+
+    #[error("Failed to quantize {input_path} -> {output_path}")]
+    Quantize {
+        input_path: String,
+        output_path: String,
+        #[source]
+        source: LlamaError,
+    },
 }
 
 #[allow(dead_code)]

@@ -17,6 +17,7 @@ pub enum RequestRoute {
     Inference,
     InferenceStream,
     InferenceImage,
+    Quantize,
 }
 
 impl RequestRoute {
@@ -27,6 +28,7 @@ impl RequestRoute {
             Self::Inference => "inference",
             Self::InferenceStream => "inference.stream",
             Self::InferenceImage => "inference.image",
+            Self::Quantize => "quantize",
         }
     }
 }
@@ -41,6 +43,7 @@ impl FromStr for RequestRoute {
             "inference" => Ok(Self::Inference),
             "inference.stream" => Ok(Self::InferenceStream),
             "inference.image" => Ok(Self::InferenceImage),
+            "quantize" => Ok(Self::Quantize),
             other => Err(format!("unknown backend op: {other}")),
         }
     }
@@ -467,6 +470,7 @@ mod tests {
             RequestRoute::Inference,
             RequestRoute::InferenceStream,
             RequestRoute::InferenceImage,
+            RequestRoute::Quantize,
         ] {
             assert_eq!(RequestRoute::from_str(route.as_str()), Ok(route));
         }
