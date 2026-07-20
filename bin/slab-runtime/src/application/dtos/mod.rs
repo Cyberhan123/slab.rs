@@ -48,6 +48,7 @@ pub(crate) struct ModelStatus {
     pub status: String,
     pub context_length: Option<u32>,
     pub training_context_length: Option<u32>,
+    pub chat_template: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -475,6 +476,7 @@ pub(crate) fn encode_model_status_response(status: &ModelStatus) -> pb::ModelSta
         status: status.status.clone(),
         context_length: status.context_length,
         training_context_length: status.training_context_length,
+        chat_template: status.chat_template.clone(),
     }
 }
 
@@ -673,6 +675,7 @@ mod tests {
             status: "loaded".to_owned(),
             context_length: Some(4096),
             training_context_length: None,
+            chat_template: None,
         });
 
         assert_eq!(encoded.backend, "onnx.text");

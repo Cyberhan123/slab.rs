@@ -83,8 +83,15 @@ impl ModelService {
                 loaded: snapshot.loaded,
                 active: snapshot.active_refs > 0,
                 active_refs: snapshot.active_refs,
+                chat_template: snapshot.chat_template,
             },
-            None => ModelRuntimeState { backend_id, loaded: false, active: false, active_refs: 0 },
+            None => ModelRuntimeState {
+                backend_id,
+                loaded: false,
+                active: false,
+                active_refs: 0,
+                chat_template: None,
+            },
         })
     }
 
@@ -111,10 +118,20 @@ pub(crate) async fn resolve_local_chat_prompt_profile(
         )));
     }
 
+    // GGUF `tokenizer.chat_template` read from the loaded model at load time
+    // (cached in the per-model runtime snapshot). Used as the default chat
+    // template source when no pack template is configured, so models without a
+    // pack template still render via minijinja instead of the raw `Role:` fallback.
+    let gguf_chat_template = state
+        .auto_unload()
+        .snapshot_for_model(backend_id, &model.id)
+        .await
+        .and_then(|snapshot| snapshot.chat_template);
+
     let Some(model_path) = model.spec.local_path.as_deref() else {
         return Ok(LocalLlamaPromptProfile {
             backend_id,
-            chat_template_source: None,
+            chat_template_source: gguf_chat_template,
             default_gbnf: None,
         });
     };
@@ -123,12 +140,19 @@ pub(crate) async fn resolve_local_chat_prompt_profile(
     {
         return Ok(LocalLlamaPromptProfile {
             backend_id: pack_target.backend_id,
-            chat_template_source: pack_target.load_defaults.chat_template_source,
+            chat_template_source: pack_target
+                .load_defaults
+                .chat_template_source
+                .or_else(|| gguf_chat_template.clone()),
             default_gbnf: pack_target.load_defaults.gbnf_source,
         });
     }
 
-    Ok(LocalLlamaPromptProfile { backend_id, chat_template_source: None, default_gbnf: None })
+    Ok(LocalLlamaPromptProfile {
+        backend_id,
+        chat_template_source: gguf_chat_template,
+        default_gbnf: None,
+    })
 }
 
 pub(crate) async fn resolve_worker_model_backend_or_default(
@@ -279,6 +303,7 @@ pub(super) fn decode_model_status(
         status: response.status,
         context_length: response.context_length,
         training_context_length: response.training_context_length,
+        chat_template: response.chat_template,
     })
 }
 
@@ -389,12 +414,14 @@ async fn load_model_candidate(
         },
     )?;
     let response = state.auto_unload().load_model_with_pressure_control(&load_spec).await?;
+    let status = decode_model_status(response)?;
     state
         .auto_unload()
         .notify_model_loaded(ModelReplayPlan {
             backend_id: candidate.backend_id,
             model_id: resolved_target.model_id.clone(),
             load_spec,
+            chat_template: status.chat_template.clone(),
         })
         .await;
 
@@ -404,7 +431,7 @@ async fn load_model_candidate(
         persist_selected_engine_id(state, model_id, candidate.backend_id).await?;
     }
 
-    decode_model_status(response)
+    Ok(status)
 }
 
 fn is_retryable_engine_load_error(error: &AppCoreError) -> bool {

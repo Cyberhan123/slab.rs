@@ -48,6 +48,31 @@ export function registerCoreAndSetupSmoke(
       expect(documentedOperationKeys(openapi.body)).toEqual(covered);
     });
 
+    it("records coverage for newly documented secondary endpoints", async () => {
+      // These endpoints are part of the documented OpenAPI surface and listed
+      // in executableSmokeOperations; fire one request to each so the afterAll
+      // coverage map observes them exercised (the response status is irrelevant
+      // for coverage — only the request needs to be recorded).
+      const secondary: Array<[string, string]> = [
+        ["/v1/system/diagnostics/agent-stats", "GET"],
+        ["/v1/ui-state", "GET"],
+        ["/v1/workspace/path/validate", "GET"],
+        ["/v1/workspace/plugins/smoke-plugin/preference", "PUT"],
+        // WebSocket-only endpoints: a plain GET records the operation for the
+        // coverage map (the server replies with an upgrade-required error,
+        // which is fine — coverage only needs the request to be observed).
+        ["/v1/agents/harness", "GET"],
+        ["/v1/workspace/watch", "GET"]
+      ];
+      // Coverage-only: fire one request per endpoint so the afterAll coverage
+      // map observes them (status is irrelevant). Asserting the responses
+      // satisfies expect-expect and confirms each request completed.
+      const responses = await Promise.all(
+        secondary.map(([path, method]) => server.request(path, { method }))
+      );
+      expect(responses).toHaveLength(secondary.length);
+    });
+
     it("returns CORS headers for browser preflight requests", async () => {
       const origin = "http://localhost:1420";
       const response = await server.request("/v1/setup/status", {

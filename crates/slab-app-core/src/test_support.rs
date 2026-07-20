@@ -143,6 +143,7 @@ impl RuntimeInferenceGateway for RecordingRuntimeGateway {
             status: "ready".to_owned(),
             context_length: None,
             training_context_length: None,
+            chat_template: None,
         })
     }
 
@@ -156,6 +157,7 @@ impl RuntimeInferenceGateway for RecordingRuntimeGateway {
             status: "unloaded".to_owned(),
             context_length: None,
             training_context_length: None,
+            chat_template: None,
         })
     }
 

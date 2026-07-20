@@ -116,12 +116,14 @@ export const executableSmokeOperations = [
   { method: "get", path: "/v1/setup/status" },
   { method: "post", path: "/v1/subtitles/render" },
   { method: "get", path: "/v1/system/diagnostics" },
+  { method: "get", path: "/v1/system/diagnostics/agent-stats" },
   { method: "get", path: "/v1/system/gpu" },
   { method: "get", path: "/v1/tasks" },
   { method: "get", path: "/v1/tasks/{id}" },
   { method: "post", path: "/v1/tasks/{id}/cancel" },
   { method: "post", path: "/v1/tasks/{id}/restart" },
   { method: "get", path: "/v1/tasks/{id}/result" },
+  { method: "get", path: "/v1/ui-state" },
   { method: "delete", path: "/v1/ui-state/{key}" },
   { method: "get", path: "/v1/ui-state/{key}" },
   { method: "put", path: "/v1/ui-state/{key}" },
@@ -147,7 +149,9 @@ export const executableSmokeOperations = [
   { method: "post", path: "/v1/workspace/open" },
   { method: "delete", path: "/v1/workspace/path" },
   { method: "patch", path: "/v1/workspace/path" },
+  { method: "get", path: "/v1/workspace/path/validate" },
   { method: "get", path: "/v1/workspace/path/stat" },
+  { method: "put", path: "/v1/workspace/plugins/{plugin_id}/preference" },
   { method: "get", path: "/v1/workspace/watch" },
   { method: "get", path: "/v1/workspace/search" },
   { method: "get", path: "/v1/workspace/search/text" }
@@ -352,23 +356,6 @@ export async function waitForTask(
     },
     timeoutMs
   );
-}
-
-export async function buildCloudModelPackFile(modelId: string): Promise<File> {
-  return buildZipFile(`${modelId}.slab`, {
-    "manifest.json": JSON.stringify({
-      capabilities: ["text_generation", "chat_generation"],
-      cloud: {
-        provider_id: "openai-main",
-        remote_model_id: modelId
-      },
-      deployment: "cloud",
-      family: "llama",
-      id: modelId,
-      label: `Smoke ${modelId}`,
-      schema_version: 3
-    })
-  });
 }
 
 export async function buildPluginPackFile(pluginId: string): Promise<File> {

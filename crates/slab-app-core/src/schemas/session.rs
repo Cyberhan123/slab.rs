@@ -70,7 +70,11 @@ pub struct AgentHistoryResponse {
     pub session_id: String,
     pub thread: Option<AgentThreadResponse>,
     pub messages: Vec<AgentThreadMessageResponse>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    // Always serialize `responses` (even when empty): the agent-history endpoint
+    // contract is to return it as `[]` for sessions with no responses, and
+    // `skip_serializing_if = "Vec::is_empty"` would omit the field entirely,
+    // breaking callers that expect an array (see `agent/mod.rs` stability note).
+    #[serde(default)]
     pub responses: Vec<serde_json::Value>,
 }
 

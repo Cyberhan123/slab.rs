@@ -447,6 +447,7 @@ impl GGMLLlamaEngine {
             })?);
         let training_context_length =
             u32::try_from(model.n_ctx_train()).ok().filter(|value| *value > 0);
+        let chat_template = model.chat_template().unwrap_or_default();
 
         let engine = LlamaRuntime::start(num_workers, Arc::clone(&model), ctx_params)
             .map_err(GGMLLlamaEngineError::from)?;
@@ -455,7 +456,7 @@ impl GGMLLlamaEngine {
 
         *write_lock = Some(engine);
         *model_write_lock = Some(model);
-        Ok(GgmlLlamaLoadMetadata { context_length, training_context_length })
+        Ok(GgmlLlamaLoadMetadata { context_length, training_context_length, chat_template })
     }
 
     pub(crate) fn load_model_from_config(

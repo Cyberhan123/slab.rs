@@ -90,6 +90,22 @@ impl AsyncBridge {
         self.tokio.clone()
     }
 
+    /// Enter the owned tokio runtime's context for the duration of the returned
+    /// guard. Returns `None` for the borrowed variant, where the caller is
+    /// already inside a tokio runtime context (that's how the handle was
+    /// obtained).
+    ///
+    /// `deno_core` 0.408 requires a tokio runtime context when a `JsRuntime` is
+    /// created — V8 posts delayed tasks that need a reactor, and creating the
+    /// isolate outside a tokio context fast-fails. The sync `Runtime`
+    /// constructors enter the owned runtime around `JsRuntime` creation.
+    pub fn enter(&self) -> Option<tokio::runtime::EnterGuard<'_>> {
+        match &self.tokio {
+            TokioRuntime::Owned(rt) => Some(rt.enter()),
+            TokioRuntime::Borrowed(_) => None,
+        }
+    }
+
     /// Destroy instance, releasing all resources
     /// Then the internal tokio runtime will be returned
     #[must_use]

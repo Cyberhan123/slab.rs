@@ -137,7 +137,12 @@ fn op_set_raw(state: &mut OpState, rid: u32, is_raw: bool, cbreak: bool) -> Resu
                 winapi::um::handleapi::CloseHandle(handle);
                 active_screen_buffer
             };
-            stdin_state.screen_buffer_info = Some(active_screen_buffer);
+            // deno_io's `WinTtyState` stores a `windows_sys` `CONSOLE_SCREEN_BUFFER_INFO`,
+            // while this file populates the `winapi` equivalent above; both mirror the
+            // same Windows SDK struct as identical `#[repr(C)]` layouts, so transmute the
+            // owned value into the field's expected type without naming the `windows_sys` path.
+            stdin_state.screen_buffer_info =
+                Some(unsafe { std::mem::transmute_copy(&active_screen_buffer) });
 
             // SAFETY: winapi call to write the VK_RETURN event.
             if unsafe {

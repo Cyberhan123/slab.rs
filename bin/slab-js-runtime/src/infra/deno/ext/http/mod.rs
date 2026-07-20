@@ -25,7 +25,7 @@ impl ExtensionTrait<()> for deno_http::deno_http {
     fn init((): ()) -> Extension {
         deno_http::deno_http::init(deno_http::Options {
             http2_builder_hook: None,
-            http1_builder_hook: None,
+            automatic_compression: true,
             no_legacy_abort: false,
         })
     }

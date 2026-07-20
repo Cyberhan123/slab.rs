@@ -60,6 +60,7 @@ pub(crate) fn model_status(backend: &str, status: &str) -> dto::ModelStatus {
         status: status.to_owned(),
         context_length: None,
         training_context_length: None,
+        chat_template: None,
     }
 }
 

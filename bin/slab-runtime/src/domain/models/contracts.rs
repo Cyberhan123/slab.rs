@@ -23,6 +23,8 @@ pub(crate) struct GgmlLlamaLoadMetadata {
     pub context_length: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub training_context_length: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_template: Option<String>,
 }
 
 /// Typed quantize request payload that flows through the driver to the engine.

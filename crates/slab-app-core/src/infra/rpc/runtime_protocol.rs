@@ -292,6 +292,7 @@ pub fn decode_model_status_response(
         status: response.status.clone(),
         context_length: response.context_length,
         training_context_length: response.training_context_length,
+        chat_template: response.chat_template.clone(),
     })
 }
 

@@ -357,7 +357,6 @@ def run(params):\n\
             "jsonrpc": "2.0",
             "id": "host-1",
             "result": { "ok": true },
-            "params": side_effect_plugin_request(temp_dir.path(), &marker_path),
         })])
         .await;
 

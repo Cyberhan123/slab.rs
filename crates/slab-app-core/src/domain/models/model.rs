@@ -597,6 +597,7 @@ pub struct ModelStatus {
     pub status: String,
     pub context_length: Option<u32>,
     pub training_context_length: Option<u32>,
+    pub chat_template: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -605,6 +606,7 @@ pub struct ModelRuntimeState {
     pub loaded: bool,
     pub active: bool,
     pub active_refs: u64,
+    pub chat_template: Option<String>,
 }
 
 #[derive(Debug, Clone)]

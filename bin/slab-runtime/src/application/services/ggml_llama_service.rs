@@ -36,6 +36,7 @@ impl GgmlLlamaService {
             status: "loaded".to_owned(),
             context_length: metadata.context_length,
             training_context_length: metadata.training_context_length,
+            chat_template: metadata.chat_template,
         })
     }
 

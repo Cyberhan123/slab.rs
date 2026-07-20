@@ -16,6 +16,10 @@ pub struct ModelReplayPlan {
     pub backend_id: RuntimeBackendId,
     pub model_id: Option<String>,
     pub load_spec: RuntimeBackendLoadSpec,
+    /// GGUF `tokenizer.chat_template` read back from the runtime at load time.
+    /// Surfaced through the per-model runtime snapshot so the chat-prompt
+    /// resolver can fall back to it when no pack template is configured.
+    pub chat_template: Option<String>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -34,6 +38,7 @@ pub struct ModelRuntimeStateSnapshot {
     pub backend_id: RuntimeBackendId,
     pub loaded: bool,
     pub active_refs: u64,
+    pub chat_template: Option<String>,
 }
 
 #[derive(Debug)]
@@ -231,6 +236,7 @@ impl ModelAutoUnloadManager {
             backend_id,
             loaded: state.resident,
             active_refs: state.active_refs,
+            chat_template: state.replay_plan.as_ref().and_then(|plan| plan.chat_template.clone()),
         })
     }
 

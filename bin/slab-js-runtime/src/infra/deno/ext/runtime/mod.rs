@@ -68,7 +68,10 @@ impl ExtensionTrait<()> for deno_runtime::runtime {
             "ext:runtime/98_global_scope_shared.js",
             deno_core::ascii_str_include!("98_global_scope_shared.js"),
         ));
-        e.esm_entry_point = None;
+        // deno_core 0.408 requires every registered ESM to be reachable from an
+        // entry point (otherwise it errors with "modules were not evaluated").
+        // 98_global_scope_shared.js is the only file we keep, so it is the entry.
+        e.esm_entry_point = Some("ext:runtime/98_global_scope_shared.js");
         e
     }
 }
@@ -243,6 +246,7 @@ fn create_web_worker_callback(options: WebWorkerCallbackOptions) -> Arc<CreateWe
                 auto_serve: false,
                 node_cluster_unique_id: None,
                 node_cluster_sched_policy: None,
+                disable_offscreen_canvas: false,
             },
             extensions: vec![],
             startup_snapshot: None,
@@ -262,6 +266,9 @@ fn create_web_worker_callback(options: WebWorkerCallbackOptions) -> Arc<CreateWe
             enable_stack_trace_arg_in_ops: false,
             maybe_cpu_prof_config: None,
             maybe_coverage_dir: None,
+            maybe_main_module_blob: None,
+            wait_for_debugger_on_start: false,
+            wait_for_page_wait_for_debugger: false,
         };
         WebWorker::bootstrap_from_options(services, options)
     })

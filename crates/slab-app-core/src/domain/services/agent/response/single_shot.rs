@@ -542,6 +542,24 @@ async fn run_llm_or_failure(
     }
 }
 
+/// Reject requests that cannot produce a response. OpenAI Responses requires a
+/// `model`, and the input must resolve to at least one message — restoring the
+/// pre-refactor 400 (BadRequest) for malformed requests instead of letting them
+/// reach runtime dispatch and surface as a 500.
+fn validate_create_response_request(req: &OpenAICreateRequest) -> Result<(), AppCoreError> {
+    if req.model.as_deref().map(str::trim).filter(|value| !value.is_empty()).is_none() {
+        return Err(AppCoreError::BadRequest(
+            "a `model` is required for /v1/agents/responses".to_owned(),
+        ));
+    }
+    if req.to_messages().is_empty() {
+        return Err(AppCoreError::BadRequest(
+            "a non-empty `input` is required for /v1/agents/responses".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 /// Run one non-streaming LLM call and return the canonical OpenAI [`Response`].
 pub(crate) async fn run_create_response(
     core: &AgentCore,
@@ -550,6 +568,7 @@ pub(crate) async fn run_create_response(
     session_id: &str,
 ) -> Result<Response, AppCoreError> {
     let config: AgentConfig = req.to_config_input().into();
+    validate_create_response_request(req)?;
     let input = resolve_input(core, req).await?;
     let command = build_command(req, input.messages.clone(), &config);
     persist_input(core, &input, session_id, &config).await?;
@@ -804,6 +823,7 @@ pub(crate) async fn run_stream_response(
     session_id: &str,
 ) -> Result<(String, super::StreamFrameStream), AppCoreError> {
     let config: AgentConfig = req.to_config_input().into();
+    validate_create_response_request(req)?;
     let input = resolve_input(core, req).await?;
     persist_input(core, &input, session_id, &config).await?;
 

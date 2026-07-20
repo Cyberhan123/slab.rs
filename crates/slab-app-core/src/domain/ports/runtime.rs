@@ -199,6 +199,7 @@ pub struct RuntimeBackendStatus {
     pub status: String,
     pub context_length: Option<u32>,
     pub training_context_length: Option<u32>,
+    pub chat_template: Option<String>,
 }
 
 /// Quantize a GGUF model on disk. `ftype` is the raw `llama_ftype` int

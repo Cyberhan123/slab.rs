@@ -81,6 +81,7 @@ impl ModelService {
                 status: "ready".to_owned(),
                 context_length: None,
                 training_context_length: None,
+                chat_template: None,
             });
         }
 
@@ -93,6 +94,7 @@ impl ModelService {
                 status: "loaded".to_owned(),
                 context_length: None,
                 training_context_length: None,
+                chat_template: None,
             });
         }
 
