@@ -417,7 +417,7 @@ fn is_canonical_ws_request(headers: &HeaderMap) -> bool {
 fn frame_to_events(frame: &StreamFrame, ctx: &mut StreamCtx) -> Vec<ResponsesServerEvent> {
     match frame {
         StreamFrame::Envelope(env) => envelope_to_events(env, ctx),
-        StreamFrame::Terminal(kind) => build_terminal_event(ctx, kind),
+        StreamFrame::Terminal(kind, usage) => build_terminal_event(ctx, kind, usage.as_ref()),
     }
 }
 

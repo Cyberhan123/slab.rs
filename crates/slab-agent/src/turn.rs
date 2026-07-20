@@ -17,7 +17,7 @@ use crate::{
     hook::{AgentHookRegistry, HookEvent, dispatch_registered_hooks},
     port::{
         AgentNotifyPort, AgentStorePort, ApprovalPort, ExecPolicyPort, LlmPort, LlmStreamObserver,
-        ParsedToolCall, ThreadMessageRecord, ToolSpec, TurnStateRecord,
+        LlmUsage, ParsedToolCall, ThreadMessageRecord, ToolSpec, TurnStateRecord,
     },
     protocol::{
         AgentMessageDeltaParams, EventMsg, ItemCompletedParams, ItemStartedParams, ReasoningText,
@@ -57,9 +57,17 @@ pub(crate) struct TurnExecutionContext<'a> {
 }
 
 pub(crate) enum TurnOutcome {
-    Final { token_usage: u32 },
-    BudgetExceeded { token_usage: u32 },
-    ToolCalls { invalid_tool_calls: usize, signatures: Vec<ToolCallSignature>, token_usage: u32 },
+    Final {
+        usage: Option<LlmUsage>,
+    },
+    BudgetExceeded {
+        usage: Option<LlmUsage>,
+    },
+    ToolCalls {
+        invalid_tool_calls: usize,
+        signatures: Vec<ToolCallSignature>,
+        usage: Option<LlmUsage>,
+    },
 }
 
 pub(crate) async fn execute_turn(
@@ -204,7 +212,8 @@ pub(crate) async fn execute_turn(
     insert_injected_messages(messages, llm_end_effects.injected_messages);
     append_observations(messages, llm_end_effects.observations);
 
-    let token_usage = response.usage.as_ref().map(|usage| usage.total_tokens).unwrap_or_default();
+    let usage = response.usage.clone();
+    let token_usage = usage.as_ref().map(|usage| usage.total_tokens).unwrap_or_default();
     if token_budget_would_be_exhausted(
         context.config.token_budget,
         context.consumed_tokens,
@@ -232,7 +241,7 @@ pub(crate) async fn execute_turn(
                 "has_tool_calls": !response.tool_calls.is_empty(),
             }),
         );
-        return Ok(TurnOutcome::BudgetExceeded { token_usage });
+        return Ok(TurnOutcome::BudgetExceeded { usage: usage.clone() });
     }
 
     if response.tool_calls.is_empty() {
@@ -267,7 +276,7 @@ pub(crate) async fn execute_turn(
             "turn_completed",
             serde_json::json!({ "more_turns": false }),
         );
-        return Ok(TurnOutcome::Final { token_usage });
+        return Ok(TurnOutcome::Final { usage: usage.clone() });
     }
 
     let validation = validate_tool_calls(
@@ -310,7 +319,7 @@ pub(crate) async fn execute_turn(
                 "turn_completed",
                 serde_json::json!({ "more_turns": false, "task_complete": true }),
             );
-            return Ok(TurnOutcome::Final { token_usage });
+            return Ok(TurnOutcome::Final { usage: usage.clone() });
         }
     }
 
@@ -334,7 +343,7 @@ pub(crate) async fn execute_turn(
     Ok(TurnOutcome::ToolCalls {
         invalid_tool_calls: validation.invalid.len(),
         signatures: validation.valid.iter().map(ToolCallSignature::new).collect(),
-        token_usage,
+        usage: usage.clone(),
     })
 }
 

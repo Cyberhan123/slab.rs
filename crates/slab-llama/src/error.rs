@@ -40,6 +40,10 @@ pub enum LlamaError {
     #[error("chat template application failed with code {0}")]
     ChatTemplateApplyFailed(i32),
 
+    /// Model quantization failed (llama.cpp processed zero layers).
+    #[error("llama model quantization failed")]
+    QuantizeFailed,
+
     /// Batch is full - cannot add more tokens.
     #[error("batch is full, cannot add more tokens")]
     BatchFull,

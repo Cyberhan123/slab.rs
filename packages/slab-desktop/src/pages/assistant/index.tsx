@@ -58,8 +58,14 @@ function Assistant() {
         approvalStatusByItemId,
         liveOutputByItemId,
         modelLoad,
+        turnUsage,
         resolveApproval,
     } = useHarnessConversation(curConversation, selectedModelId || "slab-llama")
+
+    // Context window for the usage consumption bar: prefer the runtime's
+    // post-load value, fall back to the catalog-declared context window.
+    const usageContextWindow =
+        loadedModelStatus?.context_length ?? selectedModel?.contextWindow ?? null
 
     const isSessionBootstrapping = (sessionsLoading || isCreatingSession) && conversationList.length === 0
     const isSessionBusy = isChatBusy || isPreparingModel || isHistoryLoading || isSessionMutating
@@ -181,6 +187,8 @@ function Assistant() {
                 approvalStatusByItemId={approvalStatusByItemId}
                 liveOutputByItemId={liveOutputByItemId}
                 modelLoad={modelLoad}
+                turnUsage={turnUsage}
+                contextWindow={usageContextWindow}
                 resolveApproval={resolveApproval}
             />
 

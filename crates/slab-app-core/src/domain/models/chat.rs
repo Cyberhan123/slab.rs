@@ -97,6 +97,12 @@ pub struct CommonChatParams {
 pub struct LocalChatParams {
     pub gbnf: Option<String>,
     pub structured_output: Option<StructuredOutput>,
+    /// Stable per-conversation key for the local-LLM kv-cache (incremental
+    /// prefill). Decoupled from `ChatCompletionCommand::id` (which remains the
+    /// `chat_messages` session id used for history replay/persistence) so the
+    /// agent path can opt into kv-cache reuse without triggering the chat
+    /// session machinery. When `None`, the runtime falls back to `command.id`.
+    pub session_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]

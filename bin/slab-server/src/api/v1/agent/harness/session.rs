@@ -225,7 +225,7 @@ fn push_event(notifier: &Notifier, thread_id: &str, msg: EventMsg) {
         ),
         EventMsg::TurnAborted(aborted) => notifier.notify(
             method::TURN_COMPLETED,
-            &TurnCompletedParams { thread_id: aborted.thread_id, turn: aborted.turn },
+            &TurnCompletedParams { thread_id: aborted.thread_id, turn: aborted.turn, usage: None },
         ),
         EventMsg::Warning(_) => {}
         other => {

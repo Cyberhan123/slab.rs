@@ -421,6 +421,18 @@ export interface TurnStartedParams {
 export interface TurnCompletedParams {
   threadId: string
   turn: Turn
+  /** Token usage for the turn, when the backend reported any. */
+  usage?: TurnUsage
+}
+
+/** Token-usage snapshot reported at turn completion (camelCase, mirrors the
+ * Rust `TurnUsage` in `slab-proto/src/harness/notification.rs`). */
+export interface TurnUsage {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  cachedTokens?: number
+  estimated?: boolean
 }
 
 export interface ItemStartedParams {

@@ -241,6 +241,21 @@ fn e2e_tool_available(tools: &[ToolSpec], tool_name: &str) -> bool {
     tools.iter().any(|tool| tool.name == tool_name)
 }
 
+/// Derive a stable kv-cache session key for the agent path.
+///
+/// Prefers the thread id (stable across all turns of a conversation) and falls
+/// back to the session id. The key lets the local-LLM runtime reuse its
+/// managed-session snapshot between turns so only the new turn is prefilled.
+fn agent_kv_session_key(trace_context: &AgentTraceContext) -> Option<String> {
+    if let Some(thread_id) = trace_context.thread_id.as_ref()
+        && !thread_id.trim().is_empty()
+    {
+        return Some(format!("agent:{thread_id}"));
+    }
+    let session = trace_context.session_id.trim();
+    (!session.is_empty()).then(|| format!("agent:{session}"))
+}
+
 fn chat_command_from_agent_config(
     model: &str,
     messages: Vec<ConversationMessage>,
@@ -269,7 +284,16 @@ fn chat_command_from_agent_config(
             stop: vec![],
             stream_options: ChatStreamOptions::default(),
         },
-        local: LocalChatParams { gbnf: None, structured_output: config.structured_output.clone() },
+        local: LocalChatParams {
+            gbnf: None,
+            structured_output: config.structured_output.clone(),
+            // Stable per-thread key so the local-LLM managed-session snapshot
+            // cache engages and only the new turn is re-prefilled each turn
+            // (incremental prefill). Kept separate from `id` (which stays
+            // `None`) so the chat_messages history/persistence machinery is
+            // not triggered for the agent path.
+            session_key: agent_kv_session_key(trace_context),
+        },
         cloud: CloudChatParams {
             reasoning_effort: config.reasoning_effort,
             verbosity: config.verbosity,

@@ -48,6 +48,11 @@ export const assistant = {
     downloading: '下载模型...',
     loading: '加载模型...',
   },
+  usage: {
+    prompt: '输入 {{formatted}}',
+    completion: '输出 {{formatted}}',
+    cached: '缓存 {{formatted}}',
+  },
   emptyState: {
     title: '开始一个新的助手线程，让上下文保持聚焦。',
     description: '可以请求调试帮助、完善草稿，或把当前想法交给图像生成继续展开。',

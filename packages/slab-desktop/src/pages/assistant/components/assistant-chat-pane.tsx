@@ -20,6 +20,7 @@ import {
 
 import MessageList from "@/pages/assistant/components/message/index.tsx"
 import { ModelLoadIndicator } from "@/pages/assistant/components/message/model-load-indicator"
+import { TokenUsageIndicator } from "@/pages/assistant/components/message/token-usage-indicator"
 import Sender from "@/pages/assistant/components/sender.tsx"
 import { MessageInteractionContext } from "@/pages/assistant/components/message/message-interaction-context.ts"
 import { useGreeting } from "../hooks/use-greeting"
@@ -28,7 +29,7 @@ import type {
     ApprovalStatus,
     ModelLoadState,
 } from "../hooks/use-harness-conversation"
-import type { ApprovalScope, HarnessChatTransport } from "../lib/harness"
+import type { ApprovalScope, HarnessChatTransport, TurnUsage } from "../lib/harness"
 
 export type AssistantChatPaneProps = {
     disabled: boolean
@@ -44,6 +45,10 @@ export type AssistantChatPaneProps = {
     liveOutputByItemId: ReadonlyMap<string, string>
     /** Transient model-load indicator state (null when idle). */
     modelLoad: ModelLoadState
+    /** Token usage for the most recent completed turn (null until first turn). */
+    turnUsage: TurnUsage | null
+    /** Context window size for the consumption bar (null when unknown). */
+    contextWindow: number | null
     resolveApproval: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>
 }
 
@@ -60,6 +65,8 @@ export function AssistantChatPane({
     approvalStatusByItemId,
     liveOutputByItemId,
     modelLoad,
+    turnUsage,
+    contextWindow,
     resolveApproval,
 }: AssistantChatPaneProps) {
     const { t } = useTranslation()
@@ -128,6 +135,7 @@ export function AssistantChatPane({
                     </CardContent>
                     <CardFooter className="flex-col gap-2">
                         <ModelLoadIndicator modelLoad={modelLoad} />
+                        <TokenUsageIndicator usage={turnUsage} contextWindow={contextWindow} />
                         <Sender
                             onSubmit={async (value, { files, effort, permissionMode }) => {
                                 await onBeforeSubmit(value)

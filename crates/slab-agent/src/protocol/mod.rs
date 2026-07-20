@@ -25,7 +25,7 @@ pub use notification::{
     CommandExecutionRequestApprovalParams, FileChangeApprovalChange, FileChangeOutputDeltaParams,
     FileChangeRequestApprovalParams, ItemCompletedParams, ItemStartedParams,
     ReasoningSummaryTextDeltaParams, ReasoningTextDeltaParams, ThreadStartedParams,
-    TurnCompletedParams, TurnStartedParams,
+    TurnCompletedParams, TurnStartedParams, TurnUsage,
 };
 pub use thread::{GitInfo, Thread};
 pub use turn::{Turn, TurnError};

@@ -720,7 +720,11 @@ impl From<ChatCompletionRequest> for DomainChatCompletionCommand {
                 stop,
                 stream_options: stream_options.map(Into::into).unwrap_or_default(),
             },
-            local: DomainLocalChatParams { gbnf, structured_output: structured_output.clone() },
+            local: DomainLocalChatParams {
+                gbnf,
+                structured_output: structured_output.clone(),
+                session_key: None,
+            },
             cloud: DomainCloudChatParams { reasoning_effort, verbosity, structured_output },
         }
     }
@@ -764,7 +768,11 @@ impl From<CompletionRequest> for DomainTextCompletionCommand {
                 stop,
                 stream_options: DomainChatStreamOptions::default(),
             },
-            local: DomainLocalChatParams { gbnf, structured_output: structured_output.clone() },
+            local: DomainLocalChatParams {
+                gbnf,
+                structured_output: structured_output.clone(),
+                session_key: None,
+            },
             cloud: DomainCloudChatParams {
                 reasoning_effort: None,
                 verbosity: None,

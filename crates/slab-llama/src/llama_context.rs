@@ -147,6 +147,18 @@ impl LlamaContext {
         unsafe { self.model.lib.llama_perf_context_reset(self.as_ptr()) }
     }
 
+    /// Return structured performance / token-usage data for this context.
+    ///
+    /// Reads `llama_perf_context_data`: `n_p_eval` (prompt tokens processed
+    /// during prefill) and `n_eval` (tokens generated during decode), plus
+    /// timings. Pair with [`Self::perf_reset`] so the counters reflect exactly
+    /// one prefill + decode cycle — this is the authoritative token-usage
+    /// source (replacing re-tokenization heuristics).
+    pub fn perf_data(&self) -> crate::perf::LlamaPerfContextData {
+        let raw = unsafe { self.model.lib.llama_perf_context(self.as_ptr()) };
+        crate::perf::LlamaPerfContextData::from(raw)
+    }
+
     // ── KV-cache management ──────────────────────────────────────────────────
 
     /// Clear all tokens from all sequences in the KV cache.
@@ -182,6 +194,59 @@ impl LlamaContext {
             return false;
         }
         unsafe { self.model.lib.llama_memory_can_shift(mem) }
+    }
+
+    /// Copy KV cache cells in `[p0, p1)` from sequence `src` to `dst`.
+    ///
+    /// The core primitive for cloning a session's KV state (branching a
+    /// conversation, restoring a persisted snapshot into a fresh sequence)
+    /// without re-prefilling.
+    pub fn kv_cache_seq_cp(&mut self, src: i32, dst: i32, p0: i32, p1: i32) {
+        let mem = unsafe { self.model.lib.llama_get_memory(self.as_ptr()) };
+        if !mem.is_null() {
+            unsafe { self.model.lib.llama_memory_seq_cp(mem, src, dst, p0, p1) }
+        }
+    }
+
+    /// Remove all tokens from every sequence except `seq_id`.
+    ///
+    /// Useful for pinning a shared prefix (e.g. a system prompt): prefill once
+    /// on a source sequence, `seq_cp` it into each live session, and the prefix
+    /// survives while per-session suffixes are evicted.
+    pub fn kv_cache_seq_keep(&mut self, seq_id: i32) {
+        let mem = unsafe { self.model.lib.llama_get_memory(self.as_ptr()) };
+        if !mem.is_null() {
+            unsafe { self.model.lib.llama_memory_seq_keep(mem, seq_id) }
+        }
+    }
+
+    /// Divide token positions in `[p0, p1)` for `seq_id` by `d`.
+    pub fn kv_cache_seq_div(&mut self, seq_id: i32, p0: i32, p1: i32, d: i32) {
+        let mem = unsafe { self.model.lib.llama_get_memory(self.as_ptr()) };
+        if !mem.is_null() {
+            unsafe { self.model.lib.llama_memory_seq_div(mem, seq_id, p0, p1, d) }
+        }
+    }
+
+    /// Smallest token position stored for `seq_id` (`-1` if the sequence is empty).
+    ///
+    /// Read alongside [`Self::kv_cache_seq_pos_max`] to learn where a
+    /// sequence's KV state currently ends before appending more tokens.
+    pub fn kv_cache_seq_pos_min(&self, seq_id: i32) -> i32 {
+        let mem = unsafe { self.model.lib.llama_get_memory(self.as_ptr()) };
+        if mem.is_null() {
+            return -1;
+        }
+        unsafe { self.model.lib.llama_memory_seq_pos_min(mem, seq_id) }
+    }
+
+    /// Largest token position stored for `seq_id` (`-1` if the sequence is empty).
+    pub fn kv_cache_seq_pos_max(&self, seq_id: i32) -> i32 {
+        let mem = unsafe { self.model.lib.llama_get_memory(self.as_ptr()) };
+        if mem.is_null() {
+            return -1;
+        }
+        unsafe { self.model.lib.llama_memory_seq_pos_max(mem, seq_id) }
     }
 
     // ── LoRA adapters ────────────────────────────────────────────────────────

@@ -530,7 +530,7 @@ pub(crate) fn apply_terminal(response: &mut Response, outcome: &SingleShotOutcom
     }
 }
 
-fn response_usage_from_text(usage: &TextGenerationUsage) -> ResponseUsage {
+pub(crate) fn response_usage_from_text(usage: &TextGenerationUsage) -> ResponseUsage {
     ResponseUsage {
         input_tokens: usage.prompt_tokens as i32,
         output_tokens: usage.completion_tokens as i32,

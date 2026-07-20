@@ -115,8 +115,10 @@ pub enum StreamFrame {
     Envelope(AgentEventEnvelope),
     /// The terminal `response.completed` / `response.incomplete` /
     /// `response.failed` event (expanded by
-    /// [`super::stream::build_terminal_event`]).
-    Terminal(TerminalKind),
+    /// [`super::stream::build_terminal_event`]), carrying the finalized token
+    /// usage (when the backend reported any) so the terminal event can populate
+    /// `response.usage` instead of defaulting to zero.
+    Terminal(TerminalKind, Option<TextGenerationUsage>),
 }
 
 // ── Envelope constructors ───────────────────────────────────────────────────
@@ -418,7 +420,11 @@ fn build_command(
             stop: Vec::new(),
             stream_options: Default::default(),
         },
-        local: LocalChatParams { gbnf: None, structured_output: config.structured_output.clone() },
+        local: LocalChatParams {
+            gbnf: None,
+            structured_output: config.structured_output.clone(),
+            session_key: None,
+        },
         cloud: CloudChatParams {
             reasoning_effort: config.reasoning_effort,
             verbosity: config.verbosity,
@@ -739,7 +745,8 @@ fn terminal_frames(acc: &StreamAccumulator, outcome: &SingleShotOutcome) -> Vec<
     {
         frames.push(StreamFrame::Envelope(text_done_envelope(acc.next_id, "msg_0", 0, t)));
     }
-    frames.push(StreamFrame::Terminal(TerminalKind::from_outcome(outcome)));
+    frames
+        .push(StreamFrame::Terminal(TerminalKind::from_outcome(outcome), outcome.usage().cloned()));
     frames
 }
 
@@ -810,7 +817,7 @@ pub(crate) async fn run_stream_response(
             .await?;
         let (envs, terminal) = synthesize_envelopes(&input.response_id, &outcome);
         let mut frames: Vec<StreamFrame> = envs.into_iter().map(StreamFrame::Envelope).collect();
-        frames.push(StreamFrame::Terminal(terminal));
+        frames.push(StreamFrame::Terminal(terminal, outcome.usage().cloned()));
         return Ok((input.response_id, Box::pin(stream::iter(frames))));
     }
 
@@ -1087,7 +1094,7 @@ mod tests {
                 AgentEventKind::ResponseOutputTextDone { text, .. } if text.as_str() == "hello"
             )
         ));
-        assert!(matches!(term[1], StreamFrame::Terminal(TerminalKind::Completed)));
+        assert!(matches!(term[1], StreamFrame::Terminal(TerminalKind::Completed, _)));
     }
 
     #[test]
@@ -1100,7 +1107,7 @@ mod tests {
         // Failed → no text-done envelope, just the terminal.
         let term = terminal_frames(&acc, &outcome);
         assert_eq!(term.len(), 1);
-        assert!(matches!(term[0], StreamFrame::Terminal(TerminalKind::Failed { .. })));
+        assert!(matches!(term[0], StreamFrame::Terminal(TerminalKind::Failed { .. }, _)));
     }
 
     #[test]
@@ -1111,7 +1118,7 @@ mod tests {
         // Empty → Completed terminal, no text-done envelope.
         let term = terminal_frames(&acc, &outcome);
         assert_eq!(term.len(), 1);
-        assert!(matches!(term[0], StreamFrame::Terminal(TerminalKind::Completed)));
+        assert!(matches!(term[0], StreamFrame::Terminal(TerminalKind::Completed, _)));
     }
 
     fn output_index_of(e: &AgentEventKind) -> i32 {

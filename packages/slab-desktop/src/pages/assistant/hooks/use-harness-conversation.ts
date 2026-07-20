@@ -31,6 +31,8 @@ import {
   type ModelLoadPhase,
   type OperationCategory,
   type Thread,
+  type TurnCompletedParams,
+  type TurnUsage,
 } from "../lib/harness"
 
 /** A pending human-approval request surfaced from the harness (commands / file changes). */
@@ -85,6 +87,8 @@ export interface HarnessConversation {
   liveOutputByItemId: ReadonlyMap<string, string>
   /** Transient model-load indicator state (null when idle). */
   modelLoad: ModelLoadState
+  /** Token usage for the most recent completed turn (null until the first turn completes). */
+  turnUsage: TurnUsage | null
   /** Resolve a pending approval via `approval/resolve` with a persistence scope. */
   resolveApproval: (itemId: string, approved: boolean, scope: ApprovalScope) => Promise<void>
 }
@@ -116,6 +120,7 @@ export function useHarnessConversation(
   const [approvalMap, setApprovalMap] = useState<Map<string, ApprovalRequest>>(new Map())
   const [liveOutputMap, setLiveOutputMap] = useState<Map<string, string>>(new Map())
   const [modelLoad, setModelLoad] = useState<ModelLoadState>(null)
+  const [turnUsage, setTurnUsage] = useState<TurnUsage | null>(null)
 
   const transport = useMemo(() => new HarnessChatTransport({ client, model }), [client, model])
 
@@ -155,6 +160,14 @@ export function useHarnessConversation(
       }
       if (method === HARNESS_NOTIFICATION.MODEL_LOAD_COMPLETED) {
         setModelLoad(null)
+        return
+      }
+
+      // Capture the finalized token usage for the just-completed turn so the
+      // composer footer can render a usage indicator + context-window bar.
+      if (method === HARNESS_NOTIFICATION.TURN_COMPLETED) {
+        const params = (notification.params ?? {}) as TurnCompletedParams
+        setTurnUsage(params.usage ?? null)
         return
       }
 
@@ -264,6 +277,7 @@ export function useHarnessConversation(
     setApprovalMap(new Map())
     setLiveOutputMap(new Map())
     setModelLoad(null)
+    setTurnUsage(null)
     if (!sessionId) {
       client.currentThreadId = null
       client.lastTurnIndex = -1
@@ -338,6 +352,7 @@ export function useHarnessConversation(
     approvalStatusByItemId,
     liveOutputByItemId: liveOutputMap,
     modelLoad,
+    turnUsage,
     resolveApproval,
   }
 }

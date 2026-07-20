@@ -35,6 +35,35 @@ pub struct TurnStartedParams {
 pub struct TurnCompletedParams {
     pub thread_id: String,
     pub turn: Turn,
+    /// Token usage for the turn (prompt / completion / total). `None` when the
+    /// backend did not report usage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<TurnUsage>,
+}
+
+/// Token-usage snapshot reported at turn completion.
+///
+/// `prompt_tokens` reflects the full input context of the turn (including any
+/// kv-cache-reused prefix reported as `cached_tokens`); `completion_tokens` is
+/// the number of tokens generated.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnUsage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_tokens: Option<u32>,
+    #[serde(default)]
+    pub estimated: bool,
+}
+
+impl From<crate::port::LlmUsage> for TurnUsage {
+    fn from(usage: crate::port::LlmUsage) -> Self {
+        let crate::port::LlmUsage { prompt_tokens, completion_tokens, total_tokens, estimated } =
+            usage;
+        Self { prompt_tokens, completion_tokens, total_tokens, cached_tokens: None, estimated }
+    }
 }
 
 // ---- items ----

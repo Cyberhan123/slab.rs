@@ -8,6 +8,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::event::{AgentEventEnvelope, AgentEventKind, TurnEvent};
+use crate::domain::models::TextGenerationUsage;
 
 // Glob import: the streaming state machine references ~70 slab-proto types. Glob
 // imports do not trigger `unused_imports`, which keeps this module
@@ -70,6 +71,10 @@ pub struct StreamCtx {
     /// `completed_at` unset (matching the fixture's `null`), and the completed
     /// event echoes this value when `Some`.
     completed_at_unix: Option<f64>,
+    /// Token usage for the terminal `response.completed` payload, sourced from
+    /// the single-shot LLM outcome. `None` falls back to the OpenAI default
+    /// (zero) usage, matching the previous behaviour.
+    usage: Option<ResponseUsage>,
 }
 
 impl StreamCtx {
@@ -103,6 +108,7 @@ impl StreamCtx {
             tool_delta_splits: HashMap::new(),
             shell_environment: None,
             completed_at_unix: None,
+            usage: None,
         }
     }
 
@@ -122,6 +128,13 @@ impl StreamCtx {
     /// `response.completed` payload.
     pub fn set_completed_at(&mut self, ts: Option<f64>) {
         self.completed_at_unix = ts;
+    }
+
+    /// Pin the token `usage` applied to the terminal `response.completed`
+    /// payload, sourced from the single-shot LLM outcome. When unset the
+    /// completed event reports OpenAI's default (zero) usage.
+    pub fn set_usage(&mut self, usage: Option<ResponseUsage>) {
+        self.usage = usage;
     }
 
     /// Pin the response-level shell environment applied to every `shell_call`
@@ -151,6 +164,7 @@ impl StreamCtx {
         self.tool_delta_splits = HashMap::new();
         self.shell_environment = None;
         self.completed_at_unix = None;
+        self.usage = None;
     }
 
     /// Replace the lifecycle skeleton [`Response`] verbatim. Use this when a
@@ -174,10 +188,10 @@ impl StreamCtx {
     }
 
     /// Clone the skeleton for the terminal `response.completed` event: apply
-    /// the resolved service tier, the assembled output items, default usage,
-    /// and a `completed` status.
+    /// the resolved service tier, the assembled output items, the pinned usage
+    /// (or OpenAI default usage when unset), and a `completed` status.
     fn completed_response(&self) -> Response {
-        self.terminal_response(ResponseStatus::Completed, None, None)
+        self.terminal_response(ResponseStatus::Completed, None, self.usage.clone())
     }
 
     /// Clone the skeleton for a terminal lifecycle event
@@ -212,7 +226,11 @@ impl StreamCtx {
 pub fn build_terminal_event(
     ctx: &mut StreamCtx,
     terminal: &TerminalKind,
+    usage: Option<&TextGenerationUsage>,
 ) -> Vec<ResponsesServerEvent> {
+    // Pin the finalized usage so `completed_response()` populates
+    // `response.usage` instead of OpenAI's default zero usage.
+    ctx.set_usage(usage.map(super::projection::response_usage_from_text));
     match terminal {
         TerminalKind::Completed => {
             vec![ResponsesServerEvent::ResponseCompletedEvent(Box::new(
@@ -1580,4 +1598,53 @@ fn skeleton_shell_call_output(item_id: &str, call_id: &str) -> OutputItem {
         Vec::new(),
         None,
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ctx() -> StreamCtx {
+        StreamCtx::new("resp_test".to_owned(), "test-model".to_owned(), 0.0, None)
+    }
+
+    #[test]
+    fn completed_response_defaults_to_zero_usage_when_unset() {
+        let response = ctx().completed_response();
+        let usage = response.usage.expect("completed response always carries usage");
+        assert_eq!(usage.input_tokens, 0);
+        assert_eq!(usage.output_tokens, 0);
+        assert_eq!(usage.total_tokens, 0);
+    }
+
+    #[test]
+    fn set_usage_populates_completed_response_usage() {
+        let mut ctx = ctx();
+        ctx.set_usage(Some(ResponseUsage {
+            input_tokens: 42,
+            output_tokens: 17,
+            total_tokens: 59,
+            ..Default::default()
+        }));
+        let response = ctx.completed_response();
+        let usage = response.usage.expect("completed response always carries usage");
+        assert_eq!(usage.input_tokens, 42);
+        assert_eq!(usage.output_tokens, 17);
+        assert_eq!(usage.total_tokens, 59);
+    }
+
+    #[test]
+    fn reset_for_new_response_clears_usage() {
+        let mut ctx = ctx();
+        ctx.set_usage(Some(ResponseUsage {
+            input_tokens: 9,
+            output_tokens: 1,
+            total_tokens: 10,
+            ..Default::default()
+        }));
+        ctx.reset_for_new_response();
+        let response = ctx.completed_response();
+        let usage = response.usage.expect("completed response always carries usage");
+        assert_eq!(usage.total_tokens, 0);
+    }
 }

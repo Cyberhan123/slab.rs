@@ -88,6 +88,8 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     approvalStatusByItemId: new Map<string, ApprovalStatus>(),
     liveOutputByItemId: new Map<string, string>(),
     modelLoad: null,
+    turnUsage: null,
+    contextWindow: null,
     resolveApproval: vi.fn(),
     ...overrides,
   }
@@ -145,5 +147,31 @@ describe("AssistantChatPane", () => {
     render(<AssistantChatPane {...baseProps({ approvals, resolveApproval })} />)
     const sender = screen.getByTestId("sender")
     expect(sender.getAttribute("data-approvals")).toBe("1")
+  })
+
+  it("does not render the token-usage indicator before a turn completes", () => {
+    render(<AssistantChatPane {...baseProps({ turnUsage: null, contextWindow: 8192 })} />)
+    expect(screen.queryByTestId("assistant-token-usage")).toBeNull()
+  })
+
+  it("renders the token-usage indicator + context bar once a turn reports usage", () => {
+    render(
+      <AssistantChatPane
+        {...baseProps({
+          turnUsage: {
+            promptTokens: 2048,
+            completionTokens: 128,
+            totalTokens: 2176,
+            cachedTokens: 512,
+          },
+          contextWindow: 8192,
+        })}
+      />,
+    )
+    const indicator = screen.getByTestId("assistant-token-usage")
+    expect(indicator).toBeTruthy()
+    // Consumption bar present and proportionate (2048/8192 = 25%).
+    const bar = screen.getByTestId("assistant-token-usage-bar")
+    expect(bar.getAttribute("aria-valuenow")).toBe("25")
   })
 })

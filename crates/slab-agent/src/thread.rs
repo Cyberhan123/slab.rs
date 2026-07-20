@@ -23,6 +23,7 @@ use crate::{
     },
     protocol::{
         ErrorEvent, EventMsg, Turn, TurnAbortedParams, TurnCompletedParams, TurnStartedParams,
+        TurnUsage,
     },
     repetition_guard::{RepetitionDetected, RepetitionGuard},
     risk::ToolRiskAnalyzer,
@@ -49,10 +50,16 @@ async fn emit_turn_started(notify: &Arc<dyn AgentNotifyPort>, thread_id: &str, t
     notify.on_event_msg(thread_id, &msg).await;
 }
 
-async fn emit_turn_completed(notify: &Arc<dyn AgentNotifyPort>, thread_id: &str, turn_index: u32) {
+async fn emit_turn_completed(
+    notify: &Arc<dyn AgentNotifyPort>,
+    thread_id: &str,
+    turn_index: u32,
+    usage: Option<TurnUsage>,
+) {
     let msg = EventMsg::TurnCompleted(TurnCompletedParams {
         thread_id: thread_id.to_owned(),
         turn: harness_turn(turn_index.to_string(), "completed"),
+        usage,
     });
     notify.on_event_msg(thread_id, &msg).await;
 }
@@ -315,6 +322,7 @@ impl AgentThread {
         let mut termination_reason: Option<TerminationReason> = None;
         let mut repetition_guard = RepetitionGuard::default();
         let mut consumed_tokens = 0u32;
+        let mut last_turn_usage: Option<TurnUsage> = None;
         let mut reached_final_turn = false;
 
         'turns: for turn_offset in 0..self.config.max_turns {
@@ -359,8 +367,10 @@ impl AgentThread {
             .await
             {
                 Ok(outcome) => match outcome {
-                    TurnOutcome::Final { token_usage } => {
-                        consumed_tokens = consumed_tokens.saturating_add(token_usage);
+                    TurnOutcome::Final { usage } => {
+                        let total = usage.as_ref().map(|u| u.total_tokens).unwrap_or_default();
+                        consumed_tokens = consumed_tokens.saturating_add(total);
+                        last_turn_usage = usage.map(TurnUsage::from);
                         // Extract the final assistant text.
                         reached_final_turn = true;
                         completion_text = messages.iter().rev().find_map(|m| {
@@ -374,13 +384,17 @@ impl AgentThread {
                         });
                         break 'turns;
                     }
-                    TurnOutcome::BudgetExceeded { token_usage } => {
-                        consumed_tokens = consumed_tokens.saturating_add(token_usage);
+                    TurnOutcome::BudgetExceeded { usage } => {
+                        let total = usage.as_ref().map(|u| u.total_tokens).unwrap_or_default();
+                        consumed_tokens = consumed_tokens.saturating_add(total);
+                        last_turn_usage = usage.map(TurnUsage::from);
                         termination_reason = Some(TerminationReason::BudgetExhausted);
                         break 'turns;
                     }
-                    TurnOutcome::ToolCalls { invalid_tool_calls, signatures, token_usage } => {
-                        consumed_tokens = consumed_tokens.saturating_add(token_usage);
+                    TurnOutcome::ToolCalls { invalid_tool_calls, signatures, usage } => {
+                        let total = usage.as_ref().map(|u| u.total_tokens).unwrap_or_default();
+                        consumed_tokens = consumed_tokens.saturating_add(total);
+                        last_turn_usage = usage.map(TurnUsage::from);
                         if invalid_tool_calls == 0 {
                             invalid_tool_call_retries = 0;
                         } else {
@@ -510,7 +524,8 @@ impl AgentThread {
         }
 
         info!(thread_id, "thread completed");
-        emit_turn_completed(&notify, &thread_id, starting_turn_index).await;
+        emit_turn_completed(&notify, &thread_id, starting_turn_index, last_turn_usage.clone())
+            .await;
         self.set_status(ThreadStatus::Completed, &notify).await?;
         record_json(
             trace.as_ref(),

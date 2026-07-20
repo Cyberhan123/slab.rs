@@ -186,7 +186,7 @@ async fn create_chat_completion_with_state(
                 &resolved_model,
                 &resolved_messages,
                 local::LocalChatRequestConfig {
-                    session_id: command.id.clone(),
+                    session_id: command.local.session_key.clone().or(command.id.clone()),
                     max_tokens,
                     temperature,
                     top_p: command.common.top_p,
@@ -286,7 +286,7 @@ async fn create_chat_completion_with_state(
                 &resolved_model,
                 &resolved_messages,
                 local::LocalChatRequestConfig {
-                    session_id: command.id.clone(),
+                    session_id: command.local.session_key.clone().or(command.id.clone()),
                     max_tokens,
                     temperature,
                     top_p: command.common.top_p,
@@ -671,7 +671,11 @@ mod test {
                 stop: Vec::new(),
                 stream_options: Default::default(),
             },
-            local: crate::domain::models::LocalChatParams { gbnf: None, structured_output: None },
+            local: crate::domain::models::LocalChatParams {
+                gbnf: None,
+                structured_output: None,
+                session_key: None,
+            },
             cloud: crate::domain::models::CloudChatParams {
                 reasoning_effort: None,
                 verbosity: None,
@@ -698,7 +702,11 @@ mod test {
                 stop: Vec::new(),
                 stream_options: Default::default(),
             },
-            local: crate::domain::models::LocalChatParams { gbnf: None, structured_output: None },
+            local: crate::domain::models::LocalChatParams {
+                gbnf: None,
+                structured_output: None,
+                session_key: None,
+            },
             cloud: crate::domain::models::CloudChatParams {
                 reasoning_effort: None,
                 verbosity: None,

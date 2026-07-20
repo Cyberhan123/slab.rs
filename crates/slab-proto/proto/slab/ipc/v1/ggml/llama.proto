@@ -9,6 +9,10 @@ service GgmlLlamaService {
   rpc ChatStream(GgmlLlamaChatRequest) returns (stream GgmlLlamaChatStreamChunk);
   rpc LoadModel(GgmlLlamaLoadRequest) returns (ModelStatusResponse);
   rpc UnloadModel(ModelUnloadRequest) returns (ModelStatusResponse);
+  // NOTE: `QuantizeModel(GgmlLlamaQuantizeRequest)` is designed but not yet
+  // wired — adding it here would require the full runtime→app-core→server
+  // chain (see plan Slice E). The request/response messages below are the
+  // agreed contract, ready for that focused implementation.
 }
 
 message GgmlLlamaLoadRequest {
@@ -55,4 +59,23 @@ message GgmlLlamaChatStreamChunk {
   // Deprecated: use metadata.reasoning_content.
   optional string reasoning_content = 5;
   ChatMetadata metadata = 6;
+}
+
+message GgmlLlamaQuantizeRequest {
+  optional string input_path = 1;
+  optional string output_path = 2;
+  // Target llama.cpp file type (LlamaFtype raw int, e.g. 15 = Q4_K_M, 36 = TQ1_0).
+  optional int32 ftype = 3;
+  optional int32 nthread = 4;
+  optional bool allow_requantize = 5;
+  optional bool quantize_output_tensor = 6;
+  optional bool only_copy = 7;
+  optional bool pure = 8;
+  optional bool keep_split = 9;
+  optional bool dry_run = 10;
+}
+
+message GgmlLlamaQuantizeResponse {
+  optional uint32 layers_processed = 1;
+  optional string output_path = 2;
 }

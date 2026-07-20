@@ -304,6 +304,7 @@ impl AgentMemoryPipeline {
             local: LocalChatParams {
                 gbnf: None,
                 structured_output: Some(StructuredOutput::JsonObject),
+                session_key: None,
             },
             cloud: CloudChatParams {
                 reasoning_effort: None,

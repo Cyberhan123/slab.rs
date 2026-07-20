@@ -48,6 +48,11 @@ export const assistant = {
     downloading: 'Downloading model...',
     loading: 'Loading model...',
   },
+  usage: {
+    prompt: 'In {{formatted}}',
+    completion: 'Out {{formatted}}',
+    cached: 'Cached {{formatted}}',
+  },
   emptyState: {
     title: 'Start a new thread and keep the stage focused.',
     description:
