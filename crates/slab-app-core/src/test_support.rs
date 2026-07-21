@@ -65,6 +65,15 @@ pub(crate) struct RecordingRuntimeGateway {
     available_backends: Mutex<HashSet<RuntimeBackendId>>,
     loads: Mutex<Vec<RuntimeBackendLoadSpec>>,
     unloads: Mutex<Vec<RuntimeBackendId>>,
+    /// Every text-generation request observed via `chat` / `chat_stream`, in
+    /// arrival order. Lets offline tests assert what the caller dispatched
+    /// (e.g. the agent kv-cache `session_key` — Slice D1 invariant).
+    chat_requests: Mutex<Vec<RuntimeTextGenerationRequest>>,
+    /// Optional canned response returned by `chat` (default: `BackendNotReady`).
+    /// Lets offline tests exercise runtime → agent usage propagation with no model.
+    scripted_chat: Mutex<Option<RuntimeTextGenerationResponse>>,
+    /// Optional canned chunk sequence yielded by `chat_stream` (default: empty).
+    scripted_stream: Mutex<Option<Vec<RuntimeTextGenerationChunk>>>,
 }
 
 impl RecordingRuntimeGateway {
@@ -83,6 +92,29 @@ impl RecordingRuntimeGateway {
         self.unloads.lock().unwrap_or_else(|error| error.into_inner()).clone()
     }
 
+    /// Script a canned response returned by every subsequent `chat` call.
+    pub(crate) fn with_scripted_chat(self, response: RuntimeTextGenerationResponse) -> Self {
+        *self.scripted_chat.lock().unwrap_or_else(|error| error.into_inner()) = Some(response);
+        self
+    }
+
+    /// Script a canned chunk sequence yielded by every subsequent `chat_stream`
+    /// call.
+    pub(crate) fn with_scripted_stream(self, chunks: Vec<RuntimeTextGenerationChunk>) -> Self {
+        *self.scripted_stream.lock().unwrap_or_else(|error| error.into_inner()) = Some(chunks);
+        self
+    }
+
+    /// Snapshot of every text-generation request observed via `chat` /
+    /// `chat_stream` (arrival order).
+    pub(crate) fn chat_requests(&self) -> Vec<RuntimeTextGenerationRequest> {
+        self.chat_requests.lock().unwrap_or_else(|error| error.into_inner()).clone()
+    }
+
+    fn record_chat_request(&self, request: RuntimeTextGenerationRequest) {
+        self.chat_requests.lock().unwrap_or_else(|error| error.into_inner()).push(request);
+    }
+
     fn unavailable() -> AppCoreError {
         AppCoreError::BackendNotReady("test runtime gateway is unavailable".to_owned())
     }
@@ -99,17 +131,25 @@ impl RuntimeInferenceGateway for RecordingRuntimeGateway {
 
     async fn chat(
         &self,
-        _request: RuntimeTextGenerationRequest,
+        request: RuntimeTextGenerationRequest,
     ) -> Result<RuntimeTextGenerationResponse, AppCoreError> {
-        Err(Self::unavailable())
+        self.record_chat_request(request);
+        match self.scripted_chat.lock().unwrap_or_else(|error| error.into_inner()).clone() {
+            Some(response) => Ok(response),
+            None => Err(Self::unavailable()),
+        }
     }
 
     async fn chat_stream(
         &self,
-        _request: RuntimeTextGenerationRequest,
+        request: RuntimeTextGenerationRequest,
     ) -> Result<BoxStream<'static, Result<RuntimeTextGenerationChunk, AppCoreError>>, AppCoreError>
     {
-        Ok(stream::empty().boxed())
+        self.record_chat_request(request);
+        match self.scripted_stream.lock().unwrap_or_else(|error| error.into_inner()).clone() {
+            Some(chunks) => Ok(stream::iter(chunks.into_iter().map(Ok)).boxed()),
+            None => Ok(stream::empty().boxed()),
+        }
     }
 
     async fn transcribe(
@@ -550,4 +590,112 @@ fn normalized_source_key_hub_provider(hub_provider: Option<&str>) -> Option<Stri
             other => other.to_owned(),
         }
     })
+}
+
+#[cfg(test)]
+mod recording_gateway_tests {
+    //! Offline seam (Slice F2): the `RecordingRuntimeGateway` can now synthesize
+    //! text-generation responses and record the dispatched requests, so tests can
+    //! verify usage propagation and the agent kv-cache `session_key` without a
+    //! real model or runtime process.
+    use super::*;
+    use crate::domain::ports::{
+        RuntimeInferenceGateway, RuntimeTextGenerationChunk, RuntimeTextGenerationRequest,
+        RuntimeTextGenerationResponse, RuntimeTextGenerationUsage, RuntimeTextPromptTokensDetails,
+    };
+    use futures::StreamExt;
+
+    fn usage(prompt: u32, completion: u32) -> RuntimeTextGenerationUsage {
+        RuntimeTextGenerationUsage {
+            prompt_tokens: prompt,
+            completion_tokens: completion,
+            total_tokens: prompt + completion,
+            prompt_tokens_details: RuntimeTextPromptTokensDetails { cached_tokens: 0 },
+            estimated: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn scripted_chat_surfaces_usage_and_records_session_key() {
+        let gateway =
+            RecordingRuntimeGateway::default().with_scripted_chat(RuntimeTextGenerationResponse {
+                text: "pong".to_owned(),
+                usage: Some(usage(12, 3)),
+                ..Default::default()
+            });
+
+        let request = RuntimeTextGenerationRequest {
+            model: "fixture".to_owned(),
+            prompt: "ping".to_owned(),
+            session_key: Some("agent:thread-1".to_owned()),
+            ..Default::default()
+        };
+
+        let response = gateway.chat(request).await.expect("scripted chat responds");
+        assert_eq!(response.text, "pong");
+        let surfaced = response.usage.expect("usage should be surfaced");
+        assert_eq!(surfaced.prompt_tokens, 12);
+        assert_eq!(surfaced.completion_tokens, 3);
+        assert!(!surfaced.estimated);
+
+        let recorded = gateway.chat_requests();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].prompt, "ping");
+        assert_eq!(recorded[0].session_key.as_deref(), Some("agent:thread-1"));
+    }
+
+    #[tokio::test]
+    async fn scripted_stream_emits_chunks_usage_and_records_session_key() {
+        let chunks = vec![
+            RuntimeTextGenerationChunk { delta: "hel".to_owned(), ..Default::default() },
+            RuntimeTextGenerationChunk {
+                delta: "lo".to_owned(),
+                done: true,
+                usage: Some(usage(8, 2)),
+                ..Default::default()
+            },
+        ];
+        let gateway = RecordingRuntimeGateway::default().with_scripted_stream(chunks);
+
+        let request = RuntimeTextGenerationRequest {
+            model: "fixture".to_owned(),
+            prompt: "hi".to_owned(),
+            session_key: Some("agent:thread-2".to_owned()),
+            ..Default::default()
+        };
+
+        let mut stream = gateway.chat_stream(request).await.expect("scripted stream starts");
+        let mut text = String::new();
+        let mut terminal_usage: Option<RuntimeTextGenerationUsage> = None;
+        while let Some(item) = stream.next().await {
+            let chunk = item.expect("chunk is ok");
+            text.push_str(&chunk.delta);
+            if chunk.done {
+                terminal_usage = chunk.usage;
+            }
+        }
+        assert_eq!(text, "hello");
+        let terminal_usage = terminal_usage.expect("terminal chunk carried usage");
+        assert_eq!(terminal_usage.completion_tokens, 2);
+
+        let recorded = gateway.chat_requests();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].session_key.as_deref(), Some("agent:thread-2"));
+    }
+
+    #[tokio::test]
+    async fn unscripted_chat_is_unavailable_and_still_recorded() {
+        let gateway = RecordingRuntimeGateway::default();
+        let request = RuntimeTextGenerationRequest {
+            model: "fixture".to_owned(),
+            prompt: "hi".to_owned(),
+            ..Default::default()
+        };
+
+        let result = gateway.chat(request).await;
+        assert!(result.is_err(), "unscripted chat should be unavailable");
+
+        // The request is still recorded even when no scripted response exists.
+        assert_eq!(gateway.chat_requests().len(), 1);
+    }
 }

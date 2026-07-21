@@ -15753,12 +15753,14 @@ name = "slab-llama"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "hf-hub",
  "libloading 0.9.0",
  "serde",
  "serde_json",
  "slab-ggml",
  "slab-llama-sys",
  "slab-utils",
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -15931,6 +15933,7 @@ dependencies = [
  "slab-types",
  "slab-utils",
  "slab-whisper",
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tokio-stream",

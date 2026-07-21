@@ -13,7 +13,7 @@ use thiserror::Error;
 
 use crate::infra::backends::ggml::diffusion::{DiffusionWorker, GGMLDiffusionEngine};
 use crate::infra::backends::ggml::llama::{
-    GGMLLlamaEngine, spawn_backend_with_engine as spawn_ggml_llama_backend,
+    GGMLLlamaEngine, KvCacheStore, spawn_backend_with_engine as spawn_ggml_llama_backend,
 };
 use crate::infra::backends::ggml::whisper::{GGMLWhisperEngine, WhisperWorker};
 
@@ -73,6 +73,9 @@ pub struct GgmlBackendConfig {
     pub llama_lib_dir: Option<PathBuf>,
     pub whisper_lib_dir: Option<PathBuf>,
     pub diffusion_lib_dir: Option<PathBuf>,
+    /// Root directory for the on-disk ggml.llama kv-cache (Slice D2). When
+    /// `None`, persistence is disabled and only the in-process cache is used.
+    pub kv_cache_dir: Option<PathBuf>,
 }
 
 pub fn service_ids(config: &GgmlBackendConfig) -> Vec<&'static str> {
@@ -99,7 +102,7 @@ pub fn register(
     worker_count: usize,
 ) -> Result<(), CoreError> {
     if let Some(path) = config.llama_lib_dir.as_deref() {
-        let llama_engine = load_llama_engine(path)?;
+        let llama_engine = load_llama_engine(path, config.kv_cache_dir.clone())?;
         resource_manager.register_backend("ggml.llama", move |shared_rx, control_tx| {
             spawn_ggml_llama_backend(shared_rx, control_tx, Some(Arc::clone(&llama_engine)));
         });
@@ -138,8 +141,15 @@ pub fn register(
     Ok(())
 }
 
-fn load_llama_engine(path: &Path) -> Result<Arc<GGMLLlamaEngine>, CoreError> {
-    GGMLLlamaEngine::from_path(path)
+fn load_llama_engine(
+    path: &Path,
+    kv_cache_dir: Option<PathBuf>,
+) -> Result<Arc<GGMLLlamaEngine>, CoreError> {
+    let engine = GGMLLlamaEngine::from_path(path)?;
+    if let Some(dir) = kv_cache_dir {
+        engine.install_kv_cache(KvCacheStore::new(dir));
+    }
+    Ok(engine)
 }
 
 fn load_whisper_engine(path: &Path) -> Result<GGMLWhisperEngine, CoreError> {

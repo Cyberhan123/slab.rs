@@ -22,6 +22,7 @@ use crate::domain::models::{
     TextPromptTokensDetails, TextStopMetadata,
 };
 
+use super::kv_cache_store::{CachedSession, KvCacheStore, ModelFingerprint};
 use super::{GGMLLlamaEngineError, SessionId, StreamChunk, StreamHandle};
 
 #[derive(Debug, Clone)]
@@ -342,6 +343,12 @@ pub struct GGMLLlamaEngine {
     inference_engine: RwLock<Option<LlamaRuntime>>,
     loaded_model: RwLock<Option<Arc<LlamaModel>>>,
     session_bindings: Mutex<HashMap<String, SessionBinding>>,
+    /// Optional on-disk kv-cache store (Slice D2). When `None`, the engine only
+    /// keeps the in-process snapshot cache.
+    kv_cache: Mutex<Option<Arc<KvCacheStore>>>,
+    /// Fingerprint of the currently loaded model (computed at load); used as the
+    /// top-level kv-cache directory. `None` until a model is loaded.
+    model_fp: Mutex<Option<ModelFingerprint>>,
 }
 
 // # Safety
@@ -402,6 +409,8 @@ impl GGMLLlamaEngine {
                 inference_engine: RwLock::new(None),
                 loaded_model: RwLock::new(None),
                 session_bindings: Mutex::new(HashMap::new()),
+                kv_cache: Mutex::new(None),
+                model_fp: Mutex::new(None),
             }))
         })
     }
@@ -412,6 +421,63 @@ impl GGMLLlamaEngine {
         self.session_bindings.lock().map_err(|_| GGMLLlamaEngineError::LockPoisoned {
             operation: "lock llama session bindings",
         })
+    }
+
+    /// Install an on-disk kv-cache store, enabling Slice D2 persistence. When
+    /// unset, the engine falls back to the in-process snapshot cache only.
+    /// Best-effort: a store is installed at most once; subsequent calls are ignored.
+    pub(crate) fn install_kv_cache(&self, store: KvCacheStore) {
+        if let Ok(mut guard) = self.kv_cache.lock()
+            && guard.is_none()
+        {
+            *guard = Some(Arc::new(store));
+        }
+    }
+
+    /// Snapshot the current on-disk kv-cache store + model fingerprint, if both
+    /// are available. Used by the restore/persist hooks.
+    fn disk_cache_handle(&self) -> Option<(Arc<KvCacheStore>, ModelFingerprint)> {
+        let store = self.kv_cache.lock().ok()?.as_ref()?.clone();
+        let fp = self.model_fp.lock().ok()?.as_ref()?.clone();
+        Some((store, fp))
+    }
+
+    /// Best-effort: load a disk snapshot for `session_key` so it can seed an
+    /// in-process `Ready` binding on the first turn of a restored session.
+    fn load_disk_session(&self, session_key: &str) -> Option<CachedSession> {
+        let (store, fp) = self.disk_cache_handle()?;
+        store.load(&fp, session_key)
+    }
+
+    /// Best-effort: mirror a committed snapshot to disk (fire-and-forget, off the
+    /// async hot path). Never fails the turn.
+    fn persist_disk_session(
+        &self,
+        session_key: &str,
+        snapshot: &LlamaSessionSnapshot,
+        cached_prompt: String,
+        grammar: Option<&str>,
+    ) {
+        let (store, fp) = match self.disk_cache_handle() {
+            Some(handle) => handle,
+            None => return,
+        };
+        let snapshot = snapshot.clone();
+        let session_key = session_key.to_owned();
+        let grammar = grammar.map(str::to_owned);
+
+        // Fire-and-forget on the blocking pool; errors are logged inside `save`.
+        // Fall back to a synchronous write when no ambient tokio runtime exists.
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                handle.spawn_blocking(move || {
+                    store.save(&fp, &session_key, &snapshot, &cached_prompt, grammar.as_deref());
+                });
+            }
+            Err(_) => {
+                store.save(&fp, &session_key, &snapshot, &cached_prompt, grammar.as_deref());
+            }
+        }
     }
 
     /// Load a model and start a multi-worker inference engine.
@@ -453,6 +519,13 @@ impl GGMLLlamaEngine {
             .map_err(GGMLLlamaEngineError::from)?;
         let loaded_context_length = engine.context_length();
         let context_length = (loaded_context_length > 0).then_some(loaded_context_length);
+
+        // Compute the model fingerprint before `model` is moved into the slot —
+        // it keys the on-disk kv-cache (Slice D2).
+        let model_fp = ModelFingerprint::compute(path, model.n_params(), model.model_size());
+        if let Ok(mut guard) = self.model_fp.lock() {
+            *guard = Some(model_fp);
+        }
 
         *write_lock = Some(engine);
         *model_write_lock = Some(model);
@@ -595,10 +668,28 @@ impl GGMLLlamaEngine {
             });
         };
 
+        // Best-effort: try to restore a disk snapshot BEFORE taking the bindings
+        // lock so disk I/O doesn't block other sessions under the lock (Slice D2).
+        let disk_session = self.load_disk_session(&key);
+
         let plan;
 
         {
             let mut bindings = self.lock_session_bindings()?;
+            // Pre-warm the in-process cache from disk if no live binding exists;
+            // plan_session_reuse's `Ready` arm then handles the prefix-delta check.
+            if bindings.get(&key).is_none()
+                && let Some(cached) = disk_session
+            {
+                bindings.insert(
+                    key.clone(),
+                    SessionBinding::Ready {
+                        snapshot: cached.snapshot,
+                        cached_prompt: cached.cached_prompt,
+                        grammar: cached.grammar,
+                    },
+                );
+            }
             plan =
                 plan_session_reuse(&key, bindings.get(&key), &full_prompt, request.gbnf.as_deref())
                     .map_err(ggml::EngineError::from)?;
@@ -704,6 +795,10 @@ impl GGMLLlamaEngine {
         let mut cached_prompt = String::with_capacity(full_prompt.len() + generated.len());
         cached_prompt.push_str(full_prompt);
         cached_prompt.push_str(generated);
+
+        // Best-effort disk mirror (Slice D2) before the snapshot is moved.
+        self.persist_disk_session(&key, &snapshot, cached_prompt.clone(), gbnf.as_deref());
+
         self.lock_session_bindings()?
             .insert(key, SessionBinding::Ready { snapshot, cached_prompt, grammar: gbnf });
         Ok(())

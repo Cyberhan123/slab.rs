@@ -38,6 +38,12 @@ pub struct Cli {
     pub lib_dir: Option<PathBuf>,
     #[arg(long = "log-file")]
     pub log_file: Option<PathBuf>,
+    /// Root directory for the on-disk ggml.llama kv-cache (Slice D2). Defaults to
+    /// `<runtime-home>/kv-cache` (two levels above the lib dir). Pass a path to
+    /// override; there is no explicit disable flag (point it at a read-only path
+    /// and persistence degrades best-effort to in-process caching).
+    #[arg(long = "kv-cache-dir")]
+    pub kv_cache_dir: Option<PathBuf>,
     #[arg(long = "enabled-backends", value_enum, value_delimiter = ',', ignore_case = true)]
     enabled_backends: Vec<EnabledBackendArg>,
     #[arg(long, default_value_t = false)]
@@ -82,6 +88,11 @@ impl Cli {
         let llama_lib_dir = enabled_backends.llama.then(|| base_lib_path.clone());
         let whisper_lib_dir = enabled_backends.whisper.then(|| base_lib_path.clone());
         let diffusion_lib_dir = enabled_backends.diffusion.then(|| base_lib_path.clone());
+        // Default kv-cache root = the canonical app home's `kv-cache` dir
+        // (slab-utils app_home), co-located with the DB/settings/models/logs.
+        // Overridable via --kv-cache-dir. (slab-utils is a ggml-gated dep, so the
+        // default only resolves when the llama backend is available.)
+        let kv_cache_dir = self.kv_cache_dir.or_else(default_kv_cache_dir);
 
         Ok(RuntimeConfig {
             grpc_bind: self.grpc_bind,
@@ -96,12 +107,27 @@ impl Cli {
             llama_lib_dir,
             whisper_lib_dir,
             diffusion_lib_dir,
+            kv_cache_dir,
             enable_candle_llama: enabled_backends.candle_llama,
             enable_candle_whisper: enabled_backends.candle_whisper,
             enable_candle_diffusion: enabled_backends.candle_diffusion,
             onnx_enabled: false,
         })
     }
+}
+
+/// Default kv-cache root, sourced from the canonical app home (slab-utils).
+/// Lives under `sessions/kv-cache` because kv-cache snapshots are keyed per
+/// thread/session (`agent:{thread_id}`). Only resolves when the ggml/llama
+/// backend is built in (slab-utils is a ggml-gated dep); otherwise off.
+#[cfg(feature = "ggml")]
+fn default_kv_cache_dir() -> Option<PathBuf> {
+    Some(slab_utils::app_home::sessions_dir().join("kv-cache"))
+}
+
+#[cfg(not(feature = "ggml"))]
+fn default_kv_cache_dir() -> Option<PathBuf> {
+    None
 }
 
 #[cfg(test)]
