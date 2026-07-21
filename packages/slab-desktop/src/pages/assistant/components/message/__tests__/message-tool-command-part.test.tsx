@@ -8,12 +8,27 @@ import MessageToolCommandPart from "../message-tool-command-part"
 
 // Stub the heavy leaf deps so the real tool-card logic (deriveState/isToolActive)
 // runs without pulling Radix collapsible / ansi-to-react / Mantine into jsdom.
+// The Terminal mock mirrors the composed layout: the parent renders `output`
+// into a content surface, while TerminalHeader/TerminalTitle surface the input.
 vi.mock("../terminal", () => ({
-  Terminal: ({ output, isStreaming }: { output: string; isStreaming?: boolean }) => (
-    <pre data-testid="terminal" data-streaming={isStreaming ? "true" : "false"}>
-      {output}
-    </pre>
+  Terminal: ({ output, isStreaming, children }: { output: string; isStreaming?: boolean; children?: ReactNode }) => (
+    <div data-testid="terminal" data-streaming={isStreaming ? "true" : "false"}>
+      {children}
+      <pre data-testid="terminal-content">{output}</pre>
+    </div>
   ),
+  TerminalHeader: ({ children }: { children?: ReactNode }) => (
+    <div data-testid="terminal-header">{children}</div>
+  ),
+  TerminalTitle: ({ children, title }: { children?: ReactNode; title?: string }) => (
+    <span data-testid="terminal-title" title={title}>
+      {children}
+    </span>
+  ),
+  TerminalStatus: () => null,
+  TerminalActions: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  TerminalCopyButton: () => <button data-testid="terminal-copy">copy</button>,
+  TerminalContent: () => null,
 }))
 
 vi.mock("../code-block", () => ({
@@ -65,11 +80,12 @@ describe("MessageToolCommandPart", () => {
       { approval: "pending", liveOutput: "streaming-bytes" },
     )
     const terminal = screen.getByTestId("terminal")
-    expect(terminal.textContent).toContain("streaming-bytes")
     expect(terminal.getAttribute("data-streaming")).toBe("true")
-    // Terminal framing includes the cwd + command.
-    expect(terminal.textContent).toContain("# cd /repo")
-    expect(terminal.textContent).toContain("$ echo hi")
+    // Command input lives in the header; cwd is exposed via the title attribute.
+    expect(screen.getByTestId("terminal-header").textContent).toContain("$ echo hi")
+    expect(screen.getByTestId("terminal-title").getAttribute("title")).toBe("/repo")
+    // Output (live while active) lives in the content surface, not the header.
+    expect(screen.getByTestId("terminal-content").textContent).toContain("streaming-bytes")
     // Badge reflects the approval-requested state.
     expect(screen.getByTestId("badge").textContent).toContain("Awaiting Approval")
   })
@@ -85,8 +101,9 @@ describe("MessageToolCommandPart", () => {
       { approval: "approved" },
     )
     const terminal = screen.getByTestId("terminal")
-    expect(terminal.textContent).toContain("final-result")
     expect(terminal.getAttribute("data-streaming")).toBe("false")
+    expect(screen.getByTestId("terminal-header").textContent).toContain("$ echo hi")
+    expect(screen.getByTestId("terminal-content").textContent).toContain("final-result")
     expect(screen.getByTestId("badge").textContent).toContain("Completed")
   })
 
@@ -100,7 +117,7 @@ describe("MessageToolCommandPart", () => {
       },
       {},
     )
-    expect(screen.getByTestId("terminal").textContent).toContain("boom: command not found")
+    expect(screen.getByTestId("terminal-content").textContent).toContain("boom: command not found")
     expect(screen.getByTestId("badge").textContent).toContain("Error")
   })
 
@@ -119,7 +136,7 @@ describe("MessageToolCommandPart", () => {
       {},
       "",
     )
-    // Still renders the command framing without throwing.
-    expect(screen.getByTestId("terminal").textContent).toContain("$ echo hi")
+    // Still renders the command framing in the header without throwing.
+    expect(screen.getByTestId("terminal-header").textContent).toContain("$ echo hi")
   })
 })

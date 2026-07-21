@@ -52,6 +52,8 @@ export const assistant = {
     prompt: '输入 {{formatted}}',
     completion: '输出 {{formatted}}',
     cached: '缓存 {{formatted}}',
+    used: '已使用 {{percent}}%',
+    total: '{{formatted}} tokens',
   },
   emptyState: {
     title: '开始一个新的助手线程，让上下文保持聚焦。',

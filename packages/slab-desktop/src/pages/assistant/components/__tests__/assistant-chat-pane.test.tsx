@@ -74,6 +74,12 @@ vi.mock("@slab/components/message-scroller", () => ({
   MessageScrollerProvider: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }))
 
+vi.mock("@slab/components/tooltip", () => ({
+  Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipContent: ({ children }: { children: ReactNode }) => <>{children}</>,
+}))
+
 function baseProps(overrides: Record<string, unknown> = {}) {
   return {
     disabled: false,
@@ -154,7 +160,7 @@ describe("AssistantChatPane", () => {
     expect(screen.queryByTestId("assistant-token-usage")).toBeNull()
   })
 
-  it("renders the token-usage indicator + context bar once a turn reports usage", () => {
+  it("renders the token-usage percentage label once a turn reports usage", () => {
     render(
       <AssistantChatPane
         {...baseProps({
@@ -170,8 +176,9 @@ describe("AssistantChatPane", () => {
     )
     const indicator = screen.getByTestId("assistant-token-usage")
     expect(indicator).toBeTruthy()
-    // Consumption bar present and proportionate (2048/8192 = 25%).
-    const bar = screen.getByTestId("assistant-token-usage-bar")
-    expect(bar.getAttribute("aria-valuenow")).toBe("25")
+    // Percentage label rendered (i18n mock returns the key verbatim; 2048/8192 = 25%).
+    expect(indicator.textContent).toContain("pages.assistant.usage.used")
+    // The consumption bar has been removed.
+    expect(screen.queryByTestId("assistant-token-usage-bar")).toBeNull()
   })
 })

@@ -117,6 +117,30 @@ export const ToolContent = ({ className, ...props }: ComponentProps<typeof Colla
   />
 )
 
+/** Max characters shown for a tool parameter/result before truncating with an ellipsis. */
+const TOOL_PREVIEW_LIMIT = 240
+
+/**
+ * Compact, length-capped preview of a tool parameter/result value. Strings are
+ * returned as-is; objects/arrays are serialized to a single-line JSON (no
+ * indentation) so the card never shows a wall of pretty-printed JSON. Values
+ * longer than {@link TOOL_PREVIEW_LIMIT} are truncated with "…".
+ */
+function compactToolValue(value: unknown): string {
+  if (value === undefined || value === null) return ""
+  let compact: string
+  if (typeof value === "string") {
+    compact = value
+  } else {
+    try {
+      compact = JSON.stringify(value)
+    } catch {
+      compact = String(value)
+    }
+  }
+  return compact.length > TOOL_PREVIEW_LIMIT ? `${compact.slice(0, TOOL_PREVIEW_LIMIT)}…` : compact
+}
+
 const ToolInput = ({
   className,
   input,
@@ -129,7 +153,7 @@ const ToolInput = ({
         Parameters
       </h4>
       <div className="rounded-md bg-muted/50">
-        <CodeBlock code={typeof input === "string" ? input : JSON.stringify(input, null, 2)} language="json" />
+        <CodeBlock code={compactToolValue(input)} language="json" />
       </div>
     </div>
   )
@@ -145,10 +169,11 @@ const ToolOutput = ({
   if (!errorText && !hasOutput) return null
 
   let OutputNode: ReactNode = <div>{output as ReactNode}</div>
-  if (typeof output === "object" && output !== null && !isValidElement(output)) {
-    OutputNode = <CodeBlock code={JSON.stringify(output, null, 2)} language="json" />
-  } else if (typeof output === "string") {
-    OutputNode = <CodeBlock code={output} language="json" />
+  if (
+    (typeof output === "object" && output !== null && !isValidElement(output)) ||
+    typeof output === "string"
+  ) {
+    OutputNode = <CodeBlock code={compactToolValue(output)} language="json" />
   }
 
   return (

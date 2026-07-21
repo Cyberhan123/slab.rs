@@ -1,13 +1,15 @@
+import { Tooltip, TooltipContent, TooltipTrigger } from "@slab/components/tooltip"
 import { useTranslation } from "@slab/i18n"
 
 import type { TurnUsage } from "../../lib/harness"
 
 /**
  * Token-usage indicator driven by the `turn/completed` harness notification's
- * `usage` payload. Shows prompt / completion (and cached) token counts plus a
- * context-window consumption bar when a context window is known. Rendered as a
- * sibling of {@link ModelLoadIndicator} in the composer footer. Hidden when
- * `usage` is null (no turn has completed yet).
+ * `usage` payload. Shows a compact "used X%" label (or a total-token count when
+ * the context window is unknown); hovering reveals the prompt / completion /
+ * cached breakdown as plain text. Rendered as a sibling of
+ * {@link ModelLoadIndicator} in the composer footer. Hidden when `usage` is
+ * null (no turn has completed yet).
  */
 export function TokenUsageIndicator({
     usage,
@@ -24,43 +26,44 @@ export function TokenUsageIndicator({
     const cached = usage.cachedTokens ?? 0
     const formatter = new Intl.NumberFormat()
     const ratio =
-        contextWindow && contextWindow > 0
-            ? Math.min(1, prompt / contextWindow)
-            : null
+        contextWindow && contextWindow > 0 ? Math.min(1, prompt / contextWindow) : null
+
+    const label =
+        ratio != null
+            ? t("pages.assistant.usage.used", { percent: Math.round(ratio * 100) })
+            : t("pages.assistant.usage.total", {
+                  formatted: formatter.format(usage.totalTokens ?? 0),
+              })
 
     return (
-        <div
-            className="flex w-full flex-col gap-1 px-1 text-xs text-muted-foreground"
-            data-testid="assistant-token-usage"
-        >
-            <div className="flex items-center gap-3 tabular-nums">
-                <span>{t("pages.assistant.usage.prompt", { formatted: formatter.format(prompt) })}</span>
-                <span>
-                    {t("pages.assistant.usage.completion", {
-                        formatted: formatter.format(completion),
-                    })}
-                </span>
-                {cached > 0 && (
-                    <span>
-                        {t("pages.assistant.usage.cached", { formatted: formatter.format(cached) })}
-                    </span>
-                )}
-            </div>
-            {ratio != null && (
-                <div
-                    className="h-1 w-full overflow-hidden rounded bg-muted"
-                    data-testid="assistant-token-usage-bar"
-                    role="progressbar"
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={Math.round(ratio * 100)}
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <span
+                    className="w-fit cursor-default px-1 text-xs tabular-nums text-muted-foreground"
+                    data-testid="assistant-token-usage"
                 >
-                    <div
-                        className="h-full rounded bg-primary/60 transition-all"
-                        style={{ width: `${Math.round(ratio * 100)}%` }}
-                    />
+                    {label}
+                </span>
+            </TooltipTrigger>
+            <TooltipContent>
+                <div className="flex flex-col gap-0.5 tabular-nums">
+                    <span>
+                        {t("pages.assistant.usage.prompt", { formatted: formatter.format(prompt) })}
+                    </span>
+                    <span>
+                        {t("pages.assistant.usage.completion", {
+                            formatted: formatter.format(completion),
+                        })}
+                    </span>
+                    {cached > 0 && (
+                        <span>
+                            {t("pages.assistant.usage.cached", {
+                                formatted: formatter.format(cached),
+                            })}
+                        </span>
+                    )}
                 </div>
-            )}
-        </div>
+            </TooltipContent>
+        </Tooltip>
     )
 }

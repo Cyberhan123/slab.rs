@@ -143,7 +143,18 @@ function toolChunksFromItem(item: TurnItem): UIMessageChunk[] {
 
 function handleItemStarted(state: StreamState, params: ItemStartedParams): UIMessageChunk[] {
   const { item } = params
-  if (item.type === "agentMessage") return openText(state, item.id)
+  if (item.type === "agentMessage") {
+    // The assistant's main message is starting. Close any reasoning part that is
+    // still open so its "Thinking..." indicator stops immediately — even when the
+    // server omits an explicit `item/completed(reasoning)` and jumps straight to
+    // the agent message. Idempotent: a no-op when `openReasoning` is already empty.
+    const chunks: UIMessageChunk[] = []
+    for (const reasoningId of state.openReasoning) {
+      chunks.push({ id: reasoningId, type: "reasoning-end" })
+    }
+    state.openReasoning.clear()
+    return chunks.concat(openText(state, item.id))
+  }
   if (item.type === "reasoning") return openReasoning(state, item.id)
   return []
 }

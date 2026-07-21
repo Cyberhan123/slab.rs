@@ -45,6 +45,38 @@ describe("harness stream convertNotification", () => {
         state,
       ),
     ).toEqual([{ delta: "think", id: "r1", type: "reasoning-delta" }])
+    // An explicit item/completed(reasoning) closes the part.
+    expect(
+      convertNotification({ method: "item/completed", params: { item, threadId: THREAD, turnId: TURN } }, state),
+    ).toEqual([{ id: "r1", type: "reasoning-end" }])
+  })
+
+  it("closes an open reasoning part as soon as the agent message starts", () => {
+    // Regression: some backends jump from reasoning deltas straight to
+    // item/started(agentMessage) without an item/completed(reasoning). The
+    // reasoning part must still close so its "Thinking..." indicator stops.
+    const state = createStreamState()
+    const r1: TurnItem = { type: "reasoning", id: "r1", summary: "", content: "" }
+    convertNotification({ method: "item/started", params: { item: r1, threadId: THREAD, turnId: TURN } }, state)
+    expect(state.openReasoning.has("r1")).toBe(true)
+
+    const chunks = convertNotification(agentMessageStarted("i1"), state)
+    expect(chunks).toEqual([
+      { id: "r1", type: "reasoning-end" },
+      { id: "i1", type: "text-start" },
+    ])
+    expect(state.openReasoning.has("r1")).toBe(false)
+
+    // turn/completed must not re-emit a reasoning-end for the already-closed part.
+    const finish = convertNotification(
+      { method: "turn/completed", params: { threadId: THREAD, turn: { id: TURN, items: [], status: "completed" } } },
+      state,
+    )
+    expect(finish).toEqual([
+      { id: "i1", type: "text-end" },
+      { type: "finish-step" },
+      { finishReason: "stop", type: "finish" },
+    ])
   })
 
   it("finalizes a commandExecution with input + output chunks", () => {

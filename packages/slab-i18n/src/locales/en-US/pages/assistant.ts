@@ -52,6 +52,8 @@ export const assistant = {
     prompt: 'In {{formatted}}',
     completion: 'Out {{formatted}}',
     cached: 'Cached {{formatted}}',
+    used: 'Used {{percent}}%',
+    total: '{{formatted}} tokens',
   },
   emptyState: {
     title: 'Start a new thread and keep the stage focused.',
