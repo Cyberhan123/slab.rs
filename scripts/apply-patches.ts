@@ -16,10 +16,9 @@
  *  5. Apply the patch with `git apply` inside the extracted directory.
  */
 
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, rmSync } from "fs";
 import { join, relative, resolve } from "path";
 import { spawnSync } from "child_process";
-import { tmpdir } from "os";
 
 const ROOT = resolve(import.meta.dir, "..");
 const PATCHES_DIR = join(ROOT, "patches");
@@ -100,26 +99,32 @@ async function downloadCrate(name: string, version: string): Promise<Buffer> {
   return Buffer.from(await res.arrayBuffer());
 }
 
-function extractCrate(
-  crateBuffer: Buffer,
-  destParent: string,
-  dirName: string
-): void {
-  const tmp = join(tmpdir(), `${dirName}.crate`);
-  writeFileSync(tmp, crateBuffer);
+function extractCrate(crateBuffer: Buffer, destParent: string): void {
+  mkdirSync(destParent, { recursive: true });
+  // .crate files are gzip-compressed tar archives. Feed the bytes via stdin
+  // and extract into destParent as cwd, so we never pass an absolute
+  // `C:\...\file.crate` path to tar: GNU tar (Git Bash) mis-parses a drive
+  // letter in the archive argument as `host:path` ("Cannot connect to C:").
+  // Reading from stdin (`-`) with cwd set avoids any path argument and works
+  // on both GNU tar and bsdtar (unlike `--force-local`, which bsdtar rejects).
+  const result = spawnSync("tar", ["-xzf", "-"], {
+    cwd: destParent,
+    shell: false,
+    input: crateBuffer,
+    stdio: ["pipe", "inherit", "inherit"],
+  });
 
-  try {
-    mkdirSync(destParent, { recursive: true });
-    // .crate files are gzip-compressed tar archives
-    if (!run("tar", ["-xzf", tmp, "-C", destParent])) {
-      throw new Error("tar extraction failed");
+  if (result.error) {
+    if (result.error.code === "ENOENT") {
+      throw new Error(
+        "Command 'tar' not found. scripts/apply-patches.ts requires tools like 'tar' and 'git' to be installed and available in PATH."
+      );
     }
-  } finally {
-    try {
-      rmSync(tmp);
-    } catch {
-      // ignore cleanup errors
-    }
+    throw new Error(`Failed to run tar: ${result.error.message}`);
+  }
+
+  if (result.status !== 0) {
+    throw new Error("tar extraction failed");
   }
 }
 
@@ -200,7 +205,7 @@ async function main(): Promise<void> {
 
       console.log(`  Extracting into vendor/ …`);
       try {
-        extractCrate(buf, VENDOR_DIR, dirName);
+        extractCrate(buf, VENDOR_DIR);
       } catch (err) {
         if (existsSync(vendorDir)) {
           rmSync(vendorDir, { recursive: true, force: true });

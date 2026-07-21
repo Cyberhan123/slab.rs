@@ -257,7 +257,7 @@ dirs = "6"
 dirs-next = "2.0.0"
 validator = "0.20"
 jsonschema = { version = "0.48.1", default-features = false }
-all-smi = "0.22"
+all-smi = "0.24.1"
 mime_guess = "2.0"
 percent-encoding = "2.3.2"
 itertools = "0.15.0"
@@ -338,7 +338,10 @@ checksum = "0.2.1"
 sys_traits = "0.1.28"
 
 [patch.crates-io]
-all-smi-luwen-if = { path = "vendor/all-smi-luwen-if-0.7.9" }
+# all-smi 0.24.1 pulls luwen-api 0.8.5 (Tenstorrent, linux-only), whose build-deps pin
+# home = "=0.5.5" — incompatible with the workspace's home 0.5.12 (rustyline/v8/which).
+# Vendor + relax the pin to "0.5.12". See patches/luwen-api-0.8.5.patch.
+luwen-api = { path = "vendor/luwen-api-0.8.5" }
 # Relax sqlx-sqlite's libsqlite3-sys cap (<0.38 -> <0.39) so cargo can unify on
 # libsqlite3-sys 0.38 alongside deno_cache's rusqlite 0.40 (deno_core 0.408 cycle).
 sqlx-sqlite = { path = "vendor/sqlx-sqlite-0.9.0" }
