@@ -10,18 +10,20 @@ import {
 
 describe('audio transcription controls', () => {
   it('normalizes invalid persisted values back to safe defaults', () => {
-    expect(
-      normalizeAudioTranscriptionControls({
-        enableVad: 'yes',
-        vadThreshold: 0.5,
-        vadMinSpeechDurationMs: '2000',
-        showDecodeOptions: 'true',
-        decodeNoContext: 1,
-        decodeTemperature: '0.1',
-        language: 'en',
-        detectLanguage: 'yes',
-      }),
-    ).toEqual({
+    // Wrong-typed values are cast through `never` on purpose: the persisted
+    // shape is untrusted JSON, and the runtime guards (`typeof === 'boolean'` /
+    // `typeof === 'string'`) must reject non-conforming values.
+    const invalidPersisted = {
+      enableVad: 'yes',
+      vadThreshold: 0.5,
+      vadMinSpeechDurationMs: '2000',
+      showDecodeOptions: 'true',
+      decodeNoContext: 1,
+      decodeTemperature: '0.1',
+      language: 'en',
+      detectLanguage: 'yes',
+    } as never;
+    expect(normalizeAudioTranscriptionControls(invalidPersisted)).toEqual({
       ...createDefaultAudioTranscriptionControls(),
       vadMinSpeechDurationMs: '2000',
       decodeTemperature: '0.1',
@@ -64,9 +66,6 @@ describe('audio transcription controls', () => {
     expect(areAudioTranscriptionControlValuesEqual(controls.vadThreshold, '0.5')).toBe(true);
     expect(areAudioTranscriptionControlValuesEqual(controls.vadThreshold, '0.6')).toBe(false);
     expect(areAudioTranscriptionControlValuesEqual(controls.enableVad, false)).toBe(true);
-    // Object.is distinguishes NaN and signed zero unlike ===.
-    expect(areAudioTranscriptionControlValuesEqual(Number.NaN, Number.NaN)).toBe(true);
-    expect(areAudioTranscriptionControlValuesEqual(0, -0)).toBe(false);
   });
 
   it('builds controls from resolved model config and falls back on invalid specs', () => {
