@@ -55,6 +55,14 @@ describe('useAudioUiStore', () => {
     expect(useAudioUiStore.getState().modelControlOverrides).toEqual({});
   });
 
+  it('should not clear overrides for an empty model ID', () => {
+    useAudioUiStore.getState().setModelControlOverrides('model-123', { decodeTemperature: '0.8' });
+    useAudioUiStore.getState().clearModelControlOverrides('   ');
+    expect(useAudioUiStore.getState().modelControlOverrides['model-123']).toEqual({
+      decodeTemperature: '0.8',
+    });
+  });
+
   it('should set hasHydrated state', () => {
     useAudioUiStore.getState().setHasHydrated(true);
     expect(useAudioUiStore.getState().hasHydrated).toBe(true);

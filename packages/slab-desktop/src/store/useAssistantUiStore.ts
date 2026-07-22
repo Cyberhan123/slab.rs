@@ -42,7 +42,7 @@ const initialPersistedState: PersistedAssistantUiState = {
   sessionLabels: {},
 };
 
-function normalizeToolConcurrency(value: number) {
+export function normalizeToolConcurrency(value: number) {
   if (!Number.isFinite(value)) {
     return initialPersistedState.toolConcurrency;
   }
@@ -50,7 +50,7 @@ function normalizeToolConcurrency(value: number) {
   return Math.min(4, Math.max(1, Math.trunc(value)));
 }
 
-function migrateAssistantUiState(value: unknown): PersistedAssistantUiState {
+export function migrateAssistantUiState(value: unknown): PersistedAssistantUiState {
   if (typeof value !== 'object' || value === null) {
     return initialPersistedState;
   }

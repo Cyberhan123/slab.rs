@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import './mock-ui-state-storage';
 import {
@@ -113,6 +113,31 @@ describe('useWorkspaceUiStore', () => {
 
     expect(useWorkspaceUiStore.getState().recentWorkspaces).toEqual([
       { lastOpenedAt: 40, name: 'slab', rootPath: 'C:/projects/slab' },
+    ]);
+  });
+
+  it('defaults lastOpenedAt to the current time when omitted', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-22T00:00:00Z'));
+    try {
+      useWorkspaceUiStore.getState().rememberRecentWorkspace({ name: 'Repo', rootPath: 'C:/repo' });
+      expect(useWorkspaceUiStore.getState().recentWorkspaces[0]?.lastOpenedAt).toBe(
+        new Date('2026-07-22T00:00:00Z').getTime(),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('falls back to the literal Workspace name when the root has no path segments', () => {
+    useWorkspaceUiStore.getState().rememberRecentWorkspace({
+      lastOpenedAt: 50,
+      name: '   ',
+      rootPath: '/',
+    });
+
+    expect(useWorkspaceUiStore.getState().recentWorkspaces).toEqual([
+      { lastOpenedAt: 50, name: 'Workspace', rootPath: '/' },
     ]);
   });
 });

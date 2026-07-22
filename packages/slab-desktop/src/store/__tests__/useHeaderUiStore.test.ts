@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import './mock-ui-state-storage';
-import { useHeaderUiStore } from '../useHeaderUiStore';
+import { migrateHeaderUiState, useHeaderUiStore } from '../useHeaderUiStore';
 
 describe('useHeaderUiStore', () => {
   beforeEach(() => {
@@ -50,6 +50,12 @@ describe('useHeaderUiStore', () => {
     expect(useHeaderUiStore.getState().selections).toEqual({});
   });
 
+  it('should not clear selection for an empty key', () => {
+    useHeaderUiStore.getState().setSelection('model-select', 'model-123');
+    useHeaderUiStore.getState().clearSelection('   ');
+    expect(useHeaderUiStore.getState().selections['model-select']).toBe('model-123');
+  });
+
   it('should set hasHydrated state', () => {
     useHeaderUiStore.getState().setHasHydrated(true);
     expect(useHeaderUiStore.getState().hasHydrated).toBe(true);
@@ -76,5 +82,32 @@ describe('useHeaderUiStore', () => {
     const nextState = useHeaderUiStore.getState();
     expect(nextState.selections['model-select']).toBe('model-456');
     expect(Object.keys(nextState.selections)).toHaveLength(1);
+  });
+});
+
+describe('migrateHeaderUiState', () => {
+  it('passes through snapshots that are not selections objects', () => {
+    expect(migrateHeaderUiState(null)).toBeNull();
+    expect(migrateHeaderUiState(undefined)).toBeUndefined();
+    expect(migrateHeaderUiState('string')).toBe('string');
+    expect(migrateHeaderUiState({ foo: 1 })).toEqual({ foo: 1 });
+  });
+
+  it('leaves selections unchanged when assistant:model is already set', () => {
+    const selections = { 'assistant:model': 'gpt-4', other: 'x' };
+    expect(migrateHeaderUiState({ selections })).toEqual({ selections });
+  });
+
+  it('leaves selections unchanged when there is no chat:model to migrate', () => {
+    const selections = { other: 'x' };
+    expect(migrateHeaderUiState({ selections })).toEqual({ selections });
+  });
+
+  it('copies chat:model to assistant:model and keeps the legacy key', () => {
+    const result = migrateHeaderUiState({ selections: { 'chat:model': 'gpt-4' } });
+    expect(result.selections).toEqual({
+      'chat:model': 'gpt-4',
+      'assistant:model': 'gpt-4',
+    });
   });
 });

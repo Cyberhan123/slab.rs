@@ -83,4 +83,34 @@ describe("useAgentSurfaceStore", () => {
 
     expect(useAgentSurfaceStore.getState().focusComposerSignal).toBe(2)
   })
+
+  it("clears a stored draft without returning it", () => {
+    useAgentSurfaceStore.getState().setDraft({ autoSubmit: false, prompt: "draft" })
+    useAgentSurfaceStore.getState().clearDraft()
+
+    expect(useAgentSurfaceStore.getState().draft).toBeNull()
+  })
+
+  it("clears a pending surface by matching id, ignores a mismatch, and clears unconditionally", () => {
+    useAgentSurfaceStore.getState().setPendingSurface({ type: "workspace", payload: { revealPath: "a" } })
+    const surface = useAgentSurfaceStore.getState().pendingSurface
+
+    // A mismatched id is a no-op.
+    useAgentSurfaceStore.getState().clearPendingSurface("other")
+    expect(useAgentSurfaceStore.getState().pendingSurface).toBe(surface)
+
+    // A matching id clears it.
+    useAgentSurfaceStore.getState().clearPendingSurface(surface?.id)
+    expect(useAgentSurfaceStore.getState().pendingSurface).toBeNull()
+
+    // No id clears unconditionally.
+    useAgentSurfaceStore.getState().setPendingSurface({ type: "workspace", payload: {} })
+    useAgentSurfaceStore.getState().clearPendingSurface()
+    expect(useAgentSurfaceStore.getState().pendingSurface).toBeNull()
+  })
+
+  it("returns null when consuming a pending surface that is absent", () => {
+    expect(useAgentSurfaceStore.getState().consumePendingSurface()).toBeNull()
+    expect(useAgentSurfaceStore.getState().consumePendingSurface("any-id")).toBeNull()
+  })
 })

@@ -18,6 +18,32 @@ const initialPersistedState: PersistedHeaderUiState = {
   selections: {},
 };
 
+/**
+ * Migrates a persisted header-ui snapshot: copies a legacy `chat:model`
+ * selection over to `assistant:model` (without removing the old key) when the
+ * new key is absent. Exported so the migration can be unit-tested directly;
+ * the shared mock storage returns null, so persist never invokes `migrate`
+ * during store tests.
+ */
+export function migrateHeaderUiState(persisted: unknown): PersistedHeaderUiState {
+  if (!persisted || typeof persisted !== 'object' || !('selections' in persisted)) {
+    return persisted as PersistedHeaderUiState;
+  }
+
+  const state = persisted as PersistedHeaderUiState;
+  if (state.selections['assistant:model'] || !state.selections['chat:model']) {
+    return state;
+  }
+
+  return {
+    ...state,
+    selections: {
+      ...state.selections,
+      'assistant:model': state.selections['chat:model'],
+    },
+  };
+}
+
 export const useHeaderUiStore = create<HeaderUiState>()(
   persist(
     (set) => ({
@@ -73,27 +99,7 @@ export const useHeaderUiStore = create<HeaderUiState>()(
     {
       name: 'header-ui',
       storage: createJSONStorage(() => createUiStateStorage()),
-      migrate: (persisted) => {
-        if (!persisted || typeof persisted !== 'object' || !('selections' in persisted)) {
-          return persisted;
-        }
-
-        const state = persisted as PersistedHeaderUiState;
-        if (
-          state.selections['assistant:model'] ||
-          !state.selections['chat:model']
-        ) {
-          return state;
-        }
-
-        return {
-          ...state,
-          selections: {
-            ...state.selections,
-            'assistant:model': state.selections['chat:model'],
-          },
-        };
-      },
+      migrate: migrateHeaderUiState,
       partialize: ({ selections }) => ({
         selections,
       }),

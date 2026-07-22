@@ -5,7 +5,7 @@ import { usePluginAuthorizationStore } from '../usePluginAuthorizationStore';
 
 describe('usePluginAuthorizationStore', () => {
   beforeEach(() => {
-    usePluginAuthorizationStore.setState({ grants: {} });
+    usePluginAuthorizationStore.setState({ grants: {}, hasHydrated: false });
   });
 
   it('starts with no grants', () => {
@@ -50,5 +50,36 @@ describe('usePluginAuthorizationStore', () => {
     usePluginAuthorizationStore.getState().revoke('plugin-a');
 
     expect(usePluginAuthorizationStore.getState().grants['plugin-a']).toBeUndefined();
+  });
+
+  it('deletes the plugin entry when its last granted permission is revoked', () => {
+    usePluginAuthorizationStore.getState().grant('plugin-a', 'chat:complete');
+    usePluginAuthorizationStore.getState().revoke('plugin-a', 'chat:complete');
+
+    // The whole entry is removed rather than left behind as an empty array.
+    expect(usePluginAuthorizationStore.getState().grants['plugin-a']).toBeUndefined();
+    expect(Object.keys(usePluginAuthorizationStore.getState().grants)).not.toContain('plugin-a');
+  });
+
+  it('is a no-op when revoking a permission the plugin does not hold', () => {
+    usePluginAuthorizationStore.getState().grant('plugin-a', 'chat:complete');
+    usePluginAuthorizationStore.getState().revoke('plugin-a', 'models:read');
+    usePluginAuthorizationStore.getState().revoke('plugin-unknown', 'chat:complete');
+
+    expect(usePluginAuthorizationStore.getState().grants['plugin-a']).toEqual(['chat:complete']);
+    expect(usePluginAuthorizationStore.getState().grants['plugin-unknown']).toBeUndefined();
+  });
+
+  it('reports unauthorized for both a missing entry and an empty grant list', () => {
+    usePluginAuthorizationStore.setState({ grants: { 'plugin-empty': [] } });
+    const { isAuthorized } = usePluginAuthorizationStore.getState();
+
+    expect(isAuthorized('plugin-missing', 'chat:complete')).toBe(false);
+    expect(isAuthorized('plugin-empty', 'chat:complete')).toBe(false);
+  });
+
+  it('sets hydration state', () => {
+    usePluginAuthorizationStore.getState().setHasHydrated(true);
+    expect(usePluginAuthorizationStore.getState().hasHydrated).toBe(true);
   });
 });
