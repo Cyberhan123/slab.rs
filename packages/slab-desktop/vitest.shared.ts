@@ -4,6 +4,8 @@ const componentSourcePath = path.resolve(__dirname, "../slab-components/src");
 const componentSourceUrl = componentSourcePath.replace(/\\/g, "/");
 const apiSourcePath = path.resolve(__dirname, "../api/src");
 const apiSourceUrl = apiSourcePath.replace(/\\/g, "/");
+const testUtilsSourcePath = path.resolve(__dirname, "../slab-test-utils/src");
+const testUtilsSourceUrl = testUtilsSourcePath.replace(/\\/g, "/");
 
 export const desktopVitestResolve = {
   dedupe: ["react", "react-dom"],
@@ -31,6 +33,14 @@ export const desktopVitestResolve = {
     {
       find: "@slab/i18n",
       replacement: path.resolve(__dirname, "../slab-i18n/src/index.ts"),
+    },
+    {
+      find: /^@slab\/test-utils\/(.+)$/,
+      replacement: `${testUtilsSourceUrl}/$1`,
+    },
+    {
+      find: "@slab/test-utils",
+      replacement: path.resolve(testUtilsSourcePath, "index.ts"),
     },
     {
       find: "@",

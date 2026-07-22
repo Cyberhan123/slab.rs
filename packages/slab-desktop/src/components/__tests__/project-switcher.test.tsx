@@ -1,32 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+// NOTE: `@slab/test-utils` mock factories must be imported BEFORE the modules
+// they mock (`sonner`, `@slab/i18n`). vitest hoists `vi.mock` above all imports
+// and runs each factory when its target module is first imported, so the
+// factory's helper binding must already be initialized — keep these first.
+import { setupSlabI18nMock, setupToastMock } from "@slab/test-utils/mocks"
+import { renderWithProviders } from "@slab/test-utils/providers/render-with-providers"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { toast } from "sonner"
 
 import { useWorkspaceUiStore } from "@/store/useWorkspaceUiStore"
 import { ProjectSwitcher, ProjectSwitcherView } from "../project-switcher"
 
-const { mockToastError, mockToastSuccess, mockWorkspaceOpen } = vi.hoisted(() => ({
-  mockToastError: vi.fn<() => void>(),
-  mockToastSuccess: vi.fn<() => void>(),
+const { mockWorkspaceOpen } = vi.hoisted(() => ({
   mockWorkspaceOpen: vi.fn<() => Promise<unknown>>(),
 }))
 
-vi.mock("sonner", () => ({
-  toast: {
-    success: mockToastSuccess,
-    error: mockToastError,
-  },
-}))
+// `sonner` / `@slab/i18n` mocks are provided by the shared test-utils factories.
+// Handles come back through the re-imported `toast` (and would via `vi.mocked()`
+// for i18n), exactly as before — the factory just centralizes the wiring.
+vi.mock("sonner", () => setupToastMock())
 
-vi.mock("@slab/i18n", () => ({
-  // `default` is the i18next instance; the server-backed UI-state store uses it
-  // to render persistence-failure messages, so expose a passthrough `t`.
-  default: { t: (key: string) => key },
-  useTranslation: vi.fn<() => { t: (key: string, options?: { count?: number }) => string }>(() => ({
-    t: (key, options) => (options ? `${key}:${options.count}` : key),
-  })),
-}))
+vi.mock("@slab/i18n", () => setupSlabI18nMock())
 
 vi.mock("@/lib/workspace-bridge", () => ({
   WORKSPACE_STATE_QUERY_KEY: ["workspace-state"],
@@ -89,13 +83,6 @@ describe("ProjectSwitcherView", () => {
 
 describe("ProjectSwitcher", () => {
   it("switches through the server open endpoint and reports suspended tasks", async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: {
-          retry: false,
-        },
-      },
-    })
     mockWorkspaceOpen.mockResolvedValue({
       current: {
         name: "Beta",
@@ -111,11 +98,7 @@ describe("ProjectSwitcher", () => {
       ],
     })
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <ProjectSwitcher activeName="Alpha" />
-      </QueryClientProvider>
-    )
+    const { queryClient } = renderWithProviders(<ProjectSwitcher activeName="Alpha" />)
 
     fireEvent.click(screen.getByLabelText("pages.workspace.projectSwitcher.toggle"))
     await act(async () => {

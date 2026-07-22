@@ -18,6 +18,7 @@ export default defineConfig({
         "**/tests/browser/**",
         "**/e2e/**",
         "packages/vitest-rust-reporter/**",
+        "packages/slab-test-utils/**",
       ],
       thresholds: {
         lines: 85,

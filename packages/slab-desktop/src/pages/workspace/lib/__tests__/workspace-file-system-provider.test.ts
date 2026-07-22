@@ -1,50 +1,22 @@
 import { describe, expect, it, vi } from "vitest"
 
+import {
+  monacoUriStub,
+  monacoEventStub,
+  monacoFilesServiceOverrideStub,
+} from "@slab/test-utils/mocks"
+
 // The provider depends on the Monaco/VS Code service graph (URI, Emitter, the
 // files-service-override enums and OverlayFileSystemProvider). Those packages
 // import their own `.css`, which vitest cannot load as native ESM, so this repo
 // keeps Monaco out of unit tests. We stub only the runtime primitives the
-// provider logic touches; TypeScript still resolves the real types.
-vi.mock("@codingame/monaco-vscode-api/vscode/vs/base/common/uri", () => ({
-  URI: {
-    parse: (value: string) => ({ toString: () => value }),
-  },
-}))
-vi.mock("@codingame/monaco-vscode-api/vscode/vs/base/common/event", () => ({
-  Emitter: class TestEmitter<T> {
-    private listeners: Array<(event: T) => void> = []
-    readonly event = (listener: (event: T) => void) => {
-      this.listeners = [...this.listeners, listener]
-      return {
-        dispose: () => {
-          this.listeners = this.listeners.filter((item) => item !== listener)
-        },
-      }
-    }
-    fire(event: T) {
-      for (const listener of this.listeners) {
-        listener(event)
-      }
-    }
-  },
-}))
-vi.mock("@codingame/monaco-vscode-files-service-override", () => ({
-  FileChangeType: { UPDATED: 0, ADDED: 1, DELETED: 2 },
-  FileSystemProviderCapabilities: { FileReadWrite: 2 },
-  FileSystemProviderError: { create: (message: string) => new Error(message) },
-  FileSystemProviderErrorCode: {
-    FileNotFound: "EntryNotFound",
-    NoPermissions: "NoPermissions",
-    Unavailable: "Unavailable",
-  },
-  FileType: { Unknown: 0, File: 1, Directory: 2, SymbolicLink: 64 },
-  OverlayFileSystemProvider: class {
-    register() {
-      return { dispose() {} }
-    }
-  },
-  registerFileSystemOverlay: () => ({ dispose() {} }),
-}))
+// provider logic touches; the version-coupled stub bodies are centralized in
+// `@slab/test-utils`. (vi.mock paths must stay string literals — vitest hoists
+// only literal specifiers — so the fragile bits that move are the stub bodies,
+// imported here.) TypeScript still resolves the real types.
+vi.mock("@codingame/monaco-vscode-api/vscode/vs/base/common/uri", () => monacoUriStub())
+vi.mock("@codingame/monaco-vscode-api/vscode/vs/base/common/event", () => monacoEventStub())
+vi.mock("@codingame/monaco-vscode-files-service-override", () => monacoFilesServiceOverrideStub())
 
 import { URI } from "@codingame/monaco-vscode-api/vscode/vs/base/common/uri"
 import {
