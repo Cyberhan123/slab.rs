@@ -7,6 +7,7 @@ import {
   getAssistantMessageTextContent,
   getContinueGenerationPrefix,
   mergeContinuationContent,
+  stripThinkTags,
   stripTrailingAssistantTurnArtifacts,
   toAssistantRequestMessage,
   toAssistantRequestMessages,
@@ -83,6 +84,30 @@ describe('assistant message utils', () => {
     expect(mergeContinuationContent('prefix', '')).toBe('prefix')
     expect(mergeContinuationContent('hello wor', 'world')).toBe('hello world')
     expect(mergeContinuationContent('hello', ' world')).toBe('hello world')
+    // Full overlap: generated reproduces the prefix end-to-end.
+    expect(mergeContinuationContent('hello', 'hello')).toBe('hello')
+  })
+
+  it('strips <think> reasoning blocks and leaves other content intact', () => {
+    expect(stripThinkTags('<think>secret</think>visible')).toBe('visible')
+    // Non-greedy across newlines.
+    expect(stripThinkTags('<think>multi\nline</think>text')).toBe('text')
+    // Case-insensitive tag match.
+    expect(stripThinkTags('<THINK>caps</THINK>out')).toBe('out')
+    // Attributes on the opening tag are tolerated.
+    expect(stripThinkTags('<think role="reasoning">attrs</think>after')).toBe('after')
+    // Multiple blocks in one string.
+    expect(stripThinkTags('<think>a</think>x<think>b</think>y')).toBe('xy')
+    // Surrounding whitespace is trimmed; an all-think string collapses to empty.
+    expect(stripThinkTags('  <think>x</think>  ')).toBe('')
+    // Tags that are merely prefixed by "think" (e.g. <thinking>) are left alone.
+    expect(stripThinkTags('<thinking>not a think tag</thinking>')).toBe(
+      '<thinking>not a think tag</thinking>'
+    )
+    // An unclosed tag is not removed (the regex requires a closing </think>).
+    expect(stripThinkTags('before<think>never closes')).toBe('before<think>never closes')
+    // Plain text without any tag is unchanged.
+    expect(stripThinkTags('plain text')).toBe('plain text')
   })
 
   it('extracts streaming JSON payloads and delta fields safely', () => {

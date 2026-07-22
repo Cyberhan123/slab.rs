@@ -32,6 +32,8 @@ describe('assistant page state helpers', () => {
     expect(createConversationLabel('  Project review  ', 'New assistant')).toBe('Project review');
     expect(createConversationLabel('   ', 'New assistant')).toBe('New assistant');
     expect(createConversationLabel('x'.repeat(43), 'New assistant')).toBe(`${'x'.repeat(42)}...`);
+    // Boundary: exactly 42 chars is not truncated.
+    expect(createConversationLabel('x'.repeat(42), 'New assistant')).toBe('x'.repeat(42));
   });
 
   it('uses explicit model capabilities before source defaults', () => {
@@ -73,6 +75,17 @@ describe('assistant page state helpers', () => {
       'pages.assistant.greeting.afternoon',
     );
     expect(getGreeting(new Date('2026-06-18T20:00:00'), t)).toBe(
+      'pages.assistant.greeting.evening',
+    );
+    // Boundary hours: 00:00 and 11:xx are morning, 12:00 tips into afternoon,
+    // 18:00 tips into evening.
+    expect(getGreeting(new Date('2026-06-18T00:00:00'), t)).toBe(
+      'pages.assistant.greeting.morning',
+    );
+    expect(getGreeting(new Date('2026-06-18T12:00:00'), t)).toBe(
+      'pages.assistant.greeting.afternoon',
+    );
+    expect(getGreeting(new Date('2026-06-18T18:00:00'), t)).toBe(
       'pages.assistant.greeting.evening',
     );
   });
@@ -117,5 +130,45 @@ describe('assistant page state helpers', () => {
       ...base,
       selectedModel: modelOption({ label: 'Cloud Model', source: 'cloud' }),
     })).toBe('Cloud Model / pages.assistant.status.cloudModel');
+  });
+
+  it('reports the remaining readiness states in priority order', () => {
+    const base = {
+      curConversation: 'session-1',
+      eventsConnected: false,
+      isCreatingSession: false,
+      isDeletingSession: false,
+      isHistoryLoading: false,
+      isPreparingModel: false,
+      isSessionBootstrapping: false,
+      modelLoading: false,
+      resolvedLanguage: 'en-US',
+      selectedModel: modelOption(),
+      selectedRuntimeContextLength: null,
+      t,
+    };
+
+    // Session lifecycle states win over model states.
+    expect(getSelectedModelStatusLabel({ ...base, isCreatingSession: true })).toBe(
+      'pages.assistant.status.creatingSession',
+    );
+    expect(getSelectedModelStatusLabel({ ...base, isDeletingSession: true })).toBe(
+      'pages.assistant.status.deletingSession',
+    );
+    expect(getSelectedModelStatusLabel({ ...base, modelLoading: true })).toBe(
+      'pages.assistant.status.loadingModels',
+    );
+    // No selected model yet.
+    expect(getSelectedModelStatusLabel({ ...base, selectedModel: undefined })).toBe(
+      'pages.assistant.status.selectModel',
+    );
+    // A pending download surfaces before the local-not-downloaded branch.
+    expect(
+      getSelectedModelStatusLabel({ ...base, selectedModel: modelOption({ pending: true }) })
+    ).toBe('Local Model / pages.assistant.status.downloading');
+    // A connected indicator appends even when no status qualifier is selected.
+    expect(
+      getSelectedModelStatusLabel({ ...base, eventsConnected: true })
+    ).toBe('Local Model / pages.assistant.connection.connected');
   });
 });
