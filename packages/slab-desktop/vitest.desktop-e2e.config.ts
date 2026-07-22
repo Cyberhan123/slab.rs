@@ -7,7 +7,7 @@ import { desktopVitestResolve } from "./vitest.shared"
 export default defineConfig({
   root: fileURLToPath(new URL(".", import.meta.url)),
   test: {
-    name: "desktop-e2e",
+    name: "desktop-e2e-suite",
     environment: "node",
     fileParallelism: false,
     hookTimeout: 900_000,

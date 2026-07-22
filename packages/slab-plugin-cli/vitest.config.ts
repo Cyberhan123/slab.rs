@@ -1,9 +1,13 @@
-import { defineConfig } from "vitest/config";
+import { defineProject, mergeConfig } from "vitest/config";
 
-export default defineConfig({
-  test: {
-    name: "plugin-cli",
-    environment: "node",
-    include: ["tests/**/*.test.ts"],
-  },
-});
+import { vitestBase } from "../../vitest.base";
+
+export default defineProject(
+  mergeConfig(vitestBase, {
+    test: {
+      name: "plugin-cli",
+      environment: "node",
+      include: ["tests/**/*.test.ts"],
+    },
+  }),
+);
