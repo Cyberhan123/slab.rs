@@ -1,15 +1,47 @@
 import { describe, expect, it } from 'vitest';
 
+import type { AiModel } from '@/hooks/use-ai-model';
+
 import {
   createConversationLabel,
   getGreeting,
   getSelectedModelStatusLabel,
   resolveAssistantModelCapabilities,
+  toAssistantModelOption,
   type ModelOption,
 } from '../assistant-page-state';
 
 const t = (key: string, values?: Record<string, unknown>) =>
   values ? `${key}:${values.formatted}` : key;
+
+function aiModel(overrides: Partial<AiModel> = {}): AiModel {
+  return {
+    backend_id: null,
+    backend_ids: [],
+    capabilities: ['chat_generation'],
+    chat_capabilities: null,
+    created_at: '2026-01-01T00:00:00Z',
+    display_name: 'Model',
+    filename: 'model.gguf',
+    id: 'model-1',
+    kind: 'local',
+    local_path: null,
+    pending: false,
+    repo_id: 'owner/model',
+    runtime_state: null,
+    size_bytes: null,
+    spec: {
+      filename: 'model.gguf',
+      local_path: null,
+      provider_id: null,
+      remote_model_id: null,
+      repo_id: 'owner/model',
+    },
+    status: 'ready',
+    updated_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  };
+}
 
 function modelOption(overrides: Partial<ModelOption> = {}): ModelOption {
   return {
@@ -170,5 +202,59 @@ describe('assistant page state helpers', () => {
     expect(
       getSelectedModelStatusLabel({ ...base, eventsConnected: true })
     ).toBe('Local Model / pages.assistant.connection.connected');
+  });
+
+  it('maps assistant models to picker options with downloaded/source derived state', () => {
+    // Cloud models are always considered downloaded and carry cloud defaults.
+    expect(toAssistantModelOption(aiModel({ kind: 'cloud', display_name: 'Cloud' }))).toEqual({
+      capabilities: {
+        raw_gbnf: false,
+        reasoning_controls: true,
+        structured_output: true,
+      },
+      contextWindow: null,
+      downloaded: true,
+      id: 'model-1',
+      label: 'Cloud',
+      pending: false,
+      runtimePresets: null,
+      source: 'cloud',
+    });
+
+    // Local model: downloaded only when ready AND a local_path is present.
+    expect(
+      toAssistantModelOption(aiModel({ status: 'ready', local_path: '/models/m.gguf' })).downloaded,
+    ).toBe(true);
+    expect(toAssistantModelOption(aiModel({ status: 'ready', local_path: null })).downloaded).toBe(
+      false,
+    );
+    expect(toAssistantModelOption(aiModel({ status: 'not_downloaded' })).downloaded).toBe(false);
+
+    // Pending flag and spec context window pass through; local source keeps local defaults.
+    expect(
+      toAssistantModelOption(
+        aiModel({
+          pending: true,
+          spec: {
+            context_window: 8192,
+            filename: 'model.gguf',
+            local_path: null,
+            provider_id: null,
+            remote_model_id: null,
+            repo_id: 'owner/model',
+          },
+        }),
+      ),
+    ).toMatchObject({
+      contextWindow: 8192,
+      downloaded: false,
+      pending: true,
+      source: 'local',
+      capabilities: {
+        raw_gbnf: true,
+        reasoning_controls: false,
+        structured_output: true,
+      },
+    });
   });
 });

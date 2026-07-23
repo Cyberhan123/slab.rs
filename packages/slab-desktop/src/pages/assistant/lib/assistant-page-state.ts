@@ -54,6 +54,23 @@ export function resolveAssistantModelCapabilities(
   return model.chat_capabilities ?? defaultCapabilitiesForSource(model.kind)
 }
 
+export function toAssistantModelOption(model: AiModel): ModelOption {
+  return {
+    capabilities: resolveAssistantModelCapabilities(model),
+    contextWindow: model.spec.context_window ?? null,
+    downloaded:
+      model.kind === "cloud" ||
+      (model.status === "ready" &&
+        typeof model.local_path === "string" &&
+        model.local_path.length > 0),
+    id: model.id,
+    label: model.display_name,
+    pending: model.pending,
+    runtimePresets: model.runtime_presets ?? null,
+    source: model.kind,
+  }
+}
+
 export function getGreeting(date: Date, t: AssistantPageTranslation) {
   const hour = date.getHours()
 

@@ -7,7 +7,7 @@ import { HEADER_SELECT_KEYS } from "@/layouts/header"
 
 import { getAssistantErrorDescription } from "../lib/assistant-request-errors"
 import {
-  resolveAssistantModelCapabilities,
+  toAssistantModelOption,
   type ModelOption,
   type ModelRuntimeStatus,
 } from "../lib/assistant-page-state"
@@ -23,25 +23,7 @@ export function useAssistantModel() {
   })
 
   const modelOptions = useMemo<ModelOption[]>(
-    () =>
-      assistantModels.models.map((model) => {
-        const downloaded =
-          model.kind === "cloud" ||
-          (model.status === "ready" &&
-            typeof model.local_path === "string" &&
-            model.local_path.length > 0)
-
-        return {
-          capabilities: resolveAssistantModelCapabilities(model),
-          contextWindow: model.spec.context_window ?? null,
-          downloaded,
-          id: model.id,
-          label: model.display_name,
-          pending: model.pending,
-          runtimePresets: model.runtime_presets ?? null,
-          source: model.kind,
-        }
-      }),
+    () => assistantModels.models.map(toAssistantModelOption),
     [assistantModels.models]
   )
 
