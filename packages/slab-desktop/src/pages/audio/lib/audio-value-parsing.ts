@@ -1,4 +1,4 @@
-type Translate = (key: string, options?: { label: string; value?: number }) => string;
+export type Translate = (key: string, options?: { label: string; value?: number }) => string;
 
 export function parseOptionalInt(
   raw: string,

@@ -34,6 +34,7 @@ import {
   type AudioTranscriptionControls,
 } from '../lib/audio-transcription-controls';
 import { parseOptionalFloat, parseOptionalInt } from '../lib/audio-value-parsing';
+import { prepareDecodeOptions, prepareInferenceOptions } from '../lib/audio-transcription-options';
 import { findBundledVadArtifact } from '../lib/audio-vad-models';
 import { useAudioHistory } from './use-audio-history';
 import { useAudioModelCatalog } from './use-audio-model-catalog';
@@ -153,9 +154,6 @@ export function useAudio() {
     decodeSplitOnWord,
     decodeSuppressNst,
     decodeTdrzEnable,
-    language,
-    prompt,
-    detectLanguage,
   } = controls;
 
   const bundledVadArtifact = useMemo(
@@ -489,109 +487,6 @@ export function useAudio() {
     return { settings, modelName };
   };
 
-  const prepareInferenceOptions = (): Omit<TranscribeOptions, 'decode' | 'vad'> | undefined => {
-    const next: Omit<TranscribeOptions, 'decode' | 'vad'> = {};
-    const trimmedLanguage = language.trim();
-    const trimmedPrompt = prompt.trim();
-
-    if (trimmedLanguage) {
-      next.language = trimmedLanguage;
-    }
-    if (trimmedPrompt) {
-      next.prompt = trimmedPrompt;
-    }
-    if (!trimmedLanguage && detectLanguage) {
-      next.language = 'auto';
-    }
-
-    return Object.keys(next).length > 0 ? next : undefined;
-  };
-
-  const prepareDecodeOptions = (): TranscribeOptions['decode'] | undefined => {
-    if (!showDecodeOptions) {
-      return undefined;
-    }
-
-    const decode: NonNullable<TranscribeOptions['decode']> = {};
-
-    const offsetMs = parseOptionalInt(
-      decodeOffsetMs,
-      t('pages.audio.validation.labels.decodeOffsetMs'),
-      0,
-      t,
-    );
-    const durationMs = parseOptionalInt(
-      decodeDurationMs,
-      t('pages.audio.validation.labels.decodeDurationMs'),
-      0,
-      t,
-    );
-    const wordThold = parseOptionalFloat(
-      decodeWordThold,
-      t('pages.audio.validation.labels.decodeWordThreshold'),
-      t,
-      { min: 0, max: 1 },
-    );
-    const maxLen = parseOptionalInt(
-      decodeMaxLen,
-      t('pages.audio.validation.labels.decodeMaxSegmentLength'),
-      0,
-      t,
-    );
-    const maxTokens = parseOptionalInt(
-      decodeMaxTokens,
-      t('pages.audio.validation.labels.decodeMaxTokensPerSegment'),
-      0,
-      t,
-    );
-    const temperature = parseOptionalFloat(
-      decodeTemperature,
-      t('pages.audio.validation.labels.decodeTemperature'),
-      t,
-      { min: 0 },
-    );
-    const temperatureInc = parseOptionalFloat(
-      decodeTemperatureInc,
-      t('pages.audio.validation.labels.decodeTemperatureIncrement'),
-      t,
-      { min: 0 },
-    );
-    const entropyThold = parseOptionalFloat(
-      decodeEntropyThold,
-      t('pages.audio.validation.labels.decodeEntropyThreshold'),
-      t,
-    );
-    const logprobThold = parseOptionalFloat(
-      decodeLogprobThold,
-      t('pages.audio.validation.labels.decodeLogprobThreshold'),
-      t,
-    );
-    const noSpeechThold = parseOptionalFloat(
-      decodeNoSpeechThold,
-      t('pages.audio.validation.labels.decodeNoSpeechThreshold'),
-      t,
-    );
-
-    if (offsetMs !== undefined) decode.offset_ms = offsetMs;
-    if (durationMs !== undefined) decode.duration_ms = durationMs;
-    if (wordThold !== undefined) decode.word_thold = wordThold;
-    if (maxLen !== undefined) decode.max_len = maxLen;
-    if (maxTokens !== undefined) decode.max_tokens = maxTokens;
-    if (temperature !== undefined) decode.temperature = temperature;
-    if (temperatureInc !== undefined) decode.temperature_inc = temperatureInc;
-    if (entropyThold !== undefined) decode.entropy_thold = entropyThold;
-    if (logprobThold !== undefined) decode.logprob_thold = logprobThold;
-    if (noSpeechThold !== undefined) decode.no_speech_thold = noSpeechThold;
-    if (decodeNoContext) decode.no_context = true;
-    if (decodeNoTimestamps) decode.no_timestamps = true;
-    if (decodeTokenTimestamps) decode.token_timestamps = true;
-    if (decodeSplitOnWord) decode.split_on_word = true;
-    if (decodeSuppressNst) decode.suppress_nst = true;
-    if (decodeTdrzEnable) decode.tdrz_enable = true;
-
-    return Object.keys(decode).length > 0 ? decode : undefined;
-  };
-
   const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     e.preventDefault();
     const selectedFile = await handleFile(e);
@@ -635,7 +530,7 @@ export function useAudio() {
       let decodeDescription = t('pages.audio.summary.decodeDefault');
       let transcribeOptions: TranscribeOptions | undefined;
 
-      const inferenceOptions = prepareInferenceOptions();
+      const inferenceOptions = prepareInferenceOptions(controls);
       if (inferenceOptions) {
         transcribeOptions = inferenceOptions;
       }
@@ -646,7 +541,7 @@ export function useAudio() {
         vadDescription = t('pages.audio.summary.vadOn', { model: preparedVad.modelName });
       }
 
-      const decodeOptions = prepareDecodeOptions();
+      const decodeOptions = prepareDecodeOptions(controls, t);
       if (decodeOptions) {
         transcribeOptions = { ...transcribeOptions, decode: decodeOptions };
         decodeDescription = t('pages.audio.summary.decodeCustom');

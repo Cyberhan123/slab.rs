@@ -40,6 +40,12 @@ import {
   type WorkspaceThemeMode,
 } from "../lib/monaco-theme"
 import { upsertFileTab } from "../lib/workspace-page-utils"
+import {
+  fileNameFromPath,
+  isAbsoluteFsPath,
+  parentDirectoryPath,
+  relativePathFromRoot,
+} from "../lib/workspace-path-utils"
 import type { WorkspaceLspOpenFileOptions } from "../lib/workspace-uri"
 import { useWorkspaceEditorDirty } from "./use-workspace-editor-dirty"
 import { useWorkspaceConfirmDialog } from "./use-workspace-confirm"
@@ -1009,31 +1015,3 @@ export function useWorkspacePage() {
 }
 
 export type WorkspacePageState = ReturnType<typeof useWorkspacePage>
-
-function fileNameFromPath(path: string) {
-  return path.match(/[^/\\]+$/)?.[0] ?? ""
-}
-
-function parentDirectoryPath(path: string) {
-  const normalized = path.trim()
-  const separatorIndex = Math.max(normalized.lastIndexOf("\\"), normalized.lastIndexOf("/"))
-  return separatorIndex > 0 ? normalized.slice(0, separatorIndex) : null
-}
-
-function relativePathFromRoot(path: string, rootPath: string) {
-  const comparablePath = normalizeFsPathForCompare(path)
-  const comparableRoot = normalizeFsPathForCompare(rootPath)
-  if (comparablePath === comparableRoot || !comparablePath.startsWith(`${comparableRoot}/`)) {
-    return null
-  }
-
-  return path.replaceAll("\\", "/").replace(/\/+$/, "").slice(comparableRoot.length + 1)
-}
-
-function normalizeFsPathForCompare(path: string) {
-  return path.replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase()
-}
-
-function isAbsoluteFsPath(path: string) {
-  return /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith("/") || path.startsWith("\\\\")
-}
