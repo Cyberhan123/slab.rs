@@ -1,9 +1,8 @@
 import useIsTauri from "@/hooks/use-tauri";
 import api from "@slab/api";
-import type { components } from "@slab/api/v1";
 import { useTranslation } from "@slab/i18n";
 
-type AudioTranscriptionRequest = components["schemas"]["AudioTranscriptionRequest"];
+import { buildTranscriptionBody } from "../lib/transcribe-body";
 
 export type TranscribeVadSettings = {
     enabled: true;
@@ -55,34 +54,7 @@ const useTranscribe = () => {
         value: File | string,
         options?: TranscribeOptions
     ): Promise<{ operation_id: string }> => {
-        if (!isTauri) {
-            throw new Error(t('pages.audio.error.webUploadNotImplemented'));
-        }
-        if (typeof value !== 'string' || !value.trim()) {
-            throw new Error(t('pages.audio.error.invalidDesktopFilePath'));
-        }
-
-        const body: AudioTranscriptionRequest = { path: value };
-
-        if (typeof options?.model_id === 'string' && options.model_id.trim()) {
-            (body as AudioTranscriptionRequest & { model_id?: string }).model_id = options.model_id.trim();
-        }
-        if (typeof options?.language === 'string' && options.language.trim()) {
-            body.language = options.language.trim();
-        }
-        if (typeof options?.prompt === 'string' && options.prompt.trim()) {
-            body.prompt = options.prompt.trim();
-        }
-        if (options?.detect_language) {
-            body.detect_language = true;
-        }
-        if (options?.vad) {
-            body.vad = options.vad;
-        }
-        if (options?.decode) {
-            body.decode = options.decode;
-        }
-
+        const body = buildTranscriptionBody(value, options, isTauri, t);
         const response = await mutateAsync({
             body,
         });

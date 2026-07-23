@@ -5,13 +5,9 @@ import { useTranslation } from '@slab/i18n';
 import { useAiModel } from '@/hooks/use-ai-model';
 import { HEADER_SELECT_KEYS } from '@/layouts/header';
 
-export type ImageModelOption = {
-  id: string;
-  label: string;
-  downloaded: boolean;
-  pending: boolean;
-  local_path: string | null;
-};
+import { toImageModelOption, type ImageModelOption } from '../lib/image-model-option';
+
+export type { ImageModelOption };
 
 export function useImageModelPreparation() {
   const { t } = useTranslation();
@@ -24,14 +20,7 @@ export function useImageModelPreparation() {
 
   const diffusionModels = imageModels.localModels;
   const modelOptions = useMemo<ImageModelOption[]>(
-    () =>
-      diffusionModels.map((model) => ({
-        id: model.id,
-        label: model.display_name,
-        downloaded: Boolean(model.local_path),
-        pending: model.pending,
-        local_path: model.local_path ?? null,
-      })),
+    () => diffusionModels.map(toImageModelOption),
     [diffusionModels],
   );
 

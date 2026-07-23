@@ -2,10 +2,11 @@ import { useMemo } from 'react';
 
 import {
   useAiModel,
-  type AiModel,
   type EnsureDownloadedResult,
 } from '@/hooks/use-ai-model';
 import { HEADER_SELECT_KEYS } from '@/layouts/header';
+
+import { mergeAudioModels } from '../lib/audio-model-catalog';
 
 export function useAudioModelCatalog() {
   const transcriptionCatalog = useAiModel({
@@ -21,16 +22,10 @@ export function useAudioModelCatalog() {
   const whisperTranscribeModels = transcriptionCatalog.localModels;
   const whisperVadModels = vadCatalog.localModels;
 
-  const audioModels = useMemo(() => {
-    const merged = new Map<string, AiModel>();
-    whisperTranscribeModels.forEach((model) => {
-      merged.set(model.id, model);
-    });
-    whisperVadModels.forEach((model) => {
-      merged.set(model.id, model);
-    });
-    return Array.from(merged.values());
-  }, [whisperTranscribeModels, whisperVadModels]);
+  const audioModels = useMemo(
+    () => mergeAudioModels(whisperTranscribeModels, whisperVadModels),
+    [whisperTranscribeModels, whisperVadModels],
+  );
 
   const ensureDownloadedAudioModel = async (
     modelId: string,
