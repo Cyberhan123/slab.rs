@@ -312,7 +312,7 @@ impl ModelPack {
             let Value::Object(payload) = &config.payload else {
                 return Err(ModelPackError::InvalidBackendConfigPayloadShape { id: config_id });
             };
-            for field in ["chat_template", "gbnf"] {
+            for field in ["chat_template", "gbnf", "instruction_template"] {
                 validate_optional_asset_ref(
                     field,
                     &config_id,
@@ -742,6 +742,25 @@ mod tests {
             "payload": {
                 "chat_template": {
                     "$path": "ref://models/assets/missing.jinja"
+                }
+            }
+        })
+        .to_string();
+
+        let error = ModelPack::from_bytes(&build_pack(entries)).unwrap_err();
+        assert!(error.to_string().contains("references missing asset"));
+    }
+
+    #[test]
+    fn rejects_missing_instruction_template_reference() {
+        let mut entries = valid_pack_entries();
+        entries[2].1 = json!({
+            "kind": "backend_config",
+            "label": "Default load",
+            "scope": "load",
+            "payload": {
+                "instruction_template": {
+                    "$path": "ref://models/assets/missing_instruction.jinja"
                 }
             }
         })

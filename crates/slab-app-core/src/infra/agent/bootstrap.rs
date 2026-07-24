@@ -159,6 +159,9 @@ fn build_agent_control(
             memory_root,
         )),
         Arc::new(super::memory::AgentMemoryStartupHook::new(memory_pipeline.clone())),
+        Arc::new(slab_agent_context::ContextInstructionHook::new(Arc::new(
+            super::context::AppContextSources::new((*ctx.model_state).clone()),
+        ))),
     ];
     if let Some(script_hook) =
         super::hooks::registered_script_hook(&ctx.pmid.config().agent.hooks, &ctx.config)

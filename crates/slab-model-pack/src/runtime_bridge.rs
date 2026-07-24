@@ -22,6 +22,11 @@ pub struct ModelPackLoadDefaults {
     pub chat_template_source: Option<String>,
     pub gbnf: Option<GbnfAssetRef>,
     pub gbnf_source: Option<String>,
+    /// Model-provided developer/system instruction template (raw jinja source).
+    /// Consumed by `slab-agent-context` to render the developer instruction;
+    /// absent for cloud models or local packs without one (bundled default).
+    pub instruction_template: Option<TemplateAssetRef>,
+    pub instruction_template_source: Option<String>,
     pub diffusion: Option<DiffusionLoadOptions>,
 }
 
@@ -396,6 +401,8 @@ fn build_load_defaults(
     reject_legacy_llama_load_fields(backend, &config_id, &options)?;
     let chat_template = parse_optional_asset_ref(&options, "chat_template", &config_id)?;
     let gbnf = parse_optional_asset_ref(&options, "gbnf", &config_id)?;
+    let instruction_template =
+        parse_optional_asset_ref(&options, "instruction_template", &config_id)?;
 
     Ok(ModelPackLoadDefaults {
         num_workers: options.get("num_workers").and_then(as_u32),
@@ -412,6 +419,13 @@ fn build_load_defaults(
         chat_template,
         gbnf_source: resolve_text_asset_ref(resolved, &config_id, "gbnf", gbnf.as_ref())?,
         gbnf,
+        instruction_template_source: resolve_text_asset_ref(
+            resolved,
+            &config_id,
+            "instruction_template",
+            instruction_template.as_ref(),
+        )?,
+        instruction_template,
         diffusion: matches!(
             backend,
             RuntimeBackendId::GgmlDiffusion | RuntimeBackendId::CandleDiffusion
@@ -615,6 +629,33 @@ mod v3_tests {
             resolved.compile_default_runtime_bridge().expect_err("legacy grammar field must fail");
 
         assert!(error.to_string().contains("use 'gbnf' instead"));
+    }
+
+    #[test]
+    fn compiles_instruction_template_source_from_load_payload() {
+        let mut entries = local_pack_entries();
+        entries[1].1 = json!({
+            "kind": "backend_config",
+            "label": "Load",
+            "scope": "load",
+            "payload": {
+                "num_workers": 2,
+                "instruction_template": {
+                    "$path": "ref://models/assets/instruction_template.jinja"
+                }
+            }
+        })
+        .to_string();
+        entries.push(("models/assets/instruction_template.jinja", "{{ skills }}".to_owned()));
+
+        let pack = ModelPack::from_bytes(&build_pack(entries)).expect("load pack");
+        let resolved = pack.resolve().expect("resolve pack");
+        let bridge = resolved.compile_default_runtime_bridge().expect("compile bridge");
+
+        assert_eq!(
+            bridge.load_defaults.instruction_template_source.as_deref(),
+            Some("{{ skills }}")
+        );
     }
 
     fn local_pack_entries() -> Vec<(&'static str, String)> {

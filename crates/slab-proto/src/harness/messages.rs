@@ -299,6 +299,38 @@ pub struct ThreadListResult {
     pub next_cursor: Option<String>,
 }
 
+// ============ skills/list ============
+
+/// Where a skill was discovered (workspace `.agents/skills` vs global app-home).
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillSource {
+    #[default]
+    Workspace,
+    Global,
+}
+
+/// A discoverable skill surfaced by `skills/list`.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillInfo {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub path: PathBuf,
+    pub source: SkillSource,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillsListParams {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillsListResult {
+    pub data: Vec<SkillInfo>,
+}
+
 // ============ turn/start ============
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]

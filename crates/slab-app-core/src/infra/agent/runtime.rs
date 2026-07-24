@@ -107,6 +107,9 @@ impl AgentRuntimeReloader {
                 memory_root,
             )),
             Arc::new(crate::infra::agent::memory::AgentMemoryStartupHook::new(memory_pipeline)),
+            Arc::new(slab_agent_context::ContextInstructionHook::new(Arc::new(
+                crate::infra::agent::context::AppContextSources::new(self.state.clone()),
+            ))),
         ]
     }
 }

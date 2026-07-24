@@ -15276,6 +15276,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "slab-agent-context"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "minijinja",
+ "serde",
+ "serde_json",
+ "slab-agent",
+ "slab-types",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "walkdir",
+]
+
+[[package]]
 name = "slab-agent-memories"
 version = "0.1.0"
 dependencies = [
@@ -15402,6 +15419,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slab-agent",
+ "slab-agent-context",
  "slab-agent-memories",
  "slab-agent-tools",
  "slab-agent-tracing",
@@ -16007,6 +16025,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slab-agent",
+ "slab-agent-context",
  "slab-app-core",
  "slab-cloud-provider",
  "slab-config",

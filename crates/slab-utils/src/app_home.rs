@@ -44,6 +44,17 @@ pub fn sessions_dir() -> PathBuf {
     app_home_dir().join("sessions")
 }
 
+/// Global skills directory (`<app_home>/skills`). Mirror of the workspace
+/// `.agents/skills` tree, scanned by `slab-agent-context`.
+pub fn skills_dir() -> PathBuf {
+    app_home_dir().join("skills")
+}
+
+/// Global `AGENTS.md` path (`<app_home>/AGENTS.md`).
+pub fn agents_md_path() -> PathBuf {
+    app_home_dir().join("AGENTS.md")
+}
+
 pub fn plugins_dir() -> PathBuf {
     app_home_dir().join("plugins")
 }
@@ -91,6 +102,8 @@ mod tests {
             runtime_ipc_dir(),
             models_dir(),
             sessions_dir(),
+            skills_dir(),
+            agents_md_path(),
             plugins_dir(),
             rules_dir(),
             outputs_dir(),

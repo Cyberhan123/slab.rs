@@ -27,6 +27,10 @@ pub(crate) struct LocalLlamaPromptProfile {
     pub(crate) backend_id: RuntimeBackendId,
     pub(crate) chat_template_source: Option<String>,
     pub(crate) default_gbnf: Option<String>,
+    /// Model-provided developer instruction template (raw jinja), threaded to
+    /// `slab-agent-context` to render the developer instruction. `None` for
+    /// models whose pack ships no `instruction_template.jinja`.
+    pub(crate) instruction_template_source: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -133,6 +137,7 @@ pub(crate) async fn resolve_local_chat_prompt_profile(
             backend_id,
             chat_template_source: gguf_chat_template,
             default_gbnf: None,
+            instruction_template_source: None,
         });
     };
     if let Some(pack_target) =
@@ -145,6 +150,7 @@ pub(crate) async fn resolve_local_chat_prompt_profile(
                 .chat_template_source
                 .or_else(|| gguf_chat_template.clone()),
             default_gbnf: pack_target.load_defaults.gbnf_source,
+            instruction_template_source: pack_target.load_defaults.instruction_template_source,
         });
     }
 
@@ -152,6 +158,7 @@ pub(crate) async fn resolve_local_chat_prompt_profile(
         backend_id,
         chat_template_source: gguf_chat_template,
         default_gbnf: None,
+        instruction_template_source: None,
     })
 }
 

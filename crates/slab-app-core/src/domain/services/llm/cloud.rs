@@ -393,6 +393,11 @@ fn build_genai_chat_request(
 
 fn conversation_message_to_genai(message: &DomainConversationMessage) -> GenaiChatMessage {
     let rendered = message.rendered_text();
+    // `developer` is preserved as a first-class internal role across the agent
+    // pipeline, but genai 0.6.5 exposes a closed `ChatRole { System, User,
+    // Assistant, Tool }` with no `Developer` variant — so it is flattened to
+    // `system` at this provider boundary for every cloud family. True OpenAI
+    // `developer` emission requires a genai upgrade (or a raw-HTTP OpenAI path).
     match message.role.as_str() {
         "system" | "developer" => GenaiChatMessage::system(rendered),
         "assistant" if message.tool_calls.is_empty() => GenaiChatMessage::assistant(rendered),

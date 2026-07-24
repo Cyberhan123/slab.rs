@@ -2,6 +2,7 @@ pub(crate) mod a2u_tools;
 pub mod adapter;
 pub(crate) mod bootstrap;
 pub(crate) mod code_tools;
+pub(crate) mod context;
 pub mod event_hub;
 pub mod exec_policy;
 pub(crate) mod hooks;

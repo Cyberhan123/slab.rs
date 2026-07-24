@@ -24,15 +24,16 @@ use slab_proto::harness::messages::{
 use slab_proto::harness::method;
 use slab_proto::harness::{
     ModelInfo, ModelListParams, ModelListResult, ModelLoadCompletedParams, ModelLoadDeltaParams,
-    ModelLoadError, ModelLoadPhase,
+    ModelLoadError, ModelLoadPhase, SkillInfo, SkillSource as ProtoSkillSource, SkillsListParams,
+    SkillsListResult,
 };
 use tokio::sync::mpsc;
 
 use super::session::HarnessSession;
 use super::transform::Established;
 use super::{
-    join_user_text, messages_from_input, model_info_from_spec, thread_from_snapshot,
-    thread_from_snapshot_with_id, thread_from_snapshot_with_turns,
+    join_user_text, messages_from_input, model_info_from_spec, scan_known_skills,
+    thread_from_snapshot, thread_from_snapshot_with_id, thread_from_snapshot_with_turns,
 };
 use crate::api::v1::agent::schema::AgentConfigInput;
 
@@ -81,14 +82,16 @@ pub(crate) async fn turn_start(
 
     match session.existing_real(&params.thread_id) {
         Some(real_id) => {
-            let content = join_user_text(&params.input);
+            let known_skills = scan_known_skills(session.state().workspace_root().as_deref());
+            let content = join_user_text(&params.input, &known_skills);
             session.service().send_input(&real_id, content).await.map_err(|e| e.to_string())?;
         }
         None => {
             // First turn materializes the slab thread (create + run).
+            let known_skills = scan_known_skills(session.state().workspace_root().as_deref());
             let config =
                 AgentConfigInput { model: params.model.clone(), ..Default::default() }.into();
-            let messages = messages_from_input(&params.input);
+            let messages = messages_from_input(&params.input, &known_skills);
             let real_id = session
                 .service()
                 .spawn(session.session_id().to_owned(), config, messages)
@@ -289,6 +292,33 @@ pub(crate) async fn model_list(
         })
         .collect();
     Ok(ModelListResult { data, next_cursor: None })
+}
+
+pub(crate) async fn skills_list(
+    session: HarnessSession,
+    _params: SkillsListParams,
+) -> Result<SkillsListResult, String> {
+    let workspace_root = session.state().workspace_root();
+    let app_home_skills_dir = slab_utils::app_home::skills_dir();
+    let skills = slab_agent_context::skill_manager::scan_skills(
+        workspace_root.as_deref(),
+        &app_home_skills_dir,
+    );
+    let data = skills
+        .into_iter()
+        .map(|skill| SkillInfo {
+            name: skill.name,
+            description: skill.description,
+            path: skill.path,
+            source: match skill.source {
+                slab_agent_context::skill_manager::SkillSource::Workspace => {
+                    ProtoSkillSource::Workspace
+                }
+                slab_agent_context::skill_manager::SkillSource::Global => ProtoSkillSource::Global,
+            },
+        })
+        .collect();
+    Ok(SkillsListResult { data })
 }
 
 pub(crate) async fn thread_fork(

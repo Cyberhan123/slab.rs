@@ -345,20 +345,68 @@ fn standard_reasoning_efforts() -> Vec<ReasoningEffortOption> {
     .collect()
 }
 
-/// Flatten the text of all [`slab_proto::harness::UserInput::Text`] items into a
-/// single user string (other input kinds are not yet wired).
-fn join_user_text(input: &[slab_proto::harness::UserInput]) -> String {
-    let mut text = String::new();
-    for item in input {
-        if let slab_proto::harness::UserInput::Text { text: t, .. } = item {
-            text.push_str(t);
-        }
-    }
-    text
+/// Scan workspace + global skills for the active workspace. Used to expand
+/// skills the user names in their message (slash-mention or exact name token).
+fn scan_known_skills(
+    workspace_root: Option<&std::path::Path>,
+) -> Vec<slab_agent_context::skill_manager::SkillRecord> {
+    slab_agent_context::skill_manager::scan_skills(
+        workspace_root,
+        &slab_utils::app_home::skills_dir(),
+    )
 }
 
-fn messages_from_input(input: &[slab_proto::harness::UserInput]) -> Vec<ConversationMessage> {
-    let text = join_user_text(input);
+fn push_skill_block(blocks: &mut Vec<String>, name: &str, path: &std::path::Path) {
+    let Ok(contents) = slab_agent_context::skill_manager::read_skill_contents(path) else {
+        return;
+    };
+    blocks.push(slab_agent_context::helper::render_skill_block(
+        name,
+        &path.to_string_lossy(),
+        &contents,
+    ));
+}
+
+/// Flatten the text of all [`slab_proto::harness::UserInput::Text`] items into a
+/// single user string, and expand any skills the user invoked: explicit
+/// [`slab_proto::harness::UserInput::Skill`] items, plus skills named in the
+/// text via `/name`/`$name` or an exact name token (no fuzzy matching). Expanded
+/// `<skill>` blocks are appended after the user text, de-duplicated by name.
+fn join_user_text(
+    input: &[slab_proto::harness::UserInput],
+    skills: &[slab_agent_context::skill_manager::SkillRecord],
+) -> String {
+    let mut text = String::new();
+    let mut blocks = Vec::new();
+    let mut expanded_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for item in input {
+        match item {
+            slab_proto::harness::UserInput::Text { text: t, .. } => text.push_str(t),
+            slab_proto::harness::UserInput::Skill { name, path }
+                if expanded_names.insert(name.clone()) =>
+            {
+                push_skill_block(&mut blocks, name, path);
+            }
+            _ => {}
+        }
+    }
+
+    for skill in slab_agent_context::user_instruction::SkillFragment::detect_in_text(&text, skills)
+    {
+        if expanded_names.insert(skill.name.clone()) {
+            push_skill_block(&mut blocks, &skill.name, &skill.path);
+        }
+    }
+
+    if blocks.is_empty() { text } else { format!("{}\n\n{}", text, blocks.join("\n\n")) }
+}
+
+fn messages_from_input(
+    input: &[slab_proto::harness::UserInput],
+    skills: &[slab_agent_context::skill_manager::SkillRecord],
+) -> Vec<ConversationMessage> {
+    let text = join_user_text(input, skills);
     if text.trim().is_empty() {
         Vec::new()
     } else {
@@ -382,16 +430,35 @@ mod tests {
             slab_proto::harness::UserInput::Text { text: "hel".into(), text_elements: vec![] },
             slab_proto::harness::UserInput::Text { text: "lo".into(), text_elements: vec![] },
         ];
-        assert_eq!(join_user_text(&input), "hello");
+        assert_eq!(join_user_text(&input, &[]), "hello");
     }
 
     #[test]
     fn messages_from_input_builds_single_user_message() {
         let input =
             vec![slab_proto::harness::UserInput::Text { text: "hi".into(), text_elements: vec![] }];
-        let messages = messages_from_input(&input);
+        let messages = messages_from_input(&input, &[]);
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].role, "user");
+    }
+
+    #[test]
+    fn join_user_text_expands_explicit_skill_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill_md = dir.path().join("SKILL.md");
+        std::fs::write(&skill_md, "# do the thing\n").unwrap();
+        let input = vec![
+            slab_proto::harness::UserInput::Text {
+                text: "please help".into(),
+                text_elements: vec![],
+            },
+            slab_proto::harness::UserInput::Skill { name: "thing".into(), path: skill_md.clone() },
+        ];
+        let joined = join_user_text(&input, &[]);
+        assert!(joined.starts_with("please help"));
+        assert!(joined.contains("<skill>"));
+        assert!(joined.contains("<name>thing</name>"));
+        assert!(joined.contains("# do the thing"));
     }
 
     fn spec(remote: &str, label: &str, is_default: bool) -> CloudModelSpec {

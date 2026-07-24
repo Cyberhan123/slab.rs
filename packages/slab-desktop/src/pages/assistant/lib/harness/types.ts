@@ -60,6 +60,7 @@ export const HARNESS_METHOD = {
   TURN_START: "turn/start",
   TURN_INTERRUPT: "turn/interrupt",
   MODEL_LIST: "model/list",
+  SKILLS_LIST: "skills/list",
   APPROVAL_RESOLVE: "approval/resolve",
   SHUTDOWN: "shutdown",
   WORKSPACE_MIGRATE: "workspace/migrate",
@@ -396,6 +397,21 @@ export interface ModelListParams {
 export interface ModelListResult {
   data: ModelInfo[]
   nextCursor?: string
+}
+
+export type SkillSource = "workspace" | "global"
+
+export interface SkillInfo {
+  name: string
+  description: string
+  path: string
+  source: SkillSource
+}
+
+export interface SkillsListParams {}
+
+export interface SkillsListResult {
+  data: SkillInfo[]
 }
 
 export interface WorkspaceMigrateParams {

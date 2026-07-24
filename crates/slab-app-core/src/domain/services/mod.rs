@@ -25,6 +25,7 @@ pub use backend::BackendService;
 pub use chat::ChatService;
 pub use ffmpeg::FfmpegService;
 pub use image::ImageService;
+pub(crate) use model::resolve_local_chat_prompt_profile;
 pub use model::{ModelLoadProgress, ModelService};
 pub use plugin::PluginService;
 pub use pmid::PmidService;

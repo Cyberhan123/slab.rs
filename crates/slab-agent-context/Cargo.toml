@@ -1,0 +1,25 @@
+[package]
+name = "slab-agent-context"
+version.workspace = true
+edition.workspace = true
+description = "Agent context management (skills, AGENTS.md, instructions) for slab.rs"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[dependencies]
+slab-agent = { workspace = true }
+slab-types = { workspace = true }
+
+async-trait = { workspace = true }
+minijinja = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+walkdir = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true }

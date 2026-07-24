@@ -211,7 +211,13 @@ fn normalize_template_message(message: &DomainConversationMessage) -> Value {
         }
     }
 
-    object.insert("role".to_owned(), Value::String(message.role.clone()));
+    // Local chat templates (llama.cpp / HF jinja) have no `developer` role —
+    // fold it into `system` so the model renders it correctly. `developer`
+    // remains a first-class internal role everywhere else; the cloud provider
+    // boundary also flattens it to `system` (see `domain::services::llm::cloud`
+    // — genai 0.6.5 exposes no `Developer` chat role variant).
+    let role = if message.role == "developer" { "system".to_owned() } else { message.role.clone() };
+    object.insert("role".to_owned(), Value::String(role));
     object.insert("content".to_owned(), content);
 
     if let Some(name) = message.name.as_ref() {
@@ -376,6 +382,24 @@ mod tests {
                 .expect("raw fallback prompt");
 
         assert_eq!(rendered, "System: hi\nUser: hello\nAssistant:");
+    }
+
+    #[test]
+    fn developer_role_folds_into_system_for_local_template() {
+        // llama.cpp / HF jinja templates have no `developer` role; the minijinja
+        // path must fold it into `system` before rendering.
+        let template =
+            "{% for message in messages %}[{{ message.role }}] {{ message.content }}\n{% endfor %}";
+        let rendered = build_prompt(
+            &[message("developer", "you are a coder"), message("user", "hi")],
+            Some(template),
+            None,
+            &[],
+        )
+        .expect("rendered prompt");
+
+        assert!(rendered.contains("[system] you are a coder"));
+        assert!(!rendered.contains("developer"));
     }
 
     #[test]
