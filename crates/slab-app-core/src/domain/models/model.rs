@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use slab_types::{Capability, I18nPayload, RuntimeBackendId};
+use slab_types::{Capability, ChatReasoningEffort, I18nPayload, RuntimeBackendId};
 use strum::{Display, EnumString};
 
 // ---------------------------------------------------------------------------
@@ -214,6 +214,12 @@ pub struct RuntimePresets {
     pub presence_penalty: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repetition_penalty: Option<f32>,
+    /// Per-effort sampling overrides (keys: `minimal` / `low` / `medium` /
+    /// `high`). Empty for the legacy flat payload shape (backward compatible:
+    /// such presets serialize byte-identically). Each override's set fields win
+    /// over the flat fields above for its effort level.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub efforts: BTreeMap<String, RuntimePresets>,
 }
 
 impl RuntimePresets {
@@ -226,7 +232,16 @@ impl RuntimePresets {
         presence_penalty: Option<f32>,
         repetition_penalty: Option<f32>,
     ) -> Self {
-        Self { max_tokens, temperature, top_p, top_k, min_p, presence_penalty, repetition_penalty }
+        Self {
+            max_tokens,
+            temperature,
+            top_p,
+            top_k,
+            min_p,
+            presence_penalty,
+            repetition_penalty,
+            efforts: BTreeMap::new(),
+        }
     }
 
     pub fn from_optional_fields(
@@ -251,6 +266,31 @@ impl RuntimePresets {
     }
 
     pub fn from_json_options(options: &BTreeMap<String, Value>) -> Option<Self> {
+        // Structured shape: { "default": {..}, "efforts": { "high": {..} } }.
+        if options.contains_key("efforts") || options.contains_key("default") {
+            let default = options
+                .get("default")
+                .and_then(Value::as_object)
+                .map(parse_flat_map)
+                .filter(|presets| !presets.is_empty())
+                .unwrap_or_default();
+            let efforts = options
+                .get("efforts")
+                .and_then(Value::as_object)
+                .map(|map| {
+                    map.iter()
+                        .filter_map(|(key, value)| {
+                            value.as_object().map(|obj| (key.clone(), parse_flat_map(obj)))
+                        })
+                        .filter(|(_, presets)| !presets.is_empty())
+                        .collect::<BTreeMap<_, _>>()
+                })
+                .unwrap_or_default();
+            let result = RuntimePresets { efforts, ..default };
+            return result.into_non_empty();
+        }
+
+        // Legacy flat shape: { "temperature": ..., "top_p": ... }.
         Self::from_optional_fields(
             options.get("max_tokens").and_then(json_value_to_u32),
             options.get("temperature").and_then(json_value_to_f32),
@@ -259,6 +299,43 @@ impl RuntimePresets {
             options.get("min_p").and_then(json_value_to_f32),
             options.get("presence_penalty").and_then(json_value_to_f32),
             options.get("repetition_penalty").and_then(json_value_to_f32),
+        )
+    }
+
+    /// Resolve the effective flat preset for an effort level: the matching
+    /// effort override's set fields win over this preset's flat fields. Returns
+    /// the flat default when `effort` is `None` (no thinking-strength steering).
+    pub fn resolve_for_effort(&self, effort: Option<ChatReasoningEffort>) -> RuntimePresets {
+        let key = match effort {
+            Some(ChatReasoningEffort::Minimal) => "minimal",
+            Some(ChatReasoningEffort::Low) => "low",
+            Some(ChatReasoningEffort::Medium) => "medium",
+            Some(ChatReasoningEffort::High) => "high",
+            Some(ChatReasoningEffort::None) | None => return self.flat_clone(),
+        };
+        let Some(override_preset) = self.efforts.get(key) else {
+            return self.flat_clone();
+        };
+        RuntimePresets::new(
+            override_preset.max_tokens.or(self.max_tokens),
+            override_preset.temperature.or(self.temperature),
+            override_preset.top_p.or(self.top_p),
+            override_preset.top_k.or(self.top_k),
+            override_preset.min_p.or(self.min_p),
+            override_preset.presence_penalty.or(self.presence_penalty),
+            override_preset.repetition_penalty.or(self.repetition_penalty),
+        )
+    }
+
+    fn flat_clone(&self) -> RuntimePresets {
+        RuntimePresets::new(
+            self.max_tokens,
+            self.temperature,
+            self.top_p,
+            self.top_k,
+            self.min_p,
+            self.presence_penalty,
+            self.repetition_penalty,
         )
     }
 
@@ -274,7 +351,20 @@ impl RuntimePresets {
             && self.min_p.is_none()
             && self.presence_penalty.is_none()
             && self.repetition_penalty.is_none()
+            && self.efforts.is_empty()
     }
+}
+
+fn parse_flat_map(map: &serde_json::Map<String, Value>) -> RuntimePresets {
+    RuntimePresets::new(
+        map.get("max_tokens").and_then(json_value_to_u32),
+        map.get("temperature").and_then(json_value_to_f32),
+        map.get("top_p").and_then(json_value_to_f32),
+        map.get("top_k").and_then(json_value_to_i32),
+        map.get("min_p").and_then(json_value_to_f32),
+        map.get("presence_penalty").and_then(json_value_to_f32),
+        map.get("repetition_penalty").and_then(json_value_to_f32),
+    )
 }
 
 fn json_value_to_f32(value: &Value) -> Option<f32> {
@@ -791,6 +881,45 @@ mod tests {
     use serde_json::json;
     use slab_types::Capability;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn runtime_presets_parses_flat_shape_as_default() {
+        let options: BTreeMap<String, serde_json::Value> =
+            json!({ "temperature": 0.6, "top_p": 0.95, "top_k": 20 })
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+        let presets = RuntimePresets::from_json_options(&options).expect("flat parses");
+        assert_eq!(presets.temperature, Some(0.6));
+        assert_eq!(presets.top_k, Some(20));
+        assert!(presets.efforts.is_empty(), "flat shape has no effort overrides");
+    }
+
+    #[test]
+    fn runtime_presets_parses_structured_default_and_efforts() {
+        let options: BTreeMap<String, serde_json::Value> = json!({
+            "default": { "temperature": 0.6, "top_p": 0.95 },
+            "efforts": { "high": { "temperature": 0.3, "top_k": 40 } }
+        })
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+        let presets = RuntimePresets::from_json_options(&options).expect("structured parses");
+        assert_eq!(presets.temperature, Some(0.6), "flat default comes from `default`");
+        assert_eq!(presets.efforts.len(), 1);
+        // High effort resolves with override fields winning over the default.
+        let high = presets.resolve_for_effort(Some(slab_types::ChatReasoningEffort::High));
+        assert_eq!(high.temperature, Some(0.3), "high override temperature wins");
+        assert_eq!(high.top_p, Some(0.95), "default top_p fills in");
+        assert_eq!(high.top_k, Some(40), "high-only field applied");
+        // Low (no override) falls back to the flat default.
+        let low = presets.resolve_for_effort(Some(slab_types::ChatReasoningEffort::Low));
+        assert_eq!(low.temperature, Some(0.6));
+    }
 
     #[test]
     fn stored_model_config_deserialization_requires_explicit_versions() {

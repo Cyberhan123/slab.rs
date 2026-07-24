@@ -153,14 +153,26 @@ fn build_agent_control(
         memory_config.clone(),
         memory_root.clone(),
     );
+    let exec_baseline =
+        super::exec_policy::baseline_from_config(ctx.pmid.config().agent.permissions.baseline);
+    let exec_policy = super::exec_policy::build_exec_policy_engine(
+        exec_baseline,
+        ctx.config.exec_rules_dir.clone(),
+        exec_db,
+        workspace_root.clone(),
+    );
+    // The memory read-side instruction is now folded into the context hook
+    // (AppContextSources::memory_context); only the write-side pipeline stays.
     let mut hooks: Vec<Arc<dyn slab_agent::AgentHook>> = vec![
-        Arc::new(slab_agent_memories::hooks::MemoryInstructionHook::new(
-            memory_config.enabled,
-            memory_root,
-        )),
         Arc::new(super::memory::AgentMemoryStartupHook::new(memory_pipeline.clone())),
         Arc::new(slab_agent_context::ContextInstructionHook::new(Arc::new(
-            super::context::AppContextSources::new((*ctx.model_state).clone()),
+            super::context::AppContextSources::new(
+                (*ctx.model_state).clone(),
+                super::context::shell_kind(shell_config.launcher),
+                Arc::clone(&exec_policy),
+                memory_config.enabled,
+                memory_root.clone(),
+            ),
         ))),
     ];
     if let Some(script_hook) =
@@ -179,14 +191,6 @@ fn build_agent_control(
     // ADR-013: concurrency limits are configurable via settings
     // (agent.runtime.limits), defaulting to the historical 32/4 ceiling.
     let runtime_limits = ctx.pmid.config().agent.runtime.limits.clamped();
-    let exec_baseline =
-        super::exec_policy::baseline_from_config(ctx.pmid.config().agent.permissions.baseline);
-    let exec_policy = super::exec_policy::build_exec_policy_engine(
-        exec_baseline,
-        ctx.config.exec_rules_dir.clone(),
-        exec_db,
-        workspace_root.clone(),
-    );
     let control = AgentControl::new_with_hooks_and_tracing(
         llm,
         store_adapter,

@@ -101,14 +101,22 @@ impl AgentRuntimeReloader {
             memory_root.clone(),
         );
         memory_pipeline.set_control(self.runtime.control());
+        let shell = crate::infra::agent::context::shell_kind(
+            self.state.pmid().config().agent.tools.shell.launcher,
+        );
+        let exec_policy = self.runtime.control().exec_policy();
+        // The memory read-side instruction is folded into the context hook
+        // (AppContextSources::memory_context); only the write-side pipeline stays.
         vec![
-            Arc::new(slab_agent_memories::hooks::MemoryInstructionHook::new(
-                memory_config.enabled,
-                memory_root,
-            )),
             Arc::new(crate::infra::agent::memory::AgentMemoryStartupHook::new(memory_pipeline)),
             Arc::new(slab_agent_context::ContextInstructionHook::new(Arc::new(
-                crate::infra::agent::context::AppContextSources::new(self.state.clone()),
+                crate::infra::agent::context::AppContextSources::new(
+                    self.state.clone(),
+                    shell,
+                    exec_policy,
+                    memory_config.enabled,
+                    memory_root,
+                ),
             ))),
         ]
     }

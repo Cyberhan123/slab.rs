@@ -126,6 +126,10 @@ impl ToolHandler for WebSearchTool {
         Some(slab_agent::OperationDescriptor::network(query))
     }
 
+    fn category(&self) -> slab_agent::OperationCategory {
+        slab_agent::OperationCategory::Network
+    }
+
     async fn execute(
         &self,
         _ctx: &ToolContext,

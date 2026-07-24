@@ -837,6 +837,18 @@ async fn resolve_local_catalog_model(
     Ok(model)
 }
 
+/// Best-effort lookup of a model's runtime sampling presets by id (works for
+/// local and cloud models). Returns `None` when the model is absent or carries
+/// no presets — callers fall back to request params + built-in effort presets.
+pub(crate) async fn runtime_presets_for(
+    state: &ModelState,
+    model_id: &str,
+) -> Option<crate::domain::models::RuntimePresets> {
+    let record = state.store().get_model(model_id).await.ok().flatten()?;
+    let model: UnifiedModel = record.try_into().ok()?;
+    model.runtime_presets
+}
+
 pub(super) fn resolve_local_backend_from_model(
     model: &UnifiedModel,
 ) -> Result<RuntimeBackendId, AppCoreError> {

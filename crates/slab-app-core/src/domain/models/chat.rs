@@ -103,6 +103,12 @@ pub struct LocalChatParams {
     /// agent path can opt into kv-cache reuse without triggering the chat
     /// session machinery. When `None`, the runtime falls back to `command.id`.
     pub session_key: Option<String>,
+    /// True when the caller has already injected reasoning-effort guidance into
+    /// the conversation (the agent context hook's `ReasoningEffortFragment`).
+    /// Skips the inline local reasoning-policy injection so the agent path
+    /// isn't guided twice. The raw `/v1/chat/completions` and `/responses`
+    /// paths leave this `false` (no context hook runs for them).
+    pub reasoning_guidance_in_context: bool,
 }
 
 #[derive(Debug, Clone, Default)]

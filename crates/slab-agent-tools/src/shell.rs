@@ -89,6 +89,10 @@ impl ToolHandler for ShellTool {
         Some(slab_agent::OperationDescriptor::shell(command))
     }
 
+    fn category(&self) -> slab_agent::OperationCategory {
+        slab_agent::OperationCategory::Shell
+    }
+
     async fn execute(
         &self,
         ctx: &ToolContext,

@@ -11,6 +11,8 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 
+use crate::snapshots::{EnvironmentSnapshot, MemoryContext, PermissionSnapshot};
+
 /// Resolves the dynamic inputs the context hook needs at agent-start time.
 ///
 /// The path accessors are cheap and non-blocking; filesystem scanning itself
@@ -42,4 +44,19 @@ pub trait AgentContextSources: Send + Sync {
     fn supports_developer_role(&self, _model_id: &str) -> bool {
         false
     }
+
+    /// Environment facts (cwd / shell / os / start-time) for the
+    /// `<environment_context>` fragment. Cheap and side-effect free; the host
+    /// computes the timestamp so this crate stays clock-free.
+    fn environment_snapshot(&self) -> EnvironmentSnapshot;
+
+    /// Effective permission state for the thread, for the
+    /// `<permissions_instructions>` fragment. The host bridges from its exec
+    /// policy so this crate stays free of `slab-exec-policy`.
+    fn permission_snapshot(&self, thread_id: &str) -> PermissionSnapshot;
+
+    /// Folded read-side memory context, if memory is enabled and a v1 summary
+    /// exists. `None` skips the memory fragment. The host bridges from
+    /// `slab-agent-memories` so this crate stays free of it.
+    fn memory_context(&self) -> Option<MemoryContext>;
 }

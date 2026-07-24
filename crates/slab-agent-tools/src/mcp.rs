@@ -44,6 +44,10 @@ impl ToolHandler for McpCallTool {
         })
     }
 
+    fn category(&self) -> slab_agent::OperationCategory {
+        slab_agent::OperationCategory::Network
+    }
+
     async fn execute(
         &self,
         _ctx: &ToolContext,
@@ -88,6 +92,10 @@ impl ToolHandler for McpListToolsTool {
 
     fn parameters_schema(&self) -> Value {
         serde_json::json!({ "type": "object", "properties": {} })
+    }
+
+    fn category(&self) -> slab_agent::OperationCategory {
+        slab_agent::OperationCategory::Network
     }
 
     async fn execute(
@@ -136,6 +144,10 @@ impl ToolHandler for McpProxyTool {
             return serde_json::json!({ "type": "object", "properties": {} });
         }
         self.spec.tool.input_schema.clone()
+    }
+
+    fn category(&self) -> slab_agent::OperationCategory {
+        slab_agent::OperationCategory::Network
     }
 
     async fn execute(

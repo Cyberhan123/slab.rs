@@ -599,6 +599,13 @@ impl AgentControl {
         self.exec_policy.clear_thread(thread_id).await;
     }
 
+    /// The shared exec-policy handle. Hosts use it to snapshot permission state
+    /// for context rendering (e.g. the `<permissions_instructions>` fragment and
+    /// progressive tool exposure) without re-deriving the engine.
+    pub fn exec_policy(&self) -> Arc<dyn crate::port::ExecPolicyPort> {
+        Arc::clone(&self.exec_policy)
+    }
+
     // ── private helpers ──────────────────────────────────────────────────────
 
     async fn spawn_inner(&self, request: SpawnRequest) -> Result<String, AgentError> {

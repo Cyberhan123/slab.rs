@@ -424,6 +424,7 @@ fn build_command(
             gbnf: None,
             structured_output: config.structured_output.clone(),
             session_key: None,
+            reasoning_guidance_in_context: false,
         },
         cloud: CloudChatParams {
             reasoning_effort: config.reasoning_effort,
@@ -644,6 +645,7 @@ fn local_stream_config(req: &OpenAICreateRequest, config: &AgentConfig) -> Local
         repetition_penalty: config.repetition_penalty,
         reasoning_effort: config.reasoning_effort,
         verbosity: config.verbosity,
+        reasoning_guidance_in_context: false,
         gbnf: None,
         structured_output: config.structured_output.clone(),
         tools: req.function_tools(),

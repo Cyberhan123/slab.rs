@@ -724,6 +724,7 @@ impl From<ChatCompletionRequest> for DomainChatCompletionCommand {
                 gbnf,
                 structured_output: structured_output.clone(),
                 session_key: None,
+                reasoning_guidance_in_context: false,
             },
             cloud: DomainCloudChatParams { reasoning_effort, verbosity, structured_output },
         }
@@ -772,6 +773,7 @@ impl From<CompletionRequest> for DomainTextCompletionCommand {
                 gbnf,
                 structured_output: structured_output.clone(),
                 session_key: None,
+                reasoning_guidance_in_context: false,
             },
             cloud: DomainCloudChatParams {
                 reasoning_effort: None,

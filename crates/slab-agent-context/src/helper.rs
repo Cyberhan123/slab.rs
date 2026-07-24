@@ -16,12 +16,18 @@ pub const SYSTEM_TEMPLATE: &str = include_str!("../templates/system.jinja");
 pub const DEFAULT_DEVELOPER_TEMPLATE: &str = include_str!("../templates/developer.jinja");
 pub const SKILL_TEMPLATE: &str = include_str!("../templates/skill.jinja");
 pub const AGENTS_MD_TEMPLATE: &str = include_str!("../templates/agents_md.jinja");
+pub const ENVIRONMENT_TEMPLATE: &str = include_str!("../templates/environment.jinja");
+pub const PERMISSIONS_TEMPLATE: &str = include_str!("../templates/permissions.jinja");
+pub const REASONING_EFFORT_TEMPLATE: &str = include_str!("../templates/reasoning_effort.jinja");
 
 /// Template names registered in every environment built by [`build_environment`].
 pub const SYSTEM_TEMPLATE_NAME: &str = "system";
 pub const INSTRUCTION_TEMPLATE_NAME: &str = "instruction";
 pub const SKILL_TEMPLATE_NAME: &str = "skill";
 pub const AGENTS_MD_TEMPLATE_NAME: &str = "agents_md";
+pub const ENVIRONMENT_TEMPLATE_NAME: &str = "environment";
+pub const PERMISSIONS_TEMPLATE_NAME: &str = "permissions";
+pub const REASONING_EFFORT_TEMPLATE_NAME: &str = "reasoning_effort";
 
 /// A short-path alias mapping, emitted in the developer instruction so prompts
 /// can reference `skill://<name>` / `instruction://agent.md` instead of long
@@ -46,6 +52,9 @@ pub fn build_environment() -> Environment<'static> {
     let _ = env.add_template(SYSTEM_TEMPLATE_NAME, SYSTEM_TEMPLATE);
     let _ = env.add_template(SKILL_TEMPLATE_NAME, SKILL_TEMPLATE);
     let _ = env.add_template(AGENTS_MD_TEMPLATE_NAME, AGENTS_MD_TEMPLATE);
+    let _ = env.add_template(ENVIRONMENT_TEMPLATE_NAME, ENVIRONMENT_TEMPLATE);
+    let _ = env.add_template(PERMISSIONS_TEMPLATE_NAME, PERMISSIONS_TEMPLATE);
+    let _ = env.add_template(REASONING_EFFORT_TEMPLATE_NAME, REASONING_EFFORT_TEMPLATE);
     env
 }
 

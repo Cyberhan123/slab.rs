@@ -305,6 +305,7 @@ impl AgentMemoryPipeline {
                 gbnf: None,
                 structured_output: Some(StructuredOutput::JsonObject),
                 session_key: None,
+                reasoning_guidance_in_context: false,
             },
             cloud: CloudChatParams {
                 reasoning_effort: None,

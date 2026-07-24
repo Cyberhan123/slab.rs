@@ -293,6 +293,9 @@ fn chat_command_from_agent_config(
             // `None`) so the chat_messages history/persistence machinery is
             // not triggered for the agent path.
             session_key: agent_kv_session_key(trace_context),
+            // The agent context hook already injects a reasoning-effort fragment,
+            // so the local path must not inject its inline policy a second time.
+            reasoning_guidance_in_context: true,
         },
         cloud: CloudChatParams {
             reasoning_effort: config.reasoning_effort,

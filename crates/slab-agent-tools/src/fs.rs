@@ -138,6 +138,10 @@ impl ToolHandler for WriteFileTool {
         )
     }
 
+    fn category(&self) -> slab_agent::OperationCategory {
+        slab_agent::OperationCategory::FileEdit
+    }
+
     async fn execute(
         &self,
         _ctx: &ToolContext,

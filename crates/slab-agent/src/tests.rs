@@ -1064,6 +1064,14 @@ impl crate::ExecPolicyPort for AskAllExecPolicy {
     }
     async fn set_thread_mode(&self, _thread_id: &str, _mode: crate::PermissionMode) {}
     async fn clear_thread(&self, _thread_id: &str) {}
+    fn permission_state_for(&self, _thread_id: &str) -> crate::PermissionStateSnapshot {
+        // Full exposure keeps the tool list unfiltered in approval-flow tests.
+        crate::PermissionStateSnapshot {
+            mode: crate::PermissionMode::FullControl,
+            baseline: crate::PermissionBaseline::FullAccess,
+            exposure: crate::ToolExposure::all(),
+        }
+    }
 }
 
 /// Test exec-policy that refuses every non-read-only operation. Proves the
@@ -1092,6 +1100,14 @@ impl crate::ExecPolicyPort for DenyAllExecPolicy {
     }
     async fn set_thread_mode(&self, _thread_id: &str, _mode: crate::PermissionMode) {}
     async fn clear_thread(&self, _thread_id: &str) {}
+    fn permission_state_for(&self, _thread_id: &str) -> crate::PermissionStateSnapshot {
+        // Full exposure keeps the tool list unfiltered in denial-flow tests.
+        crate::PermissionStateSnapshot {
+            mode: crate::PermissionMode::FullControl,
+            baseline: crate::PermissionBaseline::FullAccess,
+            exposure: crate::ToolExposure::all(),
+        }
+    }
 }
 
 /// ApprovalPort that counts how many times `request_approval` was called, so a
@@ -1702,6 +1718,135 @@ async fn offline_mode_drops_external_tools_from_llm_tool_list() {
         assert!(
             !tools.iter().any(|name| name.starts_with("mcp__")),
             "mcp__* must be dropped: {tools:?}"
+        );
+    }
+}
+
+/// Test tool with a configurable exposure category (defaults to `ReadOnly`).
+struct CategorizedTool {
+    name: &'static str,
+    category: crate::OperationCategory,
+}
+
+#[async_trait]
+impl ToolHandler for CategorizedTool {
+    fn name(&self) -> &str {
+        self.name
+    }
+    fn description(&self) -> &str {
+        "Categorized no-op tool for progressive-exposure tests."
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({ "type": "object" })
+    }
+    fn category(&self) -> crate::OperationCategory {
+        self.category
+    }
+    async fn execute(
+        &self,
+        _ctx: &ToolContext,
+        _arguments: &serde_json::Value,
+    ) -> Result<ToolOutput, AgentError> {
+        Ok(ToolOutput { content: "{}".to_owned(), metadata: None })
+    }
+}
+
+/// Test exec-policy that reports a read-only exposure (mirrors a read-only
+/// permission mode) so the tool-list filter hides mutating categories.
+struct ReadOnlyExposurePolicy;
+
+#[async_trait]
+impl crate::ExecPolicyPort for ReadOnlyExposurePolicy {
+    async fn evaluate(
+        &self,
+        _thread_id: &str,
+        descriptor: &crate::OperationDescriptor,
+    ) -> crate::ExecDecision {
+        match descriptor.category {
+            crate::OperationCategory::ReadOnly => crate::ExecDecision::Allow,
+            _ => crate::ExecDecision::Deny,
+        }
+    }
+    async fn remember(
+        &self,
+        _thread_id: &str,
+        _descriptor: &crate::OperationDescriptor,
+        _scope: crate::ApprovalScope,
+    ) {
+    }
+    async fn set_thread_mode(&self, _thread_id: &str, _mode: crate::PermissionMode) {}
+    async fn clear_thread(&self, _thread_id: &str) {}
+    fn permission_state_for(&self, _thread_id: &str) -> crate::PermissionStateSnapshot {
+        crate::PermissionStateSnapshot {
+            mode: crate::PermissionMode::Custom,
+            baseline: crate::PermissionBaseline::ReadOnly,
+            exposure: crate::ToolExposure::read_only(),
+        }
+    }
+}
+
+#[tokio::test]
+async fn read_only_permission_mode_drops_mutating_tools_from_llm_tool_list() {
+    // Progressive tool exposure: a read-only permission state hides tools whose
+    // category isn't ReadOnly (shell / file_edit / network), while read-only
+    // tools (echo) stay visible. Composes with the offline filter the same way.
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let llm = Arc::new(CapturingToolsLlm { calls: calls.clone() });
+    let store = Arc::new(PersistingStore::default());
+    let store_port: Arc<dyn AgentStorePort> = store.clone();
+    let notify = Arc::new(NoopNotify);
+    let router = ToolRouter::new();
+    router.register(Box::new(TestEchoTool));
+    router.register(Box::new(CategorizedTool {
+        name: "shell",
+        category: crate::OperationCategory::Shell,
+    }));
+    router.register(Box::new(CategorizedTool {
+        name: "write_file",
+        category: crate::OperationCategory::FileEdit,
+    }));
+    router.register(Box::new(CategorizedTool {
+        name: "web_search",
+        category: crate::OperationCategory::Network,
+    }));
+
+    let approval = Arc::clone(&notify);
+    let control = Arc::new(
+        AgentControl::new(llm, store_port, notify, approval, Arc::new(router), 8, 4)
+            .with_exec_policy(Arc::new(ReadOnlyExposurePolicy)),
+    );
+    let config = AgentConfig { model: "mock".into(), max_turns: 1, ..AgentConfig::default() };
+    let thread_id = control
+        .spawn(
+            "session-readonly".into(),
+            config,
+            vec![ConversationMessage {
+                role: "user".into(),
+                content: ConversationMessageContent::Text("finish".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![],
+            }],
+        )
+        .await
+        .expect("spawn");
+
+    wait_for_persisted_status(&store, &thread_id, ThreadStatus::Interrupted).await;
+    let calls = calls.lock().unwrap().clone();
+    assert!(!calls.is_empty(), "LLM should have been called at least once");
+    for tools in &calls {
+        assert!(tools.contains(&"echo".to_owned()), "read-only tool `echo` must remain: {tools:?}");
+        assert!(
+            !tools.contains(&"shell".to_owned()),
+            "shell must be hidden in read-only mode: {tools:?}"
+        );
+        assert!(
+            !tools.contains(&"write_file".to_owned()),
+            "write_file must be hidden in read-only mode: {tools:?}"
+        );
+        assert!(
+            !tools.contains(&"web_search".to_owned()),
+            "web_search must be hidden in read-only mode: {tools:?}"
         );
     }
 }

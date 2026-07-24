@@ -10,6 +10,7 @@ use tracing::warn;
 
 use crate::category::{OperationCategory, OperationDescriptor};
 use crate::decision::{ApprovalScope, ExecDecision, PermissionBaseline, PermissionMode};
+use crate::exposure::{PermissionStateSnapshot, ToolExposure};
 use crate::rule::{RuleAction, RuleSet};
 use crate::safety::{CommandSafetyChecker, SafetyDecision, is_sensitive_path};
 use crate::store::{RuleStore, workspace_rules_filename};
@@ -35,6 +36,12 @@ pub trait ExecPolicyPort: Send + Sync {
 
     /// Drop per-thread state when the thread ends.
     async fn clear_thread(&self, thread_id: &str);
+
+    /// Snapshot the resolved permission state for a thread — its effective
+    /// mode, the global baseline, and the derived tool exposure. Cheap (reads
+    /// the in-memory mode map + baseline); used to drive progressive tool
+    /// exposure and to render permission instructions to the LLM.
+    fn permission_state_for(&self, thread_id: &str) -> PermissionStateSnapshot;
 }
 
 /// Internal behavior after resolving `PermissionMode` (+ baseline for Custom).
@@ -58,6 +65,21 @@ fn resolve_behavior(mode: PermissionMode, baseline: PermissionBaseline) -> Behav
             PermissionBaseline::WorkspaceWrite => Behavior::RequestApproval,
             PermissionBaseline::FullAccess => Behavior::FullControl,
         },
+    }
+}
+
+/// Map a resolved [`Behavior`] to the set of tool categories the agent may see.
+/// `FullControl` exposes everything; `StrictReadOnly` exposes only reads;
+/// `RequestApproval` exposes all categories (the approval popup gates
+/// invocation, not visibility).
+fn behavior_to_exposure(behavior: Behavior) -> ToolExposure {
+    match behavior {
+        Behavior::FullControl => ToolExposure::all(),
+        Behavior::RequestApproval => ToolExposure::read_only()
+            .with(OperationCategory::FileEdit)
+            .with(OperationCategory::Shell)
+            .with(OperationCategory::Network),
+        Behavior::StrictReadOnly => ToolExposure::read_only(),
     }
 }
 
@@ -180,6 +202,16 @@ impl ExecPolicyPort for ExecPolicyEngine {
     async fn clear_thread(&self, thread_id: &str) {
         self.modes.remove(thread_id);
     }
+
+    fn permission_state_for(&self, thread_id: &str) -> PermissionStateSnapshot {
+        let mode = self.mode_for(thread_id);
+        let behavior = resolve_behavior(mode.effective(), self.baseline);
+        PermissionStateSnapshot {
+            mode,
+            baseline: self.baseline,
+            exposure: behavior_to_exposure(behavior),
+        }
+    }
 }
 
 fn default_base(category: OperationCategory) -> ExecDecision {
@@ -220,6 +252,15 @@ impl ExecPolicyPort for AllowAllExecPolicy {
     }
     async fn set_thread_mode(&self, _thread_id: &str, _mode: PermissionMode) {}
     async fn clear_thread(&self, _thread_id: &str) {}
+    fn permission_state_for(&self, _thread_id: &str) -> PermissionStateSnapshot {
+        // Consistent with "allow everything": report full control + full exposure
+        // so the tool-list filter is a no-op when this stub is wired.
+        PermissionStateSnapshot {
+            mode: PermissionMode::FullControl,
+            baseline: PermissionBaseline::FullAccess,
+            exposure: ToolExposure::all(),
+        }
+    }
 }
 
 // Re-export so callers don't need a separate `use` for the error type.
@@ -426,5 +467,43 @@ mod tests {
             engine.evaluate("t1", &OperationDescriptor::shell("git status")).await,
             ExecDecision::RequireApproval
         );
+    }
+
+    #[test]
+    fn permission_state_read_only_hides_mutations() {
+        let engine =
+            engine_with_rules(PermissionMode::Custom, PermissionBaseline::ReadOnly, vec![], ws());
+        let snapshot = engine.permission_state_for("t1");
+        assert_eq!(snapshot.mode, PermissionMode::Custom);
+        assert_eq!(snapshot.baseline, PermissionBaseline::ReadOnly);
+        assert_eq!(snapshot.exposure, ToolExposure::read_only());
+        assert!(!snapshot.exposure.contains(OperationCategory::Shell));
+        assert!(!snapshot.exposure.contains(OperationCategory::FileEdit));
+        assert!(!snapshot.exposure.contains(OperationCategory::Network));
+        assert!(snapshot.exposure.contains(OperationCategory::ReadOnly));
+    }
+
+    #[test]
+    fn permission_state_request_approval_exposes_everything() {
+        let engine = engine_with_rules(
+            PermissionMode::RequestApproval,
+            PermissionBaseline::WorkspaceWrite,
+            vec![],
+            ws(),
+        );
+        // RequestApproval gates invocation via the approval popup, not
+        // visibility, so every category stays exposed.
+        assert_eq!(engine.permission_state_for("t1").exposure, ToolExposure::all());
+    }
+
+    #[test]
+    fn permission_state_full_control_exposes_everything() {
+        let engine = engine_with_rules(
+            PermissionMode::FullControl,
+            PermissionBaseline::FullAccess,
+            vec![],
+            ws(),
+        );
+        assert_eq!(engine.permission_state_for("t1").exposure, ToolExposure::all());
     }
 }

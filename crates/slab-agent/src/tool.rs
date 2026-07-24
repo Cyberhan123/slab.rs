@@ -242,6 +242,16 @@ pub trait ToolHandler: Send + Sync {
         None
     }
 
+    /// Coarse operation category used for *progressive tool exposure*: tools
+    /// whose category the current permission behavior does not permit are
+    /// hidden from the LLM's tool list (e.g. shell / file-write / network tools
+    /// in read-only mode). Defaults to [`OperationCategory::ReadOnly`]; mutating
+    /// tools override this to match their [`ToolHandler::describe_operation`]
+    /// category (`Shell` / `FileEdit` / `Network`).
+    fn category(&self) -> slab_exec_policy::OperationCategory {
+        slab_exec_policy::OperationCategory::ReadOnly
+    }
+
     /// Execute the tool with the given parsed arguments.
     async fn execute(
         &self,
@@ -295,6 +305,18 @@ impl ToolRouter {
                 description: h.description().to_owned(),
                 parameters_schema: h.parameters_schema(),
             })
+            .collect()
+    }
+
+    /// Map every registered tool name to its exposure category. Used by the
+    /// turn loop to filter the tool list by the current permission behavior
+    /// without leaking categories onto the LLM-facing [`ToolSpec`].
+    pub fn categories(&self) -> HashMap<String, slab_exec_policy::OperationCategory> {
+        self.handlers
+            .read()
+            .expect("tool registry lock poisoned")
+            .iter()
+            .map(|(name, handler)| (name.clone(), handler.category()))
             .collect()
     }
 }

@@ -373,6 +373,22 @@ fn allowed_tool_specs(context: &TurnExecutionContext<'_>) -> Result<Vec<ToolSpec
         // dropping anything that needs external network/provider reachability.
         specs.retain(|tool| !is_external_tool_name(&tool.name));
     }
+    // Progressive tool exposure: hide tool categories the current permission
+    // behavior doesn't permit (e.g. shell/file-edit/network in read-only mode).
+    // Computed fresh each turn from the live per-thread permission mode, so a
+    // mid-thread mode flip is reflected immediately. `all()` short-circuits the
+    // (cheap but needless) category-map build under FullControl/RequestApproval.
+    let exposure = context.exec_policy.permission_state_for(context.thread_id).exposure;
+    if exposure != slab_exec_policy::ToolExposure::all() {
+        let categories = context.tools.categories();
+        specs.retain(|spec| {
+            let category = categories
+                .get(&spec.name)
+                .copied()
+                .unwrap_or(slab_exec_policy::OperationCategory::ReadOnly);
+            exposure.contains(category)
+        });
+    }
 
     match &context.config.tool_choice {
         AgentToolChoice::Auto => Ok(specs),

@@ -49,6 +49,7 @@ pub(crate) struct LocalChatRequestConfig {
     pub(crate) repetition_penalty: Option<f32>,
     pub(crate) reasoning_effort: Option<ChatReasoningEffort>,
     pub(crate) verbosity: Option<ChatVerbosity>,
+    pub(crate) reasoning_guidance_in_context: bool,
     pub(crate) gbnf: Option<String>,
     pub(crate) structured_output: Option<StructuredOutput>,
     pub(crate) tools: Vec<slab_proto::openai::FunctionTool>,
@@ -100,19 +101,22 @@ pub(crate) async fn build_local_runtime_request(
     let prompt_profile = model::resolve_local_chat_prompt_profile(state, model).await?;
     let backend_id = prompt_profile.backend_id;
 
-    // When the Jinja chat template natively references `enable_thinking` (e.g.
-    // Qwen3, DeepSeek-R1), it already controls thinking behaviour via the
-    // template variable.  Skip injecting an extra system-level reasoning
-    // guidance message; it can confuse smaller models and conflict with the
-    // template's own thinking protocol.
+    // Skip the inline local reasoning-policy injection when:
+    //  - the Jinja chat template natively references `enable_thinking` (e.g.
+    //    Qwen3, DeepSeek-R1) and already controls thinking via its template
+    //    variable; or
+    //  - the caller already injected a reasoning-effort fragment via the agent
+    //    context hook (`reasoning_guidance_in_context`) — the agent path would
+    //    otherwise be guided twice.
     let native_thinking =
         super::template::template_supports_thinking(prompt_profile.chat_template_source.as_deref());
-    let injected_guidance = if native_thinking {
+    let skip_inline = native_thinking || config.reasoning_guidance_in_context;
+    let injected_guidance = if skip_inline {
         None
     } else {
         local_reasoning_guidance(config.reasoning_effort, config.verbosity)
     };
-    let request_messages = if native_thinking {
+    let request_messages = if skip_inline {
         messages.to_vec()
     } else {
         apply_local_reasoning_controls(messages, config.reasoning_effort, config.verbosity)
@@ -124,6 +128,7 @@ pub(crate) async fn build_local_runtime_request(
             "local_reasoning_policy_injected",
             serde_json::json!({
                 "native_thinking": native_thinking,
+                "guidance_in_context": config.reasoning_guidance_in_context,
                 "injected": injected_guidance.is_some(),
                 "guidance": injected_guidance,
                 "reasoning_effort": config.reasoning_effort,

@@ -253,32 +253,28 @@ pub(super) fn local_reasoning_guidance(
 
     match reasoning_effort {
         Some(ChatReasoningEffort::None) => {
-            lines.push(
-                "Answer directly and do not emit <think>...</think> blocks or hidden reasoning."
-                    .to_owned(),
-            );
+            lines.push("Answer directly without rehearsing reasoning first.".to_owned());
         }
         Some(ChatReasoningEffort::Minimal) => {
             lines.push(
-                "If reasoning is necessary, keep it minimal and place it in a very short <think>...</think> block before the final answer."
-                    .to_owned(),
+                "Think briefly before answering; one short internal step is enough.".to_owned(),
             );
         }
         Some(ChatReasoningEffort::Low) => {
             lines.push(
-                "If reasoning is useful, keep the <think>...</think> block brief and keep the final answer outside the block."
+                "Think briefly before answering: confirm what is asked and pick a direct approach."
                     .to_owned(),
             );
         }
         Some(ChatReasoningEffort::Medium) => {
             lines.push(
-                "If reasoning is useful, use a moderate <think>...</think> block and keep the final answer outside the block."
+                "Reason step by step before answering: state assumptions, work through the problem, then give the answer."
                     .to_owned(),
             );
         }
         Some(ChatReasoningEffort::High) => {
             lines.push(
-                "You may use a detailed <think>...</think> block before the final answer, but keep the final answer outside the block."
+                "Reason carefully and thoroughly before answering: lay out the problem, consider edge cases and failure modes, verify your conclusions, then answer."
                     .to_owned(),
             );
         }
@@ -298,11 +294,7 @@ pub(super) fn local_reasoning_guidance(
         None => {}
     }
 
-    if lines.is_empty() {
-        None
-    } else {
-        Some(format!("Local response policy:\n{}", lines.join("\n")))
-    }
+    if lines.is_empty() { None } else { Some(format!("Reasoning effort:\n{}", lines.join("\n"))) }
 }
 
 pub(super) fn apply_local_reasoning_controls(
@@ -461,7 +453,9 @@ mod tests {
         let guidance = local_reasoning_guidance(Some(ChatReasoningEffort::None), None)
             .expect("guidance should be produced");
 
-        assert!(guidance.contains("do not emit <think>...</think>"));
+        assert!(guidance.contains("Answer directly without rehearsing reasoning first"));
+        // The fake <think>-block compat text is gone for non-native models.
+        assert!(!guidance.contains("<think>"));
     }
 
     #[test]
@@ -508,7 +502,7 @@ mod tests {
         assert_eq!(guided.len(), 3);
         assert_eq!(guided[0].role, "system");
         assert_eq!(guided[1].role, "system");
-        assert!(guided[1].rendered_text().contains("<think>...</think> block"));
+        assert!(guided[1].rendered_text().contains("Reasoning effort"));
         assert_eq!(guided[2].role, "user");
     }
 
@@ -520,7 +514,7 @@ mod tests {
             Some(ChatVerbosity::Low),
         );
 
-        assert!(prompt.starts_with("Local response policy:"));
+        assert!(prompt.starts_with("Reasoning effort:"));
         assert!(prompt.contains("Prompt:\nSolve 2+2"));
     }
 
