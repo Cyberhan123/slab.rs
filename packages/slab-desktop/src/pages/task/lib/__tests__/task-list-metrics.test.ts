@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { Task } from '../../const';
 import {
@@ -11,9 +11,21 @@ import {
   computeTotalPages,
   DURATION_SPARKLINE_FALLBACK,
   paginateTasks,
+  type PaginationRange,
+  type TaskMetrics,
   selectSettledTasks,
   SUCCESS_SPARKLINE_FALLBACK,
 } from '../task-list-metrics';
+
+describe('task metrics return types (expectTypeOf)', () => {
+  it('computeTaskMetrics returns TaskMetrics', () => {
+    expectTypeOf(computeTaskMetrics).returns.toEqualTypeOf<TaskMetrics>();
+  });
+
+  it('computePaginationRange returns PaginationRange | null', () => {
+    expectTypeOf(computePaginationRange).returns.toEqualTypeOf<PaginationRange | null>();
+  });
+});
 
 function task(overrides: { status: string } & Record<string, unknown>): Task {
   return {

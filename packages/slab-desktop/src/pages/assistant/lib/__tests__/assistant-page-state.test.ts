@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { AiModel } from '@/hooks/use-ai-model';
 
@@ -10,6 +10,12 @@ import {
   toAssistantModelOption,
   type ModelOption,
 } from '../assistant-page-state';
+
+describe('toAssistantModelOption return type (expectTypeOf)', () => {
+  it('returns a ModelOption', () => {
+    expectTypeOf(toAssistantModelOption).returns.toEqualTypeOf<ModelOption>();
+  });
+});
 
 const t = (key: string, values?: Record<string, unknown>) =>
   values ? `${key}:${values.formatted}` : key;

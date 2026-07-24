@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import {
   supportsWorkspaceLsp,
@@ -28,6 +28,12 @@ describe('supportsWorkspaceLsp', () => {
       expect(supportsWorkspaceLsp(language)).toBe(false);
     },
   );
+});
+
+describe('workspaceLspFileUri return type (expectTypeOf)', () => {
+  it('returns a string', () => {
+    expectTypeOf(workspaceLspFileUri).returns.toEqualTypeOf<string>();
+  });
 });
 
 describe('workspaceLspFileUri', () => {

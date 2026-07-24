@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 /**
  * `src/index.ts` runs `i18n.use(initReactI18next).init({...})` at module load.
@@ -38,7 +38,19 @@ import {
   getStoredAppLanguagePreference,
   isAppLanguagePreference,
   resolveAppLanguage,
+  type SupportedLanguage,
 } from '../index';
+
+describe('language public API types (expectTypeOf)', () => {
+  it('resolveAppLanguage resolves a preference to a SupportedLanguage', () => {
+    expectTypeOf(resolveAppLanguage).returns.toEqualTypeOf<SupportedLanguage>();
+  });
+
+  it('isAppLanguagePreference is a boolean guard over string | null | undefined', () => {
+    expectTypeOf(isAppLanguagePreference).parameters.toEqualTypeOf<[string | null | undefined]>();
+    expectTypeOf(isAppLanguagePreference).returns.toEqualTypeOf<boolean>();
+  });
+});
 
 /** Stub `globalThis.window` with a fresh in-memory `localStorage`. Returns the
  * mock so the test can drive `getItem` / assert on `setItem`. */
