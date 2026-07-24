@@ -10,8 +10,8 @@ desktop.ini
 ## Build output
 /target
 /testdata/whisper
-slab-libfetch/target/
-slab-*-sys/target/
+crates/slab-libfetch/target/
+crates/slab-*-sys/target/
 __pycache__/
 *.py[cod]
 
